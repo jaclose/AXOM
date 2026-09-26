@@ -75,8 +75,11 @@ async function openWorkspace(page: Page, taskTitle: string) {
 
 async function openAccount(page: Page) {
   await page.getByTitle("Settings", { exact: true }).click();
-  await page.getByRole("tab", { name: "Account", exact: true }).click();
+  await panel(page).getByRole("tab", { name: "Account", exact: true }).click();
 }
+
+/** Account controls live in the Settings dialog; the top bar has look-alike buttons. */
+const panel = (page: Page) => page.getByRole("dialog");
 
 async function taskTitles(page: Page) {
   return page.evaluate(async () => {
@@ -96,64 +99,64 @@ test("create, confirm by code, password and code sign-in, protect, merge, restor
   await openAccount(page);
 
   // Create the account; confirm with the code from the confirmation email.
-  await page.getByRole("tab", { name: "Create account" }).click();
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Create account", exact: true }).click();
-  await expect(page.getByText(/Confirmation code sent to/)).toBeVisible();
-  await page.locator(".account-code").fill(await mintCode("signup"));
-  await page.getByRole("button", { name: "Verify code" }).click();
-  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+  await panel(page).getByRole("tab", { name: "Create account" }).click();
+  await panel(page).getByLabel("Email", { exact: true }).fill(email);
+  await panel(page).getByLabel(/^Password/).fill(password);
+  await panel(page).getByRole("button", { name: "Create account", exact: true }).click();
+  await expect(panel(page).getByText(/Confirmation code sent to/)).toBeVisible();
+  await panel(page).locator(".account-code").fill(await mintCode("signup"));
+  await panel(page).getByRole("button", { name: "Verify code" }).click();
+  await expect(panel(page).getByRole("button", { name: "Sign out" })).toBeVisible();
 
   // Password sign-in, then passwordless code sign-in.
-  await page.getByRole("button", { name: "Sign out" }).click();
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
-  await page.getByRole("button", { name: "Sign out" }).click();
-  await page.getByRole("tab", { name: "Email me a code" }).click();
-  await page.getByLabel("Email").fill(email);
-  await page.getByRole("button", { name: "Send code" }).click();
-  await expect(page.getByText(/Sign-in code sent to/)).toBeVisible();
-  await page.locator(".account-code").fill(await mintCode("magiclink"));
-  await page.getByRole("button", { name: "Verify code" }).click();
-  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+  await panel(page).getByRole("button", { name: "Sign out" }).click();
+  await panel(page).getByLabel("Email", { exact: true }).fill(email);
+  await panel(page).getByLabel(/^Password/).fill(password);
+  await panel(page).getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(panel(page).getByRole("button", { name: "Sign out" })).toBeVisible();
+  await panel(page).getByRole("button", { name: "Sign out" }).click();
+  await panel(page).getByRole("tab", { name: "Email me a code" }).click();
+  await panel(page).getByLabel("Email", { exact: true }).fill(email);
+  await panel(page).getByRole("button", { name: "Send code" }).click();
+  await expect(panel(page).getByText(/Sign-in code sent to/)).toBeVisible();
+  await panel(page).locator(".account-code").fill(await mintCode("magiclink"));
+  await panel(page).getByRole("button", { name: "Verify code" }).click();
+  await expect(panel(page).getByRole("button", { name: "Sign out" })).toBeVisible();
 
   // Protect device A.
-  await page.getByRole("button", { name: "Protect this workspace" }).click();
-  await expect(page.getByText("Protected versions")).toBeVisible();
-  await expect(page.locator(".account-version-list li")).toHaveCount(1);
+  await panel(page).getByRole("button", { name: "Protect this workspace" }).click();
+  await expect(panel(page).getByText("Protected versions")).toBeVisible();
+  await expect(panel(page).locator(".account-version-list li")).toHaveCount(1);
 
   // Device B has different local work; protecting it must not overwrite A.
   const b = await secondDevice(browser);
   b.page.on("dialog", (dialog) => void dialog.accept());
   await openWorkspace(b.page, "From device B");
   await openAccount(b.page);
-  await b.page.getByLabel("Email").fill(email);
-  await b.page.getByLabel("Password").fill(password);
-  await b.page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await b.page.getByRole("button", { name: "Protect this workspace" }).click();
-  await expect(b.page.getByText("Two versions need a decision")).toBeVisible();
-  await b.page.getByRole("button", { name: /Merge both/ }).click();
+  await panel(b.page).getByLabel("Email", { exact: true }).fill(email);
+  await panel(b.page).getByLabel(/^Password/).fill(password);
+  await panel(b.page).getByRole("button", { name: "Sign in", exact: true }).click();
+  await panel(b.page).getByRole("button", { name: "Protect this workspace" }).click();
+  await expect(panel(b.page).getByText("Two versions need a decision")).toBeVisible();
+  await panel(b.page).getByRole("button", { name: /Merge both/ }).click();
   await expect.poll(() => taskTitles(b.page)).toEqual(["From device A", "From device B"]);
 
   // Restore the first protected version on B; the restore becomes a new version.
-  await b.page.getByRole("button", { name: "Refresh" }).click();
-  await b.page.locator(".account-version-list li").last().getByRole("button", { name: "Restore" }).click();
+  await panel(b.page).getByRole("button", { name: "Refresh" }).click();
+  await panel(b.page).locator(".account-version-list li").last().getByRole("button", { name: "Restore" }).click();
   await expect.poll(() => taskTitles(b.page)).toEqual(["From device A"]);
-  await b.page.getByRole("button", { name: "Refresh" }).click();
-  await expect(b.page.locator(".account-version-list")).toContainText("Restore");
+  await panel(b.page).getByRole("button", { name: "Refresh" }).click();
+  await expect(panel(b.page).locator(".account-version-list")).toContainText("Restore");
 
   // Both devices are registered; B can forget A.
-  await expect(b.page.locator(".account-device-list li")).toHaveCount(2);
-  await b.page.locator(".account-device-list li").filter({ hasNotText: "This device" }).getByRole("button", { name: "Remove" }).click();
-  await expect(b.page.locator(".account-device-list li")).toHaveCount(1);
+  await expect(panel(b.page).locator(".account-device-list li")).toHaveCount(2);
+  await panel(b.page).locator(".account-device-list li").filter({ hasNotText: "This device" }).getByRole("button", { name: "Remove" }).click();
+  await expect(panel(b.page).locator(".account-device-list li")).toHaveCount(1);
 
   // Deleting cloud copies clears the server and leaves local work alone.
-  await b.page.getByText("Delete cloud copies", { exact: true }).first().click();
-  await b.page.getByRole("button", { name: "Delete cloud copies" }).click();
-  await expect(b.page.locator(".account-version-list")).toHaveCount(0);
+  await panel(b.page).getByText("Delete cloud copies", { exact: true }).first().click();
+  await panel(b.page).getByRole("button", { name: "Delete cloud copies" }).click();
+  await expect(panel(b.page).locator(".account-version-list")).toHaveCount(0);
   expect(await taskTitles(b.page)).toEqual(["From device A"]);
   const { count } = await admin.from("workspace_revisions").select("id", { count: "exact", head: true }).eq("user_id", userId!);
   expect(count).toBe(0);

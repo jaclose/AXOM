@@ -4,6 +4,9 @@
   "version": "0.0.2-prebeta",
   "type": "module",
   "description": "Optional Vercel serverless backend for AXOM cloud sync and AI scaffolding.",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "build": "npm --prefix web run build",
     "dev": "npx vercel dev",
@@ -34,7 +37,8 @@
     "audit:beta:open": "open artifacts/beta-audit-v3/report.md",
     "audit:beta:folder": "open artifacts/beta-audit-v3",
     "residency:import": "node --experimental-strip-types web/scripts/residency-pipeline.mjs import",
-    "residency:validate": "node --experimental-strip-types web/scripts/residency-pipeline.mjs validate"
+    "residency:validate": "node --experimental-strip-types web/scripts/residency-pipeline.mjs validate",
+    "test:accounts:live": "npm --prefix web run test:accounts:live"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2"

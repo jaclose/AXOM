@@ -28,7 +28,9 @@
     "quality": "npm run typecheck && npm run lint && npm run test && npm run build",
     "snapshots": "node scripts/visual-snapshots.mjs",
     "test:e2e:chrome": "AXOM_E2E_CHANNEL=chrome playwright test",
-    "test:accounts:live": "AXOM_LIVE_ACCOUNTS=1 AXOM_E2E_CHANNEL=chrome playwright test e2e/live-accounts.spec.ts"
+    "test:accounts:live": "AXOM_LIVE_ACCOUNTS=1 AXOM_E2E_CHANNEL=chrome playwright test e2e/live-accounts.spec.ts",
+    "release:setup-updater": "node ../scripts/setup-updater.mjs",
+    "cinematic:import": "node ../scripts/import-cinematic.mjs"
   },
   "engines": {
     "node": ">=22.12.0"

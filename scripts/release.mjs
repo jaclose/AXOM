@@ -147,7 +147,7 @@ async function main() {
   const releaseRoot = join(root, 'dist/releases');
   await mkdir(releaseRoot, { recursive: true });
   const staging = await mkdtemp(join(releaseRoot, '.staging-'));
-  run(npm, ['run', 'build'], web);
+  run(npm, ['run', 'build'], web, { ...process.env, AXOM_REQUIRE_RELEASE_NOTES: '1' });
   const metadata = await readJson(join(web, 'dist/version.json'));
   if (metadata.version !== version || !metadata.buildId) throw new Error('Build metadata mismatch.');
   const webStage = join(staging, 'web');
