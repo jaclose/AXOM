@@ -1,35 +1,37 @@
 import {
-  ClipboardCheck, GraduationCap, Stethoscope, HeartPulse, Syringe, BookOpen,
-  FlaskConical, FileText, HandHeart, Microscope, Mail, Award,
+  ClipboardCheck, GraduationCap, Stethoscope, Syringe, BookOpen,
+  CheckCircle2, Clock,
 } from "lucide-react";
+import { useState } from "react";
 import { GlassCard, PanelHeader, Tag } from "../components/ui/primitives";
 import { ICON_SIZE } from "../lib/iconSize";
+import { loadTrackData, type ApplicationTrack } from "../lib/application-checker/engine";
 
-const TRACKS = [
-  { icon: GraduationCap, title: "Medical School", body: "AMCAS/AACOMAS timeline, secondaries, interviews, decisions — the primary focus.", tone: "cyan" as const },
-  { icon: Stethoscope, title: "Residency / Match", body: "ERAS, programs, LORs, interviews, rank list, and Match milestones.", tone: "purple" as const },
-];
-
-// Ordered top → bottom per the roadmap: graduate research, then undergrad,
-// then the adjacent health professions (PA / Nursing) nearer the bottom.
-const PATHWAYS = [
-  { icon: FlaskConical, title: "PhD / Master's Programs", body: "Research-degree apps: statements of purpose, PI outreach, GRE where required, and funding." },
-  { icon: BookOpen, title: "Undergraduate", body: "College apps + major planning, transfer pathways, and pre-req mapping before pre-med." },
-  { icon: HeartPulse, title: "Nursing School", body: "NursingCAS application tracking." },
-  { icon: Syringe, title: "PA School", body: "CASPA application tracking, patient-care hours, and prerequisites." },
-];
-
-// The bigger vision this page grows into (kept honest with "planned").
-const PLANNED_CAPABILITIES = [
-  { icon: BookOpen, title: "Major & DARS import", body: "Drop in your DARS (or equivalent) audit; see required courses left and track them to graduation." },
-  { icon: HandHeart, title: "Experience hours", body: "Log clinical & non-clinical hours, volunteering, and work — totaled toward your goals." },
-  { icon: Microscope, title: "Research & projects", body: "Track research, posters, presentations, and publications in one place." },
-  { icon: Mail, title: "Letters of rec", body: "Who's writing, what they have, and when each is committed and submitted." },
-  { icon: Award, title: "Grades & GPA", body: "Science vs. cumulative GPA trends to protect the number that matters." },
-  { icon: FileText, title: "Application guide", body: "Step-by-step AMCAS / AACOMAS (or program-specific) guide when you're ready to apply." },
+const TRACK_CONFIG = [
+  { id: "med_schools", icon: GraduationCap, title: "Medical School", tone: "cyan" as const },
+  { id: "residencies", icon: Stethoscope, title: "Residency / Match", tone: "purple" as const },
+  { id: "undergrad", icon: BookOpen, title: "Undergraduate", tone: "neutral" as const },
+  { id: "health_professions", icon: Syringe, title: "Health Professions", tone: "neutral" as const },
 ];
 
 export function ApplicationCheckerPage() {
+  const [activeTrack, setActiveTrack] = useState<string | null>(null);
+  const [trackData, setTrackData] = useState<ApplicationTrack | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  async function handleTrackSelect(id: string) {
+    setIsLoading(true);
+    setActiveTrack(id);
+    try {
+      const data = await loadTrackData(id);
+      setTrackData(data);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
   return (
     <>
       <GlassCard pad>
@@ -37,72 +39,111 @@ export function ApplicationCheckerPage() {
           <span className="folder-icon" style={{ color: "var(--cyan)" }}><ClipboardCheck size={ICON_SIZE.control} /></span>
           <div className="grow">
             <div style={{ fontSize: 18, fontWeight: 800 }}>Application Checker</div>
-            <div className="sub">Track applications end to end — built primarily for medical school and residency.</div>
+            <div className="sub">Track applications end to end — powered by AXOM Intelligence.</div>
           </div>
-          <Tag tone="orange">Alpha 2 · coming soon</Tag>
+          <Tag tone="cyan">Active Engine</Tag>
         </div>
       </GlassCard>
 
-      <GlassCard pad className="under-construction">
-        <span className="uc-tape t1">Under Construction</span>
-        <span className="uc-tape t2">Alpha 2</span>
-        <span className="uc-badge"><ClipboardCheck size={ICON_SIZE.body} /> Application tracking — coming soon</span>
-        <div className="uc-inner">
-          <PanelHeader title="Primary tracks" sub="Stage-by-stage checklists, deadlines, and status" />
-          <div className="grid grid-2">
-            {TRACKS.map((t) => {
-              const I = t.icon;
+      <div className="grid grid-2 gap16">
+        {/* Track Selector */}
+        <GlassCard pad>
+          <PanelHeader title="Select Your Path" sub="Load the intelligence manifest for your current application cycle" />
+          <div className="grid grid-2 gap12" style={{ marginTop: 16 }}>
+            {TRACK_CONFIG.map((t) => {
+              const Icon = t.icon;
+              const isActive = activeTrack === t.id;
               return (
-                <div className="int-row" key={t.title}>
-                  <span className="folder-icon" style={{ color: `var(--${t.tone})` }}><I size={ICON_SIZE.emphasis} /></span>
-                  <div className="grow"><div style={{ fontWeight: 700 }}>{t.title}</div><div className="sub">{t.body}</div></div>
-                  <Tag tone={t.tone}>Planned</Tag>
+                <div
+                  key={t.id}
+                  className={`int-row ${isActive ? "active" : ""}`}
+                  style={{
+                    cursor: "pointer",
+                    border: `1px solid ${isActive ? `var(--${t.tone})` : "var(--graphite)"}`,
+                    backgroundColor: isActive ? `var(--${t.tone})11` : "transparent",
+                    padding: "12px",
+                    borderRadius: "8px",
+                    transition: "all 0.2s"
+                  }}
+                  onClick={() => handleTrackSelect(t.id)}
+                >
+                  <span className="folder-icon" style={{ color: `var(--${t.tone})` }}><Icon size={ICON_SIZE.emphasis} /></span>
+                  <div className="grow"><div style={{ fontWeight: 700 }}>{t.title}</div></div>
+                  {isActive && <CheckCircle2 size={16} style={{ color: `var(--${t.tone})` }} />}
                 </div>
               );
             })}
           </div>
-        </div>
-      </GlassCard>
+        </GlassCard>
 
-      <GlassCard pad className="under-construction">
-        <span className="uc-tape t1">Under Construction</span>
-        <span className="uc-badge"><GraduationCap size={ICON_SIZE.body} /> More pathways — coming soon</span>
-        <div className="uc-inner">
-          <PanelHeader title="Other pathways" sub="From graduate research down to adjacent health professions — pick the lane that fits" />
-          <div className="grid grid-2">
-            {PATHWAYS.map((t) => {
-              const I = t.icon;
-              return (
-                <div className="int-row" key={t.title}>
-                  <span className="folder-icon"><I size={ICON_SIZE.emphasis} /></span>
-                  <div className="grow"><div style={{ fontWeight: 700 }}>{t.title}</div><div className="sub">{t.body}</div></div>
-                  <Tag tone="neutral">Planned</Tag>
-                </div>
-              );
-            })}
+        {/* Benchmarks / Gap Analysis */}
+        <GlassCard pad>
+          <PanelHeader title="Competitive Benchmarks" sub="Your current stats vs. the gold standard" />
+          <div style={{ marginTop: 16 }}>
+            {isLoading ? (
+              <div className="sub" style={{ textAlign: "center", opacity: 0.5 }}>Loading intelligence...</div>
+            ) : trackData ? (
+              <div className="grid grid-1 gap8">
+                {trackData.benchmarks.map((b, i) => (
+                  <div key={i} className="int-row" style={{ padding: "8px 0", borderBottom: "1px solid var(--graphite)" }}>
+                    <div className="grow" style={{ fontSize: 14 }}>{b.metric}</div>
+                    <div className="sub" style={{ marginRight: 12 }}>Your: {b.userValue}</div>
+                    <div style={{ fontWeight: 700, color: "var(--gold)" }}>Goal: {b.goldStandard}</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="sub" style={{ textAlign: "center", opacity: 0.5, padding: "20px" }}>Select a path to see your competitive gap analysis.</div>
+            )}
           </div>
-        </div>
-      </GlassCard>
+        </GlassCard>
+      </div>
 
-      <GlassCard pad className="under-construction">
-        <span className="uc-tape t1">Under Construction</span>
-        <span className="uc-badge"><FileText size={ICON_SIZE.body} /> Full applicant tracker — planned</span>
-        <div className="uc-inner">
-          <PanelHeader title="What this grows into" sub="A complete applicant dashboard — majors, experiences, and the application itself" />
-          <div className="grid grid-2">
-            {PLANNED_CAPABILITIES.map((t) => {
-              const I = t.icon;
-              return (
-                <div className="int-row" key={t.title}>
-                  <span className="folder-icon"><I size={ICON_SIZE.emphasis} /></span>
-                  <div className="grow"><div style={{ fontWeight: 700 }}>{t.title}</div><div className="sub">{t.body}</div></div>
-                  <Tag tone="neutral">Planned</Tag>
+      {/* Live Timeline & Checklist */}
+      {trackData && (
+        <div className="grid grid-2 gap16" style={{ marginTop: 16 }}>
+          <GlassCard pad>
+            <PanelHeader title="2026-2027 Cycle Timeline" sub="Critical milestones and deadlines" />
+            <div className="timeline-container" style={{ marginTop: 16, position: "relative" }}>
+              {trackData.timeline.map((event, i) => (
+                <div key={i} className="timeline-item" style={{ display: "flex", gap: 12, marginBottom: 12, alignItems: "flex-start" }}>
+                  <div style={{
+                    width: 12,
+                    height: 12,
+                    borderRadius: "50%",
+                    backgroundColor: event.isCritical ? "var(--gold)" : "var(--graphite)",
+                    marginTop: 5,
+                    flexShrink: 0,
+                    boxShadow: event.isCritical ? "0 0 8px var(--gold)" : "none"
+                  }} />
+                  <div>
+                    <div style={{ fontSize: 12, opacity: 0.6, fontWeight: 700 }}>{event.date}</div>
+                    <div style={{ fontSize: 14 }}>{event.event}</div>
+                  </div>
                 </div>
-              );
-            })}
-          </div>
+              ))}
+            </div>
+          </GlassCard>
+
+          <GlassCard pad>
+            <PanelHeader title="Application Checklist" sub="Required components and status" />
+            <div className="grid grid-1 gap8" style={{ marginTop: 16 }}>
+              {trackData.requirements.map((req, i) => (
+                <div key={i} className="int-row" style={{ padding: "8px 0", borderBottom: "1px solid var(--graphite)" }}>
+                  <span className="folder-icon">
+                    {req.status === "completed" ? <CheckCircle2 size={ICON_SIZE.body} style={{ color: "var(--gold)" }} /> : <Clock size={ICON_SIZE.body} style={{ color: "var(--graphite)" }} />}
+                  </span>
+                  <div className="grow">
+                    <div style={{ fontSize: 14 }}>{req.label}</div>
+                    <div className="sub" style={{ fontSize: 11 }}>Deadline: {req.deadline}</div>
+                  </div>
+                  <Tag tone={req.status === "completed" ? "gold" : "neutral"}>{req.status}</Tag>
+                </div>
+              ))}
+            </div>
+          </GlassCard>
         </div>
-      </GlassCard>
+      )}
     </>
   );
 }

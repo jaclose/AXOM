@@ -1,3 +1,5 @@
+import { version as packageVersion } from "../../package.json";
+
 // ===========================================================================
 // Brand + version configuration — the single source of truth for every visible
 // product-name string, icon reference, and release version. The product will be
@@ -57,12 +59,10 @@ export const STORAGE_KEYS = {
   migrationFailure: "axom.storage.migrationFailure",
 } as const;
 
-// Single source of truth for the release line. version.json, sw.js cache name,
-// and api/health.ts must be updated together with this (see release checklist
-// in docs/ALPHA-RELEASE.md).
-export const APP_RELEASE_VERSION = "0.0.1-prebeta";
+// Release tooling derives desktop and web metadata from this package version.
+export const APP_RELEASE_VERSION = packageVersion;
 export const APP_BUILD_LABEL = `${BRAND.productName} Pre-Beta · v${APP_RELEASE_VERSION}`;
-export const APP_VERSION_LABEL = `${APP_BUILD_LABEL} · web`;
+export const APP_VERSION_LABEL = `${APP_BUILD_LABEL} · ${typeof window !== "undefined" && "__TAURI_INTERNALS__" in window ? "desktop" : "web"}`;
 
 /** True when `candidate` is a newer semver-ish version than `current`. */
 export function isNewerVersion(candidate: string | undefined, current: string = APP_RELEASE_VERSION): boolean {

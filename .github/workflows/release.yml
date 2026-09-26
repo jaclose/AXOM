@@ -1,0 +1,239 @@
+name: AXOM Release Draft
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag, exactly v plus web/package.json version
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Never cancel a release while it is signing or uploading.
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      tag: ${{ steps.metadata.outputs.tag }}
+      commit: ${{ steps.metadata.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate exact tag and updater configuration
+        id: metadata
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          AXOM_UPDATER_PUBLIC_KEY: ${{ vars.AXOM_UPDATER_PUBLIC_KEY }}
+          AXOM_UPDATER_ENDPOINT: ${{ vars.AXOM_UPDATER_ENDPOINT }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, appendFileSync } from 'node:fs';
+          import { execFileSync } from 'node:child_process';
+          import { validateVersion, validateUpdaterSettings } from './scripts/release-lib.mjs';
+          const { version } = JSON.parse(readFileSync('web/package.json', 'utf8'));
+          validateVersion(version);
+          const tag = process.env.RELEASE_TAG;
+          if (tag !== `v${version}`) throw new Error('Tag must equal v plus web/package.json version.');
+          const commit = execFileSync('git', ['rev-parse', '--verify', `refs/tags/${tag}^{commit}`], { encoding: 'utf8' }).trim();
+          const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+          if (commit !== head) throw new Error('The checkout does not match the exact release tag.');
+          validateUpdaterSettings(process.env);
+          const endpoint = new URL(process.env.AXOM_UPDATER_ENDPOINT);
+          if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password) throw new Error('Updater endpoint must use public HTTPS without embedded credentials.');
+          const repo = JSON.parse(execFileSync('gh', ['api', `repos/${process.env.GITHUB_REPOSITORY}`], { encoding: 'utf8' }));
+          if (repo.private) {
+            throw new Error('This workflow publishes artifacts to GitHub Releases, so its repository must be public. A custom manifest endpoint alone cannot make private release assets public. Implement a separate authenticated publishing step to a public artifact host before using this workflow from a private repository.');
+          }
+          try {
+            execFileSync('gh', ['api', `repos/${process.env.GITHUB_REPOSITORY}/releases/tags/${tag}`], { stdio: ['ignore', 'pipe', 'pipe'] });
+          } catch (error) {
+            if (!String(error.stderr).includes('(HTTP 404)')) throw error;
+            appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\ntag=${tag}\ncommit=${commit}\n`);
+            process.exit(0);
+          }
+          throw new Error('A release already exists for this tag. Published versions are never overwritten; inspect any incomplete draft manually.');
+          NODE
+
+  # Check the release commit itself, including when workflow_dispatch runs on a branch.
+  quality:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm --prefix web ci
+      - run: node --test scripts/*.test.mjs
+      - run: npm --prefix web run quality
+      - run: npm --prefix web audit --omit=dev --audit-level=high
+      - run: npm --prefix web exec -- playwright install --with-deps chromium
+      - run: npm --prefix web run verify:app-updates
+      - run: npm --prefix web run verify:daily-games-offline
+
+  web:
+    needs: [prepare, quality]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      AXOM_BUILD_ID: ${{ needs.prepare.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm --prefix web ci
+      - run: node scripts/release.mjs --web-only
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-web
+          path: dist/releases/${{ needs.prepare.outputs.version }}/web/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  native:
+    needs: [prepare, quality]
+    timeout-minutes: 70
+    env:
+      AXOM_BUILD_ID: ${{ needs.prepare.outputs.commit }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            target: aarch64-apple-darwin
+            platform: darwin-aarch64
+            bundles: app,dmg
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            platform: darwin-x86_64
+            bundles: app,dmg
+          - runner: windows-2022
+            target: x86_64-pc-windows-msvc
+            platform: windows-x86_64
+            # MSI versions cannot represent ordinary text SemVer prereleases.
+            bundles: nsis
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            platform: linux-x86_64
+            bundles: deb,rpm,appimage
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install Linux build libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libfuse2 xdg-utils
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          workspaces: src-tauri -> target
+          key: ${{ matrix.target }}
+      - run: npm --prefix web ci
+      - name: Build installers and signed updater bundles
+        env:
+          AXOM_UPDATER_PUBLIC_KEY: ${{ vars.AXOM_UPDATER_PUBLIC_KEY }}
+          AXOM_UPDATER_ENDPOINT: ${{ vars.AXOM_UPDATER_ENDPOINT }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: node scripts/release.mjs --native-only --signed --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+      - name: Verify Apple signature and notarization
+        if: runner.os == 'macOS'
+        env:
+          NATIVE_TARGET: ${{ matrix.target }}
+        run: |
+          codesign --verify --deep --strict "src-tauri/target/$NATIVE_TARGET/release/bundle/macos/AXOM.app"
+          xcrun stapler validate "src-tauri/target/$NATIVE_TARGET/release/bundle/macos/AXOM.app"
+          spctl --assess --type execute --verbose "src-tauri/target/$NATIVE_TARGET/release/bundle/macos/AXOM.app"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-${{ matrix.platform }}
+          path: dist/releases/${{ needs.prepare.outputs.version }}/${{ matrix.platform }}/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  draft:
+    needs: [prepare, quality, web, native]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: release-*
+          path: .release-input
+      - name: Verify all artifacts and construct complete update manifest
+        env:
+          AXOM_UPDATER_PUBLIC_KEY: ${{ vars.AXOM_UPDATER_PUBLIC_KEY }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: node scripts/assemble-release.mjs --input .release-input --output .release-ready --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --build-id "$RELEASE_COMMIT"
+      - name: Create draft; never publish or overwrite an existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readdirSync, readFileSync } from 'node:fs';
+          import { execFileSync } from 'node:child_process';
+          const tag = process.env.RELEASE_TAG;
+          const summary = JSON.parse(readFileSync('.release-ready/release-summary.json', 'utf8'));
+          const assets = readdirSync('.release-ready').filter(name => name !== 'RELEASE-NOTES.md').map(name => `.release-ready/${name}`);
+          const args = ['release', 'create', tag, ...assets, '--repo', process.env.GITHUB_REPOSITORY, '--verify-tag', '--draft', '--title', `AXOM ${summary.version}`, '--notes-file', '.release-ready/RELEASE-NOTES.md'];
+          if (summary.version.includes('-')) args.push('--prerelease');
+          execFileSync('gh', args, { stdio: 'inherit' });
+          NODE

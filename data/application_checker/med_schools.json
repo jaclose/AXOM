@@ -1,0 +1,97 @@
+{
+  "cycle": "2026-2027",
+  "timelines": {
+    "AMCAS": {
+      "application_opens": "2026-05-05",
+      "submission_begins": "2026-05-28",
+      "initial_transmission": "2026-06-26",
+      "early_decision_deadline": "2026-08-03",
+      "general_deadlines": "September - December 2026"
+    },
+    "AACOMAS": {
+      "application_opens": "2026-05-04",
+      "cycle_closes": "2027-08-02",
+      "transcript_score_matching_deadline": "2027-08-03T17:00:00",
+      "evaluator_submission_deadline": "2027-08-03T23:59:00",
+      "final_processing_deadline": "2027-08-05T17:00:00",
+      "academic_update_periods": [
+        {
+          "period": 1,
+          "start": "2026-09-01",
+          "end": "2026-10-09"
+        },
+        {
+          "period": 2,
+          "start": "2026-12-14",
+          "end": "2027-02-12"
+        },
+        {
+          "period": 3,
+          "start": "2027-03-15",
+          "end": "2027-06-11"
+        }
+      ]
+    }
+  },
+  "holistic_review_benchmarks": {
+    "framework": "EAM (Experiences, Attributes, Metrics)",
+    "priorities": {
+      "research_focused": {
+        "clinical_priority": "High (Baseline)",
+        "research_priority": "Critical",
+        "key_focus": "Scholarly productivity, publications, analytical skills"
+      },
+      "community_focused": {
+        "clinical_priority": "Critical",
+        "research_priority": "Helpful / Bonus",
+        "key_focus": "Patient interaction, service to underserved, clinical empathy"
+      },
+      "do_programs": {
+        "clinical_priority": "Critical",
+        "research_priority": "Bonus",
+        "key_focus": "Hands-on clinical experience, osteopathic philosophy alignment"
+      }
+    },
+    "metrics": {
+      "research": [
+        "Sustained involvement (longevity > rotations)",
+        "Intellectual contribution (hypothesis/methods/limitations)",
+        "Productivity (posters, abstracts, presentations)",
+        "Progression of responsibility"
+      ],
+      "clinical": [
+        "Direct patient interaction > passive shadowing",
+        "Reflective learning (articulating impact on motivation)",
+        "Exposure to diverse/underserved populations"
+      ]
+    }
+  },
+  "schools": [
+    {
+      "name": "Example Top-Tier MD",
+      "tier": "Top",
+      "type": "MD",
+      "secondary_pattern": "Fast",
+      "requirements": [
+        {
+          "requirement": "Secondary Application",
+          "deadline": "Rolling",
+          "status": "Pending"
+        }
+      ]
+    },
+    {
+      "name": "Example Mid-Tier MD",
+      "tier": "Mid",
+      "type": "MD",
+      "secondary_pattern": "Slow",
+      "requirements": [
+        {
+          "requirement": "Secondary Application",
+          "deadline": "Rolling",
+          "status": "Pending"
+        }
+      ]
+    }
+  ]
+}

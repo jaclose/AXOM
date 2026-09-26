@@ -14,6 +14,7 @@ import {
   runQuestionAttachmentMaintenance,
 } from "../../lib/questionAttachments";
 import { AiSettingsPanel } from "./AiSettingsPanel";
+import { AppUpdatePanel } from "./AppUpdatePanel";
 import { DataHealthPanel } from "./DataHealthPanel";
 import { RecoveryStatusCard } from "./RecoveryStatusCard";
 import { PromiseCutscene } from "./PromiseCutscene";
@@ -376,6 +377,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
 
       {tab === "advanced" && (
         <section role="tabpanel" id={`${tabsId}-panel-advanced`} aria-labelledby={`${tabsId}-tab-advanced`} className="backup-center">
+          <AppUpdatePanel />
           <div className="backup-actions-panel">
             <div className="sync-title">Technical details</div>
             <div className="settings-target-grid">

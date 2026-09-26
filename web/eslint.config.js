@@ -20,6 +20,7 @@ export default [
         caches: "readonly",
         fetch: "readonly",
         URL: "readonly",
+        Response: "readonly",
       },
     },
   },

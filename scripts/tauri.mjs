@@ -1,0 +1,10 @@
+import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const cli = resolve(root, 'web/node_modules/@tauri-apps/cli/tauri.js');
+if (!existsSync(cli)) throw new Error('Run npm --prefix web ci first.');
+const child = spawnSync(process.execPath, [cli, ...process.argv.slice(2)], { cwd: root, stdio: 'inherit' });
+if (child.error) throw child.error;
+process.exitCode = child.status ?? 1;

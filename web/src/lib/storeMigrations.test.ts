@@ -41,6 +41,20 @@ function v26State() {
 describe("v26 → v27 migration", () => {
   beforeEach(() => localStorage.clear());
 
+  it.each([12, 13])("preserves unfinished setup when upgrading schema %i", (version) => {
+    const saved = makeSeed();
+    saved.profile.onboarded = false;
+    const result = migratePersistedState(saved, version);
+    expect(result.profile.onboarded).toBe(false);
+  });
+
+  it.each([12, 13])("does not force legacy established users through setup on schema %i", (version) => {
+    const saved = makeSeed();
+    delete (saved.profile as Partial<typeof saved.profile>).onboarded;
+    const result = migratePersistedState(saved, version);
+    expect(result.profile.onboarded).toBe(true);
+  });
+
   it("adds the daily-loop arrays without touching existing records", () => {
     const before = v26State();
     const result = migratePersistedState(structuredClone(before), 26);

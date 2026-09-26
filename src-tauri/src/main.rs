@@ -1,3 +1,3 @@
 fn main() {
-    noctyrium_lib::run();
+    axom_lib::run();
 }

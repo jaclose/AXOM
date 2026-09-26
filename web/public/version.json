@@ -1,12 +1,1 @@
-{
-  "app": "AXOM",
-  "version": "0.0.1-prebeta",
-  "schemaVersion": 32,
-  "channel": "pre-beta",
-  "updatedAt": "2026-07-08T00:00:00.000Z",
-  "notes": [
-    "AXOM rebrand: new mark, wordmark, and graphite/gold identity",
-    "Question bank: file + multi-question import, exam mode, session results",
-    "Version, schema, and update-safety unification for pre-beta"
-  ]
-}
+{"0.0.1-prebeta": "latest"}

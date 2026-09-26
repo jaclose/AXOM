@@ -1,5 +1,17 @@
 # AXOM Changelog
 
+## 0.0.2-prebeta — 2026-09-24 (Startup recovery and release notes)
+
+- **Desktop packaging**: the macOS app and web package share one build and the current AXOM icon. Existing workspace and storage identities remain unchanged.
+- **Startup**: wait for the saved workspace before rendering setup or the dashboard. Unfinished setup is preserved during older-data migrations; rendering errors have a recovery screen instead of a blank window.
+- **Updates on your terms**: signed distribution builds can check for new releases, show what changed, download a verified update, and install when you choose. Local test builds keep automatic desktop updates disabled until distribution is configured.
+- **Save before restart**: applying an update verifies a recovery snapshot first. A failed save stops the update, and a failed restart can be retried without installing twice.
+- **Web refresh safety**: new web builds wait for your approval. Previously opened screens and the update-save path remain available while a newer build is staged.
+- **Release notes**: review changes before updating, read a one-time notice after upgrading an existing workspace, and reopen release history from App updates.
+- **Compatibility**: keep the same app and browser storage identity. Moving from the older Swift wrapper or to a different browser/origin requires a portable backup transfer. Do not downgrade after a data-schema upgrade.
+
+Public automatic updates still require one-time signing and hosting setup. This local pre-beta package is not an Apple-notarized public release.
+
 ## 0.0.1-prebeta — 2026-07-08 (AXOM pre-beta: question bank + persistence)
 
 The version line resets to pre-beta under the AXOM identity. Persistence keys stay

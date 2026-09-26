@@ -1,7 +1,7 @@
 {
   "name": "axom-web",
   "private": true,
-  "version": "0.0.1-prebeta",
+  "version": "0.0.2-prebeta",
   "type": "module",
   "description": "AXOM — a premium, local-first medical-school command center, as a deployable web app.",
   "scripts": {
@@ -17,11 +17,24 @@
     "verify:daily-games-offline": "node scripts/verify-daily-games-offline.mjs",
     "verify:question-imports": "vitest run src/lib/questionImportEvaluation.test.ts --reporter=verbose",
     "preview": "vite preview",
-    "package": "bash scripts/package-web.sh",
+    "package": "node ../scripts/release.mjs --web-only",
+    "release": "node ../scripts/release.mjs",
+    "release:web": "node ../scripts/release.mjs --web-only",
+    "release:doctor": "node ../scripts/release.mjs --doctor",
+    "release:version": "node ../scripts/release.mjs --version",
+    "test:release": "node --test ../scripts/*.test.mjs",
+    "verify:app-updates": "node scripts/verify-app-updates.mjs",
+    "tauri": "node ../scripts/tauri.mjs",
     "quality": "npm run typecheck && npm run lint && npm run test && npm run build"
   },
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-sql": "^2.4.0",
+    "@tauri-apps/plugin-updater": "^2.12.0",
     "@vercel/analytics": "^2.0.1",
     "lucide-react": "^0.460.0",
     "mammoth": "^1.12.0",
@@ -34,21 +47,23 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.61.0",
+    "@tauri-apps/cli": "^2.11.5",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^22.20.4",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^6.0.2",
-    "@vitest/coverage-v8": "^4.1.9",
+    "@vitest/coverage-v8": "^4.1.11",
     "eslint": "^10.5.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "fake-indexeddb": "^6.2.4",
     "jsdom": "^29.1.1",
     "jszip": "^3.10.1",
-    "typescript": "^5.6.3",
+    "typescript": "^5.9.3",
     "typescript-eslint": "^8.62.0",
     "vite": "^8.0.16",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.11"
   }
 }

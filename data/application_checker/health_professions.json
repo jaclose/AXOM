@@ -1,0 +1,156 @@
+{
+  "health_professions": {
+    "pa": {
+      "application_system": "CASPA",
+      "timeline": {
+        "cycle_opens": "April 30, 2026",
+        "submission_deadline": "April 1, 2027",
+        "final_verification_deadline": "April 9, 2027",
+        "typical_program_deadlines": [
+          "June 15",
+          "July 15",
+          "August 1",
+          "September 1",
+          "October 1",
+          "November 1",
+          "December 1",
+          "January 15",
+          "March 1",
+          "April 1"
+        ],
+        "verification_lead_time": "Up to 4 weeks"
+      },
+      "clinical_benchmarks": {
+        "patient_care_experience_pce": {
+          "minimum_floor": "500 - 1,000 hours",
+          "solid_candidate": "1,000 - 2,000 hours",
+          "competitive": "2,000 - 3,500 hours",
+          "highly_competitive": "4,000+ hours",
+          "national_median": "Approximately 3,200 hours",
+          "high_value_roles": [
+            "EMT",
+            "Paramedic",
+            "CNA",
+            "Respiratory Therapist",
+            "Surgical Tech"
+          ],
+          "lower_value_roles_hce": [
+            "Medical Scribing",
+            "Hospital Volunteering",
+            "Reception"
+          ]
+        },
+        "shadowing": {
+          "recommended_hours": "40 - 100+ hours",
+          "requirement": "Shadowing a practicing Physician Assistant"
+        }
+      },
+      "standard_prerequisites": {
+        "core_sciences": [
+          { "course": "General Biology I & II", "lab_required": true },
+          { "course": "General Chemistry I & II", "lab_required": true },
+          { "course": "Human Anatomy", "lab_required": true },
+          { "course": "Human Physiology", "lab_required": true },
+          { "course": "Microbiology", "lab_required": true },
+          { "course": "Statistics", "lab_required": false }
+        ],
+        "commonly_required": [
+          { "course": "Organic Chemistry / Biochemistry", "lab_required": false },
+          { "course": "Genetics", "lab_required": false },
+          { "course": "Psychology", "lab_required": false },
+          { "course": "English/Writing", "lab_required": false },
+          { "course": "Medical Terminology", "lab_required": false }
+        ],
+        "optional_recommended": [
+          "Sociology",
+          "Anthropology",
+          "Human Nutrition",
+          "Physics"
+        ]
+      },
+      "program_specific_requirements": {
+        "standardized_tests": [
+          "GRE",
+          "PA-CAT",
+          "Casper"
+        ],
+        "letters_of_recommendation": {
+          "typical_count": 3,
+          "preferred_sources": [
+            "Practicing PA",
+            "Science Professor",
+            "Clinical Supervisor"
+          ]
+        },
+        "admissions_types": [
+          "Submitted",
+          "Completed",
+          "Verified"
+        ]
+      }
+    },
+    "nursing": {
+      "application_system": "NursingCAS",
+      "timeline": {
+        "cycle_opens": "August 6, 2026",
+        "application_closes": "January 28, 2028",
+        "transcript_test_score_deadline": "February 10, 2028",
+        "reference_submission_deadline": "February 10, 2028",
+        "final_verification_deadline": "February 17, 2028"
+      },
+      "clinical_benchmarks": {
+        "experience": {
+          "recommended_roles": [
+            "CNA",
+            "EMT",
+            "Medical Scribe"
+          ],
+          "volunteer_work": "Documented hours in community health or hospital settings"
+        },
+        "certifications": [
+          "BLS (Basic Life Support)",
+          "CPR"
+        ]
+      },
+      "standard_prerequisites": {
+        "core_sciences": [
+          { "course": "Anatomy & Physiology I", "lab_required": true },
+          { "course": "Anatomy & Physiology II", "lab_required": true },
+          { "course": "Microbiology", "lab_required": true },
+          { "course": "General Chemistry", "lab_required": true },
+          { "course": "Nutrition", "lab_required": false },
+          { "course": "Biology", "lab_required": false },
+          { "course": "Pathophysiology", "lab_required": false }
+        ],
+        "general_education": [
+          { "course": "Psychology (Introduction)", "lab_required": false },
+          { "course": "Human Growth & Development", "lab_required": false },
+          { "course": "Sociology / Anthropology", "lab_required": false },
+          { "course": "English Composition I & II", "lab_required": false },
+          { "course": "Statistics", "lab_required": false },
+          { "course": "College Algebra / Precalculus", "lab_required": false },
+          { "course": "Speech / Communications", "lab_required": false }
+        ]
+      },
+      "program_specific_requirements": {
+        "entrance_exams": [
+          "TEAS (Test of Essential Academic Skills)",
+          "HESI A2"
+        ],
+        "compliance": [
+          "Criminal Background Check",
+          "Drug Screening",
+          "Physical Exam",
+          "Immunization Records"
+        ],
+        "letters_of_recommendation": {
+          "typical_count": "2-3",
+          "preferred_sources": [
+            "Science Professor",
+            "Professional Supervisor"
+          ]
+        }
+      }
+    }
+  }
+}

@@ -77,6 +77,9 @@ export async function runStorageMigrations(): Promise<StorageMigrationResult> {
   let backupKey: string | null = null;
 
   try {
+    if (fromVersion > BUILD_INFO.schemaVersion) {
+      throw new Error("This workspace was saved by a newer AXOM data format. Install the latest compatible app; do not clear local data or downgrade it.");
+    }
     if (schemaChanged) {
       backupKey = await withTimeout(createLocalBackup(fromVersion), 5000);
       await runSequentialMigrations(fromVersion, BUILD_INFO.schemaVersion);

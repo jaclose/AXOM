@@ -11,6 +11,7 @@ import { StandupWatcher } from "./components/shell/StandupWatcher";
 import { DailyLoopReminderWatcher } from "./components/shell/DailyLoopReminderWatcher";
 import { DailyRolloverWatcher } from "./components/shell/DailyRolloverWatcher";
 import { UpdateAvailableWatcher } from "./components/shell/UpdateAvailableWatcher";
+import { WhatsNewWatcher } from "./components/shell/WhatsNewWatcher";
 import { PomodoroFx } from "./components/productivity/PomodoroFx";
 import { SessionOverlay } from "./components/session/SessionOverlay";
 import { isDailyGamesRoute, NAV } from "./components/shell/nav";
@@ -342,6 +343,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
       <DailyRolloverWatcher />
       <UpdateAvailableWatcher />
       <PomodoroFx />
+      <WhatsNewWatcher startupStatus={startupStatus} suspended={Boolean(showTour || settings || promisePromptOpen || promiseCutsceneOpen)} />
       <StandupWatcher />
       <DailyLoopReminderWatcher />
       <SessionOverlay />
