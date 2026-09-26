@@ -1,12 +1,14 @@
 // ===========================================================================
 // Cinematics — the short brand films AXOM plays at startup, after an update,
 // and while an update installs. Films are placeholders until final renders
-// (Higgsfield / Blender) replace the files in public/cinematics; swapping a
-// film only means replacing its mp4 + poster and, if needed, its entry here.
+// (Higgsfield / Blender) replace them: `npm run cinematic:import -- <video>
+// --id <film> --final` transcodes, measures and records a new render.
 //
 // Policy: a film is decoration, never a gate. It plays at most once per
 // trigger, never on reduced motion, and a device-only ledger decides when.
 // ===========================================================================
+
+import FILM_MEDIA from "../data/cinematics.json";
 
 export type CinematicId = "slow-sweep" | "push-sweep" | "edge-glint" | "optical-luster";
 
@@ -24,48 +26,23 @@ export interface CinematicFilm {
   placeholder: boolean;
 }
 
-export const CINEMATICS: Record<CinematicId, CinematicFilm> = {
-  "slow-sweep": {
-    id: "slow-sweep",
-    label: "Slow sweep",
-    description: "A single soft highlight drifts across the tile.",
-    src: "cinematics/luster-slow-sweep.mp4",
-    poster: "cinematics/luster-slow-sweep-poster.jpg",
-    background: "#0a0e14",
-    durationMs: 1600,
-    placeholder: true,
-  },
-  "push-sweep": {
-    id: "push-sweep",
-    label: "Push sweep",
-    description: "The camera eases in as the light passes. Used after updates.",
-    src: "cinematics/luster-push-sweep.mp4",
-    poster: "cinematics/luster-push-sweep-poster.jpg",
-    background: "#0a0e14",
-    durationMs: 1600,
-    placeholder: true,
-  },
-  "edge-glint": {
-    id: "edge-glint",
-    label: "Edge glint",
-    description: "A quick glint along the bevel. Used while an update installs.",
-    src: "cinematics/luster-edge-glint.mp4",
-    poster: "cinematics/luster-edge-glint-poster.jpg",
-    background: "#0a0e14",
-    durationMs: 1600,
-    placeholder: true,
-  },
-  "optical-luster": {
-    id: "optical-luster",
-    label: "Classic mark",
-    description: "The original ivory mark on black.",
-    src: "startup/axom-optical-luster.mp4",
-    poster: "startup/axom-optical-luster-poster.png",
-    background: "#0d0d0e",
-    durationMs: 1300,
-    placeholder: true,
-  },
+/** Copy lives here; measured media facts live in data/cinematics.json, which
+ * `npm run cinematic:import` rewrites when a new render is dropped in. */
+const FILM_COPY: Record<CinematicId, Pick<CinematicFilm, "label" | "description">> = {
+  "slow-sweep": { label: "Slow sweep", description: "A single soft highlight drifts across the tile." },
+  "push-sweep": { label: "Push sweep", description: "The camera eases in as the light passes. Used after updates." },
+  "edge-glint": { label: "Edge glint", description: "A quick glint along the bevel. Used while an update installs." },
+  "optical-luster": { label: "Classic mark", description: "The original ivory mark on black." },
 };
+
+type FilmMedia = Pick<CinematicFilm, "src" | "poster" | "background" | "durationMs" | "placeholder">;
+
+export const CINEMATICS = Object.fromEntries(
+  (Object.keys(FILM_COPY) as CinematicId[]).map((id) => {
+    const media = (FILM_MEDIA as Record<string, FilmMedia>)[id];
+    return [id, { id, ...FILM_COPY[id], ...media }];
+  }),
+) as Record<CinematicId, CinematicFilm>;
 
 export const INTRO_FILM_ORDER: CinematicId[] = ["slow-sweep", "push-sweep", "edge-glint", "optical-luster"];
 

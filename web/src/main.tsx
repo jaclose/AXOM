@@ -23,6 +23,8 @@ import "./styles/focus.css";
 import "./styles/account.css";
 import "./styles/settings.css";
 import "./styles/startupIntro.css";
+import "./styles/dock.css";
+import "./styles/soundscapes.css";
 
 // The inline head script prevents a first-paint flash; this keeps the chosen
 // theme synchronized with OS and cross-tab changes for the rest of the session.
@@ -34,7 +36,11 @@ installMotionSync();
 // Importing "/src/lib/store.ts" from a test can resolve to a different module
 // instance once HMR has timestamped the app's copy, silently writing nowhere.
 if (import.meta.env.DEV) {
-  (window as Window & { __AXOM_DEV__?: Promise<unknown> }).__AXOM_DEV__ = import("./lib/store").then(({ useStore }) => ({ useStore }));
+  (window as Window & { __AXOM_DEV__?: Promise<unknown> }).__AXOM_DEV__ = Promise.all([
+    import("./lib/store"),
+    import("./lib/pomodoro"),
+    import("./lib/soundscapes/store"),
+  ]).then(([{ useStore }, { usePomodoro }, { useSoundscape }]) => ({ useStore, usePomodoro, useSoundscape }));
 }
 
 installChunkRecovery();

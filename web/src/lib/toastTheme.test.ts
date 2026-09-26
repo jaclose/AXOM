@@ -77,7 +77,7 @@ describe("notification placement", () => {
   });
 
   it("stays clear of the live-session bar and of phone dialog action bars", () => {
-    expect(declarations(":root body:has(.session-bar) .toast-stack")).toContain("--toast-lift");
+    expect(declarations(":root body:has(.focus-dock) .toast-stack")).toContain("--toast-lift");
     const phone = componentCss.slice(componentCss.indexOf(":root .toast-stack > .toast"));
     expect(phone).toMatch(/@media \(max-width: 520px\)[\s\S]*max-height: min\(42dvh/);
     expect(declarations(':root body:has([aria-modal="true"], .sidebar.open) .toast-stack')).toContain("bottom: auto");

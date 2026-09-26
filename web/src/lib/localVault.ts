@@ -245,27 +245,47 @@ const vaultStorage: StateStorage = {
   },
 };
 
-// Serialize writes so an older asynchronous save cannot land after the update
-// checkpoint. A failed write must not poison the queue for later saves.
-let pendingVaultWrite: Promise<void> = Promise.resolve();
+// Writes are coalesced per key, newest wins: at most one IndexedDB write is in
+// flight, and a burst of saves collapses into the latest snapshot. An older
+// save can therefore never land after a newer one (the update checkpoint relies
+// on that), and a quick reload or tab close is not stuck behind a backlog of
+// stale full-workspace writes.
+type VaultOp = { kind: "set"; value: string } | { kind: "remove" };
+const pendingVaultOps = new Map<string, VaultOp>();
+let vaultDrain: Promise<void> | null = null;
 
-function enqueueVaultWrite(write: () => void | Promise<void>): Promise<void> {
-  const next = pendingVaultWrite.catch(() => undefined).then(write);
-  pendingVaultWrite = next;
-  // Zustand does not await ordinary action persistence. Mark the rejection as
-  // handled, while retaining it on `next` for explicit flush/checkpoint callers.
-  void next.catch(() => undefined);
-  return next;
+async function drainVaultWrites(): Promise<void> {
+  try {
+    while (pendingVaultOps.size) {
+      const [name, op] = pendingVaultOps.entries().next().value as [string, VaultOp];
+      pendingVaultOps.delete(name);
+      try {
+        if (op.kind === "set") await vaultStorage.setItem(name, op.value);
+        else await vaultStorage.removeItem(name);
+      } catch {
+        // setItem records failures itself (assertVaultWrite); keep draining.
+      }
+    }
+  } finally {
+    vaultDrain = null;
+  }
 }
 
+function scheduleVaultWrite(name: string, op: VaultOp): Promise<void> {
+  pendingVaultOps.set(name, op);
+  vaultDrain ??= drainVaultWrites();
+  return vaultDrain;
+}
+
+/** Resolves once every save requested so far (or a newer one) is on disk. */
 export function flushLocalVaultWrites(): Promise<void> {
-  return pendingVaultWrite;
+  return vaultDrain ?? Promise.resolve();
 }
 
 export const localVaultStorage: StateStorage = {
   getItem: (name) => vaultStorage.getItem(name),
-  setItem: (name, value) => enqueueVaultWrite(async () => { await vaultStorage.setItem(name, value); }),
-  removeItem: (name) => enqueueVaultWrite(async () => { await vaultStorage.removeItem(name); }),
+  setItem: (name, value) => scheduleVaultWrite(name, { kind: "set", value }),
+  removeItem: (name) => scheduleVaultWrite(name, { kind: "remove" }),
 };
 
 function persistedUserId(raw: string): string {

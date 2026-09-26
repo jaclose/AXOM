@@ -1,4 +1,7 @@
-import { version as packageVersion } from "../../package.json";
+// JSON modules expose only a default export under Node ESM (used by e2e specs).
+import packageJson from "../../package.json" with { type: "json" };
+
+const packageVersion = packageJson.version;
 
 // ===========================================================================
 // Brand + version configuration — the single source of truth for every visible

@@ -94,7 +94,7 @@ export const SOUNDSCAPES: Record<SoundscapeId, SoundscapePreset> = {
     name: "2 Hz Delta",
     short: "2 Hz",
     band: "Delta",
-    carrierHz: 40,
+    carrierHz: 39,
     beatHz: 2,
     bestFor: ["Falling asleep"],
     howTo: "20–30 minutes with the stop timer, only if it feels soothing. Quiet for the rest of the night.",

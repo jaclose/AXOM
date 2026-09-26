@@ -1,12 +1,13 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { Suspense, lazy, useEffect, useState, useSyncExternalStore } from "react";
 import { Download, RefreshCw, ShieldCheck } from "lucide-react";
 import { appUpdates, type UpdatePhase } from "../../lib/appUpdates";
 import { APP_RELEASE_VERSION } from "../../lib/brand";
-import { ReleaseNotesHistory } from "./ReleaseNotesHistory";
 import { GButton } from "../ui/primitives";
 import { useStore } from "../../lib/store";
 import { findLiveSession } from "../../lib/sessions";
 import { UPDATE_PREFS_EVENT, readUpdatePreferences, writeUpdatePreferences } from "../../lib/updatePreferences";
+
+const ReleaseNotesHistory = lazy(() => import("./ReleaseNotesHistory").then((module) => ({ default: module.ReleaseNotesHistory })));
 
 export const UPDATE_BUSY_PHASES: UpdatePhase[] = ["checking", "downloading", "preparing", "installing", "restarting"];
 
@@ -74,7 +75,7 @@ export function AppUpdatePanel() {
         </label>
       )}
       <p className="sub">Your local workspace stays on this device. Before applying an update, AXOM verifies a workspace snapshot. Portable backups in Settings also include question-image attachments.</p>
-      <ReleaseNotesHistory />
+      <Suspense fallback={<p className="sub">Loading release notes…</p>}><ReleaseNotesHistory /></Suspense>
     </div>
   );
 }

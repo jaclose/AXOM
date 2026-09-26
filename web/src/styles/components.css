@@ -1561,7 +1561,7 @@ select.field, .scope-select {
 }
 :root .toast-stack .toast-action:hover { text-decoration: underline; }
 /* The live-session bar (pause/end controls) stays reachable under notices. */
-:root body:has(.session-bar) .toast-stack { --toast-lift: 76px; }
+:root body:has(.focus-dock) .toast-stack { --toast-lift: 76px; }
 @media (max-width: 520px) {
   :root .toast-stack {
     --toast-edge-x: max(12px, calc(env(safe-area-inset-right) + 8px));

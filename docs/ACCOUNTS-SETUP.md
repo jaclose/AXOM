@@ -19,41 +19,74 @@ move between devices, and delete every cloud copy.
 
 ## Status (2026-09-26)
 
-The bookmarked project `skksijapfqmfczjsvfiw` does **not resolve** (DNS
-NXDOMAIN) while `supabase.com` itself responds, so it appears deleted. Create a
-new project and follow the steps below; nothing in the app depends on the old
-reference. The Supabase SDK is lazy-loaded, so local-only installs never
-download it.
+- **Production project:** `AXOM Production` (`jofkmfwkidubxcutkwzf`, us-east-2),
+  linked in `supabase/.temp`. All six migrations are applied and recorded
+  (`npx supabase migration list`). Function ACLs are hardened:
+  authenticated-only RPCs refuse `anon`, trigger/internal functions are not
+  client-callable, and `resolve_question_set_share` stays anonymous by design
+  (the share token is the capability). `web/src/lib/sync/supabaseMigrations.pglite.test.ts`
+  replays every migration on real Postgres (PGlite) with Supabase's default
+  privileges and asserts those ACLs, so a regression fails CI.
+- **Auth config:** `supabase/config.toml` mirrors production (8-digit codes,
+  60 s resend window, TOTP MFA on, pooler sizes) so `npx supabase config push`
+  cannot silently regress it. Run `npx supabase config diff` first — it is
+  read-only. `site_url` and the redirect allow-list are the only declared
+  values that still differ (see step 4 below).
+- **Not verified live yet:** the end-to-end account test needs the project's
+  publishable key in `web/.env.local` (see step 5). The old project
+  `skksijapfqmfczjsvfiw` is inactive; nothing references it.
 
-## Turning it on (about 15 minutes)
+## Turning it on
 
-1. Create a Supabase project.
-2. Apply the schema in `supabase/migrations/` — either connect GitHub in the
-   Supabase dashboard (**Working directory: `.`**, the repository root that
-   contains `supabase/`) or run `npx supabase link --project-ref <ref>` then
-   `npx supabase db push`. Never apply `db/migrations/001–002` (legacy PIN
-   backend without row-level security).
-3. Authentication → Providers → Email: enable email + password and email OTP.
-4. Authentication → Email templates → **Magic Link**: paste
-   `supabase/templates/magic_link.html` (it includes `{{ .Token }}` so
-   passwordless sign-in works in the desktop app). The CLI/local stack already
-   uses it via `supabase/config.toml`.
-5. Authentication → URL configuration: add your hosted origin (e.g.
-   `https://axom.info`) and `http://localhost:5187` to the redirect allow-list.
-6. Copy `web/.env.example` to `web/.env.local` and paste the project URL and
-   anon key. On Vercel, add the same two variables to the project settings.
-7. Rebuild. Settings → Account now shows Sign in / Create account / Email me a code.
+1. **Migrations** — already applied to production. For a new project: connect
+   GitHub in the Supabase dashboard (**Working directory: `.`**) or run
+   `npx supabase link --project-ref <ref>` then `npx supabase db push`. Never
+   apply `db/migrations/001–002` (legacy PIN backend without row-level security).
+2. **Email delivery (required before real users)** — Supabase's built-in
+   mailer sends only a few emails per hour and only to project team members.
+   Add custom SMTP under Authentication → Emails → SMTP. With Resend (already
+   in your bookmarks): host `smtp.resend.com`, port `465`, user `resend`,
+   password = a Resend API key, sender e.g. `AXOM <auth@your-domain>` on a
+   domain verified in Resend. Then raise Authentication → Rate limits → emails.
+3. **Templates** — every auth email carries the code *and* the link, because a
+   link opened from the desktop app lands in a browser. Paste into
+   Authentication → Emails: **Confirm signup** ← `supabase/templates/confirmation.html`,
+   **Magic Link** ← `magic_link.html`, **Reset password** ← `recovery.html`
+   (subjects are in `config.toml`). The app verifies confirmation and reset
+   codes in-app (`verifyOtp` types `email` / `recovery`).
+4. **URLs** — Authentication → URL configuration. Site URL: your production
+   web origin (currently `https://axom-jacloses-projects.vercel.app/`). Keep the
+   Vercel preview patterns and add `http://127.0.0.1:5173/**`,
+   `http://localhost:5173/**`, `http://127.0.0.1:5187/**`,
+   `http://localhost:5187/**` for local development. Mirror the final list in
+   `config.toml` (`site_url`, `additional_redirect_urls`) before any
+   `config push`: its `site_url` still points at the local dev server.
+5. **Keys** — Dashboard → Project Settings → API Keys. Copy `web/.env.example`
+   to `web/.env.local` and paste the **publishable** key
+   (`VITE_SUPABASE_PUBLISHABLE_KEY`, `sb_publishable_…`; the legacy
+   `VITE_SUPABASE_ANON_KEY` also works). In Vercel → Project → Settings →
+   Environment Variables, add `VITE_SUPABASE_URL` and
+   `VITE_SUPABASE_PUBLISHABLE_KEY` for Production and Preview, then redeploy.
+   Never put a secret/service-role key in any `VITE_` variable.
+6. **Verify live** — `cd web && AXOM_LIVE_EMAIL=<fresh address> SUPABASE_SECRET_KEY=<secret key> npm run test:accounts:live`.
+   The secret key stays in that one shell command; the test uses it only to
+   mint the same one-time codes the emails carry and to delete its throwaway
+   user afterwards. It covers: create account → confirm by code → password
+   sign-in → code sign-in → protect → second device conflict → **Merge both** →
+   restore → devices → delete cloud copies. It sends two real emails, so
+   don't loop it on the built-in mailer.
 
 ## Desktop (Tauri) packaging
 
 - The desktop build bakes the same two `VITE_` values at build time; no other
   secret is needed.
-- Email **codes** are the primary passwordless path in the desktop app: a
-  magic-link click opens the system browser, which cannot hand a PKCE session
-  back to the app window. Password sign-in works everywhere.
-- `src-tauri/tauri.conf.json` currently sets `"csp": null`. Before shipping a
-  signed desktop build, set a CSP that allows `connect-src` to your Supabase
-  URL (`https://<ref>.supabase.co` and `wss://<ref>.supabase.co`).
+- Email **codes** are the passwordless path in the desktop app (sign-in,
+  sign-up confirmation and password reset); a link click opens the system
+  browser, which cannot hand a PKCE session back to the app window. Password
+  sign-in works everywhere.
+- The desktop CSP (`src-tauri/tauri.conf.json`) allows `connect-src https:`,
+  which covers `https://<ref>.supabase.co`. AXOM does not use Realtime, so no
+  `wss:` entry is needed.
 - OAuth providers (Google/Apple) need a registered deep-link scheme for the
   desktop app; they are intentionally not wired yet.
 

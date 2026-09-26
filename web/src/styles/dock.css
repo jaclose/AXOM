@@ -1,0 +1,273 @@
+/* ===========================================================================
+   Focus dock — the persistent pill (components/dock/FocusDock.tsx).
+   Dark in both themes, like a hardware status island; accents follow the
+   active palette. The .focus-dock-goo row draws only the capsule shapes
+   through an SVG goo filter, so two capsules pinch apart like liquid; the
+   crisp, interactive content sits in .focus-dock-content on top of it.
+   =========================================================================== */
+.focus-dock {
+  --dock-bg: 15, 15, 18;
+  --dock-ink: 241, 237, 228;
+  position: fixed;
+  left: 50%;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  z-index: 60;
+  display: grid;
+  max-width: calc(100vw - 24px);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.focus-dock-defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+.focus-dock-row {
+  grid-area: 1 / 1;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 22px;
+  min-width: 0;
+}
+.focus-dock-goo { filter: url(#axom-dock-goo) drop-shadow(0 14px 26px rgb(0 0 0 / 0.34)); }
+.focus-dock-content > * { pointer-events: auto; }
+
+.dock-capsule {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 48px;
+  min-width: 0;
+  padding: 0 7px 0 9px;
+  border-radius: 999px;
+  color: rgb(var(--dock-ink));
+  animation: dock-pop 360ms cubic-bezier(.2, .9, .25, 1) both;
+}
+.focus-dock-goo .dock-capsule { background: rgb(var(--dock-bg)); }
+.focus-dock-goo .dock-capsule > * { visibility: hidden; }
+.focus-dock-content .dock-capsule { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.09), inset 0 0 0 1px rgb(255 255 255 / 0.05); }
+
+.dock-icon {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: rgba(var(--dock-ink), 0.86);
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease, transform .15s ease;
+}
+.dock-icon:hover { color: rgb(var(--dock-ink)); background: rgb(255 255 255 / 0.09); }
+.dock-icon:active { transform: scale(.94); }
+.dock-icon:focus-visible,
+.dock-sound-name:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: 1px; }
+.dock-icon.primary { color: rgb(var(--accent-hi-rgb, var(--accent-rgb))); background: rgba(var(--accent-rgb), 0.2); }
+.dock-icon.primary:hover { background: rgba(var(--accent-rgb), 0.3); }
+.dock-icon.finish { color: rgb(var(--accent-hi-rgb, var(--accent-rgb))); }
+
+/* Timer capsule */
+.dock-ring { position: relative; display: grid; place-items: center; width: 30px; height: 30px; flex: 0 0 auto; }
+.dock-ring-track { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+.dock-ring circle { fill: none; stroke-width: 2.4; }
+.dock-ring .track { stroke: rgb(255 255 255 / 0.12); }
+.dock-ring .value { stroke: rgb(var(--accent-rgb)); stroke-linecap: round; transition: stroke-dashoffset 1s linear; }
+.dock-ring.break .value { stroke: rgb(var(--cool-rgb, 120, 160, 190)); }
+.dock-ring-glyph { position: relative; color: rgba(var(--dock-ink), 0.7); }
+.dock-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgb(var(--accent-rgb));
+  box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.5);
+  animation: dock-live 2.4s ease-out infinite;
+}
+.dock-clock { min-width: 50px; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+.dock-label {
+  max-width: 190px;
+  overflow: hidden;
+  font-size: 12px;
+  color: rgba(var(--dock-ink), 0.62);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.dock-timer.paused .dock-clock { opacity: .58; }
+.dock-timer.paused .dock-live-dot { animation: none; opacity: .5; }
+.dock-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-width .34s cubic-bezier(.2, .9, .25, 1), opacity .2s ease;
+}
+.dock-timer.expanded .dock-more { max-width: 150px; opacity: 1; }
+.dock-log-menu {
+  position: absolute;
+  right: 12px;
+  bottom: calc(100% + 12px);
+  display: grid;
+  min-width: 190px;
+  padding: 6px;
+  border-radius: 16px;
+  background: rgba(var(--dock-bg), 0.98);
+  box-shadow: 0 18px 40px rgb(0 0 0 / 0.4), inset 0 0 0 1px rgb(255 255 255 / 0.07);
+  animation: dock-pop 220ms ease-out both;
+}
+.dock-log-menu button {
+  padding: 8px 10px;
+  color: rgba(var(--dock-ink), 0.86);
+  font-size: 13px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.dock-log-menu button:hover,
+.dock-log-menu button:focus-visible { color: rgb(var(--dock-ink)); background: rgb(255 255 255 / 0.08); outline: none; }
+
+/* Sound capsule */
+.dock-sound-wrap { position: relative; display: flex; }
+.dock-sound-inner { display: flex; align-items: center; gap: 6px; }
+.dock-sound.entering { animation: dock-split 680ms cubic-bezier(.2, .9, .22, 1) both; }
+.focus-dock-content .dock-sound.entering .dock-sound-inner { animation: dock-fade-in 360ms ease-out 180ms both; }
+.dock-sound.paused .dock-sound-name b { opacity: .6; }
+.dock-sound-name {
+  display: grid;
+  gap: 1px;
+  min-width: 52px;
+  padding: 2px 4px;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.dock-sound-name b { font-size: 13px; font-weight: 600; }
+.dock-sound-name small { font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(var(--dock-ink), 0.5); white-space: nowrap; }
+.dock-eq { display: inline-flex; align-items: flex-end; gap: 2.5px; height: 16px; width: 20px; margin-left: 4px; }
+.dock-eq i {
+  width: 3px;
+  height: 30%;
+  border-radius: 2px;
+  background: linear-gradient(to top, rgb(var(--accent-rgb)), rgb(var(--accent-hi-rgb, var(--accent-rgb))));
+  transform-origin: bottom;
+}
+.dock-eq.playing i { animation: dock-eq 1.35s ease-in-out infinite alternate; }
+.dock-eq.playing i:nth-child(2) { animation-duration: 1.7s; }
+.dock-eq.playing i:nth-child(3) { animation-duration: 1.15s; }
+.dock-eq.playing i:nth-child(4) { animation-duration: 1.95s; }
+
+/* Genie panel */
+.dock-genie {
+  --genie-origin: 70%;
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 14px);
+  width: min(360px, calc(100vw - 24px));
+  overflow: hidden;
+  color: rgb(var(--dock-ink));
+  background: rgb(var(--dock-bg));
+  border-radius: 22px;
+  box-shadow: 0 26px 64px rgb(0 0 0 / 0.46), inset 0 0 0 1px rgb(255 255 255 / 0.07);
+  transform-origin: var(--genie-origin) 100%;
+  pointer-events: auto;
+}
+.dock-genie.open { animation: dock-genie-in 480ms cubic-bezier(.2, .85, .22, 1) both; }
+.dock-genie.closing { animation: dock-genie-out 260ms cubic-bezier(.55, 0, .8, .2) both; }
+.dock-genie-stage { position: relative; height: 176px; background: radial-gradient(120% 90% at 50% 20%, rgba(var(--accent-rgb), 0.12), transparent 70%), rgb(8 8 10); }
+.dock-genie-stage .soundscape-visual { position: absolute; inset: 0; width: 100%; height: 100%; }
+.dock-genie-caption {
+  position: absolute;
+  left: 14px;
+  bottom: 12px;
+  display: grid;
+  gap: 1px;
+  text-shadow: 0 1px 10px rgb(0 0 0 / 0.6);
+}
+.dock-genie-caption b { font-size: 15px; font-weight: 600; }
+.dock-genie-caption small { font-size: 11px; color: rgba(var(--dock-ink), 0.62); }
+.dock-genie-controls { display: grid; gap: 10px; padding: 12px 14px 14px; }
+.dock-genie-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.dock-genie-link { font-size: 12px; color: rgb(var(--accent-hi-rgb, var(--accent-rgb))); text-decoration: none; }
+.dock-genie-link:hover { text-decoration: underline; }
+.dock-genie-note { margin: 0; font-size: 11px; line-height: 1.45; color: rgba(var(--dock-ink), 0.55); }
+.dock-genie-note span { color: rgba(var(--dock-ink), 0.78); }
+.dock-genie .soundscape-chips button { color: rgba(var(--dock-ink), 0.75); border-color: rgb(255 255 255 / 0.1); }
+.dock-genie .soundscape-chips button.on { color: rgb(var(--dock-ink)); }
+.dock-genie .soundscape-follow { color: rgba(var(--dock-ink), 0.7); }
+.dock-genie select.field { color: rgb(var(--dock-ink)); background: rgb(255 255 255 / 0.06); border-color: rgb(255 255 255 / 0.1); }
+.dock-genie .soundscape-output button { color: rgba(var(--dock-ink), 0.7); border-color: rgb(255 255 255 / 0.1); }
+.dock-genie .soundscape-output button.on { color: rgb(var(--dock-ink)); }
+
+@keyframes dock-pop { from { opacity: 0; transform: translateY(8px) scale(.94); } to { opacity: 1; transform: none; } }
+@keyframes dock-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes dock-split {
+  0% { transform: translateX(-78px) scaleX(.5); }
+  55% { transform: translateX(5px) scaleX(1.03); }
+  100% { transform: none; }
+}
+@keyframes dock-live { 0% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.5); } 70%, 100% { box-shadow: 0 0 0 7px rgba(var(--accent-rgb), 0); } }
+@keyframes dock-eq { from { transform: scaleY(.35); } to { transform: scaleY(3.1); } }
+@keyframes dock-genie-in {
+  0% {
+    opacity: .25;
+    transform: translateY(20px) scale(.92, .22);
+    clip-path: polygon(calc(var(--genie-origin) - 7%) 100%, calc(var(--genie-origin) + 7%) 100%, calc(var(--genie-origin) + 7%) 100%, calc(var(--genie-origin) - 7%) 100%);
+  }
+  45% {
+    opacity: 1;
+    transform: translateY(6px) scale(.98, .8);
+    clip-path: polygon(6% 18%, 94% 18%, calc(var(--genie-origin) + 15%) 100%, calc(var(--genie-origin) - 15%) 100%);
+  }
+  100% { opacity: 1; transform: none; clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%); }
+}
+@keyframes dock-genie-out {
+  0% { opacity: 1; transform: none; clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%); }
+  55% { opacity: .9; transform: translateY(6px) scale(.97, .7); clip-path: polygon(8% 24%, 92% 24%, calc(var(--genie-origin) + 12%) 100%, calc(var(--genie-origin) - 12%) 100%); }
+  100% {
+    opacity: 0;
+    transform: translateY(20px) scale(.9, .2);
+    clip-path: polygon(calc(var(--genie-origin) - 6%) 100%, calc(var(--genie-origin) + 6%) 100%, calc(var(--genie-origin) + 6%) 100%, calc(var(--genie-origin) - 6%) 100%);
+  }
+}
+
+@media (max-width: 560px) {
+  .focus-dock-row { gap: 16px; }
+  .dock-label { display: none; }
+  .dock-clock { min-width: 44px; font-size: 15px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dock-capsule, .dock-sound.entering, .dock-log-menu, .focus-dock-content .dock-sound.entering .dock-sound-inner { animation: none; }
+  .dock-genie.open, .dock-genie.closing { animation: dock-fade-in 120ms ease-out both; }
+  .dock-genie.closing { animation-direction: reverse; }
+  .dock-eq.playing i, .dock-live-dot { animation: none; }
+  .dock-more { transition: none; }
+}
+:root[data-motion="reduce"] .dock-capsule,
+:root[data-motion="reduce"] .dock-sound.entering,
+:root[data-motion="reduce"] .dock-log-menu,
+:root[data-motion="reduce"] .focus-dock-content .dock-sound.entering .dock-sound-inner,
+:root[data-motion="reduce"] .dock-eq.playing i,
+:root[data-motion="reduce"] .dock-live-dot { animation: none; }
+:root[data-motion="reduce"] .dock-genie.open { animation: dock-fade-in 120ms ease-out both; }
+:root[data-motion="reduce"] .dock-genie.closing { animation: dock-fade-in 120ms ease-out reverse both; }
+:root[data-motion="reduce"] .dock-more { transition: none; }
+
+/* The dock and the soundscape stage stay dark in the light theme too. */
+:root .soundscape-hero select.field,
+:root .dock-genie select.field,
+:root[data-theme="light"] .soundscape-hero select.field,
+:root[data-theme="light"] .dock-genie select.field,
+:root[data-theme="light"] .soundscape-hero select.field:focus,
+:root[data-theme="light"] .dock-genie select.field:focus {
+  color: #f1ede4;
+  background-color: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: none;
+  color-scheme: dark;
+}

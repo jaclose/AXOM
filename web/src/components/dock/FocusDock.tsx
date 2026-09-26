@@ -37,7 +37,8 @@ function useNow(active: boolean): number {
 function usePomodoroView() {
   const pomodoro = usePomodoro();
   const total = pomodoroPhaseSeconds(pomodoro);
-  const visible = pomodoro.running || (pomodoro.secondsLeft > 0 && pomodoro.secondsLeft < total);
+  // Paused mid-sprint (even at 0 s elapsed) still belongs in the dock; reset hides it.
+  const visible = pomodoro.running || pomodoro.focusRunStarted || (pomodoro.secondsLeft > 0 && pomodoro.secondsLeft < total);
   return { pomodoro, total, visible };
 }
 
@@ -106,13 +107,13 @@ function ProgressRing({ fraction, phase }: { fraction: number; phase: "focus" | 
   const Glyph = phase === "break" ? Coffee : Brain;
   return (
     <span className={`dock-ring ${phase}`} aria-hidden="true">
-      <svg viewBox="0 0 30 30">
+      <svg className="dock-ring-track" viewBox="0 0 30 30">
         <circle cx="15" cy="15" r={radius} className="track" />
         {phase !== "session" && (
           <circle cx="15" cy="15" r={radius} className="value" strokeDasharray={circumference} strokeDashoffset={circumference * (1 - Math.min(1, Math.max(0, fraction)))} />
         )}
       </svg>
-      {phase === "session" ? <i className="dock-live-dot" /> : <Glyph size={11} />}
+      {phase === "session" ? <i className="dock-live-dot" /> : <Glyph size={11} className="dock-ring-glyph" />}
     </span>
   );
 }
@@ -139,7 +140,8 @@ function TimerCapsule({ ghost, expanded, onExpand, session, pomodoro, phaseTotal
 
   const toggle = () => {
     if (pomodoro) pomodoro.toggle();
-    else if (session) (session.status === "active" ? store.pauseSession(session.id) : store.resumeSession(session.id));
+    else if (session?.status === "active") store.pauseSession(session.id);
+    else if (session) store.resumeSession(session.id);
   };
   const status = pomodoro
     ? `${pomodoro.phase === "break" ? "Break" : "Focus"} ${pomodoro.running ? "running" : "paused"}, ${clock} left`
@@ -170,20 +172,7 @@ function TimerCapsule({ ghost, expanded, onExpand, session, pomodoro, phaseTotal
         )}
         {session && (
           <>
-            <span className="dock-log-wrap">
-              <IconButton label="Log a quick note" onClick={() => setLogsOpen((value) => !value)}><ListPlus size={ICON_SIZE.body} /></IconButton>
-              {logsOpen && !ghost && (
-                <span className="dock-log-menu" role="menu">
-                  {QUICK_LOGS.map((log) => (
-                    <button key={log} type="button" role="menuitem" onClick={() => {
-                      store.quickLogSession(session.id, log);
-                      setLogsOpen(false);
-                      if (log === "completed") openCapture();
-                    }}>{QUICK_LOG_LABEL[log]}</button>
-                  ))}
-                </span>
-              )}
-            </span>
+            <IconButton label="Log a quick note" onClick={() => setLogsOpen((value) => !value)}><ListPlus size={ICON_SIZE.body} /></IconButton>
             <IconButton label={focusMode ? "Exit focus mode" : "Focus mode"} onClick={toggleFocusMode}>
               {focusMode ? <Minimize2 size={ICON_SIZE.body} /> : <Maximize2 size={ICON_SIZE.body} />}
             </IconButton>
@@ -191,6 +180,17 @@ function TimerCapsule({ ghost, expanded, onExpand, session, pomodoro, phaseTotal
           </>
         )}
       </span>
+      {session && logsOpen && !ghost && (
+        <span className="dock-log-menu" role="menu" aria-label="Quick log">
+          {QUICK_LOGS.map((log) => (
+            <button key={log} type="button" role="menuitem" onClick={() => {
+              store.quickLogSession(session.id, log);
+              setLogsOpen(false);
+              if (log === "completed") openCapture();
+            }}>{QUICK_LOG_LABEL[log]}</button>
+          ))}
+        </span>
+      )}
     </Capsule>
   );
 }
@@ -216,6 +216,24 @@ function SoundCapsule({ ghost, entering }: { ghost: boolean; entering: boolean }
   const [origin, setOrigin] = useState(70);
   const capsuleRef = useRef<HTMLDivElement | null>(null);
   const timers = useRef<{ open?: number; close?: number; out?: number }>({});
+  // Escape closes the genie wherever focus is (a hover never moves focus).
+  useEffect(() => {
+    if (ghost || genie !== "open") return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      setGenie("closing");
+      window.clearTimeout(timers.current.out);
+      timers.current.out = window.setTimeout(() => setGenie("closed"), reduced ? 0 : GENIE_OUT_MS);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [ghost, genie, reduced]);
+  useEffect(() => () => {
+    window.clearTimeout(timers.current.open);
+    window.clearTimeout(timers.current.close);
+    window.clearTimeout(timers.current.out);
+  }, []);
   if (!presetId) return null;
   const preset = SOUNDSCAPES[presetId];
   const pair = carrierPair(preset, output);
@@ -244,7 +262,6 @@ function SoundCapsule({ ghost, entering }: { ghost: boolean; entering: boolean }
       onMouseLeave={ghost ? undefined : () => close()}
       onFocus={ghost ? undefined : () => open(0)}
       onBlur={ghost ? undefined : (event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) close(); }}
-      onKeyDown={ghost ? undefined : (event) => { if (event.key === "Escape" && genie === "open") { event.stopPropagation(); close(0); } }}
     >
       {!ghost && genie !== "closed" && (
         <GeniePanel phase={genie} origin={origin} presetId={presetId} pairLabel={pair ? `${pair[0]} / ${pair[1]} Hz` : undefined} />

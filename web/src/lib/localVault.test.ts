@@ -1,9 +1,10 @@
-import { indexedDB as fakeIndexedDb, IDBKeyRange } from "fake-indexeddb";
+import { indexedDB as fakeIndexedDb, IDBKeyRange, IDBObjectStore } from "fake-indexeddb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   assertVaultWrite,
   assertVaultWritesSince,
   getVaultWriteCheckpoint,
+  flushLocalVaultWrites,
   localVaultStorage,
   writeLocalFallback,
 } from "./localVault";
@@ -30,6 +31,20 @@ beforeEach(async () => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("IndexedDB-first local vault", () => {
+  it("coalesces a burst of saves: the newest snapshot wins and nothing older lands after it", async () => {
+    const snapshot = (n: number) => JSON.stringify({ state: { profile: { userId: "jd" }, n }, version: 32 });
+    const put = vi.spyOn(IDBObjectStore.prototype, "put");
+    const saves = [1, 2, 3, 4, 5].map((n) => localVaultStorage.setItem(STORAGE_KEYS.persistedState, snapshot(n)));
+    await Promise.all(saves);
+    await flushLocalVaultWrites();
+    expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBe(snapshot(5));
+    // The first save was already in flight; 2–4 were superseded before writing.
+    const written = put.mock.calls.map(([value]) => value).filter((value) => typeof value === "string" && value.startsWith("{"));
+    expect(new Set(written)).toEqual(new Set([snapshot(1), snapshot(5)]));
+    put.mockRestore();
+  });
+
+
   it("stores the large workspace in IndexedDB and keeps only a small profile pointer in localStorage", async () => {
     const persisted = JSON.stringify({ state: { profile: { userId: "jd", name: "JD" }, questions: [{ id: "q1" }] }, version: 32 });
     await localVaultStorage.setItem(STORAGE_KEYS.persistedState, persisted);

@@ -4,7 +4,7 @@ import type { ExperimentalFlags } from "../../lib/types";
 import {
   LayoutGrid, BookOpen, BadgeCheck, Brain, LineChart, Calendar, ListChecks,
   BookText, Share2, Library, Folder, Link, Wand2, LifeBuoy, ClipboardCheck, Trophy, Compass, Info, CalendarCheck,
-  HelpCircle, BookOpenCheck, WholeWord, Stethoscope, Gamepad2, Blocks,
+  HelpCircle, BookOpenCheck, WholeWord, Stethoscope, Gamepad2, Blocks, AudioWaveform,
 } from "lucide-react";
 
 export interface NavItem {
@@ -43,6 +43,7 @@ export const NAV = [
   { id: "questions", label: "Question Bank", subtitle: "Import Center, source library, question sets, blocks, and results", icon: HelpCircle },
   { id: "shared-set", label: "Shared Question Set", subtitle: "Preview and safely copy a private shared set", icon: HelpCircle },
   { id: "methods", label: "Study Methods", subtitle: "Evidence-informed technique templates with honest trade-offs", icon: BookOpenCheck },
+  { id: "soundscapes", label: "Soundscapes", subtitle: "Synthesized study sound with live visuals and an honest listening log", icon: AudioWaveform },
   { id: "productivity", label: "Productivity", subtitle: "Study time, Anki cards, lecture blocks, day usefulness", icon: Calendar },
   { id: "journal", label: "Journal", subtitle: "Daily standups, intention follow-up, blockers, and tomorrow's plan", icon: BookText },
   { id: "reports", label: "Reports", subtitle: "Traceable statistics, energy, and performance vs. your goals", icon: LineChart },
@@ -87,6 +88,7 @@ export const MODULE_STATUS_BY_NAV_ID = {
   "daily-word": { status: "new", announcementId: "daily-word-launch-v1" },
   "daily-games": { status: "new", announcementId: "daily-games-hub-v1" },
   building: { status: "new", announcementId: "building-preview-v1" },
+  soundscapes: { status: "new", announcementId: "soundscapes-v1" },
   anki: { status: "wip" },
   habits: { status: "wip" },
   step: { status: "wip" },
@@ -116,7 +118,7 @@ export const SIDEBAR_LEARN = ["courses", "tracker", "questions", "anki"] as cons
 export const SIDEBAR_REVIEW = ["productivity", "journal", "reports"] as const;
 export const SIDEBAR_TOP = [...SIDEBAR_TODAY, ...SIDEBAR_LEARN, ...SIDEBAR_REVIEW];
 export const SIDEBAR_PREP = ["step", "premed", "appchecker"];
-export const SIDEBAR_TOOLS = ["tasks", "habits", "methods", "resources", "prompts", "integrations", "leaderboards"];
+export const SIDEBAR_TOOLS = ["tasks", "habits", "soundscapes", "methods", "resources", "prompts", "integrations", "leaderboards"];
 export const SIDEBAR_BOTTOM = ["folders", "building"];
 // Dashboard can't be hidden; everything else is subscribe/unsubscribe-able.
 export const SIDEBAR_LOCKED = new Set(["dashboard"]);

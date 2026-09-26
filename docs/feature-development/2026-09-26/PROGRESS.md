@@ -1,7 +1,7 @@
 # Personalization, accounts, and product-wide polish — progress
 
 Date: 2026-09-26 · Worktree `AXOM-accounts-v1` · Branch `feat/accounts-sync-v1` · Base HEAD `6a37af6`.
-Uncommitted; no push or deployment.
+Committed on `feat/accounts-sync-v1` (checkpoint `83a6c99` plus follow-ups); `origin/main` is merged in so the branch lands on `main` cleanly.
 
 ## Owner requests → outcome
 
@@ -40,9 +40,23 @@ Uncommitted; no push or deployment.
 - Dev-only `window.__AXOM_DEV__` live-store handle: e2e specs no longer import `/src/lib/store.ts`, which could hit a stale HMR module instance on a long-running dev server (root cause of a false “6 failures” during this session).
 - `npm run residency:import` / `residency:validate` (repository root).
 
+## Session 2 — packaging, updates, cinematics, soundscapes, focus dock
+
+| Request | Outcome |
+| --- | --- |
+| Continue accounts: auth config, templates, redirects, env, real testing | Hardening migrations made replayable on fresh databases (`rls_auto_enable` guarded) and proven by a **PGlite test that replays all six migrations with Supabase's default privileges and asserts function ACLs** (it reproduces the anon-EXECUTE gap before hardening). `config.toml` mirrors production (8-digit codes, MFA, pooler) so a push can't regress it. Every auth email carries a code; sign-up confirmation and password reset now work by code in-app (desktop-safe). Publishable-key support. `npm run test:accounts:live` covers the whole journey against production once a key is supplied. **Blocked on the owner:** publishable key, custom SMTP (Resend), site URL/redirects (see ACCOUNTS-SETUP). |
+| Intro staging + logic (first open of day/week, on update) | Opening-film policy (daily default · weekly · updates only · every launch · never), update film once per new version with caption, installing film during an approved update, previews in Settings → Appearance. Placeholder takes A/B/C from the Luster kit. `npm run cinematic:import` turns any final render into web-ready files + manifest. |
+| Package + update system from GitHub | Ported the signed Tauri updater + release pipeline from the `main` worktree. Added **background download → "Update now"**, a fixed **`update-feed` channel** (pre-beta versions are invisible to GitHub's `/releases/latest`), optional Apple notarization (ad-hoc signed otherwise), and `npm run release:setup-updater`. |
+| Sleek icon with shadow and rounded borders | macOS-grid squircle, soft lift shadow, rim light, brand mark at 1:1 (`npm run icon`). |
+| Soundscapes with visuals; persistent timer pill that splits; genie hover | Six synthesized presets matched to the owner's recordings, honest evidence notes, the owner's 90-minute rotation, listening log with an observational accuracy/"again"-rate comparison, follow-my-Pomodoro, media keys. Focus dock pill with liquid split and genie panel. |
+
+Also fixed while verifying: the ported vault write queue delayed saves enough to **lose changes on a quick reload** (two e2e journeys) — replaced with latest-wins coalescing; `.sr-only` was not defined globally (screen-reader text rendered visibly in several places); palette tokens were used with invalid `rgb(var() / a)` syntax (guard test added); a JSON import broke Playwright's loader ("0 tests"); the changelog left the startup bundle (App chunk 500 → 478 kB).
+
+Verification: `tsc` · `eslint` clean · **1,815 / 1,815** unit tests (176 files) · build OK · release tests 19/19 · e2e **21 passed**, 1 skipped (live accounts, needs a key) · `cargo check` OK · local macOS release build of `AXOM.app` (see below).
+
 ## Still open
 
-- Supabase project + env values; live two-account test; Tauri CSP allowing the Supabase origin.
-- ACGME listing download for Residency; requirement enrichment from program sites.
-- Native desktop notifications for lock-in check-ins (needs `tauri-plugin-notification`).
-- Anki note types / “my files” (owner deferred).
+- Supabase: publishable key in `web/.env.local` + Vercel, custom SMTP, final site URL/redirects, then `npm run test:accounts:live`.
+- Updates: run `npm run release:setup-updater` once; tag + publish the first release; smoke-test N → N+1.
+- The `main` worktree still holds uncommitted work this branch supersedes (release pipeline, startup intro — ported here and improved) plus items deliberately **not** ported (application-checker "intelligence" scaffold, Anki bridge, `data/application_checker/*.json`). Review those before discarding them.
+- ACGME listing download for Residency; native notifications for lock-in check-ins; Anki note types (owner deferred); final cinematic renders (Higgsfield).

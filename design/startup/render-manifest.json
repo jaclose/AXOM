@@ -1,0 +1,153 @@
+{
+  "source": "web/public/icon-512.png",
+  "sourceSha256": "27a7434cf7a41179e5fb613127effae58d3b6e69db51be2a9b09443b63aa795c",
+  "silhouette": "threshold-traced raster, 2.6 px simplification tolerance; no original vector supplied",
+  "polygons": [
+    [
+      [
+        178,
+        241
+      ],
+      [
+        262,
+        92
+      ],
+      [
+        269,
+        87
+      ],
+      [
+        357,
+        243
+      ],
+      [
+        293,
+        289
+      ],
+      [
+        285,
+        286
+      ],
+      [
+        322,
+        241
+      ],
+      [
+        269,
+        147
+      ],
+      [
+        214,
+        240
+      ],
+      [
+        249,
+        286
+      ],
+      [
+        242,
+        289
+      ]
+    ],
+    [
+      [
+        78,
+        416
+      ],
+      [
+        162,
+        269
+      ],
+      [
+        166,
+        267
+      ],
+      [
+        190,
+        278
+      ],
+      [
+        114,
+        416
+      ],
+      [
+        109,
+        420
+      ],
+      [
+        78,
+        420
+      ]
+    ],
+    [
+      [
+        344,
+        280
+      ],
+      [
+        372,
+        267
+      ],
+      [
+        457,
+        420
+      ],
+      [
+        423,
+        419
+      ],
+      [
+        420,
+        416
+      ]
+    ],
+    [
+      [
+        238,
+        304
+      ],
+      [
+        265,
+        275
+      ],
+      [
+        269,
+        275
+      ],
+      [
+        298,
+        308
+      ],
+      [
+        267,
+        337
+      ],
+      [
+        238,
+        309
+      ]
+    ]
+  ],
+  "fps": 60,
+  "frames": 78,
+  "durationSeconds": 1.3,
+  "resolution": [
+    1280,
+    720
+  ],
+  "background": "#0d0d0e",
+  "audio": false,
+  "blenderVersion": "4.5.9 LTS",
+  "assets": [
+    {
+      "path": "web/public/startup/axom-optical-luster.mp4",
+      "bytes": 31278,
+      "sha256": "1fd536c5394b996790af7ac11be1161968a88878e5a777f18628dfeb698e04e0"
+    },
+    {
+      "path": "web/public/startup/axom-optical-luster-poster.png",
+      "bytes": 35214,
+      "sha256": "f8a703935f2c6119d93bf54acb17df4ccbc0d9afd118f6fcf374599f3fcc2111"
+    }
+  ]
+}

@@ -102,6 +102,10 @@ async function main() {
   if (args.includes('--web-only') && args.includes('--native-only')) throw new Error('Choose either --web-only or --native-only.');
   const native = !args.includes('--web-only');
   const signed = args.includes('--signed');
+  // Updater signing (Tauri key) and Apple notarization are independent. Without
+  // a Developer ID the macOS app is ad-hoc signed: the first install needs
+  // right-click → Open once; in-app updates stay signature-verified by Tauri.
+  const appleSigned = process.platform === 'darwin' && Boolean(process.env.APPLE_SIGNING_IDENTITY);
   if (!native && signed) throw new Error('--signed requires a native build.');
   const target = value('--target') ?? hostTarget(process.platform, process.arch);
   if (!TARGETS[target]) throw new Error(`Unsupported target: ${target}`);
@@ -126,8 +130,9 @@ async function main() {
   if (signed) {
     try { updater = validateUpdaterSettings(process.env); } catch (error) { problems.push(error.message); }
     if (process.platform === 'darwin') {
-      if (!process.env.APPLE_SIGNING_IDENTITY) problems.push('Signed macOS releases require APPLE_SIGNING_IDENTITY (Developer ID Application).');
-      if (!(process.env.APPLE_ID && process.env.APPLE_PASSWORD && process.env.APPLE_TEAM_ID) && !(process.env.APPLE_API_KEY && process.env.APPLE_API_ISSUER && process.env.APPLE_API_KEY_PATH)) problems.push('Signed macOS releases require Apple notarization credentials (Apple ID/password/team or API key/issuer/path).');
+      if (!appleSigned && process.env.AXOM_REQUIRE_APPLE_NOTARIZATION === '1') problems.push('AXOM_REQUIRE_APPLE_NOTARIZATION=1 needs APPLE_SIGNING_IDENTITY (Developer ID Application).');
+      if (appleSigned && !(process.env.APPLE_ID && process.env.APPLE_PASSWORD && process.env.APPLE_TEAM_ID) && !(process.env.APPLE_API_KEY && process.env.APPLE_API_ISSUER && process.env.APPLE_API_KEY_PATH)) problems.push('A Developer ID build also needs Apple notarization credentials (Apple ID/password/team or API key/issuer/path).');
+      if (!appleSigned) console.warn('No Apple Developer ID: the macOS app will be ad-hoc signed and not notarized. First install: right-click AXOM → Open. Updates remain Tauri-signature verified.');
     }
   }
   console.log(`AXOM ${version} · ${native ? platform : 'web'} · ${signed ? 'signed release' : 'local build'}`);
@@ -155,7 +160,7 @@ async function main() {
     // Desktop icon: macOS-grid squircle rendered by scripts/render-app-icon.mjs
     // from the canonical web artwork, so every native size stays on-brand.
     run(process.execPath, [cli, 'icon', 'design/icon/axom-app-icon-1024.png', '--output', 'src-tauri/icons']);
-    const overlay = { build: { beforeBuildCommand: '' }, bundle: { createUpdaterArtifacts: signed, ...(!signed && process.platform === 'darwin' ? { macOS: { signingIdentity: '-' } } : {}) }, ...(updater ? { plugins: { updater } } : {}) };
+    const overlay = { build: { beforeBuildCommand: '' }, bundle: { createUpdaterArtifacts: signed, ...(!appleSigned && process.platform === 'darwin' ? { macOS: { signingIdentity: '-' } } : {}) }, ...(updater ? { plugins: { updater } } : {}) };
     const configPath = join(staging, 'tauri.release.json');
     await writeJson(configPath, overlay);
     const buildArgs = [cli, 'build', '--config', configPath, '--', '--locked'];
@@ -180,7 +185,7 @@ async function main() {
       const app = join(bundleRoot, 'macos/AXOM.app');
       if (!existsSync(app)) throw new Error('Native build did not produce AXOM.app.');
       run('codesign', ['--verify', '--deep', '--strict', app]);
-      if (signed) { run('xcrun', ['stapler', 'validate', app]); run('spctl', ['--assess', '--type', 'execute', app]); }
+      if (signed && appleSigned) { run('xcrun', ['stapler', 'validate', app]); run('spctl', ['--assess', '--type', 'execute', app]); }
       run('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', app, join(nativeStage, `AXOM-${version}-${platform}.app.zip`)]);
     }
     let updaterArtifact;
@@ -200,7 +205,7 @@ async function main() {
     }
     if (!(await readdir(nativeStage)).length) throw new Error('No fresh native bundles were produced.');
     if (signed && !updaterArtifact) throw new Error('Signed release did not produce a verified updater artifact.');
-    await writeManifest(nativeStage, metadata, { platform, target, signed, ...(updaterArtifact ? { updater: updaterArtifact } : {}) });
+    await writeManifest(nativeStage, metadata, { platform, target, signed, ...(process.platform === 'darwin' ? { notarized: signed && appleSigned } : {}), ...(updaterArtifact ? { updater: updaterArtifact } : {}) });
     await publishLocal(nativeStage, join(releaseRoot, version, platform));
   }
   if (!args.includes('--native-only')) await publishLocal(webStage, join(releaseRoot, version, 'web'));

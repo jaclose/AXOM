@@ -15,6 +15,8 @@ import { WhatsNewWatcher } from "./components/shell/WhatsNewWatcher";
 import { PomodoroFx } from "./components/productivity/PomodoroFx";
 import { MenuBarTimerBridge } from "./components/productivity/MenuBarTimerBridge";
 import { SessionOverlay } from "./components/session/SessionOverlay";
+import { FocusDock } from "./components/dock/FocusDock";
+import { SoundscapeTimerSync } from "./components/soundscapes/SoundscapeTimerSync";
 import { FocusCheckIn } from "./components/shell/FocusCheckIn";
 import { AccountSyncWatcher } from "./components/shell/AccountSyncWatcher";
 import { NAV } from "./components/shell/nav";
@@ -61,6 +63,7 @@ const LazyLeaderboardsPage = lazy(() => import("./pages/LeaderboardsPage").then(
 const LazyPremedExperienceLogPage = lazy(() => import("./pages/PremedExperienceLogPage").then((module) => ({ default: module.PremedExperienceLogPage })));
 const LazyActivityHistoryPage = lazy(() => import("./pages/ActivityHistoryPage").then((module) => ({ default: module.ActivityHistoryPage })));
 const LazyStudyMethodsPage = lazy(() => import("./pages/StudyMethodsPage").then((module) => ({ default: module.StudyMethodsPage })));
+const LazySoundscapesPage = lazy(() => import("./pages/SoundscapesPage").then((module) => ({ default: module.SoundscapesPage })));
 
 const PAGES: Record<string, () => JSX.Element> = {
   dashboard: DashboardPage,
@@ -68,6 +71,7 @@ const PAGES: Record<string, () => JSX.Element> = {
   tracker: () => <LazyCourseTrackerPage />,
   questions: () => <LazyQuestionWorkspacePage />,
   methods: () => <LazyStudyMethodsPage />,
+  soundscapes: () => <LazySoundscapesPage />,
   anki: () => <LazyAnkiLabPage />,
   resources: ResourcesPage,
   step: () => <StepPage initialLane="step1" />,
@@ -359,6 +363,8 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
       <StandupWatcher />
       <DailyLoopReminderWatcher />
       <SessionOverlay />
+      <FocusDock />
+      <SoundscapeTimerSync />
       <FocusCheckIn />
       <AccountSyncWatcher />
       <Toaster />

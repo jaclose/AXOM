@@ -319,3 +319,17 @@ h1, h2, h3, .panel-title, .stat-value { font-family: var(--font-display); }
 
 .spin { animation: spin 0.65s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* Screen-reader-only text: announced, never painted. Used app-wide (command
+   brief, journal, tracker, exam runner, focus dock, soundscapes…). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

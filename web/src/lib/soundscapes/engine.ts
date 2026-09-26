@@ -41,14 +41,19 @@ export function volumeToGain(volume: number): number {
  * Kellet's economy filter. Channels are independent so the bed feels wide.
  */
 export function fillNoise(kind: "brown" | "pink" | "white", channel: Float32Array, random: () => number = Math.random): void {
+  // Generate past the end, then fade that natural continuation into the head,
+  // so sample 0 follows sample N-1 and the buffer loops without a click.
+  const fade = Math.min(channel.length >> 1, 1764);
+  const total = channel.length + fade;
+  const samples = new Float32Array(total);
   let last = 0;
   let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
-  for (let i = 0; i < channel.length; i += 1) {
+  for (let i = 0; i < total; i += 1) {
     const white = random() * 2 - 1;
-    if (kind === "white") channel[i] = white * 0.5;
+    if (kind === "white") samples[i] = white * 0.5;
     else if (kind === "brown") {
       last = (last + 0.02 * white) / 1.02;
-      channel[i] = last * 3.5;
+      samples[i] = last * 3.5;
     } else {
       b0 = 0.99886 * b0 + white * 0.0555179;
       b1 = 0.99332 * b1 + white * 0.0750759;
@@ -56,15 +61,14 @@ export function fillNoise(kind: "brown" | "pink" | "white", channel: Float32Arra
       b3 = 0.8665 * b3 + white * 0.3104856;
       b4 = 0.55 * b4 + white * 0.5329522;
       b5 = -0.7616 * b5 - white * 0.016898;
-      channel[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
+      samples[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
       b6 = white * 0.115926;
     }
   }
-  // Fade the loop seam over 40 ms so the buffer repeats without a click.
-  const fade = Math.min(channel.length >> 1, 1764);
+  for (let i = 0; i < channel.length; i += 1) channel[i] = samples[i];
   for (let i = 0; i < fade; i += 1) {
     const t = i / fade;
-    channel[i] = channel[i] * t + channel[channel.length - fade + i] * (1 - t);
+    channel[i] = samples[i] * t + samples[channel.length + i] * (1 - t);
   }
 }
 

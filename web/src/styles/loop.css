@@ -207,50 +207,7 @@
   .brief-learning-actions .gbtn { width: 100%; justify-content: center; }
 }
 
-/* --- Session bar + focus mode ---------------------------------------------- */
-.session-bar {
-  position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: 18px;
-  z-index: 60;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  width: min(720px, calc(100vw - 32px));
-  padding: 10px 16px;
-  border-radius: var(--radius-lg);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(17,17,19, 0.92);
-  -webkit-backdrop-filter: var(--blur-panel);
-  backdrop-filter: var(--blur-panel);
-  box-shadow: var(--shadow-floating);
-}
-.session-clock { font-size: var(--fs-2xl); font-weight: var(--fw-bold); min-width: 74px; }
-.session-quicklog-wrap { position: relative; }
-.session-quicklog-menu {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  right: 0;
-  display: flex;
-  flex-direction: column;
-  min-width: 190px;
-  border-radius: var(--radius-md);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(22,22,24, 0.98);
-  overflow: hidden;
-  z-index: 61;
-}
-.session-quicklog-item {
-  background: none;
-  border: none;
-  color: var(--text-80);
-  text-align: left;
-  padding: 9px 14px;
-  font-size: var(--fs-base);
-  cursor: pointer;
-}
-.session-quicklog-item:hover { background: rgba(255, 255, 255, 0.06); }
+/* --- Focus mode (the live clock lives in the focus dock, styles/dock.css) --- */
 .focus-overlay {
   position: fixed;
   inset: 0;
@@ -272,7 +229,6 @@
 .focus-clock { font-size: 64px; font-weight: var(--fw-bold); letter-spacing: var(--tracking-wide); }
 .focus-task { font-size: var(--fs-xl); font-weight: var(--fw-semibold); }
 .focus-reason { font-size: var(--fs-base); color: var(--text-60); line-height: var(--leading-normal); }
-.session-bar.in-focus { bottom: 26px; }
 
 /* --- Recovery -------------------------------------------------------------- */
 .recovery-step { font-size: var(--fs-base); gap: 8px; cursor: pointer; }
