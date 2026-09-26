@@ -2,7 +2,7 @@
 // Features. Calm and recovery-friendly: non-punitive streaks, intentional skips,
 // and gentle restart messaging. All logic lives in lib/habits.ts (unit-tested).
 import { useMemo, useState } from "react";
-import { Plus, Trash2, Archive, ArchiveRestore, FlaskConical, Settings2 } from "lucide-react";
+import { Plus, Trash2, Archive, ArchiveRestore, FlaskConical, Settings2, Target, Check } from "lucide-react";
 import { useStore } from "../lib/store";
 import { GlassCard, GButton, GhostButton, PanelHeader, Tag, EmptyState } from "../components/ui/primitives";
 import { StreakEmber } from "../components/ui/motion";
@@ -13,6 +13,8 @@ import {
 import { addLocalDays } from "../lib/dailyRollover";
 import type { Habit, HabitCheckStatus, HabitType } from "../lib/types";
 import { ICON_SIZE } from "../lib/iconSize";
+import { linkHabitToTargets, linkedRequirement, unlinkHabitFromTargets } from "../lib/habitTargets";
+import { evaluateDailySuccess } from "../lib/dailySuccess";
 
 const CHECK_OPTIONS: HabitCheckStatus[] = ["done", "partial", "skipped", "missed"];
 
@@ -44,6 +46,7 @@ export function HabitTrackerPage() {
   return (
     <>
       <HabitCreate />
+      <HabitTargetsSummary />
       <GlassCard pad>
         <PanelHeader
           title="Habits"
@@ -75,10 +78,16 @@ function HabitCreate() {
   const addHabit = useStore((s) => s.addHabit);
   const [name, setName] = useState("");
   const [type, setType] = useState<HabitType>("binary");
+  const [countInTargets, setCountInTargets] = useState(true);
 
   function add() {
     if (!name.trim()) return;
-    addHabit(newHabitDefaults(name, type));
+    const id = addHabit(newHabitDefaults(name, type));
+    if (countInTargets && type !== "avoidance" && type !== "milestone") {
+      const state = useStore.getState();
+      const habit = state.habits.find((candidate) => candidate.id === id);
+      if (habit) state.updateProfile({ dailySuccess: linkHabitToTargets(state.profile.dailySuccess, habit) });
+    }
     setName("");
     setType("binary");
   }
@@ -95,7 +104,28 @@ function HabitCreate() {
         <GButton variant="primary" onClick={add}><Plus size={ICON_SIZE.body} /> Add</GButton>
       </div>
       <div className="sub" style={{ marginTop: 10 }}>{HABIT_TYPE_META[type].hint}</div>
+      <label className="habit-target-option">
+        <input type="checkbox" checked={countInTargets} onChange={(event) => setCountInTargets(event.target.checked)} />
+        <span>Count it in <b>Today’s targets</b> on Productivity — checking the habit fills the target automatically.</span>
+      </label>
     </GlassCard>
+  );
+}
+
+/** One line summarizing how habits feed the Productivity targets today. */
+function HabitTargetsSummary() {
+  const state = useStore();
+  const linked = (state.profile.dailySuccess?.requirements ?? []).filter((requirement) => requirement.source.kind === "habit" && requirement.enabled);
+  if (!linked.length) return null;
+  const result = evaluateDailySuccess(state);
+  const habitResults = result.requirements.filter((item) => item.requirement.source.kind === "habit" && item.eligible);
+  const met = habitResults.filter((item) => item.status === "met").length;
+  return (
+    <div className="habit-targets-summary">
+      <Target size={ICON_SIZE.body} aria-hidden="true" />
+      <span><b>{met} of {habitResults.length}</b> habit targets met today · shared with Productivity’s daily targets ({result.progress}% overall)</span>
+      <a href="#productivity">Open targets</a>
+    </div>
   );
 }
 
@@ -105,7 +135,15 @@ function HabitRow({ habit }: { habit: Habit }) {
   const clearHabitCheck = useStore((s) => s.clearHabitCheck);
   const updateHabit = useStore((s) => s.updateHabit);
   const removeHabit = useStore((s) => s.removeHabit);
+  const dailySuccess = useStore((s) => s.profile.dailySuccess);
+  const updateProfile = useStore((s) => s.updateProfile);
   const [editing, setEditing] = useState(false);
+  const linked = linkedRequirement(dailySuccess, habit.id);
+  const inTargets = Boolean(linked?.enabled);
+
+  function toggleTarget() {
+    updateProfile({ dailySuccess: inTargets ? unlinkHabitFromTargets(dailySuccess, habit.id) : linkHabitToTargets(dailySuccess, habit) });
+  }
 
   const today = todayKey();
   const myEntries = useMemo(() => entries.filter((e) => e.habitId === habit.id), [entries, habit.id]);
@@ -138,6 +176,18 @@ function HabitRow({ habit }: { habit: Habit }) {
           <b>{habit.name}</b>
           <Tag tone="neutral">{HABIT_TYPE_META[habit.type].label}</Tag>
           {habit.examMode && <Tag tone="orange">Exam mode</Tag>}
+          {!habit.archived && (
+            <button
+              type="button"
+              className={`habit-target-chip ${inTargets ? "on" : ""}`}
+              aria-pressed={inTargets}
+              title={inTargets ? "Counts toward Today’s targets on Productivity. Click to stop counting it." : "Add this habit to Today’s targets on Productivity"}
+              onClick={toggleTarget}
+            >
+              {inTargets ? <Check size={ICON_SIZE.microInline} aria-hidden="true" /> : <Target size={ICON_SIZE.microInline} aria-hidden="true" />}
+              {inTargets ? "In daily targets" : "Add to daily targets"}
+            </button>
+          )}
         </div>
         <div className="row gap8" style={{ alignItems: "center" }}>
           <StreakEmber count={streak} />
@@ -145,7 +195,11 @@ function HabitRow({ habit }: { habit: Habit }) {
           <GhostButton onClick={() => updateHabit(habit.id, { archived: !habit.archived })} title={habit.archived ? "Restore" : "Archive"}>
             {habit.archived ? <ArchiveRestore size={ICON_SIZE.body} /> : <Archive size={ICON_SIZE.body} />}
           </GhostButton>
-          <GhostButton className="danger" onClick={() => removeHabit(habit.id)} title="Delete"><Trash2 size={ICON_SIZE.body} /></GhostButton>
+          <GhostButton className="danger" onClick={() => {
+            if (!confirm(`Delete “${habit.name}” and its history? A linked daily target is removed too. Archive keeps the history instead.`)) return;
+            if (linked) updateProfile({ dailySuccess: unlinkHabitFromTargets(dailySuccess, habit.id) });
+            removeHabit(habit.id);
+          }} title="Delete"><Trash2 size={ICON_SIZE.body} /></GhostButton>
         </div>
       </div>
 

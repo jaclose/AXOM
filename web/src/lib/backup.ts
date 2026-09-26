@@ -23,6 +23,7 @@ import { isAcademicStageId, resolveTrack } from "./tracks";
 import { normalizeDailySuccessConfig } from "./dailySuccess";
 import { normalizePomodoroPreferences } from "./pomodoroPreferences";
 import { normalizeDailyLoopReminderPreferences } from "./dailyLoopReminders";
+import { normalizeFocusCheckInPreferences } from "./focusCheckIn";
 import { normalizeDashboardLayoutPreferences } from "./dashboardWidgets";
 import { normalizeJournalEntries, normalizeJournalNotebookPreferences } from "./journalNotebook";
 import { normalizeApplicationResearch } from "./applicationResearch";
@@ -360,6 +361,9 @@ export function parseImport(text: string): NoctyriumState {
       dailyLoopReminders: profile.dailyLoopReminders === undefined
         ? undefined
         : normalizeDailyLoopReminderPreferences(profile.dailyLoopReminders),
+      focusCheckIn: profile.focusCheckIn === undefined
+        ? undefined
+        : normalizeFocusCheckInPreferences(profile.focusCheckIn),
       // Preserve newer opt-in settings across export/import.
       taskAutofillDisabled: typeof profile.taskAutofillDisabled === "boolean" ? profile.taskAutofillDisabled : undefined,
       taskTemplates: Array.isArray(profile.taskTemplates) ? profile.taskTemplates as NoctyriumState["profile"]["taskTemplates"] : undefined,

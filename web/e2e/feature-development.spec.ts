@@ -1,5 +1,21 @@
 import { expect, test, type Page } from "@playwright/test";
 
+/** Dev-only live-store handle installed by src/main.tsx (see comment there). */
+type DevWindow = Window & {
+  __AXOM_DEV__: Promise<{
+    useStore: {
+      getState: () => Record<string, unknown> & {
+        profile: Record<string, unknown>;
+        terms: Array<{ id: string }>;
+        activeDayKey: string;
+        sessions: Array<{ status: string; link?: unknown; resources?: string[] }>;
+      };
+      setState: (patch: Record<string, unknown>) => void;
+    };
+  }>;
+};
+
+
 const viewports = [{ width: 1440, height: 900 }, { width: 768, height: 900 }, { width: 430, height: 880 }, { width: 390, height: 844 }];
 
 async function skipSetup(page: Page) {
@@ -109,8 +125,7 @@ test("personal standings use real logs, separate partial weeks and survive reloa
   await skipSetup(page);
   // Isolated browser context: deterministic study logs, never the owner's data.
   await page.evaluate(async () => {
-    const storePath = "/src/lib/store.ts";
-    const { useStore } = await import(/* @vite-ignore */ storePath);
+    const { useStore } = await (window as unknown as DevWindow).__AXOM_DEV__;
     const monday = new Date(); monday.setDate(monday.getDate() - (monday.getDay() + 6) % 7);
     const log = (id: string, offset: number, minutes: number, cards: number) => {
       const date = new Date(monday); date.setDate(date.getDate() - offset);

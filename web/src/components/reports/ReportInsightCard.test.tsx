@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { ReportMetric } from "../../lib/reports";
 import { ReportInsightCard } from "./ReportInsightCard";
 
@@ -20,43 +20,28 @@ const metric: ReportMetric = {
   state: "ready",
 };
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(cleanup);
 
 describe("ReportInsightCard", () => {
-  it("keeps meaning visible, reveals on focus, and closes on blur", () => {
+  it("keeps the number and its meaning visible without hover", () => {
     render(<ReportInsightCard icon={<span />} metric={metric} insight={{ change: "Up 10%", strongestContributor: "Questions" }} />);
-    const trigger = screen.getByRole("button", { name: /Consistency/ });
+    expect(screen.getByText("75%")).toBeTruthy();
     expect(screen.getByText("Activity appeared on most eligible days.")).toBeTruthy();
-    expect(trigger.getAttribute("aria-expanded")).toBe("false");
-    fireEvent.mouseEnter(trigger.closest("article")!);
-    expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    fireEvent.mouseLeave(trigger.closest("article")!);
-    expect(trigger.getAttribute("aria-expanded")).toBe("false");
-    fireEvent.focus(trigger);
-    expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByText("Up 10%").closest("[aria-hidden]")?.getAttribute("aria-hidden")).toBe("false");
-    fireEvent.blur(trigger);
-    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    const article = screen.getByText("75%").closest("article")!;
+    fireEvent.mouseEnter(article);
+    expect(screen.getByRole("button", { name: /how this is calculated/ }).getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("Up 10%")).toBeNull();
   });
 
-  it("pins with click or Enter and Escape closes the pinned layer", () => {
-    render(<ReportInsightCard icon={<span />} metric={metric} />);
-    const trigger = screen.getByRole("button", { name: /Consistency/ });
+  it("opens the calculation on click, closes on Escape, and shows plain-language details", () => {
+    render(<ReportInsightCard icon={<span />} metric={metric} insight={{ change: "Up 10%", strongestContributor: "Questions" }} />);
+    const trigger = screen.getByRole("button", { name: /show how this is calculated/ });
     fireEvent.click(trigger);
-    fireEvent.blur(trigger);
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Up 10%")).toBeTruthy();
+    expect(screen.getByText("3 ÷ 4")).toBeTruthy();
+    expect(screen.getByText("Activity log · 1 record")).toBeTruthy();
     fireEvent.keyDown(trigger, { key: "Escape" });
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
-    fireEvent.keyDown(trigger, { key: " " });
-    expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    fireEvent.keyDown(trigger, { key: "Escape" });
-    fireEvent.keyDown(trigger, { key: "Enter" });
-    expect(trigger.getAttribute("aria-expanded")).toBe("true");
-  });
-
-  it("shows the insight immediately for reduced-motion users", () => {
-    vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
-    render(<ReportInsightCard icon={<span />} metric={metric} />);
-    expect(screen.getByRole("button", { name: /Consistency/ }).getAttribute("aria-expanded")).toBe("true");
   });
 });

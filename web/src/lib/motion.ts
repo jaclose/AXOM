@@ -8,6 +8,7 @@
 // tested; the hooks are SSR-safe and matchMedia/ResizeObserver-tolerant.
 // ===========================================================================
 import { useEffect, useRef, useState } from "react";
+import { MOTION_PREFERENCE_EVENT, motionOverrideReduces } from "./motionPreference";
 
 export const MOTION_TOKENS = {
   // Durations (ms)
@@ -61,6 +62,7 @@ export function scrollProgressFor(rect: { top: number; height: number }, viewpor
 const REDUCED_QUERY = "(prefers-reduced-motion: reduce)";
 
 export function prefersReducedMotion(): boolean {
+  if (motionOverrideReduces()) return true;
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
   try {
     return window.matchMedia(REDUCED_QUERY).matches;
@@ -69,19 +71,24 @@ export function prefersReducedMotion(): boolean {
   }
 }
 
-/** Live `prefers-reduced-motion` state, updating if the OS setting changes. */
+/**
+ * Live reduced-motion state: the OS `prefers-reduced-motion` setting OR the
+ * AXOM-level "Reduce motion" override from Settings → Personalization.
+ */
 export function useReducedMotion(): boolean {
   const [reduced, setReduced] = useState<boolean>(prefersReducedMotion);
   useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
-    const mq = window.matchMedia(REDUCED_QUERY);
-    const handler = () => setReduced(mq.matches);
+    if (typeof window === "undefined") return;
+    const handler = () => setReduced(prefersReducedMotion());
     handler();
-    if (typeof mq.addEventListener === "function") mq.addEventListener("change", handler);
-    else if (typeof mq.addListener === "function") mq.addListener(handler);
+    window.addEventListener(MOTION_PREFERENCE_EVENT, handler);
+    const mq = typeof window.matchMedia === "function" ? window.matchMedia(REDUCED_QUERY) : undefined;
+    if (mq && typeof mq.addEventListener === "function") mq.addEventListener("change", handler);
+    else if (mq && typeof mq.addListener === "function") mq.addListener(handler);
     return () => {
-      if (typeof mq.removeEventListener === "function") mq.removeEventListener("change", handler);
-      else if (typeof mq.removeListener === "function") mq.removeListener(handler);
+      window.removeEventListener(MOTION_PREFERENCE_EVENT, handler);
+      if (mq && typeof mq.removeEventListener === "function") mq.removeEventListener("change", handler);
+      else if (mq && typeof mq.removeListener === "function") mq.removeListener(handler);
     };
   }, []);
   return reduced;

@@ -163,6 +163,8 @@ export interface HubFolder {
   favorite?: boolean;
   archived?: boolean;
   sortOrder?: number;
+  /** When the shortcut was last opened or copied from Hub Folders. */
+  lastOpenedAt?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -757,6 +759,8 @@ export interface Profile {
   /** Optional daily-loop reminder preferences. Reminder delivery metadata is
    * device-only and never stored with the workspace. */
   dailyLoopReminders?: DailyLoopReminderPreferences;
+  /** Optional "Are you locked in?" interval check-ins. Delivery state is device-only. */
+  focusCheckIn?: import("./focusCheckIn").FocusCheckInPreferences;
   blueprintMode?: BlueprintMode; // which lane bar (USMLE vs Pre-Health) is active
   // Repetitive-task autofill (§18): user-owned, local-only.
   taskAutofillDisabled?: boolean;

@@ -392,3 +392,14 @@
   .widget-row-actions { grid-column: 1 / -1; justify-content: flex-end; }
   .dashboard-fixed-surfaces { align-items: flex-start; }
 }
+
+/* The customize gear sits in the top-right corner of every widget. Reserve
+   that corner in each widget's header row so right-aligned actions (e.g.
+   "Open check-in") never slide under it. */
+.dashboard-widget-frame__content :is(.panel-head, .daily-checkin-collapsed, .standup-prompt-head) {
+  padding-inline-end: 3rem;
+}
+.dashboard-widget-frame__content .panel-head > :last-child:not(:first-child),
+.dashboard-widget-frame__content .daily-checkin-collapsed > :last-child:not(:first-child) {
+  flex-shrink: 0;
+}

@@ -1,7 +1,8 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import { ClipboardCheck, ExternalLink, RefreshCw, Search, ShieldCheck } from "lucide-react";
+import { ClipboardCheck, ExternalLink, GraduationCap, Hospital, RefreshCw, School, Search, ShieldCheck } from "lucide-react";
 import { GlassCard, GButton, PanelHeader, Tag } from "../components/ui/primitives";
 import { ApplicationProfilePanel } from "../components/applications/ApplicationProfilePanel";
+import { ResidencyExplorer } from "../components/applications/ResidencyExplorer";
 import { CompareSavedSchools } from "../components/applications/CompareSavedSchools";
 import { EstimatesSection, RequirementChecks, ResearchFactGroups, RiskFlagSection } from "../components/applications/SchoolDetails";
 import { CHECK_STATUS, CHECK_STATUS_ORDER, formatDate } from "../components/applications/applicationDisplay";
@@ -57,6 +58,7 @@ export function ApplicationCheckerPage() {
   const [program, setProgram] = useState("all");
   const [checkFilter, setCheckFilter] = useState<EligibilityStatus | "all">("all");
   const [sort, setSort] = useState<SortKey>("name");
+  const [pathway, setPathway] = useState<Pathway>("medical");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -148,6 +150,10 @@ export function ApplicationCheckerPage() {
         </div>
       </GlassCard>
 
+      <PathwaySwitch pathway={pathway} onChange={setPathway} medicalCount={schools.length} />
+
+      {pathway === "residency" ? <ResidencyExplorer empty={<PathwayNotCollected pathway="residency" />} />
+        : pathway === "undergraduate" ? <PathwayNotCollected pathway="undergraduate" /> : <>
       <ApplicationProfilePanel />
 
       {state.kind === "ready" && <CompareSavedSchools schools={savedSchools} results={results} hasProfile={hasProfile} />}
@@ -213,7 +219,75 @@ export function ApplicationCheckerPage() {
           </>
         )}
       </GlassCard>
+      </>}
     </div>
+  );
+}
+
+type Pathway = "medical" | "residency" | "undergraduate";
+
+const PATHWAYS: Array<{ id: Pathway; label: string; detail: string; icon: typeof School }> = [
+  { id: "medical", label: "Medical school", detail: "MD / DO programs", icon: School },
+  { id: "residency", label: "Residency", detail: "ACGME programs · import to enable", icon: Hospital },
+  { id: "undergraduate", label: "Undergrad & pre-med", detail: "Advising & linkage · not collected yet", icon: GraduationCap },
+];
+
+function PathwaySwitch({ pathway, onChange, medicalCount }: { pathway: Pathway; onChange: (pathway: Pathway) => void; medicalCount: number }) {
+  return (
+    <div className="application-pathways" role="tablist" aria-label="Application pathway">
+      {PATHWAYS.map(({ id, label, detail, icon: Icon }) => (
+        <button key={id} type="button" role="tab" aria-selected={pathway === id} className={pathway === id ? "on" : ""} onClick={() => onChange(id)}>
+          <Icon size={ICON_SIZE.emphasis} aria-hidden="true" />
+          <span><b>{label}</b><small>{id === "medical" && medicalCount ? `MD / DO · ${medicalCount} researched` : detail}</small></span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function PathwayNotCollected({ pathway }: { pathway: Exclude<Pathway, "medical"> }) {
+  const residency = pathway === "residency";
+  return (
+    <GlassCard pad className="application-pathway-empty">
+      <PanelHeader
+        title={residency ? "Residency programs — dataset not collected yet" : "Undergraduate & pre-med — dataset not collected yet"}
+        sub="AXOM won’t invent program data. This pathway turns on as soon as a sourced dataset is added."
+      />
+      <div className="application-pathway-grid">
+        <div>
+          <b>What you’ll be able to do</b>
+          <ul>
+            {residency ? (
+              <>
+                <li>Search programs by specialty, state, and track (categorical, preliminary, transitional, advanced).</li>
+                <li>See sourced requirements: Step 2 minimums, COMLEX acceptance, graduation-year limits, visa sponsorship (J-1/H-1B), signals.</li>
+                <li>Save programs, review each captured fact, and compare against your profile as review items — never as match odds.</li>
+              </>
+            ) : (
+              <>
+                <li>Find schools’ pre-health advising, committee-letter policies, and linkage or early-assurance programs.</li>
+                <li>Save institutions and track what you’ve verified, just like medical schools.</li>
+              </>
+            )}
+          </ul>
+        </div>
+        <div>
+          <b>What the data needs</b>
+          {residency ? (
+            <ol className="sub residency-steps">
+              <li>Download the official program list from <a href="https://acgmecloud.org/analytics/explore-public-data/program-search" target="_blank" rel="noopener noreferrer">ACGME Cloud → Explore Public Data</a> (the “ProgramListing” spreadsheet).</li>
+              <li>Run <code>npm run residency:import -- path/to/ProgramListing.xlsx</code> from the repository root.</li>
+              <li>Reload — ~13,700 accredited programs appear with specialty, sponsor, location, length, and status. Requirement fields stay “Unknown” until sourced.</li>
+            </ol>
+          ) : (
+            <p className="sub">
+              One JSON file with a source URL and retrieval date for every fact; missing facts stay “Unknown”. The exact contract is in
+              <code> docs/APPLICATION-PATHWAY-DATASETS.md</code>, matching the medical-school format so saved programs and backups work the same way.
+            </p>
+          )}
+        </div>
+      </div>
+    </GlassCard>
   );
 }
 

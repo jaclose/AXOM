@@ -8,7 +8,9 @@ import { useToasts } from "../lib/toast";
 import {
   announceCourseTrackerIntroOnce,
   CourseTrackerPage,
+  descendantScopes,
   extractTrackerImportFile,
+  groupItemsBySection,
   TRACKER_IMPORT_EXAMPLE,
 } from "./CourseTrackerPage";
 
@@ -243,5 +245,41 @@ describe("Course Tracker local intro and file extraction", () => {
       fileName: "modules.md",
       extraction: { text: "Week 1:\n- Cardiac cycle", warnings: [] },
     });
+  });
+});
+
+describe("Course Tracker subsections", () => {
+  function item(id: string, path: string) {
+    const base = useStore.getState().tracker[0];
+    return { ...base, id, label: `Item ${id}`, path, kind: "Lecture" as const, passes: 0, ankiPasses: 0 };
+  }
+
+  it("groups items under the next path segment and lists deeper subsections", () => {
+    const items = [item("a", "Term 4/Cardio/Week 1"), item("b", "Term 4/Cardio/Week 2"), item("c", "Term 4/Renal"), item("d", "Term 4")];
+    const groups = groupItemsBySection("Term 4", items);
+    expect(groups.map((group) => [group.key, group.path, group.items.length])).toEqual([
+      ["", "Term 4", 1], ["Cardio", "Term 4/Cardio", 2], ["Renal", "Term 4/Renal", 1],
+    ]);
+    expect(descendantScopes("Term 4", ["Term 4", "Term 4/Renal", "Term 4/Cardio", "Term 4/Cardio/Week 10", "Term 4/Cardio/Week 2", "Term 5"]))
+      .toEqual(["Term 4/Cardio", "Term 4/Cardio/Week 2", "Term 4/Cardio/Week 10", "Term 4/Renal"]);
+  });
+
+  it("narrows to one subsection from the picker, remembers it, and shows a breadcrumb back", () => {
+    useStore.setState({ tracker: [item("a", "Term 4/Cardio/Week 1"), item("b", "Term 4/Renal/Week 1"), item("c", "Term 5/Neuro")] });
+    render(<CourseTrackerPage />);
+    fireEvent.change(screen.getByLabelText("Jump to a subsection"), { target: { value: "Term 4" } });
+    expect(screen.getByText("Item a")).toBeTruthy();
+    expect(screen.queryByText("Item c")).toBeNull();
+    expect(screen.getByRole("button", { name: /Cardio/ }).getAttribute("aria-expanded")).toBe("true");
+
+    fireEvent.change(screen.getByLabelText("Jump to a subsection"), { target: { value: "Term 4/Renal" } });
+    expect(screen.queryByText("Item a")).toBeNull();
+    expect(screen.getByText("Item b")).toBeTruthy();
+    expect(localStorage.getItem("axom.tracker.scope.v1")).toBe("Term 4/Renal");
+
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Tracker location" })).getByRole("button", { name: "Term 4" }));
+    expect(screen.getByText("Item a")).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("button", { name: "Show only this" })[0]);
+    expect(screen.queryByText("Item b")).toBeNull();
   });
 });

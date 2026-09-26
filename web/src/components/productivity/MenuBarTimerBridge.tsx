@@ -4,7 +4,7 @@
 // against the same timer store the in-app controls use. In a browser it renders
 // nothing and never loads the Tauri bridge modules.
 import { useEffect } from "react";
-import { effectivePreset, getBreakDurationMinutes, reconcilePomodoro, usePomodoro } from "../../lib/pomodoro";
+import { pomodoroPhaseSeconds, reconcilePomodoro, usePomodoro } from "../../lib/pomodoro";
 import { useStore } from "../../lib/store";
 import { isMacDesktopShell } from "../../lib/desktopShell";
 import {
@@ -37,17 +37,7 @@ function loadTauriApi(): Promise<TauriApi> {
   return tauriApi;
 }
 
-/** Full length of the current phase, matching the Pomodoro dial. */
-function phaseSeconds(state: PomodoroSnapshot): number {
-  const preset = effectivePreset(state);
-  if (state.phase === "focus") return preset.focus * 60;
-  return getBreakDurationMinutes({
-    sessionsToday: state.sessionsToday,
-    cyclesBeforeLongBreak: preset.cyclesBeforeLongBreak,
-    shortBreak: preset.break,
-    longBreak: preset.longBreak,
-  }) * 60;
-}
+const phaseSeconds = (state: PomodoroSnapshot) => pomodoroPhaseSeconds(state);
 
 function runMenuBarAction(action: MenuBarTimerAction) {
   // A menu bar click does not focus the page, so PomodoroFx's focus listener

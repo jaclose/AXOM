@@ -10,7 +10,7 @@
   --nm-dur-slow: 520ms;
   --nm-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --nm-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --nm-tone-cyan: #cdb078;
+  --nm-tone-cyan: var(--accent-hi);
   --nm-tone-green: #7fb894;
   --nm-tone-orange: #d9a566;
   --nm-tone-red: #d97a72;
@@ -39,12 +39,12 @@
   background-size: 220% 100%;
   animation: nm-flow 2.4s linear infinite;
 }
-.nm-progress-fill.tone-cyan { background-image: linear-gradient(100deg, #a8894f, #cdb078, #a8894f); }
+.nm-progress-fill.tone-cyan { background-image: linear-gradient(100deg, var(--accent-lo), var(--accent-hi), var(--accent-lo)); }
 .nm-progress-fill.tone-green { background-image: linear-gradient(100deg, color-mix(in srgb, var(--green) 78%, black), var(--green), color-mix(in srgb, var(--green) 78%, black)); }
 .nm-progress-fill.tone-orange { background-image: linear-gradient(100deg, color-mix(in srgb, var(--orange) 78%, black), var(--orange), color-mix(in srgb, var(--orange) 78%, black)); }
 .nm-progress-fill.tone-red { background-image: linear-gradient(100deg, color-mix(in srgb, var(--red) 78%, black), var(--red), color-mix(in srgb, var(--red) 78%, black)); }
 .nm-progress-fill.tone-violet { background-image: linear-gradient(100deg, #877aa8, #a79ac9, #877aa8); }
-.nm-progress.glow .nm-progress-fill { box-shadow: 0 0 12px rgba(200,169,106, 0.45); }
+.nm-progress.glow .nm-progress-fill { box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.45); }
 .nm-progress-label {
   position: relative;
   z-index: 1;
@@ -80,7 +80,7 @@
   background-size: 200% 100%;
   animation: nm-flow 2.8s linear infinite;
 }
-.nm-fluid-fill.tone-cyan { background-image: linear-gradient(100deg, #a8894f, #cdb078, #a8894f); }
+.nm-fluid-fill.tone-cyan { background-image: linear-gradient(100deg, var(--accent-lo), var(--accent-hi), var(--accent-lo)); }
 .nm-fluid-fill.tone-green { background-image: linear-gradient(100deg, color-mix(in srgb, var(--green) 78%, black), var(--green), color-mix(in srgb, var(--green) 78%, black)); }
 .nm-fluid-fill.tone-orange { background-image: linear-gradient(100deg, color-mix(in srgb, var(--orange) 78%, black), var(--orange), color-mix(in srgb, var(--orange) 78%, black)); }
 .nm-fluid-fill.tone-red { background-image: linear-gradient(100deg, color-mix(in srgb, var(--red) 78%, black), var(--red), color-mix(in srgb, var(--red) 78%, black)); }
@@ -135,8 +135,8 @@
   border-style: dashed;
 }
 .nm-status-border.status-active {
-  border-color: rgba(200,169,106, 0.55);
-  box-shadow: 0 0 0 1px rgba(200,169,106, 0.22), 0 0 16px rgba(200,169,106, 0.16);
+  border-color: rgba(var(--accent-rgb), 0.55);
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.22), 0 0 16px rgba(var(--accent-rgb), 0.16);
 }
 .nm-status-border.status-idle { border-color: rgba(255, 255, 255, 0.08); }
 @keyframes nm-strong-pulse {
@@ -147,12 +147,12 @@
 /* ---- FocusGlow ----------------------------------------------------------- */
 .nm-focus-glow { border-radius: var(--radius-lg); transition: box-shadow var(--nm-dur-base) var(--nm-ease-out); }
 .nm-focus-glow.active {
-  box-shadow: 0 0 0 1px rgba(200,169,106, 0.3), 0 0 22px rgba(200,169,106, 0.18);
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.3), 0 0 22px rgba(var(--accent-rgb), 0.18);
   animation: nm-focus-breathe 3s ease-in-out infinite;
 }
 @keyframes nm-focus-breathe {
-  0%, 100% { box-shadow: 0 0 0 1px rgba(200,169,106, 0.22), 0 0 16px rgba(200,169,106, 0.12); }
-  50% { box-shadow: 0 0 0 1px rgba(200,169,106, 0.34), 0 0 26px rgba(200,169,106, 0.22); }
+  0%, 100% { box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.22), 0 0 16px rgba(var(--accent-rgb), 0.12); }
+  50% { box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.34), 0 0 26px rgba(var(--accent-rgb), 0.22); }
 }
 
 /* ---- ScrollReactiveSurface ----------------------------------------------- */
@@ -176,3 +176,71 @@
   }
   .nm-scroll-surface { transform: none !important; }
 }
+
+/* AXOM-level "Reduce motion" (Settings → Personalization → Appearance).
+   Mirrors what the OS prefers-reduced-motion media query does, for learners
+   who want a calmer AXOM without changing their whole device. Animations
+   jump to their end state; nothing is hidden behind an animation. */
+:root[data-motion="reduce"] *,
+:root[data-motion="reduce"] *::before,
+:root[data-motion="reduce"] *::after {
+  animation-duration: 0.001ms !important;
+  animation-delay: 0ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  transition-delay: 0ms !important;
+  scroll-behavior: auto !important;
+}
+:root[data-motion="reduce"] .orb,
+:root[data-motion="reduce"] .shell::after { animation: none !important; }
+
+/* ===========================================================================
+   Dashboard luster — pointer-follow glare, one sheen sweep on entry, and a
+   very small lift. Driven by useLuster(); inert for touch and reduced motion.
+   =========================================================================== */
+[data-luster] {
+  --lx: 50%;
+  --ly: 50%;
+  --rx: 0deg;
+  --ry: 0deg;
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+[data-luster].is-lustering {
+  transform: perspective(1200px) rotateX(var(--rx)) rotateY(var(--ry)) translateY(-2px);
+}
+[data-luster]::after,
+[data-luster]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: var(--card-radius);
+  pointer-events: none;
+  opacity: 0;
+}
+[data-luster]::after {
+  background: radial-gradient(520px circle at var(--lx) var(--ly), rgba(var(--accent-hi-rgb), 0.085), rgba(var(--accent-rgb), 0.025) 38%, transparent 62%);
+  transition: opacity 260ms ease;
+}
+[data-luster]::before {
+  background: linear-gradient(112deg, transparent 38%, rgba(var(--accent-hi-rgb), 0.11) 48%, rgba(255, 255, 255, 0.06) 50%, transparent 60%);
+  background-size: 250% 100%;
+  background-position: 120% 0;
+}
+[data-luster].is-lustering::after { opacity: 1; }
+[data-luster].is-lustering::before {
+  animation: luster-sweep 1.1s cubic-bezier(0.22, 1, 0.36, 1) 1 both;
+}
+@keyframes luster-sweep {
+  0% { opacity: 0; background-position: 120% 0; }
+  20% { opacity: 1; }
+  100% { opacity: 0; background-position: -30% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-luster], [data-luster].is-lustering { transform: none; transition: none; }
+  [data-luster]::before, [data-luster]::after { display: none; }
+}
+:root[data-motion="reduce"] [data-luster],
+:root[data-motion="reduce"] [data-luster].is-lustering { transform: none; }
+:root[data-motion="reduce"] [data-luster]::before,
+:root[data-motion="reduce"] [data-luster]::after { display: none; }

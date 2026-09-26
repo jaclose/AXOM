@@ -11,9 +11,12 @@ import { StandupWatcher } from "./components/shell/StandupWatcher";
 import { DailyLoopReminderWatcher } from "./components/shell/DailyLoopReminderWatcher";
 import { DailyRolloverWatcher } from "./components/shell/DailyRolloverWatcher";
 import { UpdateAvailableWatcher } from "./components/shell/UpdateAvailableWatcher";
+import { WhatsNewWatcher } from "./components/shell/WhatsNewWatcher";
 import { PomodoroFx } from "./components/productivity/PomodoroFx";
 import { MenuBarTimerBridge } from "./components/productivity/MenuBarTimerBridge";
 import { SessionOverlay } from "./components/session/SessionOverlay";
+import { FocusCheckIn } from "./components/shell/FocusCheckIn";
+import { AccountSyncWatcher } from "./components/shell/AccountSyncWatcher";
 import { NAV } from "./components/shell/nav";
 import { useStore } from "./lib/store";
 import { useUi } from "./lib/uiStore";
@@ -23,23 +26,11 @@ import { readOnboardingDraftMode, type OnboardingDestination, type OnboardingMod
 import { promisePromptStatus, shouldOfferPromiseAfterGlobalTour, shouldOfferPromisePrompt } from "./lib/promisePrompt";
 
 import { DashboardPage } from "./pages/DashboardPage";
-import { AnkiLabPage } from "./pages/AnkiLabPage";
 import { ResourcesPage } from "./pages/ResourcesPage";
 import { StepPage } from "./pages/StepPage";
-import { ReportsPage } from "./pages/ReportsPage";
 import { ProductivityPage } from "./pages/ProductivityPage";
 import { TasksPage } from "./pages/TasksPage";
-import { HabitTrackerPage } from "./pages/HabitTrackerPage";
 import { JournalPage } from "./pages/JournalPage";
-import { IntegrationsPage } from "./pages/IntegrationsPage";
-import { PromptLibraryPage } from "./pages/PromptLibraryPage";
-import { HubFoldersPage } from "./pages/HubFoldersPage";
-import { HelpPage } from "./pages/HelpPage";
-import { AboutPage } from "./pages/AboutPage";
-import { LeaderboardsPage } from "./pages/LeaderboardsPage";
-import { PremedExperienceLogPage } from "./pages/PremedExperienceLogPage";
-import { ActivityHistoryPage } from "./pages/ActivityHistoryPage";
-import { StudyMethodsPage } from "./pages/StudyMethodsPage";
 
 const DevDesignPreview = import.meta.env.DEV
   ? lazy(() => import("./pages/DesignPreviewPage"))
@@ -57,14 +48,27 @@ const LazyCoursesPage = lazy(() => import("./pages/CoursesPage").then((module) =
 const LazyCourseTrackerPage = lazy(() => import("./pages/CourseTrackerPage").then((module) => ({ default: module.CourseTrackerPage })));
 const LazyQuestionWorkspacePage = lazy(() => import("./pages/QuestionWorkspacePage").then((module) => ({ default: module.QuestionWorkspacePage })));
 const LazyApplicationCheckerPage = lazy(() => import("./pages/ApplicationCheckerPage").then((module) => ({ default: module.ApplicationCheckerPage })));
+// Less frequent routes load on demand to keep the always-loaded shell small.
+const LazyAnkiLabPage = lazy(() => import("./pages/AnkiLabPage").then((module) => ({ default: module.AnkiLabPage })));
+const LazyReportsPage = lazy(() => import("./pages/ReportsPage").then((module) => ({ default: module.ReportsPage })));
+const LazyHabitTrackerPage = lazy(() => import("./pages/HabitTrackerPage").then((module) => ({ default: module.HabitTrackerPage })));
+const LazyIntegrationsPage = lazy(() => import("./pages/IntegrationsPage").then((module) => ({ default: module.IntegrationsPage })));
+const LazyPromptLibraryPage = lazy(() => import("./pages/PromptLibraryPage").then((module) => ({ default: module.PromptLibraryPage })));
+const LazyHubFoldersPage = lazy(() => import("./pages/HubFoldersPage").then((module) => ({ default: module.HubFoldersPage })));
+const LazyHelpPage = lazy(() => import("./pages/HelpPage").then((module) => ({ default: module.HelpPage })));
+const LazyAboutPage = lazy(() => import("./pages/AboutPage").then((module) => ({ default: module.AboutPage })));
+const LazyLeaderboardsPage = lazy(() => import("./pages/LeaderboardsPage").then((module) => ({ default: module.LeaderboardsPage })));
+const LazyPremedExperienceLogPage = lazy(() => import("./pages/PremedExperienceLogPage").then((module) => ({ default: module.PremedExperienceLogPage })));
+const LazyActivityHistoryPage = lazy(() => import("./pages/ActivityHistoryPage").then((module) => ({ default: module.ActivityHistoryPage })));
+const LazyStudyMethodsPage = lazy(() => import("./pages/StudyMethodsPage").then((module) => ({ default: module.StudyMethodsPage })));
 
 const PAGES: Record<string, () => JSX.Element> = {
   dashboard: DashboardPage,
   courses: () => <LazyCoursesPage />,
   tracker: () => <LazyCourseTrackerPage />,
   questions: () => <LazyQuestionWorkspacePage />,
-  methods: StudyMethodsPage,
-  anki: AnkiLabPage,
+  methods: () => <LazyStudyMethodsPage />,
+  anki: () => <LazyAnkiLabPage />,
   resources: ResourcesPage,
   step: () => <StepPage initialLane="step1" />,
   step2: () => <StepPage initialLane="step2" />,
@@ -75,20 +79,20 @@ const PAGES: Record<string, () => JSX.Element> = {
   mcat: () => <StepPage initialLane="mcat" />,
   dat: () => <StepPage initialLane="dat" />,
   casper: () => <StepPage initialLane="casper" />,
-  "premed-log": PremedExperienceLogPage,
-  activity: ActivityHistoryPage,
-  reports: ReportsPage,
+  "premed-log": () => <LazyPremedExperienceLogPage />,
+  activity: () => <LazyActivityHistoryPage />,
+  reports: () => <LazyReportsPage />,
   productivity: ProductivityPage,
   tasks: TasksPage,
-  habits: HabitTrackerPage,
+  habits: () => <LazyHabitTrackerPage />,
   journal: JournalPage,
-  integrations: IntegrationsPage,
-  prompts: PromptLibraryPage,
-  folders: HubFoldersPage,
-  about: AboutPage,
-  help: HelpPage,
+  integrations: () => <LazyIntegrationsPage />,
+  prompts: () => <LazyPromptLibraryPage />,
+  folders: () => <LazyHubFoldersPage />,
+  about: () => <LazyAboutPage />,
+  help: () => <LazyHelpPage />,
   appchecker: () => <LazyApplicationCheckerPage />,
-  leaderboards: LeaderboardsPage,
+  leaderboards: () => <LazyLeaderboardsPage />,
   "daily-games": () => <LazyDailyGamesPage />,
   "daily-word": () => <LazyDailyWordPage />,
   doctordle: () => <LazyDoctordlePage />,
@@ -319,6 +323,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
 
         <div className="surface">
           <TopBar
+            route={routeKey}
             title={nav.label}
             subtitle={nav.subtitle}
             onMenu={() => setDrawer(true)}
@@ -350,9 +355,12 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
       <DailyRolloverWatcher />
       <UpdateAvailableWatcher />
       <PomodoroFx />
+      <WhatsNewWatcher startupStatus={startupStatus} suspended={Boolean(showTour || settings || promisePromptOpen || promiseCutsceneOpen)} />
       <StandupWatcher />
       <DailyLoopReminderWatcher />
       <SessionOverlay />
+      <FocusCheckIn />
+      <AccountSyncWatcher />
       <Toaster />
     </div>
   );

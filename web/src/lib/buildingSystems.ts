@@ -10,6 +10,6 @@ export const SYSTEM_PREVIEWS: SystemPreview[] = [
   { id:"knowledge-attrition", name:"Knowledge Attrition", status:"planned", area:"Analytics", promise:"Estimate what may be fading using transparent evidence and learner confirmation.", connectsTo:["Course Tracker","Recommendations"] },
   { id:"physiology-simulator", name:"Physiology Simulator", status:"research", area:"Simulation", promise:"Explore cause and effect across physiological variables in bounded teaching models.", connectsTo:["Equation Explorer","Patient Builder"] },
   { id:"patient-builder", name:"Patient Builder", status:"research", area:"Simulation", promise:"Construct synthetic clinical cases for reasoning practice with explicit educational constraints.", connectsTo:["Physiology Simulator","AI Tutor"] },
-  { id:"accounts-sync", name:"Accounts & Sync", status:"in-development", area:"Platform", promise:"Protect learner continuity across devices while preserving export, recovery, and local ownership.", connectsTo:["All learner data","Backups"] },
+  { id:"accounts-sync", name:"Accounts & Sync", status:"in-development", area:"Platform", promise:"Optional sign-in with versioned cloud protection, conflict-safe multi-device use, restore history, and one-click deletion — local ownership stays first.", connectsTo:["All learner data","Backups","Native AXOM"] },
   { id:"native-axom", name:"Native AXOM", status:"planned", area:"Platform", promise:"Package a stable web product after accounts, sync, PWA, and offline behavior are proven.", connectsTo:["PWA","Accounts & Sync"] },
 ];

@@ -22,6 +22,7 @@ import type { SettingsTab } from "./SettingsModal";
 import { dismissAnnouncement, isAnnouncementDismissed, readDismissedAnnouncements } from "../../lib/announcements";
 import { QuickThemeControl } from "./QuickThemeControl";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { protectionLabel, useAccount } from "../../lib/account/accountStore";
 
 const MOBILE_SIDEBAR_QUERY = "(max-width: 880px)";
 const PREP_FOLDER_TOGGLE_ID = "sidebar-academic-prep-toggle";
@@ -58,6 +59,7 @@ export function Sidebar({
   onClose: () => void;      // close drawer after pick on mobile
 }) {
   const profile = useStore((s) => s.profile);
+  const accountStatus = useAccount((state) => state.protection);
   const updateProfile = useStore((s) => s.updateProfile);
   const [manage, setManage] = useState(false);
   const [dismissedAnnouncements, setDismissedAnnouncements] = useState(readDismissedAnnouncements);
@@ -311,7 +313,7 @@ export function Sidebar({
             </button>
             <div className="user-actions">
               <QuickThemeControl />
-              <button type="button" className="user-icon-btn" onClick={() => onOpenSettings("account")} title="Account and protection" data-tour="data-safety-settings">
+              <button type="button" className="user-icon-btn account-status" data-status={accountStatus} onClick={() => onOpenSettings("account")} title="Account and protection" aria-label={`Account and protection: ${protectionLabel(accountStatus)}`} data-tour="data-safety-settings">
                 <Cloud size={ICON_SIZE.emphasis} />
               </button>
               <button type="button" className="user-icon-btn" onClick={() => onOpenSettings("profile")} title="Settings">

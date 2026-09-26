@@ -17,6 +17,16 @@ DerivedData/
 *.o
 src-tauri/target/
 src-tauri/gen/
+web/src-tauri/target/
+web/.package/
+web/AXOM-*.zip
+*.key
+*.p8
+*.p12
+*.pfx
+*.key.pub
+src-tauri/icons/android/
+src-tauri/icons/ios/
 
 # Xcode user state
 .vscode/

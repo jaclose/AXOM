@@ -181,19 +181,22 @@ The Tauri shell preloads `sqlite:noctyrium.db` through the SQL plugin and starts
 with a `local_vault_snapshots` table. This is experimental; Local Vault remains
 the active source of truth in the current pre-beta.
 
-## Updating (Pre-Beta Limitation)
+## Desktop packages and updates
 
-- **Hosted web app:** updates **automatically** — pushing to the default branch
-  redeploys on Vercel and users get the new build on next load (service worker
-  refreshes the app shell; Local Vault data is untouched).
-- **Downloadable web zip and Mac wrapper:** **manual** for the pre-beta — re-download
-  the latest [GitHub Release](docs/ALPHA-RELEASE.md) asset. There is no in-app
-  auto-updater yet (and we don't ship a fake one).
+- **Hosted web app:** new deployments are detected by build identity. Users
+  choose when to refresh; offline caching retains the current app until then.
+- **Tauri desktop app:** signed updater checks, downloads, verifies, then saves
+  a recovery snapshot before a user-approved install/restart. Public updates
+  require signing credentials and a reachable HTTPS feed. Local unsigned
+  packages explicitly disable updates.
+- **Packages:** `npm run release` builds native packages plus a web ZIP;
+  `npm run release:web` builds only the web ZIP. `npm run release:doctor`
+  checks prerequisites. Outputs live in `dist/releases/<version>/`.
 - The Local Vault is per-browser/origin, so **always Export a JSON backup**
   (Settings → Backup) before switching devices, domains, or package types.
 
 Full detail: [`docs/UPDATE-POLICY.md`](docs/UPDATE-POLICY.md) ·
-release steps: [`docs/ALPHA-RELEASE.md`](docs/ALPHA-RELEASE.md).
+release steps: [`docs/DESKTOP-RELEASE.md`](docs/DESKTOP-RELEASE.md).
 
 ## Legacy Native App
 
@@ -204,5 +207,6 @@ The original SwiftUI/macOS source is still present in:
 - [`scripts/build_app.sh`](scripts/build_app.sh)
 
 That Swift native app is legacy for now. Current development and deployment
-should use the web app plus optional Vercel backend, while the Tauri shell grows
-into the future production desktop app.
+uses the web app plus optional Vercel backend and the canonical root Tauri
+wrapper. Export/import a portable backup when moving between legacy and Tauri
+wrappers because they have different data containers.

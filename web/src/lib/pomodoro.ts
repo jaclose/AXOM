@@ -555,6 +555,18 @@ export function reconcilePomodoro() {
   ensurePomodoroClock();
 }
 
+/** Full length of the current phase in seconds, matching the Pomodoro dial. */
+export function pomodoroPhaseSeconds(state: { presetId: string; phase: PomodoroPhase; sessionsToday: number } & CustomDurations): number {
+  const preset = effectivePreset(state);
+  if (state.phase === "focus") return preset.focus * 60;
+  return getBreakDurationMinutes({
+    sessionsToday: state.sessionsToday,
+    cyclesBeforeLongBreak: preset.cyclesBeforeLongBreak,
+    shortBreak: preset.break,
+    longBreak: preset.longBreak,
+  }) * 60;
+}
+
 export function pomodoroPreset(id: string): PomodoroPreset {
   return presetById(id);
 }

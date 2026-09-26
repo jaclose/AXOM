@@ -1,4 +1,4 @@
-import { ArrowUpRight, CircleHelp, Gamepad2, Stethoscope, WholeWord } from "lucide-react";
+import { ArrowUpRight, CircleHelp, Gamepad2, Heart, Stethoscope, WholeWord } from "lucide-react";
 import { GlassCard, Tag } from "../components/ui/primitives";
 import { useStore } from "../lib/store";
 import "../styles/ecosystem.css";
@@ -21,7 +21,35 @@ export function OptionalDailyGamesPage() {
         <GameCard icon={<CircleHelp />} title="Sweeper" status="DESTINATION REQUIRES CONFIRMATION" description="A Sweeper destination has not been verified. AXOM will not guess or send you to an unconfirmed site." meta="Unavailable" />
       </section>
       <p className="ecosystem-note">External games are not embedded, proxied, or represented as AXOM products. An internet connection may be required.</p>
+      <GameCredits />
     </main>
+  );
+}
+
+/** Thanks and attribution for the people whose work makes these breaks possible. */
+export function GameCredits() {
+  return (
+    <GlassCard pad className="game-credits" aria-labelledby="game-credits-title">
+      <div className="game-credits-head">
+        <Heart size={18} aria-hidden="true" />
+        <h2 id="game-credits-title">Credits &amp; thanks</h2>
+      </div>
+      <ul>
+        <li>
+          <b>Doctordle</b> — thank you to the independent Doctordle team for a genuinely useful daily diagnosis game for medical learners.
+          AXOM simply links to <a href={DOCTORDLE_URL} target="_blank" rel="noopener noreferrer">doctordle.org</a>; we are not affiliated
+          and do not use their content. We’d love to explore a collaboration in the future — until then, this link is the whole integration.
+        </li>
+        <li>
+          <b>Daily Word dictionary</b> — word lists derived from SCOWL (Spell Checker Oriented Word Lists) by Kevin Atkinson and contributors,
+          used under its permissive license (<a href="./third-party/DAILY_WORD_SCOWL_LICENSE.txt" target="_blank" rel="noopener noreferrer">license text</a>).
+        </li>
+        <li>
+          <b>The five-letter daily format</b> — popularized by Josh Wardle’s Wordle. AXOM Daily Word is an original implementation with its own
+          word list, rules text, and design; it is not affiliated with Wordle or its publisher.
+        </li>
+      </ul>
+    </GlassCard>
   );
 }
 

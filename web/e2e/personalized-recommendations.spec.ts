@@ -1,5 +1,21 @@
 import { expect, test, type Page } from "@playwright/test";
 
+/** Dev-only live-store handle installed by src/main.tsx (see comment there). */
+type DevWindow = Window & {
+  __AXOM_DEV__: Promise<{
+    useStore: {
+      getState: () => Record<string, unknown> & {
+        profile: Record<string, unknown>;
+        terms: Array<{ id: string }>;
+        activeDayKey: string;
+        sessions: Array<{ status: string; link?: unknown; resources?: string[] }>;
+      };
+      setState: (patch: Record<string, unknown>) => void;
+    };
+  }>;
+};
+
+
 test("study defaults and item overrides drive the dashboard, survive reload, and start the right session", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -55,12 +71,11 @@ test("study defaults and item overrides drive the dashboard, survive reload, and
   await page.reload({ waitUntil: "networkidle" });
   await expect(brief.getByText(/A session is already running/)).toBeVisible();
   const session = await page.evaluate(async () => {
-    const storePath = "/src/lib/store.ts";
-    const { useStore } = await import(/* @vite-ignore */ storePath);
-    return useStore.getState().sessions.find((value: { status: string }) => value.status === "active");
+    const { useStore } = await (window as unknown as DevWindow).__AXOM_DEV__;
+    return useStore.getState().sessions.find((value) => value.status === "active");
   });
-  expect(session.link).toMatchObject({ kind: "tracker", id: "recommendation-renal" });
-  expect([...session.resources].sort()).toEqual(["Noji", "Notes"]);
+  expect(session?.link).toMatchObject({ kind: "tracker", id: "recommendation-renal" });
+  expect([...(session?.resources ?? [])].sort()).toEqual(["Noji", "Notes"]);
   await page.goto("/#tracker");
   const sixthPass = row.getByTitle("6 lecture passes", { exact: true });
   await sixthPass.focus();
@@ -148,8 +163,7 @@ async function prepareWorkspace(page: Page) {
     if (await later.count()) await later.click();
   }
   await page.evaluate(async () => {
-    const storePath = "/src/lib/store.ts";
-    const { useStore } = await import(/* @vite-ignore */ storePath);
+    const { useStore } = await (window as unknown as DevWindow).__AXOM_DEV__;
     const state = useStore.getState();
     const timestamp = new Date().toISOString();
     await useStore.setState({

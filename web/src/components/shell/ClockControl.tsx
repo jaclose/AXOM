@@ -159,6 +159,26 @@ function LiveClockControl({
   );
 }
 
+/**
+ * Keep a hand's angle monotonic so 354° → 0° animates forward by 6° instead
+ * of sweeping backwards through a full turn.
+ */
+export function unwrapAngle(previous: number | undefined, next: number): number {
+  if (previous === undefined) return next;
+  const base = previous - ((previous % 360) + 360) % 360;
+  let candidate = base + next;
+  if (candidate < previous - 180) candidate += 360;
+  if (candidate > previous + 180) candidate -= 360;
+  return candidate;
+}
+
+function useContinuousAngle(angle: number): number {
+  const previous = useRef<number | undefined>(undefined);
+  const value = unwrapAngle(previous.current, angle);
+  useEffect(() => { previous.current = value; }, [value]);
+  return value;
+}
+
 export function AnalogClock({
   date,
   timeZone,
@@ -170,6 +190,9 @@ export function AnalogClock({
 }) {
   const reducedMotion = useReducedMotion();
   const angles = analogClockAngles(getZonedTimeParts(date, timeZone), showSeconds);
+  const hour = useContinuousAngle(angles.hour);
+  const minute = useContinuousAngle(angles.minute);
+  const second = useContinuousAngle(angles.second);
   return (
     <svg
       className={`analog-clock ${reducedMotion ? "reduced" : ""}`}
@@ -189,10 +212,14 @@ export function AnalogClock({
           transform={`rotate(${index * 30} 50 50)`}
         />
       ))}
-      <line className="analog-clock-hand hour" x1="50" y1="50" x2="50" y2="28" transform={`rotate(${angles.hour} 50 50)`} />
-      <line className="analog-clock-hand minute" x1="50" y1="50" x2="50" y2="18" transform={`rotate(${angles.minute} 50 50)`} />
+      {/* Hands rotate with a CSS transform around the view-box center (see
+          .analog-clock-hand). Never combine an SVG rotate(a cx cy) attribute
+          with a CSS transform-origin: the pivot is applied twice and the hand
+          orbits (100,100) instead of the dial center. */}
+      <line className="analog-clock-hand hour" x1="50" y1="50" x2="50" y2="28" style={{ transform: `rotate(${hour}deg)` }} />
+      <line className="analog-clock-hand minute" x1="50" y1="50" x2="50" y2="18" style={{ transform: `rotate(${minute}deg)` }} />
       {showSeconds && (
-        <line className="analog-clock-hand second" x1="50" y1="56" x2="50" y2="15" transform={`rotate(${angles.second} 50 50)`} />
+        <line className="analog-clock-hand second" x1="50" y1="56" x2="50" y2="15" style={{ transform: `rotate(${second}deg)` }} />
       )}
       <circle className="analog-clock-pin" cx="50" cy="50" r="2.4" />
     </svg>

@@ -192,7 +192,7 @@ export function ProductivityPage() {
 
         <GlassCard pad className="month-intel">
           <PanelHeader title="Monthly activity calendar" sub={`${monthly.label} · each cell follows the real calendar day`}
-            action={<Tag tone={monthly.activeDays ? scoreTone(monthly.grade) : "neutral"}>{monthly.activeDays}/${monthly.days.length} active</Tag>} />
+            action={<Tag tone={monthly.activeDays ? scoreTone(monthly.grade) : "neutral"}>{monthly.activeDays}/{monthly.days.length} active</Tag>} />
           <div className="month-summary">
             <Metric icon={<Activity size={ICON_SIZE.body} />} label="Month result" value={`${Math.round(monthly.minutes / 60)}h`} note={`${monthly.cards} cards`} />
             <Metric icon={<CalendarDays size={ICON_SIZE.body} />} label="Best day" value={monthly.bestDay ? shortDate(monthly.bestDay.key) : "None"} note={monthly.bestDay ? `${monthly.bestDay.minutes}m · ${monthly.bestDay.cards} cards` : "log a session"} />

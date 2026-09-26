@@ -5,7 +5,7 @@
 // every answer is recorded on the question for spaced retry.
 // ===========================================================================
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { BookOpenCheck, ChevronLeft, Flag, ListPlus, Play, WandSparkles, Sparkles, Minus, RotateCcw } from "lucide-react";
+import { BookOpenCheck, ChevronLeft, Flag, ListPlus, Play, WandSparkles, Sparkles, Minus, RotateCcw, Timer } from "lucide-react";
 import { useStore } from "../../lib/store";
 import { STORAGE_KEYS } from "../../lib/brand";
 import {
@@ -25,6 +25,7 @@ import { pushToast } from "../../lib/toast";
 import { QuizFeedback } from "./QuizFeedback";
 import { accuracyTone } from "../../lib/library";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { formatSeconds, pacingInsight, summarizePacing } from "../../lib/quizPacing";
 import { createTextAnnotationWithIntegrity, removeTextAnnotationById, type QuestionAnnotationTarget, type QuestionAnnotationTone } from "../../lib/questionAnnotations";
 import { AnnotatedQuestionText, type QuestionTextSelection } from "./AnnotatedQuestionText";
 import { QuestionAttachmentsPanel } from "./QuestionAttachmentsPanel";
@@ -644,6 +645,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             <span className="sub">{session.score.total - session.score.scored} unscored (no correct answer set)</span>
           )}
         </div>
+        <PacingPanel session={session} />
         <section className="quiz-results-next" aria-labelledby="quiz-results-next-heading">
           <div><b id="quiz-results-next-heading">What next?</b><span className="sub">Continue with the missed material without rebuilding the session.</span></div>
           {missed.length > 0 ? <div className="row gap8" style={{ flexWrap: "wrap" }}>
@@ -1000,5 +1002,37 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       />
       </main>
     </Modal>
+  );
+}
+
+/** Per-question pacing from the seconds recorded while answering. */
+function PacingPanel({ session }: { session: QuizSession }) {
+  const summary = summarizePacing(session);
+  if (!summary) return null;
+  const max = Math.max(summary.targetSeconds, ...summary.questions.map((question) => question.seconds));
+  return (
+    <section className="quiz-pacing" aria-labelledby="quiz-pacing-heading">
+      <div className="quiz-pacing-head">
+        <b id="quiz-pacing-heading"><Timer size={ICON_SIZE.body} aria-hidden="true" /> Pacing</b>
+        <span className="sub">{pacingInsight(summary)}</span>
+      </div>
+      <div className="quiz-pacing-stats">
+        <span><b>{formatSeconds(summary.averageSeconds)}</b><small>average</small></span>
+        <span><b>{formatSeconds(summary.medianSeconds)}</b><small>median</small></span>
+        <span><b>{summary.overTarget}/{summary.measured}</b><small>over {formatSeconds(summary.targetSeconds)}{summary.timed ? "" : " (typical exam pace)"}</small></span>
+        <span><b>{summary.slowest.map((question) => `Q${question.position}`).join(", ")}</b><small>slowest</small></span>
+      </div>
+      <div className="quiz-pacing-strip" role="img" aria-label={`Seconds per question: ${summary.questions.map((question) => `Q${question.position} ${question.seconds}s`).join(", ")}`}>
+        <i className="quiz-pacing-target" style={{ bottom: `${(summary.targetSeconds / max) * 100}%` }} />
+        {summary.questions.map((question) => (
+          <span
+            key={question.questionId}
+            className={`${question.overTarget ? "over" : ""} ${question.correct === false ? "wrong" : question.correct ? "right" : ""}`}
+            style={{ height: `${Math.max(4, (question.seconds / max) * 100)}%` }}
+            title={`Q${question.position}: ${formatSeconds(question.seconds)}${question.correct === undefined ? "" : question.correct ? " · correct" : " · missed"}`}
+          />
+        ))}
+      </div>
+    </section>
   );
 }

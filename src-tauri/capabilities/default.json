@@ -1,11 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Noctyrium desktop shell permissions for Alpha native SQLite work.",
+  "description": "Local AXOM main window only. Remote web content has no native permissions.",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "sql:default",
-    "sql:allow-execute"
+    "sql:allow-execute",
+    "updater:default",
+    "process:allow-restart"
   ]
 }

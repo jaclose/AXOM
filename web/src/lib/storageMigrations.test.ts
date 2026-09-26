@@ -26,6 +26,15 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("storage migration recovery metadata", () => {
+  it("refuses to downgrade newer workspace data or overwrite its build metadata", async () => {
+    const previous = { ...BUILD_INFO, version: "99.0.0", schemaVersion: BUILD_INFO.schemaVersion + 1 };
+    localStorage.setItem(STORAGE_SCHEMA_KEY, String(previous.schemaVersion));
+    localStorage.setItem(STORAGE_KEYS.lastSeenBuild, JSON.stringify(previous));
+    const result = await runStorageMigrations();
+    expect(result.ok).toBe(false);
+    expect(localStorage.getItem(STORAGE_SCHEMA_KEY)).toBe(String(previous.schemaVersion));
+    expect(readLastSeenBuild()?.version).toBe("99.0.0");
+  });
   it("reads only the existing validated failure marker and previous build", () => {
     const previousBuild = { ...BUILD_INFO, version: "0.0.0-previous", commitSha: "previous" };
     localStorage.setItem(STORAGE_KEYS.lastSeenBuild, JSON.stringify(previousBuild));

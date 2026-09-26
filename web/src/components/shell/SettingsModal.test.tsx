@@ -97,13 +97,13 @@ describe("Settings information architecture", () => {
     expect(screen.getByRole("status").textContent).toBe("Applied 6 suggestions.");
   });
 
-  it("uses six accessible sections with only the active tab owning its mounted panel", async () => {
+  it("uses seven accessible sections with only the active tab owning its mounted panel", async () => {
     const user = userEvent.setup();
     render(<SettingsModal onClose={() => {}} />);
 
     const tabs = screen.getAllByRole("tab");
     expect(tabs.map((tab) => tab.textContent?.trim())).toEqual([
-      "Profile", "Account", "Data", "Emergency recovery", "Personalization", "Advanced",
+      "Profile", "Account", "Appearance", "Personalization", "Data", "Emergency recovery", "Advanced",
     ]);
     for (const tab of tabs) {
       const controls = tab.getAttribute("aria-controls");
@@ -129,8 +129,8 @@ describe("Settings information architecture", () => {
     expect(screen.queryByText(/your account is synced/i)).toBeNull();
     expect(screen.queryByText(/workspace follows you across devices/i)).toBeNull();
 
-    await user.click(screen.getByRole("tab", { name: "Personalization" }));
-    expect(screen.getByText("Theme", { selector: ".sync-title" })).toBeTruthy();
+    await user.click(screen.getByRole("tab", { name: "Appearance" }));
+    expect(screen.getByText("Accent palette")).toBeTruthy();
   });
 
   it("presents portable backup actions once and keeps technical details in Advanced", async () => {
@@ -171,7 +171,7 @@ describe("Settings information architecture", () => {
         updatedAt: "2026-07-12T10:01:00.000Z",
       }],
     });
-    render(<SettingsModal onClose={() => {}} initialTab="personalization" />);
+    render(<SettingsModal onClose={() => {}} initialTab="rhythm" />);
 
     expect(screen.queryByRole("checkbox", { name: "Enable Daily Games" })).toBeNull();
     expect(screen.getByRole("button", { name: "Reset Daily Word" })).toBeTruthy();
@@ -186,7 +186,7 @@ describe("Settings information architecture", () => {
         timeZonePreference: { mode: "custom", customTimezone: "America/Grenada" },
       },
     }));
-    render(<SettingsModal onClose={() => {}} initialTab="personalization" />);
+    render(<SettingsModal onClose={() => {}} initialTab="rhythm" />);
 
     await user.click(screen.getByRole("checkbox", { name: "Digital seconds" }));
     await user.selectOptions(screen.getByRole("combobox", { name: "Hour cycle" }), "24");
@@ -222,7 +222,7 @@ describe("Settings information architecture", () => {
     useStore.setState((state) => ({
       profile: { ...state.profile, dailyLoopReminders: undefined },
     }));
-    render(<SettingsModal onClose={() => {}} initialTab="personalization" />);
+    render(<SettingsModal onClose={() => {}} initialTab="rhythm" />);
 
     const checkInToggle = screen.getByRole("checkbox", { name: "Enable Daily Check-In" });
     const closeoutToggle = screen.getByRole("checkbox", { name: "Enable evening closeout" });
@@ -278,7 +278,7 @@ describe("Settings information architecture", () => {
         },
       },
     }));
-    render(<SettingsModal onClose={() => {}} initialTab="personalization" />);
+    render(<SettingsModal onClose={() => {}} initialTab="rhythm" />);
 
     expect((screen.getByRole("checkbox", { name: "Enable Daily Check-In" }) as HTMLInputElement).checked).toBe(false);
     expect((screen.getByRole("checkbox", { name: "Enable evening closeout" }) as HTMLInputElement).checked).toBe(true);
@@ -312,7 +312,7 @@ describe("Settings information architecture", () => {
     const confirm = vi.spyOn(window, "confirm")
       .mockReturnValueOnce(false)
       .mockReturnValueOnce(true);
-    render(<SettingsModal onClose={() => {}} initialTab="personalization" />);
+    render(<SettingsModal onClose={() => {}} initialTab="rhythm" />);
 
     const reset = screen.getByRole("button", { name: "Reset Daily Word" });
     await user.click(reset);
@@ -323,5 +323,57 @@ describe("Settings information architecture", () => {
     expect(useStore.getState().dailyWordPuzzles).toEqual([]);
     expect(useStore.getState().profile.experimentalFlags?.dailyGames).toBe(true);
     expect(useStore.getState().tasks).toEqual(tasks);
+  });
+
+  it("opens Personalization on Study style and switches sub-sections without losing the tab", async () => {
+    const user = userEvent.setup();
+    render(<SettingsModal onClose={() => {}} initialTab="personalization" />);
+    expect(screen.getByText("Passes & review timing")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /Daily rhythm/ }));
+    expect(screen.getByRole("checkbox", { name: "Enable lock-in check-ins" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /Program & lanes/ }));
+    expect(screen.getByText("Focus lanes")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Personalization" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("enables lock-in check-ins with a chosen interval, scope, and voice", async () => {
+    const user = userEvent.setup();
+    render(<SettingsModal onClose={() => {}} initialTab="rhythm" />);
+    await user.click(screen.getByRole("checkbox", { name: "Enable lock-in check-ins" }));
+    await user.click(screen.getByRole("button", { name: "45 min" }));
+    await user.click(screen.getByRole("radio", { name: /Whenever AXOM is open/ }));
+    await user.click(screen.getByRole("radio", { name: /Intense/ }));
+    expect(useStore.getState().profile.focusCheckIn).toMatchObject({ enabled: true, intervalMinutes: 45, scope: "anytime", tone: "intense" });
+  });
+
+  it("applies an accent palette from Appearance and keeps it device-only", async () => {
+    const user = userEvent.setup();
+    render(<SettingsModal onClose={() => {}} initialTab="appearance" />);
+    await user.click(screen.getByRole("radio", { name: /Amethyst/ }));
+    expect(document.documentElement.dataset.palette).toBe("amethyst");
+    expect(JSON.parse(localStorage.getItem("axom.palette.v1")!).id).toBe("amethyst");
+    expect(JSON.stringify(useStore.getState().profile)).not.toContain("amethyst");
+    await user.click(screen.getByRole("radio", { name: /AXOM Classic/ }));
+    expect(document.documentElement.dataset.palette).toBeUndefined();
+  });
+
+  it("shows the profile header with program facts and an account entry point", () => {
+    useStore.getState().updateProfile({ name: "Jafar", tagline: "One honest block." });
+    render(<SettingsModal onClose={() => {}} />);
+    expect((screen.getByLabelText("Display name") as HTMLInputElement).value).toBe("Jafar");
+    expect(screen.getByText("Where you are")).toBeTruthy();
+    expect(screen.getByText("Local profile on this device")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "About accounts" }));
+    expect(screen.getByRole("tab", { name: "Account" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("records restores in a device-only restore history", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<SettingsModal onClose={() => {}} initialTab="advanced" />);
+    await user.click(screen.getByRole("button", { name: /reset to starter data/i }));
+    await user.click(screen.getByRole("tab", { name: "Emergency recovery" }));
+    expect(screen.getByText("Reset to starter data", { selector: "b" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Backup status" })).toBeTruthy();
   });
 });

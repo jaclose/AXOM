@@ -31,7 +31,7 @@ test("persistent Daily Games, Daily Word history, and shared clock preferences p
   await page.getByRole("button", { name: /Open clock/ }).click();
   await page.getByRole("button", { name: "Clock preferences" }).click();
   const settings = page.getByRole("dialog", { name: "Your AXOM Setup" });
-  await expect(settings.getByText("Daily utilities")).toBeVisible();
+  await expect(settings.getByRole("heading", { name: "Daily rhythm reminders" })).toBeVisible();
 
   await settings.getByRole("combobox", { name: "Hour cycle" }).selectOption("24");
   await settings.getByRole("checkbox", { name: "Digital seconds" }).check();

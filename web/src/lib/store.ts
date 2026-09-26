@@ -30,6 +30,7 @@ import {
   type RolloverReason,
 } from "./dailyRollover";
 import { assertVaultWrite, getVaultWriteCheckpoint, localVaultStorage } from "./localVault";
+import { storeHydration } from "./storeHydration";
 import { userIdFromName } from "./userIdentity";
 import { ACADEMIC_TEMPLATE_COURSES, ACADEMIC_TEMPLATE_TERMS, focusOption, normalizedFocusIds } from "./experience";
 import { inferTrackFromFocus, isAcademicStageId, resolveTrack } from "./tracks";
@@ -50,6 +51,7 @@ import { normalizeResourceUrl } from "./resourceUtils";
 import { normalizeDailySuccessConfig } from "./dailySuccess";
 import { normalizePomodoroPreferences } from "./pomodoroPreferences";
 import { normalizeDailyLoopReminderPreferences } from "./dailyLoopReminders";
+import { normalizeFocusCheckInPreferences } from "./focusCheckIn";
 import { normalizeDashboardLayoutPreferences } from "./dashboardWidgets";
 import { normalizeJournalEntries, normalizeJournalNotebookPreferences } from "./journalNotebook";
 import { normalizeStudyWorkflow } from "./studyPreferences";
@@ -1557,14 +1559,15 @@ export const useStore = create<Store>()(
       version: SCHEMA_VERSION,
       storage: createJSONStorage(() => localVaultStorage),
       migrate: (persisted, fromVersion) => migratePersistedState(persisted, fromVersion),
-      onRehydrateStorage: () => (state) => {
-        // Startup orphan sweep — the ONLY safe moment to run it: rehydration is
-        // complete, so `state.questions` is authoritative (never the transient
-        // empty list that would nuke every blob). Bounded, non-destructive:
-        // referenced blobs are untouched; a missing blob is left for the UI.
-        if (state && Array.isArray(state.questions)) {
-          void runQuestionAttachmentMaintenance(state.questions).catch(() => {});
-        }
+      onRehydrateStorage: () => {
+        storeHydration.start();
+        return (state, error) => {
+          storeHydration.finish(error);
+          // Only sweep after rehydration, when questions are authoritative.
+          if (state && Array.isArray(state.questions)) {
+            void runQuestionAttachmentMaintenance(state.questions).catch(() => {});
+          }
+        };
       },
       partialize: (s) => {
         // persist data only — strip the action functions
@@ -1702,17 +1705,15 @@ export function migratePersistedState(persisted: unknown, fromVersion: number): 
     s.profile = profile;
   }
   if (fromVersion < 13) {
-    // Anyone upgrading from an earlier schema already has a workspace —
-    // never show the first-launch onboarding wizard to them.
+    // Legacy unspecified profiles already have a workspace, but an explicit
+    // unfinished setup decision must survive every migration.
     const profile = normalizeProfile(s.profile);
-    profile.onboarded = true;
     s.profile = profile;
   }
   if (fromVersion < 14) {
     normalizeAcademicMap(s);
     s.boardPrep = normalizeBoardPrep(s.boardPrep);
     const profile = normalizeProfile(s.profile);
-    profile.onboarded = true;
     s.profile = profile;
   }
   if (fromVersion < 15) {
@@ -2097,6 +2098,7 @@ function normalizeFolders(value: unknown): HubFolder[] {
     favorite: typeof record.favorite === "boolean" ? record.favorite : false,
     archived: typeof record.archived === "boolean" ? record.archived : false,
     sortOrder: typeof record.sortOrder === "number" ? record.sortOrder : index,
+    lastOpenedAt: typeof record.lastOpenedAt === "string" && Number.isFinite(Date.parse(record.lastOpenedAt)) ? record.lastOpenedAt : undefined,
     createdAt: typeof record.createdAt === "string" ? record.createdAt : timestamp,
     updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : timestamp,
   })));
@@ -2243,6 +2245,9 @@ function normalizeProfile(value: unknown): Profile {
     dailyLoopReminders: profile.dailyLoopReminders === undefined
       ? undefined
       : normalizeDailyLoopReminderPreferences(profile.dailyLoopReminders),
+    focusCheckIn: profile.focusCheckIn === undefined
+      ? undefined
+      : normalizeFocusCheckInPreferences(profile.focusCheckIn),
     // Preserve optional opt-in fields so they survive reset/migration.
     blueprintMode: profile.blueprintMode === "usmle" || profile.blueprintMode === "prehealth"
       ? profile.blueprintMode as Profile["blueprintMode"] : undefined,

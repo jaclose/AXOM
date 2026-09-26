@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_CLOCK_PREFERENCES } from "../../lib/seed";
 import type { ClockPrecision, ClockTicker } from "../../lib/clock";
-import { ClockControl } from "./ClockControl";
+import { AnalogClock, ClockControl, unwrapAngle } from "./ClockControl";
 
 function manualTicker(initial: string) {
   let snapshot = new Date(initial).getTime();
@@ -184,5 +184,24 @@ describe("ClockControl", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /Open clock/ }));
     expect(document.querySelector(".analog-clock")?.classList.contains("reduced")).toBe(true);
+  });
+
+  it("rotates hands around the dial center with one CSS transform (no double pivot)", () => {
+    render(<AnalogClock date={new Date("2026-07-12T14:15:30.000Z")} timeZone="UTC" showSeconds />);
+    const hands = [...document.querySelectorAll<SVGLineElement>(".analog-clock-hand")];
+    expect(hands).toHaveLength(3);
+    for (const hand of hands) {
+      expect(hand.getAttribute("transform")).toBeNull();
+      expect(hand.style.transform).toMatch(/^rotate\(-?\d+(\.\d+)?deg\)$/);
+    }
+    expect(document.querySelector<SVGLineElement>(".analog-clock-hand.minute")?.style.transform).toBe("rotate(93deg)");
+  });
+
+  it("unwraps hand angles so midnight/hour boundaries move forward", () => {
+    expect(unwrapAngle(undefined, 354)).toBe(354);
+    expect(unwrapAngle(354, 0)).toBe(360);
+    expect(unwrapAngle(360, 6)).toBe(366);
+    expect(unwrapAngle(726, 0)).toBe(720);
+    expect(unwrapAngle(90, 96)).toBe(96);
   });
 });

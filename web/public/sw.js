@@ -1,40 +1,67 @@
-// AXOM service worker — offline-first for the installable / downloadable app.
-// Cache name is bumped per build via the version query; old caches are purged.
-const CACHE = "axom-v0.0.1-prebeta";
-const CORE = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png"];
+// Build tooling injects the exact build identity and critical shell assets.
+// Optional games and document engines remain lazy and cache when first opened.
+const BUILD_ID = "__AXOM_BUILD_ID__";
+const CACHE_PREFIX = "axom-shell-";
+const CACHE = CACHE_PREFIX + BUILD_ID;
+const PRECACHE = []; // __AXOM_PRECACHE__
+const CORE = [...new Set(["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", ...PRECACHE])];
 
-self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(CORE)).then(() => self.skipWaiting()));
+self.addEventListener("install", (event) => {
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(CORE)));
+  // No skipWaiting: a ready update must not interrupt an open workspace.
 });
 
-self.addEventListener("activate", (e) => {
-  e.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))),
-    ).then(() => self.clients.claim()),
-  );
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "AXOM_ACTIVATE_UPDATE") event.waitUntil(self.skipWaiting());
 });
 
-// Cache-first for same-origin GETs (the hashed Vite assets are immutable),
-// with a network fallback that also fills the cache.
-self.addEventListener("fetch", (e) => {
-  const req = e.request;
-  const url = new URL(req.url);
-  if (req.method !== "GET" || url.origin !== self.location.origin || url.pathname.startsWith("/api/")) return;
-  if (req.mode === "navigate") {
-    e.respondWith(fetch(req).then((res) => res.ok ? res : Promise.reject(new Error("navigation unavailable"))).catch(() => caches.match("./index.html")));
+self.addEventListener("activate", (event) => {
+  event.waitUntil((async () => {
+    // Retain older assets while other tabs may still be using them. Only this
+    // application's caches are eligible; IndexedDB is never touched.
+    const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    if (clients.length > 1) return;
+    const keys = (await caches.keys()).filter((key) => key.startsWith(CACHE_PREFIX));
+    const previous = keys.filter((key) => key !== CACHE).at(-1);
+    await Promise.all(keys.filter((key) => key !== CACHE && key !== previous).map((key) => caches.delete(key)));
+    // Do not claim/reload other tabs. The user-selected page reloads itself.
+  })());
+});
+
+self.addEventListener("fetch", (event) => {
+  const request = event.request;
+  const url = new URL(request.url);
+  if (request.method !== "GET" || url.origin !== self.location.origin) return;
+  if (/\/version\.json$/.test(url.pathname) || /\/api\//.test(url.pathname)) return;
+
+  if (request.mode === "navigate") {
+    event.respondWith((async () => {
+      try {
+        const response = await fetch(request, { cache: "no-store" });
+        if (response.ok && response.headers.get("content-type")?.includes("text/html")) {
+          const cache = await caches.open(CACHE);
+          await cache.put("./index.html", response.clone());
+          return response;
+        }
+        return (await (await caches.open(CACHE)).match("./index.html")) || response;
+      } catch {
+        return (await (await caches.open(CACHE)).match("./index.html")) || Response.error();
+      }
+    })());
     return;
   }
-  e.respondWith(
-    caches.match(req).then((hit) =>
-      hit ||
-      fetch(req).then((res) => {
-        if (res.ok && res.type === "basic") {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
-        }
-        return res;
-      }),
-    ),
-  );
+
+  const staticAsset = /\.(?:js|mjs|css|png|jpe?g|svg|webp|ico|woff2?|webmanifest)$/.test(url.pathname);
+  if (!staticAsset) return;
+  event.respondWith((async () => {
+    const hit = await caches.match(request);
+    if (hit) return hit;
+    const response = await fetch(request);
+    // Hosts can rewrite missing JS to index.html: never cache HTML as an asset.
+    if (response.ok && !response.headers.get("content-type")?.includes("text/html")) {
+      const cache = await caches.open(CACHE);
+      await cache.put(request, response.clone());
+    }
+    return response;
+  })());
 });

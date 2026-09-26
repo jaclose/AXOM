@@ -34,6 +34,9 @@ import { AxomMark, AxomWordmark } from "../ui/BrandMark";
 import { Field, SelectField } from "../ui/Modal";
 import { GButton, GhostButton } from "../ui/primitives";
 import { ThemeToggle } from "../ui/ThemeToggle";
+import { PALETTES, setPalettePreference } from "../../lib/palette";
+import { usePalettePreference, useResolvedTheme } from "../../lib/useAppearance";
+import { PaletteSwatch, onRadioGroupKeyDown } from "./AppearanceStudio";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { normalizeStudyWorkflow, STUDY_METHOD_OPTIONS, toggleStudyMethod, type StudyWorkflowPreferences } from "../../lib/studyPreferences";
 import { StudyMethodFollowUps } from "./StudyMethodFollowUps";
@@ -441,6 +444,7 @@ export function OnboardingWizard({
               Choose a calm starting layout. Theme and widget choices remain available in Settings and Customize.
             </p>
             <ThemeToggle />
+            <OnboardingPalettePicker />
             <fieldset className="onboarding-choice-group">
               <legend>Dashboard widgets</legend>
               <div className="onboarding-choice-grid two">
@@ -467,7 +471,7 @@ export function OnboardingWizard({
                 <GButton size="sm" onClick={enableNotifications}>Enable</GButton>
               )}
             </div>
-            <div className="sub">Motion follows your device’s reduced-motion setting. No AI provider is required.</div>
+            <div className="sub">Fine-tune colors, pick a custom accent, or reduce motion anytime in Settings → Appearance. No AI provider is required.</div>
             <StepActions onBack={() => move(1)} onNext={() => move(3)} />
           </div>
         )}
@@ -598,4 +602,35 @@ function focusableElements(root: HTMLElement): HTMLElement[] {
   return [...root.querySelectorAll<HTMLElement>(
     'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
   )].filter((element) => !element.hidden && element.getAttribute("aria-hidden") !== "true");
+}
+
+/** "Make it yours" — the accent palettes, applied live while choosing. */
+function OnboardingPalettePicker() {
+  const palette = usePalettePreference();
+  const resolved = useResolvedTheme();
+  return (
+    <fieldset className="onboarding-choice-group onboarding-palettes">
+      <legend>Accent palette</legend>
+      <div className="onboarding-palette-row" role="radiogroup" aria-label="Accent palette" onKeyDown={onRadioGroupKeyDown}>
+        {PALETTES.map((definition) => {
+          const selected = palette.id === definition.id;
+          return (
+            <button
+              key={definition.id}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              tabIndex={selected ? 0 : -1}
+              className={selected ? "on" : ""}
+              title={definition.pairing}
+              onClick={() => setPalettePreference({ id: definition.id, customAccent: palette.customAccent })}
+            >
+              <PaletteSwatch input={resolved === "light" ? definition.light : definition.dark} size="sm" />
+              <span><b>{definition.label}</b><small>{definition.pairing}</small></span>
+            </button>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
 }

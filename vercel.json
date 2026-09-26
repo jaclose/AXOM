@@ -4,6 +4,12 @@
   "installCommand": "npm ci && npm --prefix web ci",
   "buildCommand": "npm run build",
   "outputDirectory": "web/dist",
+  "headers": [
+    { "source": "/version.json", "headers": [{ "key": "Cache-Control", "value": "no-store" }] },
+    { "source": "/sw.js", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
+    { "source": "/index.html", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
+    { "source": "/assets/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }] }
+  ],
   "rewrites": [
     { "source": "/api/user/register", "destination": "/api/user?action=register" },
     { "source": "/api/user/pin-login", "destination": "/api/user?action=pin-login" },

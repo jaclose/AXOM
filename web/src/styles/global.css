@@ -37,7 +37,7 @@ body {
 button { font-family: inherit; cursor: pointer; }
 input, textarea, select { font-family: inherit; }
 
-::selection { background: rgba(200, 169, 106, 0.32); }
+::selection { background: rgba(var(--accent-rgb), 0.32); }
 
 /* AXOM brand primitives --------------------------------------------------- */
 .brand-wordmark {
@@ -160,9 +160,9 @@ input, textarea, select { font-family: inherit; }
   inset: 0;
   z-index: -1;
   background:
-    radial-gradient(circle at 22% 8%, rgba(174,184,195,0.04), transparent 26%),
-    radial-gradient(circle at 78% 18%, rgba(230,226,214,0.045), transparent 25%),
-    radial-gradient(circle at 50% 95%, rgba(200,169,106,0.018), transparent 34%),
+    radial-gradient(circle at 22% 8%, rgba(var(--orb-a-rgb),calc(0.04 * var(--ambient))), transparent 26%),
+    radial-gradient(circle at 78% 18%, rgba(var(--tint-rgb),calc(0.045 * var(--ambient))), transparent 25%),
+    radial-gradient(circle at 50% 95%, rgba(var(--accent-rgb),0.018), transparent 34%),
     linear-gradient(135deg, var(--bg-1), var(--bg-2) 52%, var(--bg-3));
   overflow: hidden;
 }
@@ -187,19 +187,19 @@ input, textarea, select { font-family: inherit; }
 }
 .orb.cyan {
   width: 460px; height: 460px;
-  background: radial-gradient(circle, rgba(174,184,195,0.075), rgba(174,184,195,0.018) 55%, transparent 72%);
+  background: radial-gradient(circle, rgba(var(--orb-a-rgb),calc(0.075 * var(--ambient))), rgba(var(--orb-a-rgb),calc(0.018 * var(--ambient))) 55%, transparent 72%);
   top: -260px; left: -200px;
   animation: drift1 26s ease-in-out infinite;
 }
 .orb.purple {
   width: 600px; height: 600px;
-  background: radial-gradient(circle, rgba(230,226,214,0.07), rgba(230,226,214,0.015) 55%, transparent 72%);
+  background: radial-gradient(circle, rgba(var(--tint-rgb),calc(0.07 * var(--ambient))), rgba(var(--tint-rgb),calc(0.015 * var(--ambient))) 55%, transparent 72%);
   bottom: -280px; right: -200px;
   animation: drift2 32s ease-in-out infinite;
 }
 .orb.blue {
   width: 380px; height: 380px;
-  background: radial-gradient(circle, rgba(147,167,196,0.055), rgba(147,167,196,0.012) 55%, transparent 72%);
+  background: radial-gradient(circle, rgba(var(--orb-rgb),calc(0.055 * var(--ambient))), rgba(var(--orb-rgb),calc(0.012 * var(--ambient))) 55%, transparent 72%);
   bottom: 8%; left: 36%;
   animation: drift3 38s ease-in-out infinite;
 }
@@ -216,7 +216,7 @@ input, textarea, select { font-family: inherit; }
   border-radius: var(--shell-radius);
   background:
     linear-gradient(150deg, rgba(230,226,214,0.05), rgba(230,226,214,0.018) 46%, rgba(16,16,19,0.7)),
-    rgba(14,14,17,0.66);
+    var(--shell-fill);
   backdrop-filter: var(--blur-deep);
   -webkit-backdrop-filter: var(--blur-deep);
   border: 1px solid rgba(230, 226, 214, 0.10);
@@ -241,7 +241,7 @@ input, textarea, select { font-family: inherit; }
   left: -40%;
   width: 16%;
   height: 220%;
-  background: linear-gradient(to bottom, transparent, rgba(243,240,232,0.05), rgba(200,169,106,0.035), transparent);
+  background: linear-gradient(to bottom, transparent, rgba(243,240,232,0.05), rgba(var(--accent-rgb),0.035), transparent);
   transform: rotate(17deg);
   animation: luster 1.8s ease-out 0.35s 1 both;
   pointer-events: none;
@@ -279,6 +279,9 @@ input, textarea, select { font-family: inherit; }
 .surface-scroll {
   flex: 1;
   overflow-y: auto;
+  /* Reserve the scrollbar lane so switching between short and long views
+     (tabs, filters, pages) never shifts the layout sideways. */
+  scrollbar-gutter: stable;
   padding: 26px clamp(20px, 3vw, 40px) 40px;
 }
 .page { display: flex; flex-direction: column; gap: 20px; max-width: 1180px; }

@@ -11,7 +11,7 @@ import { useUi } from "./lib/uiStore";
 
 const tauri = vi.hoisted(() => ({
   invoke: vi.fn(async (_command: string, _args?: unknown) => undefined),
-  listen: vi.fn(async () => () => {}),
+  listen: vi.fn(async (_event: string, _handler?: unknown) => () => {}),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: tauri.invoke }));
@@ -19,6 +19,11 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: tauri.listen }));
 
 function commands(name: string) {
   return tauri.invoke.mock.calls.filter(([command]) => command === name);
+}
+
+/** The update watcher also listens (native "Check for Updates…" menu item). */
+function menuBarListeners() {
+  return (tauri.listen.mock.calls as unknown as Array<[string]>).filter(([event]) => event !== "axom:check-for-updates");
 }
 
 async function flushBridge() {
@@ -60,7 +65,7 @@ afterEach(() => {
 it("keeps the menu bar timer bridge mounted while setup is re-run", async () => {
   render(<App />);
   await flushBridge();
-  expect(tauri.listen).toHaveBeenCalledTimes(1);
+  expect(menuBarListeners()).toHaveLength(1);
   expect(commands("menu_bar_timer_update")).toHaveLength(1);
 
   act(() => { useUi.getState().requestOnboarding(); });
@@ -72,5 +77,5 @@ it("keeps the menu bar timer bridge mounted while setup is re-run", async () => 
   expect(document.querySelector(".shell")).not.toBeNull();
 
   expect(commands("menu_bar_timer_clear")).toHaveLength(0);
-  expect(tauri.listen).toHaveBeenCalledTimes(1);
+  expect(menuBarListeners()).toHaveLength(1);
 });

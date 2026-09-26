@@ -1,24 +1,436 @@
-import { useEffect,useRef,useState } from "react";
-import { Cloud,CloudOff,History,LogOut,RefreshCw,ShieldCheck,UserPlus } from "lucide-react";
-import type { Session } from "@supabase/supabase-js";
-import { GButton,Tag } from "../ui/primitives";import { useStore } from "../../lib/store";import { cloudConfigured,getSupabase } from "../../lib/account/supabase";
-import { SyncCoordinator } from "../../lib/sync/syncCoordinator";import { SupabaseSyncTransport } from "../../lib/sync/supabaseTransport";import { clearAccountSync,read,write } from "../../lib/sync/syncMetadata";import type { ProtectedRevision,ProtectionStatus } from "../../lib/sync/syncTypes";import { createLocalBackup } from "../../lib/localBackup";import { parseImport } from "../../lib/backup";
+import { useEffect, useState, type FormEvent } from "react";
+import {
+  AlertTriangle, BadgeCheck, Cloud, CloudOff, Download, GitMerge, History, KeyRound, Laptop, LogOut, Mail,
+  RefreshCw, RotateCcw, ShieldCheck, Smartphone, Trash2, UserPlus,
+} from "lucide-react";
+import { ICON_SIZE } from "../../lib/iconSize";
+import { GButton, Tag } from "../ui/primitives";
+import {
+  PASSWORD_MIN_LENGTH,
+  protectionLabel,
+  useAccount,
+  type AccountUser,
+} from "../../lib/account/accountStore";
+import type { AccountDevice, ProtectionStatus, RevisionSummary } from "../../lib/sync/syncTypes";
+import { useStore } from "../../lib/store";
 
-export function AccountSyncPanel(){
- const configured=cloudConfigured();const client=getSupabase();const[session,setSession]=useState<Session|null>(null);const[email,setEmail]=useState("");const[password,setPassword]=useState("");const[message,setMessage]=useState(configured?"Continue locally or sign in when ready.":"Cloud configuration is not installed. AXOM remains fully local.");const[status,setStatus]=useState<ProtectionStatus>(configured?"local-only":"local-only");const[history,setHistory]=useState<ProtectedRevision[]>([]);const[linked,setLinked]=useState(false);const coordinator=useRef<SyncCoordinator>();
- useEffect(()=>{if(!client)return;void client.auth.getSession().then(({data})=>setSession(data.session));const{data}=client.auth.onAuthStateChange((_e,next)=>setSession(next));return()=>data.subscription.unsubscribe();},[client]);
- useEffect(()=>{setLinked(Boolean(session&&read().accountUserId===session.user.id));},[session]);
- useEffect(()=>{if(!session||!linked)return;const c=new SyncCoordinator(new SupabaseSyncTransport(),()=>useStore.getState());coordinator.current=c;const offStatus=c.subscribe(setStatus);const offStore=useStore.subscribe(()=>c.queue());window.addEventListener("online",c.reconnect);if(read().pending)c.reconnect();return()=>{offStatus();offStore();window.removeEventListener("online",c.reconnect);c.dispose();coordinator.current=undefined;};},[session,linked]);
- async function auth(mode:"signUp"|"signIn"){if(!client)return;setMessage("Checking account…");const result=mode==="signUp"?await client.auth.signUp({email,password,options:{data:{display_name:useStore.getState().profile.name}}}):await client.auth.signInWithPassword({email,password});if(result.error){setMessage(`Account unavailable: ${result.error.message}. Your work is still saved locally.`);return;}setMessage(mode==="signUp"&&!result.data.session?"Check your email to confirm the account. Local work is unchanged.":"Account authenticated. Choose how to associate this device; nothing has been replaced.");}
- async function linkLocalWorkspace(){if(!session)return;setMessage("Protecting this device’s existing workspace as the account foundation…");const c=new SyncCoordinator(new SupabaseSyncTransport(),()=>useStore.getState(),0);coordinator.current=c;c.queue();await c.flush("foundation");const syncStatus=c.currentStatus();write({...read(),accountUserId:session.user.id});setLinked(true);setStatus(syncStatus);setMessage(syncStatus==="conflict"?"This device and the account both contain work. Both versions were preserved; choose a protected version or keep this device for review.":syncStatus==="retrying"?"AXOM could not reach the account, but your work is saved on this device. It will retry.":"This workspace is now protected. Future changes sync in the background.");await refresh();}
- async function refresh(){try{setHistory(await new SupabaseSyncTransport().history());}catch(error){setMessage(safeError(error));}}
- async function restore(item:ProtectedRevision){if(!confirm("Replace this device workspace with the selected protected version? AXOM will first create a local safety snapshot, then record the restore as a new server revision."))return;try{parseImport(JSON.stringify(item.payload));await createLocalBackup(useStore.getState().schemaVersion);useStore.getState().replaceAll(parseImport(JSON.stringify(item.payload)));setLinked(true);const c=coordinator.current??new SyncCoordinator(new SupabaseSyncTransport(),()=>useStore.getState(),0);c.queue();await c.flush("restore");const restoreStatus=c.currentStatus();setStatus(restoreStatus);setMessage(restoreStatus==="protected"?"Protected version restored locally and recorded as a new revision.":restoreStatus==="conflict"?"Protected version restored locally. The server retained the upload as a conflict for review instead of replacing the current account version.":"Protected version restored locally. Server protection is still pending and AXOM will retry automatically.");await refresh();}catch(error){setMessage(`Restore stopped before replacement: ${safeError(error)}`);}}
- async function signOut(){await client?.auth.signOut();coordinator.current?.dispose();clearAccountSync();setLinked(false);setHistory([]);setStatus("local-only");setMessage("Signed out. This device’s local workspace remains available.");}
- return <div className="sync-panel account-lounge"><div className="account-hero"><div className="account-avatar">{session?.user.email?.[0]?.toUpperCase()??"A"}</div><div className="grow"><div className="account-kicker">Account &amp; protection</div><div className="account-title">Your work stays local—and can be protected remotely</div><div className="account-copy">Local Vault remains immediate and authoritative for interaction. Signed-in work is copied into immutable server revisions after acknowledgment.</div></div><Tag tone={status==="protected"?"green":status==="conflict"?"red":"neutral"}>{label(status)}</Tag></div>
- {!configured&&<div className="sync-warning"><CloudOff/>Cloud credentials are absent. Account controls are disabled; local autosave and manual JSON recovery remain unchanged.</div>}
- {configured&&!session&&<section className="account-card"><h3>Continue locally or sign in</h3><p className="sub">An account is optional. Signing in never silently replaces this device’s work.</p><div className="sync-grid"><label>Email<input className="field" type="email" autoComplete="email" value={email} onChange={e=>setEmail(e.target.value)}/></label><label>Password<input className="field" type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)}/></label></div><div className="row wrap gap8"><GButton variant="primary" onClick={()=>void auth("signIn")}>Sign in</GButton><GButton onClick={()=>void auth("signUp")}><UserPlus/>Create account</GButton></div></section>}
- {session&&!linked&&<section className="account-card"><h3>Local workspace found</h3><p>This device contains AXOM work. Nothing will be uploaded or replaced until you choose.</p><div className="account-primary-actions"><GButton variant="primary" onClick={()=>void linkLocalWorkspace()}><ShieldCheck/>Use this local workspace with my account</GButton><GButton onClick={()=>void refresh()}><History/>Review account versions first</GButton></div><p className="sub">Starting a blank account workspace is intentionally deferred until a safe account-switching vault boundary is complete.</p></section>}
- {session&&<section className="account-card"><div className="account-section-head"><div><h3>Protected versions</h3><p className="sub">Server acknowledgment is required before AXOM says Protected.</p></div><GButton size="sm" onClick={()=>void refresh()}><RefreshCw/>Refresh</GButton></div>{history.length===0?<p className="sub">No protected versions are visible yet.</p>:<div className="backup-list">{history.map(item=><div className="backup-row" key={item.id}><div><b>{new Date(item.createdAt).toLocaleString()}</b><div className="sub">{item.reason} · schema {item.schemaVersion}</div></div><GButton size="sm" onClick={()=>void restore(item)}>Restore</GButton></div>)}</div>}<GButton size="sm" onClick={()=>void signOut()}><LogOut/>Sign out</GButton></section>}
- <div className="backup-note" role="status"><Cloud/><span>{message}</span></div><p className="sub">Portable JSON export, restore, and merge remain available under Emergency recovery. Question attachment files stay on this device unless you include their available bytes in a portable backup; account protection currently covers workspace data, not binary attachment sync.</p></div>;
+type AuthMode = "sign-in" | "create" | "code" | "forgot";
+
+const STATUS_TONE: Record<ProtectionStatus, "green" | "red" | "orange" | "neutral" | "cyan"> = {
+  "local-only": "neutral",
+  "saved-locally": "cyan",
+  syncing: "cyan",
+  protected: "green",
+  offline: "orange",
+  retrying: "orange",
+  conflict: "red",
+};
+
+/**
+ * Settings → Account. Every state is explicit: not configured, signed out,
+ * password recovery, signed in (unlinked / linked / linked to another account),
+ * and conflict. Local work is always legitimate; nothing uploads or replaces
+ * without a deliberate choice.
+ */
+export function AccountSyncPanel() {
+  const account = useAccount();
+  useEffect(() => { useAccount.getState().init(); }, []);
+  useEffect(() => {
+    if (account.phase === "signed-in") void useAccount.getState().refresh();
+  }, [account.phase, account.user?.id]);
+
+  return (
+    <div className="account-center">
+      <AccountHero user={account.user} status={account.protection} phase={account.phase} lastProtectedAt={account.lastProtectedAt} />
+
+      {account.phase === "unconfigured" && <UnconfiguredCard />}
+      {account.phase === "loading" && <div className="account-card account-loading" role="status">Checking your account…</div>}
+      {account.phase === "signed-out" && <AuthCard />}
+      {account.phase === "recovering-password" && <PasswordRecoveryCard />}
+      {account.phase === "signed-in" && account.user && (
+        <>
+          <IdentityCard user={account.user} />
+          <ProtectionCard />
+          <VersionsCard history={account.history} />
+          <DevicesCard devices={account.devices} />
+          <DangerCard />
+        </>
+      )}
+
+      {(account.message || account.error) && (
+        <div className={`account-notice ${account.error ? "error" : ""}`} role={account.error ? "alert" : "status"}>
+          {account.error ? <AlertTriangle size={ICON_SIZE.body} aria-hidden="true" /> : <Cloud size={ICON_SIZE.body} aria-hidden="true" />}
+          <span>{account.error || account.message}</span>
+        </div>
+      )}
+
+      <p className="account-footnote">
+        Portable JSON export, restore, and merge remain available under Emergency recovery. Question attachment images stay on this device
+        unless you include them in a portable backup; account protection covers workspace data, not binary attachment sync.
+      </p>
+    </div>
+  );
 }
-function label(s:ProtectionStatus){return({"local-only":"LOCAL ONLY","saved-locally":"SAVED LOCALLY",syncing:"SYNCING",protected:"PROTECTED",offline:"OFFLINE — SAVED LOCALLY",retrying:"SYNC ISSUE — RETRYING",conflict:"ACTION REQUIRED"})[s];}function safeError(e:unknown){return e instanceof Error?e.message:"Cloud request failed. Your local work is safe.";}
+
+function AccountHero({ user, status, phase, lastProtectedAt }: {
+  user: AccountUser | null;
+  status: ProtectionStatus;
+  phase: string;
+  lastProtectedAt?: string;
+}) {
+  const localName = useStore((state) => state.profile.name);
+  const initial = (user?.displayName || user?.email || localName || "A").trim().charAt(0).toUpperCase();
+  return (
+    <div className="account-hero-card">
+      <div className="account-hero-avatar" aria-hidden="true">{initial}</div>
+      <div className="account-hero-copy">
+        <span className="account-kicker">Account &amp; protection</span>
+        <h3>{user ? `Signed in as ${user.displayName}` : "Your work stays on this device — an account adds protection"}</h3>
+        <p>
+          {user
+            ? status === "protected" && lastProtectedAt
+              ? `Last protected ${relativeTime(lastProtectedAt)}. Changes back up in the background.`
+              : user.email
+            : "Local saving is always on and immediate. Signing in adds versioned cloud copies and lets you move between devices."}
+        </p>
+      </div>
+      <Tag tone={STATUS_TONE[status]}>{phase === "unconfigured" ? "Local only" : protectionLabel(status)}</Tag>
+    </div>
+  );
+}
+
+function UnconfiguredCard() {
+  return (
+    <section className="account-card">
+      <div className="account-card-head">
+        <CloudOff size={ICON_SIZE.emphasis} aria-hidden="true" />
+        <div>
+          <h4>Accounts aren’t switched on in this build</h4>
+          <p>Cloud credentials are absent. Account controls are disabled; local autosave and manual JSON recovery remain unchanged.</p>
+        </div>
+      </div>
+      <ul className="account-benefits">
+        <li><ShieldCheck size={ICON_SIZE.body} aria-hidden="true" /> Versioned cloud copies of your whole workspace</li>
+        <li><Laptop size={ICON_SIZE.body} aria-hidden="true" /> Pick up on another device — web or desktop app</li>
+        <li><History size={ICON_SIZE.body} aria-hidden="true" /> Restore any of your last 60 protected versions</li>
+      </ul>
+    </section>
+  );
+}
+
+function AuthCard() {
+  const { busy, signIn, signUp, sendCode, verifyCode, requestPasswordReset, pendingCodeEmail, pendingCodeKind, clearNotice } = useAccount();
+  const profileName = useStore((state) => state.profile.name);
+  const [mode, setMode] = useState<AuthMode>("sign-in");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState(profileName ?? "");
+  const [code, setCode] = useState("");
+
+  function choose(next: AuthMode) {
+    setMode(next);
+    setCode("");
+    useAccount.setState({ pendingCodeEmail: undefined, pendingCodeKind: undefined });
+    clearNotice();
+  }
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (pendingCodeEmail) await verifyCode(pendingCodeEmail, code);
+    else if (mode === "sign-in") await signIn(email, password);
+    else if (mode === "create") await signUp(email, password, displayName);
+    else if (mode === "forgot") await requestPasswordReset(email);
+    else await sendCode(email);
+  }
+
+  return (
+    <section className="account-card">
+      <div className="account-auth-tabs" role="tablist" aria-label="How to sign in">
+        {([
+          ["sign-in", "Sign in", KeyRound],
+          ["create", "Create account", UserPlus],
+          ["code", "Email me a code", Mail],
+        ] as const).map(([id, label, Icon]) => (
+          <button key={id} type="button" role="tab" aria-selected={mode === id || (mode === "forgot" && id === "sign-in")} className={mode === id || (mode === "forgot" && id === "sign-in") ? "on" : ""} onClick={() => choose(id)}>
+            <Icon size={ICON_SIZE.body} aria-hidden="true" /> {label}
+          </button>
+        ))}
+      </div>
+      <form className="account-form" onSubmit={(event) => void submit(event)}>
+        {mode === "create" && (
+          <label>
+            <span>Name on your account</span>
+            <input className="field" value={displayName} maxLength={80} autoComplete="name" onChange={(event) => setDisplayName(event.target.value)} />
+          </label>
+        )}
+        {!pendingCodeEmail && (
+          <label>
+            <span>Email</span>
+            <input className="field" type="email" required autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+          </label>
+        )}
+        {!pendingCodeEmail && (mode === "sign-in" || mode === "create") && (
+          <label>
+            <span>Password</span>
+            <input
+              className="field"
+              type="password"
+              required
+              minLength={mode === "create" ? PASSWORD_MIN_LENGTH : undefined}
+              autoComplete={mode === "create" ? "new-password" : "current-password"}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+            {mode === "create" && <small>At least {PASSWORD_MIN_LENGTH} characters with letters and a number.</small>}
+          </label>
+        )}
+        {pendingCodeEmail && (
+          <label>
+            <span>{pendingCodeKind === "signup" ? "Confirmation code" : pendingCodeKind === "recovery" ? "Password reset code" : "Sign-in code"} sent to {pendingCodeEmail}</span>
+            <input className="field account-code" inputMode="numeric" autoComplete="one-time-code" maxLength={10} value={code} onChange={(event) => setCode(event.target.value)} />
+          </label>
+        )}
+        <div className="account-form-actions">
+          <GButton variant="primary" type="submit" disabled={busy}>
+            {pendingCodeEmail ? "Verify code" : mode === "sign-in" ? "Sign in" : mode === "create" ? "Create account" : mode === "forgot" ? "Send reset code" : "Send code"}
+          </GButton>
+          {!pendingCodeEmail && mode === "sign-in" && <button type="button" className="account-link" onClick={() => choose("forgot")}>Forgot password?</button>}
+          {!pendingCodeEmail && mode === "forgot" && <button type="button" className="account-link" onClick={() => choose("sign-in")}>Back to sign in</button>}
+          {pendingCodeEmail && <button type="button" className="account-link" onClick={() => choose(mode === "forgot" ? "sign-in" : mode)}>Use a different email</button>}
+        </div>
+        <p className="account-form-note">
+          An account is optional. Signing in never uploads or replaces this device’s work until you choose to protect it.
+          {(mode === "code" || pendingCodeEmail) && " Codes work in the browser and the desktop app."}
+        </p>
+      </form>
+    </section>
+  );
+}
+
+function PasswordRecoveryCard() {
+  const { busy, updatePassword } = useAccount();
+  const [password, setPassword] = useState("");
+  return (
+    <section className="account-card">
+      <div className="account-card-head">
+        <KeyRound size={ICON_SIZE.emphasis} aria-hidden="true" />
+        <div><h4>Set a new password</h4><p>You opened a password-reset link. Choose a new password to finish.</p></div>
+      </div>
+      <form className="account-form" onSubmit={(event) => { event.preventDefault(); void updatePassword(password); }}>
+        <label>
+          <span>New password</span>
+          <input className="field" type="password" autoComplete="new-password" minLength={PASSWORD_MIN_LENGTH} value={password} onChange={(event) => setPassword(event.target.value)} />
+        </label>
+        <div className="account-form-actions"><GButton variant="primary" type="submit" disabled={busy}>Save password</GButton></div>
+      </form>
+    </section>
+  );
+}
+
+function IdentityCard({ user }: { user: AccountUser }) {
+  const { busy, updateDisplayName, signOut } = useAccount();
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(user.displayName);
+  useEffect(() => { setName(user.displayName); }, [user.displayName]);
+  return (
+    <section className="account-card account-identity">
+      <div className="account-identity-main">
+        {editing ? (
+          <form className="account-inline-form" onSubmit={(event) => { event.preventDefault(); void updateDisplayName(name).then((ok) => ok && setEditing(false)); }}>
+            <input className="field" aria-label="Account name" value={name} maxLength={80} onChange={(event) => setName(event.target.value)} autoFocus />
+            <GButton size="sm" variant="primary" type="submit" disabled={busy}>Save</GButton>
+            <GButton size="sm" type="button" onClick={() => { setEditing(false); setName(user.displayName); }}>Cancel</GButton>
+          </form>
+        ) : (
+          <div className="account-identity-name">
+            <b>{user.displayName}</b>
+            <button type="button" className="account-link" onClick={() => setEditing(true)}>Edit name</button>
+          </div>
+        )}
+        <div className="account-identity-meta">
+          <span>{user.email}</span>
+          {user.emailConfirmed
+            ? <span className="account-verified"><BadgeCheck size={ICON_SIZE.microInline} aria-hidden="true" /> Verified</span>
+            : <span className="account-unverified">Email not confirmed yet</span>}
+          {user.createdAt && <span>Member since {new Date(user.createdAt).toLocaleDateString(undefined, { month: "short", year: "numeric" })}</span>}
+        </div>
+      </div>
+      <GButton size="sm" onClick={() => void signOut()} disabled={busy}><LogOut size={ICON_SIZE.body} aria-hidden="true" /> Sign out</GButton>
+    </section>
+  );
+}
+
+function ProtectionCard() {
+  const { link, protection, lastProtectedAt, conflictServerRevision, busy, linkThisDevice, syncNow, keepThisDevice, adoptAccountVersion, mergeWithAccount, signOut } = useAccount();
+  if (link === "linked-elsewhere") {
+    return (
+      <section className="account-card account-warning">
+        <div className="account-card-head">
+          <AlertTriangle size={ICON_SIZE.emphasis} aria-hidden="true" />
+          <div>
+            <h4>This device belongs to a different account</h4>
+            <p>The workspace here was protected by another AXOM account. To avoid mixing two people’s work, sign out — or protect it with this account (both accounts keep their own copies).</p>
+          </div>
+        </div>
+        <div className="account-form-actions">
+          <GButton size="sm" onClick={() => void signOut()}>Sign out</GButton>
+          <GButton size="sm" onClick={() => void linkThisDevice()} disabled={busy}>Protect with this account</GButton>
+        </div>
+      </section>
+    );
+  }
+  if (link === "unlinked") {
+    return (
+      <section className="account-card account-cta">
+        <div className="account-card-head">
+          <ShieldCheck size={ICON_SIZE.emphasis} aria-hidden="true" />
+          <div>
+            <h4>Protect this device’s workspace</h4>
+            <p>Uploads a versioned copy now, then backs up changes in the background. If your account already has work from another device, both are kept and you choose which continues.</p>
+          </div>
+        </div>
+        <div className="account-form-actions">
+          <GButton variant="primary" onClick={() => void linkThisDevice()} disabled={busy}><ShieldCheck size={ICON_SIZE.body} aria-hidden="true" /> Protect this workspace</GButton>
+        </div>
+      </section>
+    );
+  }
+  if (protection === "conflict") {
+    return (
+      <section className="account-card account-warning">
+        <div className="account-card-head">
+          <AlertTriangle size={ICON_SIZE.emphasis} aria-hidden="true" />
+          <div>
+            <h4>Two versions need a decision</h4>
+            <p>
+              Your account moved ahead on another device{conflictServerRevision ? ` (version #${conflictServerRevision})` : ""} while this device had changes.
+              Both are safely stored. Choose which one continues — the other stays in history.
+            </p>
+          </div>
+        </div>
+        <div className="account-choice-grid three">
+          <button type="button" className="account-choice recommended" onClick={() => void mergeWithAccount()} disabled={busy}>
+            <GitMerge size={ICON_SIZE.emphasis} aria-hidden="true" />
+            <b>Merge both <Tag tone="green">Recommended</Tag></b>
+            <small>Combine records from both versions — newer copies win, nothing is deleted. Items deleted on one device may reappear.</small>
+          </button>
+          <button type="button" className="account-choice" onClick={() => void keepThisDevice()} disabled={busy}>
+            <Laptop size={ICON_SIZE.emphasis} aria-hidden="true" />
+            <b>Keep this device</b>
+            <small>Upload this device’s workspace as the newest version.</small>
+          </button>
+          <button type="button" className="account-choice" onClick={() => void adoptAccountVersion()} disabled={busy}>
+            <Download size={ICON_SIZE.emphasis} aria-hidden="true" />
+            <b>Use the account version</b>
+            <small>Replace this device with the newest protected version (a safety snapshot is made first).</small>
+          </button>
+        </div>
+      </section>
+    );
+  }
+  return (
+    <section className="account-card account-protection">
+      <div className="account-protection-status">
+        <span className={`account-status-dot ${protection}`} aria-hidden="true" />
+        <div>
+          <b>{protectionLabel(protection)}</b>
+          <small>{lastProtectedAt ? `Last protected ${relativeTime(lastProtectedAt)} · ${new Date(lastProtectedAt).toLocaleString()}` : "Waiting for the first upload"}</small>
+        </div>
+      </div>
+      <GButton size="sm" onClick={() => void syncNow()} disabled={busy || protection === "syncing"}>
+        <RefreshCw size={ICON_SIZE.body} aria-hidden="true" className={protection === "syncing" ? "spin" : ""} /> Protect now
+      </GButton>
+    </section>
+  );
+}
+
+function VersionsCard({ history }: { history: RevisionSummary[] }) {
+  const { busy, refresh, restoreRevision, link } = useAccount();
+  if (link !== "linked" && !history.length) return null;
+  return (
+    <section className="account-card">
+      <div className="account-section-head">
+        <div><h4>Protected versions</h4><p>Newest first. Restoring saves a safety snapshot of this device first.</p></div>
+        <GButton size="sm" onClick={() => void refresh()} disabled={busy}><RefreshCw size={ICON_SIZE.body} aria-hidden="true" /> Refresh</GButton>
+      </div>
+      {history.length === 0 ? (
+        <p className="account-empty">No protected versions yet.</p>
+      ) : (
+        <ol className="account-version-list">
+          {history.slice(0, 12).map((item, index) => (
+            <li key={item.id}>
+              <span className="account-version-number">#{item.revision}</span>
+              <div>
+                <b>{new Date(item.createdAt).toLocaleString()}</b>
+                <small>{reasonLabel(item.reason)} · schema v{item.schemaVersion}{index === 0 ? " · latest" : ""}</small>
+              </div>
+              <GButton size="tiny" onClick={() => {
+                if (confirm(`Replace this device’s workspace with version #${item.revision}? AXOM saves a safety snapshot first and records the restore as a new version.`)) {
+                  void restoreRevision(item);
+                }
+              }} disabled={busy}><RotateCcw size={ICON_SIZE.microInline} aria-hidden="true" /> Restore</GButton>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}
+
+function DevicesCard({ devices }: { devices: AccountDevice[] }) {
+  const { busy, forgetDevice } = useAccount();
+  if (!devices.length) return null;
+  return (
+    <section className="account-card">
+      <div className="account-section-head"><div><h4>Devices</h4><p>Where this account has been used recently.</p></div></div>
+      <ul className="account-device-list">
+        {devices.map((device) => (
+          <li key={device.deviceId}>
+            {device.platform === "desktop" ? <Laptop size={ICON_SIZE.body} aria-hidden="true" /> : <Smartphone size={ICON_SIZE.body} aria-hidden="true" />}
+            <div>
+              <b>{device.label}{device.current && <Tag tone="cyan">This device</Tag>}</b>
+              <small>Seen {relativeTime(device.lastSeenAt)}{device.lastProtectedRevision ? ` · version #${device.lastProtectedRevision}` : ""}</small>
+            </div>
+            {!device.current && <GButton size="tiny" onClick={() => void forgetDevice(device.deviceId)} disabled={busy}>Remove</GButton>}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function DangerCard() {
+  const { busy, deleteCloudData, link } = useAccount();
+  if (link !== "linked") return null;
+  return (
+    <details className="account-card account-danger">
+      <summary>Delete cloud copies</summary>
+      <p>Removes every protected version, shared question set, and device record from the server. This device’s workspace is not touched, and you can protect it again later.</p>
+      <GButton size="sm" variant="danger" disabled={busy} onClick={() => {
+        if (confirm("Delete every server copy of your AXOM workspace? Local data on this device stays. This cannot be undone.")) void deleteCloudData();
+      }}><Trash2 size={ICON_SIZE.body} aria-hidden="true" /> Delete cloud copies</GButton>
+    </details>
+  );
+}
+
+function reasonLabel(reason: string): string {
+  return ({
+    foundation: "First protection",
+    automatic: "Background backup",
+    manual: "Protected manually",
+    pre_restore: "Before a restore",
+    restore: "Restore",
+  } as Record<string, string>)[reason] ?? reason;
+}
+
+export function relativeTime(iso: string, now: Date = new Date()): string {
+  const diff = now.getTime() - Date.parse(iso);
+  if (!Number.isFinite(diff)) return "recently";
+  const minutes = Math.round(diff / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.round(hours / 24);
+  return days === 1 ? "yesterday" : `${days} days ago`;
+}

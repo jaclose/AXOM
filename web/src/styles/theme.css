@@ -29,7 +29,7 @@
   --axom-radius-card: 28px;
   --axom-radius-control: 16px;
   --axom-shadow-glass: 0 24px 80px rgba(0, 0, 0, 0.42);
-  --axom-focus-ring: 0 0 0 1px rgba(215, 180, 106, 0.72), 0 0 0 6px rgba(215, 180, 106, 0.12);
+  --axom-focus-ring: 0 0 0 1px rgba(var(--accent-rgb), 0.72), 0 0 0 6px rgba(var(--accent-rgb), 0.12);
 
   --font-brand: "Cinzel", "Marcellus", "Forum", "Cormorant Garamond SC", "Times New Roman", serif;
   --font-ui: "Inter", "Geist", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
@@ -44,16 +44,16 @@
      edges instead of coloring every ordinary icon and label. */
   --cool-accent: #aeb8c3;
   --cool-accent-strong: #cbd1d7;
-  --cool-accent-soft: rgba(174, 184, 195, 0.1);
-  --cool-accent-line: rgba(174, 184, 195, 0.24);
+  --cool-accent-soft: rgba(var(--cool-rgb), 0.1);
+  --cool-accent-line: rgba(var(--cool-rgb), 0.24);
   --neutral-hover: rgba(230, 226, 214, 0.075);
   --neutral-border-hover: rgba(216, 213, 205, 0.22);
   --cyan: var(--cool-accent);
   --cyan-strong: var(--cool-accent-strong);
   --gold: #c8a96a;
-  --gold-soft: rgba(200, 169, 106, 0.14);
-  --gold-line: rgba(200, 169, 106, 0.34);
-  --gold-glow: rgba(200, 169, 106, 0.22);
+  --gold-soft: rgba(var(--accent-rgb), 0.14);
+  --gold-line: rgba(var(--accent-rgb), 0.34);
+  --gold-glow: rgba(var(--accent-rgb), 0.22);
   --purple: #a79ac9;        /* quiet violet-bone for AI/secondary accents */
   --blue: #93a7c4;          /* muted steel, rare */
   --teal: #9fb8a8;
@@ -182,7 +182,7 @@
   --shadow-floating: 0 16px 40px rgba(0, 0, 0, 0.48);
   --shadow-overlay: 0 16px 36px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(230, 226, 214, 0.07);
   --shadow-critical: 0 18px 44px rgba(0, 0, 0, 0.5), 0 0 0 1px color-mix(in srgb, var(--red) 34%, transparent);
-  --shadow-gold: 0 0 0 1px rgba(200, 169, 106, 0.28), 0 10px 28px rgba(200, 169, 106, 0.12);
+  --shadow-gold: 0 0 0 1px rgba(var(--accent-rgb), 0.28), 0 10px 28px rgba(var(--accent-rgb), 0.12);
 
   /* Glass blur scale — one blur language (E2b). veil: scrims · soft: subtle
      panels · panel: drawers/inline glass · glass: standard cards · deep:
@@ -194,21 +194,47 @@
   --blur-deep: blur(32px) saturate(150%);
 
   /* A thin machined-gold frame token (border + faint outer + inner light). */
-  --frame-gold: 0 0 0 1px rgba(200,169,106,0.5), 0 0 0 2px rgba(0,0,0,0.4), inset 0 1px 0 rgba(230,226,214,0.06);
+  --frame-gold: 0 0 0 1px rgba(var(--accent-rgb),0.5), 0 0 0 2px rgba(0,0,0,0.4), inset 0 1px 0 rgba(230,226,214,0.06);
 
   --sidebar-w: 250px;
+
+  /* Palette channels (Settings → Personalization → Accent palette). These are
+     the AXOM Classic values; lib/palette.ts injects the same names for every
+     other palette, per mode. Consume them as rgba(var(--accent-rgb), a) — never
+     re-introduce literal brand-gold channels in product CSS. */
+  --accent-rgb: 200, 169, 106;      /* luminous accent: glows, washes, edges */
+  --accent-ink-rgb: 200, 169, 106;  /* solid accent: text, icons, selections */
+  --accent-hi-rgb: 247, 217, 154;   /* sheen at the light end of gradients */
+  --accent-lo-rgb: 168, 137, 79;    /* depth at the dark end of gradients */
+  --accent-hi: #d8bd82;
+  --accent-lo: #a8894f;
+  --on-accent: #1a160e;             /* label on an accent fill */
+  --on-cool: #1a160e;               /* label on a --cyan (cool accent) fill */
+  --cool-rgb: 174, 184, 195;
+  --orb-a-rgb: 174, 184, 195;       /* first ambient orb */
+  --tint-rgb: 230, 226, 214;        /* ambient backdrop tint (second orb) */
+  --orb-rgb: 147, 167, 196;         /* third ambient orb */
+  --paper-rgb: 229, 219, 203;       /* light-mode paper tone */
+  --ink-rgb: 230, 226, 214;         /* light-mode structural ink (hairlines) */
+  --shell-fill: rgba(14, 14, 17, 0.66);
+  --ambient: 1;                     /* ambient orb strength multiplier */
 }
 
 /* Warm paper mode. Attribute selectors are deliberate: the pre-paint script
    resolves `system` to one concrete theme before the first application frame. */
 :root[data-theme="light"] {
   color-scheme: light;
+  --accent-ink-rgb: 138, 100, 41;
+  --on-cool: #f7f4ee;
+  --cool-rgb: 82, 97, 113;
+  --ink-rgb: 67, 51, 31;
+  --shell-fill: rgba(248, 244, 236, 0.72);
   --axom-bg: #f3eee3;
   --axom-bg-soft: #e9e1d3;
   --axom-surface: rgba(255, 255, 255, 0.72);
   --axom-surface-strong: rgba(255, 255, 255, 0.9);
-  --axom-border: rgba(62, 48, 29, 0.16);
-  --axom-border-strong: rgba(62, 48, 29, 0.3);
+  --axom-border: rgba(var(--ink-rgb), 0.16);
+  --axom-border-strong: rgba(var(--ink-rgb), 0.3);
   --axom-text: #28231d;
   --axom-text-muted: rgba(40, 35, 29, 0.64);
   --axom-gold: #8a6429;
@@ -226,10 +252,10 @@
   --bg-3: #e5dccd;
   --cool-accent: #526171;
   --cool-accent-strong: #354453;
-  --cool-accent-soft: rgba(82, 97, 113, 0.1);
-  --cool-accent-line: rgba(82, 97, 113, 0.25);
-  --neutral-hover: rgba(67, 51, 31, 0.065);
-  --neutral-border-hover: rgba(67, 51, 31, 0.24);
+  --cool-accent-soft: rgba(var(--cool-rgb), 0.1);
+  --cool-accent-line: rgba(var(--cool-rgb), 0.25);
+  --neutral-hover: rgba(var(--ink-rgb), 0.065);
+  --neutral-border-hover: rgba(var(--ink-rgb), 0.24);
   --cyan: var(--cool-accent);
   --cyan-strong: var(--cool-accent-strong);
   --gold: #8a6429;
@@ -271,16 +297,16 @@
   --surface-1: rgba(255, 255, 255, 0.62);
   --surface-2: rgba(255, 255, 255, 0.78);
   --glass-card-fill: rgba(255, 253, 248, 0.74);
-  --glass-card-border: rgba(67, 51, 31, 0.12);
+  --glass-card-border: rgba(var(--ink-rgb), 0.12);
   --glass-card-border-hover: var(--neutral-border-hover);
-  --hairline: rgba(67, 51, 31, 0.13);
-  --hairline-soft: rgba(67, 51, 31, 0.075);
-  --shadow-shell: 0 32px 80px rgba(65, 48, 28, 0.19), 0 1px 0 rgba(255, 255, 255, 0.9) inset;
-  --shadow-card: 0 16px 38px rgba(65, 48, 28, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.88);
-  --shadow-raised: 0 20px 44px rgba(65, 48, 28, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.9);
-  --shadow-floating: 0 16px 38px rgba(65, 48, 28, 0.18);
-  --shadow-overlay: 0 14px 32px rgba(65, 48, 28, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.9);
-  --shadow-critical: 0 16px 36px rgba(65, 48, 28, 0.16), 0 0 0 1px color-mix(in srgb, var(--red) 30%, transparent);
+  --hairline: rgba(var(--ink-rgb), 0.13);
+  --hairline-soft: rgba(var(--ink-rgb), 0.075);
+  --shadow-shell: 0 32px 80px rgba(var(--ink-rgb), 0.19), 0 1px 0 rgba(255, 255, 255, 0.9) inset;
+  --shadow-card: 0 16px 38px rgba(var(--ink-rgb), 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.88);
+  --shadow-raised: 0 20px 44px rgba(var(--ink-rgb), 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --shadow-floating: 0 16px 38px rgba(var(--ink-rgb), 0.18);
+  --shadow-overlay: 0 14px 32px rgba(var(--ink-rgb), 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --shadow-critical: 0 16px 36px rgba(var(--ink-rgb), 0.16), 0 0 0 1px color-mix(in srgb, var(--red) 30%, transparent);
   --shadow-gold: 0 0 0 1px rgba(138, 100, 41, 0.25), 0 10px 24px rgba(138, 100, 41, 0.1);
   --frame-gold: 0 0 0 1px rgba(138,100,41,0.45), 0 0 0 2px rgba(255,255,255,0.65), inset 0 1px 0 rgba(255,255,255,0.9);
 }
@@ -289,42 +315,42 @@
    bridge in light mode. More specific selectors keep the dark defaults intact. */
 :root[data-theme="light"] .backdrop::after {
   background-image:
-    linear-gradient(rgba(67,51,31,0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(67,51,31,0.028) 1px, transparent 1px);
+    linear-gradient(rgba(var(--ink-rgb),0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(var(--ink-rgb),0.028) 1px, transparent 1px);
 }
 :root[data-theme="light"] .shell {
   background:
-    linear-gradient(150deg, rgba(255,255,255,0.72), rgba(255,255,255,0.38) 46%, rgba(227,217,201,0.7)),
-    rgba(248,244,236,0.72);
-  border-color: rgba(67,51,31,0.13);
+    linear-gradient(150deg, rgba(255,255,255,0.72), rgba(255,255,255,0.38) 46%, rgba(var(--paper-rgb),0.7)),
+    var(--shell-fill);
+  border-color: rgba(var(--ink-rgb),0.13);
 }
 :root[data-theme="light"] .sidebar {
-  background: linear-gradient(180deg, rgba(255,255,255,.32), rgba(221,210,193,.42));
-  border-color: rgba(67,51,31,.12);
+  background: linear-gradient(180deg, rgba(255,255,255,.32), rgba(var(--paper-rgb),.46));
+  border-color: rgba(var(--ink-rgb),.12);
 }
 :root[data-theme="light"] :is(.server-header:hover, .nav-manage-btn, .nav-item:hover, .user-id:hover, .user-icon-btn:hover) {
-  background-color: rgba(67,51,31,.065);
+  background-color: rgba(var(--ink-rgb),.065);
 }
-:root[data-theme="light"] .nav-folder-items { border-color: rgba(67,51,31,.14); }
-:root[data-theme="light"] .nav-folder-count { background: rgba(67,51,31,.07); }
-:root[data-theme="light"] .nav-check { border-color: rgba(67,51,31,.28); }
+:root[data-theme="light"] .nav-folder-items { border-color: rgba(var(--ink-rgb),.14); }
+:root[data-theme="light"] .nav-folder-count { background: rgba(var(--ink-rgb),.07); }
+:root[data-theme="light"] .nav-check { border-color: rgba(var(--ink-rgb),.28); }
 :root[data-theme="light"] .nav-item.on {
-  background: linear-gradient(90deg, rgba(138,100,41,.15), rgba(138,100,41,.035));
+  background: linear-gradient(90deg, rgba(var(--accent-ink-rgb),.15), rgba(var(--accent-ink-rgb),.035));
 }
 :root[data-theme="light"] .user-panel {
   background: rgba(255,255,255,.46);
-  border-color: rgba(67,51,31,.13);
+  border-color: rgba(var(--ink-rgb),.13);
 }
-:root[data-theme="light"] .user-online { border-color: #f5efe4; }
+:root[data-theme="light"] .user-online { border-color: var(--bg-2); }
 :root[data-theme="light"] .menu-btn {
   color: var(--text);
   background: rgba(255,255,255,.62);
-  border-color: rgba(67,51,31,.13);
+  border-color: rgba(var(--ink-rgb),.13);
 }
 @media (max-width: 880px) {
   :root[data-theme="light"] .sidebar {
-    background: rgba(246,241,232,.97);
-    box-shadow: 0 0 50px rgba(65,48,28,.22);
+    background: color-mix(in srgb, var(--bg-2) 97%, transparent);
+    box-shadow: 0 0 50px rgba(var(--ink-rgb),.22);
   }
 }
 
@@ -343,9 +369,9 @@
 
 :root[data-theme="light"] .glass-liquid {
   background:
-    linear-gradient(160deg, rgba(255,255,255,0.9), rgba(255,255,255,0.5) 42%, rgba(229,219,203,0.58)),
-    rgba(251,248,242,0.76);
-  border-color: rgba(67,51,31,0.13);
+    linear-gradient(160deg, rgba(255,255,255,0.9), rgba(255,255,255,0.5) 42%, rgba(var(--paper-rgb),0.58)),
+    color-mix(in srgb, var(--bg-2) 76%, transparent);
+  border-color: rgba(var(--ink-rgb),0.13);
 }
 
 /* ===========================================================================
@@ -356,7 +382,7 @@
   background-color: #0b0b0c;
   background-image:
     radial-gradient(ellipse 120% 80% at 18% 8%, rgba(230,226,214,0.05), transparent 42%),
-    radial-gradient(ellipse 90% 70% at 82% 20%, rgba(200,169,106,0.045), transparent 46%),
+    radial-gradient(ellipse 90% 70% at 82% 20%, rgba(var(--accent-rgb),0.045), transparent 46%),
     radial-gradient(ellipse 140% 100% at 60% 100%, rgba(230,226,214,0.03), transparent 50%),
     repeating-linear-gradient(122deg, rgba(230,226,214,0.018) 0 1px, transparent 1px 5px),
     repeating-linear-gradient(38deg, rgba(0,0,0,0.22) 0 2px, transparent 2px 9px),

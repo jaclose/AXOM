@@ -122,7 +122,12 @@ const yieldTone: Record<Yield, "cyan" | "green" | "orange" | "neutral"> = {
 
 export function CourseTrackerPage() {
   const s = useStore();
-  const [scope, setScope] = useState<string>("");
+  const [scope, setScopeState] = useState<string>(readSavedTrackerScope);
+  const [groupBySection, setGroupBySection] = useState(true);
+  function setScope(next: string) {
+    setScopeState(next);
+    saveTrackerScope(next);
+  }
   const [openNodes, setOpenNodes] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState(false);
   const [moduleOpen, setModuleOpen] = useState(false);
@@ -169,6 +174,11 @@ export function CourseTrackerPage() {
   const courseScopes = useMemo(() => collectCourseScopes(s.terms, s.courses), [s.terms, s.courses]);
   const tree = useMemo(() => buildTree(s.tracker, courseScopes), [s.tracker, courseScopes]);
   const scopeOptions = useMemo(() => mergeScopes(collectScopes(s.tracker), courseScopes), [s.tracker, courseScopes]);
+  // A remembered scope can outlive its items (renamed or deleted); fall back.
+  const scopeIsStale = Boolean(scope) && !parseBlueprintScope(scope) && !scopeOptions.includes(scope);
+  useEffect(() => {
+    if (scopeIsStale) setScope("");
+  }, [scopeIsStale]);
   const blueprintScope = parseBlueprintScope(scope);
   const activeBlueprintInstall = blueprintScope
     ? s.blueprintInstalls.find((install) => install.id === blueprintScope.installId) ?? null
@@ -331,8 +341,25 @@ export function CourseTrackerPage() {
                   <button key={t} className={`filter-pill ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>{t}</button>
                 ))}
               </div>
+              <TrackerScopeBar
+                scope={scope}
+                scopeOptions={scopeOptions}
+                onScope={(next) => {
+                  setScope(next);
+                  setOpenNodes((prev) => {
+                    const expanded = new Set(prev);
+                    let acc = "";
+                    for (const part of next.split("/").filter(Boolean)) { acc = acc ? `${acc}/${part}` : part; expanded.add(acc); }
+                    return expanded;
+                  });
+                }}
+                groupBySection={groupBySection}
+                onGroupBySection={setGroupBySection}
+              />
               {items.length === 0 && <EmptyState title="No items here" hint="Pick another scope, switch tabs, or import." />}
-              {items.map((it) => <ItemRow key={it.id} item={it} highlight={it.id === highlightId} />)}
+              {groupBySection
+                ? <GroupedTrackerItems scope={scope} items={items} highlightId={highlightId} onFocusSection={setScope} />
+                : items.map((it) => <ItemRow key={it.id} item={it} highlight={it.id === highlightId} />)}
             </>
           )}
           </GlassCard>
@@ -1031,6 +1058,141 @@ function collectCourseScopes(terms: Term[], courses: Course[]): string[] {
 
 function mergeScopes(a: string[], b: string[]) {
   return [...new Set([...a, ...b])].sort((x, y) => x.localeCompare(y));
+}
+
+const TRACKER_SCOPE_KEY = "axom.tracker.scope.v1";
+
+function readSavedTrackerScope(): string {
+  try { return localStorage.getItem(TRACKER_SCOPE_KEY) ?? ""; } catch { return ""; }
+}
+
+function saveTrackerScope(scope: string) {
+  try {
+    if (scope) localStorage.setItem(TRACKER_SCOPE_KEY, scope);
+    else localStorage.removeItem(TRACKER_SCOPE_KEY);
+  } catch { /* device convenience only */ }
+}
+
+/** Direct and deeper subsections under a scope, for the subsection picker. */
+export function descendantScopes(scope: string, scopeOptions: readonly string[]): string[] {
+  const prefix = scope ? `${scope}/` : "";
+  return [...new Set(scopeOptions.filter((path) => (scope ? path.startsWith(prefix) : true) && path !== scope))]
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
+
+/** Group items under the next path segment below `scope`. */
+export function groupItemsBySection(scope: string, items: readonly TrackerItem[]): Array<{ key: string; path: string; items: TrackerItem[] }> {
+  const groups = new Map<string, TrackerItem[]>();
+  for (const item of items) {
+    const relative = !scope ? item.path : item.path === scope ? "" : item.path.slice(scope.length + 1);
+    const key = relative.split("/").filter(Boolean)[0] ?? "";
+    groups.set(key, [...(groups.get(key) ?? []), item]);
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b, undefined, { numeric: true })))
+    .map(([key, groupItems]) => ({ key, path: key ? (scope ? `${scope}/${key}` : key) : scope, items: groupItems }));
+}
+
+function TrackerScopeBar({
+  scope, scopeOptions, onScope, groupBySection, onGroupBySection,
+}: {
+  scope: string;
+  scopeOptions: readonly string[];
+  onScope: (scope: string) => void;
+  groupBySection: boolean;
+  onGroupBySection: (value: boolean) => void;
+}) {
+  const parts = scope.split("/").filter(Boolean);
+  const descendants = descendantScopes(scope, scopeOptions);
+  return (
+    <div className="tracker-scope-bar">
+      <nav className="tracker-breadcrumb" aria-label="Tracker location">
+        <button type="button" className={parts.length === 0 ? "on" : ""} onClick={() => onScope("")}>Everything</button>
+        {parts.map((part, index) => {
+          const path = parts.slice(0, index + 1).join("/");
+          return (
+            <span key={path}>
+              <ChevronRight size={ICON_SIZE.microInline} aria-hidden="true" />
+              <button type="button" className={index === parts.length - 1 ? "on" : ""} onClick={() => onScope(path)}>{part}</button>
+            </span>
+          );
+        })}
+      </nav>
+      <div className="tracker-scope-controls">
+        {descendants.length > 0 && (
+          <label className="tracker-subsection-picker">
+            <span>Subsection</span>
+            <select className="field" value="" aria-label="Jump to a subsection" onChange={(event) => { if (event.target.value) onScope(event.target.value); }}>
+              <option value="">All of {parts.at(-1) ?? "Everything"}…</option>
+              {descendants.map((path) => {
+                const relative = scope ? path.slice(scope.length + 1) : path;
+                const depth = relative.split("/").length - 1;
+                return <option key={path} value={path}>{`${"\u00a0\u00a0".repeat(depth)}${relative.split("/").at(-1)}`}</option>;
+              })}
+            </select>
+          </label>
+        )}
+        <label className="tracker-group-toggle">
+          <input type="checkbox" checked={groupBySection} onChange={(event) => onGroupBySection(event.target.checked)} />
+          <span>Group by section</span>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function GroupedTrackerItems({
+  scope, items, highlightId, onFocusSection,
+}: {
+  scope: string;
+  items: TrackerItem[];
+  highlightId: string | null;
+  onFocusSection: (path: string) => void;
+}) {
+  const s = useStore();
+  const groups = useMemo(() => groupItemsBySection(scope, items), [scope, items]);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  if (groups.length <= 1) {
+    return <>{items.map((it) => <ItemRow key={it.id} item={it} highlight={it.id === highlightId} />)}</>;
+  }
+  return (
+    <div className="tracker-section-groups">
+      {groups.map((group) => {
+        const open = !collapsed.has(group.key) || group.items.some((item) => item.id === highlightId);
+        const progress = scopeStudyProgress(group.items, { preferences: s.profile.studyWorkflow, courses: s.courses });
+        return (
+          <section key={group.key || "__direct"} className={`tracker-section-group ${open ? "open" : ""}`}>
+            <div className="tracker-section-head">
+              <button
+                type="button"
+                className="tracker-section-toggle"
+                aria-expanded={open}
+                onClick={() => setCollapsed((current) => {
+                  const next = new Set(current);
+                  if (next.has(group.key)) next.delete(group.key); else next.add(group.key);
+                  return next;
+                })}
+              >
+                <ChevronRight size={ICON_SIZE.body} aria-hidden="true" className="tracker-section-chevron" />
+                <b>{group.key || `Directly in ${scope.split("/").at(-1) ?? "Everything"}`}</b>
+                <span className="tracker-section-count">{group.items.length}</span>
+              </button>
+              <span className="tracker-section-progress" aria-label={`${progress.percent}% of the study plan recorded`}>
+                <i style={{ width: `${progress.percent}%` }} />
+              </span>
+              <small>{progress.percent}%</small>
+              {group.key && (
+                <button type="button" className="tracker-section-focus" onClick={() => onFocusSection(group.path)}>
+                  Show only this
+                </button>
+              )}
+            </div>
+            {open && group.items.map((it) => <ItemRow key={it.id} item={it} highlight={it.id === highlightId} />)}
+          </section>
+        );
+      })}
+    </div>
+  );
 }
 
 function tabMatch(tab: Tab, kind: TrackerKind): boolean {

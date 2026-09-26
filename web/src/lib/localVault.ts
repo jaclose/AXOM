@@ -1,6 +1,7 @@
 import type { StateStorage } from "zustand/middleware";
 import { userIdFromName } from "./userIdentity";
 import { STORAGE_KEYS } from "./brand";
+import { markVaultWrite } from "./vaultActivity";
 
 export const DB_NAME = STORAGE_KEYS.vaultDb;
 export const STORE_NAME = "state";
@@ -150,7 +151,7 @@ async function withStore<T>(
   });
 }
 
-export const localVaultStorage: StateStorage = {
+const vaultStorage: StateStorage = {
   async getItem(name) {
     try {
       const value = await withStore<string | undefined>("readonly", (store) => store.get(name), openExistingVault);
@@ -200,11 +201,13 @@ export const localVaultStorage: StateStorage = {
         fallbackStore?.setItem(activeUserKey(name), userId);
         fallbackStore?.removeItem(scopedStateKey(name, userId));
       }
+      markVaultWrite("indexeddb");
     } catch (indexedDbError) {
       // IndexedDB can be blocked/private-mode unavailable. In that case retain
       // the full localStorage fallback so the app stays usable and data-safe.
       try {
         writeLocalFallback(fallbackStore, name, value, userId, indexedDbError);
+        markVaultWrite("local-fallback");
       } catch (fallbackError) {
         vaultWriteFailures.set(
           writeSequence,
@@ -240,6 +243,29 @@ export const localVaultStorage: StateStorage = {
       // No-op; best effort cleanup.
     }
   },
+};
+
+// Serialize writes so an older asynchronous save cannot land after the update
+// checkpoint. A failed write must not poison the queue for later saves.
+let pendingVaultWrite: Promise<void> = Promise.resolve();
+
+function enqueueVaultWrite(write: () => void | Promise<void>): Promise<void> {
+  const next = pendingVaultWrite.catch(() => undefined).then(write);
+  pendingVaultWrite = next;
+  // Zustand does not await ordinary action persistence. Mark the rejection as
+  // handled, while retaining it on `next` for explicit flush/checkpoint callers.
+  void next.catch(() => undefined);
+  return next;
+}
+
+export function flushLocalVaultWrites(): Promise<void> {
+  return pendingVaultWrite;
+}
+
+export const localVaultStorage: StateStorage = {
+  getItem: (name) => vaultStorage.getItem(name),
+  setItem: (name, value) => enqueueVaultWrite(async () => { await vaultStorage.setItem(name, value); }),
+  removeItem: (name) => enqueueVaultWrite(async () => { await vaultStorage.removeItem(name); }),
 };
 
 function persistedUserId(raw: string): string {

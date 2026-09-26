@@ -21,7 +21,7 @@ afterEach(cleanup);
 describe("ReportsPage", () => {
   it("uses honest low-data states and removes future/developer placeholders", () => {
     render(<ReportsPage />);
-    expect(screen.getByText("No targets")).toBeTruthy();
+    expect(screen.getByText("No targets", { selector: ".stat-value" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Today" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Trend" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Study system" })).toBeTruthy();
@@ -31,23 +31,35 @@ describe("ReportsPage", () => {
     expect(screen.queryByText("Traceability")).toBeNull();
   });
 
-  it("reveals insight on focus and keeps technical detail secondary", () => {
+  it("explains a metric on explicit request and falls back to activity rhythm without targets", () => {
     render(<ReportsPage />);
-    const trigger = screen.getByRole("button", { name: /Consistency/ });
+    const trigger = screen.getByRole("button", { name: /Active days: show how this is calculated/ });
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     fireEvent.focus(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(trigger);
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     const detail = document.getElementById(trigger.getAttribute("aria-controls")!);
     expect(detail?.textContent).toContain("What changed");
+    expect(detail?.textContent).toContain("Calculation");
     expect(detail?.textContent).toContain("Source");
-    expect(detail?.textContent).toContain("Technical details");
-    fireEvent.blur(trigger);
-    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByText("Activity streak")).toBeTruthy();
+  });
+
+  it("charts the last seven calendar days from logs even without daily targets", () => {
+    const today = useStore.getState().activeDayKey;
+    useStore.setState({
+      logs: [{ id: "today-study", dayKey: today, ts: `${today}T12:00:00.000Z`, type: "Deep Study", minutes: 95, cards: 0, academic: true, productive: true }],
+    });
+    render(<ReportsPage />);
+    expect(screen.getByRole("group", { name: "Minutes for the last seven days" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /: 1h 35m; last week 0m/ }).length).toBe(1);
+    expect(screen.getByText(/Study time: 1h 35m this week/)).toBeTruthy();
   });
 
   it("gives trend columns keyboard-focusable accessible names", () => {
     render(<ReportsPage />);
-    const trend = screen.getAllByRole("button", { name: /0 minutes; not scheduled/ })[0];
+    const trend = screen.getAllByRole("button", { name: /: 0m; last week 0m/ })[0];
     expect(trend.tagName).toBe("BUTTON");
   });
 

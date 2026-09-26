@@ -4,11 +4,13 @@ import {
   Database, Download, ShieldCheck, PackageCheck,
   Sunrise, Trophy, Check, Circle, ArrowRightCircle, ExternalLink,
   SlidersHorizontal, GripVertical, PlusCircle, X,
-  AlertTriangle, CalendarClock, Star, EyeOff, Settings2, RotateCcw,
+  AlertTriangle, CalendarClock,
   BookOpenCheck, ListTodo, BatteryMedium, Activity, Flame, Gamepad2,
-  ChevronUp, ChevronDown,
+  ChevronUp, ChevronDown, GraduationCap, Target, Gauge, Timer, BarChart3, Sparkles,
+  CalendarDays, Map as MapIcon, TrendingUp, Stethoscope, Link2, LayoutGrid,
 } from "lucide-react";
 import { ICON_SIZE } from "../lib/iconSize";
+import { useLuster } from "../lib/useLuster";
 import { useStore } from "../lib/store";
 import { dayTotals, productiveTotals, todayGrade, gradeLabel, gradeColor, prettyDate, lastNDays, isoDate } from "../lib/scoring";
 import { missedStandupDays, planForDay } from "../lib/journal";
@@ -31,7 +33,6 @@ import { DailyProgressVessel } from "../components/productivity/DailyProgressVes
 import { evaluateDailySuccess, type DailySuccessResult } from "../lib/dailySuccess";
 import { closeoutForDay } from "../lib/closeout";
 import { dailyLoopReminderLedger, normalizeDailyLoopReminderPreferences } from "../lib/dailyLoopReminders";
-import { AXOM_QUOTES, type QuoteAttributionStatus } from "../data/quotes";
 import {
   CURRENT_DASHBOARD_WIDGET_IDS,
   DASHBOARD_LAYOUT_PRESETS,
@@ -49,13 +50,6 @@ import {
 import { Modal } from "../components/ui/Modal";
 import { dueQuestions, questionMappingStatus, summarizeQuestionMappings } from "../lib/questions";
 import { deriveDailyWordStatsFromNormalizedHistory } from "../lib/dailyWordStats";
-import {
-  hideQuote,
-  readQuotePreferences,
-  selectQuoteForDay,
-  toggleFavoriteQuote,
-  writeQuotePreferences,
-} from "../lib/quotePreferences";
 
 const HOSTED_ALPHA_URL = "https://noctyrium-cktjdhuhw-jacloses-projects.vercel.app/#dashboard";
 
@@ -65,6 +59,7 @@ const CURRENT_DASHBOARD_ID_SET = new Set<string>(CURRENT_DASHBOARD_WIDGET_IDS);
 export function DashboardPage() {
   const s = useStore();
   const [editDashboard, setEditDashboard] = useState(false);
+  const luster = useLuster();
   const [pendingExtraLargeLayout, setPendingExtraLargeLayout] = useState<DashboardLayoutPreferences | null>(null);
   const dailyProgress = useMemo(() => evaluateDailySuccess(s, s.activeDayKey, s.activeDayKey), [s]);
   const week = weeklySummary(s);
@@ -175,11 +170,9 @@ export function DashboardPage() {
         </GlassCard>
       )}
 
-      <section className="dashboard-widget-grid" aria-label="Dashboard widgets">
+      <section className="dashboard-widget-grid" aria-label="Dashboard widgets" {...luster}>
         {visibleWidgetIds.map(renderWidget)}
       </section>
-
-      <DailyQuote activeDayKey={s.activeDayKey} />
 
       {pendingExtraLargeLayout && (
         <Modal
@@ -273,79 +266,6 @@ function AlphaBuildBanner({
       </div>
     </div>
   );
-}
-
-function DailyQuote({ activeDayKey }: { activeDayKey: string }) {
-  const [quotePreferences, setQuotePreferences] = useState(readQuotePreferences);
-  const [quoteOffset, setQuoteOffset] = useState(0);
-  const [quoteSettingsOpen, setQuoteSettingsOpen] = useState(false);
-  const quote = useMemo(
-    () => selectQuoteForDay(AXOM_QUOTES, quotePreferences, activeDayKey, quoteOffset),
-    [activeDayKey, quoteOffset, quotePreferences],
-  );
-
-  useEffect(() => { setQuoteOffset(0); }, [activeDayKey]);
-
-  function saveQuotePreferences(next: typeof quotePreferences) {
-    setQuotePreferences(writeQuotePreferences(next));
-  }
-
-  return (
-      <section className="dashboard-quote" aria-label="Daily quote">
-        {quotePreferences.quoteVisible && quote ? (
-          <>
-            <blockquote>“{quote.text}”</blockquote>
-            <div className="dashboard-quote-attribution" title={quote.attributionNote}>
-              <span>{quote.author}</span>
-              <small>{attributionLabel(quote.attributionStatus)}</small>
-            </div>
-            <div className="dashboard-quote-actions">
-              <GhostButton title="Next quote" aria-label="Next quote" onClick={() => setQuoteOffset((offset) => offset + 1)}><ArrowRight size={ICON_SIZE.body} /></GhostButton>
-              <GhostButton
-                title={quotePreferences.favoriteQuoteIds.includes(quote.id) ? "Remove favorite" : "Favorite quote"}
-                aria-label={quotePreferences.favoriteQuoteIds.includes(quote.id) ? "Remove favorite quote" : "Favorite quote"}
-                aria-pressed={quotePreferences.favoriteQuoteIds.includes(quote.id)}
-                onClick={() => saveQuotePreferences(toggleFavoriteQuote(quotePreferences, quote.id))}
-              ><Star size={ICON_SIZE.body} /></GhostButton>
-              <GhostButton title="Hide this quote" aria-label="Hide this quote" onClick={() => saveQuotePreferences(hideQuote(quotePreferences, quote.id))}><EyeOff size={ICON_SIZE.body} /></GhostButton>
-              <GhostButton
-                title="Quote settings"
-                aria-label="Quote settings"
-                aria-expanded={quoteSettingsOpen}
-                aria-controls={quoteSettingsOpen ? "dashboard-quote-settings" : undefined}
-                onClick={() => setQuoteSettingsOpen((open) => !open)}
-              ><Settings2 size={ICON_SIZE.body} /></GhostButton>
-            </div>
-          </>
-        ) : (
-          <div className="dashboard-quote-hidden">
-            <span>{quotePreferences.quoteVisible ? "All eligible quotes are hidden" : "Daily quote hidden"}</span>
-            {quotePreferences.quoteVisible
-              ? <GButton size="tiny" onClick={() => saveQuotePreferences({ ...quotePreferences, hiddenQuoteIds: [] })}>Restore quotes</GButton>
-              : <GButton size="tiny" onClick={() => saveQuotePreferences({ ...quotePreferences, quoteVisible: true })}>Show quote</GButton>}
-            <GhostButton aria-label="Quote settings" aria-expanded={quoteSettingsOpen} aria-controls={quoteSettingsOpen ? "dashboard-quote-settings" : undefined} onClick={() => setQuoteSettingsOpen((open) => !open)}><Settings2 size={ICON_SIZE.body} /></GhostButton>
-          </div>
-        )}
-        {quoteSettingsOpen && (
-          <div className="dashboard-quote-settings" id="dashboard-quote-settings">
-            <label><input type="checkbox" checked={quotePreferences.quoteVisible} onChange={(event) => saveQuotePreferences({ ...quotePreferences, quoteVisible: event.target.checked })} /> Show daily quote</label>
-            <label><input type="checkbox" checked={quotePreferences.includeGuilt} onChange={(event) => saveQuotePreferences({ ...quotePreferences, includeGuilt: event.target.checked })} /> Include guilt/shame category</label>
-            <span>{quotePreferences.favoriteQuoteIds.length} favorite{quotePreferences.favoriteQuoteIds.length === 1 ? "" : "s"} · {quotePreferences.hiddenQuoteIds.length} hidden</span>
-            {quotePreferences.hiddenQuoteIds.length > 0 && (
-              <button type="button" onClick={() => saveQuotePreferences({ ...quotePreferences, hiddenQuoteIds: [] })}><RotateCcw size={ICON_SIZE.microInline} /> Restore hidden quotes</button>
-            )}
-          </div>
-        )}
-      </section>
-  );
-}
-
-function attributionLabel(status: QuoteAttributionStatus) {
-  if (status === "axom-original") return "AXOM original";
-  if (status === "commonly-attributed") return "Commonly attributed";
-  if (status === "paraphrased") return "Paraphrased";
-  if (status === "verified") return "Verified";
-  return "Attribution unverified";
 }
 
 /** A display name must be explicitly user-authored, never a seed or initials. */
@@ -578,10 +498,41 @@ function WidgetCatalogSection({
   );
 }
 
-function WidgetPreview({ kind }: { kind: string }) {
+/** Each widget gets its own glyph and tint so the library scans at a glance. */
+const WIDGET_GLYPHS: Record<DashboardWidgetId, { icon: typeof Database; tone: string }> = {
+  welcome: { icon: Sunrise, tone: "gold" },
+  commandBrief: { icon: ArrowRightCircle, tone: "gold" },
+  questionBank: { icon: BookOpenCheck, tone: "violet" },
+  courseTracker: { icon: GraduationCap, tone: "cool" },
+  tasks: { icon: ListTodo, tone: "green" },
+  readiness: { icon: BatteryMedium, tone: "green" },
+  activity: { icon: Activity, tone: "cool" },
+  journal: { icon: BookText, tone: "rose" },
+  streak: { icon: Flame, tone: "orange" },
+  dailyWord: { icon: Gamepad2, tone: "violet" },
+  winDay: { icon: Target, tone: "gold" },
+  todayScore: { icon: Gauge, tone: "green" },
+  examCountdown: { icon: CalendarClock, tone: "rose" },
+  pomodoro: { icon: Timer, tone: "orange" },
+  weekly: { icon: BarChart3, tone: "cool" },
+  suggested: { icon: Sparkles, tone: "gold" },
+  aiActions: { icon: Sparkles, tone: "violet" },
+  schedule: { icon: CalendarDays, tone: "cool" },
+  termMap: { icon: MapIcon, tone: "cool" },
+  localData: { icon: Database, tone: "green" },
+  latestStandup: { icon: Sunrise, tone: "gold" },
+  productivityTrend: { icon: TrendingUp, tone: "cool" },
+  premedHours: { icon: Stethoscope, tone: "rose" },
+  resourceFocus: { icon: Link2, tone: "cool" },
+  boardBlueprint: { icon: LayoutGrid, tone: "violet" },
+};
+
+function WidgetPreview({ kind }: { kind: DashboardWidgetId }) {
+  const glyph = WIDGET_GLYPHS[kind] ?? { icon: LayoutGrid, tone: "cool" };
+  const Icon = glyph.icon;
   return (
-    <span className={`widget-preview mini-${kind}`} aria-hidden="true">
-      <i /><i /><i /><i />
+    <span className={`widget-preview widget-glyph tone-${glyph.tone}`} aria-hidden="true">
+      <Icon size={ICON_SIZE.control} />
     </span>
   );
 }
