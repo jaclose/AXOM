@@ -16,6 +16,7 @@ import "./styles/pages.css";
 import "./styles/motion.css";
 import "./styles/journal-notebook.css";
 import "./styles/tour.css";
+import "./styles/guide.css";
 import "./styles/loop.css";
 import "./styles/questionbank.css";
 import "./styles/appearance.css";

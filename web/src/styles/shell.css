@@ -339,13 +339,15 @@
   }
   .topbar .tb-sub { display: none; }
   .topbar .tb-actions { gap: 6px; }
-  .topbar-refresh {
+  .topbar-refresh,
+  .topbar-guide {
     width: 44px;
     min-width: 44px;
     height: 44px;
     padding: 0;
   }
-  .topbar-refresh span { display: none; }
+  .topbar-refresh span,
+  .topbar-guide span { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

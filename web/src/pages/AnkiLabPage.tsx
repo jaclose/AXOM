@@ -50,12 +50,12 @@ export function AnkiLabPage() {
         </div>
         <div className="row" style={{ flexWrap: "wrap", gap: 6, marginTop: 12 }}>
           {([
-            ["vault", "Card vault"],
-            ["review", `Review${dueCount ? ` (${dueCount})` : ""}`],
-            ["generate", "AI generate"],
-            ["prompt", "Prompt studio"],
-          ] as Array<[LabTab, string]>).map(([id, label]) => (
-            <button key={id} className={`filter-pill ${tab === id ? "on" : ""}`} onClick={() => setTab(id)}>{label}</button>
+            ["vault", "Card vault", "anki-tab-vault"],
+            ["review", `Review${dueCount ? ` (${dueCount})` : ""}`, "anki-tab-review"],
+            ["generate", "AI generate", "anki-tab-generate"],
+            ["prompt", "Prompt studio", "anki-tab-prompt"],
+          ] as Array<[LabTab, string, string]>).map(([id, label, guide]) => (
+            <button key={id} className={`filter-pill ${tab === id ? "on" : ""}`} onClick={() => setTab(id)} data-guide={guide}>{label}</button>
           ))}
         </div>
       </GlassCard>

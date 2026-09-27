@@ -123,7 +123,7 @@ export function AiCardGenerator({ onOpenAiSettings }: { onOpenAiSettings: () => 
   const providerReady = health?.ok && (settings.mode === "local" ? Boolean(settings.localModel) : true);
 
   return (
-    <GlassCard>
+    <GlassCard data-guide="anki-ai-generator">
       <PanelHeader
         title="Generate cards with AI"
         sub="Small reviewed batches, quality over volume. Every draft is editable and nothing saves without your approval."

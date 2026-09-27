@@ -870,13 +870,13 @@ export function ImportPanel({
         <div className="stack gap12">
           <div className="row wrap gap6" aria-label="Import source type">
             {([
-              ["paste", "Paste text"],
-              ["file", "Import one file"],
-              ["batch", "Import several files"],
-              ["ai", "Generate with AI"],
-            ] as Array<[ImportTab, string]>).map(([id, label]) => (
+              ["paste", "Paste text", "qb-source-paste"],
+              ["file", "Import one file", "qb-source-file"],
+              ["batch", "Import several files", "qb-source-batch"],
+              ["ai", "Generate with AI", "qb-source-ai"],
+            ] as Array<[ImportTab, string, string]>).map(([id, label, guide]) => (
               <button key={id} className={`filter-pill ${tab === id ? "on" : ""}`}
-                aria-pressed={tab === id} onClick={() => setTab(id)}>{label}</button>
+                aria-pressed={tab === id} onClick={() => setTab(id)} data-guide={guide}>{label}</button>
             ))}
           </div>
 

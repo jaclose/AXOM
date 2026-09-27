@@ -16,6 +16,8 @@ export function createMockProvider(): AIProvider {
       // stable. The task id wins: "Topic: cardiology" is not a card request.
       if (req.task === "cards.generate") return demoCards();
       if (req.task === "questions.generate") return demoQuestions();
+      // No topic ids: the guide falls back to its own local matches.
+      if (req.task === "guide.ask") return { answer: "[DEMO] Here's where to look. Turn on a real provider for written answers.", topicIds: [] };
       if (/card/i.test(req.prompt)) return demoCards();
       if (/error|classif/i.test(req.prompt)) {
         return { errorType: "knowledge-gap", rationale: "[DEMO] Canned classification for development.", confidence: 0.5 };
