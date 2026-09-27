@@ -50,7 +50,7 @@ function fields(...values: Array<string | readonly [string, string]>): Dashboard
  */
 export const DASHBOARD_WIDGET_CATALOG: readonly DashboardWidgetCatalogItem[] = [
   { id: "welcome", label: "Welcome", description: "Date, welcome state, and daily quote.", defaultSize: "large", supportedSizes: STANDARD_SIZES, fields: fields("date", "state", "quote") },
-  { id: "commandBrief", label: "Command Brief", description: "One evidence-backed next action.", defaultSize: "large", supportedSizes: STANDARD_SIZES, fields: fields("currentState", "nextAction", "why", "effort", "success", "alternate") },
+  { id: "commandBrief", label: "Up next", description: "One suggested next step from your real work, with a smaller option.", defaultSize: "large", supportedSizes: STANDARD_SIZES, fields: fields("currentState", "nextAction", "why", "effort", "success", "alternate") },
   { id: "questionBank", label: "Question Bank", description: "Trusted review work and mapping health.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("due", "accuracy", "needsReview", "recent") },
   { id: "courseTracker", label: "Course Tracker", description: "Progress, weak areas, and untouched items.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("progress", "untouched", "weak", "suggestion") },
   { id: "tasks", label: "Tasks", description: "Due, overdue, and completed work.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("due", "overdue", "completed") },
@@ -64,7 +64,7 @@ export const DASHBOARD_WIDGET_CATALOG: readonly DashboardWidgetCatalogItem[] = [
   { id: "examCountdown", label: "Exam countdown", description: "Exam date, phase, and daily question target.", defaultSize: "small", supportedSizes: COMPACT_SIZES, fields: fields("days", "phase", "questionTarget") },
   { id: "pomodoro", label: "Focus timer", description: "Current focus session and timer controls.", defaultSize: "small", supportedSizes: COMPACT_SIZES, fields: fields("timer", "intention", "sessions") },
   { id: "weekly", label: "Weekly overview", description: "Seven-day effort and active-day rhythm.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("minutes", "activeDays", "trend") },
-  { id: "suggested", label: "Suggested moves", description: "Merged into Command Brief; retained for old layouts.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("actions", "reasons", "effort"), storageOnly: true },
+  { id: "suggested", label: "Suggested moves", description: "Merged into Up next; retained for old layouts.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("actions", "reasons", "effort"), storageOnly: true },
   { id: "schedule", label: "Schedule", description: "Legacy calendar widget retained for old layouts.", defaultSize: "large", supportedSizes: STANDARD_SIZES, fields: fields("calendar", "tasks", "activity"), storageOnly: true },
   { id: "termMap", label: "Term map", description: "Merged into Course Tracker; retained for old layouts.", defaultSize: "large", supportedSizes: STANDARD_SIZES, fields: fields("terms", "courses", "progress"), storageOnly: true },
   { id: "localData", label: "Local data", description: "Workspace and backup health.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("status", "backup", "storage") },

@@ -175,7 +175,7 @@ export const STUDY_METHODS: StudyMethod[] = [
     materials: ["Due card queue or one recorded lecture"],
     timeEstimateMinutes: 15,
     steps: [
-      "Pick the Minimum Viable Win from the Command Brief.",
+      "Take the smaller step Up next offers under “Short on time?”.",
       "Timebox 15 minutes. When it rings you are DONE, guilt-free.",
       "Log it. Continuity preserved; recovery beats heroics.",
     ],

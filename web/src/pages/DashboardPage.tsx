@@ -31,7 +31,8 @@ import { pickFocusExam, buildExamCountdown, countdownHeadline, type PrepIntensit
 import { AnimatedProgressBar } from "../components/ui/motion";
 import { GlassCard, GButton, GhostButton, PanelHeader, Tag } from "../components/ui/primitives";
 import { Pomodoro } from "../components/productivity/Pomodoro";
-import { CommandBrief } from "../components/brief/CommandBrief";
+import { UpNext } from "../components/brief/UpNext";
+import { pushToast } from "../lib/toast";
 import { CloseoutModal } from "../components/brief/CloseoutModal";
 import { DailyProgressVessel } from "../components/productivity/DailyProgressVessel";
 import { evaluateDailySuccess, type DailySuccessResult } from "../lib/dailySuccess";
@@ -92,6 +93,25 @@ export function DashboardPage() {
   function saveLayout(nextValue: DashboardLayoutPreferences) {
     const next = normalizeDashboardLayoutPreferences(nextValue) ?? nextValue;
     s.updateProfile({ dashboardLayout: next });
+  }
+
+  function setUpNextHidden(hidden: boolean) {
+    const ids = new Set(layout.hiddenWidgetIds);
+    if (hidden) ids.add("commandBrief"); else ids.delete("commandBrief");
+    saveLayout({ ...layout, preset: "custom", hiddenWidgetIds: [...ids], updatedAt: new Date().toISOString() });
+  }
+
+  function hideUpNext() {
+    setUpNextHidden(true);
+    pushToast({
+      title: "Up next hidden",
+      body: "Bring it back anytime in Settings → Dashboard widgets.",
+      tone: "info",
+      duration: 7000,
+      actionLabel: "Undo",
+      onAction: () => setUpNextHidden(false),
+      dedupe: "up-next-hidden",
+    });
   }
 
   function saveWidgetSettings(widgetId: DashboardWidgetId, settings: DashboardWidgetFrameSettings) {
@@ -155,7 +175,7 @@ export function DashboardPage() {
         activeDayKey={s.activeDayKey}
       />
 
-      <CommandBrief readiness={readiness} />
+      {!hiddenWidgets.has("commandBrief") && <UpNext readiness={readiness} onHide={hideUpNext} />}
 
       <StandupPrompt />
 
