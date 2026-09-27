@@ -22,7 +22,8 @@ const FONT_SIZE: f64 = 12.5;
 
 /// Draw `title` inside the rounded outline. Main thread only.
 fn render(title: &str) -> Retained<NSImage> {
-    let font = NSFont::monospacedDigitSystemFontOfSize_weight(FONT_SIZE, unsafe { NSFontWeightMedium });
+    let font =
+        NSFont::monospacedDigitSystemFontOfSize_weight(FONT_SIZE, unsafe { NSFontWeightMedium });
     let color = NSColor::blackColor();
     let objects: [Retained<AnyObject>; 2] = [
         Retained::into_super(Retained::into_super(font)),
@@ -30,20 +31,31 @@ fn render(title: &str) -> Retained<NSImage> {
     ];
     let keys = unsafe { [NSFontAttributeName, NSForegroundColorAttributeName] };
     let attributes = NSDictionary::from_retained_objects(&keys, &objects);
-    let text = unsafe { NSAttributedString::new_with_attributes(&NSString::from_str(title), &attributes) };
+    let text =
+        unsafe { NSAttributedString::new_with_attributes(&NSString::from_str(title), &attributes) };
     let text_size = text.size();
     let width = (text_size.width + PADDING_X * 2.0).ceil();
     let handler = RcBlock::new(move |_: NSRect| -> Bool {
         let top = (BAR_HEIGHT - PILL_HEIGHT) / 2.0;
-        let outline = NSRect::new(NSPoint::new(0.5, top + 0.5), NSSize::new(width - 1.0, PILL_HEIGHT - 1.0));
+        let outline = NSRect::new(
+            NSPoint::new(0.5, top + 0.5),
+            NSSize::new(width - 1.0, PILL_HEIGHT - 1.0),
+        );
         let path = NSBezierPath::bezierPathWithRoundedRect_xRadius_yRadius(outline, RADIUS, RADIUS);
         path.setLineWidth(1.0);
         NSColor::blackColor().setStroke();
         path.stroke();
-        text.drawAtPoint(NSPoint::new(PADDING_X, (BAR_HEIGHT - text_size.height) / 2.0));
+        text.drawAtPoint(NSPoint::new(
+            PADDING_X,
+            (BAR_HEIGHT - text_size.height) / 2.0,
+        ));
         Bool::YES
     });
-    let image = NSImage::imageWithSize_flipped_drawingHandler(NSSize::new(width, BAR_HEIGHT), false, &handler);
+    let image = NSImage::imageWithSize_flipped_drawingHandler(
+        NSSize::new(width, BAR_HEIGHT),
+        false,
+        &handler,
+    );
     image.setTemplate(true);
     image
 }
@@ -75,8 +87,13 @@ mod tests {
     #[test]
     #[ignore]
     fn renders_pill() {
-        let dir = std::env::var("AXOM_PILL_PNG_DIR").unwrap_or_else(|_| std::env::temp_dir().display().to_string());
-        for (name, title) in [("focus", "24:13  ⋯"), ("paused", "‖ 12:30  ⋯"), ("break", "Break 04:59  ⋯")] {
+        let dir = std::env::var("AXOM_PILL_PNG_DIR")
+            .unwrap_or_else(|_| std::env::temp_dir().display().to_string());
+        for (name, title) in [
+            ("focus", "24:13  ⋯"),
+            ("paused", "‖ 12:30  ⋯"),
+            ("break", "Break 04:59  ⋯"),
+        ] {
             let image = super::render(title);
             let data = image.TIFFRepresentation().expect("tiff");
             let bytes = data.to_vec();
