@@ -86,6 +86,41 @@ evaluated per pixel with no meshing:
 | Retreat: subtitle, wordmark, emblem; last rim highlight dies | 5.5 – 6.5 |
 | Clean `#0D0D0E` | 6.5 – 7.0 |
 
+## Short versions (2, 3 and 4 s)
+
+Nine short stings: three layouts, each at three lengths. Shot names are
+`<layout>-<2|3|4>s`.
+
+| Layout | Shows |
+| --- | --- |
+| `mark` | the logo alone, centred |
+| `wordmark` | logo and AXOM |
+| `lockup` | logo, AXOM, gold rule and subtitle |
+
+They push the 3D and the glint further than the ident:
+
+- The emblem is a 0.075-deep slab that turns into place in 3D: from 30° yaw
+  and 10° tilt, moving slightly towards camera. Rays are intersected with the
+  rotated plane, and its side walls are ray-marched.
+- The glint strip crosses while the emblem is still turning.
+- A small spark light runs along the bevels.
+- The brightest glints get a restrained halation.
+- Text then settles in from soft focus. Shorts end on the settled logo rather
+  than black.
+
+The 7 s ident (`--shot ident`, the default) keeps a zero-depth slab and its
+original timings, so it still renders the same.
+
+```sh
+for shot in mark-2s wordmark-2s lockup-2s mark-3s wordmark-3s lockup-3s mark-4s wordmark-4s lockup-4s; do
+  python3 scripts/startup-ident/render_ident.py frames --shot $shot --width 1920 --height 1080 --out build/shorts/$shot
+  python3 scripts/startup-ident/render_ident.py encode --shot $shot --frames build/shorts/$shot --out build/shorts
+done
+```
+
+Each short is encoded as a 10-bit HEVC master and an H.264 copy
+(`AXOM_<shot>_<height>p_30p_{hevc10,h264}.mp4`).
+
 ## Reproduce
 
 ```sh
