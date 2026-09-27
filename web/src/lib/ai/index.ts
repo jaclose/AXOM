@@ -64,11 +64,11 @@ export async function checkProviderHealth(settings: AiSettings = loadAiSettings(
 }
 
 /**
- * Runs a generation task. AXOM Cloud AI builds the prompt, schema and budget
+ * Runs a server-owned task. AXOM Cloud AI builds the prompt, schema and budget
  * on the server; Local and Demo providers get the identical prompt built here.
  * Inputs are validated first, so an oversized paste never spends quota.
  */
-async function runAiTask<T extends AiTaskId>(provider: AIProvider, task: T, input: TaskInputs[T]): Promise<{ raw: unknown; promptVersion: string }> {
+export async function runAiTask<T extends AiTaskId>(provider: AIProvider, task: T, input: TaskInputs[T]): Promise<{ raw: unknown; promptVersion: string }> {
   const built = buildTask(task, input);
   if (!built.ok) throw new Error(built.error);
   if (provider.runTask) {
