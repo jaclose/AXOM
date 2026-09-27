@@ -570,7 +570,10 @@ mod tests {
         );
         assert_eq!(format_menu_bar_title(TimerPhase::Focus, true, 0), "Done  ⋯");
         assert_eq!(format_menu_bar_title(TimerPhase::Break, true, 0), "Done  ⋯");
-        assert_eq!(format_menu_bar_title(TimerPhase::Focus, false, 0), "‖ 00:00  ⋯");
+        assert_eq!(
+            format_menu_bar_title(TimerPhase::Focus, false, 0),
+            "‖ 00:00  ⋯"
+        );
     }
 
     #[test]
