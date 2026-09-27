@@ -66,3 +66,7 @@ active_study_day.txt
 
 # AXOM-0002b.1: archival evidence is never ignored (durability, AXOM-0002b finding A2)
 !docs/product-memory/**/*.csv
+
+# Python bytecode (startup ident tooling)
+__pycache__/
+*.pyc
