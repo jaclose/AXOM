@@ -27,9 +27,9 @@ function decide(prefs: Partial<CinematicPreferences>, ledger: CinematicLedger, n
 describe("startup cinematic schedule", () => {
   it("welcomes a first run, then waits for the next day", () => {
     const first = decide({}, {});
-    expect(first.decision).toMatchObject({ play: true, trigger: "first-run", film: CINEMATICS["slow-sweep"] });
+    expect(first.decision).toMatchObject({ play: true, trigger: "first-run", film: CINEMATICS.ident });
     expect(decide({}, first.nextLedger).decision).toEqual({ play: false, reason: "already-played" });
-    expect(decide({}, first.nextLedger, new Date(2026, 8, 22, 7)).decision).toMatchObject({ play: true, trigger: "daily" });
+    expect(decide({}, first.nextLedger, new Date(2026, 8, 22, 7)).decision).toMatchObject({ play: true, trigger: "daily", film: CINEMATICS["wordmark-2s"] });
   });
 
   it("plays weekly only on the first open of each ISO week", () => {
@@ -44,7 +44,7 @@ describe("startup cinematic schedule", () => {
     const seen: CinematicLedger = { lastSeenVersion: "1.0.0", lastPlayedDay: "2026-09-21", lastPlayedAt: monday.toISOString() };
     expect(decide({ frequency: "updates" }, seen).decision).toEqual({ play: false, reason: "not-an-update" });
     const updated = decide({ frequency: "updates" }, seen, monday, { version: "1.1.0" });
-    expect(updated.decision).toMatchObject({ play: true, trigger: "update", film: CINEMATICS["push-sweep"], caption: "Updated to v1.1.0" });
+    expect(updated.decision).toMatchObject({ play: true, trigger: "update", film: CINEMATICS["wordmark-3s"], caption: "Updated to v1.1.0" });
     expect(updated.nextLedger.lastSeenVersion).toBe("1.1.0");
     expect(decide({ frequency: "updates" }, updated.nextLedger, monday, { version: "1.1.0" }).decision.play).toBe(false);
   });
@@ -70,10 +70,23 @@ describe("startup cinematic schedule", () => {
       if (result.decision.play) seen.push(result.decision.film.id);
       ledger = result.nextLedger;
     }
-    expect(seen).toEqual(["slow-sweep", "push-sweep", "edge-glint", "optical-luster", "slow-sweep"]);
+    // The first open is always the ident; the rotation starts on the next day.
+    expect(seen).toEqual(["ident", "wordmark-2s", "wordmark-3s", "ident", "slow-sweep"]);
   });
 
   it("repairs unknown stored preferences", () => {
-    expect(normalizeCinematicPreferences({ frequency: "hourly", intro: "nope", update: "edge-glint" })).toEqual({ ...DEFAULT_CINEMATIC_PREFERENCES, update: "edge-glint" });
+    expect(normalizeCinematicPreferences({ version: 2, frequency: "hourly", intro: "nope", update: "edge-glint" })).toEqual({ ...DEFAULT_CINEMATIC_PREFERENCES, update: "edge-glint" });
+  });
+
+  it("moves placeholder-era choices to the finished films but keeps the schedule", () => {
+    expect(normalizeCinematicPreferences({ version: 1, frequency: "weekly", intro: "slow-sweep", update: "push-sweep", installing: "edge-glint" }))
+      .toEqual({ ...DEFAULT_CINEMATIC_PREFERENCES, frequency: "weekly" });
+    expect(DEFAULT_CINEMATIC_PREFERENCES).toMatchObject({ intro: "wordmark-2s", update: "wordmark-3s" });
+  });
+
+  it("knows how each finished film ends", () => {
+    expect(CINEMATICS.ident).toMatchObject({ exit: "black", durationMs: 7000, placeholder: false });
+    expect(CINEMATICS["wordmark-2s"]).toMatchObject({ exit: "hold", durationMs: 2000, placeholder: false });
+    expect(CINEMATICS["wordmark-3s"]).toMatchObject({ exit: "hold", durationMs: 3000, placeholder: false });
   });
 });

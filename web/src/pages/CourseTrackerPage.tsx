@@ -186,7 +186,7 @@ export function CourseTrackerPage() {
     s.updateProfile({ primaryTrackerScopes: togglePrimaryScope(s.profile.primaryTrackerScopes, path) });
     pushToast(was
       ? { title: "Removed from primary focus", body: path, tone: "info", duration: 2600 }
-      : { title: "Primary focus set", body: `${path} now leads suggestions here, in the Command Brief and on the Dashboard.`, tone: "success" });
+      : { title: "Primary focus set", body: `${path} now leads suggestions here, in Up next and on the Dashboard.`, tone: "success" });
   }
   const courseScopes = useMemo(() => collectCourseScopes(s.terms, s.courses), [s.terms, s.courses]);
   const tree = useMemo(() => buildTree(s.tracker, courseScopes), [s.tracker, courseScopes]);
@@ -1436,7 +1436,7 @@ function PrimaryFocusControl({ path, scopes, onToggle, onUntil }: {
           <input type="date" className="field" value={entry.until ?? ""} onChange={(event) => onUntil(event.target.value || undefined)} aria-label="Primary focus ends after" />
         </label>
       )}
-      {!entry && <span className="sub">Primary subsections lead suggestions, the Command Brief and the Dashboard.</span>}
+      {!entry && <span className="sub">Primary subsections lead suggestions, Up next and the Dashboard.</span>}
     </div>
   );
 }

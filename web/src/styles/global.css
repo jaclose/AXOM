@@ -77,6 +77,10 @@ input, textarea, select { font-family: inherit; }
 }
 
 .axom-mark {
+  /* Brushed ivory, as in the brand film (finish="metal"). */
+  --axom-mark-hi: #f6f2ea;
+  --axom-mark-mid: #d6cfc2;
+  --axom-mark-lo: #a39b8c;
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
@@ -85,6 +89,12 @@ input, textarea, select { font-family: inherit; }
   line-height: 0;
 }
 .axom-mark svg { width: 100%; height: 100%; }
+:root[data-theme="light"] .axom-mark {
+  /* Graphite on the light surfaces. */
+  --axom-mark-hi: #5b564d;
+  --axom-mark-mid: #3d3a34;
+  --axom-mark-lo: #24221e;
+}
 .axom-mark--framed {
   color: var(--axom-text);
   border-radius: 30%;
@@ -116,9 +126,18 @@ input, textarea, select { font-family: inherit; }
 }
 .axom-brand-lockup--lg { gap: 1rem; }
 .axom-brand-lockup--hero { gap: 1.25rem; }
-.server-brand { flex: 1; min-width: 0; }
-.server-brand .axom-brand-lockup__copy { flex: 1; }
-.server-brand .axom-brand-lockup__subtitle { font-size: var(--fs-tiny); }
+.server-brand { flex: 1; min-width: 0; gap: 11px; }
+.server-brand .axom-mark { width: 26px !important; height: 26px !important; }
+.server-brand .axom-brand-lockup__copy { flex: 1; gap: 5px; }
+/* The wordmark leads; the tagline sits beneath it, small and quiet (brand sheet). */
+.server-brand .axom-wordmark { color: var(--axom-text); width: 78px; font-size: 1rem; margin-left: -3.5px; /* optical: the Λ starts 22 units into its viewBox */ }
+.server-brand .axom-brand-lockup__subtitle {
+  font-size: 7px;
+  font-weight: var(--fw-medium);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-45);
+}
 
 @media (prefers-contrast: more) {
   .axom-mark--framed { border-color: var(--axom-border-strong); }

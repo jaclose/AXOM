@@ -23,12 +23,12 @@ test("study defaults and item overrides drive the dashboard, survive reload, and
   await prepareWorkspace(page);
 
   const brief = page.locator('[data-tour="command-brief"]');
-  await expect(brief.locator(".brief-title")).toHaveText("Review: Renal transport");
-  await brief.getByText("Why this suggestion?", { exact: true }).click();
+  await expect(brief.locator(".up-next-title")).toHaveText("Review: Renal transport");
+  await brief.getByRole("button", { name: "Why?", exact: true }).click();
   const plan = brief.getByRole("region", { name: "Study plan used for this suggestion" });
   await expect(plan).toContainText("3 of 4 passes complete");
-  await expect(brief.locator(".brief-meta")).toContainText("Notes");
-  await expect(brief.locator(".brief-meta")).not.toContainText("Anki");
+  await expect(brief.locator(".up-next-meta")).toContainText("Notes");
+  await expect(brief.locator(".up-next-meta")).not.toContainText("Anki");
 
   // Edit the real settings controls; no test-only settings UI or persistence path.
   await page.getByTitle("Settings", { exact: true }).click();
@@ -38,10 +38,10 @@ test("study defaults and item overrides drive the dashboard, survive reload, and
   await page.getByRole("button", { name: "Noji", exact: true }).click();
   await page.getByRole("button", { name: "Done", exact: true }).click();
   await expect(plan).toContainText("3 of 5 passes complete · Review after 6 days");
-  await expect(brief.locator(".brief-meta")).toContainText("Noji");
+  await expect(brief.locator(".up-next-meta")).toContainText("Noji");
 
   await page.reload({ waitUntil: "networkidle" });
-  await brief.getByText("Why this suggestion?", { exact: true }).click();
+  await brief.getByRole("button", { name: "Why?", exact: true }).click();
   await expect(plan).toContainText("3 of 5 passes complete · Review after 6 days");
 
   await page.goto("/#tracker");
@@ -52,24 +52,27 @@ test("study defaults and item overrides drive the dashboard, survive reload, and
   await editor.getByLabel("Lecture passes").fill("6");
   await editor.getByRole("button", { name: "Save plan" }).click();
   await page.goto("/#dashboard");
-  await brief.getByText("Why this suggestion?", { exact: true }).click();
+  await brief.getByRole("button", { name: "Why?", exact: true }).click();
   await expect(plan).toContainText("3 of 6 passes complete");
   await expect(plan).toContainText("item override");
 
   for (const viewport of [{ width: 1440, height: 900 }, { width: 768, height: 900 }, { width: 430, height: 880 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
     await expect(plan).toBeVisible();
-    await expect(brief.getByRole("button", { name: "Begin Session", exact: true })).toBeVisible();
+    await expect(brief.getByRole("button", { name: "Start", exact: true })).toBeVisible();
     expect(await page.evaluate(() => {
       const surface = document.querySelector<HTMLElement>(".surface-scroll")!;
       return document.documentElement.scrollWidth <= innerWidth + 1 && surface.scrollWidth <= surface.clientWidth + 1;
     })).toBe(true);
   }
 
-  await brief.getByRole("button", { name: "Begin Session", exact: true }).click();
-  await expect(brief.getByText(/A session is already running/)).toBeVisible();
+  await brief.getByRole("button", { name: "Start", exact: true }).click();
+  // The running session moves to the focus dock; Up next steps aside until it ends.
+  await expect(brief).toHaveCount(0);
+  await expect(page.locator(".focus-dock")).toBeVisible();
   await page.reload({ waitUntil: "networkidle" });
-  await expect(brief.getByText(/A session is already running/)).toBeVisible();
+  await expect(page.locator(".focus-dock")).toBeVisible();
+  await expect(brief).toHaveCount(0);
   const session = await page.evaluate(async () => {
     const { useStore } = await (window as unknown as DevWindow).__AXOM_DEV__;
     return useStore.getState().sessions.find((value) => value.status === "active");

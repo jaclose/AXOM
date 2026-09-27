@@ -9,12 +9,14 @@
   color: #f2eee6;
   isolation: isolate;
   opacity: 1;
-  transition: opacity 160ms ease-out;
+  /* The black layer dissolves while the shell settles in beneath it. */
+  transition: opacity var(--intro-fade, 560ms) cubic-bezier(0.4, 0, 0.2, 1);
   cursor: default;
 }
 
 .axom-startup-intro--leaving {
   opacity: 0;
+  pointer-events: none;
 }
 
 .axom-startup-intro__film {
@@ -23,13 +25,32 @@
   height: 100%;
   min-width: 0;
   min-height: 0;
-  object-fit: contain;
+  /* Fill the screen edge to edge: letterbox bars would sit beside the film's
+     darker vignette and show a seam. The lockup is centred, so any landscape
+     ratio (4:3 to 21:9) keeps it whole. */
+  object-fit: cover;
   opacity: 0;
   pointer-events: none;
 }
 
+
+
 .axom-startup-intro__film--playing {
   opacity: 1;
+}
+
+/* A film that holds its last frame (a lockup) fades to its own black first,
+   so the order is always identity → darkness → AXOM, never two logos at once. */
+.axom-startup-intro--to-black .axom-startup-intro__film {
+  opacity: 0;
+  transition: opacity var(--intro-to-black, 380ms) cubic-bezier(0.4, 0, 1, 1);
+}
+
+.axom-startup-intro.axom-startup-intro--exiting .axom-startup-intro__controls,
+.axom-startup-intro.axom-startup-intro--exiting .axom-startup-intro__caption {
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+  pointer-events: none;
 }
 
 .axom-startup-intro__controls {
@@ -102,7 +123,7 @@
   color: #f2eee6;
   animation: axom-update-in 260ms ease-out both;
 }
-.axom-update-cinematic__film { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.axom-update-cinematic__film { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
 .axom-update-cinematic__status {
   position: absolute;
   bottom: max(48px, calc(env(safe-area-inset-bottom) + 32px));
@@ -140,3 +161,14 @@
 }
 :root[data-motion="reduce"] .axom-update-cinematic { animation: none; }
 :root[data-motion="reduce"] .axom-update-cinematic__bar::after { animation: none; width: 100%; opacity: .5; }
+
+/* Portrait screens would crop the lockup, so fit the film and feather its
+   top and bottom edges into the black. */
+@media (max-aspect-ratio: 1/1) {
+  .axom-startup-intro__film,
+  .axom-update-cinematic__film {
+    object-fit: contain;
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 16%, #000 84%, transparent);
+    mask-image: linear-gradient(to bottom, transparent, #000 16%, #000 84%, transparent);
+  }
+}

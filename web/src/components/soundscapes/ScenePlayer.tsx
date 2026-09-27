@@ -15,8 +15,14 @@ export function ScenePlayer({ scene, animate, className = "" }: { scene: Scene; 
     if (!video) return;
     let visible = true;
     const sync = () => {
-      if (animate && !reduced && visible && !document.hidden) void video.play().catch(() => { /* autoplay blocked: poster stays */ });
-      else video.pause();
+      try {
+        if (animate && !reduced && visible && !document.hidden) {
+          const started = video.play() as Promise<void> | undefined;
+          started?.catch?.(() => { /* autoplay blocked: poster stays */ });
+        } else {
+          video.pause();
+        }
+      } catch { /* media playback unavailable (tests, old WebViews): the poster stays */ }
     };
     const observer = typeof IntersectionObserver !== "undefined"
       ? new IntersectionObserver(([entry]) => { visible = entry.isIntersecting; sync(); })

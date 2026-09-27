@@ -48,7 +48,7 @@ describe("GuidedTour", () => {
   it("contains exactly seven meaningful steps and retains the accepted Question Bank workflow", () => {
     expect(GUIDED_TOUR_STEPS).toHaveLength(7);
     expect(GUIDED_TOUR_STEPS.map((step) => step.title)).toEqual([
-      "Today’s plan",
+      "Up next",
       "Course Tracker",
       "Question Bank",
       "Why AXOM suggested this",
@@ -105,14 +105,14 @@ describe("GuidedTour", () => {
     unmount();
     sessionStorage.setItem(TOUR_PROGRESS_KEY, "99");
     render(<TourHarness />);
-    expect(screen.getByText("Today’s plan", { selector: ".tour-tip-title" })).toBeTruthy();
+    expect(screen.getByText("Up next", { selector: ".tour-tip-title" })).toBeTruthy();
   });
 
   it("keeps controls reachable when a target is missing and supports Escape", () => {
     const onExit = vi.fn();
     render(<TourHarness onExit={onExit} />);
 
-    const dialog = screen.getByRole("dialog", { name: "Today’s plan" });
+    const dialog = screen.getByRole("dialog", { name: "Up next" });
     expect(dialog.classList.contains("centered")).toBe(true);
     expect(screen.getByRole("button", { name: "Next" })).toBeTruthy();
     expect(document.activeElement).toBe(dialog);

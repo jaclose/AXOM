@@ -771,7 +771,7 @@ function DashboardVisibilitySettings() {
         </div>
       </div>
       <div className="settings-widget-grid">
-        {CURRENT_DASHBOARD_WIDGET_IDS.filter((id) => id !== "welcome" && id !== "commandBrief").map((id) => (
+        {CURRENT_DASHBOARD_WIDGET_IDS.filter((id) => id !== "welcome").map((id) => (
           <label className="early-feature-row" key={id}>
             <input type="checkbox" checked={!hidden.has(id)} onChange={(event) => setVisible(id, event.target.checked)} />
             <span>{dashboardWidgetCatalogItem(id).label}</span>

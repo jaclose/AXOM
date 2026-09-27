@@ -96,7 +96,8 @@ describe("Dashboard Daily Check-In", () => {
       commitmentLevel: 5,
     });
     expect(screen.getByText("95 min")).toBeTruthy();
-    expect(screen.getByText("Renal physiology")).toBeTruthy();
+    // Up next may also suggest the priority; this checks the check-in summary.
+    expect(screen.getByText("Renal physiology", { selector: ":not(.up-next-title)" })).toBeTruthy();
     expect(screen.getByText("Late lab")).toBeTruthy();
 
     fireEvent.change(screen.getByPlaceholderText("End-of-day note (optional)"), {

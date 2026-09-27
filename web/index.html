@@ -50,6 +50,11 @@
         document.querySelector('meta[name="theme-color"]')?.setAttribute("content", chrome);
       })();
     </script>
+    <style>
+      /* Before any stylesheet loads: the films' black (or the light theme's paper), never browser white. */
+      html { background: #0d0d0e; color-scheme: dark; }
+      html[data-theme="light"] { background: #f3eee3; color-scheme: light; }
+    </style>
     <meta name="description" content="AXOM — a private academic operating system. Courses, mastery tracking, sessions, questions, and recovery in one calm cockpit." />
     <link rel="manifest" href="./manifest.webmanifest" />
     <title>AXOM</title>
