@@ -40,7 +40,9 @@ try {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   browser = await chromium.launch({ headless: true, ...(process.env.AXOM_BROWSER_CHANNEL ? { channel: process.env.AXOM_BROWSER_CHANNEL } : {}) });
-  const context = await browser.newContext();
+  // Reduced motion skips the startup intro film. Browsers that can play it keep
+  // the app inert for up to 1.8 s, and fill() into an inert input is a no-op.
+  const context = await browser.newContext({ reducedMotion: 'reduce' });
   const page = await context.newPage();
   await page.goto(origin, { waitUntil: 'networkidle' });
   await page.getByLabel('Display name (optional)').fill('Update persistence check');
