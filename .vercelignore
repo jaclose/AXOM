@@ -26,3 +26,9 @@ web/tsconfig.tsbuildinfo
 !/scripts/
 !/scripts/release-notes.mjs
 !/scripts/release-notes.d.mts
+
+# Shared Supabase AI proxy core used by web TypeScript tests.
+!/supabase/
+!/supabase/functions/
+!/supabase/functions/ai-proxy/
+!/supabase/functions/ai-proxy/core.ts
