@@ -9,6 +9,7 @@
 import type { BriefMode } from "../commandBrief";
 import type { AnkiCardType } from "../ankiCards";
 import type { QuestionErrorType } from "../questions";
+import type { AiTaskId, TaskInputs } from "../../../../supabase/functions/ai-proxy/tasks";
 
 export type AiMode = "off" | "local" | "cloud" | "mock";
 
@@ -31,6 +32,15 @@ export interface AiJsonRequest {
   prompt: string;
   /** Rough cap; providers map it to their own parameter. */
   maxTokens?: number;
+  /** Feature or task id, for metering and deterministic demo output. */
+  task?: string;
+  /** Expected JSON shape; providers that support structured output enforce it. */
+  schema?: Record<string, unknown>;
+}
+
+export interface AiTaskReply {
+  result: unknown;
+  promptVersion?: string;
 }
 
 /** The base capability every provider implements. */
@@ -40,6 +50,12 @@ export interface AIProvider {
   available(): Promise<AiAvailability>;
   /** One-shot completion that must return parseable JSON. */
   completeJson(req: AiJsonRequest): Promise<unknown>;
+  /**
+   * Runs a server-owned task (AXOM Cloud AI): the server builds the prompt,
+   * schema and budget from these inputs. Providers without it get the same
+   * prompt built locally through completeJson.
+   */
+  runTask?<T extends AiTaskId>(task: T, input: TaskInputs[T]): Promise<AiTaskReply>;
 }
 
 // --- feature-level provider interfaces (directive §7) -------------------------------

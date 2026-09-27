@@ -3,7 +3,8 @@
 // Anthropic key stays server-side; the app only sends the signed-in user's
 // session token, and the server meters a per-user daily allowance.
 // ===========================================================================
-import type { AIProvider, AiAvailability, AiJsonRequest } from "./types";
+import type { AIProvider, AiAvailability, AiJsonRequest, AiTaskReply } from "./types";
+import type { AiTaskId, TaskInputs } from "../../../../supabase/functions/ai-proxy/tasks";
 
 export interface CloudProviderOptions {
   endpoint: string;
@@ -16,8 +17,6 @@ export interface CloudProviderOptions {
 }
 
 export interface CloudJsonRequest extends AiJsonRequest {
-  task?: string;
-  schema?: Record<string, unknown>;
   tier?: "fast" | "quality";
 }
 
@@ -27,8 +26,39 @@ export function cloudAiRemaining(): number | null {
   return lastRemaining;
 }
 
-export function createCloudProvider(options: CloudProviderOptions): AIProvider & { completeJson(req: CloudJsonRequest): Promise<unknown> } {
+export function createCloudProvider(options: CloudProviderOptions): AIProvider & {
+  completeJson(req: CloudJsonRequest): Promise<unknown>;
+  runTask<T extends AiTaskId>(task: T, input: TaskInputs[T]): Promise<AiTaskReply>;
+} {
   const doFetch = options.fetchImpl ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
+
+  async function post(body: Record<string, unknown>): Promise<AiTaskReply> {
+    const token = await options.getAccessToken();
+    if (!token) throw new Error("Sign in to your AXOM account to use Cloud AI.");
+    const response = await doFetch(options.endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        ...(options.apiKey ? { apikey: options.apiKey } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+    let payload: { result?: unknown; error?: string; remaining?: number; promptVersion?: string } = {};
+    try { payload = await response.json(); } catch { /* handled below */ }
+    if (typeof payload.remaining === "number") lastRemaining = payload.remaining;
+    if (!response.ok) {
+      if (response.status === 429) lastRemaining = 0;
+      throw new Error(payload.error || `Cloud AI failed (${response.status}).`);
+    }
+    if (payload.result === undefined) throw new Error("Cloud AI returned an empty reply.");
+    const result = payload.result as { error?: unknown };
+    if (result && typeof result === "object" && !Array.isArray(result) && typeof result.error === "string" && Object.keys(result).length === 1) {
+      throw new Error(result.error);
+    }
+    return { result: payload.result, promptVersion: payload.promptVersion };
+  }
+
   return {
     info: { kind: "anthropic", label: "AXOM Cloud AI (Claude)", local: false, requiresKey: false },
     async available(): Promise<AiAvailability> {
@@ -38,37 +68,17 @@ export function createCloudProvider(options: CloudProviderOptions): AIProvider &
         : { ok: false, detail: "Sign in to your AXOM account to use Cloud AI." };
     },
     async completeJson(req: CloudJsonRequest): Promise<unknown> {
-      const token = await options.getAccessToken();
-      if (!token) throw new Error("Sign in to your AXOM account to use Cloud AI.");
-      const response = await doFetch(options.endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          ...(options.apiKey ? { apikey: options.apiKey } : {}),
-        },
-        body: JSON.stringify({
-          task: req.task,
-          system: req.system,
-          prompt: req.prompt,
-          maxTokens: req.maxTokens,
-          tier: req.tier ?? options.tier ?? "fast",
-          schema: req.schema,
-        }),
+      const reply = await post({
+        task: req.task,
+        system: req.system,
+        prompt: req.prompt,
+        maxTokens: req.maxTokens,
+        tier: req.tier ?? options.tier ?? "fast",
+        schema: req.schema,
       });
-      let payload: { result?: unknown; error?: string; remaining?: number } = {};
-      try { payload = await response.json(); } catch { /* handled below */ }
-      if (typeof payload.remaining === "number") lastRemaining = payload.remaining;
-      if (!response.ok) {
-        if (response.status === 429) lastRemaining = 0;
-        throw new Error(payload.error || `Cloud AI failed (${response.status}).`);
-      }
-      if (payload.result === undefined) throw new Error("Cloud AI returned an empty reply.");
-      const result = payload.result as { error?: unknown };
-      if (result && typeof result === "object" && !Array.isArray(result) && typeof result.error === "string" && Object.keys(result).length === 1) {
-        throw new Error(result.error);
-      }
-      return payload.result;
+      return reply.result;
     },
+    // The server owns the prompt, schema, budget and model tier for tasks.
+    runTask: (task, input) => post({ task, input }),
   };
 }

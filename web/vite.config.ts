@@ -35,11 +35,13 @@ export default defineConfig({
   },
   base: "./",
   server: {
-    // The release-notes parser is shared with ../scripts (release tooling).
+    // The release-notes parser is shared with ../scripts (release tooling), and
+    // the AI task prompts with the ai-proxy Edge Function.
     fs: {
       allow: [
         fileURLToPath(new URL(".", import.meta.url)),
         fileURLToPath(new URL("../scripts/", import.meta.url)),
+        fileURLToPath(new URL("../supabase/functions/", import.meta.url)),
       ],
     },
   },

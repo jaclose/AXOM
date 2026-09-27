@@ -2,6 +2,7 @@
 // network APIs here, so the web test suite can exercise it directly.
 
 export type AiTier = "fast" | "quality";
+export type AiEffort = "low" | "medium" | "high";
 
 export interface ProxyRequestBody {
   task?: string;
@@ -11,6 +12,20 @@ export interface ProxyRequestBody {
   tier?: AiTier;
   /** Optional JSON Schema; enables Claude structured outputs (guaranteed JSON). */
   schema?: Record<string, unknown>;
+  /** Set only by server-owned tasks; sent only to models that accept it. */
+  effort?: AiEffort;
+}
+
+/** The Messages API request this proxy sends (a subset of the SDK's params). */
+export interface AnthropicRequest {
+  model: string;
+  max_tokens: number;
+  system: string;
+  messages: Array<{ role: "user"; content: string }>;
+  output_config?: {
+    format?: { type: "json_schema"; schema: Record<string, unknown> };
+    effort?: AiEffort;
+  };
 }
 
 export const LIMITS = { promptChars: 24_000, systemChars: 6_000, maxTokens: 2_000, taskChars: 64 } as const;
@@ -34,14 +49,37 @@ export function validateBody(value: unknown): { ok: true; body: ProxyRequestBody
   return { ok: true, body: { prompt, system, tier, maxTokens, schema, task } };
 }
 
-export function buildAnthropicRequest(body: ProxyRequestBody, models: Record<AiTier, string>) {
+/**
+ * Effort works on current Opus, Sonnet and Fable models. Haiku 4.5 and older
+ * Sonnet/Opus models reject it, and the tier models are configurable secrets.
+ */
+export function supportsEffort(model: string): boolean {
+  return /^claude-(opus-(4-[5-9]|[5-9])|sonnet-(4-[6-9]|[5-9])|fable|mythos)/.test(model);
+}
+
+export function buildAnthropicRequest(body: ProxyRequestBody, models: Record<AiTier, string>): AnthropicRequest {
+  const model = models[body.tier ?? "fast"];
+  const outputConfig: NonNullable<AnthropicRequest["output_config"]> = {
+    ...(body.schema ? { format: { type: "json_schema" as const, schema: body.schema } } : {}),
+    ...(body.effort && supportsEffort(model) ? { effort: body.effort } : {}),
+  };
   return {
-    model: models[body.tier ?? "fast"],
+    model,
     max_tokens: body.maxTokens ?? 800,
     system: [body.system, JSON_RULE].filter(Boolean).join("\n\n"),
     messages: [{ role: "user", content: body.prompt }],
-    ...(body.schema ? { output_config: { format: { type: "json_schema", schema: body.schema } } } : {}),
+    ...(Object.keys(outputConfig).length ? { output_config: outputConfig } : {}),
   };
+}
+
+/**
+ * A reply that did not finish normally has no trustworthy JSON: a refusal may
+ * not match the schema, and a max_tokens stop truncates it mid-value.
+ */
+export function stopReasonError(stopReason: string | null | undefined): { status: number; error: string } | null {
+  if (stopReason === "refusal") return { status: 422, error: "Claude declined this request. Try different material or wording." };
+  if (stopReason === "max_tokens") return { status: 502, error: "The AI reply was cut off before it finished. Ask for fewer items or send shorter material." };
+  return null;
 }
 
 /** Parse model text as JSON, tolerating stray code fences or leading prose. */
@@ -64,6 +102,7 @@ export function textFromAnthropic(data: unknown): string {
 
 /** Map upstream failures to messages that are safe and useful to show a learner. */
 export function upstreamError(status: number): { status: number; error: string } {
+  if (status === 408) return { status: 504, error: "The AI service took too long to answer. Ask for fewer items or send shorter material." };
   if (status === 429 || status === 529) return { status: 503, error: "The AI service is busy. Try again in a moment." };
   if (status === 400) return { status: 502, error: "The AI service rejected this request." };
   if (status === 401 || status === 403) return { status: 503, error: "Cloud AI is misconfigured on the server." };

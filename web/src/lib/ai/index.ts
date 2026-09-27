@@ -11,6 +11,9 @@ import { createMockProvider } from "./mock";
 import { createCloudProvider } from "./cloud";
 import { cloudConfigured, loadSupabase } from "../account/supabase";
 import { validateGeneratedCards, validateGeneratedQuestions } from "./schemas";
+import { buildTask, taskWarnings, TASK_LIMITS, type AiTaskId, type TaskInputs } from "../../../../supabase/functions/ai-proxy/tasks";
+
+export { TASK_LIMITS } from "../../../../supabase/functions/ai-proxy/tasks";
 
 export { detectOllama } from "./ollama";
 export { cloudAiRemaining } from "./cloud";
@@ -60,17 +63,27 @@ export async function checkProviderHealth(settings: AiSettings = loadAiSettings(
   return detectOllama(settings.localEndpoint);
 }
 
-const CARD_PROMPT_VERSION = "cardgen-v1";
+/**
+ * Runs a generation task. AXOM Cloud AI builds the prompt, schema and budget
+ * on the server; Local and Demo providers get the identical prompt built here.
+ * Inputs are validated first, so an oversized paste never spends quota.
+ */
+async function runAiTask<T extends AiTaskId>(provider: AIProvider, task: T, input: TaskInputs[T]): Promise<{ raw: unknown; promptVersion: string }> {
+  const built = buildTask(task, input);
+  if (!built.ok) throw new Error(built.error);
+  if (provider.runTask) {
+    const reply = await provider.runTask(task, input);
+    return { raw: reply.result, promptVersion: reply.promptVersion ?? built.task.promptVersion };
+  }
+  const { system, prompt, maxTokens, schema, promptVersion } = built.task;
+  return { raw: await provider.completeJson({ task, system, prompt, maxTokens, schema }), promptVersion };
+}
 
-const STYLE_HINT: Record<CardGenerationStyle, string> = {
-  concise: "Prefer short basic cards, one fact each.",
-  detailed: "Include an extra field with mechanism context on each card.",
-  "cloze-heavy": "Prefer cloze deletions ({{c1::...}}) for discrete facts.",
-  "clinical-vignette-heavy": "Prefer short clinical vignettes asking for diagnosis or next step.",
-  "exam-style": "Mirror board-exam phrasing; include 'why-not-others' cards where useful.",
-  "mechanism-focused": "Prefer mechanism-chain cards (A → B → C).",
-  "image-labeling": "Create image-occlusion placeholder cards describing the structure to label.",
-};
+/** An empty batch is explained by the model's own warning when it gave one. */
+function emptyBatchError(kind: string, raw: unknown, errors: string[]): Error {
+  const reason = taskWarnings(raw)[0] ?? errors.join(" ");
+  return new Error(`No usable ${kind} came back. ${reason}`.trim());
+}
 
 /**
  * Generate a SMALL reviewed batch of card drafts (directive §11: quality over
@@ -80,36 +93,18 @@ export async function generateCardDrafts(
   provider: AIProvider,
   req: { material: string; topic?: string; style: CardGenerationStyle; maxCards: number; source?: string },
 ): Promise<{ drafts: GeneratedCardDraft[]; warnings: string[]; promptVersion: string }> {
-  const max = Math.min(req.maxCards, 12);
-  const raw = await provider.completeJson({
-    system: [
-      "You create high-quality active-recall flashcards for a medical student.",
-      "Rules: one testable idea per card; no vague trivia; no copied long passages;",
-      "clinically useful phrasing; include a source string on every card;",
-      "cloze cards must use {{c1::...}} syntax. Quality over volume — fewer, better cards.",
-      `Return JSON: {"cards":[{"type","front","back","extra?","tags":[],"source"}]}. Max ${max} cards.`,
-    ].join(" "),
-    prompt: [
-      req.topic ? `Topic: ${req.topic}` : "",
-      req.source ? `Source: ${req.source}` : "",
-      `Style: ${STYLE_HINT[req.style]}`,
-      "Material:",
-      req.material.slice(0, 8000),
-    ].filter(Boolean).join("\n"),
-    maxTokens: 2000,
+  const max = Math.max(1, Math.min(req.maxCards, TASK_LIMITS.maxCards));
+  const { raw, promptVersion } = await runAiTask(provider, "cards.generate", {
+    material: req.material, topic: req.topic, source: req.source, style: req.style, maxCards: max,
   });
   const result = validateGeneratedCards(raw);
-  if (!result.ok || !result.value) {
-    throw new Error(`The model's card output failed validation: ${result.errors.join(" ")}`);
-  }
-  return { drafts: result.value.slice(0, max), warnings: result.errors, promptVersion: CARD_PROMPT_VERSION };
+  if (!result.ok || !result.value) throw emptyBatchError("cards", raw, result.errors);
+  return { drafts: result.value.slice(0, max), warnings: [...taskWarnings(raw), ...result.errors], promptVersion };
 }
 
 // --- question-level AI actions (pre-beta §9) -----------------------------------
 // All plain-text answers come back as {"text": "..."} so completeJson stays the
 // single transport; callers render the text, never auto-save it.
-
-const QUESTION_PROMPT_VERSION = "questiongen-v1";
 
 async function completeText(provider: AIProvider, system: string, prompt: string): Promise<string> {
   const raw = await provider.completeJson({
@@ -204,28 +199,13 @@ export async function generateQuestionDrafts(
     reference?: string;
   },
 ): Promise<{ drafts: GeneratedQuestionDraft[]; warnings: string[]; promptVersion: string }> {
-  const count = Math.min(Math.max(1, req.count), 10);
-  const raw = await provider.completeJson({
-    system: [
-      "You write ORIGINAL board-style practice questions for a medical student.",
-      "Never reproduce copyrighted question-bank content. One best answer, 4-5 options,",
-      "plausible distractors, and a real explanation including why the wrong options are wrong.",
-      `Return JSON: {"questions":[{"stem","options":[{"key","text"}],"correctKey","explanation","whyOthersWrong?","tags":[],"estimatedDifficulty"}]}. Exactly ${count} questions.`,
-    ].join(" "),
-    prompt: [
-      `Topic: ${req.topic}`,
-      req.category ? `Category: ${req.category}` : "",
-      req.examStyle ? `Style: ${req.examStyle}` : "",
-      `Difficulty: ${req.difficulty}`,
-      req.reference ? `Reference material (base questions on this):\n${req.reference.slice(0, 6000)}` : "",
-    ].filter(Boolean).join("\n"),
-    maxTokens: 2500,
+  const count = Math.min(Math.max(1, req.count), TASK_LIMITS.maxQuestions);
+  const { raw, promptVersion } = await runAiTask(provider, "questions.generate", {
+    topic: req.topic, category: req.category, examStyle: req.examStyle, difficulty: req.difficulty, count, reference: req.reference,
   });
   const result = validateGeneratedQuestions(raw);
-  if (!result.ok || !result.value) {
-    throw new Error(`The model's question output failed validation: ${result.errors.join(" ")}`);
-  }
-  return { drafts: result.value.slice(0, count), warnings: result.errors, promptVersion: QUESTION_PROMPT_VERSION };
+  if (!result.ok || !result.value) throw emptyBatchError("questions", raw, result.errors);
+  return { drafts: result.value.slice(0, count), warnings: [...taskWarnings(raw), ...result.errors], promptVersion };
 }
 
 /**

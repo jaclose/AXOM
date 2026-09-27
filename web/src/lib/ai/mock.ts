@@ -12,46 +12,15 @@ export function createMockProvider(): AIProvider {
     info: { kind: "mock", label: MOCK_LABEL, local: true, requiresKey: false },
     available: async () => ({ ok: true, detail: "Demo mode active — responses are canned examples.", models: ["demo"] }),
     async completeJson(req: AiJsonRequest): Promise<unknown> {
-      // Deterministic: keyed off the prompt so tests are stable.
-      if (/card/i.test(req.prompt)) {
-        return {
-          cards: [
-            {
-              type: "basic",
-              front: "[DEMO] What activates the classical complement pathway?",
-              back: "[DEMO] Antigen-antibody complexes (IgM or IgG).",
-              tags: ["demo"],
-              source: "Demo output — replace with a real provider",
-            },
-            {
-              type: "cloze",
-              front: "[DEMO] C3b's main role is {{c1::opsonization}}.",
-              back: "",
-              tags: ["demo"],
-              source: "Demo output — replace with a real provider",
-            },
-          ],
-        };
-      }
+      // Deterministic: keyed off the task id, else the prompt, so tests are
+      // stable. The task id wins: "Topic: cardiology" is not a card request.
+      if (req.task === "cards.generate") return demoCards();
+      if (req.task === "questions.generate") return demoQuestions();
+      if (/card/i.test(req.prompt)) return demoCards();
       if (/error|classif/i.test(req.prompt)) {
         return { errorType: "knowledge-gap", rationale: "[DEMO] Canned classification for development.", confidence: 0.5 };
       }
-      if (/questions/i.test(req.system ?? "") && /topic/i.test(req.prompt)) {
-        return {
-          questions: [{
-            stem: "[DEMO] A 34-year-old presents with recurrent Neisseria infections. Which complement component is most likely deficient?",
-            options: [
-              { key: "A", text: "C3" }, { key: "B", text: "C5-C9" },
-              { key: "C", text: "C1 esterase inhibitor" }, { key: "D", text: "Factor H" },
-            ],
-            correctKey: "B",
-            explanation: "[DEMO] Terminal complement (MAC) deficiency classically predisposes to recurrent Neisseria infections.",
-            whyOthersWrong: "[DEMO] C3 deficiency causes pyogenic infections; C1-INH deficiency causes angioedema.",
-            tags: ["demo", "immunology"],
-            estimatedDifficulty: "medium",
-          }],
-        };
-      }
+      if (/questions/i.test(req.system ?? "") && /topic/i.test(req.prompt)) return demoQuestions();
       if (/map the correct answer/i.test(req.system ?? "")) {
         return { suggestedKey: null, evidence: null, confidence: 0.3, needsReview: true };
       }
@@ -87,5 +56,43 @@ export function createMockProvider(): AIProvider {
         assumptions: ["Demo mode is active."],
       };
     },
+  };
+}
+
+function demoCards() {
+  return {
+    cards: [
+      {
+        type: "basic",
+        front: "[DEMO] What activates the classical complement pathway?",
+        back: "[DEMO] Antigen-antibody complexes (IgM or IgG).",
+        tags: ["demo"],
+        source: "Demo output — replace with a real provider",
+      },
+      {
+        type: "cloze",
+        front: "[DEMO] C3b's main role is {{c1::opsonization}}.",
+        back: "",
+        tags: ["demo"],
+        source: "Demo output — replace with a real provider",
+      },
+    ],
+  };
+}
+
+function demoQuestions() {
+  return {
+    questions: [{
+      stem: "[DEMO] A 34-year-old presents with recurrent Neisseria infections. Which complement component is most likely deficient?",
+      options: [
+        { key: "A", text: "C3" }, { key: "B", text: "C5-C9" },
+        { key: "C", text: "C1 esterase inhibitor" }, { key: "D", text: "Factor H" },
+      ],
+      correctKey: "B",
+      explanation: "[DEMO] Terminal complement (MAC) deficiency classically predisposes to recurrent Neisseria infections.",
+      whyOthersWrong: "[DEMO] C3 deficiency causes pyogenic infections; C1-INH deficiency causes angioedema.",
+      tags: ["demo", "immunology"],
+      estimatedDifficulty: "medium",
+    }],
   };
 }

@@ -32,6 +32,8 @@ jobs:
         run: node --test scripts/*.test.mjs
       - name: Typecheck, lint, test, and production build
         run: npm --prefix web run quality
+      - name: Type-check the ai-proxy Edge Function (Deno)
+        run: npx --yes deno@2.9.6 check --no-lock --node-modules-dir=none --no-config supabase/functions/ai-proxy/index.ts
       - name: Install browser for production update checks
         run: npm --prefix web exec -- playwright install --with-deps chromium
       - name: Verify consent, recovery snapshot and offline update behavior
