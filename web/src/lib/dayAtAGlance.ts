@@ -487,9 +487,10 @@ function selectEnergy(state: DayAtAGlanceState, dayKey: string): DayAtAGlanceEne
     tasks: state.tasks,
     dayPlans: state.dayPlans,
     productivityTrackers: state.productivityTrackers,
+    energyChecks: state.profile?.energyChecks,
   });
   const journalIds = uniqueStrings([
-    result.selfReportedEnergy.source,
+    result.selfReportedEnergy.source?.startsWith("energy-check:") ? undefined : result.selfReportedEnergy.source,
     ...state.journal
       .filter((entry) => result.possibleSignals.some((signal) => signal.id.startsWith(`journal-signal:${entry.id}:`)))
       .map((entry) => entry.id),

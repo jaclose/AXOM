@@ -1,7 +1,8 @@
 import type { CSSProperties } from "react";
 import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
 import { ICON_SIZE } from "../../lib/iconSize";
-import { gradeColor, todayGrade } from "../../lib/scoring";
+import { gradeColor, todayGrade, type GradeTargets } from "../../lib/scoring";
+import { useStore } from "../../lib/store";
 import { formatMetric, reportTrendMetricValue, type ReportDayDatum, type ReportTrendMetric } from "../../lib/reports";
 
 export const TREND_METRIC_LABELS: Record<ReportTrendMetric, string> = {
@@ -16,12 +17,18 @@ export const TREND_METRIC_LABELS: Record<ReportTrendMetric, string> = {
  * green → blue by study minutes / cards) so both pages read identically.
  * Non-minute metrics use the accent; target completion uses met/missed.
  */
-export function dayBarColor(day: ReportDayDatum, metric: ReportTrendMetric): string {
+export function dayBarColor(day: ReportDayDatum, metric: ReportTrendMetric, targets?: GradeTargets): string {
   if (metric === "requirements") {
     return day.status === "met" ? "var(--green)" : day.status === "missed" ? "var(--orange)" : "var(--cyan)";
   }
-  if (metric === "minutes") return gradeColor(todayGrade(day.minutes, day.cards));
+  if (metric === "minutes") return gradeColor(todayGrade(day.minutes, day.cards, targets));
   return "rgb(var(--accent-rgb))";
+}
+
+function useGradeTargets(): GradeTargets {
+  const minutes = useStore((s) => s.profile.dailyMinuteTarget);
+  const cards = useStore((s) => s.profile.dailyCardTarget);
+  return { minutes, cards };
 }
 
 function weekdayShort(dayKey: string) {
@@ -64,6 +71,7 @@ export function WeeklyTrendChart({
   selected?: string | null;
   onSelect: (dayKey: string) => void;
 }) {
+  const targets = useGradeTargets();
   const values = days.map((day) => reportTrendMetricValue(day, metric));
   const ghosts = previous.map((day) => reportTrendMetricValue(day, metric));
   const dense = days.length > 10;
@@ -87,7 +95,7 @@ export function WeeklyTrendChart({
             const value = values[index];
             const ghost = ghosts[index] ?? 0;
             const isToday = day.dayKey === todayKey;
-            const style = { "--bar": dayBarColor(day, metric) } as CSSProperties;
+            const style = { "--bar": dayBarColor(day, metric, targets) } as CSSProperties;
             return (
               <button
                 key={day.dayKey}
@@ -154,6 +162,7 @@ export function MonthlyTrendCalendar({
   selected?: string | null;
   onSelect: (dayKey: string) => void;
 }) {
+  const targets = useGradeTargets();
   const leading = days[0] ? new Date(`${days[0].dayKey}T12:00:00`).getDay() : 0;
   const max = Math.max(1, ...days.map((day) => reportTrendMetricValue(day, metric)));
   return (
@@ -162,7 +171,7 @@ export function MonthlyTrendCalendar({
       {Array.from({ length: leading }, (_, index) => <span className="trend-month-cell blank" key={`blank-${index}`} />)}
       {days.map((day) => {
         const value = reportTrendMetricValue(day, metric);
-        const color = dayBarColor(day, metric);
+        const color = dayBarColor(day, metric, targets);
         const future = day.dayKey > todayKey;
         return (
           <button

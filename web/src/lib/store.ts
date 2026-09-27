@@ -4,6 +4,7 @@
 // able, which is what makes the app "modular" rather than the fixed Swift build.
 // ===========================================================================
 import { create } from "zustand";
+import { normalizeEnergyChecks } from "./energyInsights";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type {
   BoardBlueprintLog, BoardExamId, BoardPrepProfile, Course, CourseModule, DailyRolloverEvent, DayPlan, HubFolder, JournalEntry, NoctyriumState,
@@ -2248,6 +2249,7 @@ function normalizeProfile(value: unknown): Profile {
     focusCheckIn: profile.focusCheckIn === undefined
       ? undefined
       : normalizeFocusCheckInPreferences(profile.focusCheckIn),
+    energyChecks: normalizeEnergyChecks(profile.energyChecks),
     // Preserve optional opt-in fields so they survive reset/migration.
     blueprintMode: profile.blueprintMode === "usmle" || profile.blueprintMode === "prehealth"
       ? profile.blueprintMode as Profile["blueprintMode"] : undefined,

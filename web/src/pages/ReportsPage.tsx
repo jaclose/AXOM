@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Flame, Target, Activity, CalendarCheck, Layers, ListChecks, Download, BatteryCharging, Gauge, AlertTriangle } from "lucide-react";
 import { useStore } from "../lib/store";
 import { GlassCard, GButton, PanelHeader, Tag } from "../components/ui/primitives";
-import { dayTotals, todayGrade, gradeColor, gradeLabel, prettyDate } from "../lib/scoring";
+import { dayTotals, todayGrade, gradeColor, gradeLabel, gradeLegend, prettyDate } from "../lib/scoring";
 import { PASS_COLOR, PASS_LABEL, YIELD_LABEL, YIELD_TONE, passStage, scopeMastery } from "../lib/tracker";
 import { resolveTrack } from "../lib/tracks";
 import { exportStateWithAttachments } from "../lib/backup";
@@ -28,6 +28,8 @@ import { evaluateDailySuccess } from "../lib/dailySuccess";
 import { MonthlyTrendCalendar, TREND_METRIC_LABELS, TrendDelta, WeeklyTrendChart } from "../components/reports/TrendCharts";
 import { ReportInsightCard, type ReportCardInsight } from "../components/reports/ReportInsightCard";
 import { ICON_SIZE } from "../lib/iconSize";
+import { EnergyFocusPanel, useEnergyInputs } from "../components/energy/EnergyInsights";
+import { todaysCapacity } from "../lib/energyInsights";
 
 const RANGES = [14, 30] as const;
 const STAGES: PassStage[] = ["untouched", "red", "young", "mature", "mastered"];
@@ -72,13 +74,16 @@ export function ReportsPage() {
     tasks: s.tasks,
     dayPlans: s.dayPlans,
     productivityTrackers: s.productivityTrackers,
-  }), [s.activeDayKey, s.energyFactors, s.journal, s.logs, s.tasks, s.dayPlans, s.productivityTrackers]);
+    energyChecks: s.profile.energyChecks,
+  }), [s.activeDayKey, s.energyFactors, s.journal, s.logs, s.tasks, s.dayPlans, s.productivityTrackers, s.profile.energyChecks]);
+  const energyInputs = useEnergyInputs();
+  const capacity = useMemo(() => todaysCapacity(energyInputs, s.activeDayKey), [energyInputs, s.activeDayKey]);
 
   const days = useMemo(() => reportSummary.observedDates.map((key) => {
     const d = new Date(`${key}T12:00:00`);
     const { minutes, cards } = dayTotals(s.logs, key);
-    return { key, date: d, minutes, cards, grade: todayGrade(minutes, cards), active: minutes > 0 || cards > 0 };
-  }), [s.logs, reportSummary.observedDates]);
+    return { key, date: d, minutes, cards, grade: todayGrade(minutes, cards, { minutes: s.profile.dailyMinuteTarget, cards: s.profile.dailyCardTarget }), active: minutes > 0 || cards > 0 };
+  }), [s.logs, reportSummary.observedDates, s.profile.dailyMinuteTarget, s.profile.dailyCardTarget]);
 
   const activeDays = days.filter((d) => d.active);
   const bestDay = days.reduce<typeof days[number] | null>((best, d) => (!best || d.minutes > best.minutes ? d : best), null);
@@ -101,22 +106,26 @@ export function ReportsPage() {
       .filter((contribution) => contribution.userConfirmed)
       .map((contribution) => contribution.factorId ?? contribution.id),
   ])];
-  const readinessMetric: ReportMetric = {
+  const capacityMetric: ReportMetric = {
     id: "readiness",
-    label: "Readiness",
-    value: readinessEvidenceIds.length ? `${readiness.estimatedReadiness}` : "No input",
-    note: readinessEvidenceIds.length ? readiness.primarySignal : "No readiness input yet",
-    numerator: readinessEvidenceIds.length ? readiness.estimatedReadiness : 0,
-    denominator: readinessEvidenceIds.length ? 100 : 0,
-    period: reportSummary.metrics.consistency.period,
-    sourceLabel: "Confirmed readiness contributions and energy check-ins",
-    sourceRecordIds: readinessEvidenceIds,
-    calculation: readinessEvidenceIds.length
-      ? `Baseline plus ${readiness.totalImpact >= 0 ? "+" : ""}${readiness.totalImpact} net contribution; ${readiness.carryoverImpact >= 0 ? "+" : ""}${readiness.carryoverImpact} carryover.`
-      : "No confirmed factor, energy check-in, or qualifying activity supplied a readiness observation.",
-    interpretation: readinessEvidenceIds.length ? readiness.recommendation : "No readiness input yet. AXOM will not present the default baseline as if you reported it.",
-    action: "Open the full calculation",
-    state: readinessEvidenceIds.length ? "ready" : "neutral",
+    label: "Capacity today",
+    value: capacity.hasEvidence ? capacity.label : "No signal",
+    note: !capacity.hasEvidence
+      ? "No energy check today"
+      : capacity.suggestedMinutes
+        ? `Aim for about ${capacity.suggestedMinutes} min of study`
+        : capacity.reasons[0],
+    numerator: 0,
+    denominator: 0,
+    period: capacity.typicalMinutes ? `Typical day ${capacity.typicalMinutes} min` : "Against your own history",
+    sourceLabel: "One-tap energy checks, journal and closeout energy, sleep you logged, and yesterday’s study minutes",
+    sourceRecordIds: capacity.latestEnergy ? [capacity.latestEnergy.at] : [],
+    calculation: "Today’s latest energy is compared with your own 30-day average (about 15 points is one step), yesterday’s minutes with your median active day (over 1.4× suggests going lighter, under half leaves room), plus any sleep you logged for today. Go lighter = 75% of your typical minutes; room to push = 110%.",
+    interpretation: capacity.hasEvidence
+      ? capacity.reasons.join(". ") + "."
+      : "Tap how your energy feels right now. AXOM compares it with your own usual, never with a made-up default.",
+    action: capacity.hasEvidence ? "Plan today around the suggested minutes; check in again after a break." : "Log a one-tap energy check below.",
+    state: capacity.hasEvidence ? (capacity.latestEnergy ? "ready" : "low-data") : "neutral",
   };
   // The legacy performance engine still considers some lifetime journal/plan
   // signals. Never let those older records unlock a directional score for a
@@ -230,9 +239,16 @@ export function ReportsPage() {
         <div className="report-section-heading"><div><span>Current state</span><h2 id="report-current-title">Today</h2></div><p>The signals that can help you decide what to do next.</p></div>
         <div className="grid grid-stats report-card-grid">
           <ReportInsightCard icon={<Target size={ICON_SIZE.emphasis} />} metric={todayMetric} />
-          <ReportInsightCard icon={<BatteryCharging size={ICON_SIZE.emphasis} />} metric={readinessMetric} />
+          <ReportInsightCard icon={<BatteryCharging size={ICON_SIZE.emphasis} />} metric={capacityMetric} />
           <ReportInsightCard icon={<ListChecks size={ICON_SIZE.emphasis} />} metric={openTaskMetric} />
         </div>
+      </section>
+
+      <section className="report-section" aria-labelledby="report-energy-title">
+        <div className="report-section-heading"><div><span>Energy &amp; focus</span><h2 id="report-energy-title">Your rhythm</h2></div><p>When you are sharpest, how much today can hold, and what seems to help — from your own check-ins, sessions and questions.</p></div>
+        <GlassCard pad className="report-energy-card">
+          <EnergyFocusPanel />
+        </GlassCard>
       </section>
 
       <section className="report-section" aria-labelledby="report-trend-title">
@@ -300,10 +316,9 @@ export function ReportsPage() {
           <div className="report-month-legend">
             {trendMetric === "minutes" ? (
               <>
-                <span><i style={{ background: "var(--grade-red)" }} /> Logged, below baseline</span>
-                <span><i style={{ background: "var(--grade-orange)" }} /> Solid</span>
-                <span><i style={{ background: "var(--grade-green)" }} /> Strong</span>
-                <span><i style={{ background: "var(--grade-blue)" }} /> Excellent</span>
+                {gradeLegend({ minutes: s.profile.dailyMinuteTarget, cards: s.profile.dailyCardTarget }).map((row) => (
+                  <span key={row.grade}><i style={{ background: gradeColor(row.grade) }} /> {row.label}</span>
+                ))}
               </>
             ) : <span><i style={{ background: "rgb(var(--accent-rgb))" }} /> Logged {TREND_METRIC_LABELS[trendMetric].toLowerCase()}</span>}
             {hasTargets && <span><i className="met" /> dot = daily targets met</span>}
@@ -326,18 +341,12 @@ export function ReportsPage() {
         <div className="stack gap16 report-advanced-body">
 
       <GlassCard pad className="report-performance-card">
-        <PanelHeader title="Energy, readiness, and performance" sub="Deterministic calculations with visible local sources."
-          action={<Tag tone={!readinessEvidenceIds.length ? "neutral" : performancePreliminary ? "orange" : "green"}>{!readinessEvidenceIds.length ? "No input" : performancePreliminary ? "Preliminary" : "Enough signal"}</Tag>} />
-        {!readinessEvidenceIds.length && (
-          <div className="report-prelim neutral">
-            <BatteryCharging size={ICON_SIZE.body} />
-            <span>No readiness input yet. AXOM will not present its default baseline as if it were a real observation.</span>
-          </div>
-        )}
+        <PanelHeader title="Performance and confirmed factors" sub="Deterministic calculations with visible local sources."
+          action={<Tag tone={performancePreliminary ? "orange" : "green"}>{performancePreliminary ? "Preliminary" : "Enough signal"}</Tag>} />
         {performancePreliminary && (
           <div className="report-prelim">
             <AlertTriangle size={ICON_SIZE.body} />
-            <span>Here are preliminary statistics. AXOM needs about 5 days of use before the energy/performance rating becomes meaningfully personalized.</span>
+            <span>Here are preliminary statistics. AXOM needs about 5 days of use before the performance rating becomes meaningfully personalized.</span>
           </div>
         )}
         <div className="report-insight-grid">
@@ -345,21 +354,15 @@ export function ReportsPage() {
             <b>Performance</b>
             <span>{performancePreliminary ? `Building baseline · ${reportSummary.activeDates.length}/5 active days with signal` : `${performance.performanceScore}/100 · ${performance.performanceLabel}`}</span>
           </div>
-        </div>
-        {readinessEvidenceIds.length > 0 && <div className="report-insight-grid">
-          <div>
-            <b>Readiness recommendation</b>
-            <span>{readiness.recommendation}</span>
-          </div>
-          <div>
-            <b>Factor impact</b>
-            <span>{readiness.totalImpact >= 0 ? "+" : ""}{readiness.totalImpact} net · {readiness.carryoverImpact >= 0 ? "+" : ""}{readiness.carryoverImpact} carryover</span>
-          </div>
-          <div>
+          {readinessEvidenceIds.length > 0 && <div>
+            <b>Confirmed factor impact</b>
+            <span>{readiness.primarySignal} · {readiness.totalImpact >= 0 ? "+" : ""}{readiness.totalImpact} net · {readiness.carryoverImpact >= 0 ? "+" : ""}{readiness.carryoverImpact} carryover</span>
+          </div>}
+          {readiness.possibleSignals.length > 0 && <div>
             <b>Possible journal signals</b>
-            <span>{readiness.possibleSignals.length ? readiness.possibleSignals.map((signal) => signal.label).join(", ") : "No unconfirmed journal signals."}</span>
-          </div>
-        </div>}
+            <span>{readiness.possibleSignals.map((signal) => signal.label).join(", ")} — confirm them in the journal before they count.</span>
+          </div>}
+        </div>
       </GlassCard>
 
       <GlassCard pad data-tour="reports-top">

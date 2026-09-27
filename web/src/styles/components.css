@@ -44,6 +44,7 @@
   font-size: var(--fs-sm);
   font-weight: var(--fw-medium);
   letter-spacing: var(--tracking-tight);
+  text-decoration: none;
   border-radius: var(--btn-radius);
   background: rgba(230, 226, 214, 0.045);
   border: 1px solid rgba(230, 226, 214, 0.11);

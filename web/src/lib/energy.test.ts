@@ -86,6 +86,21 @@ describe("energy readiness engine", () => {
     expect(result.estimatedReadiness).toBe(62);
   });
 
+  it("uses today's latest one-tap energy check ahead of the journal label", () => {
+    const result = calculateReadiness({
+      ...baseInput,
+      journal: [{ id: "journal", date: "2026-06-24T08:00:00", today: "", tomorrow: "", blockers: "", energy: "High", rating: "" }],
+      energyChecks: [
+        { at: "2026-06-23T21:00:00", score: 90 },
+        { at: "2026-06-24T09:00:00", score: 70 },
+        { at: "2026-06-24T15:00:00", score: 30 },
+      ],
+    });
+    expect(result.selfReportedEnergy).toMatchObject({ label: "Low", score: 30, source: "energy-check:2026-06-24T15:00:00" });
+    expect(result.contributions[0]).toMatchObject({ label: "Self-reported energy", explanation: "Your latest one-tap energy check today." });
+    expect(explainLowEnergy(result)).toMatchObject({ triggered: true, trigger: "Self-reported energy", currentValue: 30 });
+  });
+
   it("lets explicit self-reported energy remain authoritative while text inference stays unapplied", () => {
     const result = calculateReadiness({
       ...baseInput,

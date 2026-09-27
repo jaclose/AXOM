@@ -38,7 +38,8 @@
     "audit:beta:folder": "open artifacts/beta-audit-v3",
     "residency:import": "node --experimental-strip-types web/scripts/residency-pipeline.mjs import",
     "residency:validate": "node --experimental-strip-types web/scripts/residency-pipeline.mjs validate",
-    "test:accounts:live": "npm --prefix web run test:accounts:live"
+    "test:accounts:live": "npm --prefix web run test:accounts:live",
+    "soundscapes:import": "node scripts/import-soundscapes.mjs"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2"

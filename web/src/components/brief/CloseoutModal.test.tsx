@@ -53,8 +53,7 @@ describe("CloseoutModal daily loop", () => {
     fireEvent.click(screen.getByText("Planning details"));
     fireEvent.click(screen.getByRole("button", { name: "Higher" }));
 
-    const journalOption = screen.getByRole("checkbox") as HTMLInputElement;
-    expect(journalOption.checked).toBe(false);
+    expect(screen.queryByRole("checkbox")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
 
     expect(onClose).toHaveBeenCalledOnce();
@@ -70,10 +69,21 @@ describe("CloseoutModal daily loop", () => {
       energyVsMorning: "higher",
       tomorrowMode: "auto",
     });
-    expect(useStore.getState().journal).toEqual([]);
+    // The closeout always becomes today's journal page.
+    expect(useStore.getState().journal).toHaveLength(1);
+    expect(useStore.getState().journal[0]).toMatchObject({
+      date: `${DAY}T20:30:00`,
+      today: "Finished the question block",
+      tomorrow: "Start cardiology",
+      blockers: "A late meeting",
+      energy: "High",
+      rating: "Daily closeout",
+      wins: ["Stayed focused"],
+      losses: ["Finish the summary"],
+    });
   });
 
-  it("keeps Journal saving optional and never overwrites an existing same-day entry", () => {
+  it("merges into an existing same-day entry without overwriting anything written there", () => {
     const existing: JournalEntry = {
       id: "existing-journal",
       date: `${DAY}T09:00:00`,
@@ -84,20 +94,28 @@ describe("CloseoutModal daily loop", () => {
       rating: "Useful",
     };
     useStore.setState({ journal: [existing] });
-    const before = structuredClone(useStore.getState().journal);
     render(<CloseoutModal onClose={vi.fn()} />);
 
-    const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
-    expect(checkbox.disabled).toBe(true);
-    expect(screen.getByText("Today already has a journal entry; it will not be overwritten.")).toBeTruthy();
+    expect(screen.getByText(/your writing there stays as it is/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText("What went well?"), { target: { value: "New closeout reflection" } });
+    fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Kept going" } });
+    fireEvent.change(screen.getByLabelText("What got in the way?"), { target: { value: "Fatigue" } });
     fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
 
-    expect(useStore.getState().journal).toEqual(before);
+    const [page] = useStore.getState().journal;
+    expect(useStore.getState().journal).toHaveLength(1);
+    expect(page).toMatchObject({
+      id: "existing-journal",
+      today: "Existing reflection",
+      tomorrow: "Existing plan",
+      blockers: "Fatigue",
+      energy: "Medium",
+      wins: ["Kept going"],
+    });
     expect(useStore.getState().closeouts[0].completedSummary).toBe("New closeout reflection");
   });
 
-  it("adds a Journal entry only after opt-in and derives its energy label from the entered score", () => {
+  it("derives the journal energy label from the entered score", () => {
     render(<CloseoutModal onClose={vi.fn()} />);
 
     fireEvent.change(screen.getByLabelText("What went well?"), { target: { value: "Completed the core review" } });
@@ -105,13 +123,13 @@ describe("CloseoutModal daily loop", () => {
     fireEvent.change(screen.getByLabelText("What got in the way?"), { target: { value: "Noisy room" } });
     fireEvent.change(screen.getByLabelText("What matters tomorrow?"), { target: { value: "Review weak questions" } });
     fireEvent.change(screen.getByLabelText("Energy now (0–100)"), { target: { value: "35" } });
-    fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
 
     expect(useStore.getState().journal).toHaveLength(1);
     expect(useStore.getState().journal[0]).toMatchObject({
       date: `${DAY}T20:30:00`,
-      today: "Completed the core review\n\nWin: Asked for help early",
+      today: "Completed the core review",
+      wins: ["Asked for help early"],
       tomorrow: "Review weak questions",
       blockers: "Noisy room",
       energy: "Low",
@@ -129,7 +147,7 @@ describe("CloseoutModal daily loop", () => {
     expect(onClose).toHaveBeenCalledOnce();
     expect(useStore.getState().closeouts).toHaveLength(1);
     expect(useStore.getState().closeouts[0].tomorrowFirstTask).toBe("Start cardiology");
-    expect(useStore.getState().journal).toEqual([]);
+    expect(useStore.getState().journal[0]).toMatchObject({ tomorrow: "Start cardiology" });
     expect(useUi.getState().journalDay).toBe(DAY);
     expect(window.location.hash).toBe("#journal");
   });

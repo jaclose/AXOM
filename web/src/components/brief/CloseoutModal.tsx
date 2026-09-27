@@ -4,6 +4,8 @@
 // Saving updates tomorrow's Command Brief (first task + mode preference).
 // ===========================================================================
 import { useMemo, useState } from "react";
+import { mergeCloseoutIntoJournal } from "../../lib/closeoutJournal";
+import type { NotebookJournalEntry } from "../../lib/journalNotebook";
 import { useStore } from "../../lib/store";
 import { closeoutForDay, type EnergyVsMorning } from "../../lib/closeout";
 import { MODE_LABEL, type BriefMode } from "../../lib/commandBrief";
@@ -39,9 +41,8 @@ export function CloseoutModal({ onClose }: { onClose: () => void }) {
   const [firstTask, setFirstTask] = useState(existing?.tomorrowFirstTask ?? "");
   const [energy, setEnergy] = useState<EnergyVsMorning | undefined>(existing?.energyVsMorning);
   const [mode, setMode] = useState<"auto" | BriefMode>(existing?.tomorrowMode ?? "auto");
-  const [saveToJournal, setSaveToJournal] = useState(false);
   const glance = useMemo(() => selectDayAtAGlance(s, today, today), [s, today]);
-  const existingJournal = s.journal.some((entry) => entryDayKey(entry) === today);
+  const existingJournal = s.journal.find((entry) => entryDayKey(entry) === today) as NotebookJournalEntry | undefined;
 
   function save(openNotebook = false) {
     const record: Omit<DailyCloseout, "id" | "createdAt" | "updatedAt"> = {
@@ -56,16 +57,13 @@ export function CloseoutModal({ onClose }: { onClose: () => void }) {
       tomorrowMode: mode,
     };
     s.saveCloseout(record);
-    if (saveToJournal && !existingJournal) {
-      s.addJournal({
-        date: `${today}T20:30:00`,
-        today: [completed.trim(), oneWin.trim() ? `Win: ${oneWin.trim()}` : ""].filter(Boolean).join("\n\n") || "Daily closeout",
-        tomorrow: firstTask.trim(),
-        blockers: blocker.trim(),
-        energy: numericEnergyLabel(Number(energyNow)),
-        rating: "Daily closeout",
-      });
-    }
+    // The closeout always lands in today's journal page, without replacing
+    // anything already written there.
+    const merged = mergeCloseoutIntoJournal(existingJournal, {
+      completed, oneWin, blocker, remaining, tomorrow: firstTask, energyLabel: energyNow ? numericEnergyLabel(Number(energyNow)) : "",
+    }, today);
+    if (merged.create) s.addJournal(merged.create);
+    else if (merged.patch && existingJournal) s.updateJournal(existingJournal.id, merged.patch);
     onClose();
     if (openNotebook) gotoJournalDay(today);
   }
@@ -119,10 +117,11 @@ export function CloseoutModal({ onClose }: { onClose: () => void }) {
       </div>
       </details>
 
-      <label className="row gap8 closeout-journal-option">
-        <input type="checkbox" checked={saveToJournal} disabled={existingJournal} onChange={(event) => setSaveToJournal(event.target.checked)} />
-        <span>{existingJournal ? "Today already has a journal entry; it will not be overwritten." : "Also save this as today’s Journal entry"}</span>
-      </label>
+      <p className="sub closeout-journal-option">
+        {existingJournal
+          ? "Saved into today’s journal page too — your writing there stays as it is; this fills empty parts and adds your win."
+          : "Saved as today’s journal page too, alongside the day’s recorded activity."}
+      </p>
     </Modal>
   );
 }

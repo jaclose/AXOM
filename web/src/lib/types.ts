@@ -761,6 +761,8 @@ export interface Profile {
   dailyLoopReminders?: DailyLoopReminderPreferences;
   /** Optional "Are you locked in?" interval check-ins. Delivery state is device-only. */
   focusCheckIn?: import("./focusCheckIn").FocusCheckInPreferences;
+  /** One-tap energy checks (0–100), newest last; synced with the workspace. */
+  energyChecks?: import("./energyInsights").EnergyCheck[];
   blueprintMode?: BlueprintMode; // which lane bar (USMLE vs Pre-Health) is active
   // Repetitive-task autofill (§18): user-owned, local-only.
   taskAutofillDisabled?: boolean;

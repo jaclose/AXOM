@@ -397,3 +397,14 @@
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.88), rgba(231, 225, 212, 0.76));
   box-shadow: 0 24px 70px rgba(91, 75, 48, 0.12);
 }
+
+.journal-auto-badge {
+  margin-left: auto;
+  padding: 2px 9px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: rgba(var(--accent-rgb), 0.95);
+  background: rgba(var(--accent-rgb), 0.1);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
+  border-radius: 999px;
+}

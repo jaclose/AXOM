@@ -25,6 +25,7 @@ import "./styles/settings.css";
 import "./styles/startupIntro.css";
 import "./styles/dock.css";
 import "./styles/soundscapes.css";
+import "./styles/energy.css";
 
 // The inline head script prevents a first-paint flash; this keeps the chosen
 // theme synchronized with OS and cross-tab changes for the rest of the session.

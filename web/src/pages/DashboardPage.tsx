@@ -12,7 +12,7 @@ import {
 import { ICON_SIZE } from "../lib/iconSize";
 import { useLuster } from "../lib/useLuster";
 import { useStore } from "../lib/store";
-import { dayTotals, productiveTotals, todayGrade, gradeLabel, gradeColor, prettyDate, lastNDays, isoDate } from "../lib/scoring";
+import { dayTotals, productiveTotals, todayGrade, gradeLabel, gradeColor, gradeTargetsFor, prettyDate, lastNDays, isoDate } from "../lib/scoring";
 import { missedStandupDays, planForDay } from "../lib/journal";
 import type {
   TrackerItem, DashboardLayoutPreferences, DashboardWidgetId,
@@ -23,6 +23,8 @@ import { gotoJournalDay, useUi } from "../lib/uiStore";
 import { useInView } from "../lib/useInView";
 import { DEFAULT_DASHBOARD_WIDGETS, DEFAULT_HIDDEN_DASHBOARD_WIDGETS } from "../lib/seed";
 import { calculateReadiness } from "../lib/energy";
+import { CapacitySummary } from "../components/energy/EnergyInsights";
+import { collectEnergySamples, dailyEnergy } from "../lib/energyInsights";
 import { pickFocusExam, buildExamCountdown, countdownHeadline, type PrepIntensity } from "../lib/examPlan";
 import { AnimatedProgressBar } from "../components/ui/motion";
 import { GlassCard, GButton, GhostButton, PanelHeader, Tag } from "../components/ui/primitives";
@@ -71,7 +73,8 @@ export function DashboardPage() {
     tasks: s.tasks,
     dayPlans: s.dayPlans,
     productivityTrackers: s.productivityTrackers,
-  }), [s.activeDayKey, s.energyFactors, s.journal, s.logs, s.tasks, s.dayPlans, s.productivityTrackers]);
+    energyChecks: s.profile.energyChecks,
+  }), [s.activeDayKey, s.energyFactors, s.journal, s.logs, s.tasks, s.dayPlans, s.productivityTrackers, s.profile.energyChecks]);
   const layout = useMemo(
     () => resolveDashboardLayout(s.profile.dashboardLayout, s.profile.dashboardWidgetOrder, s.profile.hiddenDashboardWidgets),
     [s.profile.dashboardLayout, s.profile.dashboardWidgetOrder, s.profile.hiddenDashboardWidgets],
@@ -123,7 +126,6 @@ export function DashboardPage() {
       enabledFields,
       dailyProgress,
       week,
-      readiness,
       activeDayKey: s.activeDayKey,
       state: s,
     });
@@ -586,13 +588,12 @@ interface DashboardWidgetRenderContext {
   enabledFields: Set<string>;
   dailyProgress: DailySuccessResult;
   week: ReturnType<typeof weeklySummary>;
-  readiness: ReturnType<typeof calculateReadiness>;
   activeDayKey: string;
   state: ReturnType<typeof useStore.getState>;
 }
 
 function renderDashboardWidget(context: DashboardWidgetRenderContext) {
-  const { widgetId, size, enabledFields, dailyProgress, week, readiness, activeDayKey, state } = context;
+  const { widgetId, size, enabledFields, dailyProgress, week, activeDayKey, state } = context;
   if (widgetId === "winDay") return <WinTheDay />;
   if (widgetId === "todayScore") return <TodayScoreWidget result={dailyProgress} activeDayKey={activeDayKey} enabledFields={enabledFields} />;
   if (widgetId === "examCountdown") return <ExamCountdownWidget />;
@@ -601,7 +602,7 @@ function renderDashboardWidget(context: DashboardWidgetRenderContext) {
   if (widgetId === "questionBank") return <QuestionBankWidget size={size} enabledFields={enabledFields} />;
   if (widgetId === "courseTracker") return <CourseTrackerDashboardWidget size={size} enabledFields={enabledFields} />;
   if (widgetId === "tasks") return <TasksDashboardWidget size={size} enabledFields={enabledFields} />;
-  if (widgetId === "readiness") return <ReadinessDashboardWidget readiness={readiness} enabledFields={enabledFields} />;
+  if (widgetId === "readiness") return <ReadinessDashboardWidget enabledFields={enabledFields} />;
   if (widgetId === "activity") return <ActivityDashboardWidget activeDayKey={activeDayKey} week={week} enabledFields={enabledFields} />;
   if (widgetId === "journal") return <JournalDashboardWidget activeDayKey={activeDayKey} enabledFields={enabledFields} />;
   if (widgetId === "streak") return <ConsistencyDashboardWidget state={state} enabledFields={enabledFields} />;
@@ -624,7 +625,7 @@ function widgetDataStatus(id: DashboardWidgetId, s: ReturnType<typeof useStore.g
     const open = realTasks(s.tasks).filter((task) => !task.done && !task.archived).length;
     return open ? `${open} open` : "No real open tasks";
   }
-  if (id === "readiness") return s.energyFactors.length || s.journal.length ? "Local signals available" : "No confirmed signal yet";
+  if (id === "readiness") return s.profile.energyChecks?.length || s.journal.length || s.closeouts.length ? "Energy signals available" : "Waiting for a first energy check";
   if (id === "activity") return s.logs.some((log) => log.dayKey === s.activeDayKey) ? "Activity logged today" : "No activity today";
   if (id === "journal") return s.journal.length ? `${s.journal.length} local entr${s.journal.length === 1 ? "y" : "ies"}` : "No entries yet";
   if (id === "dailyWord") return s.profile.experimentalFlags?.dailyGames ? "Daily Games enabled" : "Optional module is off";
@@ -643,7 +644,7 @@ function widgetIsSuggested(id: DashboardWidgetId, s: ReturnType<typeof useStore.
   if (id === "questionBank") return s.questions.length > 0;
   if (id === "courseTracker") return realTrackerRows(s.tracker).length > 0;
   if (id === "tasks") return realTasks(s.tasks).some((task) => !task.done && !task.archived);
-  if (id === "readiness") return s.energyFactors.length > 0 || s.journal.length > 0;
+  if (id === "readiness") return true;
   if (id === "activity" || id === "weekly" || id === "streak") return s.logs.length > 0;
   if (id === "journal") return s.journal.length > 0;
   if (id === "examCountdown") return Boolean(pickFocusExam(s.boardPrep));
@@ -761,24 +762,15 @@ function TasksDashboardWidget({
 }
 
 function ReadinessDashboardWidget({
-  readiness,
   enabledFields,
 }: {
-  readiness: ReturnType<typeof calculateReadiness>;
   enabledFields: Set<string>;
 }) {
-  const hasEvidence = readiness.contributions.length > 0 || readiness.selfReportedEnergy.label !== "Unlogged";
   return (
     <GlassCard pad className="dashboard-core-widget readiness-widget">
-      <PanelHeader title="Readiness" sub="A deterministic estimate from local, confirmed signals"
-        action={<a className="gbtn sm" href="#reports">Why?</a>} />
-      {hasEvidence ? (
-        <>
-          {enabledFields.has("score") && <div className="dashboard-widget-focal"><b>{readiness.estimatedReadiness}</b><span>{readiness.readinessLabel}</span></div>}
-          {enabledFields.has("energy") && <p className="dashboard-widget-note">Reported energy: {readiness.selfReportedEnergy.label}</p>}
-          {enabledFields.has("contributors") && readiness.contributions[0] && <p className="dashboard-widget-note">Strongest contributor: {readiness.contributions[0].label} ({readiness.contributions[0].appliedDelta > 0 ? "+" : ""}{readiness.contributions[0].appliedDelta})</p>}
-        </>
-      ) : <div className="dashboard-widget-empty"><BatteryMedium size={ICON_SIZE.control} /><b>No readiness signal yet</b><span>Log energy or a confirmed factor before AXOM interprets capacity.</span></div>}
+      <PanelHeader title="Energy & capacity" sub="From your own check-ins and recent load"
+        action={<a className="gbtn sm" href="#reports">Rhythm</a>} />
+      <CapacitySummary showHead={enabledFields.has("score")} showReasons={enabledFields.has("contributors")} showCheck={enabledFields.has("energy")} />
     </GlassCard>
   );
 }
@@ -964,7 +956,7 @@ function WeeklyWidget({
       {enabledFields.has("trend") && <div className={`week-bars reveal-bars ${reveal.inView ? "in-view" : ""}`} ref={reveal.ref}>
         {week.days.map((d) => (
           <button type="button" className={`week-day ${selected?.key === d.key ? "on" : ""}`} key={d.key}
-            title={`${d.key}: ${d.minutes}m, ${d.cards} cards, readiness ${d.readiness}`}
+            title={`${d.key}: ${d.minutes}m, ${d.cards} cards${d.energy !== null ? `, energy ${d.energy}` : ""}`}
             onMouseEnter={() => setSelectedKey(d.key)}
             onFocus={() => setSelectedKey(d.key)}
             onClick={() => setSelectedKey(d.key)}>
@@ -982,9 +974,9 @@ function WeeklyWidget({
               <b>{selected.dateLabel}</b>
               <span>{selected.key}</span>
             </div>
-            <Tag tone={selected.readiness >= 78 ? "green" : selected.readiness >= 58 ? "cyan" : selected.readiness >= 38 ? "orange" : "red"}>
-              Readiness {selected.readiness}
-            </Tag>
+            {selected.energy !== null
+              ? <Tag tone={selected.energy >= 75 ? "green" : selected.energy >= 55 ? "cyan" : selected.energy >= 35 ? "orange" : "red"}>Energy {selected.energy}</Tag>
+              : <Tag tone="neutral">No energy logged</Tag>}
           </div>
           <div className="weekly-detail-grid">
             <DetailMetric label="Study" value={`${selected.minutes}m · ${selected.cards} cards`} />
@@ -1475,21 +1467,20 @@ function ProgressBar({
 }
 
 function weeklySummary(s: ReturnType<typeof useStore.getState>) {
+  const energyByDay = dailyEnergy(collectEnergySamples({
+    energyChecks: s.profile.energyChecks,
+    journal: s.journal,
+    closeouts: s.closeouts,
+    sessions: s.sessions,
+  }));
   const days = lastNDays(7).map((d) => {
     const key = isoDate(d);
     const totals = dayTotals(s.logs, key);
     const productive = productiveTotals(s.logs, key);
-    const grade = todayGrade(totals.minutes, totals.cards);
+    const grade = todayGrade(totals.minutes, totals.cards, gradeTargetsFor(s.profile));
     const intensity = Math.min(100, Math.max((totals.minutes / 480) * 100, (totals.cards / 350) * 100));
-    const readiness = calculateReadiness({
-      date: key,
-      factors: s.energyFactors ?? [],
-      journal: s.journal,
-      logs: s.logs,
-      tasks: s.tasks,
-      dayPlans: s.dayPlans,
-      productivityTrackers: s.productivityTrackers,
-    });
+    const measured = energyByDay.get(key);
+    const energy = measured === undefined ? null : Math.round(measured);
     const tasksDone = s.tasks.filter((task) => task.done && task.completedAt?.startsWith(key)).length;
     const openTasksDue = s.tasks.filter((task) => !task.done && !task.archived && task.due?.slice(0, 10) === key).length;
     return {
@@ -1504,8 +1495,8 @@ function weeklySummary(s: ReturnType<typeof useStore.getState>) {
       journalSummary: journalSummaryForDay(s.journal, key),
       topActivity: topActivityForDay(s.logs, key),
       strongestAction: strongestActionForDay({ logs: s.logs, dayPlans: s.dayPlans, tasksDone, key }),
-      suggestedCorrection: correctionForDay({ minutes: totals.minutes, cards: totals.cards, openTasksDue, readiness: readiness.estimatedReadiness }),
-      readiness: readiness.estimatedReadiness,
+      suggestedCorrection: correctionForDay({ minutes: totals.minutes, cards: totals.cards, openTasksDue, energy }),
+      energy,
       grade,
       intensity,
     };
@@ -1519,7 +1510,7 @@ function weeklySummary(s: ReturnType<typeof useStore.getState>) {
     cards,
     activeDays,
     tasksDone: days.reduce((sum, day) => sum + day.tasksDone, 0),
-    grade: todayGrade(Math.round(minutes / Math.max(activeDays, 1)), Math.round(cards / Math.max(activeDays, 1))),
+    grade: todayGrade(Math.round(minutes / Math.max(activeDays, 1)), Math.round(cards / Math.max(activeDays, 1)), gradeTargetsFor(s.profile)),
   };
 }
 
@@ -1557,14 +1548,14 @@ function strongestActionForDay({
 }
 
 function correctionForDay({
-  minutes, cards, openTasksDue, readiness,
+  minutes, cards, openTasksDue, energy,
 }: {
   minutes: number;
   cards: number;
   openTasksDue: number;
-  readiness: number;
+  energy: number | null;
 }) {
-  if (readiness < 45) return "Tomorrow: lower the load and close one small loop.";
+  if (energy !== null && energy < 40) return "Tomorrow: lower the load and close one small loop.";
   if (openTasksDue > 0) return "Tomorrow: clear the oldest due task before adding volume.";
   if (minutes === 0 && cards === 0) return "Tomorrow: create signal with one 25-minute block.";
   if (cards < 60) return "Tomorrow: add a small retrieval/card pass.";
