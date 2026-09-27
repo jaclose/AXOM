@@ -1,7 +1,7 @@
 # AXOM startup cinematic
 
 Status: the September 27 brief (cinematic brand ident) is implemented and ships
-as `web/public/startup/axom-ident.mp4`. The earlier optical-luster direction
+as `web/public/startup/axom-ident*` (10-bit HEVC/VP9, with an H.264 fallback). The earlier optical-luster direction
 below is kept for history; its launch contract still applies.
 
 ## Current direction: cinematic brand ident (September 27)

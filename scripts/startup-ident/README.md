@@ -3,8 +3,19 @@
 A 7-second cinematic reveal of the AXOM identity, rendered as a physical
 object: a champagne-ivory brushed-metal mark hanging a short distance in front
 of a near-black wall, revealed by light. It plays as the app's startup film
-(`web/public/startup/axom-ident.mp4`, driven by `web/src/lib/startupIntro.ts`)
-and ends on the overlay's own `#0D0D0E`, so the app crossfades in seamlessly.
+(`web/public/startup/`, driven by `web/src/lib/startupIntro.ts`) and ends on the
+overlay's own `#0D0D0E`, so the app crossfades in seamlessly.
+
+The player picks the best cut the engine can decode:
+
+1. `axom-ident-hevc10.mp4`: HEVC Main 10. Safari, macOS WebKit, and Chromium
+   where hardware HEVC is available.
+2. `axom-ident-vp9.webm`: VP9 profile 2, 10-bit. Chromium and Firefox.
+3. `axom-ident.mp4`: 8-bit H.264, the universal fallback.
+
+8-bit H.264 cannot keep dither in the dark wall gradient at a sane bitrate:
+CRF 18 bands, and keeping the dither costs about 30 MB. The 10-bit cuts are
+smooth at 0.2–0.4 MB.
 
 ## Source of truth
 
@@ -87,10 +98,10 @@ python3 scripts/startup-ident/render_ident.py encode --frames build/ident/frames
 
 - `AXOM_ident_4K_30p_hevc10.mp4`: 10-bit master, no banding;
 - `AXOM_ident_4K_30p_h264.mp4`: 4K, widest compatibility;
-- `AXOM_ident_1080p_30p_h264.mp4`: the app cut;
+- `AXOM_ident_1080p_30p_{hevc10.mp4,vp9.webm,h264.mp4}`: the app cuts;
 - `AXOM_ident_lockup_4K.png`: a still of the full lockup.
 
 Film grain and dither are added at encode time, per target bit depth. All
-files are tagged BT.709 / TV range. `--publish` installs the app cut and its
+files are tagged BT.709 / TV range. `--publish` installs the app cuts and the
 poster into `web/public/startup/` and records hashes in
 `design/startup/ident-manifest.json`.

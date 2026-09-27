@@ -844,12 +844,23 @@ def cmd_encode(a):
     vf = "scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int"
     targets = {
         "4k-h264": dict(size=None, bits=8, grain=1.0, file="AXOM_ident_4K_30p_h264.mp4",
-                        codec=["-c:v", "libx264", "-preset", "slow", "-crf", "14", "-tune", "film", "-profile:v", "high",
+                        codec=["-c:v", "libx264", "-preset", "slow", "-crf", str(a.h264_4k_crf), "-tune", "film", "-profile:v", "high",
                                "-x264-params", "aq-mode=3:aq-strength=0.9:deblock=-1,-1", "-pix_fmt", "yuv420p"]),
         "4k-hevc10": dict(size=None, bits=10, grain=1.0, file="AXOM_ident_4K_30p_hevc10.mp4",
                           codec=["-c:v", "libx265", "-preset", "slow", "-crf", "14", "-pix_fmt", "yuv420p10le",
                                  "-tag:v", "hvc1", "-x265-params",
                                  "aq-mode=3:colorprim=bt709:transfer=bt709:colormatrix=bt709:range=limited:log-level=error"]),
+        # App cuts. 8-bit H.264 cannot keep dither in the dark pool without banding
+        # (or ~30 MB), so the app prefers 10-bit HEVC / VP9 and keeps H.264 as a
+        # last-resort fallback.
+        "1080-hevc10": dict(size=(1920, 1080), bits=10, grain=0.8, file="AXOM_ident_1080p_30p_hevc10.mp4",
+                            codec=["-c:v", "libx265", "-preset", "slow", "-crf", "16", "-pix_fmt", "yuv420p10le",
+                                   "-tag:v", "hvc1", "-x265-params",
+                                   "aq-mode=3:colorprim=bt709:transfer=bt709:colormatrix=bt709:range=limited:log-level=error"]),
+        "1080-vp9": dict(size=(1920, 1080), bits=10, grain=0.8, file="AXOM_ident_1080p_30p_vp9.webm",
+                         codec=["-c:v", "libvpx-vp9", "-pix_fmt", "yuv420p10le", "-profile:v", "2", "-crf", "20",
+                                "-b:v", "0", "-row-mt", "1", "-deadline", "good", "-cpu-used", "1",
+                                "-tile-columns", "2", "-g", "240"]),
         "1080-h264": dict(size=(1920, 1080), bits=8, grain=a.web_grain, file="AXOM_ident_1080p_30p_h264.mp4",
                           codec=["-c:v", "libx264", "-preset", "veryslow", "-crf", str(a.web_crf), "-tune", "film",
                                  "-profile:v", "high", "-x264-params", "aq-mode=3:aq-strength=1.0",
@@ -863,7 +874,7 @@ def cmd_encode(a):
         pix = "rgb48le" if spec["bits"] > 8 else "rgb24"
         cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", pix,
                "-s", f"{w}x{h}", "-r", str(FPS), "-i", "-", "-vf", vf, *spec["codec"], *tags,
-               "-movflags", "+faststart", "-an", str(out / spec["file"])]
+               *([] if spec["file"].endswith(".webm") else ["-movflags", "+faststart"]), "-an", str(out / spec["file"])]
         jobs.append((name, spec, (w, h), subprocess.Popen(cmd, stdin=subprocess.PIPE)))
     # One pass over the 16-bit masters feeds every encoder.
     for i, fp in enumerate(frames):
@@ -900,12 +911,16 @@ def _sha(path: Path) -> str:
 
 
 def publish(out: Path):
-    """Install the 1080p cut as the app's startup film and record provenance."""
+    """Install the 1080p cuts as the app's startup film and record provenance."""
     import shutil
     web = ROOT / "web" / "public" / "startup"
     web.mkdir(parents=True, exist_ok=True)
+    cuts = {"axom-ident-hevc10.mp4": "AXOM_ident_1080p_30p_hevc10.mp4",
+            "axom-ident-vp9.webm": "AXOM_ident_1080p_30p_vp9.webm",
+            "axom-ident.mp4": "AXOM_ident_1080p_30p_h264.mp4"}
+    for dst, src in cuts.items():
+        shutil.copyfile(out / src, web / dst)
     movie, poster = web / "axom-ident.mp4", web / "axom-ident-poster.png"
-    shutil.copyfile(out / "AXOM_ident_1080p_30p_h264.mp4", movie)
     # Frame 1 of the film is exactly the overlay colour, so the poster is too.
     night = np.round(linear_to_srgb(NIGHT) * 255).astype(np.uint8)
     cv2.imwrite(str(poster), np.broadcast_to(night[::-1], (1080, 1920, 3)).copy())
@@ -920,10 +935,11 @@ def publish(out: Path):
         "beats": {"faintEdge": [0.0, 0.8], "emerge": [0.8, 2.2], "luster": [2.2, 3.1],
                   "wordmark": [3.1, 4.0], "subtitle": [3.7, 4.4], "hold": [4.4, 5.5],
                   "retreat": [5.5, 6.5], "black": [6.5, 7.0]},
-        "assets": [{"path": rel(p), "bytes": p.stat().st_size, "sha256": _sha(p)} for p in (movie, poster)],
+        "assets": [{"path": rel(p), "bytes": p.stat().st_size, "sha256": _sha(p)}
+                   for p in [*(web / name for name in cuts), poster]],
     }
     (ROOT / "design" / "startup" / "ident-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    print(f"published {rel(movie)} ({movie.stat().st_size / 1e6:.2f} MB) and {rel(poster)}")
+    print("published", ", ".join(f"{name} ({(web / name).stat().st_size / 1e6:.2f} MB)" for name in cuts), "and", rel(poster))
 
 
 def main():
@@ -944,9 +960,10 @@ def main():
     q = sub.add_parser("encode")
     q.add_argument("--frames", required=True)
     q.add_argument("--out", required=True)
-    q.add_argument("--targets", default="4k-h264,4k-hevc10,1080-h264")
-    q.add_argument("--publish", action="store_true", help="install the 1080p cut into web/public/startup")
+    q.add_argument("--targets", default="4k-h264,4k-hevc10,1080-hevc10,1080-vp9,1080-h264")
+    q.add_argument("--publish", action="store_true", help="install the 1080p cuts into web/public/startup")
     q.add_argument("--web-crf", type=int, default=18, help="x264 CRF of the app cut")
+    q.add_argument("--h264-4k-crf", type=int, default=17, help="x264 CRF of the 4K compatibility master")
     q.add_argument("--web-grain", type=float, default=0.7, help="grain scale of the app cut")
     a = p.parse_args()
     {"frames": cmd_frames, "stills": cmd_stills, "encode": cmd_encode}[a.cmd](a)

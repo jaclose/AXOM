@@ -9,6 +9,25 @@ export const STARTUP_INTRO_START_MS = 1_500;
 export const STARTUP_INTRO_MAX_MS = STARTUP_INTRO_START_MS + STARTUP_INTRO_FILM_MS + 500;
 const EXIT_MS = 160;
 
+/**
+ * 10-bit cuts keep the film's near-black gradients free of banding; 8-bit
+ * H.264 is the universal fallback. Codec strings match the published files.
+ */
+const STARTUP_FILMS = [
+  { path: "startup/axom-ident-hevc10.mp4", type: 'video/mp4; codecs="hvc1.2.4.L120.90"' },
+  { path: "startup/axom-ident-vp9.webm", type: 'video/webm; codecs="vp09.02.40.10"' },
+] as const;
+const FALLBACK_FILM = "startup/axom-ident.mp4";
+
+export function pickStartupFilm(video: HTMLVideoElement): string {
+  for (const film of STARTUP_FILMS) {
+    try {
+      if (video.canPlayType(film.type)) return film.path;
+    } catch { /* An engine that cannot answer is treated as unsupported. */ }
+  }
+  return FALLBACK_FILM;
+}
+
 export interface StartupIntro {
   /** Always resolves, including skipped, unavailable, and disabled media. */
   finished: Promise<void>;
@@ -52,7 +71,7 @@ export function startStartupIntro(options: StartupIntroOptions = {}): StartupInt
   const video = document.createElement("video");
   video.className = "axom-startup-intro__film";
   // Respect the same relative Vite base as the app's portable web package.
-  video.src = `${import.meta.env.BASE_URL}startup/axom-ident.mp4`;
+  video.src = `${import.meta.env.BASE_URL}${pickStartupFilm(video)}`;
   video.poster = `${import.meta.env.BASE_URL}startup/axom-ident-poster.png`;
   video.muted = true;
   video.defaultMuted = true;

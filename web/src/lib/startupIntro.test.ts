@@ -6,6 +6,7 @@ import {
   STARTUP_INTRO_MAX_MS,
   STARTUP_INTRO_SESSION_KEY,
   STARTUP_INTRO_START_MS,
+  pickStartupFilm,
   startStartupIntro,
 } from "./startupIntro";
 import type { StartupIntro } from "./startupIntro";
@@ -69,6 +70,25 @@ describe("bounded startup cinematic", () => {
     expect(root().textContent).toBe("Setup");
     expect(root().hasAttribute("inert")).toBe(true);
     expect(localStorage.getItem("workspace-fixture")).toBe(savedWorkspace);
+  });
+
+  it.each([
+    [["hvc1"], /\/startup\/axom-ident-hevc10\.mp4$/],
+    [["vp09"], /\/startup\/axom-ident-vp9\.webm$/],
+    [["hvc1", "vp09"], /\/startup\/axom-ident-hevc10\.mp4$/],
+    [[], /\/startup\/axom-ident\.mp4$/],
+  ])("prefers banding-free 10-bit cuts when the engine decodes %j", (codecs, expected) => {
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockImplementation(
+      (type) => (codecs.some((codec) => type.includes(codec)) ? "probably" : ""),
+    );
+    start();
+    expect(film().src).toMatch(expected);
+  });
+
+  it("falls back to H.264 when codec probing throws", () => {
+    const video = document.createElement("video");
+    vi.spyOn(video, "canPlayType").mockImplementation(() => { throw new Error("unsupported"); });
+    expect(pickStartupFilm(video)).toBe("startup/axom-ident.mp4");
   });
 
   it("lets a film that starts at the last moment finish, with bounded slack", () => {
