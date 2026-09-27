@@ -5,6 +5,7 @@
 // ===========================================================================
 import { create } from "zustand";
 import { normalizeEnergyChecks } from "./energyInsights";
+import { habitCheckForDay, habitTypeForTracker, trackerDayTotals, trackerUnitLabel } from "./trackerStats";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type {
   BoardBlueprintLog, BoardExamId, BoardPrepProfile, Course, CourseModule, DailyRolloverEvent, DayPlan, HubFolder, JournalEntry, NoctyriumState,
@@ -166,7 +167,7 @@ interface Actions {
     note?: string;
   }) => void;
   logProductivity: (entry: { trackerId: string; quantity?: number; minutes?: number; note?: string }) => void;
-  addProductivityTracker: (tracker: Omit<ProductivityTracker, "id" | "createdAt" | "updatedAt">) => void;
+  addProductivityTracker: (tracker: Omit<ProductivityTracker, "id" | "createdAt" | "updatedAt">) => string;
   updateProductivityTracker: (id: string, patch: Partial<ProductivityTracker>) => void;
   startNewStudyDay: () => void;
   checkDailyRollover: (reason?: RolloverReason, at?: Date) => { changed: boolean; toDate: string; daysAway: number; carriedTaskIds?: string[] };
@@ -514,7 +515,7 @@ export const useStore = create<Store>()(
             academic: tracker ? tracker.contributesToAcademicStudy : true,
             productive: tracker ? tracker.contributesToTotalProductiveTime : true,
           };
-          return { logs: [entry, ...s.logs] };
+          return withTrackerHabitSync(s, [entry, ...s.logs], tracker, entry.dayKey);
         }),
 
       logActivity: ({ label, trackerId, minutes = 0, quantity = 0, quantityKind, quantityLabel, note }) =>
@@ -550,7 +551,7 @@ export const useStore = create<Store>()(
             academic: tracker ? tracker.contributesToAcademicStudy : true,
             productive: tracker ? tracker.contributesToTotalProductiveTime : true,
           };
-          return { logs: [entry, ...s.logs] };
+          return withTrackerHabitSync(s, [entry, ...s.logs], tracker, entry.dayKey);
         }),
 
       logProductivity: ({ trackerId, quantity = 0, minutes, note }) =>
@@ -573,21 +574,50 @@ export const useStore = create<Store>()(
             academic: tracker.contributesToAcademicStudy,
             productive: tracker.contributesToTotalProductiveTime,
           };
-          return { logs: [entry, ...s.logs] };
+          return withTrackerHabitSync(s, [entry, ...s.logs], tracker, entry.dayKey);
         }),
 
-      addProductivityTracker: (tracker) =>
-        set((s) => ({
-          productivityTrackers: [
-            ...s.productivityTrackers,
-            { ...tracker, id: uid(), createdAt: now(), updatedAt: now() },
-          ],
-        })),
+      addProductivityTracker: (tracker) => {
+        const id = uid();
+        set((s) => {
+          const created: ProductivityTracker = { ...tracker, name: tracker.name.trim() || "Tracker", id, createdAt: now(), updatedAt: now() };
+          const linked = created.contributesToHabitTracking ? linkTrackerHabit(s, created) : { tracker: created, habits: s.habits ?? [] };
+          return { productivityTrackers: [...s.productivityTrackers, linked.tracker], habits: linked.habits };
+        });
+        return id;
+      },
+      // A tracker defines what its entries mean, so flipping "counts as
+      // academic study" or "productive time" re-labels its past entries too
+      // (reports and day grades stay consistent). Turning habit tracking on
+      // links (or creates) a habit and back-fills its checks from the log.
       updateProductivityTracker: (id, patch) =>
-        set((s) => ({
-          productivityTrackers: s.productivityTrackers.map((tracker) =>
-            tracker.id === id ? { ...tracker, ...patch, updatedAt: now() } : tracker),
-        })),
+        set((s) => {
+          const current = s.productivityTrackers.find((tracker) => tracker.id === id);
+          if (!current) return {};
+          let next: ProductivityTracker = { ...current, ...patch, updatedAt: now() };
+          let habits = s.habits ?? [];
+          let habitEntries = s.habitEntries ?? [];
+          if (next.contributesToHabitTracking && !next.archived) {
+            const linked = linkTrackerHabit({ ...s, habits }, next);
+            next = linked.tracker;
+            habits = linked.habits;
+            if (!current.contributesToHabitTracking || !current.linkedHabitId || current.dailyTarget !== next.dailyTarget || current.goal !== next.goal) {
+              habitEntries = backfillTrackerHabit(next, s.logs, habitEntries);
+            }
+          }
+          const relabel = current.contributesToAcademicStudy !== next.contributesToAcademicStudy
+            || current.contributesToTotalProductiveTime !== next.contributesToTotalProductiveTime;
+          return {
+            productivityTrackers: s.productivityTrackers.map((tracker) => (tracker.id === id ? next : tracker)),
+            habits,
+            habitEntries,
+            ...(relabel ? {
+              logs: s.logs.map((log) => (log.trackerId === id
+                ? { ...log, academic: next.contributesToAcademicStudy, productive: next.contributesToTotalProductiveTime }
+                : log)),
+            } : {}),
+          };
+        }),
 
       addEnergyFactor: (factor) =>
         set((s) => {
@@ -1982,6 +2012,64 @@ function buildTrackStructure(track: EducationTrack): { terms: Term[]; courses: C
   return { terms, courses, tracker };
 }
 
+/** Keep a habit-tracking tracker's linked habit checked for `dayKey`. */
+function withTrackerHabitSync(
+  s: NoctyriumState,
+  logs: StudyLog[],
+  tracker: ProductivityTracker | undefined,
+  dayKey: string,
+): Partial<NoctyriumState> {
+  if (!tracker?.contributesToHabitTracking || !tracker.linkedHabitId) return { logs };
+  const habit = (s.habits ?? []).find((item) => item.id === tracker.linkedHabitId && !item.archived);
+  if (!habit) return { logs };
+  const total = trackerDayTotals(tracker, logs).get(dayKey) ?? 0;
+  return { logs, habitEntries: upsertTrackerHabitEntry(s.habitEntries ?? [], habit.id, dayKey, habitCheckForDay(tracker, total)) };
+}
+
+function upsertTrackerHabitEntry(
+  entries: HabitEntry[],
+  habitId: string,
+  date: string,
+  check: ReturnType<typeof habitCheckForDay>,
+): HabitEntry[] {
+  const existing = entries.find((entry) => entry.habitId === habitId && entry.date === date);
+  // A check the learner set by hand ("skipped", a note) always wins.
+  if (existing && (existing.status === "skipped" || (existing.note && existing.note !== TRACKER_HABIT_NOTE))) return entries;
+  if (!check) return existing?.note === TRACKER_HABIT_NOTE ? entries.filter((entry) => entry !== existing) : entries;
+  if (existing) return entries.map((entry) => (entry === existing ? { ...entry, status: check.status, value: check.value, note: TRACKER_HABIT_NOTE } : entry));
+  return [{ id: uid(), habitId, date, status: check.status, value: check.value, note: TRACKER_HABIT_NOTE, createdAt: now() }, ...entries];
+}
+
+const TRACKER_HABIT_NOTE = "From your tracker";
+
+function linkTrackerHabit(s: Pick<NoctyriumState, "habits">, tracker: ProductivityTracker): { tracker: ProductivityTracker; habits: Habit[] } {
+  const habits = s.habits ?? [];
+  const existing = tracker.linkedHabitId ? habits.find((habit) => habit.id === tracker.linkedHabitId) : undefined;
+  const shape = {
+    name: tracker.name,
+    icon: tracker.icon,
+    color: tracker.color,
+    type: habitTypeForTracker(tracker),
+    category: tracker.category,
+    target: tracker.dailyTarget && tracker.dailyTarget > 0 ? tracker.dailyTarget : undefined,
+    unit: trackerUnitLabel(tracker),
+  };
+  if (existing) {
+    return { tracker, habits: habits.map((habit) => (habit.id === existing.id ? { ...habit, ...shape, archived: false, updatedAt: now() } : habit)) };
+  }
+  const habit: Habit = { ...shape, id: uid(), createdAt: tracker.createdAt || now(), updatedAt: now() };
+  return { tracker: { ...tracker, linkedHabitId: habit.id }, habits: [...habits, habit] };
+}
+
+function backfillTrackerHabit(tracker: ProductivityTracker, logs: StudyLog[], entries: HabitEntry[]): HabitEntry[] {
+  if (!tracker.linkedHabitId) return entries;
+  let next = entries;
+  for (const [day, total] of trackerDayTotals(tracker, logs)) {
+    next = upsertTrackerHabitEntry(next, tracker.linkedHabitId, day, habitCheckForDay(tracker, total));
+  }
+  return next;
+}
+
 function matchProductivityTracker(trackers: ProductivityTracker[] = [], type: string): ProductivityTracker | undefined {
   const clean = cleanText(type);
   if (!clean) return trackers.find((tracker) => tracker.id === "tracker-study");
@@ -2006,6 +2094,8 @@ function normalizeProductivityTrackers(value: unknown): ProductivityTracker[] {
       customUnit: typeof record.customUnit === "string" ? record.customUnit : base?.customUnit,
       dailyTarget: typeof record.dailyTarget === "number" ? record.dailyTarget : base?.dailyTarget,
       weeklyTarget: typeof record.weeklyTarget === "number" ? record.weeklyTarget : base?.weeklyTarget,
+      goal: record.goal === "at-most" ? "at-most" : record.goal === "at-least" ? "at-least" : base?.goal,
+      linkedHabitId: typeof record.linkedHabitId === "string" && record.linkedHabitId ? record.linkedHabitId : base?.linkedHabitId,
       category: typeof record.category === "string" && record.category ? record.category : base?.category ?? "Productivity",
       contributesToAcademicStudy: typeof record.contributesToAcademicStudy === "boolean" ? record.contributesToAcademicStudy : base?.contributesToAcademicStudy ?? false,
       contributesToTotalProductiveTime: typeof record.contributesToTotalProductiveTime === "boolean" ? record.contributesToTotalProductiveTime : base?.contributesToTotalProductiveTime ?? true,

@@ -291,6 +291,10 @@ export interface ProductivityTracker {
   customUnit?: string;
   dailyTarget?: number;
   weeklyTarget?: number;
+  /** "at-least" builds a behavior up; "at-most" keeps it under a daily limit. */
+  goal?: "at-least" | "at-most";
+  /** The habit this tracker keeps checked when habit tracking is on. */
+  linkedHabitId?: string;
   category: string;
   contributesToAcademicStudy: boolean;
   contributesToTotalProductiveTime: boolean;

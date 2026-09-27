@@ -10,6 +10,7 @@ import { Pomodoro } from "../components/productivity/Pomodoro";
 import { ActivityLabelInput } from "../components/productivity/ActivityLabelInput";
 import { DailyProgressVessel } from "../components/productivity/DailyProgressVessel";
 import { DailyRequirementsEditor } from "../components/productivity/DailyRequirementsEditor";
+import { TrackerManager } from "../components/productivity/TrackerManager";
 import { useInView } from "../lib/useInView";
 import { missedStandupDays } from "../lib/journal";
 import { gotoJournalDay } from "../lib/uiStore";
@@ -173,6 +174,8 @@ export function ProductivityPage() {
           {productive.minutes !== totals.minutes && <span>{productive.minutes} total productive minutes</span>}
         </div>
       </GlassCard>
+
+      {isActive && <TrackerManager />}
 
       {patternDays >= 3 && <div className="productivity-analytics" data-module-tour="productivity-trends">
         <GlassCard pad className="productivity-intel" data-tour="insights">

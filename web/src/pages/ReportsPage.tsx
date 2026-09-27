@@ -29,6 +29,7 @@ import { MonthlyTrendCalendar, TREND_METRIC_LABELS, TrendDelta, WeeklyTrendChart
 import { ReportInsightCard, type ReportCardInsight } from "../components/reports/ReportInsightCard";
 import { ICON_SIZE } from "../lib/iconSize";
 import { EnergyFocusPanel, useEnergyInputs } from "../components/energy/EnergyInsights";
+import { TrackerReport } from "../components/reports/TrackerReport";
 import { todaysCapacity } from "../lib/energyInsights";
 
 const RANGES = [14, 30] as const;
@@ -334,6 +335,13 @@ export function ReportsPage() {
           <ReportInsightCard icon={<Activity size={ICON_SIZE.emphasis} />} metric={questionMetric} />
           <ReportInsightCard icon={<Gauge size={ICON_SIZE.emphasis} />} metric={activityMetric} />
         </div>
+      </section>
+
+      <section className="report-section" aria-labelledby="report-trackers-title">
+        <div className="report-section-heading"><div><span>Your variables</span><h2 id="report-trackers-title">Trackers</h2></div><p>Everything you chose to follow, against your own goals and limits.</p></div>
+        <GlassCard pad className="report-trackers-card">
+          <TrackerReport />
+        </GlassCard>
       </section>
 
       <details className="report-advanced">
