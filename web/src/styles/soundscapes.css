@@ -58,14 +58,23 @@
   color: #f1ede4;
 }
 .soundscape-hero-visual { position: absolute; inset: 0; width: 100%; height: 100%; }
+.soundscape-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(9, 9, 11, 0.9) 0%, rgba(9, 9, 11, 0.62) 38%, rgba(9, 9, 11, 0.12) 72%, rgba(9, 9, 11, 0) 100%),
+    linear-gradient(to top, rgba(9, 9, 11, 0.55), transparent 55%);
+}
 .soundscape-hero-copy {
   position: relative;
+  z-index: 1;
   align-self: end;
   display: grid;
   gap: 8px;
-  max-width: 620px;
+  max-width: 640px;
   padding: 28px;
-  background: linear-gradient(to top, rgb(9 9 11 / 0.92), rgb(9 9 11 / 0.55) 70%, transparent);
 }
 .soundscape-kicker { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: rgb(241 237 228 / 0.6); }
 .soundscape-hero h2 { margin: 0; font-size: clamp(26px, 4vw, 40px); font-weight: 600; letter-spacing: -0.01em; }
@@ -140,3 +149,19 @@
   .soundscape-regimen small { grid-column: 1 / -1; }
   .soundscape-hero-copy { padding: 20px; }
 }
+
+.soundscape-versions { display: flex; flex-wrap: wrap; gap: 5px; }
+.soundscape-versions button {
+  padding: 3px 10px;
+  font-size: var(--fs-tiny);
+  color: var(--text-60);
+  background: transparent;
+  border: 1px dashed var(--hairline);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color .15s ease, border-color .15s ease, background .15s ease;
+}
+.soundscape-versions button:hover { color: var(--text); border-color: rgba(var(--accent-rgb), 0.5); }
+.soundscape-versions button.on { color: var(--text); border-style: solid; border-color: rgba(var(--accent-rgb), 0.6); background: rgba(var(--accent-rgb), 0.14); }
+.soundscape-hero .soundscape-versions button, .dock-genie .soundscape-versions button { color: rgba(241, 237, 228, 0.66); border-color: rgba(255, 255, 255, 0.14); }
+.soundscape-hero .soundscape-versions button.on, .dock-genie .soundscape-versions button.on { color: #f1ede4; border-color: rgba(var(--accent-rgb), 0.7); background: rgba(var(--accent-rgb), 0.22); }

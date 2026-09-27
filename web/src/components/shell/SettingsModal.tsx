@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useNotificationPermission } from "../../lib/useNotificationPermission";
 import {
   Bell, Clock3, Database, Download, FileJson, Palette, RotateCcw, ShieldCheck,
   Sparkles, Trash2, Upload, UserCircle2, Check, MessageCircle, Settings2,
@@ -782,10 +783,9 @@ function DashboardVisibilitySettings() {
 }
 
 function DevicePreferencePanel() {
-  const [permission, setPermission] = useState(() => typeof Notification === "undefined" ? "unavailable" : Notification.permission);
+  const [permission, requestPermission] = useNotificationPermission();
   async function requestNotifications() {
-    if (typeof Notification === "undefined") return;
-    setPermission(await Notification.requestPermission());
+    await requestPermission();
   }
   const label = permission === "granted" ? "On" : permission === "denied" ? "Blocked in browser settings" : permission === "unavailable" ? "Not supported here" : "Not enabled yet";
   return (

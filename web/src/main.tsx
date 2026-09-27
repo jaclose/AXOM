@@ -40,7 +40,7 @@ if (import.meta.env.DEV) {
     import("./lib/store"),
     import("./lib/pomodoro"),
     import("./lib/soundscapes/store"),
-  ]).then(([{ useStore }, { usePomodoro }, { useSoundscape }]) => ({ useStore, usePomodoro, useSoundscape }));
+  ]).then(([{ useStore }, { usePomodoro }, { useSoundscape, soundscapeAnalyser }]) => ({ useStore, usePomodoro, useSoundscape, soundscapeAnalyser }));
 }
 
 installChunkRecovery();

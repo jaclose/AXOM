@@ -45,6 +45,9 @@ export default defineConfig({
   },
   test: {
     exclude: [...configDefaults.exclude, "e2e/**"],
+    // Unit tests never read a developer's web/.env.local account keys; tests
+    // that need a configured backend mock lib/account/supabase explicitly.
+    env: { VITE_SUPABASE_URL: "", VITE_SUPABASE_PUBLISHABLE_KEY: "", VITE_SUPABASE_ANON_KEY: "" },
   },
   build: {
     manifest: true,

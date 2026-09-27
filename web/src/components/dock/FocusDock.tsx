@@ -6,7 +6,7 @@
 // the sound half genies its live visual out of the pill.
 // ===========================================================================
 import { useEffect, useLayoutEffect, useRef, useState, type HTMLAttributes, type ReactNode } from "react";
-import { Brain, Check, Coffee, ListPlus, Maximize2, Minimize2, Pause, Play, RotateCcw, SkipForward, X } from "lucide-react";
+import { Brain, Check, Coffee, ListPlus, Maximize2, Minimize2, Moon, Pause, Play, RotateCcw, SkipForward, Sunrise, X } from "lucide-react";
 import { useStore } from "../../lib/store";
 import { findLiveSession, formatElapsed, sessionElapsedMs, QUICK_LOG_LABEL, type SessionQuickLog } from "../../lib/sessions";
 import { formatClock, pomodoroPhaseSeconds, usePomodoro } from "../../lib/pomodoro";
@@ -15,9 +15,10 @@ import { useSoundscape } from "../../lib/soundscapes/store";
 import { EVIDENCE_LABEL, SOUNDSCAPES } from "../../lib/soundscapes/presets";
 import { carrierPair } from "../../lib/soundscapes/engine";
 import { useReducedMotion } from "../../lib/motion";
+import { formatRestClock, useRest } from "../../lib/rest";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { SoundscapeVisual } from "../soundscapes/SoundscapeVisual";
-import { FollowTimerToggle, OutputToggle, PresetChips, StopTimerControl, VolumeControl, useStopTimerLabel } from "../soundscapes/SoundscapeControls";
+import { FollowTimerToggle, OutputToggle, PresetChips, StopTimerControl, VersionChips, VolumeControl, useStopTimerLabel } from "../soundscapes/SoundscapeControls";
 
 const QUICK_LOGS = Object.keys(QUICK_LOG_LABEL) as SessionQuickLog[];
 const GENIE_OPEN_DELAY = 140;
@@ -47,7 +48,10 @@ export function FocusDock() {
   const session = findLiveSession(sessions ?? []);
   const { pomodoro, total, visible: pomodoroVisible } = usePomodoroView();
   const soundStatus = useSoundscape((state) => state.status);
-  const timerActive = Boolean(session) || pomodoroVisible;
+  const restStatus = useRest((state) => state.status);
+  const resting = restStatus !== "idle";
+  // While resting, the rest capsule stands in for the (paused) timer.
+  const timerActive = resting || Boolean(session) || pomodoroVisible;
   const soundActive = soundStatus !== "idle";
   const [expanded, setExpanded] = useState(false);
   if (!timerActive && !soundActive) return null;
@@ -55,7 +59,8 @@ export function FocusDock() {
 
   const capsules = (ghost: boolean) => (
     <>
-      {timerActive && (
+      {resting && <RestCapsule ghost={ghost} />}
+      {timerActive && !resting && (
         <TimerCapsule
           ghost={ghost}
           expanded={expanded}
@@ -195,6 +200,24 @@ function TimerCapsule({ ghost, expanded, onExpand, session, pomodoro, phaseTotal
   );
 }
 
+function RestCapsule({ ghost }: { ghost: boolean }) {
+  const status = useRest((state) => state.status);
+  const endsAt = useRest((state) => state.endsAt);
+  const now = useNow(!ghost);
+  const ringing = status === "ringing";
+  const open = () => useRest.getState().setOverlayOpen(true);
+  return (
+    <Capsule ghost={ghost} className={`dock-rest ${ringing ? "ringing" : ""}`}>
+      <span className="dock-ring session" aria-hidden="true">{ringing ? <Sunrise size={13} /> : <Moon size={13} />}</span>
+      <button type="button" className="dock-sound-name" onClick={open} aria-label={ringing ? "Rest is over — open" : "Resting — open"}>
+        <b className="mono">{ringing ? "Wake up" : formatRestClock((endsAt ?? now) - now)}</b>
+        <small>{ringing ? "Rest is over" : "Resting"}</small>
+      </button>
+      <IconButton label="Wake me now" onClick={() => useRest.getState().wakeNow()}><X size={ICON_SIZE.body} /></IconButton>
+    </Capsule>
+  );
+}
+
 function Equalizer({ playing }: { playing: boolean }) {
   return (
     <span className={`dock-eq ${playing ? "playing" : ""}`} aria-hidden="true">
@@ -314,6 +337,7 @@ function GeniePanel({ phase, origin, presetId, pairLabel }: { phase: Exclude<Gen
       </div>
       <div className="dock-genie-controls">
         <PresetChips />
+        <VersionChips presetId={presetId} />
         <div className="dock-genie-row">
           <VolumeControl />
           <StopTimerControl />

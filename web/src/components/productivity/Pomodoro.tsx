@@ -2,6 +2,7 @@
 // Productivity page and a compact widget for the Dashboard. Both are driven by
 // the shared usePomodoro store, so the clock stays in sync wherever it's shown.
 import { useEffect, useMemo, useState } from "react";
+import { RestButton } from "../rest/RestOverlay";
 import { Pause, Play, RotateCcw, Save, SkipForward, Timer, Coffee, Flame, Trash2 } from "lucide-react";
 import { GlassCard, GButton, PanelHeader } from "../ui/primitives";
 import { useStore } from "../../lib/store";
@@ -288,6 +289,7 @@ export function Pomodoro({ compact = false }: { compact?: boolean }) {
             </GButton>
           </div>
 
+          <RestButton compact={compact} />
           <div className="pomo-meta">
             <span className="pomo-stat"><Timer size={ICON_SIZE.body} /> {pomo.sessionsToday} sprint{pomo.sessionsToday === 1 ? "" : "s"} today</span>
             <span className="pomo-stat"><Flame size={ICON_SIZE.body} /> {pomo.loggedMinutesToday}m logged</span>

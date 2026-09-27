@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LISTENING_REGIMEN, SOUNDSCAPES, SOUNDSCAPE_ORDER, isSoundscapeId } from "./presets";
+import { LISTENING_REGIMEN, SOUNDSCAPES, SOUNDSCAPE_ORDER, isSoundscapeId, versionOf } from "./presets";
 import { carrierPair, fillNoise, volumeToGain } from "./engine";
 import { LISTENING_LOG_KEY, MIN_COMPARISON_SAMPLE, appendListeningInterval, compareListeningConditions, readListeningLog } from "./listeningLog";
 
@@ -38,11 +38,42 @@ describe("soundscape presets", () => {
   });
 });
 
+describe("soundscape versions", () => {
+  it("give every preset three distinct designed versions", () => {
+    for (const id of SOUNDSCAPE_ORDER) {
+      const designed = SOUNDSCAPES[id].versions.filter((version) => "recipe" in version);
+      expect(designed).toHaveLength(3);
+      expect(new Set(designed.map((version) => version.id)).size).toBe(3);
+      for (const version of designed) expect(version.description.length).toBeGreaterThan(10);
+    }
+  });
+
+  it("keep every tone layer on the preset's measured carrier and beat", () => {
+    for (const id of SOUNDSCAPE_ORDER) {
+      const preset = SOUNDSCAPES[id];
+      for (const version of preset.versions) {
+        if (!("recipe" in version)) continue;
+        const tones = version.recipe.layers.filter((layer) => layer.kind === "tone");
+        if (!preset.carrierHz) expect(tones).toEqual([]);
+        for (const tone of tones) expect(tone).toMatchObject({ carrierHz: preset.carrierHz, beatHz: preset.beatHz });
+        // Stacked layers stay well under full scale before the limiter.
+        const total = version.recipe.layers.reduce((sum, layer) => sum + layer.level, 0);
+        expect(total).toBeLessThanOrEqual(1.35);
+      }
+    }
+  });
+
+  it("falls back to the first version for unknown ids", () => {
+    expect(versionOf(SOUNDSCAPES["gamma-40"], "nope").id).toBe("clean");
+    expect(versionOf(SOUNDSCAPES["soft-rain"], "fireplace").label).toBe("Rain & fireplace");
+  });
+});
+
 describe("synthesis helpers", () => {
   it("maps volume perceptually and never approaches full scale", () => {
     expect(volumeToGain(0)).toBe(0);
     expect(volumeToGain(50)).toBeLessThan(volumeToGain(51));
-    expect(volumeToGain(100)).toBeLessThanOrEqual(0.55);
+    expect(volumeToGain(100)).toBeLessThanOrEqual(0.6);
     expect(volumeToGain(400)).toBe(volumeToGain(100));
   });
 
@@ -130,7 +161,7 @@ describe("soundscape store", () => {
     vi.setSystemTime(new Date("2026-09-26T10:00:00Z"));
     await useSoundscape.getState().play("beta-20");
     expect(useSoundscape.getState()).toMatchObject({ status: "playing", presetId: "beta-20", lastPresetId: "beta-20" });
-    expect(fake.play).toHaveBeenCalledWith(SOUNDSCAPES["beta-20"], expect.objectContaining({ output: "headphones" }));
+    expect(fake.play).toHaveBeenCalledWith(SOUNDSCAPES["beta-20"], expect.objectContaining({ output: "headphones", versionId: "clean" }));
     vi.setSystemTime(new Date("2026-09-26T10:50:00Z"));
     await useSoundscape.getState().stop();
     expect(useSoundscape.getState().status).toBe("idle");

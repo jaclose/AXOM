@@ -21,6 +21,7 @@ import {
   OutputToggle,
   StopTimerControl,
   TransportButtons,
+  VersionChips,
   VolumeControl,
   useStopTimerLabel,
 } from "../components/soundscapes/SoundscapeControls";
@@ -67,6 +68,7 @@ export function SoundscapesPage() {
             {heroPair ? `${output === "headphones" ? "Left" : "Tones"} ${heroPair[0]} Hz · ${output === "headphones" ? "Right" : ""} ${heroPair[1]} Hz → ${hero.beatHz} Hz beat` : hero.band}
             {stopLabel && status !== "idle" ? ` · ${stopLabel}` : ""}
           </p>
+          <VersionChips presetId={heroId} />
           <div className="soundscape-hero-controls">
             <TransportButtons presetId={heroId} />
             <VolumeControl />
@@ -134,6 +136,7 @@ export function SoundscapesPage() {
                   <TransportButtons presetId={id} />
                 </div>
                 <p>{preset.bestFor.join(" · ")}</p>
+                <VersionChips presetId={id} />
                 <p className="soundscape-howto">{preset.howTo}</p>
                 <div className="soundscape-evidence">
                   <Tag tone={EVIDENCE_TONE[preset.evidence]}>{EVIDENCE_LABEL[preset.evidence]}</Tag>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Headphones, Pause, Play, Speaker, Square, Timer, Volume1, Volume2, VolumeX } from "lucide-react";
 import { ICON_SIZE } from "../../lib/iconSize";
-import { SOUNDSCAPES, SOUNDSCAPE_ORDER, type SoundscapeId } from "../../lib/soundscapes/presets";
+import { SOUNDSCAPES, SOUNDSCAPE_ORDER, versionOf, type SoundscapeId } from "../../lib/soundscapes/presets";
 import { STOP_TIMER_CHOICES, useSoundscape } from "../../lib/soundscapes/store";
 
 /** Remaining time on the stop timer, refreshed every 15 s. */
@@ -34,6 +34,31 @@ export function PresetChips({ label = "Soundscape" }: { label?: string }) {
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/** The versions of one preset (three designed ones plus imported recordings). */
+export function VersionChips({ presetId }: { presetId: SoundscapeId }) {
+  const chosen = useSoundscape((state) => state.versions[presetId]);
+  const setVersion = useSoundscape((state) => state.setVersion);
+  const preset = SOUNDSCAPES[presetId];
+  const current = versionOf(preset, chosen).id;
+  return (
+    <div className="soundscape-versions" role="radiogroup" aria-label={`${preset.name} versions`}>
+      {preset.versions.map((version) => (
+        <button
+          key={version.id}
+          type="button"
+          role="radio"
+          aria-checked={current === version.id}
+          className={current === version.id ? "on" : ""}
+          title={version.description}
+          onClick={() => setVersion(presetId, version.id)}
+        >
+          {version.label}{"src" in version ? " ·  your file" : ""}
+        </button>
+      ))}
     </div>
   );
 }

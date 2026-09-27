@@ -16,6 +16,7 @@ import { PomodoroFx } from "./components/productivity/PomodoroFx";
 import { MenuBarTimerBridge } from "./components/productivity/MenuBarTimerBridge";
 import { SessionOverlay } from "./components/session/SessionOverlay";
 import { FocusDock } from "./components/dock/FocusDock";
+import { RestOverlay } from "./components/rest/RestOverlay";
 import { SoundscapeTimerSync } from "./components/soundscapes/SoundscapeTimerSync";
 import { FocusCheckIn } from "./components/shell/FocusCheckIn";
 import { AccountSyncWatcher } from "./components/shell/AccountSyncWatcher";
@@ -364,6 +365,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
       <DailyLoopReminderWatcher />
       <SessionOverlay />
       <FocusDock />
+      <RestOverlay />
       <SoundscapeTimerSync />
       <FocusCheckIn />
       <AccountSyncWatcher />

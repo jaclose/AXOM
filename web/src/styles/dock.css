@@ -271,3 +271,65 @@
   box-shadow: none;
   color-scheme: dark;
 }
+
+/* --- Rest ("Put my head down") --------------------------------------------- */
+.rest-start { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 10px; }
+.rest-start.compact { margin-top: 6px; }
+.rest-button {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 13px;
+  font-size: var(--fs-sm); font-weight: var(--fw-semibold);
+  color: var(--text-80);
+  background: linear-gradient(145deg, rgba(var(--cool-rgb, 120, 160, 190), 0.16), rgba(var(--accent-rgb), 0.08));
+  border: 1px solid rgba(var(--cool-rgb, 120, 160, 190), 0.35);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform .15s ease, border-color .15s ease, background .15s ease;
+}
+.rest-button small { color: var(--text-45); font-weight: var(--fw-medium, 500); }
+.rest-button:hover { transform: translateY(-1px); border-color: rgba(var(--cool-rgb, 120, 160, 190), 0.6); }
+.rest-button.active { color: var(--text); }
+.rest-sound-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--text-60); }
+.rest-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  color: #efe9dd;
+  background: radial-gradient(120% 90% at 50% 110%, rgb(28 30 44), rgb(6 7 10) 60%);
+  animation: rest-in 700ms ease-out both;
+}
+.rest-overlay.ringing {
+  background: radial-gradient(130% 95% at 50% 115%, rgb(222 150 92 / 0.55), rgb(92 58 60 / 0.6) 35%, rgb(12 12 18) 75%);
+  animation: rest-in 700ms ease-out both, rest-dawn 9s ease-in-out infinite alternate;
+}
+.rest-visual { position: absolute; inset: 0; opacity: .7; }
+.rest-visual .soundscape-visual { width: 100%; height: 100%; }
+.rest-copy { position: relative; display: grid; justify-items: center; gap: 10px; padding: 24px; text-align: center; }
+.rest-copy h2 { margin: 4px 0 0; font-size: clamp(22px, 3vw, 30px); font-weight: 600; letter-spacing: -0.01em; }
+.rest-copy p { margin: 0; color: rgb(239 233 221 / 0.62); }
+.rest-clock { font-size: clamp(56px, 11vw, 112px); font-weight: 300; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; line-height: 1; }
+.rest-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 14px; }
+.rest-actions button {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 42px; padding: 0 18px;
+  color: rgb(239 233 221 / 0.85);
+  background: rgb(255 255 255 / 0.06);
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 999px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background .15s ease, transform .15s ease;
+}
+.rest-actions button:hover { background: rgb(255 255 255 / 0.12); transform: translateY(-1px); }
+.rest-actions button:focus-visible { outline: 2px solid rgb(239 233 221 / 0.8); outline-offset: 2px; }
+.rest-actions .rest-primary { color: #15120e; background: #efe4cf; border-color: transparent; font-weight: 600; }
+.rest-actions .rest-primary:hover { background: #fff3dc; }
+@keyframes rest-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes rest-dawn { from { filter: brightness(0.92); } to { filter: brightness(1.08); } }
+@media (prefers-reduced-motion: reduce) { .rest-overlay, .rest-overlay.ringing { animation: none; } }
+:root[data-motion="reduce"] .rest-overlay, :root[data-motion="reduce"] .rest-overlay.ringing { animation: none; }
+.dock-rest .dock-ring { color: rgba(var(--cool-rgb, 120, 160, 190), 1); }
+.dock-rest.ringing .dock-ring { color: #f0b37e; animation: dock-live 2.4s ease-out infinite; border-radius: 50%; }
+.dock-rest .dock-sound-name b { font-variant-numeric: tabular-nums; }

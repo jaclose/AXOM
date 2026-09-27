@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { SoundscapeEngine, soundscapesSupported, type OutputMode } from "./engine";
 import { appendListeningInterval } from "./listeningLog";
-import { SOUNDSCAPES, isSoundscapeId, type SoundscapeId } from "./presets";
+import { SOUNDSCAPES, isSoundscapeId, versionOf, type SoundscapeId } from "./presets";
 
 export type SoundscapeStatus = "idle" | "playing" | "paused";
 
@@ -10,6 +10,8 @@ interface Prefs {
   output: OutputMode;
   followTimer: boolean;
   lastPresetId: SoundscapeId;
+  /** The version chosen for each preset (defaults to the first). */
+  versions: Partial<Record<SoundscapeId, string>>;
 }
 
 interface SoundscapeState extends Prefs {
@@ -19,7 +21,9 @@ interface SoundscapeState extends Prefs {
   /** Epoch ms when the stop timer ends playback (fades out). */
   stopAt?: number;
   error?: string;
-  play: (id: SoundscapeId, options?: { stopAfterMinutes?: number | null }) => Promise<void>;
+  play: (id: SoundscapeId, options?: { stopAfterMinutes?: number | null; version?: string }) => Promise<void>;
+  /** Choose a version; crossfades immediately when that preset is playing. */
+  setVersion: (id: SoundscapeId, version: string) => void;
   toggle: () => Promise<void>;
   pause: () => Promise<void>;
   resume: () => Promise<void>;
@@ -32,7 +36,7 @@ interface SoundscapeState extends Prefs {
 
 export const SOUNDSCAPE_PREFS_KEY = "axom.soundscapes.v1";
 export const STOP_TIMER_CHOICES = [15, 20, 30, 45, 60, 90] as const;
-const DEFAULT_PREFS: Prefs = { volume: 35, output: "headphones", followTimer: true, lastPresetId: "gamma-40" };
+const DEFAULT_PREFS: Prefs = { volume: 35, output: "headphones", followTimer: true, lastPresetId: "gamma-40", versions: {} };
 
 function readPrefs(): Prefs {
   try {
@@ -42,6 +46,9 @@ function readPrefs(): Prefs {
       output: raw?.output === "speakers" ? "speakers" : "headphones",
       followTimer: typeof raw?.followTimer === "boolean" ? raw.followTimer : DEFAULT_PREFS.followTimer,
       lastPresetId: isSoundscapeId(raw?.lastPresetId) ? raw.lastPresetId : DEFAULT_PREFS.lastPresetId,
+      versions: raw?.versions && typeof raw.versions === "object"
+        ? Object.fromEntries(Object.entries(raw.versions).filter(([id, version]) => isSoundscapeId(id) && typeof version === "string"))
+        : {},
     };
   } catch {
     return DEFAULT_PREFS;
@@ -101,9 +108,9 @@ function updateMediaSession(presetId: SoundscapeId | null, status: SoundscapeSta
 export const useSoundscape = create<SoundscapeState>((set, get) => {
   const persist = (patch: Partial<Prefs>) => {
     set(patch);
-    const { volume, output, followTimer, lastPresetId } = get();
+    const { volume, output, followTimer, lastPresetId, versions } = get();
     try {
-      window.localStorage.setItem(SOUNDSCAPE_PREFS_KEY, JSON.stringify({ volume, output, followTimer, lastPresetId }));
+      window.localStorage.setItem(SOUNDSCAPE_PREFS_KEY, JSON.stringify({ volume, output, followTimer, lastPresetId, versions }));
     } catch { /* device preference only */ }
   };
 
@@ -125,14 +132,15 @@ export const useSoundscape = create<SoundscapeState>((set, get) => {
       const minutes = options.stopAfterMinutes === undefined ? preset.defaultStopMinutes : options.stopAfterMinutes ?? undefined;
       const keepTimer = get().status !== "idle" && options.stopAfterMinutes === undefined && !preset.defaultStopMinutes;
       const stopAt = keepTimer ? get().stopAt : minutes ? Date.now() + minutes * 60_000 : undefined;
+      const versionId = versionOf(preset, options.version ?? get().versions[id]).id;
       try {
-        await getEngine().play(preset, { volume: get().volume, output: get().output });
+        await getEngine().play(preset, { volume: get().volume, output: get().output, versionId });
       } catch (error) {
         set({ error: error instanceof Error ? error.message : "Audio couldn’t start." });
         return;
       }
       openIntervalFor(id);
-      persist({ lastPresetId: id });
+      persist({ lastPresetId: id, versions: { ...get().versions, [id]: versionId } });
       set({ status: "playing", presetId: id, stopAt, error: undefined });
       armStopTimer(stopAt);
       updateMediaSession(id, "playing");
@@ -175,6 +183,13 @@ export const useSoundscape = create<SoundscapeState>((set, get) => {
       const { status, presetId } = get();
       // Rebuild the graph for the new routing (a quick crossfade).
       if (status === "playing" && presetId) void get().play(presetId, { stopAfterMinutes: get().stopAt ? Math.max(1, (get().stopAt! - Date.now()) / 60_000) : null });
+    },
+    setVersion(id, version) {
+      persist({ versions: { ...get().versions, [id]: version } });
+      const { status, presetId, stopAt } = get();
+      if (status === "playing" && presetId === id) {
+        void get().play(id, { version, stopAfterMinutes: stopAt ? Math.max(1, (stopAt - Date.now()) / 60_000) : null });
+      }
     },
     setFollowTimer(value) {
       persist({ followTimer: value });

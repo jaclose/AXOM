@@ -1,3 +1,4 @@
+mod menu_bar_pill;
 mod menu_bar_timer;
 mod webview_dialogs;
 
@@ -74,6 +75,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(
             tauri_plugin_sql::Builder::default()

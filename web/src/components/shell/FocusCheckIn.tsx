@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { notify } from "../../lib/notify";
 import { Coffee, Lock, Play, Timer, Waves, X } from "lucide-react";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { useStore } from "../../lib/store";
@@ -91,8 +92,10 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = () => new Date()
       progress: focusProgressHint(state, pomodoro),
       preview,
     });
-    if (!preview && preferences.systemNotifications && typeof document !== "undefined" && document.visibilityState === "hidden") {
-      notify(focusProgressHint(state, pomodoro));
+    // A desktop window is often visible but behind other apps: notify
+    // whenever AXOM is not the focused window, not only when it is hidden.
+    if (!preview && preferences.systemNotifications && typeof document !== "undefined" && (document.visibilityState === "hidden" || !document.hasFocus())) {
+      notifyLockIn(focusProgressHint(state, pomodoro));
     }
   }, [clock, persist, preferences.systemNotifications]);
 
@@ -237,16 +240,6 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = () => new Date()
 
 const dayOf = isoDate;
 
-function notify(progress: FocusProgressHint) {
-  try {
-    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-    const notification = new Notification("AXOM — are you locked in?", {
-      body: progress.target ?? progress.sprint ?? "Quick check-in. Come back when you can.",
-      tag: "axom-lock-in",
-      silent: false,
-    });
-    notification.onclick = () => { window.focus(); notification.close(); };
-  } catch {
-    // Notifications are optional.
-  }
+function notifyLockIn(progress: FocusProgressHint) {
+  void notify("AXOM — are you locked in?", progress.target ?? progress.sprint ?? "Quick check-in. Come back when you can.", { tag: "axom-lock-in" });
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
+import { useNotificationPermission } from "../../lib/useNotificationPermission";
 import {
   Archive, Camera, CheckCircle2, Clock3, Cloud, Download, GraduationCap, History, Lock, Play, RotateCcw,
   ScrollText, ShieldCheck, Target,
@@ -308,7 +309,7 @@ export function FocusCheckInSettings() {
   const raw = useStore((state) => state.profile.focusCheckIn);
   const updateProfile = useStore((state) => state.updateProfile);
   const preferences = normalizeFocusCheckInPreferences(raw);
-  const [permission, setPermission] = useState(() => typeof Notification === "undefined" ? "unavailable" : Notification.permission);
+  const [permission, requestPermission] = useNotificationPermission();
   const ledger = focusCheckInLedger.read(isoDate(new Date()));
   const rate = lockedInRate(ledger);
 
@@ -317,9 +318,7 @@ export function FocusCheckInSettings() {
   }
 
   async function enableNotifications(checked: boolean) {
-    if (checked && typeof Notification !== "undefined" && Notification.permission === "default") {
-      setPermission(await Notification.requestPermission());
-    }
+    if (checked && permission === "default") await requestPermission();
     update({ systemNotifications: checked });
   }
 

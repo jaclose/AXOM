@@ -3,6 +3,10 @@ import type { SoundscapeVisual as VisualKind } from "../../lib/soundscapes/prese
 import { soundscapeAnalyser } from "../../lib/soundscapes/store";
 import { useReducedMotion } from "../../lib/motion";
 import { VISUAL_RENDERERS, type VisualColors } from "./visuals";
+import { rgbChannels, shaderRenderer } from "./shaders";
+
+/** GPU visuals render at up to this device-pixel ratio and are scaled up smoothly. */
+const SHADER_MAX_RATIO = 1.25;
 
 function paletteColors(): VisualColors {
   const style = getComputedStyle(document.documentElement);
@@ -63,8 +67,17 @@ export function SoundscapeVisual({ visual, animate, reactive = false, className 
         // Heavy smoothing keeps brightness changes far below flash rates.
         level += (target - level) * 0.04;
       }
+      const t = (now - started) / 1000;
+      const ratio = Math.min(SHADER_MAX_RATIO, window.devicePixelRatio || 1);
+      context.save();
+      context.setTransform(1, 0, 0, 1, 0, 0);
+      const drawn = shaderRenderer.draw(visual, Math.max(1, Math.round(width * ratio)), Math.max(1, Math.round(height * ratio)), {
+        time: t, level, accent: rgbChannels(colors.accent), cool: rgbChannels(colors.cool), hi: rgbChannels(colors.hi),
+      }, context);
+      context.restore();
+      if (drawn) return;
       context.clearRect(0, 0, width, height);
-      draw({ ctx: context, width, height, t: (now - started) / 1000, level, colors });
+      draw({ ctx: context, width, height, t, level, colors });
     };
     const loop = (now: number) => {
       paint(now);

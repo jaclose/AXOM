@@ -206,7 +206,7 @@ pub fn remaining_seconds(remaining_secs: u32, running: bool, elapsed: Duration) 
     remaining_secs.saturating_sub(elapsed)
 }
 
-/// `m:ss` below an hour, `h:mm:ss` from one hour up.
+/// `mm:ss` below an hour (Raycast-style fixed width), `h:mm:ss` from one hour up.
 pub fn format_clock(total_secs: u32) -> String {
     let hours = total_secs / 3600;
     let minutes = (total_secs % 3600) / 60;
@@ -214,18 +214,19 @@ pub fn format_clock(total_secs: u32) -> String {
     if hours > 0 {
         format!("{hours}:{minutes:02}:{seconds:02}")
     } else {
-        format!("{minutes}:{seconds:02}")
+        format!("{minutes:02}:{seconds:02}")
     }
 }
 
-/// Text shown next to the status item icon.
+/// Text inside the menu bar pill: the clock, then `⋯` for the menu. A running
+/// focus sprint is just the clock; other states add one short word or glyph.
 pub fn format_menu_bar_title(phase: TimerPhase, running: bool, remaining_secs: u32) -> String {
     let clock = format_clock(remaining_secs);
     match (running, phase) {
-        (true, _) if remaining_secs == 0 => format!("⏱ {clock}"),
-        (true, TimerPhase::Focus) => format!("▶ {clock}"),
-        (true, TimerPhase::Break) => format!("☕ {clock}"),
-        (false, _) => format!("⏸ {clock}"),
+        (true, _) if remaining_secs == 0 => "Done  ⋯".to_string(),
+        (true, TimerPhase::Focus) => format!("{clock}  ⋯"),
+        (true, TimerPhase::Break) => format!("Break {clock}  ⋯"),
+        (false, _) => format!("‖ {clock}  ⋯"),
     }
 }
 
@@ -424,12 +425,8 @@ mod native {
         let hiding = applied.visible && !next.visible;
         if hiding && tray.set_visible(false).is_ok() {
             applied.visible = false;
-        }
-        if next.title != applied.title {
-            // tray-icon ignores `None` on macOS; an empty string clears it.
-            if tray.set_title(Some(next.title.as_str())).is_ok() {
-                applied.title = next.title.clone();
-            }
+            // Showing again recreates the status item; redraw the pill then.
+            applied.title.clear();
         }
         if next.tooltip != applied.tooltip && tray.set_tooltip(Some(next.tooltip.as_str())).is_ok()
         {
@@ -443,6 +440,12 @@ mod native {
         }
         if next.visible && !applied.visible && tray.set_visible(true).is_ok() {
             applied.visible = true;
+            applied.title.clear();
+        }
+        if applied.visible && next.title != applied.title {
+            if let Ok(true) = crate::menu_bar_pill::apply(tray, &next.title) {
+                applied.title = next.title.clone();
+            }
         }
     }
 
@@ -530,11 +533,11 @@ mod tests {
     fn formats_running_focus_and_break() {
         assert_eq!(
             format_menu_bar_title(TimerPhase::Focus, true, 24 * 60 + 13),
-            "▶ 24:13"
+            "24:13  ⋯"
         );
         assert_eq!(
             format_menu_bar_title(TimerPhase::Break, true, 4 * 60 + 59),
-            "☕ 4:59"
+            "Break 04:59  ⋯"
         );
     }
 
@@ -542,16 +545,16 @@ mod tests {
     fn formats_paused_for_either_phase() {
         assert_eq!(
             format_menu_bar_title(TimerPhase::Focus, false, 24 * 60 + 13),
-            "⏸ 24:13"
+            "‖ 24:13  ⋯"
         );
         assert_eq!(
             format_menu_bar_title(TimerPhase::Break, false, 5 * 60),
-            "⏸ 5:00"
+            "‖ 05:00  ⋯"
         );
         // An idle, never-started timer still shows its full length.
         assert_eq!(
             format_menu_bar_title(TimerPhase::Focus, false, 25 * 60),
-            "⏸ 25:00"
+            "‖ 25:00  ⋯"
         );
     }
 
@@ -559,21 +562,21 @@ mod tests {
     fn formats_hours_and_the_finished_state() {
         assert_eq!(
             format_menu_bar_title(TimerPhase::Focus, true, 3900),
-            "▶ 1:05:00"
+            "1:05:00  ⋯"
         );
         assert_eq!(
             format_menu_bar_title(TimerPhase::Focus, false, 2 * 3600),
-            "⏸ 2:00:00"
+            "‖ 2:00:00  ⋯"
         );
-        assert_eq!(format_menu_bar_title(TimerPhase::Focus, true, 0), "⏱ 0:00");
-        assert_eq!(format_menu_bar_title(TimerPhase::Break, true, 0), "⏱ 0:00");
-        assert_eq!(format_menu_bar_title(TimerPhase::Focus, false, 0), "⏸ 0:00");
+        assert_eq!(format_menu_bar_title(TimerPhase::Focus, true, 0), "Done  ⋯");
+        assert_eq!(format_menu_bar_title(TimerPhase::Break, true, 0), "Done  ⋯");
+        assert_eq!(format_menu_bar_title(TimerPhase::Focus, false, 0), "‖ 00:00  ⋯");
     }
 
     #[test]
     fn formats_clock_boundaries() {
-        assert_eq!(format_clock(0), "0:00");
-        assert_eq!(format_clock(59), "0:59");
+        assert_eq!(format_clock(0), "00:00");
+        assert_eq!(format_clock(59), "00:59");
         assert_eq!(format_clock(3599), "59:59");
         assert_eq!(format_clock(3600), "1:00:00");
         assert_eq!(format_clock(MAX_SECONDS), "24:00:00");
@@ -690,7 +693,7 @@ mod tests {
             view,
             TrayView {
                 visible: true,
-                title: "▶ 24:13".into(),
+                title: "24:13  ⋯".into(),
                 tooltip: "AXOM focus · Renal physiology".into(),
                 toggle_text: "Pause",
                 skip_text: "Skip to break",
@@ -705,7 +708,7 @@ mod tests {
             received + Duration::from_secs(600),
             &TrayView::hidden(),
         );
-        assert_eq!(view.title, "⏸ 25:00");
+        assert_eq!(view.title, "‖ 25:00  ⋯");
         assert_eq!(view.tooltip, DEFAULT_TOOLTIP);
         assert_eq!(view.toggle_text, "Start focus");
     }

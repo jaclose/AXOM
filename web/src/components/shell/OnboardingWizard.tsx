@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { notificationPermission as readNotificationPermission, requestNotificationPermission } from "../../lib/notify";
 import {
   ArrowLeft,
   ArrowRight,
@@ -71,6 +72,8 @@ export function OnboardingWizard({
     return readOnboardingDraft(fallback);
   });
   const [notificationStatus, setNotificationStatus] = useState(() => notificationPermission());
+  // The desktop app answers asynchronously (Tauri notification plugin).
+  useEffect(() => { void readNotificationPermission().then(setNotificationStatus); }, []);
   const studyWorkflow = draft.studyWorkflow ?? normalizeStudyWorkflow(store.profile.studyWorkflow);
   const studyMethods = (studyWorkflow.methods ?? []).filter(method => method.enabled).map(method => method.id);
   function updateStudyWorkflow(value: StudyWorkflowPreferences) {
@@ -255,15 +258,8 @@ export function OnboardingWizard({
   }
 
   async function enableNotifications() {
-    if (typeof Notification === "undefined") {
-      setNotificationStatus("unavailable");
-      return;
-    }
-    try {
-      setNotificationStatus(await Notification.requestPermission());
-    } catch {
-      setNotificationStatus(Notification.permission);
-    }
+    const result = await requestNotificationPermission();
+    setNotificationStatus(result);
   }
 
   function addFirstCourse(value: string) {
