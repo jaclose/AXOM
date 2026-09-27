@@ -59,6 +59,7 @@ const PRIVILEGED = [
   "public.create_question_set_share(text,jsonb)",
   "public.touch_account_device(uuid,text,text,bigint)",
   "public.delete_my_cloud_data()",
+  "public.consume_ai_quota(integer)",
 ];
 
 describe("Supabase migrations on real Postgres", () => {
@@ -116,6 +117,20 @@ describe("Supabase migrations on real Postgres", () => {
       (select count(*) from public.account_devices where user_id=$1)::int + (select count(*) from public.question_set_shares where owner_user_id=$1)::int as n`, [A]);
     expect(left[0].n).toBe(0);
     expect((await db.query<{ n: number }>("select count(*)::int as n from public.account_profiles where user_id=$1", [A])).rows[0].n).toBe(1);
+    await db.close();
+  }, 30_000);
+  it("meters Cloud AI per user and per day, and stops at the limit", async () => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
+    await db.exec(`insert into auth.users (id, email) values ('${A}', 'a@x.test'), ('${B}', 'b@x.test');`);
+    const call = async (sub: string, limit: number) => (await as(db, "authenticated", sub, "select public.consume_ai_quota($1) as left", [limit])).rows[0].left;
+    expect(await call(A, 2)).toBe(1);
+    expect(await call(A, 2)).toBe(0);
+    expect(await call(A, 2)).toBe(-1);
+    expect(await call(B, 2)).toBe(1);
+    const own = await as(db, "authenticated", A, "select user_id, requests from public.ai_usage");
+    expect(own.rows).toEqual([{ user_id: A, requests: 2 }]);
+    await expect(as(db, "authenticated", A, "update public.ai_usage set requests = 0")).rejects.toThrow();
+    await expect(as(db, "anon", null, "select public.consume_ai_quota(5)")).rejects.toThrow();
     await db.close();
   }, 30_000);
 });

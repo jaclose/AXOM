@@ -491,3 +491,14 @@
 
 /* --- Study methods ------------------------------------------------------------ */
 .method-steps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; font-size: var(--fs-base); line-height: var(--leading-normal); }
+
+/* Anki Lab reviewer — AI coach */
+.review-coach { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--hairline); display: grid; gap: 10px; }
+.review-coach-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.review-coach-label { display: inline-flex; align-items: center; gap: 6px; margin-right: 6px; font-size: var(--fs-tiny); font-weight: var(--fw-semibold); letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-45); }
+.review-coach-output { display: grid; gap: 8px; padding: 12px 14px; border-radius: var(--radius-md); border: 1px solid rgba(var(--accent-rgb), 0.28); background: rgba(var(--accent-rgb), 0.06); }
+.review-coach-output p { margin: 0; line-height: var(--leading-normal); white-space: pre-wrap; }
+.review-coach-output small { color: var(--text-45); font-size: var(--fs-xs); }
+.review-coach-output dl { margin: 0; display: grid; gap: 6px; }
+.review-coach-output dt { font-size: var(--fs-tiny); text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-45); }
+.review-coach-output dd { margin: 2px 0 0; white-space: pre-wrap; }

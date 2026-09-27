@@ -126,7 +126,7 @@ export function AiCardGenerator({ onOpenAiSettings }: { onOpenAiSettings: () => 
         sub="Small reviewed batches, quality over volume. Every draft is editable and nothing saves without your approval."
         action={health && (
           <Tag tone={providerReady ? "green" : "orange"}>
-            {settings.mode === "mock" ? "Demo mode" : settings.mode === "local" ? "Local AI" : settings.mode === "cloud" ? "Cloud (needs proxy)" : "AI off"}
+            {settings.mode === "mock" ? "Demo mode" : settings.mode === "local" ? "Local AI" : settings.mode === "cloud" ? "AXOM Cloud AI" : "AI off"}
           </Tag>
         )}
       />
