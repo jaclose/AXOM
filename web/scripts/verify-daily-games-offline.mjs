@@ -4,6 +4,7 @@ import { access } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { chromium } from "@playwright/test";
+import { deferPromisePrompt } from "./promise-prompt.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const port = Number(process.env.AXOM_OFFLINE_VERIFY_PORT ?? 5191);
@@ -139,6 +140,7 @@ async function completeOnboarding(page) {
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Finish setup", exact: true }).click();
+  await deferPromisePrompt(page);
 }
 
 async function loadedDailyWordAssets(page) {
