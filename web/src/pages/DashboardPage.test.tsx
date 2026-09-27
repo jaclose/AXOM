@@ -109,7 +109,8 @@ describe("DashboardPage declutter", () => {
   it("removes primary diagnostics and the duplicated five-card stat row", () => {
     const { container } = render(<DashboardPage />);
     expect(screen.getByText("Today's targets")).toBeTruthy();
-    expect(screen.getByText("No targets selected")).toBeTruthy();
+    expect(screen.getByText("Decide what makes a day count")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Choose targets" }).getAttribute("href")).toBe("#productivity");
     expect(screen.queryByText(/Schema 32/)).toBeNull();
     expect(screen.queryByText(/Version v/)).toBeNull();
     expect(screen.queryByText(/active map nodes/)).toBeNull();

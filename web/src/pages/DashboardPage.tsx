@@ -22,7 +22,7 @@ import { gotoJournalDay, useUi } from "../lib/uiStore";
 import { useInView } from "../lib/useInView";
 import { DEFAULT_DASHBOARD_WIDGETS, DEFAULT_HIDDEN_DASHBOARD_WIDGETS } from "../lib/seed";
 import { calculateReadiness } from "../lib/energy";
-import { CapacitySummary } from "../components/energy/EnergyInsights";
+import { CapacitySummary, EnergyCheckRow } from "../components/energy/EnergyInsights";
 import { activePrimaryScopes, itemsInPrimary } from "../lib/trackerFocus";
 import { rankTrackerItems } from "../lib/recommendationFactors";
 import { scopeStudyProgress } from "../lib/studyProgress";
@@ -945,7 +945,14 @@ function TodayScoreWidget({
         </div>
         <a className="gbtn sm" href="#productivity">Adjust</a>
       </div>
-      {enabledFields.has("progress") && <DailyProgressVessel result={result} compact />}
+      {result.eligibleCount === 0 && !result.requirements.some((item) => item.requirement.enabled) ? (
+        <div className="dashboard-widget-empty dashboard-targets-empty">
+          <Target size={ICON_SIZE.control} />
+          <b>Decide what makes a day count</b>
+          <span>Pick one to three signals — study minutes, questions, cards, a habit or a tracker. AXOM scores only what you choose.</span>
+          <a className="gbtn sm primary" href="#productivity">Choose targets</a>
+        </div>
+      ) : enabledFields.has("progress") && <DailyProgressVessel result={result} compact />}
       {enabledFields.has("targets") && result.requirements.filter((item) => item.eligible && item.status !== "unavailable").length > 0 && (
         <div className="dashboard-requirement-list">
           {result.requirements.filter((item) => item.eligible && item.status !== "unavailable").map((item) => (
@@ -1389,6 +1396,11 @@ function WinTheDay() {
             <div className="panel-sub">Optional. Add direction whenever it would help.</div>
           </div>
           <GButton size="sm" onClick={() => setPromptDismissed(false)}>Open check-in</GButton>
+        </div>
+      ) : null}
+      {!todayPlan && promptDismissed ? (
+        <div className="daily-checkin-energy">
+          <EnergyCheckRow />
         </div>
       ) : !todayPlan ? (
         <>
