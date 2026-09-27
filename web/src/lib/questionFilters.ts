@@ -143,10 +143,12 @@ export function isEmptyQuestionFilter(criteria: QuestionFilterCriteria): boolean
 function matchesSearch(question: QuestionRecord, term: string): boolean {
   if (question.stem.toLowerCase().includes(term)) return true;
   if (question.options.some((option) => option.text.toLowerCase().includes(term))) return true;
+  if (question.explanation?.toLowerCase().includes(term)) return true;
+  if (question.objective?.toLowerCase().includes(term)) return true;
   if ((question.tags ?? []).some((tag) => tag.includes(term))) return true;
   if (question.notes?.toLowerCase().includes(term)) return true;
   if (question.topic?.toLowerCase().includes(term)) return true;
-  const source = (question.sourceFile?.name ?? question.bank ?? "").toLowerCase();
+  const source = `${question.sourceFile?.name ?? ""} ${question.bank ?? ""}`.toLowerCase();
   return source.includes(term);
 }
 

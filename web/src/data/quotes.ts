@@ -159,7 +159,8 @@ function attribution(number: number) {
   return { author: "Unattributed", status: "unverified" as const, note: "No attribution was supplied in the source file." };
 }
 
-export const AXOM_QUOTES: readonly AxomQuote[] = Object.freeze(QUOTE_TEXTS.map((text, index) => {
+/** Library v1: the exact 100 numbered entries from the source file. Pinned. */
+export const AXOM_QUOTE_LIBRARY_V1: readonly AxomQuote[] = Object.freeze(QUOTE_TEXTS.map((text, index) => {
   const number = index + 1;
   const source = attribution(number);
   return {
@@ -171,3 +172,114 @@ export const AXOM_QUOTES: readonly AxomQuote[] = Object.freeze(QUOTE_TEXTS.map((
     attributionNote: source.note,
   };
 }));
+
+/**
+ * Library v2 (2026-09): AXOM Originals written for the product voice — calm,
+ * clinical, anti-overload. Discipline without shame; none are guilt-category.
+ * Append-only: ids are stable (quote-101 onward) so favorites/hidden survive.
+ */
+const AXOM_ORIGINAL_V2_TEXTS = [
+  "Show up small. Show up again.",
+  "The block you finish is worth more than the plan you perfect.",
+  "Calm is a skill. Practice it between questions.",
+  "You are allowed to be tired and still be consistent.",
+  "Retrieval feels uncomfortable because it is working.",
+  "A wrong answer today is a right answer on exam day.",
+  "Protect the first hour. It sets the tone for the rest.",
+  "Enough is a number. Find yours, then stop.",
+  "Rest is part of the protocol, not a break from it.",
+  "The goal is contact with the material, not a war with it.",
+  "Every card you review is a patient you will recognize.",
+  "Precision first. Speed follows.",
+  "Your notes are the map. Questions are the terrain.",
+  "Don’t chase the perfect day. Stack honest ones.",
+  "The syllabus is long. So is your runway.",
+  "Missed yesterday? Today still counts in full.",
+  "Attention is the scarcest thing you own. Spend it on purpose.",
+  "One more question is how the hard concepts finally land.",
+  "Understanding is slower than memorizing, and it lasts far longer.",
+  "The anxiety fades. The knowledge stays.",
+  "Treat your focus like a sterile field.",
+  "You don’t need more time. You need fewer tabs.",
+  "Close the loop before you open a new one.",
+  "Recovery is not falling behind. It is how you stay in the race.",
+  "Mastery is repetition that stopped feeling boring.",
+  "Learn it like someone’s life depends on it. Someday it will.",
+  "The exam measures one morning. Your habits built it.",
+  "Finish the lecture you started before opening the one you fear.",
+  "Honest logs beat impressive ones.",
+  "Keep the streak kind and the standard high.",
+  "The hardest question on the page is the one teaching you most.",
+  "Momentum is built in minutes, not in moods.",
+  "Put the phone in another room. Put your future in this one.",
+  "Your best study days rarely feel special while you are in them.",
+  "Don’t negotiate with the timer. Start it.",
+  "Confusion is the doorway, not the wall.",
+  "A clear desk, a clear block, a closed door.",
+  "Be the learner who reviews mistakes on purpose.",
+  "Today, just outwork the version of you from last week.",
+  "Evidence over feelings: log the work and let it speak.",
+  "You are building clinical judgment one decision at a time.",
+  "Hard days are still data. Keep them.",
+  "Mercy for yourself, rigor for the material.",
+  "The plan is a promise. The review is the proof.",
+  "Every attending you admire once missed this exact question.",
+  "Study like the patient is already in the room.",
+  "Accuracy climbs quietly for weeks, then shows up all at once.",
+  "Stop when you hit enough. Tomorrow needs you too.",
+  "A tired mind still keeps what it retrieved.",
+  "Your worst week of studying still moved you forward.",
+  "Make the next step so small you can’t refuse it.",
+  "Nobody sees the early-morning flashcards. Your patients will feel them.",
+  "Questions first. Feelings later.",
+  "You can’t cram judgment. You can only build it.",
+  "There is no shortcut around physiology, only a path through it.",
+  "Earn the weekend with a focused Tuesday.",
+  "A good block ends with one note for tomorrow.",
+  "Busy is not the same as better.",
+  "What you review today, you won’t have to relearn next month.",
+  "Take the break before burnout takes it for you.",
+  "Stop rehearsing the start. Start.",
+  "Your attention is the instrument. Keep it tuned.",
+  "Breathe. Sip water. Next question.",
+  "One chapter fully understood beats three skimmed.",
+  "Future you is counting on present you to press start.",
+  "Keep the promise small enough to keep.",
+  "The work is quiet. The results are not.",
+  "Discipline is memory: remembering why you started.",
+  "Doubt is loudest at the start of every block. Start anyway.",
+  "Progress hides in the reviews you almost skipped.",
+  "The material doesn’t care how you feel. Luckily, it doesn’t need to.",
+  "Consistency is the quiet flex.",
+  "Know the mechanism and the facts will follow.",
+  "Measure the day by what now makes sense, not by hours spent.",
+  "Your future self is already grateful. Don’t keep them waiting.",
+  "Be steady. Steady wins long races.",
+  "Lock in. The world will still be there in fifty minutes.",
+  "When in doubt, do one more pass.",
+  "Every correct answer was once a mistake you studied.",
+  "Build the doctor you would want treating your family.",
+] as const;
+
+export const AXOM_ORIGINALS_V2: readonly AxomQuote[] = Object.freeze(AXOM_ORIGINAL_V2_TEXTS.map((text, index) => ({
+  id: `quote-${String(101 + index).padStart(3, "0")}`,
+  text,
+  author: "AXOM",
+  category: "axom-original" as const,
+  intensity: 2 as const,
+  guilt: false,
+  attributionStatus: "axom-original" as const,
+  attributionNote: "AXOM Original — library v2 (September 2026).",
+})));
+
+/** The full, append-only library. v1 is pinned; later volumes only append. */
+export const AXOM_QUOTES: readonly AxomQuote[] = Object.freeze([...AXOM_QUOTE_LIBRARY_V1, ...AXOM_ORIGINALS_V2]);
+
+export const QUOTE_CATEGORY_LABELS: Record<QuoteCategory, string> = {
+  "axom-original": "AXOM Originals",
+  discipline: "Discipline",
+  perspective: "Perspective",
+  "success-ambition": "Ambition",
+  "brutal-reality": "Brutal reality",
+  "shame-guilt": "Guilt & shame",
+};

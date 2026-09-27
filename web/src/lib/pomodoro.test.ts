@@ -229,6 +229,22 @@ describe("pomodoro clock lifecycle (root-owned, page-independent)", () => {
     expect(usePomodoro.getState().secondsLeft).toBe(300);
   });
 
+  it("carries sub-second remainders so ticks never drift slower than wall time", () => {
+    resetPomo({ phase: "focus", secondsLeft: 600, running: true, lastTickAt: Date.now() });
+    const start = Date.now();
+    for (const at of [1004, 2008, 3012, 4016, 5020]) {
+      vi.setSystemTime(start + at);
+      usePomodoro.getState()._tick();
+    }
+    expect(usePomodoro.getState().secondsLeft).toBe(595);
+    vi.setSystemTime(start + 5500);
+    usePomodoro.getState()._tick(); // an early fire counts nothing yet
+    expect(usePomodoro.getState().secondsLeft).toBe(595);
+    vi.setSystemTime(start + 60_000);
+    usePomodoro.getState()._tick();
+    expect(usePomodoro.getState().secondsLeft).toBe(540);
+  });
+
   it("completes a sprint that elapsed entirely while backgrounded, logging once", () => {
     resetPomo({ phase: "focus", secondsLeft: 120, running: true, lastTickAt: Date.now(), sessionsToday: 0 });
     vi.setSystemTime(Date.now() + 200 * 1000);

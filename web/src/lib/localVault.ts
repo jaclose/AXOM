@@ -1,6 +1,7 @@
 import type { StateStorage } from "zustand/middleware";
 import { userIdFromName } from "./userIdentity";
 import { STORAGE_KEYS } from "./brand";
+import { markVaultWrite } from "./vaultActivity";
 
 export const DB_NAME = STORAGE_KEYS.vaultDb;
 export const STORE_NAME = "state";
@@ -18,12 +19,64 @@ export function ensureVaultStores(db: IDBDatabase) {
 }
 const activeUserKey = (name: string) => `${name}:active-user`;
 const scopedStateKey = (name: string, userId: string) => `${name}:user:${userId}`;
+let vaultWriteSequence = 0;
+const vaultWriteFailures = new Map<number, Error>();
+
+/** Capture the current adapter position before a write that must be durable. */
+export function getVaultWriteCheckpoint(): number {
+  return vaultWriteSequence;
+}
+
+/** Assert the outcome of one exact adapter write, without attributing a later
+ * unrelated write failure to this operation. */
+export function assertVaultWrite(sequence: number): void {
+  if (vaultWriteSequence < sequence) {
+    throw new Error("AXOM could not confirm that the expected local vault write started.");
+  }
+  const failure = vaultWriteFailures.get(sequence);
+  if (failure) throw failure;
+}
+
+/**
+ * Ordinary store writes remain best-effort for non-browser/test environments,
+ * but finalization can explicitly require that every adapter write since its
+ * checkpoint reached IndexedDB or the localStorage fallback.
+ */
+export function assertVaultWritesSince(checkpoint: number): void {
+  const failed = [...vaultWriteFailures.entries()]
+    .filter(([sequence]) => sequence > checkpoint)
+    .sort(([left], [right]) => left - right)[0];
+  if (failed) throw failed[1];
+}
 
 function localFallback(): Storage | null {
   try {
+    // Node 25 exposes an unusable experimental global `localStorage` unless a
+    // file flag is supplied. In browsers/jsdom, the Window-owned storage is the
+    // real fallback and must take precedence over that process-level getter.
+    if (typeof window !== "undefined") return window.localStorage;
     return typeof localStorage === "undefined" ? null : localStorage;
   } catch {
     return null;
+  }
+}
+
+export function writeLocalFallback(
+  fallbackStore: Storage | null,
+  name: string,
+  value: string,
+  userId: string,
+  indexedDbError?: unknown,
+): void {
+  if (!fallbackStore) {
+    throw new Error("AXOM could not write to IndexedDB and no local storage fallback is available.", {
+      cause: indexedDbError,
+    });
+  }
+  fallbackStore.setItem(name, value);
+  if (userId) {
+    fallbackStore.setItem(activeUserKey(name), userId);
+    fallbackStore.setItem(scopedStateKey(name, userId), value);
   }
 }
 
@@ -128,6 +181,7 @@ const vaultStorage: StateStorage = {
   },
 
   async setItem(name, value) {
+    const writeSequence = ++vaultWriteSequence;
     const userId = persistedUserId(value);
     const fallbackStore = localFallback();
     try {
@@ -147,13 +201,20 @@ const vaultStorage: StateStorage = {
         fallbackStore?.setItem(activeUserKey(name), userId);
         fallbackStore?.removeItem(scopedStateKey(name, userId));
       }
-    } catch {
+      markVaultWrite("indexeddb");
+    } catch (indexedDbError) {
       // IndexedDB can be blocked/private-mode unavailable. In that case retain
       // the full localStorage fallback so the app stays usable and data-safe.
-      fallbackStore?.setItem(name, value);
-      if (userId) {
-        fallbackStore?.setItem(activeUserKey(name), userId);
-        fallbackStore?.setItem(scopedStateKey(name, userId), value);
+      try {
+        writeLocalFallback(fallbackStore, name, value, userId, indexedDbError);
+        markVaultWrite("local-fallback");
+      } catch (fallbackError) {
+        vaultWriteFailures.set(
+          writeSequence,
+          fallbackError instanceof Error
+            ? fallbackError
+            : new Error("AXOM could not persist the local workspace."),
+        );
       }
     }
   },
@@ -184,27 +245,47 @@ const vaultStorage: StateStorage = {
   },
 };
 
-// Serialize writes so an older asynchronous save cannot land after the update
-// checkpoint. A failed write must not poison the queue for later saves.
-let pendingVaultWrite: Promise<void> = Promise.resolve();
+// Writes are coalesced per key, newest wins: at most one IndexedDB write is in
+// flight, and a burst of saves collapses into the latest snapshot. An older
+// save can therefore never land after a newer one (the update checkpoint relies
+// on that), and a quick reload or tab close is not stuck behind a backlog of
+// stale full-workspace writes.
+type VaultOp = { kind: "set"; value: string } | { kind: "remove" };
+const pendingVaultOps = new Map<string, VaultOp>();
+let vaultDrain: Promise<void> | null = null;
 
-function enqueueVaultWrite(write: () => void | Promise<void>): Promise<void> {
-  const next = pendingVaultWrite.catch(() => undefined).then(write);
-  pendingVaultWrite = next;
-  // Zustand does not await ordinary action persistence. Mark the rejection as
-  // handled, while retaining it on `next` for explicit flush/checkpoint callers.
-  void next.catch(() => undefined);
-  return next;
+async function drainVaultWrites(): Promise<void> {
+  try {
+    while (pendingVaultOps.size) {
+      const [name, op] = pendingVaultOps.entries().next().value as [string, VaultOp];
+      pendingVaultOps.delete(name);
+      try {
+        if (op.kind === "set") await vaultStorage.setItem(name, op.value);
+        else await vaultStorage.removeItem(name);
+      } catch {
+        // setItem records failures itself (assertVaultWrite); keep draining.
+      }
+    }
+  } finally {
+    vaultDrain = null;
+  }
 }
 
+function scheduleVaultWrite(name: string, op: VaultOp): Promise<void> {
+  pendingVaultOps.set(name, op);
+  vaultDrain ??= drainVaultWrites();
+  return vaultDrain;
+}
+
+/** Resolves once every save requested so far (or a newer one) is on disk. */
 export function flushLocalVaultWrites(): Promise<void> {
-  return pendingVaultWrite;
+  return vaultDrain ?? Promise.resolve();
 }
 
 export const localVaultStorage: StateStorage = {
   getItem: (name) => vaultStorage.getItem(name),
-  setItem: (name, value) => enqueueVaultWrite(async () => { await vaultStorage.setItem(name, value); }),
-  removeItem: (name) => enqueueVaultWrite(async () => { await vaultStorage.removeItem(name); }),
+  setItem: (name, value) => scheduleVaultWrite(name, { kind: "set", value }),
+  removeItem: (name) => scheduleVaultWrite(name, { kind: "remove" }),
 };
 
 function persistedUserId(raw: string): string {

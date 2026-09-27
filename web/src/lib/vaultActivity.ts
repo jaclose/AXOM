@@ -1,0 +1,40 @@
+import { STORAGE_KEYS } from "./brand";
+
+/**
+ * The exact time of the latest successful local workspace write, so Settings
+ * can say "Saved on this device at 8:42:13 PM" instead of a vague "autosave
+ * is on". Stores one timestamp and the storage tier — never content.
+ */
+export type VaultWriteTarget = "indexeddb" | "local-fallback";
+export interface VaultWriteRecord { at: string; target: VaultWriteTarget }
+
+export const VAULT_WRITE_EVENT = "axom:vault-write";
+let lastWrite: VaultWriteRecord | null = null;
+let lastPersistedAt = 0;
+
+export function markVaultWrite(target: VaultWriteTarget, now: Date = new Date()): void {
+  lastWrite = { at: now.toISOString(), target };
+  // Keep the tiny localStorage marker current without hammering it on every
+  // keystroke: at most once per second.
+  if (now.getTime() - lastPersistedAt >= 1000) {
+    lastPersistedAt = now.getTime();
+    try { window.localStorage.setItem(STORAGE_KEYS.lastVaultWriteAt, JSON.stringify(lastWrite)); } catch { /* optional */ }
+  }
+  if (typeof window !== "undefined" && typeof CustomEvent !== "undefined") {
+    window.dispatchEvent(new CustomEvent(VAULT_WRITE_EVENT));
+  }
+}
+
+export function readLastVaultWrite(): VaultWriteRecord | null {
+  if (lastWrite) return lastWrite;
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt) ?? "null") as VaultWriteRecord | null;
+    if (parsed && Number.isFinite(Date.parse(parsed.at)) && (parsed.target === "indexeddb" || parsed.target === "local-fallback")) {
+      lastWrite = parsed;
+      return parsed;
+    }
+  } catch {
+    // Fall through.
+  }
+  return null;
+}

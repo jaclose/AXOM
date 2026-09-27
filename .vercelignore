@@ -20,3 +20,9 @@ web/Noctyrium-*.zip
 web/Noctyrium.app
 web/tsconfig.tsbuildinfo
 **/.DS_Store
+
+# Shared release metadata required by the web build.
+!/CHANGELOG.md
+!/scripts/
+!/scripts/release-notes.mjs
+!/scripts/release-notes.d.mts

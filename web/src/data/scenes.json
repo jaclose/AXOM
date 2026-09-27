@@ -1,0 +1,92 @@
+[
+  {
+    "id": "kelp-forest",
+    "label": "Kelp forest",
+    "mood": "calm",
+    "src": "scenes/kelp-forest.mp4",
+    "poster": "scenes/kelp-forest.jpg",
+    "credit": "Pixabay",
+    "seconds": 5.5
+  },
+  {
+    "id": "heartbeat",
+    "label": "Heartbeat monitor",
+    "mood": "fun",
+    "src": "scenes/heartbeat.mp4",
+    "poster": "scenes/heartbeat.jpg",
+    "credit": "Pixabay",
+    "seconds": 9
+  },
+  {
+    "id": "cockpit",
+    "label": "Flight deck",
+    "mood": "serious",
+    "src": "scenes/cockpit.mp4",
+    "poster": "scenes/cockpit.jpg",
+    "credit": "Pixabay",
+    "seconds": 12
+  },
+  {
+    "id": "newtons-cradle",
+    "label": "Newton’s cradle",
+    "mood": "fun",
+    "src": "scenes/newtons-cradle.mp4",
+    "poster": "scenes/newtons-cradle.jpg",
+    "credit": "Pixabay",
+    "seconds": 9.3
+  },
+  {
+    "id": "retro-tv",
+    "label": "Retro TV",
+    "mood": "fun",
+    "src": "scenes/retro-tv.mp4",
+    "poster": "scenes/retro-tv.jpg",
+    "credit": "Pixabay",
+    "seconds": 12
+  },
+  {
+    "id": "satellite",
+    "label": "Satellite & moon",
+    "mood": "calm",
+    "src": "scenes/satellite.mp4",
+    "poster": "scenes/satellite.jpg",
+    "credit": "Pixabay",
+    "seconds": 12
+  },
+  {
+    "id": "chrome-rings",
+    "label": "Chrome rings",
+    "mood": "serious",
+    "src": "scenes/chrome-rings.mp4",
+    "poster": "scenes/chrome-rings.jpg",
+    "credit": "Pixabay",
+    "seconds": 6.9
+  },
+  {
+    "id": "chrome-spheres",
+    "label": "Chrome spheres",
+    "mood": "serious",
+    "src": "scenes/chrome-spheres.mp4",
+    "poster": "scenes/chrome-spheres.jpg",
+    "credit": "Pixabay",
+    "seconds": 4.9
+  },
+  {
+    "id": "earth",
+    "label": "Earth turning",
+    "mood": "calm",
+    "src": "scenes/earth.mp4",
+    "poster": "scenes/earth.jpg",
+    "credit": "Pixabay",
+    "seconds": 12
+  },
+  {
+    "id": "skeleton",
+    "label": "Dancing skeleton",
+    "mood": "fun",
+    "src": "scenes/skeleton.mp4",
+    "poster": "scenes/skeleton.jpg",
+    "credit": "Pixabay",
+    "seconds": 12
+  }
+]

@@ -7,6 +7,7 @@ import {
   startStartupIntro,
 } from "./startupIntro";
 import type { StartupIntro } from "./startupIntro";
+import { CINEMATICS, CINEMATIC_LEDGER_KEY, writeCinematicPreferences } from "./cinematics";
 
 let players: StartupIntro[];
 function start(native = false) {
@@ -58,8 +59,8 @@ describe("bounded startup cinematic", () => {
     expect(film().muted).toBe(true);
     expect(film().defaultMuted).toBe(true);
     expect(film().playsInline).toBe(true);
-    expect(film().src).toMatch(/\/startup\/axom-optical-luster\.mp4$/);
-    expect(film().poster).toMatch(/\/startup\/axom-optical-luster-poster\.png$/);
+    expect(film().src).toMatch(/\/cinematics\/luster-slow-sweep\.mp4$/);
+    expect(film().poster).toMatch(/\/cinematics\/luster-slow-sweep-poster\.jpg$/);
     expect(film().play).toHaveBeenCalledOnce();
     expect(film().classList.contains("axom-startup-intro__film--playing")).toBe(false);
     film().dispatchEvent(new Event("playing"));
@@ -136,7 +137,7 @@ describe("bounded startup cinematic", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("plays once per web tab session and leaves navigation untouched", async () => {
+  it("plays once per day by default and leaves navigation untouched", async () => {
     const first = start();
     first.dismiss();
     expect(sessionStorage.getItem(STARTUP_INTRO_SESSION_KEY)).toBe("1");
@@ -149,6 +150,7 @@ describe("bounded startup cinematic", () => {
   });
 
   it("does not use the web session marker for a native startup", () => {
+    writeCinematicPreferences({ frequency: "always" });
     sessionStorage.setItem(STARTUP_INTRO_SESSION_KEY, "1");
     const first = start(true);
     expect(overlay()).not.toBeNull();
@@ -227,5 +229,34 @@ describe("bounded startup cinematic", () => {
     expect(overlay()).toBeNull();
     expect(root().hasAttribute("inert")).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("plays the update film once, with a caption, on the first open after an update", async () => {
+    localStorage.setItem(CINEMATIC_LEDGER_KEY, JSON.stringify({ lastSeenVersion: "0.0.1", lastPlayedDay: "2000-01-01" }));
+    const player = startStartupIntro({ native: true, version: "0.0.2" });
+    players.push(player);
+    expect(film().src).toMatch(/luster-push-sweep\.mp4$/);
+    expect(overlay()!.querySelector(".axom-startup-intro__caption")?.textContent).toBe("Updated to v0.0.2");
+    player.dismiss();
+    players.push(startStartupIntro({ native: true, version: "0.0.2" }));
+    expect(overlay()).toBeNull();
+  });
+
+  it("previews a chosen film immediately, whatever the schedule", () => {
+    writeCinematicPreferences({ frequency: "never" });
+    players.push(startStartupIntro({ native: true, preview: { film: CINEMATICS["edge-glint"] } }));
+    expect(film().src).toMatch(/luster-edge-glint\.mp4$/);
+  });
+
+  it("honors AXOM's own reduced-motion setting, not only the OS", async () => {
+    document.documentElement.dataset.motion = "reduce";
+    try {
+      const player = start();
+      await player.finished;
+      expect(overlay()).toBeNull();
+      expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+    } finally {
+      delete document.documentElement.dataset.motion;
+    }
   });
 });

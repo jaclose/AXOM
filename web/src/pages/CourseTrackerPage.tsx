@@ -2,15 +2,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { useUi } from "../lib/uiStore";
 import {
-  Plus, Trash2, ChevronRight, ChevronDown, ListPlus, RefreshCw, BookOpen, HelpCircle, Eye, Upload, Pencil, Brain, ExternalLink, Copy, X,
+  Plus, Trash2, ChevronRight, ChevronDown, ListPlus, RefreshCw, BookOpen, HelpCircle, Eye, Upload, Pencil, Brain, ExternalLink, Copy, X, Star,
 } from "lucide-react";
 import { useStore } from "../lib/store";
 import { GlassCard, GButton, GhostButton, PanelHeader, Tag, EmptyState } from "../components/ui/primitives";
 import { Modal, Field, SelectField, TextAreaField } from "../components/ui/Modal";
 import {
-  passStage, PASS_COLOR, PASS_LABEL, ankiColor, YIELD_LABEL,
-  suggestMoves, scopeMastery, isCompletionKind, isQuestionKind,
+  passStage, PASS_COLOR, ankiColor, YIELD_LABEL,
+  isCompletionKind, isQuestionKind,
 } from "../lib/tracker";
+import { personalizedSuggestions } from "../lib/recommendationFactors";
+import { resolveStudyPlan, studyPlanCourse, type StudyMethodId } from "../lib/studyPreferences";
+import { scopeStudyProgress, trackerStudyProgress } from "../lib/studyProgress";
 import { BLUEPRINT_LANES } from "../lib/blueprintCatalog";
 import { routeForBlueprintLane } from "../lib/blueprintRoutes";
 import {
@@ -24,11 +27,13 @@ import {
   trackerPathKey,
 } from "../lib/pathUtils";
 import type { BlueprintNodeStatus, Course, InstalledBlueprint, InstalledBlueprintNode, Term, TrackerItem, TrackerKind, Yield } from "../lib/types";
-import { extractPdfText, extractPlainText, type ExtractedText } from "../lib/extractText";
+import { extractDocxText, extractPdfText, extractPlainText, type ExtractedText } from "../lib/extractText";
 import { dismissAnnouncement, isAnnouncementDismissed, readDismissedAnnouncements } from "../lib/announcements";
 import { pushToast } from "../lib/toast";
 import { ModuleTour, type ModuleTourStep } from "../components/shell/ModuleTour";
 import { ICON_SIZE } from "../lib/iconSize";
+import { parseCourseSchedule, reconcileScheduleDuplicates, scheduleCandidatesToTracker, type ScheduleCandidate } from "../lib/courseScheduleImport";
+import { activePrimaryPaths, activePrimaryScopes, isPrimaryPath, itemsInPrimary, setPrimaryUntil, togglePrimaryScope, type PrimaryTrackerScope } from "../lib/trackerFocus";
 
 const KINDS: TrackerKind[] = ["Lecture", "DLA", "PQ", "Lab", "Reading", "Requirement", "Milestone", "Evidence", "Question Block", "Assessment", "Review Loop"];
 const TABS = ["All", "Lecture", "DLA", "PQ", "Blueprint", "Extra"] as const;
@@ -118,11 +123,24 @@ const yieldTone: Record<Yield, "cyan" | "green" | "orange" | "neutral"> = {
 
 export function CourseTrackerPage() {
   const s = useStore();
-  const [scope, setScope] = useState<string>("");
+  // Open on the remembered view, else the first primary focus.
+  const [scope, setScopeState] = useState<string>(() => {
+    const saved = readSavedTrackerScope();
+    if (saved) return saved;
+    const state = useStore.getState();
+    return activePrimaryPaths(state.profile.primaryTrackerScopes, state.activeDayKey)[0] ?? "";
+  });
+  const [groupBySection, setGroupBySection] = useState(true);
+  function setScope(next: string) {
+    setScopeState(next);
+    saveTrackerScope(next);
+  }
   const [openNodes, setOpenNodes] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState(false);
   const [moduleOpen, setModuleOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [snoozeItem, setSnoozeItem] = useState<TrackerItem | null>(null);
   const [moduleHelpOpen, setModuleHelpOpen] = useState(false);
   const [moduleTourOpen, setModuleTourOpen] = useState(false);
   const [deleteScope, setDeleteScope] = useState<string | null>(null);
@@ -160,9 +178,24 @@ export function CourseTrackerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusItemId]);
 
+  const primaries = useMemo(() => activePrimaryScopes(s.profile.primaryTrackerScopes, s.activeDayKey), [s.profile.primaryTrackerScopes, s.activeDayKey]);
+  const primaryPaths = useMemo(() => primaries.map((primary) => primary.path), [primaries]);
+  function togglePrimary(path: string) {
+    if (!path) return;
+    const was = isPrimaryPath(s.profile.primaryTrackerScopes, path);
+    s.updateProfile({ primaryTrackerScopes: togglePrimaryScope(s.profile.primaryTrackerScopes, path) });
+    pushToast(was
+      ? { title: "Removed from primary focus", body: path, tone: "info", duration: 2600 }
+      : { title: "Primary focus set", body: `${path} now leads suggestions here, in the Command Brief and on the Dashboard.`, tone: "success" });
+  }
   const courseScopes = useMemo(() => collectCourseScopes(s.terms, s.courses), [s.terms, s.courses]);
   const tree = useMemo(() => buildTree(s.tracker, courseScopes), [s.tracker, courseScopes]);
   const scopeOptions = useMemo(() => mergeScopes(collectScopes(s.tracker), courseScopes), [s.tracker, courseScopes]);
+  // A remembered scope can outlive its items (renamed or deleted); fall back.
+  const scopeIsStale = Boolean(scope) && !parseBlueprintScope(scope) && !scopeOptions.includes(scope);
+  useEffect(() => {
+    if (scopeIsStale) setScope("");
+  }, [scopeIsStale]);
   const blueprintScope = parseBlueprintScope(scope);
   const activeBlueprintInstall = blueprintScope
     ? s.blueprintInstalls.find((install) => install.id === blueprintScope.installId) ?? null
@@ -181,8 +214,12 @@ export function CourseTrackerPage() {
     [inBlueprintScope, scope, s.tracker],
   );
   const items = inScope.filter((t) => tabMatch(tab, t.kind));
-  const mastery = inBlueprintScope ? blueprintMastery : scopeMastery(inScope);
-  const suggestions = useMemo(() => inBlueprintScope ? [] : suggestMoves(inScope, 3, salt), [inBlueprintScope, inScope, salt]);
+  const scopeProgress = useMemo(() => scopeStudyProgress(inScope, { preferences: s.profile.studyWorkflow, courses: s.courses }), [inScope, s.profile.studyWorkflow, s.courses]);
+  const progressPercent = inBlueprintScope ? blueprintMastery : scopeProgress.percent;
+  const suggestions = useMemo(() => {
+    void salt; // Refresh recomputes current facts; deterministic evidence keeps the same order stable.
+    return inBlueprintScope ? [] : personalizedSuggestions(inScope, 3, { preferences: s.profile.studyWorkflow, courses: s.courses, primaryScopes: primaryPaths });
+  }, [inBlueprintScope, inScope, s.profile.studyWorkflow, s.courses, salt, primaryPaths]);
 
   function toggle(path: string) {
     setOpenNodes((prev) => {
@@ -221,13 +258,17 @@ export function CourseTrackerPage() {
           <GlassCard pad data-tour="import" data-module-tour="tracker-structure">
             <PanelHeader title="Mastery tree" sub="Choose a course or module"
               action={<GhostButton title="Add one item" onClick={() => setAdding(true)}><Plus size={ICON_SIZE.emphasis} /></GhostButton>} />
+            {primaries.length > 0 && (
+              <PrimaryFocusList primaries={primaries} tracker={s.tracker} active={scope} onSelect={setScope} onToggle={togglePrimary} />
+            )}
             <div className="tree">
               <div className={`tree-node ${scope === "" ? "on" : ""}`} onClick={() => setScope("")}>
                 <span style={{ width: 14 }} /><span>Everything</span><span className="tree-count">{s.tracker.length}</span>
               </div>
               {tree.map((node) => (
                 <TreeNode key={node.path} node={node} depth={0}
-                  openNodes={openNodes} onToggle={toggle} active={scope} onSelect={setScope} />
+                  openNodes={openNodes} onToggle={toggle} active={scope} onSelect={setScope}
+                  primaryPaths={primaryPaths} onTogglePrimary={togglePrimary} />
               ))}
               {tree.length === 0 && <EmptyState title="Empty tree" hint="Import or add a module to begin." />}
               <BlueprintTree installs={s.blueprintInstalls} openNodes={openNodes} onToggle={toggle} active={scope} onSelect={setScope} />
@@ -239,11 +280,12 @@ export function CourseTrackerPage() {
               <GButton size="sm" onClick={() => setModuleOpen(true)}>
                 <BookOpen size={ICON_SIZE.body} /> Add course or module
               </GButton>
+              <GButton size="sm" onClick={() => setScheduleOpen(true)}><Upload size={ICON_SIZE.body}/> Import schedule</GButton>
             </div>
           </GlassCard>
 
           <GlassCard pad className="tracker-suggestions-card" data-module-tour="tracker-suggestions">
-            <PanelHeader title="Suggested next moves" sub="Based on passes, yield, and unfinished work"
+            <PanelHeader title="Suggested next moves" sub={primaries.length ? "Your primary focus is weighted first, then progress, yield, timing and workflow" : "Stable guidance based on progress, yield, timing, and your study workflow"}
               action={<GhostButton title="Refresh suggestions" onClick={() => setSalt((x) => x + 1)}><RefreshCw size={ICON_SIZE.body} /></GhostButton>} />
             {!inBlueprintScope && (
               <select className="scope-select" value={scope} onChange={(e) => setScope(e.target.value)} aria-label="Suggestion scope">
@@ -262,6 +304,7 @@ export function CourseTrackerPage() {
                       <div className="grow"><b>{sg.title}</b><span>{sg.reason}</span></div>
                       <small>~{suggestionEffortMinutes(item)} min</small>
                       <GButton size="tiny" onClick={() => sg.itemId ? focusItem(sg.itemId) : setBulkOpen(true)}>Open</GButton>
+                      {item && <GhostButton aria-label={`Defer ${item.label}`} title="Choose when this suggestion returns" onClick={() => setSnoozeItem(item)}>Not now</GhostButton>}
                     </div>
                   );
                 })}
@@ -282,26 +325,35 @@ export function CourseTrackerPage() {
                 {inBlueprintScope
                   ? `${activeBlueprintNodes.length} blueprint objects · ${activeBlueprintNodes.filter((n) => n.status === "done" || n.status === "mastered").length} complete · ${activeBlueprintNodes.filter((n) => n.sourceUrl).length} sourced`
                   : <>
-                    {inScope.length} items · {inScope.filter((i) => i.kind === "Lecture").length} lec ·{" "}
-                    {inScope.filter((i) => i.kind === "DLA").length} DLA · {inScope.filter((i) => i.passes >= 3).length} mature ·{" "}
-                    {inScope.filter((i) => i.passes >= 4).length} mastered
+                    {inScope.length} {inScope.length === 1 ? "item" : "items"} · {scopeProgress.complete} plan complete · {scopeProgress.inProgress} in progress · {scopeProgress.notStarted} not started
                   </>}
               </div>
+              {!inBlueprintScope && <p className="sub">Study-plan progress · Each item counts equally. This measures recorded work, not mastery.</p>}
+              {!inBlueprintScope && scope && (
+                <PrimaryFocusControl
+                  path={scope}
+                  scopes={s.profile.primaryTrackerScopes}
+                  onToggle={() => togglePrimary(scope)}
+                  onUntil={(until) => s.updateProfile({ primaryTrackerScopes: setPrimaryUntil(s.profile.primaryTrackerScopes, scope, until) })}
+                />
+              )}
             </div>
-            <div className="ring" style={{ width: 92, height: 92 }}>
-              <svg width="92" height="92" viewBox="0 0 92 92">
+            <div className="ring" style={{ width: 92, height: 92 }} role="progressbar"
+              aria-label={inBlueprintScope ? "Blueprint mastery" : "Study-plan progress"}
+              aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressPercent}>
+              <svg width="92" height="92" viewBox="0 0 92 92" aria-hidden="true">
                 <circle cx="46" cy="46" r="40" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="11" />
                 <circle cx="46" cy="46" r="40" fill="none" stroke="var(--cyan)" strokeWidth="11" strokeLinecap="round"
-                  strokeDasharray={2 * Math.PI * 40} strokeDashoffset={2 * Math.PI * 40 * (1 - mastery / 100)}
+                  strokeDasharray={2 * Math.PI * 40} strokeDashoffset={2 * Math.PI * 40 * (1 - progressPercent / 100)}
                   transform="rotate(-90 46 46)" style={{ transition: "stroke-dashoffset .5s ease" }} />
               </svg>
-              <div className="ring-label" style={{ fontSize: 15 }}>{mastery}%</div>
+              <div className="ring-label" style={{ fontSize: 15 }}>{progressPercent}%</div>
             </div>
           </div>
           </GlassCard>
 
           <GlassCard pad data-tour="tracker-help" data-module-tour="tracker-passes">
-          <PanelHeader title="Items" sub="Click pass boxes to fill or clear progress · click Anki blocks to cycle card mastery"
+          <PanelHeader title="Items" sub="Log passes toward your saved plan · Anki rounds are tracked separately"
             action={
               <div className="row gap6">
                 {scope && <GhostButton title="Rename selected tracker group" onClick={renameCurrentScope}><Pencil size={ICON_SIZE.body} /></GhostButton>}
@@ -318,8 +370,25 @@ export function CourseTrackerPage() {
                   <button key={t} className={`filter-pill ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>{t}</button>
                 ))}
               </div>
+              <TrackerScopeBar
+                scope={scope}
+                scopeOptions={scopeOptions}
+                onScope={(next) => {
+                  setScope(next);
+                  setOpenNodes((prev) => {
+                    const expanded = new Set(prev);
+                    let acc = "";
+                    for (const part of next.split("/").filter(Boolean)) { acc = acc ? `${acc}/${part}` : part; expanded.add(acc); }
+                    return expanded;
+                  });
+                }}
+                groupBySection={groupBySection}
+                onGroupBySection={setGroupBySection}
+              />
               {items.length === 0 && <EmptyState title="No items here" hint="Pick another scope, switch tabs, or import." />}
-              {items.map((it) => <ItemRow key={it.id} item={it} highlight={it.id === highlightId} />)}
+              {groupBySection
+                ? <GroupedTrackerItems scope={scope} items={items} highlightId={highlightId} onFocusSection={setScope} primaryPaths={primaryPaths} onTogglePrimary={togglePrimary} />
+                : items.map((it) => <ItemRow key={it.id} item={it} highlight={it.id === highlightId} />)}
             </>
           )}
           </GlassCard>
@@ -329,9 +398,124 @@ export function CourseTrackerPage() {
       {adding && <TrackerEditor defaultPath={scope} onClose={() => setAdding(false)} />}
       {moduleOpen && <ModuleEditor onDone={(nextScope) => { setModuleOpen(false); if (nextScope) setScope(nextScope); }} />}
       {bulkOpen && <BulkImportModal defaultPath={scope} onClose={() => setBulkOpen(false)} />}
+      {scheduleOpen && <ScheduleImportModal defaultPath={scope} onClose={() => setScheduleOpen(false)} />}
+      {snoozeItem && <RecommendationSnoozeModal item={snoozeItem} onClose={() => setSnoozeItem(null)} />}
       {deleteScope && <DeleteScopeModal scope={deleteScope} onSelect={setScope} onClose={() => setDeleteScope(null)} />}
       {moduleTourOpen && <ModuleTour name="Course Tracker" route="tracker" steps={COURSE_TRACKER_TOUR_STEPS} onExit={() => setModuleTourOpen(false)} />}
     </div>
+  );
+}
+
+function RecommendationSnoozeModal({ item, onClose }: { item: TrackerItem; onClose: () => void }) {
+  const updateTrackerItem = useStore((state) => state.updateTrackerItem);
+  const [custom, setCustom] = useState("");
+  function defer(until: string) {
+    updateTrackerItem(item.id, { recommendationSnoozedUntil: until });
+    pushToast({ title: "Suggestion deferred", body: `${item.label} will return when the pause ends.`, tone: "success" });
+    onClose();
+  }
+  return (
+    <Modal title="When should this return?" onClose={onClose} footer={<GButton onClick={onClose}>Cancel</GButton>}>
+      <p className="sub"><b>{item.label}</b> stays in your Tracker. Deferring only removes it from suggestions temporarily.</p>
+      <div className="snooze-choice-grid">
+        <GButton onClick={() => defer(laterTodayIso())}>Later today</GButton>
+        <GButton onClick={() => defer(tomorrowIso())}>Tomorrow</GButton>
+        <GButton onClick={() => defer(daysFromNowIso(2))}>In 2 days</GButton>
+      </div>
+      <div className="row gap8 align-end">
+        <Field label="Custom return time" type="datetime-local" min={localDateTimeValue(new Date())} value={custom} onChange={(event) => setCustom(event.target.value)} />
+        <GButton variant="primary" disabled={!custom || Date.parse(custom) <= Date.now()} onClick={() => defer(new Date(custom).toISOString())}>Defer</GButton>
+      </div>
+    </Modal>
+  );
+}
+
+function ScheduleImportModal({ defaultPath, onClose }: { defaultPath: string; onClose: () => void }) {
+  const store = useStore();
+  const [path, setPath] = useState(defaultPath);
+  const [text, setText] = useState("");
+  const [review, setReview] = useState<ScheduleCandidate[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [errors, setErrors] = useState<string[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const counts = review.reduce((result, row) => {
+    if (row.problem) result.invalid += 1;
+    else if (row.duplicate === "exact") result.existing += 1;
+    else if (row.duplicate === "likely") result.review += 1;
+    else result.ready += 1;
+    return result;
+  }, { ready: 0, review: 0, existing: 0, invalid: 0 });
+
+  function updateRow(index: number, patch: Partial<ScheduleCandidate>) {
+    setReview((current) => reconcileScheduleDuplicates(current.map((candidate, candidateIndex) => candidateIndex === index ? { ...candidate, ...patch } : candidate), store.tracker));
+  }
+  function extractPaste() {
+    setErrors([]);
+    setReview(parseCourseSchedule(text, store.tracker, "Pasted schedule"));
+  }
+  async function extractFiles(files: FileList | null) {
+    if (!files?.length) return;
+    setBusy(true);
+    setErrors([]);
+    const settled = await Promise.allSettled([...files].map(async (file) => {
+      const extension = file.name.split(".").pop()?.toLowerCase();
+      let extracted: ExtractedText;
+      if (extension === "pdf") extracted = await extractPdfText(await file.arrayBuffer());
+      else if (extension === "docx") extracted = await extractDocxText(await file.arrayBuffer());
+      else extracted = extractPlainText(await file.text());
+      if (extracted.empty) throw new Error(extracted.warnings[0] ?? "No readable schedule text was found.");
+      const parsed = parseCourseSchedule(extracted.text, store.tracker, file.name);
+      if (!parsed.length) throw new Error("No schedule entries were detected. Check the file format or paste the rows for review.");
+      return parsed;
+    }));
+    const candidates = settled.flatMap((result) => result.status === "fulfilled" ? result.value : []);
+    setErrors(settled.flatMap((result, index) => result.status === "rejected" ? [`${files[index].name}: ${result.reason instanceof Error ? result.reason.message : "Could not read file."}`] : []));
+    setReview((current) => reconcileScheduleDuplicates([...current, ...candidates], store.tracker));
+    setBusy(false);
+    if (fileRef.current) fileRef.current.value = "";
+  }
+  function commit() {
+    const items = scheduleCandidatesToTracker(review, path || "Imported schedule");
+    store.bulkAddTrackerItems(items);
+    pushToast({ title: `${items.length} schedule item${items.length === 1 ? "" : "s"} imported`, body: "Your reviewed items are ready in Course Tracker.", tone: "success" });
+    onClose();
+  }
+  const importable = review.filter((row) => row.selected && row.duplicate !== "exact" && !row.problem).length;
+  return (
+    <Modal title="Import course schedule" onClose={onClose} footer={<><GButton onClick={onClose}>Cancel</GButton>{review.length ? <GButton variant="primary" disabled={!importable || busy} onClick={commit}>Import selected ({importable})</GButton> : <GButton variant="primary" disabled={!text.trim() || busy} onClick={extractPaste}>Review schedule</GButton>}</>}>
+      <p className="sub">Add PDF, DOCX, ICS, CSV, TSV, or TXT files—or paste rows. AXOM extracts candidates first; nothing is created until you review.</p>
+      <Field label="Tracker destination" value={path} onChange={(event) => setPath(event.target.value)} placeholder="Term/Course/Module" />
+      <div className="schedule-source-actions">
+        <GButton onClick={() => fileRef.current?.click()} disabled={busy}><Upload size={ICON_SIZE.body} /> {busy ? "Reading files…" : "Add schedule files"}</GButton>
+        <input ref={fileRef} hidden type="file" multiple accept=".pdf,.docx,.ics,.csv,.tsv,.txt,text/calendar,text/csv,text/tab-separated-values,text/plain,application/pdf" onChange={(event) => void extractFiles(event.target.files)} />
+        <span className="sub">One unreadable file will not stop the rest.</span>
+      </div>
+      <TextAreaField label="Or paste schedule rows" value={text} onChange={(event) => setText(event.target.value)} placeholder={"2026-08-14,Renal Physiology,Lecture\n2026-08-20,IMCQ 2,Assessment"} />
+      {text.trim() && review.length > 0 && <GButton size="sm" onClick={extractPaste}>Replace review with pasted rows</GButton>}
+      <div aria-live="polite" className="sr-only">{busy ? "Reading schedule files" : review.length ? `${counts.ready} ready, ${counts.review} need review, ${counts.existing} already exist, ${counts.invalid} invalid` : ""}</div>
+      {errors.length > 0 && <div className="schedule-import-errors" role="alert"><b>Some files could not be read. Your other files are still available.</b>{errors.map((error) => <span key={error}>{error}</span>)}</div>}
+      {review.length > 0 && <>
+        <div className="schedule-review-summary" aria-label="Schedule import summary">
+          <b>{counts.ready} ready</b><span>{counts.review} need review</span><span>{counts.existing} already exist</span><span>{counts.invalid} invalid</span>
+          <GButton size="tiny" onClick={() => setReview((current) => current.map((row) => ({ ...row, selected: !row.problem && row.duplicate !== "exact" })))}>Select importable</GButton>
+          <GButton size="tiny" onClick={() => setReview((current) => current.map((row) => ({ ...row, selected: false })))}>Clear selection</GButton>
+        </div>
+        <div className="schedule-review-list" aria-label="Schedule review">
+          {review.map((row, index) => <div className="schedule-review-row" key={`${row.id}-${index}`}>
+            <input aria-label={`Select ${row.label || `row ${row.sourceLine}`}`} type="checkbox" checked={row.selected} disabled={row.duplicate === "exact" || Boolean(row.problem)} onChange={(event) => updateRow(index, { selected: event.target.checked })} />
+            <div className="schedule-review-fields">
+              <Field label="Date" type="date" value={row.date ?? ""} onChange={(event) => updateRow(index, { date: event.target.value || undefined })} />
+              <Field label="Title" value={row.label} onChange={(event) => updateRow(index, { label: event.target.value, problem: event.target.value.trim() ? undefined : "A title is required." })} />
+              <SelectField label="Type" value={row.kind} onChange={(event) => updateRow(index, { kind: event.target.value as TrackerKind })}>{KINDS.map((kind) => <option key={kind}>{kind}</option>)}</SelectField>
+            </div>
+            <small className={`schedule-row-state schedule-row-state--${row.problem ? "invalid" : row.duplicate}`}>
+              {row.problem ?? (row.duplicate === "exact" ? "Already exists" : row.duplicate === "likely" ? "Possible duplicate — compare before importing" : "Ready")}
+              {row.sourceName ? ` · ${row.sourceName}` : ""}
+            </small>
+          </div>)}
+        </div>
+      </>}
+    </Modal>
   );
 }
 
@@ -365,15 +549,25 @@ function suggestionEffortMinutes(item?: TrackerItem) {
 
 function ItemRow({ item, highlight }: { item: TrackerItem; highlight?: boolean }) {
   const s = useStore();
+  const [planOpen, setPlanOpen] = useState(false);
   const questionStyle = isQuestionKind(item.kind);
   const completionStyle = isCompletionKind(item.kind);
+  const { plan, target, complete } = trackerStudyProgress(item, { preferences: s.profile.studyWorkflow, courses: s.courses });
+  const unit = questionStyle ? "practice round" : "pass";
+  const pluralUnit = questionStyle ? "practice rounds" : "passes";
+  const progressLabel = completionStyle ? (complete ? "Plan complete" : "Not started")
+    : item.passes > target ? `${item.passes} ${pluralUnit} recorded · Target of ${target} reached`
+      : `${item.passes} of ${target} ${target === 1 ? unit : pluralUnit} · ${complete ? "Plan complete" : `${target - item.passes} remaining`}`;
+  const planLabels = completionStyle ? [] : plan.methods.filter((method) => method.enabled && (!questionStyle || method.id !== "lecture-passes")).slice(0, 3).map((method) => method.id === "lecture-passes" ? `Pass ×${target}` : method.id === "practice-questions" ? "Questions" : method.id === "teach-aloud" ? "Teach" : method.label ?? method.id);
   return (
     <div className={`dense-row tracker-item-row ${questionStyle ? "pq-row" : ""} ${completionStyle ? "milestone-row" : ""} ${highlight ? "row-highlight" : ""}`} data-item-id={item.id}>
-      {!questionStyle && !completionStyle && <MasteryShard item={item} />}
+      {!questionStyle && !completionStyle && <MasteryShard item={item} progressLabel={progressLabel} />}
       <div className="grow">
         <div className="dr-label">{item.label}</div>
         <div className="dr-type">{item.path}</div>
+        <div className="dr-note">{progressLabel}</div>
         {item.note && <div className="dr-note">{item.note}</div>}
+        {planLabels.length > 0 && <div className="row wrap gap6" aria-label="Effective study plan">{planLabels.map((label) => <Tag key={label} tone="neutral">{label}</Tag>)}</div>}
       </div>
 
       <button className={`yield-badge y-${item.yield}`} onClick={() => s.cycleYield(item.id)} title="Cycle yield">
@@ -382,7 +576,7 @@ function ItemRow({ item, highlight }: { item: TrackerItem; highlight?: boolean }
       <Tag tone={kindTone[item.kind]}>{item.kind}</Tag>
 
       {completionStyle ? <CompletionBlock item={item} /> : questionStyle ? <PQCompleteBlocks item={item} /> : <>
-        <PassBlocks item={item} />
+        <PassBlocks item={item} target={target} />
         <AnkiBlocks item={item} />
       </>}
 
@@ -393,10 +587,62 @@ function ItemRow({ item, highlight }: { item: TrackerItem; highlight?: boolean }
         }}>
         <Pencil size={ICON_SIZE.body} />
       </GhostButton>
+      <GhostButton title="Edit study plan" onClick={() => setPlanOpen(true)}><Brain size={ICON_SIZE.body} /></GhostButton>
       <GhostButton className="danger" onClick={() => s.removeTrackerItem(item.id)}><Trash2 size={ICON_SIZE.body} /></GhostButton>
+      {planOpen && <ItemStudyPlanEditor item={item} onClose={() => setPlanOpen(false)} />}
     </div>
   );
 }
+
+function ItemStudyPlanEditor({ item, onClose }: { item: TrackerItem; onClose: () => void }) {
+  const store = useStore();
+  const base = item.studyPlanOverride ?? {};
+  const plan = resolveStudyPlan(store.profile.studyWorkflow, studyPlanCourse(store.courses, item), { ...item, studyPlanOverride: undefined });
+  const [passes, setPasses] = useState(base.lecturePasses);
+  const [methods, setMethods] = useState(() => new Map((base.methods ?? []).map((method) => [method.id, method.enabled])));
+  const [difficulty, setDifficulty] = useState(item.difficulty ?? "");
+  const [assessmentDate, setAssessmentDate] = useState(item.assessmentDate ?? "");
+  const [priority, setPriority] = useState(item.explicitPriority?.toString() ?? "");
+  const options: Array<[StudyMethodId, string]> = [["anki", "Anki"], ["practice-questions", "Practice questions"], ["notes", "Notes"], ["teach-aloud", "Teaching / retrieval"]];
+  function save() {
+    const override = { ...base };
+    if (passes === undefined) delete override.lecturePasses;
+    else override.lecturePasses = passes;
+    if (methods.size) override.methods = [...methods].map(([id, enabled]) => ({
+      ...base.methods?.find((method) => method.id === id), id, enabled,
+    }));
+    store.updateTrackerItem(item.id, {
+      studyPlanOverride: Object.keys(override).length ? override : undefined,
+      difficulty: difficulty as TrackerItem["difficulty"] || undefined,
+      assessmentDate: assessmentDate || undefined,
+      explicitPriority: priority ? Number(priority) as TrackerItem["explicitPriority"] : undefined,
+    });
+    onClose();
+  }
+  return (
+    <Modal title={`Study plan · ${item.label}`} onClose={onClose} footer={<>
+      <GButton onClick={() => { store.updateTrackerItem(item.id, { studyPlanOverride: undefined }); onClose(); }}>Use inherited plan</GButton>
+      <GButton variant="primary" onClick={save}>Save plan</GButton>
+    </>}>
+      <p className="sub">Only this item changes. Learner and course defaults remain intact.</p>
+      <label className="stack gap6"><span>Lecture passes</span><input className="field" type="number" min={1} max={6} value={passes ?? ""} placeholder={`Inherited: ${plan.lecturePasses}`} onChange={(event) => setPasses(event.target.value ? Number(event.target.value) : undefined)}/></label>
+      <div className="row wrap gap8">{options.map(([id, label]) => {
+        const active = methods.get(id) ?? plan.methods.find((method) => method.id === id)?.enabled ?? false;
+        return <button key={id} type="button" className={`filter-pill ${active ? "on" : ""}`} aria-pressed={active} onClick={() => setMethods((current) => new Map(current).set(id, !active))}>{label}</button>;
+      })}</div>
+      <div className="settings-target-grid">
+        <label className="stack gap6"><span>Difficulty</span><select className="field" value={difficulty} onChange={(event) => setDifficulty(event.target.value as typeof difficulty)}><option value="">Unknown</option><option value="easy">Easy</option><option value="moderate">Moderate</option><option value="hard">Hard</option><option value="very-hard">Very hard</option></select></label>
+        <label className="stack gap6"><span>Assessment date</span><input className="field" type="date" value={assessmentDate} onChange={(event) => setAssessmentDate(event.target.value)}/></label>
+        <label className="stack gap6"><span>Priority</span><select className="field" value={priority} onChange={(event) => setPriority(event.target.value)}><option value="">Normal</option>{[1,2,3,4,5].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+      </div>
+    </Modal>
+  );
+}
+
+function tomorrowIso() { const date = new Date(); date.setDate(date.getDate() + 1); date.setHours(8, 0, 0, 0); return date.toISOString(); }
+function laterTodayIso() { return new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(); }
+function daysFromNowIso(days: number) { const date = new Date(); date.setDate(date.getDate() + days); date.setHours(8, 0, 0, 0); return date.toISOString(); }
+function localDateTimeValue(date: Date) { const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000); return local.toISOString().slice(0, 16); }
 
 function PQCompleteBlocks({ item }: { item: TrackerItem }) {
   const s = useStore();
@@ -436,7 +682,7 @@ function CompletionBlock({ item }: { item: TrackerItem }) {
   );
 }
 
-function MasteryShard({ item }: { item: TrackerItem }) {
+function MasteryShard({ item, progressLabel }: { item: TrackerItem; progressLabel: string }) {
   const stage = passStage(item.passes);
   const ankiTone = item.ankiPasses > 0 ? ankiColor(item.ankiPasses) : "rgba(255,255,255,0.12)";
   const style = {
@@ -446,33 +692,34 @@ function MasteryShard({ item }: { item: TrackerItem }) {
 
   return (
     <div className="mastery-shard" style={style}
-      title={`${PASS_LABEL[stage]} · ${item.ankiPasses ? `Anki ${item.ankiPasses}/3` : "No Anki rounds yet"}`}>
+      title={`${progressLabel} · ${item.ankiPasses ? `Anki ${item.ankiPasses}/3` : "No Anki rounds yet"}`}>
       <span className="shard-pass"><Eye size={ICON_SIZE.body} /></span>
       <span className="shard-anki">A</span>
     </div>
   );
 }
 
-function PassBlocks({ item }: { item: TrackerItem }) {
+function PassBlocks({ item, target }: { item: TrackerItem; target: number }) {
   const s = useStore();
   return (
     <div className="pass-blocks" aria-label="Lecture passes">
-      {[1, 2, 3, 4].map((n) => {
+      {Array.from({ length: Math.min(6, Math.max(4, target, item.passes)) }, (_, index) => index + 1).map((n) => {
         const blockStage = passStage(n);
         const active = item.passes >= n;
         const style = { "--block-color": PASS_COLOR[blockStage] } as CSSProperties;
         return (
           <button key={n}
+            aria-pressed={active}
             className={`pass-block ${active ? "on" : ""} stage-${blockStage}`}
             style={style}
             onClick={() => s.setPasses(item.id, n)}
-            title={`${n}${n === 4 ? "+" : ""} lecture pass${n > 1 ? "es" : ""}`}>
-            <span>{n === 4 ? "4+" : n}</span>
+            title={`${n} lecture pass${n > 1 ? "es" : ""}`}>
+            <span>{n}</span>
           </button>
         );
       })}
-      <span className="pass-num" style={{ color: PASS_COLOR[passStage(item.passes)] }}>
-        {item.passes > 4 ? `${item.passes}` : PASS_LABEL[passStage(item.passes)]}
+      <span className="pass-num" title="Recorded passes / study-plan target" style={{ color: PASS_COLOR[passStage(item.passes)] }}>
+        {item.passes}/{target}
       </span>
     </div>
   );
@@ -496,8 +743,8 @@ function AnkiBlocks({ item }: { item: TrackerItem }) {
 function TrackerGuide() {
   return (
     <div className="tracker-guide">
-      <p>Each focused review is one pass: 1 is fragile, 2 is forming, 3 is mature, and 4+ is mastered. Click the same level again to step back.</p>
-      <p>Anki rounds are tracked separately. Practice-question rows use three completed levels, and yield labels help AXOM prioritize high-value or weak work.</p>
+      <p>Each focused review is one pass. Progress uses your learner defaults, course plan, item-kind defaults, and any item override. Edit an item's study plan to change its target; recorded passes are kept. Click the same level again to step back.</p>
+      <p>Plan complete means the recorded work meets your current target, not that mastery has been assessed. Anki rounds are tracked separately. Practice-question rows use three rounds; requirements and milestones use done/not done. Yield labels help prioritize work without changing its target.</p>
     </div>
   );
 }
@@ -842,6 +1089,151 @@ function mergeScopes(a: string[], b: string[]) {
   return [...new Set([...a, ...b])].sort((x, y) => x.localeCompare(y));
 }
 
+const TRACKER_SCOPE_KEY = "axom.tracker.scope.v1";
+
+function readSavedTrackerScope(): string {
+  try { return localStorage.getItem(TRACKER_SCOPE_KEY) ?? ""; } catch { return ""; }
+}
+
+function saveTrackerScope(scope: string) {
+  try {
+    if (scope) localStorage.setItem(TRACKER_SCOPE_KEY, scope);
+    else localStorage.removeItem(TRACKER_SCOPE_KEY);
+  } catch { /* device convenience only */ }
+}
+
+/** Direct and deeper subsections under a scope, for the subsection picker. */
+export function descendantScopes(scope: string, scopeOptions: readonly string[]): string[] {
+  const prefix = scope ? `${scope}/` : "";
+  return [...new Set(scopeOptions.filter((path) => (scope ? path.startsWith(prefix) : true) && path !== scope))]
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
+
+/** Group items under the next path segment below `scope`. */
+export function groupItemsBySection(scope: string, items: readonly TrackerItem[]): Array<{ key: string; path: string; items: TrackerItem[] }> {
+  const groups = new Map<string, TrackerItem[]>();
+  for (const item of items) {
+    const relative = !scope ? item.path : item.path === scope ? "" : item.path.slice(scope.length + 1);
+    const key = relative.split("/").filter(Boolean)[0] ?? "";
+    groups.set(key, [...(groups.get(key) ?? []), item]);
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b, undefined, { numeric: true })))
+    .map(([key, groupItems]) => ({ key, path: key ? (scope ? `${scope}/${key}` : key) : scope, items: groupItems }));
+}
+
+function TrackerScopeBar({
+  scope, scopeOptions, onScope, groupBySection, onGroupBySection,
+}: {
+  scope: string;
+  scopeOptions: readonly string[];
+  onScope: (scope: string) => void;
+  groupBySection: boolean;
+  onGroupBySection: (value: boolean) => void;
+}) {
+  const parts = scope.split("/").filter(Boolean);
+  const descendants = descendantScopes(scope, scopeOptions);
+  return (
+    <div className="tracker-scope-bar">
+      <nav className="tracker-breadcrumb" aria-label="Tracker location">
+        <button type="button" className={parts.length === 0 ? "on" : ""} onClick={() => onScope("")}>Everything</button>
+        {parts.map((part, index) => {
+          const path = parts.slice(0, index + 1).join("/");
+          return (
+            <span key={path}>
+              <ChevronRight size={ICON_SIZE.microInline} aria-hidden="true" />
+              <button type="button" className={index === parts.length - 1 ? "on" : ""} onClick={() => onScope(path)}>{part}</button>
+            </span>
+          );
+        })}
+      </nav>
+      <div className="tracker-scope-controls">
+        {descendants.length > 0 && (
+          <label className="tracker-subsection-picker">
+            <span>Subsection</span>
+            <select className="field" value="" aria-label="Jump to a subsection" onChange={(event) => { if (event.target.value) onScope(event.target.value); }}>
+              <option value="">All of {parts.at(-1) ?? "Everything"}…</option>
+              {descendants.map((path) => {
+                const relative = scope ? path.slice(scope.length + 1) : path;
+                const depth = relative.split("/").length - 1;
+                return <option key={path} value={path}>{`${"\u00a0\u00a0".repeat(depth)}${relative.split("/").at(-1)}`}</option>;
+              })}
+            </select>
+          </label>
+        )}
+        <label className="tracker-group-toggle">
+          <input type="checkbox" checked={groupBySection} onChange={(event) => onGroupBySection(event.target.checked)} />
+          <span>Group by section</span>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function GroupedTrackerItems({
+  scope, items, highlightId, onFocusSection, primaryPaths = [], onTogglePrimary,
+}: {
+  scope: string;
+  items: TrackerItem[];
+  highlightId: string | null;
+  onFocusSection: (path: string) => void;
+  primaryPaths?: readonly string[];
+  onTogglePrimary?: (path: string) => void;
+}) {
+  const s = useStore();
+  const groups = useMemo(() => groupItemsBySection(scope, items), [scope, items]);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  if (groups.length <= 1) {
+    return <>{items.map((it) => <ItemRow key={it.id} item={it} highlight={it.id === highlightId} />)}</>;
+  }
+  return (
+    <div className="tracker-section-groups">
+      {groups.map((group) => {
+        const open = !collapsed.has(group.key) || group.items.some((item) => item.id === highlightId);
+        const progress = scopeStudyProgress(group.items, { preferences: s.profile.studyWorkflow, courses: s.courses });
+        return (
+          <section key={group.key || "__direct"} className={`tracker-section-group ${open ? "open" : ""}`}>
+            <div className="tracker-section-head">
+              <button
+                type="button"
+                className="tracker-section-toggle"
+                aria-expanded={open}
+                onClick={() => setCollapsed((current) => {
+                  const next = new Set(current);
+                  if (next.has(group.key)) next.delete(group.key); else next.add(group.key);
+                  return next;
+                })}
+              >
+                <ChevronRight size={ICON_SIZE.body} aria-hidden="true" className="tracker-section-chevron" />
+                <b>{group.key || `Directly in ${scope.split("/").at(-1) ?? "Everything"}`}</b>
+                <span className="tracker-section-count">{group.items.length}</span>
+              </button>
+              <span className="tracker-section-progress" aria-label={`${progress.percent}% of the study plan recorded`}>
+                <i style={{ width: `${progress.percent}%` }} />
+              </span>
+              <small>{progress.percent}%</small>
+              {group.key && onTogglePrimary && (
+                <button type="button" className={`tracker-primary-star ${primaryPaths.includes(group.path) ? "on" : ""}`}
+                  aria-pressed={primaryPaths.includes(group.path)} aria-label={`${primaryPaths.includes(group.path) ? "Remove" : "Make"} ${group.key} ${primaryPaths.includes(group.path) ? "from primary focus" : "a primary focus"}`}
+                  title={primaryPaths.includes(group.path) ? "Primary focus — click to remove" : "Make this subsection a primary focus"}
+                  onClick={() => onTogglePrimary(group.path)}>
+                  <Star size={ICON_SIZE.body} />
+                </button>
+              )}
+              {group.key && (
+                <button type="button" className="tracker-section-focus" onClick={() => onFocusSection(group.path)}>
+                  Show only this
+                </button>
+              )}
+            </div>
+            {open && group.items.map((it) => <ItemRow key={it.id} item={it} highlight={it.id === highlightId} />)}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 function tabMatch(tab: Tab, kind: TrackerKind): boolean {
   if (tab === "All") return true;
   if (tab === "Extra") return kind === "Lab" || kind === "Reading";
@@ -957,27 +1349,95 @@ function DeleteScopeModal({ scope, onSelect, onClose }: { scope: string; onSelec
 }
 
 function TreeNode({
-  node, depth, openNodes, onToggle, active, onSelect,
+  node, depth, openNodes, onToggle, active, onSelect, primaryPaths = [], onTogglePrimary,
 }: {
   node: TNode; depth: number; openNodes: Set<string>;
   onToggle: (p: string) => void; active: string; onSelect: (p: string) => void;
+  primaryPaths?: readonly string[]; onTogglePrimary?: (path: string) => void;
 }) {
   const open = openNodes.has(node.path);
   const hasKids = node.children.length > 0;
+  const primary = primaryPaths.includes(node.path);
   return (
     <>
-      <div className={`tree-node depth${Math.min(depth, 2)} ${active === node.path ? "on" : ""}`}
+      <div className={`tree-node depth${Math.min(depth, 2)} ${active === node.path ? "on" : ""} ${primary ? "primary" : ""}`}
         style={{ "--tree-indent": `${depth * 14}px` } as CSSProperties}
         onClick={() => { onSelect(node.path); if (hasKids) onToggle(node.path); }}>
         {hasKids ? (open ? <ChevronDown size={ICON_SIZE.body} /> : <ChevronRight size={ICON_SIZE.body} />) : <span style={{ width: 14 }} />}
         <span>{node.name}</span>
+        {onTogglePrimary && (
+          <button type="button" className={`tracker-primary-star ${primary ? "on" : ""}`} aria-pressed={primary}
+            aria-label={primary ? `Remove ${node.name} from primary focus` : `Make ${node.name} a primary focus`}
+            title={primary ? "Primary focus — click to remove" : "Make primary"}
+            onClick={(event) => { event.stopPropagation(); onTogglePrimary(node.path); }}>
+            <Star size={ICON_SIZE.microInline} />
+          </button>
+        )}
         <span className="tree-count">{node.count}</span>
       </div>
       {open && node.children.map((c) => (
         <TreeNode key={c.path} node={c} depth={depth + 1}
-          openNodes={openNodes} onToggle={onToggle} active={active} onSelect={onSelect} />
+          openNodes={openNodes} onToggle={onToggle} active={active} onSelect={onSelect}
+          primaryPaths={primaryPaths} onTogglePrimary={onTogglePrimary} />
       ))}
     </>
+  );
+}
+
+/** Pinned list of primary subsections with their plan progress. */
+function PrimaryFocusList({ primaries, tracker, active, onSelect, onToggle }: {
+  primaries: PrimaryTrackerScope[];
+  tracker: TrackerItem[];
+  active: string;
+  onSelect: (path: string) => void;
+  onToggle: (path: string) => void;
+}) {
+  const s = useStore();
+  return (
+    <div className="tracker-primary-list" aria-label="Primary focus">
+      <div className="tracker-primary-list-head"><Star size={ICON_SIZE.microInline} aria-hidden="true" /> Primary focus</div>
+      {primaries.map((primary) => {
+        const items = itemsInPrimary(tracker, [primary.path]);
+        const progress = scopeStudyProgress(items, { preferences: s.profile.studyWorkflow, courses: s.courses });
+        const parts = primary.path.split("/");
+        return (
+          <div key={primary.path} className={`tracker-primary-row ${active === primary.path ? "on" : ""}`}>
+            <button type="button" className="tracker-primary-open" onClick={() => onSelect(primary.path)}>
+              <b>{parts.at(-1)}</b>
+              <small>{parts.slice(0, -1).join(" / ") || "Top level"}{primary.until ? ` · until ${new Date(`${primary.until}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : ""}</small>
+              <span className="tracker-section-progress" aria-label={`${progress.percent}% of the study plan recorded`}><i style={{ width: `${progress.percent}%` }} /></span>
+            </button>
+            <span className="tracker-primary-pct">{progress.percent}%</span>
+            <button type="button" className="tracker-primary-star on" aria-label={`Remove ${parts.at(-1)} from primary focus`} onClick={() => onToggle(primary.path)}>
+              <Star size={ICON_SIZE.microInline} />
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function PrimaryFocusControl({ path, scopes, onToggle, onUntil }: {
+  path: string;
+  scopes: PrimaryTrackerScope[] | undefined;
+  onToggle: () => void;
+  onUntil: (until: string | undefined) => void;
+}) {
+  const entry = scopes?.find((scope) => scope.path === path);
+  return (
+    <div className="tracker-primary-control">
+      <button type="button" className={`tracker-primary-toggle ${entry ? "on" : ""}`} aria-pressed={Boolean(entry)} onClick={onToggle}>
+        <Star size={ICON_SIZE.body} /> {entry ? "Primary focus" : "Make primary"}
+      </button>
+      {entry && (
+        <label className="tracker-primary-until">
+          <span>until</span>
+          <input type="date" className="field" value={entry.until ?? ""} onChange={(event) => onUntil(event.target.value || undefined)} aria-label="Primary focus ends after" />
+        </label>
+      )}
+      {!entry && <span className="sub">Primary subsections lead suggestions, the Command Brief and the Dashboard.</span>}
+    </div>
   );
 }
 

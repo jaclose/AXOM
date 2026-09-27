@@ -1,10 +1,15 @@
-import { todayGrade, gradeLabel, gradeColor } from "../../lib/scoring";
+import { todayGrade, gradeLabel, gradeColor, gradeThresholds } from "../../lib/scoring";
+import { useStore } from "../../lib/store";
 
-// Day-score ring — ported from RingScore. Fills toward the 480-minute (8h) cap.
+// Day-score ring — ported from RingScore. Fills toward the "excellent" line
+// (1.6× the learner's minute target; 480 min with the original defaults).
 export function Ring({ minutes, cards }: { minutes: number; cards: number }) {
-  const grade = todayGrade(minutes, cards);
+  const minuteTarget = useStore((s) => s.profile.dailyMinuteTarget);
+  const cardTarget = useStore((s) => s.profile.dailyCardTarget);
+  const targets = { minutes: minuteTarget, cards: cardTarget };
+  const grade = todayGrade(minutes, cards, targets);
   const color = gradeColor(grade);
-  const pct = Math.min(minutes / 480, 1);
+  const pct = Math.min(minutes / gradeThresholds(targets).blue.minutes, 1);
   const r = 51;
   const c = 2 * Math.PI * r;
 

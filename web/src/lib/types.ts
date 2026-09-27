@@ -5,6 +5,7 @@
 // ===========================================================================
 
 import type { JournalNotebookEntryFields, JournalNotebookPreferences } from "./journalNotebook";
+import type { StudyPlanSettings, StudyWorkflowPreferences } from "./studyPreferences";
 
 export type ID = string;
 export type BoardExamId = "step1" | "step2" | "step3" | "shelf" | "mcat" | "premed";
@@ -30,6 +31,7 @@ export interface Course {
   files: number; // count shown on the card; user-editable
   link?: string; // optional URL the "Open" button targets
   modules: CourseModule[];
+  studyPlanOverride?: StudyPlanSettings;
 }
 
 export type TrackerStatus = "anki" | "working" | "mature" | "reset";
@@ -65,6 +67,11 @@ export interface TrackerItem {
   yield: Yield; // high / low / review / none
   note?: string;
   updated: string; // ISO
+  studyPlanOverride?: StudyPlanSettings;
+  difficulty?: "easy" | "moderate" | "hard" | "very-hard";
+  assessmentDate?: string; // yyyy-MM-dd; explicit learner/course evidence only
+  explicitPriority?: 1 | 2 | 3 | 4 | 5;
+  recommendationSnoozedUntil?: string; // ISO timestamp; defers, never deletes
 }
 
 export interface Task {
@@ -156,6 +163,8 @@ export interface HubFolder {
   favorite?: boolean;
   archived?: boolean;
   sortOrder?: number;
+  /** When the shortcut was last opened or copied from Hub Folders. */
+  lastOpenedAt?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -252,6 +261,8 @@ export interface PomodoroPreferences {
   autoStartBreak: boolean;
   autoStartFocus: boolean;
   savedPresets: PomodoroSavedPreset[];
+  /** Mirror the timer in the macOS menu bar (desktop app only). Unset means on. */
+  showInMenuBar?: boolean;
 }
 
 /** Persisted submitted rows only; the unsubmitted row remains component-local. */
@@ -280,6 +291,10 @@ export interface ProductivityTracker {
   customUnit?: string;
   dailyTarget?: number;
   weeklyTarget?: number;
+  /** "at-least" builds a behavior up; "at-most" keeps it under a daily limit. */
+  goal?: "at-least" | "at-most";
+  /** The habit this tracker keeps checked when habit tracking is on. */
+  linkedHabitId?: string;
   category: string;
   contributesToAcademicStudy: boolean;
   contributesToTotalProductiveTime: boolean;
@@ -748,6 +763,12 @@ export interface Profile {
   /** Optional daily-loop reminder preferences. Reminder delivery metadata is
    * device-only and never stored with the workspace. */
   dailyLoopReminders?: DailyLoopReminderPreferences;
+  /** Optional "Are you locked in?" interval check-ins. Delivery state is device-only. */
+  focusCheckIn?: import("./focusCheckIn").FocusCheckInPreferences;
+  /** One-tap energy checks (0–100), newest last; synced with the workspace. */
+  energyChecks?: import("./energyInsights").EnergyCheck[];
+  /** Course Tracker subsections marked as the current primary focus. */
+  primaryTrackerScopes?: import("./trackerFocus").PrimaryTrackerScope[];
   blueprintMode?: BlueprintMode; // which lane bar (USMLE vs Pre-Health) is active
   // Repetitive-task autofill (§18): user-owned, local-only.
   taskAutofillDisabled?: boolean;
@@ -764,6 +785,10 @@ export interface Profile {
   // Custom Pomodoro durations (§3), persisted with the profile.
   pomodoroCustom?: { focus: number; break: number; longBreak: number; cyclesBeforeLongBreak: number };
   pomodoroPreferences?: PomodoroPreferences;
+  /** Learner-authored defaults; course, kind, and item layers resolve without duplicating state. */
+  studyWorkflow?: StudyWorkflowPreferences;
+  applicationResearch?: import("./applicationResearch").ApplicationResearchEntry[];
+  applicationProfile?: import("./applicationProfile").ApplicationProfile;
 }
 
 export interface DailyLoopReminderPreferences {

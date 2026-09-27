@@ -1,4 +1,5 @@
 import { STORAGE_KEYS } from "./brand";
+import { paletteThemeColor, readPalettePreference } from "./palette";
 
 export type ThemePreference = "light" | "dark" | "system";
 export type ResolvedTheme = "light" | "dark";
@@ -68,7 +69,7 @@ export function applyThemePreference(
   root.dataset.themePreference = safePreference;
   root.style.colorScheme = resolvedTheme;
   const themeColor = targetDocument.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
-  themeColor?.setAttribute("content", resolvedTheme === "dark" ? "#0d0d0e" : "#f3eee3");
+  themeColor?.setAttribute("content", paletteThemeColor(readPalettePreference(), resolvedTheme));
   return resolvedTheme;
 }
 

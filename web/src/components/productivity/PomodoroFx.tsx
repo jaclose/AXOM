@@ -4,6 +4,7 @@
 // fires the whole-page glow + a completion toast (and an OS notification if the
 // user granted permission).
 import { useEffect, useState } from "react";
+import { notify } from "../../lib/notify";
 import { usePomodoro, ensurePomodoroClock, reconcilePomodoro } from "../../lib/pomodoro";
 import { pushToast } from "../../lib/toast";
 
@@ -42,15 +43,9 @@ export function PomodoroFx() {
       duration: 7000,
       dedupe: `pomodoro-complete-${completedAt}`,
     });
-    try {
-      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-        new Notification("AXOM — focus sprint complete", {
-          body: minutes ? `${minutes} minutes logged. Take your break.` : "Take your break.",
-          icon: "./icon-192.png",
-          tag: `axom-pomodoro-${completedAt}`,
-        });
-      }
-    } catch { /* ignore */ }
+    if (typeof document !== "undefined" && (document.visibilityState === "hidden" || !document.hasFocus())) {
+      void notify("AXOM — focus sprint complete", minutes ? `${minutes} minutes logged. Take your break.` : "Take your break.", { tag: `axom-pomodoro-${completedAt}` });
+    }
     const timer = setTimeout(() => setGlow(false), 2800);
     return () => clearTimeout(timer);
   }, [completedAt, completedMinutes]);

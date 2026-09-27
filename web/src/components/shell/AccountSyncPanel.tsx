@@ -1,603 +1,436 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import {
-  CheckCircle2, Cloud, CloudDownload, CloudUpload, Database, Fingerprint,
-  HardDrive, KeyRound, LogOut, RefreshCw, ShieldAlert, Sparkles, UserPlus,
+  AlertTriangle, BadgeCheck, Cloud, CloudOff, Download, GitMerge, History, KeyRound, Laptop, LogOut, Mail,
+  RefreshCw, RotateCcw, ShieldCheck, Smartphone, Trash2, UserPlus,
 } from "lucide-react";
-import { GButton } from "../ui/primitives";
-import { CloudBackupPanel } from "./CloudBackupPanel";
-import { useStore } from "../../lib/store";
-import {
-  createCloudBackup,
-  createPinAccount,
-  getBackendHealth,
-  getCloudData,
-  listCloudBackups,
-  loadProgressByName,
-  loginByName,
-  loginWithPin,
-  logoutPinSession,
-  restoreCloudBackup,
-  saveCloudData,
-  saveProgressByName,
-} from "../../services/syncClient";
-import {
-  defaultDeviceLabel,
-  fingerprintState,
-  getPortableState,
-  loadSyncMeta,
-  saveSyncMeta,
-} from "../../services/storageService";
-import type { CloudBackup, CloudSnapshot, SyncMeta } from "../../types/sync";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { GButton, Tag } from "../ui/primitives";
+import {
+  PASSWORD_MIN_LENGTH,
+  protectionLabel,
+  useAccount,
+  type AccountUser,
+} from "../../lib/account/accountStore";
+import type { AccountDevice, ProtectionStatus, RevisionSummary } from "../../lib/sync/syncTypes";
+import { useStore } from "../../lib/store";
 
-type BusyState = "idle" | "login" | "pin" | "save" | "load" | "backup" | "restore" | "auto";
+type AuthMode = "sign-in" | "create" | "code" | "forgot";
 
+const STATUS_TONE: Record<ProtectionStatus, "green" | "red" | "orange" | "neutral" | "cyan"> = {
+  "local-only": "neutral",
+  "saved-locally": "cyan",
+  syncing: "cyan",
+  protected: "green",
+  offline: "orange",
+  retrying: "orange",
+  conflict: "red",
+};
+
+/**
+ * Settings → Account. Every state is explicit: not configured, signed out,
+ * password recovery, signed in (unlinked / linked / linked to another account),
+ * and conflict. Local work is always legitimate; nothing uploads or replaces
+ * without a deliberate choice.
+ */
 export function AccountSyncPanel() {
-  const store = useStore();
-  const [meta, setMeta] = useState<SyncMeta>(() => loadSyncMeta());
-  const [accountName, setAccountName] = useState(() => loadSyncMeta().user?.displayName || store.profile.name || "");
-  const [pin, setPin] = useState("");
-  const [backupLabel, setBackupLabel] = useState("");
-  const [backups, setBackups] = useState<CloudBackup[]>([]);
-  const [busy, setBusy] = useState<BusyState>("idle");
-  const [status, setStatus] = useState("Local autosave is always on. Link a name to save progress to cloud.");
-  const [backendStatus, setBackendStatus] = useState("Checking backend...");
-  const metaRef = useRef(meta);
-  const busyRef = useRef(false);
-
-  const isBusy = busy !== "idle";
-
-  function persistMeta(next: SyncMeta) {
-    metaRef.current = next;
-    saveSyncMeta(next);
-    setMeta(next);
-  }
-
-  function markBusy(next: BusyState) {
-    busyRef.current = next !== "idle";
-    setBusy(next);
-  }
-
-  async function withBusy(next: BusyState, task: () => Promise<void>) {
-    markBusy(next);
-    try {
-      await task();
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Cloud sync failed.");
-    } finally {
-      markBusy("idle");
-    }
-  }
-
-  async function handleLogin() {
-    await withBusy("login", async () => {
-      const user = await loginByName(accountName);
-      const cloud = await getCloudData(user.id);
-      const sameAccount = metaRef.current.user?.id === user.id;
-      const localFingerprint = fingerprintState(useStore.getState());
-      const next = {
-        ...metaRef.current,
-        user,
-        deviceLabel: metaRef.current.deviceLabel || defaultDeviceLabel(),
-        lastCloudUpdatedAt: sameAccount ? metaRef.current.lastCloudUpdatedAt : undefined,
-        lastLocalFingerprint: cloud && !sameAccount ? undefined : localFingerprint,
-      };
-      persistMeta(next);
-      setStatus(cloud ? "Signed in. Cloud data exists, so choose Save or Load before replacing anything." : "Signed in. No cloud snapshot yet.");
-      await refreshBackups(user.id);
-    });
-  }
-
-  async function handleCreatePinAccount() {
-    const username = accountName.trim();
-    if (!username || !pin.trim()) {
-      setStatus("Enter a username and PIN first.");
-      return;
-    }
-    await withBusy("pin", async () => {
-      const result = await createPinAccount({ username, pin, deviceLabel: metaRef.current.deviceLabel || defaultDeviceLabel() });
-      persistMeta({
-        ...metaRef.current,
-        user: result.user,
-        session: result.session,
-        deviceLabel: metaRef.current.deviceLabel || defaultDeviceLabel(),
-        lastLocalFingerprint: fingerprintState(useStore.getState()),
-      });
-      setPin("");
-      setStatus("PIN account created. This is still alpha authentication; keep JSON backups.");
-      await refreshBackups(result.user.id);
-    });
-  }
-
-  async function handlePinLogin() {
-    const username = accountName.trim();
-    if (!username || !pin.trim()) {
-      setStatus("Enter a username and PIN first.");
-      return;
-    }
-    await withBusy("pin", async () => {
-      const result = await loginWithPin({ username, pin, deviceLabel: metaRef.current.deviceLabel || defaultDeviceLabel() });
-      const cloud = await getCloudData(result.user.id);
-      persistMeta({
-        ...metaRef.current,
-        user: result.user,
-        session: result.session,
-        deviceLabel: metaRef.current.deviceLabel || defaultDeviceLabel(),
-        lastCloudUpdatedAt: cloud?.updatedAt,
-      });
-      setPin("");
-      setStatus(cloud ? "PIN login complete. Cloud data exists; choose Save or Load before replacing anything." : "PIN login complete. No cloud snapshot yet.");
-      await refreshBackups(result.user.id);
-    });
-  }
-
-  async function handlePinLogout() {
-    const session = metaRef.current.session;
-    await withBusy("pin", async () => {
-      if (session?.token) await logoutPinSession(session.token);
-      persistMeta({ ...metaRef.current, session: undefined, autoSync: false });
-      setStatus("Logged out of the PIN session on this device. Local vault remains available.");
-    });
-  }
-
-  async function handleSave() {
-    const account = accountName.trim();
-    if (!account) {
-      setStatus("Enter an account name first.");
-      return;
-    }
-    await withBusy("save", async () => {
-      const activeUser = metaRef.current.user;
-      if (!activeUser) {
-        const existing = await loadProgressByName(account);
-        if (existing.snapshot) {
-          if (!confirm("This name already has saved cloud progress. Create a cloud backup, then replace it with this browser's progress?")) return;
-          await backupSnapshot(existing.user.id, existing.snapshot, "Cloud before alpha progress save");
-        }
-        const { user, snapshot } = await saveProgressByName(account, makeSaveInput());
-        persistMeta({
-          ...metaRef.current,
-          user,
-          lastSyncedAt: new Date().toISOString(),
-          lastCloudUpdatedAt: snapshot.updatedAt,
-          lastLocalFingerprint: fingerprintState(useStore.getState()),
-        });
-        setStatus("Saved progress to cloud.");
-        await refreshBackups(user.id);
-        return;
-      }
-
-      const user = activeUser;
-      const cloud = await getCloudData(user.id);
-      const cloudChanged = hasCloudChanged(cloud, metaRef.current.lastCloudUpdatedAt);
-      const localChanged = fingerprintState(useStore.getState()) !== metaRef.current.lastLocalFingerprint;
-
-      if (cloud && !metaRef.current.lastCloudUpdatedAt) {
-        if (!confirm("This account already has cloud data. Uploading now will replace it. Create a cloud backup first and continue?")) return;
-        await backupSnapshot(user.id, cloud, "Cloud before first local upload");
-      } else if (cloudChanged) {
-        if (!confirm(localChanged
-          ? "Both local and cloud data changed. Create a cloud backup, then upload this device's data?"
-          : "Cloud data changed since your last sync. Create a backup, then overwrite it from this device?")) return;
-        if (cloud) await backupSnapshot(user.id, cloud, "Cloud before local overwrite");
-      }
-
-      const snapshot = await saveCloudData(user.id, makeSaveInput());
-      persistMeta({
-        ...metaRef.current,
-        lastSyncedAt: new Date().toISOString(),
-        lastCloudUpdatedAt: snapshot.updatedAt,
-        lastLocalFingerprint: fingerprintState(useStore.getState()),
-      });
-      setStatus("Saved this browser's data to cloud.");
-      await refreshBackups(user.id);
-    });
-  }
-
-  async function handleLoad() {
-    const account = accountName.trim();
-    if (!account) {
-      setStatus("Enter an account name first.");
-      return;
-    }
-    await withBusy("load", async () => {
-      const loaded = metaRef.current.user
-        ? { user: metaRef.current.user, snapshot: await getCloudData(metaRef.current.user.id) }
-        : await loadProgressByName(account);
-      const { user, snapshot } = loaded;
-      if (!snapshot) {
-        setStatus("No cloud snapshot found for this account.");
-        persistMeta({ ...metaRef.current, user });
-        return;
-      }
-
-      const localFingerprint = fingerprintState(useStore.getState());
-      const cloudFingerprint = fingerprintState(snapshot.dataJson);
-      const localDiffers = localFingerprint !== cloudFingerprint;
-      const localChanged = localFingerprint !== metaRef.current.lastLocalFingerprint;
-
-      if (localDiffers && localChanged) {
-        if (!confirm("Cloud data will replace local data. Create a cloud backup of the current local state first and continue?")) return;
-        await createCloudBackup(user.id, makeSaveInput("Local before cloud download"));
-      } else if (localDiffers && !confirm("Cloud data differs from local data. Replace local data with cloud?")) {
-        return;
-      }
-
-      useStore.getState().replaceAll(snapshot.dataJson);
-      persistMeta({
-        ...metaRef.current,
-        lastSyncedAt: new Date().toISOString(),
-        lastCloudUpdatedAt: snapshot.updatedAt,
-        lastLocalFingerprint: fingerprintState(useStore.getState()),
-      });
-      setStatus("Loaded cloud data into this browser.");
-      await refreshBackups(user.id);
-    });
-  }
-
-  async function handleBackup() {
-    const user = metaRef.current.user;
-    if (!user) {
-      setStatus("Sign in by name first.");
-      return;
-    }
-    await withBusy("backup", async () => {
-      const label = backupLabel.trim() || `Manual backup ${new Date().toLocaleString()}`;
-      await createCloudBackup(user.id, makeSaveInput(label));
-      setBackupLabel("");
-      setStatus("Cloud backup created.");
-      await refreshBackups(user.id);
-    });
-  }
-
-  async function handleRestore(backupId: string) {
-    const user = metaRef.current.user;
-    if (!user) return;
-    await withBusy("restore", async () => {
-      const localFingerprint = fingerprintState(useStore.getState());
-      const localChanged = localFingerprint !== metaRef.current.lastLocalFingerprint;
-      if (localChanged) {
-        if (!confirm("Restoring this backup will replace local data. Create a backup of local data first and continue?")) return;
-        await createCloudBackup(user.id, makeSaveInput("Local before backup restore"));
-      } else if (!confirm("Restore this cloud backup into the current app?")) {
-        return;
-      }
-
-      const restored = await restoreCloudBackup(user.id, backupId);
-      useStore.getState().replaceAll(restored.current.dataJson);
-      persistMeta({
-        ...metaRef.current,
-        lastSyncedAt: new Date().toISOString(),
-        lastCloudUpdatedAt: restored.current.updatedAt,
-        lastLocalFingerprint: fingerprintState(useStore.getState()),
-      });
-      setStatus("Backup restored.");
-      await refreshBackups(user.id);
-    });
-  }
-
-  async function refreshBackups(userId = metaRef.current.user?.id) {
-    if (!userId) {
-      setBackups([]);
-      return;
-    }
-    const rows = await listCloudBackups(userId);
-    setBackups(rows);
-  }
-
-  function setAutoSync(enabled: boolean) {
-    persistMeta({ ...metaRef.current, autoSync: enabled });
-    setStatus(enabled ? "Auto-sync is on. It pauses if cloud data changes elsewhere." : "Auto-sync is off.");
-  }
-
-  function setDeviceLabel(deviceLabel: string) {
-    persistMeta({ ...metaRef.current, deviceLabel });
-  }
-
-  function handleInitializeProfile() {
-    const name = accountName.trim();
-    if (!name) {
-      setStatus("Enter a name to initialize this local profile.");
-      return;
-    }
-    store.updateProfile({ name });
-    persistMeta({
-      ...metaRef.current,
-      deviceLabel: metaRef.current.deviceLabel || defaultDeviceLabel(),
-      lastLocalFingerprint: fingerprintState(useStore.getState()),
-    });
-    setStatus("Local profile initialized. This browser vault is still saved on this device.");
-  }
-
+  const account = useAccount();
+  useEffect(() => { useAccount.getState().init(); }, []);
   useEffect(() => {
-    metaRef.current = meta;
-  }, [meta]);
-
-  useEffect(() => {
-    getBackendHealth()
-      .then((health) => setBackendStatus(health.databaseConfigured ? "API + database ready" : "API online; DATABASE_URL missing"))
-      .catch(() => setBackendStatus("Backend unavailable; local mode only"));
-  }, []);
-
-  useEffect(() => {
-    if (meta.user?.id) {
-      refreshBackups(meta.user.id).catch((error) => {
-        setStatus(error instanceof Error ? error.message : "Could not load backups.");
-      });
-    }
-  }, [meta.user?.id]);
-
-  useEffect(() => {
-    if (!meta.autoSync || !meta.user?.id) return undefined;
-    let timer: number | undefined;
-    let stopped = false;
-
-    const unsubscribe = useStore.subscribe((state) => {
-      if (busyRef.current) return;
-      const currentMeta = metaRef.current;
-      if (!currentMeta.autoSync || !currentMeta.user) return;
-      const currentFingerprint = fingerprintState(state);
-      if (currentFingerprint === currentMeta.lastLocalFingerprint) return;
-      if (timer) window.clearTimeout(timer);
-      timer = window.setTimeout(async () => {
-        if (stopped || busyRef.current) return;
-        const latestMeta = metaRef.current;
-        if (!latestMeta.autoSync || !latestMeta.user) return;
-        const latestState = useStore.getState();
-        const latestFingerprint = fingerprintState(latestState);
-        if (latestFingerprint === latestMeta.lastLocalFingerprint) return;
-
-        markBusy("auto");
-        try {
-          const cloud = await getCloudData(latestMeta.user.id);
-          if (cloud && (!latestMeta.lastCloudUpdatedAt || hasCloudChanged(cloud, latestMeta.lastCloudUpdatedAt))) {
-            persistMeta({ ...latestMeta, autoSync: false, lastCloudUpdatedAt: cloud.updatedAt });
-            setStatus("Auto-sync paused because cloud data changed. Use Save or Load to resolve it.");
-            return;
-          }
-          const snapshot = await saveCloudData(latestMeta.user.id, makeSaveInput());
-          persistMeta({
-            ...latestMeta,
-            lastSyncedAt: new Date().toISOString(),
-            lastCloudUpdatedAt: snapshot.updatedAt,
-            lastLocalFingerprint: fingerprintState(useStore.getState()),
-          });
-          setStatus("Auto-synced.");
-        } catch (error) {
-          setStatus(error instanceof Error ? `Auto-sync paused: ${error.message}` : "Auto-sync paused.");
-        } finally {
-          markBusy("idle");
-        }
-      }, 2500);
-    });
-
-    return () => {
-      stopped = true;
-      if (timer) window.clearTimeout(timer);
-      unsubscribe();
-    };
-  }, [meta.autoSync, meta.user?.id]);
+    if (account.phase === "signed-in") void useAccount.getState().refresh();
+  }, [account.phase, account.user?.id]);
 
   return (
-    <div className="sync-panel account-lounge">
-      <div className="account-hero">
-        <div className="account-avatar">{accountName.trim().slice(0, 1) || store.profile.name.slice(0, 1) || "A"}</div>
-        <div className="grow">
-          <div className="account-kicker">Account &amp; Sync</div>
-          <div className="account-title">Your AXOM Vault</div>
-          <div className="account-copy">
-            Your work is saved locally in this browser today. The account vault is the planned path for creating a profile once, preserving that local vault, and restoring it on another device.
-          </div>
+    <div className="account-center">
+      <AccountHero user={account.user} status={account.protection} phase={account.phase} lastProtectedAt={account.lastProtectedAt} />
+
+      {account.phase === "unconfigured" && <UnconfiguredCard />}
+      {account.phase === "loading" && <div className="account-card account-loading" role="status">Checking your account…</div>}
+      {account.phase === "signed-out" && <AuthCard />}
+      {account.phase === "recovering-password" && <PasswordRecoveryCard />}
+      {account.phase === "signed-in" && account.user && (
+        <>
+          <IdentityCard user={account.user} />
+          <ProtectionCard />
+          <VersionsCard history={account.history} />
+          <DevicesCard devices={account.devices} />
+          <DangerCard />
+        </>
+      )}
+
+      {(account.message || account.error) && (
+        <div className={`account-notice ${account.error ? "error" : ""}`} role={account.error ? "alert" : "status"}>
+          {account.error ? <AlertTriangle size={ICON_SIZE.body} aria-hidden="true" /> : <Cloud size={ICON_SIZE.body} aria-hidden="true" />}
+          <span>{account.error || account.message}</span>
         </div>
-        <span className={`sync-pill ${meta.user ? "on" : ""}`}>{meta.user ? "Linked" : "Local first"}</span>
+      )}
+
+      <p className="account-footnote">
+        Portable JSON export, restore, and merge remain available under Emergency recovery. Question attachment images stay on this device
+        unless you include them in a portable backup; account protection covers workspace data, not binary attachment sync.
+      </p>
+    </div>
+  );
+}
+
+function AccountHero({ user, status, phase, lastProtectedAt }: {
+  user: AccountUser | null;
+  status: ProtectionStatus;
+  phase: string;
+  lastProtectedAt?: string;
+}) {
+  const localName = useStore((state) => state.profile.name);
+  const initial = (user?.displayName || user?.email || localName || "A").trim().charAt(0).toUpperCase();
+  return (
+    <div className="account-hero-card">
+      <div className="account-hero-avatar" aria-hidden="true">{initial}</div>
+      <div className="account-hero-copy">
+        <span className="account-kicker">Account &amp; protection</span>
+        <h3>{user ? `Signed in as ${user.displayName}` : "Your work stays on this device — an account adds protection"}</h3>
+        <p>
+          {user
+            ? status === "protected" && lastProtectedAt
+              ? `Last protected ${relativeTime(lastProtectedAt)}. Changes back up in the background.`
+              : user.email
+            : "Local saving is always on and immediate. Signing in adds versioned cloud copies and lets you move between devices."}
+        </p>
       </div>
+      <Tag tone={STATUS_TONE[status]}>{phase === "unconfigured" ? "Local only" : protectionLabel(status)}</Tag>
+    </div>
+  );
+}
 
-      <div className="account-status-row">
-        <span><HardDrive size={ICON_SIZE.body} /> Local autosave on</span>
-        <span><Fingerprint size={ICON_SIZE.body} /> Profile ID: {store.profile.userId}</span>
-        <span><Cloud size={ICON_SIZE.body} /> {backendStatus}</span>
-      </div>
-
-      <div className="account-roadmap under-construction">
-        <span className="uc-tape t1">Under Construction</span>
-        <span className="uc-tape t2">Account Vault</span>
-        <span className="uc-badge"><KeyRound size={ICON_SIZE.body} /> Backend account flow in progress</span>
-        <div className="uc-inner account-roadmap-inner">
-          <div><UserPlus size={ICON_SIZE.emphasis} /><b>Create account</b><span>Name, email, or passkey creates the account shell.</span></div>
-          <div><Sparkles size={ICON_SIZE.emphasis} /><b>Initialize profile</b><span>Your name, targets, promise, and preferences become the account profile.</span></div>
-          <div><HardDrive size={ICON_SIZE.emphasis} /><b>Preserve local vault</b><span>The current browser data becomes the first recoverable snapshot.</span></div>
-          <div><CloudDownload size={ICON_SIZE.emphasis} /><b>Restore anywhere</b><span>A new device can load the saved AXOM state after confirmation.</span></div>
+function UnconfiguredCard() {
+  return (
+    <section className="account-card">
+      <div className="account-card-head">
+        <CloudOff size={ICON_SIZE.emphasis} aria-hidden="true" />
+        <div>
+          <h4>Accounts aren’t switched on in this build</h4>
+          <p>Cloud credentials are absent. Account controls are disabled; local autosave and manual JSON recovery remain unchanged.</p>
         </div>
       </div>
+      <ul className="account-benefits">
+        <li><ShieldCheck size={ICON_SIZE.body} aria-hidden="true" /> Versioned cloud copies of your whole workspace</li>
+        <li><Laptop size={ICON_SIZE.body} aria-hidden="true" /> Pick up on another device — web or desktop app</li>
+        <li><History size={ICON_SIZE.body} aria-hidden="true" /> Restore any of your last 60 protected versions</li>
+      </ul>
+    </section>
+  );
+}
 
-      <section className="account-card">
-        <div className="account-section-head">
-          <div>
-            <div className="sync-title">Set up this browser</div>
-            <div className="sub">Start here. This does not replace or upload anything.</div>
-          </div>
-          <span className="sync-pill">Safe</span>
-        </div>
+function AuthCard() {
+  const { busy, signIn, signUp, sendCode, verifyCode, requestPasswordReset, pendingCodeEmail, pendingCodeKind, clearNotice } = useAccount();
+  const profileName = useStore((state) => state.profile.name);
+  const [mode, setMode] = useState<AuthMode>("sign-in");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState(profileName ?? "");
+  const [code, setCode] = useState("");
 
-        <div className="sync-grid">
-          <label className="stack gap6">
-            <span className="field-label">Account name</span>
-            <input className="field" value={accountName} onChange={(e) => setAccountName(e.target.value)} placeholder="Your name" />
-          </label>
-          <label className="stack gap6">
-            <span className="field-label">This device</span>
-            <input className="field" value={meta.deviceLabel || ""} onChange={(e) => setDeviceLabel(e.target.value)} placeholder={defaultDeviceLabel()} />
-          </label>
-        </div>
+  function choose(next: AuthMode) {
+    setMode(next);
+    setCode("");
+    useAccount.setState({ pendingCodeEmail: undefined, pendingCodeKind: undefined });
+    clearNotice();
+  }
 
-        <div className="account-primary-actions">
-          <GButton variant="primary" onClick={handleInitializeProfile} disabled={!accountName.trim()}>
-            <CheckCircle2 size={ICON_SIZE.body} /> Initialize local profile
-          </GButton>
-          <GButton onClick={handleLogin} disabled={isBusy || !accountName.trim()}>
-            <Database size={ICON_SIZE.body} /> {meta.user ? "Refresh account link" : "Try alpha account link"}
-          </GButton>
-        </div>
-      </section>
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (pendingCodeEmail) await verifyCode(pendingCodeEmail, code);
+    else if (mode === "sign-in") await signIn(email, password);
+    else if (mode === "create") await signUp(email, password, displayName);
+    else if (mode === "forgot") await requestPasswordReset(email);
+    else await sendCode(email);
+  }
 
-      <section className="account-card">
-        <div className="account-section-head">
-          <div>
-            <div className="sync-title"><KeyRound size={ICON_SIZE.body} style={{ verticalAlign: -2, marginRight: 6 }} /> Username + PIN account</div>
-            <div className="sub">Six digits preferred. Four digits remain accepted only as a legacy/minimum fallback.</div>
-          </div>
-          <span className={`sync-pill ${meta.session ? "on" : ""}`}>{meta.session ? "Session active" : "Alpha auth"}</span>
-        </div>
-        <div className="sync-grid">
-          <label className="stack gap6">
-            <span className="field-label">Username</span>
-            <input className="field" value={accountName} onChange={(e) => setAccountName(e.target.value)} placeholder="your username" autoComplete="username" />
+  return (
+    <section className="account-card">
+      <div className="account-auth-tabs" role="tablist" aria-label="How to sign in">
+        {([
+          ["sign-in", "Sign in", KeyRound],
+          ["create", "Create account", UserPlus],
+          ["code", "Email me a code", Mail],
+        ] as const).map(([id, label, Icon]) => (
+          <button key={id} type="button" role="tab" aria-selected={mode === id || (mode === "forgot" && id === "sign-in")} className={mode === id || (mode === "forgot" && id === "sign-in") ? "on" : ""} onClick={() => choose(id)}>
+            <Icon size={ICON_SIZE.body} aria-hidden="true" /> {label}
+          </button>
+        ))}
+      </div>
+      <form className="account-form" onSubmit={(event) => void submit(event)}>
+        {mode === "create" && (
+          <label>
+            <span>Name on your account</span>
+            <input className="field" value={displayName} maxLength={80} autoComplete="name" onChange={(event) => setDisplayName(event.target.value)} />
           </label>
-          <label className="stack gap6">
-            <span className="field-label">PIN</span>
-            <input className="field" type="password" inputMode="numeric" pattern="[0-9]*" minLength={4} maxLength={12}
-              value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 12))}
-              placeholder="6 digits preferred" autoComplete="current-password" />
+        )}
+        {!pendingCodeEmail && (
+          <label>
+            <span>Email</span>
+            <input className="field" type="email" required autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} />
           </label>
-        </div>
-        <div className="row wrap gap8" style={{ marginTop: 10 }}>
-          <GButton size="sm" variant="primary" onClick={handleCreatePinAccount} disabled={isBusy || !accountName.trim() || pin.length < 4}>
-            <UserPlus size={ICON_SIZE.body} /> Create PIN account
+        )}
+        {!pendingCodeEmail && (mode === "sign-in" || mode === "create") && (
+          <label>
+            <span>Password</span>
+            <input
+              className="field"
+              type="password"
+              required
+              minLength={mode === "create" ? PASSWORD_MIN_LENGTH : undefined}
+              autoComplete={mode === "create" ? "new-password" : "current-password"}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+            {mode === "create" && <small>At least {PASSWORD_MIN_LENGTH} characters with letters and a number.</small>}
+          </label>
+        )}
+        {pendingCodeEmail && (
+          <label>
+            <span>{pendingCodeKind === "signup" ? "Confirmation code" : pendingCodeKind === "recovery" ? "Password reset code" : "Sign-in code"} sent to {pendingCodeEmail}</span>
+            <input className="field account-code" inputMode="numeric" autoComplete="one-time-code" maxLength={10} value={code} onChange={(event) => setCode(event.target.value)} />
+          </label>
+        )}
+        <div className="account-form-actions">
+          <GButton variant="primary" type="submit" disabled={busy}>
+            {pendingCodeEmail ? "Verify code" : mode === "sign-in" ? "Sign in" : mode === "create" ? "Create account" : mode === "forgot" ? "Send reset code" : "Send code"}
           </GButton>
-          <GButton size="sm" onClick={handlePinLogin} disabled={isBusy || !accountName.trim() || pin.length < 4}>
-            <KeyRound size={ICON_SIZE.body} /> Log in with PIN
-          </GButton>
-          <GButton size="sm" onClick={handlePinLogout} disabled={isBusy || !meta.session}>
-            <LogOut size={ICON_SIZE.body} /> Log out session
-          </GButton>
+          {!pendingCodeEmail && mode === "sign-in" && <button type="button" className="account-link" onClick={() => choose("forgot")}>Forgot password?</button>}
+          {!pendingCodeEmail && mode === "forgot" && <button type="button" className="account-link" onClick={() => choose("sign-in")}>Back to sign in</button>}
+          {pendingCodeEmail && <button type="button" className="account-link" onClick={() => choose(mode === "forgot" ? "sign-in" : mode)}>Use a different email</button>}
         </div>
-        <div className="sync-warning compact">
-          <ShieldAlert size={ICON_SIZE.body} />
-          <span>PINs are hashed server-side with lockout/backoff, but this is not final medical-grade authentication. Recovery, passkeys, OAuth, and email verification are future work.</span>
-        </div>
-        {meta.session && (
-          <div className="sub" style={{ marginTop: 8 }}>
-            Session expires {formatDate(meta.session.expiresAt)} on {meta.session.deviceLabel || meta.deviceLabel || "this device"}.
+        <p className="account-form-note">
+          An account is optional. Signing in never uploads or replaces this device’s work until you choose to protect it.
+          {(mode === "code" || pendingCodeEmail) && " Codes work in the browser and the desktop app."}
+        </p>
+      </form>
+    </section>
+  );
+}
+
+function PasswordRecoveryCard() {
+  const { busy, updatePassword } = useAccount();
+  const [password, setPassword] = useState("");
+  return (
+    <section className="account-card">
+      <div className="account-card-head">
+        <KeyRound size={ICON_SIZE.emphasis} aria-hidden="true" />
+        <div><h4>Set a new password</h4><p>You opened a password-reset link. Choose a new password to finish.</p></div>
+      </div>
+      <form className="account-form" onSubmit={(event) => { event.preventDefault(); void updatePassword(password); }}>
+        <label>
+          <span>New password</span>
+          <input className="field" type="password" autoComplete="new-password" minLength={PASSWORD_MIN_LENGTH} value={password} onChange={(event) => setPassword(event.target.value)} />
+        </label>
+        <div className="account-form-actions"><GButton variant="primary" type="submit" disabled={busy}>Save password</GButton></div>
+      </form>
+    </section>
+  );
+}
+
+function IdentityCard({ user }: { user: AccountUser }) {
+  const { busy, updateDisplayName, signOut } = useAccount();
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(user.displayName);
+  useEffect(() => { setName(user.displayName); }, [user.displayName]);
+  return (
+    <section className="account-card account-identity">
+      <div className="account-identity-main">
+        {editing ? (
+          <form className="account-inline-form" onSubmit={(event) => { event.preventDefault(); void updateDisplayName(name).then((ok) => ok && setEditing(false)); }}>
+            <input className="field" aria-label="Account name" value={name} maxLength={80} onChange={(event) => setName(event.target.value)} autoFocus />
+            <GButton size="sm" variant="primary" type="submit" disabled={busy}>Save</GButton>
+            <GButton size="sm" type="button" onClick={() => { setEditing(false); setName(user.displayName); }}>Cancel</GButton>
+          </form>
+        ) : (
+          <div className="account-identity-name">
+            <b>{user.displayName}</b>
+            <button type="button" className="account-link" onClick={() => setEditing(true)}>Edit name</button>
           </div>
         )}
-      </section>
-
-      <section className="account-card">
-        <div className="account-section-head">
-          <div>
-            <div className="sync-title">Cloud copy controls</div>
-            <div className="sub">Manual controls for Alpha testing. Confirm before replacing local data.</div>
-          </div>
+        <div className="account-identity-meta">
+          <span>{user.email}</span>
+          {user.emailConfirmed
+            ? <span className="account-verified"><BadgeCheck size={ICON_SIZE.microInline} aria-hidden="true" /> Verified</span>
+            : <span className="account-unverified">Email not confirmed yet</span>}
+          {user.createdAt && <span>Member since {new Date(user.createdAt).toLocaleDateString(undefined, { month: "short", year: "numeric" })}</span>}
         </div>
-
-        <div className="sync-flow">
-          <div><b>1 · Local</b><span>This browser remains the source of truth until you choose otherwise.</span></div>
-          <div><b>2 · Save</b><span>Uploads this browser's current AXOM state.</span></div>
-          <div><b>3 · Load</b><span>Downloads cloud state into this browser after confirmation.</span></div>
-          <div><b>4 · Backup</b><span>Creates restore points before risky replaces.</span></div>
-        </div>
-
-        <div className="row wrap gap8">
-          <GButton size="sm" onClick={handleSave} disabled={isBusy || !accountName.trim()}>
-            <CloudUpload size={ICON_SIZE.body} /> Save this browser
-          </GButton>
-          <GButton size="sm" onClick={handleLoad} disabled={isBusy || !accountName.trim()}>
-            <CloudDownload size={ICON_SIZE.body} /> Load cloud copy
-          </GButton>
-          <GButton size="sm" onClick={() => refreshBackups().catch((error) => setStatus(error instanceof Error ? error.message : "Could not refresh backups."))} disabled={isBusy || !meta.user}>
-            <RefreshCw size={ICON_SIZE.body} className={busy === "auto" ? "spin" : ""} /> Refresh cloud status
-          </GButton>
-        </div>
-      </section>
-
-      <label className="sync-toggle">
-        <input type="checkbox" checked={meta.autoSync} disabled={!meta.user || isBusy} onChange={(e) => setAutoSync(e.target.checked)} />
-        <span>Auto-sync after local edits <small>Alpha only</small></span>
-      </label>
-
-      <div className="sync-meta-grid">
-        <Meta label="Cloud account" value={meta.user?.displayName || "Not linked"} />
-        <Meta label="Last synced" value={meta.lastSyncedAt ? formatDate(meta.lastSyncedAt) : "Never"} />
-        <Meta label="Backend" value={backendStatus} />
-        <Meta label="Status" value={busy === "idle" ? status : `${labelBusy(busy)}...`} />
       </div>
-
-      <section className="account-card">
-        <div className="account-section-head">
-          <div>
-            <div className="sync-title">Cloud restore points</div>
-            <div className="sub">Create a checkpoint before loading, resetting, or changing devices.</div>
-          </div>
-        </div>
-
-        <div className="sync-backup-create">
-          <input className="field" value={backupLabel} onChange={(e) => setBackupLabel(e.target.value)} placeholder="Backup label, optional" />
-          <GButton size="sm" onClick={handleBackup} disabled={isBusy || !meta.user}>Create cloud backup</GButton>
-        </div>
-
-        <CloudBackupPanel backups={backups} busy={isBusy} onRefresh={() => refreshBackups().catch((error) => setStatus(error instanceof Error ? error.message : "Could not refresh backups."))} onRestore={handleRestore} />
-      </section>
-
-      <div className="sync-warning">
-        <ShieldAlert size={ICON_SIZE.body} />
-        <span>This account vault is not production authentication yet. Treat it as a design preview until email magic links, OAuth, or passkeys are wired in.</span>
-      </div>
-    </div>
+      <GButton size="sm" onClick={() => void signOut()} disabled={busy}><LogOut size={ICON_SIZE.body} aria-hidden="true" /> Sign out</GButton>
+    </section>
   );
 }
 
-function Meta({ label, value }: { label: string; value: string }) {
+function ProtectionCard() {
+  const { link, protection, lastProtectedAt, conflictServerRevision, busy, linkThisDevice, syncNow, keepThisDevice, adoptAccountVersion, mergeWithAccount, signOut } = useAccount();
+  if (link === "linked-elsewhere") {
+    return (
+      <section className="account-card account-warning">
+        <div className="account-card-head">
+          <AlertTriangle size={ICON_SIZE.emphasis} aria-hidden="true" />
+          <div>
+            <h4>This device belongs to a different account</h4>
+            <p>The workspace here was protected by another AXOM account. To avoid mixing two people’s work, sign out — or protect it with this account (both accounts keep their own copies).</p>
+          </div>
+        </div>
+        <div className="account-form-actions">
+          <GButton size="sm" onClick={() => void signOut()}>Sign out</GButton>
+          <GButton size="sm" onClick={() => void linkThisDevice()} disabled={busy}>Protect with this account</GButton>
+        </div>
+      </section>
+    );
+  }
+  if (link === "unlinked") {
+    return (
+      <section className="account-card account-cta">
+        <div className="account-card-head">
+          <ShieldCheck size={ICON_SIZE.emphasis} aria-hidden="true" />
+          <div>
+            <h4>Protect this device’s workspace</h4>
+            <p>Uploads a versioned copy now, then backs up changes in the background. If your account already has work from another device, both are kept and you choose which continues.</p>
+          </div>
+        </div>
+        <div className="account-form-actions">
+          <GButton variant="primary" onClick={() => void linkThisDevice()} disabled={busy}><ShieldCheck size={ICON_SIZE.body} aria-hidden="true" /> Protect this workspace</GButton>
+        </div>
+      </section>
+    );
+  }
+  if (protection === "conflict") {
+    return (
+      <section className="account-card account-warning">
+        <div className="account-card-head">
+          <AlertTriangle size={ICON_SIZE.emphasis} aria-hidden="true" />
+          <div>
+            <h4>Two versions need a decision</h4>
+            <p>
+              Your account moved ahead on another device{conflictServerRevision ? ` (version #${conflictServerRevision})` : ""} while this device had changes.
+              Both are safely stored. Choose which one continues — the other stays in history.
+            </p>
+          </div>
+        </div>
+        <div className="account-choice-grid three">
+          <button type="button" className="account-choice recommended" onClick={() => void mergeWithAccount()} disabled={busy}>
+            <GitMerge size={ICON_SIZE.emphasis} aria-hidden="true" />
+            <b>Merge both <Tag tone="green">Recommended</Tag></b>
+            <small>Combine records from both versions — newer copies win, nothing is deleted. Items deleted on one device may reappear.</small>
+          </button>
+          <button type="button" className="account-choice" onClick={() => void keepThisDevice()} disabled={busy}>
+            <Laptop size={ICON_SIZE.emphasis} aria-hidden="true" />
+            <b>Keep this device</b>
+            <small>Upload this device’s workspace as the newest version.</small>
+          </button>
+          <button type="button" className="account-choice" onClick={() => void adoptAccountVersion()} disabled={busy}>
+            <Download size={ICON_SIZE.emphasis} aria-hidden="true" />
+            <b>Use the account version</b>
+            <small>Replace this device with the newest protected version (a safety snapshot is made first).</small>
+          </button>
+        </div>
+      </section>
+    );
+  }
   return (
-    <div className="sync-meta-item">
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
+    <section className="account-card account-protection">
+      <div className="account-protection-status">
+        <span className={`account-status-dot ${protection}`} aria-hidden="true" />
+        <div>
+          <b>{protectionLabel(protection)}</b>
+          <small>{lastProtectedAt ? `Last protected ${relativeTime(lastProtectedAt)} · ${new Date(lastProtectedAt).toLocaleString()}` : "Waiting for the first upload"}</small>
+        </div>
+      </div>
+      <GButton size="sm" onClick={() => void syncNow()} disabled={busy || protection === "syncing"}>
+        <RefreshCw size={ICON_SIZE.body} aria-hidden="true" className={protection === "syncing" ? "spin" : ""} /> Protect now
+      </GButton>
+    </section>
   );
 }
 
-function makeSaveInput(backupLabel?: string) {
-  const state = useStore.getState();
-  const meta = loadSyncMeta();
-  return {
-    appVersion: state.profile.versionLabel,
-    schemaVersion: state.schemaVersion,
-    dataJson: getPortableState(state),
-    deviceLabel: meta.deviceLabel || defaultDeviceLabel(),
-    backupLabel,
-  };
+function VersionsCard({ history }: { history: RevisionSummary[] }) {
+  const { busy, refresh, restoreRevision, link } = useAccount();
+  if (link !== "linked" && !history.length) return null;
+  return (
+    <section className="account-card">
+      <div className="account-section-head">
+        <div><h4>Protected versions</h4><p>Newest first. Restoring saves a safety snapshot of this device first.</p></div>
+        <GButton size="sm" onClick={() => void refresh()} disabled={busy}><RefreshCw size={ICON_SIZE.body} aria-hidden="true" /> Refresh</GButton>
+      </div>
+      {history.length === 0 ? (
+        <p className="account-empty">No protected versions yet.</p>
+      ) : (
+        <ol className="account-version-list">
+          {history.slice(0, 12).map((item, index) => (
+            <li key={item.id}>
+              <span className="account-version-number">#{item.revision}</span>
+              <div>
+                <b>{new Date(item.createdAt).toLocaleString()}</b>
+                <small>{reasonLabel(item.reason)} · schema v{item.schemaVersion}{index === 0 ? " · latest" : ""}</small>
+              </div>
+              <GButton size="tiny" onClick={() => {
+                if (confirm(`Replace this device’s workspace with version #${item.revision}? AXOM saves a safety snapshot first and records the restore as a new version.`)) {
+                  void restoreRevision(item);
+                }
+              }} disabled={busy}><RotateCcw size={ICON_SIZE.microInline} aria-hidden="true" /> Restore</GButton>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
 }
 
-async function backupSnapshot(userId: string, snapshot: CloudSnapshot, label: string) {
-  await createCloudBackup(userId, {
-    appVersion: snapshot.appVersion,
-    schemaVersion: snapshot.schemaVersion,
-    dataJson: snapshot.dataJson,
-    deviceLabel: snapshot.deviceLabel,
-    backupLabel: `${label} ${new Date().toLocaleString()}`,
-  });
+function DevicesCard({ devices }: { devices: AccountDevice[] }) {
+  const { busy, forgetDevice } = useAccount();
+  if (!devices.length) return null;
+  return (
+    <section className="account-card">
+      <div className="account-section-head"><div><h4>Devices</h4><p>Where this account has been used recently.</p></div></div>
+      <ul className="account-device-list">
+        {devices.map((device) => (
+          <li key={device.deviceId}>
+            {device.platform === "desktop" ? <Laptop size={ICON_SIZE.body} aria-hidden="true" /> : <Smartphone size={ICON_SIZE.body} aria-hidden="true" />}
+            <div>
+              <b>{device.label}{device.current && <Tag tone="cyan">This device</Tag>}</b>
+              <small>Seen {relativeTime(device.lastSeenAt)}{device.lastProtectedRevision ? ` · version #${device.lastProtectedRevision}` : ""}</small>
+            </div>
+            {!device.current && <GButton size="tiny" onClick={() => void forgetDevice(device.deviceId)} disabled={busy}>Remove</GButton>}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
-function hasCloudChanged(snapshot: CloudSnapshot | null, lastCloudUpdatedAt?: string) {
-  if (!snapshot || !lastCloudUpdatedAt) return false;
-  return new Date(snapshot.updatedAt).getTime() > new Date(lastCloudUpdatedAt).getTime() + 1000;
+function DangerCard() {
+  const { busy, deleteCloudData, link } = useAccount();
+  if (link !== "linked") return null;
+  return (
+    <details className="account-card account-danger">
+      <summary>Delete cloud copies</summary>
+      <p>Removes every protected version, shared question set, and device record from the server. This device’s workspace is not touched, and you can protect it again later.</p>
+      <GButton size="sm" variant="danger" disabled={busy} onClick={() => {
+        if (confirm("Delete every server copy of your AXOM workspace? Local data on this device stays. This cannot be undone.")) void deleteCloudData();
+      }}><Trash2 size={ICON_SIZE.body} aria-hidden="true" /> Delete cloud copies</GButton>
+    </details>
+  );
 }
 
-function labelBusy(value: BusyState) {
-  const labels: Record<BusyState, string> = {
-    idle: "Idle",
-    login: "Signing in",
-    pin: "Checking PIN",
-    save: "Saving",
-    load: "Loading",
-    backup: "Backing up",
-    restore: "Restoring",
-    auto: "Auto-syncing",
-  };
-  return labels[value];
+function reasonLabel(reason: string): string {
+  return ({
+    foundation: "First protection",
+    automatic: "Background backup",
+    manual: "Protected manually",
+    pre_restore: "Before a restore",
+    restore: "Restore",
+  } as Record<string, string>)[reason] ?? reason;
 }
 
-function formatDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+export function relativeTime(iso: string, now: Date = new Date()): string {
+  const diff = now.getTime() - Date.parse(iso);
+  if (!Number.isFinite(diff)) return "recently";
+  const minutes = Math.round(diff / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.round(hours / 24);
+  return days === 1 ? "yesterday" : `${days} days ago`;
 }

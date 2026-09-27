@@ -7,8 +7,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import {
   AlertTriangle, BarChart3, BookOpen, FileInput, Files, ListFilter,
-  Microscope, Play, RotateCcw, Sparkles, HelpCircle,
-} from "lucide-react";
+  Microscope, Play, RotateCcw, Sparkles, HelpCircle, MonitorPlay } from "lucide-react";
 import { useStore } from "../lib/store";
 import {
   analyzeQuestionStyle, dueQuestions, errorPatterns, questionCollectionMetrics,
@@ -20,8 +19,8 @@ import type { QuizBlock, QuizFilters, QuizMode } from "../lib/quiz";
 import type { QuestionSet, SourceDocument } from "../lib/library";
 import { GlassCard, PanelHeader, EmptyState } from "../components/ui/primitives";
 import { ImportPanel, parseStoredDocument, type ImportSeed } from "../components/questions/ImportPanel";
-import { MassImport } from "../components/questions/MassImport";
 import { ExamRunner } from "../components/questions/ExamRunner";
+import { EXAM_SKINS, blockCounts, readSuspendedBlock } from "../lib/examSim";
 import { PerformancePanel } from "../components/questions/PerformancePanel";
 import { QuestionDetailModal } from "../components/questions/QuestionDetailModal";
 import { SourceLibrary, QuestionSetList } from "../components/questions/LibraryPanels";
@@ -32,6 +31,7 @@ import { coachWeakness, resolveActiveProvider } from "../lib/ai";
 import { pushToast } from "../lib/toast";
 import { ModuleTour, type ModuleTourStep } from "../components/shell/ModuleTour";
 import { ICON_SIZE } from "../lib/iconSize";
+import { STORAGE_KEYS } from "../lib/brand";
 
 const NO_QUESTIONS: QuestionRecord[] = [];
 const NO_SETS: QuestionSet[] = [];
@@ -64,6 +64,7 @@ function timestamp(value: string | undefined): number | undefined {
 
 interface RunnerLaunch {
   mode: QuizMode;
+  simulate?: boolean;
   retakeIds?: string[];
   presetFilters?: Partial<QuizFilters>;
   presetTimed?: boolean;
@@ -78,13 +79,19 @@ export function QuestionWorkspacePage() {
   const [tab, setTab] = useState<BankTab>("overview");
   const [open, setOpen] = useState<QuestionRecord | null>(null);
   const [showStyle, setShowStyle] = useState(false);
-  const [runner, setRunner] = useState<RunnerLaunch | null>(null);
+  const [runner, setRunner] = useState<RunnerLaunch | null>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession) ?? "null") as { mode?: QuizMode; poolIds?: string[] } | null;
+      return saved?.mode && saved.poolIds?.length ? { mode: saved.mode } : null;
+    } catch { return null; }
+  });
   const [importSeed, setImportSeed] = useState<ImportSeed | null>(null);
   const [importEntry, setImportEntry] = useState<"file" | "paste">("file");
   const [bankReview, setBankReview] = useState<{ ids?: string[]; key: number }>({ key: 0 });
   const [coach, setCoach] = useState<{ diagnosis: string; suggestedBlock: string } | null>(null);
   const [coachBusy, setCoachBusy] = useState(false);
   const [moduleTourOpen, setModuleTourOpen] = useState(false);
+  const [suspendedSim, setSuspendedSim] = useState(() => readSuspendedBlock());
   const entryRef = useRef<HTMLDivElement>(null);
   const provider = useMemo(() => resolveActiveProvider(), []);
 
@@ -184,6 +191,7 @@ export function QuestionWorkspacePage() {
       sizeBytes: doc.sizeBytes,
       pageTexts: doc.pageTexts,
       checksum: doc.checksum,
+      source: doc.fileType.toLowerCase().includes("pdf") ? "pdf" : "imported",
     });
     setImportEntry("file");
     setTab("import");
@@ -435,6 +443,10 @@ export function QuestionWorkspacePage() {
             <button className="qb-loop-card" disabled={!weak[0]} onClick={() => weak[0] && setRunner({ mode: "tutor", presetFilters: { status: "all", count: 15, categories: [weak[0].topic] } })}>
               <Microscope size={ICON_SIZE.emphasis} /><b>Weak-topic block</b><span>{weak[0]?.topic ?? "Needs more attempts"}</span>
             </button>
+            <button className="qb-loop-card qb-sim-card" disabled={!runnable && !suspendedSim} onClick={() => setRunner({ mode: suspendedSim?.mode ?? "exam", simulate: true })}>
+              <MonitorPlay size={ICON_SIZE.emphasis} /><b>{suspendedSim ? "Resume suspended block" : "Exam simulator"}</b>
+              <span>{suspendedSim ? `${EXAM_SKINS[suspendedSim.skin].label} · ${blockCounts(suspendedSim.poolIds, suspendedSim.items).answered}/${suspendedSim.poolIds.length} answered` : "UWorld · USMLE/NBME · ExamSoft interfaces"}</span>
+            </button>
             <button className="qb-loop-card" onClick={() => openImport("file")}>
               <FileInput size={ICON_SIZE.emphasis} /><b>Import questions</b><span>Review uncertainty, not every line</span>
             </button>
@@ -476,25 +488,15 @@ export function QuestionWorkspacePage() {
       )}
 
       {tab === "import" && (
-        // One Import surface: the multi-file queue leads on a fresh visit; the
-        // paste/review panel leads when arriving with an inspect/parse seed.
-        <>
-          {importSeed && (
-            <ImportPanel
-              key={`${importSeed.sourceDocumentId ?? importSeed.reference?.title ?? importSeed.fileName ?? "plain"}-${importEntry}`}
-              seed={importSeed}
-              initialTab={importEntry}
-            />
-          )}
-          <MassImport onInspect={(payload) => {
-            setImportSeed(payload);
-            setImportEntry("file");
-            setTab("import");
-          }} />
-          {!importSeed && (
-            <ImportPanel key={`plain-${importEntry}`} seed={importSeed} initialTab={importEntry} />
-          )}
-        </>
+        <ImportPanel
+          key={`${importSeed?.sourceDocumentId ?? importSeed?.reference?.title ?? importSeed?.fileName ?? "plain"}-${importEntry}`}
+          seed={importSeed}
+          initialTab={importEntry}
+          onFinalized={(result) => {
+            setImportSeed(null);
+            setTab(result.setId ? "sets" : "library");
+          }}
+        />
       )}
       {tab === "sets" && (
         <QuestionSetList
@@ -573,7 +575,8 @@ export function QuestionWorkspacePage() {
           presetFilters={runner.presetFilters}
           presetTimed={runner.presetTimed}
           blockId={runner.blockId}
-          onClose={() => setRunner(null)}
+          simulate={runner.simulate}
+          onClose={() => { setRunner(null); setSuspendedSim(readSuspendedBlock()); }}
         />
       )}
       {moduleTourOpen && (

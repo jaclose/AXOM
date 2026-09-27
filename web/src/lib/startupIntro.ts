@@ -1,8 +1,28 @@
+import {
+  CINEMATICS,
+  LEGACY_INTRO_ENABLED_KEY,
+  decideStartupCinematic,
+  readCinematicLedger,
+  readCinematicPreferences,
+  writeCinematicLedger,
+  writeCinematicPreferences,
+  type CinematicFilm,
+} from "./cinematics";
+import { APP_RELEASE_VERSION } from "./brand";
+
 /** The cinematic is decoration, never a signal that saved data is ready. */
-export const STARTUP_INTRO_ENABLED_KEY = "axom.startupIntro.enabled";
+export const STARTUP_INTRO_ENABLED_KEY = LEGACY_INTRO_ENABLED_KEY;
 export const STARTUP_INTRO_SESSION_KEY = "axom.startupIntro.seen";
-export const STARTUP_INTRO_MAX_MS = 1_800;
 const EXIT_MS = 160;
+/** Headroom past the film's own length for decode start and the fade. */
+const DEADLINE_SLACK_MS = 700;
+
+export function introDeadlineMs(film: CinematicFilm): number {
+  return film.durationMs + DEADLINE_SLACK_MS;
+}
+
+/** Hard deadline for the default everyday film. */
+export const STARTUP_INTRO_MAX_MS = introDeadlineMs(CINEMATICS["slow-sweep"]);
 
 export interface StartupIntro {
   /** Always resolves, including skipped, unavailable, and disabled media. */
@@ -14,26 +34,53 @@ export interface StartupIntro {
 type StartupIntroOptions = {
   native?: boolean;
   appRoot?: HTMLElement | null;
+  /** Preview a specific film now, ignoring the schedule (Settings → Preview). */
+  preview?: { film: CinematicFilm; caption?: string };
+  now?: Date;
+  version?: string;
 };
+
+function reducedMotion(): boolean {
+  try {
+    if (document.documentElement.dataset.motion === "reduce") return true;
+    return Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
+  } catch {
+    return true;
+  }
+}
 
 export function startStartupIntro(options: StartupIntroOptions = {}): StartupIntro {
   const inactive = { finished: Promise.resolve(), dismiss() {} };
   if (typeof window === "undefined" || typeof document === "undefined" || !document.body) return inactive;
 
-  // Privacy modes can deny either storage API. Decoration must still fail open.
-  try {
-    if (window.localStorage.getItem(STARTUP_INTRO_ENABLED_KEY) === "false") return inactive;
-  } catch { /* Preference unavailable; continue without writing workspace data. */ }
-  try {
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return inactive;
-  } catch { return inactive; }
-
   const native = options.native ?? ("__TAURI_INTERNALS__" in window);
-  if (!native) {
-    try {
-      if (window.sessionStorage.getItem(STARTUP_INTRO_SESSION_KEY) === "1") return inactive;
-      window.sessionStorage.setItem(STARTUP_INTRO_SESSION_KEY, "1");
-    } catch { /* A blocked session store must not prevent opening the app. */ }
+  let film: CinematicFilm;
+  let caption: string | undefined;
+  if (options.preview) {
+    if (reducedMotion()) return inactive;
+    film = options.preview.film;
+    caption = options.preview.caption;
+  } else {
+    let playedThisTab = false;
+    if (!native) {
+      try { playedThisTab = window.sessionStorage.getItem(STARTUP_INTRO_SESSION_KEY) === "1"; } catch { /* blocked */ }
+    }
+    const { decision, nextLedger } = decideStartupCinematic({
+      prefs: readCinematicPreferences(),
+      ledger: readCinematicLedger(),
+      version: options.version ?? APP_RELEASE_VERSION,
+      now: options.now ?? new Date(),
+      reducedMotion: reducedMotion(),
+      playedThisTab,
+    });
+    // Privacy modes can deny either storage API. Decoration must still fail open.
+    writeCinematicLedger(nextLedger);
+    if (!decision.play) return inactive;
+    if (!native) {
+      try { window.sessionStorage.setItem(STARTUP_INTRO_SESSION_KEY, "1"); } catch { /* blocked */ }
+    }
+    film = decision.film;
+    caption = decision.caption;
   }
 
   let resolveFinished!: () => void;
@@ -41,14 +88,16 @@ export function startStartupIntro(options: StartupIntroOptions = {}): StartupInt
   const overlay = document.createElement("section");
   overlay.className = "axom-startup-intro";
   overlay.setAttribute("role", "dialog");
-  overlay.setAttribute("aria-label", "Opening AXOM");
+  overlay.setAttribute("aria-label", caption ? `Opening AXOM — ${caption}` : "Opening AXOM");
   overlay.setAttribute("aria-modal", "true");
+  overlay.dataset.film = film.id;
+  overlay.style.background = film.background;
 
   const video = document.createElement("video");
   video.className = "axom-startup-intro__film";
   // Respect the same relative Vite base as the app's portable web package.
-  video.src = `${import.meta.env.BASE_URL}startup/axom-optical-luster.mp4`;
-  video.poster = `${import.meta.env.BASE_URL}startup/axom-optical-luster-poster.png`;
+  video.src = `${import.meta.env.BASE_URL}${film.src}`;
+  video.poster = `${import.meta.env.BASE_URL}${film.poster}`;
   video.muted = true;
   video.defaultMuted = true;
   video.playsInline = true;
@@ -66,7 +115,14 @@ export function startStartupIntro(options: StartupIntroOptions = {}): StartupInt
   disable.type = "button";
   disable.textContent = "Don’t show again";
   controls.append(skip, disable);
-  overlay.append(video, controls);
+  overlay.append(video);
+  if (caption) {
+    const text = document.createElement("p");
+    text.className = "axom-startup-intro__caption";
+    text.textContent = caption;
+    overlay.append(text);
+  }
+  overlay.append(controls);
 
   const appRoot = options.appRoot ?? document.getElementById("root");
   const wasInert = appRoot?.hasAttribute("inert") ?? false;
@@ -78,7 +134,7 @@ export function startStartupIntro(options: StartupIntroOptions = {}): StartupInt
   let removed = false;
   let fading = false;
   let fadeTimer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = setTimeout(dismiss, STARTUP_INTRO_MAX_MS);
+  const deadline = setTimeout(dismiss, introDeadlineMs(film));
 
   function dismiss() {
     if (removed) return;
@@ -116,6 +172,7 @@ export function startStartupIntro(options: StartupIntroOptions = {}): StartupInt
   function onPlaying() {
     // Reveal decoded frames, not the bright poster immediately before frame 1.
     video.classList.add("axom-startup-intro__film--playing");
+    overlay.classList.add("axom-startup-intro--playing");
   }
 
   function onKeyDown(event: KeyboardEvent) {
@@ -129,9 +186,7 @@ export function startStartupIntro(options: StartupIntroOptions = {}): StartupInt
     // Consume the launch gesture; it must not click a freshly mounted setup UI.
     event.preventDefault();
     event.stopPropagation();
-    if (event.target === disable) {
-      try { window.localStorage.setItem(STARTUP_INTRO_ENABLED_KEY, "false"); } catch { /* Still skip now. */ }
-    }
+    if (event.target === disable) writeCinematicPreferences({ frequency: "never" });
     dismiss();
   }
 

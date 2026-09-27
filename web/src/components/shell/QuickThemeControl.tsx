@@ -3,6 +3,10 @@ import { useEffect, useId, useRef, useState } from "react";
 import { setThemePreference, type ThemePreference } from "../../lib/theme";
 import { useThemePreference } from "../../lib/useThemePreference";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { PALETTES, customPaletteDefinition, setPalettePreference } from "../../lib/palette";
+import { usePalettePreference, useResolvedTheme } from "../../lib/useAppearance";
+import { useUi } from "../../lib/uiStore";
+import { PaletteSwatch, onRadioGroupKeyDown } from "./AppearanceStudio";
 
 const THEME_OPTIONS: Array<{
   value: ThemePreference;
@@ -19,6 +23,8 @@ export function QuickThemeControl() {
   const preference = useThemePreference();
   const current = THEME_OPTIONS.find((option) => option.value === preference) ?? THEME_OPTIONS[2];
   const CurrentIcon = current.icon;
+  const palette = usePalettePreference();
+  const resolved = useResolvedTheme();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -102,6 +108,36 @@ export function QuickThemeControl() {
               );
             })}
           </fieldset>
+          <div className="quick-palette-row" role="radiogroup" aria-label="Accent palette" onKeyDown={onRadioGroupKeyDown}>
+            {[...PALETTES, customPaletteDefinition(palette.customAccent ?? "")].map((definition) => {
+              const selected = palette.id === definition.id;
+              return (
+                <button
+                  key={definition.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  tabIndex={selected ? 0 : -1}
+                  aria-label={`${definition.label} palette — ${definition.pairing}`}
+                  title={`${definition.label} · ${definition.pairing}`}
+                  className={selected ? "on" : ""}
+                  onClick={() => setPalettePreference({ id: definition.id, customAccent: palette.customAccent })}
+                >
+                  <PaletteSwatch input={resolved === "light" ? definition.light : definition.dark} size="sm" />
+                </button>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            className="quick-theme-more"
+            onClick={() => {
+              close(false);
+              useUi.getState().requestSettings("appearance");
+            }}
+          >
+            All appearance options
+          </button>
         </div>
       )}
     </div>

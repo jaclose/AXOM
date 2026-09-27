@@ -12,7 +12,6 @@ import {
   DAILY_GAMES_FOLDER,
   getNavAnnouncementId,
   getNavModuleStatus,
-  isDailyGamesEnabled,
   MODULE_STATUS_META,
 } from "./nav";
 
@@ -159,14 +158,16 @@ describe("sidebar module status", () => {
     expect(getNavModuleStatus("questions")).toBe("new");
     expect(getNavModuleStatus("methods")).toBe("new");
     expect(getNavModuleStatus("daily-word")).toBe("new");
-    expect(getNavModuleStatus("doctordle")).toBe("wip");
+    expect(getNavModuleStatus("doctordle")).toBeUndefined();
+    expect(getNavModuleStatus("daily-games")).toBe("new");
+    expect(getNavModuleStatus("building")).toBe("new");
     expect(getNavModuleStatus("anki")).toBe("wip");
     expect(getNavModuleStatus("habits")).toBe("wip");
     expect(getNavModuleStatus("step")).toBe("wip");
     expect(getNavModuleStatus("premed")).toBe("wip");
     expect(getNavModuleStatus("integrations")).toBe("wip");
-    expect(getNavModuleStatus("appchecker")).toBe("under-construction");
-    expect(getNavModuleStatus("leaderboards")).toBe("under-construction");
+    expect(getNavModuleStatus("appchecker")).toBe("wip");
+    expect(getNavModuleStatus("leaderboards")).toBe("wip");
     expect(getNavModuleStatus("dashboard")).toBeUndefined();
     expect(getNavAnnouncementId("questions")).toBe("question-bank-entry-v1");
     expect(getNavAnnouncementId("methods")).toBe("study-methods-library-v1");
@@ -195,10 +196,10 @@ describe("sidebar module status", () => {
     const wipItem = screen.getByRole("button", { name: "Anki Lab, Work in progress" });
     expect(wipItem.querySelector(".nav-status")?.textContent).toBe("WIP");
 
-    const buildingItem = screen.getByRole("button", { name: "Application Checker, Under construction" });
+    const buildingItem = screen.getByRole("button", { name: "Application Checker, Work in progress" });
     const buildingBadge = buildingItem.querySelector<HTMLElement>(".nav-status");
-    expect(buildingBadge?.textContent).toBe("BUILDING");
-    expect(buildingBadge?.getAttribute("title")).toBe("Under construction");
+    expect(buildingBadge?.textContent).toBe("WIP");
+    expect(buildingBadge?.getAttribute("title")).toBe("Work in progress");
   });
 
   it("keeps status treatments visible for hidden modules in customize mode", () => {
@@ -249,7 +250,7 @@ describe("sidebar module status", () => {
     expect(screen.getByRole("button", { name: "Study Methods, New" })).toBeTruthy();
   });
 
-  it("does not dismiss an optional NEW route at its disabled gate and never dismisses WIP or BUILDING", () => {
+  it("dismisses a persistent game route and never dismisses WIP or BUILDING", () => {
     const props = {
       onSelect: vi.fn(),
       onOpenSettings: vi.fn(),
@@ -257,13 +258,13 @@ describe("sidebar module status", () => {
       onClose: vi.fn(),
     };
     const { rerender } = render(<Sidebar {...props} active="daily-word" />);
-    expect(localStorage.getItem(STORAGE_KEYS.dismissedAnnouncements)).toBeNull();
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.dismissedAnnouncements) ?? "[]")).toContain("daily-word-launch-v1");
 
     rerender(<Sidebar {...props} active="anki" />);
     expect(screen.getByRole("button", { name: "Anki Lab, Work in progress" })).toBeTruthy();
     rerender(<Sidebar {...props} active="appchecker" />);
-    expect(screen.getByRole("button", { name: "Application Checker, Under construction" })).toBeTruthy();
-    expect(localStorage.getItem(STORAGE_KEYS.dismissedAnnouncements)).toBeNull();
+    expect(screen.getByRole("button", { name: "Application Checker, Work in progress" })).toBeTruthy();
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.dismissedAnnouncements) ?? "[]")).toEqual(["daily-word-launch-v1"]);
   });
 });
 
@@ -306,7 +307,7 @@ describe("sidebar folder disclosure accessibility", () => {
     expect(toolItems.hidden).toBe(true);
   });
 
-  it("keeps Daily Games opt-in, exposes it in Customize, and preserves history when disabled", () => {
+  it("keeps Daily Games persistent and preserves local history", () => {
     useStore.setState({
       dailyWordPuzzles: [{
         puzzleId: "daily-word:general-1:2026-07-12",
@@ -330,23 +331,10 @@ describe("sidebar folder disclosure accessibility", () => {
       />,
     );
 
-    expect(isDailyGamesEnabled(useStore.getState().profile.experimentalFlags)).toBe(false);
-    expect(screen.queryByRole("button", { name: DAILY_GAMES_FOLDER.label })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Daily Word, New" })).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "Customize" }));
-    const optionalToggle = screen.getByRole("button", { name: "Daily Games, optional feature" });
-    expect(optionalToggle.getAttribute("aria-pressed")).toBe("false");
-    fireEvent.click(optionalToggle);
-
-    expect(optionalToggle.getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("button", { name: DAILY_GAMES_FOLDER.label })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Daily Games, New" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Daily Word, New" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Doctordle, Work in progress" })).toBeTruthy();
-
-    fireEvent.click(optionalToggle);
-    expect(optionalToggle.getAttribute("aria-pressed")).toBe("false");
-    expect(screen.queryByRole("button", { name: DAILY_GAMES_FOLDER.label })).toBeNull();
+    expect(screen.getByRole("button", { name: "Doctordle" })).toBeTruthy();
     expect(useStore.getState().dailyWordPuzzles).toHaveLength(1);
   });
 

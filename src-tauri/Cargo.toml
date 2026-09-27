@@ -17,7 +17,7 @@ crate-type = ["rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -26,12 +26,15 @@ tauri-plugin-process = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-window-state = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-notification = "2"
 
 # Native JavaScript dialogs (src/webview_dialogs.rs). Already in the tree via wry.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 block2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSString"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSString", "NSAttributedString", "NSData", "NSDictionary", "NSGeometry", "NSObject"] }
+# Menu bar pill (src/menu_bar_pill.rs): drawn with AppKit into a template image.
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-foundation", "NSAttributedString", "NSBezierPath", "NSButton", "NSColor", "NSControl", "NSFont", "NSFontDescriptor", "NSImage", "NSResponder", "NSStatusBarButton", "NSStatusItem", "NSStringDrawing", "NSView"] }
 
 # Keep local builds small; updater assets never need compiler debug symbols.
 [profile.dev]

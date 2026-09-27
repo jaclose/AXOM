@@ -1,6 +1,6 @@
 {
     "compilerOptions": {
-        "moduleResolution": "node",
+        "moduleResolution": "Bundler",
         "module": "ESNext",
         "target": "es2022",
         "lib": [
@@ -11,8 +11,7 @@
             "node",
             "@wdio/globals/types",
             "expect-webdriverio",
-            "@wdio/mocha-framework",
-            "@wdio/visual-service"
+            "@wdio/mocha-framework"
         ],
         "skipLibCheck": true,
         "noEmit": true,

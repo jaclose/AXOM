@@ -146,3 +146,47 @@ describe("Pomodoro custom presets", () => {
     expect(useStore.getState().logs).toEqual(logs);
   });
 });
+
+describe("Pomodoro menu bar toggle", () => {
+  const MAC_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)";
+
+  function enterMacDesktopShell() {
+    (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+    Object.defineProperty(window.navigator, "userAgent", { configurable: true, get: () => MAC_UA });
+  }
+
+  afterEach(() => {
+    delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+    delete (window.navigator as { userAgent?: string }).userAgent;
+  });
+
+  it("is hidden in a browser, where there is no menu bar to draw in", () => {
+    render(<Pomodoro />);
+    expect(screen.queryByLabelText("Show timer in the Mac menu bar")).toBeNull();
+  });
+
+  it("is hidden in the desktop app on other platforms", () => {
+    (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+    Object.defineProperty(window.navigator, "userAgent", { configurable: true, get: () => "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" });
+    render(<Pomodoro />);
+    expect(screen.queryByLabelText("Show timer in the Mac menu bar")).toBeNull();
+  });
+
+  it("defaults on in the Mac desktop app and persists the learner's choice", () => {
+    enterMacDesktopShell();
+    render(<Pomodoro />);
+    const toggle = screen.getByLabelText("Show timer in the Mac menu bar") as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    fireEvent.click(toggle);
+    expect(useStore.getState().profile.pomodoroPreferences?.showInMenuBar).toBe(false);
+    expect((screen.getByLabelText("Show timer in the Mac menu bar") as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(screen.getByLabelText("Show timer in the Mac menu bar"));
+    expect(useStore.getState().profile.pomodoroPreferences?.showInMenuBar).toBe(true);
+  });
+
+  it("stays out of the compact dashboard widget", () => {
+    enterMacDesktopShell();
+    render(<Pomodoro compact />);
+    expect(screen.queryByLabelText("Show timer in the Mac menu bar")).toBeNull();
+  });
+});

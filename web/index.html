@@ -21,7 +21,33 @@
         root.dataset.theme = theme;
         root.dataset.themePreference = preference;
         root.style.colorScheme = theme;
-        document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "dark" ? "#0d0d0e" : "#f3eee3");
+        let chrome = theme === "dark" ? "#0d0d0e" : "#f3eee3";
+        // Accent palette (keep in sync with STORAGE_KEYS.palettePreference and
+        // paletteCss() in src/lib/palette.ts). Names/values are allow-listed so
+        // a tampered entry can never escape its declaration block.
+        try {
+          const palette = JSON.parse(localStorage.getItem("axom.palette.v1") || "null");
+          const ids = ["ivory", "amethyst", "sapphire", "midnight", "emerald", "rose", "platinum", "custom"];
+          if (palette && ids.includes(palette.id) && palette.vars && palette.vars.dark && palette.vars.light) {
+            const name = /^--[a-z0-9-]{1,40}$/;
+            const value = /^[#0-9a-zA-Z(),.%\s-]{1,200}$/;
+            const block = (record) => Object.keys(record)
+              .filter((key) => name.test(key) && typeof record[key] === "string" && value.test(record[key]))
+              .map((key) => key + ": " + record[key] + ";").join(" ");
+            const style = document.createElement("style");
+            style.id = "axom-palette";
+            style.textContent = ':root[data-palette="' + palette.id + '"] { ' + block(palette.vars.dark) + ' }\n'
+              + ':root[data-palette="' + palette.id + '"][data-theme="light"] { ' + block(palette.vars.light) + ' }';
+            document.head.appendChild(style);
+            root.dataset.palette = palette.id;
+            const bg = palette.vars[theme] && palette.vars[theme]["--bg-2"];
+            if (typeof bg === "string" && /^#[0-9a-f]{6}$/i.test(bg)) chrome = bg;
+          }
+        } catch { /* classic gold is the safe fallback */ }
+        try {
+          if (localStorage.getItem("axom.motion") === "reduce") root.dataset.motion = "reduce";
+        } catch { /* motion follows the device */ }
+        document.querySelector('meta[name="theme-color"]')?.setAttribute("content", chrome);
       })();
     </script>
     <meta name="description" content="AXOM — a private academic operating system. Courses, mastery tracking, sessions, questions, and recovery in one calm cockpit." />

@@ -19,7 +19,7 @@ describe("Daily Word help and status", () => {
     expect(screen.getByText("AXOM Daily Word")).toBeTruthy();
     expect(screen.getByText(/Optional local-first five-letter puzzle/)).toBeTruthy();
     expect(screen.getByText(/after one successful online load/)).toBeTruthy();
-    expect(screen.getByText(/no cloud account or cross-device sync/i)).toBeTruthy();
+    expect(screen.getByText(/account protection is built but stays off until this deployment configures and verifies its account service/i)).toBeTruthy();
     expect(screen.queryByTitle("Live site preview")).toBeNull();
   });
 });

@@ -69,3 +69,74 @@
 @media (prefers-reduced-motion: reduce) {
   .axom-startup-intro { transition: none; }
 }
+
+.axom-startup-intro__caption {
+  position: absolute;
+  inset-inline: 16px;
+  bottom: calc(max(16px, env(safe-area-inset-bottom)) + 64px);
+  margin: 0;
+  text-align: center;
+  color: #e9e4d8;
+  font: 500 12px/1.4 system-ui, sans-serif;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 420ms ease-out 520ms, transform 420ms ease-out 520ms;
+  pointer-events: none;
+}
+
+.axom-startup-intro--playing .axom-startup-intro__caption {
+  opacity: 0.82;
+  transform: none;
+}
+
+/* --- Update film (UpdateCinematic) ------------------------------------------ */
+.axom-update-cinematic {
+  position: fixed;
+  inset: 0;
+  z-index: 2147482000;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  color: #f2eee6;
+  animation: axom-update-in 260ms ease-out both;
+}
+.axom-update-cinematic__film { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.axom-update-cinematic__status {
+  position: absolute;
+  bottom: max(48px, calc(env(safe-area-inset-bottom) + 32px));
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  min-width: min(320px, calc(100vw - 32px));
+  font: 500 13px/1.4 system-ui, sans-serif;
+  text-align: center;
+}
+.axom-update-cinematic__status b { font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; font-size: 12px; }
+.axom-update-cinematic__status span { color: #b9b7b2; }
+.axom-update-cinematic__bar {
+  position: relative;
+  width: 160px;
+  height: 2px;
+  margin-top: 6px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgb(255 255 255 / 10%);
+}
+.axom-update-cinematic__bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, #f2eee6, transparent);
+  animation: axom-update-sweep 1.4s ease-in-out infinite;
+}
+@keyframes axom-update-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes axom-update-sweep { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+@media (prefers-reduced-motion: reduce) {
+  .axom-update-cinematic { animation: none; }
+  .axom-update-cinematic__bar::after { animation: none; width: 100%; opacity: .5; }
+}
+:root[data-motion="reduce"] .axom-update-cinematic { animation: none; }
+:root[data-motion="reduce"] .axom-update-cinematic__bar::after { animation: none; width: 100%; opacity: .5; }

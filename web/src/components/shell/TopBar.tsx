@@ -4,11 +4,13 @@ import { GButton } from "../ui/primitives";
 import { useStore } from "../../lib/store";
 import { useUi } from "../../lib/uiStore";
 import { ClockControl } from "./ClockControl";
+import { TopBarQuote } from "./TopBarQuote";
 import { ICON_SIZE } from "../../lib/iconSize";
 
 export function TopBar({
-  title, subtitle, onMenu, menuButtonRef, drawerOpen, onRefresh, refreshing,
+  title, subtitle, onMenu, menuButtonRef, drawerOpen, onRefresh, refreshing, route = "dashboard",
 }: {
+  route?: string;
   title: string;
   subtitle: string;
   onMenu: () => void;
@@ -19,6 +21,7 @@ export function TopBar({
 }) {
   const clockPreferences = useStore((state) => state.profile.clockPreferences);
   const timeZonePreference = useStore((state) => state.profile.timeZonePreference);
+  const activeDayKey = useStore((state) => state.activeDayKey);
   return (
     <div className="topbar">
       <button
@@ -36,11 +39,12 @@ export function TopBar({
         <div className="tb-title">{title}</div>
         <div className="tb-sub">{subtitle}</div>
       </div>
+      <TopBarQuote dayKey={activeDayKey} route={route} />
       <div className="tb-actions">
         <ClockControl
           clockPreferences={clockPreferences}
           timeZonePreference={timeZonePreference}
-          onOpenPreferences={() => useUi.getState().requestSettings("personalization")}
+          onOpenPreferences={() => useUi.getState().requestSettings("rhythm")}
         />
         <GButton className="topbar-refresh" onClick={onRefresh}>
           <RotateCw size={ICON_SIZE.body} className={refreshing ? "spin" : ""} />

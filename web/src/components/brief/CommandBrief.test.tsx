@@ -39,6 +39,27 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("CommandBrief recommendation provenance", () => {
+  it("updates the resolved plan after preference edits and carries enabled resources into a session", async () => {
+    const current = useStore.getState();
+    useStore.setState({
+      profile: { ...current.profile, studyWorkflow: { configured: true, lecturePasses: 4, methods: [{ id: "anki", enabled: false }, { id: "notes", enabled: true }] } },
+      courses: [{ id: "renal", termId: "term", code: "RENAL", name: "Renal block", files: 0, modules: [] }],
+      tracker: [{ id: "real", path: "RENAL/Lectures", label: "Renal transport", kind: "Lecture", passes: 3, ankiPasses: 0, yield: "high", updated: "2026-07-12T08:00:00Z" }],
+      dayPlans: [{ dayKey: "2026-07-12", intention: "Renal transport", wins: [], createdAt: "2026-07-12T08:00:00Z" }],
+    });
+    render(<CommandBrief />);
+    expect(screen.getByText("Review: Renal transport")).toBeTruthy();
+    fireEvent.click(screen.getByText("Why this suggestion?"));
+    const plan = screen.getByRole("region", { name: "Study plan used for this suggestion" });
+    expect(plan.textContent).toContain("3 of 4 passes complete");
+    await act(() => useStore.setState({ courses: [{ ...useStore.getState().courses[0], studyPlanOverride: { lecturePasses: 5, reviewAfterDays: 6 } }] }));
+    expect(plan.textContent).toContain("3 of 5 passes complete · Review after 6 days");
+    expect(plan.textContent).toContain("course override");
+    await act(() => useStore.setState({ profile: { ...useStore.getState().profile, studyWorkflow: { configured: true, lecturePasses: 4, methods: [{ id: "anki", enabled: false }, { id: "noji", enabled: true }] } } }));
+    fireEvent.click(screen.getByRole("button", { name: "Begin Session" }));
+    expect(useStore.getState().sessions[0]).toMatchObject({ link: { id: "real", kind: "tracker" }, resources: ["Noji"] });
+  });
+
   it("renders a neutral evidence checklist for a seed-only workspace", () => {
     useStore.setState({ ...makeSeed(), activeDayKey: "2026-07-12" });
     render(<CommandBrief />);

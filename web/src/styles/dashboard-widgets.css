@@ -392,3 +392,28 @@
   .widget-row-actions { grid-column: 1 / -1; justify-content: flex-end; }
   .dashboard-fixed-surfaces { align-items: flex-start; }
 }
+
+/* The customize gear sits in the top-right corner of every widget. Reserve
+   that corner in each widget's header row so right-aligned actions (e.g.
+   "Open check-in") never slide under it. */
+.dashboard-widget-frame__content :is(.panel-head, .daily-checkin-collapsed, .standup-prompt-head) {
+  padding-inline-end: 3rem;
+}
+.dashboard-widget-frame__content .panel-head > :last-child:not(:first-child),
+.dashboard-widget-frame__content .daily-checkin-collapsed > :last-child:not(:first-child) {
+  flex-shrink: 0;
+}
+
+/* Course Tracker widget — primary focus rows */
+.dashboard-primary-focus { display: grid; gap: 6px; margin: 4px 0 10px; }
+.dashboard-primary-row { display: grid; grid-template-columns: 14px minmax(0, 1fr) 1fr 36px; align-items: center; gap: 8px; color: var(--text-80); text-decoration: none; font-size: var(--fs-sm); }
+.dashboard-primary-row svg { color: var(--gold); fill: currentColor; }
+.dashboard-primary-row span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dashboard-primary-row i { height: 5px; border-radius: 999px; background: var(--neutral-hover, rgba(230,226,214,0.08)); overflow: hidden; }
+.dashboard-primary-row i b { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent-lo, var(--gold)), var(--accent-hi, var(--gold))); }
+.dashboard-primary-row small { text-align: right; color: var(--text-45); font-variant-numeric: tabular-nums; }
+.dashboard-primary-row:hover span { color: var(--text); }
+
+.dashboard-targets-empty { gap: 6px 12px; }
+.dashboard-targets-empty .gbtn { grid-column: 2; justify-self: start; margin-top: 6px; }
+.daily-checkin-energy { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hairline); }

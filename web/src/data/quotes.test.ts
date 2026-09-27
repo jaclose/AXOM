@@ -1,16 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { AXOM_QUOTES } from "./quotes";
+import { AXOM_ORIGINALS_V2, AXOM_QUOTES, AXOM_QUOTE_LIBRARY_V1 } from "./quotes";
 
 describe("normalized AXOM quote library v1", () => {
   it("pins the exact 100 source entries and stable numbered ids", () => {
-    expect(AXOM_QUOTES).toHaveLength(100);
-    expect(AXOM_QUOTES.map((quote) => quote.id)).toEqual(
+    expect(AXOM_QUOTE_LIBRARY_V1).toHaveLength(100);
+    expect(AXOM_QUOTE_LIBRARY_V1.map((quote) => quote.id)).toEqual(
       Array.from({ length: 100 }, (_, index) => `quote-${String(index + 1).padStart(3, "0")}`),
     );
-    expect(new Set(AXOM_QUOTES.map((quote) => quote.text)).size).toBe(100);
-    expect(fnv1a32(`${AXOM_QUOTES.map((quote) => quote.text).join("\n")}\n`)).toBe(1_240_300_146);
-    expect(AXOM_QUOTES[0].text).toBe("The person you become is hidden inside the work you’re avoiding.");
-    expect(AXOM_QUOTES[99].text).toBe("Become someone your past self would trust with their dreams.");
+    expect(new Set(AXOM_QUOTE_LIBRARY_V1.map((quote) => quote.text)).size).toBe(100);
+    expect(fnv1a32(`${AXOM_QUOTE_LIBRARY_V1.map((quote) => quote.text).join("\n")}\n`)).toBe(1_240_300_146);
+    expect(AXOM_QUOTE_LIBRARY_V1[0].text).toBe("The person you become is hidden inside the work you’re avoiding.");
+    expect(AXOM_QUOTE_LIBRARY_V1[99].text).toBe("Become someone your past self would trust with their dreams.");
+  });
+
+  it("appends AXOM Originals v2 with stable ids, unique text, and no guilt category", () => {
+    expect(AXOM_QUOTES.slice(0, 100)).toEqual(AXOM_QUOTE_LIBRARY_V1);
+    expect(AXOM_ORIGINALS_V2.length).toBeGreaterThanOrEqual(80);
+    expect(AXOM_ORIGINALS_V2[0].id).toBe("quote-101");
+    expect(new Set(AXOM_QUOTES.map((quote) => quote.id)).size).toBe(AXOM_QUOTES.length);
+    expect(new Set(AXOM_QUOTES.map((quote) => quote.text.toLowerCase())).size).toBe(AXOM_QUOTES.length);
+    expect(AXOM_ORIGINALS_V2.every((quote) => quote.author === "AXOM" && quote.attributionStatus === "axom-original" && !quote.guilt)).toBe(true);
   });
 
   it("preserves the six source category ranges and defaults guilt/shame off", () => {
@@ -19,7 +28,7 @@ describe("normalized AXOM quote library v1", () => {
     expect(count("discipline")).toBe(20);
     expect(count("perspective")).toBe(15);
     expect(count("success-ambition")).toBe(15);
-    expect(count("axom-original")).toBe(10);
+    expect(count("axom-original")).toBe(10 + AXOM_ORIGINALS_V2.length);
     expect(AXOM_QUOTES.filter((quote) => quote.guilt).map((quote) => quote.id)).toEqual(
       Array.from({ length: 20 }, (_, index) => `quote-${String(index + 21).padStart(3, "0")}`),
     );

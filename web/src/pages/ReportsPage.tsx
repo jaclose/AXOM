@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Flame, Target, Activity, CalendarCheck, Layers, ListChecks, Download, BatteryCharging, Gauge, AlertTriangle } from "lucide-react";
 import { useStore } from "../lib/store";
 import { GlassCard, GButton, PanelHeader, Tag } from "../components/ui/primitives";
-import { dayTotals, todayGrade, gradeColor, gradeLabel, prettyDate } from "../lib/scoring";
+import { dayTotals, todayGrade, gradeColor, gradeLabel, gradeLegend, prettyDate } from "../lib/scoring";
 import { PASS_COLOR, PASS_LABEL, YIELD_LABEL, YIELD_TONE, passStage, scopeMastery } from "../lib/tracker";
 import { resolveTrack } from "../lib/tracks";
 import { exportStateWithAttachments } from "../lib/backup";
@@ -11,17 +11,26 @@ import { calculateReadiness } from "../lib/energy";
 import type { PassStage } from "../lib/tracker";
 import type { TrackerKind, Yield } from "../lib/types";
 import {
+  buildActivityRhythm,
+  buildCalendarWeeks,
   buildCanonicalReportSummary,
+  buildRecentDays,
   buildCanonicalReportTrends,
   compareReportPeriods,
+  formatMetric,
   reportTrendMetricValue,
+  summarizeActivityWeek,
   type ReportDayDatum,
   type ReportMetric,
   type ReportTrendMetric,
 } from "../lib/reports";
 import { evaluateDailySuccess } from "../lib/dailySuccess";
+import { MonthlyTrendCalendar, TREND_METRIC_LABELS, TrendDelta, WeeklyTrendChart } from "../components/reports/TrendCharts";
 import { ReportInsightCard, type ReportCardInsight } from "../components/reports/ReportInsightCard";
 import { ICON_SIZE } from "../lib/iconSize";
+import { EnergyFocusPanel, useEnergyInputs } from "../components/energy/EnergyInsights";
+import { TrackerReport } from "../components/reports/TrackerReport";
+import { todaysCapacity } from "../lib/energyInsights";
 
 const RANGES = [14, 30] as const;
 const STAGES: PassStage[] = ["untouched", "red", "young", "mature", "mastered"];
@@ -38,6 +47,10 @@ export function ReportsPage() {
   const cardTarget = s.profile.dailyCardTarget || 120;
   const reportSummary = useMemo(() => buildCanonicalReportSummary(s, range), [s, range]);
   const reportTrends = useMemo(() => buildCanonicalReportTrends(s), [s]);
+  const calendarWeeks = useMemo(() => buildCalendarWeeks(s), [s]);
+  const effortDays = useMemo(() => buildRecentDays(s, range), [s, range]);
+  const activityRhythm = useMemo(() => buildActivityRhythm(s, range), [s, range]);
+  const hasTargets = Boolean(s.profile.dailySuccess?.requirements.some((requirement) => requirement.enabled));
   const weeklyComparison = useMemo(
     () => compareReportPeriods(reportTrends.currentWeek, reportTrends.previousWeek, trendMetric),
     [reportTrends, trendMetric],
@@ -62,17 +75,19 @@ export function ReportsPage() {
     tasks: s.tasks,
     dayPlans: s.dayPlans,
     productivityTrackers: s.productivityTrackers,
-  }), [s.activeDayKey, s.energyFactors, s.journal, s.logs, s.tasks, s.dayPlans, s.productivityTrackers]);
+    energyChecks: s.profile.energyChecks,
+  }), [s.activeDayKey, s.energyFactors, s.journal, s.logs, s.tasks, s.dayPlans, s.productivityTrackers, s.profile.energyChecks]);
+  const energyInputs = useEnergyInputs();
+  const capacity = useMemo(() => todaysCapacity(energyInputs, s.activeDayKey), [energyInputs, s.activeDayKey]);
 
   const days = useMemo(() => reportSummary.observedDates.map((key) => {
     const d = new Date(`${key}T12:00:00`);
     const { minutes, cards } = dayTotals(s.logs, key);
-    return { key, date: d, minutes, cards, grade: todayGrade(minutes, cards), active: minutes > 0 || cards > 0 };
-  }), [s.logs, reportSummary.observedDates]);
+    return { key, date: d, minutes, cards, grade: todayGrade(minutes, cards, { minutes: s.profile.dailyMinuteTarget, cards: s.profile.dailyCardTarget }), active: minutes > 0 || cards > 0 };
+  }), [s.logs, reportSummary.observedDates, s.profile.dailyMinuteTarget, s.profile.dailyCardTarget]);
 
   const activeDays = days.filter((d) => d.active);
   const bestDay = days.reduce<typeof days[number] | null>((best, d) => (!best || d.minutes > best.minutes ? d : best), null);
-  const maxMin = Math.max(1, ...days.map((d) => d.minutes));
 
   const dist = { blue: 0, green: 0, orange: 0, red: 0 };
   activeDays.forEach((d) => dist[d.grade]++);
@@ -92,22 +107,26 @@ export function ReportsPage() {
       .filter((contribution) => contribution.userConfirmed)
       .map((contribution) => contribution.factorId ?? contribution.id),
   ])];
-  const readinessMetric: ReportMetric = {
+  const capacityMetric: ReportMetric = {
     id: "readiness",
-    label: "Readiness",
-    value: readinessEvidenceIds.length ? `${readiness.estimatedReadiness}` : "No input",
-    note: readinessEvidenceIds.length ? readiness.primarySignal : "No readiness input yet",
-    numerator: readinessEvidenceIds.length ? readiness.estimatedReadiness : 0,
-    denominator: readinessEvidenceIds.length ? 100 : 0,
-    period: reportSummary.metrics.consistency.period,
-    sourceLabel: "Confirmed readiness contributions and energy check-ins",
-    sourceRecordIds: readinessEvidenceIds,
-    calculation: readinessEvidenceIds.length
-      ? `Baseline plus ${readiness.totalImpact >= 0 ? "+" : ""}${readiness.totalImpact} net contribution; ${readiness.carryoverImpact >= 0 ? "+" : ""}${readiness.carryoverImpact} carryover.`
-      : "No confirmed factor, energy check-in, or qualifying activity supplied a readiness observation.",
-    interpretation: readinessEvidenceIds.length ? readiness.recommendation : "No readiness input yet. AXOM will not present the default baseline as if you reported it.",
-    action: "Open the full calculation",
-    state: readinessEvidenceIds.length ? "ready" : "neutral",
+    label: "Capacity today",
+    value: capacity.hasEvidence ? capacity.label : "No signal",
+    note: !capacity.hasEvidence
+      ? "No energy check today"
+      : capacity.suggestedMinutes
+        ? `Aim for about ${capacity.suggestedMinutes} min of study`
+        : capacity.reasons[0],
+    numerator: 0,
+    denominator: 0,
+    period: capacity.typicalMinutes ? `Typical day ${capacity.typicalMinutes} min` : "Against your own history",
+    sourceLabel: "One-tap energy checks, journal and closeout energy, sleep you logged, and yesterday’s study minutes",
+    sourceRecordIds: capacity.latestEnergy ? [capacity.latestEnergy.at] : [],
+    calculation: "Today’s latest energy is compared with your own 30-day average (about 15 points is one step), yesterday’s minutes with your median active day (over 1.4× suggests going lighter, under half leaves room), plus any sleep you logged for today. Go lighter = 75% of your typical minutes; room to push = 110%.",
+    interpretation: capacity.hasEvidence
+      ? capacity.reasons.join(". ") + "."
+      : "Tap how your energy feels right now. AXOM compares it with your own usual, never with a made-up default.",
+    action: capacity.hasEvidence ? "Plan today around the suggested minutes; check in again after a break." : "Log a one-tap energy check below.",
+    state: capacity.hasEvidence ? (capacity.latestEnergy ? "ready" : "low-data") : "neutral",
   };
   // The legacy performance engine still considers some lifetime journal/plan
   // signals. Never let those older records unlock a directional score for a
@@ -187,12 +206,12 @@ export function ReportsPage() {
     change: weeklyComparison.interpretation,
     strongestContributor: weeklyComparison.strongestContributor,
   };
-  const weekMax = Math.max(1, ...reportTrends.currentWeek.map((day) => reportTrendMetricValue(day, trendMetric)));
-  const monthMax = Math.max(1, ...reportTrends.month.map((day) => reportTrendMetricValue(day, trendMetric)));
-  const monthBlanks = reportTrends.month[0]
-    ? new Date(`${reportTrends.month[0].dayKey}T12:00:00`).getDay()
-    : 0;
-  const selectedDay = [...reportTrends.currentWeek, ...reportTrends.month].find((day) => day.dayKey === selectedTrendDay);
+  const weekDays = trendMetric === "requirements" ? reportTrends.currentWeek : calendarWeeks.current;
+  const weekPrevious = trendMetric === "requirements" ? reportTrends.previousWeek : calendarWeeks.previous;
+  const weekSummary = trendMetric === "requirements" ? null : summarizeActivityWeek(calendarWeeks.current, calendarWeeks.previous, trendMetric);
+  const metricTarget = trendTarget(s, trendMetric);
+  const selectedDay = [...calendarWeeks.current, ...calendarWeeks.previous, ...reportTrends.currentWeek, ...reportTrends.month].find((day) => day.dayKey === selectedTrendDay);
+  const monthActiveDays = reportTrends.month.filter((day) => reportTrendMetricValue(day, trendMetric) > 0).length;
   const monthMetricTotal = reportTrends.month.reduce((sum, day) => sum + reportTrendMetricValue(day, trendMetric), 0);
   const monthBest = [...reportTrends.month]
     .sort((a, b) => reportTrendMetricValue(b, trendMetric) - reportTrendMetricValue(a, trendMetric) || a.dayKey.localeCompare(b.dayKey))[0];
@@ -221,64 +240,90 @@ export function ReportsPage() {
         <div className="report-section-heading"><div><span>Current state</span><h2 id="report-current-title">Today</h2></div><p>The signals that can help you decide what to do next.</p></div>
         <div className="grid grid-stats report-card-grid">
           <ReportInsightCard icon={<Target size={ICON_SIZE.emphasis} />} metric={todayMetric} />
-          <ReportInsightCard icon={<BatteryCharging size={ICON_SIZE.emphasis} />} metric={readinessMetric} />
+          <ReportInsightCard icon={<BatteryCharging size={ICON_SIZE.emphasis} />} metric={capacityMetric} />
           <ReportInsightCard icon={<ListChecks size={ICON_SIZE.emphasis} />} metric={openTaskMetric} />
         </div>
+      </section>
+
+      <section className="report-section" aria-labelledby="report-energy-title">
+        <div className="report-section-heading"><div><span>Energy &amp; focus</span><h2 id="report-energy-title">Your rhythm</h2></div><p>When you are sharpest, how much today can hold, and what seems to help — from your own check-ins, sessions and questions.</p></div>
+        <GlassCard pad className="report-energy-card">
+          <EnergyFocusPanel />
+        </GlassCard>
       </section>
 
       <section className="report-section" aria-labelledby="report-trend-title">
         <div className="report-section-heading"><div><span>Pattern over time</span><h2 id="report-trend-title">Trend</h2></div><p>Only scheduled, tracked dates enter requirement comparisons.</p></div>
         <div className="grid grid-stats report-card-grid report-card-grid-two">
-          <ReportInsightCard icon={<CalendarCheck size={ICON_SIZE.emphasis} />} metric={reportSummary.metrics.consistency} insight={trendInsight} />
-          <ReportInsightCard icon={<Flame size={ICON_SIZE.emphasis} />} metric={reportSummary.metrics.streak} insight={trendInsight} />
+          <ReportInsightCard icon={<CalendarCheck size={ICON_SIZE.emphasis} />} metric={hasTargets ? reportSummary.metrics.consistency : activityRhythm.consistency} insight={hasTargets ? trendInsight : { change: weekSummary?.interpretation }} />
+          <ReportInsightCard icon={<Flame size={ICON_SIZE.emphasis} />} metric={hasTargets ? reportSummary.metrics.streak : activityRhythm.streak} insight={hasTargets ? trendInsight : { change: weekSummary?.interpretation }} />
         </div>
         <GlassCard pad className="report-week-card">
-          <PanelHeader title="Weekly trend" sub="Your latest seven eligible study days"
-            action={<Tag tone={weeklyComparison.sufficient ? "cyan" : "neutral"}>{reportTrends.currentWeek.length}/7 eligible</Tag>} />
+          <PanelHeader title="Weekly trend" sub={trendMetric === "requirements" ? "Your latest seven days with scheduled targets" : "The last seven calendar days — same days and colors as Productivity"}
+            action={trendMetric === "requirements"
+              ? <Tag tone={weeklyComparison.sufficient ? "cyan" : "neutral"}>{reportTrends.currentWeek.length}/7 scheduled</Tag>
+              : <TrendDelta percentChange={weekSummary?.percentChange ?? null} />} />
           <div className="report-metric-switch" role="group" aria-label="Weekly and monthly trend metric">
             {(["minutes", "questions", "cards", "requirements"] as ReportTrendMetric[]).map((metric) => (
-              <button key={metric} className={`filter-pill ${trendMetric === metric ? "on" : ""}`} onClick={() => setTrendMetric(metric)}>
-                {metric === "minutes" ? "Minutes" : metric === "questions" ? "Questions" : metric === "cards" ? "Cards" : "Target completion"}
+              <button key={metric} className={`filter-pill ${trendMetric === metric ? "on" : ""}`} aria-pressed={trendMetric === metric} onClick={() => setTrendMetric(metric)}>
+                {TREND_METRIC_LABELS[metric]}
               </button>
             ))}
           </div>
-          <div className="report-eligible-week" aria-label="Seven eligible day trend">
-            {reportTrends.currentWeek.map((day) => {
-              const value = reportTrendMetricValue(day, trendMetric);
-              return <button key={day.dayKey} className={`report-eligible-day ${day.status} ${selectedTrendDay === day.dayKey ? "selected" : ""}`} aria-label={`${day.dayKey}: ${value} ${trendMetric}`} aria-pressed={selectedTrendDay === day.dayKey} onClick={() => setSelectedTrendDay(day.dayKey)}>
-                <span className="report-eligible-bar"><i style={{ height: `${Math.max(value ? 8 : 0, (value / weekMax) * 100)}%` }} /></span>
-                <b>{new Date(`${day.dayKey}T12:00:00`).toLocaleDateString(undefined, { weekday: "short" }).slice(0, 2)}</b>
-                <small>{value}</small>
-              </button>;
-            })}
-            {!reportTrends.currentWeek.length && <p className="dim">Not enough tracked days yet.</p>}
-          </div>
+          {weekSummary && (
+            <div className="trend-kpis">
+              <span><b>{formatMetric(weekSummary.total, trendMetric)}</b><small>this week</small></span>
+              <span><b>{weekSummary.activeDays}/7</b><small>active days</small></span>
+              <span><b>{weekSummary.activeDays ? formatMetric(Math.round(weekSummary.total / weekSummary.activeDays), trendMetric) : "—"}</b><small>per active day</small></span>
+              <span><b>{weekSummary.bestDayKey ? new Date(`${weekSummary.bestDayKey}T12:00:00`).toLocaleDateString(undefined, { weekday: "long" }) : "—"}</b><small>strongest day</small></span>
+            </div>
+          )}
+          {trendMetric === "requirements" && !hasTargets ? (
+            <div className="report-empty-trend">
+              <b>No daily targets yet</b>
+              <span>Target completion appears once you choose what makes a day successful. Minutes, questions, and cards above work without targets.</span>
+              <a className="gbtn sm" href="#productivity">Choose daily targets</a>
+            </div>
+          ) : weekDays.length ? (
+            <WeeklyTrendChart
+              days={weekDays}
+              previous={weekPrevious}
+              metric={trendMetric}
+              target={metricTarget}
+              todayKey={s.activeDayKey}
+              selected={selectedTrendDay}
+              onSelect={setSelectedTrendDay}
+            />
+          ) : <p className="dim">Not enough scheduled days yet.</p>}
           <div className="report-trend-interpretation">
-            <b>{weeklyComparison.interpretation}</b>
-            <span>{weeklyComparison.strongestContributor ? `${weeklyComparison.strongestContributor} was the strongest contributor. ` : ""}{weeklyComparison.quietEligibleDays ? `${weeklyComparison.quietEligibleDays} scheduled day${weeklyComparison.quietEligibleDays === 1 ? "" : "s"} had no activity.` : "No completed eligible day was silently classified from an off-day."}</span>
+            <b>{weekSummary ? weekSummary.interpretation : weeklyComparison.interpretation}</b>
+            <span>
+              {weekSummary
+                ? "Bars show each real day; faint bars are the same weekday last week. Hover or focus a bar for details, click it to see the records."
+                : `${weeklyComparison.strongestContributor ? `${weeklyComparison.strongestContributor} was the strongest contributor. ` : ""}${weeklyComparison.quietEligibleDays ? `${weeklyComparison.quietEligibleDays} scheduled day${weeklyComparison.quietEligibleDays === 1 ? "" : "s"} had no activity.` : "Only days with scheduled targets are compared."}`}
+            </span>
           </div>
         </GlassCard>
 
         <GlassCard pad className="report-month-card">
-          <PanelHeader title="Monthly trend" sub="Calendar month · dates before tracking or off schedule stay neutral"
-            action={<Tag tone={reportTrends.month.some((day) => reportTrendMetricValue(day, trendMetric) > 0) ? "cyan" : "neutral"}>{trendMetric}</Tag>} />
-          <div className="report-month-grid" aria-label="Monthly trend calendar">
-            {Array.from({ length: monthBlanks }, (_, index) => <span className="report-month-day blank" key={`blank-${index}`} />)}
-            {reportTrends.month.map((day) => {
-              const value = reportTrendMetricValue(day, trendMetric);
-              const intensity = value / monthMax;
-              return <button key={day.dayKey} className={`report-month-day ${day.status} ${selectedTrendDay === day.dayKey ? "selected" : ""}`} aria-label={`${day.dayKey}: ${value} ${trendMetric}; ${day.eligible ? "eligible" : "not scheduled"}`} aria-pressed={selectedTrendDay === day.dayKey} onClick={() => setSelectedTrendDay(day.dayKey)}>
-                <span>{Number(day.dayKey.slice(-2))}</span>
-                <i style={{ opacity: value ? Math.max(.2, intensity) : .06 }} />
-              </button>;
-            })}
-          </div>
+          <PanelHeader title="Monthly trend" sub={`${new Date(`${s.activeDayKey}T12:00:00`).toLocaleDateString(undefined, { month: "long", year: "numeric" })} · each cell is a real calendar day, colored like Productivity`}
+            action={<Tag tone={monthActiveDays ? "cyan" : "neutral"}>{monthActiveDays}/{reportTrends.month.length} active</Tag>} />
+          <MonthlyTrendCalendar days={reportTrends.month} metric={trendMetric} todayKey={s.activeDayKey} selected={selectedTrendDay} onSelect={setSelectedTrendDay} />
           <div className="report-month-summary">
-            <span><b>{monthSummaryValue}{trendMetric === "requirements" ? "%" : ""}</b> {trendMetric === "requirements" ? "average target completion" : `total ${trendMetric}`}</span>
-            <span><b>{monthBest && reportTrendMetricValue(monthBest, trendMetric) > 0 ? monthBest.dayKey : "—"}</b> best day</span>
-            <span><b>{monthScored.length ? `${Math.round((monthMet / monthScored.length) * 100)}%` : "—"}</b> target completion</span>
+            <span><b>{trendMetric === "requirements" ? `${monthSummaryValue}%` : formatMetric(monthSummaryValue, trendMetric)}</b> {trendMetric === "requirements" ? "average target completion" : `total ${TREND_METRIC_LABELS[trendMetric].toLowerCase()}`}</span>
+            <span><b>{monthBest && reportTrendMetricValue(monthBest, trendMetric) > 0 ? new Date(`${monthBest.dayKey}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "—"}</b> best day</span>
+            <span><b>{monthScored.length ? `${Math.round((monthMet / monthScored.length) * 100)}%` : hasTargets ? "—" : "No targets"}</b> days with targets met</span>
           </div>
-          <div className="report-month-legend"><span><i className="met" /> target met</span><span><i className="missed" /> scheduled, not met</span><span><i className="neutral" /> not tracked or not scheduled</span></div>
+          <div className="report-month-legend">
+            {trendMetric === "minutes" ? (
+              <>
+                {gradeLegend({ minutes: s.profile.dailyMinuteTarget, cards: s.profile.dailyCardTarget }).map((row) => (
+                  <span key={row.grade}><i style={{ background: gradeColor(row.grade) }} /> {row.label}</span>
+                ))}
+              </>
+            ) : <span><i style={{ background: "rgb(var(--accent-rgb))" }} /> Logged {TREND_METRIC_LABELS[trendMetric].toLowerCase()}</span>}
+            {hasTargets && <span><i className="met" /> dot = daily targets met</span>}
+          </div>
         </GlassCard>
         {selectedDay && <DayTrendDetail day={selectedDay} metric={trendMetric} />}
       </section>
@@ -292,23 +337,24 @@ export function ReportsPage() {
         </div>
       </section>
 
+      <section className="report-section" aria-labelledby="report-trackers-title">
+        <div className="report-section-heading"><div><span>Your variables</span><h2 id="report-trackers-title">Trackers</h2></div><p>Everything you chose to follow, against your own goals and limits.</p></div>
+        <GlassCard pad className="report-trackers-card">
+          <TrackerReport />
+        </GlassCard>
+      </section>
+
       <details className="report-advanced">
         <summary>More reports and technical detail</summary>
         <div className="stack gap16 report-advanced-body">
 
       <GlassCard pad className="report-performance-card">
-        <PanelHeader title="Energy, readiness, and performance" sub="Deterministic calculations with visible local sources."
-          action={<Tag tone={!readinessEvidenceIds.length ? "neutral" : performancePreliminary ? "orange" : "green"}>{!readinessEvidenceIds.length ? "No input" : performancePreliminary ? "Preliminary" : "Enough signal"}</Tag>} />
-        {!readinessEvidenceIds.length && (
-          <div className="report-prelim neutral">
-            <BatteryCharging size={ICON_SIZE.body} />
-            <span>No readiness input yet. AXOM will not present its default baseline as if it were a real observation.</span>
-          </div>
-        )}
+        <PanelHeader title="Performance and confirmed factors" sub="Deterministic calculations with visible local sources."
+          action={<Tag tone={performancePreliminary ? "orange" : "green"}>{performancePreliminary ? "Preliminary" : "Enough signal"}</Tag>} />
         {performancePreliminary && (
           <div className="report-prelim">
             <AlertTriangle size={ICON_SIZE.body} />
-            <span>Here are preliminary statistics. AXOM needs about 5 days of use before the energy/performance rating becomes meaningfully personalized.</span>
+            <span>Here are preliminary statistics. AXOM needs about 5 days of use before the performance rating becomes meaningfully personalized.</span>
           </div>
         )}
         <div className="report-insight-grid">
@@ -316,36 +362,29 @@ export function ReportsPage() {
             <b>Performance</b>
             <span>{performancePreliminary ? `Building baseline · ${reportSummary.activeDates.length}/5 active days with signal` : `${performance.performanceScore}/100 · ${performance.performanceLabel}`}</span>
           </div>
-        </div>
-        {readinessEvidenceIds.length > 0 && <div className="report-insight-grid">
-          <div>
-            <b>Readiness recommendation</b>
-            <span>{readiness.recommendation}</span>
-          </div>
-          <div>
-            <b>Factor impact</b>
-            <span>{readiness.totalImpact >= 0 ? "+" : ""}{readiness.totalImpact} net · {readiness.carryoverImpact >= 0 ? "+" : ""}{readiness.carryoverImpact} carryover</span>
-          </div>
-          <div>
+          {readinessEvidenceIds.length > 0 && <div>
+            <b>Confirmed factor impact</b>
+            <span>{readiness.primarySignal} · {readiness.totalImpact >= 0 ? "+" : ""}{readiness.totalImpact} net · {readiness.carryoverImpact >= 0 ? "+" : ""}{readiness.carryoverImpact} carryover</span>
+          </div>}
+          {readiness.possibleSignals.length > 0 && <div>
             <b>Possible journal signals</b>
-            <span>{readiness.possibleSignals.length ? readiness.possibleSignals.map((signal) => signal.label).join(", ") : "No unconfirmed journal signals."}</span>
-          </div>
-        </div>}
+            <span>{readiness.possibleSignals.map((signal) => signal.label).join(", ")} — confirm them in the journal before they count.</span>
+          </div>}
+        </div>
       </GlassCard>
 
       <GlassCard pad data-tour="reports-top">
         <PanelHeader title="Effort trend" sub={`Minutes logged per day over the last ${range} days`}
           action={<Tag tone={bestDay && bestDay.minutes > 0 ? "cyan" : "neutral"}>{bestDay && bestDay.minutes > 0 ? `Best: ${bestDay.minutes}m on ${prettyDate(`${bestDay.key}T12:00:00`)}` : "No effort logged yet"}</Tag>} />
-        <div className="report-trend">
-          {days.map((d) => (
-            <button type="button" className="report-trend-col" key={d.key} aria-label={`${prettyDate(`${d.key}T12:00:00`)}: ${d.minutes} minutes, ${d.cards} cards`}>
-              <div className="report-trend-shell">
-                <div className="report-trend-fill" style={{ height: `${Math.max(d.minutes ? 5 : 0, (d.minutes / maxMin) * 100)}%`, background: gradeColor(d.grade) }} />
-              </div>
-              <span>{d.date.getDate()}</span>
-            </button>
-          ))}
-        </div>
+        <WeeklyTrendChart
+          days={effortDays}
+          previous={[]}
+          metric="minutes"
+          target={trendTarget(s, "minutes")}
+          todayKey={s.activeDayKey}
+          selected={selectedTrendDay}
+          onSelect={setSelectedTrendDay}
+        />
         <div className="report-target-line"><span>{reportSummary.metrics["daily-success"].note}</span></div>
       </GlassCard>
 
@@ -510,4 +549,15 @@ function courseCoverage(course: { code: string; name: string; modules: { name: s
   const review = items.filter((i) => i.yield === "review" || i.passes < 2).length;
   const highYield = items.filter((i) => i.yield === "high").length;
   return { items: items.length, ready, review, highYield };
+}
+
+/** The daily target for a metric, from Daily requirements (or the legacy minute target). */
+function trendTarget(state: ReturnType<typeof useStore.getState>, metric: ReportTrendMetric): number | undefined {
+  if (metric === "requirements") return 100;
+  const requirements = state.profile.dailySuccess?.requirements.filter((requirement) => requirement.enabled) ?? [];
+  const kind = metric === "minutes" ? "study-minutes" : metric === "questions" ? "practice-questions" : "cards-reviewed";
+  const match = requirements.find((requirement) => requirement.source.kind === kind && requirement.schedule.kind === "daily");
+  if (match) return match.target;
+  if (!state.profile.dailySuccess && metric === "minutes") return state.profile.dailyMinuteTarget || undefined;
+  return undefined;
 }

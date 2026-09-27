@@ -123,6 +123,7 @@ jobs:
     timeout-minutes: 70
     env:
       AXOM_BUILD_ID: ${{ needs.prepare.outputs.commit }}
+      HAS_APPLE_ID: ${{ secrets.APPLE_SIGNING_IDENTITY != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -183,7 +184,8 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN: '1'
         run: node scripts/release.mjs --native-only --signed --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
       - name: Verify Apple signature and notarization
-        if: runner.os == 'macOS'
+        # Only when a Developer ID is configured; otherwise the app is ad-hoc signed.
+        if: runner.os == 'macOS' && env.HAS_APPLE_ID == 'true'
         env:
           NATIVE_TARGET: ${{ matrix.target }}
         run: |

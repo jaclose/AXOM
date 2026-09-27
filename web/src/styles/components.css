@@ -44,6 +44,7 @@
   font-size: var(--fs-sm);
   font-weight: var(--fw-medium);
   letter-spacing: var(--tracking-tight);
+  text-decoration: none;
   border-radius: var(--btn-radius);
   background: rgba(230, 226, 214, 0.045);
   border: 1px solid rgba(230, 226, 214, 0.11);
@@ -67,22 +68,22 @@
   background:
     linear-gradient(180deg, rgba(230,226,214,0.05), rgba(0,0,0,0.18)),
     rgba(12,12,13,0.72);
-  border-color: rgba(200, 169, 106, 0.55);
+  border-color: rgba(var(--accent-rgb), 0.55);
   box-shadow:
     0 1px 0 rgba(230,226,214,0.08) inset,
     0 8px 22px rgba(0,0,0,0.42),
-    0 0 0 1px rgba(200,169,106,0.12);
+    0 0 0 1px rgba(var(--accent-rgb),0.12);
 }
 .gbtn.primary:hover {
   color: #fff;
-  border-color: rgba(210, 180, 118, 0.85);
+  border-color: rgba(var(--accent-rgb), 0.85);
   background:
     linear-gradient(180deg, rgba(230,226,214,0.08), rgba(0,0,0,0.15)),
     rgba(16,16,17,0.78);
   box-shadow:
     0 1px 0 rgba(230,226,214,0.1) inset,
     0 10px 28px rgba(0,0,0,0.5),
-    0 0 20px rgba(200,169,106,0.2);
+    0 0 20px rgba(var(--accent-rgb),0.2);
 }
 .gbtn.primary svg { color: var(--gold); }
 .gbtn.danger { color: var(--red); }
@@ -108,7 +109,7 @@
   border: 1px solid var(--cool-accent-line);
 }
 .tag.green { color: var(--green); background: rgba(127,184,148,0.13); border-color: rgba(127,184,148,0.2); }
-.tag.gold { color: var(--gold); background: rgba(200,169,106,0.13); border-color: rgba(200,169,106,0.22); }
+.tag.gold { color: var(--gold); background: rgba(var(--accent-rgb),0.13); border-color: rgba(var(--accent-rgb),0.22); }
 .tag.purple { color: var(--purple); background: rgba(163,150,201,0.14); border-color: rgba(163,150,201,0.2); }
 .tag.neutral { color: var(--text-60); background: rgba(230,226,214,0.06); border-color: rgba(230,226,214,0.1); }
 .tag.orange { color: var(--orange); background: rgba(217,165,102,0.14); border-color: rgba(217,165,102,0.2); }
@@ -164,7 +165,7 @@
 .field:focus {
   border-color: var(--gold-line);
   background: rgba(230,226,214,0.07);
-  box-shadow: 0 0 0 3px rgba(200,169,106,0.1);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb),0.1);
 }
 .field::placeholder { color: var(--text-30); }
 textarea.field { resize: vertical; min-height: 80px; line-height: var(--leading-relaxed); }
@@ -402,7 +403,7 @@ select.field, .scope-select {
    literal graphite glass. Dark framed primary actions remain brand-consistent. */
 :root[data-theme="light"] .glass-card {
   background:
-    linear-gradient(155deg, rgba(255,255,255,0.86), rgba(255,255,255,0.38) 42%, rgba(229,219,203,0.55)),
+    linear-gradient(155deg, rgba(255,255,255,0.86), rgba(255,255,255,0.38) 42%, rgba(var(--paper-rgb),0.55)),
     var(--glass-card-fill);
 }
 :root[data-theme="light"] .glass-card::before { background: linear-gradient(90deg, transparent, rgba(255,255,255,0.9), transparent); }
@@ -410,7 +411,7 @@ select.field, .scope-select {
 :root[data-theme="light"] .field {
   color: var(--text-80);
   background-color: rgba(255,255,255,0.64);
-  border-color: rgba(67,51,31,0.16);
+  border-color: rgba(var(--ink-rgb),0.16);
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.8);
 }
 :root[data-theme="light"] .gbtn:not(.primary):hover,
@@ -418,28 +419,28 @@ select.field, .scope-select {
 :root[data-theme="light"] .gbtn.primary,
 :root[data-theme="light"] .gbtn.primary:hover { color: #f7f1e6; }
 :root[data-theme="light"] .modal {
-  background: linear-gradient(135deg, rgba(255,254,250,0.98), rgba(236,227,213,0.98));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--bg-2) 60%, white), color-mix(in srgb, rgb(var(--paper-rgb)) 72%, white));
 }
 :root[data-theme="light"] .settings-intro,
 :root[data-theme="light"] .settings-profile-card {
   background-color: rgba(255,255,255,0.58);
-  border-color: rgba(67,51,31,0.13);
+  border-color: rgba(var(--ink-rgb),0.13);
 }
-:root[data-theme="light"] .onboarding-scrim { background: rgba(72,59,43,0.28); }
+:root[data-theme="light"] .onboarding-scrim { background: rgba(var(--ink-rgb),0.28); }
 :root[data-theme="light"] .onboarding-card {
-  background: linear-gradient(150deg, rgba(255,254,250,0.98), rgba(235,225,210,0.99));
+  background: linear-gradient(150deg, color-mix(in srgb, var(--bg-2) 60%, white), color-mix(in srgb, rgb(var(--paper-rgb)) 75%, white));
 }
 :root[data-theme="light"] .onboarding-actions {
-  background: linear-gradient(180deg, rgba(246,240,231,0), rgba(246,240,231,.96) 30%, #f6f0e7);
+  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--bg-2) 96%, transparent) 30%, var(--bg-2));
 }
 :root[data-theme="light"] .onboarding-body h2 {
-  background: linear-gradient(120deg, var(--text), #8a6429 62%, #6f4d1d);
+  background: linear-gradient(120deg, var(--text), var(--gold) 62%, color-mix(in srgb, var(--gold) 78%, black));
   -webkit-background-clip: text;
   background-clip: text;
 }
 :root[data-theme="light"] :is(.onboarding-phase, .focus-group, .focus-card, .onboarding-summary, .onboarding-track-note) {
   background-color: rgba(255,255,255,0.55);
-  border-color: rgba(67,51,31,0.13);
+  border-color: rgba(var(--ink-rgb),0.13);
 }
 
 /* Account sync controls inside Settings */
@@ -451,7 +452,7 @@ select.field, .scope-select {
   border: 1px solid rgba(230,226,214,0.14);
   border-radius: var(--radius-lg);
   background:
-    radial-gradient(circle at 8% 0%, rgba(200,169,106,0.14), transparent 34%),
+    radial-gradient(circle at 8% 0%, rgba(var(--accent-rgb),0.14), transparent 34%),
     linear-gradient(145deg, rgba(255,255,255,0.082), rgba(255,255,255,0.026) 46%, rgba(12,12,14,0.72));
   box-shadow: var(--shadow-overlay);
 }
@@ -472,9 +473,9 @@ select.field, .scope-select {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #1a160e;
-  background: linear-gradient(135deg, #d8bd82, var(--gold));
-  box-shadow: 0 14px 28px rgba(0,0,0,0.3), 0 0 20px rgba(200,169,106,0.18);
+  color: var(--on-accent);
+  background: linear-gradient(135deg, var(--accent-hi), rgb(var(--accent-rgb)));
+  box-shadow: 0 14px 28px rgba(0,0,0,0.3), 0 0 20px rgba(var(--accent-rgb),0.18);
   font-size: var(--fs-2xl);
   font-weight: var(--fw-heavy);
   text-transform: uppercase;
@@ -521,7 +522,7 @@ select.field, .scope-select {
   min-height: 180px;
   border-radius: var(--radius-lg);
   background:
-    radial-gradient(circle at 10% 0%, rgba(200,169,106,0.12), transparent 36%),
+    radial-gradient(circle at 10% 0%, rgba(var(--accent-rgb),0.12), transparent 36%),
     radial-gradient(circle at 100% 20%, rgba(163,150,201,0.1), transparent 34%),
     rgba(255,255,255,0.035);
 }
@@ -585,8 +586,8 @@ select.field, .scope-select {
 }
 .sync-pill.on {
   color: var(--cyan);
-  background: rgba(200,169,106,0.13);
-  border-color: rgba(200,169,106,0.28);
+  background: rgba(var(--accent-rgb),0.13);
+  border-color: rgba(var(--accent-rgb),0.28);
 }
 .sync-grid {
   display: grid;
@@ -704,8 +705,8 @@ select.field, .scope-select {
   line-height: var(--leading-snug);
   padding: 9px 10px;
   border-radius: var(--radius-md);
-  background: rgba(247,217,154,0.08);
-  border: 1px solid rgba(247,217,154,0.16);
+  background: rgba(var(--accent-hi-rgb),0.08);
+  border: 1px solid rgba(var(--accent-hi-rgb),0.16);
 }
 .sync-warning svg { flex: 0 0 auto; margin-top: 1px; }
 
@@ -723,7 +724,7 @@ select.field, .scope-select {
 .backup-actions-panel {
   border-radius: var(--radius-lg);
   background:
-    radial-gradient(circle at 0% 0%, rgba(200,169,106,0.08), transparent 38%),
+    radial-gradient(circle at 0% 0%, rgba(var(--accent-rgb),0.08), transparent 38%),
     rgba(255,255,255,0.04);
   border: 1px solid rgba(230,226,214,0.095);
 }
@@ -774,8 +775,8 @@ select.field, .scope-select {
   margin-top: 8px;
   padding: 9px 10px;
   border-radius: var(--radius-md);
-  background: rgba(200,169,106,0.07);
-  border: 1px solid rgba(200,169,106,0.12);
+  background: rgba(var(--accent-rgb),0.07);
+  border: 1px solid rgba(var(--accent-rgb),0.12);
 }
 .backup-status {
   color: var(--cyan);
@@ -783,8 +784,8 @@ select.field, .scope-select {
   font-weight: var(--fw-bold);
   padding: 9px 10px;
   border-radius: var(--radius-md);
-  background: rgba(200,169,106,0.08);
-  border: 1px solid rgba(200,169,106,0.14);
+  background: rgba(var(--accent-rgb),0.08);
+  border: 1px solid rgba(var(--accent-rgb),0.14);
 }
 
 @media (max-width: 620px) {
@@ -841,7 +842,7 @@ select.field, .scope-select {
   width: 46px; height: 46px; border-radius: var(--radius-md);
   display: grid; place-items: center;
   background: var(--gold-soft);
-  border: 1px solid rgba(200, 169, 106, 0.2);
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
   margin-bottom: 2px;
 }
 
@@ -859,7 +860,7 @@ select.field, .scope-select {
 }
 .spill:hover { color: var(--text); background: rgba(255,255,255,0.1); }
 .spill.on.anki { color: #ffd27a; background: rgba(255,184,77,0.18); border-color: rgba(255,184,77,0.4); }
-.spill.on.working { color: var(--cyan); background: rgba(200,169,106,0.18); border-color: rgba(200,169,106,0.4); }
+.spill.on.working { color: var(--cyan); background: rgba(var(--accent-rgb),0.18); border-color: rgba(var(--accent-rgb),0.4); }
 .spill.on.mature { color: var(--green); background: color-mix(in srgb, var(--green) 18%, transparent); border-color: color-mix(in srgb, var(--green) 40%, transparent); }
 .spill.on.reset { color: var(--text-60); background: rgba(255,255,255,0.08); }
 
@@ -1038,9 +1039,9 @@ select.field, .scope-select {
 }
 .onboarding-choice:hover { transform: translateY(-1px); border-color: var(--glass-card-border-hover); }
 .onboarding-choice.on {
-  border-color: rgba(200,169,106,0.48);
-  background: rgba(200,169,106,0.11);
-  box-shadow: 0 0 0 1px rgba(200,169,106,0.12) inset;
+  border-color: rgba(var(--accent-rgb),0.48);
+  background: rgba(var(--accent-rgb),0.11);
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb),0.12) inset;
 }
 .onboarding-choice input { margin: 3px 0 0; accent-color: var(--cyan); }
 .onboarding-choice > svg { flex: 0 0 auto; margin-top: 1px; color: var(--cyan); }
@@ -1099,10 +1100,10 @@ select.field, .scope-select {
 
 :root[data-theme="light"] :is(.onboarding-choice, .onboarding-notification-row, .onboarding-tour-choice, .onboarding-safety-grid > div) {
   background: rgba(255,255,255,0.55);
-  border-color: rgba(72,59,43,0.15);
+  border-color: rgba(var(--ink-rgb),0.15);
 }
 :root[data-theme="light"] .onboarding-choice.on {
-  background: rgba(176,149,90,0.16);
+  background: rgba(var(--accent-lo-rgb),0.16);
   border-color: rgba(120,91,43,0.42);
 }
 
@@ -1111,18 +1112,18 @@ select.field, .scope-select {
 .onboarding-card::before {
   content: ""; position: absolute; top: -120px; left: 50%; transform: translateX(-50%);
   width: 520px; height: 320px; pointer-events: none; z-index: 0;
-  background: radial-gradient(closest-side, rgba(200,169,106,0.18), rgba(163,150,201,0.08) 60%, transparent 75%);
+  background: radial-gradient(closest-side, rgba(var(--accent-rgb),0.18), rgba(163,150,201,0.08) 60%, transparent 75%);
   filter: blur(20px);
 }
 .onboarding-steps, .onboarding-body { position: relative; z-index: 1; }
 .onboarding-body h2 {
-  background: linear-gradient(120deg, var(--bone), #dcc38a 60%, var(--gold));
+  background: linear-gradient(120deg, var(--bone), var(--accent-hi) 60%, var(--gold));
   -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
   letter-spacing: var(--tracking-tighter);
 }
 .onboarding-mark {
   position: relative;
-  box-shadow: 0 0 0 6px rgba(200,169,106,0.06), 0 12px 30px rgba(0,0,0,0.4);
+  box-shadow: 0 0 0 6px rgba(var(--accent-rgb),0.06), 0 12px 30px rgba(0,0,0,0.4);
   animation: onb-float 5s ease-in-out infinite;
 }
 .onboarding-mark.good { animation: none; }
@@ -1146,7 +1147,7 @@ select.field, .scope-select {
 }
 .onboarding-step-dot.on > span {
   color: var(--bg-1); background: var(--cyan); border-color: var(--cyan);
-  box-shadow: 0 0 16px rgba(200,169,106,0.4);
+  box-shadow: 0 0 16px rgba(var(--accent-rgb),0.4);
 }
 .onboarding-step-dot.done > span {
   color: var(--green); background: color-mix(in srgb, var(--green) 14%, transparent); border-color: color-mix(in srgb, var(--green) 35%, transparent);
@@ -1160,8 +1161,8 @@ select.field, .scope-select {
 .onboarding-mark {
   width: 52px; height: 52px; border-radius: var(--radius-lg);
   display: flex; align-items: center; justify-content: center;
-  color: var(--cyan); background: rgba(200,169,106,0.12);
-  border: 1px solid rgba(200,169,106,0.25);
+  color: var(--cyan); background: rgba(var(--accent-rgb),0.12);
+  border: 1px solid rgba(var(--accent-rgb),0.25);
 }
 .onboarding-mark.good { color: var(--green); background: color-mix(in srgb, var(--green) 12%, transparent); border-color: color-mix(in srgb, var(--green) 30%, transparent); }
 
@@ -1177,13 +1178,13 @@ select.field, .scope-select {
 }
 .onboarding-phase:hover { background: rgba(255,255,255,0.06); border-color: var(--glass-card-border-hover); }
 .onboarding-phase.on {
-  background: rgba(200,169,106,0.1); border-color: rgba(200,169,106,0.4);
-  box-shadow: 0 0 0 1px rgba(200,169,106,0.18) inset;
+  background: rgba(var(--accent-rgb),0.1); border-color: rgba(var(--accent-rgb),0.4);
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb),0.18) inset;
 }
 .onboarding-phase-icon {
   flex-shrink: 0; width: 34px; height: 34px; border-radius: var(--radius-sm);
   display: flex; align-items: center; justify-content: center;
-  color: var(--cyan); background: rgba(200,169,106,0.12);
+  color: var(--cyan); background: rgba(var(--accent-rgb),0.12);
 }
 .onboarding-phase div b { display: block; font-size: var(--fs-base); font-weight: var(--fw-bold); margin-bottom: 2px; }
 .onboarding-phase div span { display: block; font-size: var(--fs-xs); color: var(--text-45); line-height: var(--leading-snug); }
@@ -1197,7 +1198,7 @@ select.field, .scope-select {
   padding: 12px;
   border-radius: var(--radius-lg);
   background:
-    radial-gradient(circle at 0% 0%, rgba(200,169,106,0.08), transparent 36%),
+    radial-gradient(circle at 0% 0%, rgba(var(--accent-rgb),0.08), transparent 36%),
     rgba(255,255,255,0.025);
   border: 1px solid rgba(230,226,214,0.085);
 }
@@ -1235,14 +1236,14 @@ select.field, .scope-select {
 }
 .focus-card:hover {
   transform: translateY(-2px);
-  border-color: rgba(200,169,106,0.4);
+  border-color: rgba(var(--accent-rgb),0.4);
   background: rgba(255,255,255,0.07);
-  box-shadow: 0 14px 30px rgba(0,0,0,0.28), 0 0 18px rgba(200,169,106,0.1);
+  box-shadow: 0 14px 30px rgba(0,0,0,0.28), 0 0 18px rgba(var(--accent-rgb),0.1);
 }
 .focus-card.subscribed {
-  border-color: rgba(200,169,106,0.2);
+  border-color: rgba(var(--accent-rgb),0.2);
   background:
-    radial-gradient(circle at 0% 0%, rgba(200,169,106,0.11), transparent 40%),
+    radial-gradient(circle at 0% 0%, rgba(var(--accent-rgb),0.11), transparent 40%),
     rgba(255,255,255,0.042);
 }
 .focus-card.primary {
@@ -1261,8 +1262,8 @@ select.field, .scope-select {
   align-items: center;
   justify-content: center;
   color: var(--cyan);
-  background: rgba(200,169,106,0.11);
-  border: 1px solid rgba(200,169,106,0.18);
+  background: rgba(var(--accent-rgb),0.11);
+  border: 1px solid rgba(var(--accent-rgb),0.18);
 }
 .focus-card-copy b { display: block; font-size: var(--fs-sm); font-weight: var(--fw-heavy); margin-bottom: 3px; }
 .focus-card-copy small { display: block; color: var(--text-45); font-size: var(--fs-xs); line-height: var(--leading-snug); }
@@ -1289,7 +1290,7 @@ select.field, .scope-select {
 .focus-check.on {
   background: linear-gradient(135deg, var(--cyan), var(--purple));
   border-color: rgba(255,255,255,0.18);
-  box-shadow: 0 0 16px rgba(200,169,106,0.25);
+  box-shadow: 0 0 16px rgba(var(--accent-rgb),0.25);
 }
 
 .onboarding-presets { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -1299,7 +1300,7 @@ select.field, .scope-select {
   cursor: pointer; transition: all .12s ease;
 }
 .onboarding-preset:hover { color: var(--text); background: rgba(255,255,255,0.08); }
-.onboarding-preset.on { color: var(--cyan); border-color: rgba(200,169,106,0.35); background: rgba(200,169,106,0.1); }
+.onboarding-preset.on { color: var(--cyan); border-color: rgba(var(--accent-rgb),0.35); background: rgba(var(--accent-rgb),0.1); }
 
 .onboarding-ai-grid {
   display: grid;
@@ -1348,7 +1349,7 @@ select.field, .scope-select {
 .onboarding-track-note {
   display: flex; align-items: flex-start; gap: 9px;
   padding: 10px 12px; border-radius: var(--radius-md);
-  background: rgba(200,169,106,0.08); border: 1px solid rgba(200,169,106,0.2);
+  background: rgba(var(--accent-rgb),0.08); border: 1px solid rgba(var(--accent-rgb),0.2);
   font-size: var(--fs-sm); line-height: var(--leading-normal); color: var(--text-60);
 }
 .onboarding-track-note svg { color: var(--cyan); flex-shrink: 0; margin-top: 1px; }
@@ -1463,10 +1464,10 @@ select.field, .scope-select {
   background: rgba(255,255,255,0.035); border: 1px solid rgba(230,226,214,0.085);
   color: var(--text); transition: transform .12s ease, border-color .12s ease, background .12s ease;
 }
-.track-setting-card:hover { transform: translateY(-1px); border-color: rgba(200,169,106,0.35); background: rgba(255,255,255,0.06); }
+.track-setting-card:hover { transform: translateY(-1px); border-color: rgba(var(--accent-rgb),0.35); background: rgba(255,255,255,0.06); }
 .track-setting-card.on {
-  border-color: rgba(200,169,106,0.45);
-  background: radial-gradient(circle at 0% 0%, rgba(200,169,106,0.14), transparent 42%), rgba(255,255,255,0.05);
+  border-color: rgba(var(--accent-rgb),0.45);
+  background: radial-gradient(circle at 0% 0%, rgba(var(--accent-rgb),0.14), transparent 42%), rgba(255,255,255,0.05);
 }
 .track-setting-card b { font-size: var(--fs-base); font-weight: var(--fw-bold); }
 .track-setting-card small { display: block; color: var(--text-45); font-size: var(--fs-xs); line-height: var(--leading-snug); margin-top: 4px; }
@@ -1494,7 +1495,100 @@ select.field, .scope-select {
 .focus-setting-row span { display: block; color: var(--text-45); font-size: var(--fs-xs); line-height: var(--leading-snug); margin-top: 2px; }
 .premium-panel {
   background:
-    radial-gradient(circle at 0% 0%, rgba(200,169,106,0.12), transparent 36%),
+    radial-gradient(circle at 0% 0%, rgba(var(--accent-rgb),0.12), transparent 36%),
     radial-gradient(circle at 100% 0%, rgba(163,150,201,0.12), transparent 36%),
     rgba(255,255,255,0.038);
 }
+
+/* ---- Study-text suggestions (Onboarding + Settings → How you study) ----
+   Deterministic, confirmation-only suggestions shown under the learner's own
+   "Other" text. The status line is visually hidden but announced. */
+.study-suggestions-region { display: grid; gap: 8px; }
+.study-suggestions-status {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+.study-suggestions {
+  display: grid; gap: 10px; padding: 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--cool-accent-line);
+  background: var(--cool-accent-soft);
+}
+.study-suggestions-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.study-suggestions-title { font-size: var(--fs-sm); font-weight: var(--fw-bold); color: var(--text); }
+.study-suggestion-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.study-suggestion {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 10px; border-radius: var(--radius-sm);
+  background: var(--surface-1); border: 1px solid var(--hairline);
+}
+.study-suggestion > span { display: grid; gap: 2px; min-width: 0; }
+.study-suggestion b { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text); }
+.study-suggestion small { font-size: var(--fs-xs); color: var(--text-60); line-height: var(--leading-snug); overflow-wrap: anywhere; }
+.study-suggestion .gbtn { flex-shrink: 0; }
+@media (max-width: 520px) {
+  .study-suggestion { flex-direction: column; align-items: stretch; }
+  .study-suggestion .gbtn { justify-content: center; min-height: 40px; }
+}
+
+/* ---- Notification layer (Toaster) ----
+   Base toast styles live in pages.css, which loads later, so these overrides
+   use a :root prefix for specificity.
+   1. Placement: clear of device safe areas and the live-session bar; the stack
+      never intercepts clicks outside an actual notice and never grows past the
+      viewport (42% of it on phones), scrolling instead.
+   2. Light theme: the base dark gradient left light-theme text at ~1.1:1.
+      Contrast on the darker #f4eee3 end: title 14.5:1, body 9.1:1, actions
+      8.7:1, close 6.7:1, tone icons >= 4.7:1 (WCAG AA 4.5:1 text, 3:1 UI).
+   3. Dark theme keeps its surface; its button actions lose browser chrome. */
+:root .toast-stack {
+  --toast-edge-x: max(18px, calc(env(safe-area-inset-right) + 12px));
+  --toast-edge-y: max(18px, calc(env(safe-area-inset-bottom) + 12px));
+  --toast-lift: 0px;
+  right: var(--toast-edge-x);
+  bottom: calc(var(--toast-edge-y) + var(--toast-lift));
+  max-height: calc(100dvh - var(--toast-edge-y) - var(--toast-lift) - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: none;
+}
+:root .toast-stack > .toast { flex-shrink: 0; pointer-events: auto; }
+:root .toast-stack .toast-close { min-width: 28px; min-height: 28px; align-items: center; justify-content: center; }
+/* Button actions match link actions. Browser button chrome previously put
+   dark-theme action text on a gray fill at 2.65:1. */
+:root .toast-stack button.toast-action {
+  padding: 0 2px; border: 0; border-radius: var(--radius-xs);
+  background: transparent; cursor: pointer;
+}
+:root .toast-stack .toast-action:hover { text-decoration: underline; }
+/* The live-session bar (pause/end controls) stays reachable under notices. */
+:root body:has(.focus-dock) .toast-stack { --toast-lift: 76px; }
+@media (max-width: 520px) {
+  :root .toast-stack {
+    --toast-edge-x: max(12px, calc(env(safe-area-inset-right) + 8px));
+    --toast-edge-y: max(12px, calc(env(safe-area-inset-bottom) + 8px));
+    left: max(12px, calc(env(safe-area-inset-left) + 8px));
+    max-height: min(42dvh, calc(100dvh - var(--toast-edge-y) - var(--toast-lift) - 24px));
+  }
+  :root .toast-stack .toast { padding: 11px 11px 11px 12px; }
+  /* Phone dialogs keep their primary actions in a bottom bar (onboarding
+     Continue/Finish, modal Save) and the navigation drawer keeps Settings and
+     the account controls at its foot. While either is open, notices sit at
+     the top instead. */
+  :root body:has([aria-modal="true"], .sidebar.open) .toast-stack {
+    top: max(12px, calc(env(safe-area-inset-top) + 8px));
+    bottom: auto;
+  }
+}
+:root[data-theme="light"] .toast {
+  background: linear-gradient(160deg, #fffdf9, #f4eee3);
+  border-color: rgba(var(--ink-rgb),0.2);
+}
+:root[data-theme="light"] .toast-success { border-color: color-mix(in srgb, var(--green) 45%, transparent); }
+:root[data-theme="light"] .toast-warn { border-color: color-mix(in srgb, var(--orange) 50%, transparent); }
+:root[data-theme="light"] .toast-body b { color: #211d18; }
+:root[data-theme="light"] .toast-body span { color: #463e35; }
+:root[data-theme="light"] .toast-action { color: #354453; }
+:root[data-theme="light"] .toast-action:hover { color: #211d18; text-decoration: underline; }
+:root[data-theme="light"] .toast-close { color: #5a5147; }
+:root[data-theme="light"] .toast-close:hover { color: #211d18; background: rgba(var(--ink-rgb),0.08); }

@@ -35,12 +35,20 @@ Local Mac builds are for testing and are not Apple-notarized distribution
 builds. Their updater is explicitly disabled. Use a signed distribution build
 to start receiving in-app desktop updates; there is no embedded placeholder key.
 
-The native icons are generated automatically during each desktop release from
-`web/public/icon-512.png`: the current ivory AXOM mark on black. Update this
-canonical artwork and the web favicon/touch icon when rebranding; no separate
-desktop artwork needs to be maintained. Keep the bundle/storage identity unchanged.
+The desktop icon is `design/icon/axom-app-icon-1024.png`: a macOS-grid squircle
+(824 px on a 1024 canvas) with a soft drop shadow, a top-edge rim light and the
+ivory mark cut from the canonical web artwork `web/public/icon-512.png`. Every
+native size is generated from it during each desktop release. After changing the
+web artwork, run `npm run icon` (renders the PNG with installed Chrome, then
+`tauri icon`). Keep the bundle/storage identity unchanged.
 
 ## One-time signing and distribution setup
+
+**Fast path:** from the repository root, run `npm run release:setup-updater`.
+It creates (or reuses) `~/.tauri/axom-updater.key`, lets Tauri ask for its
+password, and stores the private key, password, public key and feed URL in
+GitHub through your `gh` login. It never prints a secret. The details below
+explain what it configures.
 
 Tauri requires an Ed25519 update key even on Windows/Linux. This is separate
 from Apple Developer ID and Windows Authenticode publisher certificates.
@@ -62,9 +70,13 @@ Configure these GitHub repository **variables**:
 | `AXOM_UPDATER_PUBLIC_KEY` | Full base64 text inside the generated `.pub` file |
 | `AXOM_UPDATER_ENDPOINT` | Public HTTPS URL serving Tauri `latest.json` |
 
-For a public GitHub repository and stable releases, the standard endpoint is
-`https://github.com/jaclose/Noctyrium/releases/latest/download/latest.json`.
-Verify this repository is public before using it. A private repository needs
+The endpoint is the fixed update feed
+`https://github.com/jaclose/AXOM/releases/download/update-feed/latest.json`.
+`.github/workflows/update-feed.yml` copies the signed `latest.json` of every
+release you **publish** into the `update-feed` release, after checking its
+version, signatures and download URLs. This works for pre-beta versions,
+which GitHub's `/releases/latest` ignores. Drafts are never offered.
+The repository must be public. A private repository needs
 separate publicly readable release hosting, including package downloads.
 The supplied workflow assembles download URLs for GitHub release assets; it
 therefore refuses private repositories, even with a custom manifest endpoint.
@@ -78,11 +90,16 @@ Configure these **secrets**:
 | --- | --- |
 | `TAURI_SIGNING_PRIVATE_KEY` | Contents of the private updater key |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Password used when generating the key |
-| `APPLE_CERTIFICATE` | Base64 exported Developer ID Application `.p12` |
+| `APPLE_CERTIFICATE` *(optional)* | Base64 exported Developer ID Application `.p12` |
 | `APPLE_CERTIFICATE_PASSWORD` | Password protecting that certificate |
 | `APPLE_SIGNING_IDENTITY` | Exact Developer ID Application identity |
 | `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` | Apple ID, app-specific password and team for notarization |
 
+Apple secrets are optional. Without `APPLE_SIGNING_IDENTITY` the macOS app is
+ad-hoc signed and not notarized: the first install needs right-click → Open
+(or System Settings → Privacy & Security → Open Anyway), and every later
+update installs through the Tauri-signed updater with no prompt. Set
+`AXOM_REQUIRE_APPLE_NOTARIZATION=1` to make a missing Developer ID a hard error.
 The release job imports the Apple identity using Tauri's signing support.
 The local script also supports Apple's API key environment alternative
 (`APPLE_API_KEY`, `APPLE_API_ISSUER`, `APPLE_API_KEY_PATH`); customize CI to
@@ -125,7 +142,8 @@ manual execution of **AXOM Release Draft** against an existing exact tag:
 1. Verifies the tag, version, immutable commit and signing configuration.
 2. Runs release regression tests, typecheck, lint, tests and web build.
 3. Builds macOS Apple Silicon and Intel, Windows x64 and Linux x64 independently.
-4. Verifies Apple signatures/notarization and every updater signature locally.
+4. Verifies Apple signatures/notarization (when a Developer ID is configured)
+   and every updater signature locally.
 5. Collects a web ZIP plus the complete desktop set. Checks hashes, versions,
    build IDs, updater signatures, unique filenames and required platforms.
 6. Creates one **draft** GitHub release, never automatically publishes it.
@@ -141,10 +159,21 @@ cannot publish a partial updater manifest. Existing release tags are never
 overwritten by the workflow. An incomplete existing draft requires review
 before rerunning rather than silent replacement.
 
-The current `0.0.1-prebeta` version is a prerelease. GitHub's `/releases/latest`
-does **not** select prereleases. Either use a stable version for this channel,
-or provision a separate prerelease feed and point prerelease builds to it.
-This pipeline does not silently promote a prerelease into the stable feed.
+### Shipping an update (after the one-time setup)
+
+```sh
+npm --prefix web run release:version -- 0.0.3-prebeta
+# add "## 0.0.3-prebeta — <date> (<title>)" to CHANGELOG.md (required by the build)
+git commit -am "release: 0.0.3-prebeta"
+git tag v0.0.3-prebeta && git push origin main v0.0.3-prebeta
+```
+
+GitHub builds, signs and drafts the release. Review it, then press **Publish**:
+the update-feed workflow points installed apps at it. Desktop apps download
+and verify it in the background, then offer **Update now**. A short film plays
+while AXOM saves a checkpoint, installs and restarts, and the first open
+afterwards plays the update film once. Web users get the same prompt as soon as
+Vercel deploys `main`.
 
 ## Web distribution
 
