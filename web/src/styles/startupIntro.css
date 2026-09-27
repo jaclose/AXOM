@@ -23,7 +23,9 @@
   height: 100%;
   min-width: 0;
   min-height: 0;
-  object-fit: contain;
+  /* The ident keeps its lockup inside a central safe area, so it can fill any
+     window without letterbox bars that would reveal a colour mismatch. */
+  object-fit: cover;
   opacity: 0;
   pointer-events: none;
 }
@@ -64,6 +66,11 @@
 .axom-startup-intro__controls button:focus-visible {
   outline: 2px solid #f2eee6;
   outline-offset: 2px;
+}
+
+/* Tall phone screens would crop the wordmark; letterbox them instead. */
+@media (max-aspect-ratio: 3/4) {
+  .axom-startup-intro__film { object-fit: contain; }
 }
 
 @media (prefers-reduced-motion: reduce) {

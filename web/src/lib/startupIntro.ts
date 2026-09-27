@@ -1,7 +1,12 @@
 /** The cinematic is decoration, never a signal that saved data is ready. */
 export const STARTUP_INTRO_ENABLED_KEY = "axom.startupIntro.enabled";
 export const STARTUP_INTRO_SESSION_KEY = "axom.startupIntro.seen";
-export const STARTUP_INTRO_MAX_MS = 1_800;
+/** The ident runs 7.0 s and ends on 0.5 s of the overlay's own #0d0d0e. */
+export const STARTUP_INTRO_FILM_MS = 7_000;
+/** A film that has not started by now (slow network, stalled decoder) is skipped. */
+export const STARTUP_INTRO_START_MS = 1_500;
+/** Absolute cap from mount: a film that starts at the last moment still finishes. */
+export const STARTUP_INTRO_MAX_MS = STARTUP_INTRO_START_MS + STARTUP_INTRO_FILM_MS + 500;
 const EXIT_MS = 160;
 
 export interface StartupIntro {
@@ -47,8 +52,8 @@ export function startStartupIntro(options: StartupIntroOptions = {}): StartupInt
   const video = document.createElement("video");
   video.className = "axom-startup-intro__film";
   // Respect the same relative Vite base as the app's portable web package.
-  video.src = `${import.meta.env.BASE_URL}startup/axom-optical-luster.mp4`;
-  video.poster = `${import.meta.env.BASE_URL}startup/axom-optical-luster-poster.png`;
+  video.src = `${import.meta.env.BASE_URL}startup/axom-ident.mp4`;
+  video.poster = `${import.meta.env.BASE_URL}startup/axom-ident-poster.png`;
   video.muted = true;
   video.defaultMuted = true;
   video.playsInline = true;
@@ -79,11 +84,13 @@ export function startStartupIntro(options: StartupIntroOptions = {}): StartupInt
   let fading = false;
   let fadeTimer: ReturnType<typeof setTimeout> | undefined;
   const deadline = setTimeout(dismiss, STARTUP_INTRO_MAX_MS);
+  let startDeadline: ReturnType<typeof setTimeout> | undefined = setTimeout(dismiss, STARTUP_INTRO_START_MS);
 
   function dismiss() {
     if (removed) return;
     removed = true;
     clearTimeout(deadline);
+    clearTimeout(startDeadline);
     clearTimeout(fadeTimer);
     window.removeEventListener("keydown", onKeyDown, true);
     window.removeEventListener("pagehide", dismiss);
@@ -114,8 +121,11 @@ export function startStartupIntro(options: StartupIntroOptions = {}): StartupInt
   }
 
   function onPlaying() {
-    // Reveal decoded frames, not the bright poster immediately before frame 1.
+    // Reveal decoded frames, not the poster immediately before frame 1.
     video.classList.add("axom-startup-intro__film--playing");
+    // Once frames flow, only the absolute cap applies.
+    clearTimeout(startDeadline);
+    startDeadline = undefined;
   }
 
   function onKeyDown(event: KeyboardEvent) {
