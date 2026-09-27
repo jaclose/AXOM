@@ -7,8 +7,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import {
   AlertTriangle, BarChart3, BookOpen, FileInput, Files, ListFilter,
-  Microscope, Play, RotateCcw, Sparkles, HelpCircle,
-} from "lucide-react";
+  Microscope, Play, RotateCcw, Sparkles, HelpCircle, MonitorPlay } from "lucide-react";
 import { useStore } from "../lib/store";
 import {
   analyzeQuestionStyle, dueQuestions, errorPatterns, questionCollectionMetrics,
@@ -21,6 +20,7 @@ import type { QuestionSet, SourceDocument } from "../lib/library";
 import { GlassCard, PanelHeader, EmptyState } from "../components/ui/primitives";
 import { ImportPanel, parseStoredDocument, type ImportSeed } from "../components/questions/ImportPanel";
 import { ExamRunner } from "../components/questions/ExamRunner";
+import { EXAM_SKINS, blockCounts, readSuspendedBlock } from "../lib/examSim";
 import { PerformancePanel } from "../components/questions/PerformancePanel";
 import { QuestionDetailModal } from "../components/questions/QuestionDetailModal";
 import { SourceLibrary, QuestionSetList } from "../components/questions/LibraryPanels";
@@ -64,6 +64,7 @@ function timestamp(value: string | undefined): number | undefined {
 
 interface RunnerLaunch {
   mode: QuizMode;
+  simulate?: boolean;
   retakeIds?: string[];
   presetFilters?: Partial<QuizFilters>;
   presetTimed?: boolean;
@@ -90,6 +91,7 @@ export function QuestionWorkspacePage() {
   const [coach, setCoach] = useState<{ diagnosis: string; suggestedBlock: string } | null>(null);
   const [coachBusy, setCoachBusy] = useState(false);
   const [moduleTourOpen, setModuleTourOpen] = useState(false);
+  const [suspendedSim, setSuspendedSim] = useState(() => readSuspendedBlock());
   const entryRef = useRef<HTMLDivElement>(null);
   const provider = useMemo(() => resolveActiveProvider(), []);
 
@@ -441,6 +443,10 @@ export function QuestionWorkspacePage() {
             <button className="qb-loop-card" disabled={!weak[0]} onClick={() => weak[0] && setRunner({ mode: "tutor", presetFilters: { status: "all", count: 15, categories: [weak[0].topic] } })}>
               <Microscope size={ICON_SIZE.emphasis} /><b>Weak-topic block</b><span>{weak[0]?.topic ?? "Needs more attempts"}</span>
             </button>
+            <button className="qb-loop-card qb-sim-card" disabled={!runnable && !suspendedSim} onClick={() => setRunner({ mode: suspendedSim?.mode ?? "exam", simulate: true })}>
+              <MonitorPlay size={ICON_SIZE.emphasis} /><b>{suspendedSim ? "Resume suspended block" : "Exam simulator"}</b>
+              <span>{suspendedSim ? `${EXAM_SKINS[suspendedSim.skin].label} · ${blockCounts(suspendedSim.poolIds, suspendedSim.items).answered}/${suspendedSim.poolIds.length} answered` : "UWorld · USMLE/NBME · ExamSoft interfaces"}</span>
+            </button>
             <button className="qb-loop-card" onClick={() => openImport("file")}>
               <FileInput size={ICON_SIZE.emphasis} /><b>Import questions</b><span>Review uncertainty, not every line</span>
             </button>
@@ -569,7 +575,8 @@ export function QuestionWorkspacePage() {
           presetFilters={runner.presetFilters}
           presetTimed={runner.presetTimed}
           blockId={runner.blockId}
-          onClose={() => setRunner(null)}
+          simulate={runner.simulate}
+          onClose={() => { setRunner(null); setSuspendedSim(readSuspendedBlock()); }}
         />
       )}
       {moduleTourOpen && (

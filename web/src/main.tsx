@@ -27,6 +27,7 @@ import "./styles/dock.css";
 import "./styles/soundscapes.css";
 import "./styles/energy.css";
 import "./styles/trackers.css";
+import "./styles/exam-sim.css";
 
 // The inline head script prevents a first-paint flash; this keeps the chosen
 // theme synchronized with OS and cross-tab changes for the rest of the session.

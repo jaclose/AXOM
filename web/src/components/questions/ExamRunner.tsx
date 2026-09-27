@@ -35,11 +35,26 @@ import {
   type TutorPanel,
 } from "./TutorUtilityDock";
 import type { QuizCalculatorValue } from "./QuizCalculator";
+import { ExamSimulator } from "./ExamSimulator";
+import {
+  BLOCK_PRESETS, EXAM_SKINS, blockCounts, formatClock, readSuspendedBlock, writeSuspendedBlock,
+  type BlockPreset, type ExamSkin, type SuspendedBlock,
+} from "../../lib/examSim";
 
 const ERROR_TYPES = Object.keys(ERROR_TYPE_LABEL) as QuestionErrorType[];
 const EXAM_TYPES = Object.keys(EXAM_TYPE_LABEL) as QuestionExamType[];
 
-type Stage = "setup" | "running" | "results";
+type Stage = "setup" | "running" | "results" | "sim";
+type ExamInterface = "axom" | ExamSkin;
+const INTERFACE_KEY = "axom.examSim.interface.v1";
+function readInterface(): ExamInterface {
+  try {
+    const value = localStorage.getItem(INTERFACE_KEY);
+    return value === "uworld" || value === "nbme" || value === "examsoft" ? value : "axom";
+  } catch { return "axom"; }
+}
+/** Every preset runs at the USMLE pace of 90 seconds per item. */
+const SECONDS_PER_ITEM = 90;
 interface ActiveQuizSnapshot {
   mode: QuizMode; poolIds: string[]; index: number; answers: QuizAnswer[];
   picked?: string; revealed: boolean; startedAt: string; timed: boolean; filters: QuizFilters;
@@ -66,7 +81,7 @@ function readReadingScale(): number {
   } catch { return 1; }
 }
 
-export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, presetTimed = false, blockId, onClose }: {
+export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, presetTimed = false, blockId, simulate = false, onClose }: {
   mode: QuizMode;
   /** When set, skips setup and runs exactly these questions (retake missed). */
   retakeIds?: string[];
@@ -76,6 +91,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   presetTimed?: boolean;
   /** Saved block whose last-run timestamp advances only when the run begins. */
   blockId?: string;
+  /** Open straight into exam-interface simulation (UWorld / NBME / ExamSoft). */
+  simulate?: boolean;
   onClose: () => void;
 }) {
   const s = useStore();
@@ -86,15 +103,23 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const [stage, setStage] = useState<Stage>(restored || retakeIds?.length ? "running" : "setup");
 
   // --- setup state
-  const [count, setCount] = useState(presetFilters?.count ?? 10);
+  const [count, setCount] = useState(presetFilters?.count ?? (simulate ? 20 : 10));
   const [status, setStatus] = useState<QuizFilters["status"]>(presetFilters?.status ?? "all");
   const [category, setCategory] = useState(presetFilters?.categories?.[0] ?? "");
   const [examType, setExamType] = useState<QuestionExamType | "">(presetFilters?.examTypes?.[0] ?? "");
   const [setIds, setSetIds] = useState<string[]>(presetFilters?.setIds ?? []);
   const [ordered, setOrdered] = useState(presetFilters?.ordered ?? false);
-  const [timed, setTimed] = useState(restored?.timed ?? presetTimed);
+  const [timed, setTimed] = useState(restored?.timed ?? (simulate || presetTimed));
   const [runBlockId, setRunBlockId] = useState(blockId);
   const [minutesPerQ] = useState(1.5);
+  const [examInterface, setExamInterface] = useState<ExamInterface>(() => {
+    if (retakeIds?.length) return "axom";
+    const stored = readInterface();
+    return simulate && stored === "axom" ? "nbme" : stored;
+  });
+  const [presetId, setPresetId] = useState<BlockPreset["id"]>("usmle-2026");
+  const [suspended, setSuspended] = useState<SuspendedBlock | undefined>(() => readSuspendedBlock());
+  const [simRun, setSimRun] = useState<{ skin: ExamSkin; pool: QuestionRecord[]; timeLimitSeconds?: number; resume?: SuspendedBlock } | null>(null);
 
   // --- run state
   const [pool, setPool] = useState<QuestionRecord[]>(() => restored
@@ -304,11 +329,38 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     pushToast({ title: "Block saved", body: "Rerun it any time from Block Builder.", tone: "success" });
   }
 
+  function chooseInterface(value: ExamInterface) {
+    setExamInterface(value);
+    try { localStorage.setItem(INTERFACE_KEY, value); } catch { /* device pref only */ }
+    if (value !== "axom") {
+      const preset = BLOCK_PRESETS.find((item) => item.id === presetId);
+      if (preset?.items) setCount(preset.items);
+    }
+  }
+
+  function choosePreset(preset: BlockPreset) {
+    setPresetId(preset.id);
+    if (preset.items) { setCount(preset.items); setTimed(true); }
+  }
+
   function begin() {
     const filters = currentFilters();
     const built = buildQuizPool(questions, filters, questionSets);
     if (built.length === 0) {
       pushToast({ title: "No questions match", body: "Loosen the filters or import more questions first.", tone: "warn" });
+      return;
+    }
+    if (examInterface !== "axom") {
+      if (suspended && !confirm("Starting a new block discards your suspended block. Continue?")) return;
+      writeSuspendedBlock(null);
+      setSuspended(undefined);
+      clearActiveQuiz();
+      setSimRun({ skin: examInterface, pool: built, timeLimitSeconds: timed ? built.length * SECONDS_PER_ITEM : undefined });
+      if (runBlockId) {
+        const savedBlock = (s.quizBlocks ?? []).find((block) => block.id === runBlockId);
+        if (savedBlock) s.saveQuizBlock({ ...savedBlock, lastRunAt: new Date().toISOString() });
+      }
+      setStage("sim");
       return;
     }
     const runStartedAt = new Date().toISOString();
@@ -418,6 +470,72 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     clearActiveQuiz();
     setSession(result);
     setStage("results");
+  }
+
+  function resumeSuspended() {
+    if (!suspended) return;
+    const resumedPool = suspended.poolIds
+      .map((id) => questions.find((question) => question.id === id))
+      .filter((question): question is QuestionRecord => Boolean(question));
+    if (!resumedPool.length) {
+      pushToast({ title: "Suspended block unavailable", body: "Its questions are no longer in this workspace.", tone: "warn" });
+      writeSuspendedBlock(null);
+      setSuspended(undefined);
+      return;
+    }
+    setMode(suspended.mode);
+    setSimRun({ skin: suspended.skin, pool: resumedPool, timeLimitSeconds: suspended.timeLimitSeconds, resume: suspended });
+    setStage("sim");
+  }
+
+  function discardSuspended() {
+    if (!confirm("Discard the suspended block? Its answers will not be scored.")) return;
+    writeSuspendedBlock(null);
+    setSuspended(undefined);
+  }
+
+  function finishSimulation(answerList: QuizAnswer[], meta: { startedAt: string; elapsedSeconds: number }) {
+    if (!simRun) return;
+    const result: QuizSession = {
+      id: crypto.randomUUID(),
+      mode,
+      startedAt: meta.startedAt,
+      endedAt: new Date().toISOString(),
+      timed: simRun.timeLimitSeconds !== undefined,
+      timeLimitSeconds: simRun.timeLimitSeconds,
+      filters: currentFilters(),
+      questionIds: simRun.pool.map((q) => q.id),
+      answers: answerList,
+      score: scoreSession(answerList),
+      simulation: { skin: simRun.skin, preset: simRun.resume ? undefined : presetId, elapsedSeconds: meta.elapsedSeconds },
+    };
+    for (const a of answerList) {
+      if (!a.answerKey && !a.flagged) continue;
+      s.recordQuestionAttempt(a.questionId, {
+        answerKey: a.answerKey,
+        status: a.correct === undefined ? "needs-review" : a.correct ? "correct" : "incorrect",
+        timeSpentSeconds: a.seconds,
+      });
+    }
+    s.saveQuizSession(result);
+    writeSuspendedBlock(null);
+    setSuspended(undefined);
+    setPool(simRun.pool);
+    setSession(result);
+    setSimRun(null);
+    setStage("results");
+  }
+
+  function suspendSimulation(block: SuspendedBlock) {
+    writeSuspendedBlock(block);
+    setSuspended(block);
+    const counts = blockCounts(block.poolIds, block.items);
+    pushToast({
+      title: "Block suspended",
+      body: `${counts.answered}/${counts.total} answered${block.timeLimitSeconds ? ` · ${formatClock(block.timeLimitSeconds - block.elapsedMs / 1000)} left` : ""}. Resume it from block setup.`,
+      tone: "success",
+    });
+    onClose();
   }
 
   function toggleFlag() {
@@ -545,6 +663,44 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             <GButton variant="primary" onClick={begin}><Play size={ICON_SIZE.body} /> Start {mode} block</GButton>
           </>
         }>
+        {suspended && (
+          <div className="sim-suspended-banner" role="status">
+            <div>
+              <b>Suspended block · {EXAM_SKINS[suspended.skin].label}</b>
+              <span className="sub">
+                {(() => { const c = blockCounts(suspended.poolIds, suspended.items); return `${c.answered}/${c.total} answered · ${c.marked} marked`; })()}
+                {suspended.timeLimitSeconds ? ` · ${formatClock(suspended.timeLimitSeconds - suspended.elapsedMs / 1000)} left` : ""}
+                {` · suspended ${new Date(suspended.suspendedAt).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`}
+              </span>
+            </div>
+            <div className="row gap6">
+              <GhostButton onClick={discardSuspended}>Discard</GhostButton>
+              <GButton size="sm" variant="primary" onClick={resumeSuspended}><Play size={ICON_SIZE.body} /> Resume</GButton>
+            </div>
+          </div>
+        )}
+        <div className="stack gap6">
+          <span className="field-label">Interface</span>
+          <div className="sim-interface-grid" role="radiogroup" aria-label="Exam interface">
+            {([["axom", "AXOM", "Tutor tools, AI help and repair cards in the AXOM player."], ...Object.entries(EXAM_SKINS).map(([id, meta]) => [id, meta.label, meta.description])] as Array<[ExamInterface, string, string]>).map(([id, label, description]) => (
+              <button type="button" key={id} role="radio" aria-checked={examInterface === id} className={`sim-interface-option skin-${id} ${examInterface === id ? "on" : ""}`} onClick={() => chooseInterface(id)}>
+                <b>{label}</b><small>{description}</small>
+              </button>
+            ))}
+          </div>
+        </div>
+        {examInterface !== "axom" && (
+          <div className="stack gap6">
+            <span className="field-label">Block</span>
+            <div className="row" style={{ flexWrap: "wrap", gap: 6 }} role="group" aria-label="Block preset">
+              {BLOCK_PRESETS.map((preset) => (
+                <button type="button" key={preset.id} className={`filter-pill ${presetId === preset.id ? "on" : ""}`} aria-pressed={presetId === preset.id}
+                  onClick={() => choosePreset(preset)} title={preset.note}>{preset.label}{preset.items ? ` · ${preset.items}` : ""}</button>
+              ))}
+            </div>
+            <span className="sub">{BLOCK_PRESETS.find((preset) => preset.id === presetId)?.note}</span>
+          </div>
+        )}
         <div className="row" style={{ gap: 6 }} role="group" aria-label="Block mode">
           {(["tutor", "exam"] as QuizMode[]).map((m) => (
             <button type="button" key={m} className={`filter-pill ${mode === m ? "on" : ""}`}
@@ -570,7 +726,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         <div className="stack gap6">
           <span className="field-label">How many questions</span>
           <div className="row" style={{ flexWrap: "wrap" }} role="group" aria-label="Question count">
-            {[5, 10, 20, 40].map((n) => (
+            {[5, 10, 20, 40, 50].map((n) => (
               <button type="button" key={n} className={`filter-pill ${count === n ? "on" : ""}`}
                 aria-pressed={count === n} onClick={() => setCount(n)}>{n}</button>
             ))}
@@ -599,13 +755,27 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           <input type="checkbox" checked={ordered} onChange={() => setOrdered((v) => !v)} />
           <span>Keep document order (instead of shuffling)</span>
         </label>
-        {mode === "exam" && (
+        {(mode === "exam" || examInterface !== "axom") && (
           <label className="row" style={{ gap: 8, cursor: "pointer" }}>
             <input type="checkbox" checked={timed} onChange={() => setTimed((v) => !v)} />
-            <span>Timed · {minutesPerQ} min per question</span>
+            <span>Timed · {minutesPerQ} min per question{examInterface !== "axom" && timed ? ` (${Math.round(count * minutesPerQ)} min block)` : ""}</span>
           </label>
         )}
       </Modal>
+    );
+  }
+
+  if (stage === "sim" && simRun) {
+    return (
+      <ExamSimulator
+        skin={simRun.skin}
+        mode={mode}
+        pool={simRun.pool}
+        timeLimitSeconds={simRun.timeLimitSeconds}
+        resume={simRun.resume}
+        onFinish={finishSimulation}
+        onSuspend={suspendSimulation}
+      />
     );
   }
 
@@ -640,7 +810,10 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             {session.score?.correct}/{session.score?.scored} correct ({session.score?.pct}%)
           </Tag>
           <Tag tone="neutral">{session.mode} mode</Tag>
-          {session.timed && <Tag tone="neutral">{Math.round((Date.parse(session.endedAt!) - Date.parse(session.startedAt)) / 60000)} min</Tag>}
+          {session.simulation && <Tag tone="neutral">{EXAM_SKINS[session.simulation.skin as ExamSkin]?.label ?? "Simulation"}</Tag>}
+          {session.simulation?.elapsedSeconds !== undefined
+            ? <Tag tone="neutral">{formatClock(session.simulation.elapsedSeconds).replace(/^00:/, "")}{session.timeLimitSeconds ? ` of ${Math.round(session.timeLimitSeconds / 60)} min` : ""}</Tag>
+            : session.timed && <Tag tone="neutral">{Math.round((Date.parse(session.endedAt!) - Date.parse(session.startedAt)) / 60000)} min</Tag>}
           {session.score && session.score.total > session.score.scored && (
             <span className="sub">{session.score.total - session.score.scored} unscored (no correct answer set)</span>
           )}

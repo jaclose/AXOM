@@ -61,6 +61,8 @@ export interface QuizSession {
   questionIds: ID[];
   answers: QuizAnswer[];
   score?: { correct: number; scored: number; total: number; pct: number };
+  /** Set when the block ran in an exam-interface simulation (lib/examSim). */
+  simulation?: { skin: string; preset?: string; elapsedSeconds?: number };
 }
 
 // --- pool building -----------------------------------------------------------
