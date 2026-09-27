@@ -1,4 +1,4 @@
-import changelog from "virtual:axom-changelog";
+import changelog from "../../../CHANGELOG.md?raw";
 import { parseReleaseNotes } from "../../../scripts/release-notes.mjs";
 import { APP_RELEASE_VERSION, isNewerVersion } from "./brand";
 import type { StorageMigrationResult } from "./storageMigrations";
