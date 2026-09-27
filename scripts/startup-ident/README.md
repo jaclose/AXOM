@@ -2,9 +2,23 @@
 
 A 7-second cinematic reveal of the AXOM identity, rendered as a physical
 object: a champagne-ivory brushed-metal mark hanging a short distance in front
-of a near-black wall, revealed by light. It plays as the app's startup film
-(`web/public/startup/axom-ident.mp4`, driven by `web/src/lib/startupIntro.ts`)
-and ends on the overlay's own `#0D0D0E`, so the app crossfades in seamlessly.
+of a near-black wall, revealed by light. It ends on the overlay's own
+`#0D0D0E`, so the app crossfades in seamlessly.
+
+In the app it is the `brand-ident` film of the cinematics catalog
+(`web/src/data/cinematics.json`; see `docs/CINEMATICS.md`). Learners choose it
+under Settings → Appearance → Opening film, and it takes part in "rotate".
+The player (`pickFilmSource` in `web/src/lib/startupIntro.ts`) picks the best
+cut the engine can decode:
+
+1. `axom-ident-hevc10.mp4`: HEVC Main 10. Safari, macOS WebKit, and Chromium
+   where hardware HEVC is available.
+2. `axom-ident-vp9.webm`: VP9 profile 2, 10-bit. Chromium and Firefox.
+3. `axom-ident.mp4`: 8-bit H.264, the universal fallback.
+
+8-bit H.264 cannot keep dither in the dark wall gradient at a sane bitrate:
+CRF 18 bands, and keeping the dither costs about 30 MB. The 10-bit cuts are
+smooth at 0.2–0.4 MB.
 
 ## Source of truth
 
@@ -72,6 +86,41 @@ evaluated per pixel with no meshing:
 | Retreat: subtitle, wordmark, emblem; last rim highlight dies | 5.5 – 6.5 |
 | Clean `#0D0D0E` | 6.5 – 7.0 |
 
+## Short versions (2, 3 and 4 s)
+
+Nine short stings: three layouts, each at three lengths. Shot names are
+`<layout>-<2|3|4>s`.
+
+| Layout | Shows |
+| --- | --- |
+| `mark` | the logo alone, centred |
+| `wordmark` | logo and AXOM |
+| `lockup` | logo, AXOM, gold rule and subtitle |
+
+They push the 3D and the glint further than the ident:
+
+- The emblem is a 0.075-deep slab that turns into place in 3D: from 30° yaw
+  and 10° tilt, moving slightly towards camera. Rays are intersected with the
+  rotated plane, and its side walls are ray-marched.
+- The glint strip crosses while the emblem is still turning.
+- A small spark light runs along the bevels.
+- The brightest glints get a restrained halation.
+- Text then settles in from soft focus. Shorts end on the settled logo rather
+  than black.
+
+The 7 s ident (`--shot ident`, the default) keeps a zero-depth slab and its
+original timings, so it still renders the same.
+
+```sh
+for shot in mark-2s wordmark-2s lockup-2s mark-3s wordmark-3s lockup-3s mark-4s wordmark-4s lockup-4s; do
+  python3 scripts/startup-ident/render_ident.py frames --shot $shot --width 1920 --height 1080 --out build/shorts/$shot
+  python3 scripts/startup-ident/render_ident.py encode --shot $shot --frames build/shorts/$shot --out build/shorts
+done
+```
+
+Each short is encoded as a 10-bit HEVC master and an H.264 copy
+(`AXOM_<shot>_<height>p_30p_{hevc10,h264}.mp4`).
+
 ## Reproduce
 
 ```sh
@@ -87,10 +136,20 @@ python3 scripts/startup-ident/render_ident.py encode --frames build/ident/frames
 
 - `AXOM_ident_4K_30p_hevc10.mp4`: 10-bit master, no banding;
 - `AXOM_ident_4K_30p_h264.mp4`: 4K, widest compatibility;
-- `AXOM_ident_1080p_30p_h264.mp4`: the app cut;
+- `AXOM_ident_1080p_30p_{hevc10.mp4,vp9.webm,h264.mp4}`: the app cuts;
 - `AXOM_ident_lockup_4K.png`: a still of the full lockup.
 
 Film grain and dither are added at encode time, per target bit depth. All
-files are tagged BT.709 / TV range. `--publish` installs the app cut and its
-poster into `web/public/startup/` and records hashes in
-`design/startup/ident-manifest.json`.
+files are tagged BT.709 / TV range.
+
+`--publish` (or `render_ident.py publish --out build/ident` for cuts that are
+already encoded) does three things:
+
+- installs the app cuts and a lockup poster (the Settings thumbnail) into
+  `web/public/startup/`;
+- writes the `brand-ident` entry, with its 10-bit `sources`, into
+  `web/src/data/cinematics.json`;
+- records hashes in `design/startup/ident-manifest.json`.
+
+Don't re-import this film with `npm run cinematic:import`. That tool makes a
+single 8-bit file and would drop the 10-bit sources.

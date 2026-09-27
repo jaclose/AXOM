@@ -33,6 +33,20 @@ Current films are placeholders from the Optical Luster Blender kit
 (`design/startup/`, `scripts/render-startup-luster.*`, and the three takes in
 `public/cinematics/`). Direction notes: `docs/planning/AXOM-STARTUP-CINEMATIC.md`.
 
+## AXOM ident (final render)
+
+`brand-ident` is the finished 7 s brand ident: the full lockup in brushed
+metal, revealed by one sweep of light. It is offered alongside the films above,
+in the Opening film picker and in "rotate". It is longer than the 1–2.5 s
+guidance because the brief asked for a 5–7 s ident; the hard deadline still
+follows the film (7.0 s + 0.7 s).
+
+It is the only film with `sources`: 10-bit HEVC and VP9 cuts that the player
+tries first (`pickFilmSource`, via `canPlayType`), because 8-bit H.264 bands in
+its near-black gradient. Its `src` is the H.264 fallback. It is rendered and
+published by `scripts/startup-ident/` (see the README there), not by
+`cinematic:import`, which would collapse it to a single 8-bit file.
+
 ## Update flow
 
 `lib/appUpdates.ts` owns the lifecycle. Desktop builds download a signed

@@ -78,3 +78,7 @@ web/src/data/soundscape-recordings.personal.json
 # Raw media drop folders (sources for scripts/import-*.mjs; only processed output is committed)
 soundscapes_import/
 design/assets/soundscapes_import/
+
+# Python bytecode (startup ident tooling)
+__pycache__/
+*.pyc

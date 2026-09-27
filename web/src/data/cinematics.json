@@ -26,5 +26,22 @@
     "background": "#0d0d0e",
     "durationMs": 1300,
     "placeholder": true
+  },
+  "brand-ident": {
+    "src": "startup/axom-ident.mp4",
+    "poster": "startup/axom-ident-poster.jpg",
+    "background": "#0d0d0e",
+    "durationMs": 7000,
+    "placeholder": false,
+    "sources": [
+      {
+        "src": "startup/axom-ident-hevc10.mp4",
+        "type": "video/mp4; codecs=\"hvc1.2.4.L120.90\""
+      },
+      {
+        "src": "startup/axom-ident-vp9.webm",
+        "type": "video/webm; codecs=\"vp09.02.40.10\""
+      }
+    ]
   }
 }

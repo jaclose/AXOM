@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   CINEMATICS,
@@ -65,12 +67,30 @@ describe("startup cinematic schedule", () => {
   it("rotates through every film when asked", () => {
     let ledger: CinematicLedger = {};
     const seen: string[] = [];
-    for (let day = 21; day < 26; day += 1) {
+    for (let day = 21; day < 27; day += 1) {
       const result = decide({ intro: "rotate" }, ledger, new Date(2026, 8, day, 9));
       if (result.decision.play) seen.push(result.decision.film.id);
       ledger = result.nextLedger;
     }
-    expect(seen).toEqual(["slow-sweep", "push-sweep", "edge-glint", "optical-luster", "slow-sweep"]);
+    expect(seen).toEqual(["slow-sweep", "push-sweep", "edge-glint", "optical-luster", "brand-ident", "slow-sweep"]);
+  });
+
+  it("ships every film's media, including higher-fidelity alternates", () => {
+    const publicFile = (path: string) => fileURLToPath(new URL(`../../public/${path}`, import.meta.url));
+    for (const film of Object.values(CINEMATICS)) {
+      for (const path of [film.src, film.poster, ...(film.sources ?? []).map((source) => source.src)]) {
+        expect(existsSync(publicFile(path)), `${film.id}: ${path}`).toBe(true);
+      }
+    }
+  });
+
+  it("offers the final AXOM ident with 10-bit encodings ahead of its H.264 fallback", () => {
+    const ident = CINEMATICS["brand-ident"];
+    expect(ident).toMatchObject({ placeholder: false, background: "#0d0d0e", durationMs: 7000, src: "startup/axom-ident.mp4" });
+    expect(ident.sources?.map((source) => source.type)).toEqual([
+      'video/mp4; codecs="hvc1.2.4.L120.90"',
+      'video/webm; codecs="vp09.02.40.10"',
+    ]);
   });
 
   it("repairs unknown stored preferences", () => {

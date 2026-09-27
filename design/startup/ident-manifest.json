@@ -1,0 +1,80 @@
+{
+  "renderer": "scripts/startup-ident/render_ident.py",
+  "geometry": {
+    "path": "design/startup/axom-ident-geometry.json",
+    "sha256": "ab5fc6773846553673738d6c70825a28ef34f53dcda3a9736f71f6ef70ecd728"
+  },
+  "catalog": {
+    "path": "web/src/data/cinematics.json",
+    "film": "brand-ident"
+  },
+  "fps": 30,
+  "frames": 210,
+  "durationSeconds": 7.0,
+  "master": [
+    3840,
+    2160
+  ],
+  "web": [
+    1920,
+    1080
+  ],
+  "background": "#0D0D0E",
+  "audio": false,
+  "beats": {
+    "faintEdge": [
+      0.0,
+      0.8
+    ],
+    "emerge": [
+      0.8,
+      2.2
+    ],
+    "luster": [
+      2.2,
+      3.1
+    ],
+    "wordmark": [
+      3.1,
+      4.0
+    ],
+    "subtitle": [
+      3.7,
+      4.4
+    ],
+    "hold": [
+      4.4,
+      5.5
+    ],
+    "retreat": [
+      5.5,
+      6.5
+    ],
+    "black": [
+      6.5,
+      7.0
+    ]
+  },
+  "assets": [
+    {
+      "path": "web/public/startup/axom-ident-hevc10.mp4",
+      "bytes": 364765,
+      "sha256": "bdc0ff00e0c05fede63ce2c6da36f3603f8dc2ad2b8e0cff6c5e010ba99cd691"
+    },
+    {
+      "path": "web/public/startup/axom-ident-vp9.webm",
+      "bytes": 206180,
+      "sha256": "f304a63b3df90dc81de526051fc1c5f12e141f46b6c4e979a50331efeacfc9aa"
+    },
+    {
+      "path": "web/public/startup/axom-ident.mp4",
+      "bytes": 528457,
+      "sha256": "e501dc1e388866b4e08736def3de43abb1095b0e9d656b47d3dd570ecef5b5cb"
+    },
+    {
+      "path": "web/public/startup/axom-ident-poster.jpg",
+      "bytes": 17195,
+      "sha256": "107792f5b01a6aacdcdbeb9b5723d337b9c14fc12d1824507f701749a5f6e8e4"
+    }
+  ]
+}

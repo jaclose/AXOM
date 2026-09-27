@@ -129,19 +129,27 @@ class Beat:
     sub_blur: float = 0.0
     sub_dy: float = 0.0
     grain: float = 0.0
+    yaw: float = 0.0     # emblem rotation about its vertical axis (radians)
+    pitch: float = 0.0   # emblem tilt about its horizontal axis (radians)
+    spark: float = 0.0   # small bright light that glints along the bevels
+    bloom: float = 0.0   # halation of the brightest glints
 
 
 KEY_T0, KEY_T1 = 1.95, 3.45  # strip travel window
 KEY_X0, KEY_X1 = -1.45, 1.45  # strip travel (relative to the mark centre)
 
 
+KEY_LEVEL = (1.95, 2.35, 2.98, 3.42)  # strip fade-in start/end, fade-out start/end
+
+
 def key_state(t: float):
     x = KEY_X0 + (KEY_X1 - KEY_X0) * sine_io((t - KEY_T0) / (KEY_T1 - KEY_T0))
-    level = ramp(t, 1.95, 2.35) * fall(t, 2.98, 3.42)
+    a, b, c, d = KEY_LEVEL
+    level = ramp(t, a, b) * fall(t, c, d)
     return x, level
 
 
-def beat(t: float) -> Beat:
+def beat_ident(t: float) -> Beat:
     b = Beat(t)
     # Camera: a slow dolly of ~3.5% over the whole film.
     b.cam_z = 7.25 - 0.26 * float(smoother(t / DURATION))
@@ -179,8 +187,13 @@ CAM_Y = 0.05                      # optical lift: lockup sits slightly above cen
 F_4K = 486.0 * 7.0                # focal length (px @3840) -> mark 486 px tall at z=7
 WALL_Z = -0.30                    # wall sits 0.3 mark heights behind the emblem
 BEVEL = 0.019                     # emblem bevel width (mark heights)
+THICKNESS = 0.0                   # emblem slab depth (the shorts turn it and show its walls)
 WORD_BEVEL = 0.021                # wordmark bevel width (cap heights)
 POOL_PEAK = 0.0046                # wall pool brightness above night at full fill (linear)
+
+SHOW_WORD = True                  # which parts of the lockup a shot shows
+SHOW_SUB = True
+POOL_REF_T = 4.8                  # a hold moment used to normalise the wall pool
 
 MARK_POLYS = [np.array(G["mark"][k], dtype=np.float64) for k in ("chevron", "diamond", "legLeft", "legRight")]
 WORD_POLYS = [np.array(G["wordmark"][k], dtype=np.float64) for k in ("Lambda", "X", "M")]
@@ -326,6 +339,9 @@ KEY = AreaLight("key", (6.2, 0.15), 44, 2, np.array([1.0, 0.975, 0.94]) * 1.75, 
 RIM = AreaLight("rim", (6.5, 0.38), 28, 2, np.array([0.97, 0.98, 1.0]) * 0.7, k=2.0, feather=0.4, seed=31)
 KICK = AreaLight("kick", (3.2, 0.34), 14, 2, (GOLD / GOLD.max()) * 0.3, k=2.0, feather=0.4, seed=41)
 
+# A small, bright source whose reflection runs along the bevels as the mark turns.
+SPARK = AreaLight("spark", (0.55, 0.55), 5, 5, np.array([1.0, 0.99, 0.97]) * 7.0, k=1.0, feather=0.6, seed=53)
+
 KEY_TILT = math.radians(19.0)
 KEY_Z = 1.3
 
@@ -364,6 +380,9 @@ def light_rig(b: Beat, cam, for_wall=False):
     if b.rim > 1e-5 and not for_wall:
         c = mc + np.array([-0.25, -2.35, 0.78])
         rig.append((RIM, *RIM.samples(c, [1, 0, 0], aim(c), b.rim)))
+    if b.spark > 1e-5 and not for_wall:
+        c = mc + np.array([1.35, -1.45, 2.3])
+        rig.append((SPARK, *SPARK.samples(c, [1, 0, 0], aim(c), b.spark)))
     if b.kick > 1e-5 and not for_wall:
         c = mc + np.array([-2.45, -0.55, 0.85])
         rig.append((KICK, *KICK.samples(c, [0, 1, 0], aim(c), b.kick)))
@@ -559,6 +578,8 @@ class Scene:
     # -- metal layers -----------------------------------------------------
     def metal_layer(self, kind, b: Beat, cam, rig):
         if kind == "mark":
+            return self.mark_layer(b, cam, rig)
+        if kind == "mark-flat":
             z, bev, unit = b.mark_z, BEVEL, 1.0
             X0, X1, Y0, Y1 = -0.6, 0.6, Y_APEX - 0.02, Y_APEX + 1.02
         else:
@@ -568,7 +589,7 @@ class Scene:
             Y0, Y1 = WORD_TOP + dy - 0.1 * WORD_CAP, WORD_TOP + dy + 1.1 * WORD_CAP
         x0, x1, y0, y1 = self.box(X0, X1, Y0, Y1, z, cam)
         X, Y, spacing = self.sample_grid(x0, x1, y0, y1, z, cam)
-        if kind == "mark":
+        if kind == "mark-flat":
             lx, ly = X, Y - Y_APEX
             d, gx, gy = polygon_sdf(lx, ly, MARK_POLYS)
         else:
@@ -582,8 +603,8 @@ class Scene:
             sn, cs = np.sin(th), np.cos(th)
             N = np.stack([-gx[sel] * sn, -gy[sel] * sn, cs], 1)
             # texture coordinates in object units (wrap)
-            tu = lx[sel] * self.tex_res + (0 if kind == "mark" else 900)
-            tv = ly[sel] * self.tex_res + (0 if kind == "mark" else 700)
+            tu = lx[sel] * self.tex_res + (0 if kind == "mark-flat" else 900)
+            tv = ly[sel] * self.tex_res + (0 if kind == "mark-flat" else 700)
             coords = np.stack([tv % self.tex_a.shape[0], tu % self.tex_a.shape[1]])
             ta = ndimage.map_coordinates(self.tex_a, coords, order=1, mode="wrap")
             tb = ndimage.map_coordinates(self.tex_b, coords, order=1, mode="wrap")
@@ -607,6 +628,100 @@ class Scene:
         alpha = self.downsample(cov)
         return (x0, x1, y0, y1), prem, alpha
 
+    def mark_layer(self, b: Beat, cam, rig):
+        """The emblem as a bevelled metal slab that can turn in space.
+
+        Each sample's camera ray is intersected with the (rotated) front plane;
+        rays that miss the front face are marched through the slab depth to
+        find its side walls. Head-on, this reduces exactly to the flat case.
+        """
+        mc, R = mark_frame(b)
+        n_w = R[:, 2]
+        corners = np.array([[u, v, w] for u in (-0.62, 0.62) for v in (-0.53, 0.53) for w in (0.0, -THICKNESS)])
+        world = mc[None] + corners @ R.T
+        s = self.F / (cam[2] - world[:, 2])
+        sxs = self.W / 2 + s * (world[:, 0] - cam[0])
+        sys_ = self.H / 2 + s * (world[:, 1] - cam[1])
+        pad = 3
+        x0, x1 = max(0, int(sxs.min()) - pad), min(self.W, int(math.ceil(sxs.max())) + pad)
+        y0, y1 = max(0, int(sys_.min()) - pad), min(self.H, int(math.ceil(sys_.max())) + pad)
+        ss = self.ss
+        SX, SY = np.meshgrid(x0 + (np.arange((x1 - x0) * ss) + 0.5) / ss, y0 + (np.arange((y1 - y0) * ss) + 0.5) / ss)
+        D = np.stack([(SX - self.W / 2) / self.F, (SY - self.H / 2) / self.F, -np.ones_like(SX)], -1)
+        den = D @ n_w
+        lam = ((mc - cam) @ n_w) / den
+        P = cam[None, None] + lam[..., None] * D
+        loc = (P - mc[None, None]) @ R
+        u, v = loc[..., 0], loc[..., 1]
+        d, gx, gy = polygon_sdf(u, v + 0.5, MARK_POLYS)
+        cos_inc = np.abs(den) / np.linalg.norm(D, axis=-1)
+        spacing = lam / self.F / ss / np.maximum(cos_inc, 0.2)
+        cov_f = np.clip(d / spacing + 0.5, 0.0, 1.0)
+        # Side walls: march behind the front plane where the front face is missed.
+        Dl = D @ R
+        slope = -Dl[..., :2] / Dl[..., 2:3]          # local uv shift per unit of depth
+        reach = THICKNESS * np.linalg.norm(slope, axis=-1)
+        cand = (cov_f < 1.0) & (d > -(reach + 2 * spacing)) & (THICKNESS > 0)
+        wall = np.zeros(d.shape, bool)
+        w_hit = np.zeros(d.shape)
+        wgx = np.zeros(d.shape)
+        wgy = np.zeros(d.shape)
+        if cand.any():
+            ci = np.nonzero(cand)
+            cu, cv, sl = u[ci], v[ci], slope[ci]
+            prev = d[ci]
+            hit = np.zeros(len(cu), bool)
+            depth = np.zeros(len(cu))
+            hgx, hgy = np.zeros(len(cu)), np.zeros(len(cu))
+            steps = 14
+            for k in range(1, steps + 1):
+                wk = THICKNESS * k / steps
+                dk, gxk, gyk = polygon_sdf(cu + sl[:, 0] * wk, cv + sl[:, 1] * wk + 0.5, MARK_POLYS)
+                new = (~hit) & (dk >= 0)
+                frac = np.clip(prev / np.minimum(prev - dk, -1e-12), 0, 1)
+                depth = np.where(new, THICKNESS * (k - 1 + frac) / steps, depth)
+                hgx, hgy = np.where(new, gxk, hgx), np.where(new, gyk, hgy)
+                hit |= new
+                prev = dk
+            wall[ci], w_hit[ci], wgx[ci], wgy[ci] = hit, depth, hgx, hgy
+        cov_w = np.where(wall, 1.0 - cov_f, 0.0)
+        front = cov_f > 0
+        n_f, n_wl = int(front.sum()), int(wall.sum())
+        lit_f = np.zeros(d.shape + (3,))
+        lit_w = np.zeros(d.shape + (3,))
+        if n_f + n_wl:
+            th = bevel_angle(d[front] / BEVEL)
+            sn, cs = np.sin(th), np.cos(th)
+            Nf = np.stack([-gx[front] * sn, -gy[front] * sn, cs], 1)
+            lx, ly = u[front], v[front] + 0.5
+            coords = np.stack([(ly * self.tex_res) % self.tex_a.shape[0], (lx * self.tex_res) % self.tex_a.shape[1]])
+            ta = ndimage.map_coordinates(self.tex_a, coords, order=1, mode="wrap")
+            tb = ndimage.map_coordinates(self.tex_b, coords, order=1, mode="wrap")
+            Tf = np.array([1.0, 0.0, 0.0])[None] - Nf[:, 0:1] * Nf
+            Tf /= np.linalg.norm(Tf, axis=1, keepdims=True)
+            Nf = Nf + (0.0035 * ta + 0.0025 * tb)[:, None] * np.cross(Nf, Tf)
+            Nf /= np.linalg.norm(Nf, axis=1, keepdims=True)
+            Tf = Tf - (Tf * Nf).sum(1, keepdims=True) * Nf
+            Tf /= np.linalg.norm(Tf, axis=1, keepdims=True)
+            # walls: outward edge normal, grain running through the depth
+            Nw = np.stack([-wgx[wall], -wgy[wall], np.zeros(n_wl)], 1)
+            Nw /= np.maximum(np.linalg.norm(Nw, axis=1, keepdims=True), 1e-9)
+            Tw = np.tile([0.0, 0.0, 1.0], (n_wl, 1))
+            N = np.concatenate([Nf, Nw]) @ R.T
+            T = np.concatenate([Tf, Tw]) @ R.T
+            Bv = np.cross(N, T)
+            at = np.concatenate([0.040 * (1 + 0.08 * tb), np.full(n_wl, 0.07)])
+            ab = np.concatenate([0.22 * (1 + 0.10 * ta), np.full(n_wl, 0.20)])
+            F0 = np.concatenate([METAL_F0[None] * (1 + 0.006 * ta + 0.004 * tb)[:, None],
+                                 np.tile(METAL_F0 * 0.96, (n_wl, 1))])
+            lam_w = lam[wall] + w_hit[wall] / (-Dl[..., 2][wall])
+            Pw = cam[None] + lam_w[:, None] * D[wall]
+            lit = metal_radiance(np.concatenate([P[front], Pw]), N, T, Bv, at, ab, F0, cam, rig)
+            lit_f[front], lit_w[wall] = lit[:n_f], lit[n_f:]
+        prem = self.downsample((lit_f + NIGHT) * cov_f[..., None] + (lit_w + NIGHT) * cov_w[..., None])
+        alpha = self.downsample(cov_f + cov_w)
+        return (x0, x1, y0, y1), prem, alpha
+
     # -- wall ------------------------------------------------------------
     def wall(self, b: Beat, cam):
         W, H = self.W, self.H
@@ -617,6 +732,8 @@ class Scene:
         scale = (cam[2] - WALL_Z) / self.F
         QX, QY = cam[0] + (sx - W / 2) * scale, cam[1] + (sy - H / 2) * scale
         E = np.zeros((h, w, 3))
+        mc, R = mark_frame(b)
+        n_w = R[:, 2]
         for light, pos, wgt, nrm in light_rig(b, cam, for_wall=True):
             for s, wv in zip(pos, wgt):
                 dx, dy, dz = s[0] - QX, s[1] - QY, s[2] - WALL_Z
@@ -626,13 +743,16 @@ class Scene:
                 cw = np.clip(dz * ir, 0, None)
                 irr = ce ** (light.k + 1) * cw / r2
                 # shadow: where does the segment wall->light cross the emblem plane?
-                tt = (b.mark_z - WALL_Z) / dz
-                mx, my = QX + tt * dx, QY + tt * dy - Y_APEX
+                den = dx * n_w[0] + dy * n_w[1] + dz * n_w[2]
+                tt = ((mc[0] - QX) * n_w[0] + (mc[1] - QY) * n_w[1] + (mc[2] - WALL_Z) * n_w[2]) / den
+                px, py, pz = QX + tt * dx - mc[0], QY + tt * dy - mc[1], WALL_Z + tt * dz - mc[2]
+                mx = px * R[0, 0] + py * R[1, 0] + pz * R[2, 0]
+                my = px * R[0, 1] + py * R[1, 1] + pz * R[2, 1] + 0.5
                 occ = ndimage.map_coordinates(self.occ, [(my - self.occ_y0) * self.occ_res - 0.5,
                                                          (mx - self.occ_x0) * self.occ_res - 0.5], order=1, cval=0.0)
                 E += (irr * (1 - occ))[..., None] * (wv * light.wall_gain)[None, None]
         if self._pool_norm is None:
-            ref = beat(4.8)
+            ref = beat(POOL_REF_T)
             Eref = self._pool_at_centre(ref, cam_for(ref))
             self._pool_norm = POOL_PEAK / max(Eref, 1e-12)
         E = ndimage.gaussian_filter(E, (1.2, 1.2, 0))
@@ -706,28 +826,115 @@ class Scene:
         (x0, x1, y0, y1), prem, alpha = self.metal_layer("mark", b, cam, rig)
         img[y0:y1, x0:x1] = img[y0:y1, x0:x1] * (1 - alpha[..., None]) + prem
         # wordmark: opacity + soft focus
-        if b.word > 1e-4:
+        if b.word > 1e-4 and SHOW_WORD:
             (x0, x1, y0, y1), prem, alpha = self.metal_layer("word", b, cam, rig)
             sig = b.word_blur * self.F / cam[2]
             if sig > 0.05:
                 prem = ndimage.gaussian_filter(prem, (sig, sig, 0))
                 alpha = ndimage.gaussian_filter(alpha, sig)
             img[y0:y1, x0:x1] = img[y0:y1, x0:x1] * (1 - b.word * alpha[..., None]) + b.word * prem
-        if b.rule > 1e-4:
+        if b.rule > 1e-4 and SHOW_SUB:
             (x0, x1, y0, y1), cov = self.rule_layer(b, cam)
             a = (0.78 * b.rule * cov)[..., None]
             img[y0:y1, x0:x1] = img[y0:y1, x0:x1] * (1 - a) + a * GOLD[None, None]
-        if b.sub > 1e-4:
+        if b.sub > 1e-4 and SHOW_SUB:
             (x0, x1, y0, y1), cov, sig = self.subtitle_layer(b, cam)
             if sig > 0.05:
                 cov = ndimage.gaussian_filter(cov, sig)
             a = (b.sub * cov)[..., None]
             img[y0:y1, x0:x1] = img[y0:y1, x0:x1] * (1 - a) + a * SUBTITLE_INK[None, None]
+        if b.bloom > 1e-4:
+            # Lens halation on the brightest glints only (nothing below 0.75).
+            hi = np.maximum(img - 0.75, 0).astype(np.float32)
+            k = self.W / 1920.0
+            img = img + b.bloom * (0.55 * cv2.GaussianBlur(hi, (0, 0), 2.2 * k)
+                                   + 0.45 * cv2.GaussianBlur(hi, (0, 0), 9.0 * k))
         return img.astype(np.float32)
 
 
 def cam_for(b: Beat):
     return np.array([0.0, CAM_Y, b.cam_z])
+
+
+def mark_frame(b: Beat):
+    """Centre and rotation of the emblem: world = centre + R @ local."""
+    cy, sy = math.cos(b.yaw), math.sin(b.yaw)
+    cp, sp = math.cos(b.pitch), math.sin(b.pitch)
+    ry = np.array([[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]])
+    rx = np.array([[1, 0, 0], [0, cp, -sp], [0, sp, cp]])
+    return np.array([0.0, MARK_CY, b.mark_z]), ry @ rx
+
+
+# ---------------------------------------------------------------- shots
+
+beat = beat_ident
+
+# Layouts: where the lockup sits and how large (mark heights; focal px @3840).
+VARIANTS = {
+    # Full lockup: mark, wordmark, rule and subtitle (the 7 s ident's framing).
+    "lockup": dict(y_apex=-LOCKUP_H / 2.0, cam_y=0.05, focal=486.0 * 7.0, word=True, sub=True),
+    # Mark and wordmark only, centred as a pair.
+    "wordmark": dict(y_apex=-(LK["wordmarkCapTop"] + LK["wordmarkCapHeight"]) / 2.0, cam_y=0.045,
+                     focal=560.0 * 7.0, word=True, sub=False),
+    # The mark alone, centred with a little optical lift.
+    "mark": dict(y_apex=-0.5, cam_y=0.035, focal=0.31 * 2160 * 7.0, word=False, sub=False),
+}
+SHOT_DURATIONS = (2.0, 3.0, 4.0)
+SHOTS = {"ident": ("lockup", 7.0)} | {f"{v}-{int(d)}s": (v, d) for v in VARIANTS for d in SHOT_DURATIONS}
+
+
+def beat_short(t: float) -> Beat:
+    """A short sting: the mark turns into place in 3D under a travelling glint."""
+    D = DURATION
+    b = Beat(t)
+    b.cam_z = 7.4 - 0.4 * float(smoother(t / D))
+    settle = 0.62 * D
+    m = 1.0 - (1.0 - min(max(t / settle, 0.0), 1.0)) ** 3          # decisive, soft landing
+    b.yaw = math.radians(-30.0) * (1.0 - m)
+    b.pitch = math.radians(10.0) * (1.0 - m)
+    b.mark_z = -0.2 * (1.0 - m)
+    b.rim = ramp(t, 0.0, 0.3 * D) * (0.4 + 0.6 * ramp(t, 0.1 * D, 0.5 * D))
+    b.fill = 0.24 * ramp(t, 0.04 * D, 0.32 * D) + 0.76 * ramp(t, 0.5 * D, 0.8 * D)
+    b.top = 0.5 * ramp(t, 0.04 * D, 0.32 * D) + 0.5 * ramp(t, 0.5 * D, 0.8 * D)
+    b.kick = ramp(t, 0.08 * D, 0.45 * D)
+    b.fill_dx = 0.2 * ramp(t, 0.6 * D, D)
+    b.key_x, level = key_state(t)
+    b.key = 1.45 * level
+    b.spark = ramp(t, 0.1 * D, 0.26 * D) * fall(t, 0.52 * D, 0.7 * D)
+    b.bloom = 0.25 + 0.45 * level
+    w0 = 0.55 * D
+    wd = 0.25 + 0.12 * D
+    b.word = ramp(t, w0, w0 + wd)
+    b.word_blur = 0.016 * (1.0 - ramp(t, w0, w0 + wd))
+    b.word_dy = 0.012 * (1.0 - ramp(t, w0, w0 + wd * 1.1))
+    s0 = w0 + 0.08 * D
+    b.rule = ramp(t, s0, s0 + wd)
+    b.sub = 0.86 * ramp(t, s0 + 0.03 * D, s0 + 0.03 * D + wd)
+    b.sub_blur = 0.008 * (1.0 - ramp(t, s0, s0 + wd))
+    b.sub_dy = 0.008 * (1.0 - ramp(t, s0, s0 + wd))
+    b.grain = ramp(t, 0.0, 0.12 * D)
+    return b
+
+
+def configure(shot: str):
+    """Point the module-level layout and timeline at one shot (before any Scene)."""
+    global DURATION, FRAMES, Y_APEX, MARK_CY, WORD_TOP, CAM_Y, F_4K, WALL_Z, THICKNESS
+    global SHOW_WORD, SHOW_SUB, POOL_REF_T, KEY_T0, KEY_T1, KEY_LEVEL, beat
+    variant, duration = SHOTS[shot]
+    lay = VARIANTS[variant]
+    DURATION, FRAMES = duration, int(round(FPS * duration))
+    Y_APEX, CAM_Y, F_4K = lay["y_apex"], lay["cam_y"], lay["focal"]
+    MARK_CY, WORD_TOP = Y_APEX + 0.5, Y_APEX + LK["wordmarkCapTop"]
+    SHOW_WORD, SHOW_SUB = lay["word"], lay["sub"]
+    if shot == "ident":
+        WALL_Z, THICKNESS, POOL_REF_T, beat = -0.30, 0.0, 4.8, beat_ident
+        KEY_T0, KEY_T1, KEY_LEVEL = 1.95, 3.45, (1.95, 2.35, 2.98, 3.42)
+    else:
+        WALL_Z, THICKNESS, POOL_REF_T, beat = -0.85, 0.075, 0.95 * duration, beat_short
+        FRONT.nu = FRONT.nw = 10   # the scrim is broad; fewer samples keep shorts fast
+        KEY_T0, KEY_T1 = 0.08 * duration, 0.74 * duration
+        span = KEY_T1 - KEY_T0
+        KEY_LEVEL = (KEY_T0, KEY_T0 + 0.22 * span, KEY_T1 - 0.28 * span, KEY_T1)
 
 
 # ---------------------------------------------------------------- output
@@ -796,7 +1003,9 @@ def cmd_stills(a):
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     scene = Scene(a.width, a.height, a.ss)
-    times = [float(v) for v in a.times.split(",")]
+    default = ("0.4,0.8,1.5,2.2,2.45,2.62,2.8,3.1,3.6,4.2,5.0,6.1" if a.shot == "ident"
+               else ",".join(f"{DURATION * f:.2f}" for f in (0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.8, 0.99)))
+    times = [float(v) for v in (a.times or default).split(",")]
     tiles = []
     for t in times:
         t0 = time.time()
@@ -844,18 +1053,37 @@ def cmd_encode(a):
     vf = "scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int"
     targets = {
         "4k-h264": dict(size=None, bits=8, grain=1.0, file="AXOM_ident_4K_30p_h264.mp4",
-                        codec=["-c:v", "libx264", "-preset", "slow", "-crf", "14", "-tune", "film", "-profile:v", "high",
+                        codec=["-c:v", "libx264", "-preset", "slow", "-crf", str(a.h264_4k_crf), "-tune", "film", "-profile:v", "high",
                                "-x264-params", "aq-mode=3:aq-strength=0.9:deblock=-1,-1", "-pix_fmt", "yuv420p"]),
         "4k-hevc10": dict(size=None, bits=10, grain=1.0, file="AXOM_ident_4K_30p_hevc10.mp4",
                           codec=["-c:v", "libx265", "-preset", "slow", "-crf", "14", "-pix_fmt", "yuv420p10le",
                                  "-tag:v", "hvc1", "-x265-params",
                                  "aq-mode=3:colorprim=bt709:transfer=bt709:colormatrix=bt709:range=limited:log-level=error"]),
+        # App cuts. 8-bit H.264 cannot keep dither in the dark pool without banding
+        # (or ~30 MB), so the app prefers 10-bit HEVC / VP9 and keeps H.264 as a
+        # last-resort fallback.
+        "1080-hevc10": dict(size=(1920, 1080), bits=10, grain=0.8, file="AXOM_ident_1080p_30p_hevc10.mp4",
+                            codec=["-c:v", "libx265", "-preset", "slow", "-crf", "16", "-pix_fmt", "yuv420p10le",
+                                   "-tag:v", "hvc1", "-x265-params",
+                                   "aq-mode=3:colorprim=bt709:transfer=bt709:colormatrix=bt709:range=limited:log-level=error"]),
+        "1080-vp9": dict(size=(1920, 1080), bits=10, grain=0.8, file="AXOM_ident_1080p_30p_vp9.webm",
+                         codec=["-c:v", "libvpx-vp9", "-pix_fmt", "yuv420p10le", "-profile:v", "2", "-crf", "20",
+                                "-b:v", "0", "-row-mt", "1", "-deadline", "good", "-cpu-used", "1",
+                                "-tile-columns", "2", "-g", "240"]),
         "1080-h264": dict(size=(1920, 1080), bits=8, grain=a.web_grain, file="AXOM_ident_1080p_30p_h264.mp4",
                           codec=["-c:v", "libx264", "-preset", "veryslow", "-crf", str(a.web_crf), "-tune", "film",
                                  "-profile:v", "high", "-x264-params", "aq-mode=3:aq-strength=1.0",
                                  "-pix_fmt", "yuv420p"]),
     }
     h0, w0 = load_png16(frames[0]).shape[:2]
+    if a.shot != "ident":
+        # Shorts: a 10-bit HEVC master and an H.264 copy at the rendered size.
+        stem = f"AXOM_{a.shot}_{h0}p_30p"
+        targets = {
+            "hevc10": dict(size=None, bits=10, grain=1.0, file=f"{stem}_hevc10.mp4", codec=targets["4k-hevc10"]["codec"]),
+            "h264": dict(size=None, bits=8, grain=1.0, file=f"{stem}_h264.mp4", codec=targets["4k-h264"]["codec"]),
+        }
+        a.targets = "hevc10,h264"
     jobs = []
     for name in a.targets.split(","):
         spec = targets[name]
@@ -863,7 +1091,7 @@ def cmd_encode(a):
         pix = "rgb48le" if spec["bits"] > 8 else "rgb24"
         cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", pix,
                "-s", f"{w}x{h}", "-r", str(FPS), "-i", "-", "-vf", vf, *spec["codec"], *tags,
-               "-movflags", "+faststart", "-an", str(out / spec["file"])]
+               *([] if spec["file"].endswith(".webm") else ["-movflags", "+faststart"]), "-an", str(out / spec["file"])]
         jobs.append((name, spec, (w, h), subprocess.Popen(cmd, stdin=subprocess.PIPE)))
     # One pass over the 16-bit masters feeds every encoder.
     for i, fp in enumerate(frames):
@@ -886,6 +1114,8 @@ def cmd_encode(a):
             sys.exit(f"ffmpeg failed for {name}")
         print(f"{name}: {out / spec['file']}  {(out / spec['file']).stat().st_size / 1e6:.1f} MB")
 
+    if a.shot != "ident":
+        return
     # A finished still of the full lockup (t = 5.0 s), dithered to 8 bit.
     hold = grain_frame(load_png16(frames[int(5.0 * FPS)]), 150, 1.0, 1 / 255.0)
     cv2.imwrite(str(out / "AXOM_ident_lockup_4K.png"),
@@ -899,20 +1129,50 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+# Codec strings match the published files (HEVC Main 10 L4.0, VP9 profile 2 L4.0).
+CATALOG_SOURCES = [
+    {"src": "startup/axom-ident-hevc10.mp4", "type": 'video/mp4; codecs="hvc1.2.4.L120.90"'},
+    {"src": "startup/axom-ident-vp9.webm", "type": 'video/webm; codecs="vp09.02.40.10"'},
+]
+
+
 def publish(out: Path):
-    """Install the 1080p cut as the app's startup film and record provenance."""
+    """Install the 1080p cuts as the `brand-ident` film and record provenance.
+
+    The film is registered in web/src/data/cinematics.json directly rather than
+    through scripts/import-cinematic.mjs, which re-encodes to one 8-bit file and
+    would drop the 10-bit `sources`.
+    """
     import shutil
     web = ROOT / "web" / "public" / "startup"
     web.mkdir(parents=True, exist_ok=True)
-    movie, poster = web / "axom-ident.mp4", web / "axom-ident-poster.png"
-    shutil.copyfile(out / "AXOM_ident_1080p_30p_h264.mp4", movie)
-    # Frame 1 of the film is exactly the overlay colour, so the poster is too.
-    night = np.round(linear_to_srgb(NIGHT) * 255).astype(np.uint8)
-    cv2.imwrite(str(poster), np.broadcast_to(night[::-1], (1080, 1920, 3)).copy())
+    cuts = {"axom-ident-hevc10.mp4": "AXOM_ident_1080p_30p_hevc10.mp4",
+            "axom-ident-vp9.webm": "AXOM_ident_1080p_30p_vp9.webm",
+            "axom-ident.mp4": "AXOM_ident_1080p_30p_h264.mp4"}
+    for dst, src in cuts.items():
+        shutil.copyfile(out / src, web / dst)
+    # Poster: the settled lockup, which Settings shows as the film's thumbnail
+    # (the intro overlay reveals decoded frames only, so it never flashes).
+    poster = web / "axom-ident-poster.jpg"
+    lockup = cv2.imread(str(out / "AXOM_ident_lockup_4K.png"))
+    cv2.imwrite(str(poster), cv2.resize(lockup, (960, 540), interpolation=cv2.INTER_AREA),
+                [cv2.IMWRITE_JPEG_QUALITY, 88])
     rel = lambda p: str(p.relative_to(ROOT))
+    catalog_path = ROOT / "web" / "src" / "data" / "cinematics.json"
+    catalog = json.loads(catalog_path.read_text())
+    catalog["brand-ident"] = {
+        "src": "startup/axom-ident.mp4",
+        "poster": rel(poster).removeprefix("web/public/"),
+        "background": "#0d0d0e",
+        "durationMs": int(round(DURATION * 1000)),
+        "placeholder": False,
+        "sources": CATALOG_SOURCES,
+    }
+    catalog_path.write_text(json.dumps(catalog, indent=2) + "\n")
     manifest = {
         "renderer": rel(Path(__file__)),
         "geometry": {"path": rel(GEOMETRY), "sha256": _sha(GEOMETRY)},
+        "catalog": {"path": rel(catalog_path), "film": "brand-ident"},
         "fps": FPS, "frames": FRAMES, "durationSeconds": DURATION,
         "master": [3840, 2160], "web": [1920, 1080],
         "background": "#0D0D0E",
@@ -920,10 +1180,12 @@ def publish(out: Path):
         "beats": {"faintEdge": [0.0, 0.8], "emerge": [0.8, 2.2], "luster": [2.2, 3.1],
                   "wordmark": [3.1, 4.0], "subtitle": [3.7, 4.4], "hold": [4.4, 5.5],
                   "retreat": [5.5, 6.5], "black": [6.5, 7.0]},
-        "assets": [{"path": rel(p), "bytes": p.stat().st_size, "sha256": _sha(p)} for p in (movie, poster)],
+        "assets": [{"path": rel(p), "bytes": p.stat().st_size, "sha256": _sha(p)}
+                   for p in [*(web / name for name in cuts), poster]],
     }
     (ROOT / "design" / "startup" / "ident-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    print(f"published {rel(movie)} ({movie.stat().st_size / 1e6:.2f} MB) and {rel(poster)}")
+    print("published", ", ".join(f"{name} ({(web / name).stat().st_size / 1e6:.2f} MB)" for name in cuts),
+          "and", rel(poster), "as the brand-ident film")
 
 
 def main():
@@ -939,16 +1201,26 @@ def main():
             q.add_argument("--jobs", type=int, default=os.cpu_count() or 1)
             q.add_argument("--range", default="")
         else:
-            q.add_argument("--times", default="0.4,0.8,1.5,2.2,2.45,2.62,2.8,3.1,3.6,4.2,5.0,6.1")
+            q.add_argument("--times", default="")
             q.add_argument("--sheet", action="store_true")
     q = sub.add_parser("encode")
     q.add_argument("--frames", required=True)
     q.add_argument("--out", required=True)
-    q.add_argument("--targets", default="4k-h264,4k-hevc10,1080-h264")
-    q.add_argument("--publish", action="store_true", help="install the 1080p cut into web/public/startup")
+    q.add_argument("--targets", default="4k-h264,4k-hevc10,1080-hevc10,1080-vp9,1080-h264")
+    q.add_argument("--publish", action="store_true", help="install the 1080p cuts into web/public/startup")
     q.add_argument("--web-crf", type=int, default=18, help="x264 CRF of the app cut")
+    q.add_argument("--h264-4k-crf", type=int, default=17, help="x264 CRF of the 4K compatibility master")
     q.add_argument("--web-grain", type=float, default=0.7, help="grain scale of the app cut")
+    q = sub.add_parser("publish", help="install already-encoded cuts from --out without re-encoding")
+    q.add_argument("--out", required=True)
+    for q in sub.choices.values():
+        q.add_argument("--shot", default="ident", choices=sorted(SHOTS),
+                       help="ident (7 s lockup) or a short: <mark|wordmark|lockup>-<2|3|4>s")
     a = p.parse_args()
+    configure(a.shot)
+    if a.cmd == "publish":
+        publish(Path(a.out))
+        return
     {"frames": cmd_frames, "stills": cmd_stills, "encode": cmd_encode}[a.cmd](a)
 
 

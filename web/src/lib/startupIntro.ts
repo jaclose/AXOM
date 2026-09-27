@@ -17,6 +17,16 @@ const EXIT_MS = 160;
 /** Headroom past the film's own length for decode start and the fade. */
 const DEADLINE_SLACK_MS = 700;
 
+/** The best encoding this engine can decode: 10-bit sources first, then `src`. */
+export function pickFilmSource(video: HTMLVideoElement, film: CinematicFilm): string {
+  for (const source of film.sources ?? []) {
+    try {
+      if (video.canPlayType(source.type)) return source.src;
+    } catch { /* An engine that cannot answer is treated as unsupported. */ }
+  }
+  return film.src;
+}
+
 export function introDeadlineMs(film: CinematicFilm): number {
   return film.durationMs + DEADLINE_SLACK_MS;
 }
@@ -96,7 +106,7 @@ export function startStartupIntro(options: StartupIntroOptions = {}): StartupInt
   const video = document.createElement("video");
   video.className = "axom-startup-intro__film";
   // Respect the same relative Vite base as the app's portable web package.
-  video.src = `${import.meta.env.BASE_URL}${film.src}`;
+  video.src = `${import.meta.env.BASE_URL}${pickFilmSource(video, film)}`;
   video.poster = `${import.meta.env.BASE_URL}${film.poster}`;
   video.muted = true;
   video.defaultMuted = true;

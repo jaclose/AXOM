@@ -10,7 +10,7 @@
 
 import FILM_MEDIA from "../data/cinematics.json";
 
-export type CinematicId = "slow-sweep" | "push-sweep" | "edge-glint" | "optical-luster";
+export type CinematicId = "slow-sweep" | "push-sweep" | "edge-glint" | "optical-luster" | "brand-ident";
 
 export interface CinematicFilm {
   id: CinematicId;
@@ -24,6 +24,14 @@ export interface CinematicFilm {
   durationMs: number;
   /** True while the film is a stand-in for the final render. */
   placeholder: boolean;
+  /** Higher-fidelity encodings (e.g. 10-bit) tried in order before `src`. */
+  sources?: readonly CinematicSource[];
+}
+
+export interface CinematicSource {
+  src: string;
+  /** A full MIME type with codecs, as `HTMLMediaElement.canPlayType` expects. */
+  type: string;
 }
 
 /** Copy lives here; measured media facts live in data/cinematics.json, which
@@ -33,9 +41,10 @@ const FILM_COPY: Record<CinematicId, Pick<CinematicFilm, "label" | "description"
   "push-sweep": { label: "Push sweep", description: "The camera eases in as the light passes. Used after updates." },
   "edge-glint": { label: "Edge glint", description: "A quick glint along the bevel. Used while an update installs." },
   "optical-luster": { label: "Classic mark", description: "The original ivory mark on black." },
+  "brand-ident": { label: "AXOM ident", description: "The full identity in brushed metal, revealed by one sweep of light (7 s)." },
 };
 
-type FilmMedia = Pick<CinematicFilm, "src" | "poster" | "background" | "durationMs" | "placeholder">;
+type FilmMedia = Pick<CinematicFilm, "src" | "poster" | "background" | "durationMs" | "placeholder" | "sources">;
 
 export const CINEMATICS = Object.fromEntries(
   (Object.keys(FILM_COPY) as CinematicId[]).map((id) => {
@@ -44,7 +53,7 @@ export const CINEMATICS = Object.fromEntries(
   }),
 ) as Record<CinematicId, CinematicFilm>;
 
-export const INTRO_FILM_ORDER: CinematicId[] = ["slow-sweep", "push-sweep", "edge-glint", "optical-luster"];
+export const INTRO_FILM_ORDER: CinematicId[] = ["slow-sweep", "push-sweep", "edge-glint", "optical-luster", "brand-ident"];
 
 export type IntroFrequency = "daily" | "weekly" | "updates" | "always" | "never";
 

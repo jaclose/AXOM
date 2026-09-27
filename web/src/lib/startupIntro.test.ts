@@ -4,6 +4,7 @@ import {
   STARTUP_INTRO_ENABLED_KEY,
   STARTUP_INTRO_MAX_MS,
   STARTUP_INTRO_SESSION_KEY,
+  pickFilmSource,
   startStartupIntro,
 } from "./startupIntro";
 import type { StartupIntro } from "./startupIntro";
@@ -246,6 +247,26 @@ describe("bounded startup cinematic", () => {
     writeCinematicPreferences({ frequency: "never" });
     players.push(startStartupIntro({ native: true, preview: { film: CINEMATICS["edge-glint"] } }));
     expect(film().src).toMatch(/luster-edge-glint\.mp4$/);
+  });
+
+  it.each([
+    [["hvc1"], /\/startup\/axom-ident-hevc10\.mp4$/],
+    [["vp09"], /\/startup\/axom-ident-vp9\.webm$/],
+    [["hvc1", "vp09"], /\/startup\/axom-ident-hevc10\.mp4$/],
+    [[], /\/startup\/axom-ident\.mp4$/],
+  ])("plays the ident's banding-free 10-bit cut when the engine decodes %j", (codecs, expected) => {
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockImplementation(
+      (type) => (codecs.some((codec) => type.includes(codec)) ? "probably" : ""),
+    );
+    players.push(startStartupIntro({ native: true, preview: { film: CINEMATICS["brand-ident"] } }));
+    expect(film().src).toMatch(expected);
+  });
+
+  it("falls back to a film's H.264 source when codec probing throws or it has no alternates", () => {
+    const video = document.createElement("video");
+    vi.spyOn(video, "canPlayType").mockImplementation(() => { throw new Error("unsupported"); });
+    expect(pickFilmSource(video, CINEMATICS["brand-ident"])).toBe("startup/axom-ident.mp4");
+    expect(pickFilmSource(video, CINEMATICS["slow-sweep"])).toBe(CINEMATICS["slow-sweep"].src);
   });
 
   it("honors AXOM's own reduced-motion setting, not only the OS", async () => {
