@@ -8,6 +8,7 @@ import { installMotionSync } from "./lib/motionPreference";
 import { installChunkRecovery, registerWebWorker } from "./lib/webUpdates";
 import { storeHydration } from "./lib/storeHydration";
 import { startStartupIntro } from "./lib/startupIntro";
+import { endPresentation, revealApp } from "./lib/presentation";
 import { AppErrorBoundary } from "./components/shell/AppErrorBoundary";
 import "./styles/global.css";
 import "./styles/components.css";
@@ -23,6 +24,7 @@ import "./styles/focus.css";
 import "./styles/account.css";
 import "./styles/settings.css";
 import "./styles/startupIntro.css";
+import "./styles/presentation.css";
 import "./styles/dock.css";
 import "./styles/soundscapes.css";
 import "./styles/energy.css";
@@ -51,6 +53,8 @@ installChunkRecovery();
 // Pure decoration: migrations and hydration run in parallel and never await
 // media. The player releases inputs on skip, failure, or its hard deadline.
 const startupIntro = startStartupIntro();
+// Without a film, the workspace still settles in quietly as it first renders.
+if (!startupIntro.playing) revealApp("open");
 
 async function bootstrap() {
   const rootElement = document.getElementById("root");
@@ -82,6 +86,7 @@ async function bootstrap() {
 
 function showStartupError(message?: string) {
   startupIntro.dismiss();
+  endPresentation();
   // This fallback must not depend on a lazy module: that may be what failed.
   const root = document.getElementById("root");
   if (!root) return;

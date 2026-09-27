@@ -9,12 +9,14 @@
   color: #f2eee6;
   isolation: isolate;
   opacity: 1;
-  transition: opacity 160ms ease-out;
+  /* The black layer dissolves while the shell settles in beneath it. */
+  transition: opacity var(--intro-fade, 560ms) cubic-bezier(0.4, 0, 0.2, 1);
   cursor: default;
 }
 
 .axom-startup-intro--leaving {
   opacity: 0;
+  pointer-events: none;
 }
 
 .axom-startup-intro__film {
@@ -30,6 +32,20 @@
 
 .axom-startup-intro__film--playing {
   opacity: 1;
+}
+
+/* A film that holds its last frame (a lockup) fades to its own black first,
+   so the order is always identity → darkness → AXOM, never two logos at once. */
+.axom-startup-intro--to-black .axom-startup-intro__film {
+  opacity: 0;
+  transition: opacity var(--intro-to-black, 380ms) cubic-bezier(0.4, 0, 1, 1);
+}
+
+.axom-startup-intro.axom-startup-intro--exiting .axom-startup-intro__controls,
+.axom-startup-intro.axom-startup-intro--exiting .axom-startup-intro__caption {
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+  pointer-events: none;
 }
 
 .axom-startup-intro__controls {

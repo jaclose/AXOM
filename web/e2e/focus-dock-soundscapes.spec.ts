@@ -101,9 +101,13 @@ test.describe("with motion allowed", () => {
     await page.goto("/#dashboard");
     const film = page.getByRole("dialog", { name: /Opening AXOM/ });
     await expect(film).toBeVisible();
-    await expect(film.locator("video")).toHaveAttribute("src", /cinematics\/luster-slow-sweep\.mp4$/);
+    // The very first open plays the full AXOM ident.
+    await expect(film.locator("video")).toHaveAttribute("src", /cinematics\/ident\.mp4$/);
     await page.keyboard.press("Escape");
     await expect(film).toBeHidden();
+    // Nothing lingers: no overlay, no video, no reveal left on the page.
+    await expect(page.locator(".axom-startup-intro, .axom-startup-intro__film")).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.reveal ?? null)).toBeNull();
     await page.reload();
     await page.waitForLoadState("networkidle");
     await expect(page.getByRole("dialog", { name: /Opening AXOM/ })).toHaveCount(0);

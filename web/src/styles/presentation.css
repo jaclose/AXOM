@@ -1,0 +1,88 @@
+/* ===========================================================================
+   Presentation: how the interface resolves (lib/presentation.ts).
+   :root[data-reveal]  after the opening film ("intro") or on a plain open.
+   .page[data-enter]   the first visit to a tab this session.
+   Whole regions only, never every nested child:
+     1. the shell and backdrop are already there (the film's black fades off them),
+     2. sidebar zones and the page heading, with their hairlines,
+     3. page sections, a few frames apart,
+     4. dashboard widgets and the top bar's secondary controls.
+   Opacity plus a few pixels of rise, eased out: no spring, overshoot or glow.
+   The whole reveal lasts about 0.9 s.
+   =========================================================================== */
+
+:root {
+  --reveal-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --reveal-dur: 460ms;
+}
+
+@keyframes axom-settle {
+  from { opacity: 0; transform: translate3d(0, 8px, 0); }
+}
+@keyframes axom-settle-card {
+  from { opacity: 0; transform: translate3d(0, 8px, 0) scale(0.99); }
+}
+/* Hairlines arrive with their regions rather than being there first. */
+@keyframes axom-rule {
+  from { border-color: transparent; }
+}
+
+/* Stagger index for sections and widgets (capped: late items don't wait long). */
+:is(.page > *, .page > :only-child > *, .dashboard-widget-grid > *):nth-child(2) { --reveal-i: 1; }
+:is(.page > *, .page > :only-child > *, .dashboard-widget-grid > *):nth-child(3) { --reveal-i: 2; }
+:is(.page > *, .page > :only-child > *, .dashboard-widget-grid > *):nth-child(4) { --reveal-i: 3; }
+:is(.page > *, .page > :only-child > *, .dashboard-widget-grid > *):nth-child(5) { --reveal-i: 4; }
+:is(.page > *, .page > :only-child > *, .dashboard-widget-grid > *):nth-child(6) { --reveal-i: 5; }
+:is(.page > *, .page > :only-child > *, .dashboard-widget-grid > *):nth-child(n + 7) { --reveal-i: 6; }
+
+/* --- Stage 2: navigation and the page heading --------------------------------- */
+:root[data-reveal] .sidebar { animation: axom-rule 520ms var(--reveal-ease) 80ms both; }
+:root[data-reveal] .sidebar .server-header {
+  animation: axom-settle var(--reveal-dur) var(--reveal-ease) 40ms both, axom-rule 520ms var(--reveal-ease) 120ms both;
+}
+:root[data-reveal] .sidebar .nav-manage-zone { animation: axom-settle var(--reveal-dur) var(--reveal-ease) 80ms both; }
+:root[data-reveal] .sidebar .nav { animation: axom-settle var(--reveal-dur) var(--reveal-ease) 110ms both; }
+:root[data-reveal] .sidebar .sidebar-foot { animation: axom-settle var(--reveal-dur) var(--reveal-ease) 170ms both; }
+:root[data-reveal] .topbar-heading { animation: axom-settle var(--reveal-dur) var(--reveal-ease) 90ms both; }
+
+/* --- Stage 3: page sections ------------------------------------------------------ */
+/* A page with several sections staggers them; a page wrapped in one element
+   staggers that wrapper's sections instead. The widget grid hands its stagger
+   to its widgets. */
+:root[data-reveal] .page > :not(.dashboard-widget-grid):not(:only-child),
+:root[data-reveal] .page > :only-child:not(.dashboard-widget-grid) > * {
+  animation: axom-settle var(--reveal-dur) var(--reveal-ease) both;
+  animation-delay: calc(160ms + var(--reveal-i, 0) * 45ms);
+}
+.page[data-enter] > :not(.dashboard-widget-grid):not(:only-child),
+.page[data-enter] > :only-child:not(.dashboard-widget-grid) > * {
+  animation: axom-settle var(--reveal-dur) var(--reveal-ease) both;
+  animation-delay: calc(var(--reveal-i, 0) * 40ms);
+}
+
+/* --- Stage 4: widgets and secondary controls ---------------------------------------- */
+:root[data-reveal] .dashboard-widget-grid > * {
+  animation: axom-settle-card var(--reveal-dur) var(--reveal-ease) both;
+  animation-delay: calc(260ms + var(--reveal-i, 0) * 30ms);
+}
+.page[data-enter] .dashboard-widget-grid > * {
+  animation: axom-settle-card var(--reveal-dur) var(--reveal-ease) both;
+  animation-delay: calc(80ms + var(--reveal-i, 0) * 30ms);
+}
+:root[data-reveal] .topbar .tb-actions { animation: axom-settle var(--reveal-dur) var(--reveal-ease) 300ms both; }
+
+/* --- Reduced motion: the interface is simply there. ---------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-reveal] :is(.sidebar, .sidebar .server-header, .sidebar .nav-manage-zone, .sidebar .nav, .sidebar .sidebar-foot, .topbar-heading, .topbar .tb-actions, .dashboard-widget-grid > *),
+  :root[data-reveal] .page > *,
+  :root[data-reveal] .page > :only-child > *,
+  .page[data-enter] > *,
+  .page[data-enter] > :only-child > *,
+  .page[data-enter] .dashboard-widget-grid > * { animation: none; }
+}
+:root[data-motion="reduce"][data-reveal] :is(.sidebar, .sidebar .server-header, .sidebar .nav-manage-zone, .sidebar .nav, .sidebar .sidebar-foot, .topbar-heading, .topbar .tb-actions, .dashboard-widget-grid > *),
+:root[data-motion="reduce"][data-reveal] .page > *,
+:root[data-motion="reduce"][data-reveal] .page > :only-child > *,
+:root[data-motion="reduce"] .page[data-enter] > *,
+:root[data-motion="reduce"] .page[data-enter] > :only-child > *,
+:root[data-motion="reduce"] .page[data-enter] .dashboard-widget-grid > * { animation: none; }

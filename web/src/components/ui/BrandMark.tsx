@@ -1,7 +1,10 @@
 // ===========================================================================
 // AXOM brand primitives. The official angular mark remains a tintable SVG so
 // it stays crisp in compact navigation, high-density displays, and print.
+// Geometry is traced from the AXOM ident film: an apex whose arms hook inward
+// toward a centre diamond, over two flaring legs.
 // ===========================================================================
+import { useId } from "react";
 
 export type AxomWordmarkSize = "sm" | "md" | "lg" | "hero";
 export type AxomMarkSize = "xs" | "sm" | "md" | "lg" | "hero";
@@ -25,6 +28,8 @@ export interface AxomMarkProps {
   /** Numeric values remain supported for existing compact placements. */
   size?: AxomMarkSize | number;
   framed?: boolean;
+  /** "metal": the brushed ivory of the brand film (graphite on light surfaces). */
+  finish?: "flat" | "metal";
   className?: string;
   /** Provide when the mark appears without the visible AXOM wordmark. */
   ariaLabel?: string;
@@ -38,6 +43,7 @@ export interface AxomBrandLockupProps {
   subtitle?: string;
   className?: string;
   markFramed?: boolean;
+  markFinish?: AxomMarkProps["finish"];
 }
 
 export function AxomWordmark({
@@ -81,10 +87,12 @@ export function AxomWordmark({
 export function AxomMark({
   size = "md",
   framed = false,
+  finish = "flat",
   className = "",
   ariaLabel,
 }: AxomMarkProps) {
   const pixels = typeof size === "number" ? size : MARK_SIZE[size];
+  const gradientId = `axom-metal-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   return (
     <span
       className={[
@@ -103,13 +111,24 @@ export function AxomMark({
         aria-hidden={ariaLabel ? undefined : true}
         focusable="false"
       >
-        {/* apex chevron with inward-tapered tips */}
-        <polygon points="50,4 71,46 63,49 50,22 37,49 29,46" />
-        {/* center diamond */}
-        <polygon points="50,50 59,60 50,70 41,60" />
-        {/* flaring legs */}
-        <polygon points="33,58 39,62 29,94 22,91" />
-        <polygon points="67,58 61,62 71,94 78,91" />
+        {finish === "metal" && (
+          <defs>
+            <linearGradient id={gradientId} x1="0.15" y1="0" x2="0.85" y2="1">
+              <stop offset="0" style={{ stopColor: "var(--axom-mark-hi)" }} />
+              <stop offset="0.55" style={{ stopColor: "var(--axom-mark-mid)" }} />
+              <stop offset="1" style={{ stopColor: "var(--axom-mark-lo)" }} />
+            </linearGradient>
+          </defs>
+        )}
+        <g fill={finish === "metal" ? `url(#${gradientId})` : undefined}>
+          {/* apex whose arms hook inward to fine points */}
+          <polygon points="50,6 72.4,45.5 58.1,58.1 65.3,44 50,21.3 34.7,44 41.9,58.1 27.6,45.5" />
+          {/* centre diamond */}
+          <polygon points="50,56.4 57.2,63.3 50,70.2 42.8,63.3" />
+          {/* flaring legs */}
+          <polygon points="22.88,54.34 28.97,56.55 6.83,94 0,93.1" />
+          <polygon points="77.12,54.34 71.03,56.55 93.17,94 100,93.1" />
+        </g>
       </svg>
     </span>
   );
@@ -123,6 +142,7 @@ export function AxomBrandLockup({
   subtitle,
   className = "",
   markFramed = false,
+  markFinish = "flat",
 }: AxomBrandLockupProps) {
   if (!showMark && !showWordmark) return null;
 
@@ -133,6 +153,7 @@ export function AxomBrandLockup({
         <AxomMark
           size={markSize}
           framed={markFramed}
+          finish={markFinish}
           ariaLabel={showWordmark ? undefined : "AXOM"}
         />
       )}
