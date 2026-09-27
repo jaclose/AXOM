@@ -31,5 +31,9 @@ logo.
 Example: `shorts-3s/AXOM_wordmark-3s_1080p_30p_h264.mp4` is the logo and AXOM,
 3 seconds, 1080p.
 
+`shorts-4s/` has only the logo-only version so far; rendering stopped before
+`wordmark-4s` and `lockup-4s`. To make them, see the next paragraph (shots
+`wordmark-4s` and `lockup-4s`).
+
 Re-render or change any of these with `scripts/startup-ident/render_ident.py`;
 see `scripts/startup-ident/README.md`.
