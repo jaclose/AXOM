@@ -18,6 +18,8 @@ export interface ReadinessInput {
   tasks: Task[];
   dayPlans: DayPlan[];
   productivityTrackers?: ProductivityTracker[];
+  /** One-tap energy checks (0–100). The latest one today wins over the journal label. */
+  energyChecks?: Array<{ at: string; score: number }>;
 }
 
 export interface SelfReportedEnergy {
@@ -206,7 +208,7 @@ export const QUICK_ENERGY_FACTORS: Array<Pick<EnergyFactor, "label" | "category"
 ];
 
 export function calculateReadiness(input: ReadinessInput): ReadinessResult {
-  const selfReportedEnergy = selfReportedEnergyForDay(input.journal, input.date);
+  const selfReportedEnergy = selfReportedEnergyForDay(input.journal, input.date, input.energyChecks);
   const possibleSignals = inferJournalSignals(input.journal, input.date)
     .filter((signal) => !input.factors.some((factor) => factor.id === signal.id));
   const contributions = [
@@ -323,7 +325,7 @@ function selfReportedContribution(energy: SelfReportedEnergy, date: string): Rea
     appliedDelta,
     confidence: 1,
     daysSince: 0,
-    explanation: "User-selected energy from today's standup.",
+    explanation: energy.source.startsWith("energy-check:") ? "Your latest one-tap energy check today." : "User-selected energy from today's standup.",
     userConfirmed: true,
     editable: false,
   }];
@@ -417,7 +419,14 @@ function implicit(
   };
 }
 
-function selfReportedEnergyForDay(journal: JournalEntry[], date: string): SelfReportedEnergy {
+function selfReportedEnergyForDay(journal: JournalEntry[], date: string, checks: ReadinessInput["energyChecks"] = []): SelfReportedEnergy {
+  const check = checks
+    .filter((item) => { const parsed = new Date(item.at); return !Number.isNaN(parsed.getTime()) && localDateKey(parsed) === date; })
+    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0];
+  if (check) {
+    const score = Math.max(0, Math.min(100, Math.round(check.score)));
+    return { score, label: score < 45 ? "Low" : score < 70 ? "Medium" : "High", source: `energy-check:${check.at}` };
+  }
   const entry = journalForLocalDate(journal, date)[0];
   if (!entry?.energy) return { score: 55, label: "Unlogged" };
   if (entry.energy === "High") return { score: 82, label: "High", source: entry.id };

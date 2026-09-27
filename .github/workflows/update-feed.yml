@@ -1,0 +1,55 @@
+name: AXOM Update Feed
+
+# Installed desktop apps poll one fixed URL:
+#   https://github.com/<owner>/<repo>/releases/download/update-feed/latest.json
+# GitHub's /releases/latest skips prereleases (every 0.x-prebeta build), so
+# this workflow copies the signed latest.json of each release you publish into
+# the fixed "update-feed" release. Drafts are never offered: nothing reaches
+# users until you press Publish on the draft the release workflow created.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-feed
+  cancel-in-progress: false
+
+jobs:
+  feed:
+    if: startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Point installed apps at this release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+          REPO: ${{ github.repository }}
+          TARGET: ${{ github.event.release.target_commitish }}
+        run: |
+          set -euo pipefail
+          mkdir -p feed
+          gh release download "$TAG" --repo "$REPO" --pattern latest.json --dir feed
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const manifest = JSON.parse(readFileSync('feed/latest.json', 'utf8'));
+          const tag = process.env.TAG;
+          if (`v${manifest.version}` !== tag) throw new Error(`latest.json is for ${manifest.version}, not ${tag}.`);
+          const platforms = Object.entries(manifest.platforms ?? {});
+          if (!platforms.length) throw new Error('latest.json lists no platforms.');
+          for (const [platform, entry] of platforms) {
+            if (!entry.signature || !entry.url?.startsWith('https://')) throw new Error(`Unsigned or non-HTTPS entry for ${platform}.`);
+            if (!entry.url.includes(`/releases/download/${tag}/`)) throw new Error(`${platform} points outside release ${tag}.`);
+          }
+          console.log(`Feed → ${manifest.version} (${platforms.map(([name]) => name).join(', ')})`);
+          NODE
+          if ! gh release view update-feed --repo "$REPO" >/dev/null 2>&1; then
+            gh release create update-feed --repo "$REPO" --target "$TARGET" --prerelease \
+              --title "AXOM update feed" \
+              --notes "Machine-readable channel for installed AXOM apps. Do not delete; download installers from the versioned releases."
+          fi
+          gh release upload update-feed feed/latest.json --repo "$REPO" --clobber

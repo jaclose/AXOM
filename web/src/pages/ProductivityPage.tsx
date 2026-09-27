@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Activity, BookOpen, CalendarDays, Clock, HelpCircle, History, Layers, Minus, Plus, Target, Timer, TrendingUp, X, Zap } from "lucide-react";
 import { useStore } from "../lib/store";
-import { dayTotals, gradeColor, Grade, isoDate, prettyDate, productiveTotals, todayGrade } from "../lib/scoring";
+import { dayTotals, gradeColor, gradeLegend, gradeTargetsFor, isoDate, prettyDate, productiveTotals, todayGrade, type Grade, type GradeTargets } from "../lib/scoring";
 import { previousLocalDateKey } from "../lib/dailyRollover";
 import type { StudyLog } from "../lib/types";
 import { GlassCard, GButton, PanelHeader, Tag } from "../components/ui/primitives";
@@ -10,6 +10,7 @@ import { Pomodoro } from "../components/productivity/Pomodoro";
 import { ActivityLabelInput } from "../components/productivity/ActivityLabelInput";
 import { DailyProgressVessel } from "../components/productivity/DailyProgressVessel";
 import { DailyRequirementsEditor } from "../components/productivity/DailyRequirementsEditor";
+import { TrackerManager } from "../components/productivity/TrackerManager";
 import { useInView } from "../lib/useInView";
 import { missedStandupDays } from "../lib/journal";
 import { gotoJournalDay } from "../lib/uiStore";
@@ -56,8 +57,8 @@ export function ProductivityPage() {
   // object here was both unnecessary and dependency-fragile; calculate it on
   // render so new requirements/logs can never leave the period floor stale.
   const trackingFloor = productivityTrackingFloor(s);
-  const weekly = useMemo(() => summarizePeriod(s.logs, daysEndingOn(s.activeDayKey, 7).filter((date) => isoDate(date) >= trackingFloor), "week", s.activeDayKey), [s.logs, s.activeDayKey, trackingFloor]);
-  const monthly = useMemo(() => summarizePeriod(s.logs, currentMonthDays(s.activeDayKey).filter((date) => isoDate(date) >= trackingFloor), "month", s.activeDayKey), [s.logs, s.activeDayKey, trackingFloor]);
+  const weekly = useMemo(() => summarizePeriod(s.logs, daysEndingOn(s.activeDayKey, 7).filter((date) => isoDate(date) >= trackingFloor), "week", s.activeDayKey, gradeTargetsFor(s.profile)), [s.logs, s.activeDayKey, trackingFloor, s.profile]);
+  const monthly = useMemo(() => summarizePeriod(s.logs, currentMonthDays(s.activeDayKey).filter((date) => isoDate(date) >= trackingFloor), "month", s.activeDayKey, gradeTargetsFor(s.profile)), [s.logs, s.activeDayKey, trackingFloor, s.profile]);
   const monthCells = useMemo(() => buildMonthCells(monthly.days), [monthly.days]);
   const calendarToday = s.activeDayKey;
   const missedSet = useMemo(() => new Set(missedStandupDays({ journal: s.journal, logs: s.logs, dayPlans: s.dayPlans }, s.activeDayKey)), [s.journal, s.logs, s.dayPlans, s.activeDayKey]);
@@ -174,6 +175,8 @@ export function ProductivityPage() {
         </div>
       </GlassCard>
 
+      {isActive && <TrackerManager />}
+
       {patternDays >= 3 && <div className="productivity-analytics" data-module-tour="productivity-trends">
         <GlassCard pad className="productivity-intel" data-tour="insights">
           <PanelHeader title="Weekly activity" sub="Calendar-aligned 7-day view of minutes and optional quantities"
@@ -192,7 +195,7 @@ export function ProductivityPage() {
 
         <GlassCard pad className="month-intel">
           <PanelHeader title="Monthly activity calendar" sub={`${monthly.label} · each cell follows the real calendar day`}
-            action={<Tag tone={monthly.activeDays ? scoreTone(monthly.grade) : "neutral"}>{monthly.activeDays}/${monthly.days.length} active</Tag>} />
+            action={<Tag tone={monthly.activeDays ? scoreTone(monthly.grade) : "neutral"}>{monthly.activeDays}/{monthly.days.length} active</Tag>} />
           <div className="month-summary">
             <Metric icon={<Activity size={ICON_SIZE.body} />} label="Month result" value={`${Math.round(monthly.minutes / 60)}h`} note={`${monthly.cards} cards`} />
             <Metric icon={<CalendarDays size={ICON_SIZE.body} />} label="Best day" value={monthly.bestDay ? shortDate(monthly.bestDay.key) : "None"} note={monthly.bestDay ? `${monthly.bestDay.minutes}m · ${monthly.bestDay.cards} cards` : "log a session"} />
@@ -211,10 +214,9 @@ export function ProductivityPage() {
           </div>
           <InsightList insights={monthly.insights} compact />
           <div className="heat-legend">
-            <span className="lg"><span className="sw" style={{ background: "color-mix(in srgb, var(--grade-red) 80%, transparent)" }} /> Red: logged, below baseline</span>
-            <span className="lg"><span className="sw" style={{ background: "color-mix(in srgb, var(--grade-orange) 82%, transparent)" }} /> Orange: solid day</span>
-            <span className="lg"><span className="sw" style={{ background: "color-mix(in srgb, var(--grade-green) 78%, transparent)" }} /> Green: strong day</span>
-            <span className="lg"><span className="sw" style={{ background: "color-mix(in srgb, var(--grade-blue) 88%, transparent)" }} /> 👑 Blue: excellent day</span>
+            {gradeLegend(gradeTargetsFor(s.profile)).map((row) => (
+              <span className="lg" key={row.grade}><span className="sw" style={{ background: gradeColor(row.grade) }} /> {row.label}</span>
+            ))}
           </div>
         </GlassCard>
       </div>}
@@ -341,11 +343,11 @@ function InsightList({
   );
 }
 
-function summarizePeriod(logs: ReturnType<typeof useStore.getState>["logs"], dates: Date[], span: "week" | "month", activeDayKey: string): PeriodSummary {
+function summarizePeriod(logs: ReturnType<typeof useStore.getState>["logs"], dates: Date[], span: "week" | "month", activeDayKey: string, targets?: GradeTargets): PeriodSummary {
   const days = dates.map((date) => {
     const key = isoDate(date);
     const totals = dayTotals(logs, key);
-    const grade = todayGrade(totals.minutes, totals.cards);
+    const grade = todayGrade(totals.minutes, totals.cards, targets);
     const intensity = Math.min(100, Math.max((totals.minutes / 480) * 100, (totals.cards / 350) * 100));
     return { key, date, minutes: totals.minutes, cards: totals.cards, grade, active: totals.minutes > 0 || totals.cards > 0, intensity };
   });
@@ -360,7 +362,7 @@ function summarizePeriod(logs: ReturnType<typeof useStore.getState>["logs"], dat
   const avgMinutes = activeDays ? Math.round(minutes / activeDays) : 0;
   const avgCards = activeDays ? Math.round(cards / activeDays) : 0;
   const consistency = Math.round((activeDays / Math.max(days.length, 1)) * 100);
-  const grade = todayGrade(avgMinutes, avgCards);
+  const grade = todayGrade(avgMinutes, avgCards, targets);
   const bestDay = [...days].sort((a, b) => b.intensity - a.intensity || b.minutes - a.minutes || b.cards - a.cards)[0];
   const monthName = days[0]?.date.toLocaleDateString(undefined, { month: "long", year: "numeric" }) ?? "Month";
   const label = span === "week" ? "Last 7 days" : monthName;

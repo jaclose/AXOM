@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { GhostButton } from "../ui/primitives";
 import { ICON_SIZE } from "../../lib/iconSize";
@@ -27,39 +27,58 @@ function evaluate(expr: string): string {
   }
 }
 
-export function QuizCalculator({ onClose }: { onClose: () => void }) {
-  const [expr, setExpr] = useState("");
-  const [result, setResult] = useState("");
+export interface QuizCalculatorValue {
+  expression: string;
+  result: string;
+}
+
+export function QuizCalculator({ onClose, value, onChange, showClose = true }: {
+  onClose: () => void;
+  value?: QuizCalculatorValue;
+  onChange?: (value: QuizCalculatorValue) => void;
+  showClose?: boolean;
+}) {
+  const [expr, setExpr] = useState(value?.expression ?? "");
+  const [result, setResult] = useState(value?.result ?? "");
   const panelRef = useRef<HTMLDivElement>(null);
 
+  const update = useCallback((nextExpression: string, nextResult = result) => {
+    setExpr(nextExpression);
+    setResult(nextResult);
+    onChange?.({ expression: nextExpression, result: nextResult });
+  }, [onChange, result]);
+
   const press = (k: string) => {
-    if (k === "C") { setExpr(""); setResult(""); return; }
-    if (k === "←") { setExpr((e) => e.slice(0, -1)); return; }
-    if (k === "=") { setResult(evaluate(expr)); return; }
-    setExpr((e) => e + (OPS[k] ? k : k));
+    if (k === "C") { update("", ""); return; }
+    if (k === "←") { update(expr.slice(0, -1)); return; }
+    if (k === "=") { update(expr, evaluate(expr)); return; }
+    update(expr + (OPS[k] ? k : k));
   };
 
   useEffect(() => {
     panelRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+  }, []);
+
+  useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") { onClose(); return; }
-      if (/^[0-9.]$/.test(e.key)) { setExpr((v) => v + e.key); e.preventDefault(); }
+      if (/^[0-9.]$/.test(e.key)) { update(expr + e.key); e.preventDefault(); }
       else if (["+", "-", "*", "/"].includes(e.key)) {
         const disp = { "+": "+", "-": "−", "*": "×", "/": "÷" }[e.key]!;
-        setExpr((v) => v + disp); e.preventDefault();
-      } else if (e.key === "Enter" || e.key === "=") { setResult(evaluate(expr)); e.preventDefault(); }
-      else if (e.key === "Backspace") { setExpr((v) => v.slice(0, -1)); e.preventDefault(); }
+        update(expr + disp); e.preventDefault();
+      } else if (e.key === "Enter" || e.key === "=") { update(expr, evaluate(expr)); e.preventDefault(); }
+      else if (e.key === "Backspace") { update(expr.slice(0, -1)); e.preventDefault(); }
     }
     const node = panelRef.current;
     node?.addEventListener("keydown", onKey);
     return () => node?.removeEventListener("keydown", onKey);
-  }, [expr, onClose]);
+  }, [expr, onClose, update]);
 
   return (
     <div className="quiz-calculator" ref={panelRef} role="dialog" aria-label="Calculator">
       <div className="quiz-calc-head">
         <span className="field-label">Calculator</span>
-        <GhostButton className="icon-only" aria-label="Close calculator" onClick={onClose}><X size={ICON_SIZE.body} /></GhostButton>
+        {showClose && <GhostButton className="icon-only" aria-label="Close calculator" onClick={onClose}><X size={ICON_SIZE.body} /></GhostButton>}
       </div>
       <div className="quiz-calc-display" aria-live="polite">
         <div className="quiz-calc-expr">{expr || "0"}</div>

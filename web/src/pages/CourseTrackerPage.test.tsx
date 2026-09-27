@@ -5,10 +5,13 @@ import { STORAGE_KEYS } from "../lib/brand";
 import { makeSeed } from "../lib/seed";
 import { useStore } from "../lib/store";
 import { useToasts } from "../lib/toast";
+import type { TrackerItem } from "../lib/types";
 import {
   announceCourseTrackerIntroOnce,
   CourseTrackerPage,
+  descendantScopes,
   extractTrackerImportFile,
+  groupItemsBySection,
   TRACKER_IMPORT_EXAMPLE,
 } from "./CourseTrackerPage";
 
@@ -35,6 +38,82 @@ afterEach(() => {
 });
 
 describe("Course Tracker comprehension layout", () => {
+  it("shows plan-relative progress and recalculates edited targets without rewriting history", () => {
+    const state = useStore.getState();
+    useStore.setState({
+      tracker: [{ ...state.tracker[0], id: "plan-progress", label: "Planned lecture", kind: "Lecture", passes: 4, ankiPasses: 2, yield: "high", studyPlanOverride: { lecturePasses: 6 } }],
+    });
+    render(<CourseTrackerPage />);
+    const progress = screen.getByRole("progressbar", { name: "Study-plan progress" });
+    expect(progress.getAttribute("aria-valuenow")).toBe("67");
+    expect(screen.getByText("4 of 6 passes · 2 remaining")).toBeTruthy();
+    expect(screen.getByText("1 item · 0 plan complete · 1 in progress · 0 not started")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit study plan" }));
+    fireEvent.change(within(screen.getByRole("dialog")).getByLabelText("Lecture passes"), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save plan" }));
+    expect(progress.getAttribute("aria-valuenow")).toBe("100");
+    expect(screen.getByText("4 passes recorded · Target of 2 reached")).toBeTruthy();
+    expect(screen.getByText("This scope is complete")).toBeTruthy();
+    expect(useStore.getState().tracker[0]).toMatchObject({ passes: 4, ankiPasses: 2, yield: "high" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit study plan" }));
+    fireEvent.change(within(screen.getByRole("dialog")).getByLabelText("Lecture passes"), { target: { value: "6" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save plan" }));
+    expect(progress.getAttribute("aria-valuenow")).toBe("67");
+    expect(screen.queryByText("This scope is complete")).toBeNull();
+    expect(useStore.getState().tracker[0].passes).toBe(4);
+  });
+
+  it("keeps previously recorded passes visible when a learner lowers the target", () => {
+    const state = useStore.getState();
+    useStore.setState({ tracker: [{ ...state.tracker[0], kind: "Lecture", passes: 6, studyPlanOverride: { lecturePasses: 2 } }] });
+    render(<CourseTrackerPage />);
+    expect(screen.getByText("6 passes recorded · Target of 2 reached")).toBeTruthy();
+    const sixth = screen.getByTitle("6 lecture passes");
+    expect(sixth.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(sixth);
+    expect(useStore.getState().tracker[0].passes).toBe(5);
+  });
+
+  it("lets the learner record and undo the sixth pass in a six-pass plan", () => {
+    const state = useStore.getState();
+    useStore.setState({
+      tracker: [{ ...state.tracker[0], id: "six-passes", label: "Six-pass lecture", kind: "Lecture", passes: 5, studyPlanOverride: { lecturePasses: 6 } }],
+    });
+    render(<CourseTrackerPage />);
+    const sixth = screen.getByTitle("6 lecture passes");
+    expect(sixth.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(sixth);
+    expect(useStore.getState().tracker[0].passes).toBe(6);
+    expect(sixth.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByText("This scope is complete")).toBeTruthy();
+    fireEvent.click(sixth);
+    expect(useStore.getState().tracker[0].passes).toBe(5);
+    expect(sixth.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("edits priority without enabling inherited methods or replacing hidden plan settings", () => {
+    const state = useStore.getState();
+    const item = { ...state.tracker[0], id: "personalized-item", label: "Personalized lecture", studyPlanOverride: {
+      reviewAfterDays: 7, customContext: "Keep my original context",
+      methods: [{ id: "custom" as const, enabled: true, label: "Whiteboard", timing: "ongoing" as const }],
+    } };
+    useStore.setState({ tracker: [item], profile: { ...state.profile, studyWorkflow: {
+      configured: true, lecturePasses: 4, methods: [{ id: "anki", enabled: false }, { id: "notes", enabled: true }],
+    } } });
+    render(<CourseTrackerPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit study plan" }));
+    const dialog = screen.getByRole("dialog", { name: "Study plan · Personalized lecture" });
+    expect(within(dialog).getByRole("button", { name: "Anki" }).getAttribute("aria-pressed")).toBe("false");
+    expect(within(dialog).getByRole("button", { name: "Notes" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.change(within(dialog).getByLabelText("Priority"), { target: { value: "4" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save plan" }));
+    expect(useStore.getState().tracker[0].studyPlanOverride).toEqual(item.studyPlanOverride);
+    expect(useStore.getState().tracker[0].explicitPriority).toBe(4);
+    expect(useStore.getState().profile.studyWorkflow?.methods).toEqual([{ id: "anki", enabled: false }, { id: "notes", enabled: true }]);
+  });
+
   it("places immediate import/add controls before a separate suggestions card and preserves tracker data", () => {
     const before = structuredClone(useStore.getState().tracker);
     const { container } = render(<CourseTrackerPage />);
@@ -64,11 +143,36 @@ describe("Course Tracker comprehension layout", () => {
     expect(screen.getByRole("dialog", { name: "Add course module" })).toBeTruthy();
   });
 
+  it("reviews, edits, and imports schedule candidates before persistence", () => {
+    render(<CourseTrackerPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Import schedule" }));
+    const dialog = screen.getByRole("dialog", { name: "Import course schedule" });
+    expect(within(dialog).getByRole("button", { name: "Add schedule files" })).toBeTruthy();
+    fireEvent.change(within(dialog).getByLabelText("Or paste schedule rows"), { target: { value: "2026-09-01,Unique Renal Seminar,Lecture" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Review schedule" }));
+    expect(within(dialog).getByText("1 ready")).toBeTruthy();
+    fireEvent.change(within(dialog).getByLabelText("Title"), { target: { value: "Edited Renal Seminar" } });
+    fireEvent.change(within(dialog).getByLabelText("Type"), { target: { value: "Assessment" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Import selected (1)" }));
+    expect(useStore.getState().tracker.some((item) => item.label === "Edited Renal Seminar" && item.kind === "Assessment" && item.assessmentDate === "2026-09-01")).toBe(true);
+  });
+
   it("opens suggestions for inspection without mutating pass history", () => {
     const before = useStore.getState().tracker.map((item) => ({ id: item.id, passes: item.passes }));
     render(<CourseTrackerPage />);
     fireEvent.click(screen.getAllByRole("button", { name: "Open" })[0]);
     expect(useStore.getState().tracker.map((item) => ({ id: item.id, passes: item.passes }))).toEqual(before);
+  });
+
+  it("defers a recommendation with explicit, reversible timing", () => {
+    render(<CourseTrackerPage />);
+    const deferButton = screen.getAllByRole("button", { name: /^Defer / })[0];
+    fireEvent.click(deferButton);
+    const dialog = screen.getByRole("dialog", { name: "When should this return?" });
+    expect(within(dialog).getByText(/stays in your Tracker/)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "In 2 days" }));
+    expect(useStore.getState().tracker.some((item) => item.recommendationSnoozedUntil && Date.parse(item.recommendationSnoozedUntil) > Date.now())).toBe(true);
+    expect(screen.queryByRole("dialog", { name: "When should this return?" })).toBeNull();
   });
 
   it("exposes a plain Help entry point and stable module-tour anchors", () => {
@@ -142,5 +246,56 @@ describe("Course Tracker local intro and file extraction", () => {
       fileName: "modules.md",
       extraction: { text: "Week 1:\n- Cardiac cycle", warnings: [] },
     });
+  });
+});
+
+describe("Course Tracker subsections", () => {
+  function item(id: string, path: string) {
+    const base = useStore.getState().tracker[0];
+    return { ...base, id, label: `Item ${id}`, path, kind: "Lecture" as const, passes: 0, ankiPasses: 0 };
+  }
+
+  it("groups items under the next path segment and lists deeper subsections", () => {
+    const items = [item("a", "Term 4/Cardio/Week 1"), item("b", "Term 4/Cardio/Week 2"), item("c", "Term 4/Renal"), item("d", "Term 4")];
+    const groups = groupItemsBySection("Term 4", items);
+    expect(groups.map((group) => [group.key, group.path, group.items.length])).toEqual([
+      ["", "Term 4", 1], ["Cardio", "Term 4/Cardio", 2], ["Renal", "Term 4/Renal", 1],
+    ]);
+    expect(descendantScopes("Term 4", ["Term 4", "Term 4/Renal", "Term 4/Cardio", "Term 4/Cardio/Week 10", "Term 4/Cardio/Week 2", "Term 5"]))
+      .toEqual(["Term 4/Cardio", "Term 4/Cardio/Week 2", "Term 4/Cardio/Week 10", "Term 4/Renal"]);
+  });
+
+  it("narrows to one subsection from the picker, remembers it, and shows a breadcrumb back", () => {
+    useStore.setState({ tracker: [item("a", "Term 4/Cardio/Week 1"), item("b", "Term 4/Renal/Week 1"), item("c", "Term 5/Neuro")] });
+    render(<CourseTrackerPage />);
+    fireEvent.change(screen.getByLabelText("Jump to a subsection"), { target: { value: "Term 4" } });
+    expect(screen.getByText("Item a")).toBeTruthy();
+    expect(screen.queryByText("Item c")).toBeNull();
+    expect(screen.getByRole("button", { name: /^Cardio/ }).getAttribute("aria-expanded")).toBe("true");
+
+    fireEvent.change(screen.getByLabelText("Jump to a subsection"), { target: { value: "Term 4/Renal" } });
+    expect(screen.queryByText("Item a")).toBeNull();
+    expect(screen.getByText("Item b")).toBeTruthy();
+    expect(localStorage.getItem("axom.tracker.scope.v1")).toBe("Term 4/Renal");
+
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Tracker location" })).getByRole("button", { name: "Term 4" }));
+    expect(screen.getByText("Item a")).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("button", { name: "Show only this" })[0]);
+    expect(screen.queryByText("Item b")).toBeNull();
+  });
+});
+
+describe("Course Tracker primary focus", () => {
+  it("stars a subsection, pins it, and opens on it next time", () => {
+    const make = (id: string, path: string): TrackerItem => ({ id, path, label: `${id} lecture`, kind: "Lecture", passes: 0, ankiPasses: 0, yield: "none", updated: "2026-09-01T12:00:00.000Z" });
+    useStore.setState({ tracker: [make("a", "Term 4/Cardio/Week 1"), make("b", "Term 4/Renal/Week 1")], profile: { ...useStore.getState().profile, primaryTrackerScopes: [] } });
+    render(<CourseTrackerPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Make Term 4 a primary focus" }));
+    expect(useStore.getState().profile.primaryTrackerScopes?.map((scope) => scope.path)).toEqual(["Term 4"]);
+    const pinned = screen.getByLabelText("Primary focus");
+    expect(within(pinned).getByText("Term 4")).toBeTruthy();
+    cleanup();
+    render(<CourseTrackerPage />);
+    expect(screen.getByRole("button", { name: "Primary focus" }).getAttribute("aria-pressed")).toBe("true");
   });
 });

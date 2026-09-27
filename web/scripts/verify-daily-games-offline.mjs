@@ -33,7 +33,7 @@ try {
   await page.goto(`${origin}/#daily-word`, { waitUntil: "networkidle" });
   await completeOnboarding(page);
   await page.evaluate(() => { window.location.hash = "daily-word"; });
-  await page.getByRole("heading", { level: 1, name: "Daily Games is currently disabled" }).waitFor();
+  await page.getByRole("heading", { level: 1, name: "AXOM Daily Word" }).waitFor();
 
   await page.evaluate(async () => {
     await navigator.serviceWorker.ready;
@@ -44,13 +44,6 @@ try {
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
 
-  const beforeEnable = await loadedDailyWordAssets(page);
-  if (beforeEnable.length) {
-    throw new Error(`Daily Word assets loaded while the optional module was disabled: ${beforeEnable.join(", ")}`);
-  }
-
-  await page.getByRole("button", { name: "Enable Daily Games" }).click();
-  await page.getByRole("heading", { level: 1, name: "AXOM Daily Word" }).waitFor();
   await page.keyboard.type("FOXES");
   await page.keyboard.press("Enter");
   await page.getByRole("gridcell", { name: /Row 1, column 1, letter F/ }).waitFor();
@@ -141,10 +134,4 @@ async function completeOnboarding(page) {
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Finish setup", exact: true }).click();
   await deferPromisePrompt(page);
-}
-
-async function loadedDailyWordAssets(page) {
-  return page.evaluate(() => performance.getEntriesByType("resource")
-    .map((entry) => entry.name)
-    .filter((name) => /DailyWordPage-.*\.(?:js|css)$|dailyWordWords-.*\.js$/.test(name)));
 }

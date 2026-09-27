@@ -37,6 +37,8 @@ export function normalizePomodoroPreferences(value: unknown): PomodoroPreference
     autoStartBreak: record.autoStartBreak !== false,
     autoStartFocus: record.autoStartFocus === true,
     savedPresets,
+    // Only an explicit choice is stored; unset keeps the default (on).
+    ...(typeof record.showInMenuBar === "boolean" ? { showInMenuBar: record.showInMenuBar } : {}),
   };
 }
 

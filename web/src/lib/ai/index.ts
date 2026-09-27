@@ -8,9 +8,12 @@ import type { AIProvider, CardGenerationStyle, GeneratedCardDraft, GeneratedQues
 import { loadAiSettings, type AiSettings } from "./settings";
 import { createOllamaProvider, detectOllama } from "./ollama";
 import { createMockProvider } from "./mock";
+import { createCloudProvider } from "./cloud";
+import { cloudConfigured, loadSupabase } from "../account/supabase";
 import { validateGeneratedCards, validateGeneratedQuestions } from "./schemas";
 
 export { detectOllama } from "./ollama";
+export { cloudAiRemaining } from "./cloud";
 export { loadAiSettings, saveAiSettings, DEFAULT_AI_SETTINGS } from "./settings";
 export type { AiSettings } from "./settings";
 export * from "./types";
@@ -25,16 +28,33 @@ export function resolveActiveProvider(settings: AiSettings = loadAiSettings()): 
   if (settings.mode === "local" && settings.localModel) {
     return createOllamaProvider(settings.localEndpoint, settings.localModel);
   }
-  // Cloud mode intentionally resolves to null until a secure proxy exists —
-  // there is no client-side key path by design (directive §7B).
+  // Cloud mode = AXOM Cloud AI: Claude through the ai-proxy Edge Function,
+  // authorized by the signed-in account. No client-side key path exists.
+  if (settings.mode === "cloud" && cloudConfigured()) {
+    return createCloudProvider({
+      endpoint: cloudEndpoint(settings),
+      apiKey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY,
+      getAccessToken: async () => {
+        const client = await loadSupabase();
+        const { data } = client ? await client.auth.getSession() : { data: { session: null } };
+        return data.session?.access_token ?? null;
+      },
+    });
+  }
   return null;
+}
+
+export function cloudEndpoint(settings: AiSettings = loadAiSettings()): string {
+  return settings.cloudProxyUrl || `${String(import.meta.env.VITE_SUPABASE_URL ?? "").replace(/\/$/, "")}/functions/v1/ai-proxy`;
 }
 
 /** Probe the configured provider; used by settings UI and feature gates. */
 export async function checkProviderHealth(settings: AiSettings = loadAiSettings()) {
   if (settings.mode === "off") return { ok: false, detail: "AI is turned off." };
   if (settings.mode === "cloud") {
-    return { ok: false, detail: "Cloud AI needs the secure server proxy (not yet available). Local Ollama works today without any key." };
+    if (!cloudConfigured()) return { ok: false, detail: "This build has no AXOM account server, so Cloud AI is unavailable. Local Ollama works without any key." };
+    const provider = resolveActiveProvider(settings);
+    return provider ? provider.available() : { ok: false, detail: "Cloud AI is unavailable." };
   }
   if (settings.mode === "mock") return { ok: true, detail: "Demo mode — canned outputs, clearly labeled." };
   return detectOllama(settings.localEndpoint);
@@ -102,6 +122,46 @@ async function completeText(provider: AIProvider, system: string, prompt: string
     : "";
   if (!text) throw new Error("The model returned an empty answer.");
   return text;
+}
+
+// --- card-level AI actions (Anki Lab reviewer) ---------------------------------
+// Inspired by in-reviewer AI sidebars (e.g. the "Anki Terminator" add-on), kept
+// to AXOM's rule: suggestions only; a rewrite is applied only when accepted.
+
+export function explainCard(provider: AIProvider, card: { front: string; back: string }): Promise<string> {
+  return completeText(
+    provider,
+    "You are a concise medical tutor. Explain the mechanism behind this flashcard so the answer becomes obvious, in plain language.",
+    `Card front: ${card.front.slice(0, 1500)}\nCard back: ${card.back.slice(0, 1500)}`,
+  );
+}
+
+export function cardMnemonic(provider: AIProvider, card: { front: string; back: string }): Promise<string> {
+  return completeText(
+    provider,
+    "You create one short, vivid, accurate memory hook (mnemonic, image or story) for a flashcard. Never change the facts.",
+    `Card front: ${card.front.slice(0, 1500)}\nCard back: ${card.back.slice(0, 1500)}`,
+  );
+}
+
+export interface CardRewrite {
+  front: string;
+  back: string;
+  why: string;
+}
+
+/** Propose a sharper card (minimum-information principle); the learner accepts or ignores it. */
+export async function sharpenCard(provider: AIProvider, card: { type: string; front: string; back: string }): Promise<CardRewrite> {
+  const raw = await provider.completeJson({
+    system: "You improve spaced-repetition flashcards using the minimum-information principle: one fact per card, unambiguous cue, no lists on the back, cloze syntax {{c1::...}} kept when present. Keep every fact accurate; never add facts that are not on the card. Return JSON {\"front\": string, \"back\": string, \"why\": string (one sentence)}.",
+    prompt: `Card type: ${card.type}\nFront: ${card.front.slice(0, 1500)}\nBack: ${card.back.slice(0, 1500)}`,
+    maxTokens: 600,
+  });
+  const value = raw as Partial<CardRewrite> | null;
+  if (!value || typeof value.front !== "string" || !value.front.trim() || typeof value.back !== "string") {
+    throw new Error("The model did not return a usable card.");
+  }
+  return { front: value.front.trim(), back: value.back.trim(), why: typeof value.why === "string" ? value.why.trim() : "" };
 }
 
 export function explainSimply(provider: AIProvider, q: { stem: string; correct?: string; explanation?: string }): Promise<string> {

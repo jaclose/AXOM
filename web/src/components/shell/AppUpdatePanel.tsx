@@ -1,16 +1,38 @@
-import { useSyncExternalStore } from "react";
+import { Suspense, lazy, useEffect, useState, useSyncExternalStore } from "react";
 import { Download, RefreshCw, ShieldCheck } from "lucide-react";
 import { appUpdates, type UpdatePhase } from "../../lib/appUpdates";
 import { APP_RELEASE_VERSION } from "../../lib/brand";
-import { ReleaseNotesHistory } from "./ReleaseNotesHistory";
 import { GButton } from "../ui/primitives";
 import { useStore } from "../../lib/store";
 import { findLiveSession } from "../../lib/sessions";
+import { UPDATE_PREFS_EVENT, readUpdatePreferences, writeUpdatePreferences } from "../../lib/updatePreferences";
+
+const ReleaseNotesHistory = lazy(() => import("./ReleaseNotesHistory").then((module) => ({ default: module.ReleaseNotesHistory })));
 
 export const UPDATE_BUSY_PHASES: UpdatePhase[] = ["checking", "downloading", "preparing", "installing", "restarting"];
 
+/** The one consent step before AXOM saves a checkpoint, installs, and restarts. */
+export function requestApplyUpdate(): void {
+  const state = appUpdates.getSnapshot();
+  const live = findLiveSession(useStore.getState().sessions ?? []);
+  const nextStep = state.desktop ? (state.restartPending ? "restart to finish the installed update" : "install the update and restart") : "refresh to the new web build";
+  const prompt = `${live ? "You have an open study session. " : ""}Finish any unsaved edits first. AXOM will save a workspace recovery snapshot, then ${nextStep}. Continue?`;
+  if (window.confirm(prompt)) void appUpdates.apply();
+}
+
+function useAutoDownload(): boolean {
+  const [value, setValue] = useState(() => readUpdatePreferences().autoDownload);
+  useEffect(() => {
+    const sync = () => setValue(readUpdatePreferences().autoDownload);
+    window.addEventListener(UPDATE_PREFS_EVENT, sync);
+    return () => window.removeEventListener(UPDATE_PREFS_EVENT, sync);
+  }, []);
+  return value;
+}
+
 export function AppUpdatePanel() {
   const state = useSyncExternalStore(appUpdates.subscribe, appUpdates.getSnapshot);
+  const autoDownload = useAutoDownload();
   const busy = UPDATE_BUSY_PHASES.includes(state.phase);
   const canApply = Boolean(state.version) && (!state.desktop || appUpdates.hasDownloaded() || state.restartPending);
   const status: Record<UpdatePhase, string> = {
@@ -26,12 +48,7 @@ export function AppUpdatePanel() {
     disabled: state.error ?? "Updates are unavailable for this build.",
     error: state.error ?? "The update could not finish. Try again later.",
   };
-  const apply = () => {
-    const live = findLiveSession(useStore.getState().sessions ?? []);
-    const nextStep = state.desktop ? (state.restartPending ? "restart to finish the installed update" : "install the update and restart") : "refresh to the new web build";
-    const prompt = `${live ? "You have an open study session. " : ""}Finish any unsaved edits first. AXOM will save a workspace recovery snapshot, then ${nextStep}. Continue?`;
-    if (window.confirm(prompt)) void appUpdates.apply();
-  };
+  const apply = requestApplyUpdate;
   return (
     <div className="backup-actions-panel" aria-busy={busy}>
       <div className="sync-title">App updates</div>
@@ -51,8 +68,14 @@ export function AppUpdatePanel() {
         {state.version && !busy && <GButton size="sm" onClick={() => appUpdates.defer()}>Remind me next time</GButton>}
       </div>
       {state.deferred && <p className="sub">Reminder deferred for this app session. You can still update here.</p>}
+      {state.desktop && (
+        <label className="row gap8 sub">
+          <input type="checkbox" checked={autoDownload} onChange={(event) => writeUpdatePreferences({ autoDownload: event.target.checked })} />
+          Download updates in the background (installing always waits for you)
+        </label>
+      )}
       <p className="sub">Your local workspace stays on this device. Before applying an update, AXOM verifies a workspace snapshot. Portable backups in Settings also include question-image attachments.</p>
-      <ReleaseNotesHistory />
+      <Suspense fallback={<p className="sub">Loading release notes…</p>}><ReleaseNotesHistory /></Suspense>
     </div>
   );
 }

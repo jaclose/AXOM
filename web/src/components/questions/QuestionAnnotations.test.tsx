@@ -30,24 +30,26 @@ describe("question annotation UI", () => {
   it("offers named, pressed toolbar controls and disables highlight without a selection", () => {
     render(
       <QuestionAnnotationToolbar
-        selectedTone="cyan"
+        activeMode={{ kind: "highlight", tone: "cyan" }}
         hasSelection={false}
-        onTone={() => {}}
+        onHighlightMode={() => {}}
+        onEraserMode={() => {}}
         onHighlight={() => {}}
         onClear={() => {}}
       />,
     );
     expect(screen.getByRole("toolbar", { name: "Question annotation tools" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Cyan highlight" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Cyan persistent highlight" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("button", { name: "Highlight selection" })).toHaveProperty("disabled", true);
   });
 
   it("announces an overlap rejection through the toolbar live status", () => {
     render(
       <QuestionAnnotationToolbar
-        selectedTone="yellow"
+        activeMode={{ kind: "highlight", tone: "yellow" }}
         hasSelection
-        onTone={() => {}}
+        onHighlightMode={() => {}}
+        onEraserMode={() => {}}
         onHighlight={() => {}}
         onClear={() => {}}
         statusMessage="Highlight overlaps an existing highlight."

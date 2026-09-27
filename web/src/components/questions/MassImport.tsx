@@ -2,32 +2,26 @@
 // Mass Import (rehaul phase 2) — a staged queue for many files at once:
 //   1. upload queue      2. extract text (parallel, capped)
 //   3. detect Q/A/expl   4. file-level summary
-//   5. inspect each file 6. batch-save clean files
-//   7. low-confidence files are flagged and can be opened in the single-file
-//      Import Center for full review.
-// Clean files (all high/medium confidence, no needs-review) can be batch-saved
-// as question sets; risky files require inspection. Never auto-saves garbage.
+//   5. inspect each file 6. hand off to the single-file Import Center
+// Every parsed file, including a high-confidence one, must pass through the
+// shared editable review before it can be finalized. This queue never persists
+// questions, sets, or source documents directly.
 // ===========================================================================
-import { useRef, useState } from "react";
-import { FileUp, RefreshCw, Save, CheckCircle2, AlertTriangle, Trash2, Eye } from "lucide-react";
-import { useStore } from "../../lib/store";
-import { parseQuestionBlocks, type ParsedQuestionDraft } from "../../lib/questionParse";
+import { useEffect, useRef, useState } from "react";
+import { FileUp, RefreshCw, CheckCircle2, AlertTriangle, Trash2, Eye } from "lucide-react";
+import { associateAnswerSource, parseAnswerSections, parseQuestionBlocks, type ParsedQuestionDraft } from "../../lib/questionParse";
 import { importFromCsv, importFromJson } from "../../lib/questionImport";
 import { extractDocxText, extractPdfText, extractPlainText } from "../../lib/extractText";
-import { documentTitleFromFile, type QuestionSet, type SourceDocument } from "../../lib/library";
-import { suggestCategory, normalizeTags } from "../../lib/taxonomy";
-import { enhanceQuestionSet, resolveActiveProvider } from "../../lib/ai";
-import { hashGenerationInput, saveAiGeneration } from "../../lib/aiGenerations";
+import { documentTitleFromFile } from "../../lib/library";
 import type { QuestionSource } from "../../lib/questions";
 import { GlassCard, GButton, GhostButton, PanelHeader, Tag, EmptyState } from "../ui/primitives";
-import { pushToast } from "../../lib/toast";
 import { sha256Hex } from "../../lib/checksum";
 import { assignDraftProvenancePages } from "../../lib/questionProvenance";
 import type { ImportSeed } from "./ImportPanel";
 import { draftImportStatus } from "../../lib/questionImportTrust";
 import { ICON_SIZE } from "../../lib/iconSize";
 
-type FileStatus = "queued" | "extracting" | "parsing" | "ready" | "needs-review" | "no-text" | "error" | "saved";
+type FileStatus = "queued" | "extracting" | "parsing" | "ready" | "needs-review" | "answer-source" | "no-text" | "error";
 
 interface QueuedFile {
   id: string;
@@ -53,13 +47,46 @@ export function massImportFileStatus(drafts: readonly ParsedQuestionDraft[]): "e
   return drafts.every((draft) => draftImportStatus(draft) === "ready") ? "ready" : "needs-review";
 }
 
-export function MassImport({ onInspect }: { onInspect: (payload: ImportSeed & { title: string; drafts: ParsedQuestionDraft[]; rawText: string; fileName: string }) => void }) {
-  const s = useStore();
+export function MassImport({
+  onInspect,
+  finalizedQueueId,
+}: {
+  onInspect: (payload: ImportSeed & { title: string; drafts: ParsedQuestionDraft[]; rawText: string; fileName: string }) => void;
+  finalizedQueueId?: string;
+}) {
   const [queue, setQueue] = useState<QueuedFile[]>([]);
   const [processing, setProcessing] = useState(false);
-  const [batchAi, setBatchAi] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
-  const provider = resolveActiveProvider();
+  const ownedFileIds = useRef(new Set<string>());
+  const queueRef = useRef(queue);
+
+  useEffect(() => { queueRef.current = queue; }, [queue]);
+
+  useEffect(() => () => {
+    for (const id of ownedFileIds.current) fileMap.delete(id);
+    ownedFileIds.current.clear();
+  }, []);
+
+  useEffect(() => {
+    if (!finalizedQueueId) return;
+    const current = queueRef.current;
+    const removedIndex = current.findIndex((file) => file.id === finalizedQueueId);
+    const remaining = current.filter((file) => file.id !== finalizedQueueId);
+    const focusFile = removedIndex >= 0
+      ? remaining[Math.min(removedIndex, remaining.length - 1)]
+      : undefined;
+    fileMap.delete(finalizedQueueId);
+    ownedFileIds.current.delete(finalizedQueueId);
+    queueRef.current = remaining;
+    setQueue(remaining);
+    if (focusFile) {
+      const inspectable = (focusFile.status === "needs-review" || focusFile.status === "ready")
+        && focusFile.drafts.length > 0;
+      focusAfterQueueUpdate(inspectable
+        ? `mass-import-inspect-${focusFile.id}`
+        : `mass-import-remove-${focusFile.id}`);
+    }
+  }, [finalizedQueueId]);
 
   function enqueue(files: FileList) {
     const added: QueuedFile[] = Array.from(files).map((f) => ({
@@ -75,7 +102,10 @@ export function MassImport({ onInspect }: { onInspect: (payload: ImportSeed & { 
       source: sourceKind(f),
     }));
     // Keep the File objects alongside the queue rows for processing.
-    added.forEach((row, i) => fileMap.set(row.id, files[i]));
+    added.forEach((row, i) => {
+      fileMap.set(row.id, files[i]);
+      ownedFileIds.current.add(row.id);
+    });
     setQueue((q) => [...q, ...added]);
   }
 
@@ -96,6 +126,22 @@ export function MassImport({ onInspect }: { onInspect: (payload: ImportSeed & { 
 
   function patch(id: string, next: Partial<QueuedFile>) {
     setQueue((q) => q.map((f) => (f.id === id ? { ...f, ...next } : f)));
+  }
+
+  function removeQueuedFile(id: string) {
+    const index = queue.findIndex((file) => file.id === id);
+    const focusFile = queue[index + 1] ?? queue[index - 1];
+    fileMap.delete(id);
+    ownedFileIds.current.delete(id);
+    setQueue((current) => current.filter((file) => file.id !== id));
+    const restoreFocus = () => {
+      const target = document.getElementById(
+        focusFile ? `mass-import-remove-${focusFile.id}` : "mass-import-add-files",
+      );
+      if (target instanceof HTMLElement) target.focus();
+    };
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(restoreFocus);
+    else setTimeout(restoreFocus, 0);
   }
 
   async function processOne(id: string) {
@@ -150,139 +196,37 @@ export function MassImport({ onInspect }: { onInspect: (payload: ImportSeed & { 
       });
     } catch (err) {
       patch(id, { status: "error", error: err instanceof Error ? err.message : "Could not read this file." });
-    }
+    } finally { /* retain the File for an explicit retry; removal/finalization releases it */ }
   }
 
-  function saveClean() {
-    const clean = queue.filter((f) => f.status === "ready");
-    let sets = 0;
-    let totalQ = 0;
-    for (const file of clean) {
-      const existingDoc = file.checksum
-        ? (s.documents ?? []).find((document) => document.checksum === file.checksum)
-        : undefined;
-      const docId = existingDoc?.id ?? uid();
-      const setId = uid();
-      const questionIds: string[] = [];
-      for (const d of file.drafts) {
-        const suggestion = suggestCategory(`${d.stem} ${d.options.map((o) => o.text).join(" ")} ${d.explanation ?? ""}`);
-        const result = s.addQuestion({
-          source: file.source,
-          stem: d.stem,
-          options: d.options,
-          correctKey: d.correctKey,
-          correctAnswerText: d.correctAnswerText,
-          explanation: d.explanation,
-          choiceRationales: d.choiceRationales,
-          needsReview: d.needsReview,
-          topic: d.topic,
-          objective: d.objective,
-          category: d.category ?? (suggestion.autoAssign ? suggestion.category : undefined),
-          bank: documentTitleFromFile(file.fileName),
-          setId,
-          sourceDocumentId: docId,
-          questionNumber: d.questionNumber,
-          sourcePage: d.sourcePage,
-          citation: d.reference ?? file.fileName,
-          tags: normalizeTags([...(d.tags ?? []), ...suggestion.tags]),
-          status: "unseen",
-          extraction: {
-            confidence: d.confidence,
-            reviewed: true,
-            reviewedAt: new Date().toISOString(),
-            questionDetectionConfidence: d.questionDetectionConfidence,
-            answerDetectionConfidence: d.answerDetectionConfidence,
-            explanationDetectionConfidence: d.explanationDetectionConfidence,
-            overallImportConfidence: d.overallImportConfidence,
-            warnings: d.warnings,
-            parserRuleIds: d.parserRuleIds,
-            sourceSnippet: d.sourceSnippet,
-            questionSourceSnippet: d.questionSourceSnippet,
-            questionSourcePage: d.questionSourcePage,
-            answerEvidence: d.answerEvidence,
-            answerEvidenceSnippet: d.answerEvidenceSnippet,
-            answerEvidencePage: d.answerEvidencePage,
-            explanationSourceSnippet: d.explanationSourceSnippet,
-            explanationSourcePage: d.explanationSourcePage,
-            explanationSource: d.explanationSource,
-            explanationRawCandidate: d.explanationRawCandidate,
-            explanationCleanupOperations: d.explanationCleanupOperations,
-          },
-        });
-        if (result.ok && result.id) questionIds.push(result.id);
-      }
-      if (!questionIds.length) continue;
-      const qset: QuestionSet = {
-        id: setId,
-        title: documentTitleFromFile(file.fileName),
-        sourceDocumentIds: [docId],
-        createdAt: new Date().toISOString(),
-        questionIds,
-        tags: [],
-        aiEnhanced: false,
-        parserWarnings: file.warnings,
-      };
-      s.addQuestionSet(qset);
-      if (existingDoc) {
-        s.updateDocument(existingDoc.id, {
-          linkedQuestionSetIds: [...new Set([...existingDoc.linkedQuestionSetIds, setId])],
-          libraryOnly: false,
-        });
-      } else {
-        const doc: SourceDocument = {
-          id: docId,
-          title: documentTitleFromFile(file.fileName),
-          fileName: file.fileName,
-          fileType: file.fileType,
-          uploadedAt: new Date().toISOString(),
-          rawText: file.rawText,
-          pageTexts: file.pageTexts,
-          sizeBytes: file.sizeBytes,
-          checksum: file.checksum,
-          tags: [],
-          linkedQuestionSetIds: [setId],
-          libraryOnly: false,
-        };
-        s.addDocument(doc);
-      }
-      patch(file.id, { status: "saved" });
-      sets++;
-      totalQ += questionIds.length;
+  function retry(id: string) {
+    patch(id, { status: "queued", error: undefined, warnings: [], drafts: [], rawText: "" });
+    queueMicrotask(() => void processOne(id));
+  }
 
-      if (batchAi && provider) {
-        const forDigest = file.drafts.map((d) => ({ stem: d.stem, correct: d.options.find((o) => o.key === d.correctKey)?.text, explanation: d.explanation }));
-        enhanceQuestionSet(provider, { title: qset.title, questions: forDigest })
-          .then((digest) => {
-            s.updateQuestionSet(setId, { aiEnhanced: true, digest: { ...digest, generatedBy: provider.info.label, generatedAt: new Date().toISOString() } });
-            void saveAiGeneration({
-              kind: "summary",
-              title: `${qset.title} digest`,
-              inputHash: hashGenerationInput({ kind: "mass-import-digest", setId, questionIds }),
-              sourceIds: [setId, docId],
-              model: provider.info.label,
-              promptVersion: "question-set-digest-v1",
-              content: digest,
-              metadata: { provider: provider.info.label, fileName: file.fileName, questionCount: questionIds.length },
-            });
-          })
-          .catch(() => { /* enhancement is best-effort */ });
-      }
-    }
-    pushToast({
-      title: sets ? `Saved ${sets} set${sets === 1 ? "" : "s"} · ${totalQ} questions` : "Nothing clean to save",
-      body: sets ? "Flagged files still need inspection before they save." : "Import files first, then inspect any flagged ones.",
-      tone: sets ? "success" : "warn",
+  function associateAnswers(answerFile: QueuedFile, target: QueuedFile) {
+    const result = associateAnswerSource(target.drafts, answerFile.rawText);
+    const status = massImportFileStatus(result.drafts);
+    patch(target.id, {
+      drafts: result.drafts,
+      status,
+      answerKeyDetected: result.matched > 0,
+      warnings: [...target.warnings, `Matched ${result.matched} numbered answer${result.matched === 1 ? "" : "s"} from ${answerFile.fileName}.`, ...(result.unmatchedNumbers.length ? [`Unmatched answer numbers: ${result.unmatchedNumbers.join(", ")}.`] : [])],
     });
+    patch(answerFile.id, { status: "answer-source", error: undefined });
   }
 
-  const cleanCount = queue.filter((f) => f.status === "ready").length;
+  const readyCount = queue.filter((f) => f.status === "ready").length;
+  const needsReviewCount = queue.filter((f) => f.status === "needs-review").length;
   const anyQueued = queue.some((f) => f.status === "queued");
+  const failedCount = queue.filter((f) => f.status === "error" || f.status === "no-text").length;
+  const finishedCount = queue.filter((f) => !["queued", "extracting", "parsing"].includes(f.status)).length;
 
   return (
     <GlassCard>
       <PanelHeader
         title="Import"
-        sub="Upload one file or several related files — extraction, review routing, and batch save happen automatically."
+        sub="Upload one file or several related files. AXOM extracts and summarizes each file, then sends it through editable review before finalization."
         action={
           <div className="row">
             <input
@@ -294,7 +238,7 @@ export function MassImport({ onInspect }: { onInspect: (payload: ImportSeed & { 
               className="visually-hidden-input"
               onChange={(e) => { if (e.target.files?.length) enqueue(e.target.files); e.target.value = ""; }}
             />
-            <GhostButton onClick={() => fileInput.current?.click()}><FileUp size={ICON_SIZE.body} /> Add files</GhostButton>
+            <GhostButton id="mass-import-add-files" onClick={() => fileInput.current?.click()}><FileUp size={ICON_SIZE.body} /> Add files</GhostButton>
             <GButton size="sm" variant="primary" disabled={!anyQueued || processing} onClick={() => void processAll()}>
               {processing ? <RefreshCw size={ICON_SIZE.body} className="spin" /> : <RefreshCw size={ICON_SIZE.body} />} {processing ? "Importing…" : "Import files"}
             </GButton>
@@ -303,17 +247,17 @@ export function MassImport({ onInspect }: { onInspect: (payload: ImportSeed & { 
       />
 
       {queue.length === 0 ? (
-        <EmptyState icon={<FileUp size={ICON_SIZE.emphasis} />} title="No files queued" hint="Add several PDFs or documents at once — each is parsed and summarized before you save." />
+        <EmptyState icon={<FileUp size={ICON_SIZE.emphasis} />} title="No files queued" hint="Add several PDFs or documents at once — each is parsed and summarized before inspection." />
       ) : (
         <div className="stack" style={{ gap: 10 }}>
           <div className="spread" style={{ flexWrap: "wrap", gap: 8 }}>
-            <label className="row" style={{ gap: 6, cursor: provider ? "pointer" : "not-allowed", opacity: provider ? 1 : 0.55 }}>
-              <input type="checkbox" checked={batchAi} disabled={!provider} onChange={() => setBatchAi((v) => !v)} />
-              <span className="sub">AI-enhance each saved set (digest + pitfalls){provider ? "" : " — needs a provider"}</span>
-            </label>
-            <GButton size="sm" variant="primary" disabled={!cleanCount} onClick={saveClean}>
-              <Save size={ICON_SIZE.body} /> Batch-save {cleanCount} clean file{cleanCount === 1 ? "" : "s"}
-            </GButton>
+            <div className="row wrap gap6" aria-label="Mass import review status">
+              <Tag tone="green">Ready to inspect {readyCount}</Tag>
+              <Tag tone="orange">Needs review {needsReviewCount}</Tag>
+              <Tag tone="red">Could not import {failedCount}</Tag>
+              <Tag tone="cyan">Processed {finishedCount}/{queue.length}</Tag>
+            </div>
+            <span className="sub">Inspect each parsed file to edit and finalize its questions.</span>
           </div>
 
           <div className="stack gap6">
@@ -325,7 +269,7 @@ export function MassImport({ onInspect }: { onInspect: (payload: ImportSeed & { 
                     <span className="truncate" style={{ fontWeight: 600 }}>{file.fileName}</span>
                     <span className="sub truncate">
                       {file.fileType.toUpperCase()} · {Math.round(file.sizeBytes / 1024)} KB
-                      {file.status === "ready" || file.status === "needs-review" || file.status === "saved"
+                      {file.status === "ready" || file.status === "needs-review"
                         ? ` · ${file.drafts.length} questions · answer key ${file.answerKeyDetected ? "found" : "not found"}`
                         : ""}
                       {file.error ? ` · ${file.error}` : ""}
@@ -333,8 +277,12 @@ export function MassImport({ onInspect }: { onInspect: (payload: ImportSeed & { 
                   </div>
                   <StatusTag status={file.status} />
                   {(file.status === "needs-review" || file.status === "ready") && file.drafts.length > 0 && (
-                    <GhostButton title="Open in Import Center for full review"
+                    <GhostButton
+                      id={`mass-import-inspect-${file.id}`}
+                      aria-label={`Inspect ${file.fileName}`}
+                      title="Open in Import Center for full review"
                       onClick={() => onInspect({
+                        batchQueueId: file.id,
                         title: documentTitleFromFile(file.fileName),
                         drafts: file.drafts,
                         rawText: file.rawText,
@@ -349,7 +297,23 @@ export function MassImport({ onInspect }: { onInspect: (payload: ImportSeed & { 
                       <Eye size={ICON_SIZE.body} /> Inspect
                     </GhostButton>
                   )}
-                  <GhostButton aria-label={`Remove ${file.fileName}`} onClick={() => { fileMap.delete(file.id); setQueue((q) => q.filter((f) => f.id !== file.id)); }}>
+                  {file.status === "error" && parseAnswerSections(file.rawText).entries.size > 0 && queue.filter((candidate) => candidate.drafts.length > 0).length === 1 && (
+                    <GhostButton aria-label={`Match ${file.fileName} to questions`} onClick={() => associateAnswers(file, queue.find((candidate) => candidate.drafts.length > 0)!)}>
+                      Match answers
+                    </GhostButton>
+                  )}
+                  {file.status === "answer-source" && (
+                    <GhostButton aria-label={`Inspect ${file.fileName}`} onClick={() => onInspect({ batchQueueId: file.id, title: documentTitleFromFile(file.fileName), drafts: [], rawText: file.rawText, fileName: file.fileName, fileType: file.fileType, sizeBytes: file.sizeBytes, checksum: file.checksum, warnings: file.warnings, source: file.source })}>
+                      <Eye size={ICON_SIZE.body} /> Keep source
+                    </GhostButton>
+                  )}
+                  {(file.status === "error" || file.status === "no-text") && fileMap.has(file.id) && (
+                    <GhostButton aria-label={`Retry ${file.fileName}`} onClick={() => retry(file.id)}>
+                      <RefreshCw size={ICON_SIZE.body} /> Retry
+                    </GhostButton>
+                  )}
+                  <GhostButton id={`mass-import-remove-${file.id}`} aria-label={`Remove ${file.fileName}`}
+                    onClick={() => removeQueuedFile(file.id)}>
                     <Trash2 size={ICON_SIZE.body} />
                   </GhostButton>
                 </div>
@@ -363,6 +327,15 @@ export function MassImport({ onInspect }: { onInspect: (payload: ImportSeed & { 
       )}
     </GlassCard>
   );
+}
+
+function focusAfterQueueUpdate(elementId: string) {
+  const restore = () => {
+    const target = document.getElementById(elementId);
+    if (target instanceof HTMLElement) target.focus();
+  };
+  if (typeof requestAnimationFrame === "function") requestAnimationFrame(restore);
+  else setTimeout(restore, 0);
 }
 
 // File objects can't live in React state cleanly across renders; keep them in a
@@ -387,7 +360,7 @@ function assignSourcePages(drafts: ParsedQuestionDraft[], pages: string[]) {
 }
 
 function StatusIcon({ status }: { status: FileStatus }) {
-  if (status === "saved" || status === "ready") return <CheckCircle2 size={ICON_SIZE.emphasis} style={{ color: "var(--grade-green)" }} />;
+  if (status === "ready") return <CheckCircle2 size={ICON_SIZE.emphasis} style={{ color: "var(--grade-green)" }} />;
   if (status === "needs-review" || status === "no-text" || status === "error") return <AlertTriangle size={ICON_SIZE.emphasis} style={{ color: "var(--grade-orange)" }} />;
   if (status === "extracting" || status === "parsing") return <RefreshCw size={ICON_SIZE.emphasis} className="spin" />;
   return <FileUp size={ICON_SIZE.emphasis} className="dim" />;
@@ -398,11 +371,11 @@ function StatusTag({ status }: { status: FileStatus }) {
     queued: { label: "queued", tone: "neutral" },
     extracting: { label: "extracting", tone: "cyan" },
     parsing: { label: "parsing", tone: "cyan" },
-    ready: { label: "ready", tone: "green" },
+    ready: { label: "ready to inspect", tone: "green" },
     "needs-review": { label: "needs review", tone: "orange" },
+    "answer-source": { label: "answers matched", tone: "cyan" },
     "no-text": { label: "no text (scan)", tone: "orange" },
     error: { label: "no questions", tone: "red" },
-    saved: { label: "saved", tone: "green" },
   };
   const meta = map[status];
   return <Tag tone={meta.tone}>{meta.label}</Tag>;

@@ -2,13 +2,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   STARTUP_INTRO_ENABLED_KEY,
-  STARTUP_INTRO_FILM_MS,
   STARTUP_INTRO_MAX_MS,
   STARTUP_INTRO_SESSION_KEY,
-  STARTUP_INTRO_START_MS,
   startStartupIntro,
 } from "./startupIntro";
 import type { StartupIntro } from "./startupIntro";
+import { CINEMATICS, CINEMATIC_LEDGER_KEY, writeCinematicPreferences } from "./cinematics";
 
 let players: StartupIntro[];
 function start(native = false) {
@@ -60,8 +59,8 @@ describe("bounded startup cinematic", () => {
     expect(film().muted).toBe(true);
     expect(film().defaultMuted).toBe(true);
     expect(film().playsInline).toBe(true);
-    expect(film().src).toMatch(/\/startup\/axom-ident\.mp4$/);
-    expect(film().poster).toMatch(/\/startup\/axom-ident-poster\.png$/);
+    expect(film().src).toMatch(/\/cinematics\/luster-slow-sweep\.mp4$/);
+    expect(film().poster).toMatch(/\/cinematics\/luster-slow-sweep-poster\.jpg$/);
     expect(film().play).toHaveBeenCalledOnce();
     expect(film().classList.contains("axom-startup-intro__film--playing")).toBe(false);
     film().dispatchEvent(new Event("playing"));
@@ -71,16 +70,10 @@ describe("bounded startup cinematic", () => {
     expect(localStorage.getItem("workspace-fixture")).toBe(savedWorkspace);
   });
 
-  it("lets a film that starts at the last moment finish, with bounded slack", () => {
-    expect(STARTUP_INTRO_START_MS).toBeLessThanOrEqual(2_000);
-    expect(STARTUP_INTRO_MAX_MS).toBeGreaterThanOrEqual(STARTUP_INTRO_START_MS + STARTUP_INTRO_FILM_MS);
-    expect(STARTUP_INTRO_MAX_MS - STARTUP_INTRO_START_MS - STARTUP_INTRO_FILM_MS).toBeLessThanOrEqual(1_000);
-  });
-
-  it("fails open and releases media, input, and timers when the film never starts", async () => {
+  it("finishes and releases media, input, and timers at a hard deadline even if decoding hangs", async () => {
     const player = start();
     const video = film();
-    await vi.advanceTimersByTimeAsync(STARTUP_INTRO_START_MS - 1);
+    await vi.advanceTimersByTimeAsync(STARTUP_INTRO_MAX_MS - 1);
     expect(overlay()).not.toBeNull();
     await vi.advanceTimersByTimeAsync(1);
     await expect(player.finished).resolves.toBeUndefined();
@@ -92,23 +85,8 @@ describe("bounded startup cinematic", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("finishes at a hard deadline even if a playing film stalls", async () => {
-    const player = start();
-    const video = film();
-    video.dispatchEvent(new Event("playing"));
-    await vi.advanceTimersByTimeAsync(STARTUP_INTRO_MAX_MS - 1);
-    expect(overlay()).not.toBeNull();
-    await vi.advanceTimersByTimeAsync(1);
-    await expect(player.finished).resolves.toBeUndefined();
-    expect(overlay()).toBeNull();
-    expect(root().hasAttribute("inert")).toBe(false);
-    expect(video.hasAttribute("src")).toBe(false);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
   it("crossfades on video end but never extends the hard deadline", async () => {
     start();
-    film().dispatchEvent(new Event("playing"));
     await vi.advanceTimersByTimeAsync(STARTUP_INTRO_MAX_MS - 50);
     film().dispatchEvent(new Event("ended"));
     expect(overlay()?.classList.contains("axom-startup-intro--leaving")).toBe(true);
@@ -159,7 +137,7 @@ describe("bounded startup cinematic", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("plays once per web tab session and leaves navigation untouched", async () => {
+  it("plays once per day by default and leaves navigation untouched", async () => {
     const first = start();
     first.dismiss();
     expect(sessionStorage.getItem(STARTUP_INTRO_SESSION_KEY)).toBe("1");
@@ -172,6 +150,7 @@ describe("bounded startup cinematic", () => {
   });
 
   it("does not use the web session marker for a native startup", () => {
+    writeCinematicPreferences({ frequency: "always" });
     sessionStorage.setItem(STARTUP_INTRO_SESSION_KEY, "1");
     const first = start(true);
     expect(overlay()).not.toBeNull();
@@ -250,5 +229,34 @@ describe("bounded startup cinematic", () => {
     expect(overlay()).toBeNull();
     expect(root().hasAttribute("inert")).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("plays the update film once, with a caption, on the first open after an update", async () => {
+    localStorage.setItem(CINEMATIC_LEDGER_KEY, JSON.stringify({ lastSeenVersion: "0.0.1", lastPlayedDay: "2000-01-01" }));
+    const player = startStartupIntro({ native: true, version: "0.0.2" });
+    players.push(player);
+    expect(film().src).toMatch(/luster-push-sweep\.mp4$/);
+    expect(overlay()!.querySelector(".axom-startup-intro__caption")?.textContent).toBe("Updated to v0.0.2");
+    player.dismiss();
+    players.push(startStartupIntro({ native: true, version: "0.0.2" }));
+    expect(overlay()).toBeNull();
+  });
+
+  it("previews a chosen film immediately, whatever the schedule", () => {
+    writeCinematicPreferences({ frequency: "never" });
+    players.push(startStartupIntro({ native: true, preview: { film: CINEMATICS["edge-glint"] } }));
+    expect(film().src).toMatch(/luster-edge-glint\.mp4$/);
+  });
+
+  it("honors AXOM's own reduced-motion setting, not only the OS", async () => {
+    document.documentElement.dataset.motion = "reduce";
+    try {
+      const player = start();
+      await player.finished;
+      expect(overlay()).toBeNull();
+      expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+    } finally {
+      delete document.documentElement.dataset.motion;
+    }
   });
 });

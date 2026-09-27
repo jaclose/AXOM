@@ -15,6 +15,8 @@ import { pushToast } from "../../lib/toast";
 import type { QuestionRecord } from "../../lib/questions";
 import { QuestionSetCard } from "./QuestionSetCard";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { createQuestionSetShare } from "../../lib/sharing/questionSetShare";
+import { publishShare } from "../../lib/sharing/supabaseSharing";
 
 const NO_QUESTIONS: QuestionRecord[] = [];
 const NO_DOCUMENTS: SourceDocument[] = [];
@@ -169,6 +171,17 @@ export function QuestionSetList({
       setEnhancing(null);
     }
   }
+  async function share(set: QuestionSet) {
+    try {
+      const snapshot = createQuestionSetShare(set, questions);
+      const result = await publishShare(set.id, snapshot);
+      const link = `${location.origin}${location.pathname}#shared-set?token=${encodeURIComponent(result.token)}`;
+      await navigator.clipboard.writeText(link);
+      pushToast({ title: "Private share link copied", body: "Only the resolved Question Set snapshot is included. Attempts, notes, annotations, and private workspace data are excluded.", tone: "success" });
+    } catch (error) {
+      pushToast({ title: "Share not created", body: error instanceof Error ? error.message : "Sign in and try again.", tone: "warn" });
+    }
+  }
 
   return (
     <GlassCard>
@@ -211,6 +224,7 @@ export function QuestionSetList({
                   const title = prompt("Rename this question set:", set.title)?.trim();
                   if (title && title !== set.title) s.updateQuestionSet(set.id, { title });
                 } : undefined}
+                onShare={!compact ? () => void share(set) : undefined}
                 compact={compact}
               >
                 {!compact && set.digest && (

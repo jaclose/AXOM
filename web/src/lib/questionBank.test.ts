@@ -434,14 +434,253 @@ describe("structured answer parsing and import diagnostics", () => {
     expect(drafts.every((draft) => draft.needsReview)).toBe(true);
   });
 
-  it("does not confidently split malformed bare-number prefixes", () => {
+  it("retains malformed bare-number prefixes as separate review candidates", () => {
     const drafts = parseQuestionBlocks([
       "1 First malformed stem?", "A. one", "B. two", "C. three", "Answer: A", "",
       "2 Second malformed stem?", "A. one", "B. two", "C. three", "Answer: B",
     ].join("\n"));
+    expect(drafts).toHaveLength(2);
+    expect(drafts.map((draft) => draft.questionNumber)).toEqual([1, 2]);
+    expect(drafts.map((draft) => draft.stem)).toEqual([
+      "First malformed stem?",
+      "Second malformed stem?",
+    ]);
+    expect(drafts.map((draft) => draft.correctKey)).toEqual(["A", "B"]);
+    expect(drafts.every((draft) => draft.needsReview)).toBe(true);
+    expect(drafts.every((draft) => (draft.questionDetectionConfidence ?? 1) <= 0.55)).toBe(true);
+    expect(drafts.every((draft) => draft.parserRuleIds?.includes("question.malformed-boundary"))).toBe(true);
+    expect(drafts.every((draft) => draft.warnings.some((warning) => /retained as a separate question/i.test(warning)))).toBe(true);
+  });
+
+  it("keeps answer and reasoning provenance attached across malformed question boundaries", () => {
+    const drafts = parseQuestionBlocks([
+      "11 First multiline stem begins with a clinical clue",
+      "and continues with the finding that identifies the mechanism?",
+      "A) Alpha", "B) Beta", "C) Gamma", "Ans: B",
+      "Reasoning: Beta follows from the first mechanism.",
+      "The second line completes only the first explanation.", "",
+      "12 Second multiline stem begins here",
+      "and asks about a different mechanism?",
+      "A: Delta", "B: Epsilon", "C: Zeta", "Correct answer: C",
+      "Explanation: Zeta follows from the second mechanism.",
+    ].join("\n"));
+
+    expect(drafts).toHaveLength(2);
+    expect(drafts.map((draft) => draft.correctKey)).toEqual(["B", "C"]);
+    expect(drafts[0].stem).toContain("clinical clue\nand continues");
+    expect(drafts[1].stem).toContain("begins here\nand asks");
+    expect(drafts[0].explanation).toBe([
+      "Beta follows from the first mechanism.",
+      "The second line completes only the first explanation.",
+    ].join("\n"));
+    expect(drafts[1].explanation).toBe("Zeta follows from the second mechanism.");
+    expect(drafts[0].explanationSourceSnippet).not.toContain("Second multiline stem");
+    expect(drafts[1].explanationSourceSnippet).not.toContain("first mechanism");
+  });
+
+  it("keeps malformed numbered drafts in review after a trailing answer key maps successfully", () => {
+    const drafts = parseQuestionBlocks([
+      "1 First malformed question?", "A. Alpha", "B. Beta", "C. Gamma", "",
+      "2 Second malformed question?", "A. Alpha", "B. Beta", "C. Gamma", "",
+      "Answer key:", "1. B", "2. C",
+    ].join("\n"));
+
+    expect(drafts.map((draft) => draft.correctKey)).toEqual(["B", "C"]);
+    expect(drafts.every((draft) => draft.needsReview)).toBe(true);
+    expect(drafts.every((draft) => draft.parserRuleIds?.includes("question.malformed-boundary"))).toBe(true);
+  });
+
+  it("retains a standard numbered question with missing choices between valid neighbors", () => {
+    const drafts = parseQuestionBlocks([
+      "1. First valid question?", "A. Alpha", "B. Beta", "Answer: A", "",
+      "2. Which finding is missing its choices?",
+      "Explanation: This malformed question still belongs to question two.", "",
+      "3. Third valid question?", "A. Gamma", "B. Delta", "Answer: B",
+    ].join("\n"));
+
+    expect(drafts).toHaveLength(3);
+    expect(drafts.map((draft) => draft.questionNumber)).toEqual([1, 2, 3]);
+    expect(drafts[1].stem).toBe("Which finding is missing its choices?");
+    expect(drafts[1].options).toEqual([]);
+    expect(drafts[1].explanation).toBe("This malformed question still belongs to question two.");
+    expect(drafts[1].needsReview).toBe(true);
+    expect(drafts[1].parserRuleIds).toContain("question.numbered-boundary");
+    expect(drafts[1].parserRuleIds).not.toContain("question.malformed-boundary");
+    expect(drafts[0].explanation ?? "").not.toContain("question two");
+    expect(drafts[2].correctKey).toBe("B");
+  });
+
+  it("retains a zero-choice numbered question after an explanation instead of swallowing it", () => {
+    const drafts = parseQuestionBlocks([
+      "1. First valid question?", "A. Alpha", "B. Beta", "Answer: A",
+      "Explanation: The first explanation ends here.",
+      "2. Which second question has no choices?",
+      "3. Third valid question?", "A. Gamma", "B. Delta", "Answer: B",
+    ].join("\n"));
+
+    expect(drafts).toHaveLength(3);
+    expect(drafts.map((item) => item.questionNumber)).toEqual([1, 2, 3]);
+    expect(drafts[0].explanation).toBe("The first explanation ends here.");
+    expect(drafts[0].parserRuleIds).toContain("explanation.ambiguous-boundary");
+    expect(drafts[1]).toMatchObject({
+      stem: "Which second question has no choices?",
+      options: [],
+      needsReview: true,
+    });
+    expect(drafts[1].parserRuleIds).toContain("question.ambiguous-explanation-boundary");
+    expect(drafts[2].correctKey).toBe("B");
+  });
+
+  it("retains an unnumbered question-shaped preamble before a numbered sequence", () => {
+    const drafts = parseQuestionBlocks([
+      "Unnumbered first question?", "A. Alpha", "B. Beta", "Answer: A",
+      "Explanation: First explanation.", "",
+      "1. Numbered second question?", "A. Gamma", "B. Delta", "Answer: B",
+    ].join("\n"));
+
+    expect(drafts).toHaveLength(2);
+    expect(drafts[0]).toMatchObject({
+      stem: "Unnumbered first question?",
+      correctKey: "A",
+      needsReview: true,
+    });
+    expect(drafts[0].questionNumber).toBeUndefined();
+    expect(drafts[0].parserRuleIds).toContain("question.malformed-boundary");
+    expect(drafts[1]).toMatchObject({ questionNumber: 1, correctKey: "B" });
+  });
+
+  it("does not promote a numeric clinical detail inside a multiline stem to a question boundary", () => {
+    const drafts = parseQuestionBlocks([
+      "1. A patient begins treatment.",
+      "20 mg daily is prescribed before symptoms improve.",
+      "Which mechanism best explains the response?",
+      "A. Alpha", "B. Beta", "C. Gamma", "Answer: B",
+    ].join("\n"));
+
     expect(drafts).toHaveLength(1);
+    expect(drafts[0].stem).toContain("20 mg daily");
+    expect(drafts[0].correctKey).toBe("B");
+  });
+
+  it("keeps a numbered findings list inside the complete multiline stem", () => {
+    const drafts = parseQuestionBlocks([
+      "1. A patient has these findings:",
+      "1. first mechanism",
+      "2. second mechanism",
+      "Which diagnosis is most likely?",
+      "A. Alpha",
+      "B. Beta",
+      "Answer: B",
+    ].join("\n"));
+
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]).toMatchObject({ questionNumber: 1, correctKey: "B" });
+    expect(drafts[0].stem).toBe([
+      "A patient has these findings:",
+      "1. first mechanism",
+      "2. second mechanism",
+      "Which diagnosis is most likely?",
+    ].join("\n"));
+    expect(drafts[0].parserRuleIds).toContain("question.numbered-stem-list");
+    expect(drafts[0].parserRuleIds).toContain("question.ambiguous-numbered-stem-list");
     expect(drafts[0].needsReview).toBe(true);
-    expect(drafts[0].questionDetectionConfidence).toBeLessThan(0.9);
+  });
+
+  it("keeps a numbered findings list when the outer stem is already question-shaped", () => {
+    const drafts = parseQuestionBlocks([
+      "1. Which findings are present?",
+      "1. first mechanism",
+      "2. second mechanism",
+      "Select the best diagnosis.",
+      "A. Alpha",
+      "B. Beta",
+      "Answer: B",
+    ].join("\n"));
+
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]).toMatchObject({ questionNumber: 1, correctKey: "B" });
+    expect(drafts[0].stem).toContain("1. first mechanism\n2. second mechanism");
+    expect(drafts[0].parserRuleIds).toContain("question.numbered-stem-list");
+    expect(drafts[0].parserRuleIds).toContain("question.ambiguous-numbered-stem-list");
+    expect(drafts[0].needsReview).toBe(true);
+  });
+
+  it("keeps a numbered findings list inside an unnumbered question", () => {
+    const drafts = parseQuestionBlocks([
+      "Which findings are present?",
+      "1. first finding",
+      "2. second finding",
+      "Select the best diagnosis.",
+      "A. Alpha",
+      "B. Beta",
+      "Answer: B",
+    ].join("\n"));
+
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]).toMatchObject({
+      stem: [
+        "Which findings are present?",
+        "1. first finding",
+        "2. second finding",
+        "Select the best diagnosis.",
+      ].join("\n"),
+      correctKey: "B",
+    });
+    expect(drafts[0].questionNumber).toBeUndefined();
+    expect(drafts[0].parserRuleIds).toContain("question.numbered-stem-list");
+    expect(drafts[0].parserRuleIds).toContain("question.ambiguous-numbered-stem-list");
+    expect(drafts[0].needsReview).toBe(true);
+  });
+
+  it("keeps an unnumbered question's numbered findings without a trailing directive", () => {
+    const drafts = parseQuestionBlocks([
+      "Which findings are present?",
+      "1. first finding",
+      "2. second finding",
+      "A. Alpha",
+      "B. Beta",
+      "Answer: B",
+    ].join("\n"));
+
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]).toMatchObject({
+      stem: "Which findings are present?\n1. first finding\n2. second finding",
+      correctKey: "B",
+      needsReview: true,
+    });
+  });
+
+  it("does not swallow forward-numbered questions as a nested stem list", () => {
+    const drafts = parseQuestionBlocks([
+      "1. Which question lacks choices?",
+      "2. A patient has fever.",
+      "3. A patient has cough.",
+      "Which diagnosis is likely?",
+      "A. Alpha",
+      "B. Beta",
+      "Answer: B",
+    ].join("\n"));
+
+    expect(drafts.map((draft) => draft.questionNumber)).toEqual([1, 3]);
+    expect(drafts[0]).toMatchObject({ needsReview: true });
+    expect(drafts[0].stem).not.toContain("A patient has cough");
+    expect(drafts[1]).toMatchObject({
+      stem: "A patient has cough.\nWhich diagnosis is likely?",
+      correctKey: "B",
+    });
+    expect(drafts[0].parserRuleIds).not.toContain("question.numbered-stem-list");
+  });
+
+  it("does not swallow a numbered question that follows Reference metadata without a blank", () => {
+    const drafts = parseQuestionBlocks([
+      "1. First question?", "A. Alpha", "B. Beta", "Answer: A", "Reference: Source one.",
+      "2. Second question?", "A. Gamma", "B. Delta", "Answer: A",
+    ].join("\n"));
+
+    expect(drafts).toHaveLength(2);
+    expect(drafts[0]).toMatchObject({ questionNumber: 1, reference: "Source one.", correctKey: "A" });
+    expect(drafts[0].reference).not.toContain("Second question");
+    expect(drafts[1]).toMatchObject({ questionNumber: 2, stem: "Second question?", correctKey: "A" });
   });
 
   it("does not mistake a standalone Explanation header for an answer section", () => {
@@ -619,6 +858,112 @@ describe("answer-mapping regression safety", () => {
     expect(draft.options.map((option) => option.text)).toEqual(["Alpha", "Beta", "Gamma", "Delta"]);
     expect(draft.explanation).toContain("A. common distraction");
     expect(draft.explanation).toContain("B. Beta is supported");
+  });
+
+  it("keeps lettered lists inside multiline Reasoning prose out of the option list", () => {
+    const [draft] = parseQuestionBlocks([
+      "1) Which mechanism is best supported?",
+      "The finding persists after the initial exposure.",
+      "A) Immediate antibody release", "B) Sensitized T-cell response", "C) Immune-complex deposition",
+      "Answer: B. Sensitized T-cell response",
+      "Reasoning:",
+      "The evidence supports a delayed cellular response.",
+      "A. The timing is delayed rather than immediate.",
+      "B. Prior sensitization is required.",
+      "C. Immune complexes are not described.",
+    ].join("\n"));
+
+    expect(draft.options).toEqual([
+      { key: "A", text: "Immediate antibody release" },
+      { key: "B", text: "Sensitized T-cell response" },
+      { key: "C", text: "Immune-complex deposition" },
+    ]);
+    expect(draft.correctKey).toBe("B");
+    expect(draft.explanation).toContain("The evidence supports a delayed cellular response.");
+    expect(draft.explanation).toContain("A. The timing is delayed");
+    expect(draft.explanation).toContain("C. Immune complexes are not described.");
+    expect(draft.parserRuleIds).toContain("explanation.reasoning");
+  });
+
+  it.each(["Explanation", "Rationale", "Reasoning"])(
+    "keeps lettered rationale after a punctuation-free %s heading out of the options",
+    (heading) => {
+      const [draft] = parseQuestionBlocks([
+        "1. Which option is supported?", "A. Alpha", "B. Beta",
+        heading,
+        "A. First reason",
+        "B. Second reason",
+        "Answer: B",
+      ].join("\n"));
+
+      expect(draft.options).toEqual([
+        { key: "A", text: "Alpha" },
+        { key: "B", text: "Beta" },
+      ]);
+      expect(draft.correctKey).toBe("B");
+      expect(draft.explanation).toContain("A. First reason");
+      expect(draft.explanation).toContain("B. Second reason");
+      expect(draft.explanation).not.toMatch(new RegExp(`^${heading}$`, "m"));
+    },
+  );
+
+  it("keeps numbered mechanism lists inside an explanation instead of creating questions", () => {
+    const drafts = parseQuestionBlocks([
+      "1. Which mechanism is supported?", "A. Alpha", "B. Beta", "Answer: B",
+      "Explanation: Two mechanisms support this finding:",
+      "1. receptor activation increases signaling",
+      "2. downstream transcription remains active",
+    ].join("\n"));
+
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0].questionNumber).toBe(1);
+    expect(drafts[0].correctKey).toBe("B");
+    expect(drafts[0].explanation).toContain("1. receptor activation");
+    expect(drafts[0].explanation).toContain("2. downstream transcription");
+  });
+
+  it("does not let Answer-prefixed explanation prose replace the explicit key", () => {
+    const [draft] = parseQuestionBlocks([
+      "1. What is the actual answer?",
+      "A. the receptor is blocked",
+      "B. the receptor is activated",
+      "Answer: B",
+      "Explanation: The agonist activates signaling.",
+      "Answer: the receptor is blocked",
+    ].join("\n"));
+
+    expect(draft.correctKey).toBe("B");
+    expect(draft.correctAnswerText).toBe("the receptor is activated");
+    expect(draft.explanation).toContain("Answer: the receptor is blocked");
+    expect(draft.parserRuleIds).toContain("explanation.answer-prefixed-prose");
+    expect(draft.parserRuleIds).not.toContain("conflict.explicit-answer");
+  });
+
+  it("does not attach a second question stem when the first has no explanation", () => {
+    const drafts = parseQuestionBlocks([
+      "1. First question?", "A. First alpha", "B. First beta", "Answer: B", "",
+      "2. Second question?", "A. Second alpha", "B. Second beta", "Answer: A",
+      "Explanation: Only the second question has this rationale.",
+    ].join("\n"));
+
+    expect(drafts).toHaveLength(2);
+    expect(drafts[0]).toMatchObject({ questionNumber: 1, correctKey: "B", explanation: undefined });
+    expect(drafts[1]).toMatchObject({
+      questionNumber: 2,
+      correctKey: "A",
+      explanation: "Only the second question has this rationale.",
+    });
+  });
+
+  it("does not treat clinical reasoning prose inside an option as a Reasoning heading", () => {
+    const draft = parseQuestionText([
+      "Which choice is supported?", "A. Alpha", "B. Clinical reasoning: choose Beta.", "C. Gamma",
+      "Answer: B",
+    ].join("\n"));
+
+    expect(draft.options.find((option) => option.key === "B")?.text).toBe("Clinical reasoning: choose Beta.");
+    expect(draft.explanation).toBeUndefined();
+    expect(draft.correctKey).toBe("B");
   });
 
   it("normalizes an OCR-spaced Explanation label without altering its prose", () => {
@@ -833,6 +1178,45 @@ describe("file import", () => {
     expect(result.drafts).toHaveLength(1);
     expect(result.drafts[0].options[1]).toEqual({ key: "B", text: "two" });
     expect(result.drafts[0].correctKey).toBe("B");
+  });
+
+  it("review-gates a structured explanation truncated at an ambiguous numbered boundary", () => {
+    const result = importFromJson(JSON.stringify([{
+      question: "Which option is correct?",
+      options: ["Alpha", "Beta", "Gamma"],
+      answer: "B",
+      explanation: [
+        "Explanation: Main rationale.",
+        "2. Which illustrative detail?",
+        "A. First teaching point",
+        "B. Second teaching point",
+      ].join("\n"),
+    }]));
+
+    expect(result.drafts[0].explanation).toBe("Main rationale.");
+    expect(result.drafts[0].needsReview).toBe(true);
+    expect(result.drafts[0].explanationDetectionConfidence).toBeLessThanOrEqual(0.6);
+    expect(result.drafts[0].parserRuleIds).toContain("explanation.ambiguous-boundary");
+    expect(result.drafts[0].explanationCleanupOperations).toContain("ambiguous-question-boundary");
+  });
+
+  it("review-gates structured explanation truncation even after a blank separator", () => {
+    const result = importFromJson(JSON.stringify([{
+      question: "Which option is correct?",
+      options: ["Alpha", "Beta", "Gamma"],
+      answer: "B",
+      explanation: [
+        "Explanation: Main rationale.", "",
+        "2. Which illustrative detail?",
+        "A. First teaching point",
+        "B. Second teaching point",
+      ].join("\n"),
+    }]));
+
+    expect(result.drafts[0].explanation).toBe("Main rationale.");
+    expect(result.drafts[0].needsReview).toBe(true);
+    expect(result.drafts[0].parserRuleIds).toContain("explanation.ambiguous-boundary");
+    expect(result.drafts[0].explanationCleanupOperations).toContain("stop-at-next-question");
   });
 
   it("maps answer text consistently in CSV and JSON without leading-letter ambiguity", () => {

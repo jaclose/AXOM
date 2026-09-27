@@ -149,7 +149,7 @@ describe("v26 → v27 migration", () => {
     };
     const state = { ...v26State(), schemaVersion: 31, questions: [question] };
     const result = migratePersistedState(structuredClone(state), 31);
-    expect(result.schemaVersion).toBe(33);
+    expect(result.schemaVersion).toBe(34);
     expect(result.questions[0].stem).toBe(question.stem);
     expect(result.questions[0].explanation).toBe(question.explanation);
     expect(result.questions[0].correctAnswerText).toBe("Beta");
@@ -201,7 +201,7 @@ describe("v26 → v27 migration", () => {
     delete state.dailyWordPuzzles;
 
     const migrated = migratePersistedState(structuredClone(state), SCHEMA_VERSION);
-    expect(migrated.schemaVersion).toBe(33);
+    expect(migrated.schemaVersion).toBe(34);
     expect(migrated.profile.experimentalFlags?.dailyGames).toBe(false);
     expect(migrated.profile.timeZonePreference).toEqual({ mode: "system" });
     expect(migrated.profile.clockPreferences).toMatchObject({ enabled: true, showDigitalSeconds: false, hourCycle: "12" });
@@ -252,7 +252,7 @@ describe("v26 → v27 migration", () => {
     };
 
     const migrated = migratePersistedState(structuredClone(state), SCHEMA_VERSION);
-    expect(migrated.schemaVersion).toBe(33);
+    expect(migrated.schemaVersion).toBe(34);
     expect(migrated.profile.dashboardLayout).toMatchObject({
       version: 1,
       preset: "custom",
@@ -275,7 +275,7 @@ describe("v26 → v27 migration", () => {
       promptVersion: "promise-prompt-v1",
     };
     const migrated = migratePersistedState(structuredClone(state), SCHEMA_VERSION);
-    expect(migrated.schemaVersion).toBe(33);
+    expect(migrated.schemaVersion).toBe(34);
     expect(migrated.profile.promisePromptStatus).toEqual(state.profile.promisePromptStatus);
   });
 

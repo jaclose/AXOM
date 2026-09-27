@@ -5,10 +5,9 @@
 // every answer is recorded on the question for spaced retry.
 // ===========================================================================
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ChevronLeft, Flag, Play, WandSparkles, Sparkles, Calculator, Minus, Plus, RotateCcw } from "lucide-react";
+import { BookOpenCheck, ChevronLeft, Flag, ListPlus, Play, WandSparkles, Sparkles, Minus, RotateCcw, Timer } from "lucide-react";
 import { useStore } from "../../lib/store";
 import { STORAGE_KEYS } from "../../lib/brand";
-import { QuizCalculator } from "./QuizCalculator";
 import {
   buildQuizPool, missedQuestionIds, scoreSession,
   type QuizAnswer, type QuizFilters, type QuizMode, type QuizSession,
@@ -26,16 +25,46 @@ import { pushToast } from "../../lib/toast";
 import { QuizFeedback } from "./QuizFeedback";
 import { accuracyTone } from "../../lib/library";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { formatSeconds, pacingInsight, summarizePacing } from "../../lib/quizPacing";
 import { createTextAnnotationWithIntegrity, removeTextAnnotationById, type QuestionAnnotationTarget, type QuestionAnnotationTone } from "../../lib/questionAnnotations";
 import { AnnotatedQuestionText, type QuestionTextSelection } from "./AnnotatedQuestionText";
-import { QuestionAnnotationToolbar } from "./QuestionAnnotationToolbar";
-import { QuestionNotesPanel } from "./QuestionNotesPanel";
 import { QuestionAttachmentsPanel } from "./QuestionAttachmentsPanel";
+import {
+  TutorUtilityDock,
+  type AnnotationTool,
+  type TutorPanel,
+} from "./TutorUtilityDock";
+import type { QuizCalculatorValue } from "./QuizCalculator";
+import { ExamSimulator } from "./ExamSimulator";
+import {
+  BLOCK_PRESETS, EXAM_SKINS, blockCounts, formatClock, readSuspendedBlock, writeSuspendedBlock,
+  type BlockPreset, type ExamSkin, type SuspendedBlock,
+} from "../../lib/examSim";
 
 const ERROR_TYPES = Object.keys(ERROR_TYPE_LABEL) as QuestionErrorType[];
 const EXAM_TYPES = Object.keys(EXAM_TYPE_LABEL) as QuestionExamType[];
 
-type Stage = "setup" | "running" | "results";
+type Stage = "setup" | "running" | "results" | "sim";
+type ExamInterface = "axom" | ExamSkin;
+const INTERFACE_KEY = "axom.examSim.interface.v1";
+function readInterface(): ExamInterface {
+  try {
+    const value = localStorage.getItem(INTERFACE_KEY);
+    return value === "uworld" || value === "nbme" || value === "examsoft" ? value : "axom";
+  } catch { return "axom"; }
+}
+/** Every preset runs at the USMLE pace of 90 seconds per item. */
+const SECONDS_PER_ITEM = 90;
+interface ActiveQuizSnapshot {
+  mode: QuizMode; poolIds: string[]; index: number; answers: QuizAnswer[];
+  picked?: string; revealed: boolean; startedAt: string; timed: boolean; filters: QuizFilters;
+}
+function readActiveQuiz(): ActiveQuizSnapshot | undefined {
+  try {
+    const value = JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession) ?? "null") as ActiveQuizSnapshot | null;
+    return value && Array.isArray(value.poolIds) && value.poolIds.length > 0 ? value : undefined;
+  } catch { return undefined; }
+}
 
 function trustedCorrectKey(question: QuestionRecord): string | undefined {
   return questionMappingStatus(question) === "ready" ? question.correctKey : undefined;
@@ -52,7 +81,7 @@ function readReadingScale(): number {
   } catch { return 1; }
 }
 
-export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, presetTimed = false, blockId, onClose }: {
+export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, presetTimed = false, blockId, simulate = false, onClose }: {
   mode: QuizMode;
   /** When set, skips setup and runs exactly these questions (retake missed). */
   retakeIds?: string[];
@@ -62,43 +91,55 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   presetTimed?: boolean;
   /** Saved block whose last-run timestamp advances only when the run begins. */
   blockId?: string;
+  /** Open straight into exam-interface simulation (UWorld / NBME / ExamSoft). */
+  simulate?: boolean;
   onClose: () => void;
 }) {
   const s = useStore();
   const questions = s.questions ?? [];
   const questionSets = s.questionSets ?? [];
+  const restored = useMemo(() => readActiveQuiz(), []);
   const [mode, setMode] = useState<QuizMode>(initialMode);
-  const [stage, setStage] = useState<Stage>(retakeIds?.length ? "running" : "setup");
+  const [stage, setStage] = useState<Stage>(restored || retakeIds?.length ? "running" : "setup");
 
   // --- setup state
-  const [count, setCount] = useState(presetFilters?.count ?? 10);
+  const [count, setCount] = useState(presetFilters?.count ?? (simulate ? 20 : 10));
   const [status, setStatus] = useState<QuizFilters["status"]>(presetFilters?.status ?? "all");
   const [category, setCategory] = useState(presetFilters?.categories?.[0] ?? "");
   const [examType, setExamType] = useState<QuestionExamType | "">(presetFilters?.examTypes?.[0] ?? "");
   const [setIds, setSetIds] = useState<string[]>(presetFilters?.setIds ?? []);
   const [ordered, setOrdered] = useState(presetFilters?.ordered ?? false);
-  const [timed, setTimed] = useState(presetTimed);
+  const [timed, setTimed] = useState(restored?.timed ?? (simulate || presetTimed));
   const [runBlockId, setRunBlockId] = useState(blockId);
   const [minutesPerQ] = useState(1.5);
+  const [examInterface, setExamInterface] = useState<ExamInterface>(() => {
+    if (retakeIds?.length) return "axom";
+    const stored = readInterface();
+    return simulate && stored === "axom" ? "nbme" : stored;
+  });
+  const [presetId, setPresetId] = useState<BlockPreset["id"]>("usmle-2026");
+  const [suspended, setSuspended] = useState<SuspendedBlock | undefined>(() => readSuspendedBlock());
+  const [simRun, setSimRun] = useState<{ skin: ExamSkin; pool: QuestionRecord[]; timeLimitSeconds?: number; resume?: SuspendedBlock } | null>(null);
 
   // --- run state
-  const [pool, setPool] = useState<QuestionRecord[]>(() =>
-    retakeIds?.length
+  const [pool, setPool] = useState<QuestionRecord[]>(() => restored
+    ? restored.poolIds.map((id) => questions.find((question) => question.id === id)).filter((question): question is QuestionRecord => Boolean(question))
+    : retakeIds?.length
       ? buildQuizPool(
           questions.filter((question) => retakeIds.includes(question.id)),
           { count: Math.max(1, retakeIds.length), status: "all", ordered: true },
         )
       : []);
-  const [index, setIndex] = useState(0);
-  const [answers, setAnswers] = useState<Map<string, QuizAnswer>>(new Map());
-  const [picked, setPicked] = useState<string | undefined>();
-  const [revealed, setRevealed] = useState(false); // tutor mode reveal
+  const [index, setIndex] = useState(restored?.index ?? 0);
+  const [answers, setAnswers] = useState<Map<string, QuizAnswer>>(() => new Map((restored?.answers ?? []).map((answer) => [answer.questionId, answer])));
+  const [picked, setPicked] = useState<string | undefined>(restored?.picked);
+  const [revealed, setRevealed] = useState(restored?.revealed ?? false); // tutor mode reveal
   const [errorType, setErrorType] = useState<QuestionErrorType | "">("");
   const [confidence, setConfidence] = useState<1 | 2 | 3 | 4 | 5 | undefined>();
-  const [startedAt, setStartedAt] = useState<string>(() => new Date().toISOString());
+  const [startedAt, setStartedAt] = useState<string>(() => restored?.startedAt ?? new Date().toISOString());
   const [shownAt, setShownAt] = useState(() => Date.now());
   const [nowTick, setNowTick] = useState(() => Date.now());
-  const [annotationTone, setAnnotationTone] = useState<QuestionAnnotationTone>("yellow");
+  const [annotationTool, setAnnotationTool] = useState<AnnotationTool>(null);
   const [annotationSelection, setAnnotationSelection] = useState<{
     target: QuestionAnnotationTarget;
     range: QuestionTextSelection;
@@ -107,6 +148,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const localAnnotationsRef = useRef(localAnnotations);
   const [annotationStatus, setAnnotationStatus] = useState<string>();
   const [session, setSession] = useState<QuizSession | null>(null);
+  const [reviewSetCreated, setReviewSetCreated] = useState(false);
+  const [trackerReviewAdded, setTrackerReviewAdded] = useState(false);
   const [aiText, setAiText] = useState<string | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [editingMapping, setEditingMapping] = useState(false);
@@ -115,8 +158,12 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   // --- Q2a player toolkit: strikeout (session-transient per question), reading
   // scale (persisted device pref), calculator, and scroll-to-top on advance.
   const [struck, setStruck] = useState<Set<string>>(() => new Set());
-  const [calcOpen, setCalcOpen] = useState(false);
+  const [activePanel, setActivePanel] = useState<TutorPanel | null>(null);
+  const [calculatorValue, setCalculatorValue] = useState<QuizCalculatorValue>({ expression: "", result: "" });
   const [readingScale, setReadingScale] = useState(() => readReadingScale());
+  const [tipVisible, setTipVisible] = useState(() => {
+    try { return localStorage.getItem(STORAGE_KEYS.quizTutorTips) !== "dismissed"; } catch { return true; }
+  });
   const stemRef = useRef<HTMLDivElement>(null);
 
   function toggleStrike(key: string) {
@@ -133,16 +180,33 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       return next;
     });
   }
-  function closeCalculator() {
-    setCalcOpen(false);
-    window.setTimeout(() => {
-      document.querySelector<HTMLButtonElement>('button[aria-label="Calculator"]')?.focus();
-    }, 0);
+  function resetReadingScale() {
+    setReadingScale(1);
+    try { localStorage.setItem(STORAGE_KEYS.quizReadingScale, "1"); } catch { /* device pref only */ }
+  }
+  function dismissTip() {
+    setTipVisible(false);
+    try { localStorage.setItem(STORAGE_KEYS.quizTutorTips, "dismissed"); } catch { /* device guidance only */ }
+  }
+  function resetTips() {
+    setTipVisible(true);
+    try { localStorage.removeItem(STORAGE_KEYS.quizTutorTips); } catch { /* device guidance only */ }
   }
 
   const timeLimitSeconds = timed ? Math.round(pool.length * minutesPerQ * 60) : undefined;
   const question = pool[index];
   const provider = useMemo(() => resolveActiveProvider(), []);
+
+  useEffect(() => {
+    if (stage !== "running" || pool.length === 0) return;
+    const filters: QuizFilters = { count, status, categories: category ? [category] : undefined, examTypes: examType ? [examType] : undefined, setIds: setIds.length ? setIds : undefined, ordered: ordered || undefined };
+    const snapshot: ActiveQuizSnapshot = { mode, poolIds: pool.map((item) => item.id), index, answers: [...answers.values()], picked, revealed, startedAt, timed, filters };
+    try { localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify(snapshot)); } catch { /* Local Vault remains authoritative for saved work. */ }
+  }, [answers, category, count, examType, index, mode, ordered, picked, pool, revealed, setIds, stage, startedAt, status, timed]);
+
+  function clearActiveQuiz() {
+    try { localStorage.removeItem(STORAGE_KEYS.quizActiveSession); } catch { /* non-fatal */ }
+  }
 
   // Timer display tick (display only — limits derive from timestamps).
   useEffect(() => {
@@ -195,6 +259,32 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage, question?.id, revealed, picked, mode, errorType, confidence]);
 
+  // Tutor tools consume Escape before the containing modal. The first press
+  // closes the utility/mode; a later press retains the established leave-block
+  // confirmation behavior.
+  useEffect(() => {
+    if (stage !== "running") return;
+    function onToolEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape" || (!activePanel && !annotationTool)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      if (activePanel) {
+        const label = activePanel === "highlight" ? "Highlight tools"
+          : activePanel === "notes" ? "Question notes"
+            : activePanel === "text" ? "Text settings"
+              : activePanel === "help" ? "Tutor tips" : "Calculator";
+        setActivePanel(null);
+        window.setTimeout(() => document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)?.focus(), 0);
+      } else {
+        setAnnotationTool(null);
+        setAnnotationStatus("Annotation tool off.");
+      }
+    }
+    window.addEventListener("keydown", onToolEscape, true);
+    return () => window.removeEventListener("keydown", onToolEscape, true);
+  }, [activePanel, annotationTool, stage]);
+
   // On advancing to a new question, clear this question's eliminations and reset
   // the reading surface to the top of the stem, moving focus there so assistive
   // tech announces the new question. Instant (no smooth scroll) respects
@@ -239,11 +329,38 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     pushToast({ title: "Block saved", body: "Rerun it any time from Block Builder.", tone: "success" });
   }
 
+  function chooseInterface(value: ExamInterface) {
+    setExamInterface(value);
+    try { localStorage.setItem(INTERFACE_KEY, value); } catch { /* device pref only */ }
+    if (value !== "axom") {
+      const preset = BLOCK_PRESETS.find((item) => item.id === presetId);
+      if (preset?.items) setCount(preset.items);
+    }
+  }
+
+  function choosePreset(preset: BlockPreset) {
+    setPresetId(preset.id);
+    if (preset.items) { setCount(preset.items); setTimed(true); }
+  }
+
   function begin() {
     const filters = currentFilters();
     const built = buildQuizPool(questions, filters, questionSets);
     if (built.length === 0) {
       pushToast({ title: "No questions match", body: "Loosen the filters or import more questions first.", tone: "warn" });
+      return;
+    }
+    if (examInterface !== "axom") {
+      if (suspended && !confirm("Starting a new block discards your suspended block. Continue?")) return;
+      writeSuspendedBlock(null);
+      setSuspended(undefined);
+      clearActiveQuiz();
+      setSimRun({ skin: examInterface, pool: built, timeLimitSeconds: timed ? built.length * SECONDS_PER_ITEM : undefined });
+      if (runBlockId) {
+        const savedBlock = (s.quizBlocks ?? []).find((block) => block.id === runBlockId);
+        if (savedBlock) s.saveQuizBlock({ ...savedBlock, lastRunAt: new Date().toISOString() });
+      }
+      setStage("sim");
       return;
     }
     const runStartedAt = new Date().toISOString();
@@ -350,8 +467,75 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       }
     }
     s.saveQuizSession(result);
+    clearActiveQuiz();
     setSession(result);
     setStage("results");
+  }
+
+  function resumeSuspended() {
+    if (!suspended) return;
+    const resumedPool = suspended.poolIds
+      .map((id) => questions.find((question) => question.id === id))
+      .filter((question): question is QuestionRecord => Boolean(question));
+    if (!resumedPool.length) {
+      pushToast({ title: "Suspended block unavailable", body: "Its questions are no longer in this workspace.", tone: "warn" });
+      writeSuspendedBlock(null);
+      setSuspended(undefined);
+      return;
+    }
+    setMode(suspended.mode);
+    setSimRun({ skin: suspended.skin, pool: resumedPool, timeLimitSeconds: suspended.timeLimitSeconds, resume: suspended });
+    setStage("sim");
+  }
+
+  function discardSuspended() {
+    if (!confirm("Discard the suspended block? Its answers will not be scored.")) return;
+    writeSuspendedBlock(null);
+    setSuspended(undefined);
+  }
+
+  function finishSimulation(answerList: QuizAnswer[], meta: { startedAt: string; elapsedSeconds: number }) {
+    if (!simRun) return;
+    const result: QuizSession = {
+      id: crypto.randomUUID(),
+      mode,
+      startedAt: meta.startedAt,
+      endedAt: new Date().toISOString(),
+      timed: simRun.timeLimitSeconds !== undefined,
+      timeLimitSeconds: simRun.timeLimitSeconds,
+      filters: currentFilters(),
+      questionIds: simRun.pool.map((q) => q.id),
+      answers: answerList,
+      score: scoreSession(answerList),
+      simulation: { skin: simRun.skin, preset: simRun.resume ? undefined : presetId, elapsedSeconds: meta.elapsedSeconds },
+    };
+    for (const a of answerList) {
+      if (!a.answerKey && !a.flagged) continue;
+      s.recordQuestionAttempt(a.questionId, {
+        answerKey: a.answerKey,
+        status: a.correct === undefined ? "needs-review" : a.correct ? "correct" : "incorrect",
+        timeSpentSeconds: a.seconds,
+      });
+    }
+    s.saveQuizSession(result);
+    writeSuspendedBlock(null);
+    setSuspended(undefined);
+    setPool(simRun.pool);
+    setSession(result);
+    setSimRun(null);
+    setStage("results");
+  }
+
+  function suspendSimulation(block: SuspendedBlock) {
+    writeSuspendedBlock(block);
+    setSuspended(block);
+    const counts = blockCounts(block.poolIds, block.items);
+    pushToast({
+      title: "Block suspended",
+      body: `${counts.answered}/${counts.total} answered${block.timeLimitSeconds ? ` · ${formatClock(block.timeLimitSeconds - block.elapsedMs / 1000)} left` : ""}. Resume it from block setup.`,
+      tone: "success",
+    });
+    onClose();
   }
 
   function toggleFlag() {
@@ -386,6 +570,44 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     pushToast(result.saved
       ? { title: "Repair card created", body: "Due now in the Anki Lab review queue.", tone: "success" }
       : { title: "Couldn't create card", body: result.errors.join(" "), tone: "warn" });
+  }
+
+  function createMissedReviewSet(questionIds: string[]) {
+    if (!questionIds.length || reviewSetCreated) return;
+    const createdAt = new Date().toISOString();
+    s.addQuestionSet({
+      id: crypto.randomUUID(),
+      title: `Missed review — ${new Date(createdAt).toLocaleDateString()}`,
+      sourceDocumentIds: [],
+      createdAt,
+      questionIds: [...questionIds],
+      tags: ["missed-review"],
+      aiEnhanced: false,
+      parserWarnings: [],
+      ordering: "import",
+    });
+    setReviewSetCreated(true);
+    pushToast({ title: "Review set created", body: `${questionIds.length} missed question${questionIds.length === 1 ? "" : "s"} saved as a fixed Question Set.`, tone: "success" });
+  }
+
+  function addMissedTopicsToTracker(questionIds: string[]) {
+    if (!questionIds.length || trackerReviewAdded) return;
+    const topics = [...new Set(questionIds.flatMap((id) => {
+      const item = questions.find((candidate) => candidate.id === id);
+      return item ? [item.topic, item.category].filter((value): value is string => Boolean(value?.trim())) : [];
+    }))];
+    const existing = new Set(s.tracker.map((item) => `${item.path}|${item.label}`.toLowerCase()));
+    const items = topics.flatMap((topic) => {
+      const item = { path: "Question Bank/Review", label: `Review ${topic}`, kind: "Review Loop" as const, passes: 0, ankiPasses: 0, yield: "review" as const, note: "Created from missed Question Bank results." };
+      return existing.has(`${item.path}|${item.label}`.toLowerCase()) ? [] : [item];
+    });
+    if (!items.length) {
+      pushToast({ title: topics.length ? "Review topics already tracked" : "No topic labels available", body: topics.length ? "Nothing new was added." : "Add a topic or category to these questions before creating Tracker review work.", tone: "warn" });
+      return;
+    }
+    s.bulkAddTrackerItems(items);
+    setTrackerReviewAdded(true);
+    pushToast({ title: "Review work added", body: `${items.length} weak topic${items.length === 1 ? "" : "s"} added under Question Bank/Review.`, tone: "success" });
   }
 
   async function runAi(kind: "simple" | "why-wrong" | "hook") {
@@ -441,6 +663,44 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             <GButton variant="primary" onClick={begin}><Play size={ICON_SIZE.body} /> Start {mode} block</GButton>
           </>
         }>
+        {suspended && (
+          <div className="sim-suspended-banner" role="status">
+            <div>
+              <b>Suspended block · {EXAM_SKINS[suspended.skin].label}</b>
+              <span className="sub">
+                {(() => { const c = blockCounts(suspended.poolIds, suspended.items); return `${c.answered}/${c.total} answered · ${c.marked} marked`; })()}
+                {suspended.timeLimitSeconds ? ` · ${formatClock(suspended.timeLimitSeconds - suspended.elapsedMs / 1000)} left` : ""}
+                {` · suspended ${new Date(suspended.suspendedAt).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`}
+              </span>
+            </div>
+            <div className="row gap6">
+              <GhostButton onClick={discardSuspended}>Discard</GhostButton>
+              <GButton size="sm" variant="primary" onClick={resumeSuspended}><Play size={ICON_SIZE.body} /> Resume</GButton>
+            </div>
+          </div>
+        )}
+        <div className="stack gap6">
+          <span className="field-label">Interface</span>
+          <div className="sim-interface-grid" role="radiogroup" aria-label="Exam interface">
+            {([["axom", "AXOM", "Tutor tools, AI help and repair cards in the AXOM player."], ...Object.entries(EXAM_SKINS).map(([id, meta]) => [id, meta.label, meta.description])] as Array<[ExamInterface, string, string]>).map(([id, label, description]) => (
+              <button type="button" key={id} role="radio" aria-checked={examInterface === id} className={`sim-interface-option skin-${id} ${examInterface === id ? "on" : ""}`} onClick={() => chooseInterface(id)}>
+                <b>{label}</b><small>{description}</small>
+              </button>
+            ))}
+          </div>
+        </div>
+        {examInterface !== "axom" && (
+          <div className="stack gap6">
+            <span className="field-label">Block</span>
+            <div className="row" style={{ flexWrap: "wrap", gap: 6 }} role="group" aria-label="Block preset">
+              {BLOCK_PRESETS.map((preset) => (
+                <button type="button" key={preset.id} className={`filter-pill ${presetId === preset.id ? "on" : ""}`} aria-pressed={presetId === preset.id}
+                  onClick={() => choosePreset(preset)} title={preset.note}>{preset.label}{preset.items ? ` · ${preset.items}` : ""}</button>
+              ))}
+            </div>
+            <span className="sub">{BLOCK_PRESETS.find((preset) => preset.id === presetId)?.note}</span>
+          </div>
+        )}
         <div className="row" style={{ gap: 6 }} role="group" aria-label="Block mode">
           {(["tutor", "exam"] as QuizMode[]).map((m) => (
             <button type="button" key={m} className={`filter-pill ${mode === m ? "on" : ""}`}
@@ -466,7 +726,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         <div className="stack gap6">
           <span className="field-label">How many questions</span>
           <div className="row" style={{ flexWrap: "wrap" }} role="group" aria-label="Question count">
-            {[5, 10, 20, 40].map((n) => (
+            {[5, 10, 20, 40, 50].map((n) => (
               <button type="button" key={n} className={`filter-pill ${count === n ? "on" : ""}`}
                 aria-pressed={count === n} onClick={() => setCount(n)}>{n}</button>
             ))}
@@ -495,13 +755,27 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           <input type="checkbox" checked={ordered} onChange={() => setOrdered((v) => !v)} />
           <span>Keep document order (instead of shuffling)</span>
         </label>
-        {mode === "exam" && (
+        {(mode === "exam" || examInterface !== "axom") && (
           <label className="row" style={{ gap: 8, cursor: "pointer" }}>
             <input type="checkbox" checked={timed} onChange={() => setTimed((v) => !v)} />
-            <span>Timed · {minutesPerQ} min per question</span>
+            <span>Timed · {minutesPerQ} min per question{examInterface !== "axom" && timed ? ` (${Math.round(count * minutesPerQ)} min block)` : ""}</span>
           </label>
         )}
       </Modal>
+    );
+  }
+
+  if (stage === "sim" && simRun) {
+    return (
+      <ExamSimulator
+        skin={simRun.skin}
+        mode={mode}
+        pool={simRun.pool}
+        timeLimitSeconds={simRun.timeLimitSeconds}
+        resume={simRun.resume}
+        onFinish={finishSimulation}
+        onSuspend={suspendSimulation}
+      />
     );
   }
 
@@ -536,11 +810,22 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             {session.score?.correct}/{session.score?.scored} correct ({session.score?.pct}%)
           </Tag>
           <Tag tone="neutral">{session.mode} mode</Tag>
-          {session.timed && <Tag tone="neutral">{Math.round((Date.parse(session.endedAt!) - Date.parse(session.startedAt)) / 60000)} min</Tag>}
+          {session.simulation && <Tag tone="neutral">{EXAM_SKINS[session.simulation.skin as ExamSkin]?.label ?? "Simulation"}</Tag>}
+          {session.simulation?.elapsedSeconds !== undefined
+            ? <Tag tone="neutral">{formatClock(session.simulation.elapsedSeconds).replace(/^00:/, "")}{session.timeLimitSeconds ? ` of ${Math.round(session.timeLimitSeconds / 60)} min` : ""}</Tag>
+            : session.timed && <Tag tone="neutral">{Math.round((Date.parse(session.endedAt!) - Date.parse(session.startedAt)) / 60000)} min</Tag>}
           {session.score && session.score.total > session.score.scored && (
             <span className="sub">{session.score.total - session.score.scored} unscored (no correct answer set)</span>
           )}
         </div>
+        <PacingPanel session={session} />
+        <section className="quiz-results-next" aria-labelledby="quiz-results-next-heading">
+          <div><b id="quiz-results-next-heading">What next?</b><span className="sub">Continue with the missed material without rebuilding the session.</span></div>
+          {missed.length > 0 ? <div className="row gap8" style={{ flexWrap: "wrap" }}>
+            <GButton size="sm" onClick={() => createMissedReviewSet(missed)} disabled={reviewSetCreated}><ListPlus size={ICON_SIZE.body} /> {reviewSetCreated ? "Review set created" : "Create set from missed"}</GButton>
+            <GButton size="sm" onClick={() => addMissedTopicsToTracker(missed)} disabled={trackerReviewAdded}><BookOpenCheck size={ICON_SIZE.body} /> {trackerReviewAdded ? "Topics added to Tracker" : "Add weak topics to Tracker"}</GButton>
+          </div> : <span className="sub">You cleared this block. Close results or start another filtered block when ready.</span>}
+        </section>
         {missed.length > 0 && (
           <div className="stack gap6">
             <span className="field-label">Missed — review and repair</span>
@@ -577,17 +862,20 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const stemAnnotations = annotations.filter((annotation) => annotation.target === "stem");
   const explanationAnnotations = annotations.filter((annotation) => annotation.target === "explanation");
 
-  function saveAnnotation() {
-    if (!annotationSelection) return;
-    const sourceText = annotationSelection.target === "stem" ? question.stem : question.explanation ?? "";
+  function saveAnnotation(
+    selection = annotationSelection,
+    tone: QuestionAnnotationTone = annotationTool?.kind === "highlight" ? annotationTool.tone : "yellow",
+  ) {
+    if (!selection) return;
+    const sourceText = selection.target === "stem" ? question.stem : question.explanation ?? "";
     const now = new Date().toISOString();
     const result = createTextAnnotationWithIntegrity({
       id: `annotation-${crypto.randomUUID()}`,
-      target: annotationSelection.target,
+      target: selection.target,
       sourceText,
-      startOffset: annotationSelection.range.startOffset,
-      endOffset: annotationSelection.range.endOffset,
-      tone: annotationTone,
+      startOffset: selection.range.startOffset,
+      endOffset: selection.range.endOffset,
+      tone,
       now,
       existingAnnotations: localAnnotationsRef.current,
     });
@@ -605,14 +893,24 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     window.getSelection()?.removeAllRanges();
   }
 
+  function handleAnnotationSelection(target: QuestionAnnotationTarget, range: QuestionTextSelection | null) {
+    const selection = range ? { target, range } : null;
+    setAnnotationSelection(selection);
+    if (selection && annotationTool?.kind === "highlight") {
+      saveAnnotation(selection, annotationTool.tone);
+      dismissTip();
+    }
+  }
+
   function clearAnnotations() {
     if (!annotations.length) return;
+    if (annotations.length > 1 && !confirm(`Clear all ${annotations.length} highlights from this question?`)) return;
     localAnnotationsRef.current = [];
     setLocalAnnotations([]);
     setPool((current) => current.map((item) => item.id === question.id ? { ...item, annotations: [] } : item));
     s.updateQuestion(question.id, { annotations: [] });
     setAnnotationSelection(null);
-    setAnnotationStatus("Highlights cleared.");
+    setAnnotationStatus("All highlights cleared.");
   }
 
   function deleteAnnotation(annotationId: string) {
@@ -622,7 +920,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     setLocalAnnotations(next);
     setPool((current) => current.map((item) => item.id === question.id ? { ...item, annotations: next } : item));
     s.updateQuestion(question.id, { annotations: next });
-    setAnnotationStatus("Highlight deleted.");
+    setAnnotationStatus("One highlight erased.");
+    dismissTip();
   }
 
   return (
@@ -630,13 +929,13 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       title={`${mode === "exam" ? "Exam" : "Tutor"} · ${index + 1} of ${pool.length}`}
       className="quiz-player-modal"
       bodyClassName="quiz-player-body"
-      onClose={() => { if (confirm("Leave this block? Progress in unanswered questions is discarded.")) onClose(); }}
+      onClose={() => { if (confirm("Leave this block? Progress in unanswered questions is discarded.")) { clearActiveQuiz(); onClose(); } }}
       footer={
         mode === "tutor"
           ? (
             <>
               <GhostButton disabled={index === 0} onClick={goPrevious}><ChevronLeft size={ICON_SIZE.body} /> Previous</GhostButton>
-              <GhostButton onClick={toggleFlag} aria-pressed={answer?.flagged ?? false}>
+              <GhostButton onClick={toggleFlag} aria-label="Flag question" aria-pressed={answer?.flagged ?? false}>
                 <Flag size={ICON_SIZE.body} /> {answer?.flagged ? "Flagged" : "Mark review"}
               </GhostButton>
               {!revealed
@@ -658,7 +957,10 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       <div className="quiz-progress" aria-hidden="true">
         <span className="quiz-progress-fill" style={{ width: `${Math.round(((index + (revealed ? 1 : 0)) / pool.length) * 100)}%` }} />
       </div>
-      <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+      <main className={`tutor-workspace-shell ${activePanel ? "panel-open" : ""}`} aria-label="Tutor question workspace">
+      <section className="tutor-question-region" aria-labelledby="tutor-question-heading">
+      <h2 id="tutor-question-heading" className="sr-only">Question {index + 1} of {pool.length}</h2>
+      <div className="tutor-question-meta">
         {timed && timeLeft !== undefined && (
           <Tag tone={timeLeft < 60 ? "red" : "neutral"}>{Math.floor(timeLeft / 60)}:{String(timeLeft % 60).padStart(2, "0")} left</Tag>
         )}
@@ -666,36 +968,12 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         {question.examType && <Tag tone="neutral">{EXAM_TYPE_LABEL[question.examType]}</Tag>}
         {question.sourcePage && <Tag tone="neutral">p.{question.sourcePage}</Tag>}
         {question.bank && <span className="sub truncate" style={{ maxWidth: 200 }}>{question.bank}</span>}
-        <div className="quiz-tools" role="group" aria-label="Reading tools">
-          {struck.size > 0 && (
-            <GhostButton className="quiz-tool" onClick={() => setStruck(new Set())} aria-label="Reset eliminations">
-              <RotateCcw size={ICON_SIZE.microInline} /> Reset
-            </GhostButton>
-          )}
-          <div className="quiz-reading-control" role="group" aria-label="Reading size">
-            <GhostButton className="icon-only" aria-label="Decrease reading size" disabled={readingScale <= READING_SCALE_MIN} onClick={() => adjustReadingScale(-1)}><Minus size={ICON_SIZE.microInline} /></GhostButton>
-            <span className="quiz-reading-value" aria-hidden="true">A</span>
-            <GhostButton className="icon-only" aria-label="Increase reading size" disabled={readingScale >= READING_SCALE_MAX} onClick={() => adjustReadingScale(1)}><Plus size={ICON_SIZE.microInline} /></GhostButton>
-          </div>
-          <GhostButton className="icon-only" aria-label="Calculator" aria-pressed={calcOpen} onClick={() => setCalcOpen((value) => !value)}>
-            <Calculator size={ICON_SIZE.body} />
+        {struck.size > 0 && (
+          <GhostButton className="quiz-tool" onClick={() => setStruck(new Set())} aria-label="Reset eliminations">
+            <RotateCcw size={ICON_SIZE.microInline} /> Reset eliminations
           </GhostButton>
-          <GhostButton onClick={toggleFlag} aria-label="Flag question" aria-pressed={answer?.flagged ?? false}>
-            <Flag size={ICON_SIZE.body} style={{ color: answer?.flagged ? "var(--gold)" : undefined }} /> {answer?.flagged ? "Flagged" : "Flag"}
-          </GhostButton>
-        </div>
+        )}
       </div>
-
-      {calcOpen && <QuizCalculator onClose={closeCalculator} />}
-
-      <QuestionAnnotationToolbar
-        selectedTone={annotationTone}
-        hasSelection={Boolean(annotationSelection)}
-        onTone={setAnnotationTone}
-        onHighlight={saveAnnotation}
-        onClear={clearAnnotations}
-        statusMessage={annotationStatus}
-      />
 
       <div className="quiz-reading" style={{ "--quiz-reading-scale": readingScale } as CSSProperties}>
         <AnnotatedQuestionText
@@ -704,11 +982,12 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           className="question-stem"
           label="Question stem"
           onDelete={deleteAnnotation}
+          eraseMode={annotationTool?.kind === "eraser"}
           focusRef={stemRef}
-          onSelection={(range) => setAnnotationSelection(range ? { target: "stem", range } : null)}
+          onSelection={(range) => handleAnnotationSelection("stem", range)}
         />
 
-        <div className="stack gap6">
+        <div className="tutor-answer-options">
           {question.options.map((opt) => {
             const isPicked = picked === opt.key;
             const showCorrect = revealed && correctKey === opt.key;
@@ -755,8 +1034,9 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
                 className="question-explanation-text"
                 label="Question explanation"
                 onDelete={deleteAnnotation}
+                eraseMode={annotationTool?.kind === "eraser"}
                 inline
-                onSelection={(range) => setAnnotationSelection(range ? { target: "explanation", range } : null)}
+                onSelection={(range) => handleAnnotationSelection("explanation", range)}
               />
             ) : undefined}
           />
@@ -848,18 +1128,6 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
               <b>{provider?.info.label}:</b> {aiText}
             </div>
           )}
-          <QuestionNotesPanel
-            questionId={question.id}
-            value={question.notes}
-            onSave={(notesValue) => {
-              const trimmed = notesValue.trim() || undefined;
-              // Keep the in-run pool in sync (like annotations) so a note
-              // survives navigating away and back within the same block —
-              // not just in the persisted store.
-              setPool((current) => current.map((item) => item.id === question.id ? { ...item, notes: trimmed } : item));
-              s.updateQuestion(question.id, { notes: trimmed });
-            }}
-          />
           <QuestionAttachmentsPanel
             questionId={question.id}
             attachments={question.attachments ?? []}
@@ -871,6 +1139,73 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           />
         </>
       )}
+      </section>
+      <TutorUtilityDock
+        activePanel={activePanel}
+        setActivePanel={(panel) => {
+          setActivePanel(panel);
+          if (panel && panel !== "help") dismissTip();
+        }}
+        annotationTool={annotationTool}
+        setAnnotationTool={(tool) => {
+          setAnnotationTool(tool);
+          if (tool) dismissTip();
+          setAnnotationStatus(tool?.kind === "highlight" ? `${tool.tone} highlight mode active.` : tool?.kind === "eraser" ? "Eraser mode active." : "Annotation tool off.");
+        }}
+        annotationStatus={annotationStatus}
+        hasAnnotations={annotations.length > 0}
+        onClearAnnotations={clearAnnotations}
+        questionId={question.id}
+        note={question.notes}
+        onSaveNote={(notesValue) => {
+          const trimmed = notesValue.trim() || undefined;
+          setPool((current) => current.map((item) => item.id === question.id ? { ...item, notes: trimmed } : item));
+          s.updateQuestion(question.id, { notes: trimmed });
+        }}
+        calculator={calculatorValue}
+        onCalculatorChange={setCalculatorValue}
+        readingScale={readingScale}
+        readingScaleMin={READING_SCALE_MIN}
+        readingScaleMax={READING_SCALE_MAX}
+        onReadingScale={adjustReadingScale}
+        onResetReadingScale={resetReadingScale}
+        tipVisible={tipVisible}
+        onDismissTip={dismissTip}
+        onResetTips={resetTips}
+      />
+      </main>
     </Modal>
+  );
+}
+
+/** Per-question pacing from the seconds recorded while answering. */
+function PacingPanel({ session }: { session: QuizSession }) {
+  const summary = summarizePacing(session);
+  if (!summary) return null;
+  const max = Math.max(summary.targetSeconds, ...summary.questions.map((question) => question.seconds));
+  return (
+    <section className="quiz-pacing" aria-labelledby="quiz-pacing-heading">
+      <div className="quiz-pacing-head">
+        <b id="quiz-pacing-heading"><Timer size={ICON_SIZE.body} aria-hidden="true" /> Pacing</b>
+        <span className="sub">{pacingInsight(summary)}</span>
+      </div>
+      <div className="quiz-pacing-stats">
+        <span><b>{formatSeconds(summary.averageSeconds)}</b><small>average</small></span>
+        <span><b>{formatSeconds(summary.medianSeconds)}</b><small>median</small></span>
+        <span><b>{summary.overTarget}/{summary.measured}</b><small>over {formatSeconds(summary.targetSeconds)}{summary.timed ? "" : " (typical exam pace)"}</small></span>
+        <span><b>{summary.slowest.map((question) => `Q${question.position}`).join(", ")}</b><small>slowest</small></span>
+      </div>
+      <div className="quiz-pacing-strip" role="img" aria-label={`Seconds per question: ${summary.questions.map((question) => `Q${question.position} ${question.seconds}s`).join(", ")}`}>
+        <i className="quiz-pacing-target" style={{ bottom: `${(summary.targetSeconds / max) * 100}%` }} />
+        {summary.questions.map((question) => (
+          <span
+            key={question.questionId}
+            className={`${question.overTarget ? "over" : ""} ${question.correct === false ? "wrong" : question.correct ? "right" : ""}`}
+            style={{ height: `${Math.max(4, (question.seconds / max) * 100)}%` }}
+            title={`Q${question.position}: ${formatSeconds(question.seconds)}${question.correct === undefined ? "" : question.correct ? " · correct" : " · missed"}`}
+          />
+        ))}
+      </div>
+    </section>
   );
 }

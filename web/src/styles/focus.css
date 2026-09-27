@@ -1,0 +1,126 @@
+/* ===========================================================================
+   "Are you locked in?" — the interval focus check-in card.
+   Floats top-center over the current page without a scrim; never modal.
+   =========================================================================== */
+.focus-checkin {
+  position: fixed;
+  z-index: 140;
+  top: max(18px, env(safe-area-inset-top));
+  left: 50%;
+  width: min(430px, calc(100vw - 28px));
+  display: grid;
+  gap: 12px;
+  padding: 18px 18px 14px;
+  color: var(--text);
+  background:
+    radial-gradient(120% 90% at 0% 0%, rgba(var(--accent-rgb), 0.16), transparent 55%),
+    var(--surface-2);
+  border: 1px solid var(--gold-line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-floating), 0 0 0 1px rgba(var(--accent-rgb), 0.08), 0 18px 60px rgba(var(--accent-rgb), 0.14);
+  -webkit-backdrop-filter: var(--blur-deep);
+  backdrop-filter: var(--blur-deep);
+  transform: translateX(-50%);
+  animation: focus-checkin-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  overflow: hidden;
+}
+.focus-checkin-glow {
+  position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(115deg, transparent 30%, rgba(var(--accent-hi-rgb), 0.16) 48%, transparent 62%);
+  transform: translateX(-100%);
+  animation: focus-checkin-sheen 1.6s ease-out 0.25s 1 both;
+}
+@keyframes focus-checkin-in {
+  from { opacity: 0; transform: translate(-50%, -14px) scale(0.97); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+@keyframes focus-checkin-sheen {
+  to { transform: translateX(100%); }
+}
+.focus-checkin-close {
+  position: absolute; top: 10px; right: 10px;
+  width: 30px; height: 30px; display: grid; place-items: center;
+  color: var(--text-45); background: transparent; border: 0; border-radius: var(--radius-sm); cursor: pointer;
+}
+.focus-checkin-close:hover { color: var(--text); background: var(--neutral-hover); }
+.focus-checkin-head, .focus-checkin-reply { position: relative; display: flex; align-items: center; gap: 12px; padding-right: 26px; }
+.focus-checkin-icon {
+  flex: 0 0 auto;
+  width: 42px; height: 42px;
+  display: grid; place-items: center;
+  color: var(--on-accent);
+  background: linear-gradient(135deg, var(--accent-hi), rgb(var(--accent-rgb)));
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 22px rgba(var(--accent-rgb), 0.3);
+}
+.focus-checkin.prompt .focus-checkin-icon { animation: focus-checkin-pulse 2.4s ease-in-out infinite; }
+@keyframes focus-checkin-pulse {
+  0%, 100% { box-shadow: 0 8px 22px rgba(var(--accent-rgb), 0.3); }
+  50% { box-shadow: 0 8px 30px rgba(var(--accent-rgb), 0.5), 0 0 0 6px rgba(var(--accent-rgb), 0.08); }
+}
+.focus-checkin-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
+}
+.focus-checkin-reply .focus-checkin-title { font-size: var(--fs-lg); }
+.focus-checkin-sub { margin-top: 3px; color: var(--text-60); font-size: var(--fs-sm); }
+.focus-checkin-progress { position: relative; display: flex; flex-wrap: wrap; gap: 6px; }
+.focus-checkin-progress span {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 9px;
+  color: var(--text-80);
+  font-size: var(--fs-xs); font-weight: var(--fw-semibold);
+  background: rgba(var(--accent-rgb), 0.1);
+  border: 1px solid rgba(var(--accent-rgb), 0.22);
+  border-radius: var(--radius-pill);
+}
+.focus-checkin-progress svg { color: var(--gold); }
+.focus-checkin-actions { position: relative; display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 7px; }
+.focus-checkin-actions button,
+.focus-checkin-restart {
+  min-height: 40px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 0 10px;
+  color: var(--text-80);
+  font-size: var(--fs-sm); font-weight: var(--fw-semibold);
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: transform .12s ease, border-color .12s ease, background .12s ease;
+}
+.focus-checkin-actions button:hover,
+.focus-checkin-restart:hover { color: var(--text); border-color: var(--neutral-border-hover); transform: translateY(-1px); }
+.focus-checkin-actions button.primary {
+  color: var(--on-accent);
+  background: linear-gradient(135deg, var(--accent-hi), rgb(var(--accent-rgb)));
+  border-color: transparent;
+  box-shadow: 0 8px 20px rgba(var(--accent-rgb), 0.25);
+}
+.focus-checkin-actions button.primary:hover { filter: brightness(1.05); }
+.focus-checkin-actions button:focus-visible,
+.focus-checkin-foot button:focus-visible,
+.focus-checkin-close:focus-visible,
+.focus-checkin-restart:focus-visible { outline: 2px solid var(--gold-line); outline-offset: 2px; }
+.focus-checkin-restart { margin-top: 8px; min-height: 34px; font-size: var(--fs-xs); }
+.focus-checkin-foot {
+  position: relative;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  color: var(--text-45); font-size: var(--fs-tiny);
+}
+.focus-checkin-foot button { padding: 2px 0; color: var(--text-60); font-size: var(--fs-tiny); background: none; border: 0; cursor: pointer; }
+.focus-checkin-foot button:hover { color: var(--text); text-decoration: underline; }
+.focus-checkin-foot em { margin-left: auto; font-style: normal; color: var(--gold); }
+.focus-checkin-reply.drifted .focus-checkin-icon { color: var(--text); background: var(--surface-1); box-shadow: none; border: 1px solid var(--hairline); }
+.focus-checkin-reply.break .focus-checkin-icon { color: var(--text); background: color-mix(in srgb, var(--green) 26%, transparent); box-shadow: none; }
+
+@media (max-width: 520px) {
+  .focus-checkin-actions { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .focus-checkin, .focus-checkin-glow, .focus-checkin.prompt .focus-checkin-icon { animation: none; }
+  .focus-checkin-glow { display: none; }
+}

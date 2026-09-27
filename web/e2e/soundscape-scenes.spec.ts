@@ -1,0 +1,51 @@
+import { expect, test, type Page } from "@playwright/test";
+
+async function openWorkspace(page: Page) {
+  await page.goto("/#dashboard", { waitUntil: "networkidle" });
+  const name = page.getByLabel("Display name (optional)");
+  if (await name.isVisible()) {
+    await name.fill("Scenes test");
+    for (let step = 0; step < 3; step++) await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.getByRole("button", { name: "Finish setup", exact: true }).click();
+    const later = page.getByRole("button", { name: "Review later", exact: true });
+    if (await later.count()) await later.click();
+  }
+}
+
+test("frequency cards, ambient sounds, scenes and Spotify load cleanly", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+  await openWorkspace(page);
+  await page.goto("/#soundscapes");
+
+  await expect(page.getByRole("heading", { name: "What each frequency is for" })).toBeVisible();
+  for (const headline of ["The binding rhythm", "The working brain", "The resting rhythm", "The slow waves of sleep"]) {
+    await expect(page.getByRole("heading", { name: headline })).toBeVisible();
+  }
+  const ambient = page.locator(".ambient-card");
+  await expect(ambient).toHaveCount(8);
+
+  // Scenes are real, loadable video files.
+  const gamma = page.getByRole("article", { name: /40 Hz Gamma/ });
+  const video = gamma.locator("video.scene-player");
+  await expect(video).toHaveAttribute("src", /scenes\/cockpit\.mp4$/);
+  const status = await page.evaluate(async (src) => (await fetch(src, { method: "HEAD" })).status, await video.getAttribute("src"));
+  expect(status).toBe(200);
+
+  // The hero's scene picker swaps between scenes and the generative visual.
+  const hero = page.locator(".soundscape-hero");
+  await hero.getByRole("radio", { name: "Earth turning scene" }).click();
+  await expect(hero.locator("video.scene-player")).toHaveAttribute("src", /scenes\/earth\.mp4$/);
+  await hero.getByRole("radio", { name: "Generative" }).click();
+  await expect(hero.locator("video.scene-player")).toHaveCount(0);
+  await expect(hero.locator("canvas.soundscape-visual")).toHaveCount(1);
+  await hero.getByRole("radio", { name: "Auto" }).click();
+
+  // Spotify only loads when asked.
+  await expect(page.locator("iframe.spotify-embed")).toHaveCount(0);
+  await page.getByRole("button", { name: /Load the Spotify player/ }).first().click();
+  await expect(page.locator("iframe.spotify-embed").first()).toHaveAttribute("src", /open\.spotify\.com\/embed\/playlist\/0KAHoInyGB8kJ0NplpAP3h/);
+
+  expect(errors.filter((message) => !/spotify|favicon|Failed to load resource/i.test(message))).toEqual([]);
+});

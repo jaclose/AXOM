@@ -1,0 +1,3 @@
+// @vitest-environment jsdom
+import { cleanup,render,screen } from "@testing-library/react";import { afterEach,describe,expect,it } from "vitest";import { AccountSyncPanel } from "./AccountSyncPanel";
+afterEach(cleanup);describe("Account protection boundary",()=>{it("keeps local work legitimate when cloud configuration is absent",()=>{render(<AccountSyncPanel/>);expect(screen.getByText(/Cloud credentials are absent/)).toBeTruthy();expect(screen.getByText(/Portable JSON export/i)).toBeTruthy();expect(screen.queryByRole("button",{name:"Sign in"})).toBeNull();expect(screen.getByText(/binary attachment sync/i)).toBeTruthy();});});

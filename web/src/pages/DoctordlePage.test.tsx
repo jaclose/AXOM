@@ -1,24 +1,17 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { DoctordlePage } from "./DoctordlePage";
 
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-});
-
-describe("Doctordle WIP boundary", () => {
-  it("is accessible and contains no executable integration surface", () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
+afterEach(cleanup);
+describe("Doctordle external boundary", () => {
+  it("links safely to the verified destination without embedding it", () => {
     const { container } = render(<DoctordlePage />);
-
-    expect(screen.getByRole("heading", { level: 1, name: "Doctordle" })).toBeTruthy();
-    expect(screen.getByText(/Integration pending collaboration approval/i)).toBeTruthy();
-    expect(screen.getByText("WIP")).toBeTruthy();
+    const link = screen.getByRole("link", { name: /open doctordle.org/i });
+    expect(link.getAttribute("href")).toBe("https://doctordle.org/");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toContain("noopener");
+    expect(screen.getByText(/does not embed/i)).toBeTruthy();
     expect(container.querySelector("iframe")).toBeNull();
-    expect(container.querySelector("a[href]")).toBeNull();
-    expect(screen.queryByRole("button")).toBeNull();
-    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

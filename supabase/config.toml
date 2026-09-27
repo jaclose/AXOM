@@ -48,9 +48,9 @@ port = 54329
 # Configure one of the supported pooler modes: `transaction`, `session`.
 pool_mode = "transaction"
 # How many server connections to allow per user/database pair.
-default_pool_size = 20
+default_pool_size = 15
 # Maximum number of client connections allowed.
-max_client_conn = 100
+max_client_conn = 200
 
 # [db.vault]
 # secret_key = "env(SECRET_VALUE)"
@@ -134,7 +134,7 @@ enabled = true
 # Store analytical data in S3 for running ETL jobs over Iceberg Catalog
 # This feature is only available on the hosted platform.
 [storage.analytics]
-enabled = false
+enabled = true
 max_namespaces = 5
 max_tables = 10
 max_catalogs = 2
@@ -226,9 +226,9 @@ enable_confirmations = true
 # If enabled, users will need to reauthenticate or have logged in recently to change their password.
 secure_password_change = false
 # Controls the minimum amount of time that must pass before sending another signup confirmation or password reset email.
-max_frequency = "1s"
-# Number of characters used in the email OTP.
-otp_length = 6
+max_frequency = "1m0s"
+# Number of characters used in the email OTP. AXOM accepts 6–10 digits.
+otp_length = 8
 # Number of seconds before the email OTP expires (defaults to 1 hour).
 otp_expiry = 3600
 
@@ -254,11 +254,20 @@ otp_expiry = 3600
 # content_path = "./supabase/templates/password_changed_notification.html"
 
 
-# AXOM: the sign-in email must include the one-time code ({{ .Token }}) so
-# passwordless sign-in also works in the packaged desktop app.
+# AXOM: every auth email carries the one-time code ({{ .Token }}) as well as
+# the link, because a link opened from the desktop app lands in a browser and
+# cannot return to the app window. The app verifies codes with verifyOtp.
 [auth.email.template.magic_link]
 subject = "Your AXOM sign-in code"
 content_path = "./supabase/templates/magic_link.html"
+
+[auth.email.template.confirmation]
+subject = "Confirm your AXOM account"
+content_path = "./supabase/templates/confirmation.html"
+
+[auth.email.template.recovery]
+subject = "Reset your AXOM password"
+content_path = "./supabase/templates/recovery.html"
 
 [auth.sms]
 # Allow/disallow new user signups via SMS to your project.
@@ -291,13 +300,8 @@ max_frequency = "5s"
 # enabled = true
 # uri = "pg-functions://<database>/<schema>/<hook_name>"
 
-# Configure one of the supported SMS providers: `twilio`, `twilio_verify`, `messagebird`, `textlocal`, `vonage`.
-[auth.sms.twilio]
-enabled = false
-account_sid = ""
-message_service_sid = ""
-# DO NOT commit your Twilio auth token to git. Use environment variable substitution instead:
-auth_token = "env(SUPABASE_AUTH_SMS_TWILIO_AUTH_TOKEN)"
+# AXOM has no SMS sign-in. The Twilio block is deliberately undeclared so a
+# config push leaves whatever the dashboard holds unchanged.
 
 # Multi-factor-authentication is available to Supabase Pro plan.
 [auth.mfa]
@@ -306,8 +310,8 @@ max_enrolled_factors = 10
 
 # Control MFA via App Authenticator (TOTP)
 [auth.mfa.totp]
-enroll_enabled = false
-verify_enabled = false
+enroll_enabled = true
+verify_enabled = true
 
 # Configure MFA via Phone Messaging
 [auth.mfa.phone]
@@ -420,3 +424,8 @@ enabled = true
 # formatted with uppercase keywords, indent 2, max width 180, trailing commas,
 # and column/key alignment. Set to "null" to emit raw, unformatted SQL.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":180,\"commaStyle\":\"trailing\"}"
+
+[functions.ai-proxy]
+# Callers must present a signed-in user's JWT; the function re-checks it and
+# meters a per-user daily quota before calling Claude.
+verify_jwt = true

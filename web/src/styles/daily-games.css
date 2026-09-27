@@ -104,8 +104,8 @@
 }
 
 .daily-word-tile.filled {
-  border-color: rgba(200, 169, 106, 0.28);
-  background: rgba(200, 169, 106, 0.055);
+  border-color: rgba(var(--accent-rgb), 0.28);
+  background: rgba(var(--accent-rgb), 0.055);
 }
 
 .daily-word-tile svg {

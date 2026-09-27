@@ -13,8 +13,14 @@ import { DailyRolloverWatcher } from "./components/shell/DailyRolloverWatcher";
 import { UpdateAvailableWatcher } from "./components/shell/UpdateAvailableWatcher";
 import { WhatsNewWatcher } from "./components/shell/WhatsNewWatcher";
 import { PomodoroFx } from "./components/productivity/PomodoroFx";
+import { MenuBarTimerBridge } from "./components/productivity/MenuBarTimerBridge";
 import { SessionOverlay } from "./components/session/SessionOverlay";
-import { isDailyGamesRoute, NAV } from "./components/shell/nav";
+import { FocusDock } from "./components/dock/FocusDock";
+import { RestOverlay } from "./components/rest/RestOverlay";
+import { SoundscapeTimerSync } from "./components/soundscapes/SoundscapeTimerSync";
+import { FocusCheckIn } from "./components/shell/FocusCheckIn";
+import { AccountSyncWatcher } from "./components/shell/AccountSyncWatcher";
+import { NAV } from "./components/shell/nav";
 import { useStore } from "./lib/store";
 import { useUi } from "./lib/uiStore";
 import { pushToast } from "./lib/toast";
@@ -23,28 +29,11 @@ import { readOnboardingDraftMode, type OnboardingDestination, type OnboardingMod
 import { promisePromptStatus, shouldOfferPromiseAfterGlobalTour, shouldOfferPromisePrompt } from "./lib/promisePrompt";
 
 import { DashboardPage } from "./pages/DashboardPage";
-import { CoursesPage } from "./pages/CoursesPage";
-import { CourseTrackerPage } from "./pages/CourseTrackerPage";
-import { AnkiLabPage } from "./pages/AnkiLabPage";
 import { ResourcesPage } from "./pages/ResourcesPage";
 import { StepPage } from "./pages/StepPage";
-import { ReportsPage } from "./pages/ReportsPage";
 import { ProductivityPage } from "./pages/ProductivityPage";
 import { TasksPage } from "./pages/TasksPage";
-import { HabitTrackerPage } from "./pages/HabitTrackerPage";
 import { JournalPage } from "./pages/JournalPage";
-import { IntegrationsPage } from "./pages/IntegrationsPage";
-import { PromptLibraryPage } from "./pages/PromptLibraryPage";
-import { HubFoldersPage } from "./pages/HubFoldersPage";
-import { HelpPage } from "./pages/HelpPage";
-import { AboutPage } from "./pages/AboutPage";
-import { ApplicationCheckerPage } from "./pages/ApplicationCheckerPage";
-import { LeaderboardsPage } from "./pages/LeaderboardsPage";
-import { PremedExperienceLogPage } from "./pages/PremedExperienceLogPage";
-import { ActivityHistoryPage } from "./pages/ActivityHistoryPage";
-import { QuestionWorkspacePage } from "./pages/QuestionWorkspacePage";
-import { StudyMethodsPage } from "./pages/StudyMethodsPage";
-import { OptionalDailyGamesPage } from "./pages/OptionalDailyGamesPage";
 
 const DevDesignPreview = import.meta.env.DEV
   ? lazy(() => import("./pages/DesignPreviewPage"))
@@ -55,14 +44,36 @@ const DevDesignPreview = import.meta.env.DEV
 // route cannot fetch the engine or list.
 const LazyDailyWordPage = lazy(() => import("./pages/DailyWordPage").then((module) => ({ default: module.DailyWordPage })));
 const LazyDoctordlePage = lazy(() => import("./pages/DoctordlePage").then((module) => ({ default: module.DoctordlePage })));
+const LazyDailyGamesPage = lazy(() => import("./pages/OptionalDailyGamesPage").then((module) => ({ default: module.OptionalDailyGamesPage })));
+const LazyBuildingPage = lazy(() => import("./pages/BuildingPage").then((module) => ({ default: module.BuildingPage })));
+const LazySharedQuestionSetPage = lazy(() => import("./pages/SharedQuestionSetPage").then((module) => ({ default: module.SharedQuestionSetPage })));
+const LazyCoursesPage = lazy(() => import("./pages/CoursesPage").then((module) => ({ default: module.CoursesPage })));
+const LazyCourseTrackerPage = lazy(() => import("./pages/CourseTrackerPage").then((module) => ({ default: module.CourseTrackerPage })));
+const LazyQuestionWorkspacePage = lazy(() => import("./pages/QuestionWorkspacePage").then((module) => ({ default: module.QuestionWorkspacePage })));
+const LazyApplicationCheckerPage = lazy(() => import("./pages/ApplicationCheckerPage").then((module) => ({ default: module.ApplicationCheckerPage })));
+// Less frequent routes load on demand to keep the always-loaded shell small.
+const LazyAnkiLabPage = lazy(() => import("./pages/AnkiLabPage").then((module) => ({ default: module.AnkiLabPage })));
+const LazyReportsPage = lazy(() => import("./pages/ReportsPage").then((module) => ({ default: module.ReportsPage })));
+const LazyHabitTrackerPage = lazy(() => import("./pages/HabitTrackerPage").then((module) => ({ default: module.HabitTrackerPage })));
+const LazyIntegrationsPage = lazy(() => import("./pages/IntegrationsPage").then((module) => ({ default: module.IntegrationsPage })));
+const LazyPromptLibraryPage = lazy(() => import("./pages/PromptLibraryPage").then((module) => ({ default: module.PromptLibraryPage })));
+const LazyHubFoldersPage = lazy(() => import("./pages/HubFoldersPage").then((module) => ({ default: module.HubFoldersPage })));
+const LazyHelpPage = lazy(() => import("./pages/HelpPage").then((module) => ({ default: module.HelpPage })));
+const LazyAboutPage = lazy(() => import("./pages/AboutPage").then((module) => ({ default: module.AboutPage })));
+const LazyLeaderboardsPage = lazy(() => import("./pages/LeaderboardsPage").then((module) => ({ default: module.LeaderboardsPage })));
+const LazyPremedExperienceLogPage = lazy(() => import("./pages/PremedExperienceLogPage").then((module) => ({ default: module.PremedExperienceLogPage })));
+const LazyActivityHistoryPage = lazy(() => import("./pages/ActivityHistoryPage").then((module) => ({ default: module.ActivityHistoryPage })));
+const LazyStudyMethodsPage = lazy(() => import("./pages/StudyMethodsPage").then((module) => ({ default: module.StudyMethodsPage })));
+const LazySoundscapesPage = lazy(() => import("./pages/SoundscapesPage").then((module) => ({ default: module.SoundscapesPage })));
 
 const PAGES: Record<string, () => JSX.Element> = {
   dashboard: DashboardPage,
-  courses: CoursesPage,
-  tracker: CourseTrackerPage,
-  questions: QuestionWorkspacePage,
-  methods: StudyMethodsPage,
-  anki: AnkiLabPage,
+  courses: () => <LazyCoursesPage />,
+  tracker: () => <LazyCourseTrackerPage />,
+  questions: () => <LazyQuestionWorkspacePage />,
+  methods: () => <LazyStudyMethodsPage />,
+  soundscapes: () => <LazySoundscapesPage />,
+  anki: () => <LazyAnkiLabPage />,
   resources: ResourcesPage,
   step: () => <StepPage initialLane="step1" />,
   step2: () => <StepPage initialLane="step2" />,
@@ -73,20 +84,25 @@ const PAGES: Record<string, () => JSX.Element> = {
   mcat: () => <StepPage initialLane="mcat" />,
   dat: () => <StepPage initialLane="dat" />,
   casper: () => <StepPage initialLane="casper" />,
-  "premed-log": PremedExperienceLogPage,
-  activity: ActivityHistoryPage,
-  reports: ReportsPage,
+  "premed-log": () => <LazyPremedExperienceLogPage />,
+  activity: () => <LazyActivityHistoryPage />,
+  reports: () => <LazyReportsPage />,
   productivity: ProductivityPage,
   tasks: TasksPage,
-  habits: HabitTrackerPage,
+  habits: () => <LazyHabitTrackerPage />,
   journal: JournalPage,
-  integrations: IntegrationsPage,
-  prompts: PromptLibraryPage,
-  folders: HubFoldersPage,
-  about: AboutPage,
-  help: HelpPage,
-  appchecker: ApplicationCheckerPage,
-  leaderboards: LeaderboardsPage,
+  integrations: () => <LazyIntegrationsPage />,
+  prompts: () => <LazyPromptLibraryPage />,
+  folders: () => <LazyHubFoldersPage />,
+  about: () => <LazyAboutPage />,
+  help: () => <LazyHelpPage />,
+  appchecker: () => <LazyApplicationCheckerPage />,
+  leaderboards: () => <LazyLeaderboardsPage />,
+  "daily-games": () => <LazyDailyGamesPage />,
+  "daily-word": () => <LazyDailyWordPage />,
+  doctordle: () => <LazyDoctordlePage />,
+  building: () => <LazyBuildingPage />,
+  "shared-set": () => <LazySharedQuestionSetPage />,
 };
 
 export default function App({ startupStatus }: { startupStatus?: StorageMigrationResult }) {
@@ -113,7 +129,6 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const restoreMenuFocusRef = useRef(false);
   const onboarded = useStore((s) => s.profile.onboarded);
-  const dailyGamesEnabled = useStore((s) => s.profile.experimentalFlags?.dailyGames === true);
   const tourDone = useStore((s) => s.profile.tourDone);
   const updateProfile = useStore((s) => s.updateProfile);
   // Show the tour once after onboarding; "Replay tour" simply clears tourDone.
@@ -265,13 +280,9 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
     setTimeout(() => setRefreshing(false), 650);
   }
 
-  const nav = NAV.find((n) => n.id === route) ?? NAV[0];
-  let Page: ComponentType = PAGES[route] ?? DashboardPage;
-  if (isDailyGamesRoute(route)) {
-    Page = !dailyGamesEnabled
-      ? OptionalDailyGamesPage
-      : route === "daily-word" ? LazyDailyWordPage : LazyDoctordlePage;
-  }
+  const routeKey = route.split("?")[0];
+  const nav = NAV.find((n) => n.id === routeKey) ?? NAV[0];
+  const Page: ComponentType = PAGES[routeKey] ?? DashboardPage;
 
   if (!onboarded || setupMode) {
     return (
@@ -281,6 +292,9 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
           <div className="orb purple" />
           <div className="orb blue" />
         </div>
+        {/* Same child slot as in the main shell below, so re-running setup
+            keeps one bridge mounted and a running sprint stays in the menu bar. */}
+        {onboarded && <MenuBarTimerBridge />}
         <DailyRolloverWatcher />
         <UpdateAvailableWatcher />
         <OnboardingWizard
@@ -300,6 +314,8 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
         <div className="orb purple" />
         <div className="orb blue" />
       </div>
+      {/* Keep in the slot right after the backdrop (see the setup branch). */}
+      <MenuBarTimerBridge />
 
       <div className="shell">
         <Sidebar
@@ -312,6 +328,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
 
         <div className="surface">
           <TopBar
+            route={routeKey}
             title={nav.label}
             subtitle={nav.subtitle}
             onMenu={() => setDrawer(true)}
@@ -322,7 +339,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
           />
           <div className="surface-scroll">
             <div className={route === "tracker" ? "page page-tracker" : "page"}>
-              <Suspense fallback={<div className="route-loading" role="status">Opening optional module…</div>}>
+              <Suspense fallback={<div className="route-loading" role="status" aria-live="polite">Opening your workspace…</div>}>
                 <Page />
               </Suspense>
             </div>
@@ -347,6 +364,11 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
       <StandupWatcher />
       <DailyLoopReminderWatcher />
       <SessionOverlay />
+      <FocusDock />
+      <RestOverlay />
+      <SoundscapeTimerSync />
+      <FocusCheckIn />
+      <AccountSyncWatcher />
       <Toaster />
     </div>
   );

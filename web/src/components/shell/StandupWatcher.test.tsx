@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { STORAGE_KEYS } from "../../lib/brand";
 import { prettyDate } from "../../lib/scoring";
 import { useStore } from "../../lib/store";
-import { pushToast, useToasts } from "../../lib/toast";
+import { pushToast, REMINDER_TOAST_DURATION_MS, useToasts } from "../../lib/toast";
 import { useUi } from "../../lib/uiStore";
 import type { JournalEntry, StudyLog } from "../../lib/types";
 import { StandupWatcher } from "./StandupWatcher";
@@ -72,6 +72,13 @@ describe("StandupWatcher", () => {
     expect(useUi.getState().journalDay).toBe("2026-07-10");
     expect(window.location.hash).toBe("#journal");
     expect(useStore.getState().journal).toEqual([existing]);
+  });
+
+  it("is an optional reminder that leaves on its own instead of covering the page until dismissed", async () => {
+    setReminderState("2026-07-16", ["2026-07-15"]);
+    renderWatcher();
+    expect(await screen.findByRole("button", { name: /Dismiss Journal catch-up/ })).toBeTruthy();
+    expect(useToasts.getState().toasts.map((toast) => toast.duration)).toEqual([REMINDER_TOAST_DURATION_MS]);
   });
 
   it("persists Skip for the current day and target", async () => {

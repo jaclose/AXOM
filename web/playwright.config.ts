@@ -14,6 +14,9 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   use: {
     ...devices["Desktop Chrome"],
+    // AXOM_E2E_CHANNEL=chrome runs against installed Google Chrome when the
+    // bundled Playwright Chromium is not downloaded (npm run test:e2e:chrome).
+    ...(process.env.AXOM_E2E_CHANNEL ? { channel: process.env.AXOM_E2E_CHANNEL } : {}),
     baseURL,
     headless: true,
     reducedMotion: "reduce",

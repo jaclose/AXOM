@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { makeDailyRequirement } from "./dailySuccess";
-import { buildCanonicalReportSummary, buildCanonicalReportTrends, compareReportPeriods, reportDateKeys } from "./reports";
+import { buildCanonicalReportSummary, buildCanonicalReportTrends, compareReportPeriods, reportDateKeys, buildCalendarWeeks, summarizeActivityWeek, buildActivityRhythm } from "./reports";
 import { makeSeed } from "./seed";
 import type { StudyLog } from "./types";
 
@@ -222,5 +222,43 @@ describe("canonical report trends", () => {
     const trends = buildCanonicalReportTrends(state);
     expect(trends.currentWeek.at(-1)).toMatchObject({ dayKey: TODAY, eligible: true, scored: false, status: "pending" });
     expect(compareReportPeriods(trends.currentWeek, trends.previousWeek, "minutes").sufficient).toBe(false);
+  });
+});
+
+describe("activity-based report trends", () => {
+  function stateWithLogs(minutesByOffset: Record<number, number>) {
+    const state = makeSeed();
+    state.activeDayKey = "2026-09-26";
+    state.profile.dailySuccess = undefined;
+    state.logs = Object.entries(minutesByOffset).map(([offset, minutes]) => {
+      const date = new Date(2026, 8, 26 - Number(offset), 12);
+      const dayKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      return { id: `log-${offset}`, dayKey, ts: `${dayKey}T12:00:00.000Z`, type: "Study", minutes, cards: 0, academic: true, productive: true };
+    });
+    return state;
+  }
+
+  it("splits the last 14 calendar days into this week and last week", () => {
+    const weeks = buildCalendarWeeks(stateWithLogs({ 0: 30, 7: 60 }));
+    expect(weeks.current.map((day) => day.dayKey)).toEqual(["2026-09-20", "2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24", "2026-09-25", "2026-09-26"]);
+    expect(weeks.previous[6].dayKey).toBe("2026-09-19");
+    expect(weeks.current[6].minutes).toBe(30);
+    expect(weeks.previous[6].minutes).toBe(60);
+  });
+
+  it("summarizes the week against the previous seven days", () => {
+    const weeks = buildCalendarWeeks(stateWithLogs({ 0: 60, 1: 60, 7: 40, 8: 40 }));
+    const summary = summarizeActivityWeek(weeks.current, weeks.previous, "minutes");
+    expect(summary).toMatchObject({ total: 120, previousTotal: 80, activeDays: 2, percentChange: 50, bestDayKey: "2026-09-25" });
+    expect(summary.interpretation).toMatch(/up 50%/);
+    expect(summarizeActivityWeek(weeks.current, weeks.current.map((day) => ({ ...day, minutes: 0 })), "minutes").percentChange).toBeNull();
+  });
+
+  it("counts an activity streak without letting an empty today break it", () => {
+    const rhythm = buildActivityRhythm(stateWithLogs({ 1: 30, 2: 30, 3: 30, 5: 30, 9: 30 }), 14);
+    expect(rhythm.streak.value).toBe("3");
+    expect(rhythm.consistency.note).toBe("5 of 9 days had logged activity");
+    const withToday = buildActivityRhythm(stateWithLogs({ 0: 10, 1: 30 }), 14);
+    expect(withToday.streak.value).toBe("2");
   });
 });

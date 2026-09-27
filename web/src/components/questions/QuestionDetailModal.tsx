@@ -236,9 +236,10 @@ export function QuestionDetailModal({ question, onClose }: { question: QuestionR
       </div>
 
       <QuestionAnnotationToolbar
-        selectedTone={annotationTone}
+        activeMode={{ kind: "highlight", tone: annotationTone }}
         hasSelection={Boolean(annotationSelection)}
-        onTone={setAnnotationTone}
+        onHighlightMode={setAnnotationTone}
+        onEraserMode={() => setAnnotationStatus("Use Delete or Backspace on a focused highlight.")}
         onHighlight={saveAnnotation}
         onClear={() => {
           annotationsRef.current = [];

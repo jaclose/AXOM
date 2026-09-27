@@ -1,3 +1,5 @@
+mod menu_bar_pill;
+mod menu_bar_timer;
 mod webview_dialogs;
 
 use serde::Serialize;
@@ -63,7 +65,7 @@ pub fn run() {
         kind: MigrationKind::Up,
     }];
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();
@@ -73,13 +75,19 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations("sqlite:noctyrium.db", migrations)
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![desktop_status])
+        .manage(menu_bar_timer::MenuBarTimerState::default())
+        .invoke_handler(tauri::generate_handler![
+            desktop_status,
+            menu_bar_timer::menu_bar_timer_update,
+            menu_bar_timer::menu_bar_timer_clear,
+        ])
         .setup(|app| {
             // Unsigned development packages remain usable without a fake update key.
             if updater_configured(app.handle()) {
@@ -122,6 +130,7 @@ pub fn run() {
             let updates = Submenu::with_items(app, "Updates", true, &[&check])?;
             menu.append(&updates)?;
             app.set_menu(menu)?;
+            menu_bar_timer::setup(app.handle());
             Ok(())
         })
         .on_menu_event(|app, event| {
@@ -129,8 +138,11 @@ pub fn run() {
                 let _ = app.emit("axom:check-for-updates", ());
             }
         })
-        .run(tauri::generate_context!())
+        .on_window_event(menu_bar_timer::on_window_event)
+        .build(tauri::generate_context!())
         .expect("Unable to start AXOM desktop; local data has not been reset");
+
+    app.run(menu_bar_timer::on_run_event);
 }
 
 #[cfg(test)]

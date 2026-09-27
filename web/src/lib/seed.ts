@@ -9,7 +9,7 @@ import { userIdFromName } from "./userIdentity";
 import { ACADEMIC_TEMPLATE_COURSES, ACADEMIC_TEMPLATE_TERMS, DEFAULT_FOCUS_IDS } from "./experience";
 import { normalizeResourceUrl } from "./resourceUtils";
 
-export const SCHEMA_VERSION = 33;
+export const SCHEMA_VERSION = 34;
 // Version + brand strings live in brand.ts (single source of truth for rebrand).
 export { APP_RELEASE_VERSION, APP_BUILD_LABEL, APP_VERSION_LABEL } from "./brand";
 import { APP_VERSION_LABEL, BRAND } from "./brand";

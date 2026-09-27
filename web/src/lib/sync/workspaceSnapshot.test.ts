@@ -1,0 +1,3 @@
+// @vitest-environment jsdom
+import { describe,expect,it } from "vitest";import { makeSeed } from "../seed";import { snapshotWorkspace } from "./workspaceSnapshot";
+describe("workspace snapshot",()=>{it("is deterministic and contains no authentication secrets",async()=>{const state=makeSeed();const a=await snapshotWorkspace(state,{deviceId:"11111111-1111-4111-8111-111111111111",baseRevision:0,idempotencyKey:"i",reason:"foundation"});const b=await snapshotWorkspace(state,{deviceId:a.deviceId,baseRevision:0,idempotencyKey:"i",reason:"foundation"});expect(a.contentHash).toBe(b.contentHash);expect(JSON.stringify(a.payload)).not.toMatch(/access_token|refresh_token|sessionToken|password/i);});});

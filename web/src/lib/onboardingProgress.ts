@@ -1,6 +1,7 @@
 import { EDUCATION_TRACKS, resolveTrack } from "./tracks";
 import { academicStagesForTrack, isAcademicStageId } from "./tracks";
 import type { AcademicStageId, EducationTrackId, ExperienceFocusId } from "./types";
+import { normalizeStudyWorkflow, type StudyWorkflowPreferences } from "./studyPreferences";
 
 export type OnboardingMode = "first-run" | "rerun";
 export type OnboardingDestination = "dashboard" | "tracker" | "questions";
@@ -21,6 +22,7 @@ export interface OnboardingDraft {
   widgetPreset: OnboardingWidgetPreset;
   launchTour: boolean;
   quickRequirements: OnboardingQuickRequirement[];
+  studyWorkflow?: StudyWorkflowPreferences;
 }
 
 export const ONBOARDING_DRAFT_KEY = "axom.onboarding-draft.v1";
@@ -82,6 +84,8 @@ export function readOnboardingDraft(
       customStage: safeText(parsed.customStage, fallback.customStage, 120),
       focusId,
       firstCourse: safeText(parsed.firstCourse, fallback.firstCourse, 160),
+      studyWorkflow: parsed.studyWorkflow && typeof parsed.studyWorkflow === "object" && !Array.isArray(parsed.studyWorkflow)
+        ? normalizeStudyWorkflow(parsed.studyWorkflow) : fallback.studyWorkflow,
       destination: isDestination(parsed.destination) ? parsed.destination : fallback.destination,
       widgetPreset: parsed.widgetPreset === "expanded" || parsed.widgetPreset === "focused"
         ? parsed.widgetPreset

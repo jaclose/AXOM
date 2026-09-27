@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { STORAGE_KEYS } from "../src/lib/brand";
 
-test("Daily Games opt-in, Daily Word history, and shared clock preferences persist locally", async ({ page }) => {
+test("persistent Daily Games, Daily Word history, and shared clock preferences persist locally", async ({ page }) => {
   const browserErrors: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error") browserErrors.push(message.text());
@@ -12,11 +12,6 @@ test("Daily Games opt-in, Daily Word history, and shared clock preferences persi
   await completeOnboarding(page);
   await page.evaluate(() => { window.location.hash = "daily-word"; });
 
-  await expect(page.getByRole("heading", { level: 1, name: "Daily Games is currently disabled" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Enable Daily Games" })).toBeVisible();
-  expect(await loadedGameResources(page)).toEqual({ engine: false, words: false });
-
-  await page.getByRole("button", { name: "Enable Daily Games" }).click();
   await expect(page.getByRole("heading", { level: 1, name: "AXOM Daily Word" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Daily Games", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Daily Word", exact: true })).toBeVisible();
@@ -36,7 +31,7 @@ test("Daily Games opt-in, Daily Word history, and shared clock preferences persi
   await page.getByRole("button", { name: /Open clock/ }).click();
   await page.getByRole("button", { name: "Clock preferences" }).click();
   const settings = page.getByRole("dialog", { name: "Your AXOM Setup" });
-  await expect(settings.getByText("Daily utilities")).toBeVisible();
+  await expect(settings.getByRole("heading", { name: "Daily rhythm reminders" })).toBeVisible();
 
   await settings.getByRole("combobox", { name: "Hour cycle" }).selectOption("24");
   await settings.getByRole("checkbox", { name: "Digital seconds" }).check();
@@ -45,22 +40,13 @@ test("Daily Games opt-in, Daily Word history, and shared clock preferences persi
   await settings.getByLabel("Custom timezone").fill("America/Grenada");
   await settings.getByRole("button", { name: "Apply timezone" }).click();
 
-  // Disabling hides navigation and gates the active direct route, but history
-  // remains in the IndexedDB workspace.
-  await settings.getByRole("checkbox", { name: "Enable Daily Games" }).uncheck();
   await settings.getByRole("button", { name: "Done" }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "Daily Games is currently disabled" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Daily Games", exact: true })).toHaveCount(0);
   expect((await readPersistedWorkspace(page)).dailyWordPuzzles[0].guesses).toEqual(["FOXES"]);
-
-  await page.getByRole("button", { name: "Enable Daily Games" }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "AXOM Daily Word" })).toBeVisible();
   await expect(page.getByRole("gridcell", { name: /Row 1, column 1, letter F/ })).toBeVisible();
 
   await page.reload({ waitUntil: "networkidle" });
   const persisted = await readPersistedWorkspace(page);
-  expect(persisted.schemaVersion).toBe(33);
-  expect(persisted.profile.experimentalFlags.dailyGames).toBe(true);
+  expect(persisted.schemaVersion).toBe(34);
   expect(persisted.profile.timeZonePreference).toEqual({ mode: "custom", customTimezone: "America/Grenada" });
   expect(persisted.profile.clockPreferences).toMatchObject({
     enabled: true,
@@ -106,16 +92,6 @@ async function completeOnboarding(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Finish setup", exact: true }).click();
   const reviewLater = page.getByRole("button", { name: "Review later" });
   if (await reviewLater.count()) await reviewLater.click();
-}
-
-async function loadedGameResources(page: Page): Promise<{ engine: boolean; words: boolean }> {
-  return page.evaluate(() => {
-    const names = performance.getEntriesByType("resource").map((entry) => entry.name);
-    return {
-      engine: names.some((name) => /DailyWordPage/i.test(name)),
-      words: names.some((name) => /dailyWordWords/i.test(name)),
-    };
-  });
 }
 
 async function readPersistedWorkspace(page: Page) {

@@ -7,8 +7,11 @@
 // Scanned PDFs with no text layer are stored as source records and say so
 // honestly; no fake OCR.
 // ===========================================================================
-import { useMemo, useRef, useState } from "react";
-import { ClipboardPaste, FileUp, Save, Sparkles, RefreshCw, ChevronDown, ChevronUp, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowLeft, CheckCircle2, ClipboardPaste, FileUp, Save, Sparkles,
+  RefreshCw, ChevronDown, ChevronUp, Trash2, X,
+} from "lucide-react";
 import { useStore } from "../../lib/store";
 import { createImportMappingLedger, parseQuestionBlocks, type ParsedQuestionDraft } from "../../lib/questionParse";
 import { detectImportFormat, importFromCsv, importFromJson, importFromText } from "../../lib/questionImport";
@@ -16,7 +19,8 @@ import { extractDocxText, extractPdfText, extractPlainText } from "../../lib/ext
 import { documentTitleFromFile, type QuestionSet, type SourceDocument } from "../../lib/library";
 import {
   EXAM_TYPE_LABEL, QUESTION_CATEGORIES,
-  type QuestionDifficulty, type QuestionExamType, type QuestionRecord, type QuestionSource,
+  validateQuestionRecord,
+  type ExtractionConfidence, type QuestionDifficulty, type QuestionExamType, type QuestionRecord, type QuestionSource,
 } from "../../lib/questions";
 import { normalizeTags, suggestCategory } from "../../lib/taxonomy";
 import {
@@ -29,17 +33,34 @@ import { Field, SelectField, TextAreaField } from "../ui/Modal";
 import { pushToast } from "../../lib/toast";
 import { sha256Hex } from "../../lib/checksum";
 import { assignDraftProvenancePages } from "../../lib/questionProvenance";
-import { draftImportStatus, summarizeImportDrafts } from "../../lib/questionImportTrust";
+import {
+  evaluateImportDraft, evaluateImportDrafts, summarizeImportDrafts,
+  type DraftImportEvaluation,
+} from "../../lib/questionImportTrust";
+import {
+  findEquivalentReviewedSet,
+  isReviewedImportInFlight,
+  persistReviewedImportOnce,
+  reviewedImportFingerprint,
+  type ImportDocumentWrite,
+  type ReviewedQuestionInput,
+} from "../../lib/questionImportFinalization";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { MassImport } from "./MassImport";
+import { flagImportDuplicates } from "../../lib/questionDuplicates";
 
-export type ImportTab = "paste" | "file" | "ai";
+export type ImportTab = "paste" | "file" | "batch" | "ai";
 type SaveMode = "set" | "doc" | "both";
+type ImportStep = "source" | "review" | "finalize";
 
 interface ReviewDraft extends ParsedQuestionDraft {
+  reviewId: string;
   include: boolean;
   aiGenerated?: boolean;
   expanded?: boolean;
   source: QuestionSource;
+  /** Explicit acknowledgement for valid drafts whose extraction still needs review. */
+  reviewAcknowledged?: boolean;
 }
 
 interface PendingDocument {
@@ -71,6 +92,14 @@ export interface ImportSeed {
   checksum?: string;
   warnings?: string[];
   source?: QuestionSource;
+  /** Internal queue identity used to retire one multi-file row after success. */
+  batchQueueId?: string;
+}
+
+export interface ImportFinalizationResult {
+  setId?: string;
+  documentId?: string;
+  questionIds: string[];
 }
 
 /** Re-open a saved source with the deterministic local parser; no provider is required. */
@@ -127,6 +156,7 @@ export function preserveUserReviewedMappings(
       || hasNonSequentialOptionKeys
       || (draft.parserRuleIds ?? []).some((ruleId) => (
         ruleId === "question.malformed-boundary"
+        || ruleId === "question.ambiguous-explanation-boundary"
         || ruleId === "conflict.duplicate-question-number"
       ))
     );
@@ -157,14 +187,28 @@ export function preserveUserReviewedMappings(
   });
 }
 
-export function ImportPanel({ seed, initialTab = "file" }: { seed?: ImportSeed | null; initialTab?: ImportTab }) {
+export function ImportPanel({
+  seed,
+  initialTab = "file",
+  onFinalized,
+}: {
+  seed?: ImportSeed | null;
+  initialTab?: ImportTab;
+  onFinalized?: (result: ImportFinalizationResult) => void;
+}) {
   const s = useStore();
   const [tab, setTab] = useState<ImportTab>(seed?.reference ? "ai" : initialTab);
+  const [step, setStep] = useState<ImportStep>(seed?.drafts ? "review" : "source");
   const [drafts, setDrafts] = useState<ReviewDraft[]>(() =>
     seed?.drafts
-      ? preserveUserReviewedMappings(seed.drafts, s.questions ?? [], seed.sourceDocumentId)
-        .map((d) => ({ ...d, include: true, source: seed.source ?? "imported" }))
+      ? flagImportDuplicates(
+        preserveUserReviewedMappings(seed.drafts, s.questions ?? [], seed.sourceDocumentId),
+        s.questions ?? [],
+      )
+        .map((d) => ({ ...d, reviewId: uid(), include: true, source: seed.source ?? "imported" }))
       : []);
+  const [sourceText, setSourceText] = useState(seed?.rawText ?? "");
+  const [sourceType, setSourceType] = useState<QuestionSource>(seed?.source ?? "pasted");
   const [batchWarnings, setBatchWarnings] = useState<string[]>(() => seed?.warnings ?? []);
   const [pendingDoc, setPendingDoc] = useState<PendingDocument | null>(() =>
     seed?.drafts && seed.rawText != null
@@ -189,9 +233,19 @@ export function ImportPanel({ seed, initialTab = "file" }: { seed?: ImportSeed |
   const [examType, setExamType] = useState<QuestionExamType | "">("");
   const [difficulty, setDifficulty] = useState<QuestionDifficulty | "">("");
   const [aiBusyDraft, setAiBusyDraft] = useState<number | null>(null);
+  const [finalizing, setFinalizing] = useState(false);
+  const [activeBatchQueueId, setActiveBatchQueueId] = useState<string | undefined>(seed?.batchQueueId);
+  const [finalizedBatchQueueId, setFinalizedBatchQueueId] = useState<string | undefined>();
+  const finalizingRef = useRef(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const provider = useMemo(() => resolveActiveProvider(), []);
-  const reviewing = drafts.length > 0 || pendingDoc !== null;
+  const reviewing = step === "review" || step === "finalize";
 
   // Auto-categorize only when the user hasn't set a batch category and the
   // draft has none: high-confidence heuristic assigns, otherwise left blank.
@@ -206,162 +260,294 @@ export function ImportPanel({ seed, initialTab = "file" }: { seed?: ImportSeed |
     return suggestCategory(draftText(d)).tags;
   }
 
-  function reset() {
+  function reset(preserveFinalizedGuard = false) {
     setDrafts([]);
     setBatchWarnings([]);
     setPendingDoc(null);
+    setSourceText("");
+    setSourceType("pasted");
+    setActiveBatchQueueId(undefined);
     setSetTitle("");
     setSaveMode("both");
     setAiEnhance(false);
+    setStep("source");
+    if (!preserveFinalizedGuard) finalizingRef.current = false;
+    setFinalizing(false);
   }
 
   function loadDrafts(parsed: ParsedQuestionDraft[], warnings: string[], source: QuestionSource, doc: PendingDocument | null, ai = false) {
-    setDrafts(parsed.map((d) => ({ ...d, include: true, aiGenerated: ai, source })));
+    finalizingRef.current = false;
+    setFinalizing(false);
+    const duplicateAware = flagImportDuplicates(parsed, s.questions ?? []);
+    setDrafts(duplicateAware.map((d) => ({ ...d, reviewId: uid(), include: true, aiGenerated: ai, source })));
     setBatchWarnings(warnings);
     setPendingDoc(doc);
+    setSourceType(source);
+    if (doc) setSourceText(doc.rawText);
     setSetTitle(doc?.title ?? (ai ? "AI-generated set" : `Pasted set ${new Date().toISOString().slice(0, 10)}`));
     setSaveMode(doc ? (parsed.length > 0 ? "both" : "doc") : "set");
+    setStep("review");
+  }
+
+  function finishSuccessfulImport(result: ImportFinalizationResult) {
+    if (!mountedRef.current) return;
+    const continueBatch = Boolean(activeBatchQueueId);
+    if (continueBatch) {
+      setFinalizedBatchQueueId(activeBatchQueueId);
+      setActiveBatchQueueId(undefined);
+    }
+    reset(true);
+    if (continueBatch) {
+      setTab("batch");
+      return;
+    }
+    try {
+      onFinalized?.(result);
+    } catch {
+      pushToast({ title: "Import finalized", body: "The reviewed questions were saved, but AXOM could not open the destination automatically.", tone: "warn" });
+    }
   }
 
   async function saveApproved(modeOverride: SaveMode = saveMode) {
-    const approved = drafts.filter((d) => d.include);
+    if (finalizingRef.current) return;
+
+    const approved = drafts.filter((draft) => draft.include);
+    const approvedEvaluations = evaluateImportDrafts(approved);
+    const approvedEntries = approved.map((draft, index) => ({ draft, evaluation: approvedEvaluations[index] }));
     const wantsSet = modeOverride !== "doc" && approved.length > 0;
     const wantsDoc = modeOverride !== "set" && pendingDoc !== null;
     if (!wantsSet && !wantsDoc) {
-      pushToast({ title: "Nothing to save", body: "Include at least one question, or choose 'library document only'.", tone: "warn" });
+      pushToast({ title: "Nothing to finalize", body: "Include at least one valid question, or keep the source document for later review.", tone: "warn" });
       return;
     }
 
-    const duplicateDoc = wantsDoc
-      ? (s.documents ?? []).find((document) => document.id === pendingDoc?.existingDocumentId)
-        ?? (pendingDoc?.checksum
+    if (wantsSet) {
+      const blocked = approvedEntries.filter(({ draft, evaluation }) => (
+          !evaluation.isValid || (evaluation.level === "Needs Review" && !draft.reviewAcknowledged)
+        ));
+      if (blocked.length > 0) {
+        const blockedDrafts = new Set(blocked.map(({ draft }) => draft));
+        setDrafts((all) => all.map((draft) => blockedDrafts.has(draft) ? { ...draft, expanded: true } : draft));
+        pushToast({
+          title: "Review is not complete",
+          body: `${blocked.length} included question${blocked.length === 1 ? " needs" : "s need"} correction or explicit review before finalization.`,
+          tone: "warn",
+        });
+        return;
+      }
+    }
+
+    const duplicateDoc = pendingDoc
+      ? (s.documents ?? []).find((document) => document.id === pendingDoc.existingDocumentId)
+        ?? (pendingDoc.checksum
           ? (s.documents ?? []).find((document) => document.checksum === pendingDoc.checksum)
           : undefined)
       : undefined;
-    const docId = wantsDoc ? (duplicateDoc?.id ?? uid()) : undefined;
+    const documentId = pendingDoc ? (duplicateDoc?.id ?? (wantsDoc ? uid() : undefined)) : undefined;
     const setId = wantsSet ? uid() : undefined;
-
-    // Questions first, so the set can reference their real ids.
-    const questionIds: string[] = [];
-    const errors: string[] = [];
-    if (wantsSet) {
-      for (const d of approved) {
-        const manuallyReviewedAnswer = Boolean(
-          d.correctKey && d.parserRuleIds?.includes("answer.user-reviewed-mapping"),
-        );
-        const extractionReviewed = Boolean(
-          d.correctKey && (manuallyReviewedAnswer || (!d.needsReview && d.confidence === "high")),
-        );
-        const result = s.addQuestion({
-          source: d.source,
-          stem: d.stem,
-          options: d.options,
-          correctKey: d.correctKey,
-          correctAnswerText: d.correctAnswerText,
-          explanation: d.explanation,
-          choiceRationales: d.choiceRationales,
-          needsReview: d.needsReview,
-          topic: d.topic,
-          system: d.system,
-          objective: d.objective,
-          category: resolveCategory(d),
-          bank: setTitle || undefined,
-          setId,
-          sourceDocumentId: docId,
-          questionNumber: d.questionNumber,
-          sourcePage: d.sourcePage,
-          examType: (examType || undefined) as QuestionExamType | undefined,
-          difficulty: (difficulty || undefined) as QuestionDifficulty | undefined,
-          citation: d.reference ?? d.sourceLabel ?? pendingDoc?.fileName,
-          tags: normalizeTags([...(d.tags ?? []), ...autoTags(d)]),
-          status: "unseen",
-          ai: d.aiGenerated ? { generated: true, provider: provider?.info.label } : undefined,
-          extraction: {
-            confidence: d.confidence,
-            reviewed: extractionReviewed,
-            reviewedAt: extractionReviewed ? new Date().toISOString() : undefined,
-            questionDetectionConfidence: d.questionDetectionConfidence,
-            answerDetectionConfidence: d.answerDetectionConfidence,
-            explanationDetectionConfidence: d.explanationDetectionConfidence,
-            overallImportConfidence: d.overallImportConfidence,
-            warnings: d.warnings,
-            parserRuleIds: d.parserRuleIds,
-            sourceSnippet: d.sourceSnippet,
-            questionSourceSnippet: d.questionSourceSnippet,
-            questionSourcePage: d.questionSourcePage,
-            answerEvidence: d.answerEvidence,
-            answerEvidenceSnippet: d.answerEvidenceSnippet,
-            answerEvidencePage: d.answerEvidencePage,
-            explanationSourceSnippet: d.explanationSourceSnippet,
-            explanationSourcePage: d.explanationSourcePage,
-            explanationSource: d.explanationSource,
-            explanationRawCandidate: d.explanationRawCandidate,
-            explanationCleanupOperations: d.explanationCleanupOperations,
-          },
-        });
-        if (result.ok && result.id) questionIds.push(result.id);
-        else errors.push(...result.errors);
-      }
-      if (questionIds.length > 0) {
-        const qset: QuestionSet = {
-          id: setId!,
-          title: setTitle || "Untitled set",
-          sourceDocumentIds: docId ? [docId] : [],
-          createdAt: new Date().toISOString(),
-          questionIds,
-          tags: category ? [category] : [],
-          aiEnhanced: false,
-          parserWarnings: batchWarnings,
-        };
-        s.addQuestionSet(qset);
-      }
-    }
-
-    const savedSetId = questionIds.length > 0 ? setId : undefined;
-
-    if (wantsDoc && pendingDoc && duplicateDoc) {
-      s.updateDocument(duplicateDoc.id, {
-        linkedQuestionSetIds: savedSetId
-          ? [...new Set([...duplicateDoc.linkedQuestionSetIds, savedSetId])]
-          : duplicateDoc.linkedQuestionSetIds,
-        libraryOnly: duplicateDoc.libraryOnly && !savedSetId,
-      });
-    } else if (wantsDoc && pendingDoc) {
-      const doc: SourceDocument = {
-        id: docId!,
-        title: pendingDoc.title,
-        fileName: pendingDoc.fileName,
-        fileType: pendingDoc.fileType,
-        uploadedAt: new Date().toISOString(),
-        rawText: pendingDoc.rawText,
-        pageTexts: pendingDoc.pageTexts,
-        sizeBytes: pendingDoc.sizeBytes,
-        checksum: pendingDoc.checksum,
-        tags: category ? [category] : [],
-        linkedQuestionSetIds: savedSetId ? [savedSetId] : [],
-        libraryOnly: !savedSetId,
+    const reviewedAt = new Date().toISOString();
+    const normalizedSetTitle = setTitle.trim() || "Untitled set";
+    const extractionConfidence = (evaluation: DraftImportEvaluation): ExtractionConfidence => (
+      evaluation.level === "High" ? "high" : "medium"
+    );
+    const questionInputs: ReviewedQuestionInput[] = approvedEntries.map(({ draft, evaluation }) => {
+      return {
+        id: uid(),
+        source: draft.source,
+        stem: draft.stem,
+        options: draft.options,
+        correctKey: draft.correctKey,
+        // Always derive this from the current edited option list at the boundary.
+        correctAnswerText: draft.options.find((option) => option.key === draft.correctKey)?.text,
+        explanation: draft.explanation,
+        choiceRationales: draft.choiceRationales,
+        needsReview: undefined,
+        topic: draft.topic,
+        system: draft.system,
+        objective: draft.objective,
+        category: resolveCategory(draft),
+        bank: normalizedSetTitle,
+        setId,
+        sourceDocumentId: documentId,
+        sourceFile: pendingDoc ? {
+          name: pendingDoc.fileName,
+          type: pendingDoc.fileType,
+          size: pendingDoc.sizeBytes,
+          addedAt: reviewedAt,
+        } : undefined,
+        questionNumber: draft.questionNumber,
+        sourcePage: draft.sourcePage,
+        examType: (examType || undefined) as QuestionExamType | undefined,
+        difficulty: (difficulty || undefined) as QuestionDifficulty | undefined,
+        citation: draft.reference !== undefined
+          ? (draft.reference.trim() || undefined)
+          : draft.sourceLabel ?? pendingDoc?.fileName,
+        tags: normalizeTags([...(draft.tags ?? []), ...autoTags(draft)]),
+        status: "unseen",
+        ai: draft.aiGenerated ? { generated: true, provider: provider?.info.label } : undefined,
+        extraction: {
+          confidence: extractionConfidence(evaluation),
+          reviewed: true,
+          reviewedAt,
+          questionDetectionConfidence: draft.questionDetectionConfidence,
+          answerDetectionConfidence: draft.answerDetectionConfidence,
+          explanationDetectionConfidence: draft.explanationDetectionConfidence,
+          overallImportConfidence: draft.overallImportConfidence,
+          warnings: draft.warnings,
+          parserRuleIds: [...new Set([
+            ...(draft.parserRuleIds ?? []),
+            ...(draft.reviewAcknowledged ? ["import.user-reviewed"] : []),
+          ])],
+          sourceSnippet: draft.sourceSnippet,
+          questionSourceSnippet: draft.questionSourceSnippet,
+          questionSourcePage: draft.questionSourcePage,
+          answerEvidence: draft.answerEvidence,
+          answerEvidenceSnippet: draft.answerEvidenceSnippet,
+          answerEvidencePage: draft.answerEvidencePage,
+          explanationSourceSnippet: draft.explanationSourceSnippet,
+          explanationSourcePage: draft.explanationSourcePage,
+          explanationSource: draft.explanationSource,
+          explanationRawCandidate: draft.explanationRawCandidate,
+          explanationCleanupOperations: draft.explanationCleanupOperations,
+        },
       };
-      s.addDocument(doc);
+    });
+
+    if (wantsSet) {
+      const preflightErrors = questionInputs.flatMap((input, index) => {
+        const result = validateQuestionRecord(input);
+        return result.ok ? [] : result.errors.map((error) => `Question ${input.questionNumber ?? index + 1}: ${error}`);
+      });
+      if (preflightErrors.length > 0) {
+        pushToast({ title: "Finalization blocked", body: preflightErrors.slice(0, 2).join(" "), tone: "warn" });
+        return;
+      }
     }
 
-    pushToast({
+    const fingerprint = reviewedImportFingerprint({
+      title: normalizedSetTitle,
+      destination: modeOverride,
+      sourceIdentity: pendingDoc
+        ? pendingDoc.checksum
+          ? `checksum:${pendingDoc.checksum}`
+          : `file:${pendingDoc.fileName}:${pendingDoc.fileType}:${pendingDoc.sizeBytes}`
+        : `source:${sourceType}`,
+      candidates: wantsSet ? questionInputs : [],
+    });
+    const equivalent = wantsSet && !isReviewedImportInFlight(fingerprint)
+      ? findEquivalentReviewedSet({
+          sets: s.questionSets ?? [],
+          questions: s.questions ?? [],
+          title: normalizedSetTitle,
+          sourceDocumentId: duplicateDoc?.id,
+          candidates: questionInputs,
+        })
+      : undefined;
+    if (equivalent) {
+      finalizingRef.current = true;
+      pushToast({
+        title: "Import already finalized",
+        body: "AXOM found the same reviewed questions and reused the existing set instead of creating duplicates.",
+        tone: "success",
+      });
+      finishSuccessfulImport({
+        setId: equivalent.set.id,
+        documentId: wantsDoc ? duplicateDoc?.id : undefined,
+        questionIds: equivalent.questionIds,
+      });
+      return;
+    }
+
+    const questionSet: QuestionSet | undefined = wantsSet ? {
+      id: setId!,
+      title: normalizedSetTitle,
+      sourceDocumentIds: documentId ? [documentId] : [],
+      createdAt: reviewedAt,
+      questionIds: questionInputs.map((question) => question.id),
+      tags: category ? [category] : [],
+      aiEnhanced: false,
+      parserWarnings: batchWarnings,
+    } : undefined;
+    let documentWrite: ImportDocumentWrite | undefined;
+    if (pendingDoc && duplicateDoc && (wantsDoc || Boolean(setId))) {
+      documentWrite = {
+        kind: "update",
+        id: duplicateDoc.id,
+        original: duplicateDoc,
+        patch: {
+          linkedQuestionSetIds: setId
+            ? [...new Set([...duplicateDoc.linkedQuestionSetIds, setId])]
+            : duplicateDoc.linkedQuestionSetIds,
+          libraryOnly: duplicateDoc.libraryOnly && !setId,
+        },
+      };
+    } else if (wantsDoc && pendingDoc && documentId) {
+      documentWrite = {
+        kind: "create",
+        document: {
+          id: documentId,
+          title: pendingDoc.title,
+          fileName: pendingDoc.fileName,
+          fileType: pendingDoc.fileType,
+          uploadedAt: reviewedAt,
+          rawText: pendingDoc.rawText,
+          pageTexts: pendingDoc.pageTexts,
+          sizeBytes: pendingDoc.sizeBytes,
+          checksum: pendingDoc.checksum,
+          tags: category ? [category] : [],
+          linkedQuestionSetIds: setId ? [setId] : [],
+          libraryOnly: !setId,
+        },
+      };
+    }
+
+    finalizingRef.current = true;
+    setFinalizing(true);
+    setStep("finalize");
+    const coordinated = await persistReviewedImportOnce(fingerprint, s, {
+      questions: wantsSet ? questionInputs : [],
+      questionSet,
+      documentWrite,
+    });
+    const persisted = coordinated.result;
+    if (!persisted.ok) {
+      if (!mountedRef.current) return;
+      finalizingRef.current = false;
+      setFinalizing(false);
+      setStep("review");
+      pushToast({
+        title: persisted.rollbackFailures.length
+          ? "Finalization failed — cleanup incomplete"
+          : "Nothing was finalized",
+        body: persisted.rollbackFailures.length
+          ? `${persisted.message} AXOM could not confirm cleanup for ${persisted.rollbackFailures.join(", ")}. Review the Question Bank and Source Library before retrying.`
+          : persisted.message,
+        tone: "warn",
+      });
+      return;
+    }
+
+    const questionIds = persisted.questionIds;
+    const savedSetId = persisted.questionSetId;
+    const savedDocumentId = persisted.documentId;
+    if (mountedRef.current) pushToast({
       title: savedSetId
-        ? `${questionIds.length} question${questionIds.length === 1 ? "" : "s"} saved${wantsDoc ? " + source document" : ""}`
-        : "Source document saved to the library",
-      body: errors.length
-        ? `Skipped: ${errors.slice(0, 2).join(" ")}`
-        : duplicateDoc ? "Matched the existing source checksum and linked it instead of storing a duplicate." : undefined,
+        ? `${questionIds.length} reviewed question${questionIds.length === 1 ? "" : "s"} finalized`
+        : "Source document saved for later review",
+      body: duplicateDoc
+        ? "AXOM reused the existing source record and linked the new reviewed set."
+        : savedSetId ? "The imported set is available in Question Sets and the Question Bank." : undefined,
       tone: "success",
     });
 
     // Optional AI enhancement — after save, clearly labeled, never blocking.
-    if (aiEnhance && savedSetId && provider) {
-      const forDigest = approved.map((d) => ({
-        stem: d.stem,
-        correct: d.options.find((o) => o.key === d.correctKey)?.text,
-        explanation: d.explanation,
+    if (aiEnhance && savedSetId && provider && !coordinated.joined) {
+      const forDigest = approved.map((draft) => ({
+        stem: draft.stem,
+        correct: draft.options.find((option) => option.key === draft.correctKey)?.text,
+        explanation: draft.explanation,
       }));
-      enhanceQuestionSet(provider, { title: setTitle || "Question set", questions: forDigest })
+      enhanceQuestionSet(provider, { title: normalizedSetTitle, questions: forDigest })
         .then((digest) => {
           s.updateQuestionSet(savedSetId, {
             aiEnhanced: true,
@@ -369,23 +555,174 @@ export function ImportPanel({ seed, initialTab = "file" }: { seed?: ImportSeed |
           });
           void saveAiGeneration({
             kind: "summary",
-            title: `${setTitle || "Question set"} digest`,
+            title: `${normalizedSetTitle} digest`,
             inputHash: hashGenerationInput({ kind: "question-set-digest", setId: savedSetId, questionIds }),
-            sourceIds: [savedSetId, ...(docId ? [docId] : [])],
+            sourceIds: [savedSetId, ...(savedDocumentId ? [savedDocumentId] : [])],
             model: provider.info.label,
             promptVersion: "question-set-digest-v1",
             content: digest,
             metadata: { provider: provider.info.label, questionCount: questionIds.length },
           });
-          pushToast({ title: "Question Intelligence ready", body: "The set's digest and pitfalls are on its card in Question Sets.", tone: "success" });
+          if (mountedRef.current) pushToast({ title: "Question Intelligence ready", body: "The set's digest and pitfalls are on its card in Question Sets.", tone: "success" });
         })
-        .catch((err) => pushToast({ title: "AI enhancement failed", body: err instanceof Error ? err.message : "Unknown error.", tone: "warn" }));
+        .catch((error) => {
+          if (mountedRef.current) pushToast({ title: "AI enhancement failed", body: error instanceof Error ? error.message : "Unknown error.", tone: "warn" });
+        });
     }
-    reset();
+
+    finishSuccessfulImport({
+      setId: savedSetId,
+      documentId: wantsDoc ? savedDocumentId : undefined,
+      questionIds,
+    });
   }
 
   function updateDraft(index: number, patch: Partial<ReviewDraft>) {
-    setDrafts((all) => all.map((d, i) => (i === index ? { ...d, ...patch } : d)));
+    setDrafts((all) => all.map((draft, draftIndex) => (
+      draftIndex === index ? { ...draft, ...patch } : draft
+    )));
+  }
+
+  function editDraft(
+    index: number,
+    patch: Partial<ReviewDraft>,
+    resolvedRules: readonly string[] = [],
+  ) {
+    setDrafts((all) => all.map((draft, draftIndex) => {
+      if (draftIndex !== index) return draft;
+      return {
+        ...draft,
+        ...patch,
+        parserRuleIds: resolvedRules.length
+          ? (draft.parserRuleIds ?? []).filter((rule) => !resolvedRules.includes(rule))
+          : draft.parserRuleIds,
+      };
+    }));
+  }
+
+  function acknowledgeDraftReview(index: number) {
+    updateDraft(index, { needsReview: undefined, reviewAcknowledged: true });
+  }
+
+  function confirmDraftBoundary(index: number) {
+    setDrafts((all) => all.map((draft, draftIndex) => draftIndex === index ? {
+      ...draft,
+      needsReview: undefined,
+      reviewAcknowledged: false,
+      parserRuleIds: [
+        ...(draft.parserRuleIds ?? []).filter((rule) => (
+          rule !== "question.malformed-boundary"
+          && rule !== "question.ambiguous-explanation-boundary"
+          && rule !== "question.ambiguous-numbered-stem-list"
+        )),
+        "question.user-reviewed-boundary",
+      ],
+    } : draft));
+  }
+
+  function focusAfterReviewUpdate(...elementIds: Array<string | undefined>) {
+    const restore = () => {
+      for (const id of elementIds) {
+        if (!id) continue;
+        const element = document.getElementById(id);
+        if (element instanceof HTMLElement) {
+          element.focus();
+          return;
+        }
+      }
+    };
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(restore);
+    else setTimeout(restore, 0);
+  }
+
+  function removeDraft(index: number) {
+    const focusDraft = drafts[index + 1] ?? drafts[index - 1];
+    setDrafts((all) => all.filter((_, draftIndex) => draftIndex !== index));
+    focusAfterReviewUpdate(
+      focusDraft ? `import-draft-toggle-${focusDraft.reviewId}` : undefined,
+      "import-discard-button",
+    );
+  }
+
+  function updateOptionKey(index: number, draft: ReviewDraft, optionIndex: number, rawKey: string) {
+    const key = rawKey.replace(/[^a-z]/gi, "").slice(0, 1).toUpperCase();
+    const previousKey = draft.options[optionIndex]?.key;
+    const options = draft.options.map((option, currentIndex) => (
+      currentIndex === optionIndex ? { ...option, key } : option
+    ));
+    const keyIsNowAmbiguous = Boolean(key)
+      && options.filter((option) => option.key.trim().toUpperCase() === key).length > 1;
+    const collisionTouchesAnswer = keyIsNowAmbiguous
+      && (draft.correctKey === previousKey || draft.correctKey === key);
+    // A clean rename follows the selected option. Once a collision makes that
+    // identity ambiguous, clear the mapping and require an explicit reselection;
+    // later label edits must never silently retarget the answer to another row.
+    const correctKey = collisionTouchesAnswer
+      ? undefined
+      : draft.correctKey === previousKey ? (key || undefined) : draft.correctKey;
+    editDraft(index, {
+      options,
+      correctKey,
+      correctAnswerText: correctKey ? options.find((option) => option.key === correctKey)?.text : undefined,
+    });
+  }
+
+  function updateOptionText(index: number, draft: ReviewDraft, optionIndex: number, text: string) {
+    const options = draft.options.map((option, currentIndex) => (
+      currentIndex === optionIndex ? { ...option, text } : option
+    ));
+    editDraft(index, {
+      options,
+      correctAnswerText: draft.correctKey
+        ? options.find((option) => option.key === draft.correctKey)?.text
+        : undefined,
+    });
+  }
+
+  function moveOption(index: number, draft: ReviewDraft, optionIndex: number, direction: -1 | 1) {
+    const targetIndex = optionIndex + direction;
+    if (targetIndex < 0 || targetIndex >= draft.options.length) return;
+    const options = [...draft.options];
+    [options[optionIndex], options[targetIndex]] = [options[targetIndex], options[optionIndex]];
+    editDraft(index, {
+      options,
+      correctAnswerText: draft.correctKey
+        ? options.find((option) => option.key === draft.correctKey)?.text
+        : undefined,
+    });
+    focusAfterReviewUpdate(`import-option-text-${draft.reviewId}-${targetIndex}`);
+  }
+
+  function removeOption(index: number, draft: ReviewDraft, optionIndex: number) {
+    const removedKey = draft.options[optionIndex]?.key;
+    const options = draft.options.filter((_, currentIndex) => currentIndex !== optionIndex);
+    const correctKey = draft.correctKey === removedKey ? undefined : draft.correctKey;
+    editDraft(index, {
+      options,
+      correctKey,
+      correctAnswerText: correctKey ? options.find((option) => option.key === correctKey)?.text : undefined,
+    });
+    const nextOptionIndex = options.length ? Math.min(optionIndex, options.length - 1) : undefined;
+    focusAfterReviewUpdate(
+      nextOptionIndex !== undefined ? `import-option-text-${draft.reviewId}-${nextOptionIndex}` : undefined,
+      `import-add-option-${draft.reviewId}`,
+    );
+  }
+
+  function addOption(index: number, draft: ReviewDraft) {
+    const used = new Set(draft.options.map((option) => option.key.trim().toUpperCase()));
+    const key = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").find((candidate) => !used.has(candidate)) ?? "";
+    editDraft(index, { options: [...draft.options, { key, text: "" }] });
+  }
+
+  function returnToSource() {
+    setStep("source");
+    if (tab === "batch") {
+      focusAfterReviewUpdate(activeBatchQueueId ? `mass-import-inspect-${activeBatchQueueId}` : undefined);
+    } else {
+      setTab("paste");
+      focusAfterReviewUpdate("import-source-text");
+    }
   }
 
   function confirmDraftAnswer(index: number, draft: ReviewDraft, key: string | undefined) {
@@ -403,18 +740,19 @@ export function ImportPanel({ seed, initialTab = "file" }: { seed?: ImportSeed |
       parserRuleIds: key
         ? [...new Set([...(draft.parserRuleIds ?? []), "answer.user-reviewed-mapping"])]
         : draft.parserRuleIds,
+      reviewAcknowledged: false,
     });
   }
 
   async function assistDraftMapping(index: number) {
     const draft = drafts[index];
-    if (!provider || !draft || !pendingDoc?.rawText) return;
+    if (!provider || !draft || !sourceText) return;
     setAiBusyDraft(index);
     try {
       const result = await mapAnswerFromText(provider, {
         stem: draft.stem,
         options: draft.options,
-        nearbyText: draft.sourceSnippet ?? pendingDoc.rawText.slice(0, 4000),
+        nearbyText: draft.sourceSnippet ?? sourceText.slice(0, 4000),
       });
       updateDraft(index, {
         correctKey: result.suggestedKey,
@@ -433,6 +771,7 @@ export function ImportPanel({ seed, initialTab = "file" }: { seed?: ImportSeed |
             : `AI mapping suggestion ${result.suggestedKey} is grounded in the evidence shown below and still requires your approval.`,
         ],
         parserRuleIds: [...new Set([...(draft.parserRuleIds ?? []), "ai.mapping-assist.reviewed-suggestion"])],
+        reviewAcknowledged: false,
       });
     } catch (error) {
       pushToast({ title: "Mapping assist failed", body: error instanceof Error ? error.message : "Unknown error.", tone: "warn" });
@@ -458,6 +797,7 @@ export function ImportPanel({ seed, initialTab = "file" }: { seed?: ImportSeed |
         needsReview: true,
         warnings: [...draft.warnings, "AI cleaned this explanation without changing the mapped answer — review before acceptance."],
         parserRuleIds: [...new Set([...(draft.parserRuleIds ?? []), "ai.explanation-cleaner.review-required"])],
+        reviewAcknowledged: false,
       });
     } catch (error) {
       pushToast({ title: "Explanation cleaner failed", body: error instanceof Error ? error.message : "Unknown error.", tone: "warn" });
@@ -466,128 +806,441 @@ export function ImportPanel({ seed, initialTab = "file" }: { seed?: ImportSeed |
     }
   }
 
-  const includedCount = drafts.filter((d) => d.include).length;
+  const evaluations = useMemo(() => evaluateImportDrafts(drafts), [drafts]);
+  const includedDrafts = useMemo(() => drafts.filter((draft) => draft.include), [drafts]);
+  const includedEvaluations = useMemo(() => evaluateImportDrafts(includedDrafts), [includedDrafts]);
+  const displayedEvaluations = useMemo(() => {
+    const includedById = new Map(includedDrafts.map((draft, index) => (
+      [draft.reviewId, includedEvaluations[index]]
+    )));
+    return drafts.map((draft, index) => (
+      draft.include ? includedById.get(draft.reviewId) ?? evaluations[index] : evaluations[index]
+    ));
+  }, [drafts, evaluations, includedDrafts, includedEvaluations]);
+  const includedCount = includedDrafts.length;
+  const blockedCount = includedDrafts.filter((draft, index) => (
+    !includedEvaluations[index]?.isValid
+    || (includedEvaluations[index]?.level === "Needs Review" && !draft.reviewAcknowledged)
+  )).length;
+  const levelCounts = displayedEvaluations.reduce((counts, evaluation) => {
+    counts[evaluation.level] += 1;
+    return counts;
+  }, { High: 0, "Needs Review": 0, Invalid: 0 });
   const importSummary = useMemo(() => summarizeImportDrafts(drafts), [drafts]);
   const developerLedger = useMemo(() => import.meta.env.DEV ? createImportMappingLedger(drafts) : [], [drafts]);
+  const destinationMissing = saveMode === "doc"
+    ? !pendingDoc
+    : saveMode === "set"
+      ? includedCount === 0
+      : !pendingDoc || includedCount === 0;
+  const finalizeDisabled = finalizing || destinationMissing || (saveMode !== "doc" && blockedCount > 0);
+  const finalizeStatus = finalizing
+    ? "Finalization is in progress."
+    : !pendingDoc && saveMode !== "set"
+      ? "Attach a source document or choose Questions before finalizing."
+      : includedCount === 0 && saveMode !== "doc"
+        ? "Include at least one question before finalizing."
+        : saveMode !== "doc" && blockedCount > 0
+          ? `${blockedCount} included question${blockedCount === 1 ? " still needs" : "s still need"} correction or explicit review before finalization.`
+          : "The reviewed import is ready to finalize.";
 
   return (
-    <GlassCard>
+    <GlassCard className="question-import-flow">
       <PanelHeader
-        title="Paste & inspect"
+        title="Import questions"
         headingLevel={2}
-        sub="Paste a question block, generate with AI, or review drafts from your imported files. Everything passes through inspection before it becomes a question set."
+        sub="Bring in structured text, inspect every consequential field, then finalize only valid reviewed questions."
       />
+
+      <nav className="import-steps" aria-label="Question import progress">
+        {(["source", "review", "finalize"] as ImportStep[]).map((item, index) => {
+          const isCurrent = item === step;
+          const isComplete = (item === "source" && reviewing) || (item === "review" && step === "finalize");
+          return (
+            <div key={item} className={`${isCurrent ? "current" : ""} ${isComplete ? "complete" : ""}`}
+              aria-current={isCurrent ? "step" : undefined}>
+              <span>{isComplete ? <CheckCircle2 size={ICON_SIZE.microInline} /> : index + 1}</span>
+              {item[0].toUpperCase() + item.slice(1)}
+            </div>
+          );
+        })}
+      </nav>
+
       {!reviewing && (
-        <div className="row" style={{ flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
-          {([["file", "Import file"], ["paste", "Paste text"], ["ai", "Generate with AI"]] as Array<[ImportTab, string]>).map(([id, label]) => (
-            <button key={id} className={`filter-pill ${tab === id ? "on" : ""}`} onClick={() => setTab(id)}>{label}</button>
-          ))}
+        <div className="stack gap12">
+          <div className="row wrap gap6" aria-label="Import source type">
+            {([
+              ["paste", "Paste text"],
+              ["file", "Import one file"],
+              ["batch", "Import several files"],
+              ["ai", "Generate with AI"],
+            ] as Array<[ImportTab, string]>).map(([id, label]) => (
+              <button key={id} className={`filter-pill ${tab === id ? "on" : ""}`}
+                aria-pressed={tab === id} onClick={() => setTab(id)}>{label}</button>
+            ))}
+          </div>
+
+          {tab === "paste" && (
+            <PasteTab
+              raw={sourceText}
+              label={pendingDoc ? `Edit extracted source text from ${pendingDoc.fileName}` : undefined}
+              onRawChange={setSourceText}
+              parseSource={(raw) => {
+                const format = pendingDoc?.fileType.toLowerCase();
+                const result = format === "csv"
+                  ? importFromCsv(raw)
+                  : format === "json"
+                    ? importFromJson(raw)
+                    : importFromText(raw);
+                if (pendingDoc?.pageTexts?.length && raw === pendingDoc.rawText) {
+                  assignDraftProvenancePages(result.drafts, pendingDoc.pageTexts);
+                }
+                return result;
+              }}
+              onParsed={(parsed, warnings, raw) => {
+                const sourceEdited = Boolean(pendingDoc && raw !== pendingDoc.rawText);
+                const reviewedDrafts = sourceEdited
+                  ? parsed.map((draft) => ({
+                      ...draft,
+                      needsReview: true,
+                      warnings: [
+                        ...draft.warnings,
+                        "The extracted source text was edited before parsing — verify this question against the original source.",
+                      ],
+                      parserRuleIds: [...new Set([...(draft.parserRuleIds ?? []), "import.source-text-edited"])],
+                    }))
+                  : parsed;
+                loadDrafts(reviewedDrafts, warnings, pendingDoc ? sourceType : "pasted", pendingDoc);
+                setSourceText(raw);
+              }}
+            />
+          )}
+          {tab === "file" && (
+            <FileTab busyFile={busyFile} setBusyFile={setBusyFile} onParsed={loadDrafts} />
+          )}
+          {tab === "ai" && (
+            <AiGenerateTab seedReference={seed?.reference} onParsed={(parsed, warnings) => loadDrafts(parsed, warnings, "ai-generated", null, true)} />
+          )}
         </div>
       )}
 
-      {!reviewing && tab === "paste" && <PasteTab onParsed={(d, w) => loadDrafts(d, w, "pasted", null)} />}
-      {!reviewing && tab === "file" && (
-        <FileTab
-          busyFile={busyFile}
-          setBusyFile={setBusyFile}
-          onParsed={loadDrafts}
-        />
-      )}
-      {!reviewing && tab === "ai" && (
-        <AiGenerateTab seedReference={seed?.reference} onParsed={(d, w) => loadDrafts(d, w, "ai-generated", null, true)} />
-      )}
+      <div hidden={reviewing || tab !== "batch"}>
+        <MassImport finalizedQueueId={finalizedBatchQueueId} onInspect={(payload) => {
+          setActiveBatchQueueId(payload.batchQueueId);
+          loadDrafts(
+            payload.drafts ?? [],
+            payload.warnings ?? [],
+            payload.source ?? "imported",
+            payload.rawText != null
+              ? {
+                  existingDocumentId: payload.sourceDocumentId,
+                  title: payload.title ?? "Imported",
+                  fileName: payload.fileName ?? "import",
+                  fileType: payload.fileType ?? "imported",
+                  sizeBytes: payload.sizeBytes ?? payload.rawText.length,
+                  rawText: payload.rawText,
+                  pageTexts: payload.pageTexts,
+                  checksum: payload.checksum,
+                }
+              : null,
+          );
+        }} />
+      </div>
 
       {reviewing && (
-        <div className="stack" style={{ gap: 12 }}>
-          <div className="spread" style={{ flexWrap: "wrap", gap: 8 }}>
+        <div className="stack gap12" aria-live="polite">
+          <div className="spread wrap gap8">
             <div className="stack" style={{ gap: 2 }}>
               <b>
                 {drafts.length > 0
                   ? `Review ${drafts.length} parsed question${drafts.length === 1 ? "" : "s"}`
-                  : "No questions parsed from this file"}
+                  : "No questions were parsed"}
                 {pendingDoc ? ` · ${pendingDoc.fileName}` : ""}
               </b>
               <span className="sub">
                 {drafts.length > 0
-                  ? "Uncheck what you don't want. Expand a row to fix the extraction before saving."
-                  : "You can still keep the file in the Source Library and paste its text later."}
+                  ? "Expand a question to correct it. Invalid questions must be repaired or removed before finalization."
+                  : "Keep this source for later review, or return to the source text and adjust it."}
               </span>
             </div>
-            <div className="row">
-              <GhostButton onClick={reset}>Cancel import</GhostButton>
-              {pendingDoc && drafts.length > 0 && (
-                <GhostButton onClick={() => void saveApproved("doc")}>Save and review later</GhostButton>
+            <div className="row wrap gap6">
+              {sourceText && (
+                <GhostButton disabled={finalizing} onClick={returnToSource}>
+                  <ArrowLeft size={ICON_SIZE.body} /> Back to source
+                </GhostButton>
               )}
-              <GButton
-                variant="primary"
-                disabled={saveMode === "doc" ? !pendingDoc : saveMode === "set" ? !includedCount : !pendingDoc || !includedCount}
-                onClick={() => void saveApproved()}
-              >
-                <Save size={ICON_SIZE.body} /> Save
+              <GhostButton id="import-discard-button" disabled={finalizing} onClick={() => reset()}>Discard import</GhostButton>
+              {pendingDoc && drafts.length > 0 && (
+                <GhostButton disabled={finalizing} onClick={() => void saveApproved("doc")}>Keep source for later</GhostButton>
+              )}
+              <GButton id="import-finalize-button" variant="primary" disabled={finalizeDisabled}
+                aria-describedby="import-finalize-status" onClick={() => void saveApproved()}>
+                {finalizing ? <RefreshCw size={ICON_SIZE.body} className="spin" /> : <Save size={ICON_SIZE.body} />}
+                {finalizing ? "Finalizing…" : "Finalize import"}
               </GButton>
             </div>
           </div>
+          <div id="import-finalize-status" className="sub" aria-live="polite">{finalizeStatus}</div>
 
           {batchWarnings.length > 0 && (
-            <ul className="intake-warnings">{batchWarnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
+            <ul className="intake-warnings">{batchWarnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
           )}
 
           {drafts.length > 0 && (
             <section className="import-summary" aria-labelledby="import-summary-title">
               <div className="spread wrap gap8">
                 <div>
-                  <b id="import-summary-title">Import summary</b>
-                  <div className="sub">Wrong trusted answers are blocked. Review anything AXOM could not ground cleanly.</div>
-                  {importSummary.unresolved > 0 && (
-                    <div className="sub">Unresolved questions may be saved as drafts, but they cannot enter a practice block until repaired.</div>
-                  )}
+                  <b id="import-summary-title">Review status</b>
+                  <div className="sub">These levels are deterministic checks, not machine-learning certainty.</div>
+                  {blockedCount > 0 && <div className="sub">{blockedCount} included question{blockedCount === 1 ? " is" : "s are"} blocking finalization.</div>}
                 </div>
-                <div className="row wrap gap6" aria-label="Import trust counts">
-                  <Tag tone="green">Ready {importSummary.ready}</Tag>
-                  <Tag tone="orange">Review suggested {importSummary.reviewSuggested}</Tag>
-                  <Tag tone="red">Unresolved {importSummary.unresolved}</Tag>
+                <div className="row wrap gap6" aria-label="Import confidence counts">
+                  <Tag tone="green">High {levelCounts.High}</Tag>
+                  <Tag tone="orange">Needs Review {levelCounts["Needs Review"]}</Tag>
+                  <Tag tone="red">Invalid {levelCounts.Invalid}</Tag>
                 </div>
               </div>
               <div className="row wrap gap8 sub">
                 <span>Explanations found <b>{importSummary.explanationsFound}</b></span>
                 <span>Missing <b>{importSummary.explanationsMissing}</b></span>
-                <span>Source confidence: <b>{importSummary.sourceConfidence.high} high</b> · {importSummary.sourceConfidence.medium} medium · {importSummary.sourceConfidence.low} low</span>
+                <span>Included <b>{includedCount}</b> of {drafts.length}</span>
               </div>
               <div className="row wrap gap6">
-                <GhostButton onClick={() => setDrafts((all) => all.map((d) => ({ ...d, include: draftImportStatus(d) === "ready" })))}>
-                  Approve ready ({importSummary.ready})
-                </GhostButton>
-                <GhostButton onClick={() => setDrafts((all) => all.map((d) => ({
-                  ...d,
-                  include: draftImportStatus(d) === "review-suggested",
-                  expanded: draftImportStatus(d) === "review-suggested" || d.expanded,
-                })))}>
-                  Review suggested ({importSummary.reviewSuggested})
-                </GhostButton>
-                <GhostButton onClick={() => setDrafts((all) => all.map((d) => ({
-                  ...d,
-                  include: draftImportStatus(d) === "unresolved",
-                  expanded: draftImportStatus(d) === "unresolved" || d.expanded,
-                })))}>
-                  Repair unresolved ({importSummary.unresolved})
-                </GhostButton>
+                <GhostButton onClick={() => setDrafts((all) => all.map((draft, index) => ({
+                  ...draft, include: displayedEvaluations[index]?.level === "High",
+                })))}>Select High ({levelCounts.High})</GhostButton>
+                <GhostButton onClick={() => setDrafts((all) => all.map((draft, index) => ({
+                  ...draft,
+                  include: displayedEvaluations[index]?.level === "Needs Review",
+                  expanded: displayedEvaluations[index]?.level === "Needs Review" || draft.expanded,
+                })))}>Review flagged ({levelCounts["Needs Review"]})</GhostButton>
+                <GhostButton onClick={() => setDrafts((all) => all.map((draft, index) => ({
+                  ...draft,
+                  include: displayedEvaluations[index]?.level === "Invalid",
+                  expanded: displayedEvaluations[index]?.level === "Invalid" || draft.expanded,
+                })))}>Repair invalid ({levelCounts.Invalid})</GhostButton>
+                <GhostButton onClick={() => setDrafts((all) => all.map((draft) => ({ ...draft, include: true })))}>Include all</GhostButton>
               </div>
             </section>
           )}
 
-          {drafts.length > 1 && (
-            <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
-              <span className="sub">Quick select:</span>
-              <button className="filter-pill" onClick={() => setDrafts((all) => all.map((d) => ({ ...d, include: d.confidence === "high" && !d.needsReview })))}>
-                High-confidence only ({drafts.filter((d) => d.confidence === "high" && !d.needsReview).length})
-              </button>
-              <button className="filter-pill" onClick={() => setDrafts((all) => all.map((d) => ({ ...d, include: Boolean(d.needsReview || d.confidence === "low") })))}>
-                Needs-review only ({drafts.filter((d) => d.needsReview || d.confidence === "low").length})
-              </button>
-              <button className="filter-pill" onClick={() => setDrafts((all) => all.map((d) => ({ ...d, include: true })))}>All</button>
-              <button className="filter-pill" onClick={() => setDrafts((all) => all.map((d) => ({ ...d, include: false })))}>None</button>
+          <fieldset className="import-destination">
+            <legend className="field-label">Finalize as</legend>
+            <div className="row wrap gap6">
+              {([
+                ["set", "Questions"],
+                ["doc", "Source document only"],
+                ["both", "Source document + questions"],
+              ] as Array<[SaveMode, string]>).map(([mode, label]) => {
+                const disabled = (mode !== "set" && !pendingDoc) || (mode !== "doc" && drafts.length === 0);
+                return (
+                  <button key={mode} className={`filter-pill ${saveMode === mode ? "on" : ""}`}
+                    aria-pressed={saveMode === mode} disabled={disabled}
+                    title={disabled ? (pendingDoc ? "No questions were parsed" : "No source file is attached") : undefined}
+                    onClick={() => setSaveMode(mode)}>{label}</button>
+                );
+              })}
+              <label className="row" style={{ gap: 6, cursor: provider ? "pointer" : "not-allowed", opacity: provider ? 1 : 0.55 }}>
+                <input type="checkbox" checked={aiEnhance} disabled={!provider || saveMode === "doc"}
+                  onChange={() => setAiEnhance((value) => !value)} />
+                <span className="sub">Optional AI digest after finalization{provider ? "" : " — enable a provider in Settings → AI"}</span>
+              </label>
+            </div>
+          </fieldset>
+
+          {saveMode !== "doc" && (
+            <div className="grid grid-2">
+              <Field label="Set title" value={setTitle} onChange={(event) => setSetTitle(event.target.value)} />
+              <SelectField label="Category (applies to all)" value={category} onChange={(event) => setCategory(event.target.value)}>
+                <option value="">None</option>
+                {QUESTION_CATEGORIES.map((item) => <option key={item} value={item}>{item}</option>)}
+              </SelectField>
+              <SelectField label="Exam style" value={examType} onChange={(event) => setExamType(event.target.value as QuestionExamType | "")}>
+                <option value="">Not set</option>
+                {EXAM_TYPES.map((item) => <option key={item} value={item}>{EXAM_TYPE_LABEL[item]}</option>)}
+              </SelectField>
+              <SelectField label="Difficulty" value={difficulty} onChange={(event) => setDifficulty(event.target.value as QuestionDifficulty | "")}>
+                <option value="">Not set</option>
+                <option value="easy">Easy</option>
+                <option value="medium">Medium</option>
+                <option value="hard">Hard</option>
+              </SelectField>
             </div>
           )}
+
+          <div className="stack gap6">
+            {drafts.map((draft, index) => {
+              const evaluation = displayedEvaluations[index] ?? evaluateImportDraft(draft);
+              const editorId = `import-question-editor-${index}`;
+              const reasonsId = `import-question-reasons-${index}`;
+              const titleId = `import-question-title-${draft.reviewId}`;
+              const tone = evaluation.level === "High" ? "green" : evaluation.level === "Needs Review" ? "orange" : "red";
+              return (
+                <section key={draft.reviewId} role="group" aria-labelledby={titleId}
+                  className={`import-draft ${draft.include ? "" : "excluded"} ${evaluation.level.toLowerCase().replace(" ", "-")}`}>
+                  <div className="row wrap gap8">
+                    <input type="checkbox" checked={draft.include}
+                      aria-label={`Include question ${draft.questionNumber ?? index + 1}`}
+                      onChange={() => updateDraft(index, { include: !draft.include })} />
+                    <button id={`import-draft-toggle-${draft.reviewId}`} className="grow stack card-row-main"
+                      aria-expanded={Boolean(draft.expanded)} aria-controls={editorId}
+                      onClick={() => updateDraft(index, { expanded: !draft.expanded })}>
+                      <span id={titleId} className="truncate" style={{ fontWeight: 600 }}>
+                        {draft.questionNumber !== undefined ? `${draft.questionNumber}. ` : ""}{draft.stem || "(no stem — correction required)"}
+                      </span>
+                      <span className="sub truncate">
+                        {draft.options.length} choices{draft.correctKey ? ` · answer ${draft.correctKey}` : " · answer missing"}
+                        {draft.explanation ? " · explanation present" : " · explanation missing"}
+                        {draft.sourcePage ? ` · page ${draft.sourcePage}` : ""}
+                      </span>
+                    </button>
+                    <Tag tone={tone}>{evaluation.level}</Tag>
+                    {draft.reviewAcknowledged && <Tag tone="cyan">Reviewed</Tag>}
+                    {draft.aiGenerated && <Tag tone="purple">AI</Tag>}
+                    <GhostButton aria-label={`Remove question ${draft.questionNumber ?? index + 1}`}
+                      title="Remove this malformed question" onClick={() => removeDraft(index)}>
+                      <Trash2 size={ICON_SIZE.body} />
+                    </GhostButton>
+                    <GhostButton aria-label={`Toggle editor for question ${draft.questionNumber ?? index + 1}`}
+                      aria-expanded={Boolean(draft.expanded)} aria-controls={editorId}
+                      onClick={() => updateDraft(index, { expanded: !draft.expanded })}>
+                      {draft.expanded ? <ChevronUp size={ICON_SIZE.body} /> : <ChevronDown size={ICON_SIZE.body} />}
+                    </GhostButton>
+                  </div>
+
+                  {draft.expanded && (
+                    <div id={editorId} className="stack gap10 import-draft-editor">
+                      <div id={reasonsId} className={`import-review-result ${evaluation.level.toLowerCase().replace(" ", "-")}`} role="status">
+                        <b>{evaluation.level}</b>
+                        {evaluation.reasons.length > 0
+                          ? <ul>{evaluation.reasons.map((reason) => <li key={reason.code}>{reason.message}</li>)}</ul>
+                          : <span>No blocking or ambiguous extraction signals remain.</span>}
+                      </div>
+
+                      {draft.warnings.length > 0 && (
+                        <details className="question-import-diagnostics">
+                          <summary>Parser notes ({draft.warnings.length})</summary>
+                          <ul className="intake-warnings">{draft.warnings.map((warning, warningIndex) => <li key={warningIndex}>{warning}</li>)}</ul>
+                        </details>
+                      )}
+
+                      <div className="grid grid-2 import-core-fields">
+                        <Field label="Question number" type="number" min={1} step={1}
+                          value={draft.questionNumber ?? ""}
+                          aria-invalid={evaluation.reasons.some((reason) => reason.code === "invalid-question-number" || reason.code === "duplicate-question-number")}
+                          aria-describedby={reasonsId}
+                          onChange={(event) => editDraft(index, {
+                            questionNumber: event.target.value ? Number(event.target.value) : undefined,
+                          }, ["conflict.duplicate-question-number"])} />
+                        <Field label="Reference / source" value={draft.reference ?? draft.sourceLabel ?? pendingDoc?.fileName ?? "Pasted text"}
+                          onChange={(event) => editDraft(index, { reference: event.target.value })} />
+                      </div>
+
+                      <TextAreaField label="Stem" rows={4} value={draft.stem} aria-describedby={reasonsId}
+                        aria-invalid={evaluation.reasons.some((reason) => reason.code === "missing-stem")}
+                        onChange={(event) => editDraft(index, { stem: event.target.value })} />
+
+                      <fieldset className="import-options" aria-describedby={reasonsId}>
+                        <legend className="field-label">Answer choices</legend>
+                        <div className="stack gap6">
+                          {draft.options.map((option, optionIndex) => (
+                            <div key={optionIndex} className="row gap6">
+                              <input className="field import-option-label mono" value={option.key} maxLength={1}
+                                aria-label={`Label for option ${optionIndex + 1}`}
+                                aria-invalid={evaluation.reasons.some((reason) => reason.code === "duplicate-option-labels" || reason.code === "incomplete-option")}
+                                onChange={(event) => updateOptionKey(index, draft, optionIndex, event.target.value)} />
+                              <input id={`import-option-text-${draft.reviewId}-${optionIndex}`} className="field grow"
+                                value={option.text} aria-label={`Option ${option.key || optionIndex + 1}`}
+                                aria-invalid={!option.text.trim() || evaluation.reasons.some((reason) => reason.code === "explanation-detected-as-option")}
+                                onChange={(event) => updateOptionText(index, draft, optionIndex, event.target.value)} />
+                              <GhostButton aria-label={`Move option ${option.key || optionIndex + 1} up`}
+                                disabled={optionIndex === 0}
+                                onClick={() => moveOption(index, draft, optionIndex, -1)}>
+                                <ChevronUp size={ICON_SIZE.body} />
+                              </GhostButton>
+                              <GhostButton aria-label={`Move option ${option.key || optionIndex + 1} down`}
+                                disabled={optionIndex === draft.options.length - 1}
+                                onClick={() => moveOption(index, draft, optionIndex, 1)}>
+                                <ChevronDown size={ICON_SIZE.body} />
+                              </GhostButton>
+                              <GhostButton aria-label={`Remove option ${option.key || optionIndex + 1}`}
+                                onClick={() => removeOption(index, draft, optionIndex)}><X size={ICON_SIZE.body} /></GhostButton>
+                            </div>
+                          ))}
+                        </div>
+                        <GhostButton id={`import-add-option-${draft.reviewId}`} onClick={() => addOption(index, draft)}>+ Add option</GhostButton>
+                      </fieldset>
+
+                      <div className="grid grid-2">
+                        <SelectField label="Correct answer" value={draft.correctKey ?? ""} aria-describedby={reasonsId}
+                          aria-invalid={evaluation.reasons.some((reason) => reason.code === "missing-correct-answer" || reason.code === "correct-answer-not-option")}
+                          onChange={(event) => confirmDraftAnswer(index, draft, event.target.value || undefined)}>
+                          <option value="">Not set</option>
+                          {draft.options.map((option, optionIndex) => (
+                            <option key={`${option.key}-${optionIndex}`} value={option.key}>{option.key || `Choice ${optionIndex + 1}`}</option>
+                          ))}
+                        </SelectField>
+                        {draft.correctKey && evaluation.level !== "High" && (
+                          <GhostButton onClick={() => confirmDraftAnswer(index, draft, draft.correctKey)}>
+                            Confirm mapped answer {draft.correctKey}
+                          </GhostButton>
+                        )}
+                        <Field label="Topic" value={draft.topic ?? ""} onChange={(event) => editDraft(index, { topic: event.target.value || undefined })} />
+                        <Field label="Learning objective" value={draft.objective ?? ""} onChange={(event) => editDraft(index, { objective: event.target.value || undefined })} />
+                      </div>
+
+                      <TextAreaField label="Explanation or rationale" rows={4} value={draft.explanation ?? ""}
+                        aria-describedby={reasonsId}
+                        aria-invalid={evaluation.reasons.some((reason) => reason.code === "explanation-boundary-ambiguous")}
+                        onChange={(event) => editDraft(index, {
+                          explanation: event.target.value || undefined,
+                          explanationSource: event.target.value ? (draft.explanationSource ?? "inline") : undefined,
+                        }, ["explanation.ambiguous-boundary", "ai.explanation-cleaner.review-required"])} />
+
+                      {evaluation.reasons.some((reason) => reason.code === "structurally-ambiguous-block") && (
+                        <GhostButton onClick={() => confirmDraftBoundary(index)}>Confirm this is one complete question</GhostButton>
+                      )}
+                      {evaluation.level === "Needs Review"
+                        && !draft.reviewAcknowledged
+                        && !evaluation.reasons.some((reason) => (
+                          reason.code === "answer-mapping-needs-review"
+                          || reason.code === "unrecognized-answer-key"
+                        )) && (
+                        <GhostButton onClick={() => acknowledgeDraftReview(index)}>
+                          Mark source review complete
+                        </GhostButton>
+                      )}
+
+                      {provider && (
+                        <div className="row wrap gap6">
+                          {!draft.correctKey && sourceText && (
+                            <GhostButton disabled={aiBusyDraft === index} onClick={() => void assistDraftMapping(index)}>
+                              <Sparkles size={ICON_SIZE.body} /> {aiBusyDraft === index ? "Checking evidence…" : "Mapping assist"}
+                            </GhostButton>
+                          )}
+                          {draft.explanation && (
+                            <GhostButton disabled={aiBusyDraft === index} onClick={() => void cleanDraftWithAi(index)}>
+                              <Sparkles size={ICON_SIZE.body} /> {aiBusyDraft === index ? "Cleaning…" : "Clean explanation with AI"}
+                            </GhostButton>
+                          )}
+                          <span className="sub">AI suggestions remain review-gated and never invent a key without quoted evidence.</span>
+                        </div>
+                      )}
+                      {draft.answerEvidence && <div className="question-explanation"><b>Answer evidence:</b> {draft.answerEvidence}</div>}
+                      {draft.choiceRationales && Object.keys(draft.choiceRationales).length > 0 && (
+                        <div className="stack gap6">
+                          <span className="field-label">Choice rationales</span>
+                          {Object.entries(draft.choiceRationales).map(([key, rationale]) => <div key={key} className="sub"><b>{key}:</b> {rationale}</div>)}
+                        </div>
+                      )}
+                      {sourceText && draft.stem && <SourcePeek rawText={sourceText} stem={draft.stem} />}
+                      {(draft.parserRuleIds?.length ?? 0) > 0 && <div className="source-rules">Parser rules: {draft.parserRuleIds!.join(" · ")}</div>}
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+          </div>
 
           {import.meta.env.DEV && drafts.length > 0 && (
             <details className="question-import-diagnostics">
@@ -600,160 +1253,11 @@ export function ImportPanel({ seed, initialTab = "file" }: { seed?: ImportSeed |
                     <div>Evidence: {entry.answerEvidence ?? "none"}</div>
                     <div>Mapping: {entry.selectedMapping ?? "unresolved"} · confidence {Math.round(entry.confidence * 100)}%</div>
                     {entry.conflictReason && <div>Conflict: {entry.conflictReason}</div>}
-                    <div>Source spans: {entry.sourceSpans.map((span) => `${span.kind}${span.page ? ` p.${span.page}` : ""}`).join(" · ") || "none"}</div>
                   </div>
                 ))}
               </div>
             </details>
           )}
-
-          <div className="stack gap6">
-            <span className="field-label">Save as</span>
-            <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
-              {([
-                ["set", "Save questions"],
-                ["doc", "Save document"],
-                ["both", "Save document + questions"],
-              ] as Array<[SaveMode, string]>).map(([mode, label]) => {
-                const disabled = (mode !== "set" && !pendingDoc) || (mode !== "doc" && drafts.length === 0);
-                return (
-                  <button key={mode} className={`filter-pill ${saveMode === mode ? "on" : ""}`} disabled={disabled}
-                    title={disabled ? (pendingDoc ? "No questions were parsed" : "No source file attached") : undefined}
-                    onClick={() => setSaveMode(mode)}>
-                    {label}
-                  </button>
-                );
-              })}
-              <label className="row" style={{ gap: 6, cursor: provider ? "pointer" : "not-allowed", opacity: provider ? 1 : 0.55 }}>
-                <input type="checkbox" checked={aiEnhance} disabled={!provider || saveMode === "doc"}
-                  onChange={() => setAiEnhance((v) => !v)} />
-                <span className="sub">AI enhancement (digest, pitfalls, review targets{provider ? "" : " — needs a provider in Settings → AI"})</span>
-              </label>
-            </div>
-          </div>
-
-          {saveMode !== "doc" && <div className="grid grid-2">
-            <Field label="Set title" value={setTitle} onChange={(e) => setSetTitle(e.target.value)} />
-            <SelectField label="Category (applies to all)" value={category} onChange={(e) => setCategory(e.target.value)}>
-              <option value="">None</option>
-              {QUESTION_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-            </SelectField>
-            <SelectField label="Exam style" value={examType} onChange={(e) => setExamType(e.target.value as QuestionExamType | "")}>
-              <option value="">Not set</option>
-              {EXAM_TYPES.map((t) => <option key={t} value={t}>{EXAM_TYPE_LABEL[t]}</option>)}
-            </SelectField>
-            <SelectField label="Difficulty" value={difficulty} onChange={(e) => setDifficulty(e.target.value as QuestionDifficulty | "")}>
-              <option value="">Not set</option>
-              <option value="easy">Easy</option>
-              <option value="medium">Medium</option>
-              <option value="hard">Hard</option>
-            </SelectField>
-          </div>}
-
-          <div className="stack gap6">
-            {drafts.map((d, i) => (
-              <div key={i} className={`import-draft ${d.include ? "" : "excluded"}`}>
-                <div className="row" style={{ gap: 8 }}>
-                  <input
-                    type="checkbox"
-                    checked={d.include}
-                    aria-label={`Include question ${d.questionNumber ?? i + 1}`}
-                    onChange={() => updateDraft(i, { include: !d.include })}
-                  />
-                  <button className="grow stack card-row-main" onClick={() => updateDraft(i, { expanded: !d.expanded })}>
-                    <span className="truncate" style={{ fontWeight: 600 }}>
-                      {d.questionNumber !== undefined ? `${d.questionNumber}. ` : ""}{d.stem || "(no stem — needs editing)"}
-                    </span>
-                    <span className="sub truncate">
-                      {d.options.length} options{d.correctKey ? ` · answer ${d.correctKey}` : " · no answer set"}
-                      {d.explanation ? ` · explanation${d.explanationSource === "answer-section" ? " (from answer section)" : ""}` : " · no explanation"}
-                      {d.sourcePage ? ` · p.${d.sourcePage}` : ""}{d.topic ? ` · ${d.topic}` : ""}
-                    </span>
-                  </button>
-                  {d.needsReview && <Tag tone="red">needs review</Tag>}
-                  <Tag tone={d.confidence === "high" ? "green" : d.confidence === "medium" ? "orange" : "red"}>{d.confidence}</Tag>
-                  {d.aiGenerated && <Tag tone="purple">AI</Tag>}
-                  {d.warnings.length > 0 && <Tag tone="orange">{d.warnings.length}⚠</Tag>}
-                  <GhostButton aria-label="Toggle editor" onClick={() => updateDraft(i, { expanded: !d.expanded })}>
-                    {d.expanded ? <ChevronUp size={ICON_SIZE.body} /> : <ChevronDown size={ICON_SIZE.body} />}
-                  </GhostButton>
-                </div>
-                {d.expanded && (
-                  <div className="stack" style={{ gap: 8, marginTop: 10 }}>
-                    {d.warnings.length > 0 && <ul className="intake-warnings">{d.warnings.map((w, j) => <li key={j}>{w}</li>)}</ul>}
-                    <div className="import-confidence-grid" aria-label="Parser confidence by layer">
-                      <span><b>{Math.round((d.questionDetectionConfidence ?? 0) * 100)}%</b> question</span>
-                      <span><b>{Math.round((d.answerDetectionConfidence ?? 0) * 100)}%</b> answer</span>
-                      <span><b>{Math.round((d.explanationDetectionConfidence ?? 0) * 100)}%</b> explanation</span>
-                      <span><b>{Math.round((d.overallImportConfidence ?? 0) * 100)}%</b> overall</span>
-                    </div>
-                    <TextAreaField label="Stem" rows={3} value={d.stem} onChange={(e) => updateDraft(i, { stem: e.target.value })} />
-                    {d.options.map((opt, j) => (
-                      <div key={j} className="row">
-                        <span className="mono option-key">{opt.key}</span>
-                        <input className="field grow" value={opt.text} aria-label={`Option ${opt.key}`}
-                          onChange={(e) => updateDraft(i, { options: d.options.map((o, k) => (k === j ? { ...o, text: e.target.value } : o)) })} />
-                        <GhostButton aria-label={`Remove option ${opt.key}`}
-                          onClick={() => updateDraft(i, { options: d.options.filter((_, k) => k !== j) })}><X size={ICON_SIZE.body} /></GhostButton>
-                      </div>
-                    ))}
-                    <GhostButton onClick={() => updateDraft(i, { options: [...d.options, { key: String.fromCharCode(65 + d.options.length), text: "" }] })}>
-                      + Add option
-                    </GhostButton>
-                    <div className="grid grid-2">
-                      <SelectField label="Correct answer" value={d.correctKey ?? ""}
-                        onChange={(e) => {
-                          const key = e.target.value || undefined;
-                          confirmDraftAnswer(i, d, key);
-                        }}>
-                        <option value="">Not set</option>
-                        {d.options.map((o) => <option key={o.key} value={o.key}>{o.key}</option>)}
-                      </SelectField>
-                      {d.correctKey && d.needsReview && (
-                        <GhostButton onClick={() => confirmDraftAnswer(i, d, d.correctKey)}>
-                          Confirm mapped answer {d.correctKey}
-                        </GhostButton>
-                      )}
-                      <Field label="Topic" value={d.topic ?? ""} onChange={(e) => updateDraft(i, { topic: e.target.value || undefined })} />
-                      <Field label="Learning objective" value={d.objective ?? ""} onChange={(e) => updateDraft(i, { objective: e.target.value || undefined })} />
-                      <Field label="Reference / source" value={d.reference ?? d.sourceLabel ?? ""}
-                        onChange={(e) => updateDraft(i, { reference: e.target.value || undefined })} />
-                    </div>
-                    <TextAreaField label="Explanation" rows={2} value={d.explanation ?? ""}
-                      onChange={(e) => updateDraft(i, { explanation: e.target.value || undefined })} />
-                    {provider && (
-                      <div className="row wrap gap6">
-                        {!d.correctKey && pendingDoc?.rawText && (
-                          <GhostButton disabled={aiBusyDraft === i} onClick={() => void assistDraftMapping(i)}>
-                            <Sparkles size={ICON_SIZE.body} /> {aiBusyDraft === i ? "Checking evidence…" : "Mapping assist"}
-                          </GhostButton>
-                        )}
-                        {d.explanation && (
-                          <GhostButton disabled={aiBusyDraft === i} onClick={() => void cleanDraftWithAi(i)}>
-                            <Sparkles size={ICON_SIZE.body} /> {aiBusyDraft === i ? "Cleaning…" : "Clean explanation with AI"}
-                          </GhostButton>
-                        )}
-                        <span className="sub">AI suggestions stay review-gated and never invent a key without quoted evidence.</span>
-                      </div>
-                    )}
-                    {d.answerEvidence && <div className="question-explanation"><b>Answer evidence:</b> {d.answerEvidence}</div>}
-                    {d.choiceRationales && Object.keys(d.choiceRationales).length > 0 && (
-                      <div className="stack gap6">
-                        <span className="field-label">Choice rationales</span>
-                        {Object.entries(d.choiceRationales).map(([key, why]) => (
-                          <div key={key} className="sub"><b>{key}:</b> {why}</div>
-                        ))}
-                      </div>
-                    )}
-                    {pendingDoc?.rawText && d.stem && (
-                      <SourcePeek rawText={pendingDoc.rawText} stem={d.stem} />
-                    )}
-                    {(d.parserRuleIds?.length ?? 0) > 0 && <div className="source-rules">Parser rules: {d.parserRuleIds!.join(" · ")}</div>}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
         </div>
       )}
     </GlassCard>
@@ -787,25 +1291,39 @@ function SourcePeek({ rawText, stem }: { rawText: string; stem: string }) {
 
 // --- paste tab ---------------------------------------------------------------
 
-function PasteTab({ onParsed }: { onParsed: (drafts: ParsedQuestionDraft[], warnings: string[]) => void }) {
-  const [raw, setRaw] = useState("");
+function PasteTab({ raw, label, onRawChange, parseSource, onParsed }: {
+  raw: string;
+  label?: string;
+  onRawChange: (raw: string) => void;
+  parseSource?: (raw: string) => { drafts: ParsedQuestionDraft[]; warnings: string[] };
+  onParsed: (drafts: ParsedQuestionDraft[], warnings: string[], raw: string) => void;
+}) {
   function parse() {
-    const drafts = parseQuestionBlocks(raw);
-    onParsed(drafts, drafts.length === 0 ? ["No questions detected — check the format (numbered stems, A./B./C. options)."] : []);
+    const result = parseSource?.(raw) ?? { drafts: parseQuestionBlocks(raw), warnings: [] };
+    onParsed(
+      result.drafts,
+      [
+        ...result.warnings,
+        ...(result.drafts.length === 0 ? ["No questions detected — check the format (numbered stems, A./B./C. options)."] : []),
+      ],
+      raw,
+    );
   }
   return (
     <div className="stack" style={{ gap: 10 }}>
       <TextAreaField
-        label="Paste one question or a whole numbered set (answer keys like 'Answer key: 1. C  2. B' are mapped automatically)"
-        rows={6}
+        id="import-source-text"
+        label={label ?? "Structured question text"}
+        rows={12}
         value={raw}
-        onChange={(e) => setRaw(e.target.value)}
+        onChange={(event) => onRawChange(event.target.value)}
         placeholder={"1. A 45-year-old man presents with…\nA. Option one\nB. Option two\nC. Option three\nD. Option four\n\n2. The next question…\nA. …\nB. …\n\nAnswer key:\n1. C\n2. A"}
       />
       <div className="row">
         <GButton variant="primary" disabled={!raw.trim()} onClick={parse}>
-          <ClipboardPaste size={ICON_SIZE.body} /> Extract & inspect
+          <ClipboardPaste size={ICON_SIZE.body} /> Parse and review
         </GButton>
+        <span className="sub">Supports numbered questions, A–H choices, answer keys, explanations, rationales, and reasoning.</span>
       </div>
     </div>
   );

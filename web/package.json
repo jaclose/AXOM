@@ -25,26 +25,35 @@
     "test:release": "node --test ../scripts/*.test.mjs",
     "verify:app-updates": "node scripts/verify-app-updates.mjs",
     "tauri": "node ../scripts/tauri.mjs",
-    "quality": "npm run typecheck && npm run lint && npm run test && npm run build"
+    "quality": "npm run typecheck && npm run lint && npm run test && npm run build",
+    "snapshots": "node scripts/visual-snapshots.mjs",
+    "test:e2e:chrome": "AXOM_E2E_CHANNEL=chrome playwright test",
+    "test:accounts:live": "AXOM_LIVE_ACCOUNTS=1 AXOM_E2E_CHANNEL=chrome playwright test e2e/live-accounts.spec.ts",
+    "release:setup-updater": "node ../scripts/setup-updater.mjs",
+    "cinematic:import": "node ../scripts/import-cinematic.mjs",
+    "soundscapes:import": "node ../scripts/import-soundscapes.mjs"
   },
   "engines": {
     "node": ">=22.12.0"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.2",
     "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-notification": "^2.5.0",
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-sql": "^2.4.0",
     "@tauri-apps/plugin-updater": "^2.12.0",
     "@vercel/analytics": "^2.0.1",
     "lucide-react": "^0.460.0",
     "mammoth": "^1.12.0",
-    "pdfjs-dist": "^6.1.200",
+    "pdfjs-dist": "^6.2.108",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "xlsx-js-style": "^1.2.0",
     "zustand": "^5.0.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.61.0",
     "@tauri-apps/cli": "^2.11.5",

@@ -104,7 +104,7 @@ export interface ImportMappingDiagnostic {
 const OPTION_RE = /^\s*\(?\s*([A-Ha-h])\s*(?:\)\s*[.:\-–]?|[.:\-–])\s+(.*\S)\s*$/;
 /** Feedback/explanation/objective markers that begin a NON-option content block.
  * Capturing group 1 is the marker keyword so callers can classify it. */
-const EXPLANATION_RE = /^\s*(correct\s+feedback|incorrect\s+feedback|feedback|answer\s+explanation|explanation|rationale|discussion|teaching\s+point|key\s+concept|why)\s*[:\-–]/i;
+const EXPLANATION_RE = /^\s*(correct\s+feedback|incorrect\s+feedback|feedback|answer\s+explanation|explanation|rationale|reasoning|discussion|teaching\s+point|key\s+concept|why)\s*(?:(?:[:\-–]\s*)|$)/i;
 /**
  * The SAME markers, matched mid-line so we can split feedback that got glued to
  * an answer choice ("E. Co-payment Correct Feedback: …"). Requires whitespace
@@ -390,6 +390,18 @@ export function parseQuestionText(raw: string): ParsedQuestionDraft {
       const rest = line.replace(EXPLANATION_RE, "").trim();
       explanationCandidateLines.push(line.trim());
       if (rest) explanationLines.push(rest);
+      continue;
+    }
+    // Once an explicit explanation/rationale block has begun, prose such as
+    // "Answer: the receptor is blocked" is teaching text, not a second answer
+    // key. A genuinely explicit letter ("Answer: B") remains usable so sources
+    // that place their key after the rationale continue to work.
+    if (answerSignal && phase === "explanation" && explanationMarkerDetected && !answerSignal.key) {
+      explanationLines.push(line);
+      explanationCandidateLines.push(rawLine);
+      feedbackFlow = true;
+      metadataFlow = undefined;
+      parserRuleIds.add("explanation.answer-prefixed-prose");
       continue;
     }
     if (answerSignal && phase !== "stem") {
@@ -686,6 +698,12 @@ export function parseQuestionText(raw: string): ParsedQuestionDraft {
 
   const explanationCleanup = sanitizeExplanationCandidate(explanationCandidate, { stem, options, correctKey });
   const explanation = explanationCleanup.cleanedText || undefined;
+  const explanationBoundaryAmbiguous = explanationCleanup.cleanupOperations.includes("stop-at-next-question");
+  if (explanationBoundaryAmbiguous) {
+    warnings.push("Question-like numbered content touched this explanation without a clear separator — verify the boundary against the source.");
+    needsReview = true;
+    parserRuleIds.add("explanation.ambiguous-boundary");
+  }
   if (rawExplanation && !explanation) {
     warnings.push("Explanation content contained only duplicated question structure or metadata and was removed.");
   }
@@ -698,7 +716,9 @@ export function parseQuestionText(raw: string): ParsedQuestionDraft {
             : 0.42,
   );
   const explanationDetectionConfidence = boundedConfidence(
-    explanation ? (explanationMarkerDetected
+    explanation ? (explanationBoundaryAmbiguous
+      ? Math.min(explanationCleanup.confidence, 0.6)
+      : explanationMarkerDetected
       ? Math.max(0.95, explanationCleanup.confidence)
       : explanationCleanup.confidence) : 0,
   );
@@ -789,49 +809,138 @@ function matchExplanationToOption(explanation: string, options: QuestionOption[]
 export function parseQuestionBlocks(raw: string): ParsedQuestionDraft[] {
   const { body, entries } = parseAnswerSections(normalizeSourceText(raw));
   const lines = body.split("\n");
-  const starts: number[] = [];
+  const protectedUnnumberedStemThrough = unnumberedNestedStemFirstOptionIndex(lines);
+  const starts: QuestionBlockStart[] = [];
+  const ambiguousAcceptedStarts = new Set<number>();
+  let activeStartIndex: number | undefined;
+  let protectedStemStartIndex: number | undefined;
   lines.forEach((line, i) => {
-    if (matchQuestionStart(line) && looksLikeNumberedQuestion(lines, i)) starts.push(i);
+    if (protectedStemStartIndex !== undefined && OPTION_RE.test(line)) {
+      protectedStemStartIndex = undefined;
+    }
+    const standard = matchQuestionStart(line);
+    if (standard) {
+      // A structurally valid unnumbered question can also contain a reset 1/2
+      // findings list. Protect only the strongly evidenced pre-option region;
+      // later numbered questions remain ordinary boundaries.
+      if (protectedUnnumberedStemThrough !== undefined && i < protectedUnnumberedStemThrough) return;
+      // A numbered list embedded in an already accepted pre-option stem is
+      // prose, even when the list's final item can see the outer A/B choices.
+      if (protectedStemStartIndex !== undefined && i > protectedStemStartIndex) return;
+      const hasDirectOptions = looksLikeNumberedQuestion(lines, i);
+      const ownsNestedStemList = !hasDirectOptions
+        && looksLikeQuestionWithNestedNumberedStem(lines, i);
+      const isIncompleteQuestion = !hasDirectOptions
+        && !ownsNestedStemList
+        && looksLikeIncompleteNumberedQuestion(lines, i, standard.rest);
+      if (hasDirectOptions || ownsNestedStemList) {
+        const ambiguous = insideActiveExplanation(lines, activeStartIndex, i)
+          && !hasReliableExplanationExit(lines, i);
+        starts.push({
+          index: i,
+          number: standard.number,
+          rest: standard.rest,
+          malformed: false,
+          nestedStemList: ownsNestedStemList,
+        });
+        if (ambiguous) ambiguousAcceptedStarts.add(i);
+        activeStartIndex = i;
+        protectedStemStartIndex = ownsNestedStemList ? i : undefined;
+      } else if (isIncompleteQuestion) {
+        if (
+          insideActiveMetadata(lines, activeStartIndex, i)
+          && !hasReliableExplanationExit(lines, i)
+          && !/\?/.test(standard.rest)
+          && !/^(?:which|what|who|when|where|why|how)\b/i.test(standard.rest)
+        ) return;
+        const ambiguous = insideActiveExplanation(lines, activeStartIndex, i)
+          && !hasReliableExplanationExit(lines, i);
+        starts.push({ index: i, number: standard.number, rest: standard.rest, malformed: false });
+        if (ambiguous) ambiguousAcceptedStarts.add(i);
+        activeStartIndex = i;
+      }
+      return;
+    }
+    const malformed = matchMalformedQuestionStart(line);
+    if (malformed && hasMalformedQuestionBoundaryContext(lines, i)
+      && looksLikeMalformedNumberedQuestion(lines, i)) {
+      const ambiguous = insideActiveExplanation(lines, activeStartIndex, i)
+        && !hasReliableExplanationExit(lines, i);
+      starts.push({ index: i, number: malformed.number, rest: malformed.rest, malformed: true });
+      if (ambiguous) ambiguousAcceptedStarts.add(i);
+      activeStartIndex = i;
+    }
   });
 
   let drafts: ParsedQuestionDraft[];
   if (starts.length === 0) {
     const draft = parseQuestionText(body);
-    drafts = draft.stem || draft.options.length ? [draft] : [];
-  } else if (starts.length === 1) {
-    // Drop a document title/preamble before the sole numbered question.
-    const block = lines.slice(starts[0]).join("\n");
-    const number = leadingNumber(block);
-    const cleaned = stripLeadingNumber(block);
-    const draft = parseQuestionText(cleaned);
-    draft.questionNumber = number;
-    markNumberedDraft(draft, block);
+    if (protectedUnnumberedStemThrough !== undefined) {
+      draft.needsReview = true;
+      draft.warnings.push("An unnumbered question contains numbered stem content that could also be neighboring questions — confirm the boundary against the source.");
+      draft.parserRuleIds = [...new Set([
+        ...(draft.parserRuleIds ?? []),
+        "question.numbered-stem-list",
+        "question.ambiguous-numbered-stem-list",
+      ])];
+    }
     drafts = draft.stem || draft.options.length ? [draft] : [];
   } else {
     drafts = [];
-    // Any preamble before the first numbered question is dropped.
+    const preamble = lines.slice(0, starts[0].index).join("\n").trim();
+    if (preamble) {
+      const preambleDraft = parseQuestionText(preamble);
+      if (preambleDraft.options.length >= 2 || /\?/.test(preambleDraft.stem)) {
+        markUnnumberedPreambleDraft(preambleDraft, preamble);
+        drafts.push(preambleDraft);
+      }
+    }
     for (let b = 0; b < starts.length; b++) {
-      const from = starts[b];
-      const to = b + 1 < starts.length ? starts[b + 1] : lines.length;
+      const start = starts[b];
+      const from = start.index;
+      const to = b + 1 < starts.length ? starts[b + 1].index : lines.length;
       const block = lines.slice(from, to).join("\n");
-      const draft = parseQuestionText(stripLeadingNumber(block));
-      draft.questionNumber = leadingNumber(block);
-      markNumberedDraft(draft, block);
+      const draft = parseQuestionText(stripQuestionStart(block, start));
+      draft.questionNumber = start.number;
+      if (start.malformed) markMalformedNumberedDraft(draft, block);
+      else markNumberedDraft(draft, block);
+      if (start.nestedStemList) {
+        draft.needsReview = true;
+        draft.warnings.push("This numbered stem contains a reset numbered list that could also be neighboring questions — confirm the boundary against the source.");
+        draft.parserRuleIds = [...new Set([
+          ...(draft.parserRuleIds ?? []),
+          "question.numbered-stem-list",
+          "question.ambiguous-numbered-stem-list",
+        ])];
+      }
+      if (ambiguousAcceptedStarts.has(start.index)) markAmbiguousQuestionBoundary(draft);
+      if (b + 1 < starts.length && ambiguousAcceptedStarts.has(starts[b + 1].index)) {
+        markAmbiguousExplanationBoundary(draft);
+      }
       if (draft.stem || draft.options.length) drafts.push(draft);
     }
-    const numbers = drafts.map((d) => d.questionNumber).filter((n): n is number => n !== undefined);
-    if (new Set(numbers).size !== numbers.length) {
-      for (const d of drafts) {
-        d.warnings.push("Duplicate question numbers in this document — check the split.");
-        d.needsReview = true;
-        d.confidence = "low";
-        d.overallImportConfidence = Math.min(d.overallImportConfidence ?? 0.45, 0.45);
-        d.parserRuleIds = [...new Set([...(d.parserRuleIds ?? []), "conflict.duplicate-question-number"])];
-      }
+  }
+
+  const numbers = drafts.map((d) => d.questionNumber).filter((n): n is number => n !== undefined);
+  if (new Set(numbers).size !== numbers.length) {
+    for (const d of drafts) {
+      d.warnings.push("Duplicate question numbers in this document — check the split.");
+      d.needsReview = true;
+      d.confidence = "low";
+      d.overallImportConfidence = Math.min(d.overallImportConfidence ?? 0.45, 0.45);
+      d.parserRuleIds = [...new Set([...(d.parserRuleIds ?? []), "conflict.duplicate-question-number"])];
     }
   }
 
   return entries.size ? applyAnswerEntries(drafts, entries) : drafts;
+}
+
+interface QuestionBlockStart {
+  index: number;
+  number: number;
+  rest: string;
+  malformed: boolean;
+  nestedStemList?: boolean;
 }
 
 function matchQuestionStart(line: string): { number: number; rest: string } | undefined {
@@ -844,15 +953,65 @@ function matchQuestionStart(line: string): { number: number; rest: string } | un
   return numbered ? { number: Number(numbered[1]), rest: numbered[2].trim() } : undefined;
 }
 
-function leadingNumber(block: string): number | undefined {
-  return matchQuestionStart(block.split("\n", 1)[0])?.number;
+function matchMalformedQuestionStart(line: string): { number: number; rest: string } | undefined {
+  // A bare numeric prefix without punctuation is intentionally a weak signal.
+  // It is accepted only when looksLikeMalformedNumberedQuestion confirms a
+  // nearby A/B option list, and every resulting draft is forced through review.
+  const match = line.match(/^\s*(\d{1,4})\s+(\S.*?)\s*$/);
+  return match ? { number: Number(match[1]), rest: match[2].trim() } : undefined;
 }
 
-function stripLeadingNumber(block: string): string {
+/**
+ * Retain a clearly question-shaped numbered block even when its choices are
+ * missing. Review can repair or remove it; silently attaching it to a neighbor
+ * would corrupt both questions. Ordinary numbered objectives remain prose.
+ */
+function looksLikeIncompleteNumberedQuestion(lines: string[], index: number, firstLine: string): boolean {
+  if (/^\s*(?:question|q)\s*#?\s*\d{1,4}\b/i.test(lines[index] ?? "")) return true;
+  const stemLines = [firstLine];
+  for (let cursor = index + 1; cursor < Math.min(lines.length, index + 5); cursor += 1) {
+    const line = lines[cursor] ?? "";
+    if (matchQuestionStart(line) || OPTION_RE.test(line) || EXPLANATION_RE.test(line) || parseAnswerSignal(line)) break;
+    if (!line.trim() && stemLines.some((part) => part.trim())) break;
+    stemLines.push(line);
+  }
+  const stem = stemLines.join(" ").replace(/\s+/g, " ").trim();
+  return /\?/.test(stem)
+    || /^(?:which|what|who|when|where|why|how|select|choose|identify|determine|calculate|name)\b/i.test(stem);
+}
+
+/** A numbered teaching point inside an explanation is not a question boundary
+ * merely because lettered prose follows it. Require an observable transition:
+ * a strong Q/Question label or a blank separator. Question-shaped content
+ * without either cue is still retained, but is marked structurally ambiguous. */
+function hasReliableExplanationExit(lines: string[], index: number): boolean {
+  return /^\s*(?:question|q)\s*#?\s*\d{1,4}\b/i.test(lines[index] ?? "")
+    || (index > 0 && !(lines[index - 1] ?? "").trim());
+}
+
+function insideActiveExplanation(
+  lines: string[],
+  activeStartIndex: number | undefined,
+  candidateIndex: number,
+): boolean {
+  if (activeStartIndex === undefined) return false;
+  return lines.slice(activeStartIndex + 1, candidateIndex).some((line) => EXPLANATION_RE.test(line));
+}
+
+function insideActiveMetadata(
+  lines: string[],
+  activeStartIndex: number | undefined,
+  candidateIndex: number,
+): boolean {
+  if (activeStartIndex === undefined) return false;
+  return lines.slice(activeStartIndex + 1, candidateIndex).some((line) => (
+    OBJECTIVE_RE.test(line) || REFERENCE_RE.test(line)
+  ));
+}
+
+function stripQuestionStart(block: string, start: QuestionBlockStart): string {
   const lines = block.split("\n");
-  const match = matchQuestionStart(lines[0]);
-  if (!match) return block;
-  return [match.rest, ...lines.slice(1)].filter((line, index) => index > 0 || Boolean(line)).join("\n");
+  return [start.rest, ...lines.slice(1)].filter((line, index) => index > 0 || Boolean(line)).join("\n");
 }
 
 function markNumberedDraft(draft: ParsedQuestionDraft, originalBlock: string) {
@@ -871,6 +1030,58 @@ function markNumberedDraft(draft: ParsedQuestionDraft, originalBlock: string) {
   );
   if (draft.needsReview && (draft.answerDetectionConfidence ?? 0) <= 0.1) draft.overallImportConfidence = Math.min(draft.overallImportConfidence, 0.49);
   if (draft.correctKey && (draft.answerDetectionConfidence ?? 0) < 0.8) draft.overallImportConfidence = Math.min(draft.overallImportConfidence, 0.84);
+  draft.confidence = categoricalConfidence(draft.overallImportConfidence);
+}
+
+function markMalformedNumberedDraft(draft: ParsedQuestionDraft, originalBlock: string) {
+  draft.parserRuleIds = [...new Set([...(draft.parserRuleIds ?? []), "question.malformed-boundary"])];
+  draft.warnings.push("Question number lacked a standard delimiter — retained as a separate question for review.");
+  draft.needsReview = true;
+  draft.questionDetectionConfidence = Math.min(draft.questionDetectionConfidence ?? 0.55, 0.55);
+  draft.sourceSnippet = sourceSnippet(originalBlock);
+  draft.questionSourceSnippet = sourceSnippet([
+    draft.questionNumber !== undefined ? `${draft.questionNumber} ${draft.stem}` : draft.stem,
+    ...draft.options.map((option) => `${option.key}. ${option.text}`),
+  ].join("\n"));
+  draft.overallImportConfidence = boundedConfidence(
+    draft.questionDetectionConfidence * 0.4
+      + (draft.answerDetectionConfidence ?? 0) * 0.4
+      + (draft.explanationDetectionConfidence ?? 0) * 0.2,
+  );
+  draft.overallImportConfidence = Math.min(draft.overallImportConfidence, 0.84);
+  draft.confidence = categoricalConfidence(draft.overallImportConfidence);
+}
+
+function markAmbiguousExplanationBoundary(draft: ParsedQuestionDraft) {
+  draft.parserRuleIds = [...new Set([...(draft.parserRuleIds ?? []), "explanation.ambiguous-boundary"])];
+  draft.warnings.push("Numbered question-like content touched an explanation without a clear separator — verify this boundary against the source.");
+  draft.needsReview = true;
+  draft.explanationDetectionConfidence = Math.min(draft.explanationDetectionConfidence ?? 0.6, 0.6);
+  draft.overallImportConfidence = Math.min(draft.overallImportConfidence ?? 0.74, 0.74);
+  draft.confidence = categoricalConfidence(draft.overallImportConfidence);
+}
+
+function markAmbiguousQuestionBoundary(draft: ParsedQuestionDraft) {
+  draft.parserRuleIds = [...new Set([
+    ...(draft.parserRuleIds ?? []),
+    "question.ambiguous-explanation-boundary",
+    "explanation.ambiguous-boundary",
+  ])];
+  draft.warnings.push("This question began inside an explanation without a clear separator — confirm whether it is a separate question.");
+  draft.needsReview = true;
+  draft.questionDetectionConfidence = Math.min(draft.questionDetectionConfidence ?? 0.55, 0.55);
+  draft.explanationDetectionConfidence = Math.min(draft.explanationDetectionConfidence ?? 0.6, 0.6);
+  draft.overallImportConfidence = Math.min(draft.overallImportConfidence ?? 0.6, 0.6);
+  draft.confidence = categoricalConfidence(draft.overallImportConfidence);
+}
+
+function markUnnumberedPreambleDraft(draft: ParsedQuestionDraft, originalBlock: string) {
+  draft.parserRuleIds = [...new Set([...(draft.parserRuleIds ?? []), "question.malformed-boundary"])];
+  draft.warnings.push("Question-like content appeared before the numbered sequence — retained for review instead of being discarded.");
+  draft.needsReview = true;
+  draft.questionDetectionConfidence = Math.min(draft.questionDetectionConfidence ?? 0.55, 0.55);
+  draft.sourceSnippet = sourceSnippet(originalBlock);
+  draft.overallImportConfidence = Math.min(draft.overallImportConfidence ?? 0.74, 0.74);
   draft.confidence = categoricalConfidence(draft.overallImportConfidence);
 }
 
@@ -893,12 +1104,18 @@ function parseAnswerSectionContent(
     const continuationIsExplanation = continuation
       ? Boolean(continuation.match(EXPLANATION_RE) || isRationaleTail(continuation))
       : false;
-    const answerText = explicit.answerText && !sectionIncludesExplanations && continuation && !continuationIsExplanation
+    // Keep textual answers even in an "Answers and Explanations" section;
+    // applyAnswerEntries resolves them against the question's actual options.
+    // Treating the text as explanation here loses valid answers such as
+    // "1. CD4 T lymphocyte".
+    const answerText = explicit.key && sectionIncludesExplanations
+      ? undefined
+      : explicit.answerText && continuation && !continuationIsExplanation
       ? `${explicit.answerText} ${continuation}`
-      : sectionIncludesExplanations ? undefined : explicit.answerText;
+      : explicit.answerText;
     const explanation = [
       explicit.rationale,
-      sectionIncludesExplanations ? explicit.answerText : undefined,
+      sectionIncludesExplanations && explicit.key ? explicit.answerText : undefined,
       (sectionIncludesExplanations || continuationIsExplanation) ? continuation : undefined,
     ]
       .filter(Boolean).join("\n").trim() || undefined;
@@ -1132,16 +1349,137 @@ function looksLikeNumberedQuestion(lines: string[], index: number): boolean {
   return false;
 }
 
+/**
+ * Recognize an unnumbered, question-shaped stem that owns a reset 1/2 list
+ * before its A/B choices. Requiring sequential items plus an explicit
+ * question-shaped continuation keeps ordinary numbered question sequences
+ * eligible for the normal boundary pass.
+ */
+function unnumberedNestedStemFirstOptionIndex(lines: string[]): number | undefined {
+  const firstIndex = lines.findIndex((line) => line.trim());
+  if (firstIndex < 0) return undefined;
+  const first = lines[firstIndex].trim();
+  if (matchQuestionStart(first) || OPTION_RE.test(first)) return undefined;
+  let questionShaped = /\?/.test(first)
+    || /^(?:which|what|who|when|where|why|how|select|choose|identify|determine|calculate|name)\b/i.test(first);
+  let questionShapedBeforeList = questionShaped;
+  let expectedNumber = 1;
+  let listItems = 0;
+  let continuationAfterList = false;
+  let firstOptionIndex: number | undefined;
+  const optionKeys = new Set<string>();
+
+  for (let cursor = firstIndex + 1; cursor < lines.length && cursor <= firstIndex + 30; cursor += 1) {
+    const line = lines[cursor] ?? "";
+    const option = line.match(OPTION_RE);
+    if (option) {
+      if (listItems < 2 || !questionShaped || (!questionShapedBeforeList && !continuationAfterList)) return undefined;
+      firstOptionIndex ??= cursor;
+      optionKeys.add(option[1].toUpperCase());
+      if (optionKeys.has("A") && optionKeys.has("B")) return firstOptionIndex;
+      continue;
+    }
+    if (firstOptionIndex !== undefined || parseAnswerSignal(line) || EXPLANATION_RE.test(line)) return undefined;
+
+    const nested = matchQuestionStart(line);
+    if (nested) {
+      if (/^\s*(?:question|q)\s*#?\s*\d{1,4}\b/i.test(line)
+        || nested.number !== expectedNumber
+        || /\?/.test(nested.rest)
+        || /^(?:which|what|who|when|where|why|how|select|choose|identify|determine|calculate|name)\b/i.test(nested.rest)) {
+        return undefined;
+      }
+      listItems += 1;
+      expectedNumber += 1;
+      continue;
+    }
+
+    const prose = line.trim();
+    if (!prose) continue;
+    const proseQuestionShaped = /\?/.test(prose)
+      || /^(?:which|what|who|when|where|why|how|select|choose|identify|determine|calculate|name)\b/i.test(prose);
+    questionShaped ||= proseQuestionShaped;
+    if (listItems === 0 && proseQuestionShaped) questionShapedBeforeList = true;
+    if (listItems > 0 && proseQuestionShaped) continuationAfterList = true;
+  }
+  return undefined;
+}
+
+/**
+ * A real question stem can contain its own numbered findings before the A/B
+ * choices. The ordinary boundary probe intentionally stops at every numbered
+ * line, so this conservative fallback accepts the earliest outer boundary only
+ * when later non-option stem prose is unmistakably question-shaped and A/B
+ * choices follow nearby. The caller protects that pre-option region so the
+ * nested list items cannot become competing starts.
+ */
+function looksLikeQuestionWithNestedNumberedStem(lines: string[], index: number): boolean {
+  const start = matchQuestionStart(lines[index] ?? "");
+  if (!start) return false;
+  let questionShaped = /\?/.test(start.rest)
+    || /^(?:which|what|who|when|where|why|how|select|choose|identify|determine|calculate|name)\b/i.test(start.rest);
+  let nestedListItems = 0;
+  let priorNestedNumber: number | undefined;
+  const optionKeys = new Set<string>();
+  for (let cursor = index + 1; cursor < lines.length && cursor <= index + 30; cursor += 1) {
+    const line = lines[cursor] ?? "";
+    if (parseAnswerSignal(line) || EXPLANATION_RE.test(line)) return false;
+    const option = line.match(OPTION_RE);
+    if (option) {
+      optionKeys.add(option[1].toUpperCase());
+      if (nestedListItems >= 2 && questionShaped && optionKeys.has("A") && optionKeys.has("B")) return true;
+      continue;
+    }
+    const nested = matchQuestionStart(line);
+    if (nested) {
+      // A real neighboring question is not a list item. Require at least two
+      // plain, sequential numbered findings before allowing the outer stem to
+      // own A/B. The first item must reset/equal the outer number; a forward
+      // 1 → 2 transition is far more likely to be the next question.
+      if (/^\s*(?:question|q)\s*#?\s*\d{1,4}\b/i.test(line)
+        || /\?/.test(nested.rest)
+        || /^(?:which|what|who|when|where|why|how|select|choose|identify|determine|calculate|name)\b/i.test(nested.rest)) return false;
+      if (priorNestedNumber === undefined) {
+        if (nested.number > start.number) return false;
+      } else if (nested.number !== priorNestedNumber + 1) {
+        return false;
+      }
+      nestedListItems += 1;
+      priorNestedNumber = nested.number;
+      continue;
+    }
+    const prose = line.trim();
+    if (/\?/.test(prose)
+      || /^(?:which|what|who|when|where|why|how|select|choose|identify|determine|calculate|name)\b/i.test(prose)) {
+      questionShaped = true;
+    }
+  }
+  return false;
+}
+
 function looksLikeMalformedNumberedQuestion(lines: string[], index: number): boolean {
   const line = lines[index] ?? "";
   if (matchQuestionStart(line) || !/^\s*\d{1,4}\s+\S/.test(line)) return false;
   let optionCount = 0;
+  const stemLines = [line.replace(/^\s*\d{1,4}\s+/, "")];
   for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
     if (matchQuestionStart(lines[cursor]) || /^\s*\d{1,4}\s+\S/.test(lines[cursor])) break;
     if (OPTION_RE.test(lines[cursor])) optionCount += 1;
-    if (optionCount >= 2) return true;
+    else if (optionCount === 0) stemLines.push(lines[cursor]);
+    if (optionCount >= 2) {
+      const stem = stemLines.join(" ").replace(/\s+/g, " ").trim();
+      return /\?/.test(stem)
+        || /^(?:which|what|who|when|where|why|how|select|choose|identify|determine|calculate|name)\b/i.test(stem);
+    }
   }
   return false;
+}
+
+function hasMalformedQuestionBoundaryContext(lines: string[], index: number): boolean {
+  if (index === 0 || !(lines[index - 1] ?? "").trim()) return true;
+  const prior = lines.slice(Math.max(0, index - 12), index);
+  return prior.some((line) => OPTION_RE.test(line))
+    && prior.some((line) => Boolean(parseAnswerSignal(line) || EXPLANATION_RE.test(line)));
 }
 
 function attachNumberedExplanations(entries: Map<number, AnswerSectionEntry>, sectionText: string): void {
@@ -1156,7 +1494,9 @@ function attachNumberedExplanations(entries: Map<number, AnswerSectionEntry>, se
     const numberMatch = entryLines[0].match(ENTRY_START_RE);
     if (!numberMatch) continue;
     const number = Number(numberMatch[1]);
-    const explanation = [entryLines[0].slice(numberMatch[0].length), ...entryLines.slice(1)].join("\n").trim();
+    const contentLines = [entryLines[0].slice(numberMatch[0].length), ...entryLines.slice(1)];
+    const noiseIndex = contentLines.findIndex((line) => /^(?:footer\b|page\s+\d+\s+of\s+\d+\b|commercial-style footer\b)/i.test(line.trim()));
+    const explanation = contentLines.slice(0, noiseIndex < 0 ? contentLines.length : noiseIndex).join("\n").trim();
     if (!explanation) continue;
     const existing = entries.get(number);
     entries.set(number, {
@@ -1313,6 +1653,23 @@ function applyAnswerEntries(drafts: ParsedQuestionDraft[], entries: Map<number, 
   });
 }
 
+/** Deterministically associate a separately supplied numbered answer or
+ * explanation source. Numbered matches are applied; unmatched or conflicting
+ * entries remain visible through the returned diagnostics. */
+export function associateAnswerSource(
+  drafts: readonly ParsedQuestionDraft[],
+  answerSourceText: string,
+): { drafts: ParsedQuestionDraft[]; matched: number; unmatchedNumbers: number[] } {
+  const { entries } = parseAnswerSections(answerSourceText);
+  const before = new Map(drafts.map((draft) => [draft.questionNumber, draft.correctKey]));
+  const associated = applyAnswerEntries([...drafts], entries);
+  const matched = associated.filter((draft) => draft.questionNumber !== undefined
+    && entries.has(draft.questionNumber)
+    && (draft.correctKey !== before.get(draft.questionNumber) || Boolean(draft.answerEvidence))).length;
+  const known = new Set(drafts.map((draft) => draft.questionNumber).filter((number): number is number => number !== undefined));
+  return { drafts: associated, matched, unmatchedNumbers: [...entries.keys()].filter((number) => !known.has(number)) };
+}
+
 function refreshAnswerEntryDiagnostics(draft: ParsedQuestionDraft): ParsedQuestionDraft {
   const warnings = draft.warnings.filter((warning) => !/no correct answer/i.test(warning));
   const parserRuleIds = [...new Set([...(draft.parserRuleIds ?? []), "answer.trailing-section"])];
@@ -1322,7 +1679,8 @@ function refreshAnswerEntryDiagnostics(draft: ParsedQuestionDraft): ParsedQuesti
       + answerDetectionConfidence * 0.4
       + (draft.explanationDetectionConfidence ?? 0) * 0.2,
   );
-  const stillNeedsReview = warnings.some((warning) => /conflict|duplicate|doesn't match|no such option|no question stem|no answer options|missing or out of sequence/i.test(warning));
+  const stillNeedsReview = parserRuleIds.includes("question.malformed-boundary")
+    || warnings.some((warning) => /conflict|duplicate|doesn't match|no such option|no question stem|no answer options|missing or out of sequence/i.test(warning));
   if (stillNeedsReview) overallImportConfidence = Math.min(overallImportConfidence, 0.49);
   return {
     ...draft,

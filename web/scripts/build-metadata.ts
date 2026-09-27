@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve, relative } from "node:path";
 import type { Plugin } from "vite";
-import { formatReleaseNotes, requireReleaseNotes } from "../../scripts/release-notes.mjs";
+import { formatReleaseNotes, parseReleaseNotes, requireReleaseNotes } from "../../scripts/release-notes.mjs";
 
 export function buildMetadata(root: string, version: string) {
   let commit = "local";
@@ -10,8 +10,15 @@ export function buildMetadata(root: string, version: string) {
   const builtAt = new Date().toISOString();
   const buildId = process.env.AXOM_BUILD_ID || `${commit}-${builtAt.replace(/[^0-9]/g, "")}`;
   if (!/^[a-zA-Z0-9._-]{1,160}$/.test(buildId)) throw new Error("AXOM_BUILD_ID must be 1–160 safe identifier characters.");
-  const release = requireReleaseNotes(readFileSync(resolve(root, "../CHANGELOG.md"), "utf8"), version);
-  return { version, buildId, builtAt, commit, notes: formatReleaseNotes(release) };
+  // Release packaging (scripts/release.mjs sets AXOM_REQUIRE_RELEASE_NOTES) must
+  // ship notes for this exact version. An ordinary web deploy never fails over
+  // them: a missing entry or an absent CHANGELOG just means no notes.
+  const changelogPath = resolve(root, "../CHANGELOG.md");
+  const changelog = existsSync(changelogPath) ? readFileSync(changelogPath, "utf8") : "";
+  const release = process.env.AXOM_REQUIRE_RELEASE_NOTES === "1"
+    ? requireReleaseNotes(changelog, version)
+    : parseReleaseNotes(changelog).find((entry: { version: string }) => entry.version === version);
+  return { version, buildId, builtAt, commit, notes: release ? formatReleaseNotes(release) : "" };
 }
 
 export function releaseMetadataPlugin(metadata: ReturnType<typeof buildMetadata>): Plugin {
@@ -48,7 +55,7 @@ export function releaseMetadataPlugin(metadata: ReturnType<typeof buildMetadata>
       // Plain static hosts can use these headers; Vercel config mirrors them.
       writeFileSync(resolve(dist, "_headers"), "/sw.js\n  Cache-Control: no-cache\n/version.json\n  Cache-Control: no-store\n/index.html\n  Cache-Control: no-cache\n/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n");
       const entries = readdirSync(dist, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile());
-      if (entries.some((entry) => relative(dist, resolve(entry.parentPath, entry.name)).endsWith(".map"))) throw new Error("Unexpected source map in release output.");
+      if (entries.some((entry) => relative(dist, resolve(entry.parentPath ?? (entry as { path?: string }).path ?? dist, entry.name)).endsWith(".map"))) throw new Error("Unexpected source map in release output.");
     },
   };
 }

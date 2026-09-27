@@ -41,7 +41,12 @@ export type JournalGlanceSectionKey =
   | "tasks"
   | "energy"
   | "wins"
-  | "unfinished";
+  | "unfinished"
+  | "sessions"
+  | "accuracy"
+  | "sound"
+  | "rest"
+  | "checkins";
 
 export interface JournalGlancePreferences {
   hiddenSections?: JournalGlanceSectionKey[];

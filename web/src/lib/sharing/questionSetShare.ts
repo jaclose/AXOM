@@ -1,0 +1,17 @@
+import type { QuestionSet } from "../library";import type { QuestionRecord } from "../questions";
+export const SHARE_FORMAT_VERSION=1;
+export interface SharedQuestion { id:string;stem:string;options:{key:string;text:string}[];correctKey?:string;correctAnswerText?:string;explanation?:string;choiceRationales?:Record<string,string>;system?:string;topic?:string;objective?:string;category?:string;subcategory?:string;tags:string[];citation?:string; }
+export interface SharedQuestionSetSnapshot { shareFormatVersion:1;title:string;tags:string[];orderedQuestionIds:string[];questions:SharedQuestion[];createdAt:string;copyrightNotice:string; }
+export function createQuestionSetShare(set:QuestionSet,bank:readonly QuestionRecord[],now=new Date().toISOString()):SharedQuestionSetSnapshot{
+ const byId=new Map(bank.map(q=>[q.id,q]));const questions=set.questionIds.map(id=>byId.get(id)).filter((q):q is QuestionRecord=>Boolean(q)).map(toShared);
+ if(questions.length!==set.questionIds.length)throw new Error("Question Set contains missing questions and cannot be shared safely.");
+ return{shareFormatVersion:1,title:set.title,tags:[...set.tags],orderedQuestionIds:questions.map(q=>q.id),questions,createdAt:now,copyrightNotice:"Share only material you have permission to distribute."};
+}
+export function importSharedQuestionSet(snapshot:SharedQuestionSetSnapshot,existing:readonly QuestionRecord[],now=new Date().toISOString()):{set:QuestionSet;questions:QuestionRecord[];reused:number}{
+ validateShare(snapshot);const existingByKey=new Map(existing.map(q=>[identity(q),q]));const added:QuestionRecord[]=[];const ids:string[]=[];let reused=0;
+ for(const shared of snapshot.questions){const match=existingByKey.get(identity(shared));if(match){ids.push(match.id);reused++;continue;}const id=crypto.randomUUID();ids.push(id);added.push({...shared,id,source:"imported",status:"unseen",attempts:[],createdAt:now,updatedAt:now});}
+ return{questions:added,reused,set:{id:crypto.randomUUID(),title:snapshot.title,sourceDocumentIds:[],createdAt:now,questionIds:ids,tags:[...snapshot.tags],aiEnhanced:false,parserWarnings:["Imported from private Question Set share."],ordering:"import"}};
+}
+export function validateShare(value:unknown):asserts value is SharedQuestionSetSnapshot{if(!value||typeof value!=="object")throw new Error("Shared set payload is invalid.");const s=value as Partial<SharedQuestionSetSnapshot>;if(s.shareFormatVersion!==1||typeof s.title!=="string"||!Array.isArray(s.questions)||!Array.isArray(s.orderedQuestionIds))throw new Error("Shared set format is unsupported or corrupt.");if(s.questions.length!==s.orderedQuestionIds.length||s.questions.some(q=>!q||typeof q.stem!=="string"||!Array.isArray(q.options)))throw new Error("Shared set membership is incomplete.");}
+function toShared(q:QuestionRecord):SharedQuestion{return{id:q.id,stem:q.stem,options:q.options.map(o=>({...o})),correctKey:q.correctKey,correctAnswerText:q.correctAnswerText,explanation:q.explanation,choiceRationales:q.choiceRationales?{...q.choiceRationales}:undefined,system:q.system,topic:q.topic,objective:q.objective,category:q.category,subcategory:q.subcategory,tags:[...q.tags],citation:q.citation};}
+function identity(q:Pick<QuestionRecord,"stem"|"options">|SharedQuestion){return`${norm(q.stem)}|${q.options.map(o=>`${o.key}:${norm(o.text)}`).join("|")}`;}function norm(v:string){return v.trim().replace(/\s+/g," ").toLowerCase();}
