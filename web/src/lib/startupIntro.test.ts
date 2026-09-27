@@ -2,8 +2,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   STARTUP_INTRO_ENABLED_KEY,
+  STARTUP_INTRO_FILM_MS,
   STARTUP_INTRO_MAX_MS,
   STARTUP_INTRO_SESSION_KEY,
+  STARTUP_INTRO_START_MS,
   startStartupIntro,
 } from "./startupIntro";
 import type { StartupIntro } from "./startupIntro";
@@ -58,8 +60,8 @@ describe("bounded startup cinematic", () => {
     expect(film().muted).toBe(true);
     expect(film().defaultMuted).toBe(true);
     expect(film().playsInline).toBe(true);
-    expect(film().src).toMatch(/\/startup\/axom-optical-luster\.mp4$/);
-    expect(film().poster).toMatch(/\/startup\/axom-optical-luster-poster\.png$/);
+    expect(film().src).toMatch(/\/startup\/axom-ident\.mp4$/);
+    expect(film().poster).toMatch(/\/startup\/axom-ident-poster\.png$/);
     expect(film().play).toHaveBeenCalledOnce();
     expect(film().classList.contains("axom-startup-intro__film--playing")).toBe(false);
     film().dispatchEvent(new Event("playing"));
@@ -69,10 +71,16 @@ describe("bounded startup cinematic", () => {
     expect(localStorage.getItem("workspace-fixture")).toBe(savedWorkspace);
   });
 
-  it("finishes and releases media, input, and timers at a hard deadline even if decoding hangs", async () => {
+  it("lets a film that starts at the last moment finish, with bounded slack", () => {
+    expect(STARTUP_INTRO_START_MS).toBeLessThanOrEqual(2_000);
+    expect(STARTUP_INTRO_MAX_MS).toBeGreaterThanOrEqual(STARTUP_INTRO_START_MS + STARTUP_INTRO_FILM_MS);
+    expect(STARTUP_INTRO_MAX_MS - STARTUP_INTRO_START_MS - STARTUP_INTRO_FILM_MS).toBeLessThanOrEqual(1_000);
+  });
+
+  it("fails open and releases media, input, and timers when the film never starts", async () => {
     const player = start();
     const video = film();
-    await vi.advanceTimersByTimeAsync(STARTUP_INTRO_MAX_MS - 1);
+    await vi.advanceTimersByTimeAsync(STARTUP_INTRO_START_MS - 1);
     expect(overlay()).not.toBeNull();
     await vi.advanceTimersByTimeAsync(1);
     await expect(player.finished).resolves.toBeUndefined();
@@ -84,8 +92,23 @@ describe("bounded startup cinematic", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("finishes at a hard deadline even if a playing film stalls", async () => {
+    const player = start();
+    const video = film();
+    video.dispatchEvent(new Event("playing"));
+    await vi.advanceTimersByTimeAsync(STARTUP_INTRO_MAX_MS - 1);
+    expect(overlay()).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(player.finished).resolves.toBeUndefined();
+    expect(overlay()).toBeNull();
+    expect(root().hasAttribute("inert")).toBe(false);
+    expect(video.hasAttribute("src")).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("crossfades on video end but never extends the hard deadline", async () => {
     start();
+    film().dispatchEvent(new Event("playing"));
     await vi.advanceTimersByTimeAsync(STARTUP_INTRO_MAX_MS - 50);
     film().dispatchEvent(new Event("ended"));
     expect(overlay()?.classList.contains("axom-startup-intro--leaving")).toBe(true);

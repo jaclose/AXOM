@@ -1,8 +1,32 @@
-# AXOM startup cinematic — proposed direction
+# AXOM startup cinematic
 
-Status: design recommendation, not implemented or approved as final animation.
+Status: the September 27 brief (cinematic brand ident) is implemented and ships
+as `web/public/startup/axom-ident.mp4`. The earlier optical-luster direction
+below is kept for history; its launch contract still applies.
 
-## Direction: Optical luster
+## Current direction: cinematic brand ident (September 27)
+
+A 7-second reveal of the full identity (mark, wordmark, gold rule, subtitle) as
+a physical object: champagne-ivory brushed metal with a machined bevel, hanging
+a short distance in front of a near-black textured wall.
+
+- 0–0.8 s: black; a faint rim appears on the upper edges.
+- 0.8–2.2 s: the mark emerges through light as it moves slightly forward.
+- 2.2–3.1 s: a narrow studio-light luster crosses the mark and gathers briefly
+  on the diamond.
+- 3.1–4.4 s: the wordmark settles in from soft focus; the rule and subtitle
+  follow more quietly.
+- 4.4–5.5 s: hold.
+- 5.5–6.5 s: the light retreats: subtitle, then wordmark, then mark.
+- 6.5–7.0 s: clean `#0D0D0E` for the crossfade into the app.
+
+The geometry is vectorised from the supplied artwork, never redrawn, and
+rendered by a deterministic in-repo renderer instead of Blender. The mark-only
+constraint of the earlier direction no longer applies: the brief asks for the
+wordmark and subtitle. Pipeline, measurements and reproduction steps are in
+`scripts/startup-ident/README.md`.
+
+## Earlier direction: Optical luster (superseded)
 
 Revised after the user's September 24 screen-recording reference and request for
 very fast, restrained 3D luster suitable for a medical-school app. The reference's
