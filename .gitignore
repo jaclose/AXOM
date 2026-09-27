@@ -70,3 +70,7 @@ active_study_day.txt
 # Blender autosaves and generated icon composition (the PNG is the source of truth)
 *.blend1
 design/icon/axom-app-icon.svg
+
+# Personal soundscape imports (your own audio; never committed or deployed)
+web/public/soundscapes/personal/
+web/src/data/soundscape-recordings.personal.json

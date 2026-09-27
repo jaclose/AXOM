@@ -3,6 +3,11 @@
 //
 //   npm run soundscapes:import                 # everything in ./soundscapes_import
 //   npm run soundscapes:import -- --dir ~/Music/focus --seconds 240
+//   npm run soundscapes:import -- --publish     # ship with the app (only audio you may redistribute)
+//
+// By default imports are PERSONAL: written to web/public/soundscapes/personal/
+// and web/src/data/soundscape-recordings.personal.json, both gitignored, so
+// your own downloads play in your builds but are never committed or deployed.
 //
 // Each file (audio or video) is matched to a preset by name — "40 Hz",
 // "20 Hz", "10 Hz"/"alpha", "2 Hz"/"delta", "brown", "rain" — or by an
@@ -25,7 +30,9 @@ const option = (name, fallback) => {
 const dir = resolve(option('dir', join(root, 'soundscapes_import')).replace(/^~(?=\/)/, process.env.HOME ?? '~'));
 const loopSeconds = Number(option('seconds', '180'));
 const crossfade = 4;
-const manifestPath = join(root, 'web/src/data/soundscape-recordings.json');
+const publish = args.includes('--publish');
+const manifestPath = join(root, publish ? 'web/src/data/soundscape-recordings.json' : 'web/src/data/soundscape-recordings.personal.json');
+const publicBase = publish ? 'soundscapes' : 'soundscapes/personal';
 const PRESETS = ['gamma-40', 'beta-20', 'alpha-10', 'delta-2', 'brown-noise', 'soft-rain'];
 const MEDIA = /\.(mp3|m4a|aac|wav|flac|ogg|opus|mp4|mov|mkv|webm)$/i;
 
@@ -60,7 +67,7 @@ function importFile(file) {
   // Skip intros/outros: start a quarter of the way in when there is room.
   const start = total > length + crossfade + 60 ? Math.floor(total * 0.25) : 0;
   const slug = slugFor(name);
-  const relative = `soundscapes/${preset}/${slug}.m4a`;
+  const relative = `${publicBase}/${preset}/${slug}.m4a`;
   const out = join(root, 'web/public', relative);
   mkdirSync(dirname(out), { recursive: true });
   // O(t) = S(t) for t ∈ [X, L); for t ∈ [0, X) the head fades in while the
@@ -93,13 +100,13 @@ function main() {
       continue;
     }
     const label = basename(result.name, extname(result.name)).replace(/^[a-z0-9-]+__/, '').replace(/[_]+/g, ' ').slice(0, 40);
-    const entry = { preset: result.preset, id: result.id, label, description: `Your recording, looped from ${Math.round(result.seconds / 60)} min.`, src: result.src, gain: 0.9, source: result.name };
+    const entry = { preset: result.preset, id: result.id, label, description: `${publish ? 'Recording' : 'Your recording'}, a seamless ${Math.round(result.seconds / 60)}-minute loop.`, src: result.src, gain: 0.9, source: result.name };
     const index = manifest.findIndex((item) => item.preset === entry.preset && item.id === entry.id);
     if (index >= 0) manifest[index] = entry; else manifest.push(entry);
     console.log(`ok    ${result.name} → ${result.preset} (${(result.bytes / 1_048_576).toFixed(1)} MB, ${result.seconds}s loop)`);
   }
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-  console.log(`Registered ${manifest.length} recording(s) in web/src/data/soundscape-recordings.json.`);
+  console.log(`Registered ${manifest.length} recording(s) in ${manifestPath.slice(root.length + 1)}${publish ? '' : ' (personal — gitignored)'}.`);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

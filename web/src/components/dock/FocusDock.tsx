@@ -12,7 +12,7 @@ import { findLiveSession, formatElapsed, sessionElapsedMs, QUICK_LOG_LABEL, type
 import { formatClock, pomodoroPhaseSeconds, usePomodoro } from "../../lib/pomodoro";
 import { useSessionUi } from "../../lib/sessionUi";
 import { useSoundscape } from "../../lib/soundscapes/store";
-import { EVIDENCE_LABEL, SOUNDSCAPES } from "../../lib/soundscapes/presets";
+import { EVIDENCE_LABEL, SOUNDSCAPES, lookFor } from "../../lib/soundscapes/presets";
 import { carrierPair } from "../../lib/soundscapes/engine";
 import { useReducedMotion } from "../../lib/motion";
 import { formatRestClock, useRest } from "../../lib/rest";
@@ -322,6 +322,7 @@ function SoundCapsule({ ghost, entering }: { ghost: boolean; entering: boolean }
 function GeniePanel({ phase, origin, presetId, pairLabel }: { phase: Exclude<GeniePhase, "closed">; origin: number; presetId: NonNullable<ReturnType<typeof useSoundscape.getState>["presetId"]>; pairLabel?: string }) {
   const preset = SOUNDSCAPES[presetId];
   const status = useSoundscape((state) => state.status);
+  const versionId = useSoundscape((state) => state.versions[presetId]);
   const panelRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     panelRef.current?.style.setProperty("--genie-origin", `${origin}%`);
@@ -329,7 +330,7 @@ function GeniePanel({ phase, origin, presetId, pairLabel }: { phase: Exclude<Gen
   return (
     <div ref={panelRef} className={`dock-genie ${phase}`} role="dialog" aria-label={`${preset.name} soundscape`}>
       <div className="dock-genie-stage">
-        <SoundscapeVisual visual={preset.visual} animate={status === "playing"} reactive label={`${preset.name} visual`} />
+        <SoundscapeVisual {...lookFor(preset, versionId)} animate={status === "playing"} reactive label={`${preset.name} visual`} />
         <div className="dock-genie-caption">
           <b>{preset.name}</b>
           <small>{[preset.band, pairLabel].filter(Boolean).join(" · ")}</small>

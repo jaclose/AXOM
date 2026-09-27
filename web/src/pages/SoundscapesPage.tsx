@@ -9,6 +9,7 @@ import {
   LISTENING_REGIMEN,
   SOUNDSCAPES,
   SOUNDSCAPE_ORDER,
+  lookFor,
   type EvidenceLevel,
   type SoundscapeId,
 } from "../lib/soundscapes/presets";
@@ -44,6 +45,7 @@ export function SoundscapesPage() {
   const output = useSoundscape((state) => state.output);
   const supported = useSoundscape((state) => state.supported);
   const error = useSoundscape((state) => state.error);
+  const versions = useSoundscape((state) => state.versions);
   const [focused, setFocused] = useState<SoundscapeId | null>(null);
   const heroId = focused ?? presetId ?? lastPresetId;
   const hero = SOUNDSCAPES[heroId];
@@ -54,7 +56,7 @@ export function SoundscapesPage() {
     <div className="soundscapes-page">
       <section className={`soundscape-hero ${status === "playing" && presetId === heroId ? "live" : ""}`}>
         <SoundscapeVisual
-          visual={hero.visual}
+          {...lookFor(hero, versions[hero.id])}
           animate={status === "playing" || focused !== null}
           reactive={status === "playing" && presetId === heroId}
           className="soundscape-hero-visual"
@@ -125,7 +127,7 @@ export function SoundscapesPage() {
               onMouseLeave={() => setFocused(null)}
             >
               <div className="soundscape-card-visual">
-                <SoundscapeVisual visual={preset.visual} animate={live || focused === id} reactive={live} />
+                <SoundscapeVisual {...lookFor(preset, versions[id])} animate={live || focused === id} reactive={live} />
               </div>
               <div className="soundscape-card-body">
                 <div className="soundscape-card-head">

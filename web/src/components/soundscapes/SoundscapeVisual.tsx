@@ -23,8 +23,11 @@ function paletteColors(): VisualColors {
  * `animate` is true; reduced motion draws one still frame. Colors follow the
  * active palette (re-read when the theme or palette changes).
  */
-export function SoundscapeVisual({ visual, animate, reactive = false, className = "", label }: {
+export function SoundscapeVisual({ visual, overlay, overlayMix = 0.55, animate, reactive = false, className = "", label }: {
   visual: VisualKind;
+  /** A second scene blended on top (screen), e.g. rain over the lattice. */
+  overlay?: VisualKind;
+  overlayMix?: number;
   animate: boolean;
   /** Follow the live audio level (only for the preset that is playing). */
   reactive?: boolean;
@@ -75,9 +78,25 @@ export function SoundscapeVisual({ visual, animate, reactive = false, className 
         time: t, level, accent: rgbChannels(colors.accent), cool: rgbChannels(colors.cool), hi: rgbChannels(colors.hi),
       }, context);
       context.restore();
-      if (drawn) return;
-      context.clearRect(0, 0, width, height);
-      draw({ ctx: context, width, height, t, level, colors });
+      if (!drawn) {
+        context.clearRect(0, 0, width, height);
+        draw({ ctx: context, width, height, t, level, colors });
+      }
+      if (overlay && overlay !== visual) {
+        context.save();
+        context.globalCompositeOperation = "screen";
+        context.globalAlpha = Math.max(0, Math.min(1, overlayMix));
+        context.setTransform(1, 0, 0, 1, 0, 0);
+        const overlaid = shaderRenderer.draw(overlay, Math.max(1, Math.round(width * ratio)), Math.max(1, Math.round(height * ratio)), {
+          time: t + 7, level, accent: rgbChannels(colors.accent), cool: rgbChannels(colors.cool), hi: rgbChannels(colors.hi),
+        }, context);
+        if (!overlaid) {
+          const scale = Math.min(2, window.devicePixelRatio || 1);
+          context.setTransform(scale, 0, 0, scale, 0, 0);
+          VISUAL_RENDERERS[overlay]({ ctx: context, width, height, t: t + 7, level, colors });
+        }
+        context.restore();
+      }
     };
     const loop = (now: number) => {
       paint(now);
@@ -114,7 +133,7 @@ export function SoundscapeVisual({ visual, animate, reactive = false, className 
       window.removeEventListener("axom:palette-change", onPalette);
       window.removeEventListener("axom:theme-change", onPalette);
     };
-  }, [visual, animate, reactive, reduced]);
+  }, [visual, overlay, overlayMix, animate, reactive, reduced]);
 
   return <canvas ref={canvasRef} className={`soundscape-visual ${className}`} role={label ? "img" : undefined} aria-label={label} aria-hidden={label ? undefined : true} />;
 }
