@@ -26,3 +26,10 @@ web/tsconfig.tsbuildinfo
 !/scripts/
 !/scripts/release-notes.mjs
 !/scripts/release-notes.d.mts
+
+# Edge Function logic the web tests import; `tsc -b` in the build type-checks
+# them, so without it every deployment fails with TS2307. Migrations, config
+# and email templates stay out of the upload.
+!/supabase/
+/supabase/*
+!/supabase/functions/
