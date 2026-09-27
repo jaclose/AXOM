@@ -6,12 +6,14 @@ import { LayerKit, type SynthLayer } from "./synth";
 import { useSoundscape } from "./store";
 
 describe("scenes", () => {
-  it("ships the ten licensed scenes with posters", () => {
-    expect(SCENES.map((scene) => scene.id).sort()).toEqual(["chrome-rings", "chrome-spheres", "cockpit", "earth", "heartbeat", "kelp-forest", "newtons-cradle", "retro-tv", "satellite", "skeleton"]);
+  it("ships only licensed scenes, each with a poster and a genre", () => {
+    expect(SCENES.length).toBe(28);
+    expect(SCENES.map((scene) => scene.id)).toEqual(expect.arrayContaining(["earth", "open-sea", "neon-corridor", "emerald-dust", "skeleton"]));
     for (const scene of SCENES) {
       expect(scene.src).toMatch(/^scenes\/[a-z-]+\.mp4$/);
       expect(scene.poster).toMatch(/^scenes\/[a-z-]+\.jpg$/);
       expect(scene.credit).toBe("Pixabay");
+      expect(["nature", "future", "space", "waves", "fun"]).toContain(scene.genre);
     }
     expect(sceneById("earth")?.label).toBe("Earth turning");
     expect(sceneUrl("scenes/earth.mp4")).toMatch(/\/scenes\/earth\.mp4$/);

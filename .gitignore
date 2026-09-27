@@ -83,3 +83,7 @@ design/assets/soundscapes_import/
 # Processed, licensed output lives in web/public/scenes; personal imports in */personal/.
 01-downloaded-originals_v0.01/
 amboss:uworld:examsoft:step 1 ui questions/
+
+# Personal scenes (your own wallpapers/clips; never committed or deployed)
+web/public/scenes/personal/
+web/src/data/scenes.personal.json

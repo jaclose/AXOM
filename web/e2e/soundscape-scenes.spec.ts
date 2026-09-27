@@ -1,5 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
 
+/** First visits open the "What are you into?" opener; tests that aren't about it skip it. */
+async function skipSoundscapeOpener(page: Page) {
+  // The opener mounts in the same render as the page, so wait for the page first.
+  await page.locator(".soundscapes-page").waitFor();
+  const skip = page.getByRole("button", { name: "Skip for now" });
+  if (await skip.count()) await skip.click();
+  await expect(page.locator(".soundscape-opener")).toHaveCount(0);
+}
+
 async function openWorkspace(page: Page) {
   await page.goto("/#dashboard", { waitUntil: "networkidle" });
   const name = page.getByLabel("Display name (optional)");
@@ -18,6 +27,7 @@ test("frequency cards, ambient sounds, scenes and Spotify load cleanly", async (
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
   await openWorkspace(page);
   await page.goto("/#soundscapes");
+  await skipSoundscapeOpener(page);
 
   await expect(page.getByRole("heading", { name: "What each frequency is for" })).toBeVisible();
   for (const headline of ["The binding rhythm", "The working brain", "The resting rhythm", "The slow waves of sleep"]) {

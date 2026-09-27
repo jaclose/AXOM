@@ -5,6 +5,7 @@ import { useSoundscape } from "../../lib/soundscapes/store";
 import { carrierPair } from "../../lib/soundscapes/engine";
 import { SoundscapeStage } from "./SoundscapeStage";
 import { TransportButtons, VersionChips } from "./SoundscapeControls";
+import { PinButton } from "./PinButton";
 
 const EVIDENCE_TONE: Record<EvidenceLevel, "cyan" | "neutral" | "orange" | "green"> = {
   tentative: "cyan",
@@ -73,7 +74,7 @@ export function FrequencyCard({ id }: { id: SoundscapeId }) {
             <small>{significance.range}</small>
           </span>
         </div>
-        <div className="frequency-play"><TransportButtons presetId={id} /></div>
+        <div className="frequency-play"><PinButton presetId={id} /><TransportButtons presetId={id} /></div>
       </div>
       <div className="frequency-body">
         <span className="frequency-state">{significance.state} · {preset.beatHz} Hz beat</span>
@@ -108,7 +109,7 @@ export function AmbientCard({ id }: { id: SoundscapeId }) {
         <SoundscapeStage preset={preset} animate={live || hover} reactive={live} ring={live} />
         <div className="ambient-head">
           <span><b>{preset.name}</b><small>{preset.band}</small></span>
-          <TransportButtons presetId={id} />
+          <span className="ambient-actions"><PinButton presetId={id} /><TransportButtons presetId={id} /></span>
         </div>
       </div>
       <div className="ambient-body">

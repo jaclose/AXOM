@@ -1,5 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
 
+/** First visits open the "What are you into?" opener; tests that aren't about it skip it. */
+async function skipSoundscapeOpener(page: Page) {
+  // The opener mounts in the same render as the page, so wait for the page first.
+  await page.locator(".soundscapes-page").waitFor();
+  const skip = page.getByRole("button", { name: "Skip for now" });
+  if (await skip.count()) await skip.click();
+  await expect(page.locator(".soundscape-opener")).toHaveCount(0);
+}
+
 /** Dev-only live-store handle installed by src/main.tsx. */
 type DevWindow = Window & {
   __AXOM_DEV__: Promise<{
@@ -41,6 +50,7 @@ test("the focus dock splits for a soundscape, genies its visual, and stops clean
   await expect(dock).not.toHaveClass(/split/);
 
   await page.goto("/#soundscapes");
+  await skipSoundscapeOpener(page);
   await expect(page.getByRole("heading", { name: "Your rotation" })).toBeVisible();
   await page.getByRole("button", { name: "Play 20 Hz Beta" }).first().click();
   await expect.poll(() => soundStatus(page)).toBe("playing");

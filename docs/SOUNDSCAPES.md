@@ -33,6 +33,37 @@ on theme or palette change. Renderers (`visuals.ts`) are deliberately slow. No
 luminance change repeats faster than about every 2 s, so a 40 Hz preset never
 becomes 40 Hz flicker (WCAG 2.3.1).
 
+### Scenes
+
+Scenes are looping video clips (`web/src/data/scenes.json`, files in
+`web/public/scenes/`), each tagged with a `genre`: nature, future, space,
+waves or fun. `scripts/import-scenes.mjs` cuts seamless crossfade loops
+(`--crf`, default 29; `--width`, default 1280). By default it writes to the
+personal manifest (`scenes.personal.json`, files in `public/scenes/personal/`).
+Both are gitignored, so your own wallpapers never enter the repository.
+`--publish` writes redistributable clips to the committed manifest. Unit tests
+ignore the personal manifest.
+
+## Personalization (`taste.ts`, `SoundscapeOpener.tsx`, `ForYouRow.tsx`)
+
+The first visit opens a two-step opener: sounds you're into (frequencies,
+birds & nature, rain & waves, noise, places, piano & jazz), then scenes you like
+to look at (the five genres plus random). Tiles widen on hover. After
+"Turn on previews" (a click, so the audio context may start), they also play a
+short preview. A preview never overwrites preferences, the stop timer or the
+listening log, and never interrupts something that is already playing. Picks
+are optional and can be changed with Personalize.
+
+- `forYouOrder` puts pinned presets first, then the presets of each picked
+  genre in pick order. The For you row, section order and card order follow it.
+- `sceneForTaste` keeps a preset's designed scene when it fits your visual picks.
+  Otherwise it chooses one from those genres; "random" reshuffles each session.
+  A scene you choose in the picker always wins.
+- Taste and pins live in `axom.soundscapes.v1` on this device.
+- The opener renders through a portal on `document.body`. The shell's
+  backdrop filter would otherwise contain a fixed overlay, clipping it and
+  placing it under notices.
+
 ## Focus dock (`web/src/components/dock/FocusDock.tsx`, `styles/dock.css`)
 
 It appears whenever a session, a Pomodoro phase (including paused mid-sprint)

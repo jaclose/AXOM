@@ -6,7 +6,8 @@
     "src": "scenes/kelp-forest.mp4",
     "poster": "scenes/kelp-forest.jpg",
     "credit": "Pixabay",
-    "seconds": 5.5
+    "seconds": 5.5,
+    "genre": "nature"
   },
   {
     "id": "heartbeat",
@@ -15,7 +16,8 @@
     "src": "scenes/heartbeat.mp4",
     "poster": "scenes/heartbeat.jpg",
     "credit": "Pixabay",
-    "seconds": 9
+    "seconds": 9,
+    "genre": "fun"
   },
   {
     "id": "cockpit",
@@ -24,7 +26,8 @@
     "src": "scenes/cockpit.mp4",
     "poster": "scenes/cockpit.jpg",
     "credit": "Pixabay",
-    "seconds": 12
+    "seconds": 12,
+    "genre": "space"
   },
   {
     "id": "newtons-cradle",
@@ -33,7 +36,8 @@
     "src": "scenes/newtons-cradle.mp4",
     "poster": "scenes/newtons-cradle.jpg",
     "credit": "Pixabay",
-    "seconds": 9.3
+    "seconds": 9.3,
+    "genre": "fun"
   },
   {
     "id": "retro-tv",
@@ -42,7 +46,8 @@
     "src": "scenes/retro-tv.mp4",
     "poster": "scenes/retro-tv.jpg",
     "credit": "Pixabay",
-    "seconds": 12
+    "seconds": 12,
+    "genre": "fun"
   },
   {
     "id": "satellite",
@@ -51,7 +56,8 @@
     "src": "scenes/satellite.mp4",
     "poster": "scenes/satellite.jpg",
     "credit": "Pixabay",
-    "seconds": 12
+    "seconds": 12,
+    "genre": "space"
   },
   {
     "id": "chrome-rings",
@@ -60,7 +66,8 @@
     "src": "scenes/chrome-rings.mp4",
     "poster": "scenes/chrome-rings.jpg",
     "credit": "Pixabay",
-    "seconds": 6.9
+    "seconds": 6.9,
+    "genre": "future"
   },
   {
     "id": "chrome-spheres",
@@ -69,7 +76,8 @@
     "src": "scenes/chrome-spheres.mp4",
     "poster": "scenes/chrome-spheres.jpg",
     "credit": "Pixabay",
-    "seconds": 4.9
+    "seconds": 4.9,
+    "genre": "future"
   },
   {
     "id": "earth",
@@ -78,7 +86,8 @@
     "src": "scenes/earth.mp4",
     "poster": "scenes/earth.jpg",
     "credit": "Pixabay",
-    "seconds": 12
+    "seconds": 12,
+    "genre": "space"
   },
   {
     "id": "skeleton",
@@ -87,6 +96,187 @@
     "src": "scenes/skeleton.mp4",
     "poster": "scenes/skeleton.jpg",
     "credit": "Pixabay",
-    "seconds": 12
+    "seconds": 12,
+    "genre": "fun"
+  },
+  {
+    "id": "emerald-dust",
+    "label": "Emerald dust",
+    "mood": "calm",
+    "genre": "space",
+    "src": "scenes/emerald-dust.mp4",
+    "poster": "scenes/emerald-dust.jpg",
+    "credit": "Pixabay",
+    "seconds": 10
+  },
+  {
+    "id": "blue-tunnel",
+    "label": "Blue tunnel",
+    "mood": "serious",
+    "genre": "future",
+    "src": "scenes/blue-tunnel.mp4",
+    "poster": "scenes/blue-tunnel.jpg",
+    "credit": "Pixabay",
+    "seconds": 10
+  },
+  {
+    "id": "prism-tunnel",
+    "label": "Prism tunnel",
+    "mood": "fun",
+    "genre": "future",
+    "src": "scenes/prism-tunnel.mp4",
+    "poster": "scenes/prism-tunnel.jpg",
+    "credit": "Pixabay",
+    "seconds": 10
+  },
+  {
+    "id": "amber-storm",
+    "label": "Amber storm",
+    "mood": "calm",
+    "genre": "nature",
+    "src": "scenes/amber-storm.mp4",
+    "poster": "scenes/amber-storm.jpg",
+    "credit": "Pixabay",
+    "seconds": 10
+  },
+  {
+    "id": "ink-bloom",
+    "label": "Ink bloom",
+    "mood": "calm",
+    "genre": "waves",
+    "src": "scenes/ink-bloom.mp4",
+    "poster": "scenes/ink-bloom.jpg",
+    "credit": "Pixabay",
+    "seconds": 10
+  },
+  {
+    "id": "ember-haze",
+    "label": "Ember haze",
+    "mood": "calm",
+    "genre": "space",
+    "src": "scenes/ember-haze.mp4",
+    "poster": "scenes/ember-haze.jpg",
+    "credit": "Pixabay",
+    "seconds": 10
+  },
+  {
+    "id": "warp-lines",
+    "label": "Warp lines",
+    "mood": "serious",
+    "genre": "future",
+    "src": "scenes/warp-lines.mp4",
+    "poster": "scenes/warp-lines.jpg",
+    "credit": "Pixabay",
+    "seconds": 5.4
+  },
+  {
+    "id": "open-sea",
+    "label": "Open sea",
+    "mood": "calm",
+    "genre": "waves",
+    "src": "scenes/open-sea.mp4",
+    "poster": "scenes/open-sea.jpg",
+    "credit": "Pixabay",
+    "seconds": 10
+  },
+  {
+    "id": "spark-field",
+    "label": "Spark field",
+    "mood": "fun",
+    "genre": "future",
+    "src": "scenes/spark-field.mp4",
+    "poster": "scenes/spark-field.jpg",
+    "credit": "Pixabay",
+    "seconds": 10
+  },
+  {
+    "id": "neon-corridor",
+    "label": "Neon corridor",
+    "mood": "serious",
+    "genre": "future",
+    "src": "scenes/neon-corridor.mp4",
+    "poster": "scenes/neon-corridor.jpg",
+    "credit": "Pixabay",
+    "seconds": 10
+  },
+  {
+    "id": "hangar-lights",
+    "label": "Hangar lights",
+    "mood": "serious",
+    "genre": "future",
+    "src": "scenes/hangar-lights.mp4",
+    "poster": "scenes/hangar-lights.jpg",
+    "credit": "Pixabay",
+    "seconds": 10
+  },
+  {
+    "id": "runway",
+    "label": "Runway",
+    "mood": "serious",
+    "genre": "future",
+    "src": "scenes/runway.mp4",
+    "poster": "scenes/runway.jpg",
+    "credit": "Pixabay",
+    "seconds": 10
+  },
+  {
+    "id": "calm-water",
+    "label": "Calm water",
+    "mood": "calm",
+    "genre": "waves",
+    "src": "scenes/calm-water.mp4",
+    "poster": "scenes/calm-water.jpg",
+    "credit": "Pixabay",
+    "seconds": 10
+  },
+  {
+    "id": "dark-tunnel",
+    "label": "Dark tunnel",
+    "mood": "serious",
+    "genre": "future",
+    "src": "scenes/dark-tunnel.mp4",
+    "poster": "scenes/dark-tunnel.jpg",
+    "credit": "Pixabay",
+    "seconds": 8.9
+  },
+  {
+    "id": "circuit-lines",
+    "label": "Circuit lines",
+    "mood": "serious",
+    "genre": "future",
+    "src": "scenes/circuit-lines.mp4",
+    "poster": "scenes/circuit-lines.jpg",
+    "credit": "Pixabay",
+    "seconds": 10
+  },
+  {
+    "id": "copper-tunnel",
+    "label": "Copper tunnel",
+    "mood": "serious",
+    "genre": "future",
+    "src": "scenes/copper-tunnel.mp4",
+    "poster": "scenes/copper-tunnel.jpg",
+    "credit": "Pixabay",
+    "seconds": 8.9
+  },
+  {
+    "id": "sea-foam",
+    "label": "Sea foam",
+    "mood": "calm",
+    "genre": "waves",
+    "src": "scenes/sea-foam.mp4",
+    "poster": "scenes/sea-foam.jpg",
+    "credit": "Pixabay",
+    "seconds": 10
+  },
+  {
+    "id": "violet-shards",
+    "label": "Violet shards",
+    "mood": "fun",
+    "genre": "future",
+    "src": "scenes/violet-shards.mp4",
+    "poster": "scenes/violet-shards.jpg",
+    "credit": "Pixabay",
+    "seconds": 8.9
   }
 ]

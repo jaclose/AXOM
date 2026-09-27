@@ -11,7 +11,8 @@
 // manifest; --publish writes the shipped manifest (only for footage you may
 // redistribute, e.g. Pixabay/Pexels/Mixkit or your own).
 //
-// --map points at JSON: { "<file name>": { "id", "label", "mood": "calm"|"serious"|"fun", "credit" } }.
+// --map points at JSON: { "<file name>": { "id", "label", "mood": "calm"|"serious"|"fun",
+//   "genre": "nature"|"future"|"space"|"waves"|"fun", "credit" } }.
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, join, resolve } from 'node:path';
@@ -26,6 +27,8 @@ const option = (name, fallback) => {
 const expand = (path) => resolve(path.replace(/^~(?=\/)/, process.env.HOME ?? '~'));
 const dir = expand(option('dir', join(root, 'soundscapes_import/scenes')));
 const maxSeconds = Number(option('seconds', '12'));
+const crf = String(option('crf', '29'));
+const maxWidth = Number(option('width', '1280'));
 const publish = args.includes('--publish');
 const mapPath = option('map', '');
 const meta = mapPath ? JSON.parse(readFileSync(expand(mapPath), 'utf8')) : {};
@@ -58,7 +61,7 @@ function importClip(file) {
   mkdirSync(dirname(out), { recursive: true });
   // O = S[F, L) then a crossfade from S[L, L+F) into S[0, F): the last frame
   // flows into the first, so <video loop> has no visible jump.
-  const scale = "scale='min(1280,iw)':-2:flags=lanczos,fps=24,format=yuv420p";
+  const scale = `scale='min(${maxWidth},iw)':-2:flags=lanczos,fps=24,format=yuv420p`;
   const filter = [
     `[0:v]${scale},split=3[a][b][c]`,
     `[a]trim=${FADE}:${length},setpts=PTS-STARTPTS[body]`,
@@ -68,7 +71,7 @@ function importClip(file) {
     `[body][joint]concat=n=2:v=1:a=0[out]`,
   ].join(';');
   execFileSync('ffmpeg', ['-v', 'error', '-y', '-ss', String(start), '-t', String(length + FADE + 0.2), '-i', file,
-    '-filter_complex', filter, '-map', '[out]', '-an', '-c:v', 'libx264', '-preset', 'slow', '-crf', '27', '-profile:v', 'high',
+    '-filter_complex', filter, '-map', '[out]', '-an', '-c:v', 'libx264', '-preset', 'slow', '-crf', crf, '-profile:v', 'high',
     '-movflags', '+faststart', out], { stdio: 'inherit' });
   execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', out, '-frames:v', '1', '-q:v', '4', poster], { stdio: 'inherit' });
   return {
@@ -77,6 +80,7 @@ function importClip(file) {
       id,
       label: entry.label ?? basename(name, extname(name)).replace(/[_-]+/g, ' ').slice(0, 40),
       mood: entry.mood ?? 'calm',
+      genre: entry.genre ?? 'nature',
       src: `${publicBase}/${id}.mp4`,
       poster: `${publicBase}/${id}.jpg`,
       credit: entry.credit ?? (publish ? undefined : 'Your file'),
