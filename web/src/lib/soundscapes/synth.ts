@@ -10,15 +10,24 @@ export type RainIntensity = "light" | "steady" | "heavy";
 
 export interface ToneLayer { kind: "tone"; carrierHz: number; beatHz: number; level: number }
 export interface PadLayer { kind: "pad"; style: PadStyle; rootHz: number; level: number }
-export interface NoiseLayer { kind: "noise"; color: "brown" | "pink"; level: number; lowpassHz?: number }
+export interface NoiseLayer { kind: "noise"; color: "brown" | "pink" | "white"; level: number; lowpassHz?: number; highpassHz?: number }
 export interface OceanLayer { kind: "ocean"; level: number }
 export interface RainLayer { kind: "rain"; intensity: RainIntensity; level: number; thunder?: boolean; window?: boolean }
 export interface WindLayer { kind: "wind"; level: number }
 export interface FireLayer { kind: "fire"; level: number }
 export interface ChimesLayer { kind: "chimes"; level: number }
 export interface VinylLayer { kind: "vinyl"; level: number }
+/** A box fan: airy broadband wash, a low motor hum and a faint blade flutter. */
+export interface FanLayer { kind: "fan"; level: number; speed?: "low" | "high" }
+/** An airliner cabin at cruise: low engine drone, air-conditioning hiss, slow swells. */
+export interface CabinLayer { kind: "cabin"; level: number }
+/** A café murmur: several distant voices (formant-shaped noise) and the odd cup. */
+export interface ChatterLayer { kind: "chatter"; level: number; voices?: number; cups?: boolean }
+/** Forest birdsong over leaves: a few species calling from different distances. */
+export interface BirdsLayer { kind: "birds"; level: number; density?: "sparse" | "dawn" }
 
-export type SynthLayer = ToneLayer | PadLayer | NoiseLayer | OceanLayer | RainLayer | WindLayer | FireLayer | ChimesLayer | VinylLayer;
+export type SynthLayer = ToneLayer | PadLayer | NoiseLayer | OceanLayer | RainLayer | WindLayer | FireLayer | ChimesLayer | VinylLayer
+  | FanLayer | CabinLayer | ChatterLayer | BirdsLayer;
 
 export interface SynthRecipe {
   layers: SynthLayer[];
@@ -119,6 +128,10 @@ export class LayerKit {
       case "fire": return this.fire(layer, dry, wet);
       case "chimes": return this.chimes(layer, wet);
       case "vinyl": return this.vinyl(layer, dry);
+      case "fan": return this.fan(layer, dry);
+      case "cabin": return this.cabin(layer, dry);
+      case "chatter": return this.chatter(layer, dry, wet);
+      case "birds": return this.birds(layer, dry, wet);
     }
   }
 
@@ -242,8 +255,10 @@ export class LayerKit {
     const stops: Array<() => void> = [];
     const source = this.loop(layer.color, stops);
     const level = this.gain(layer.level);
-    if (layer.lowpassHz) source.connect(this.filter("lowpass", layer.lowpassHz, 0.4)).connect(level);
-    else source.connect(level);
+    let chain: AudioNode = source;
+    if (layer.highpassHz) chain = chain.connect(this.filter("highpass", layer.highpassHz, 0.5));
+    if (layer.lowpassHz) chain = chain.connect(this.filter("lowpass", layer.lowpassHz, 0.4));
+    chain.connect(level);
     level.connect(dry);
     return stops;
   }
@@ -410,6 +425,222 @@ export class LayerKit {
       source.start();
       source.onended = () => { source.disconnect(); env.disconnect(); };
     }, stops);
+    return stops;
+  }
+
+  private fan(layer: FanLayer, dry: AudioNode) {
+    const stops: Array<() => void> = [];
+    const high = layer.speed === "high";
+    // Air: pink noise shaped like a fan grille (a broad hump around 500–900 Hz).
+    const air = this.loop("pink", stops);
+    const body = this.filter("peaking", high ? 820 : 620, 0.8);
+    body.gain.value = 6;
+    const top = this.filter("lowpass", high ? 5200 : 3800, 0.5);
+    const airLevel = this.gain(layer.level * 0.75);
+    air.connect(body).connect(top).connect(airLevel).connect(dry);
+    // Blade flutter: the air gently modulated at the blade-pass rate.
+    this.lfo(high ? 21 : 14, layer.level * 0.05, airLevel.gain, stops);
+    // Motor hum: a quiet mains-ish fundamental with a softer harmonic.
+    const hum = this.gain(layer.level * 0.06);
+    hum.connect(this.filter("lowpass", 400, 0.7)).connect(dry);
+    [[high ? 118 : 104, 1], [high ? 236 : 208, 0.35]].forEach(([frequency, amp]) => this.osc(frequency, "sine", stops).connect(this.gain(amp)).connect(hum));
+    this.lfo(0.05, layer.level * 0.015, hum.gain, stops);
+    return stops;
+  }
+
+  private cabin(layer: CabinLayer, dry: AudioNode) {
+    const stops: Array<() => void> = [];
+    // The deep roar that fills an airliner at cruise.
+    const roar = this.loop("brown", stops);
+    const roarLevel = this.gain(layer.level * 0.95);
+    roar.connect(this.filter("lowpass", 260, 0.6)).connect(roarLevel).connect(dry);
+    this.lfo(0.021, layer.level * 0.12, roarLevel.gain, stops);
+    // Air-conditioning: a soft, bright hiss from the vents.
+    const vent = this.loop("pink", stops);
+    vent.connect(this.filter("highpass", 1200, 0.5)).connect(this.filter("lowpass", 6500, 0.5)).connect(this.gain(layer.level * 0.12)).connect(dry);
+    // Engine tones: close pairs that beat slowly, like two engines out of sync.
+    const drone = this.gain(layer.level * 0.035);
+    drone.connect(this.filter("lowpass", 700, 0.7)).connect(dry);
+    [[86, 86.35], [129, 129.6], [172, 172.4]].forEach(([a, b], i) => {
+      const amp = [1, 0.5, 0.25][i];
+      this.osc(a, "sine", stops).connect(this.gain(amp)).connect(drone);
+      this.osc(b, "sine", stops).connect(this.gain(amp * 0.8)).connect(drone);
+    });
+    return stops;
+  }
+
+  /** Distant café voices. Each "speaker" is noise through two moving vowel formants, gated in syllables and phrases. */
+  private chatter(layer: ChatterLayer, dry: AudioNode, wet: AudioNode) {
+    const stops: Array<() => void> = [];
+    // Room tone under everything.
+    const room = this.loop("pink", stops);
+    room.connect(this.filter("lowpass", 900, 0.5)).connect(this.gain(layer.level * 0.18)).connect(dry);
+    const muffle = this.filter("lowpass", 2600, 0.6);
+    const bus = this.gain(1);
+    bus.connect(muffle);
+    muffle.connect(this.gain(0.55)).connect(dry);
+    muffle.connect(this.gain(0.9)).connect(wet);
+    const vowels = [[730, 1090], [530, 1840], [270, 2290], [570, 840], [440, 1020], [300, 870], [660, 1720]];
+    const voices = Math.max(2, Math.min(9, layer.voices ?? 6));
+    for (let v = 0; v < voices; v += 1) {
+      const source = this.loop(v % 2 ? "white" : "pink", stops);
+      const pitchShift = 0.82 + Math.random() * 0.4; // lower and higher voices
+      const f1 = this.filter("bandpass", 500, 7);
+      const f2 = this.filter("bandpass", 1500, 9);
+      const gate = this.ctx.createGain();
+      gate.gain.value = 0;
+      const pan = this.ctx.createStereoPanner();
+      pan.pan.value = Math.random() * 1.6 - 0.8;
+      // Narrow formant bands pass little energy, so voices need real gain to be heard.
+      const distance = this.gain(layer.level * (0.8 + Math.random() * 1.1) * Math.sqrt(6 / voices));
+      source.connect(f1).connect(gate);
+      source.connect(f2).connect(this.gain(0.6)).connect(gate);
+      gate.connect(distance).connect(pan).connect(bus);
+      // Speak in phrases of syllables, then pause, like real conversation.
+      let talking = Math.random() < 0.5;
+      this.every(160, 260, () => {
+        const at = this.ctx.currentTime + 0.02;
+        if (Math.random() < (talking ? 0.07 : 0.2)) talking = !talking;
+        if (!talking) { gate.gain.setTargetAtTime(0, at, 0.05); return; }
+        const [a, b] = vowels[Math.floor(Math.random() * vowels.length)];
+        f1.frequency.setTargetAtTime(a * pitchShift, at, 0.03);
+        f2.frequency.setTargetAtTime(b * pitchShift, at, 0.03);
+        const peak = 0.5 + Math.random() * 0.5;
+        gate.gain.cancelScheduledValues(at);
+        gate.gain.setTargetAtTime(peak, at, 0.025);
+        gate.gain.setTargetAtTime(0.05, at + 0.09 + Math.random() * 0.08, 0.04);
+      }, stops);
+    }
+    if (layer.cups !== false) {
+      // Now and then a cup meets a saucer somewhere in the room.
+      this.every(4000, 12_000, () => {
+        const at = this.ctx.currentTime;
+        const env = this.ctx.createGain();
+        env.gain.setValueAtTime(0.0001, at);
+        env.gain.exponentialRampToValueAtTime(layer.level * (0.05 + Math.random() * 0.06), at + 0.004);
+        env.gain.exponentialRampToValueAtTime(0.0001, at + 0.35);
+        const pan = this.ctx.createStereoPanner();
+        pan.pan.value = Math.random() * 1.4 - 0.7;
+        env.connect(pan);
+        pan.connect(dry);
+        pan.connect(wet);
+        const base = 2600 + Math.random() * 1800;
+        [[1, 1], [1.51, 0.5], [2.37, 0.3]].forEach(([ratio, amp]) => {
+          const osc = this.ctx.createOscillator();
+          osc.frequency.value = base * ratio;
+          const partial = this.gain(amp);
+          osc.connect(partial).connect(env);
+          osc.start(at);
+          osc.stop(at + 0.4);
+          osc.onended = () => { osc.disconnect(); partial.disconnect(); };
+        });
+      }, stops);
+    }
+    return stops;
+  }
+
+  /** Birdsong: whistles, chirp runs and trills from a few species at different distances, over leaves. */
+  private birds(layer: BirdsLayer, dry: AudioNode, wet: AudioNode) {
+    const stops: Array<() => void> = [];
+    const dawn = layer.density === "dawn";
+    // Leaves: airy high noise that breathes with the breeze.
+    const leaves = this.loop("pink", stops);
+    const leafLevel = this.gain(layer.level * 0.06);
+    leaves.connect(this.filter("highpass", 1800, 0.5)).connect(this.filter("lowpass", 7000, 0.5)).connect(leafLevel).connect(dry);
+    this.lfo(0.07, layer.level * 0.03, leafLevel.gain, stops);
+    const species: Array<(at: number, out: AudioNode, amp: number) => number> = [
+      // Whistle that slides down (a thrush-like call).
+      (at, out, amp) => {
+        const osc = this.ctx.createOscillator();
+        const env = this.ctx.createGain();
+        const f = 2400 + Math.random() * 900;
+        osc.frequency.setValueAtTime(f, at);
+        osc.frequency.exponentialRampToValueAtTime(f * 0.72, at + 0.34);
+        env.gain.setValueAtTime(0.0001, at);
+        env.gain.exponentialRampToValueAtTime(amp, at + 0.03);
+        env.gain.exponentialRampToValueAtTime(0.0001, at + 0.38);
+        osc.connect(env).connect(out);
+        osc.start(at); osc.stop(at + 0.4);
+        osc.onended = () => { osc.disconnect(); env.disconnect(); };
+        return 0.4;
+      },
+      // A run of quick up-chirps (a sparrow-like phrase).
+      (at, out, amp) => {
+        const notes = 3 + Math.floor(Math.random() * 4);
+        const base = 3600 + Math.random() * 1400;
+        for (let n = 0; n < notes; n += 1) {
+          const start = at + n * 0.09;
+          const osc = this.ctx.createOscillator();
+          const env = this.ctx.createGain();
+          osc.frequency.setValueAtTime(base * 0.8, start);
+          osc.frequency.exponentialRampToValueAtTime(base * (1.05 + n * 0.02), start + 0.045);
+          env.gain.setValueAtTime(0.0001, start);
+          env.gain.exponentialRampToValueAtTime(amp * 0.8, start + 0.008);
+          env.gain.exponentialRampToValueAtTime(0.0001, start + 0.06);
+          osc.connect(env).connect(out);
+          osc.start(start); osc.stop(start + 0.07);
+          osc.onended = () => { osc.disconnect(); env.disconnect(); };
+        }
+        return notes * 0.09;
+      },
+      // A warbled trill (fast frequency wobble).
+      (at, out, amp) => {
+        const osc = this.ctx.createOscillator();
+        const wobble = this.ctx.createOscillator();
+        const depth = this.gain(260 + Math.random() * 200);
+        const env = this.ctx.createGain();
+        const length = 0.35 + Math.random() * 0.5;
+        osc.frequency.value = 3000 + Math.random() * 1500;
+        wobble.frequency.value = 24 + Math.random() * 14;
+        wobble.connect(depth).connect(osc.frequency);
+        env.gain.setValueAtTime(0.0001, at);
+        env.gain.exponentialRampToValueAtTime(amp * 0.7, at + 0.05);
+        env.gain.setValueAtTime(amp * 0.7, at + length - 0.08);
+        env.gain.exponentialRampToValueAtTime(0.0001, at + length);
+        osc.connect(env).connect(out);
+        osc.start(at); wobble.start(at); osc.stop(at + length + 0.02); wobble.stop(at + length + 0.02);
+        osc.onended = () => { osc.disconnect(); wobble.disconnect(); depth.disconnect(); env.disconnect(); };
+        return length;
+      },
+      // Two-note "tee-oo" call.
+      (at, out, amp) => {
+        [[4200, 0], [3300, 0.22]].forEach(([f, offset]) => {
+          const start = at + offset;
+          const osc = this.ctx.createOscillator();
+          const env = this.ctx.createGain();
+          osc.frequency.setValueAtTime(f, start);
+          osc.frequency.linearRampToValueAtTime(f * 0.94, start + 0.16);
+          env.gain.setValueAtTime(0.0001, start);
+          env.gain.exponentialRampToValueAtTime(amp * 0.7, start + 0.02);
+          env.gain.exponentialRampToValueAtTime(0.0001, start + 0.18);
+          osc.connect(env).connect(out);
+          osc.start(start); osc.stop(start + 0.2);
+          osc.onended = () => { osc.disconnect(); env.disconnect(); };
+        });
+        return 0.42;
+      },
+    ];
+    // Each bird lives somewhere in the forest (pan + distance) and repeats its own song.
+    const birds = Array.from({ length: dawn ? 6 : 4 }, (_, i) => ({
+      song: species[i % species.length],
+      pan: Math.random() * 1.8 - 0.9,
+      distance: 0.35 + Math.random() * 0.65,
+    }));
+    birds.forEach((bird) => {
+      const pan = this.ctx.createStereoPanner();
+      pan.pan.value = bird.pan;
+      const air = this.filter("lowpass", 3000 + bird.distance * 6000, 0.5); // far birds lose their top
+      const out = this.gain(1);
+      out.connect(air).connect(pan);
+      pan.connect(this.gain(0.7)).connect(dry);
+      pan.connect(this.gain(0.6)).connect(wet);
+      stops.push(() => { pan.disconnect(); air.disconnect(); out.disconnect(); });
+      this.every(dawn ? 1800 : 3500, dawn ? 7000 : 14_000, () => {
+        let at = this.ctx.currentTime + 0.05;
+        const repeats = 1 + Math.floor(Math.random() * 3);
+        for (let r = 0; r < repeats; r += 1) at += bird.song(at, out, layer.level * 0.22 * bird.distance) + 0.25 + Math.random() * 0.4;
+      }, stops);
+    });
     return stops;
   }
 }

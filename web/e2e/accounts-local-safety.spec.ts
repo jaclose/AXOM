@@ -22,8 +22,10 @@ test("account foundation preserves local-only use and manual recovery at every l
     if (await menu.isVisible()) await menu.click();
     await page.getByTitle("Account and protection").click();
 
-    await expect(page.getByRole("tab", { name: "Account" })).toHaveAttribute("aria-selected", "true");
-    await expect(page.getByText(/Cloud credentials are absent/)).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Account", exact: true })).toHaveAttribute("aria-selected", "true");
+    // Builds without cloud credentials say so; a dev server with .env.local shows sign-in instead.
+    const localOnly = await page.getByText(/Cloud credentials are absent/).isVisible();
+    if (!localOnly) await expect(page.getByRole("tab", { name: "Sign in", exact: true })).toBeVisible();
     await expect(page.getByText(/Portable JSON export/i)).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
 

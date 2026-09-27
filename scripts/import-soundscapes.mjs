@@ -100,7 +100,7 @@ function main() {
       continue;
     }
     const label = basename(result.name, extname(result.name)).replace(/^[a-z0-9-]+__/, '').replace(/[_]+/g, ' ').slice(0, 40);
-    const entry = { preset: result.preset, id: result.id, label, description: `${publish ? 'Recording' : 'Your recording'}, a seamless ${Math.round(result.seconds / 60)}-minute loop.`, src: result.src, gain: 0.9, source: result.name };
+    const entry = { preset: result.preset, id: result.id, label, description: `${publish ? 'Recording' : 'Your recording'}, a seamless ${Math.round(result.seconds / 60)}-minute loop.`, src: result.src, gain: 2.3, source: result.name };
     const index = manifest.findIndex((item) => item.preset === entry.preset && item.id === entry.id);
     if (index >= 0) manifest[index] = entry; else manifest.push(entry);
     console.log(`ok    ${result.name} → ${result.preset} (${(result.bytes / 1_048_576).toFixed(1)} MB, ${result.seconds}s loop)`);

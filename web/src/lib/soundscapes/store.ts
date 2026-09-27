@@ -12,6 +12,8 @@ interface Prefs {
   lastPresetId: SoundscapeId;
   /** The version chosen for each preset (defaults to the first). */
   versions: Partial<Record<SoundscapeId, string>>;
+  /** Scene chosen per preset: a scene id, or "generative" for the shader visual (absent = the version's own scene). */
+  scenes: Partial<Record<SoundscapeId, string>>;
 }
 
 interface SoundscapeState extends Prefs {
@@ -24,6 +26,8 @@ interface SoundscapeState extends Prefs {
   play: (id: SoundscapeId, options?: { stopAfterMinutes?: number | null; version?: string }) => Promise<void>;
   /** Choose a version; crossfades immediately when that preset is playing. */
   setVersion: (id: SoundscapeId, version: string) => void;
+  /** Choose the scene for a preset ("auto" clears the choice). */
+  setScene: (id: SoundscapeId, scene: string) => void;
   toggle: () => Promise<void>;
   pause: () => Promise<void>;
   resume: () => Promise<void>;
@@ -36,7 +40,7 @@ interface SoundscapeState extends Prefs {
 
 export const SOUNDSCAPE_PREFS_KEY = "axom.soundscapes.v1";
 export const STOP_TIMER_CHOICES = [15, 20, 30, 45, 60, 90] as const;
-const DEFAULT_PREFS: Prefs = { volume: 35, output: "headphones", followTimer: true, lastPresetId: "gamma-40", versions: {} };
+const DEFAULT_PREFS: Prefs = { volume: 35, output: "headphones", followTimer: true, lastPresetId: "gamma-40", versions: {}, scenes: {} };
 
 function readPrefs(): Prefs {
   try {
@@ -48,6 +52,9 @@ function readPrefs(): Prefs {
       lastPresetId: isSoundscapeId(raw?.lastPresetId) ? raw.lastPresetId : DEFAULT_PREFS.lastPresetId,
       versions: raw?.versions && typeof raw.versions === "object"
         ? Object.fromEntries(Object.entries(raw.versions).filter(([id, version]) => isSoundscapeId(id) && typeof version === "string"))
+        : {},
+      scenes: raw?.scenes && typeof raw.scenes === "object"
+        ? Object.fromEntries(Object.entries(raw.scenes).filter(([id, scene]) => isSoundscapeId(id) && typeof scene === "string"))
         : {},
     };
   } catch {
@@ -108,9 +115,9 @@ function updateMediaSession(presetId: SoundscapeId | null, status: SoundscapeSta
 export const useSoundscape = create<SoundscapeState>((set, get) => {
   const persist = (patch: Partial<Prefs>) => {
     set(patch);
-    const { volume, output, followTimer, lastPresetId, versions } = get();
+    const { volume, output, followTimer, lastPresetId, versions, scenes } = get();
     try {
-      window.localStorage.setItem(SOUNDSCAPE_PREFS_KEY, JSON.stringify({ volume, output, followTimer, lastPresetId, versions }));
+      window.localStorage.setItem(SOUNDSCAPE_PREFS_KEY, JSON.stringify({ volume, output, followTimer, lastPresetId, versions, scenes }));
     } catch { /* device preference only */ }
   };
 
@@ -183,6 +190,11 @@ export const useSoundscape = create<SoundscapeState>((set, get) => {
       const { status, presetId } = get();
       // Rebuild the graph for the new routing (a quick crossfade).
       if (status === "playing" && presetId) void get().play(presetId, { stopAfterMinutes: get().stopAt ? Math.max(1, (get().stopAt! - Date.now()) / 60_000) : null });
+    },
+    setScene(id, scene) {
+      const next = { ...get().scenes };
+      if (scene === "auto") delete next[id]; else next[id] = scene;
+      persist({ scenes: next });
     },
     setVersion(id, version) {
       persist({ versions: { ...get().versions, [id]: version } });

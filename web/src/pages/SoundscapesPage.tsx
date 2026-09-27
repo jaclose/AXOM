@@ -1,22 +1,23 @@
 import { useMemo, useState } from "react";
-import { AudioWaveform, FlaskConical, Headphones, Info, VolumeX } from "lucide-react";
-import { GlassCard, PanelHeader, Tag } from "../components/ui/primitives";
+import { AudioWaveform, FlaskConical, Info, VolumeX, Wind } from "lucide-react";
+import { GlassCard, PanelHeader } from "../components/ui/primitives";
 import { ICON_SIZE } from "../lib/iconSize";
 import { useStore } from "../lib/store";
 import {
-  EVIDENCE_LABEL,
   LISTENING_PRINCIPLES,
   LISTENING_REGIMEN,
   SOUNDSCAPES,
-  SOUNDSCAPE_ORDER,
-  lookFor,
-  type EvidenceLevel,
+  FREQUENCY_ORDER,
+  AMBIENT_ORDER,
   type SoundscapeId,
 } from "../lib/soundscapes/presets";
 import { useSoundscape } from "../lib/soundscapes/store";
 import { carrierPair } from "../lib/soundscapes/engine";
 import { MIN_COMPARISON_SAMPLE, compareListeningConditions, readListeningLog } from "../lib/soundscapes/listeningLog";
-import { SoundscapeVisual } from "../components/soundscapes/SoundscapeVisual";
+import { SoundscapeStage } from "../components/soundscapes/SoundscapeStage";
+import { ScenePicker } from "../components/soundscapes/ScenePicker";
+import { AmbientCard, FrequencyCard } from "../components/soundscapes/FrequencyCard";
+import { SpotifySection } from "../components/soundscapes/SpotifySection";
 import {
   FollowTimerToggle,
   OutputToggle,
@@ -26,13 +27,6 @@ import {
   VolumeControl,
   useStopTimerLabel,
 } from "../components/soundscapes/SoundscapeControls";
-
-const EVIDENCE_TONE: Record<EvidenceLevel, "cyan" | "neutral" | "orange" | "green"> = {
-  tentative: "cyan",
-  low: "neutral",
-  "very-low": "orange",
-  comfort: "green",
-};
 
 function percent(value: number | null): string {
   return value === null ? "—" : `${Math.round(value * 100)}%`;
@@ -45,7 +39,6 @@ export function SoundscapesPage() {
   const output = useSoundscape((state) => state.output);
   const supported = useSoundscape((state) => state.supported);
   const error = useSoundscape((state) => state.error);
-  const versions = useSoundscape((state) => state.versions);
   const [focused, setFocused] = useState<SoundscapeId | null>(null);
   const heroId = focused ?? presetId ?? lastPresetId;
   const hero = SOUNDSCAPES[heroId];
@@ -55,8 +48,8 @@ export function SoundscapesPage() {
   return (
     <div className="soundscapes-page">
       <section className={`soundscape-hero ${status === "playing" && presetId === heroId ? "live" : ""}`}>
-        <SoundscapeVisual
-          {...lookFor(hero, versions[hero.id])}
+        <SoundscapeStage
+          preset={hero}
           animate={status === "playing" || focused !== null}
           reactive={status === "playing" && presetId === heroId}
           className="soundscape-hero-visual"
@@ -71,6 +64,7 @@ export function SoundscapesPage() {
             {stopLabel && status !== "idle" ? ` · ${stopLabel}` : ""}
           </p>
           <VersionChips presetId={heroId} />
+          <ScenePicker presetId={heroId} />
           <div className="soundscape-hero-controls">
             <TransportButtons presetId={heroId} />
             <VolumeControl />
@@ -114,42 +108,27 @@ export function SoundscapesPage() {
         </ol>
       </GlassCard>
 
-      <div className="soundscape-grid">
-        {SOUNDSCAPE_ORDER.map((id) => {
-          const preset = SOUNDSCAPES[id];
-          const pair = carrierPair(preset, output);
-          const live = status !== "idle" && presetId === id;
-          return (
-            <article
-              key={id}
-              className={`soundscape-card ${live ? "live" : ""}`}
-              onMouseEnter={() => setFocused(id)}
-              onMouseLeave={() => setFocused(null)}
-            >
-              <div className="soundscape-card-visual">
-                <SoundscapeVisual {...lookFor(preset, versions[id])} animate={live || focused === id} reactive={live} />
-              </div>
-              <div className="soundscape-card-body">
-                <div className="soundscape-card-head">
-                  <div>
-                    <b>{preset.name}</b>
-                    <small>{pair ? `${pair[0]} / ${pair[1]} Hz` : preset.band}</small>
-                  </div>
-                  <TransportButtons presetId={id} />
-                </div>
-                <p>{preset.bestFor.join(" · ")}</p>
-                <VersionChips presetId={id} />
-                <p className="soundscape-howto">{preset.howTo}</p>
-                <div className="soundscape-evidence">
-                  <Tag tone={EVIDENCE_TONE[preset.evidence]}>{EVIDENCE_LABEL[preset.evidence]}</Tag>
-                  <span>{preset.evidenceNote}</span>
-                </div>
-                {preset.source && <p className="soundscape-source"><Headphones size={ICON_SIZE.microInline} aria-hidden="true" /> {preset.source}</p>}
-              </div>
-            </article>
-          );
-        })}
-      </div>
+      <section className="soundscape-section" aria-labelledby="frequencies-title">
+        <div className="soundscape-section-head">
+          <div><span className="soundscape-kicker"><AudioWaveform size={ICON_SIZE.body} aria-hidden="true" /> Brainwave frequencies</span><h2 id="frequencies-title">What each frequency is for</h2></div>
+          <p>Each band is named after a brain rhythm. Your own recordings lead; two designed versions sit beside them. Use headphones for binaural beats.</p>
+        </div>
+        <div className="frequency-grid">
+          {FREQUENCY_ORDER.map((id) => <FrequencyCard key={id} id={id} />)}
+        </div>
+      </section>
+
+      <section className="soundscape-section" aria-labelledby="ambient-title">
+        <div className="soundscape-section-head">
+          <div><span className="soundscape-kicker"><Wind size={ICON_SIZE.body} aria-hidden="true" /> Ambient</span><h2 id="ambient-title">Noise, rooms & nature</h2></div>
+          <p>Everything here is generated on your device, so it never loops or seams. Use it to mask a noisy room or for breaks.</p>
+        </div>
+        <div className="ambient-grid">
+          {AMBIENT_ORDER.map((id) => <AmbientCard key={id} id={id} />)}
+        </div>
+      </section>
+
+      <SpotifySection />
 
       <ListeningExperiment />
 

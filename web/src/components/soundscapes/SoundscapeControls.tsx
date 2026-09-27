@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Headphones, Pause, Play, Speaker, Square, Timer, Volume1, Volume2, VolumeX } from "lucide-react";
 import { ICON_SIZE } from "../../lib/iconSize";
-import { SOUNDSCAPES, SOUNDSCAPE_ORDER, versionOf, type SoundscapeId } from "../../lib/soundscapes/presets";
+import { SOUNDSCAPES, SOUNDSCAPE_ORDER, versionOf, type SoundscapeId, FREQUENCY_ORDER } from "../../lib/soundscapes/presets";
 import { STOP_TIMER_CHOICES, useSoundscape } from "../../lib/soundscapes/store";
 
 /** Remaining time on the stop timer, refreshed every 15 s. */
@@ -25,11 +25,11 @@ export function PresetChips({ label = "Soundscape" }: { label?: string }) {
   const play = useSoundscape((state) => state.play);
   return (
     <div className="soundscape-chips" role="group" aria-label={label}>
-      {SOUNDSCAPE_ORDER.map((id) => {
+      {SOUNDSCAPE_ORDER.map((id, index) => {
         const preset = SOUNDSCAPES[id];
         const active = status !== "idle" && presetId === id;
         return (
-          <button key={id} type="button" className={active ? "on" : ""} aria-pressed={active} onClick={() => void play(id)} title={preset.name}>
+          <button key={id} type="button" className={`${active ? "on" : ""} ${index === FREQUENCY_ORDER.length ? "group-start" : ""}`} aria-pressed={active} onClick={() => void play(id)} title={preset.name}>
             {preset.short}
           </button>
         );
@@ -56,7 +56,7 @@ export function VersionChips({ presetId }: { presetId: SoundscapeId }) {
           title={version.description}
           onClick={() => setVersion(presetId, version.id)}
         >
-          {version.label}{"src" in version ? " ·  your file" : ""}
+          {version.label}{"src" in version && <span className="version-own">your file</span>}
         </button>
       ))}
     </div>
