@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(higgsfield --version)",
+      "Bash(higgsfield --help)"
+    ]
+  }
+}

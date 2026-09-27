@@ -1,0 +1,201 @@
+{
+  "match_cycle": "2026",
+  "timeline": {
+    "application_phase": {
+      "token_availability": "2025-06-24",
+      "application_submission_opens": "2025-09-02T09:00:00",
+      "nrmp_registration_opens": "2025-09-15T12:00:00",
+      "program_review_opens": "2025-09-23T09:00:00"
+    },
+    "interview_phase": {
+      "period": "Fall/Early Winter 2025-2026",
+      "registration_deadline": "2026-01-30"
+    },
+    "ranking_phase": {
+      "rol_opens": "2026-02-02T12:00:00",
+      "rol_certification_deadline": "2026-03-04T21:00:00"
+    },
+    "results_phase": {
+      "match_week_start": "2026-03-16T10:00:00",
+      "soap_period": "2026-03-16 to 2026-03-19",
+      "match_day": "2026-03-20T12:00:00",
+      "residency_start": "2026-07-01"
+    }
+  },
+  "specialties": {
+    "top_10_competitive": [
+      {
+        "name": "Dermatology",
+        "competitiveness_tier": "Top",
+        "estimated_step2_min": 255,
+        "research_importance": "Critical",
+        "signals": {
+          "type": "Tiered",
+          "gold": 3,
+          "silver": 25
+        }
+      },
+      {
+        "name": "Plastic Surgery",
+        "competitiveness_tier": "Top",
+        "estimated_step2_min": 255,
+        "research_importance": "Critical",
+        "signals": {
+          "type": "Standard",
+          "total": "Variable (Refer to Specialty guidelines)"
+        }
+      },
+      {
+        "name": "Orthopedic Surgery",
+        "competitiveness_tier": "Top",
+        "estimated_step2_min": 252,
+        "research_importance": "High",
+        "signals": {
+          "type": "Standard",
+          "total": 30
+        }
+      },
+      {
+        "name": "Neurological Surgery",
+        "competitiveness_tier": "Top",
+        "estimated_step2_min": 250,
+        "research_importance": "High",
+        "signals": {
+          "type": "Standard",
+          "total": 25
+        }
+      },
+      {
+        "name": "Otolaryngology (ENT)",
+        "competitiveness_tier": "Top",
+        "estimated_step2_min": 250,
+        "research_importance": "High",
+        "signals": {
+          "type": "Standard",
+          "total": 25
+        }
+      },
+      {
+        "name": "Vascular Surgery",
+        "competitiveness_tier": "Top",
+        "estimated_step2_min": 250,
+        "research_importance": "High",
+        "signals": {
+          "type": "Standard",
+          "total": "Variable"
+        }
+      },
+      {
+        "name": "Thoracic Surgery",
+        "competitiveness_tier": "Top",
+        "estimated_step2_min": 250,
+        "research_importance": "High",
+        "signals": {
+          "type": "Standard",
+          "total": "Variable"
+        }
+      },
+      {
+        "name": "Diagnostic Radiology",
+        "competitiveness_tier": "Mid-High",
+        "estimated_step2_min": 245,
+        "research_importance": "Medium-High",
+        "signals": {
+          "type": "Tiered",
+          "gold": 6,
+          "silver": 6
+        }
+      },
+      {
+        "name": "Anesthesiology",
+        "competitiveness_tier": "Mid-High",
+        "estimated_step2_min": 240,
+        "research_importance": "Medium",
+        "signals": {
+          "type": "Tiered",
+          "gold": 5,
+          "silver": 10
+        }
+      },
+      {
+        "name": "General Surgery",
+        "competitiveness_tier": "Mid-High",
+        "estimated_step2_min": 240,
+        "research_importance": "Medium",
+        "signals": {
+          "type": "Standard",
+          "total": 15
+        }
+      }
+    ],
+    "primary_care": [
+      {
+        "name": "Family Medicine",
+        "competitiveness_tier": "Low-Medium",
+        "estimated_step2_min": null,
+        "research_importance": "Low",
+        "signals": {
+          "type": "Standard",
+          "total": 5
+        }
+      },
+      {
+        "name": "Internal Medicine",
+        "competitiveness_tier": "Low-Medium",
+        "estimated_step2_min": null,
+        "research_importance": "Medium (for elite programs)",
+        "signals": {
+          "type": "Tiered",
+          "gold": 3,
+          "silver": 12
+        }
+      },
+      {
+        "name": "Pediatrics",
+        "competitiveness_tier": "Low-Medium",
+        "estimated_step2_min": null,
+        "research_importance": "Low",
+        "signals": {
+          "type": "Standard",
+          "total": 5
+        }
+      }
+    ]
+  },
+  "program_signaling": {
+    "mechanism": "Applicants indicate interest levels (Gold/Silver or Yes) at application. Programs use as 'plus factor' for interview selection.",
+    "key_trends": {
+      "impact": "Significantly increases interview probability; non-signaled applications have <3% interview rate in some fields.",
+      "model": "Opt-out for programs in 2025-2026 season.",
+      "strategy": "Use all signals; signal based on genuine interest and competitiveness."
+    }
+  },
+  "hidden_requirements": {
+    "lor_expectations": {
+      "red_flags": [
+        "Template-style letters with generic adjectives",
+        "Coded language (e.g., 'completed rotation satisfactorily' implies bare minimum)",
+        "Lack of specific clinical anecdotes"
+      ],
+      "gold_standards": [
+        "Comparative language (e.g., 'Top 5% of students')",
+        "Explicit 'Hire' statement ('I would happily have this applicant in my program')",
+        "Detailed clinical judgment examples"
+      ]
+    },
+    "institutional_dynamics": {
+      "trust_hierarchy": [
+        "Home students with strong performance",
+        "Away rotators who impressed residents/faculty",
+        "Students from 'known' prestigious schools",
+        "General applicant pool"
+      ],
+      "sub_i_importance": "Crucial 'test drive'; glowing Sub-I eval can offset lower scores."
+    },
+    "triage_process": [
+      "Hard filters (Step 2, YOG, Visa)",
+      "Red flag scan (Gaps, failures)",
+      "Signal check (Tiebreaker for borderline candidates)"
+    ]
+  }
+}

@@ -37,12 +37,15 @@ export const CARD_TYPE_LABEL: Record<AnkiCardType, string> = {
 
 export type ReviewRating = "again" | "hard" | "good" | "easy";
 
+export type CardPriority = "normal" | "urgent" | "flagged";
+
 export interface CardSchedule {
   dueAt: string; // ISO
   intervalDays: number;
   ease: number; // 1.3 .. 3.0
   reps: number;
   lapses: number;
+  priority: CardPriority;
 }
 
 export interface AnkiCard {
@@ -75,7 +78,7 @@ export interface CardReviewLog {
 }
 
 export function newSchedule(now: Date = new Date()): CardSchedule {
-  return { dueAt: now.toISOString(), intervalDays: 0, ease: 2.5, reps: 0, lapses: 0 };
+  return { dueAt: now.toISOString(), intervalDays: 0, ease: 2.5, reps: 0, lapses: 0, priority: "normal" };
 }
 
 /**
@@ -85,6 +88,10 @@ export function newSchedule(now: Date = new Date()): CardSchedule {
  */
 export function nextSchedule(s: CardSchedule, rating: ReviewRating, now: Date = new Date()): CardSchedule {
   const day = 24 * 60 * 60 * 1000;
+
+  // Reset priority to normal upon successful review
+  const priority = "normal";
+
   if (rating === "again") {
     return {
       dueAt: new Date(now.getTime() + 10 * 60 * 1000).toISOString(), // 10 minutes
@@ -92,6 +99,7 @@ export function nextSchedule(s: CardSchedule, rating: ReviewRating, now: Date = 
       ease: Math.max(1.3, s.ease - 0.2),
       reps: 0,
       lapses: s.lapses + 1,
+      priority,
     };
   }
   const easeDelta = rating === "hard" ? -0.15 : rating === "easy" ? 0.15 : 0;
@@ -109,12 +117,21 @@ export function nextSchedule(s: CardSchedule, rating: ReviewRating, now: Date = 
     ease,
     reps: s.reps + 1,
     lapses: s.lapses,
+    priority,
   };
 }
 
 export function dueCards(cards: AnkiCard[], now: Date = new Date()): AnkiCard[] {
   const iso = now.toISOString();
-  return cards.filter((c) => !c.suspended && c.schedule.dueAt <= iso);
+  return cards
+    .filter((c) => !c.suspended && (c.schedule.dueAt <= iso || c.schedule.priority === "urgent"))
+    .sort((a, b) => {
+      const priorityMap = { urgent: 0, flagged: 1, normal: 2 };
+      if (a.schedule.priority !== b.schedule.priority) {
+        return priorityMap[a.schedule.priority] - priorityMap[b.schedule.priority];
+      }
+      return a.schedule.dueAt.localeCompare(b.schedule.dueAt);
+    });
 }
 
 // --- validation -----------------------------------------------------------------
@@ -175,7 +192,7 @@ export function validateAnkiCard(input: unknown, now: Date = new Date()): Valida
             intervalDays: typeof sched.intervalDays === "number" ? sched.intervalDays : 0,
             ease: typeof sched.ease === "number" ? Math.min(3, Math.max(1.3, sched.ease)) : 2.5,
             reps: typeof sched.reps === "number" ? sched.reps : 0,
-            lapses: typeof sched.lapses === "number" ? sched.lapses : 0,
+            lapses: typeof sched.lapses === "number" ? sched.lapses : 0, priority: sched.priority === "urgent" || sched.priority === "flagged" ? sched.priority : "normal",
           }
         : newSchedule(now),
       createdAt: typeof input.createdAt === "string" ? input.createdAt : iso,
