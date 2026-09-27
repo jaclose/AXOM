@@ -2,10 +2,19 @@ import type { Course, TrackerItem } from "./types";
 import { type EffectiveStudyPlan, type StudyMethodId, type StudyWorkflowPreferences } from "./studyPreferences";
 import { trackerStudyProgress } from "./studyProgress";
 import { isCompletionKind, isQuestionKind, passStage, PASS_COLOR, type Suggestion } from "./tracker";
+import { PRIMARY_FOCUS_BOOST, pathInScopes } from "./trackerFocus";
 
 export interface RecommendationFactor { id: string; label: string; value: number; }
 export interface RankedTrackerItem { item: TrackerItem; score: number; factors: RecommendationFactor[]; reason: string; plan: EffectiveStudyPlan; target: number; }
-export function rankTrackerItems(items: TrackerItem[], options: { preferences?: StudyWorkflowPreferences; courses?: Course[]; now?: Date } = {}): RankedTrackerItem[] {
+export interface RankOptions {
+  preferences?: StudyWorkflowPreferences;
+  courses?: Course[];
+  now?: Date;
+  /** Course Tracker scopes the learner marked as primary (lib/trackerFocus). */
+  primaryScopes?: readonly string[];
+}
+
+export function rankTrackerItems(items: TrackerItem[], options: RankOptions = {}): RankedTrackerItem[] {
   const now = options.now ?? new Date();
   return items.flatMap((item) => {
     if (item.recommendationSnoozedUntil && Date.parse(item.recommendationSnoozedUntil) > now.getTime()) return [];
@@ -27,13 +36,14 @@ export function rankTrackerItems(items: TrackerItem[], options: { preferences?: 
     const questionsEnabled = plan.methods.some((method) => method.id === "practice-questions" && method.enabled);
     add(factors, "learner-plan", "Matches your study workflow", isQuestionKind(item.kind) && questionsEnabled ? 8 : 0);
     add(factors, "explicit-priority", "Learner-set priority", item.explicitPriority ? Math.min(16, item.explicitPriority * 3) : 0);
+    add(factors, "primary-focus", "In your primary focus", options.primaryScopes?.length && pathInScopes(item.path, options.primaryScopes) ? PRIMARY_FOCUS_BOOST : 0);
     add(factors, "item-type", "Practice work", isQuestionKind(item.kind) ? 4 : 0);
     add(factors, "recency", "Recently updated", ageDays < 1 && item.passes > 0 ? -6 : 0);
     const score = factors.reduce((sum, factor) => sum + factor.value, 0);
     return [{ item, score, factors, plan, target, reason: factors.filter((factor) => factor.value > 0).sort((a, b) => b.value - a.value).slice(0, 3).map((factor) => factor.label).join(" · ") }];
   }).sort((a, b) => b.score - a.score || a.item.updated.localeCompare(b.item.updated) || a.item.id.localeCompare(b.item.id));
 }
-export function personalizedSuggestions(items: TrackerItem[], n = 3, options: { preferences?: StudyWorkflowPreferences; courses?: Course[]; now?: Date } = {}): Suggestion[] {
+export function personalizedSuggestions(items: TrackerItem[], n = 3, options: RankOptions = {}): Suggestion[] {
   if (!items.length) return [{ title: "Import the first tracker items", reason: "Add course work so AXOM can recommend a useful first move.", color: PASS_COLOR.untouched }];
   const ranked = rankTrackerItems(items, options);
   if (!ranked.length) {

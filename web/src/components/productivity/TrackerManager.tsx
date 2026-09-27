@@ -74,7 +74,7 @@ export function TrackerManager() {
         sub="The variables you follow. Log in one tap; goals, streaks, energy comparisons and reports follow from the same entries."
         action={<GButton size="sm" variant="primary" onClick={() => setEditing("new")}><Plus size={ICON_SIZE.body} /> New tracker</GButton>}
       />
-      <div className="tracker-grid">
+      <div className="tracker-board-grid">
         {ordered.map((tracker) => (
           <TrackerCard key={tracker.id} tracker={tracker} summary={summaries.get(tracker.id)!} onEdit={() => setEditing(tracker)} />
         ))}

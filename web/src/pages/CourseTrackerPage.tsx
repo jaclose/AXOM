@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { useUi } from "../lib/uiStore";
 import {
-  Plus, Trash2, ChevronRight, ChevronDown, ListPlus, RefreshCw, BookOpen, HelpCircle, Eye, Upload, Pencil, Brain, ExternalLink, Copy, X,
+  Plus, Trash2, ChevronRight, ChevronDown, ListPlus, RefreshCw, BookOpen, HelpCircle, Eye, Upload, Pencil, Brain, ExternalLink, Copy, X, Star,
 } from "lucide-react";
 import { useStore } from "../lib/store";
 import { GlassCard, GButton, GhostButton, PanelHeader, Tag, EmptyState } from "../components/ui/primitives";
@@ -33,6 +33,7 @@ import { pushToast } from "../lib/toast";
 import { ModuleTour, type ModuleTourStep } from "../components/shell/ModuleTour";
 import { ICON_SIZE } from "../lib/iconSize";
 import { parseCourseSchedule, reconcileScheduleDuplicates, scheduleCandidatesToTracker, type ScheduleCandidate } from "../lib/courseScheduleImport";
+import { activePrimaryPaths, activePrimaryScopes, isPrimaryPath, itemsInPrimary, setPrimaryUntil, togglePrimaryScope, type PrimaryTrackerScope } from "../lib/trackerFocus";
 
 const KINDS: TrackerKind[] = ["Lecture", "DLA", "PQ", "Lab", "Reading", "Requirement", "Milestone", "Evidence", "Question Block", "Assessment", "Review Loop"];
 const TABS = ["All", "Lecture", "DLA", "PQ", "Blueprint", "Extra"] as const;
@@ -122,7 +123,13 @@ const yieldTone: Record<Yield, "cyan" | "green" | "orange" | "neutral"> = {
 
 export function CourseTrackerPage() {
   const s = useStore();
-  const [scope, setScopeState] = useState<string>(readSavedTrackerScope);
+  // Open on the remembered view, else the first primary focus.
+  const [scope, setScopeState] = useState<string>(() => {
+    const saved = readSavedTrackerScope();
+    if (saved) return saved;
+    const state = useStore.getState();
+    return activePrimaryPaths(state.profile.primaryTrackerScopes, state.activeDayKey)[0] ?? "";
+  });
   const [groupBySection, setGroupBySection] = useState(true);
   function setScope(next: string) {
     setScopeState(next);
@@ -171,6 +178,16 @@ export function CourseTrackerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusItemId]);
 
+  const primaries = useMemo(() => activePrimaryScopes(s.profile.primaryTrackerScopes, s.activeDayKey), [s.profile.primaryTrackerScopes, s.activeDayKey]);
+  const primaryPaths = useMemo(() => primaries.map((primary) => primary.path), [primaries]);
+  function togglePrimary(path: string) {
+    if (!path) return;
+    const was = isPrimaryPath(s.profile.primaryTrackerScopes, path);
+    s.updateProfile({ primaryTrackerScopes: togglePrimaryScope(s.profile.primaryTrackerScopes, path) });
+    pushToast(was
+      ? { title: "Removed from primary focus", body: path, tone: "info", duration: 2600 }
+      : { title: "Primary focus set", body: `${path} now leads suggestions here, in the Command Brief and on the Dashboard.`, tone: "success" });
+  }
   const courseScopes = useMemo(() => collectCourseScopes(s.terms, s.courses), [s.terms, s.courses]);
   const tree = useMemo(() => buildTree(s.tracker, courseScopes), [s.tracker, courseScopes]);
   const scopeOptions = useMemo(() => mergeScopes(collectScopes(s.tracker), courseScopes), [s.tracker, courseScopes]);
@@ -201,8 +218,8 @@ export function CourseTrackerPage() {
   const progressPercent = inBlueprintScope ? blueprintMastery : scopeProgress.percent;
   const suggestions = useMemo(() => {
     void salt; // Refresh recomputes current facts; deterministic evidence keeps the same order stable.
-    return inBlueprintScope ? [] : personalizedSuggestions(inScope, 3, { preferences: s.profile.studyWorkflow, courses: s.courses });
-  }, [inBlueprintScope, inScope, s.profile.studyWorkflow, s.courses, salt]);
+    return inBlueprintScope ? [] : personalizedSuggestions(inScope, 3, { preferences: s.profile.studyWorkflow, courses: s.courses, primaryScopes: primaryPaths });
+  }, [inBlueprintScope, inScope, s.profile.studyWorkflow, s.courses, salt, primaryPaths]);
 
   function toggle(path: string) {
     setOpenNodes((prev) => {
@@ -241,13 +258,17 @@ export function CourseTrackerPage() {
           <GlassCard pad data-tour="import" data-module-tour="tracker-structure">
             <PanelHeader title="Mastery tree" sub="Choose a course or module"
               action={<GhostButton title="Add one item" onClick={() => setAdding(true)}><Plus size={ICON_SIZE.emphasis} /></GhostButton>} />
+            {primaries.length > 0 && (
+              <PrimaryFocusList primaries={primaries} tracker={s.tracker} active={scope} onSelect={setScope} onToggle={togglePrimary} />
+            )}
             <div className="tree">
               <div className={`tree-node ${scope === "" ? "on" : ""}`} onClick={() => setScope("")}>
                 <span style={{ width: 14 }} /><span>Everything</span><span className="tree-count">{s.tracker.length}</span>
               </div>
               {tree.map((node) => (
                 <TreeNode key={node.path} node={node} depth={0}
-                  openNodes={openNodes} onToggle={toggle} active={scope} onSelect={setScope} />
+                  openNodes={openNodes} onToggle={toggle} active={scope} onSelect={setScope}
+                  primaryPaths={primaryPaths} onTogglePrimary={togglePrimary} />
               ))}
               {tree.length === 0 && <EmptyState title="Empty tree" hint="Import or add a module to begin." />}
               <BlueprintTree installs={s.blueprintInstalls} openNodes={openNodes} onToggle={toggle} active={scope} onSelect={setScope} />
@@ -264,7 +285,7 @@ export function CourseTrackerPage() {
           </GlassCard>
 
           <GlassCard pad className="tracker-suggestions-card" data-module-tour="tracker-suggestions">
-            <PanelHeader title="Suggested next moves" sub="Stable guidance based on progress, yield, timing, and your study workflow"
+            <PanelHeader title="Suggested next moves" sub={primaries.length ? "Your primary focus is weighted first, then progress, yield, timing and workflow" : "Stable guidance based on progress, yield, timing, and your study workflow"}
               action={<GhostButton title="Refresh suggestions" onClick={() => setSalt((x) => x + 1)}><RefreshCw size={ICON_SIZE.body} /></GhostButton>} />
             {!inBlueprintScope && (
               <select className="scope-select" value={scope} onChange={(e) => setScope(e.target.value)} aria-label="Suggestion scope">
@@ -308,6 +329,14 @@ export function CourseTrackerPage() {
                   </>}
               </div>
               {!inBlueprintScope && <p className="sub">Study-plan progress · Each item counts equally. This measures recorded work, not mastery.</p>}
+              {!inBlueprintScope && scope && (
+                <PrimaryFocusControl
+                  path={scope}
+                  scopes={s.profile.primaryTrackerScopes}
+                  onToggle={() => togglePrimary(scope)}
+                  onUntil={(until) => s.updateProfile({ primaryTrackerScopes: setPrimaryUntil(s.profile.primaryTrackerScopes, scope, until) })}
+                />
+              )}
             </div>
             <div className="ring" style={{ width: 92, height: 92 }} role="progressbar"
               aria-label={inBlueprintScope ? "Blueprint mastery" : "Study-plan progress"}
@@ -358,7 +387,7 @@ export function CourseTrackerPage() {
               />
               {items.length === 0 && <EmptyState title="No items here" hint="Pick another scope, switch tabs, or import." />}
               {groupBySection
-                ? <GroupedTrackerItems scope={scope} items={items} highlightId={highlightId} onFocusSection={setScope} />
+                ? <GroupedTrackerItems scope={scope} items={items} highlightId={highlightId} onFocusSection={setScope} primaryPaths={primaryPaths} onTogglePrimary={togglePrimary} />
                 : items.map((it) => <ItemRow key={it.id} item={it} highlight={it.id === highlightId} />)}
             </>
           )}
@@ -1142,12 +1171,14 @@ function TrackerScopeBar({
 }
 
 function GroupedTrackerItems({
-  scope, items, highlightId, onFocusSection,
+  scope, items, highlightId, onFocusSection, primaryPaths = [], onTogglePrimary,
 }: {
   scope: string;
   items: TrackerItem[];
   highlightId: string | null;
   onFocusSection: (path: string) => void;
+  primaryPaths?: readonly string[];
+  onTogglePrimary?: (path: string) => void;
 }) {
   const s = useStore();
   const groups = useMemo(() => groupItemsBySection(scope, items), [scope, items]);
@@ -1181,6 +1212,14 @@ function GroupedTrackerItems({
                 <i style={{ width: `${progress.percent}%` }} />
               </span>
               <small>{progress.percent}%</small>
+              {group.key && onTogglePrimary && (
+                <button type="button" className={`tracker-primary-star ${primaryPaths.includes(group.path) ? "on" : ""}`}
+                  aria-pressed={primaryPaths.includes(group.path)} aria-label={`${primaryPaths.includes(group.path) ? "Remove" : "Make"} ${group.key} ${primaryPaths.includes(group.path) ? "from primary focus" : "a primary focus"}`}
+                  title={primaryPaths.includes(group.path) ? "Primary focus — click to remove" : "Make this subsection a primary focus"}
+                  onClick={() => onTogglePrimary(group.path)}>
+                  <Star size={ICON_SIZE.body} />
+                </button>
+              )}
               {group.key && (
                 <button type="button" className="tracker-section-focus" onClick={() => onFocusSection(group.path)}>
                   Show only this
@@ -1310,27 +1349,95 @@ function DeleteScopeModal({ scope, onSelect, onClose }: { scope: string; onSelec
 }
 
 function TreeNode({
-  node, depth, openNodes, onToggle, active, onSelect,
+  node, depth, openNodes, onToggle, active, onSelect, primaryPaths = [], onTogglePrimary,
 }: {
   node: TNode; depth: number; openNodes: Set<string>;
   onToggle: (p: string) => void; active: string; onSelect: (p: string) => void;
+  primaryPaths?: readonly string[]; onTogglePrimary?: (path: string) => void;
 }) {
   const open = openNodes.has(node.path);
   const hasKids = node.children.length > 0;
+  const primary = primaryPaths.includes(node.path);
   return (
     <>
-      <div className={`tree-node depth${Math.min(depth, 2)} ${active === node.path ? "on" : ""}`}
+      <div className={`tree-node depth${Math.min(depth, 2)} ${active === node.path ? "on" : ""} ${primary ? "primary" : ""}`}
         style={{ "--tree-indent": `${depth * 14}px` } as CSSProperties}
         onClick={() => { onSelect(node.path); if (hasKids) onToggle(node.path); }}>
         {hasKids ? (open ? <ChevronDown size={ICON_SIZE.body} /> : <ChevronRight size={ICON_SIZE.body} />) : <span style={{ width: 14 }} />}
         <span>{node.name}</span>
+        {onTogglePrimary && (
+          <button type="button" className={`tracker-primary-star ${primary ? "on" : ""}`} aria-pressed={primary}
+            aria-label={primary ? `Remove ${node.name} from primary focus` : `Make ${node.name} a primary focus`}
+            title={primary ? "Primary focus — click to remove" : "Make primary"}
+            onClick={(event) => { event.stopPropagation(); onTogglePrimary(node.path); }}>
+            <Star size={ICON_SIZE.microInline} />
+          </button>
+        )}
         <span className="tree-count">{node.count}</span>
       </div>
       {open && node.children.map((c) => (
         <TreeNode key={c.path} node={c} depth={depth + 1}
-          openNodes={openNodes} onToggle={onToggle} active={active} onSelect={onSelect} />
+          openNodes={openNodes} onToggle={onToggle} active={active} onSelect={onSelect}
+          primaryPaths={primaryPaths} onTogglePrimary={onTogglePrimary} />
       ))}
     </>
+  );
+}
+
+/** Pinned list of primary subsections with their plan progress. */
+function PrimaryFocusList({ primaries, tracker, active, onSelect, onToggle }: {
+  primaries: PrimaryTrackerScope[];
+  tracker: TrackerItem[];
+  active: string;
+  onSelect: (path: string) => void;
+  onToggle: (path: string) => void;
+}) {
+  const s = useStore();
+  return (
+    <div className="tracker-primary-list" aria-label="Primary focus">
+      <div className="tracker-primary-list-head"><Star size={ICON_SIZE.microInline} aria-hidden="true" /> Primary focus</div>
+      {primaries.map((primary) => {
+        const items = itemsInPrimary(tracker, [primary.path]);
+        const progress = scopeStudyProgress(items, { preferences: s.profile.studyWorkflow, courses: s.courses });
+        const parts = primary.path.split("/");
+        return (
+          <div key={primary.path} className={`tracker-primary-row ${active === primary.path ? "on" : ""}`}>
+            <button type="button" className="tracker-primary-open" onClick={() => onSelect(primary.path)}>
+              <b>{parts.at(-1)}</b>
+              <small>{parts.slice(0, -1).join(" / ") || "Top level"}{primary.until ? ` · until ${new Date(`${primary.until}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : ""}</small>
+              <span className="tracker-section-progress" aria-label={`${progress.percent}% of the study plan recorded`}><i style={{ width: `${progress.percent}%` }} /></span>
+            </button>
+            <span className="tracker-primary-pct">{progress.percent}%</span>
+            <button type="button" className="tracker-primary-star on" aria-label={`Remove ${parts.at(-1)} from primary focus`} onClick={() => onToggle(primary.path)}>
+              <Star size={ICON_SIZE.microInline} />
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function PrimaryFocusControl({ path, scopes, onToggle, onUntil }: {
+  path: string;
+  scopes: PrimaryTrackerScope[] | undefined;
+  onToggle: () => void;
+  onUntil: (until: string | undefined) => void;
+}) {
+  const entry = scopes?.find((scope) => scope.path === path);
+  return (
+    <div className="tracker-primary-control">
+      <button type="button" className={`tracker-primary-toggle ${entry ? "on" : ""}`} aria-pressed={Boolean(entry)} onClick={onToggle}>
+        <Star size={ICON_SIZE.body} /> {entry ? "Primary focus" : "Make primary"}
+      </button>
+      {entry && (
+        <label className="tracker-primary-until">
+          <span>until</span>
+          <input type="date" className="field" value={entry.until ?? ""} onChange={(event) => onUntil(event.target.value || undefined)} aria-label="Primary focus ends after" />
+        </label>
+      )}
+      {!entry && <span className="sub">Primary subsections lead suggestions, the Command Brief and the Dashboard.</span>}
+    </div>
   );
 }
 

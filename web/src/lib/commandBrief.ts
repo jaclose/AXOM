@@ -111,6 +111,8 @@ export interface CommandBrief {
 export interface BriefStateSlice {
   tasks: Task[];
   tracker: TrackerItem[];
+  /** Active primary Course Tracker scopes (lib/trackerFocus). */
+  primaryScopes?: readonly string[];
   courses?: Course[];
   studyWorkflow?: StudyWorkflowPreferences;
   logs: NoctyriumState["logs"];
@@ -534,12 +536,13 @@ function isMeaningfulTrackerItem(item: TrackerItem): boolean {
 }
 
 function rankMeaningfulTracker(
-  state: Pick<BriefStateSlice, "tracker" | "courses" | "studyWorkflow">,
+  state: Pick<BriefStateSlice, "tracker" | "courses" | "studyWorkflow" | "primaryScopes">,
   now?: Date,
 ) {
   return rankTrackerItems(state.tracker.filter(isMeaningfulTrackerItem), {
     preferences: state.studyWorkflow,
     courses: state.courses,
+    primaryScopes: state.primaryScopes,
     now,
   });
 }

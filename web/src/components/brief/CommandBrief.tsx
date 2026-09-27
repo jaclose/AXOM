@@ -24,6 +24,7 @@ import { explainLowEnergy, type ReadinessResult } from "../../lib/energy";
 import { gotoJournalDay } from "../../lib/uiStore";
 import { evaluateDailySuccess } from "../../lib/dailySuccess";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { activePrimaryPaths } from "../../lib/trackerFocus";
 
 const MODE_TONE: Record<BriefMode, "cyan" | "green" | "purple" | "orange" | "red" | "neutral"> = {
   maintain: "green",
@@ -77,6 +78,7 @@ export function CommandBrief({ readiness }: { readiness?: ReadinessResult }) {
     () => evidence.ready ? buildCommandBrief({
       tasks: s.tasks,
       tracker: s.tracker,
+      primaryScopes: activePrimaryPaths(s.profile.primaryTrackerScopes, s.activeDayKey),
       courses: s.courses,
       studyWorkflow: s.profile.studyWorkflow,
       logs: s.logs,
@@ -93,7 +95,7 @@ export function CommandBrief({ readiness }: { readiness?: ReadinessResult }) {
       readiness,
     }) : null,
     [
-      evidence.ready, s.tasks, s.tracker, s.courses, s.profile.studyWorkflow, s.logs, s.boardPrep, s.activeDayKey, s.sessions,
+      evidence.ready, s.tasks, s.tracker, s.profile.primaryTrackerScopes, s.courses, s.profile.studyWorkflow, s.logs, s.boardPrep, s.activeDayKey, s.sessions,
       s.closeouts, s.questions, s.ankiCards, s.dayPlans, dailySuccess, s.habits, s.habitEntries, readiness,
     ],
   );

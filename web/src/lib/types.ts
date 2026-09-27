@@ -767,6 +767,8 @@ export interface Profile {
   focusCheckIn?: import("./focusCheckIn").FocusCheckInPreferences;
   /** One-tap energy checks (0–100), newest last; synced with the workspace. */
   energyChecks?: import("./energyInsights").EnergyCheck[];
+  /** Course Tracker subsections marked as the current primary focus. */
+  primaryTrackerScopes?: import("./trackerFocus").PrimaryTrackerScope[];
   blueprintMode?: BlueprintMode; // which lane bar (USMLE vs Pre-Health) is active
   // Repetitive-task autofill (§18): user-owned, local-only.
   taskAutofillDisabled?: boolean;

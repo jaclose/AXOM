@@ -5,6 +5,7 @@
 // ===========================================================================
 import { create } from "zustand";
 import { normalizeEnergyChecks } from "./energyInsights";
+import { normalizePrimaryScopes, renamePrimaryScopes } from "./trackerFocus";
 import { habitCheckForDay, habitTypeForTracker, trackerDayTotals, trackerUnitLabel } from "./trackerStats";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type {
@@ -398,16 +399,28 @@ export const useStore = create<Store>()(
                 ? { ...t, path: `${to}${cleanPath.slice(from.length)}`, updated: now() }
                 : t;
             }),
+            // Primary focus follows the rename so a renamed module stays primary.
+            profile: s.profile.primaryTrackerScopes
+              ? { ...s.profile, primaryTrackerScopes: renamePrimaryScopes(s.profile.primaryTrackerScopes, from, to) }
+              : s.profile,
           };
         }),
       removeTrackerScope: (path) =>
         set((s) => {
           const from = trackerPathKey(path);
           if (!from) return {};
-          return { tracker: s.tracker.filter((t) => {
-            const key = trackerPathKey(t.path);
-            return !(key === from || key.startsWith(`${from}/`));
-          }) };
+          return {
+            tracker: s.tracker.filter((t) => {
+              const key = trackerPathKey(t.path);
+              return !(key === from || key.startsWith(`${from}/`));
+            }),
+            profile: s.profile.primaryTrackerScopes
+              ? { ...s.profile, primaryTrackerScopes: s.profile.primaryTrackerScopes.filter((scope) => {
+                const key = trackerPathKey(scope.path);
+                return !(key === from || key.startsWith(`${from}/`));
+              }) }
+              : s.profile,
+          };
         }),
       bumpPasses: (id, delta) =>
         set((s) => ({
@@ -2340,6 +2353,7 @@ function normalizeProfile(value: unknown): Profile {
       ? undefined
       : normalizeFocusCheckInPreferences(profile.focusCheckIn),
     energyChecks: normalizeEnergyChecks(profile.energyChecks),
+    primaryTrackerScopes: normalizePrimaryScopes(profile.primaryTrackerScopes),
     // Preserve optional opt-in fields so they survive reset/migration.
     blueprintMode: profile.blueprintMode === "usmle" || profile.blueprintMode === "prehealth"
       ? profile.blueprintMode as Profile["blueprintMode"] : undefined,

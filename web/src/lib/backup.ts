@@ -3,6 +3,7 @@
 // ===========================================================================
 import type { ClockPreferences, DailyWordPuzzleState, NoctyriumState, TimeZonePreference } from "./types";
 import { normalizeEnergyChecks } from "./energyInsights";
+import { normalizePrimaryScopes } from "./trackerFocus";
 import {
   APP_VERSION_LABEL, DEFAULT_CLOCK_PREFERENCES, DEFAULT_DASHBOARD_WIDGETS,
   DEFAULT_HIDDEN_DASHBOARD_WIDGETS, DEFAULT_TIME_ZONE_PREFERENCE, SCHEMA_VERSION,
@@ -366,6 +367,7 @@ export function parseImport(text: string): NoctyriumState {
         ? undefined
         : normalizeFocusCheckInPreferences(profile.focusCheckIn),
       energyChecks: normalizeEnergyChecks(profile.energyChecks),
+      primaryTrackerScopes: normalizePrimaryScopes(profile.primaryTrackerScopes),
       // Preserve newer opt-in settings across export/import.
       taskAutofillDisabled: typeof profile.taskAutofillDisabled === "boolean" ? profile.taskAutofillDisabled : undefined,
       taskTemplates: Array.isArray(profile.taskTemplates) ? profile.taskTemplates as NoctyriumState["profile"]["taskTemplates"] : undefined,

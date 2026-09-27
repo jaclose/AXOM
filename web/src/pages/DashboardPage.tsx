@@ -7,8 +7,7 @@ import {
   AlertTriangle, CalendarClock,
   BookOpenCheck, ListTodo, BatteryMedium, Activity, Flame, Gamepad2,
   ChevronUp, ChevronDown, GraduationCap, Target, Gauge, Timer, BarChart3, Sparkles,
-  CalendarDays, Map as MapIcon, TrendingUp, Stethoscope, Link2, LayoutGrid,
-} from "lucide-react";
+  CalendarDays, Map as MapIcon, TrendingUp, Stethoscope, Link2, LayoutGrid, Star } from "lucide-react";
 import { ICON_SIZE } from "../lib/iconSize";
 import { useLuster } from "../lib/useLuster";
 import { useStore } from "../lib/store";
@@ -24,6 +23,9 @@ import { useInView } from "../lib/useInView";
 import { DEFAULT_DASHBOARD_WIDGETS, DEFAULT_HIDDEN_DASHBOARD_WIDGETS } from "../lib/seed";
 import { calculateReadiness } from "../lib/energy";
 import { CapacitySummary } from "../components/energy/EnergyInsights";
+import { activePrimaryScopes, itemsInPrimary } from "../lib/trackerFocus";
+import { rankTrackerItems } from "../lib/recommendationFactors";
+import { scopeStudyProgress } from "../lib/studyProgress";
 import { collectEnergySamples, dailyEnergy } from "../lib/energyInsights";
 import { pickFocusExam, buildExamCountdown, countdownHeadline, type PrepIntensity } from "../lib/examPlan";
 import { AnimatedProgressBar } from "../components/ui/motion";
@@ -708,10 +710,20 @@ function CourseTrackerDashboardWidget({
   enabledFields: Set<string>;
 }) {
   const tracker = useStore((s) => s.tracker);
+  const primaryScopes = useStore((s) => s.profile.primaryTrackerScopes);
+  const activeDayKey = useStore((s) => s.activeDayKey);
+  const studyWorkflow = useStore((s) => s.profile.studyWorkflow);
+  const courses = useStore((s) => s.courses);
   const rows = realTrackerRows(tracker);
-  const untouched = rows.filter((row) => row.passes === 0);
-  const weak = rows.filter((row) => row.yield === "review" || (row.passes > 0 && row.passes < 2));
-  const progress = rows.length ? Math.round(rows.reduce((sum, row) => sum + Math.min(4, row.passes), 0) / (rows.length * 4) * 100) : 0;
+  const primaries = activePrimaryScopes(primaryScopes, activeDayKey);
+  const primaryPaths = primaries.map((primary) => primary.path);
+  // With a primary focus the widget is about that focus; otherwise everything.
+  const focusRows = primaryPaths.length ? itemsInPrimary(rows, primaryPaths) : rows;
+  const untouched = focusRows.filter((row) => row.passes === 0);
+  const weak = focusRows.filter((row) => row.yield === "review" || (row.passes > 0 && row.passes < 2));
+  // Same study-plan progress as the Course Tracker, so both screens agree.
+  const progress = scopeStudyProgress(focusRows, { preferences: studyWorkflow, courses }).percent;
+  const nextMove = rankTrackerItems(rows, { preferences: studyWorkflow, courses, primaryScopes: primaryPaths })[0];
   return (
     <GlassCard pad className="dashboard-core-widget course-tracker-widget">
       <PanelHeader title="Course Tracker" sub="Real course items, passes, and untouched work"
@@ -720,13 +732,33 @@ function CourseTrackerDashboardWidget({
         <div className="dashboard-widget-empty"><BookText size={ICON_SIZE.control} /><b>Add or import your first study item</b><span>Shipped examples teach the interface but never count as your workload.</span></div>
       ) : (
         <>
-          {enabledFields.has("progress") && <div className="dashboard-widget-focal"><b>{progress}%</b><span>pass progress</span></div>}
+          {enabledFields.has("progress") && <div className="dashboard-widget-focal"><b>{progress}%</b><span>{primaries.length ? "of your primary focus plan" : "of your study plan"}</span></div>}
+          {primaries.length > 0 && size !== "small" && (
+            <div className="dashboard-primary-focus">
+              {primaries.slice(0, 3).map((primary) => {
+                const scoped = itemsInPrimary(rows, [primary.path]);
+                const pct = scopeStudyProgress(scoped, { preferences: studyWorkflow, courses }).percent;
+                return (
+                  <a key={primary.path} href="#tracker" className="dashboard-primary-row" title={primary.path}>
+                    <Star size={ICON_SIZE.microInline} aria-hidden="true" />
+                    <span>{primary.path.split("/").at(-1)}</span>
+                    <i><b style={{ width: `${pct}%` }} /></i>
+                    <small>{pct}%</small>
+                  </a>
+                );
+              })}
+            </div>
+          )}
           <div className="dashboard-widget-metrics">
             {enabledFields.has("untouched") && <span><b>{untouched.length}</b> untouched</span>}
             {enabledFields.has("weak") && <span><b>{weak.length}</b> need another pass</span>}
-            <span><b>{rows.length}</b> real items</span>
+            <span><b>{focusRows.length}</b> {primaries.length ? "in focus" : "real items"}</span>
           </div>
-          {size !== "small" && enabledFields.has("suggestion") && <p className="dashboard-widget-note">{untouched[0] ? `Start with ${untouched[0].label}.` : weak[0] ? `Revisit ${weak[0].label}.` : "Your tracked items have at least one pass."}</p>}
+          {size !== "small" && enabledFields.has("suggestion") && (
+            <p className="dashboard-widget-note">
+              {nextMove ? <>Next: <b>{nextMove.item.label}</b>{nextMove.reason ? ` — ${nextMove.reason.toLowerCase()}` : ""}.</> : "Your tracked items have reached their current plan."}
+            </p>
+          )}
         </>
       )}
     </GlassCard>

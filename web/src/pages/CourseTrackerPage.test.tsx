@@ -5,6 +5,7 @@ import { STORAGE_KEYS } from "../lib/brand";
 import { makeSeed } from "../lib/seed";
 import { useStore } from "../lib/store";
 import { useToasts } from "../lib/toast";
+import type { TrackerItem } from "../lib/types";
 import {
   announceCourseTrackerIntroOnce,
   CourseTrackerPage,
@@ -270,7 +271,7 @@ describe("Course Tracker subsections", () => {
     fireEvent.change(screen.getByLabelText("Jump to a subsection"), { target: { value: "Term 4" } });
     expect(screen.getByText("Item a")).toBeTruthy();
     expect(screen.queryByText("Item c")).toBeNull();
-    expect(screen.getByRole("button", { name: /Cardio/ }).getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("button", { name: /^Cardio/ }).getAttribute("aria-expanded")).toBe("true");
 
     fireEvent.change(screen.getByLabelText("Jump to a subsection"), { target: { value: "Term 4/Renal" } });
     expect(screen.queryByText("Item a")).toBeNull();
@@ -281,5 +282,20 @@ describe("Course Tracker subsections", () => {
     expect(screen.getByText("Item a")).toBeTruthy();
     fireEvent.click(screen.getAllByRole("button", { name: "Show only this" })[0]);
     expect(screen.queryByText("Item b")).toBeNull();
+  });
+});
+
+describe("Course Tracker primary focus", () => {
+  it("stars a subsection, pins it, and opens on it next time", () => {
+    const make = (id: string, path: string): TrackerItem => ({ id, path, label: `${id} lecture`, kind: "Lecture", passes: 0, ankiPasses: 0, yield: "none", updated: "2026-09-01T12:00:00.000Z" });
+    useStore.setState({ tracker: [make("a", "Term 4/Cardio/Week 1"), make("b", "Term 4/Renal/Week 1")], profile: { ...useStore.getState().profile, primaryTrackerScopes: [] } });
+    render(<CourseTrackerPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Make Term 4 a primary focus" }));
+    expect(useStore.getState().profile.primaryTrackerScopes?.map((scope) => scope.path)).toEqual(["Term 4"]);
+    const pinned = screen.getByLabelText("Primary focus");
+    expect(within(pinned).getByText("Term 4")).toBeTruthy();
+    cleanup();
+    render(<CourseTrackerPage />);
+    expect(screen.getByRole("button", { name: "Primary focus" }).getAttribute("aria-pressed")).toBe("true");
   });
 });
