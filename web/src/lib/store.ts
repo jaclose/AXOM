@@ -4,6 +4,9 @@
 // able, which is what makes the app "modular" rather than the fixed Swift build.
 // ===========================================================================
 import { create } from "zustand";
+import { normalizeEnergyChecks } from "./energyInsights";
+import { normalizePrimaryScopes, renamePrimaryScopes } from "./trackerFocus";
+import { habitCheckForDay, habitTypeForTracker, trackerDayTotals, trackerUnitLabel } from "./trackerStats";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type {
   BoardBlueprintLog, BoardExamId, BoardPrepProfile, Course, CourseModule, DailyRolloverEvent, DayPlan, HubFolder, JournalEntry, NoctyriumState,
@@ -29,7 +32,7 @@ import {
   shouldRollover,
   type RolloverReason,
 } from "./dailyRollover";
-import { localVaultStorage } from "./localVault";
+import { assertVaultWrite, getVaultWriteCheckpoint, localVaultStorage } from "./localVault";
 import { storeHydration } from "./storeHydration";
 import { userIdFromName } from "./userIdentity";
 import { ACADEMIC_TEMPLATE_COURSES, ACADEMIC_TEMPLATE_TERMS, focusOption, normalizedFocusIds } from "./experience";
@@ -51,8 +54,12 @@ import { normalizeResourceUrl } from "./resourceUtils";
 import { normalizeDailySuccessConfig } from "./dailySuccess";
 import { normalizePomodoroPreferences } from "./pomodoroPreferences";
 import { normalizeDailyLoopReminderPreferences } from "./dailyLoopReminders";
+import { normalizeFocusCheckInPreferences } from "./focusCheckIn";
 import { normalizeDashboardLayoutPreferences } from "./dashboardWidgets";
 import { normalizeJournalEntries, normalizeJournalNotebookPreferences } from "./journalNotebook";
+import { normalizeStudyWorkflow } from "./studyPreferences";
+import { normalizeApplicationResearch } from "./applicationResearch";
+import { normalizeApplicationProfile } from "./applicationProfile";
 import { BRAND, STORAGE_KEYS } from "./brand";
 import {
   closeOpenSegment, findLiveSession, openNewSegment, restoreSession, sessionElapsedMinutes,
@@ -72,6 +79,10 @@ import { deleteQuestionAttachmentBlobs, listQuestionAttachmentBlobKeys, runQuest
 import type { QuizBlock, QuizSession } from "./quiz";
 import { buildQuestionSetFromFilter, type QuestionSet, type SourceDocument } from "./library";
 import { repairOrphans } from "./orphanRepair";
+import type {
+  ReviewedImportPersistencePlan,
+  ReviewedImportPersistenceResult,
+} from "./questionImportFinalization";
 import {
   nextSchedule, validateAnkiCard,
   type AnkiCard, type CardReviewLog, type ReviewRating,
@@ -157,7 +168,7 @@ interface Actions {
     note?: string;
   }) => void;
   logProductivity: (entry: { trackerId: string; quantity?: number; minutes?: number; note?: string }) => void;
-  addProductivityTracker: (tracker: Omit<ProductivityTracker, "id" | "createdAt" | "updatedAt">) => void;
+  addProductivityTracker: (tracker: Omit<ProductivityTracker, "id" | "createdAt" | "updatedAt">) => string;
   updateProductivityTracker: (id: string, patch: Partial<ProductivityTracker>) => void;
   startNewStudyDay: () => void;
   checkDailyRollover: (reason?: RolloverReason, at?: Date) => { changed: boolean; toDate: string; daysAway: number; carriedTaskIds?: string[] };
@@ -214,6 +225,8 @@ interface Actions {
 
   // question workspace (Phase 4) — records are validated at the boundary
   addQuestion: (input: unknown) => { ok: boolean; errors: string[]; id?: string };
+  /** Validate and durably persist one complete reviewed import snapshot. */
+  commitReviewedImport: (plan: ReviewedImportPersistencePlan) => Promise<ReviewedImportPersistenceResult>;
   updateQuestion: (id: string, patch: Partial<QuestionRecord>) => void;
   removeQuestion: (id: string) => void;
   recordQuestionAttempt: (id: string, attempt: Omit<QuestionAttempt, "at">) => void;
@@ -386,16 +399,28 @@ export const useStore = create<Store>()(
                 ? { ...t, path: `${to}${cleanPath.slice(from.length)}`, updated: now() }
                 : t;
             }),
+            // Primary focus follows the rename so a renamed module stays primary.
+            profile: s.profile.primaryTrackerScopes
+              ? { ...s.profile, primaryTrackerScopes: renamePrimaryScopes(s.profile.primaryTrackerScopes, from, to) }
+              : s.profile,
           };
         }),
       removeTrackerScope: (path) =>
         set((s) => {
           const from = trackerPathKey(path);
           if (!from) return {};
-          return { tracker: s.tracker.filter((t) => {
-            const key = trackerPathKey(t.path);
-            return !(key === from || key.startsWith(`${from}/`));
-          }) };
+          return {
+            tracker: s.tracker.filter((t) => {
+              const key = trackerPathKey(t.path);
+              return !(key === from || key.startsWith(`${from}/`));
+            }),
+            profile: s.profile.primaryTrackerScopes
+              ? { ...s.profile, primaryTrackerScopes: s.profile.primaryTrackerScopes.filter((scope) => {
+                const key = trackerPathKey(scope.path);
+                return !(key === from || key.startsWith(`${from}/`));
+              }) }
+              : s.profile,
+          };
         }),
       bumpPasses: (id, delta) =>
         set((s) => ({
@@ -503,7 +528,7 @@ export const useStore = create<Store>()(
             academic: tracker ? tracker.contributesToAcademicStudy : true,
             productive: tracker ? tracker.contributesToTotalProductiveTime : true,
           };
-          return { logs: [entry, ...s.logs] };
+          return withTrackerHabitSync(s, [entry, ...s.logs], tracker, entry.dayKey);
         }),
 
       logActivity: ({ label, trackerId, minutes = 0, quantity = 0, quantityKind, quantityLabel, note }) =>
@@ -539,7 +564,7 @@ export const useStore = create<Store>()(
             academic: tracker ? tracker.contributesToAcademicStudy : true,
             productive: tracker ? tracker.contributesToTotalProductiveTime : true,
           };
-          return { logs: [entry, ...s.logs] };
+          return withTrackerHabitSync(s, [entry, ...s.logs], tracker, entry.dayKey);
         }),
 
       logProductivity: ({ trackerId, quantity = 0, minutes, note }) =>
@@ -562,21 +587,50 @@ export const useStore = create<Store>()(
             academic: tracker.contributesToAcademicStudy,
             productive: tracker.contributesToTotalProductiveTime,
           };
-          return { logs: [entry, ...s.logs] };
+          return withTrackerHabitSync(s, [entry, ...s.logs], tracker, entry.dayKey);
         }),
 
-      addProductivityTracker: (tracker) =>
-        set((s) => ({
-          productivityTrackers: [
-            ...s.productivityTrackers,
-            { ...tracker, id: uid(), createdAt: now(), updatedAt: now() },
-          ],
-        })),
+      addProductivityTracker: (tracker) => {
+        const id = uid();
+        set((s) => {
+          const created: ProductivityTracker = { ...tracker, name: tracker.name.trim() || "Tracker", id, createdAt: now(), updatedAt: now() };
+          const linked = created.contributesToHabitTracking ? linkTrackerHabit(s, created) : { tracker: created, habits: s.habits ?? [] };
+          return { productivityTrackers: [...s.productivityTrackers, linked.tracker], habits: linked.habits };
+        });
+        return id;
+      },
+      // A tracker defines what its entries mean, so flipping "counts as
+      // academic study" or "productive time" re-labels its past entries too
+      // (reports and day grades stay consistent). Turning habit tracking on
+      // links (or creates) a habit and back-fills its checks from the log.
       updateProductivityTracker: (id, patch) =>
-        set((s) => ({
-          productivityTrackers: s.productivityTrackers.map((tracker) =>
-            tracker.id === id ? { ...tracker, ...patch, updatedAt: now() } : tracker),
-        })),
+        set((s) => {
+          const current = s.productivityTrackers.find((tracker) => tracker.id === id);
+          if (!current) return {};
+          let next: ProductivityTracker = { ...current, ...patch, updatedAt: now() };
+          let habits = s.habits ?? [];
+          let habitEntries = s.habitEntries ?? [];
+          if (next.contributesToHabitTracking && !next.archived) {
+            const linked = linkTrackerHabit({ ...s, habits }, next);
+            next = linked.tracker;
+            habits = linked.habits;
+            if (!current.contributesToHabitTracking || !current.linkedHabitId || current.dailyTarget !== next.dailyTarget || current.goal !== next.goal) {
+              habitEntries = backfillTrackerHabit(next, s.logs, habitEntries);
+            }
+          }
+          const relabel = current.contributesToAcademicStudy !== next.contributesToAcademicStudy
+            || current.contributesToTotalProductiveTime !== next.contributesToTotalProductiveTime;
+          return {
+            productivityTrackers: s.productivityTrackers.map((tracker) => (tracker.id === id ? next : tracker)),
+            habits,
+            habitEntries,
+            ...(relabel ? {
+              logs: s.logs.map((log) => (log.trackerId === id
+                ? { ...log, academic: next.contributesToAcademicStudy, productive: next.contributesToTotalProductiveTime }
+                : log)),
+            } : {}),
+          };
+        }),
 
       addEnergyFactor: (factor) =>
         set((s) => {
@@ -963,6 +1017,316 @@ export const useStore = create<Store>()(
         const record = result.value;
         set((s) => ({ questions: [record, ...(s.questions ?? [])] }));
         return { ok: true, errors: [], id: record.id };
+      },
+      commitReviewedImport: async (plan) => {
+        const current = get();
+        const failure = (message: string, rollbackFailures: string[] = []): ReviewedImportPersistenceResult => ({
+          ok: false,
+          message,
+          rollbackFailures,
+        });
+        const validId = (value: unknown): value is string => (
+          typeof value === "string" && value.length > 0 && value === value.trim()
+        );
+
+        if (!plan.questions.length && !plan.questionSet && !plan.documentWrite) {
+          return failure("The reviewed import does not contain anything to persist.");
+        }
+        if (plan.questions.length > 0 && !plan.questionSet) {
+          return failure("Reviewed questions must be finalized into a question set.");
+        }
+
+        const requestedQuestionIds = plan.questions.map((question) => question.id);
+        if (requestedQuestionIds.some((id) => !validId(id))) {
+          return failure("Every reviewed question must have a stable ID before finalization.");
+        }
+        if (new Set(requestedQuestionIds).size !== requestedQuestionIds.length) {
+          return failure("Reviewed question IDs must be unique within one import.");
+        }
+        const existingQuestionIds = new Set((current.questions ?? []).map((question) => question.id));
+        const conflictingQuestionId = requestedQuestionIds.find((id) => existingQuestionIds.has(id));
+        if (conflictingQuestionId) {
+          return failure(`Question ID "${conflictingQuestionId}" already exists.`);
+        }
+
+        const validationTime = new Date();
+        const validatedQuestions: QuestionRecord[] = [];
+        for (let index = 0; index < plan.questions.length; index += 1) {
+          const result = validateQuestionRecord(plan.questions[index], validationTime);
+          if (!result.ok || !result.value) {
+            return failure(
+              `Question ${plan.questions[index].questionNumber ?? index + 1}: ${result.errors.slice(0, 2).join(" ")}`,
+            );
+          }
+          const optionKeys = result.value.options.map((option) => option.key);
+          if (result.value.options.length < 2 || new Set(optionKeys).size !== optionKeys.length) {
+            return failure(
+              `Question ${plan.questions[index].questionNumber ?? index + 1}: At least two usable, uniquely labeled answer choices are required.`,
+            );
+          }
+          if (!result.value.correctKey || !optionKeys.includes(result.value.correctKey)) {
+            return failure(
+              `Question ${plan.questions[index].questionNumber ?? index + 1}: A correct answer matching an existing choice is required.`,
+            );
+          }
+          if (result.value.needsReview) {
+            return failure(
+              `Question ${plan.questions[index].questionNumber ?? index + 1}: Review must be completed before finalization.`,
+            );
+          }
+          if (result.value.extraction?.reviewed !== true) {
+            return failure(
+              `Question ${plan.questions[index].questionNumber ?? index + 1}: Reviewed import confirmation is required before finalization.`,
+            );
+          }
+          validatedQuestions.push(result.value);
+        }
+
+        const questionSet = plan.questionSet
+          ? { ...plan.questionSet, questionIds: validatedQuestions.map((question) => question.id) }
+          : undefined;
+        if (questionSet) {
+          if (!validId(questionSet.id)) return failure("The reviewed question set must have a stable ID.");
+          if (!validatedQuestions.length) return failure("A reviewed question set must contain at least one question.");
+          if (new Set(questionSet.sourceDocumentIds).size !== questionSet.sourceDocumentIds.length) {
+            return failure("Question-set source-document IDs must be unique.");
+          }
+          if ((current.questionSets ?? []).some((item) => item.id === questionSet.id)) {
+            return failure(`Question set ID "${questionSet.id}" already exists.`);
+          }
+          for (let index = 0; index < validatedQuestions.length; index += 1) {
+            validatedQuestions[index] = { ...validatedQuestions[index], setId: questionSet.id };
+          }
+        }
+
+        let documents = current.documents ?? [];
+        const documentWrite = plan.documentWrite;
+        if (documentWrite?.kind === "create") {
+          if (!validId(documentWrite.document.id)) {
+            return failure("The imported source document must have a stable ID.");
+          }
+          if (documents.some((document) => document.id === documentWrite.document.id)) {
+            return failure(`Source document ID "${documentWrite.document.id}" already exists.`);
+          }
+          documents = [documentWrite.document, ...documents];
+        } else if (documentWrite?.kind === "update") {
+          if (!validId(documentWrite.id)) {
+            return failure("The source-document update must have a stable ID.");
+          }
+          const target = documents.find((document) => document.id === documentWrite.id);
+          if (!target) {
+            return failure(`Source document "${documentWrite.id}" no longer exists.`);
+          }
+          if (documentWrite.patch.id !== undefined && documentWrite.patch.id !== documentWrite.id) {
+            return failure("A source-document update cannot change the document ID.");
+          }
+          documents = documents.map((document) => document.id === documentWrite.id
+            ? { ...document, ...documentWrite.patch, id: document.id }
+            : document);
+        }
+
+        const availableDocumentIds = new Set(documents.map((document) => document.id));
+        const missingSetDocument = questionSet?.sourceDocumentIds.find((id) => !availableDocumentIds.has(id));
+        if (missingSetDocument) {
+          return failure(`Source document "${missingSetDocument}" does not exist.`);
+        }
+        const missingQuestionDocument = validatedQuestions
+          .map((question) => question.sourceDocumentId)
+          .find((id): id is string => Boolean(id) && !availableDocumentIds.has(id!));
+        if (missingQuestionDocument) {
+          return failure(`Source document "${missingQuestionDocument}" does not exist.`);
+        }
+        if (questionSet) {
+          const setDocumentIds = new Set(questionSet.sourceDocumentIds);
+          const inconsistentQuestion = validatedQuestions.find((question) => (
+            question.sourceDocumentId
+              ? !setDocumentIds.has(question.sourceDocumentId)
+              : setDocumentIds.size > 0
+          ));
+          if (inconsistentQuestion) {
+            return failure(
+              `Question "${inconsistentQuestion.id}" does not share the question set's source-document association.`,
+            );
+          }
+        }
+
+        if (questionSet?.sourceDocumentIds.length) {
+          const linkedDocumentIds = new Set(questionSet.sourceDocumentIds);
+          documents = documents.map((document) => linkedDocumentIds.has(document.id)
+            ? {
+                ...document,
+                linkedQuestionSetIds: [...new Set([...document.linkedQuestionSetIds, questionSet.id])],
+                libraryOnly: false,
+              }
+            : document);
+        }
+
+        const previous = {
+          questions: current.questions ?? [],
+          questionSets: current.questionSets ?? [],
+          documents: current.documents ?? [],
+        };
+        const next = {
+          // Preserve the existing addQuestion ordering while committing one
+          // serialized workspace snapshot.
+          questions: [...validatedQuestions].reverse().concat(previous.questions),
+          questionSets: questionSet ? [questionSet, ...previous.questionSets] : previous.questionSets,
+          documents,
+        };
+
+        const sameValue = (left: unknown, right: unknown) => (
+          JSON.stringify(left) === JSON.stringify(right)
+        );
+        const insertedQuestionIds = new Set(validatedQuestions.map((question) => question.id));
+        const insertedSetId = questionSet?.id;
+        const createdDocumentId = documentWrite?.kind === "create" ? documentWrite.document.id : undefined;
+        const priorDocuments = new Map(previous.documents.map((document) => [document.id, document]));
+        const committedDocuments = new Map(next.documents.map((document) => [document.id, document]));
+        const changedDocumentIds = new Set([
+          ...(questionSet?.sourceDocumentIds ?? []),
+          ...(documentWrite?.kind === "update" ? [documentWrite.id] : []),
+        ]);
+
+        const writeSequence = getVaultWriteCheckpoint() + 1;
+        try {
+          // Zustand persist returns the storage promise at runtime. Awaiting it
+          // here guarantees that success means the complete snapshot reached
+          // IndexedDB or the established localStorage fallback.
+          await set(() => next);
+          assertVaultWrite(writeSequence);
+        } catch (error) {
+          const rollbackFailures = new Set<string>();
+          const rollbackSequence = getVaultWriteCheckpoint() + 1;
+          try {
+            await set((live) => {
+              const liveQuestionSets = live.questionSets ?? [];
+              const liveQuestions = live.questions ?? [];
+              for (const liveSet of liveQuestionSets) {
+                if (liveSet.id !== insertedSetId
+                  && liveSet.questionIds.some((id) => insertedQuestionIds.has(id))) {
+                  rollbackFailures.add(`question set ${liveSet.id}`);
+                }
+              }
+
+              const createdDocumentHasConcurrentReferences = Boolean(createdDocumentId) && (
+                liveQuestionSets.some((liveSet) => (
+                  liveSet.id !== insertedSetId
+                  && liveSet.sourceDocumentIds.includes(createdDocumentId!)
+                ))
+                || liveQuestions.some((question) => (
+                  !insertedQuestionIds.has(question.id)
+                  && question.sourceDocumentId === createdDocumentId
+                ))
+              );
+              if (createdDocumentHasConcurrentReferences) {
+                rollbackFailures.add(`source document ${createdDocumentId} (concurrent references)`);
+              }
+
+              let rolledBackDocuments = (live.documents ?? [])
+                .filter((document) => (
+                  document.id !== createdDocumentId || createdDocumentHasConcurrentReferences
+                ))
+                .map((document) => {
+                  const beforeDocument = priorDocuments.get(document.id);
+                  const committedDocument = committedDocuments.get(document.id);
+                  const restore: Partial<SourceDocument> = {};
+
+                  // A failed set cannot retain reverse links to itself. Remove
+                  // only the inserted set ID, preserving every other live link.
+                  if (insertedSetId
+                    && document.linkedQuestionSetIds.includes(insertedSetId)
+                    && !beforeDocument?.linkedQuestionSetIds.includes(insertedSetId)) {
+                    restore.linkedQuestionSetIds = document.linkedQuestionSetIds
+                      .filter((id) => id !== insertedSetId);
+                  }
+
+                  if (!changedDocumentIds.has(document.id) || !beforeDocument || !committedDocument) {
+                    return Object.keys(restore).length ? { ...document, ...restore } : document;
+                  }
+
+                  const beforeValues = beforeDocument as unknown as Record<string, unknown>;
+                  const committedValues = committedDocument as unknown as Record<string, unknown>;
+                  const liveValues = document as unknown as Record<string, unknown>;
+                  const restoreValues = restore as unknown as Record<string, unknown>;
+                  const changedKeys = new Set([
+                    ...Object.keys(beforeValues),
+                    ...Object.keys(committedValues),
+                  ]);
+
+                  for (const key of changedKeys) {
+                    if (key === "id" || sameValue(beforeValues[key], committedValues[key])) continue;
+                    if (key === "linkedQuestionSetIds") {
+                      const liveLinks = restore.linkedQuestionSetIds ?? document.linkedQuestionSetIds;
+                      const committedLinks = committedDocument.linkedQuestionSetIds
+                        .filter((id) => id !== insertedSetId || beforeDocument.linkedQuestionSetIds.includes(id));
+                      if (sameValue(committedLinks, beforeDocument.linkedQuestionSetIds)) {
+                        // The import changed only its own reverse link. It was
+                        // removed above; retain unrelated concurrent links.
+                        continue;
+                      }
+                      if (sameValue(liveLinks, committedLinks)) {
+                        restore.linkedQuestionSetIds = [...beforeDocument.linkedQuestionSetIds];
+                      } else if (!sameValue(liveLinks, beforeDocument.linkedQuestionSetIds)) {
+                        rollbackFailures.add(`source document ${document.id}.linkedQuestionSetIds`);
+                      }
+                      continue;
+                    }
+
+                    if (sameValue(liveValues[key], committedValues[key])) {
+                      restoreValues[key] = beforeValues[key];
+                    } else if (!sameValue(liveValues[key], beforeValues[key])) {
+                      rollbackFailures.add(`source document ${document.id}.${key}`);
+                    }
+                  }
+
+                  return Object.keys(restore).length ? { ...document, ...restore, id: document.id } : document;
+                });
+
+              // A concurrently-created document can observe the tentative set;
+              // remove only that now-invalid reverse link as well.
+              if (insertedSetId) {
+                rolledBackDocuments = rolledBackDocuments.map((document) => (
+                  document.linkedQuestionSetIds.includes(insertedSetId)
+                    && !priorDocuments.get(document.id)?.linkedQuestionSetIds.includes(insertedSetId)
+                    ? {
+                        ...document,
+                        linkedQuestionSetIds: document.linkedQuestionSetIds.filter((id) => id !== insertedSetId),
+                      }
+                    : document
+                ));
+              }
+
+              // A concurrent link makes a document part of the active
+              // question-bank graph even if the import had temporarily
+              // changed libraryOnly from true to false.
+              rolledBackDocuments = rolledBackDocuments.map((document) => (
+                document.linkedQuestionSetIds.length > 0 && document.libraryOnly
+                  ? { ...document, libraryOnly: false }
+                  : document
+              ));
+
+              return {
+                questions: liveQuestions.filter((question) => !insertedQuestionIds.has(question.id)),
+                questionSets: liveQuestionSets.filter((item) => item.id !== insertedSetId),
+                documents: rolledBackDocuments,
+              };
+            });
+            assertVaultWrite(rollbackSequence);
+          } catch {
+            rollbackFailures.add("reviewed import state");
+          }
+          return failure(
+            error instanceof Error ? error.message : "AXOM could not persist the reviewed import.",
+            [...rollbackFailures],
+          );
+        }
+
+        return {
+          ok: true,
+          questionIds: validatedQuestions.map((question) => question.id),
+          questionSetId: questionSet?.id,
+          documentId: documentWrite?.kind === "create" ? documentWrite.document.id : documentWrite?.id,
+        };
       },
       updateQuestion: (id, patch) =>
         set((s) => ({
@@ -1611,6 +1975,13 @@ export function migratePersistedState(persisted: unknown, fromVersion: number): 
     tags: normalizeTagList(question.tags),
   }));
   s.savedQuestionFilters = normalizeSavedQuestionFilters(s.savedQuestionFilters);
+  s.tracker = arrayOfRecords(s.tracker).map((item) => {
+    const difficulty = ["easy", "moderate", "hard", "very-hard"].includes(String(item.difficulty)) ? item.difficulty : undefined;
+    const assessmentDate = typeof item.assessmentDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(item.assessmentDate) ? item.assessmentDate : undefined;
+    const priority = Number(item.explicitPriority);
+    const recommendationSnoozedUntil = typeof item.recommendationSnoozedUntil === "string" && Number.isFinite(Date.parse(item.recommendationSnoozedUntil)) ? item.recommendationSnoozedUntil : undefined;
+    return { ...item, path: normalizeTrackerPath(String(item.path ?? "")), difficulty, assessmentDate, explicitPriority: priority >= 1 && priority <= 5 ? Math.round(priority) : undefined, recommendationSnoozedUntil };
+  });
   s.schemaVersion = SCHEMA_VERSION;
   return s as unknown as NoctyriumState;
 }
@@ -1654,6 +2025,64 @@ function buildTrackStructure(track: EducationTrack): { terms: Term[]; courses: C
   return { terms, courses, tracker };
 }
 
+/** Keep a habit-tracking tracker's linked habit checked for `dayKey`. */
+function withTrackerHabitSync(
+  s: NoctyriumState,
+  logs: StudyLog[],
+  tracker: ProductivityTracker | undefined,
+  dayKey: string,
+): Partial<NoctyriumState> {
+  if (!tracker?.contributesToHabitTracking || !tracker.linkedHabitId) return { logs };
+  const habit = (s.habits ?? []).find((item) => item.id === tracker.linkedHabitId && !item.archived);
+  if (!habit) return { logs };
+  const total = trackerDayTotals(tracker, logs).get(dayKey) ?? 0;
+  return { logs, habitEntries: upsertTrackerHabitEntry(s.habitEntries ?? [], habit.id, dayKey, habitCheckForDay(tracker, total)) };
+}
+
+function upsertTrackerHabitEntry(
+  entries: HabitEntry[],
+  habitId: string,
+  date: string,
+  check: ReturnType<typeof habitCheckForDay>,
+): HabitEntry[] {
+  const existing = entries.find((entry) => entry.habitId === habitId && entry.date === date);
+  // A check the learner set by hand ("skipped", a note) always wins.
+  if (existing && (existing.status === "skipped" || (existing.note && existing.note !== TRACKER_HABIT_NOTE))) return entries;
+  if (!check) return existing?.note === TRACKER_HABIT_NOTE ? entries.filter((entry) => entry !== existing) : entries;
+  if (existing) return entries.map((entry) => (entry === existing ? { ...entry, status: check.status, value: check.value, note: TRACKER_HABIT_NOTE } : entry));
+  return [{ id: uid(), habitId, date, status: check.status, value: check.value, note: TRACKER_HABIT_NOTE, createdAt: now() }, ...entries];
+}
+
+const TRACKER_HABIT_NOTE = "From your tracker";
+
+function linkTrackerHabit(s: Pick<NoctyriumState, "habits">, tracker: ProductivityTracker): { tracker: ProductivityTracker; habits: Habit[] } {
+  const habits = s.habits ?? [];
+  const existing = tracker.linkedHabitId ? habits.find((habit) => habit.id === tracker.linkedHabitId) : undefined;
+  const shape = {
+    name: tracker.name,
+    icon: tracker.icon,
+    color: tracker.color,
+    type: habitTypeForTracker(tracker),
+    category: tracker.category,
+    target: tracker.dailyTarget && tracker.dailyTarget > 0 ? tracker.dailyTarget : undefined,
+    unit: trackerUnitLabel(tracker),
+  };
+  if (existing) {
+    return { tracker, habits: habits.map((habit) => (habit.id === existing.id ? { ...habit, ...shape, archived: false, updatedAt: now() } : habit)) };
+  }
+  const habit: Habit = { ...shape, id: uid(), createdAt: tracker.createdAt || now(), updatedAt: now() };
+  return { tracker: { ...tracker, linkedHabitId: habit.id }, habits: [...habits, habit] };
+}
+
+function backfillTrackerHabit(tracker: ProductivityTracker, logs: StudyLog[], entries: HabitEntry[]): HabitEntry[] {
+  if (!tracker.linkedHabitId) return entries;
+  let next = entries;
+  for (const [day, total] of trackerDayTotals(tracker, logs)) {
+    next = upsertTrackerHabitEntry(next, tracker.linkedHabitId, day, habitCheckForDay(tracker, total));
+  }
+  return next;
+}
+
 function matchProductivityTracker(trackers: ProductivityTracker[] = [], type: string): ProductivityTracker | undefined {
   const clean = cleanText(type);
   if (!clean) return trackers.find((tracker) => tracker.id === "tracker-study");
@@ -1678,6 +2107,8 @@ function normalizeProductivityTrackers(value: unknown): ProductivityTracker[] {
       customUnit: typeof record.customUnit === "string" ? record.customUnit : base?.customUnit,
       dailyTarget: typeof record.dailyTarget === "number" ? record.dailyTarget : base?.dailyTarget,
       weeklyTarget: typeof record.weeklyTarget === "number" ? record.weeklyTarget : base?.weeklyTarget,
+      goal: record.goal === "at-most" ? "at-most" : record.goal === "at-least" ? "at-least" : base?.goal,
+      linkedHabitId: typeof record.linkedHabitId === "string" && record.linkedHabitId ? record.linkedHabitId : base?.linkedHabitId,
       category: typeof record.category === "string" && record.category ? record.category : base?.category ?? "Productivity",
       contributesToAcademicStudy: typeof record.contributesToAcademicStudy === "boolean" ? record.contributesToAcademicStudy : base?.contributesToAcademicStudy ?? false,
       contributesToTotalProductiveTime: typeof record.contributesToTotalProductiveTime === "boolean" ? record.contributesToTotalProductiveTime : base?.contributesToTotalProductiveTime ?? true,
@@ -1771,6 +2202,7 @@ function normalizeFolders(value: unknown): HubFolder[] {
     favorite: typeof record.favorite === "boolean" ? record.favorite : false,
     archived: typeof record.archived === "boolean" ? record.archived : false,
     sortOrder: typeof record.sortOrder === "number" ? record.sortOrder : index,
+    lastOpenedAt: typeof record.lastOpenedAt === "string" && Number.isFinite(Date.parse(record.lastOpenedAt)) ? record.lastOpenedAt : undefined,
     createdAt: typeof record.createdAt === "string" ? record.createdAt : timestamp,
     updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : timestamp,
   })));
@@ -1917,6 +2349,11 @@ function normalizeProfile(value: unknown): Profile {
     dailyLoopReminders: profile.dailyLoopReminders === undefined
       ? undefined
       : normalizeDailyLoopReminderPreferences(profile.dailyLoopReminders),
+    focusCheckIn: profile.focusCheckIn === undefined
+      ? undefined
+      : normalizeFocusCheckInPreferences(profile.focusCheckIn),
+    energyChecks: normalizeEnergyChecks(profile.energyChecks),
+    primaryTrackerScopes: normalizePrimaryScopes(profile.primaryTrackerScopes),
     // Preserve optional opt-in fields so they survive reset/migration.
     blueprintMode: profile.blueprintMode === "usmle" || profile.blueprintMode === "prehealth"
       ? profile.blueprintMode as Profile["blueprintMode"] : undefined,
@@ -1933,6 +2370,9 @@ function normalizeProfile(value: unknown): Profile {
       : undefined,
     pomodoroCustom: isRecord(profile.pomodoroCustom) ? profile.pomodoroCustom as Profile["pomodoroCustom"] : undefined,
     pomodoroPreferences: normalizePomodoroPreferences(profile.pomodoroPreferences),
+    studyWorkflow: normalizeStudyWorkflow(profile.studyWorkflow),
+    applicationResearch: normalizeApplicationResearch(profile.applicationResearch),
+    applicationProfile: normalizeApplicationProfile(profile.applicationProfile),
   };
 }
 

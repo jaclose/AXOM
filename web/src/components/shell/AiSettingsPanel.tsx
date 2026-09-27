@@ -1,13 +1,13 @@
 // ===========================================================================
 // AI settings (directive Phase 3). Modes: Off · Local (Ollama, no key) ·
-// Cloud BYOK (config surface only — calls stay disabled until a secure server
-// proxy exists; no key field exists client-side by design) · Demo (labeled
-// mock). Detection is live and honest: nothing claims to work until probed.
+// AXOM Cloud AI (Claude through the account's ai-proxy Edge Function; the
+// model key lives only on the server) · Demo (labeled mock). Detection is
+// live and honest: nothing claims to work until probed.
 // ===========================================================================
 import { useEffect, useState, type ReactNode } from "react";
 import { RefreshCw, ShieldCheck, Cpu, Cloud, FlaskConical, Power } from "lucide-react";
 import {
-  DEFAULT_AI_SETTINGS, detectOllama, loadAiSettings, saveAiSettings,
+  DEFAULT_AI_SETTINGS, checkProviderHealth, detectOllama, loadAiSettings, saveAiSettings,
   type AiSettings,
 } from "../../lib/ai";
 import type { AiAvailability, AiMode } from "../../lib/ai";
@@ -18,7 +18,7 @@ import { ICON_SIZE } from "../../lib/iconSize";
 const MODES: Array<{ id: AiMode; label: string; icon: ReactNode; note: string }> = [
   { id: "off", label: "Off", icon: <Power size={ICON_SIZE.body} />, note: "The app is fully usable without AI." },
   { id: "local", label: "Local (Ollama)", icon: <Cpu size={ICON_SIZE.body} />, note: "Free, private, on-device. No API key." },
-  { id: "cloud", label: "Cloud (BYOK)", icon: <Cloud size={ICON_SIZE.body} />, note: "Coming later via a secure proxy — keys never live in this app." },
+  { id: "cloud", label: "AXOM Cloud AI", icon: <Cloud size={ICON_SIZE.body} />, note: "Claude through your AXOM account. No API key in the app; a daily allowance applies." },
   { id: "mock", label: "Demo", icon: <FlaskConical size={ICON_SIZE.body} />, note: "Canned outputs for exploring the flows. Clearly labeled." },
 ];
 
@@ -46,6 +46,10 @@ export function AiSettingsPanel() {
 
   useEffect(() => {
     if (settings.mode === "local") void runProbe();
+    if (settings.mode === "cloud") {
+      setProbing(true);
+      void checkProviderHealth(settings).then((result) => { setProbe(result); setProbing(false); });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.mode]);
 
@@ -110,20 +114,15 @@ export function AiSettingsPanel() {
 
       {settings.mode === "cloud" && (
         <div className="stack" style={{ gap: 10 }}>
-          <SelectField label="Preferred provider (saved for when the proxy ships)" value={settings.cloudProvider ?? ""}
-            onChange={(e) => update({ cloudProvider: (e.target.value || undefined) as AiSettings["cloudProvider"] })}>
-            <option value="">Choose…</option>
-            <option value="anthropic">Anthropic (Claude)</option>
-            <option value="openai">OpenAI</option>
-            <option value="gemini">Google Gemini</option>
-            <option value="deepseek">DeepSeek</option>
-            <option value="openai-compat">Other OpenAI-compatible endpoint</option>
-          </SelectField>
-          <div className="sub">
-            Cloud calls are disabled until a secure server-side proxy exists — pasting API keys into a browser app
-            exposes them, so this app simply doesn't ask for them. Local mode works today without any key.
+          <div className="row" style={{ gap: 8 }}>
+            <Tag tone={probe?.ok ? "green" : probing ? "neutral" : "orange"}>{probing ? "Checking…" : probe?.ok ? "Ready" : "Not available"}</Tag>
+            <span className="sub">{probe?.detail ?? "Checking your account…"}</span>
           </div>
-          <GhostButton onClick={() => update({ mode: "local" })}>Use local AI instead</GhostButton>
+          <div className="sub">
+            Requests go to Claude through AXOM's server with your account session — the model key never touches this device.
+            Only the text a feature sends (a card source, a question) leaves your machine, and every result still lands in a review step.
+          </div>
+          {!probe?.ok && !probing && <GhostButton onClick={() => update({ mode: "local" })}>Use local AI instead</GhostButton>}
         </div>
       )}
 

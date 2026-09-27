@@ -352,15 +352,22 @@ function withStructuredDiagnostics(draft: ParsedQuestionDraft, resolution: Answe
   const diagnosticDraft = { ...draft, correctKey, warnings: structuralWarnings };
   const explanationCleanup = sanitizeExplanationCandidate(draft.explanation, diagnosticDraft);
   const explanation = explanationCleanup.cleanedText || undefined;
+  const explanationBoundaryAmbiguous = explanationCleanup.cleanupOperations.includes("stop-at-next-question");
+  if (explanationBoundaryAmbiguous) {
+    structuralWarnings.push("Question-like numbered content touched this explanation without a clear separator — verify the boundary against the source.");
+  }
   const questionDetectionConfidence = draft.stem && draft.options.length >= 3 ? 0.96 : draft.stem ? 0.6 : 0.1;
   const answerDetectionConfidence = duplicateKeys ? 0.05
     : resolution.status === "resolved" ? 0.98
       : resolution.status === "candidate" ? 0.65
         : resolution.status === "conflict" ? 0.05 : 0;
-  const explanationDetectionConfidence = explanation ? 0.94 : 0;
+  const explanationDetectionConfidence = explanation
+    ? explanationBoundaryAmbiguous ? Math.min(explanationCleanup.confidence, 0.6) : 0.94
+    : 0;
   const overallImportConfidence = Math.max(0, Math.min(1,
     questionDetectionConfidence * 0.4 + answerDetectionConfidence * 0.4 + explanationDetectionConfidence * 0.2));
-  const needsReview = resolution.needsReview || !correctKey || questionDetectionConfidence < 0.75 || structuralWarnings.length > 0;
+  const needsReview = resolution.needsReview || !correctKey || questionDetectionConfidence < 0.75
+    || structuralWarnings.length > 0 || explanationBoundaryAmbiguous;
   return {
     ...draft,
     correctKey,
@@ -379,6 +386,7 @@ function withStructuredDiagnostics(draft: ParsedQuestionDraft, resolution: Answe
       ...(duplicateKeys ? ["conflict.duplicate-option-key"] : []),
       ...(nonSequentialKeys ? ["options.nonsequential"] : []),
       ...(explanation ? ["explanation.structured-field"] : []),
+      ...(explanationBoundaryAmbiguous ? ["explanation.ambiguous-boundary"] : []),
       resolution.ruleId,
     ],
     sourceSnippet: [draft.stem, ...draft.options.map((option) => `${option.key}. ${option.text}`)].join("\n").slice(0, 800),

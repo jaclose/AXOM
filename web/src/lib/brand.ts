@@ -1,4 +1,7 @@
-import { version as packageVersion } from "../../package.json";
+// JSON modules expose only a default export under Node ESM (used by e2e specs).
+import packageJson from "../../package.json" with { type: "json" };
+
+const packageVersion = packageJson.version;
 
 // ===========================================================================
 // Brand + version configuration — the single source of truth for every visible
@@ -46,10 +49,24 @@ export const STORAGE_KEYS = {
   themePreference: "axom.theme",
   /** Stable announcement ids only; never stores routes, profile data, or workspace content. */
   dismissedAnnouncements: "axom.announcements.dismissed.v1",
+  /** Device-only accent palette choice (+ pre-computed CSS variables for pre-paint). */
+  palettePreference: "axom.palette.v1",
+  /** Device-only motion override: "system" or "reduce". */
+  motionPreference: "axom.motion",
+  /** Lock-in check-in delivery ledger: date key, timestamps, and response counts only. */
+  focusCheckIns: "axom.focus-checkins.v1",
+  /** Device-only ledger of restore/merge/reset events; never workspace content. */
+  restoreHistory: "axom.restore-history.v1",
+  /** Timestamp of the latest successful local workspace write. */
+  lastVaultWriteAt: "axom.vault.last-write-at",
   /** Bounded quote ids and display toggles only; never workspace or profile content. */
   quotePreferences: "axom.quotes.preferences.v1",
   /** Device-only quiz reading preference (font-scale step); never workspace content. */
   quizReadingScale: "axom.quiz.reading-scale.v1",
+  /** Recoverable active question session; cleared on finish or explicit exit. */
+  quizActiveSession: "axom.quiz.active-session.v1",
+  /** Device-only Tutor tool guidance dismissal; contains no learner content. */
+  quizTutorTips: "axom.quiz.tutor-tips.v1",
   /** Small device-only reminder ledger; contains date keys only, never journal content. */
   missedStandupReminder: "noctyrium-missed-standup-alert",
   /** Daily check-in/closeout delivery state: date, status, and snooze timestamps only. */

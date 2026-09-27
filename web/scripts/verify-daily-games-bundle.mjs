@@ -34,9 +34,9 @@ if (wordChunks.length !== 1) {
   throw new Error(`Daily Games bundle check: expected one isolated word-list chunk, found ${wordChunks.length}.`);
 }
 const gameChunk = findSingleChunk("lazy Daily Word engine", ["AXOM Daily Word", dailyWordEngineMarker]);
-const doctordleChunk = findSingleChunk("lazy Doctordle WIP", ["Integration pending collaboration approval.", "No integration is active"]);
+const doctordleChunk = findSingleChunk("lazy verified Doctordle bridge", ["Verified external destination", "independent daily diagnosis game"]);
 if (gameChunk === appChunk || wordChunks.includes(appChunk) || wordChunks.includes(gameChunk)) {
-  throw new Error("Daily Games bundle check: optional game code is not isolated from the shell.");
+  throw new Error("Daily Games bundle check: lazy game code is not isolated from the shell.");
 }
 const engineChunks = scripts.filter((name) => (
   contents.get(name)?.includes("The answer list cannot be empty.")

@@ -1,4 +1,4 @@
-import { AlertTriangle, BarChart3, Edit3, Play, RotateCcw } from "lucide-react";
+import { AlertTriangle, BarChart3, Edit3, Play, RotateCcw, Share2 } from "lucide-react";
 import type { ReactNode } from "react";
 import type { QuestionSet, QuestionSetMetrics } from "../../lib/library";
 import { GButton, GhostButton, Tag } from "../ui/primitives";
@@ -12,6 +12,7 @@ export function QuestionSetCard({
   onReviewMisses,
   onEdit,
   onInsights,
+  onShare,
   compact = false,
   children,
 }: {
@@ -22,6 +23,7 @@ export function QuestionSetCard({
   onReviewMisses?: () => void;
   onEdit?: () => void;
   onInsights?: () => void;
+  onShare?: () => void;
   compact?: boolean;
   children?: ReactNode;
 }) {
@@ -86,6 +88,7 @@ export function QuestionSetCard({
         )}
         {!compact && onEdit && <GhostButton onClick={onEdit}><Edit3 size={ICON_SIZE.body} /> Edit</GhostButton>}
         {!compact && onInsights && <GhostButton onClick={onInsights}><BarChart3 size={ICON_SIZE.body} /> Insights</GhostButton>}
+        {!compact && onShare && <GhostButton onClick={onShare}><Share2 size={ICON_SIZE.body} /> Share</GhostButton>}
       </div>
     </article>
   );

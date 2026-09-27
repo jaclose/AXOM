@@ -1,7 +1,9 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useNotificationPermission } from "../../lib/useNotificationPermission";
 import {
-  Bell, Clock3, Database, Download, FileJson, Gamepad2, ImagePlus, Palette, RotateCcw, ShieldCheck,
-  Sparkles, Trash2, Upload, UserCircle2, Check, ScrollText, MessageCircle, Settings2,
+  Bell, Clock3, Database, Download, FileJson, Palette, RotateCcw, ShieldCheck,
+  Sparkles, Trash2, Upload, UserCircle2, Check, MessageCircle, Settings2,
+  Paintbrush, BookOpen, LayoutGrid, GraduationCap, Globe2,
 } from "lucide-react";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { Modal, Field } from "../ui/Modal";
@@ -19,11 +21,10 @@ import { DataHealthPanel } from "./DataHealthPanel";
 import { RecoveryStatusCard } from "./RecoveryStatusCard";
 import { PromiseCutscene } from "./PromiseCutscene";
 import { FOCUS_OPTIONS, focusOption, normalizedFocusIds } from "../../lib/experience";
-import { academicStagesForTrack, EDUCATION_TRACKS, resolveTrack } from "../../lib/tracks";
+import { EDUCATION_TRACKS, resolveTrack } from "../../lib/tracks";
 import { prettyDate } from "../../lib/scoring";
-import type { AcademicStageId, DashboardWidgetId, EducationTrackId, ExperienceFocusId } from "../../lib/types";
+import type { DashboardWidgetId, EducationTrackId, ExperienceFocusId } from "../../lib/types";
 import { HardDrive } from "lucide-react";
-import { ThemeToggle } from "../ui/ThemeToggle";
 import { AxomWordmark } from "../ui/BrandMark";
 import { SCHEMA_VERSION, APP_BUILD_LABEL } from "../../lib/seed";
 import { lastBackupAt } from "../../lib/backup";
@@ -33,6 +34,19 @@ import { runStorageMigrations } from "../../lib/storageMigrations";
 import { requestOnboardingRerun } from "../../lib/uiStore";
 import { canonicalTimeZone, normalizeClockPreferences, normalizeTimeZonePreference, systemTimeZone } from "../../lib/clock";
 import { normalizeDailyLoopReminderPreferences } from "../../lib/dailyLoopReminders";
+import { AccountSyncPanel } from "./AccountSyncPanel";
+import { AppearanceStudio } from "./AppearanceStudio";
+import {
+  BackupStatusCard,
+  FocusCheckInSettings,
+  LastSavedLine,
+  ProfileSection,
+  RestoreHistoryCard,
+} from "./SettingsSections";
+import { recordRestoreEvent } from "../../lib/restoreHistory";
+import { DEFAULT_STUDY_WORKFLOW, normalizeStudyWorkflow, toggleStudyMethod, type StudyMethodId } from "../../lib/studyPreferences";
+import { StudyMethodFollowUps } from "./StudyMethodFollowUps";
+import { StudyTextSuggestions } from "./StudyTextSuggestions";
 import {
   CURRENT_DASHBOARD_WIDGET_IDS,
   adaptLegacyDashboardLayout,
@@ -41,22 +55,37 @@ import {
   normalizeDashboardLayoutPreferences,
 } from "../../lib/dashboardWidgets";
 
-type SettingsSection = "profile" | "data" | "backup" | "personalization" | "advanced";
+type SettingsSection = "profile" | "account" | "appearance" | "personalization" | "data" | "backup" | "advanced";
+export type PersonalizationSubsection = "study" | "rhythm" | "dashboard" | "program";
 /** Legacy names remain accepted so existing deep links keep opening safely. */
-export type SettingsTab = SettingsSection | "general" | "ai" | "account";
+export type SettingsTab = SettingsSection | PersonalizationSubsection | "general" | "ai";
 
 const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; icon: typeof UserCircle2 }> = [
   { id: "profile", label: "Profile", icon: UserCircle2 },
-  { id: "data", label: "Data", icon: Database },
-  { id: "backup", label: "Backup", icon: FileJson },
+  { id: "account", label: "Account", icon: ShieldCheck },
+  { id: "appearance", label: "Appearance", icon: Paintbrush },
   { id: "personalization", label: "Personalization", icon: Palette },
+  { id: "data", label: "Data", icon: Database },
+  { id: "backup", label: "Emergency recovery", icon: FileJson },
   { id: "advanced", label: "Advanced", icon: Settings2 },
+];
+
+const PERSONALIZATION_SUBSECTIONS: Array<{ id: PersonalizationSubsection; label: string; detail: string; icon: typeof UserCircle2 }> = [
+  { id: "study", label: "Study style", detail: "Methods, passes, and review timing", icon: BookOpen },
+  { id: "rhythm", label: "Daily rhythm", detail: "Reminders, lock-in check-ins, clock", icon: Clock3 },
+  { id: "dashboard", label: "Dashboard", detail: "Which widgets appear", icon: LayoutGrid },
+  { id: "program", label: "Program & lanes", detail: "Track, focus lanes, early features", icon: GraduationCap },
 ];
 
 function normalizeSettingsTab(tab: SettingsTab): SettingsSection {
   if (tab === "general") return "profile";
-  if (tab === "ai" || tab === "account") return "advanced";
+  if (tab === "ai") return "advanced";
+  if (tab === "study" || tab === "rhythm" || tab === "dashboard" || tab === "program") return "personalization";
   return tab;
+}
+
+function initialSubsection(tab: SettingsTab): PersonalizationSubsection {
+  return tab === "rhythm" || tab === "dashboard" || tab === "program" ? tab : "study";
 }
 
 export function SettingsModal({ onClose, initialTab = "general" }: { onClose: () => void; initialTab?: SettingsTab }) {
@@ -67,6 +96,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
   const avatarRef = useRef<HTMLInputElement>(null);
   const [msg, setMsg] = useState<string>("");
   const [tab, setTab] = useState<SettingsSection>(() => normalizeSettingsTab(initialTab));
+  const [personalTab, setPersonalTab] = useState<PersonalizationSubsection>(() => initialSubsection(initialTab));
   const tabsId = useId();
   const tabRefs = useRef<Partial<Record<SettingsSection, HTMLButtonElement | null>>>({});
   const [resigning, setResigning] = useState(false);
@@ -77,17 +107,19 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
       title: "Profile",
       body: "Your identity, academic path, current focus, and good-enough daily targets.",
     },
+    account: { title: "Account & protection", body: "Optional sign-in, automatic protected versions, and safe restore controls." },
+    appearance: { title: "Appearance", body: "Make AXOM yours: light or dark, an accent palette (or your own color), and motion." },
     data: {
       title: "Data on this device",
       body: "See where your workspace lives, whether storage is healthy, and what AXOM has saved.",
     },
     backup: {
-      title: "Backup & recovery",
+      title: "Emergency recovery",
       body: "Export a portable copy, restore safely, and review automatic local recovery snapshots.",
     },
     personalization: {
       title: "Personalization",
-      body: "Choose theme, dashboard visibility, study lanes, and device-level preferences.",
+      body: "How you study, your daily rhythm, what the dashboard shows, and your program.",
     },
     advanced: {
       title: "Advanced",
@@ -96,9 +128,6 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
   };
   const localBackups = listLocalBackups();
   const exportedAt = lastBackupAt();
-  const track = resolveTrack(profile.educationTrack);
-  const stageGroup = academicStagesForTrack(track.id);
-  const focus = focusOption(profile.activeFocusId);
 
   function onTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, section: SettingsSection) {
     const index = SETTINGS_SECTIONS.findIndex((item) => item.id === section);
@@ -142,6 +171,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
             return;
           }
           store.replaceAll(next);
+          recordRestoreEvent({ kind: "portable-restore", detail: file.name });
           setMsg(`Restored from ${file.name}. Your data is back.`);
           finishAttachments(next.questions);
         } else {
@@ -151,6 +181,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
             return;
           }
           store.replaceAll(merged);
+          recordRestoreEvent({ kind: "portable-merge", detail: file.name });
           setMsg(`Merged ${file.name} into this device's data.`);
           finishAttachments(merged.questions);
         }
@@ -215,66 +246,17 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
 
       {tab === "profile" && (
         <section role="tabpanel" id={`${tabsId}-panel-profile`} aria-labelledby={`${tabsId}-tab-profile`}>
-          <div className="settings-profile-card">
-            <span className="avatar" style={{ width: 44, height: 44 }}>
-              {profile.avatarDataUrl
-                ? <img src={profile.avatarDataUrl} alt="" />
-                : <span className="avatar-mono">{(profile.name || "A").slice(0, 1)}</span>}
-            </span>
-            <div className="grow">
-              <div className="sync-title">{profile.name || "AXOM"}</div>
-              <div className="sub">Stored in this device’s AXOM workspace</div>
-            </div>
-            <div className="row wrap gap8">
-              <GButton size="sm" onClick={() => avatarRef.current?.click()}>
-                <ImagePlus size={ICON_SIZE.body} /> Change avatar
-              </GButton>
-            </div>
-            <input ref={avatarRef} type="file" accept="image/*" hidden
-              onChange={(e) => e.target.files?.[0] && setAvatar(e.target.files[0])} />
-          </div>
-
-          <Field label="Display name" value={profile.name}
-            onChange={(e) => store.updateProfile({ name: e.target.value })} />
-          <div className="settings-target-grid">
-            <Field label="Academic path" value={track.label} readOnly />
-            <label className="stack gap6"><span className="field-label">Current stage</span><select className="field" value={profile.academicStageId ?? stageGroup.defaultStageId} onChange={(event) => store.updateProfile({ academicStageId: event.target.value as AcademicStageId, customAcademicStage: event.target.value === "other" ? profile.customAcademicStage : undefined })}>
-              {stageGroup.options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-            </select></label>
-            <Field label="Current focus" value={focus?.label ?? "Choose in Personalization"} readOnly />
-          </div>
-          {(profile.academicStageId ?? stageGroup.defaultStageId) === "other" && <Field label="Custom stage (optional)" value={profile.customAcademicStage ?? ""} onChange={(event) => store.updateProfile({ customAcademicStage: event.target.value })} />}
-          <Field label="Optional goal" value={profile.tagline}
-            onChange={(e) => store.updateProfile({ tagline: e.target.value })} />
-
-          <details className="settings-profile-disclosure">
-            <summary>Legacy targets and reminder time</summary>
-            <p className="sub">These minute/card targets are used only while an existing workspace has not configured Daily requirements. Cards are optional in the new model.</p>
-            <div className="settings-target-grid">
-              <Field label="Legacy card target" type="number" value={String(profile.dailyCardTarget ?? 120)}
-                onChange={(e) => store.updateProfile({ dailyCardTarget: Number(e.target.value) || 0 })} />
-              <Field label="Legacy minute target" type="number" value={String(profile.dailyMinuteTarget ?? 240)}
-                onChange={(e) => store.updateProfile({ dailyMinuteTarget: Number(e.target.value) || 0 })} />
-              <Field label="Journal follow-up time" type="time" value={profile.journalReviewTime ?? "20:00"}
-                onChange={(e) => store.updateProfile({ journalReviewTime: e.target.value || "20:00" })} />
-            </div>
-            <a className="gbtn sm" href="#productivity" onClick={onClose}>Configure daily requirements</a>
-          </details>
-
-          <div className="backup-actions-panel promise-settings-card" style={{ marginTop: 14 }}>
-            <div>
-              <div className="sync-title"><ScrollText size={ICON_SIZE.body} style={{ verticalAlign: -2, marginRight: 6 }} /> Your promise</div>
-              <div className="sub">{promise?.signedName
-                ? `Signed by ${promise.signedName} on ${prettyDate(promise.signedAt)}.`
-                : "You haven't signed your promise yet."}</div>
-            </div>
-            <div className="row wrap gap8">
-              {promise?.signedName && <GButton size="sm" onClick={() => setViewingPromise(true)}><ScrollText size={ICON_SIZE.body} /> View signed promise</GButton>}
-              <GButton size="sm" onClick={() => setResigning(true)}>
-                <ScrollText size={ICON_SIZE.body} /> {promise?.signedName ? "Re-sign promise" : "Sign your promise"}
-              </GButton>
-            </div>
-          </div>
+          <ProfileSection
+            onChangeAvatar={() => avatarRef.current?.click()}
+            onRemoveAvatar={() => store.updateProfile({ avatarDataUrl: undefined })}
+            onViewPromise={() => setViewingPromise(true)}
+            onSignPromise={() => setResigning(true)}
+            onOpenProgram={() => { setPersonalTab("program"); setTab("personalization"); }}
+            onOpenAccount={() => setTab("account")}
+            onClose={onClose}
+          />
+          <input ref={avatarRef} type="file" accept="image/*" hidden
+            onChange={(e) => e.target.files?.[0] && setAvatar(e.target.files[0])} />
         </section>
       )}
 
@@ -284,20 +266,29 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
             <div>
               <div className="sync-title">Local-first workspace</div>
               <div className="sub">
-                Your AXOM workspace is stored on this device. It is not automatically synced to an account or uploaded to the cloud.
-                Changes save locally as you work.
+                Your AXOM workspace is stored on this device and changes save locally as you work.
+                When you deliberately link an account, acknowledged protected versions are also retained remotely.
               </div>
+              <div style={{ marginTop: 8 }}><LastSavedLine /></div>
             </div>
             <Tag tone="green"><ShieldCheck size={ICON_SIZE.microInline} /> On this device</Tag>
           </div>
           <DataHealthPanel />
         </section>
       )}
+      {tab === "account" && <section role="tabpanel" id={`${tabsId}-panel-account`} aria-labelledby={`${tabsId}-tab-account`}><AccountSyncPanel /></section>}
+
+      {tab === "appearance" && (
+        <section role="tabpanel" id={`${tabsId}-panel-appearance`} aria-labelledby={`${tabsId}-tab-appearance`} className="backup-center">
+          <AppearanceStudio />
+          <DevicePreferencePanel />
+        </section>
+      )}
 
       {tab === "backup" && (
         <section role="tabpanel" id={`${tabsId}-panel-backup`} aria-labelledby={`${tabsId}-tab-backup`} className="backup-center">
           <div className="sub" style={{ marginBottom: 4 }}>
-            Automatic local recovery snapshots help protect updates and migrations. Export a backup to keep a portable copy.
+            Signed-in accounts can retain protected server versions. Manual JSON backup remains an emergency portable safety valve.
           </div>
 
           <RecoveryStatusCard
@@ -309,6 +300,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
                 throw new Error("Restore cancelled. No data changed.");
               }
               await restoreLocalWorkspaceBackup(key);
+              recordRestoreEvent({ kind: "snapshot-restore", detail: "Automatic local snapshot" });
               setMsg("Safety snapshot restored. Retry startup to finish recovery.");
               return true;
             }}
@@ -317,8 +309,8 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
 
           <div className="backup-actions-panel">
             <div>
-              <div className="sync-title">Portable backup file</div>
-              <div className="sub">Export a copy you control, or choose a saved AXOM JSON file to restore or merge.</div>
+              <div className="sync-title">Portable emergency copy</div>
+              <div className="sub">Automatic local saving is primary. Export a portable copy you control, or restore or merge a saved AXOM JSON file when recovery is needed.</div>
             </div>
             <div className="row wrap gap8">
               <GButton size="sm" variant="primary" onClick={exportBackup}>
@@ -341,22 +333,12 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
             </div>
           </div>
 
-          <div className="backup-actions-panel">
-            <div className="sync-title">Backup status</div>
-            <div className="data-health-grid">
-              <div className="data-health-cell"><b>{localBackups.length}</b><span className="sub">Automatic snapshots</span></div>
-              <div className="data-health-cell"><b>{localBackups[0] ? formatSettingsDate(localBackups[0].savedAt) : "None yet"}</b><span className="sub">Latest local snapshot</span></div>
-              <div className="data-health-cell"><b>{exportedAt ? formatSettingsDate(exportedAt) : "None yet"}</b><span className="sub">Last exported</span></div>
-              <div className="data-health-cell"><b>Checked on import</b><span className="sub">Portable-file verification</span></div>
-            </div>
-            <details>
-              <summary>How backups work</summary>
-              <div className="sub" style={{ marginTop: 8 }}>
-                The live workspace stays in this browser’s local vault. Automatic snapshots are local safety copies made before storage migrations.
-                An exported JSON file is the portable copy you can keep elsewhere. AXOM currently does not retain a separate restore-history log.
-              </div>
-            </details>
-          </div>
+          <BackupStatusCard
+            snapshotCount={localBackups.length}
+            latestSnapshotAt={localBackups[0]?.savedAt}
+            lastExportedAt={exportedAt ?? undefined}
+          />
+          <RestoreHistoryCard />
 
           {msg && <div className="backup-status" role="status">{msg}</div>}
         </section>
@@ -364,14 +346,24 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
 
       {tab === "personalization" && (
         <section role="tabpanel" id={`${tabsId}-panel-personalization`} aria-labelledby={`${tabsId}-tab-personalization`} className="backup-center">
-          <div className="backup-actions-panel">
-            <div><div className="sync-title">Theme</div><div className="sub">Light, dark, or the current device setting.</div></div>
-            <ThemeToggle />
-          </div>
-          <DailyUtilitiesSettings />
-          <DashboardVisibilitySettings />
-          <DevicePreferencePanel />
-          <PersonalizationPanel />
+          <nav className="settings-subnav" aria-label="Personalization sections">
+            {PERSONALIZATION_SUBSECTIONS.map(({ id, label, detail, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className={personalTab === id ? "on" : ""}
+                aria-current={personalTab === id ? "true" : undefined}
+                onClick={() => setPersonalTab(id)}
+              >
+                <Icon size={ICON_SIZE.body} aria-hidden="true" />
+                <span><b>{label}</b><small>{detail}</small></span>
+              </button>
+            ))}
+          </nav>
+          {personalTab === "study" && <StudyWorkflowSettings />}
+          {personalTab === "rhythm" && <DailyUtilitiesSettings />}
+          {personalTab === "dashboard" && <DashboardVisibilitySettings />}
+          {personalTab === "program" && <PersonalizationPanel />}
         </section>
       )}
 
@@ -412,6 +404,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
               onClick={() => {
                 if (confirm("Reset everything to the starter data? This wipes your current local data.")) {
                   store.resetToSeed();
+                  recordRestoreEvent({ kind: "reset", detail: "Starter data" });
                   setMsg("Reset to starter data.");
                 }
               }}>
@@ -425,6 +418,109 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
       {resigning && <PromiseCutscene onDone={() => setResigning(false)} />}
       {viewingPromise && promise && <PromiseSheet onClose={() => setViewingPromise(false)} />}
     </Modal>
+  );
+}
+
+const STUDY_METHOD_OPTIONS: Array<{ id: StudyMethodId; label: string }> = [
+  { id: "lecture-passes", label: "Lecture passes" }, { id: "practice-questions", label: "Practice questions" },
+  { id: "anki", label: "Anki" }, { id: "quizlet", label: "Quizlet" }, { id: "noji", label: "Noji" },
+  { id: "remnote", label: "RemNote" }, { id: "notes", label: "Notes / concept notes" },
+  { id: "teach-aloud", label: "Teaching aloud / Feynman" }, { id: "recall", label: "Recall sessions" },
+  { id: "external-resource", label: "External resources" }, { id: "custom", label: "Other" },
+];
+
+function StudyWorkflowSettings() {
+  const store = useStore();
+  const workflow = normalizeStudyWorkflow(store.profile.studyWorkflow ?? DEFAULT_STUDY_WORKFLOW);
+  const enabled = new Set((workflow.methods ?? []).filter((method) => method.enabled).map((method) => method.id));
+  function toggle(id: StudyMethodId) {
+    store.updateProfile({ studyWorkflow: toggleStudyMethod(workflow, id) });
+  }
+  function save(patch: Partial<typeof workflow>) {
+    store.updateProfile({ studyWorkflow: { ...workflow, configured: true, ...patch } });
+  }
+  function setKindPasses(kind: "Lecture" | "DLA" | "PQ", lecturePasses: number) {
+    save({ itemKindDefaults: { ...workflow.itemKindDefaults, [kind]: { ...workflow.itemKindDefaults?.[kind], lecturePasses } } });
+  }
+  return (
+    <div className="settings-stack">
+      <section className="settings-card" aria-labelledby="study-methods-title">
+        <div className="settings-card-head">
+          <span className="settings-card-icon"><BookOpen size={ICON_SIZE.body} aria-hidden="true" /></span>
+          <div>
+            <h4 id="study-methods-title">How you study</h4>
+            <p>Pick every method you actually use. AXOM uses this to shape recommendations and follow-ups — it never forces a method (not even Anki).</p>
+          </div>
+        </div>
+        <div className="settings-chip-row" aria-label="Study methods">
+          {STUDY_METHOD_OPTIONS.map((option) => (
+            <button key={option.id} type="button" className={`filter-pill ${enabled.has(option.id) ? "on" : ""}`} aria-pressed={enabled.has(option.id)} onClick={() => toggle(option.id)}>
+              {enabled.has(option.id) && <Check size={ICON_SIZE.microInline} aria-hidden="true" />} {option.label}
+            </button>
+          ))}
+        </div>
+        <StudyMethodFollowUps workflow={workflow} onChange={(studyWorkflow) => store.updateProfile({ studyWorkflow })} />
+      </section>
+
+      <section className="settings-card" aria-labelledby="study-passes-title">
+        <div className="settings-card-head">
+          <span className="settings-card-icon"><RotateCcw size={ICON_SIZE.body} aria-hidden="true" /></span>
+          <div>
+            <h4 id="study-passes-title">Passes &amp; review timing</h4>
+            <p>
+              How many times you usually go through material, and when AXOM should bring it back. Course Tracker items without their own
+              setting use these — a course or single item can always override them.
+            </p>
+          </div>
+        </div>
+        <div className="settings-target-grid">
+          <label className="stack gap6">
+            <span className="field-label">Usual lecture passes</span>
+            <input className="field" type="number" min={1} max={6} value={workflow.lecturePasses ?? 2} onChange={(event) => save({ lecturePasses: Number(event.target.value) })} />
+          </label>
+          <label className="stack gap6">
+            <span className="field-label">Review again after (days)</span>
+            <input className="field" type="number" min={1} max={14} value={workflow.reviewAfterDays ?? 3} onChange={(event) => save({ reviewAfterDays: Number(event.target.value) })} />
+          </label>
+        </div>
+        <div className="settings-kind-defaults">
+          <span className="field-label">Passes by item type</span>
+          <p className="sub">Example: set PQ to 6 if you usually do six rounds of practice questions. Leave a type alone to use your usual passes.</p>
+          <div className="settings-kind-grid">
+            {(["Lecture", "DLA", "PQ"] as const).map((kind) => (
+              <label className="settings-kind" key={kind}>
+                <b>{kind}</b>
+                <input
+                  className="field"
+                  aria-label={`${kind} default passes`}
+                  type="number"
+                  min={1}
+                  max={6}
+                  value={workflow.itemKindDefaults?.[kind]?.lecturePasses ?? workflow.lecturePasses ?? 2}
+                  onChange={(event) => setKindPasses(kind, Number(event.target.value))}
+                />
+                <small>{workflow.itemKindDefaults?.[kind]?.lecturePasses ? "Custom" : "Uses usual"}</small>
+              </label>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="settings-card" aria-labelledby="study-words-title">
+        <div className="settings-card-head">
+          <span className="settings-card-icon"><Sparkles size={ICON_SIZE.body} aria-hidden="true" /></span>
+          <div>
+            <h4 id="study-words-title">In your own words</h4>
+            <p>Anything the options above miss. AXOM keeps this text exactly as written. Suggestions below come from fixed word rules (not AI), are shown for you to confirm, and are never applied automatically.</p>
+          </div>
+        </div>
+        <label className="stack gap6">
+          <span className="field-label">Other — tell AXOM how you study</span>
+          <textarea className="field" rows={3} value={workflow.customContext ?? ""} placeholder="e.g. First pass on lecture day, Anki that night, a week later I redo the PQs." onChange={(event) => save({ customContext: event.target.value })} />
+        </label>
+        <StudyTextSuggestions workflow={workflow} onApply={(studyWorkflow) => store.updateProfile({ studyWorkflow })} />
+      </section>
+    </div>
   );
 }
 
@@ -471,42 +567,18 @@ function DailyUtilitiesSettings() {
   }
 
   return (
-    <details className="backup-actions-panel" open>
-      <summary>Daily utilities</summary>
-      <div className="stack" style={{ gap: 12, marginTop: 10 }}>
-        <div className="settings-utility-row">
-          <div>
-            <div className="sync-title"><Gamepad2 size={ICON_SIZE.body} /> Daily Games</div>
-            <div className="sub">Optional Daily Word and Doctordle WIP folder. Disabling it hides navigation and preserves history.</div>
-          </div>
-          <label className="settings-inline-toggle">
-            <input
-              type="checkbox"
-              checked={profile.experimentalFlags?.dailyGames === true}
-              onChange={(event) => updateProfile({
-                experimentalFlags: { ...(profile.experimentalFlags ?? {}), dailyGames: event.target.checked },
-              })}
-            />
-            <span>Enable Daily Games</span>
-          </label>
-        </div>
+    <div className="settings-stack">
+      <FocusCheckInSettings />
 
-        <div className="settings-utility-row">
+      <section className="settings-card" aria-labelledby="rhythm-reminders-title">
+        <div className="settings-card-head">
+          <span className="settings-card-icon"><Bell size={ICON_SIZE.body} aria-hidden="true" /></span>
           <div>
-            <div className="sync-title"><Clock3 size={ICON_SIZE.body} /> Clock</div>
-            <div className="sub">Compact TopBar time with an optional analog popover. Only preferences persist; current time never does.</div>
+            <h4 id="rhythm-reminders-title">Daily rhythm reminders</h4>
+            <p>Optional in-app prompts use this device's local time. Each enabled prompt appears at most once per day unless you choose Snooze.</p>
           </div>
-          <label className="settings-inline-toggle">
-            <input type="checkbox" checked={clock.enabled} onChange={(event) => updateClock({ enabled: event.target.checked })} />
-            <span>Show clock</span>
-          </label>
         </div>
-
-        <fieldset className="settings-timezone-fieldset settings-reminder-fieldset">
-          <legend>Daily rhythm reminders</legend>
-          <div className="sub">
-            Optional in-app prompts use this device's local time. Each enabled prompt appears at most once per day unless you choose Snooze.
-          </div>
+        <div className="settings-reminder-list">
           <div className="settings-reminder-row">
             <div>
               <div className="sync-title">Daily Check-In</div>
@@ -558,7 +630,7 @@ function DailyUtilitiesSettings() {
           <div className="settings-reminder-row settings-reminder-quiet-hours">
             <div>
               <div className="sync-title">Quiet hours</div>
-              <div className="sub">Pause prompts in this device-local window. A pending prompt can resume later the same day, but never carries into a new day.</div>
+              <div className="sub">No prompts or check-ins in this window. A pending prompt can resume later the same day, but never carries into a new day.</div>
             </div>
             <label className="settings-inline-toggle">
               <input
@@ -591,9 +663,22 @@ function DailyUtilitiesSettings() {
               </label>
             </div>
           </div>
-        </fieldset>
+        </div>
+      </section>
 
-        <div className="settings-compact-grid" aria-label="Clock display preferences">
+      <section className="settings-card" aria-labelledby="rhythm-clock-title">
+        <div className="settings-card-head">
+          <span className="settings-card-icon"><Clock3 size={ICON_SIZE.body} aria-hidden="true" /></span>
+          <div>
+            <h4 id="rhythm-clock-title">Clock</h4>
+            <p>The time in the top bar, with an optional analog clock when you click it. Only preferences are saved — never the time itself.</p>
+          </div>
+          <label className="settings-switch">
+            <input type="checkbox" checked={clock.enabled} onChange={(event) => updateClock({ enabled: event.target.checked })} />
+            <span>Show clock</span>
+          </label>
+        </div>
+        <div className={`settings-compact-grid ${clock.enabled ? "" : "muted"}`} aria-label="Clock display preferences">
           <label><input type="checkbox" checked={clock.showDigital} onChange={(event) => updateClock({ showDigital: event.target.checked })} /> Digital time</label>
           <label><input type="checkbox" checked={clock.showAnalog} onChange={(event) => updateClock({ showAnalog: event.target.checked })} /> Analog popover</label>
           <label><input type="checkbox" checked={clock.showDigitalSeconds} onChange={(event) => updateClock({ showDigitalSeconds: event.target.checked })} /> Digital seconds</label>
@@ -608,7 +693,16 @@ function DailyUtilitiesSettings() {
             </select>
           </label>
         </div>
+      </section>
 
+      <section className="settings-card" aria-labelledby="rhythm-timezone-title">
+        <div className="settings-card-head">
+          <span className="settings-card-icon"><Globe2 size={ICON_SIZE.body} aria-hidden="true" /></span>
+          <div>
+            <h4 id="rhythm-timezone-title">Timezone</h4>
+            <p>Shared by the clock, reminders, and Daily Word. Daily Word locks the timezone when a puzzle starts.</p>
+          </div>
+        </div>
         <fieldset className="settings-timezone-fieldset">
           <legend>Shared timezone</legend>
           <div className="row wrap gap8">
@@ -630,19 +724,18 @@ function DailyUtilitiesSettings() {
             <GButton size="sm" onClick={saveCustomTimeZone}>Apply timezone</GButton>
           </div>
           {timeZoneError && <div className="field-error" id={timeZoneErrorId} role="alert">{timeZoneError}</div>}
-          <div className="sub">Daily Word locks this timezone when a puzzle starts. Changing it never replaces an active puzzle.</div>
         </fieldset>
+      </section>
 
-        {puzzleCount > 0 && (
-          <div className="settings-utility-row danger-zone">
-            <div><div className="sync-title">Daily Word history</div><div className="sub">{puzzleCount} local puzzle record{puzzleCount === 1 ? "" : "s"}. This reset does not affect courses, tasks, or other AXOM data.</div></div>
-            <GButton size="sm" variant="danger" onClick={() => {
-              if (confirm("Reset Daily Word history and statistics on this device? No other AXOM data will change.")) resetDailyWordPuzzles();
-            }}><Trash2 size={ICON_SIZE.body} /> Reset Daily Word</GButton>
-          </div>
-        )}
-      </div>
-    </details>
+      {puzzleCount > 0 && (
+        <div className="settings-utility-row danger-zone">
+          <div><div className="sync-title">Daily Word history</div><div className="sub">{puzzleCount} local puzzle record{puzzleCount === 1 ? "" : "s"}. This reset does not affect courses, tasks, or other AXOM data.</div></div>
+          <GButton size="sm" variant="danger" onClick={() => {
+            if (confirm("Reset Daily Word history and statistics on this device? No other AXOM data will change.")) resetDailyWordPuzzles();
+          }}><Trash2 size={ICON_SIZE.body} /> Reset Daily Word</GButton>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -669,9 +762,14 @@ function DashboardVisibilitySettings() {
     });
   }
   return (
-    <details className="backup-actions-panel">
-      <summary>Dashboard widgets</summary>
-      <div className="sub" style={{ margin: "8px 0" }}>Choose what appears on the dashboard. This changes presentation only.</div>
+    <section className="settings-card" aria-labelledby="dashboard-widgets-title">
+      <div className="settings-card-head">
+        <span className="settings-card-icon"><LayoutGrid size={ICON_SIZE.body} aria-hidden="true" /></span>
+        <div>
+          <h4 id="dashboard-widgets-title">Dashboard widgets</h4>
+          <p>Choose what appears on the dashboard. This changes presentation only — hiding a widget never deletes data. Use “Edit dashboard” for sizes and order.</p>
+        </div>
+      </div>
       <div className="settings-widget-grid">
         {CURRENT_DASHBOARD_WIDGET_IDS.filter((id) => id !== "welcome" && id !== "commandBrief").map((id) => (
           <label className="early-feature-row" key={id}>
@@ -680,31 +778,28 @@ function DashboardVisibilitySettings() {
           </label>
         ))}
       </div>
-    </details>
+    </section>
   );
 }
 
 function DevicePreferencePanel() {
-  const [permission, setPermission] = useState(() => typeof Notification === "undefined" ? "unavailable" : Notification.permission);
-  const reducedMotion = typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const [permission, requestPermission] = useNotificationPermission();
   async function requestNotifications() {
-    if (typeof Notification === "undefined") return;
-    setPermission(await Notification.requestPermission());
+    await requestPermission();
   }
+  const label = permission === "granted" ? "On" : permission === "denied" ? "Blocked in browser settings" : permission === "unavailable" ? "Not supported here" : "Not enabled yet";
   return (
-    <div className="backup-actions-panel">
-      <div>
-        <div className="sync-title"><Bell size={ICON_SIZE.body} style={{ verticalAlign: -2, marginRight: 6 }} /> Device preferences</div>
-        <div className="sub">Reduced motion: <b>{reducedMotion ? "On" : "Off"}</b> (follows this device). Focus-timer notifications: <b>{permission}</b>.</div>
+    <section className="settings-card" aria-labelledby="device-notifications-title">
+      <div className="settings-card-head">
+        <span className="settings-card-icon"><Bell size={ICON_SIZE.body} aria-hidden="true" /></span>
+        <div>
+          <h4 id="device-notifications-title">System notifications</h4>
+          <p>Lets focus timers and lock-in check-ins reach you while AXOM is in the background. Status on this device: <b>{label}</b>.</p>
+        </div>
+        {permission === "default" && <GButton size="sm" onClick={requestNotifications}>Enable notifications</GButton>}
       </div>
-      {permission === "default" && <GButton size="sm" onClick={requestNotifications}>Enable focus-timer notifications</GButton>}
-    </div>
+    </section>
   );
-}
-
-function formatSettingsDate(value: string) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "Unknown" : date.toLocaleDateString([], { dateStyle: "medium" });
 }
 
 const PROMISE_LINES = [
@@ -799,97 +894,111 @@ function PersonalizationPanel() {
   }
 
   return (
-    <div className="backup-center">
-      <div className="backup-actions-panel premium-panel">
-        <div>
-          <div className="sync-title">Program: {track.label}</div>
-          <div className="sub">
-            Current focus: <b>{activeFocus?.label ?? "Custom"}</b>. Your program controls starter courses,
-            visible resources, and study lanes. Switching it never deletes existing data.
+    <div className="settings-stack">
+      <section className="settings-card" aria-labelledby="program-title">
+        <div className="settings-card-head">
+          <span className="settings-card-icon"><GraduationCap size={ICON_SIZE.body} aria-hidden="true" /></span>
+          <div>
+            <h4 id="program-title">Program: {track.label}</h4>
+            <p>Your program controls starter courses, visible resources, and study lanes. Switching never deletes existing data.</p>
           </div>
+          <GButton size="sm" onClick={requestOnboardingRerun}>
+            <Sparkles size={ICON_SIZE.body} /> Run setup again
+          </GButton>
         </div>
-        <GButton size="sm" variant="primary" onClick={requestOnboardingRerun}>
-          <Sparkles size={ICON_SIZE.body} /> Run setup again
-        </GButton>
-      </div>
-
-      <div className="backup-actions-panel premium-panel">
-        <div>
-          <div className="sync-title">Early Features <Tag tone="orange">Labs</Tag></div>
-          <div className="sub">
-            Opt into experimental surfaces still under active development. They can change, move, or be removed
-            between releases — your data stays local either way.
-          </div>
-          <label className="early-feature-row">
-            <input
-              type="checkbox"
-              checked={profile.experimentalFlags?.habits === true}
-              onChange={(e) => store.updateProfile({
-                experimentalFlags: { ...(profile.experimentalFlags ?? {}), habits: e.target.checked },
-              })}
-            />
-            <span><b>Habit Tracker</b> — calm, recovery-friendly habit tracking. Adds a “Habit Tracker” entry under Tools.</span>
-          </label>
-        </div>
-      </div>
-
-      <div className="track-settings-grid">
-        {EDUCATION_TRACKS.map((t) => {
-          const current = t.id === track.id;
-          return (
-            <button key={t.id} type="button" className={`track-setting-card ${current ? "on" : ""}`}
-              onClick={() => chooseTrack(t.id)}>
-              <div className="spread">
-                <b>{t.short}</b>
-                {current ? <Tag tone="cyan">Current</Tag> : t.status === "planned" ? <Tag tone="orange">Lighter</Tag> : null}
-              </div>
-              <small>{t.program}</small>
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="backup-actions-panel">
-        <div>
-          <div className="sync-title"><HardDrive size={ICON_SIZE.body} style={{ verticalAlign: -2, marginRight: 6 }} /> SGU shared drives</div>
-          <div className="sub">Show SGU-specific drives on the Resources page. Your personal drive and universal board packs always stay.</div>
-        </div>
-        <button type="button" className={`onboarding-switch ${showSgu ? "on" : ""}`}
-          onClick={() => store.updateProfile({ showSguResources: !showSgu })}
-          aria-label="Show SGU shared drives" title={showSgu ? "SGU drives shown" : "SGU drives hidden"}>
-          <span />
-        </button>
-      </div>
-
-      <div className="backup-actions-panel">
-        <div>
-          <div className="sync-title">Starter structure</div>
-          <div className="sub">{track.progress.summary}</div>
-        </div>
-        <GButton size="sm" onClick={loadStarter}><Sparkles size={ICON_SIZE.body} /> Load {track.short} structure</GButton>
-      </div>
-
-      <div className="focus-settings-grid">
-        {laneOptions.map((option) => {
-          const subscribed = subscriptions.includes(option.id);
-          const primary = activeFocusId === option.id;
-          return (
-            <div key={option.id} className={`focus-setting-row ${primary ? "primary" : ""}`}>
-              <button type="button" className={`focus-check ${subscribed ? "on" : ""}`} onClick={() => toggleFocus(option.id)} title="Toggle subscription">
-                {subscribed && <Check size={ICON_SIZE.microInline} />}
+        <div className="track-settings-grid">
+          {EDUCATION_TRACKS.map((t) => {
+            const current = t.id === track.id;
+            return (
+              <button key={t.id} type="button" className={`track-setting-card ${current ? "on" : ""}`}
+                aria-pressed={current}
+                onClick={() => chooseTrack(t.id)}>
+                <div className="spread">
+                  <b>{t.short}</b>
+                  {current ? <Tag tone="cyan">Current</Tag> : t.status === "planned" ? <Tag tone="orange">Lighter</Tag> : null}
+                </div>
+                <small>{t.program}</small>
               </button>
-              <div className="grow">
-                <b>{option.label}</b>
-                <span>{option.blurb}</span>
+            );
+          })}
+        </div>
+        <div className="settings-inline-row">
+          <div>
+            <div className="sync-title">Starter structure</div>
+            <div className="sub">{track.progress.summary}</div>
+          </div>
+          <GButton size="sm" onClick={loadStarter}><Sparkles size={ICON_SIZE.body} /> Load {track.short} structure</GButton>
+        </div>
+      </section>
+
+      <section className="settings-card" aria-labelledby="lanes-title">
+        <div className="settings-card-head">
+          <span className="settings-card-icon"><Check size={ICON_SIZE.body} aria-hidden="true" /></span>
+          <div>
+            <h4 id="lanes-title">Focus lanes</h4>
+            <p>
+              Current primary: <b>{activeFocus?.label ?? "Custom"}</b>. Check the lanes you follow; “Make primary” sets your main focus and
+              default targets. The Course Tracker lets you narrow to one term, course, or section inside a lane.
+            </p>
+          </div>
+        </div>
+        <div className="focus-settings-grid">
+          {laneOptions.map((option) => {
+            const subscribed = subscriptions.includes(option.id);
+            const primary = activeFocusId === option.id;
+            return (
+              <div key={option.id} className={`focus-setting-row ${primary ? "primary" : ""}`}>
+                <button type="button" className={`focus-check ${subscribed ? "on" : ""}`} onClick={() => toggleFocus(option.id)} title="Toggle subscription" aria-pressed={subscribed} aria-label={`Follow ${option.label}`}>
+                  {subscribed && <Check size={ICON_SIZE.microInline} />}
+                </button>
+                <div className="grow">
+                  <b>{option.label}</b>
+                  <span>{option.blurb}</span>
+                </div>
+                <Tag tone={option.group === "SGU Terms" ? "cyan" : option.group === "Boards" ? "purple" : "green"}>{option.group}</Tag>
+                <GButton size="sm" onClick={() => makePrimary(option.id)} disabled={primary}>
+                  {primary ? "Primary" : "Make primary"}
+                </GButton>
               </div>
-              <Tag tone={option.group === "SGU Terms" ? "cyan" : option.group === "Boards" ? "purple" : "green"}>{option.group}</Tag>
-              <GButton size="sm" onClick={() => makePrimary(option.id)} disabled={primary}>
-                {primary ? "Primary" : "Make primary"}
-              </GButton>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="settings-card" aria-labelledby="resources-title">
+        <div className="settings-card-head">
+          <span className="settings-card-icon"><HardDrive size={ICON_SIZE.body} aria-hidden="true" /></span>
+          <div>
+            <h4 id="resources-title">SGU shared drives</h4>
+            <p>Show SGU-specific drives on the Resources page. Your personal drive and universal board packs always stay.</p>
+          </div>
+          <button type="button" className={`onboarding-switch ${showSgu ? "on" : ""}`}
+            onClick={() => store.updateProfile({ showSguResources: !showSgu })}
+            aria-label="Show SGU shared drives" aria-pressed={showSgu} title={showSgu ? "SGU drives shown" : "SGU drives hidden"}>
+            <span />
+          </button>
+        </div>
+      </section>
+
+      <section className="settings-card" aria-labelledby="labs-title">
+        <div className="settings-card-head">
+          <span className="settings-card-icon"><Sparkles size={ICON_SIZE.body} aria-hidden="true" /></span>
+          <div>
+            <h4 id="labs-title">Early features <Tag tone="orange">Labs</Tag></h4>
+            <p>Opt into surfaces still under active development. They can change between releases — your data stays either way.</p>
+          </div>
+        </div>
+        <label className="early-feature-row">
+          <input
+            type="checkbox"
+            checked={profile.experimentalFlags?.habits === true}
+            onChange={(e) => store.updateProfile({
+              experimentalFlags: { ...(profile.experimentalFlags ?? {}), habits: e.target.checked },
+            })}
+          />
+          <span><b>Habit Tracker</b> — calm, recovery-friendly habit tracking. Adds a “Habit Tracker” entry under Tools.</span>
+        </label>
+      </section>
     </div>
   );
 }

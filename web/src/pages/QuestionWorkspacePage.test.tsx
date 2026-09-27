@@ -1,12 +1,23 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { indexedDB as fakeIndexedDb, IDBKeyRange } from "fake-indexeddb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { QuestionSet } from "../lib/library";
 import type { QuestionRecord } from "../lib/questions";
 import type { QuizSession } from "../lib/quiz";
 import { useStore } from "../lib/store";
 import { QuestionWorkspacePage } from "./QuestionWorkspacePage";
+
+const localValues = new Map<string, string>();
+const localStorageStub: Storage = {
+  get length() { return localValues.size; },
+  clear: () => localValues.clear(),
+  getItem: (key) => localValues.get(key) ?? null,
+  key: (index) => [...localValues.keys()][index] ?? null,
+  removeItem: (key) => { localValues.delete(key); },
+  setItem: (key, value) => { localValues.set(key, String(value)); },
+};
 
 function question(patch: Partial<QuestionRecord>): QuestionRecord {
   return {
@@ -48,18 +59,22 @@ const session: QuizSession = {
   answers: [],
 };
 
-beforeEach(() => {
+beforeEach(async () => {
+  localValues.clear();
+  vi.stubGlobal("indexedDB", fakeIndexedDb);
+  vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+  vi.stubGlobal("localStorage", localStorageStub);
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
     callback(0);
     return 1;
   });
-  useStore.setState({ questions: [], questionSets: [], documents: [], quizSessions: [], quizBlocks: [] });
+  await useStore.setState({ questions: [], questionSets: [], documents: [], quizSessions: [], quizBlocks: [] });
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  await useStore.setState({ questions: [], questionSets: [], documents: [], quizSessions: [], quizBlocks: [] });
   vi.unstubAllGlobals();
-  useStore.setState({ questions: [], questionSets: [], documents: [], quizSessions: [], quizBlocks: [] });
 });
 
 describe("QuestionWorkspacePage first use", () => {
@@ -86,9 +101,36 @@ describe("QuestionWorkspacePage first use", () => {
     render(<QuestionWorkspacePage />);
 
     await user.click(screen.getByRole("button", { name: "Paste text" }));
-    expect(screen.getByRole("heading", { name: "Paste & inspect" })).toBeTruthy();
-    expect(screen.getByLabelText(/Paste one question or a whole numbered set/)).toBeTruthy();
-    expect((screen.getByRole("button", { name: "Extract & inspect" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("heading", { name: "Import questions" })).toBeTruthy();
+    expect(screen.getByLabelText("Structured question text")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Parse and review" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("finalizes reviewed pasted text and routes to the reachable saved set", async () => {
+    const user = userEvent.setup();
+    render(<QuestionWorkspacePage />);
+
+    await user.click(screen.getByRole("button", { name: "Paste text" }));
+    await user.type(screen.getByLabelText("Structured question text"), [
+      "1. Which option is correct?",
+      "A. Alpha",
+      "B. Beta",
+      "Answer: B",
+      "Explanation: Beta follows from the source.",
+    ].join("\n"));
+    await user.click(screen.getByRole("button", { name: "Parse and review" }));
+    await user.click(screen.getByRole("button", { name: "Finalize import" }));
+
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Question Sets (1)" }).getAttribute("aria-selected")).toBe("true"));
+    const state = useStore.getState();
+    expect(state.questions).toHaveLength(1);
+    expect(state.questions[0]).toMatchObject({
+      source: "pasted",
+      correctKey: "B",
+      correctAnswerText: "Beta",
+      explanation: "Beta follows from the source.",
+    });
+    expect(screen.getByRole("heading", { name: state.questionSets[0].title })).toBeTruthy();
   });
 
   it("opens a same-route, missing-target-safe Question Bank tour", async () => {
@@ -303,7 +345,7 @@ describe("QuestionWorkspacePage returning state", () => {
     expect(screen.getByRole("button", { name: "Import questions" })).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: /Begin/ }));
-    expect(screen.getByRole("heading", { name: "Paste & inspect" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Import questions" })).toBeTruthy();
     expect(screen.queryByRole("dialog", { name: /Tutor/ })).toBeNull();
   });
 });

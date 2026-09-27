@@ -4,6 +4,10 @@
     "path": "design/startup/axom-ident-geometry.json",
     "sha256": "ab5fc6773846553673738d6c70825a28ef34f53dcda3a9736f71f6ef70ecd728"
   },
+  "catalog": {
+    "path": "web/src/data/cinematics.json",
+    "film": "brand-ident"
+  },
   "fps": 30,
   "frames": 210,
   "durationSeconds": 7.0,
@@ -68,9 +72,9 @@
       "sha256": "e501dc1e388866b4e08736def3de43abb1095b0e9d656b47d3dd570ecef5b5cb"
     },
     {
-      "path": "web/public/startup/axom-ident-poster.png",
-      "bytes": 9560,
-      "sha256": "5553048427c60b3f331661b3e26939dd821613878de16800c694807b2d84bac3"
+      "path": "web/public/startup/axom-ident-poster.jpg",
+      "bytes": 17195,
+      "sha256": "107792f5b01a6aacdcdbeb9b5723d337b9c14fc12d1824507f701749a5f6e8e4"
     }
   ]
 }

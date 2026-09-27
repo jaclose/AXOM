@@ -19,16 +19,20 @@ const bank: QuestionRecord[] = [
   q({ id: "2", stem: "Renal tubule", tags: ["renal"], difficulty: "easy", status: "correct", attempts: [{ status: "correct", at: "x" } as never], reviewDueAt: "2026-07-17T00:00:00.000Z", notes: "review this" }),
   q({ id: "3", stem: "Ethics scenario", tags: ["ethics", "high-yield"], difficulty: "medium", status: "unseen", attempts: [], attachments: [{ id: "a", fileName: "f.png", mimeType: "image/png", byteSize: 1, altText: "", createdAt: "x", updatedAt: "x", blobKey: "a" }] }),
   q({ id: "4", stem: "Micro basics", tags: ["microbiology"], status: "unseen", attempts: [], source: "manual" }),
+  q({ id: "5", stem: "Other", explanation: "Loop diuretics block NKCC", objective: "Manage pulmonary edema", bank: "BPM week 7", status: "unseen" }),
 ];
 
 describe("applyQuestionFilter", () => {
   it("empty criteria returns all, order preserved", () => {
-    expect(applyQuestionFilter(bank, {}, NOW).map((x) => x.id)).toEqual(["1", "2", "3", "4"]);
+    expect(applyQuestionFilter(bank, {}, NOW).map((x) => x.id)).toEqual(["1", "2", "3", "4", "5"]);
   });
   it("search matches stem, tags, and notes", () => {
     expect(applyQuestionFilter(bank, { search: "cardiac" }, NOW).map((x) => x.id)).toEqual(["1"]);
     expect(applyQuestionFilter(bank, { search: "high-yield" }, NOW).map((x) => x.id)).toEqual(["1", "3"]);
     expect(applyQuestionFilter(bank, { search: "review this" }, NOW).map((x) => x.id)).toEqual(["2"]);
+    expect(applyQuestionFilter(bank, { search: "nkcc" }, NOW).map((x) => x.id)).toEqual(["5"]);
+    expect(applyQuestionFilter(bank, { search: "pulmonary edema" }, NOW).map((x) => x.id)).toEqual(["5"]);
+    expect(applyQuestionFilter(bank, { search: "bpm week" }, NOW).map((x) => x.id)).toEqual(["5"]);
   });
   it("tags ALL vs ANY", () => {
     expect(applyQuestionFilter(bank, { tags: ["high-yield", "ethics"], tagMatch: "all" }, NOW).map((x) => x.id)).toEqual(["3"]);
@@ -38,7 +42,7 @@ describe("applyQuestionFilter", () => {
     expect(applyQuestionFilter(bank, { tags: ["high-yield"], difficulty: ["hard"], incorrect: true }, NOW).map((x) => x.id)).toEqual(["1"]);
   });
   it("answered/unanswered", () => {
-    expect(applyQuestionFilter(bank, { answered: false }, NOW).map((x) => x.id)).toEqual(["3", "4"]);
+    expect(applyQuestionFilter(bank, { answered: false }, NOW).map((x) => x.id)).toEqual(["3", "4", "5"]);
     expect(applyQuestionFilter(bank, { answered: true }, NOW).map((x) => x.id)).toEqual(["1", "2"]);
   });
   it("boolean facets: bookmarked, reviewDue, hasAttachment, hasNotes", () => {

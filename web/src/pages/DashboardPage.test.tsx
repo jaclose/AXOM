@@ -9,8 +9,6 @@ import {
 } from "../lib/seed";
 import { useStore } from "../lib/store";
 import { DashboardPage } from "./DashboardPage";
-import { STORAGE_KEYS } from "../lib/brand";
-import { AXOM_QUOTES } from "../data/quotes";
 
 const localValues = new Map<string, string>();
 const memoryLocalStorage = {
@@ -45,43 +43,11 @@ afterEach(() => {
 });
 
 describe("DashboardPage declutter", () => {
-  it("renders a stable, non-guilt quote with honest attribution and user-controlled actions", () => {
-    render(<DashboardPage />);
-    const region = screen.getByRole("region", { name: "Daily quote" });
-    const firstText = region.querySelector("blockquote")?.textContent ?? "";
-    const source = AXOM_QUOTES.find((quote) => firstText.includes(quote.text));
-    expect(source).toBeTruthy();
-    expect(source?.guilt).toBe(false);
-    expect(withinRegion(region, source!.author)).toBeTruthy();
-    expect(screen.getByText(attributionText(source!.attributionStatus))).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: "Next quote" }));
-    expect(region.querySelector("blockquote")?.textContent).not.toBe(firstText);
-    fireEvent.click(screen.getByRole("button", { name: "Favorite quote" }));
-    expect(screen.getByRole("button", { name: "Remove favorite quote" }).getAttribute("aria-pressed")).toBe("true");
-    expect(localStorage.getItem(STORAGE_KEYS.quotePreferences)).toContain("favoriteQuoteIds");
-
-    const beforeHide = region.querySelector("blockquote")?.textContent;
-    fireEvent.click(screen.getByRole("button", { name: "Hide this quote" }));
-    expect(region.querySelector("blockquote")?.textContent).not.toBe(beforeHide);
-  });
-
-  it("keeps guilt/shame off by default and exposes bounded quote preferences", () => {
-    render(<DashboardPage />);
-    fireEvent.click(screen.getByRole("button", { name: "Quote settings" }));
-    expect((screen.getByLabelText("Include guilt/shame category") as HTMLInputElement).checked).toBe(false);
-    fireEvent.click(screen.getByLabelText("Show daily quote"));
-    expect(screen.getByText("Daily quote hidden")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Show quote" }));
-    expect(screen.getByRole("region", { name: "Daily quote" }).querySelector("blockquote")).toBeTruthy();
-  });
-
-  it("keeps welcome first and quote second for a clean 390px structural stack", () => {
-    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+  it("leaves the daily quote to the top bar instead of duplicating it on the dashboard", () => {
     const { container } = render(<DashboardPage />);
-    const welcome = container.querySelector(".alpha-build-copy")!;
-    const quote = container.querySelector(".dashboard-quote")!;
-    expect(welcome.compareDocumentPosition(quote) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(container.querySelector(".alpha-build-copy")).toBeTruthy();
+    expect(container.querySelector(".dashboard-quote")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Daily quote" })).toBeNull();
     expect(screen.queryByText("Welcome, JD", { exact: true })).toBeNull();
   });
 
@@ -143,7 +109,8 @@ describe("DashboardPage declutter", () => {
   it("removes primary diagnostics and the duplicated five-card stat row", () => {
     const { container } = render(<DashboardPage />);
     expect(screen.getByText("Today's targets")).toBeTruthy();
-    expect(screen.getByText("No targets selected")).toBeTruthy();
+    expect(screen.getByText("Decide what makes a day count")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Choose targets" }).getAttribute("href")).toBe("#productivity");
     expect(screen.queryByText(/Schema 32/)).toBeNull();
     expect(screen.queryByText(/Version v/)).toBeNull();
     expect(screen.queryByText(/active map nodes/)).toBeNull();
@@ -159,15 +126,3 @@ describe("DashboardPage declutter", () => {
     expect(useStore.getState().tracker.length).toBeGreaterThan(0);
   });
 });
-
-function withinRegion(region: HTMLElement, text: string) {
-  return [...region.querySelectorAll("span")].find((element) => element.textContent === text);
-}
-
-function attributionText(status: (typeof AXOM_QUOTES)[number]["attributionStatus"]) {
-  if (status === "axom-original") return "AXOM original";
-  if (status === "commonly-attributed") return "Commonly attributed";
-  if (status === "paraphrased") return "Paraphrased";
-  if (status === "verified") return "Verified";
-  return "Attribution unverified";
-}

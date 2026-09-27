@@ -125,4 +125,18 @@ describe("cleanExplanationText", () => {
       "extract-answer-rationale",
     ]));
   });
+
+  it("recognizes Reasoning as an explanation heading without flattening multiline prose", () => {
+    const result = sanitizeExplanationCandidate([
+      "Reasoning: Sensitized T cells coordinate the delayed response.",
+      "Macrophage activation then produces the tissue reaction.",
+    ].join("\n"), ppdQuestion);
+
+    expect(result.cleanedText).toBe([
+      "Sensitized T cells coordinate the delayed response.",
+      "Macrophage activation then produces the tissue reaction.",
+    ].join("\n"));
+    expect(result.cleanupOperations).toContain("remove-explanation-label");
+    expect(result.confidence).toBeGreaterThanOrEqual(0.9);
+  });
 });

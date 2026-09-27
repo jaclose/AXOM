@@ -20,6 +20,7 @@ export type ExplanationCleanupOperation =
   | "remove-source-metadata"
   | "stop-at-answer-key"
   | "stop-at-next-question"
+  | "ambiguous-question-boundary"
   | "remove-duplicate-line";
 
 export interface ExplanationCleanupResult {
@@ -33,7 +34,10 @@ export interface ExplanationCleanupResult {
   confidence: number;
 }
 
-const EXPLANATION_MARKER_RE = /(?:^|\s)(correct\s+feedback|feedback|answer\s+explanation|explanation|rationale|discussion|teaching\s+point|key\s+concept|why)\s*[:\-–]\s*/i;
+// "Reasoning" is intentionally line-leading only. Treating it as a generic
+// mid-line marker truncates legitimate prose such as "Clinical reasoning: …".
+// A supported heading may also appear alone on a line without punctuation.
+const EXPLANATION_MARKER_RE = /(?:(?:^|\n)[ \t]*(?:correct\s+feedback|feedback|answer\s+explanation|explanation|rationale|reasoning|discussion|teaching\s+point|key\s+concept|why)[ \t]*[:\-–][ \t]*|(?:^|\n)[ \t]*(?:correct\s+feedback|feedback|answer\s+explanation|explanation|rationale|reasoning|discussion|teaching\s+point|key\s+concept|why)[ \t]*(?=\n|$)|(?:^|[ \t])(?:correct\s+feedback|feedback|answer\s+explanation|explanation|rationale|discussion|teaching\s+point|key\s+concept|why)[ \t]*[:\-–][ \t]*)/i;
 const OBJECTIVE_LINE_RE = /^\s*(?:objectives?|learning\s+objectives?|this\s+question\s+addresses\s+objectives?)\s*[:\-–]/i;
 const SOURCE_LINE_RE = /^\s*(?:source|references?|citation)\s*[:\-–]/i;
 const OPTION_LINE_RE = /^\s*\(?([A-H])\)?[).:\-–]\s*(.*)$/i;
@@ -65,16 +69,20 @@ function addOperation(operations: ExplanationCleanupOperation[], operation: Expl
 }
 
 /** A numbered line is a new question only when nearby sequential options support it. */
-function startsQuestion(lines: string[], index: number): boolean {
-  if (!NUMBERED_LINE_RE.test(lines[index] ?? "")) return false;
+function startsQuestion(lines: string[], index: number): { ambiguous: boolean } | undefined {
+  if (!NUMBERED_LINE_RE.test(lines[index] ?? "")) return undefined;
+  const strongLabel = /^\s*(?:q(?:uestion)?)\s*\d{1,4}\b/i.test(lines[index] ?? "");
+  const separated = index > 0 && !(lines[index - 1] ?? "").trim();
   const optionKeys: string[] = [];
   for (let cursor = index + 1; cursor < lines.length && cursor <= index + 12; cursor += 1) {
     if (NUMBERED_LINE_RE.test(lines[cursor] ?? "")) break;
     const option = lines[cursor]?.match(OPTION_LINE_RE);
     if (option) optionKeys.push(option[1].toUpperCase());
-    if (optionKeys.includes("A") && optionKeys.includes("B")) return true;
+    if (optionKeys.includes("A") && optionKeys.includes("B")) {
+      return { ambiguous: !strongLabel && !separated };
+    }
   }
-  return false;
+  return undefined;
 }
 
 /**
@@ -124,8 +132,10 @@ export function sanitizeExplanationCandidate(
       addOperation(operations, "stop-at-answer-key");
       break;
     }
-    if (startsQuestion(lines, index)) {
+    const questionBoundary = startsQuestion(lines, index);
+    if (questionBoundary) {
       addOperation(operations, "stop-at-next-question");
+      if (questionBoundary.ambiguous) addOperation(operations, "ambiguous-question-boundary");
       break;
     }
 
@@ -167,7 +177,16 @@ export function sanitizeExplanationCandidate(
       }
     }
 
-    if (ANSWER_LINE_RE.test(line)) {
+    const answerLine = line.match(ANSWER_LINE_RE);
+    if (answerLine) {
+      const explicitKeyPayload = /^\(?[A-H]\)?(?:\s*$|\s*[).:\-–—]\s*)/i.test(answerLine[1].trim());
+      // Inside an explicitly labelled explanation, an Answer:-prefixed prose
+      // sentence is part of the authored rationale. Only a key-shaped payload
+      // is structural answer metadata that should be removed.
+      if (explicitMarker && !explicitKeyPayload) {
+        kept.push(line);
+        continue;
+      }
       const rationale = answerRationale(line);
       if (rationale) {
         kept.push(rationale);
@@ -197,6 +216,7 @@ export function sanitizeExplanationCandidate(
   if (operations.includes("stop-at-next-question") || operations.includes("stop-at-answer-key")) {
     confidence = Math.min(confidence, explicitMarker ? 0.92 : 0.74);
   }
+  if (operations.includes("ambiguous-question-boundary")) confidence = Math.min(confidence, 0.6);
   return { rawCandidate, cleanedText, cleanupOperations: operations, confidence };
 }
 

@@ -17,6 +17,10 @@ import { entryDayKey, missedStandupDays, planForDay, reflectionPrompts } from ".
 import type { DayPlan, JournalEntry, Profile } from "../lib/types";
 import { announceJournalEnergyOnce } from "../lib/journalAnnouncement";
 import { selectDayAtAGlance } from "../lib/dayAtAGlance";
+import { buildDayExtraSections } from "../lib/journalExtras";
+import { readListeningLog } from "../lib/soundscapes/listeningLog";
+import { readRestLog } from "../lib/rest";
+import { focusCheckInLedger } from "../lib/focusCheckIn";
 import { useReducedMotion } from "../lib/motion";
 import {
   DEFAULT_JOURNAL_NOTEBOOK,
@@ -284,7 +288,21 @@ function JournalWritingPage({
     journal: s.journal,
     closeouts: s.closeouts,
   }, day, today);
-  const glanceSections = useMemo(() => buildJournalGlanceSections(glance), [glance]);
+  const glanceSections = useMemo(() => [
+    ...buildJournalGlanceSections(glance),
+    ...buildDayExtraSections({
+      day,
+      sessions: s.sessions ?? [],
+      attempts: (s.questions ?? []).flatMap((question) => question.attempts ?? []),
+      listening: readListeningLog(),
+      rests: readRestLog(),
+      checkIns: focusCheckInLedger.read(day),
+    }),
+  ], [glance, day, s.sessions, s.questions]);
+  // The day's record is always part of the page; hide or correct any line.
+  const liveGlanceText = renderJournalGlanceText(glanceSections, draft.dayAtAGlance);
+  const liveGlanceRef = useRef(liveGlanceText);
+  liveGlanceRef.current = liveGlanceText;
 
   const persist = useCallback((status?: "draft" | "complete") => {
     const current = draftRef.current;
@@ -305,7 +323,7 @@ function JournalWritingPage({
       wins: current.wins.filter((value) => value.trim()),
       losses: current.losses.filter((value) => value.trim()),
       attachments: current.attachments,
-      dayAtAGlance: current.dayAtAGlance,
+      dayAtAGlance: { ...current.dayAtAGlance, includedText: liveGlanceRef.current, includedAt: timestamp },
       notebookStatus: status ?? current.notebookStatus,
       updatedAt: timestamp,
     };
@@ -469,10 +487,10 @@ function JournalWritingPage({
               placeholder="Write without a template. This stays on your device." />
           </label>
 
-          {draft.dayAtAGlance.includedText && (
+          {liveGlanceText && (
             <section className="journal-included-glance" aria-labelledby="included-glance-title">
-              <div><Check size={ICON_SIZE.body} /><h3 id="included-glance-title">Day at a glance</h3></div>
-              <pre>{draft.dayAtAGlance.includedText}</pre>
+              <div><Check size={ICON_SIZE.body} /><h3 id="included-glance-title">Your day, recorded</h3><span className="journal-auto-badge">Updates automatically</span></div>
+              <pre>{liveGlanceText}</pre>
             </section>
           )}
 
@@ -566,14 +584,7 @@ function JournalWritingPage({
               );
             })}
           </div>
-          <GButton variant="primary" size="sm" onClick={() => {
-            const includedText = renderJournalGlanceText(glanceSections, draftRef.current.dayAtAGlance);
-            setDraft((current) => ({
-              ...current,
-              dayAtAGlance: { ...current.dayAtAGlance, includedText, includedAt: new Date().toISOString() },
-            }));
-          }}><Plus size={ICON_SIZE.body} /> Include in journal</GButton>
-          <span className="journal-glance-footnote">Hidden sections stay out of the included summary. Your original records are never changed.</span>
+          <span className="journal-glance-footnote">Every visible line is included in your page automatically and saved with it. Hide a line to leave it out; corrections change only this page, never your records.</span>
         </aside>
       </div>
     </section>

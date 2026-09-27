@@ -910,8 +910,20 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+# Codec strings match the published files (HEVC Main 10 L4.0, VP9 profile 2 L4.0).
+CATALOG_SOURCES = [
+    {"src": "startup/axom-ident-hevc10.mp4", "type": 'video/mp4; codecs="hvc1.2.4.L120.90"'},
+    {"src": "startup/axom-ident-vp9.webm", "type": 'video/webm; codecs="vp09.02.40.10"'},
+]
+
+
 def publish(out: Path):
-    """Install the 1080p cuts as the app's startup film and record provenance."""
+    """Install the 1080p cuts as the `brand-ident` film and record provenance.
+
+    The film is registered in web/src/data/cinematics.json directly rather than
+    through scripts/import-cinematic.mjs, which re-encodes to one 8-bit file and
+    would drop the 10-bit `sources`.
+    """
     import shutil
     web = ROOT / "web" / "public" / "startup"
     web.mkdir(parents=True, exist_ok=True)
@@ -920,14 +932,28 @@ def publish(out: Path):
             "axom-ident.mp4": "AXOM_ident_1080p_30p_h264.mp4"}
     for dst, src in cuts.items():
         shutil.copyfile(out / src, web / dst)
-    movie, poster = web / "axom-ident.mp4", web / "axom-ident-poster.png"
-    # Frame 1 of the film is exactly the overlay colour, so the poster is too.
-    night = np.round(linear_to_srgb(NIGHT) * 255).astype(np.uint8)
-    cv2.imwrite(str(poster), np.broadcast_to(night[::-1], (1080, 1920, 3)).copy())
+    # Poster: the settled lockup, which Settings shows as the film's thumbnail
+    # (the intro overlay reveals decoded frames only, so it never flashes).
+    poster = web / "axom-ident-poster.jpg"
+    lockup = cv2.imread(str(out / "AXOM_ident_lockup_4K.png"))
+    cv2.imwrite(str(poster), cv2.resize(lockup, (960, 540), interpolation=cv2.INTER_AREA),
+                [cv2.IMWRITE_JPEG_QUALITY, 88])
     rel = lambda p: str(p.relative_to(ROOT))
+    catalog_path = ROOT / "web" / "src" / "data" / "cinematics.json"
+    catalog = json.loads(catalog_path.read_text())
+    catalog["brand-ident"] = {
+        "src": "startup/axom-ident.mp4",
+        "poster": rel(poster).removeprefix("web/public/"),
+        "background": "#0d0d0e",
+        "durationMs": int(round(DURATION * 1000)),
+        "placeholder": False,
+        "sources": CATALOG_SOURCES,
+    }
+    catalog_path.write_text(json.dumps(catalog, indent=2) + "\n")
     manifest = {
         "renderer": rel(Path(__file__)),
         "geometry": {"path": rel(GEOMETRY), "sha256": _sha(GEOMETRY)},
+        "catalog": {"path": rel(catalog_path), "film": "brand-ident"},
         "fps": FPS, "frames": FRAMES, "durationSeconds": DURATION,
         "master": [3840, 2160], "web": [1920, 1080],
         "background": "#0D0D0E",
@@ -939,7 +965,8 @@ def publish(out: Path):
                    for p in [*(web / name for name in cuts), poster]],
     }
     (ROOT / "design" / "startup" / "ident-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    print("published", ", ".join(f"{name} ({(web / name).stat().st_size / 1e6:.2f} MB)" for name in cuts), "and", rel(poster))
+    print("published", ", ".join(f"{name} ({(web / name).stat().st_size / 1e6:.2f} MB)" for name in cuts),
+          "and", rel(poster), "as the brand-ident film")
 
 
 def main():
@@ -965,7 +992,12 @@ def main():
     q.add_argument("--web-crf", type=int, default=18, help="x264 CRF of the app cut")
     q.add_argument("--h264-4k-crf", type=int, default=17, help="x264 CRF of the 4K compatibility master")
     q.add_argument("--web-grain", type=float, default=0.7, help="grain scale of the app cut")
+    q = sub.add_parser("publish", help="install already-encoded cuts from --out without re-encoding")
+    q.add_argument("--out", required=True)
     a = p.parse_args()
+    if a.cmd == "publish":
+        publish(Path(a.out))
+        return
     {"frames": cmd_frames, "stills": cmd_stills, "encode": cmd_encode}[a.cmd](a)
 
 

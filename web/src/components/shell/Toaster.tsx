@@ -1,4 +1,6 @@
-// Renders the global toast stack (bottom-right). Mounted once at the app root.
+// Renders the global toast stack (bottom-right; full width above the safe area
+// on phones). Mounted once at the app root. Placement and light-theme colors
+// are in components.css ("Notification layer").
 import { CheckCircle2, Info, AlertTriangle, X, ArrowRight } from "lucide-react";
 import { useToasts } from "../../lib/toast";
 import { ICON_SIZE } from "../../lib/iconSize";
@@ -12,6 +14,8 @@ const ICON = {
 export function Toaster() {
   const toasts = useToasts((s) => s.toasts);
   const dismiss = useToasts((s) => s.dismiss);
+  const hold = useToasts((s) => s.hold);
+  const release = useToasts((s) => s.release);
   if (!toasts.length) return null;
 
   return (
@@ -24,7 +28,18 @@ export function Toaster() {
             ? [{ label: toast.actionLabel, href: toast.href, onAction: toast.onAction }]
             : [];
         return (
-          <div className={`toast toast-${toast.tone}`} key={toast.id} role="status">
+          <div
+            className={`toast toast-${toast.tone}`}
+            key={toast.id}
+            role="status"
+            // Auto-dismiss waits while the notice is being read or operated.
+            onMouseEnter={() => hold(toast.id, "hover")}
+            onMouseLeave={() => release(toast.id, "hover")}
+            onFocus={() => hold(toast.id, "focus")}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) release(toast.id, "focus");
+            }}
+          >
             <span className="toast-icon"><Icon size={ICON_SIZE.emphasis} /></span>
             <div className="toast-body">
               <b>{toast.title}</b>

@@ -1,0 +1,62 @@
+# Personalization, accounts, and product-wide polish — progress
+
+Date: 2026-09-26 · Worktree `AXOM-accounts-v1` · Branch `feat/accounts-sync-v1` · Base HEAD `6a37af6`.
+Committed on `feat/accounts-sync-v1` (checkpoint `83a6c99` plus follow-ups); `origin/main` is merged in so the branch lands on `main` cleanly.
+
+## Owner requests → outcome
+
+| Request | Outcome |
+| --- | --- |
+| Color themes beyond light/dark (gold & white, purple & black, blue & silver…) | **Done.** Appearance tab + quick popover + onboarding: 8 curated palettes × light/dark (Classic, Ivory, Amethyst, Sapphire, Midnight, Emerald, Rosé, Platinum) and any custom color. Custom colors are derived in OKLCH so contrast fixes keep the hue. 302 hard-coded gold literals migrated to palette channels. Pre-paint script prevents a flash on reload (allow-listed; tampered storage rejected). |
+| “Are you locked in?” pop-up on a chosen interval | **Done.** 10 min–2 h, during focus sprints or whenever AXOM is open, gentle/coach/intense voice, optional ±30% varied timing, quiet hours, background notifications, preview, daily stats. Replies know what’s left (“Just 42 min to go on Study time”). |
+| Quote at the top, rotating, more AXOM Originals | **Done.** Top bar on every page; rotation daily / 6 h / 2 h / hourly / every section; categories, favorites, hide; library 100 → 180 (80 new AXOM Originals). |
+| Account system | **Much further.** App-wide account store; background protection on every page (previously stopped when Settings closed); password, one-time email code (works in the desktop app), reset; name editing; device list; restore; conflict resolution incl. **Merge both**; delete cloud copies; sidebar status dot; migration 004; setup doc. Activation needs a Supabase project (the bookmarked one no longer resolves). |
+| Course Tracker subsections | **Done.** Breadcrumb, subsection dropdown, collapsible per-section groups with progress, “Show only this”, remembered location. |
+| Application Checker: residency / undergrad | **Residency built** (ACGME-keyed importer `npm run residency:import`, validator, explorer with search/filters/save); needs the official ACGME listing download. Undergrad: honest not-collected state + contract. |
+| Settings: profile ugly, personalization cluttered, backup status ugly | **Done.** New Profile header, Appearance tab, Personalization sub-sections (Study style · Daily rhythm · Dashboard · Program & lanes), readable backup status, restore history, exact last-saved time. |
+| Clock minute hand floating | **Fixed** (double pivot: SVG rotate attribute + CSS transform-origin). |
+| Reports hard to read; weekly/monthly/effort trends | **Done.** Explanations open on click (no hover reflow); weekly/monthly/effort charts follow real calendar days and Productivity’s day grades; activity-based consistency/streak when no targets exist (previously “Building” forever). |
+| Habit Tracker ↔ Productivity targets | **Done.** Habits count toward Today’s targets by default; chip per habit; one source of truth. |
+| Dashboard luster + unique widget icons | **Done.** Pointer-follow glare, one-shot sheen, subtle lift (off for touch/reduced motion); 25 distinct widget glyphs. |
+| Daily games attributions | **Done.** Doctordle thanks + future-collaboration note; SCOWL and Wordle-format credits. |
+| Integrations confusing | **Rebuilt** by readiness (works today / experimental / planned) with “what leaves your device”; new **.ics calendar export**. |
+| Leaderboards | **Rebuilt:** race your past self (this week vs typical and best at the same point), records, projected rank, private study-groups plan. |
+| Hub Folders | **Rebuilt:** search, groups, pinned, recently used, copy path, grid/list, color swatches. |
+| Building page header moving | **Fixed** (stable scrollbar gutter, sticky tabs); status filters and connection highlighting. |
+| About / Help | **Updated** to the current state. |
+| Deferred items | Shipped: AXOM-level reduce motion, restore-history ledger, exact vault-write time, quiz pacing on block results, calendar export, broader route-level code splitting. |
+
+## Verification (fresh, this session)
+
+- `tsc -b` clean · `eslint .` clean · **1,707 / 1,707** unit tests (165 files).
+- Production build OK. Always-loaded shell: **459 kB / 129 kB gzip** vs **610 kB / 179 kB** at base HEAD (rare routes and the Supabase SDK now load on demand).
+- Browser (installed Chrome): full suite **17 / 17**, plus a new pre-paint palette test (blocks the app bundle) passing — 18 journeys total.
+- Visual review via `npm run snapshots` (routes × themes × palettes, synthetic data) — no page errors.
+
+## New tooling
+
+- `npm run snapshots [-- --routes … --palettes … --themes … --seed]` → `web/.snapshots/` contact sheet.
+- `npm run test:e2e:chrome` — e2e on installed Chrome when Playwright’s Chromium isn’t downloaded.
+- Dev-only `window.__AXOM_DEV__` live-store handle: e2e specs no longer import `/src/lib/store.ts`, which could hit a stale HMR module instance on a long-running dev server (root cause of a false “6 failures” during this session).
+- `npm run residency:import` / `residency:validate` (repository root).
+
+## Session 2 — packaging, updates, cinematics, soundscapes, focus dock
+
+| Request | Outcome |
+| --- | --- |
+| Continue accounts: auth config, templates, redirects, env, real testing | Hardening migrations made replayable on fresh databases (`rls_auto_enable` guarded) and proven by a **PGlite test that replays all six migrations with Supabase's default privileges and asserts function ACLs** (it reproduces the anon-EXECUTE gap before hardening). `config.toml` mirrors production (8-digit codes, MFA, pooler) so a push can't regress it. Every auth email carries a code; sign-up confirmation and password reset now work by code in-app (desktop-safe). Publishable-key support. `npm run test:accounts:live` covers the whole journey against production once a key is supplied. **Blocked on the owner:** publishable key, custom SMTP (Resend), site URL/redirects (see ACCOUNTS-SETUP). |
+| Intro staging + logic (first open of day/week, on update) | Opening-film policy (daily default · weekly · updates only · every launch · never), update film once per new version with caption, installing film during an approved update, previews in Settings → Appearance. Placeholder takes A/B/C from the Luster kit. `npm run cinematic:import` turns any final render into web-ready files + manifest. |
+| Package + update system from GitHub | Ported the signed Tauri updater + release pipeline from the `main` worktree. Added **background download → "Update now"**, a fixed **`update-feed` channel** (pre-beta versions are invisible to GitHub's `/releases/latest`), optional Apple notarization (ad-hoc signed otherwise), and `npm run release:setup-updater`. |
+| Sleek icon with shadow and rounded borders | macOS-grid squircle, soft lift shadow, rim light, brand mark at 1:1 (`npm run icon`). |
+| Soundscapes with visuals; persistent timer pill that splits; genie hover | Six synthesized presets matched to the owner's recordings, honest evidence notes, the owner's 90-minute rotation, listening log with an observational accuracy/"again"-rate comparison, follow-my-Pomodoro, media keys. Focus dock pill with liquid split and genie panel. |
+
+Also fixed while verifying: the ported vault write queue delayed saves enough to **lose changes on a quick reload** (two e2e journeys) — replaced with latest-wins coalescing; `.sr-only` was not defined globally (screen-reader text rendered visibly in several places); palette tokens were used with invalid `rgb(var() / a)` syntax (guard test added); a JSON import broke Playwright's loader ("0 tests"); the changelog left the startup bundle (App chunk 500 → 478 kB).
+
+Verification: `tsc` · `eslint` clean · **1,815 / 1,815** unit tests (176 files) · build OK · release tests 19/19 · e2e **21 passed**, 1 skipped (live accounts, needs a key) · `cargo check` OK · local macOS release build of `AXOM.app` (see below).
+
+## Still open
+
+- Supabase: publishable key in `web/.env.local` + Vercel, custom SMTP, final site URL/redirects, then `npm run test:accounts:live`.
+- Updates: run `npm run release:setup-updater` once; tag + publish the first release; smoke-test N → N+1.
+- The `main` worktree still holds uncommitted work this branch supersedes (release pipeline, startup intro — ported here and improved) plus items deliberately **not** ported (application-checker "intelligence" scaffold, Anki bridge, `data/application_checker/*.json`). Review those before discarding them.
+- ACGME listing download for Residency; native notifications for lock-in check-ins; Anki note types (owner deferred); final cinematic renders (Higgsfield).

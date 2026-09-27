@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeSeed } from "../lib/seed";
 import { useStore } from "../lib/store";
@@ -101,7 +101,8 @@ describe("Journal notebook foundation", () => {
     const notebook = await screen.findByLabelText("Journal notebook");
     expect(notebook.getAttribute("data-motion")).toBe("reduced");
     expect(screen.getByLabelText("Free writing")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Include in journal" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Include in journal" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Your day, recorded" })).toBeTruthy();
   });
 
   it("autosaves free writing into the IndexedDB-backed workspace state", async () => {
@@ -190,14 +191,15 @@ describe("Journal notebook foundation", () => {
     expect(screen.queryByRole("button", { name: /Export unsafe|Export claimed/ })).toBeNull();
   });
 
-  it("lets the user correct and omit local summary values before including them", async () => {
+  it("includes the day's summary automatically, with the user's corrections and omissions", async () => {
     render(<JournalPage />);
     fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal/i }));
     fireEvent.click(screen.getByRole("button", { name: "Correct Focused time" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Correct Focused time" }), { target: { value: "45 min after correcting a late log" } });
     fireEvent.click(screen.getByRole("button", { name: "Hide Energy and readiness" }));
-    fireEvent.click(screen.getByRole("button", { name: "Include in journal" }));
-    expect(screen.getByText(/Focused time: 45 min after correcting a late log/)).toBeTruthy();
-    expect(screen.getByText("Hidden sections stay out of the included summary. Your original records are never changed.")).toBeTruthy();
+    const recorded = screen.getByRole("region", { name: "Your day, recorded" });
+    expect(within(recorded).getByText(/Focused time: 45 min after correcting a late log/)).toBeTruthy();
+    expect(within(recorded).queryByText(/Energy and readiness/)).toBeNull();
+    expect(screen.getByText(/Every visible line is included in your page automatically/)).toBeTruthy();
   });
 });

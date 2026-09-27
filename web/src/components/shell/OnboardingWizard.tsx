@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { notificationPermission as readNotificationPermission, requestNotificationPermission } from "../../lib/notify";
 import {
   ArrowLeft,
   ArrowRight,
@@ -34,7 +35,13 @@ import { AxomMark, AxomWordmark } from "../ui/BrandMark";
 import { Field, SelectField } from "../ui/Modal";
 import { GButton, GhostButton } from "../ui/primitives";
 import { ThemeToggle } from "../ui/ThemeToggle";
+import { PALETTES, setPalettePreference } from "../../lib/palette";
+import { usePalettePreference, useResolvedTheme } from "../../lib/useAppearance";
+import { PaletteSwatch, onRadioGroupKeyDown } from "./AppearanceStudio";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { normalizeStudyWorkflow, STUDY_METHOD_OPTIONS, toggleStudyMethod, type StudyWorkflowPreferences } from "../../lib/studyPreferences";
+import { StudyMethodFollowUps } from "./StudyMethodFollowUps";
+import { StudyTextSuggestions } from "./StudyTextSuggestions";
 
 const STEP_TITLES = ["Identity", "Core setup", "Workspace", "Data safety"] as const;
 
@@ -65,6 +72,13 @@ export function OnboardingWizard({
     return readOnboardingDraft(fallback);
   });
   const [notificationStatus, setNotificationStatus] = useState(() => notificationPermission());
+  // The desktop app answers asynchronously (Tauri notification plugin).
+  useEffect(() => { void readNotificationPermission().then(setNotificationStatus); }, []);
+  const studyWorkflow = draft.studyWorkflow ?? normalizeStudyWorkflow(store.profile.studyWorkflow);
+  const studyMethods = (studyWorkflow.methods ?? []).filter(method => method.enabled).map(method => method.id);
+  function updateStudyWorkflow(value: StudyWorkflowPreferences) {
+    setDraft(current => ({ ...current, studyWorkflow: { ...value, configured: true } }));
+  }
   const dialogRef = useRef<HTMLDivElement>(null);
   const stepRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -170,6 +184,7 @@ export function OnboardingWizard({
           : [],
       } : {}),
       ...(effectiveMode === "first-run" || draft.launchTour ? { tourDone: !draft.launchTour } : {}),
+      ...(draft.studyWorkflow?.configured ? { studyWorkflow: draft.studyWorkflow } : {}),
     };
     store.updateProfile(profilePatch);
     applyQuickRequirements(draft.quickRequirements);
@@ -243,15 +258,8 @@ export function OnboardingWizard({
   }
 
   async function enableNotifications() {
-    if (typeof Notification === "undefined") {
-      setNotificationStatus("unavailable");
-      return;
-    }
-    try {
-      setNotificationStatus(await Notification.requestPermission());
-    } catch {
-      setNotificationStatus(Notification.permission);
-    }
+    const result = await requestNotificationPermission();
+    setNotificationStatus(result);
   }
 
   function addFirstCourse(value: string) {
@@ -409,6 +417,18 @@ export function OnboardingWizard({
               </div>
               <div className="onboarding-custom-later">Custom later — add schedules and targets when you know what fits.</div>
             </section>
+            <details className="onboarding-disclosure">
+              <summary>How do you usually study? (optional)</summary>
+              <p className="sub">Choose only methods you actually use. You can skip this and edit it later in Settings.</p>
+              <div className="onboarding-quick-requirements">
+                {STUDY_METHOD_OPTIONS.map(({ id, label }) => <label key={id}><input type="checkbox" checked={studyMethods.includes(id)} onChange={() => updateStudyWorkflow(toggleStudyMethod(studyWorkflow, id))}/><span><b>{label}</b></span></label>)}
+              </div>
+              {studyMethods.includes("lecture-passes") && <label className="stack gap6"><span>Usual lecture passes</span><input className="field" type="number" min={1} max={6} value={studyWorkflow.lecturePasses ?? 2} onChange={(event) => updateStudyWorkflow({ ...studyWorkflow, lecturePasses: Math.max(1, Math.min(6, Number(event.target.value))) })}/></label>}
+              <StudyMethodFollowUps workflow={studyWorkflow} onChange={updateStudyWorkflow} />
+              <label className="stack gap6"><span>Other — tell AXOM how you study</span><textarea className="field" value={studyWorkflow.customContext ?? ""} onChange={(event) => updateStudyWorkflow({ ...studyWorkflow, customContext: event.target.value })} /></label>
+              <p className="sub">Your words are kept exactly as written. AXOM may suggest settings from them using fixed word rules (not AI); each suggestion is shown for you to confirm and is never applied automatically.</p>
+              <StudyTextSuggestions workflow={studyWorkflow} onApply={updateStudyWorkflow} />
+            </details>
             <StepActions onBack={() => move(0)} onNext={() => move(2)} />
           </div>
         )}
@@ -420,6 +440,7 @@ export function OnboardingWizard({
               Choose a calm starting layout. Theme and widget choices remain available in Settings and Customize.
             </p>
             <ThemeToggle />
+            <OnboardingPalettePicker />
             <fieldset className="onboarding-choice-group">
               <legend>Dashboard widgets</legend>
               <div className="onboarding-choice-grid two">
@@ -446,7 +467,7 @@ export function OnboardingWizard({
                 <GButton size="sm" onClick={enableNotifications}>Enable</GButton>
               )}
             </div>
-            <div className="sub">Motion follows your device’s reduced-motion setting. No AI provider is required.</div>
+            <div className="sub">Fine-tune colors, pick a custom accent, or reduce motion anytime in Settings → Appearance. No AI provider is required.</div>
             <StepActions onBack={() => move(1)} onNext={() => move(3)} />
           </div>
         )}
@@ -481,6 +502,7 @@ export function OnboardingWizard({
               <div><span>Current focus</span><b>{activeFocus.label}</b></div>
               <div><span>Start in</span><b>{WORKFLOWS.find((workflow) => workflow.id === draft.destination)?.title}</b></div>
               <div><span>Portable save</span><b>Optional</b></div>
+              <div><span>Study methods to apply</span><b>{studyMethods.map(id => STUDY_METHOD_OPTIONS.find(option => option.id === id)?.label).join(", ") || (studyWorkflow.configured ? "No methods selected" : "No changes")}</b></div>
             </div>
             <div className="onboarding-actions">
               <GhostButton onClick={() => move(2)}><ArrowLeft size={ICON_SIZE.body} /> Back</GhostButton>
@@ -557,6 +579,7 @@ function defaultDraft(store: ReturnType<typeof useStore.getState>, mode: Onboard
     widgetPreset: hidden.length === 0 ? "expanded" : "focused",
     launchTour: false,
     quickRequirements,
+    studyWorkflow: normalizeStudyWorkflow(store.profile.studyWorkflow),
   };
 }
 
@@ -575,4 +598,35 @@ function focusableElements(root: HTMLElement): HTMLElement[] {
   return [...root.querySelectorAll<HTMLElement>(
     'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
   )].filter((element) => !element.hidden && element.getAttribute("aria-hidden") !== "true");
+}
+
+/** "Make it yours" — the accent palettes, applied live while choosing. */
+function OnboardingPalettePicker() {
+  const palette = usePalettePreference();
+  const resolved = useResolvedTheme();
+  return (
+    <fieldset className="onboarding-choice-group onboarding-palettes">
+      <legend>Accent palette</legend>
+      <div className="onboarding-palette-row" role="radiogroup" aria-label="Accent palette" onKeyDown={onRadioGroupKeyDown}>
+        {PALETTES.map((definition) => {
+          const selected = palette.id === definition.id;
+          return (
+            <button
+              key={definition.id}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              tabIndex={selected ? 0 : -1}
+              className={selected ? "on" : ""}
+              title={definition.pairing}
+              onClick={() => setPalettePreference({ id: definition.id, customAccent: palette.customAccent })}
+            >
+              <PaletteSwatch input={resolved === "light" ? definition.light : definition.dark} size="sm" />
+              <span><b>{definition.label}</b><small>{definition.pairing}</small></span>
+            </button>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
 }

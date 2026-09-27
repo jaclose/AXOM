@@ -2,35 +2,17 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SourceDocument } from "../../lib/library";
 import { extractPdfText } from "../../lib/extractText";
 import { MassImport, massImportFileStatus } from "./MassImport";
 
-const mocked = vi.hoisted(() => ({
-  addDocument: vi.fn(),
-  addQuestion: vi.fn(),
-  addQuestionSet: vi.fn(),
-  updateDocument: vi.fn(),
-  updateQuestionSet: vi.fn(),
-  documents: [] as SourceDocument[],
-}));
-
-vi.mock("../../lib/store", () => ({ useStore: () => mocked }));
-vi.mock("../../lib/toast", () => ({ pushToast: vi.fn() }));
 vi.mock("../../lib/checksum", () => ({ sha256Hex: vi.fn(async () => "sha256-test") }));
 vi.mock("../../lib/extractText", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../lib/extractText")>(),
   extractPdfText: vi.fn(),
 }));
-vi.mock("../../lib/ai", () => ({
-  enhanceQuestionSet: vi.fn(),
-  resolveActiveProvider: vi.fn(() => null),
-}));
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocked.documents.splice(0);
-  mocked.addQuestion.mockReturnValue({ ok: true, errors: [], id: "question-1" });
 });
 afterEach(cleanup);
 
@@ -49,7 +31,7 @@ async function processReadyText(onInspect = vi.fn()) {
   const file = new File([contents], "mapped.txt", { type: "text/plain" });
   await user.upload(screen.getByLabelText("Choose multiple question files"), file);
   await user.click(screen.getByRole("button", { name: "Import files" }));
-  await screen.findByText("ready");
+  await screen.findByText("ready to inspect");
   return { user, file, onInspect };
 }
 
@@ -64,11 +46,13 @@ describe("Mass Import trust handoff", () => {
     }])).toBe("needs-review");
   });
 
-  it("hands every source field and warning to the Import Center", async () => {
+  it("requires a ready file to hand off with every source field instead of persisting directly", async () => {
     const onInspect = vi.fn();
     const { user, file } = await processReadyText(onInspect);
 
-    await user.click(screen.getByRole("button", { name: "Inspect" }));
+    expect(screen.queryByRole("button", { name: /save/i })).toBeNull();
+    expect(screen.queryByText(/batch-save/i)).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Inspect mapped.txt" }));
     expect(onInspect).toHaveBeenCalledWith(expect.objectContaining({
       title: "mapped",
       fileName: "mapped.txt",
@@ -99,8 +83,8 @@ describe("Mass Import trust handoff", () => {
     const file = new File(["pdf bytes"], "mapped.pdf", { type: "application/pdf" });
     await user.upload(screen.getByLabelText("Choose multiple question files"), file);
     await user.click(screen.getByRole("button", { name: "Import files" }));
-    await screen.findByText("ready");
-    await user.click(screen.getByRole("button", { name: "Inspect" }));
+    await screen.findByText("ready to inspect");
+    await user.click(screen.getByRole("button", { name: "Inspect mapped.pdf" }));
 
     expect(onInspect).toHaveBeenCalledWith(expect.objectContaining({
       fileName: "mapped.pdf",
@@ -113,14 +97,65 @@ describe("Mass Import trust handoff", () => {
     }));
   });
 
-  it("marks batch-saved ready mappings as reviewed", async () => {
-    const { user } = await processReadyText();
-    await user.click(screen.getByRole("button", { name: /Batch-save 1 clean file/ }));
+  it("routes a needs-review file through the same inspection handoff", async () => {
+    const user = userEvent.setup();
+    const onInspect = vi.fn();
+    render(<MassImport onInspect={onInspect} />);
+    const file = new File([[
+      "1. Which option is correct?",
+      "A. Alpha",
+      "B. Beta",
+      "C. Gamma",
+    ].join("\n")], "unmapped.txt", { type: "text/plain" });
+    await user.upload(screen.getByLabelText("Choose multiple question files"), file);
+    await user.click(screen.getByRole("button", { name: "Import files" }));
+    await screen.findByText("needs review");
 
-    await waitFor(() => expect(mocked.addQuestion).toHaveBeenCalled());
-    expect(mocked.addQuestion).toHaveBeenCalledWith(expect.objectContaining({
-      correctKey: "B",
-      extraction: expect.objectContaining({ reviewed: true, reviewedAt: expect.any(String) }),
+    expect(screen.queryByRole("button", { name: /save/i })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Inspect unmapped.txt" }));
+    expect(onInspect).toHaveBeenCalledWith(expect.objectContaining({
+      fileName: "unmapped.txt",
+      rawText: expect.stringContaining("Which option is correct?"),
+      drafts: [expect.objectContaining({ correctKey: undefined })],
+    }));
+  });
+
+  it("removes an invalid middle file without losing later work or keyboard focus", async () => {
+    const user = userEvent.setup();
+    render(<MassImport onInspect={vi.fn()} />);
+    const valid = "1. Stable question?\nA. Alpha\nB. Beta\nAnswer: B";
+    await user.upload(screen.getByLabelText("Choose multiple question files"), [
+      new File([valid], "first.txt", { type: "text/plain" }),
+      new File(["notes without a question"], "invalid.txt", { type: "text/plain" }),
+      new File([valid], "third.txt", { type: "text/plain" }),
+    ]);
+    await user.click(screen.getByRole("button", { name: "Import files" }));
+    await screen.findByRole("button", { name: "Inspect third.txt" });
+
+    await user.click(screen.getByRole("button", { name: "Remove invalid.txt" }));
+    expect(screen.queryByText("invalid.txt")).toBeNull();
+    expect(screen.getByRole("button", { name: "Inspect first.txt" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Inspect third.txt" })).toBeTruthy();
+    await waitFor(() => expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Remove third.txt" }),
+    ));
+  });
+
+  it("associates a separate numbered answer file and keeps it as provenance", async () => {
+    const user = userEvent.setup();
+    const onInspect = vi.fn();
+    render(<MassImport onInspect={onInspect} />);
+    await user.upload(screen.getByLabelText("Choose multiple question files"), [
+      new File(["1. Which option is correct?\nA. Alpha\nB. Beta\nC. Gamma"], "questions.txt", { type: "text/plain" }),
+      new File(["Answer key\n1. B"], "answers.txt", { type: "text/plain" }),
+    ]);
+    await user.click(screen.getByRole("button", { name: "Import files" }));
+    await screen.findByRole("button", { name: "Match answers.txt to questions" });
+    await user.click(screen.getByRole("button", { name: "Match answers.txt to questions" }));
+    expect(await screen.findByText("answers matched")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Inspect questions.txt" }));
+    expect(onInspect).toHaveBeenCalledWith(expect.objectContaining({
+      drafts: [expect.objectContaining({ correctKey: "B" })],
     }));
   });
 });

@@ -37,13 +37,73 @@ afterEach(() => {
 });
 
 describe("Settings information architecture", () => {
-  it("uses five accessible sections with only the active tab owning its mounted panel", async () => {
+  it("edits method follow-ups without erasing other methods or kind defaults", () => {
+    useStore.getState().updateProfile({ studyWorkflow: { configured: true, methods: [{ id: "noji", enabled: true, timing: "ongoing", usage: "My own recall cards" }], itemKindDefaults: { Lab: { lecturePasses: 3 } } } });
+    render(<SettingsModal onClose={() => {}} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Personalization" }));
+    fireEvent.click(screen.getByRole("button", { name: "Anki" }));
+    fireEvent.click(screen.getByRole("button", { name: "Noji" }));
+    fireEvent.click(screen.getByRole("button", { name: "Noji" }));
+    fireEvent.click(screen.getByText("How do you use Noji?"));
+    fireEvent.change(screen.getByLabelText("Your Noji approach (optional)"), { target: { value: "  Exact revised words  " } });
+    expect(useStore.getState().profile.studyWorkflow?.methods).toEqual(expect.arrayContaining([expect.objectContaining({ id: "noji", enabled: true, timing: "ongoing", usage: "  Exact revised words  " })]));
+    expect(useStore.getState().profile.studyWorkflow?.itemKindDefaults?.Lab?.lecturePasses).toBe(3);
+  });
+  it("shows study-text suggestions without applying them and applies exactly one on confirmation", () => {
+    const methods = [
+      { id: "noji" as const, enabled: true, timing: "after-first-pass" as const, usage: "My recall cards", label: "Own deck" },
+      { id: "quizlet" as const, enabled: false, usage: "Old sets" },
+    ];
+    useStore.getState().updateProfile({ studyWorkflow: { configured: true, methods, lecturePasses: 2, reviewAfterDays: 3, itemKindDefaults: { Lab: { lecturePasses: 3 } } } });
+    render(<SettingsModal onClose={() => {}} initialTab="personalization" />);
+    expect(screen.queryByText("Suggestions from your words")).toBeNull();
+    expect(screen.getByText(/keeps this text exactly as written.*fixed word rules \(not AI\).*never applied automatically/)).toBeTruthy();
+
+    const original = "Noji every day. I review a week later — I don't use Quizlet.";
+    fireEvent.change(screen.getByLabelText("Other — tell AXOM how you study"), { target: { value: original } });
+    const region = screen.getByRole("region", { name: "Suggestions from your words" });
+    expect(region.textContent).toContain("You wrote “Noji every day”");
+    expect(region.textContent).toContain("You wrote “review a week later”");
+    expect(region.textContent).not.toContain("Quizlet");
+    // Typing only saves the words; no setting changes until Apply.
+    expect(useStore.getState().profile.studyWorkflow).toMatchObject({ methods, reviewAfterDays: 3, customContext: original });
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply: Use Noji throughout the course" }));
+    const workflow = useStore.getState().profile.studyWorkflow!;
+    expect(workflow.methods).toEqual([{ ...methods[0], timing: "ongoing" }, methods[1]]);
+    expect(workflow).toMatchObject({ reviewAfterDays: 3, lecturePasses: 2, customContext: original, itemKindDefaults: { Lab: { lecturePasses: 3 } } });
+    expect(screen.queryByRole("button", { name: "Apply: Use Noji throughout the course" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Apply all" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Apply: Review again after 7 days" })).toBeTruthy();
+  });
+
+  it("applies all suggestions at once, keeps the original text, and removes the list", () => {
+    useStore.getState().updateProfile({ studyWorkflow: { configured: true, methods: [{ id: "anki", enabled: false, usage: "Own cards" }], lecturePasses: 2, reviewAfterDays: 3 } });
+    render(<SettingsModal onClose={() => {}} initialTab="personalization" />);
+    const original = "  Anki before exams, UWorld after lectures, and I rewatch lectures 3 times.  ";
+    fireEvent.change(screen.getByLabelText("Other — tell AXOM how you study"), { target: { value: original } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply all" }));
+
+    const workflow = useStore.getState().profile.studyWorkflow!;
+    expect(workflow.customContext).toBe(original);
+    expect(workflow.lecturePasses).toBe(3);
+    expect(workflow.methods).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "anki", enabled: true, usage: "Own cards", timing: "near-exam" }),
+      expect.objectContaining({ id: "practice-questions", enabled: true, timing: "after-first-pass" }),
+      expect.objectContaining({ id: "lecture-passes", enabled: true }),
+    ]));
+    expect(screen.queryByText("Suggestions from your words")).toBeNull();
+    expect(screen.getByRole("button", { name: "Anki" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("status").textContent).toBe("Applied 6 suggestions.");
+  });
+
+  it("uses seven accessible sections with only the active tab owning its mounted panel", async () => {
     const user = userEvent.setup();
     render(<SettingsModal onClose={() => {}} />);
 
     const tabs = screen.getAllByRole("tab");
     expect(tabs.map((tab) => tab.textContent?.trim())).toEqual([
-      "Profile", "Data", "Backup", "Personalization", "Advanced",
+      "Profile", "Account", "Appearance", "Personalization", "Data", "Emergency recovery", "Advanced",
     ]);
     for (const tab of tabs) {
       const controls = tab.getAttribute("aria-controls");
@@ -65,12 +125,12 @@ describe("Settings information architecture", () => {
     const user = userEvent.setup();
     render(<SettingsModal onClose={() => {}} initialTab="data" />);
     expect(screen.getByText(/workspace is stored on this device/i)).toBeTruthy();
-    expect(screen.getByText(/not automatically synced to an account or uploaded to the cloud/i)).toBeTruthy();
+    expect(screen.getByText(/deliberately link an account/i)).toBeTruthy();
     expect(screen.queryByText(/your account is synced/i)).toBeNull();
     expect(screen.queryByText(/workspace follows you across devices/i)).toBeNull();
 
-    await user.click(screen.getByRole("tab", { name: "Personalization" }));
-    expect(screen.getByText("Theme", { selector: ".sync-title" })).toBeTruthy();
+    await user.click(screen.getByRole("tab", { name: "Appearance" }));
+    expect(screen.getByText("Accent palette")).toBeTruthy();
   });
 
   it("presents portable backup actions once and keeps technical details in Advanced", async () => {
@@ -97,8 +157,7 @@ describe("Settings information architecture", () => {
     expect(reset).not.toHaveBeenCalled();
   });
 
-  it("keeps Daily Games disabled by default and preserves history across enable and disable", async () => {
-    const user = userEvent.setup();
+  it("keeps Daily Games persistent and retains its explicit history reset", () => {
     useStore.setState({
       dailyWordPuzzles: [{
         puzzleId: "daily-word:general-1:2026-07-12",
@@ -112,20 +171,10 @@ describe("Settings information architecture", () => {
         updatedAt: "2026-07-12T10:01:00.000Z",
       }],
     });
-    render(<SettingsModal onClose={() => {}} initialTab="personalization" />);
+    render(<SettingsModal onClose={() => {}} initialTab="rhythm" />);
 
-    const toggle = screen.getByRole("checkbox", { name: "Enable Daily Games" });
-    expect((toggle as HTMLInputElement).checked).toBe(false);
-    expect(useStore.getState().profile.experimentalFlags?.dailyGames).toBe(false);
-
-    await user.click(toggle);
-    expect((toggle as HTMLInputElement).checked).toBe(true);
-    expect(useStore.getState().profile.experimentalFlags?.dailyGames).toBe(true);
-    expect(useStore.getState().dailyWordPuzzles).toHaveLength(1);
-
-    await user.click(toggle);
-    expect((toggle as HTMLInputElement).checked).toBe(false);
-    expect(useStore.getState().profile.experimentalFlags?.dailyGames).toBe(false);
+    expect(screen.queryByRole("checkbox", { name: "Enable Daily Games" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Reset Daily Word" })).toBeTruthy();
     expect(useStore.getState().dailyWordPuzzles).toHaveLength(1);
   });
 
@@ -137,7 +186,7 @@ describe("Settings information architecture", () => {
         timeZonePreference: { mode: "custom", customTimezone: "America/Grenada" },
       },
     }));
-    render(<SettingsModal onClose={() => {}} initialTab="personalization" />);
+    render(<SettingsModal onClose={() => {}} initialTab="rhythm" />);
 
     await user.click(screen.getByRole("checkbox", { name: "Digital seconds" }));
     await user.selectOptions(screen.getByRole("combobox", { name: "Hour cycle" }), "24");
@@ -173,7 +222,7 @@ describe("Settings information architecture", () => {
     useStore.setState((state) => ({
       profile: { ...state.profile, dailyLoopReminders: undefined },
     }));
-    render(<SettingsModal onClose={() => {}} initialTab="personalization" />);
+    render(<SettingsModal onClose={() => {}} initialTab="rhythm" />);
 
     const checkInToggle = screen.getByRole("checkbox", { name: "Enable Daily Check-In" });
     const closeoutToggle = screen.getByRole("checkbox", { name: "Enable evening closeout" });
@@ -229,7 +278,7 @@ describe("Settings information architecture", () => {
         },
       },
     }));
-    render(<SettingsModal onClose={() => {}} initialTab="personalization" />);
+    render(<SettingsModal onClose={() => {}} initialTab="rhythm" />);
 
     expect((screen.getByRole("checkbox", { name: "Enable Daily Check-In" }) as HTMLInputElement).checked).toBe(false);
     expect((screen.getByRole("checkbox", { name: "Enable evening closeout" }) as HTMLInputElement).checked).toBe(true);
@@ -263,7 +312,7 @@ describe("Settings information architecture", () => {
     const confirm = vi.spyOn(window, "confirm")
       .mockReturnValueOnce(false)
       .mockReturnValueOnce(true);
-    render(<SettingsModal onClose={() => {}} initialTab="personalization" />);
+    render(<SettingsModal onClose={() => {}} initialTab="rhythm" />);
 
     const reset = screen.getByRole("button", { name: "Reset Daily Word" });
     await user.click(reset);
@@ -274,5 +323,57 @@ describe("Settings information architecture", () => {
     expect(useStore.getState().dailyWordPuzzles).toEqual([]);
     expect(useStore.getState().profile.experimentalFlags?.dailyGames).toBe(true);
     expect(useStore.getState().tasks).toEqual(tasks);
+  });
+
+  it("opens Personalization on Study style and switches sub-sections without losing the tab", async () => {
+    const user = userEvent.setup();
+    render(<SettingsModal onClose={() => {}} initialTab="personalization" />);
+    expect(screen.getByText("Passes & review timing")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /Daily rhythm/ }));
+    expect(screen.getByRole("checkbox", { name: "Enable lock-in check-ins" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /Program & lanes/ }));
+    expect(screen.getByText("Focus lanes")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Personalization" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("enables lock-in check-ins with a chosen interval, scope, and voice", async () => {
+    const user = userEvent.setup();
+    render(<SettingsModal onClose={() => {}} initialTab="rhythm" />);
+    await user.click(screen.getByRole("checkbox", { name: "Enable lock-in check-ins" }));
+    await user.click(screen.getByRole("button", { name: "45 min" }));
+    await user.click(screen.getByRole("radio", { name: /Whenever AXOM is open/ }));
+    await user.click(screen.getByRole("radio", { name: /Intense/ }));
+    expect(useStore.getState().profile.focusCheckIn).toMatchObject({ enabled: true, intervalMinutes: 45, scope: "anytime", tone: "intense" });
+  });
+
+  it("applies an accent palette from Appearance and keeps it device-only", async () => {
+    const user = userEvent.setup();
+    render(<SettingsModal onClose={() => {}} initialTab="appearance" />);
+    await user.click(screen.getByRole("radio", { name: /Amethyst/ }));
+    expect(document.documentElement.dataset.palette).toBe("amethyst");
+    expect(JSON.parse(localStorage.getItem("axom.palette.v1")!).id).toBe("amethyst");
+    expect(JSON.stringify(useStore.getState().profile)).not.toContain("amethyst");
+    await user.click(screen.getByRole("radio", { name: /AXOM Classic/ }));
+    expect(document.documentElement.dataset.palette).toBeUndefined();
+  });
+
+  it("shows the profile header with program facts and an account entry point", () => {
+    useStore.getState().updateProfile({ name: "Jafar", tagline: "One honest block." });
+    render(<SettingsModal onClose={() => {}} />);
+    expect((screen.getByLabelText("Display name") as HTMLInputElement).value).toBe("Jafar");
+    expect(screen.getByText("Where you are")).toBeTruthy();
+    expect(screen.getByText("Local profile on this device")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "About accounts" }));
+    expect(screen.getByRole("tab", { name: "Account" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("records restores in a device-only restore history", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<SettingsModal onClose={() => {}} initialTab="advanced" />);
+    await user.click(screen.getByRole("button", { name: /reset to starter data/i }));
+    await user.click(screen.getByRole("tab", { name: "Emergency recovery" }));
+    expect(screen.getByText("Reset to starter data", { selector: "b" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Backup status" })).toBeTruthy();
   });
 });

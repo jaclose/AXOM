@@ -11,7 +11,9 @@
 import type { Course, DayPlan, Habit, HabitEntry, NoctyriumState, Task, TrackerItem } from "./types";
 import { sessionElapsedMinutes, type StudySession, type SessionLink } from "./sessions";
 import type { DailyCloseout } from "./closeout";
-import { suggestMoves, targetPassesForItem, isQuestionKind } from "./tracker";
+import { isQuestionKind } from "./tracker";
+import { rankTrackerItems, trackerStudyAction } from "./recommendationFactors";
+import type { StudyWorkflowPreferences } from "./studyPreferences";
 import { dayTotals, isoDate } from "./scoring";
 import { pickFocusExam, daysUntilExam, EXAM_META } from "./examPlan";
 import { previousCloseout } from "./closeout";
@@ -43,6 +45,7 @@ export interface NextBestMove {
   resources: string[];
   reason: string;
   expectedOutcome: string;
+  studyPlan?: { summary: string; sources: string[] };
   /** Inspectable, deterministic evidence. The weights sum to score. */
   score?: number;
   contributions?: BriefRecommendationContribution[];
@@ -108,6 +111,10 @@ export interface CommandBrief {
 export interface BriefStateSlice {
   tasks: Task[];
   tracker: TrackerItem[];
+  /** Active primary Course Tracker scopes (lib/trackerFocus). */
+  primaryScopes?: readonly string[];
+  courses?: Course[];
+  studyWorkflow?: StudyWorkflowPreferences;
   logs: NoctyriumState["logs"];
   boardPrep: NoctyriumState["boardPrep"];
   activeDayKey: string;
@@ -127,6 +134,7 @@ export interface BriefStateSlice {
 export interface BriefEvidenceState {
   courses: Course[];
   tracker: TrackerItem[];
+  studyWorkflow?: StudyWorkflowPreferences;
   logs: NoctyriumState["logs"];
   tasks: Task[];
   questions: QuestionRecord[];
@@ -240,7 +248,7 @@ export function assessCommandBriefEvidence(
   state: BriefEvidenceState,
   options: CommandBriefEvidenceOptions = {},
 ): CommandBriefEvidenceAssessment {
-  const meaningfulTracker = state.tracker.filter(isMeaningfulActiveTrackerItem);
+  const meaningfulTracker = rankMeaningfulTracker(state, options.now).map(({ item }) => item);
   const actionableTasks = state.tasks.filter(isActionableTask);
   const dueTrustedQuestions = trustedDueQuestions(state.questions, options.now ?? new Date());
   const realCourses = state.courses.filter(isRealWorkloadCourse).length;
@@ -518,14 +526,25 @@ function isRealWorkloadCourse(course: Course): boolean {
   return !TEMPLATE_COURSE_FINGERPRINTS.has(courseFingerprint(course));
 }
 
-function isMeaningfulActiveTrackerItem(item: TrackerItem): boolean {
-  if (item.passes >= targetPassesForItem(item)) return false;
+function isMeaningfulTrackerItem(item: TrackerItem): boolean {
   const origin = recordOrigin(item);
   if (origin === "user" || origin === "import") return true;
   const baseline = TEMPLATE_TRACKER_BASELINES.get(trackerFingerprint(item));
   if (baseline) return item.passes > baseline.passes || item.ankiPasses > baseline.ankiPasses;
   if (/^example(?:[:\s]|$)/i.test(item.label.trim())) return item.passes > 0 || item.ankiPasses > 0;
   return true;
+}
+
+function rankMeaningfulTracker(
+  state: Pick<BriefStateSlice, "tracker" | "courses" | "studyWorkflow" | "primaryScopes">,
+  now?: Date,
+) {
+  return rankTrackerItems(state.tracker.filter(isMeaningfulTrackerItem), {
+    preferences: state.studyWorkflow,
+    courses: state.courses,
+    primaryScopes: state.primaryScopes,
+    now,
+  });
 }
 
 function isActionableTask(task: Task): boolean {
@@ -646,7 +665,7 @@ export function deriveSignals(s: BriefStateSlice, now: Date = new Date()): Brief
   const overdueTasks = open.filter((t) => t.due && t.due < today).length;
   const carriedTasks = open.filter((t) => (t.carryoverFrom?.length ?? 0) > 0).length;
 
-  const activeTracker = s.tracker.filter(isMeaningfulActiveTrackerItem);
+  const activeTracker = rankMeaningfulTracker(s, now).map(({ item }) => item);
   const reviewFlagged = activeTracker.filter((t) => t.yield === "review").length;
   const behindTracker = activeTracker.length;
 
@@ -936,14 +955,11 @@ export function rankCommandBriefCandidates(
     });
   }
 
-  for (const item of s.tracker.filter(isMeaningfulActiveTrackerItem)) {
-    const [suggestion] = suggestMoves([item], 1);
-    const contributions = [evidence("active-item", "Active study item", 15, "Course Tracker")];
-    if (item.yield === "review") contributions.push(evidence("review-flag", "Marked for review", 70, "Course Tracker"));
-    if (item.yield === "high") contributions.push(evidence("high-yield", "Marked high yield", item.passes === 0 ? 55 : 35, "Course Tracker"));
-    if (item.passes === 0) contributions.push(evidence("untouched", "Not started", 25, "Course Tracker"));
-    else if (item.passes === 1) contributions.push(evidence("fragile", "One pass so far", 22, "Course Tracker"));
-    if (isQuestionKind(item.kind)) contributions.push(evidence("question-practice", "Practice work", 12, "Course Tracker"));
+  const sharedTrackerRanks = rankMeaningfulTracker(s, now);
+  for (const ranked of sharedTrackerRanks) {
+    const item = ranked.item;
+    const action = trackerStudyAction(ranked);
+    const contributions = ranked.factors.map((factor) => evidence(factor.id, factor.label, factor.value, "Course Tracker"));
     if (examNear && (item.yield === "review" || item.yield === "high" || isQuestionKind(item.kind))) {
       contributions.push(evidence("exam-proximity", `${EXAM_META[examId!].label} is within seven days`, 18, "Exam plan"));
     }
@@ -952,12 +968,13 @@ export function rankCommandBriefCandidates(
     const score = candidateScore(contributions);
     candidates.push({
       candidateId: `tracker:${item.id}`,
-      title: suggestion?.title ?? item.label,
+      title: action.title,
       link: { kind: "tracker", id: item.id, label: item.label, context: item.path.split("/").slice(0, 3).join(" · ") },
       estimatedMinutes: mode === "recovery" ? 25 : minutes,
-      resources: isQuestionKind(item.kind) ? ["Linked question set", "Error log"] : ["Lecture notes / slides", "Anki Lab for anchoring"],
-      reason: suggestion?.reason ?? "This active item has the strongest current evidence.",
-      expectedOutcome: item.passes === 0 ? "Complete a first pass so this is no longer unknown." : "Move one pass closer to stable recall.",
+      resources: action.resources,
+      reason: ranked.reason || "This active item has the strongest current evidence.",
+      expectedOutcome: action.expectedOutcome,
+      studyPlan: { summary: action.summary, sources: action.sources },
       score,
       contributions,
       source: "command-brief",
@@ -1110,7 +1127,7 @@ export function rankCommandBriefCandidates(
 
 // --- minimum viable win -----------------------------------------------------
 
-export function deriveMinimumViableWin(s: BriefStateSlice, signals: BriefSignals): MinimumViableWin {
+export function deriveMinimumViableWin(s: BriefStateSlice, signals: BriefSignals, now: Date = new Date()): MinimumViableWin {
   if (signals.dueCardCount > 0) {
     const n = Math.min(signals.dueCardCount, 8);
     return {
@@ -1129,7 +1146,7 @@ export function deriveMinimumViableWin(s: BriefStateSlice, signals: BriefSignals
       link: { kind: "question-set", label: "Question Workspace", context: "Review mode" },
     };
   }
-  const fragile = s.tracker.find((t) => isMeaningfulActiveTrackerItem(t) && t.passes === 1 && t.yield !== "low");
+  const fragile = rankMeaningfulTracker(s, now).find(({ item }) => item.passes === 1 && item.yield !== "low")?.item;
   if (fragile) {
     return {
       title: `15-minute skim: ${fragile.label}`,
@@ -1217,7 +1234,7 @@ export function buildCommandBrief(s: BriefStateSlice, now: Date = new Date()): C
     mode,
     modeReason: reason,
     move,
-    minimumViableWin: deriveMinimumViableWin(s, signals),
+    minimumViableWin: deriveMinimumViableWin(s, signals, now),
     changes: deriveChanges(s, signals),
     signals,
     recoverySuggested: mode === "recovery",

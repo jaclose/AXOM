@@ -1,161 +1,191 @@
 import { useMemo, useState } from "react";
-import { Trophy, Flame, Layers, Users, Crown, TrendingUp, TrendingDown, Minus, Lock } from "lucide-react";
+import { Award, CalendarDays, Crown, Flame, Lock, Medal, TrendingUp, Trophy, Users, Zap } from "lucide-react";
 import { GlassCard, PanelHeader, Tag } from "../components/ui/primitives";
 import { useStore } from "../lib/store";
-import { studyStreak, dayTotals, lastNDays, isoDate } from "../lib/scoring";
+import {
+  bestDay,
+  longestActiveStreak,
+  personalActivityWeeks,
+  rankPersonalWeeks,
+  weekPace,
+  type PersonalBoardMetric,
+  type WeekPace,
+} from "../lib/leaderboards";
+import { isoDate } from "../lib/scoring";
 import { ICON_SIZE } from "../lib/iconSize";
+import { useAccount } from "../lib/account/accountStore";
 
-type BoardId = "streaks" | "anki" | "hours";
+const BOARDS: Array<{ id: PersonalBoardMetric; label: string }> = [
+  { id: "activeDays", label: "Study days" }, { id: "cards", label: "Logged cards" }, { id: "minutes", label: "Study time" },
+];
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-interface BoardConfig {
-  id: BoardId;
-  label: string;
-  icon: typeof Flame;
-  unit: string;
-  blurb: string;
+function formatValue(amount: number, metric: PersonalBoardMetric, compact = false) {
+  if (metric === "minutes") {
+    if (!compact && amount < 90) return `${Math.round(amount)} min`;
+    const hours = amount / 60;
+    return compact ? `${hours >= 10 ? Math.round(hours) : Number(hours.toFixed(1))}h` : `${Number(hours.toFixed(1))} hours`;
+  }
+  const rounded = metric === "activeDays" ? Math.round(amount * 10) / 10 : Math.round(amount);
+  return compact ? rounded.toLocaleString() : `${rounded.toLocaleString()} ${metric === "cards" ? "cards" : rounded === 1 ? "day" : "days"}`;
 }
 
-const BOARDS: BoardConfig[] = [
-  { id: "streaks", label: "Study streaks", icon: Flame, unit: "day streak", blurb: "Consecutive study days among friends who opt in." },
-  { id: "anki", label: "Anki reviews", icon: Layers, unit: "cards / wk", blurb: "Weekly card reviews (Anki Leaderboard add-on)." },
-  { id: "hours", label: "Study hours", icon: TrendingUp, unit: "hrs / wk", blurb: "Logged focus time this week across the cohort." },
-];
+function paceHeadline(pace: WeekPace): { title: string; body: string } {
+  const metric = pace.metric;
+  if (pace.status === "no-history") {
+    return { title: "Your first week is the baseline", body: "Finish this week and AXOM will race every future week against it." };
+  }
+  const gap = Math.abs(pace.current - pace.typicalSoFar);
+  if (pace.status === "ahead") {
+    return {
+      title: pace.projectedRank === 1 ? "On track for your best week yet" : "Ahead of your usual pace",
+      body: `${formatValue(gap, metric)} ahead of where a typical week is by ${WEEKDAYS[pace.elapsedDays - 1]}. Projected: ${formatValue(pace.projected, metric)}.`,
+    };
+  }
+  if (pace.status === "on-track") {
+    return {
+      title: "Right on your usual pace",
+      body: `Keep today normal and this lands near your average week (${formatValue(pace.typicalWeek, metric)}).`,
+    };
+  }
+  return {
+    title: "Behind your usual pace — still very catchable",
+    body: `${formatValue(gap, metric)} behind a typical week by ${WEEKDAYS[pace.elapsedDays - 1]}. One solid block today closes most of it.`,
+  };
+}
 
-// Believable placeholder cohort — clearly a preview until real opt-in sync ships.
-const COHORT: Record<BoardId, { name: string; value: number; delta: number }[]> = {
-  streaks: [
-    { name: "Amara O.", value: 47, delta: 2 }, { name: "Diego R.", value: 41, delta: 0 },
-    { name: "Priya N.", value: 33, delta: -1 }, { name: "Sam K.", value: 29, delta: 3 },
-    { name: "Lena M.", value: 22, delta: 1 }, { name: "Tomas V.", value: 18, delta: -2 },
-  ],
-  anki: [
-    { name: "Priya N.", value: 1820, delta: 4 }, { name: "Amara O.", value: 1610, delta: 1 },
-    { name: "Sam K.", value: 1490, delta: -1 }, { name: "Diego R.", value: 1305, delta: 2 },
-    { name: "Lena M.", value: 1120, delta: 0 }, { name: "Tomas V.", value: 940, delta: -3 },
-  ],
-  hours: [
-    { name: "Diego R.", value: 38, delta: 1 }, { name: "Amara O.", value: 34, delta: -1 },
-    { name: "Lena M.", value: 31, delta: 2 }, { name: "Priya N.", value: 27, delta: 0 },
-    { name: "Sam K.", value: 24, delta: 1 }, { name: "Tomas V.", value: 20, delta: -2 },
-  ],
-};
+/** What it takes to set a new personal record this week, in plain words. */
+export function beatYourBestMessage(pace: WeekPace): { done: boolean; text: string } | null {
+  if (!pace.best || pace.neededPerDayToBeatBest === null) return null;
+  if (pace.neededPerDayToBeatBest === 0) return { done: true, text: "You’ve already beaten your best week. Anything more is a new record." };
+  const remaining = 7 - pace.elapsedDays + 1;
+  const dayWord = (count: number) => `${count} day${count === 1 ? "" : "s"}`;
+  if (pace.metric === "activeDays") {
+    const needed = Math.max(0, pace.best.activeDays + 1 - pace.current);
+    return needed > remaining
+      ? { done: false, text: `Your best week (${dayWord(pace.best.activeDays)}) is out of reach this week — matching your usual pace is still a strong week.` }
+      : { done: false, text: `To beat your best week: study on ${needed} of the next ${dayWord(remaining)}.` };
+  }
+  return { done: false, text: `To beat your best week: about ${formatValue(pace.neededPerDayToBeatBest, pace.metric)} per day for the next ${dayWord(remaining)}.` };
+}
 
-function initials(name: string) {
-  return name.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase();
+function BeatYourBest({ pace }: { pace: WeekPace }) {
+  const message = beatYourBestMessage(pace);
+  if (!message) return null;
+  return (
+    <div className={`lb-beat ${message.done ? "done" : ""}`}>
+      {message.done ? <Crown size={ICON_SIZE.body} aria-hidden="true" /> : <Zap size={ICON_SIZE.body} aria-hidden="true" />}
+      <span>{message.text}</span>
+    </div>
+  );
 }
 
 export function LeaderboardsPage() {
-  const s = useStore();
-  const [board, setBoard] = useState<BoardId>("streaks");
-  const config = BOARDS.find((b) => b.id === board)!;
-
-  // The user's real number from local data, slotted into the mock cohort so the
-  // preview reflects actual effort instead of a hard-coded "You".
-  const myValue = useMemo(() => {
-    if (board === "streaks") return studyStreak(s.logs);
-    const week = lastNDays(7).map((d) => dayTotals(s.logs, isoDate(d)));
-    if (board === "anki") return week.reduce((a, d) => a + d.cards, 0);
-    return Math.round(week.reduce((a, d) => a + d.minutes, 0) / 60);
-  }, [board, s.logs]);
-
-  const ranked = useMemo(() => {
-    const me = { name: s.profile.name || "You", value: myValue, delta: 0, you: true };
-    const rows = [...COHORT[board].map((r) => ({ ...r, you: false })), me]
-      .sort((a, b) => b.value - a.value)
-      .map((r, i) => ({ ...r, rank: i + 1 }));
-    return rows;
-  }, [board, myValue, s.profile.name]);
-
-  const myRank = ranked.find((r) => r.you)!.rank;
-  const podium = ranked.slice(0, 3);
-  const podiumOrder = [podium[1], podium[0], podium[2]].filter(Boolean); // 2 · 1 · 3
+  const logs = useStore((s) => s.logs);
+  const accountPhase = useAccount((s) => s.phase);
+  const [metric, setMetric] = useState<PersonalBoardMetric>("activeDays");
+  const today = isoDate(new Date());
+  const now = useMemo(() => new Date(`${today}T12:00:00`), [today]);
+  const weeks = useMemo(() => personalActivityWeeks(logs, now), [logs, now]);
+  const ranked = useMemo(() => rankPersonalWeeks(weeks, metric), [weeks, metric]);
+  const pace = useMemo(() => weekPace(logs, metric, now), [logs, metric, now]);
+  const longest = useMemo(() => longestActiveStreak(logs, now), [logs, now]);
+  const bestMinutesDay = useMemo(() => bestDay(logs, "minutes", now), [logs, now]);
+  const current = weeks[0];
+  const headline = paceHeadline(pace);
+  const maxRanked = Math.max(1, ...ranked.map((week) => week[metric]));
+  const raceMax = Math.max(1, pace.series.best.at(-1) ?? 0, pace.series.typical.at(-1) ?? 0, pace.series.you.at(-1) ?? 0);
 
   return (
-    <>
-      <GlassCard pad>
-        <div className="row gap12" style={{ alignItems: "center" }}>
-          <span className="folder-icon" style={{ color: "var(--orange)" }}><Trophy size={ICON_SIZE.control} /></span>
+    <div className="lb-page">
+      <GlassCard pad className="lb-hero">
+        <div className="lb-hero-head">
+          <span className="lb-hero-icon"><Trophy size={ICON_SIZE.control} aria-hidden="true" /></span>
           <div className="grow">
-            <div style={{ fontSize: 18, fontWeight: 800 }}>Leaderboards</div>
-            <div className="sub">Opt-in, friendly accountability — never a grind contest.</div>
+            <span className="lb-kicker">Race your past self</span>
+            <h2>{headline.title}</h2>
+            <p>{headline.body}</p>
           </div>
-          <Tag tone="orange">Alpha 2 · preview</Tag>
+          <Tag tone="cyan">Personal standings</Tag>
         </div>
-      </GlassCard>
+        <div className="lb-tabs" role="group" aria-label="Leaderboard measure">
+          {BOARDS.map((board) => (
+            <button type="button" key={board.id} className={`filter-pill ${metric === board.id ? "on" : ""}`} aria-pressed={metric === board.id} onClick={() => setMetric(board.id)}>{board.label}</button>
+          ))}
+        </div>
 
-      <GlassCard pad className="under-construction">
-        <span className="uc-tape t1">Under Construction</span>
-        <span className="uc-badge"><Lock size={ICON_SIZE.body} /> Opt-in sync — not live yet</span>
-        <div className="uc-inner">
-          <div className="lb-tabs">
-            {BOARDS.map((b) => {
-              const I = b.icon;
-              return (
-                <button type="button" key={b.id} className={`filter-pill ${board === b.id ? "on" : ""}`} onClick={() => setBoard(b.id)}>
-                  <I size={ICON_SIZE.body} /> {b.label}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="lb-stat-strip">
-            <div className="lb-stat"><Trophy size={ICON_SIZE.body} /><div><b>#{myRank}</b><span>your rank</span></div></div>
-            <div className="lb-stat"><config.icon size={ICON_SIZE.body} /><div><b>{myValue}</b><span>your {config.unit}</span></div></div>
-            <div className="lb-stat"><Users size={ICON_SIZE.body} /><div><b>{ranked.length}</b><span>in cohort</span></div></div>
-          </div>
-
-          <div className="lb-podium">
-            {podiumOrder.map((p) => {
-              const place = p.rank;
-              return (
-                <div key={p.name} className={`lb-podium-col p${place} ${p.you ? "you" : ""}`}>
-                  {place === 1 && <Crown size={ICON_SIZE.emphasis} className="lb-crown" />}
-                  <span className="lb-avatar">{p.you ? "YOU" : initials(p.name)}</span>
-                  <b className="truncate">{p.name}</b>
-                  <span className="lb-podium-val">{p.value.toLocaleString()}</span>
-                  <div className="lb-podium-base">{place}</div>
-                </div>
-              );
-            })}
-          </div>
-
-          <PanelHeader title={config.label} sub={config.blurb} />
-          <div className="lb-rows">
-            {ranked.map((r) => (
-              <div key={r.name} className={`lb-row ${r.you ? "you" : ""}`}>
-                <span className="lb-rank">{r.rank}</span>
-                <span className="lb-avatar sm">{r.you ? "YOU" : initials(r.name)}</span>
-                <span className="grow truncate">{r.name}{r.you && <Tag tone="cyan">You</Tag>}</span>
-                <span className="lb-delta">
-                  {r.delta > 0 ? <TrendingUp size={ICON_SIZE.body} className="up" /> : r.delta < 0 ? <TrendingDown size={ICON_SIZE.body} className="down" /> : <Minus size={ICON_SIZE.body} className="flat" />}
-                </span>
-                <b className="lb-value">{r.value.toLocaleString()}<small> {config.unit}</small></b>
+        <div className="lb-race" aria-label="This week compared with your typical and best weeks">
+          {([
+            { key: "you", label: "You, this week", value: pace.current, tone: "you", note: `${pace.elapsedDays} of 7 days in` },
+            { key: "typical", label: "Your typical week, by today", value: pace.typicalSoFar, tone: "typical", note: `full week ≈ ${formatValue(pace.typicalWeek, metric)}` },
+            { key: "best", label: "Your best week, by today", value: pace.series.best[pace.elapsedDays - 1] ?? 0, tone: "best", note: pace.best ? `full week ${formatValue(pace.best[metric], metric)} · ${pace.best.start}` : "no completed weeks yet" },
+          ] as const).map((lane) => (
+            <div className={`lb-lane ${lane.tone}`} key={lane.key}>
+              <div className="lb-lane-label"><b>{lane.label}</b><small>{lane.note}</small></div>
+              <div className="lb-lane-track">
+                <i style={{ width: `${Math.min(100, (lane.value / raceMax) * 100)}%` }} />
+                <span className="lb-lane-value">{formatValue(lane.value, metric)}</span>
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
         </div>
+
+        {pace.best && pace.neededPerDayToBeatBest !== null && <BeatYourBest pace={pace} />}
       </GlassCard>
+
+      <div className="lb-stat-strip">
+        <div className="lb-stat"><CalendarDays size={ICON_SIZE.emphasis} aria-hidden="true" /><div><b>{current.activeDays}/7</b><span>study days this week</span></div></div>
+        <div className="lb-stat"><Award size={ICON_SIZE.emphasis} aria-hidden="true" /><div><b>{current.cards.toLocaleString()}</b><span>logged cards this week</span></div></div>
+        <div className="lb-stat"><TrendingUp size={ICON_SIZE.emphasis} aria-hidden="true" /><div><b>{Number((current.minutes / 60).toFixed(1))}</b><span>study hours this week</span></div></div>
+        <div className="lb-stat"><Flame size={ICON_SIZE.emphasis} aria-hidden="true" /><div><b>{longest}</b><span>longest day streak</span></div></div>
+        <div className="lb-stat"><Crown size={ICON_SIZE.emphasis} aria-hidden="true" /><div><b>{bestMinutesDay ? `${Math.round(bestMinutesDay.value / 6) / 10}h` : "—"}</b><span>{bestMinutesDay ? `best day · ${bestMinutesDay.dayKey}` : "best day"}</span></div></div>
+      </div>
 
       <GlassCard pad>
-        <PanelHeader title="How leaderboards will work" sub="Designed to motivate, not to overload" />
-        <div className="grid grid-2">
-          {[
-            { icon: Lock, title: "Opt-in only", body: "Nothing is shared until you turn it on and pick a cohort. Private by default." },
-            { icon: Users, title: "Small cohorts", body: "Friends and study groups, not a global ranking — accountability you actually feel." },
-            { icon: Flame, title: "Effort, not extremes", body: "Streaks and consistency are rewarded over single grind days, in line with anti-overload." },
-            { icon: Layers, title: "Anki add-on sync", body: "Pull weekly reviews from the Anki Leaderboard add-on once integrations land." },
-          ].map((t) => {
-            const I = t.icon;
-            return (
-              <div className="int-row" key={t.title}>
-                <span className="folder-icon"><I size={ICON_SIZE.emphasis} /></span>
-                <div className="grow"><div style={{ fontWeight: 700 }}>{t.title}</div><div className="sub">{t.body}</div></div>
-                <Tag tone="neutral">Planned</Tag>
-              </div>
-            );
-          })}
+        <PanelHeader
+          title="Your completed weeks"
+          sub="Your last eight completed Monday–Sunday weeks. Equal totals share a rank; the week in progress is shown with its projection, never ranked early."
+          action={pace.projectedRank && pace.status !== "no-history" ? <Tag tone={pace.projectedRank <= 3 ? "green" : "neutral"}>This week on pace for #{pace.projectedRank}</Tag> : undefined}
+        />
+        {ranked.length ? (
+          <ol className="lb-rows" aria-label="Personal weekly standings">
+            {ranked.map((week) => (
+              <li className={`lb-row rank-${Math.min(week.rank, 4)}`} key={week.start}>
+                <span className="lb-rank">{week.rank}</span>
+                <span className="lb-medal" aria-hidden="true">{week.rank <= 3 ? <Medal size={ICON_SIZE.body} /> : null}</span>
+                <span className="lb-row-dates"><b>{week.start}</b><small>to {week.end}</small></span>
+                <span className="lb-row-bar" aria-hidden="true"><i style={{ width: `${(week[metric] / maxRanked) * 100}%` }} /></span>
+                <b className="lb-value">{formatValue(week[metric], metric)}</b>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <div className="application-state">
+            <h3>No completed weeks with {BOARDS.find((board) => board.id === metric)?.label.toLowerCase()} yet</h3>
+            <p className="sub">Log your study from Today. Your standings appear after the week ends.</p>
+            <a className="ghost-btn" href="#dashboard">Go to Today</a>
+          </div>
+        )}
+        <p className="sub">Based only on academic activity recorded in AXOM. Logged cards are not a verified connection to the Anki Leaderboard add-on.</p>
+      </GlassCard>
+
+      <GlassCard pad className="lb-friends">
+        <PanelHeader title="Study with friends" sub="Planned · not connected" action={<Tag tone="neutral"><Lock size={ICON_SIZE.microInline} /> Private by design</Tag>} />
+        <div className="lb-friends-body">
+          <Users size={ICON_SIZE.display} aria-hidden="true" />
+          <div>
+            <p>
+              Small private groups will compare <b>this week’s pace</b> the same way you race your past self above — “on track for a better week”,
+              “needs a stronger push” — never raw rankings of strangers. Groups will require an account, an explicit invite, opt-in per measure,
+              and the ability to leave and delete your shared numbers at any time.
+            </p>
+            <p className="sub">
+              {accountPhase === "signed-in" ? "You’re signed in, so you’ll be ready when groups open." : "Nothing from this page leaves your device today. No participants are invented."}
+            </p>
+          </div>
         </div>
       </GlassCard>
-    </>
+    </div>
   );
 }
+

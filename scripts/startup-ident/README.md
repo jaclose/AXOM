@@ -2,11 +2,14 @@
 
 A 7-second cinematic reveal of the AXOM identity, rendered as a physical
 object: a champagne-ivory brushed-metal mark hanging a short distance in front
-of a near-black wall, revealed by light. It plays as the app's startup film
-(`web/public/startup/`, driven by `web/src/lib/startupIntro.ts`) and ends on the
-overlay's own `#0D0D0E`, so the app crossfades in seamlessly.
+of a near-black wall, revealed by light. It ends on the overlay's own
+`#0D0D0E`, so the app crossfades in seamlessly.
 
-The player picks the best cut the engine can decode:
+In the app it is the `brand-ident` film of the cinematics catalog
+(`web/src/data/cinematics.json`; see `docs/CINEMATICS.md`). Learners choose it
+under Settings → Appearance → Opening film, and it takes part in "rotate".
+The player (`pickFilmSource` in `web/src/lib/startupIntro.ts`) picks the best
+cut the engine can decode:
 
 1. `axom-ident-hevc10.mp4`: HEVC Main 10. Safari, macOS WebKit, and Chromium
    where hardware HEVC is available.
@@ -102,6 +105,16 @@ python3 scripts/startup-ident/render_ident.py encode --frames build/ident/frames
 - `AXOM_ident_lockup_4K.png`: a still of the full lockup.
 
 Film grain and dither are added at encode time, per target bit depth. All
-files are tagged BT.709 / TV range. `--publish` installs the app cuts and the
-poster into `web/public/startup/` and records hashes in
-`design/startup/ident-manifest.json`.
+files are tagged BT.709 / TV range.
+
+`--publish` (or `render_ident.py publish --out build/ident` for cuts that are
+already encoded) does three things:
+
+- installs the app cuts and a lockup poster (the Settings thumbnail) into
+  `web/public/startup/`;
+- writes the `brand-ident` entry, with its 10-bit `sources`, into
+  `web/src/data/cinematics.json`;
+- records hashes in `design/startup/ident-manifest.json`.
+
+Don't re-import this film with `npm run cinematic:import`. That tool makes a
+single 8-bit file and would drop the 10-bit sources.

@@ -1,20 +1,20 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
-  Settings, UserCircle2, SlidersHorizontal, Check, ChevronDown, ChevronRight, Wrench, GraduationCap, MessageCircle,
+  Settings, Cloud, SlidersHorizontal, Check, ChevronDown, ChevronRight, Wrench, GraduationCap, MessageCircle,
 } from "lucide-react";
 import {
   DAILY_GAMES_FOLDER,
   getNavAnnouncementId,
   getNavModuleStatus,
-  isDailyGamesEnabled,
-  isDailyGamesRoute,
   MODULE_STATUS_META,
   navById,
   SIDEBAR_BOTTOM,
   SIDEBAR_LOCKED,
+  SIDEBAR_LEARN,
   SIDEBAR_PREP,
+  SIDEBAR_REVIEW,
+  SIDEBAR_TODAY,
   SIDEBAR_TOOLS,
-  SIDEBAR_TOP,
 } from "./nav";
 import { useStore } from "../../lib/store";
 import { AxomBrandLockup } from "../ui/BrandMark";
@@ -22,6 +22,7 @@ import type { SettingsTab } from "./SettingsModal";
 import { dismissAnnouncement, isAnnouncementDismissed, readDismissedAnnouncements } from "../../lib/announcements";
 import { QuickThemeControl } from "./QuickThemeControl";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { protectionLabel, useAccount } from "../../lib/account/accountStore";
 
 const MOBILE_SIDEBAR_QUERY = "(max-width: 880px)";
 const PREP_FOLDER_TOGGLE_ID = "sidebar-academic-prep-toggle";
@@ -58,13 +59,13 @@ export function Sidebar({
   onClose: () => void;      // close drawer after pick on mobile
 }) {
   const profile = useStore((s) => s.profile);
+  const accountStatus = useAccount((state) => state.protection);
   const updateProfile = useStore((s) => s.updateProfile);
   const [manage, setManage] = useState(false);
   const [dismissedAnnouncements, setDismissedAnnouncements] = useState(readDismissedAnnouncements);
   const sidebarRef = useRef<HTMLElement>(null);
   const mobile = useMobileSidebar();
   const hiddenOffscreen = mobile && !collapsed;
-  const dailyGamesOn = isDailyGamesEnabled(profile.experimentalFlags);
 
   useLayoutEffect(() => {
     const sidebar = sidebarRef.current;
@@ -84,9 +85,8 @@ export function Sidebar({
     if (!announcementId || isAnnouncementDismissed(announcementId, dismissedAnnouncements)) return;
     // The optional-route gate is an enablement explanation, not a meaningful
     // open of the game itself. Dismiss only once the module can render.
-    if (isDailyGamesRoute(active) && !dailyGamesOn) return;
     setDismissedAnnouncements(dismissAnnouncement(announcementId));
-  }, [active, dailyGamesOn, dismissedAnnouncements]);
+  }, [active, dismissedAnnouncements]);
 
   const hidden = new Set(profile.hiddenNav ?? []);
   const toolsOpen = !profile.toolsCollapsed;
@@ -198,8 +198,12 @@ export function Sidebar({
         </div>
 
         <nav className="nav">
-          <div className="nav-cat"><span>{manage ? "Customize sidebar" : "Control surface"}</span></div>
-          {SIDEBAR_TOP.map((id) => <Item key={id} id={id} />)}
+          <div className="nav-cat"><span>{manage ? "Customize sidebar" : "Today"}</span></div>
+          {SIDEBAR_TODAY.map((id) => <Item key={id} id={id} />)}
+          <div className="nav-cat"><span>Learn</span></div>
+          {SIDEBAR_LEARN.map((id) => <Item key={id} id={id} />)}
+          <div className="nav-cat"><span>Review &amp; reflect</span></div>
+          {SIDEBAR_REVIEW.map((id) => <Item key={id} id={id} />)}
 
           {(prepItems.length > 0 || manage) && (
             <div className="nav-folder">
@@ -251,29 +255,7 @@ export function Sidebar({
             </div>
           )}
 
-          {manage && (
-            <button
-              type="button"
-              className={`nav-item manage ${dailyGamesOn ? "" : "off"}`}
-              aria-label={`${DAILY_GAMES_FOLDER.label}, optional feature`}
-              aria-pressed={dailyGamesOn}
-              onClick={() => updateProfile({
-                experimentalFlags: {
-                  ...(profile.experimentalFlags ?? {}),
-                  [DAILY_GAMES_FOLDER.featureFlag]: !dailyGamesOn,
-                },
-              })}
-              title={dailyGamesOn ? "Disable Daily Games (history is preserved)" : "Enable Daily Games"}
-            >
-              <span className={`nav-check ${dailyGamesOn ? "on" : ""}`}>{dailyGamesOn && <Check size={ICON_SIZE.microInline} />}</span>
-              <DailyGamesIcon size={ICON_SIZE.emphasis} />
-              <span className="nav-item-label">{DAILY_GAMES_FOLDER.label}</span>
-              <span className="nav-status nav-status--wip" aria-hidden="true">OPTIONAL</span>
-            </button>
-          )}
-
-          {dailyGamesOn && (
-            <div className="nav-folder">
+          <div className="nav-folder">
               <button
                 id={DAILY_GAMES_FOLDER.toggleId}
                 type="button"
@@ -295,8 +277,7 @@ export function Sidebar({
               >
                 {dailyGameItems.map((id) => <Item key={id} id={id} />)}
               </div>
-            </div>
-          )}
+          </div>
 
           {SIDEBAR_BOTTOM.map((id) => <Item key={id} id={id} />)}
         </nav>
@@ -332,8 +313,8 @@ export function Sidebar({
             </button>
             <div className="user-actions">
               <QuickThemeControl />
-              <button type="button" className="user-icon-btn" onClick={() => onOpenSettings("data")} title="Local data and backups" data-tour="data-safety-settings">
-                <UserCircle2 size={ICON_SIZE.emphasis} />
+              <button type="button" className="user-icon-btn account-status" data-status={accountStatus} onClick={() => onOpenSettings("account")} title="Account and protection" aria-label={`Account and protection: ${protectionLabel(accountStatus)}`} data-tour="data-safety-settings">
+                <Cloud size={ICON_SIZE.emphasis} />
               </button>
               <button type="button" className="user-icon-btn" onClick={() => onOpenSettings("profile")} title="Settings">
                 <Settings size={ICON_SIZE.emphasis} />

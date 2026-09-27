@@ -523,12 +523,15 @@ export const usePomodoro = create<PomodoroState>((set, get) => {
     setIntention: (intention) => { set({ intention }); persistSnapshot(get()); },
     _tick: () => {
       const state = get();
-      const elapsed = Math.max(1, Math.floor((Date.now() - state.lastTickAt) / 1000));
+      const elapsed = Math.floor((Date.now() - state.lastTickAt) / 1000);
+      // An early interval fire counts nothing yet; the sub-second remainder carries
+      // into the next tick so the clock never drifts slower than wall time.
+      if (elapsed < 1) return;
       if (state.secondsLeft <= elapsed) {
         complete(true);
         return;
       }
-      set({ secondsLeft: state.secondsLeft - elapsed, lastTickAt: Date.now() });
+      set({ secondsLeft: state.secondsLeft - elapsed, lastTickAt: state.lastTickAt + elapsed * 1000 });
       persistSnapshot(get());
     },
   };
@@ -550,6 +553,18 @@ export function reconcilePomodoro() {
   const state = usePomodoro.getState();
   if (state.running && Date.now() - state.lastTickAt >= 1500) state._tick();
   ensurePomodoroClock();
+}
+
+/** Full length of the current phase in seconds, matching the Pomodoro dial. */
+export function pomodoroPhaseSeconds(state: { presetId: string; phase: PomodoroPhase; sessionsToday: number } & CustomDurations): number {
+  const preset = effectivePreset(state);
+  if (state.phase === "focus") return preset.focus * 60;
+  return getBreakDurationMinutes({
+    sessionsToday: state.sessionsToday,
+    cyclesBeforeLongBreak: preset.cyclesBeforeLongBreak,
+    shortBreak: preset.break,
+    longBreak: preset.longBreak,
+  }) * 60;
 }
 
 export function pomodoroPreset(id: string): PomodoroPreset {

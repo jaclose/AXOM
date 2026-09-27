@@ -18,6 +18,7 @@ export function AnnotatedQuestionText({
   focusRef,
   onSelection,
   onDelete,
+  eraseMode = false,
   inline = false,
 }: {
   text: string;
@@ -27,6 +28,7 @@ export function AnnotatedQuestionText({
   focusRef?: MutableRefObject<HTMLDivElement | null>;
   onSelection?: (selection: QuestionTextSelection | null) => void;
   onDelete?: (annotationId: string) => void;
+  eraseMode?: boolean;
   inline?: boolean;
 }) {
   const localRef = useRef<HTMLDivElement | null>(null);
@@ -73,8 +75,12 @@ export function AnnotatedQuestionText({
         aria-label={`Highlighted text: ${annotation.exactText}`}
         aria-keyshortcuts="Delete Backspace"
         data-annotation-id={annotation.id}
+        data-erase-active={eraseMode || undefined}
+        onClick={() => {
+          if (eraseMode && onDelete) onDelete(annotation.id);
+        }}
         onKeyDown={(event) => {
-          if (onDelete && (event.key === "Delete" || event.key === "Backspace")) {
+          if (onDelete && (event.key === "Delete" || event.key === "Backspace" || (eraseMode && (event.key === "Enter" || event.key === " ")))) {
             event.preventDefault();
             onDelete(annotation.id);
             window.setTimeout(() => localRef.current?.focus(), 0);

@@ -5,6 +5,7 @@ import { GlassCard, GButton, GhostButton, Tag, EmptyState } from "../components/
 import { Modal, Field, SelectField } from "../components/ui/Modal";
 import type { Course } from "../lib/types";
 import { ICON_SIZE } from "../lib/iconSize";
+import type { StudyMethodId } from "../lib/studyPreferences";
 
 export function CoursesPage() {
   const s = useStore();
@@ -146,10 +147,15 @@ function CourseEditor({ course, onClose }: { course: Course | null; onClose: () 
   const [termId, setTermId] = useState(course?.termId ?? s.terms[0]?.id ?? "");
   const [files, setFiles] = useState(String(course?.files ?? 0));
   const [link, setLink] = useState(course?.link ?? "");
+  const [customWorkflow, setCustomWorkflow] = useState(Boolean(course?.studyPlanOverride));
+  const [passes, setPasses] = useState(course?.studyPlanOverride?.lecturePasses ?? 2);
+  const [reviewDays, setReviewDays] = useState(course?.studyPlanOverride?.reviewAfterDays ?? 3);
+  const [methods, setMethods] = useState(() => new Set((course?.studyPlanOverride?.methods ?? []).filter((method) => method.enabled).map((method) => method.id)));
 
   function save() {
     if (!code.trim() || !termId) return;
-    const payload = { code: code.trim(), name: name.trim(), termId, files: Number(files) || 0, link: link.trim() || undefined };
+    const methodOptions: StudyMethodId[] = ["lecture-passes", "practice-questions", "anki", "notes", "teach-aloud", "external-resource"];
+    const payload = { code: code.trim(), name: name.trim(), termId, files: Number(files) || 0, link: link.trim() || undefined, studyPlanOverride: customWorkflow ? { lecturePasses: passes, reviewAfterDays: reviewDays, methods: methodOptions.map((id) => ({ id, enabled: methods.has(id) })) } : undefined };
     if (course) {
       const oldTerm = s.terms.find((t) => t.id === course.termId);
       const newTerm = s.terms.find((t) => t.id === termId);
@@ -172,6 +178,8 @@ function CourseEditor({ course, onClose }: { course: Course | null; onClose: () 
       </SelectField>
       <Field label="Files" type="number" value={files} onChange={(e) => setFiles(e.target.value)} />
       <Field label="Open link (optional)" placeholder="https://… or leave blank" value={link} onChange={(e) => setLink(e.target.value)} />
+      <label className="early-feature-row"><input type="checkbox" checked={customWorkflow} onChange={(event) => setCustomWorkflow(event.target.checked)}/><span><b>Customize this course</b><small>Otherwise this course uses your normal study workflow.</small></span></label>
+      {customWorkflow && <><div className="settings-target-grid"><Field label="Lecture passes" type="number" min={1} max={6} value={passes} onChange={(event) => setPasses(Number(event.target.value))}/><Field label="Review after (days)" type="number" min={1} max={14} value={reviewDays} onChange={(event) => setReviewDays(Number(event.target.value))}/></div><div className="row wrap gap8" aria-label="Course study methods">{([ ["lecture-passes", "Lecture passes"], ["practice-questions", "Practice questions"], ["anki", "Anki"], ["notes", "Notes"], ["teach-aloud", "Teach aloud"], ["external-resource", "External resources"] ] as Array<[StudyMethodId,string]>).map(([id,label]) => <button key={id} type="button" className={`filter-pill ${methods.has(id) ? "on" : ""}`} aria-pressed={methods.has(id)} onClick={() => setMethods((current) => { const next=new Set(current); if(next.has(id))next.delete(id);else next.add(id);return next; })}>{label}</button>)}</div></>}
     </Modal>
   );
 }

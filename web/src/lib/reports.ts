@@ -414,3 +414,139 @@ function finite(value: unknown): number {
 function unique(values: string[]): string[] {
   return [...new Set(values)];
 }
+
+// ---------------------------------------------------------------------------
+// Activity-based trends (no daily targets required)
+//
+// Weekly and monthly *activity* charts follow real calendar days — exactly
+// like the Productivity page — so a learner who logs work but has not set up
+// daily targets still sees an honest pattern. Target-completion views keep
+// using the schedule-aware eligible-day series above.
+// ---------------------------------------------------------------------------
+
+export interface CalendarWeeks {
+  current: ReportDayDatum[];
+  previous: ReportDayDatum[];
+}
+
+/** The last `count` calendar days ending today (for effort charts). */
+export function buildRecentDays(state: NoctyriumState, count: number): ReportDayDatum[] {
+  const floor = reportTrackingFloor(state);
+  return reportDateKeys(state.activeDayKey, count).map((dayKey) => reportDayDatum(state, dayKey, floor));
+}
+
+/** The last 7 calendar days ending today, and the 7 before them. */
+export function buildCalendarWeeks(state: NoctyriumState): CalendarWeeks {
+  const floor = reportTrackingFloor(state);
+  const keys = reportDateKeys(state.activeDayKey, 14);
+  const days = keys.map((dayKey) => reportDayDatum(state, dayKey, floor));
+  return { previous: days.slice(0, 7), current: days.slice(7) };
+}
+
+export interface ActivityWeekSummary {
+  total: number;
+  previousTotal: number;
+  activeDays: number;
+  previousActiveDays: number;
+  /** null when last week had nothing to compare against. */
+  percentChange: number | null;
+  bestDayKey?: string;
+  interpretation: string;
+}
+
+export function summarizeActivityWeek(
+  current: readonly ReportDayDatum[],
+  previous: readonly ReportDayDatum[],
+  metric: Exclude<ReportTrendMetric, "requirements">,
+): ActivityWeekSummary {
+  const value = (day: ReportDayDatum) => reportTrendMetricValue(day, metric);
+  const total = current.reduce((sum, day) => sum + value(day), 0);
+  const previousTotal = previous.reduce((sum, day) => sum + value(day), 0);
+  const activeDays = current.filter((day) => value(day) > 0).length;
+  const previousActiveDays = previous.filter((day) => value(day) > 0).length;
+  const best = [...current].sort((a, b) => value(b) - value(a) || a.dayKey.localeCompare(b.dayKey))[0];
+  const percentChange = previousTotal > 0 ? Math.round(((total - previousTotal) / previousTotal) * 100) : null;
+  const noun = metric === "minutes" ? "Study time" : metric === "questions" ? "Practice questions" : "Cards";
+  const interpretation = !total && !previousTotal
+    ? `No ${metric} logged in the last two weeks yet.`
+    : percentChange === null
+      ? `${noun}: ${formatMetric(total, metric)} this week — last week had none to compare.`
+      : percentChange === 0
+        ? `${noun} matched last week exactly.`
+        : `${noun} is ${percentChange > 0 ? "up" : "down"} ${Math.abs(percentChange)}% vs the previous 7 days (${formatMetric(previousTotal, metric)}).`;
+  return {
+    total,
+    previousTotal,
+    activeDays,
+    previousActiveDays,
+    percentChange,
+    bestDayKey: best && value(best) > 0 ? best.dayKey : undefined,
+    interpretation,
+  };
+}
+
+export function formatMetric(value: number, metric: ReportTrendMetric): string {
+  if (metric === "minutes") {
+    const hours = Math.floor(value / 60);
+    const minutes = Math.round(value % 60);
+    return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+  }
+  if (metric === "requirements") return `${Math.round(value)}%`;
+  return `${Math.round(value)} ${metric}`;
+}
+
+/**
+ * Activity rhythm for learners without daily targets: active days in the
+ * window and the current run of consecutive active days. Today counts once
+ * it has activity; an empty today never breaks the run.
+ */
+export function buildActivityRhythm(state: NoctyriumState, range: number): { consistency: ReportMetric; streak: ReportMetric } {
+  const floor = reportTrackingFloor(state);
+  const endKey = state.activeDayKey;
+  const observed = reportDateKeys(endKey, range).filter((dayKey) => dayKey >= floor);
+  const completed = observed.filter((dayKey) => dayKey < endKey);
+  const active = completed.filter((dayKey) => hasNetActivity(state.logs, dayKey));
+  const todayActive = hasNetActivity(state.logs, endKey);
+  let streak = todayActive ? 1 : 0;
+  for (let cursor = addLocalDays(endKey, -1); cursor >= floor; cursor = addLocalDays(cursor, -1)) {
+    if (!hasNetActivity(state.logs, cursor)) break;
+    streak += 1;
+  }
+  const rate = percent(active.length, completed.length);
+  const period = `${completed.length} completed day${completed.length === 1 ? "" : "s"} in the last ${range}`;
+  const sourceRecordIds = state.logs.filter((log) => observed.includes(log.dayKey)).map((log) => log.id);
+  return {
+    consistency: {
+      id: "consistency",
+      label: "Active days",
+      value: completed.length ? `${rate}%` : "Building",
+      note: `${active.length} of ${completed.length} days had logged activity`,
+      numerator: active.length,
+      denominator: completed.length,
+      period,
+      sourceLabel: "Activity log (calendar days)",
+      sourceRecordIds,
+      calculation: `${active.length} days with positive logged activity ÷ ${completed.length} completed calendar days since you started tracking. Today is excluded until it ends.`,
+      interpretation: completed.length < 3
+        ? "A few more days are needed before a pattern means much."
+        : rate >= 80 ? "You show up almost every day." : rate >= 50 ? "You’re active on most days — protect the quiet ones." : "The rhythm is intermittent; aim for small daily contact.",
+      action: "Set daily targets for target-based consistency",
+      state: completed.length >= 3 ? "ready" : completed.length ? "low-data" : "neutral",
+    },
+    streak: {
+      id: "streak",
+      label: "Activity streak",
+      value: `${streak}`,
+      note: `${streak === 1 ? "day" : "days"} in a row with logged activity${todayActive ? " (including today)" : ""}`,
+      numerator: streak,
+      denominator: observed.length,
+      period,
+      sourceLabel: "Activity log (calendar days)",
+      sourceRecordIds,
+      calculation: "Consecutive calendar days with positive logged activity, counting back from yesterday (today is added once it has activity).",
+      interpretation: streak >= 7 ? "A full week of contact. Keep the floor low enough to keep it." : streak ? "The run is alive — one small log keeps it going." : "Log anything today to start a new run.",
+      action: "Log an activity",
+      state: observed.length ? "ready" : "neutral",
+    },
+  };
+}

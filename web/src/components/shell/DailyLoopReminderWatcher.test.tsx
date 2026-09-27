@@ -4,7 +4,7 @@ import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDailyLoopReminderLedger } from "../../lib/dailyLoopReminders";
 import { useStore } from "../../lib/store";
-import { useToasts } from "../../lib/toast";
+import { REMINDER_TOAST_DURATION_MS, useToasts } from "../../lib/toast";
 import { Toaster } from "./Toaster";
 import {
   DAILY_LOOP_REMINDER_OPEN_EVENT,
@@ -66,6 +66,7 @@ describe("DailyLoopReminderWatcher", () => {
     expect(screen.getByText(/less than a minute.*optional/i)).toBeTruthy();
     expect(screen.getByRole("region", { name: "Notifications" })).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
+    expect(useToasts.getState().toasts.map((toast) => toast.duration)).toEqual([REMINDER_TOAST_DURATION_MS]);
 
     fireEvent.click(screen.getByRole("button", { name: "Open check-in" }));
     expect(window.location.hash).toBe("#dashboard");

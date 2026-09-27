@@ -2,11 +2,14 @@
 // Productivity page and a compact widget for the Dashboard. Both are driven by
 // the shared usePomodoro store, so the clock stays in sync wherever it's shown.
 import { useEffect, useMemo, useState } from "react";
+import { RestButton } from "../rest/RestOverlay";
 import { Pause, Play, RotateCcw, Save, SkipForward, Timer, Coffee, Flame, Trash2 } from "lucide-react";
 import { GlassCard, GButton, PanelHeader } from "../ui/primitives";
 import { useStore } from "../../lib/store";
 import { usePomodoro, POMODORO_PRESETS, PRIMARY_POMODORO_PRESET_IDS, clampPomodoroCustomDurations, effectivePreset, formatClock, getBreakDurationMinutes } from "../../lib/pomodoro";
 import { effectivePomodoroPreferences } from "../../lib/pomodoroPreferences";
+import { isMacDesktopShell } from "../../lib/desktopShell";
+import { isMenuBarTimerEnabled } from "../../lib/menuBarTimer";
 import type { PomodoroSavedPreset } from "../../lib/types";
 import { ICON_SIZE } from "../../lib/iconSize";
 
@@ -37,6 +40,8 @@ export function Pomodoro({ compact = false }: { compact?: boolean }) {
   const elapsed = total - pomo.secondsLeft;
   const pct = total ? Math.min(100, Math.max(0, (elapsed / total) * 100)) : 0;
   const isFocus = pomo.phase === "focus";
+  // Only the macOS desktop app has a menu bar to draw in; browsers never see this control.
+  const showMenuBarToggle = !compact && isMacDesktopShell();
 
   const radius = compact ? 46 : 58;
   const dim = (radius + 7) * 2;
@@ -121,6 +126,10 @@ export function Pomodoro({ compact = false }: { compact?: boolean }) {
 
   function updateAutoStart(patch: Partial<Pick<typeof preferences, "autoStartBreak" | "autoStartFocus">>) {
     updateProfile({ pomodoroPreferences: { ...preferences, ...patch } });
+  }
+
+  function updateShowInMenuBar(showInMenuBar: boolean) {
+    updateProfile({ pomodoroPreferences: { ...preferences, showInMenuBar } });
   }
 
   return (
@@ -280,6 +289,7 @@ export function Pomodoro({ compact = false }: { compact?: boolean }) {
             </GButton>
           </div>
 
+          <RestButton compact={compact} />
           <div className="pomo-meta">
             <span className="pomo-stat"><Timer size={ICON_SIZE.body} /> {pomo.sessionsToday} sprint{pomo.sessionsToday === 1 ? "" : "s"} today</span>
             <span className="pomo-stat"><Flame size={ICON_SIZE.body} /> {pomo.loggedMinutesToday}m logged</span>
@@ -287,6 +297,12 @@ export function Pomodoro({ compact = false }: { compact?: boolean }) {
               <input type="checkbox" checked={pomo.autoLog} onChange={(event) => pomo.setAutoLog(event.target.checked)} />
               <span>Auto-log</span>
             </label>
+            {showMenuBarToggle && (
+              <label className="pomo-toggle" title="Show the clock at the top of the screen. Closing the window during a sprint keeps it running there.">
+                <input type="checkbox" checked={isMenuBarTimerEnabled(preferences)} onChange={(event) => updateShowInMenuBar(event.target.checked)} />
+                <span>Show timer in the Mac menu bar</span>
+              </label>
+            )}
           </div>
         </div>
       </div>

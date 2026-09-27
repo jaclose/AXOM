@@ -4,13 +4,14 @@ import {
   Database, Download, ShieldCheck, PackageCheck,
   Sunrise, Trophy, Check, Circle, ArrowRightCircle, ExternalLink,
   SlidersHorizontal, GripVertical, PlusCircle, X,
-  AlertTriangle, CalendarClock, Star, EyeOff, Settings2, RotateCcw,
+  AlertTriangle, CalendarClock,
   BookOpenCheck, ListTodo, BatteryMedium, Activity, Flame, Gamepad2,
-  ChevronUp, ChevronDown,
-} from "lucide-react";
+  ChevronUp, ChevronDown, GraduationCap, Target, Gauge, Timer, BarChart3, Sparkles,
+  CalendarDays, Map as MapIcon, TrendingUp, Stethoscope, Link2, LayoutGrid, Star } from "lucide-react";
 import { ICON_SIZE } from "../lib/iconSize";
+import { useLuster } from "../lib/useLuster";
 import { useStore } from "../lib/store";
-import { dayTotals, productiveTotals, todayGrade, gradeLabel, gradeColor, prettyDate, lastNDays, isoDate } from "../lib/scoring";
+import { dayTotals, productiveTotals, todayGrade, gradeLabel, gradeColor, gradeTargetsFor, prettyDate, lastNDays, isoDate } from "../lib/scoring";
 import { missedStandupDays, planForDay } from "../lib/journal";
 import type {
   TrackerItem, DashboardLayoutPreferences, DashboardWidgetId,
@@ -21,6 +22,11 @@ import { gotoJournalDay, useUi } from "../lib/uiStore";
 import { useInView } from "../lib/useInView";
 import { DEFAULT_DASHBOARD_WIDGETS, DEFAULT_HIDDEN_DASHBOARD_WIDGETS } from "../lib/seed";
 import { calculateReadiness } from "../lib/energy";
+import { CapacitySummary, EnergyCheckRow } from "../components/energy/EnergyInsights";
+import { activePrimaryScopes, itemsInPrimary } from "../lib/trackerFocus";
+import { rankTrackerItems } from "../lib/recommendationFactors";
+import { scopeStudyProgress } from "../lib/studyProgress";
+import { collectEnergySamples, dailyEnergy } from "../lib/energyInsights";
 import { pickFocusExam, buildExamCountdown, countdownHeadline, type PrepIntensity } from "../lib/examPlan";
 import { AnimatedProgressBar } from "../components/ui/motion";
 import { GlassCard, GButton, GhostButton, PanelHeader, Tag } from "../components/ui/primitives";
@@ -31,7 +37,6 @@ import { DailyProgressVessel } from "../components/productivity/DailyProgressVes
 import { evaluateDailySuccess, type DailySuccessResult } from "../lib/dailySuccess";
 import { closeoutForDay } from "../lib/closeout";
 import { dailyLoopReminderLedger, normalizeDailyLoopReminderPreferences } from "../lib/dailyLoopReminders";
-import { AXOM_QUOTES, type QuoteAttributionStatus } from "../data/quotes";
 import {
   CURRENT_DASHBOARD_WIDGET_IDS,
   DASHBOARD_LAYOUT_PRESETS,
@@ -49,13 +54,6 @@ import {
 import { Modal } from "../components/ui/Modal";
 import { dueQuestions, questionMappingStatus, summarizeQuestionMappings } from "../lib/questions";
 import { deriveDailyWordStatsFromNormalizedHistory } from "../lib/dailyWordStats";
-import {
-  hideQuote,
-  readQuotePreferences,
-  selectQuoteForDay,
-  toggleFavoriteQuote,
-  writeQuotePreferences,
-} from "../lib/quotePreferences";
 
 const HOSTED_ALPHA_URL = "https://noctyrium-cktjdhuhw-jacloses-projects.vercel.app/#dashboard";
 
@@ -65,6 +63,7 @@ const CURRENT_DASHBOARD_ID_SET = new Set<string>(CURRENT_DASHBOARD_WIDGET_IDS);
 export function DashboardPage() {
   const s = useStore();
   const [editDashboard, setEditDashboard] = useState(false);
+  const luster = useLuster();
   const [pendingExtraLargeLayout, setPendingExtraLargeLayout] = useState<DashboardLayoutPreferences | null>(null);
   const dailyProgress = useMemo(() => evaluateDailySuccess(s, s.activeDayKey, s.activeDayKey), [s]);
   const week = weeklySummary(s);
@@ -76,7 +75,8 @@ export function DashboardPage() {
     tasks: s.tasks,
     dayPlans: s.dayPlans,
     productivityTrackers: s.productivityTrackers,
-  }), [s.activeDayKey, s.energyFactors, s.journal, s.logs, s.tasks, s.dayPlans, s.productivityTrackers]);
+    energyChecks: s.profile.energyChecks,
+  }), [s.activeDayKey, s.energyFactors, s.journal, s.logs, s.tasks, s.dayPlans, s.productivityTrackers, s.profile.energyChecks]);
   const layout = useMemo(
     () => resolveDashboardLayout(s.profile.dashboardLayout, s.profile.dashboardWidgetOrder, s.profile.hiddenDashboardWidgets),
     [s.profile.dashboardLayout, s.profile.dashboardWidgetOrder, s.profile.hiddenDashboardWidgets],
@@ -128,7 +128,6 @@ export function DashboardPage() {
       enabledFields,
       dailyProgress,
       week,
-      readiness,
       activeDayKey: s.activeDayKey,
       state: s,
     });
@@ -175,11 +174,9 @@ export function DashboardPage() {
         </GlassCard>
       )}
 
-      <section className="dashboard-widget-grid" aria-label="Dashboard widgets">
+      <section className="dashboard-widget-grid" aria-label="Dashboard widgets" {...luster}>
         {visibleWidgetIds.map(renderWidget)}
       </section>
-
-      <DailyQuote activeDayKey={s.activeDayKey} />
 
       {pendingExtraLargeLayout && (
         <Modal
@@ -273,79 +270,6 @@ function AlphaBuildBanner({
       </div>
     </div>
   );
-}
-
-function DailyQuote({ activeDayKey }: { activeDayKey: string }) {
-  const [quotePreferences, setQuotePreferences] = useState(readQuotePreferences);
-  const [quoteOffset, setQuoteOffset] = useState(0);
-  const [quoteSettingsOpen, setQuoteSettingsOpen] = useState(false);
-  const quote = useMemo(
-    () => selectQuoteForDay(AXOM_QUOTES, quotePreferences, activeDayKey, quoteOffset),
-    [activeDayKey, quoteOffset, quotePreferences],
-  );
-
-  useEffect(() => { setQuoteOffset(0); }, [activeDayKey]);
-
-  function saveQuotePreferences(next: typeof quotePreferences) {
-    setQuotePreferences(writeQuotePreferences(next));
-  }
-
-  return (
-      <section className="dashboard-quote" aria-label="Daily quote">
-        {quotePreferences.quoteVisible && quote ? (
-          <>
-            <blockquote>“{quote.text}”</blockquote>
-            <div className="dashboard-quote-attribution" title={quote.attributionNote}>
-              <span>{quote.author}</span>
-              <small>{attributionLabel(quote.attributionStatus)}</small>
-            </div>
-            <div className="dashboard-quote-actions">
-              <GhostButton title="Next quote" aria-label="Next quote" onClick={() => setQuoteOffset((offset) => offset + 1)}><ArrowRight size={ICON_SIZE.body} /></GhostButton>
-              <GhostButton
-                title={quotePreferences.favoriteQuoteIds.includes(quote.id) ? "Remove favorite" : "Favorite quote"}
-                aria-label={quotePreferences.favoriteQuoteIds.includes(quote.id) ? "Remove favorite quote" : "Favorite quote"}
-                aria-pressed={quotePreferences.favoriteQuoteIds.includes(quote.id)}
-                onClick={() => saveQuotePreferences(toggleFavoriteQuote(quotePreferences, quote.id))}
-              ><Star size={ICON_SIZE.body} /></GhostButton>
-              <GhostButton title="Hide this quote" aria-label="Hide this quote" onClick={() => saveQuotePreferences(hideQuote(quotePreferences, quote.id))}><EyeOff size={ICON_SIZE.body} /></GhostButton>
-              <GhostButton
-                title="Quote settings"
-                aria-label="Quote settings"
-                aria-expanded={quoteSettingsOpen}
-                aria-controls={quoteSettingsOpen ? "dashboard-quote-settings" : undefined}
-                onClick={() => setQuoteSettingsOpen((open) => !open)}
-              ><Settings2 size={ICON_SIZE.body} /></GhostButton>
-            </div>
-          </>
-        ) : (
-          <div className="dashboard-quote-hidden">
-            <span>{quotePreferences.quoteVisible ? "All eligible quotes are hidden" : "Daily quote hidden"}</span>
-            {quotePreferences.quoteVisible
-              ? <GButton size="tiny" onClick={() => saveQuotePreferences({ ...quotePreferences, hiddenQuoteIds: [] })}>Restore quotes</GButton>
-              : <GButton size="tiny" onClick={() => saveQuotePreferences({ ...quotePreferences, quoteVisible: true })}>Show quote</GButton>}
-            <GhostButton aria-label="Quote settings" aria-expanded={quoteSettingsOpen} aria-controls={quoteSettingsOpen ? "dashboard-quote-settings" : undefined} onClick={() => setQuoteSettingsOpen((open) => !open)}><Settings2 size={ICON_SIZE.body} /></GhostButton>
-          </div>
-        )}
-        {quoteSettingsOpen && (
-          <div className="dashboard-quote-settings" id="dashboard-quote-settings">
-            <label><input type="checkbox" checked={quotePreferences.quoteVisible} onChange={(event) => saveQuotePreferences({ ...quotePreferences, quoteVisible: event.target.checked })} /> Show daily quote</label>
-            <label><input type="checkbox" checked={quotePreferences.includeGuilt} onChange={(event) => saveQuotePreferences({ ...quotePreferences, includeGuilt: event.target.checked })} /> Include guilt/shame category</label>
-            <span>{quotePreferences.favoriteQuoteIds.length} favorite{quotePreferences.favoriteQuoteIds.length === 1 ? "" : "s"} · {quotePreferences.hiddenQuoteIds.length} hidden</span>
-            {quotePreferences.hiddenQuoteIds.length > 0 && (
-              <button type="button" onClick={() => saveQuotePreferences({ ...quotePreferences, hiddenQuoteIds: [] })}><RotateCcw size={ICON_SIZE.microInline} /> Restore hidden quotes</button>
-            )}
-          </div>
-        )}
-      </section>
-  );
-}
-
-function attributionLabel(status: QuoteAttributionStatus) {
-  if (status === "axom-original") return "AXOM original";
-  if (status === "commonly-attributed") return "Commonly attributed";
-  if (status === "paraphrased") return "Paraphrased";
-  if (status === "verified") return "Verified";
-  return "Attribution unverified";
 }
 
 /** A display name must be explicitly user-authored, never a seed or initials. */
@@ -578,10 +502,41 @@ function WidgetCatalogSection({
   );
 }
 
-function WidgetPreview({ kind }: { kind: string }) {
+/** Each widget gets its own glyph and tint so the library scans at a glance. */
+const WIDGET_GLYPHS: Record<DashboardWidgetId, { icon: typeof Database; tone: string }> = {
+  welcome: { icon: Sunrise, tone: "gold" },
+  commandBrief: { icon: ArrowRightCircle, tone: "gold" },
+  questionBank: { icon: BookOpenCheck, tone: "violet" },
+  courseTracker: { icon: GraduationCap, tone: "cool" },
+  tasks: { icon: ListTodo, tone: "green" },
+  readiness: { icon: BatteryMedium, tone: "green" },
+  activity: { icon: Activity, tone: "cool" },
+  journal: { icon: BookText, tone: "rose" },
+  streak: { icon: Flame, tone: "orange" },
+  dailyWord: { icon: Gamepad2, tone: "violet" },
+  winDay: { icon: Target, tone: "gold" },
+  todayScore: { icon: Gauge, tone: "green" },
+  examCountdown: { icon: CalendarClock, tone: "rose" },
+  pomodoro: { icon: Timer, tone: "orange" },
+  weekly: { icon: BarChart3, tone: "cool" },
+  suggested: { icon: Sparkles, tone: "gold" },
+  aiActions: { icon: Sparkles, tone: "violet" },
+  schedule: { icon: CalendarDays, tone: "cool" },
+  termMap: { icon: MapIcon, tone: "cool" },
+  localData: { icon: Database, tone: "green" },
+  latestStandup: { icon: Sunrise, tone: "gold" },
+  productivityTrend: { icon: TrendingUp, tone: "cool" },
+  premedHours: { icon: Stethoscope, tone: "rose" },
+  resourceFocus: { icon: Link2, tone: "cool" },
+  boardBlueprint: { icon: LayoutGrid, tone: "violet" },
+};
+
+function WidgetPreview({ kind }: { kind: DashboardWidgetId }) {
+  const glyph = WIDGET_GLYPHS[kind] ?? { icon: LayoutGrid, tone: "cool" };
+  const Icon = glyph.icon;
   return (
-    <span className={`widget-preview mini-${kind}`} aria-hidden="true">
-      <i /><i /><i /><i />
+    <span className={`widget-preview widget-glyph tone-${glyph.tone}`} aria-hidden="true">
+      <Icon size={ICON_SIZE.control} />
     </span>
   );
 }
@@ -635,13 +590,12 @@ interface DashboardWidgetRenderContext {
   enabledFields: Set<string>;
   dailyProgress: DailySuccessResult;
   week: ReturnType<typeof weeklySummary>;
-  readiness: ReturnType<typeof calculateReadiness>;
   activeDayKey: string;
   state: ReturnType<typeof useStore.getState>;
 }
 
 function renderDashboardWidget(context: DashboardWidgetRenderContext) {
-  const { widgetId, size, enabledFields, dailyProgress, week, readiness, activeDayKey, state } = context;
+  const { widgetId, size, enabledFields, dailyProgress, week, activeDayKey, state } = context;
   if (widgetId === "winDay") return <WinTheDay />;
   if (widgetId === "todayScore") return <TodayScoreWidget result={dailyProgress} activeDayKey={activeDayKey} enabledFields={enabledFields} />;
   if (widgetId === "examCountdown") return <ExamCountdownWidget />;
@@ -650,7 +604,7 @@ function renderDashboardWidget(context: DashboardWidgetRenderContext) {
   if (widgetId === "questionBank") return <QuestionBankWidget size={size} enabledFields={enabledFields} />;
   if (widgetId === "courseTracker") return <CourseTrackerDashboardWidget size={size} enabledFields={enabledFields} />;
   if (widgetId === "tasks") return <TasksDashboardWidget size={size} enabledFields={enabledFields} />;
-  if (widgetId === "readiness") return <ReadinessDashboardWidget readiness={readiness} enabledFields={enabledFields} />;
+  if (widgetId === "readiness") return <ReadinessDashboardWidget enabledFields={enabledFields} />;
   if (widgetId === "activity") return <ActivityDashboardWidget activeDayKey={activeDayKey} week={week} enabledFields={enabledFields} />;
   if (widgetId === "journal") return <JournalDashboardWidget activeDayKey={activeDayKey} enabledFields={enabledFields} />;
   if (widgetId === "streak") return <ConsistencyDashboardWidget state={state} enabledFields={enabledFields} />;
@@ -673,7 +627,7 @@ function widgetDataStatus(id: DashboardWidgetId, s: ReturnType<typeof useStore.g
     const open = realTasks(s.tasks).filter((task) => !task.done && !task.archived).length;
     return open ? `${open} open` : "No real open tasks";
   }
-  if (id === "readiness") return s.energyFactors.length || s.journal.length ? "Local signals available" : "No confirmed signal yet";
+  if (id === "readiness") return s.profile.energyChecks?.length || s.journal.length || s.closeouts.length ? "Energy signals available" : "Waiting for a first energy check";
   if (id === "activity") return s.logs.some((log) => log.dayKey === s.activeDayKey) ? "Activity logged today" : "No activity today";
   if (id === "journal") return s.journal.length ? `${s.journal.length} local entr${s.journal.length === 1 ? "y" : "ies"}` : "No entries yet";
   if (id === "dailyWord") return s.profile.experimentalFlags?.dailyGames ? "Daily Games enabled" : "Optional module is off";
@@ -692,7 +646,7 @@ function widgetIsSuggested(id: DashboardWidgetId, s: ReturnType<typeof useStore.
   if (id === "questionBank") return s.questions.length > 0;
   if (id === "courseTracker") return realTrackerRows(s.tracker).length > 0;
   if (id === "tasks") return realTasks(s.tasks).some((task) => !task.done && !task.archived);
-  if (id === "readiness") return s.energyFactors.length > 0 || s.journal.length > 0;
+  if (id === "readiness") return true;
   if (id === "activity" || id === "weekly" || id === "streak") return s.logs.length > 0;
   if (id === "journal") return s.journal.length > 0;
   if (id === "examCountdown") return Boolean(pickFocusExam(s.boardPrep));
@@ -756,10 +710,20 @@ function CourseTrackerDashboardWidget({
   enabledFields: Set<string>;
 }) {
   const tracker = useStore((s) => s.tracker);
+  const primaryScopes = useStore((s) => s.profile.primaryTrackerScopes);
+  const activeDayKey = useStore((s) => s.activeDayKey);
+  const studyWorkflow = useStore((s) => s.profile.studyWorkflow);
+  const courses = useStore((s) => s.courses);
   const rows = realTrackerRows(tracker);
-  const untouched = rows.filter((row) => row.passes === 0);
-  const weak = rows.filter((row) => row.yield === "review" || (row.passes > 0 && row.passes < 2));
-  const progress = rows.length ? Math.round(rows.reduce((sum, row) => sum + Math.min(4, row.passes), 0) / (rows.length * 4) * 100) : 0;
+  const primaries = activePrimaryScopes(primaryScopes, activeDayKey);
+  const primaryPaths = primaries.map((primary) => primary.path);
+  // With a primary focus the widget is about that focus; otherwise everything.
+  const focusRows = primaryPaths.length ? itemsInPrimary(rows, primaryPaths) : rows;
+  const untouched = focusRows.filter((row) => row.passes === 0);
+  const weak = focusRows.filter((row) => row.yield === "review" || (row.passes > 0 && row.passes < 2));
+  // Same study-plan progress as the Course Tracker, so both screens agree.
+  const progress = scopeStudyProgress(focusRows, { preferences: studyWorkflow, courses }).percent;
+  const nextMove = rankTrackerItems(rows, { preferences: studyWorkflow, courses, primaryScopes: primaryPaths })[0];
   return (
     <GlassCard pad className="dashboard-core-widget course-tracker-widget">
       <PanelHeader title="Course Tracker" sub="Real course items, passes, and untouched work"
@@ -768,13 +732,33 @@ function CourseTrackerDashboardWidget({
         <div className="dashboard-widget-empty"><BookText size={ICON_SIZE.control} /><b>Add or import your first study item</b><span>Shipped examples teach the interface but never count as your workload.</span></div>
       ) : (
         <>
-          {enabledFields.has("progress") && <div className="dashboard-widget-focal"><b>{progress}%</b><span>pass progress</span></div>}
+          {enabledFields.has("progress") && <div className="dashboard-widget-focal"><b>{progress}%</b><span>{primaries.length ? "of your primary focus plan" : "of your study plan"}</span></div>}
+          {primaries.length > 0 && size !== "small" && (
+            <div className="dashboard-primary-focus">
+              {primaries.slice(0, 3).map((primary) => {
+                const scoped = itemsInPrimary(rows, [primary.path]);
+                const pct = scopeStudyProgress(scoped, { preferences: studyWorkflow, courses }).percent;
+                return (
+                  <a key={primary.path} href="#tracker" className="dashboard-primary-row" title={primary.path}>
+                    <Star size={ICON_SIZE.microInline} aria-hidden="true" />
+                    <span>{primary.path.split("/").at(-1)}</span>
+                    <i><b style={{ width: `${pct}%` }} /></i>
+                    <small>{pct}%</small>
+                  </a>
+                );
+              })}
+            </div>
+          )}
           <div className="dashboard-widget-metrics">
             {enabledFields.has("untouched") && <span><b>{untouched.length}</b> untouched</span>}
             {enabledFields.has("weak") && <span><b>{weak.length}</b> need another pass</span>}
-            <span><b>{rows.length}</b> real items</span>
+            <span><b>{focusRows.length}</b> {primaries.length ? "in focus" : "real items"}</span>
           </div>
-          {size !== "small" && enabledFields.has("suggestion") && <p className="dashboard-widget-note">{untouched[0] ? `Start with ${untouched[0].label}.` : weak[0] ? `Revisit ${weak[0].label}.` : "Your tracked items have at least one pass."}</p>}
+          {size !== "small" && enabledFields.has("suggestion") && (
+            <p className="dashboard-widget-note">
+              {nextMove ? <>Next: <b>{nextMove.item.label}</b>{nextMove.reason ? ` — ${nextMove.reason.toLowerCase()}` : ""}.</> : "Your tracked items have reached their current plan."}
+            </p>
+          )}
         </>
       )}
     </GlassCard>
@@ -810,24 +794,15 @@ function TasksDashboardWidget({
 }
 
 function ReadinessDashboardWidget({
-  readiness,
   enabledFields,
 }: {
-  readiness: ReturnType<typeof calculateReadiness>;
   enabledFields: Set<string>;
 }) {
-  const hasEvidence = readiness.contributions.length > 0 || readiness.selfReportedEnergy.label !== "Unlogged";
   return (
     <GlassCard pad className="dashboard-core-widget readiness-widget">
-      <PanelHeader title="Readiness" sub="A deterministic estimate from local, confirmed signals"
-        action={<a className="gbtn sm" href="#reports">Why?</a>} />
-      {hasEvidence ? (
-        <>
-          {enabledFields.has("score") && <div className="dashboard-widget-focal"><b>{readiness.estimatedReadiness}</b><span>{readiness.readinessLabel}</span></div>}
-          {enabledFields.has("energy") && <p className="dashboard-widget-note">Reported energy: {readiness.selfReportedEnergy.label}</p>}
-          {enabledFields.has("contributors") && readiness.contributions[0] && <p className="dashboard-widget-note">Strongest contributor: {readiness.contributions[0].label} ({readiness.contributions[0].appliedDelta > 0 ? "+" : ""}{readiness.contributions[0].appliedDelta})</p>}
-        </>
-      ) : <div className="dashboard-widget-empty"><BatteryMedium size={ICON_SIZE.control} /><b>No readiness signal yet</b><span>Log energy or a confirmed factor before AXOM interprets capacity.</span></div>}
+      <PanelHeader title="Energy & capacity" sub="From your own check-ins and recent load"
+        action={<a className="gbtn sm" href="#reports">Rhythm</a>} />
+      <CapacitySummary showHead={enabledFields.has("score")} showReasons={enabledFields.has("contributors")} showCheck={enabledFields.has("energy")} />
     </GlassCard>
   );
 }
@@ -970,7 +945,14 @@ function TodayScoreWidget({
         </div>
         <a className="gbtn sm" href="#productivity">Adjust</a>
       </div>
-      {enabledFields.has("progress") && <DailyProgressVessel result={result} compact />}
+      {result.eligibleCount === 0 && !result.requirements.some((item) => item.requirement.enabled) ? (
+        <div className="dashboard-widget-empty dashboard-targets-empty">
+          <Target size={ICON_SIZE.control} />
+          <b>Decide what makes a day count</b>
+          <span>Pick one to three signals — study minutes, questions, cards, a habit or a tracker. AXOM scores only what you choose.</span>
+          <a className="gbtn sm primary" href="#productivity">Choose targets</a>
+        </div>
+      ) : enabledFields.has("progress") && <DailyProgressVessel result={result} compact />}
       {enabledFields.has("targets") && result.requirements.filter((item) => item.eligible && item.status !== "unavailable").length > 0 && (
         <div className="dashboard-requirement-list">
           {result.requirements.filter((item) => item.eligible && item.status !== "unavailable").map((item) => (
@@ -1013,7 +995,7 @@ function WeeklyWidget({
       {enabledFields.has("trend") && <div className={`week-bars reveal-bars ${reveal.inView ? "in-view" : ""}`} ref={reveal.ref}>
         {week.days.map((d) => (
           <button type="button" className={`week-day ${selected?.key === d.key ? "on" : ""}`} key={d.key}
-            title={`${d.key}: ${d.minutes}m, ${d.cards} cards, readiness ${d.readiness}`}
+            title={`${d.key}: ${d.minutes}m, ${d.cards} cards${d.energy !== null ? `, energy ${d.energy}` : ""}`}
             onMouseEnter={() => setSelectedKey(d.key)}
             onFocus={() => setSelectedKey(d.key)}
             onClick={() => setSelectedKey(d.key)}>
@@ -1031,9 +1013,9 @@ function WeeklyWidget({
               <b>{selected.dateLabel}</b>
               <span>{selected.key}</span>
             </div>
-            <Tag tone={selected.readiness >= 78 ? "green" : selected.readiness >= 58 ? "cyan" : selected.readiness >= 38 ? "orange" : "red"}>
-              Readiness {selected.readiness}
-            </Tag>
+            {selected.energy !== null
+              ? <Tag tone={selected.energy >= 75 ? "green" : selected.energy >= 55 ? "cyan" : selected.energy >= 35 ? "orange" : "red"}>Energy {selected.energy}</Tag>
+              : <Tag tone="neutral">No energy logged</Tag>}
           </div>
           <div className="weekly-detail-grid">
             <DetailMetric label="Study" value={`${selected.minutes}m · ${selected.cards} cards`} />
@@ -1415,6 +1397,11 @@ function WinTheDay() {
           </div>
           <GButton size="sm" onClick={() => setPromptDismissed(false)}>Open check-in</GButton>
         </div>
+      ) : null}
+      {!todayPlan && promptDismissed ? (
+        <div className="daily-checkin-energy">
+          <EnergyCheckRow />
+        </div>
       ) : !todayPlan ? (
         <>
           <PanelHeader title="Daily Check-In" sub="Before the day runs away from you, what would make today count?" />
@@ -1524,21 +1511,20 @@ function ProgressBar({
 }
 
 function weeklySummary(s: ReturnType<typeof useStore.getState>) {
+  const energyByDay = dailyEnergy(collectEnergySamples({
+    energyChecks: s.profile.energyChecks,
+    journal: s.journal,
+    closeouts: s.closeouts,
+    sessions: s.sessions,
+  }));
   const days = lastNDays(7).map((d) => {
     const key = isoDate(d);
     const totals = dayTotals(s.logs, key);
     const productive = productiveTotals(s.logs, key);
-    const grade = todayGrade(totals.minutes, totals.cards);
+    const grade = todayGrade(totals.minutes, totals.cards, gradeTargetsFor(s.profile));
     const intensity = Math.min(100, Math.max((totals.minutes / 480) * 100, (totals.cards / 350) * 100));
-    const readiness = calculateReadiness({
-      date: key,
-      factors: s.energyFactors ?? [],
-      journal: s.journal,
-      logs: s.logs,
-      tasks: s.tasks,
-      dayPlans: s.dayPlans,
-      productivityTrackers: s.productivityTrackers,
-    });
+    const measured = energyByDay.get(key);
+    const energy = measured === undefined ? null : Math.round(measured);
     const tasksDone = s.tasks.filter((task) => task.done && task.completedAt?.startsWith(key)).length;
     const openTasksDue = s.tasks.filter((task) => !task.done && !task.archived && task.due?.slice(0, 10) === key).length;
     return {
@@ -1553,8 +1539,8 @@ function weeklySummary(s: ReturnType<typeof useStore.getState>) {
       journalSummary: journalSummaryForDay(s.journal, key),
       topActivity: topActivityForDay(s.logs, key),
       strongestAction: strongestActionForDay({ logs: s.logs, dayPlans: s.dayPlans, tasksDone, key }),
-      suggestedCorrection: correctionForDay({ minutes: totals.minutes, cards: totals.cards, openTasksDue, readiness: readiness.estimatedReadiness }),
-      readiness: readiness.estimatedReadiness,
+      suggestedCorrection: correctionForDay({ minutes: totals.minutes, cards: totals.cards, openTasksDue, energy }),
+      energy,
       grade,
       intensity,
     };
@@ -1568,7 +1554,7 @@ function weeklySummary(s: ReturnType<typeof useStore.getState>) {
     cards,
     activeDays,
     tasksDone: days.reduce((sum, day) => sum + day.tasksDone, 0),
-    grade: todayGrade(Math.round(minutes / Math.max(activeDays, 1)), Math.round(cards / Math.max(activeDays, 1))),
+    grade: todayGrade(Math.round(minutes / Math.max(activeDays, 1)), Math.round(cards / Math.max(activeDays, 1)), gradeTargetsFor(s.profile)),
   };
 }
 
@@ -1606,14 +1592,14 @@ function strongestActionForDay({
 }
 
 function correctionForDay({
-  minutes, cards, openTasksDue, readiness,
+  minutes, cards, openTasksDue, energy,
 }: {
   minutes: number;
   cards: number;
   openTasksDue: number;
-  readiness: number;
+  energy: number | null;
 }) {
-  if (readiness < 45) return "Tomorrow: lower the load and close one small loop.";
+  if (energy !== null && energy < 40) return "Tomorrow: lower the load and close one small loop.";
   if (openTasksDue > 0) return "Tomorrow: clear the oldest due task before adding volume.";
   if (minutes === 0 && cards === 0) return "Tomorrow: create signal with one 25-minute block.";
   if (cards < 60) return "Tomorrow: add a small retrieval/card pass.";

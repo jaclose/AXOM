@@ -10,7 +10,9 @@ import { findLiveSession } from "../../lib/sessions";
 import { BRAND } from "../../lib/brand";
 import { pushToast } from "../../lib/toast";
 import { appUpdates, isDesktopApp, UPDATE_CHECK_INTERVAL } from "../../lib/appUpdates";
-import { AppUpdatePanel } from "./AppUpdatePanel";
+import { AppUpdatePanel, requestApplyUpdate } from "./AppUpdatePanel";
+import { UpdateCinematic } from "./UpdateCinematic";
+import { readUpdatePreferences } from "../../lib/updatePreferences";
 import { Modal } from "../ui/Modal";
 
 export function UpdateAvailableWatcher() {
@@ -55,18 +57,35 @@ export function UpdateAvailableWatcher() {
     };
   }, []);
   useEffect(() => {
-    if (state.phase !== "available" || state.deferred || findLiveSession(sessions ?? [])) return;
+    if (state.deferred || findLiveSession(sessions ?? [])) return;
+    // Desktop: fetch and verify quietly first, so "Update now" is instant.
+    if (state.phase === "available" && state.desktop && readUpdatePreferences().autoDownload) {
+      void appUpdates.download();
+      return;
+    }
+    const ready = state.phase === "ready" || (state.phase === "available" && !state.desktop);
+    if (!ready && state.phase !== "available") return;
+    const label = state.version ? `v${state.version}` : "A new version";
     pushToast({
-      title: `Update available — v${state.version}`,
-      body: "Review what’s new and choose when to update. Your app will not restart automatically.",
-      tone: "info", actionLabel: "Review update", duration: 0,
-      dedupe: `app-update-${state.buildId ?? state.version}`,
-      onAction: () => setOpen(true),
+      title: ready ? `AXOM ${label} is ready` : `Update available — ${label}`,
+      body: ready
+        ? "Update now: AXOM saves your workspace first, then restarts in a few seconds. Nothing restarts until you choose."
+        : "Review what’s new and choose when to download. Your app will not restart automatically.",
+      tone: "info", duration: 0,
+      dedupe: `app-update-${state.phase}-${state.buildId ?? state.version}`,
+      actions: ready
+        ? [{ label: "Update now", onAction: requestApplyUpdate }, { label: "What’s new", onAction: () => setOpen(true) }]
+        : [{ label: "Review update", onAction: () => setOpen(true) }],
     });
     appUpdates.defer();
   }, [state, sessions]);
   const applying = ["preparing", "installing", "restarting"].includes(state.phase);
-  return open ? <Modal title="AXOM updates" onClose={() => { if (!applying) setOpen(false); }}><AppUpdatePanel /></Modal> : null;
+  return (
+    <>
+      <UpdateCinematic />
+      {open && <Modal title="AXOM updates" onClose={() => { if (!applying) setOpen(false); }}><AppUpdatePanel /></Modal>}
+    </>
+  );
 }
 
 /** Exposed for the About page: what channel/product this build is. */

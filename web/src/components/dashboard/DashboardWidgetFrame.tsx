@@ -140,6 +140,7 @@ export function DashboardWidgetFrame({
       className={`dashboard-widget-frame dashboard-widget-frame--${size} ${editing ? "is-configuring" : ""} ${className}`.trim()}
       data-widget-id={widgetId}
       data-widget-size={size}
+      data-luster={editing ? undefined : ""}
       aria-label={`${title} widget`}
     >
       <div className="dashboard-widget-frame__front" hidden={editing}>

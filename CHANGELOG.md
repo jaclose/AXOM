@@ -1,6 +1,13 @@
 # AXOM Changelog
 
-## 0.0.2-prebeta — 2026-09-24 (Startup recovery and release notes)
+## 0.0.2-prebeta — 2026-09-26 (Accounts, soundscapes, focus dock and safe updates)
+
+- **Focus dock**: a pill at the bottom of every page shows the running Pomodoro or study session with pause, skip, quick log, focus mode and finish. When a soundscape plays, the pill splits in two; hover the sound half to open its live visual and controls.
+- **Soundscapes**: 40 Hz, 20 Hz, 10 Hz and 2 Hz binaural tones (matched to the recordings you already use), brown noise and soft rain, all generated on your device with palette-aware visuals. Headphones or speakers mode, a sleep-friendly stop timer, media keys, and "follow my Pomodoro" (10 Hz on breaks). Each preset states its evidence honestly, and "Is it working for you?" compares your question accuracy and Anki "again" rate with and without sound.
+- **Opening films**: a short luster film plays on the first open of the day (or week, only after updates, every launch, or never). A dedicated film plays after an update and while one installs. Preview and choose films in Settings → Appearance.
+- **Accounts (optional)**: create an account, confirm it, sign in or reset your password with emailed codes that also work in the desktop app; protect your workspace, merge two devices, restore any recent version, and remove everything stored online.
+- **Appearance**: eight accent palettes plus a custom color with readable contrast in light and dark, an AXOM-level reduce-motion switch, and a daily quote in the top bar with its own rotation settings.
+- **Study tools**: lock-in check-ins, Course Tracker subsections, habit targets that feed productivity, clearer Reports trends, residency programs in the Application Checker, and a refreshed desktop icon.
 
 - **Desktop packaging**: the macOS app and web package share one build and the current AXOM icon. Existing workspace and storage identities remain unchanged.
 - **Startup**: wait for the saved workspace before rendering setup or the dashboard. Unfinished setup is preserved during older-data migrations; rendering errors have a recovery screen instead of a blank window.

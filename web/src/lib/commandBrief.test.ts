@@ -11,8 +11,57 @@ import { makeSeed } from "./seed";
 import type { QuestionRecord } from "./questions";
 import type { DailySuccessResult } from "./dailySuccess";
 import type { ReadinessResult } from "./energy";
+import { rankTrackerItems } from "./recommendationFactors";
 
 const TODAY = "2026-07-07";
+
+describe("personalized tracker recommendations across surfaces", () => {
+  const now = new Date(`${TODAY}T08:00:00Z`);
+  const course = { id: "course", termId: "term", code: "BPM 501", name: "Renal course", files: 0, modules: [], studyPlanOverride: { lecturePasses: 4, reviewAfterDays: 5 } };
+
+  it("uses the same inherited plan and factors as Course Tracker, including work past the legacy target", () => {
+    const state = slice({
+      tracker: [tracker({ id: "renal", label: "Renal transport", passes: 3 })],
+      courses: [course],
+      studyWorkflow: { configured: true, lecturePasses: 2, methods: [{ id: "anki", enabled: false }, { id: "notes", enabled: true }] },
+    });
+    const [shared] = rankTrackerItems(state.tracker, { preferences: state.studyWorkflow, courses: state.courses, now });
+    const [candidate] = rankCommandBriefCandidates(state, "maintain", now);
+    expect(candidate.link.id).toBe(shared.item.id);
+    expect(candidate.score).toBe(shared.score);
+    expect(candidate.resources).toEqual(["Notes"]);
+    expect(candidate.expectedOutcome).toBe("Complete pass 4 of 4 in your study plan.");
+    expect(candidate.studyPlan).toEqual({ summary: "3 of 4 passes complete · Review after 5 days.", sources: ["learner defaults", "course override"] });
+    expect(assessCommandBriefEvidence(evidenceState({ ...state, courses: [course] }), { now }).actionableCount).toBe(1);
+  });
+
+  it("applies item-kind and item overrides without changing saved preferences", () => {
+    const state = slice({
+      tracker: [tracker({ id: "renal", passes: 3, studyPlanOverride: { lecturePasses: 6, reviewAfterDays: 7 } })],
+      courses: [course],
+      studyWorkflow: { configured: true, lecturePasses: 2, itemKindDefaults: { Lecture: { lecturePasses: 5 } } },
+    });
+    const before = structuredClone(state);
+    const [candidate] = rankCommandBriefCandidates(state, "maintain", now);
+    expect(candidate.studyPlan?.summary).toBe("3 of 6 passes complete · Review after 7 days.");
+    expect(candidate.studyPlan?.sources).toEqual(["learner defaults", "course override", "item-kind default", "item override"]);
+    expect(state).toEqual(before);
+    state.tracker[0] = { ...state.tracker[0], studyPlanOverride: undefined };
+    expect(rankCommandBriefCandidates(state, "maintain", now)[0].expectedOutcome).toMatch(/4 of 5/);
+  });
+
+  it("omits completed and snoozed work from activation, backlog, primary moves, and small wins", () => {
+    const state = slice({
+      tracker: [tracker({ id: "done", passes: 1, yield: "review" }), tracker({ id: "later", passes: 1, yield: "review", studyPlanOverride: { lecturePasses: 3 }, recommendationSnoozedUntil: "2026-07-09T08:00:00Z" })],
+      studyWorkflow: { configured: true, lecturePasses: 1 },
+    });
+    expect(rankCommandBriefCandidates(state, "maintain", now)).toEqual([]);
+    expect(deriveSignals(state, now)).toMatchObject({ reviewFlagged: 0, backlogScore: 0 });
+    expect(deriveMinimumViableWin(state, deriveSignals(state, now), now).link.kind).toBe("free");
+    expect(assessCommandBriefEvidence(evidenceState({ ...state, courses: [] }), { now }).actionableCount).toBe(0);
+    expect(rankCommandBriefCandidates(state, "maintain", new Date("2026-07-10T08:00:00Z"))[0].link.id).toBe("later");
+  });
+});
 
 function tracker(patch: Partial<TrackerItem>): TrackerItem {
   return {
@@ -215,7 +264,7 @@ describe("next best move priority", () => {
       ],
     });
     const move = deriveNextBestMove(s, "maintain", deriveSignals(s));
-    expect(move.title).toContain("Needs review"); // review outranks untouched
+    expect(move.title).toContain("Untouched high-yield"); // first exposure can outrank an additional pass
     expect(move.reason.length).toBeGreaterThan(10);
     expect(move.expectedOutcome.length).toBeGreaterThan(10);
     expect(move.estimatedMinutes).toBeGreaterThan(0);

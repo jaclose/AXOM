@@ -237,6 +237,88 @@ describe("OnboardingWizard", () => {
     expect(onComplete).toHaveBeenCalledWith("dashboard");
   });
 
+  it("resumes all study methods and exact original text, and preserves overrides on finish", async () => {
+    const original = "  My original approach.\n".repeat(40);
+    useStore.getState().updateProfile({ studyWorkflow: { configured: true,
+      methods: [{ id: "noji", enabled: true, timing: "after-first-pass", usage: original }, { id: "quizlet", enabled: true, label: "Own sets" }],
+      lecturePasses: 4, reviewAfterDays: 6, customContext: original,
+      itemKindDefaults: { Lab: { lecturePasses: 3 } },
+    } });
+    const first = render(<OnboardingWizard mode="rerun" />);
+    continueSetup();
+    fireEvent.click(screen.getByText("How do you usually study? (optional)"));
+    expect((screen.getByLabelText("Noji", { exact: true }) as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByLabelText("Anki", { exact: true }));
+    fireEvent.click(screen.getByText("How do you use Anki?"));
+    fireEvent.change(screen.getByLabelText("When do you use Anki?"), { target: { value: "ongoing" } });
+    fireEvent.change(screen.getByLabelText("Your Anki approach (optional)"), { target: { value: "  My own cards\nNot a premade deck.  " } });
+    await waitFor(() => expect(sessionStorage.getItem(ONBOARDING_DRAFT_KEY)).toContain("Not a premade deck."));
+    first.unmount();
+    render(<OnboardingWizard mode="rerun" />);
+    expect(screen.getByRole("dialog", { name: "Core setup" })).toBeTruthy();
+    continueSetup(2);
+    fireEvent.click(screen.getByRole("button", { name: "Finish setup" }));
+    expect(useStore.getState().profile.studyWorkflow).toMatchObject({ lecturePasses: 4, reviewAfterDays: 6, customContext: original, itemKindDefaults: { Lab: { lecturePasses: 3 } } });
+    expect(useStore.getState().profile.studyWorkflow?.methods).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "noji", enabled: true, timing: "after-first-pass", usage: original }),
+      expect.objectContaining({ id: "quizlet", enabled: true, label: "Own sets" }),
+      expect.objectContaining({ id: "anki", timing: "ongoing", usage: "  My own cards\nNot a premade deck.  " }),
+    ]));
+  });
+
+  it("clearly confirms removing all study methods without deleting their original descriptions", () => {
+    useStore.getState().updateProfile({ studyWorkflow: { configured: true, methods: [{ id: "anki", enabled: true, usage: "My own cards" }] } });
+    render(<OnboardingWizard mode="rerun" />);
+    continueSetup();
+    fireEvent.click(screen.getByText("How do you usually study? (optional)"));
+    fireEvent.click(screen.getByLabelText("Anki", { exact: true }));
+    continueSetup(2);
+    expect(screen.getByText("No methods selected")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Finish setup" }));
+    expect(useStore.getState().profile.studyWorkflow?.methods).toContainEqual(expect.objectContaining({ id: "anki", enabled: false, usage: "My own cards" }));
+  });
+
+  it("previews deterministic suggestions from the learner's words and applies only the confirmed one", () => {
+    useStore.getState().updateProfile({ studyWorkflow: { configured: true, lecturePasses: 2, reviewAfterDays: 3,
+      methods: [{ id: "noji", enabled: true, timing: "after-first-pass", usage: "My Noji words" }, { id: "anki", enabled: false, label: "Own deck", usage: "Old Anki cards" }],
+    } });
+    const before = structuredClone(useStore.getState().profile.studyWorkflow);
+    render(<OnboardingWizard mode="rerun" />);
+    continueSetup();
+    fireEvent.click(screen.getByText("How do you usually study? (optional)"));
+    expect(screen.queryByText("Suggestions from your words")).toBeNull();
+    expect(screen.getByText(/fixed word rules \(not AI\).*never applied automatically/)).toBeTruthy();
+
+    const original = "  I use Anki every day.\nI watch lectures three times.  ";
+    fireEvent.change(screen.getByLabelText("Other — tell AXOM how you study"), { target: { value: original } });
+    const suggestions = screen.getByRole("region", { name: "Suggestions from your words" });
+    expect(suggestions.textContent).toContain("You wrote “Anki”");
+    expect(screen.getByRole("button", { name: "Apply: Turn on Anki" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Apply: Use Anki throughout the course" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Apply: Set usual lecture passes to 3" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Apply all" })).toBeTruthy();
+    // Showing suggestions changes nothing.
+    expect((screen.getByLabelText("Anki", { exact: true }) as HTMLInputElement).checked).toBe(false);
+    expect(useStore.getState().profile.studyWorkflow).toEqual(before);
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply: Turn on Anki" }));
+    expect((screen.getByLabelText("Anki", { exact: true }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.queryByRole("button", { name: "Apply: Turn on Anki" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Apply: Use Anki throughout the course" })).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Apply: Use Anki throughout the course" }));
+    expect(screen.getByRole("status").textContent).toBe("Applied: Turn on Anki.");
+    expect((screen.getByLabelText("Other — tell AXOM how you study") as HTMLTextAreaElement).value).toBe(original);
+    expect(screen.getByRole("button", { name: "Apply: Set usual lecture passes to 3" })).toBeTruthy();
+    expect((screen.getByLabelText("Lecture passes", { exact: true }) as HTMLInputElement).checked).toBe(false);
+
+    continueSetup(2);
+    fireEvent.click(screen.getByRole("button", { name: "Finish setup" }));
+    const saved = useStore.getState().profile.studyWorkflow!;
+    expect(saved).toMatchObject({ customContext: original, lecturePasses: 2, reviewAfterDays: 3 });
+    expect(saved.methods).toContainEqual({ id: "anki", enabled: true, label: "Own deck", usage: "Old Anki cards" });
+    expect(saved.methods).toContainEqual(expect.objectContaining({ id: "noji", enabled: true, timing: "after-first-pass", usage: "My Noji words" }));
+  });
+
   it("skips first-run setup without applying track changes and cancels reruns without changing profile data", () => {
     const firstComplete = vi.fn();
     render(<OnboardingWizard mode="first-run" onComplete={firstComplete} />);

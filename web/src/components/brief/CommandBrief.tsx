@@ -24,6 +24,7 @@ import { explainLowEnergy, type ReadinessResult } from "../../lib/energy";
 import { gotoJournalDay } from "../../lib/uiStore";
 import { evaluateDailySuccess } from "../../lib/dailySuccess";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { activePrimaryPaths } from "../../lib/trackerFocus";
 
 const MODE_TONE: Record<BriefMode, "cyan" | "green" | "purple" | "orange" | "red" | "neutral"> = {
   maintain: "green",
@@ -56,6 +57,7 @@ export function CommandBrief({ readiness }: { readiness?: ReadinessResult }) {
   const evidence = useMemo(() => assessCommandBriefEvidence({
     courses: s.courses,
     tracker: s.tracker,
+    studyWorkflow: s.profile.studyWorkflow,
     logs: s.logs,
     tasks: s.tasks,
     questions: s.questions ?? [],
@@ -69,13 +71,16 @@ export function CommandBrief({ readiness }: { readiness?: ReadinessResult }) {
     habitEntries: s.habitEntries ?? [],
     readiness,
   }, { manualActivation }), [
-    s.courses, s.tracker, s.logs, s.tasks, s.questions, s.documents, s.questionSets,
+    s.courses, s.tracker, s.profile.studyWorkflow, s.logs, s.tasks, s.questions, s.documents, s.questionSets,
     s.activeDayKey, s.dayPlans, s.sessions, s.habits, s.habitEntries, dailySuccess, readiness, manualActivation,
   ]);
   const brief = useMemo(
     () => evidence.ready ? buildCommandBrief({
       tasks: s.tasks,
       tracker: s.tracker,
+      primaryScopes: activePrimaryPaths(s.profile.primaryTrackerScopes, s.activeDayKey),
+      courses: s.courses,
+      studyWorkflow: s.profile.studyWorkflow,
       logs: s.logs,
       boardPrep: s.boardPrep,
       activeDayKey: s.activeDayKey,
@@ -90,7 +95,7 @@ export function CommandBrief({ readiness }: { readiness?: ReadinessResult }) {
       readiness,
     }) : null,
     [
-      evidence.ready, s.tasks, s.tracker, s.logs, s.boardPrep, s.activeDayKey, s.sessions,
+      evidence.ready, s.tasks, s.tracker, s.profile.primaryTrackerScopes, s.courses, s.profile.studyWorkflow, s.logs, s.boardPrep, s.activeDayKey, s.sessions,
       s.closeouts, s.questions, s.ankiCards, s.dayPlans, dailySuccess, s.habits, s.habitEntries, readiness,
     ],
   );
@@ -211,6 +216,12 @@ export function CommandBrief({ readiness }: { readiness?: ReadinessResult }) {
           <details className="brief-provenance" data-tour="recommendation-provenance">
             <summary>Why this suggestion?</summary>
             <p>{brief.move.reason}</p>
+            {brief.move.studyPlan && (
+              <section aria-label="Study plan used for this suggestion">
+                <p><b>Your study plan:</b> {brief.move.studyPlan.summary}</p>
+                <p className="sub">Applied in order: {brief.move.studyPlan.sources.join(" → ")}. Change defaults in Settings or override this item in Course Tracker.</p>
+              </section>
+            )}
             {(brief.move.contributions?.length ?? 0) > 0 && (
               <>
                 <div className="brief-evidence-score">Evidence score: {brief.move.score}</div>

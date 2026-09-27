@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 import { Analytics } from "@vercel/analytics/react";
 import { runStorageMigrations } from "./lib/storageMigrations";
 import { installThemeSync } from "./lib/theme";
+import { installPaletteSync } from "./lib/palette";
+import { installMotionSync } from "./lib/motionPreference";
 import { installChunkRecovery, registerWebWorker } from "./lib/webUpdates";
 import { storeHydration } from "./lib/storeHydration";
 import { startStartupIntro } from "./lib/startupIntro";
@@ -16,11 +18,34 @@ import "./styles/journal-notebook.css";
 import "./styles/tour.css";
 import "./styles/loop.css";
 import "./styles/questionbank.css";
+import "./styles/appearance.css";
+import "./styles/focus.css";
+import "./styles/account.css";
+import "./styles/settings.css";
 import "./styles/startupIntro.css";
+import "./styles/dock.css";
+import "./styles/soundscapes.css";
+import "./styles/energy.css";
+import "./styles/trackers.css";
+import "./styles/exam-sim.css";
 
 // The inline head script prevents a first-paint flash; this keeps the chosen
 // theme synchronized with OS and cross-tab changes for the rest of the session.
 installThemeSync();
+installPaletteSync();
+installMotionSync();
+
+// Dev-only handle so browser tests and debugging reach the app's LIVE store.
+// Importing "/src/lib/store.ts" from a test can resolve to a different module
+// instance once HMR has timestamped the app's copy, silently writing nowhere.
+if (import.meta.env.DEV) {
+  (window as Window & { __AXOM_DEV__?: Promise<unknown> }).__AXOM_DEV__ = Promise.all([
+    import("./lib/store"),
+    import("./lib/pomodoro"),
+    import("./lib/soundscapes/store"),
+  ]).then(([{ useStore }, { usePomodoro }, { useSoundscape, soundscapeAnalyser }]) => ({ useStore, usePomodoro, useSoundscape, soundscapeAnalyser }));
+}
+
 installChunkRecovery();
 
 // Pure decoration: migrations and hydration run in parallel and never await

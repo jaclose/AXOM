@@ -30,7 +30,7 @@ describe("Help feedback", () => {
     expect(draft).toContain("mailto:jafardabbagh@gmail.com");
     expect(draft).toContain("subject=[AXOM Urgent]&");
     expect(draft).toContain("Page or feature: Question Bank");
-    expect(draft).toContain("Schema version: 33");
+    expect(draft).toContain("Schema version: 34");
     expect(draft).toContain("Route: #help");
     expect(draft).not.toContain("Private Name");
     expect(draft).not.toContain("private journal text");

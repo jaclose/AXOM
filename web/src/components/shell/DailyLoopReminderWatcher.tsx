@@ -9,7 +9,7 @@ import {
 } from "../../lib/dailyLoopReminders";
 import { isoDate } from "../../lib/scoring";
 import { useStore } from "../../lib/store";
-import { pushToast } from "../../lib/toast";
+import { pushToast, REMINDER_TOAST_DURATION_MS } from "../../lib/toast";
 import { useUi } from "../../lib/uiStore";
 
 export const DAILY_LOOP_REMINDER_OPEN_EVENT = "axom:daily-loop-reminder-open";
@@ -111,7 +111,7 @@ function toastForSignal(
       ? "Choose one intention for today. It takes less than a minute, and it is optional."
       : "Review what changed and choose tomorrow’s first step. This is optional.",
     tone: "info" as const,
-    duration: 18_000,
+    duration: REMINDER_TOAST_DURATION_MS,
     dedupe: `daily-loop:${signal.dayKey}:${signal.kind}`,
     actions: [
       { label: checkIn ? "Open check-in" : "Open closeout", onAction: actions.open },

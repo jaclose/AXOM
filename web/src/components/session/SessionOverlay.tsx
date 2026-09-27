@@ -1,47 +1,50 @@
 // ===========================================================================
-// Live session surface (directive §2). Renders whenever an active/paused
-// session exists: a persistent bottom bar with the running clock (recomputed
-// every second from absolute timestamp segments — never a stored counter), the
-// committed task, quick logging, pause/resume, an optional full-screen focus
-// mode, and the completion capture (confidence, status, takeaway, blocker,
-// energy). On mount it restores the live session after reload/sleep.
+// Live session surface (directive §2). The running clock, pause/resume and
+// quick logging live in the focus dock (components/dock/FocusDock). This
+// component owns the full-screen focus mode and the completion capture
+// (confidence, status, takeaway, blocker, energy), and on mount restores the
+// live session after reload/sleep. Clocks are recomputed every second from
+// absolute timestamp segments — never a stored counter.
 // ===========================================================================
 import { useEffect, useMemo, useState } from "react";
-import { Pause, Play, Check, Maximize2, Minimize2 } from "lucide-react";
 import { useStore } from "../../lib/store";
 import {
   findLiveSession, formatElapsed, sessionElapsedMs,
   QUICK_LOG_LABEL, type SessionCapture, type SessionQuickLog,
 } from "../../lib/sessions";
+import { useSessionUi } from "../../lib/sessionUi";
 import { GButton, GhostButton, Tag } from "../ui/primitives";
 import { Modal, Field, TextAreaField } from "../ui/Modal";
-import { ICON_SIZE } from "../../lib/iconSize";
 
 const QUICK_LOGS = Object.keys(QUICK_LOG_LABEL) as SessionQuickLog[];
 
 export function SessionOverlay() {
-  const s = useStore();
+  const sessions = useStore((st) => st.sessions);
   const restoreLiveSessions = useStore((st) => st.restoreLiveSessions);
-  const session = findLiveSession(s.sessions ?? []);
+  const session = findLiveSession(sessions ?? []);
+  const { focusMode, capturing, setFocusMode, closeCapture } = useSessionUi();
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const [focusMode, setFocusMode] = useState(false);
-  const [capturing, setCapturing] = useState(false);
-  const [showQuickLogs, setShowQuickLogs] = useState(false);
 
   // Restore once on mount: caps stale open segments after sleep/reload.
   useEffect(() => {
     restoreLiveSessions();
   }, [restoreLiveSessions]);
 
-  // The visible clock re-derives from timestamps every second; the interval is
-  // display-only and never the source of truth.
   const sessionId = session?.id;
   const sessionStatus = session?.status;
   useEffect(() => {
-    if (sessionStatus !== "active") return;
+    if (!focusMode || sessionStatus !== "active") return;
     const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [sessionId, sessionStatus]);
+  }, [focusMode, sessionId, sessionStatus]);
+
+  // Leaving the session (finished elsewhere, discarded) also leaves focus mode.
+  useEffect(() => {
+    if (!session && (focusMode || capturing)) {
+      setFocusMode(false);
+      closeCapture();
+    }
+  }, [session, focusMode, capturing, setFocusMode, closeCapture]);
 
   const elapsedMs = useMemo(
     () => (session ? sessionElapsedMs(session, new Date(nowMs)) : 0),
@@ -49,60 +52,11 @@ export function SessionOverlay() {
   );
 
   if (!session) return null;
-
-  const planned = session.plannedMinutes ? session.plannedMinutes * 60_000 : null;
-  const progress = planned ? Math.min(100, Math.round((elapsedMs / planned) * 100)) : null;
-  const running = session.status === "active";
-
-  function quickLog(log: SessionQuickLog) {
-    if (!session) return;
-    s.quickLogSession(session.id, log);
-    setShowQuickLogs(false);
-    if (log === "completed") setCapturing(true);
-  }
-
-  const bar = (
-    <div className={`session-bar ${focusMode ? "in-focus" : ""}`}>
-      <div className="session-clock mono">{formatElapsed(elapsedMs)}</div>
-      <div className="stack grow" style={{ gap: 2, minWidth: 0 }}>
-        <div className="truncate" style={{ fontWeight: 700 }}>{session.title}</div>
-        <div className="sub truncate">
-          {session.link.context ?? session.link.label}
-          {progress !== null ? ` · ${progress}% of ~${session.plannedMinutes}m` : ""}
-          {session.status === "paused" ? " · paused" : ""}
-        </div>
-      </div>
-      <div className="row" style={{ gap: 6, flexShrink: 0 }}>
-        <div className="session-quicklog-wrap">
-          <GhostButton onClick={() => setShowQuickLogs((v) => !v)}>Log…</GhostButton>
-          {showQuickLogs && (
-            <div className="session-quicklog-menu">
-              {QUICK_LOGS.map((log) => (
-                <button key={log} className="session-quicklog-item" onClick={() => quickLog(log)}>
-                  {QUICK_LOG_LABEL[log]}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        <GButton size="sm" iconOnly aria-label={running ? "Pause session" : "Resume session"}
-          onClick={() => (running ? s.pauseSession(session.id) : s.resumeSession(session.id))}>
-          {running ? <Pause size={ICON_SIZE.body} /> : <Play size={ICON_SIZE.body} />}
-        </GButton>
-        <GButton size="sm" iconOnly aria-label={focusMode ? "Exit focus mode" : "Focus mode"}
-          onClick={() => setFocusMode((v) => !v)}>
-          {focusMode ? <Minimize2 size={ICON_SIZE.body} /> : <Maximize2 size={ICON_SIZE.body} />}
-        </GButton>
-        <GButton size="sm" variant="primary" onClick={() => setCapturing(true)}>
-          <Check size={ICON_SIZE.body} /> Finish
-        </GButton>
-      </div>
-    </div>
-  );
+  const s = useStore.getState();
 
   return (
     <>
-      {focusMode ? (
+      {focusMode && (
         <div className="focus-overlay">
           <div className="focus-center">
             <div className="focus-clock mono">{formatElapsed(elapsedMs)}</div>
@@ -115,16 +69,15 @@ export function SessionOverlay() {
               </div>
             )}
           </div>
-          {bar}
         </div>
-      ) : bar}
+      )}
       {capturing && (
         <SessionCaptureModal
-          onCancel={() => setCapturing(false)}
-          onAbandon={() => { s.abandonSession(session.id); setCapturing(false); setFocusMode(false); }}
+          onCancel={closeCapture}
+          onAbandon={() => { s.abandonSession(session.id); closeCapture(); setFocusMode(false); }}
           onSave={(capture) => {
             s.completeSession(session.id, capture);
-            setCapturing(false);
+            closeCapture();
             setFocusMode(false);
           }}
         />

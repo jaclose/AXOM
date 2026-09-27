@@ -7,16 +7,59 @@ import type { StudyLog } from "./types";
 
 export type Grade = "blue" | "green" | "orange" | "red";
 
-/** todayGrade(minutes, cards) from the Swift source. */
-export function todayGrade(minutes: number, cards: number): Grade {
-  if (minutes >= 480 || cards >= 350) return "blue";
-  if (minutes >= 360 || cards >= 250) return "green";
-  if (minutes >= 300 || cards >= 150) return "orange";
+/** A learner's own daily targets. A card target of 0 means "no card goal". */
+export interface GradeTargets {
+  minutes?: number;
+  cards?: number;
+}
+
+/** The Swift source's thresholds, where 300 min / 150 cards meant "on target". */
+export const DEFAULT_GRADE_TARGETS = { minutes: 300, cards: 150 } as const;
+
+export function gradeTargetsFor(profile: { dailyMinuteTarget?: number; dailyCardTarget?: number } | undefined): GradeTargets {
+  return { minutes: profile?.dailyMinuteTarget, cards: profile?.dailyCardTarget };
+}
+
+/**
+ * Grade thresholds scale with the learner's own targets: on target (orange)
+ * at 1×, strong (green) at 1.2× minutes / 1.67× cards, excellent (blue) at
+ * 1.6× minutes / 2.33× cards. With the Swift defaults this reproduces the
+ * original 300/360/480 minutes and 150/250/350 cards exactly.
+ */
+export function gradeThresholds(targets: GradeTargets = DEFAULT_GRADE_TARGETS) {
+  const minutes = targets.minutes && targets.minutes > 0 ? targets.minutes : DEFAULT_GRADE_TARGETS.minutes;
+  const cards = targets.cards === 0 ? Number.POSITIVE_INFINITY : targets.cards && targets.cards > 0 ? targets.cards : DEFAULT_GRADE_TARGETS.cards;
+  return {
+    blue: { minutes: minutes * 1.6, cards: (cards * 7) / 3 },
+    green: { minutes: minutes * 1.2, cards: (cards * 5) / 3 },
+    orange: { minutes, cards },
+  };
+}
+
+/** todayGrade(minutes, cards) from the Swift source, relative to the learner's targets. */
+export function todayGrade(minutes: number, cards: number, targets?: GradeTargets): Grade {
+  const t = gradeThresholds(targets);
+  if (minutes >= t.blue.minutes || cards >= t.blue.cards) return "blue";
+  if (minutes >= t.green.minutes || cards >= t.green.cards) return "green";
+  if (minutes >= t.orange.minutes || cards >= t.orange.cards) return "orange";
   return "red";
 }
 
+/** Legend rows with the learner's actual thresholds, weakest first. */
+export function gradeLegend(targets?: GradeTargets): Array<{ grade: Grade; label: string }> {
+  const t = gradeThresholds(targets);
+  const min = (value: number) => (value >= 120 ? `${Math.round(value / 6) / 10}h` : `${Math.round(value)} min`);
+  const cards = (value: number) => (Number.isFinite(value) ? ` or ${Math.round(value)} cards` : "");
+  return [
+    { grade: "red", label: `Below target (under ${min(t.orange.minutes)})` },
+    { grade: "orange", label: `On target (${min(t.orange.minutes)}${cards(t.orange.cards)})` },
+    { grade: "green", label: `Strong (${min(t.green.minutes)}${cards(t.green.cards)})` },
+    { grade: "blue", label: `👑 Excellent (${min(t.blue.minutes)}${cards(t.blue.cards)})` },
+  ];
+}
+
 export function gradeLabel(g: Grade): string {
-  return g === "blue" ? "👑 Blue" : g[0].toUpperCase() + g.slice(1);
+  return { blue: "👑 Excellent", green: "Strong", orange: "On target", red: "Below target" }[g];
 }
 
 export function gradeColor(g: Grade): string {
@@ -30,12 +73,11 @@ export function gradeColor(g: Grade): string {
 
 /** Heatmap cell fill — mirrors Heatmap.color(minutes:cards:). Uses the
  * grade tokens (E2d) so heatmaps re-theme with light/dark like gradeColor. */
-export function heatColor(minutes: number, cards: number): string {
-  if (minutes >= 480 || cards >= 350) return "color-mix(in srgb, var(--grade-blue) 88%, transparent)";
-  if (minutes >= 360 || cards >= 250) return "color-mix(in srgb, var(--grade-green) 78%, transparent)";
-  if (minutes >= 300 || (cards >= 150 && cards <= 200)) return "color-mix(in srgb, var(--grade-orange) 82%, transparent)";
-  if (minutes > 0 || cards > 0) return "color-mix(in srgb, var(--grade-red) 80%, transparent)";
-  return "rgba(255,255,255,0.055)";
+export function heatColor(minutes: number, cards: number, targets?: GradeTargets): string {
+  if (minutes <= 0 && cards <= 0) return "rgba(255,255,255,0.055)";
+  const grade = todayGrade(minutes, cards, targets);
+  const mix = { blue: 88, green: 78, orange: 82, red: 80 }[grade];
+  return `color-mix(in srgb, var(--grade-${grade}) ${mix}%, transparent)`;
 }
 
 /**
