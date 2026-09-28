@@ -721,6 +721,8 @@ export interface InstalledBlueprint {
 
 export interface Profile {
   name: string;
+  /** Easter eggs found (e.g. "again"); unlocks are permanent and follow the account. */
+  unlocks?: string[];
   userId: string; // local backend owner key derived from display name
   versionLabel: string;
   tagline: string;

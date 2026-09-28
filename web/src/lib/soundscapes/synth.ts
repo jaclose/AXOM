@@ -40,6 +40,8 @@ export interface SynthRecipe {
 /** Speakers can't reproduce very low carriers; monaural beats stay audible above this. */
 const SPEAKER_MIN_CARRIER_HZ = 140;
 const NOISE_SECONDS = 12;
+/** Relative level of the second carrier through speakers (the beat's modulation depth). */
+export const MONAURAL_BEAT_DEPTH = 0.5;
 
 export function carrierPairFor(carrierHz: number, beatHz: number, output: OutputMode): [number, number] {
   const base = output === "speakers" ? Math.max(carrierHz, SPEAKER_MIN_CARRIER_HZ) : carrierHz;
@@ -198,8 +200,11 @@ export class LayerKit {
       r.connect(merger, 0, 1);
       merger.connect(level);
     } else {
+      // Two equal tones in the air beat at 100% depth, a buzz that tires the
+      // ear within minutes (20–40 Hz is the "roughness" band). A quieter
+      // second tone keeps the beat audible at about half the depth.
       l.connect(level);
-      r.connect(level);
+      r.connect(this.gain(MONAURAL_BEAT_DEPTH)).connect(level);
     }
     return stops;
   }
@@ -365,8 +370,8 @@ export class LayerKit {
       for (let i = 0; i < burst; i += 1) {
         const source = this.ctx.createBufferSource();
         source.buffer = click;
-        const tone = this.filter("highpass", 1400 + Math.random() * 2400, 0.8);
-        const env = this.gain(layer.level * (0.08 + Math.random() * 0.22));
+        const tone = this.filter("bandpass", 1200 + Math.random() * 1800, 0.9);
+        const env = this.gain(layer.level * (0.06 + Math.random() * 0.14));
         const pan = this.ctx.createStereoPanner();
         pan.pan.value = Math.random() * 0.8 - 0.4;
         source.connect(tone).connect(env).connect(pan);
@@ -391,12 +396,12 @@ export class LayerKit {
         const start = at + n * (0.18 + Math.random() * 0.4);
         const env = this.ctx.createGain();
         env.gain.setValueAtTime(0.0001, start);
-        env.gain.exponentialRampToValueAtTime(layer.level * (0.3 + Math.random() * 0.4), start + 0.01);
+        env.gain.exponentialRampToValueAtTime(layer.level * (0.2 + Math.random() * 0.25), start + 0.03);
         env.gain.exponentialRampToValueAtTime(0.0001, start + 3.2);
         const pan = this.ctx.createStereoPanner();
         pan.pan.value = Math.random() * 1.4 - 0.7;
         env.connect(pan).connect(wet);
-        [[1, 1], [2.76, 0.25], [5.4, 0.08]].forEach(([ratio, amp]) => {
+        [[1, 1], [2.76, 0.18], [5.4, 0.04]].forEach(([ratio, amp]) => {
           const osc = this.ctx.createOscillator();
           osc.frequency.value = frequency * ratio;
           const partial = this.gain(amp);
@@ -420,8 +425,8 @@ export class LayerKit {
     this.every(90, 900, () => {
       const source = this.ctx.createBufferSource();
       source.buffer = click;
-      const env = this.gain(layer.level * (0.05 + Math.random() * 0.2));
-      source.connect(this.filter("highpass", 2000, 0.7)).connect(env).connect(dry);
+      const env = this.gain(layer.level * (0.03 + Math.random() * 0.1));
+      source.connect(this.filter("bandpass", 2400, 0.8)).connect(env).connect(dry);
       source.start();
       source.onended = () => { source.disconnect(); env.disconnect(); };
     }, stops);
@@ -438,8 +443,8 @@ export class LayerKit {
     const top = this.filter("lowpass", high ? 5200 : 3800, 0.5);
     const airLevel = this.gain(layer.level * 0.75);
     air.connect(body).connect(top).connect(airLevel).connect(dry);
-    // Blade flutter: the air gently modulated at the blade-pass rate.
-    this.lfo(high ? 21 : 14, layer.level * 0.05, airLevel.gain, stops);
+    // Blade flutter: a slow, shallow sway (fast flutter reads as a buzz).
+    this.lfo(high ? 9 : 6.5, layer.level * 0.025, airLevel.gain, stops);
     // Motor hum: a quiet mains-ish fundamental with a softer harmonic.
     const hum = this.gain(layer.level * 0.06);
     hum.connect(this.filter("lowpass", 400, 0.7)).connect(dry);
@@ -472,66 +477,66 @@ export class LayerKit {
   /** Distant café voices. Each "speaker" is noise through two moving vowel formants, gated in syllables and phrases. */
   private chatter(layer: ChatterLayer, dry: AudioNode, wet: AudioNode) {
     const stops: Array<() => void> = [];
-    // Room tone under everything.
+    // Room tone under everything: it carries the loudness, so the voices can stay far away.
     const room = this.loop("pink", stops);
-    room.connect(this.filter("lowpass", 900, 0.5)).connect(this.gain(layer.level * 0.18)).connect(dry);
-    const muffle = this.filter("lowpass", 2600, 0.6);
+    room.connect(this.filter("lowpass", 1100, 0.5)).connect(this.gain(layer.level * 0.42)).connect(dry);
+    const muffle = this.filter("lowpass", 2200, 0.6);
     const bus = this.gain(1);
     bus.connect(muffle);
-    muffle.connect(this.gain(0.55)).connect(dry);
+    muffle.connect(this.gain(0.45)).connect(dry);
     muffle.connect(this.gain(0.9)).connect(wet);
     const vowels = [[730, 1090], [530, 1840], [270, 2290], [570, 840], [440, 1020], [300, 870], [660, 1720]];
     const voices = Math.max(2, Math.min(9, layer.voices ?? 6));
     for (let v = 0; v < voices; v += 1) {
-      const source = this.loop(v % 2 ? "white" : "pink", stops);
+      const source = this.loop("pink", stops);
       const pitchShift = 0.82 + Math.random() * 0.4; // lower and higher voices
-      const f1 = this.filter("bandpass", 500, 7);
-      const f2 = this.filter("bandpass", 1500, 9);
+      // Broad formants: narrow ones whistle.
+      const f1 = this.filter("bandpass", 500, 3.2);
+      const f2 = this.filter("bandpass", 1500, 4);
       const gate = this.ctx.createGain();
       gate.gain.value = 0;
       const pan = this.ctx.createStereoPanner();
       pan.pan.value = Math.random() * 1.6 - 0.8;
-      // Narrow formant bands pass little energy, so voices need real gain to be heard.
-      const distance = this.gain(layer.level * (0.8 + Math.random() * 1.1) * Math.sqrt(6 / voices));
+      const distance = this.gain(layer.level * (0.35 + Math.random() * 0.45) * Math.sqrt(6 / voices));
       source.connect(f1).connect(gate);
-      source.connect(f2).connect(this.gain(0.6)).connect(gate);
+      source.connect(f2).connect(this.gain(0.45)).connect(gate);
       gate.connect(distance).connect(pan).connect(bus);
       // Speak in phrases of syllables, then pause, like real conversation.
       let talking = Math.random() < 0.5;
-      this.every(160, 260, () => {
+      this.every(170, 280, () => {
         const at = this.ctx.currentTime + 0.02;
         if (Math.random() < (talking ? 0.07 : 0.2)) talking = !talking;
-        if (!talking) { gate.gain.setTargetAtTime(0, at, 0.05); return; }
+        if (!talking) { gate.gain.setTargetAtTime(0, at, 0.08); return; }
         const [a, b] = vowels[Math.floor(Math.random() * vowels.length)];
-        f1.frequency.setTargetAtTime(a * pitchShift, at, 0.03);
-        f2.frequency.setTargetAtTime(b * pitchShift, at, 0.03);
-        const peak = 0.5 + Math.random() * 0.5;
+        f1.frequency.setTargetAtTime(a * pitchShift, at, 0.04);
+        f2.frequency.setTargetAtTime(b * pitchShift, at, 0.04);
+        const peak = 0.45 + Math.random() * 0.35;
         gate.gain.cancelScheduledValues(at);
-        gate.gain.setTargetAtTime(peak, at, 0.025);
-        gate.gain.setTargetAtTime(0.05, at + 0.09 + Math.random() * 0.08, 0.04);
+        gate.gain.setTargetAtTime(peak, at, 0.04);
+        gate.gain.setTargetAtTime(0.12, at + 0.1 + Math.random() * 0.08, 0.06);
       }, stops);
     }
     if (layer.cups !== false) {
-      // Now and then a cup meets a saucer somewhere in the room.
-      this.every(4000, 12_000, () => {
+      // Now and then a cup meets a saucer somewhere across the room.
+      this.every(5000, 14_000, () => {
         const at = this.ctx.currentTime;
         const env = this.ctx.createGain();
         env.gain.setValueAtTime(0.0001, at);
-        env.gain.exponentialRampToValueAtTime(layer.level * (0.05 + Math.random() * 0.06), at + 0.004);
-        env.gain.exponentialRampToValueAtTime(0.0001, at + 0.35);
+        env.gain.exponentialRampToValueAtTime(layer.level * (0.015 + Math.random() * 0.02), at + 0.012);
+        env.gain.exponentialRampToValueAtTime(0.0001, at + 0.45);
         const pan = this.ctx.createStereoPanner();
         pan.pan.value = Math.random() * 1.4 - 0.7;
         env.connect(pan);
-        pan.connect(dry);
+        pan.connect(this.gain(0.4)).connect(dry);
         pan.connect(wet);
-        const base = 2600 + Math.random() * 1800;
-        [[1, 1], [1.51, 0.5], [2.37, 0.3]].forEach(([ratio, amp]) => {
+        const base = 1900 + Math.random() * 1100;
+        [[1, 1], [1.51, 0.4], [2.37, 0.15]].forEach(([ratio, amp]) => {
           const osc = this.ctx.createOscillator();
           osc.frequency.value = base * ratio;
           const partial = this.gain(amp);
           osc.connect(partial).connect(env);
           osc.start(at);
-          osc.stop(at + 0.4);
+          osc.stop(at + 0.5);
           osc.onended = () => { osc.disconnect(); partial.disconnect(); };
         });
       }, stops);
@@ -539,106 +544,112 @@ export class LayerKit {
     return stops;
   }
 
-  /** Birdsong: whistles, chirp runs and trills from a few species at different distances, over leaves. */
+  /**
+   * Birdsong over leaves. Calls sit in the 1.6–3.4 kHz range with soft
+   * onsets (25–40 ms): real birds far away, not beeps in your ear. The leaf
+   * bed carries the loudness so the calls stay a few dB above it.
+   */
   private birds(layer: BirdsLayer, dry: AudioNode, wet: AudioNode) {
     const stops: Array<() => void> = [];
     const dawn = layer.density === "dawn";
-    // Leaves: airy high noise that breathes with the breeze.
+    // Leaves: a soft rustle that breathes with the breeze.
     const leaves = this.loop("pink", stops);
-    const leafLevel = this.gain(layer.level * 0.06);
-    leaves.connect(this.filter("highpass", 1800, 0.5)).connect(this.filter("lowpass", 7000, 0.5)).connect(leafLevel).connect(dry);
-    this.lfo(0.07, layer.level * 0.03, leafLevel.gain, stops);
+    const leafLevel = this.gain(layer.level * 0.28);
+    leaves.connect(this.filter("highpass", 500, 0.5)).connect(this.filter("lowpass", 3800, 0.5)).connect(leafLevel).connect(dry);
+    this.lfo(0.07, layer.level * 0.09, leafLevel.gain, stops);
+    // A far-off low wash (distant trees and air) so the forest has depth.
+    const air = this.loop("brown", stops);
+    air.connect(this.filter("lowpass", 380, 0.5)).connect(this.gain(layer.level * 0.22)).connect(dry);
+    const envelope = (env: GainNode, at: number, peak: number, attack: number, end: number) => {
+      env.gain.setValueAtTime(0.0001, at);
+      env.gain.exponentialRampToValueAtTime(peak, at + attack);
+      env.gain.exponentialRampToValueAtTime(0.0001, end);
+    };
     const species: Array<(at: number, out: AudioNode, amp: number) => number> = [
-      // Whistle that slides down (a thrush-like call).
+      // A slow whistle that slides down (thrush-like).
       (at, out, amp) => {
         const osc = this.ctx.createOscillator();
         const env = this.ctx.createGain();
-        const f = 2400 + Math.random() * 900;
+        const f = 1900 + Math.random() * 600;
         osc.frequency.setValueAtTime(f, at);
-        osc.frequency.exponentialRampToValueAtTime(f * 0.72, at + 0.34);
-        env.gain.setValueAtTime(0.0001, at);
-        env.gain.exponentialRampToValueAtTime(amp, at + 0.03);
-        env.gain.exponentialRampToValueAtTime(0.0001, at + 0.38);
+        osc.frequency.exponentialRampToValueAtTime(f * 0.78, at + 0.5);
+        envelope(env, at, amp, 0.04, at + 0.55);
         osc.connect(env).connect(out);
-        osc.start(at); osc.stop(at + 0.4);
+        osc.start(at); osc.stop(at + 0.6);
         osc.onended = () => { osc.disconnect(); env.disconnect(); };
-        return 0.4;
+        return 0.6;
       },
-      // A run of quick up-chirps (a sparrow-like phrase).
+      // A short phrase of soft up-chirps (sparrow-like).
       (at, out, amp) => {
-        const notes = 3 + Math.floor(Math.random() * 4);
-        const base = 3600 + Math.random() * 1400;
+        const notes = 2 + Math.floor(Math.random() * 3);
+        const base = 2500 + Math.random() * 700;
         for (let n = 0; n < notes; n += 1) {
-          const start = at + n * 0.09;
+          const start = at + n * 0.14;
           const osc = this.ctx.createOscillator();
           const env = this.ctx.createGain();
-          osc.frequency.setValueAtTime(base * 0.8, start);
-          osc.frequency.exponentialRampToValueAtTime(base * (1.05 + n * 0.02), start + 0.045);
-          env.gain.setValueAtTime(0.0001, start);
-          env.gain.exponentialRampToValueAtTime(amp * 0.8, start + 0.008);
-          env.gain.exponentialRampToValueAtTime(0.0001, start + 0.06);
+          osc.frequency.setValueAtTime(base * 0.85, start);
+          osc.frequency.exponentialRampToValueAtTime(base * (1.02 + n * 0.015), start + 0.07);
+          envelope(env, start, amp * 0.7, 0.025, start + 0.11);
           osc.connect(env).connect(out);
-          osc.start(start); osc.stop(start + 0.07);
+          osc.start(start); osc.stop(start + 0.12);
           osc.onended = () => { osc.disconnect(); env.disconnect(); };
         }
-        return notes * 0.09;
+        return notes * 0.14;
       },
-      // A warbled trill (fast frequency wobble).
+      // A gentle warble (slow wobble; fast ones sound like an alarm).
       (at, out, amp) => {
         const osc = this.ctx.createOscillator();
         const wobble = this.ctx.createOscillator();
-        const depth = this.gain(260 + Math.random() * 200);
+        const depth = this.gain(70 + Math.random() * 60);
         const env = this.ctx.createGain();
-        const length = 0.35 + Math.random() * 0.5;
-        osc.frequency.value = 3000 + Math.random() * 1500;
-        wobble.frequency.value = 24 + Math.random() * 14;
+        const length = 0.45 + Math.random() * 0.4;
+        osc.frequency.value = 2200 + Math.random() * 700;
+        wobble.frequency.value = 9 + Math.random() * 5;
         wobble.connect(depth).connect(osc.frequency);
         env.gain.setValueAtTime(0.0001, at);
-        env.gain.exponentialRampToValueAtTime(amp * 0.7, at + 0.05);
-        env.gain.setValueAtTime(amp * 0.7, at + length - 0.08);
+        env.gain.exponentialRampToValueAtTime(amp * 0.55, at + 0.08);
+        env.gain.setValueAtTime(amp * 0.55, at + length - 0.12);
         env.gain.exponentialRampToValueAtTime(0.0001, at + length);
         osc.connect(env).connect(out);
         osc.start(at); wobble.start(at); osc.stop(at + length + 0.02); wobble.stop(at + length + 0.02);
         osc.onended = () => { osc.disconnect(); wobble.disconnect(); depth.disconnect(); env.disconnect(); };
         return length;
       },
-      // Two-note "tee-oo" call.
+      // Two-note "tee-oo" call (a chickadee-like pair).
       (at, out, amp) => {
-        [[4200, 0], [3300, 0.22]].forEach(([f, offset]) => {
+        [[3100, 0], [2500, 0.3]].forEach(([f, offset]) => {
           const start = at + offset;
           const osc = this.ctx.createOscillator();
           const env = this.ctx.createGain();
           osc.frequency.setValueAtTime(f, start);
-          osc.frequency.linearRampToValueAtTime(f * 0.94, start + 0.16);
-          env.gain.setValueAtTime(0.0001, start);
-          env.gain.exponentialRampToValueAtTime(amp * 0.7, start + 0.02);
-          env.gain.exponentialRampToValueAtTime(0.0001, start + 0.18);
+          osc.frequency.linearRampToValueAtTime(f * 0.95, start + 0.22);
+          envelope(env, start, amp * 0.6, 0.035, start + 0.26);
           osc.connect(env).connect(out);
-          osc.start(start); osc.stop(start + 0.2);
+          osc.start(start); osc.stop(start + 0.28);
           osc.onended = () => { osc.disconnect(); env.disconnect(); };
         });
-        return 0.42;
+        return 0.6;
       },
     ];
     // Each bird lives somewhere in the forest (pan + distance) and repeats its own song.
-    const birds = Array.from({ length: dawn ? 6 : 4 }, (_, i) => ({
+    const birds = Array.from({ length: dawn ? 5 : 3 }, (_, i) => ({
       song: species[i % species.length],
-      pan: Math.random() * 1.8 - 0.9,
-      distance: 0.35 + Math.random() * 0.65,
+      pan: Math.random() * 1.6 - 0.8,
+      distance: 0.3 + Math.random() * 0.5,
     }));
     birds.forEach((bird) => {
       const pan = this.ctx.createStereoPanner();
       pan.pan.value = bird.pan;
-      const air = this.filter("lowpass", 3000 + bird.distance * 6000, 0.5); // far birds lose their top
+      const far = this.filter("lowpass", 2600 + bird.distance * 3000, 0.5); // far birds lose their top
       const out = this.gain(1);
-      out.connect(air).connect(pan);
-      pan.connect(this.gain(0.7)).connect(dry);
-      pan.connect(this.gain(0.6)).connect(wet);
-      stops.push(() => { pan.disconnect(); air.disconnect(); out.disconnect(); });
-      this.every(dawn ? 1800 : 3500, dawn ? 7000 : 14_000, () => {
+      out.connect(far).connect(pan);
+      pan.connect(this.gain(0.45)).connect(dry);
+      pan.connect(this.gain(0.8)).connect(wet);
+      stops.push(() => { pan.disconnect(); far.disconnect(); out.disconnect(); });
+      this.every(dawn ? 2600 : 4500, dawn ? 8000 : 15_000, () => {
         let at = this.ctx.currentTime + 0.05;
-        const repeats = 1 + Math.floor(Math.random() * 3);
-        for (let r = 0; r < repeats; r += 1) at += bird.song(at, out, layer.level * 0.22 * bird.distance) + 0.25 + Math.random() * 0.4;
+        const repeats = 1 + Math.floor(Math.random() * 2);
+        for (let r = 0; r < repeats; r += 1) at += bird.song(at, out, layer.level * 0.07 * bird.distance) + 0.4 + Math.random() * 0.5;
       }, stops);
     });
     return stops;

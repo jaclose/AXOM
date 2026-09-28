@@ -33,7 +33,7 @@ export interface SoundscapeLook {
 
 export type SoundscapeVersion =
   | ({ id: string; label: string; description: string; recipe: SynthRecipe; replacedByRecording?: boolean } & SoundscapeLook)
-  | ({ id: string; label: string; description: string; src: string; gain?: number; source?: string; replacedByRecording?: boolean } & SoundscapeLook);
+  | ({ id: string; label: string; description: string; src: string; gain?: number; source?: string; replacedByRecording?: boolean; userFile?: boolean } & SoundscapeLook);
 
 /** What a brainwave band is associated with, told plainly (frequency cards). */
 export interface Significance {
@@ -52,7 +52,7 @@ export interface SoundscapePreset {
   name: string;
   /** Short label for the dock capsule. */
   short: string;
-  band: "Gamma" | "Beta" | "Alpha" | "Delta" | "Noise" | "Nature" | "Ambience";
+  band: "Gamma" | "Beta" | "Alpha" | "Delta" | "Noise" | "Nature" | "Ambience" | "Music" | "Yours";
   family: "frequency" | "ambient";
   /** Default video scene when a version doesn't choose one. */
   scene?: string;
@@ -74,7 +74,11 @@ export interface SoundscapePreset {
 }
 
 export type SoundscapeId = "gamma-40" | "beta-20" | "alpha-10" | "delta-2" | "brown-noise" | "soft-rain"
-  | "white-noise" | "cafe" | "fan" | "airplane" | "forest" | "ocean";
+  | "white-noise" | "cafe" | "fan" | "airplane" | "forest" | "ocean"
+  /** Files you added that don't lead a preset (versions come from userMedia). */
+  | "yours"
+  /** An unlockable track (see lib/unlocks). */
+  | "again";
 
 export const EVIDENCE_LABEL: Record<EvidenceLevel, string> = {
   tentative: "Tentative evidence",
@@ -95,9 +99,9 @@ export const SOUNDSCAPES: Record<SoundscapeId, SoundscapePreset> = {
     carrierHz: 200,
     beatHz: 40,
     versions: [
-      { id: "clean", replacedByRecording: true, label: "Clean tone", description: "Just the 200 / 240 Hz pair in a small room.", recipe: { layers: [{ kind: "tone", carrierHz: 200, beatHz: 40, level: 0.32 }], reverb: { seconds: 1.2, mix: 0.15 } } },
-      { id: "deep-focus", label: "Deep focus", description: "A slow analog chord pad over a low brown-noise floor.", recipe: { layers: [{ kind: "tone", carrierHz: 200, beatHz: 40, level: 0.22 }, { kind: "pad", style: "warm", rootHz: 110, level: 0.15 }, { kind: "noise", color: "brown", level: 0.16, lowpassHz: 500 }], reverb: { seconds: 3.5, mix: 0.35 } }, overlay: "breath", overlayMix: 0.35, scene: "chrome-rings" },
-      { id: "rainfall", label: "Rainfall focus", description: "Steady rain with a faint glass pad.", recipe: { trimDb: -1, layers: [{ kind: "tone", carrierHz: 200, beatHz: 40, level: 0.2 }, { kind: "rain", intensity: "steady", level: 0.7 }, { kind: "pad", style: "glass", rootHz: 220, level: 0.05 }], reverb: { seconds: 2, mix: 0.25 } }, overlay: "rain", overlayMix: 0.6 },
+      { id: "clean", replacedByRecording: true, label: "Clean tone", description: "Just the 200 / 240 Hz pair in a small room.", recipe: { trimDb: -3.5, layers: [{ kind: "tone", carrierHz: 200, beatHz: 40, level: 0.2 }], reverb: { seconds: 1.2, mix: 0.15 } } },
+      { id: "deep-focus", label: "Deep focus", description: "A slow analog chord pad over a low brown-noise floor.", recipe: { trimDb: -1.5, layers: [{ kind: "tone", carrierHz: 200, beatHz: 40, level: 0.15 }, { kind: "pad", style: "warm", rootHz: 110, level: 0.15 }, { kind: "noise", color: "brown", level: 0.16, lowpassHz: 500 }], reverb: { seconds: 3.5, mix: 0.35 } }, overlay: "breath", overlayMix: 0.35, scene: "chrome-rings" },
+      { id: "rainfall", label: "Rainfall focus", description: "Steady rain with a faint glass pad.", recipe: { trimDb: -2.2, layers: [{ kind: "tone", carrierHz: 200, beatHz: 40, level: 0.14 }, { kind: "rain", intensity: "steady", level: 0.7 }, { kind: "pad", style: "glass", rootHz: 220, level: 0.05 }], reverb: { seconds: 2, mix: 0.25 } }, overlay: "rain", overlayMix: 0.6 },
     ],
     bestFor: ["New lecture learning", "Untimed practice questions"],
     howTo: "Quiet volume through the whole block. For recorded lectures, use the lecturer’s audio alone.",
@@ -116,9 +120,9 @@ export const SOUNDSCAPES: Record<SoundscapeId, SoundscapePreset> = {
     carrierHz: 100,
     beatHz: 20,
     versions: [
-      { id: "clean", replacedByRecording: true, label: "Clean tone", description: "The 100 / 120 Hz pair from your recording.", recipe: { trimDb: -3.8, layers: [{ kind: "tone", carrierHz: 100, beatHz: 20, level: 0.32 }], reverb: { seconds: 1, mix: 0.12 } } },
-      { id: "study-room", label: "Study room", description: "A quiet library hum with a low warm pad.", recipe: { trimDb: -2.8, layers: [{ kind: "tone", carrierHz: 100, beatHz: 20, level: 0.24 }, { kind: "noise", color: "pink", level: 0.13, lowpassHz: 1800 }, { kind: "pad", style: "warm", rootHz: 98, level: 0.08 }], reverb: { seconds: 1.6, mix: 0.2 } }, overlay: "grain", overlayMix: 0.3, scene: "skeleton" },
-      { id: "lofi", label: "Lo-fi warmth", description: "Chords, tape hiss, dust crackle and light rain.", recipe: { layers: [{ kind: "tone", carrierHz: 100, beatHz: 20, level: 0.2 }, { kind: "pad", style: "warm", rootHz: 130.81, level: 0.16 }, { kind: "vinyl", level: 0.6 }, { kind: "rain", intensity: "light", level: 0.32 }], reverb: { seconds: 2.5, mix: 0.3 } }, visual: "grain", overlay: "rain", overlayMix: 0.45, scene: "retro-tv" },
+      { id: "clean", replacedByRecording: true, label: "Clean tone", description: "The 100 / 120 Hz pair from your recording.", recipe: { trimDb: -5.1, layers: [{ kind: "tone", carrierHz: 100, beatHz: 20, level: 0.22 }], reverb: { seconds: 1, mix: 0.12 } } },
+      { id: "study-room", label: "Study room", description: "A quiet library hum with a low warm pad.", recipe: { trimDb: -3.1, layers: [{ kind: "tone", carrierHz: 100, beatHz: 20, level: 0.17 }, { kind: "noise", color: "pink", level: 0.13, lowpassHz: 1800 }, { kind: "pad", style: "warm", rootHz: 98, level: 0.08 }], reverb: { seconds: 1.6, mix: 0.2 } }, overlay: "grain", overlayMix: 0.3, scene: "skeleton" },
+      { id: "lofi", label: "Lo-fi warmth", description: "Chords, tape hiss, dust crackle and light rain.", recipe: { trimDb: -2.1, layers: [{ kind: "tone", carrierHz: 100, beatHz: 20, level: 0.15 }, { kind: "pad", style: "warm", rootHz: 130.81, level: 0.16 }, { kind: "vinyl", level: 0.6 }, { kind: "rain", intensity: "light", level: 0.32 }], reverb: { seconds: 2.5, mix: 0.3 } }, visual: "grain", overlay: "rain", overlayMix: 0.45, scene: "retro-tv" },
     ],
     bestFor: ["Lecture review", "Anki", "Morning start"],
     howTo: "One track for the whole review block. Keep it low enough to form each answer in your head.",
@@ -138,9 +142,9 @@ export const SOUNDSCAPES: Record<SoundscapeId, SoundscapePreset> = {
     carrierHz: 55.5,
     beatHz: 10,
     versions: [
-      { id: "clean", replacedByRecording: true, label: "Clean tone", description: "The 55.5 / 65.5 Hz pair from your recording.", recipe: { trimDb: -2.3, layers: [{ kind: "tone", carrierHz: 55.5, beatHz: 10, level: 0.34 }], reverb: { seconds: 1.4, mix: 0.15 } } },
-      { id: "ocean", label: "Ocean", description: "Slow surf that rises and falls about every nine seconds.", recipe: { trimDb: -2.8, layers: [{ kind: "tone", carrierHz: 55.5, beatHz: 10, level: 0.22 }, { kind: "ocean", level: 0.8 }], reverb: { seconds: 3, mix: 0.3 } }, visual: "tide", scene: "kelp-forest" },
-      { id: "wind-chimes", label: "Wind chimes", description: "A glass pad, a light breeze and sparse chimes.", recipe: { trimDb: -0.5, layers: [{ kind: "tone", carrierHz: 55.5, beatHz: 10, level: 0.2 }, { kind: "pad", style: "glass", rootHz: 261.63, level: 0.07 }, { kind: "chimes", level: 0.35 }, { kind: "wind", level: 0.24 }], reverb: { seconds: 4, mix: 0.45 } }, overlay: "flow", overlayMix: 0.4 },
+      { id: "clean", replacedByRecording: true, label: "Clean tone", description: "The 55.5 / 65.5 Hz pair from your recording.", recipe: { trimDb: -6.0, layers: [{ kind: "tone", carrierHz: 55.5, beatHz: 10, level: 0.2 }], reverb: { seconds: 1.4, mix: 0.15 } } },
+      { id: "ocean", label: "Ocean", description: "Slow surf that rises and falls about every nine seconds.", recipe: { trimDb: -4.4, layers: [{ kind: "tone", carrierHz: 55.5, beatHz: 10, level: 0.13 }, { kind: "ocean", level: 0.8 }], reverb: { seconds: 3, mix: 0.3 } }, visual: "tide", scene: "kelp-forest" },
+      { id: "wind-chimes", label: "Wind chimes", description: "A glass pad, a light breeze and sparse chimes.", recipe: { trimDb: -2.1, layers: [{ kind: "tone", carrierHz: 55.5, beatHz: 10, level: 0.12 }, { kind: "pad", style: "glass", rootHz: 261.63, level: 0.07 }, { kind: "chimes", level: 0.35 }, { kind: "wind", level: 0.24 }], reverb: { seconds: 4, mix: 0.45 } }, overlay: "flow", overlayMix: 0.4 },
     ],
     bestFor: ["Rest between blocks", "Unwinding at home"],
     howTo: "About 10 minutes eyes-closed or away from screens, then move for 5 before the next block.",
@@ -161,9 +165,9 @@ export const SOUNDSCAPES: Record<SoundscapeId, SoundscapePreset> = {
     carrierHz: 39,
     beatHz: 2,
     versions: [
-      { id: "clean", replacedByRecording: true, label: "Clean tone", description: "The 39 / 41 Hz pair from your recording.", recipe: { layers: [{ kind: "tone", carrierHz: 39, beatHz: 2, level: 0.36 }], reverb: { seconds: 1.5, mix: 0.15 } } },
-      { id: "night-rain", label: "Night rain", description: "Light rain on the window over a deep floor.", recipe: { layers: [{ kind: "tone", carrierHz: 39, beatHz: 2, level: 0.26 }, { kind: "rain", intensity: "light", level: 0.55, window: true }, { kind: "noise", color: "brown", level: 0.2, lowpassHz: 300 }], reverb: { seconds: 2.5, mix: 0.3 } }, overlay: "rain", overlayMix: 0.55 },
-      { id: "deep-hum", label: "Deep hum", description: "A distant low choir in a large, dark room.", recipe: { trimDb: 1.4, layers: [{ kind: "tone", carrierHz: 39, beatHz: 2, level: 0.24 }, { kind: "pad", style: "choir", rootHz: 65.41, level: 0.15 }], reverb: { seconds: 6, mix: 0.5 } }, visual: "grain", overlay: "breath", overlayMix: 0.3, scene: "earth" },
+      { id: "clean", replacedByRecording: true, label: "Clean tone", description: "The 39 / 41 Hz pair from your recording.", recipe: { trimDb: -5.5, layers: [{ kind: "tone", carrierHz: 39, beatHz: 2, level: 0.19 }], reverb: { seconds: 1.5, mix: 0.15 } } },
+      { id: "night-rain", label: "Night rain", description: "Light rain on the window over a deep floor.", recipe: { trimDb: -3.1, layers: [{ kind: "tone", carrierHz: 39, beatHz: 2, level: 0.14 }, { kind: "rain", intensity: "light", level: 0.55, window: true }, { kind: "noise", color: "brown", level: 0.2, lowpassHz: 300 }], reverb: { seconds: 2.5, mix: 0.3 } }, overlay: "rain", overlayMix: 0.55 },
+      { id: "deep-hum", label: "Deep hum", description: "A distant low choir in a large, dark room.", recipe: { trimDb: -2.6, layers: [{ kind: "tone", carrierHz: 39, beatHz: 2, level: 0.13 }, { kind: "pad", style: "choir", rootHz: 65.41, level: 0.15 }], reverb: { seconds: 6, mix: 0.5 } }, visual: "grain", overlay: "breath", overlayMix: 0.3, scene: "earth" },
     ],
     bestFor: ["Falling asleep"],
     howTo: "20–30 minutes with the stop timer, only if it feels soothing. Quiet for the rest of the night.",
@@ -180,9 +184,9 @@ export const SOUNDSCAPES: Record<SoundscapeId, SoundscapePreset> = {
     band: "Noise",
     family: "ambient",
     versions: [
-      { id: "deep", label: "Deep brown", description: "Warm, rounded low noise.", recipe: { trimDb: 2.3, layers: [{ kind: "noise", color: "brown", level: 0.62, lowpassHz: 700 }] } },
-      { id: "soft-fan", label: "Soft fan", description: "Brown noise with a little airy pink on top.", recipe: { trimDb: 3.1, layers: [{ kind: "noise", color: "brown", level: 0.42 }, { kind: "noise", color: "pink", level: 0.12, lowpassHz: 1200 }] }, overlay: "flow", overlayMix: 0.3 },
-      { id: "brown-rain", label: "Brown + rain", description: "A deep floor with light rain above it.", recipe: { trimDb: 3.3, layers: [{ kind: "noise", color: "brown", level: 0.45, lowpassHz: 900 }, { kind: "rain", intensity: "light", level: 0.35 }], reverb: { seconds: 1.5, mix: 0.15 } }, overlay: "rain", overlayMix: 0.5 },
+      { id: "deep", label: "Deep brown", description: "Warm, rounded low noise.", recipe: { trimDb: -1.6, layers: [{ kind: "noise", color: "brown", level: 0.62, lowpassHz: 700 }] } },
+      { id: "soft-fan", label: "Soft fan", description: "Brown noise with a little airy pink on top.", recipe: { trimDb: 1.5, layers: [{ kind: "noise", color: "brown", level: 0.42 }, { kind: "noise", color: "pink", level: 0.12, lowpassHz: 1200 }] }, overlay: "flow", overlayMix: 0.3 },
+      { id: "brown-rain", label: "Brown + rain", description: "A deep floor with light rain above it.", recipe: { trimDb: 0.9, layers: [{ kind: "noise", color: "brown", level: 0.45, lowpassHz: 900 }, { kind: "rain", intensity: "light", level: 0.35 }], reverb: { seconds: 1.5, mix: 0.15 } }, overlay: "rain", overlayMix: 0.5 },
     ],
     bestFor: ["Masking a noisy room", "Deep study when silence isn’t possible"],
     howTo: "Low volume, only when conversations around you break focus. Silence stays the baseline.",
@@ -197,9 +201,9 @@ export const SOUNDSCAPES: Record<SoundscapeId, SoundscapePreset> = {
     band: "Nature",
     family: "ambient",
     versions: [
-      { id: "light", label: "Light rain", description: "A gentle, even shower.", recipe: { trimDb: 4, layers: [{ kind: "rain", intensity: "light", level: 0.9 }], reverb: { seconds: 1.8, mix: 0.2 } } },
-      { id: "window", label: "Rain on the window", description: "Steady rain on glass, thunder far away.", recipe: { trimDb: 3.1, layers: [{ kind: "rain", intensity: "steady", level: 0.85, window: true, thunder: true }, { kind: "noise", color: "brown", level: 0.12, lowpassHz: 250 }], reverb: { seconds: 2.4, mix: 0.25 } }, overlay: "tide", overlayMix: 0.25 },
-      { id: "fireplace", label: "Rain & fireplace", description: "Light rain outside, a fire crackling inside.", recipe: { trimDb: 3.8, layers: [{ kind: "rain", intensity: "light", level: 0.5 }, { kind: "fire", level: 0.8 }], reverb: { seconds: 1.5, mix: 0.2 } }, overlay: "breath", overlayMix: 0.45 },
+      { id: "light", label: "Light rain", description: "A gentle, even shower.", recipe: { trimDb: 4.1, layers: [{ kind: "rain", intensity: "light", level: 0.9 }], reverb: { seconds: 1.8, mix: 0.2 } } },
+      { id: "window", label: "Rain on the window", description: "Steady rain on glass, thunder far away.", recipe: { trimDb: 1.9, layers: [{ kind: "rain", intensity: "steady", level: 0.85, window: true, thunder: true }, { kind: "noise", color: "brown", level: 0.12, lowpassHz: 250 }], reverb: { seconds: 2.4, mix: 0.25 } }, overlay: "tide", overlayMix: 0.25 },
+      { id: "fireplace", label: "Rain & fireplace", description: "Light rain outside, a fire crackling inside.", recipe: { trimDb: 2.6, layers: [{ kind: "rain", intensity: "light", level: 0.5 }, { kind: "fire", level: 0.8 }], reverb: { seconds: 1.5, mix: 0.2 } }, overlay: "breath", overlayMix: 0.45 },
     ],
     bestFor: ["Breaks", "Settling before sleep"],
     howTo: "Through a speaker is fine. Before bed, 20 minutes, then let it stop at lights out.",
@@ -216,9 +220,9 @@ export const SOUNDSCAPES: Record<SoundscapeId, SoundscapePreset> = {
     family: "ambient",
     scene: "retro-tv",
     versions: [
-      { id: "soft", label: "Soft white", description: "White noise with the harsh top rolled off.", recipe: { trimDb: 2.7, layers: [{ kind: "noise", color: "white", level: 0.3, highpassHz: 60, lowpassHz: 6500 }] } },
-      { id: "pure", label: "Pure white", description: "Flat, even hiss: the classic masker.", recipe: { trimDb: 0.6, layers: [{ kind: "noise", color: "white", level: 0.24 }] } },
-      { id: "pink", label: "Pink", description: "Balanced like rain on a roof: softer highs, fuller lows.", recipe: { trimDb: 0.7, layers: [{ kind: "noise", color: "pink", level: 0.5 }] }, visual: "grain", overlay: "rain", overlayMix: 0.25 },
+      { id: "soft", label: "Soft white", description: "White noise with the harsh top rolled off.", recipe: { trimDb: 4.6, layers: [{ kind: "noise", color: "white", level: 0.3, highpassHz: 60, lowpassHz: 4800 }] } },
+      { id: "pure", label: "Bright white", description: "The classic even hiss, with only the sharpest edge taken off.", recipe: { trimDb: 5.1, layers: [{ kind: "noise", color: "white", level: 0.24, highpassHz: 40, lowpassHz: 8000 }] } },
+      { id: "pink", label: "Pink", description: "Balanced like rain on a roof: softer highs, fuller lows.", recipe: { trimDb: 1.3, layers: [{ kind: "noise", color: "pink", level: 0.5 }] }, visual: "grain", overlay: "rain", overlayMix: 0.25 },
     ],
     bestFor: ["Masking chatter and traffic", "Open-plan libraries"],
     howTo: "Keep it just loud enough to cover the distraction; louder only makes you tired.",
@@ -233,9 +237,9 @@ export const SOUNDSCAPES: Record<SoundscapeId, SoundscapePreset> = {
     band: "Ambience",
     family: "ambient",
     versions: [
-      { id: "quiet", label: "Quiet café", description: "A few conversations across the room and the odd cup.", recipe: { trimDb: 12.8, layers: [{ kind: "chatter", level: 0.55, voices: 4 }], reverb: { seconds: 1.8, mix: 0.35 } } },
-      { id: "busy", label: "Busy café", description: "A fuller room: more voices, more cups.", recipe: { trimDb: 12.1, layers: [{ kind: "chatter", level: 0.6, voices: 8 }], reverb: { seconds: 2.2, mix: 0.4 } } },
-      { id: "rainy", label: "Rainy afternoon", description: "Soft voices inside, rain on the window.", recipe: { trimDb: 10, layers: [{ kind: "chatter", level: 0.45, voices: 5 }, { kind: "rain", intensity: "light", level: 0.4, window: true }], reverb: { seconds: 1.8, mix: 0.3 } }, overlay: "rain", overlayMix: 0.4 },
+      { id: "quiet", label: "Quiet café", description: "A few conversations across the room and the odd cup.", recipe: { trimDb: 8.0, layers: [{ kind: "chatter", level: 0.55, voices: 4 }], reverb: { seconds: 1.8, mix: 0.35 } } },
+      { id: "busy", label: "Busy café", description: "A fuller room: more voices, more cups.", recipe: { trimDb: 8.0, layers: [{ kind: "chatter", level: 0.6, voices: 8 }], reverb: { seconds: 2.2, mix: 0.4 } } },
+      { id: "rainy", label: "Rainy afternoon", description: "Soft voices inside, rain on the window.", recipe: { trimDb: 8.0, layers: [{ kind: "chatter", level: 0.45, voices: 5 }, { kind: "rain", intensity: "light", level: 0.4, window: true }], reverb: { seconds: 1.8, mix: 0.3 } }, overlay: "rain", overlayMix: 0.4 },
     ],
     bestFor: ["Writing and admin", "When silence feels too loud"],
     howTo: "Moderate ambient noise can help creative work; switch it off for dense reading.",
@@ -251,9 +255,9 @@ export const SOUNDSCAPES: Record<SoundscapeId, SoundscapePreset> = {
     family: "ambient",
     scene: "chrome-spheres",
     versions: [
-      { id: "low", label: "Box fan · low", description: "Soft air, a quiet motor hum.", recipe: { trimDb: 1.3, layers: [{ kind: "fan", level: 0.55, speed: "low" }] } },
-      { id: "high", label: "Box fan · high", description: "More air, a brighter wash.", recipe: { trimDb: 0.1, layers: [{ kind: "fan", level: 0.55, speed: "high" }] } },
-      { id: "purifier", label: "Air purifier", description: "Smooth filtered air, no hum.", recipe: { trimDb: 1.5, layers: [{ kind: "noise", color: "pink", level: 0.42, highpassHz: 180, lowpassHz: 3200 }] } },
+      { id: "low", label: "Box fan · low", description: "Soft air, a quiet motor hum.", recipe: { trimDb: 0.9, layers: [{ kind: "fan", level: 0.55, speed: "low" }] } },
+      { id: "high", label: "Box fan · high", description: "More air, a brighter wash.", recipe: { trimDb: 0.8, layers: [{ kind: "fan", level: 0.55, speed: "high" }] } },
+      { id: "purifier", label: "Air purifier", description: "Smooth filtered air, no hum.", recipe: { trimDb: 4.5, layers: [{ kind: "noise", color: "pink", level: 0.42, highpassHz: 180, lowpassHz: 3200 }] } },
     ],
     bestFor: ["Sleep and naps", "A steady masker without the “noise” color"],
     howTo: "Use a stop timer for sleep; steady sound all night isn’t needed.",
@@ -270,9 +274,9 @@ export const SOUNDSCAPES: Record<SoundscapeId, SoundscapePreset> = {
     family: "ambient",
     scene: "cockpit",
     versions: [
-      { id: "cruise", label: "Cruise", description: "The low, even roar of a long-haul cabin.", recipe: { trimDb: 0.8, layers: [{ kind: "cabin", level: 0.6 }] } },
-      { id: "night", label: "Night flight", description: "Darker and deeper, lights off.", recipe: { trimDb: 1.6, layers: [{ kind: "cabin", level: 0.5 }, { kind: "noise", color: "brown", level: 0.2, lowpassHz: 180 }] }, visual: "tide" },
-      { id: "window", label: "Window seat", description: "Engines plus wind past the fuselage.", recipe: { trimDb: 1.9, layers: [{ kind: "cabin", level: 0.5 }, { kind: "wind", level: 0.35 }] } },
+      { id: "cruise", label: "Cruise", description: "The low, even roar of a long-haul cabin.", recipe: { trimDb: -1.2, layers: [{ kind: "cabin", level: 0.6 }] } },
+      { id: "night", label: "Night flight", description: "Darker and deeper, lights off.", recipe: { trimDb: -0.3, layers: [{ kind: "cabin", level: 0.5 }, { kind: "noise", color: "brown", level: 0.2, lowpassHz: 180 }] }, visual: "tide" },
+      { id: "window", label: "Window seat", description: "Engines plus wind past the fuselage.", recipe: { trimDb: 0.0, layers: [{ kind: "cabin", level: 0.5 }, { kind: "wind", level: 0.35 }] } },
     ],
     bestFor: ["Deep study in a noisy space", "Naps"],
     howTo: "The low rumble masks voices well; keep it quiet and use headphones.",
@@ -288,9 +292,9 @@ export const SOUNDSCAPES: Record<SoundscapeId, SoundscapePreset> = {
     family: "ambient",
     scene: "kelp-forest",
     versions: [
-      { id: "morning", label: "Morning birds", description: "A few birds calling across the trees.", recipe: { trimDb: 21, layers: [{ kind: "birds", level: 0.6 }], reverb: { seconds: 2.4, mix: 0.3 } } },
-      { id: "dawn", label: "Dawn chorus", description: "More voices, closer together.", recipe: { trimDb: 19.3, layers: [{ kind: "birds", level: 0.55, density: "dawn" }], reverb: { seconds: 2.6, mix: 0.35 } } },
-      { id: "stream", label: "Birds by a stream", description: "Birdsong over running water.", recipe: { trimDb: 8.4, layers: [{ kind: "birds", level: 0.5 }, { kind: "noise", color: "pink", level: 0.22, highpassHz: 600, lowpassHz: 5000 }, { kind: "ocean", level: 0.2 }], reverb: { seconds: 2, mix: 0.25 } } },
+      { id: "morning", label: "Morning birds", description: "A few birds calling across the trees.", recipe: { trimDb: 8.0, layers: [{ kind: "birds", level: 0.6 }], reverb: { seconds: 2.4, mix: 0.3 } } },
+      { id: "dawn", label: "Dawn chorus", description: "More voices, closer together.", recipe: { trimDb: 8.0, layers: [{ kind: "birds", level: 0.55, density: "dawn" }], reverb: { seconds: 2.6, mix: 0.35 } } },
+      { id: "stream", label: "Birds by a stream", description: "Birdsong over running water.", recipe: { trimDb: 6.4, layers: [{ kind: "birds", level: 0.5 }, { kind: "noise", color: "pink", level: 0.22, highpassHz: 600, lowpassHz: 5000 }, { kind: "ocean", level: 0.2 }], reverb: { seconds: 2, mix: 0.25 } } },
     ],
     bestFor: ["Breaks and walks", "Morning start"],
     howTo: "A nature break, not background for dense reading. Pair it with a few minutes away from screens.",
@@ -305,15 +309,45 @@ export const SOUNDSCAPES: Record<SoundscapeId, SoundscapePreset> = {
     band: "Nature",
     family: "ambient",
     versions: [
-      { id: "surf", label: "Surf", description: "Waves rolling in about every nine seconds.", recipe: { trimDb: 1.2, layers: [{ kind: "ocean", level: 0.7 }], reverb: { seconds: 2.5, mix: 0.25 } } },
-      { id: "shore", label: "Distant shore", description: "Softer waves with a breeze off the water.", recipe: { trimDb: 2, layers: [{ kind: "ocean", level: 0.5 }, { kind: "wind", level: 0.3 }], reverb: { seconds: 3, mix: 0.3 } } },
-      { id: "night", label: "Night sea", description: "Low, dark swells.", recipe: { trimDb: 2.3, layers: [{ kind: "ocean", level: 0.5 }, { kind: "noise", color: "brown", level: 0.25, lowpassHz: 260 }], reverb: { seconds: 3, mix: 0.3 } }, scene: "satellite" },
+      { id: "surf", label: "Surf", description: "Waves rolling in about every nine seconds.", recipe: { trimDb: 1.5, layers: [{ kind: "ocean", level: 0.7 }], reverb: { seconds: 2.5, mix: 0.25 } } },
+      { id: "shore", label: "Distant shore", description: "Softer waves with a breeze off the water.", recipe: { trimDb: 4.0, layers: [{ kind: "ocean", level: 0.5 }, { kind: "wind", level: 0.3 }], reverb: { seconds: 3, mix: 0.3 } } },
+      { id: "night", label: "Night sea", description: "Low, dark swells.", recipe: { trimDb: 2.4, layers: [{ kind: "ocean", level: 0.5 }, { kind: "noise", color: "brown", level: 0.25, lowpassHz: 260 }], reverb: { seconds: 3, mix: 0.3 } }, scene: "satellite" },
     ],
     bestFor: ["Breaks", "Winding down"],
     howTo: "Slow and repetitive, which is what makes it calming; better for rests than for reading.",
     evidence: "comfort",
     evidenceNote: "A comfort sound. Natural sounds are consistently rated restorative, but they’re not a learning aid.",
     visual: "tide",
+  },
+  yours: {
+    id: "yours",
+    name: "Your sounds",
+    short: "Yours",
+    band: "Yours",
+    family: "ambient",
+    scene: "calm-water",
+    versions: [],
+    bestFor: ["Whatever works for you"],
+    howTo: "Files you add stay on this device. Keep the volume low enough to think over.",
+    evidence: "comfort",
+    evidenceNote: "Your own sound. The listening log below is the honest way to see whether it helps your recall.",
+    visual: "flow",
+  },
+  again: {
+    id: "again",
+    name: "Again",
+    short: "Again",
+    band: "Music",
+    family: "ambient",
+    scene: "ink-bloom",
+    versions: [
+      { id: "original", label: "Again", description: "Unlocked on the desk. A song from a friend of AXOM.", src: "soundscapes/unlockables/again.m4a", gain: 0.55 },
+    ],
+    bestFor: ["Breaks", "A reset between blocks"],
+    howTo: "A song, not a masker: play it between blocks, not under dense reading.",
+    evidence: "comfort",
+    evidenceNote: "Music with lyrics tends to compete with reading and memorizing, so it’s here for breaks and resets.",
+    visual: "flow",
   },
 };
 
@@ -331,6 +365,31 @@ for (const recording of recordings as RecordingEntry[]) {
 for (const [id, list] of leading) {
   const preset = SOUNDSCAPES[id];
   preset.versions = [...list, ...preset.versions.filter((version) => !version.replacedByRecording)];
+}
+
+/** Versions before any of your own files were added (restored when files are removed). */
+const BASE_VERSIONS = new Map<SoundscapeId, SoundscapeVersion[]>(
+  (Object.keys(SOUNDSCAPES) as SoundscapeId[]).map((id) => [id, SOUNDSCAPES[id].versions]),
+);
+
+export interface UserSoundVersionInput { id: string; name: string; presetId?: string; url: string }
+
+/**
+ * Put your own files in front of the preset they belong to (or on the
+ * "Your sounds" shelf). Idempotent: always rebuilds from the base versions.
+ */
+export function applyUserSounds(sounds: UserSoundVersionInput[]): void {
+  for (const id of Object.keys(SOUNDSCAPES) as SoundscapeId[]) {
+    const own: SoundscapeVersion[] = sounds
+      .filter((sound) => (isSoundscapeId(sound.presetId) && sound.presetId !== "again" ? sound.presetId : "yours") === id)
+      .map((sound) => ({ id: `user-${sound.id}`, label: sound.name, description: "Your file, stored on this device.", src: sound.url, gain: 1, userFile: true }));
+    SOUNDSCAPES[id].versions = [...own, ...(BASE_VERSIONS.get(id) ?? [])];
+  }
+}
+
+/** Presets with nothing to play (an empty "Your sounds") are hidden and never started. */
+export function isPlayable(id: SoundscapeId): boolean {
+  return SOUNDSCAPES[id].versions.length > 0;
 }
 
 export function versionOf(preset: SoundscapePreset, versionId?: string): SoundscapeVersion {

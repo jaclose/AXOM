@@ -2373,6 +2373,9 @@ function normalizeProfile(value: unknown): Profile {
     studyWorkflow: normalizeStudyWorkflow(profile.studyWorkflow),
     applicationResearch: normalizeApplicationResearch(profile.applicationResearch),
     applicationProfile: normalizeApplicationProfile(profile.applicationProfile),
+    unlocks: Array.isArray(profile.unlocks)
+      ? [...new Set(profile.unlocks.filter((value): value is string => typeof value === "string" && /^[a-z0-9-]{1,40}$/.test(value)))].slice(0, 50)
+      : undefined,
   };
 }
 
