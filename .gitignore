@@ -78,3 +78,12 @@ web/src/data/soundscape-recordings.personal.json
 # Raw media drop folders (sources for scripts/import-*.mjs; only processed output is committed)
 soundscapes_import/
 design/assets/soundscapes_import/
+
+# Raw downloads and third-party reference media (never commit: size + licensing).
+# Processed, licensed output lives in web/public/scenes; personal imports in */personal/.
+01-downloaded-originals_v0.01/
+amboss:uworld:examsoft:step 1 ui questions/
+
+# Personal scenes (your own wallpapers/clips; never committed or deployed)
+web/public/scenes/personal/
+web/src/data/scenes.personal.json

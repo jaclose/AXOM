@@ -53,6 +53,12 @@ export class SoundscapeEngine {
     return this.analyser;
   }
 
+  /** Create/resume the audio context inside a user gesture so later (hover) previews can start. */
+  async unlock(): Promise<boolean> {
+    const ctx = await this.context();
+    return ctx.state === "running";
+  }
+
   private async context(): Promise<AudioContext> {
     if (this.ctx) {
       if (this.ctx.state === "suspended") await this.ctx.resume();

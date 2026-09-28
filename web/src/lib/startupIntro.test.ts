@@ -8,6 +8,12 @@ import {
 } from "./startupIntro";
 import type { StartupIntro } from "./startupIntro";
 import { CINEMATICS, CINEMATIC_LEDGER_KEY, writeCinematicPreferences } from "./cinematics";
+import { PRESENTATION_TIMING, markAppReady, resetPresentationForTests } from "./presentation";
+
+/** Worst case for a skip or media error: the app never reports ready, the cap lifts the black, then it settles. */
+const QUICK = PRESENTATION_TIMING.readyHoldMs + PRESENTATION_TIMING.quickFadeMs;
+/** The reveal also waits (bounded) for content before it settles. */
+const SETTLE = PRESENTATION_TIMING.readyHoldMs + PRESENTATION_TIMING.settleMs;
 
 let players: StartupIntro[];
 function start(native = false) {
@@ -33,6 +39,7 @@ function memoryStorage(): Storage {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  resetPresentationForTests();
   players = [];
   document.body.innerHTML = '<div id="root"><button>Setup</button></div>';
   vi.stubGlobal("localStorage", memoryStorage());
@@ -59,8 +66,9 @@ describe("bounded startup cinematic", () => {
     expect(film().muted).toBe(true);
     expect(film().defaultMuted).toBe(true);
     expect(film().playsInline).toBe(true);
-    expect(film().src).toMatch(/\/cinematics\/luster-slow-sweep\.mp4$/);
-    expect(film().poster).toMatch(/\/cinematics\/luster-slow-sweep-poster\.jpg$/);
+    // The first open ever plays the full ident, untouched.
+    expect(film().src).toMatch(/\/cinematics\/ident\.mp4$/);
+    expect(film().poster).toMatch(/\/cinematics\/ident-poster\.jpg$/);
     expect(film().play).toHaveBeenCalledOnce();
     expect(film().classList.contains("axom-startup-intro__film--playing")).toBe(false);
     film().dispatchEvent(new Event("playing"));
@@ -85,23 +93,70 @@ describe("bounded startup cinematic", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("crossfades on video end but never extends the hard deadline", async () => {
+  it("hands over on video end but never extends the hard deadline", async () => {
     start();
     await vi.advanceTimersByTimeAsync(STARTUP_INTRO_MAX_MS - 50);
     film().dispatchEvent(new Event("ended"));
-    expect(overlay()?.classList.contains("axom-startup-intro--leaving")).toBe(true);
+    expect(overlay()?.classList.contains("axom-startup-intro--exiting")).toBe(true);
     await vi.advanceTimersByTimeAsync(50);
     expect(overlay()).toBeNull();
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("ends a completed film with a bounded short fade", async () => {
+  it("fades the black away while the workspace settles in, once it has rendered", async () => {
+    markAppReady();
     const player = start();
     film().dispatchEvent(new Event("ended"));
-    await vi.advanceTimersByTimeAsync(160);
+    await vi.advanceTimersByTimeAsync(0);
+    // The ident ends on black: no extra fade to black, straight to the hand-over.
+    expect(overlay()?.classList.contains("axom-startup-intro--to-black")).toBe(false);
+    expect(overlay()?.classList.contains("axom-startup-intro--leaving")).toBe(true);
+    expect(document.documentElement.dataset.reveal).toBe("intro");
+    expect(root().hasAttribute("inert")).toBe(false);
+    await vi.advanceTimersByTimeAsync(PRESENTATION_TIMING.overlayFadeMs);
     await player.finished;
     expect(overlay()).toBeNull();
+    await vi.advanceTimersByTimeAsync(PRESENTATION_TIMING.settleMs);
+    expect(document.documentElement.dataset.reveal).toBeUndefined();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("takes a lockup film to black before handing over", async () => {
+    markAppReady();
+    const player = startStartupIntro({ native: true, preview: { film: CINEMATICS["wordmark-2s"] } });
+    players.push(player);
+    film().dispatchEvent(new Event("ended"));
+    expect(overlay()?.classList.contains("axom-startup-intro--to-black")).toBe(true);
+    expect(overlay()?.classList.contains("axom-startup-intro--leaving")).toBe(false);
+    await vi.advanceTimersByTimeAsync(PRESENTATION_TIMING.toBlackMs);
+    expect(overlay()?.classList.contains("axom-startup-intro--leaving")).toBe(true);
+    await vi.advanceTimersByTimeAsync(PRESENTATION_TIMING.overlayFadeMs);
+    await player.finished;
+    expect(overlay()).toBeNull();
+  });
+
+  it("holds on black until the workspace renders, but never past the cap", async () => {
+    const player = start();
+    film().dispatchEvent(new Event("ended"));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(overlay()?.classList.contains("axom-startup-intro--leaving")).toBe(false);
+    markAppReady();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(overlay()?.classList.contains("axom-startup-intro--leaving")).toBe(true);
+    await vi.advanceTimersByTimeAsync(PRESENTATION_TIMING.overlayFadeMs);
+    await player.finished;
+
+    resetPresentationForTests();
+    writeCinematicPreferences({ frequency: "always" });
+    const capped = start(true); // everyday wordmark: it holds its lockup, so it goes to black first
+    film().dispatchEvent(new Event("ended"));
+    await vi.advanceTimersByTimeAsync(PRESENTATION_TIMING.toBlackMs + PRESENTATION_TIMING.readyHoldMs - 1);
+    expect(overlay()?.classList.contains("axom-startup-intro--leaving")).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(overlay()?.classList.contains("axom-startup-intro--leaving")).toBe(true);
+    await vi.advanceTimersByTimeAsync(PRESENTATION_TIMING.overlayFadeMs);
+    await capped.finished;
+    expect(overlay()).toBeNull();
   });
 
   it.each(["click", "Escape"])("skips on %s and consumes the gesture", async (gesture) => {
@@ -113,6 +168,7 @@ describe("bounded startup cinematic", () => {
         ? new MouseEvent("click", { bubbles: true, cancelable: true })
         : new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
       (gesture === "click" ? overlay()! : window).dispatchEvent(event);
+      await vi.advanceTimersByTimeAsync(QUICK + SETTLE);
       await player.finished;
       expect(event.defaultPrevented).toBe(true);
       expect(bubbled).not.toHaveBeenCalled();
@@ -128,6 +184,7 @@ describe("bounded startup cinematic", () => {
     const player = start();
     const disable = overlay()!.querySelectorAll("button")[1];
     disable.click();
+    await vi.advanceTimersByTimeAsync(QUICK + SETTLE);
     await player.finished;
     expect(localStorage.getItem(STARTUP_INTRO_ENABLED_KEY)).toBe("false");
     const next = start(true);
@@ -174,9 +231,10 @@ describe("bounded startup cinematic", () => {
     expect(vi.getTimerCount()).toBe(existingTimers);
   });
 
-  it("fails open immediately on missing media or unsupported codecs", async () => {
+  it("fails open quickly on missing media or unsupported codecs", async () => {
     const player = start();
     film().dispatchEvent(new Event("error"));
+    await vi.advanceTimersByTimeAsync(QUICK + SETTLE);
     await player.finished;
     expect(overlay()).toBeNull();
     expect(root().hasAttribute("inert")).toBe(false);
@@ -186,6 +244,7 @@ describe("bounded startup cinematic", () => {
   it("fails open when autoplay is rejected", async () => {
     vi.mocked(HTMLMediaElement.prototype.play).mockRejectedValue(new Error("Autoplay denied"));
     const player = start();
+    await vi.advanceTimersByTimeAsync(QUICK + SETTLE);
     await player.finished;
     expect(overlay()).toBeNull();
     expect(vi.getTimerCount()).toBe(0);
@@ -216,6 +275,7 @@ describe("bounded startup cinematic", () => {
     const player = start();
     expect(overlay()).not.toBeNull();
     overlay()!.querySelectorAll("button")[1].click();
+    await vi.advanceTimersByTimeAsync(QUICK + SETTLE);
     await player.finished;
     expect(overlay()).toBeNull();
     expect(vi.getTimerCount()).toBe(0);
@@ -235,7 +295,7 @@ describe("bounded startup cinematic", () => {
     localStorage.setItem(CINEMATIC_LEDGER_KEY, JSON.stringify({ lastSeenVersion: "0.0.1", lastPlayedDay: "2000-01-01" }));
     const player = startStartupIntro({ native: true, version: "0.0.2" });
     players.push(player);
-    expect(film().src).toMatch(/luster-push-sweep\.mp4$/);
+    expect(film().src).toMatch(/wordmark-3s\.mp4$/);
     expect(overlay()!.querySelector(".axom-startup-intro__caption")?.textContent).toBe("Updated to v0.0.2");
     player.dismiss();
     players.push(startStartupIntro({ native: true, version: "0.0.2" }));

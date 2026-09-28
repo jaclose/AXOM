@@ -9,26 +9,32 @@ import {
   type CinematicFilm,
 } from "./cinematics";
 import { APP_RELEASE_VERSION } from "./brand";
+import { PRESENTATION_TIMING, coverForIntro, endPresentation, onAppReady, prefersReducedMotion, revealApp } from "./presentation";
 
 /** The cinematic is decoration, never a signal that saved data is ready. */
 export const STARTUP_INTRO_ENABLED_KEY = LEGACY_INTRO_ENABLED_KEY;
 export const STARTUP_INTRO_SESSION_KEY = "axom.startupIntro.seen";
-const EXIT_MS = 160;
-/** Headroom past the film's own length for decode start and the fade. */
+/** A film that ends on black starts handing over this long before its end. */
+const BLACK_HANDOVER_LEAD_S = 0.42;
+/** Headroom past the film's own length for decode start. */
 const DEADLINE_SLACK_MS = 700;
 
+/** Hard liveness deadline: the film, its exit, the longest wait for the app, and slack. */
 export function introDeadlineMs(film: CinematicFilm): number {
-  return film.durationMs + DEADLINE_SLACK_MS;
+  const toBlack = film.exit === "hold" ? PRESENTATION_TIMING.toBlackMs : 0;
+  return film.durationMs + toBlack + PRESENTATION_TIMING.readyHoldMs + PRESENTATION_TIMING.overlayFadeMs + DEADLINE_SLACK_MS;
 }
 
-/** Hard deadline for the default everyday film. */
-export const STARTUP_INTRO_MAX_MS = introDeadlineMs(CINEMATICS["slow-sweep"]);
+/** Hard deadline for the longest film (the first-run ident). */
+export const STARTUP_INTRO_MAX_MS = introDeadlineMs(CINEMATICS.ident);
 
 export interface StartupIntro {
   /** Always resolves, including skipped, unavailable, and disabled media. */
   finished: Promise<void>;
   /** Immediate removal for startup errors or an explicit skip. Idempotent. */
   dismiss: () => void;
+  /** True when a film is actually playing (the app then reveals when it ends). */
+  playing: boolean;
 }
 
 type StartupIntroOptions = {
@@ -40,17 +46,10 @@ type StartupIntroOptions = {
   version?: string;
 };
 
-function reducedMotion(): boolean {
-  try {
-    if (document.documentElement.dataset.motion === "reduce") return true;
-    return Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
-  } catch {
-    return true;
-  }
-}
+const reducedMotion = prefersReducedMotion;
 
 export function startStartupIntro(options: StartupIntroOptions = {}): StartupIntro {
-  const inactive = { finished: Promise.resolve(), dismiss() {} };
+  const inactive = { finished: Promise.resolve(), dismiss() {}, playing: false };
   if (typeof window === "undefined" || typeof document === "undefined" || !document.body) return inactive;
 
   const native = options.native ?? ("__TAURI_INTERNALS__" in window);
@@ -129,24 +128,74 @@ export function startStartupIntro(options: StartupIntroOptions = {}): StartupInt
   const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   // App can render underneath, but its inputs are unavailable until visible.
   appRoot?.setAttribute("inert", "");
+  overlay.style.setProperty("--intro-to-black", `${PRESENTATION_TIMING.toBlackMs}ms`);
+  overlay.style.setProperty("--intro-fade", `${PRESENTATION_TIMING.overlayFadeMs}ms`);
   document.body.append(overlay);
+  coverForIntro();
 
   let removed = false;
-  let fading = false;
+  let leaving = false;
   let fadeTimer: ReturnType<typeof setTimeout> | undefined;
+  let stopWaiting = () => {};
+  let frame = 0;
   const deadline = setTimeout(dismiss, introDeadlineMs(film));
+
+  function releaseInputs() {
+    if (!wasInert) appRoot?.removeAttribute("inert");
+  }
+
+  /**
+   * Film → black → AXOM. A lockup film first fades to the film's own black;
+   * then, once the workspace has rendered (or after a short cap), the black
+   * layer fades away while the shell settles in beneath it.
+   */
+  function leave(quick = false) {
+    if (removed || leaving) return;
+    leaving = true;
+    cancelAnimationFrame(frame);
+    overlay.classList.add("axom-startup-intro--exiting");
+    let handedOver = false;
+    const reveal = () => {
+      if (handedOver || removed) return;
+      handedOver = true;
+      stopWaiting();
+      clearTimeout(fadeTimer);
+      const fadeMs = quick ? PRESENTATION_TIMING.quickFadeMs : PRESENTATION_TIMING.overlayFadeMs;
+      overlay.style.setProperty("--intro-fade", `${fadeMs}ms`);
+      overlay.classList.add("axom-startup-intro--leaving");
+      releaseInputs();
+      revealApp("intro");
+      fadeTimer = setTimeout(dismiss, fadeMs);
+    };
+    // Stay on black until the workspace's first frame exists (capped), so the
+    // film never hands over to a loading state, even on a skip or a media error.
+    const handOver = () => {
+      fadeTimer = setTimeout(reveal, PRESENTATION_TIMING.readyHoldMs);
+      stopWaiting = onAppReady(reveal);
+    };
+    if (!quick && film.exit === "hold") {
+      overlay.classList.add("axom-startup-intro--to-black");
+      fadeTimer = setTimeout(handOver, PRESENTATION_TIMING.toBlackMs);
+    } else {
+      handOver();
+    }
+  }
 
   function dismiss() {
     if (removed) return;
     removed = true;
     clearTimeout(deadline);
     clearTimeout(fadeTimer);
+    stopWaiting();
+    cancelAnimationFrame(frame);
+    // Removed without a hand-over (deadline, pagehide, startup error): no reveal pending.
+    if (!leaving) endPresentation();
     window.removeEventListener("keydown", onKeyDown, true);
     window.removeEventListener("pagehide", dismiss);
     overlay.removeEventListener("click", onClick);
     video.removeEventListener("ended", onEnded);
     video.removeEventListener("playing", onPlaying);
-    video.removeEventListener("error", dismiss);
+    video.removeEventListener("error", onError);
     const restoreFocus = overlay.contains(document.activeElement);
     // Release the decoder and network request; a detached autoplaying video can
     // otherwise stay alive in a long-running desktop webview.
@@ -154,7 +203,7 @@ export function startStartupIntro(options: StartupIntroOptions = {}): StartupInt
     video.removeAttribute("src");
     try { video.load(); } catch { /* Unsupported media API. */ }
     overlay.remove();
-    if (!wasInert) appRoot?.removeAttribute("inert");
+    releaseInputs();
     if (restoreFocus && previousFocus?.isConnected && !previousFocus.closest("[inert]")) {
       previousFocus.focus({ preventScroll: true });
     }
@@ -162,24 +211,35 @@ export function startStartupIntro(options: StartupIntroOptions = {}): StartupInt
   }
 
   function onEnded() {
-    if (removed || fading) return;
-    fading = true;
-    overlay.classList.add("axom-startup-intro--leaving");
     // The deadline remains active: neither CSS nor a media event owns liveness.
-    fadeTimer = setTimeout(dismiss, EXIT_MS);
+    leave();
+  }
+
+  function onError() {
+    // Missing codec or file: the black layer simply fades into the app.
+    leave(true);
+  }
+
+  /** A film that ends on black hands over during its final black frames. */
+  function watchForBlack() {
+    if (removed || leaving) return;
+    const duration = Number.isFinite(video.duration) ? video.duration : film.durationMs / 1000;
+    if (video.currentTime >= duration - BLACK_HANDOVER_LEAD_S) leave();
+    else frame = requestAnimationFrame(watchForBlack);
   }
 
   function onPlaying() {
     // Reveal decoded frames, not the bright poster immediately before frame 1.
     video.classList.add("axom-startup-intro__film--playing");
     overlay.classList.add("axom-startup-intro--playing");
+    if (film.exit === "black") frame = requestAnimationFrame(watchForBlack);
   }
 
   function onKeyDown(event: KeyboardEvent) {
     if (event.key !== "Escape") return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    dismiss();
+    leave(true);
   }
 
   function onClick(event: MouseEvent) {
@@ -187,7 +247,7 @@ export function startStartupIntro(options: StartupIntroOptions = {}): StartupInt
     event.preventDefault();
     event.stopPropagation();
     if (event.target === disable) writeCinematicPreferences({ frequency: "never" });
-    dismiss();
+    leave(true);
   }
 
   window.addEventListener("keydown", onKeyDown, true);
@@ -195,8 +255,8 @@ export function startStartupIntro(options: StartupIntroOptions = {}): StartupInt
   overlay.addEventListener("click", onClick);
   video.addEventListener("ended", onEnded);
   video.addEventListener("playing", onPlaying);
-  video.addEventListener("error", dismiss);
-  // Missing codecs, denied autoplay, and missing files all dismiss immediately.
-  try { void video.play()?.catch(dismiss); } catch { dismiss(); }
-  return { finished, dismiss };
+  video.addEventListener("error", onError);
+  // Missing codecs, denied autoplay, and missing files hand over at once.
+  try { void video.play()?.catch(onError); } catch { onError(); }
+  return { finished, dismiss, playing: true };
 }

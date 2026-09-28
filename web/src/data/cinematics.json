@@ -26,5 +26,29 @@
     "background": "#0d0d0e",
     "durationMs": 1300,
     "placeholder": true
+  },
+  "ident": {
+    "src": "cinematics/ident.mp4",
+    "poster": "cinematics/ident-poster.jpg",
+    "background": "#0d0d0d",
+    "durationMs": 7000,
+    "exit": "black",
+    "placeholder": false
+  },
+  "wordmark-2s": {
+    "src": "cinematics/wordmark-2s.mp4",
+    "poster": "cinematics/wordmark-2s-poster.jpg",
+    "background": "#0d0d0d",
+    "durationMs": 2000,
+    "exit": "hold",
+    "placeholder": false
+  },
+  "wordmark-3s": {
+    "src": "cinematics/wordmark-3s.mp4",
+    "poster": "cinematics/wordmark-3s-poster.jpg",
+    "background": "#0d0d0d",
+    "durationMs": 3000,
+    "exit": "hold",
+    "placeholder": false
   }
 }

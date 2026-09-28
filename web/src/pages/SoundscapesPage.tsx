@@ -18,6 +18,10 @@ import { SoundscapeStage } from "../components/soundscapes/SoundscapeStage";
 import { ScenePicker } from "../components/soundscapes/ScenePicker";
 import { AmbientCard, FrequencyCard } from "../components/soundscapes/FrequencyCard";
 import { SpotifySection } from "../components/soundscapes/SpotifySection";
+import { SoundscapeOpener } from "../components/soundscapes/SoundscapeOpener";
+import { ForYouRow } from "../components/soundscapes/ForYouRow";
+import { PinButton } from "../components/soundscapes/PinButton";
+import { forYouOrder, preferFirst } from "../lib/soundscapes/taste";
 import {
   FollowTimerToggle,
   OutputToggle,
@@ -33,6 +37,9 @@ function percent(value: number | null): string {
 }
 
 export function SoundscapesPage() {
+  const taste = useSoundscape((state) => state.taste);
+  const pinned = useSoundscape((state) => state.pinned);
+  const [openerOpen, setOpenerOpen] = useState(() => !useSoundscape.getState().taste.completedAt);
   const status = useSoundscape((state) => state.status);
   const presetId = useSoundscape((state) => state.presetId);
   const lastPresetId = useSoundscape((state) => state.lastPresetId);
@@ -44,9 +51,15 @@ export function SoundscapesPage() {
   const hero = SOUNDSCAPES[heroId];
   const heroPair = carrierPair(hero, output);
   const stopLabel = useStopTimerLabel();
+  // Lead with what the learner said they're into.
+  const firstPick = taste.sounds.find((genre) => genre !== "music");
+  const ambientFirst = Boolean(firstPick && firstPick !== "frequencies");
+  const musicFirst = taste.sounds[0] === "music";
 
   return (
     <div className="soundscapes-page">
+      {openerOpen && <SoundscapeOpener onClose={() => setOpenerOpen(false)} />}
+      <ForYouRow onPersonalize={() => setOpenerOpen(true)} />
       <section className={`soundscape-hero ${status === "playing" && presetId === heroId ? "live" : ""}`}>
         <SoundscapeStage
           preset={hero}
@@ -67,6 +80,7 @@ export function SoundscapesPage() {
           <ScenePicker presetId={heroId} />
           <div className="soundscape-hero-controls">
             <TransportButtons presetId={heroId} />
+            <PinButton presetId={heroId} />
             <VolumeControl />
             <StopTimerControl />
           </div>
@@ -108,27 +122,40 @@ export function SoundscapesPage() {
         </ol>
       </GlassCard>
 
-      <section className="soundscape-section" aria-labelledby="frequencies-title">
-        <div className="soundscape-section-head">
-          <div><span className="soundscape-kicker"><AudioWaveform size={ICON_SIZE.body} aria-hidden="true" /> Brainwave frequencies</span><h2 id="frequencies-title">What each frequency is for</h2></div>
-          <p>Each band is named after a brain rhythm. Your own recordings lead; two designed versions sit beside them. Use headphones for binaural beats.</p>
-        </div>
-        <div className="frequency-grid">
-          {FREQUENCY_ORDER.map((id) => <FrequencyCard key={id} id={id} />)}
-        </div>
-      </section>
-
+      {musicFirst && <SpotifySection />}
+      {ambientFirst && (
       <section className="soundscape-section" aria-labelledby="ambient-title">
         <div className="soundscape-section-head">
           <div><span className="soundscape-kicker"><Wind size={ICON_SIZE.body} aria-hidden="true" /> Ambient</span><h2 id="ambient-title">Noise, rooms & nature</h2></div>
           <p>Everything here is generated on your device, so it never loops or seams. Use it to mask a noisy room or for breaks.</p>
         </div>
         <div className="ambient-grid">
-          {AMBIENT_ORDER.map((id) => <AmbientCard key={id} id={id} />)}
+          {preferFirst(AMBIENT_ORDER, forYouOrder(taste, pinned)).map((id) => <AmbientCard key={id} id={id} />)}
+        </div>
+      </section>
+      )}
+      <section className="soundscape-section" aria-labelledby="frequencies-title">
+        <div className="soundscape-section-head">
+          <div><span className="soundscape-kicker"><AudioWaveform size={ICON_SIZE.body} aria-hidden="true" /> Brainwave frequencies</span><h2 id="frequencies-title">What each frequency is for</h2></div>
+          <p>Each band is named after a brain rhythm. Your own recordings lead; two designed versions sit beside them. Use headphones for binaural beats.</p>
+        </div>
+        <div className="frequency-grid">
+          {preferFirst(FREQUENCY_ORDER, forYouOrder(taste, pinned)).map((id) => <FrequencyCard key={id} id={id} />)}
         </div>
       </section>
 
-      <SpotifySection />
+      {!ambientFirst && (
+      <section className="soundscape-section" aria-labelledby="ambient-title">
+        <div className="soundscape-section-head">
+          <div><span className="soundscape-kicker"><Wind size={ICON_SIZE.body} aria-hidden="true" /> Ambient</span><h2 id="ambient-title">Noise, rooms & nature</h2></div>
+          <p>Everything here is generated on your device, so it never loops or seams. Use it to mask a noisy room or for breaks.</p>
+        </div>
+        <div className="ambient-grid">
+          {preferFirst(AMBIENT_ORDER, forYouOrder(taste, pinned)).map((id) => <AmbientCard key={id} id={id} />)}
+        </div>
+      </section>
+      )}
+      {!musicFirst && <SpotifySection />}
 
       <ListeningExperiment />
 

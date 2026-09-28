@@ -170,13 +170,13 @@ export function Sidebar({
         aria-hidden={hiddenOffscreen || undefined}
         tabIndex={-1}
       >
-        <button type="button" className="server-header" onClick={() => onOpenSettings("profile")} title="Profile & settings">
+        <button type="button" className="server-header" onClick={() => onOpenSettings("profile")} title={`Profile & settings · ${profile.versionLabel}`}>
           <AxomBrandLockup
             className="server-brand"
             layout="horizontal"
             size="sm"
-            subtitle={profile.versionLabel}
-            markFramed
+            subtitle="Private academic OS"
+            markFinish="metal"
           />
           <ChevronDown size={ICON_SIZE.emphasis} className="server-caret" />
         </button>

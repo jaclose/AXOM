@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { SoundscapeEngine, soundscapesSupported, type OutputMode } from "./engine";
 import { appendListeningInterval } from "./listeningLog";
 import { SOUNDSCAPES, isSoundscapeId, versionOf, type SoundscapeId } from "./presets";
+import { EMPTY_TASTE, normalizeTaste, type Taste } from "./taste";
 
 export type SoundscapeStatus = "idle" | "playing" | "paused";
 
@@ -14,6 +15,10 @@ interface Prefs {
   versions: Partial<Record<SoundscapeId, string>>;
   /** Scene chosen per preset: a scene id, or "generative" for the shader visual (absent = the version's own scene). */
   scenes: Partial<Record<SoundscapeId, string>>;
+  /** What the learner said they're into (the opener); drives ordering and scene choice. */
+  taste: Taste;
+  /** Pinned presets, shown first. */
+  pinned: SoundscapeId[];
 }
 
 interface SoundscapeState extends Prefs {
@@ -23,11 +28,17 @@ interface SoundscapeState extends Prefs {
   /** Epoch ms when the stop timer ends playback (fades out). */
   stopAt?: number;
   error?: string;
-  play: (id: SoundscapeId, options?: { stopAfterMinutes?: number | null; version?: string }) => Promise<void>;
+  /** `preview` plays without touching preferences, the stop timer or the listening log. */
+  play: (id: SoundscapeId, options?: { stopAfterMinutes?: number | null; version?: string; preview?: boolean }) => Promise<void>;
+  previewing: boolean;
   /** Choose a version; crossfades immediately when that preset is playing. */
   setVersion: (id: SoundscapeId, version: string) => void;
   /** Choose the scene for a preset ("auto" clears the choice). */
   setScene: (id: SoundscapeId, scene: string) => void;
+  setTaste: (taste: Partial<Taste>) => void;
+  togglePin: (id: SoundscapeId) => void;
+  /** Start the audio context inside a click so hover previews can play. */
+  unlockAudio: () => Promise<boolean>;
   toggle: () => Promise<void>;
   pause: () => Promise<void>;
   resume: () => Promise<void>;
@@ -40,7 +51,7 @@ interface SoundscapeState extends Prefs {
 
 export const SOUNDSCAPE_PREFS_KEY = "axom.soundscapes.v1";
 export const STOP_TIMER_CHOICES = [15, 20, 30, 45, 60, 90] as const;
-const DEFAULT_PREFS: Prefs = { volume: 35, output: "headphones", followTimer: true, lastPresetId: "gamma-40", versions: {}, scenes: {} };
+const DEFAULT_PREFS: Prefs = { volume: 35, output: "headphones", followTimer: true, lastPresetId: "gamma-40", versions: {}, scenes: {}, taste: EMPTY_TASTE, pinned: [] };
 
 function readPrefs(): Prefs {
   try {
@@ -56,6 +67,8 @@ function readPrefs(): Prefs {
       scenes: raw?.scenes && typeof raw.scenes === "object"
         ? Object.fromEntries(Object.entries(raw.scenes).filter(([id, scene]) => isSoundscapeId(id) && typeof scene === "string"))
         : {},
+      taste: normalizeTaste(raw?.taste),
+      pinned: Array.isArray(raw?.pinned) ? [...new Set(raw.pinned.filter(isSoundscapeId))] : [],
     };
   } catch {
     return DEFAULT_PREFS;
@@ -115,9 +128,9 @@ function updateMediaSession(presetId: SoundscapeId | null, status: SoundscapeSta
 export const useSoundscape = create<SoundscapeState>((set, get) => {
   const persist = (patch: Partial<Prefs>) => {
     set(patch);
-    const { volume, output, followTimer, lastPresetId, versions, scenes } = get();
+    const { volume, output, followTimer, lastPresetId, versions, scenes, taste, pinned } = get();
     try {
-      window.localStorage.setItem(SOUNDSCAPE_PREFS_KEY, JSON.stringify({ volume, output, followTimer, lastPresetId, versions, scenes }));
+      window.localStorage.setItem(SOUNDSCAPE_PREFS_KEY, JSON.stringify({ volume, output, followTimer, lastPresetId, versions, scenes, taste, pinned }));
     } catch { /* device preference only */ }
   };
 
@@ -133,6 +146,7 @@ export const useSoundscape = create<SoundscapeState>((set, get) => {
     supported: typeof window !== "undefined" && soundscapesSupported(),
     status: "idle",
     presetId: null,
+    previewing: false,
 
     async play(id, options = {}) {
       const preset = SOUNDSCAPES[id];
@@ -146,9 +160,16 @@ export const useSoundscape = create<SoundscapeState>((set, get) => {
         set({ error: error instanceof Error ? error.message : "Audio couldn’t start." });
         return;
       }
+      if (options.preview) {
+        // A taste of the sound only: no preference, timer or log changes.
+        closeInterval();
+        clearTimeout(stopTimer);
+        set({ status: "playing", presetId: id, stopAt: undefined, error: undefined, previewing: true });
+        return;
+      }
       openIntervalFor(id);
       persist({ lastPresetId: id, versions: { ...get().versions, [id]: versionId } });
-      set({ status: "playing", presetId: id, stopAt, error: undefined });
+      set({ status: "playing", presetId: id, stopAt, error: undefined, previewing: false });
       armStopTimer(stopAt);
       updateMediaSession(id, "playing");
     },
@@ -177,7 +198,7 @@ export const useSoundscape = create<SoundscapeState>((set, get) => {
       if (get().status === "idle") return;
       closeInterval();
       clearTimeout(stopTimer);
-      set({ status: "idle", stopAt: undefined });
+      set({ status: "idle", stopAt: undefined, previewing: false });
       updateMediaSession(null, "idle");
       await getEngine().stop(fadeSeconds);
     },
@@ -190,6 +211,16 @@ export const useSoundscape = create<SoundscapeState>((set, get) => {
       const { status, presetId } = get();
       // Rebuild the graph for the new routing (a quick crossfade).
       if (status === "playing" && presetId) void get().play(presetId, { stopAfterMinutes: get().stopAt ? Math.max(1, (get().stopAt! - Date.now()) / 60_000) : null });
+    },
+    setTaste(patch) {
+      persist({ taste: normalizeTaste({ ...get().taste, ...patch }) });
+    },
+    togglePin(id) {
+      const pinned = get().pinned;
+      persist({ pinned: pinned.includes(id) ? pinned.filter((item) => item !== id) : [id, ...pinned] });
+    },
+    async unlockAudio() {
+      try { return await getEngine().unlock(); } catch { return false; }
     },
     setScene(id, scene) {
       const next = { ...get().scenes };

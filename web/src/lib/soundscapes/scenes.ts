@@ -7,6 +7,7 @@ export interface Scene {
   id: string;
   label: string;
   mood: "calm" | "serious" | "fun";
+  genre: "nature" | "future" | "space" | "waves" | "fun";
   /** Relative to the site root (served from web/public). */
   src: string;
   poster: string;

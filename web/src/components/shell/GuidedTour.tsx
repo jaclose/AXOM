@@ -22,8 +22,8 @@ export const GUIDED_TOUR_STEPS: readonly TourStep[] = [
   {
     route: "dashboard",
     target: "command-brief",
-    title: "Today’s plan",
-    body: "The Command Brief turns current work into one next move. It explains why the move is suggested, and nothing changes until you choose an action.",
+    title: "Up next",
+    body: "Up next suggests one step from your real work, with a smaller option beside it. It appears once you have added something, and nothing starts until you press Start.",
   },
   {
     route: "tracker",
@@ -41,7 +41,7 @@ export const GUIDED_TOUR_STEPS: readonly TourStep[] = [
     route: "dashboard",
     target: "recommendation-provenance",
     title: "Why AXOM suggested this",
-    body: "Recommendation details show the trigger, source data, threshold, result, and available override. AXOM calculations remain separate from optional AI wording.",
+    body: "Press Why? on Up next to see what led to a suggestion: the items, signals and how much each counted, plus the override you can change. AXOM calculations remain separate from optional AI wording.",
   },
   {
     route: "reports",

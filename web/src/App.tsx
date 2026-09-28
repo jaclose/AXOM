@@ -27,6 +27,7 @@ import { NAV } from "./components/shell/nav";
 import { useStore } from "./lib/store";
 import { useUi } from "./lib/uiStore";
 import { pushToast } from "./lib/toast";
+import { markAppReady, usePageEntrance } from "./lib/presentation";
 import type { StorageMigrationResult } from "./lib/storageMigrations";
 import { readOnboardingDraftMode, type OnboardingDestination, type OnboardingMode } from "./lib/onboardingProgress";
 import { promisePromptStatus, shouldOfferPromiseAfterGlobalTour, shouldOfferPromisePrompt } from "./lib/promisePrompt";
@@ -258,10 +259,14 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
     return () => window.removeEventListener("keydown", onKey);
   }, [guideAvailable]);
 
+  // First visit to a tab this session: its sections settle in (lib/presentation).
+  const pageEnter = usePageEntrance(route.split("?")[0]);
+
   if (route === "design-preview" && DevDesignPreview) {
     return (
       <Suspense fallback={<div className="design-preview-boot">Preparing AXOM component preview…</div>}>
         <DevDesignPreview />
+        <PresentationReady />
       </Suspense>
     );
   }
@@ -335,6 +340,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
           onComplete={completeOnboarding}
           onCancel={() => setSetupMode(null)}
         />
+        <PresentationReady />
         <Toaster />
       </div>
     );
@@ -371,9 +377,11 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
             refreshing={refreshing}
           />
           <div className="surface-scroll">
-            <div className={route === "tracker" ? "page page-tracker" : "page"}>
+            <div className={route === "tracker" ? "page page-tracker" : "page"} data-enter={pageEnter ? "" : undefined}>
               <Suspense fallback={<div className="route-loading" role="status" aria-live="polite">Opening your workspace…</div>}>
                 <Page />
+                {/* Commits with the page itself, so the film only hands over to real content. */}
+                <PresentationReady />
               </Suspense>
             </div>
           </div>
@@ -411,4 +419,10 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
       <Toaster />
     </div>
   );
+}
+
+/** Signals that real content has rendered (the opening film waits for this). */
+function PresentationReady() {
+  useEffect(() => markAppReady(), []);
+  return null;
 }

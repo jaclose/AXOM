@@ -1,8 +1,9 @@
 // ===========================================================================
 // Cinematics — the short brand films AXOM plays at startup, after an update,
-// and while an update installs. Films are placeholders until final renders
-// (Higgsfield / Blender) replace them: `npm run cinematic:import -- <video>
-// --id <film> --final` transcodes, measures and records a new render.
+// and while an update installs. The finished AXOM films are the 7-second
+// ident (first open ever), the 2-second wordmark (first open of the day) and
+// the 3-second wordmark (after updates). `npm run cinematic:import -- <video>
+// --id <film> --final [--as-is]` measures and records a render.
 //
 // Policy: a film is decoration, never a gate. It plays at most once per
 // trigger, never on reduced motion, and a device-only ledger decides when.
@@ -10,7 +11,7 @@
 
 import FILM_MEDIA from "../data/cinematics.json";
 
-export type CinematicId = "slow-sweep" | "push-sweep" | "edge-glint" | "optical-luster";
+export type CinematicId = "ident" | "wordmark-2s" | "wordmark-3s" | "slow-sweep" | "push-sweep" | "edge-glint" | "optical-luster";
 
 export interface CinematicFilm {
   id: CinematicId;
@@ -22,6 +23,8 @@ export interface CinematicFilm {
   /** The film's edge color, so letterboxing never shows a seam. */
   background: string;
   durationMs: number;
+  /** How the film ends: on black (hand straight over) or holding its last frame (fade to black first). */
+  exit: "black" | "hold";
   /** True while the film is a stand-in for the final render. */
   placeholder: boolean;
 }
@@ -29,22 +32,28 @@ export interface CinematicFilm {
 /** Copy lives here; measured media facts live in data/cinematics.json, which
  * `npm run cinematic:import` rewrites when a new render is dropped in. */
 const FILM_COPY: Record<CinematicId, Pick<CinematicFilm, "label" | "description">> = {
+  ident: { label: "AXOM ident", description: "The full seven-second film: mark, wordmark, private academic operating system." },
+  "wordmark-2s": { label: "Wordmark", description: "Two seconds: the mark resolves into the wordmark." },
+  "wordmark-3s": { label: "Wordmark, long", description: "Three seconds, with a longer hold. Used after updates." },
   "slow-sweep": { label: "Slow sweep", description: "A single soft highlight drifts across the tile." },
   "push-sweep": { label: "Push sweep", description: "The camera eases in as the light passes. Used after updates." },
   "edge-glint": { label: "Edge glint", description: "A quick glint along the bevel. Used while an update installs." },
   "optical-luster": { label: "Classic mark", description: "The original ivory mark on black." },
 };
 
-type FilmMedia = Pick<CinematicFilm, "src" | "poster" | "background" | "durationMs" | "placeholder">;
+type FilmMedia = Pick<CinematicFilm, "src" | "poster" | "background" | "durationMs" | "placeholder"> & { exit?: CinematicFilm["exit"] };
 
 export const CINEMATICS = Object.fromEntries(
   (Object.keys(FILM_COPY) as CinematicId[]).map((id) => {
     const media = (FILM_MEDIA as Record<string, FilmMedia>)[id];
-    return [id, { id, ...FILM_COPY[id], ...media }];
+    return [id, { id, ...FILM_COPY[id], ...media, exit: media.exit ?? "hold" }];
   }),
 ) as Record<CinematicId, CinematicFilm>;
 
-export const INTRO_FILM_ORDER: CinematicId[] = ["slow-sweep", "push-sweep", "edge-glint", "optical-luster"];
+export const INTRO_FILM_ORDER: CinematicId[] = ["wordmark-2s", "wordmark-3s", "ident", "slow-sweep", "push-sweep", "edge-glint", "optical-luster"];
+
+/** The very first time AXOM opens on a device. */
+export const FIRST_RUN_FILM: CinematicId = "ident";
 
 export type IntroFrequency = "daily" | "weekly" | "updates" | "always" | "never";
 
@@ -57,7 +66,8 @@ export const INTRO_FREQUENCY_LABELS: Record<IntroFrequency, { label: string; hin
 };
 
 export interface CinematicPreferences {
-  version: 1;
+  /** 2: the finished AXOM films replaced the placeholders as defaults. */
+  version: 2;
   frequency: IntroFrequency;
   /** The everyday intro, or "rotate" to cycle through every film. */
   intro: CinematicId | "rotate";
@@ -68,11 +78,11 @@ export interface CinematicPreferences {
 }
 
 export const DEFAULT_CINEMATIC_PREFERENCES: CinematicPreferences = {
-  version: 1,
+  version: 2,
   frequency: "daily",
-  intro: "slow-sweep",
-  update: "push-sweep",
-  installing: "edge-glint",
+  intro: "wordmark-2s",
+  update: "wordmark-3s",
+  installing: "wordmark-2s",
 };
 
 export interface CinematicLedger {
@@ -115,10 +125,13 @@ export function isoWeekKey(date: Date): string {
 }
 
 export function normalizeCinematicPreferences(raw: unknown): CinematicPreferences {
-  const value = raw && typeof raw === "object" ? raw as Partial<CinematicPreferences> : {};
+  const value = raw && typeof raw === "object" ? raw as Partial<Omit<CinematicPreferences, "version">> & { version?: number } : {};
+  const frequency = FREQUENCIES.has(value.frequency as IntroFrequency) ? value.frequency as IntroFrequency : DEFAULT_CINEMATIC_PREFERENCES.frequency;
+  // Version 1 only ever offered placeholder films: keep the schedule, adopt the finished films.
+  if (value.version !== 2) return { ...DEFAULT_CINEMATIC_PREFERENCES, frequency };
   return {
-    version: 1,
-    frequency: FREQUENCIES.has(value.frequency as IntroFrequency) ? value.frequency as IntroFrequency : DEFAULT_CINEMATIC_PREFERENCES.frequency,
+    version: 2,
+    frequency,
     intro: value.intro === "rotate" || isFilm(value.intro) ? value.intro : DEFAULT_CINEMATIC_PREFERENCES.intro,
     update: isFilm(value.update) ? value.update : DEFAULT_CINEMATIC_PREFERENCES.update,
     installing: isFilm(value.installing) ? value.installing : DEFAULT_CINEMATIC_PREFERENCES.installing,
@@ -201,7 +214,7 @@ export function decideStartupCinematic(input: {
   else if (prefs.frequency === "weekly" && ledger.lastPlayedWeek !== week) trigger = "weekly";
   if (!trigger) return skip(prefs.frequency === "updates" ? "not-an-update" : "already-played");
 
-  const film = trigger === "update" ? CINEMATICS[prefs.update] : introFilm(prefs, ledger);
+  const film = trigger === "update" ? CINEMATICS[prefs.update] : trigger === "first-run" ? CINEMATICS[FIRST_RUN_FILM] : introFilm(prefs, ledger);
   return {
     decision: { play: true, trigger, film, caption: trigger === "update" ? `Updated to v${version}` : undefined },
     nextLedger: {
@@ -209,7 +222,8 @@ export function decideStartupCinematic(input: {
       lastPlayedAt: now.toISOString(),
       lastPlayedDay: day,
       lastPlayedWeek: week,
-      rotateIndex: prefs.intro === "rotate" && trigger !== "update" ? (ledger.rotateIndex ?? 0) + 1 : ledger.rotateIndex,
+      // The first-run ident and update films are fixed; only everyday opens advance the rotation.
+      rotateIndex: prefs.intro === "rotate" && trigger !== "update" && trigger !== "first-run" ? (ledger.rotateIndex ?? 0) + 1 : ledger.rotateIndex,
     },
   };
 }

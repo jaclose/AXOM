@@ -18,7 +18,7 @@ const READY: Feature[] = [
   { name: "Lock-in check-ins", detail: "Optional “Are you locked in?” pop-ups at your chosen interval, with replies that know how much is left in your sprint and your daily targets." },
   { name: "Top-bar quotes", detail: "180 quotes (90 AXOM Originals) next to the clock on every page, rotating daily, every few hours, or per section — with favorites, hiding, and category filters." },
   { name: "Question Bank", detail: "Review-first PDF, text, Markdown, CSV, and JSON import with unresolved-answer safety, source provenance, practice blocks, and results." },
-  { name: "Dashboard", detail: "A focused daily surface with an evidence-gated Command Brief, customizable widgets with their own icons, and a subtle pointer luster." },
+  { name: "Dashboard", detail: "A focused daily surface with a one-line Up next suggestion, customizable widgets with their own icons, and a subtle pointer luster." },
   { name: "Productivity & Reports", detail: "Fast activity logging, optional targets (habits can count too), focus timer, and weekly/monthly trends that follow real calendar days — with plain-language explanations on demand." },
   { name: "Course Tracker", detail: "Course/module structure with a breadcrumb and subsection picker, collapsible sections, imports, pass and yield tracking, and next-move suggestions." },
   { name: "Leaderboards", detail: "Race your past self: this week vs your typical and best weeks, with what it takes to set a new record. No invented competitors." },

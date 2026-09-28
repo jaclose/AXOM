@@ -4,6 +4,7 @@ import { ICON_SIZE } from "../../lib/iconSize";
 import {
   CINEMATICS,
   CINEMATIC_PREFS_EVENT,
+  FIRST_RUN_FILM,
   INTRO_FILM_ORDER,
   INTRO_FREQUENCY_LABELS,
   readCinematicPreferences,
@@ -42,6 +43,7 @@ export function CinematicSettings() {
   const groupId = useId();
   const prefs = useCinematicPreferences();
   const reduced = useReducedMotion();
+  const placeholders = [prefs.intro, prefs.update, prefs.installing].some((id) => id !== "rotate" && CINEMATICS[id].placeholder);
   return (
     <section className="appearance-block cinematic-settings" aria-labelledby={`${groupId}-films`}>
       <header>
@@ -108,6 +110,11 @@ export function CinematicSettings() {
       </div>
 
       <div className="cinematic-moments">
+        <div className="cinematic-moment-fixed">
+          <span>First open on a device</span>
+          <b>{CINEMATICS[FIRST_RUN_FILM].label} · {Math.round(CINEMATICS[FIRST_RUN_FILM].durationMs / 1000)} s</b>
+          <button type="button" className="account-link" disabled={reduced} onClick={() => preview(FIRST_RUN_FILM)}>Preview</button>
+        </div>
         <label>
           <span>After an update</span>
           <select className="field" value={prefs.update} onChange={(event) => writeCinematicPreferences({ update: event.target.value as CinematicId })}>
@@ -125,7 +132,9 @@ export function CinematicSettings() {
       <p className="appearance-footnote">
         {reduced
           ? "Films are off while reduced motion is on."
-          : "These films are placeholders; final renders will replace them in a future update without changing your choices."}
+          : placeholders
+            ? "Some of your chosen films are early placeholders; the AXOM wordmark films are the finished renders."
+            : "Each film fades to black and AXOM settles in beneath it. Nothing waits on the film."}
       </p>
     </section>
   );
