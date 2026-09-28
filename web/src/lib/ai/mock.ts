@@ -4,6 +4,7 @@
 // mock data can never masquerade as real analysis.
 // ===========================================================================
 import type { AIProvider, AiJsonRequest } from "./types";
+import { demoCourseTask } from "./mockCourse";
 
 export const MOCK_LABEL = "Demo (mock output — not real analysis)";
 
@@ -16,6 +17,8 @@ export function createMockProvider(): AIProvider {
       // stable. The task id wins: "Topic: cardiology" is not a card request.
       if (req.task === "cards.generate") return demoCards();
       if (req.task === "questions.generate") return demoQuestions();
+      const courseDemo = demoCourseTask(req);
+      if (courseDemo !== undefined) return courseDemo;
       // No topic ids: the guide falls back to its own local matches.
       if (req.task === "guide.ask") return { answer: "[DEMO] Here's where to look. Turn on a real provider for written answers.", topicIds: [] };
       if (/card/i.test(req.prompt)) return demoCards();
