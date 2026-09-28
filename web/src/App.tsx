@@ -18,6 +18,7 @@ import { SessionOverlay } from "./components/session/SessionOverlay";
 import { FocusDock } from "./components/dock/FocusDock";
 import { RestOverlay } from "./components/rest/RestOverlay";
 import { SoundscapeTimerSync } from "./components/soundscapes/SoundscapeTimerSync";
+import { UserMediaBridge } from "./components/soundscapes/UserMediaBridge";
 import { FocusCheckIn } from "./components/shell/FocusCheckIn";
 import { AccountSyncWatcher } from "./components/shell/AccountSyncWatcher";
 import { NAV } from "./components/shell/nav";
@@ -375,6 +376,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
       <FocusDock />
       <RestOverlay />
       <SoundscapeTimerSync />
+      <UserMediaBridge />
       <FocusCheckIn />
       <AccountSyncWatcher />
       <Toaster />

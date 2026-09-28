@@ -7,8 +7,10 @@ import { sceneForTaste } from "../../lib/soundscapes/taste";
 import { useSoundscape } from "../../lib/soundscapes/store";
 
 /** The visual for a preset: its chosen video scene (with the pulse ring) or the generative shader. */
-export function SoundscapeStage({ preset, animate, reactive = false, ring = true, className = "", label }: {
+export function SoundscapeStage({ preset, animate, reactive = false, ring = true, className = "", label, sceneOverride }: {
   preset: SoundscapePreset;
+  /** Temporarily show another scene (hover preview in the background picker). */
+  sceneOverride?: string | null;
   animate: boolean;
   reactive?: boolean;
   ring?: boolean;
@@ -16,7 +18,9 @@ export function SoundscapeStage({ preset, animate, reactive = false, ring = true
   label?: string;
 }) {
   const versionId = useSoundscape((state) => state.versions[preset.id]);
-  const choice = useSoundscape((state) => state.scenes[preset.id]);
+  const chosen = useSoundscape((state) => state.scenes[preset.id]);
+  useSoundscape((state) => state.catalog);
+  const choice = sceneOverride ?? chosen;
   const visuals = useSoundscape((state) => state.taste.visuals);
   const look = lookFor(preset, versionId);
   // An explicit choice wins; otherwise "Auto" follows the version's design, bent toward your visual taste.

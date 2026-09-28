@@ -36,13 +36,16 @@ export function ScenePlayer({ scene, animate, className = "" }: { scene: Scene; 
     };
   }, [animate, reduced, scene.src]);
 
+  if (scene.image) {
+    return <img className={`scene-player ${className}`} src={sceneUrl(scene.src)} alt="" aria-hidden="true" />;
+  }
   return (
     <video
       ref={videoRef}
       key={scene.src}
       className={`scene-player ${className}`}
       src={sceneUrl(scene.src)}
-      poster={sceneUrl(scene.poster)}
+      poster={scene.poster ? sceneUrl(scene.poster) : undefined}
       muted
       loop
       playsInline

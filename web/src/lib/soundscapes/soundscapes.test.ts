@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LISTENING_REGIMEN, SOUNDSCAPES, SOUNDSCAPE_ORDER, isSoundscapeId, versionOf } from "./presets";
-import { carrierPair, fillNoise, volumeToGain } from "./engine";
+import { COMFORT, MAX_TRIM_DB, carrierPair, fillNoise, volumeToGain } from "./engine";
+import { MONAURAL_BEAT_DEPTH } from "./synth";
 import { LISTENING_LOG_KEY, MIN_COMPARISON_SAMPLE, appendListeningInterval, compareListeningConditions, readListeningLog } from "./listeningLog";
 
 describe("soundscape presets", () => {
@@ -61,6 +62,21 @@ describe("soundscape versions", () => {
         expect(total).toBeLessThanOrEqual(1.35);
       }
     }
+  });
+
+  it("stay comfortable: capped trims, soft tones and shallow speaker beats", () => {
+    for (const id of SOUNDSCAPE_ORDER) {
+      for (const version of SOUNDSCAPES[id].versions) {
+        if (!("recipe" in version)) continue;
+        // Loudness-matching sparse sounds (birds, cups) by boosting them made their peaks shrill.
+        expect(version.recipe.trimDb ?? 0).toBeLessThanOrEqual(MAX_TRIM_DB);
+        for (const layer of version.recipe.layers) if (layer.kind === "tone") expect(layer.level).toBeLessThanOrEqual(0.22);
+      }
+    }
+    expect(MONAURAL_BEAT_DEPTH).toBeLessThanOrEqual(0.6);
+    expect(COMFORT.subsonicHz).toBeGreaterThanOrEqual(25);
+    expect(COMFORT.shelfDb).toBeLessThan(0);
+    expect(COMFORT.ceilingDb).toBeLessThanOrEqual(-6);
   });
 
   it("falls back to the first version for unknown ids", () => {
