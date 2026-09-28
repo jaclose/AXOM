@@ -2,7 +2,7 @@
 // and the Claude call are injected, so the web test suite drives this exact
 // flow without Deno, Supabase or Anthropic; index.ts wires the real services.
 import {
-  buildAnthropicRequest, parseJsonLoose, stopReasonError, upstreamError, validateBody,
+  buildAnthropicRequest, LIMITS, parseJsonLoose, stopReasonError, upstreamError, validateBody,
   type AiTier, type AnthropicRequest, type ProxyRequestBody,
 } from "./core.ts";
 import { buildTask, isTaskId } from "./tasks.ts";
@@ -47,6 +47,7 @@ type Resolved = { ok: true; body: ProxyRequestBody; promptVersion?: string } | {
 /**
  * `{ task, input }` runs a server-owned task (its prompt, schema, budget and
  * tier come from tasks.ts). Anything else is the original freeform request.
+ * Only tasks can carry screenshots, and each task validates its own.
  */
 export function resolveRequest(value: unknown): Resolved {
   if (value && typeof value === "object" && !Array.isArray(value) && "input" in value) {
@@ -54,8 +55,12 @@ export function resolveRequest(value: unknown): Resolved {
     if (!isTaskId(task)) return { ok: false, error: "Unknown AI task." };
     const built = buildTask(task, input);
     if (!built.ok) return built;
-    const { system, prompt, schema, maxTokens, tier, effort, promptVersion } = built.task;
-    return { ok: true, body: { task, system, prompt, schema, maxTokens, tier, effort }, promptVersion };
+    const { system, prompt, schema, maxTokens, tier, effort, promptVersion, images } = built.task;
+    return {
+      ok: true,
+      body: { task, system, prompt, schema, maxTokens, tier, effort, ...(images?.length ? { images } : {}) },
+      promptVersion,
+    };
   }
   return validateBody(value);
 }
@@ -74,6 +79,12 @@ export function createHandler(deps: ProxyDeps): (req: Request) => Promise<Respon
     if (!authorization.startsWith("Bearer ")) return json({ error: "Sign in to use AXOM Cloud AI." }, 401);
     const user = await deps.authenticate(authorization);
     if (!user) return json({ error: "Your session expired. Sign in again." }, 401);
+
+    // Screenshots make bodies large; refuse an oversized one before reading it.
+    const declaredBytes = Number(req.headers.get("Content-Length") ?? 0);
+    if (declaredBytes > LIMITS.bodyBytes) {
+      return json({ error: "This request is too large. Send fewer or smaller screenshots at a time." }, 413);
+    }
 
     let raw: unknown;
     try { raw = await req.json(); } catch { return json({ error: "Invalid JSON body." }, 400); }

@@ -5,7 +5,11 @@
 // Deno or network APIs), so the web app reuses the same prompts for Local
 // (Ollama) and Demo modes, and the web test suite exercises them directly.
 // ===========================================================================
-import type { AiEffort, AiTier } from "./core.ts";
+import type { AiEffort, AiTier, TaskImage } from "./core.ts";
+import {
+  buildCourseAdviseTask, buildCourseExtractTask, buildQuestionExtractTask,
+  type CourseAdviseInput, type CourseExtractInput, type QuestionExtractInput,
+} from "./courseTasks.ts";
 
 // Mirrors AnkiCardType in web/src/lib/ankiCards.ts (a test keeps them equal).
 export const CARD_TYPES = [
@@ -51,6 +55,9 @@ export interface QuestionTaskInput {
 export interface TaskInputs {
   "cards.generate": CardTaskInput;
   "questions.generate": QuestionTaskInput;
+  "course.extract": CourseExtractInput;
+  "questions.extract": QuestionExtractInput;
+  "course.advise": CourseAdviseInput;
 }
 
 export type AiTaskId = keyof TaskInputs;
@@ -65,12 +72,15 @@ export interface BuiltTask {
   maxTokens: number;
   tier: AiTier;
   effort: AiEffort;
+  /** Validated screenshots, for tasks that read images (courseTasks.ts). */
+  images?: TaskImage[];
 }
 
 type Built = { ok: true; task: BuiltTask } | { ok: false; error: string };
 
 export function isTaskId(value: unknown): value is AiTaskId {
-  return value === "cards.generate" || value === "questions.generate";
+  return value === "cards.generate" || value === "questions.generate"
+    || value === "course.extract" || value === "questions.extract" || value === "course.advise";
 }
 
 export function buildTask(task: string, input: unknown): Built {
@@ -78,6 +88,9 @@ export function buildTask(task: string, input: unknown): Built {
   const record = input as Record<string, unknown>;
   if (task === "cards.generate") return buildCardTask(record);
   if (task === "questions.generate") return buildQuestionTask(record);
+  if (task === "course.extract") return buildCourseExtractTask(record);
+  if (task === "questions.extract") return buildQuestionExtractTask(record);
+  if (task === "course.advise") return buildCourseAdviseTask(record);
   return { ok: false, error: "Unknown AI task." };
 }
 
