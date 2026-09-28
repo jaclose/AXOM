@@ -306,7 +306,7 @@ export function QuestionWorkspacePage() {
             <div className="qb-hero-actions" data-module-tour="qb-import">
               {isFirstUse ? (
                 <>
-                  <button className="qb-cta primary" onClick={() => openImport("file")}>
+                  <button className="qb-cta primary" onClick={() => openImport("file")} data-guide="qb-open-import">
                     <FileInput size={ICON_SIZE.emphasis} /> Import Questions
                   </button>
                   <button className="qb-cta ghost" onClick={() => openImport("paste")}>
@@ -318,7 +318,7 @@ export function QuestionWorkspacePage() {
                   <button className="qb-cta primary" onClick={launchRecommended}>
                     <Play size={ICON_SIZE.emphasis} /> {lastSession ? "Continue last session" : runnable ? "Start practice" : "Import questions"}
                   </button>
-                  <button className="qb-cta ghost" onClick={() => openImport("file")}>
+                  <button className="qb-cta ghost" onClick={() => openImport("file")} data-guide="qb-open-import">
                     <FileInput size={ICON_SIZE.body} /> Import
                   </button>
                 </>

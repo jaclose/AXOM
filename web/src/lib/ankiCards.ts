@@ -57,6 +57,10 @@ export interface AnkiCard {
   source?: string;
   tags: string[];
   courseId?: ID;
+  /** Module within the course (CourseModule.id); files the card into its Anki subdeck. */
+  moduleId?: ID;
+  /** Course Tracker item (lecture, DLA…) the card belongs to. */
+  trackerItemId?: ID;
   lectureLabel?: string;
   questionId?: ID;
   confidence?: 1 | 2 | 3 | 4 | 5;
@@ -172,7 +176,9 @@ export function validateAnkiCard(input: unknown, now: Date = new Date()): Valida
       extra: typeof input.extra === "string" && input.extra.trim() ? input.extra.trim() : undefined,
       source: typeof input.source === "string" && input.source.trim() ? input.source.trim() : undefined,
       tags: Array.isArray(input.tags) ? input.tags.filter((t): t is string => typeof t === "string" && !!t.trim()).map((t) => t.trim()) : [],
-      courseId: typeof input.courseId === "string" ? input.courseId : undefined,
+      courseId: typeof input.courseId === "string" && input.courseId ? input.courseId : undefined,
+      moduleId: typeof input.moduleId === "string" && input.moduleId ? input.moduleId : undefined,
+      trackerItemId: typeof input.trackerItemId === "string" && input.trackerItemId ? input.trackerItemId : undefined,
       lectureLabel: typeof input.lectureLabel === "string" && input.lectureLabel.trim() ? input.lectureLabel.trim() : undefined,
       questionId: typeof input.questionId === "string" ? input.questionId : undefined,
       confidence: typeof input.confidence === "number" && [1, 2, 3, 4, 5].includes(input.confidence) ? input.confidence as 1 | 2 | 3 | 4 | 5 : undefined,

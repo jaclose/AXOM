@@ -1,0 +1,69 @@
+/* ===========================================================================
+   AXOM Guide: the question panel and the non-modal pointer. The pointer shares
+   the guided tour's ring and card language but never veils the page, so the
+   learner clicks the real control.
+   =========================================================================== */
+
+.guide-modal { width: min(560px, calc(100vw - 24px)); }
+.guide-form { display: flex; align-items: center; gap: 8px; position: relative; }
+.guide-form-icon { position: absolute; left: 12px; color: var(--text-45); pointer-events: none; }
+.guide-input { flex: 1; min-width: 0; padding-left: 40px; }
+.guide-answer {
+  margin-top: 12px; padding: 12px 14px; border-radius: var(--radius-md);
+  background: rgba(var(--accent-rgb), 0.08); border: 1px solid rgba(var(--accent-rgb), 0.22);
+}
+.guide-answer p { margin: 0 0 4px; line-height: var(--leading-relaxed); }
+.guide-error { margin-top: 10px; }
+.guide-heading { margin-top: 14px; }
+.guide-topics { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
+.guide-topic {
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+  border-radius: var(--radius-md); border: 1px solid rgba(var(--ink-rgb), 0.08);
+}
+.guide-topic .sub { line-height: var(--leading-relaxed); }
+.guide-topic .gbtn { flex-shrink: 0; }
+.guide-footnote { margin-top: 12px; }
+
+/* The pointer layer passes clicks through; only the callout takes them. */
+.guide-pointer { position: fixed; inset: 0; z-index: 250; pointer-events: none; }
+.guide-ring {
+  position: fixed; border-radius: var(--radius-lg);
+  border: 2px solid rgba(var(--accent-rgb), 0.9);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.25), 0 0 32px rgba(var(--accent-rgb), 0.5);
+  transition: top .2s ease, left .2s ease, width .2s ease, height .2s ease;
+  animation: ring-pulse 2.2s ease-in-out infinite;
+}
+.guide-callout {
+  position: fixed; pointer-events: auto; width: 320px; max-width: calc(100vw - 24px);
+  padding: 14px 16px; border-radius: var(--radius-lg);
+  background: linear-gradient(150deg, rgba(22, 30, 48, 0.98), rgba(10, 15, 27, 0.99));
+  border: 1px solid rgba(var(--accent-rgb), 0.28);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  color: #f1ede4;
+  animation: tip-in .22s cubic-bezier(.2, .8, .2, 1);
+}
+/* No target on screen: sit clear of toasts and the focus dock. */
+.guide-callout.floating { right: max(18px, env(safe-area-inset-right)); top: 84px; }
+.guide-callout-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.guide-callout-step {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: var(--fs-tiny); font-weight: var(--fw-bold); letter-spacing: var(--tracking-wide); color: var(--cyan);
+}
+.guide-callout-close {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 28px; min-height: 28px;
+  border: none; background: transparent; color: rgba(241, 237, 228, 0.6); border-radius: var(--radius-xs);
+}
+.guide-callout-close:hover { color: #f1ede4; }
+.guide-callout-title { font-size: var(--fs-lg); font-weight: var(--fw-heavy); margin-bottom: 4px; }
+.guide-callout-body { font-size: var(--fs-base); line-height: var(--leading-relaxed); color: rgba(241, 237, 228, 0.78); }
+.guide-callout-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; }
+.guide-callout-hint { font-size: var(--fs-xs); color: rgba(241, 237, 228, 0.6); }
+.guide-callout-actions .gbtn { margin-left: auto; }
+
+@media (max-width: 520px) {
+  .guide-callout.floating { left: 12px; right: 12px; width: auto; top: auto; bottom: max(96px, calc(env(safe-area-inset-bottom) + 88px)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guide-ring, .guide-callout { animation: none; transition: none; }
+}

@@ -4,6 +4,9 @@ import { TopBar } from "./components/shell/TopBar";
 import { SettingsModal, type SettingsTab } from "./components/shell/SettingsModal";
 import { OnboardingWizard } from "./components/shell/OnboardingWizard";
 import { GuidedTour, type TourExitReason } from "./components/shell/GuidedTour";
+import { GuideAssistant } from "./components/shell/GuideAssistant";
+import { GuidePointer } from "./components/shell/GuidePointer";
+import type { GuideTopic } from "./lib/guide/topics";
 import { PromisePrompt } from "./components/shell/PromisePrompt";
 import { PromiseCutscene } from "./components/shell/PromiseCutscene";
 import { Toaster } from "./components/shell/Toaster";
@@ -239,6 +242,23 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
     useUi.getState().clearOnboardingRequest();
   }, [onboardingRequested]);
 
+  // Ctrl/⌘ + / toggles the Guide anywhere in the workspace (not during setup).
+  const guideOpen = useUi((u) => u.guideOpen);
+  const guideRun = useUi((u) => u.guideRun);
+  const guideAvailable = onboarded && !setupMode;
+  useEffect(() => {
+    if (!guideAvailable) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "/" || !(event.metaKey || event.ctrlKey) || event.altKey) return;
+      event.preventDefault();
+      const ui = useUi.getState();
+      if (ui.guideOpen) ui.closeGuide();
+      else ui.openGuide();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [guideAvailable]);
+
   // First visit to a tab this session: its sections settle in (lib/presentation).
   const pageEnter = usePageEntrance(route.split("?")[0]);
 
@@ -278,6 +298,19 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
   function navigateTour(id: string) {
     setRoute(id);
     try { window.history.replaceState(null, "", `#${id}`); } catch { location.hash = id; }
+  }
+
+  // Settings features open the modal on their tab; page features start the pointer.
+  function startGuideTopic(topic: GuideTopic) {
+    const ui = useUi.getState();
+    ui.closeGuide();
+    if (topic.settingsTab) {
+      ui.stopGuide();
+      setSettingsTab(topic.settingsTab);
+      setSettings(true);
+    } else if (topic.steps?.length) {
+      ui.startGuide(topic.steps);
+    }
   }
 
   function refresh() {
@@ -357,6 +390,12 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
 
       {settings && <SettingsModal onClose={() => setSettings(false)} initialTab={settingsTab} />}
       {showTour && <GuidedTour onExit={endTour} onNavigate={navigateTour} currentRoute={route} />}
+      {guideOpen && !showTour && (
+        <GuideAssistant route={routeKey} onClose={() => useUi.getState().closeGuide()} onStart={startGuideTopic} />
+      )}
+      {guideRun && !showTour && (
+        <GuidePointer key={guideRun.id} steps={guideRun.steps} currentRoute={route} onNavigate={navigateTour} onExit={() => useUi.getState().stopGuide()} />
+      )}
       {promisePromptOpen && !showTour && (
         <PromisePrompt
           onSign={() => { setPromisePromptOpen(false); setPromiseCutsceneOpen(true); }}

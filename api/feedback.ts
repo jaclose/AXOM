@@ -2,9 +2,11 @@ import { optionalString, requireBodyObject, requireString, sendJson, withApi } f
 
 // Alpha feedback intake. Sends an email via Resend when RESEND_API_KEY is set;
 // otherwise returns 501 so the client shows the clean "copy + email" fallback.
-// No secrets are ever exposed to the client.
+// No secrets are ever exposed to the client. The resend.dev default sender only
+// delivers to the Resend account's own address; set FEEDBACK_FROM to an address
+// on a domain verified in Resend (`npm run accounts:doctor` checks it).
 const TO = process.env.FEEDBACK_TO || "jdabbagh@sgu.edu";
-const FROM = process.env.FEEDBACK_FROM || "Noctyrium Alpha <onboarding@resend.dev>";
+const FROM = process.env.FEEDBACK_FROM || "AXOM Feedback <onboarding@resend.dev>";
 
 export default withApi(["POST"], async (req, res) => {
   const body = requireBodyObject(req);
@@ -33,11 +35,15 @@ export default withApi(["POST"], async (req, res) => {
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       from: FROM, to: [TO], reply_to: email || undefined,
-      subject: `Noctyrium Alpha Feedback — ${type} — ${area}`, text,
+      subject: `AXOM Feedback — ${type} — ${area}`, text,
     }),
   });
 
   if (!r.ok) {
+    // Resend explains rejections (unverified domain, restricted key) in the
+    // body; log that reason for the Vercel function logs, never the key.
+    const reason = await r.json().then((data: { name?: string; message?: string }) => `${data.name ?? ""} ${data.message ?? ""}`.trim(), () => "");
+    console.error("resend", r.status, reason.slice(0, 300));
     sendJson(res, { ok: false, configured: true, message: "Could not send right now." }, 502);
     return;
   }

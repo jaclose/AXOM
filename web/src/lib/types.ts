@@ -20,6 +20,65 @@ export interface Term {
 export interface CourseModule {
   id: ID;
   name: string;
+  /** Canvas module id when imported, so a later import updates instead of duplicating (schema v35). */
+  sourceId?: string;
+  /** Link back to the module in Canvas (http/https only). */
+  sourceUrl?: string;
+  /** Order in the source course. */
+  position?: number;
+}
+
+/** Where a course or tracker item was imported from. Institution attribution stays visible. */
+export type CourseSourceKind = "canvas" | "calendar" | "ai" | "text";
+
+/** One instructor from the course page or entered by the learner. */
+export interface CourseInstructor {
+  name: string;
+  email?: string;
+  role?: string;
+}
+
+/** A course-wide link: syllabus, textbook, Canvas home, recordings. */
+export interface CourseResourceLink {
+  id: ID;
+  title: string;
+  url: string;
+  note?: string;
+}
+
+/** A grade category such as "Exams" and its share of the final grade, as the course states it. */
+export interface CourseGradingGroup {
+  id: ID;
+  name: string;
+  /** Percent of the final grade; only when the source or the learner states it. */
+  weight?: number;
+  /** Canvas assignment group id. */
+  sourceId?: string;
+}
+
+/** Provenance of an imported course (schema v35). */
+export interface CourseSource {
+  kind: CourseSourceKind;
+  /** e.g. "school.instructure.com" */
+  host?: string;
+  /** Canvas course id. */
+  courseId?: string;
+  url?: string;
+  termName?: string;
+  importedAt: string;
+}
+
+/** Optional course details beyond the tracker structure (schema v35). Every field is optional. */
+export interface CourseDetails {
+  instructors?: CourseInstructor[];
+  resources?: CourseResourceLink[];
+  gradingGroups?: CourseGradingGroup[];
+  /** Canvas "weight final grade by assignment group"; group weights apply only when true. */
+  applyGroupWeights?: boolean;
+  startDate?: string; // yyyy-MM-dd
+  endDate?: string; // yyyy-MM-dd
+  source?: CourseSource;
+  notes?: string;
 }
 
 /** A course (e.g. "01 BPM 500"), belonging to a term. */
@@ -32,6 +91,7 @@ export interface Course {
   link?: string; // optional URL the "Open" button targets
   modules: CourseModule[];
   studyPlanOverride?: StudyPlanSettings;
+  details?: CourseDetails;
 }
 
 export type TrackerStatus = "anki" | "working" | "mature" | "reset";
@@ -72,6 +132,26 @@ export interface TrackerItem {
   assessmentDate?: string; // yyyy-MM-dd; explicit learner/course evidence only
   explicitPriority?: 1 | 2 | 3 | 4 | 5;
   recommendationSnoozedUntil?: string; // ISO timestamp; defers, never deletes
+  // Course details (schema v35). All optional; dates and weights come from the
+  // course source or the learner, never from inference.
+  dueDate?: string; // yyyy-MM-dd deadline (assignments, requirements)
+  dueAt?: string; // ISO timestamp when the source gives a time
+  scheduledDate?: string; // yyyy-MM-dd when the session happens (lectures, labs)
+  weight?: number; // percent of the final grade, as stated
+  gradingGroup?: string; // e.g. "Exams" (Canvas assignment group)
+  pointsPossible?: number;
+  objectives?: string[]; // learning objectives for this item
+  sourceUrl?: string; // link back to the Canvas item (http/https only)
+  source?: TrackerItemSource;
+}
+
+/** Import provenance for one tracker item, so a later import refreshes it instead of duplicating it. */
+export interface TrackerItemSource {
+  kind: CourseSourceKind;
+  /** Stable identity in the source, e.g. "canvas:assignment:123". */
+  ref?: string;
+  host?: string;
+  importedAt: string;
 }
 
 export interface Task {

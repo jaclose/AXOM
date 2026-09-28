@@ -1,4 +1,4 @@
-import { Menu, RotateCw } from "lucide-react";
+import { Compass, Menu, RotateCw } from "lucide-react";
 import type { RefObject } from "react";
 import { GButton } from "../ui/primitives";
 import { useStore } from "../../lib/store";
@@ -46,6 +46,17 @@ export function TopBar({
           timeZonePreference={timeZonePreference}
           onOpenPreferences={() => useUi.getState().requestSettings("rhythm")}
         />
+        <GButton
+          className="topbar-guide"
+          onClick={() => useUi.getState().openGuide()}
+          aria-label="Open the AXOM Guide"
+          aria-keyshortcuts="Control+/ Meta+/"
+          title="Ask how to do anything (Ctrl or ⌘ + /)"
+          data-guide="topbar-guide"
+        >
+          <Compass size={ICON_SIZE.body} aria-hidden="true" />
+          <span>Guide</span>
+        </GButton>
         <GButton className="topbar-refresh" onClick={onRefresh}>
           <RotateCw size={ICON_SIZE.body} className={refreshing ? "spin" : ""} />
           <span>{refreshing ? "Refreshing" : "Refresh"}</span>

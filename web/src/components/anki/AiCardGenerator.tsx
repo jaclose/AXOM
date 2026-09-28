@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import { Sparkles, RefreshCw, Check, X } from "lucide-react";
 import { useStore } from "../../lib/store";
 import {
-  checkProviderHealth, generateCardDrafts, loadAiSettings, resolveActiveProvider,
+  checkProviderHealth, generateCardDrafts, loadAiSettings, resolveActiveProvider, TASK_LIMITS,
   type CardGenerationStyle, type GeneratedCardDraft,
 } from "../../lib/ai";
 import { newSchedule, reviewCardQuality, type CardQualityFlag } from "../../lib/ankiCards";
@@ -43,7 +43,9 @@ export function AiCardGenerator({ onOpenAiSettings }: { onOpenAiSettings: () => 
   const [maxCards, setMaxCards] = useState("6");
   const [busy, setBusy] = useState(false);
   const [drafts, setDrafts] = useState<DraftWithFlags[]>([]);
+  const [promptVersion, setPromptVersion] = useState("");
   const settings = loadAiSettings();
+  const tooLong = material.length > TASK_LIMITS.materialChars;
 
   useEffect(() => {
     let stopped = false;
@@ -56,7 +58,7 @@ export function AiCardGenerator({ onOpenAiSettings }: { onOpenAiSettings: () => 
     if (!provider) return;
     setBusy(true);
     try {
-      const requestedMaxCards = Math.max(1, Math.min(12, Number(maxCards) || 6));
+      const requestedMaxCards = Math.max(1, Math.min(TASK_LIMITS.maxCards, Number(maxCards) || 6));
       const result = await generateCardDrafts(provider, {
         material,
         topic: topic || undefined,
@@ -65,6 +67,7 @@ export function AiCardGenerator({ onOpenAiSettings }: { onOpenAiSettings: () => 
         source: source || undefined,
       });
       const existing = s.ankiCards ?? [];
+      setPromptVersion(result.promptVersion);
       setDrafts(result.drafts.map((d) => ({
         ...d,
         flags: reviewCardQuality({ type: d.type, front: d.front, back: d.back, source: d.source, aiGenerated: true }, existing),
@@ -106,7 +109,7 @@ export function AiCardGenerator({ onOpenAiSettings }: { onOpenAiSettings: () => 
       tags: [...d.tags, "ai-generated"],
       source: d.source ?? source ?? undefined,
       aiGenerated: true,
-      generation: { provider: provider?.info.label ?? "unknown", promptVersion: "cardgen-v1" },
+      generation: { provider: provider?.info.label ?? "unknown", promptVersion },
       schedule: newSchedule(),
     })));
     pushToast({
@@ -120,7 +123,7 @@ export function AiCardGenerator({ onOpenAiSettings }: { onOpenAiSettings: () => 
   const providerReady = health?.ok && (settings.mode === "local" ? Boolean(settings.localModel) : true);
 
   return (
-    <GlassCard>
+    <GlassCard data-guide="anki-ai-generator">
       <PanelHeader
         title="Generate cards with AI"
         sub="Small reviewed batches, quality over volume. Every draft is editable and nothing saves without your approval."
@@ -141,17 +144,22 @@ export function AiCardGenerator({ onOpenAiSettings }: { onOpenAiSettings: () => 
         <div className="stack" style={{ gap: 12 }}>
           <TextAreaField label="Study material (notes, objectives, an explanation…)" rows={5}
             value={material} onChange={(e) => setMaterial(e.target.value)} />
+          {material.length > 0 && (
+            <p className="sub" style={tooLong ? { color: "var(--grade-orange)" } : undefined}>
+              {material.length.toLocaleString()} / {TASK_LIMITS.materialChars.toLocaleString()} characters{tooLong ? ". Split it into smaller sections." : ""}
+            </p>
+          )}
           <div className="grid grid-2">
             <Field label="Topic (optional)" value={topic} onChange={(e) => setTopic(e.target.value)} />
             <Field label="Source reference" value={source} onChange={(e) => setSource(e.target.value)} placeholder="lecture 39, textbook ch. 4…" />
             <SelectField label="Style" value={style} onChange={(e) => setStyle(e.target.value as CardGenerationStyle)}>
               {STYLES.map((st) => <option key={st.id} value={st.id}>{st.label}</option>)}
             </SelectField>
-            <Field label="Max cards (≤12)" type="number" min={1} max={12} value={maxCards}
+            <Field label={`Max cards (≤${TASK_LIMITS.maxCards})`} type="number" min={1} max={TASK_LIMITS.maxCards} value={maxCards}
               onChange={(e) => setMaxCards(e.target.value)} />
           </div>
           <div className="row">
-            <GButton variant="primary" disabled={busy || !material.trim()} onClick={generate}>
+            <GButton variant="primary" disabled={busy || !material.trim() || tooLong} onClick={generate}>
               {busy ? <RefreshCw size={ICON_SIZE.body} className="spin" /> : <Sparkles size={ICON_SIZE.body} />} {busy ? "Generating…" : "Generate drafts"}
             </GButton>
           </div>

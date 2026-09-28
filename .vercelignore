@@ -27,8 +27,9 @@ web/tsconfig.tsbuildinfo
 !/scripts/release-notes.mjs
 !/scripts/release-notes.d.mts
 
-# Shared Supabase AI proxy core used by web TypeScript tests.
+# Edge Function logic the web tests import; `tsc -b` in the build type-checks
+# them, so without it every deployment fails with TS2307. Migrations, config
+# and email templates stay out of the upload.
 !/supabase/
+/supabase/*
 !/supabase/functions/
-!/supabase/functions/ai-proxy/
-!/supabase/functions/ai-proxy/core.ts
