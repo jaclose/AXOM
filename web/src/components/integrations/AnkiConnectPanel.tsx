@@ -6,12 +6,13 @@ import { Layers, Plug, RefreshCw, CheckCircle2, AlertTriangle, Wand2, ExternalLi
 import { useStore } from "../../lib/store";
 import { GlassCard, GButton, PanelHeader, Tag } from "../ui/primitives";
 import {
-  AnkiError, DEFAULT_ANKI_ENDPOINT, fetchAnkiSnapshot, getAnkiAutoSync, getAnkiEndpoint,
+  AnkiError, DEFAULT_ANKI_ENDPOINT, createAnkiClient, fetchAnkiSnapshot, getAnkiAutoSync, getAnkiEndpoint,
   setAnkiAutoSync, setAnkiEndpoint, pendingSyncDelta, commitSync, alreadySyncedToday,
   ANKI_DIAGNOSTIC_TEMPLATE,
 } from "../../lib/ankiConnect";
 import type { AnkiDiagnosticStatus, AnkiDiagnosticStepId, AnkiSnapshot } from "../../lib/ankiConnect";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { loadLinkSettings } from "../../lib/anki/linkSettings";
 
 type Status = "idle" | "connecting" | "connected" | "error";
 
@@ -59,7 +60,7 @@ export function AnkiConnectPanel() {
     setSteps(ANKI_DIAGNOSTIC_TEMPLATE.map((step) => ({ ...step })));
     setAnkiEndpoint(endpoint);
     try {
-      const snap = await fetchAnkiSnapshot(endpoint, markStep);
+      const snap = await fetchAnkiSnapshot(createAnkiClient({ endpoint, apiKey: loadLinkSettings().apiKey }), markStep);
       setSnapshot(snap);
       setStatus("connected");
       if (silentSync) doSync(snap.today, true);
