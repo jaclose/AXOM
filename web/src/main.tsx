@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Analytics } from "@vercel/analytics/react";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 import { runStorageMigrations } from "./lib/storageMigrations";
 import { installThemeSync } from "./lib/theme";
 import { installPaletteSync } from "./lib/palette";
@@ -79,7 +80,12 @@ async function bootstrap() {
   createRoot(rootElement).render(
     <StrictMode>
       <AppErrorBoundary><App startupStatus={startupStatus} /></AppErrorBoundary>
-      {analyticsEnabled && <Analytics />}
+      {analyticsEnabled && (
+        <>
+          <Analytics />
+          <SpeedInsights />
+        </>
+      )}
     </StrictMode>,
   );
 }
