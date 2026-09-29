@@ -51,10 +51,15 @@ function waitForWorker(worker: ServiceWorker, expected: "installed" | "activated
   });
 }
 
-/** A failed screen can contain unsaved input, so never automatically reload. */
+/**
+ * A failed screen can contain unsaved input, so never automatically reload.
+ * The error is announced (the update watcher offers a review) but NOT
+ * swallowed: preventDefault() would make the failed import resolve to
+ * `undefined`, turning a clear "chunk failed" into a TypeError deep inside the
+ * caller. Route screens surface it through RouteErrorBoundary instead.
+ */
 export function installChunkRecovery(): void {
-  window.addEventListener("vite:preloadError", (event) => {
-    event.preventDefault();
+  window.addEventListener("vite:preloadError", () => {
     window.dispatchEvent(new Event("axom:chunk-load-error"));
   });
 }

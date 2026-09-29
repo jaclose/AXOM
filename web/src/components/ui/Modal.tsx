@@ -1,4 +1,5 @@
 import React, { useEffect, useId, useRef } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { GhostButton } from "./primitives";
 import { ICON_SIZE } from "../../lib/iconSize";
@@ -62,7 +63,10 @@ export function Modal({
     };
   }, []);
 
-  return (
+  // Portaled to <body>: a dialog opened from inside a list row (the Course
+  // Tracker's study-plan editor) otherwise inherits the row's stacking
+  // context and backdrop-filter, so later rows paint over it.
+  return createPortal(
     <div className="modal-scrim" onMouseDown={onClose}>
       <div ref={dialogRef} className={`modal ${className}`} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}
         onMouseDown={(e) => e.stopPropagation()}>
@@ -73,7 +77,8 @@ export function Modal({
         <div className={`modal-body ${bodyClassName}`}>{children}</div>
         {footer && <div className="modal-actions">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

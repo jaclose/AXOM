@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentType } from "react";
 import { Sidebar } from "./components/shell/Sidebar";
 import { TopBar } from "./components/shell/TopBar";
+import { RouteErrorBoundary } from "./components/shell/RouteErrorBoundary";
 import { SettingsModal, type SettingsTab } from "./components/shell/SettingsModal";
 import { OnboardingWizard } from "./components/shell/OnboardingWizard";
 import { GuidedTour, type TourExitReason } from "./components/shell/GuidedTour";
@@ -346,11 +347,13 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
           />
           <div className="surface-scroll">
             <div className={route === "tracker" ? "page page-tracker" : "page"} data-enter={pageEnter ? "" : undefined}>
-              <Suspense fallback={<div className="route-loading" role="status" aria-live="polite">Opening your workspace…</div>}>
-                <Page />
-                {/* Commits with the page itself, so the film only hands over to real content. */}
-                <PresentationReady />
-              </Suspense>
+              <RouteErrorBoundary key={routeKey} onHome={() => go("dashboard")}>
+                <Suspense fallback={<div className="route-loading" role="status" aria-live="polite">Opening your workspace…</div>}>
+                  <Page />
+                  {/* Commits with the page itself, so the film only hands over to real content. */}
+                  <PresentationReady />
+                </Suspense>
+              </RouteErrorBoundary>
             </div>
           </div>
         </div>

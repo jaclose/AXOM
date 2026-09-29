@@ -352,3 +352,55 @@
   .sidebar { transition: none; }
   .analog-clock-hand { transition: none; }
 }
+
+/* --- Route error card: a failed screen stays inside the shell ------------- */
+.route-error {
+  display: grid;
+  place-items: center;
+  min-height: min(62dvh, 560px);
+  padding: 24px 16px;
+}
+.route-error-card {
+  width: min(520px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 26px 26px 20px;
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--glass-card-border);
+  background:
+    radial-gradient(120% 90% at 0% 0%, rgba(var(--accent-rgb), 0.10), transparent 58%),
+    var(--surface-2);
+  box-shadow: var(--shadow-floating);
+  -webkit-backdrop-filter: var(--blur-panel);
+  backdrop-filter: var(--blur-panel);
+  animation: route-error-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.route-error-card h2 {
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-tight);
+}
+.route-error-card p {
+  margin: 0;
+  color: var(--text-65);
+  line-height: var(--leading-relaxed);
+  max-width: 60ch;
+}
+.route-error-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+.route-error-details { color: var(--text-50); font-size: var(--fs-xs); }
+.route-error-details summary { cursor: pointer; width: fit-content; }
+.route-error-details pre {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  color: var(--text-60);
+}
+@keyframes route-error-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.99); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .route-error-card { animation: none; }
+}

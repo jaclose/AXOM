@@ -29,8 +29,8 @@ export function releaseMetadataPlugin(metadata: ReturnType<typeof buildMetadata>
     configResolved(config) { dist = resolve(config.root, config.build.outDir); },
     closeBundle() {
       writeFileSync(resolve(dist, "version.json"), `${JSON.stringify(metadata, null, 2)}\n`);
-      // Only the eagerly referenced entry files are installed with the shell.
-      // Optional game engines/dictionaries stay lazy and cache on first visit.
+      // The entry, the shell, every route screen and the update path are
+      // installed with the service worker; heavy document engines load lazily.
       const html = readFileSync(resolve(dist, "index.html"), "utf8");
       const assets = [...html.matchAll(/(?:src|href)="(\.\/assets\/[^"?]+)"/g)].map((match) => match[1]);
       const manifest = JSON.parse(readFileSync(resolve(dist, ".vite/manifest.json"), "utf8")) as Record<string, { file: string; imports?: string[]; css?: string[] }>;
@@ -48,6 +48,13 @@ export function releaseMetadataPlugin(metadata: ReturnType<typeof buildMetadata>
       // hashed assets. Keep the save/checkpoint path with that build's shell,
       // even though it is lazy-loaded to preserve the pre-hydration guard.
       collect("src/lib/updateCheckpoint.ts");
+      // Every route screen ships with the shell. A tab left open across a
+      // deploy otherwise asks the host for hashes it no longer serves, and
+      // the screen fails (the Daily Games "black screen"). Heavy engines
+      // (xlsx, pdf) stay out: pages import them dynamically, not statically.
+      Object.keys(manifest)
+        .filter((key) => /^src\/pages\/[^/]+Page\.tsx$/.test(key) || /^src\/data\/dailyWord\w*\.ts$/.test(key))
+        .forEach(collect);
       const precache = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", ...assets];
       const sw = resolve(dist, "sw.js");
       writeFileSync(sw, readFileSync(sw, "utf8").replaceAll("__AXOM_BUILD_ID__", metadata.buildId)
