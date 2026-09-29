@@ -4,6 +4,8 @@
 // a tracker changes what AXOM does with its entries, and says so.
 // ===========================================================================
 import { useMemo, useState, type ComponentType, type CSSProperties } from "react";
+import { useSettledOrder } from "../../lib/useSettledOrder";
+import { compareTrackersForBoard } from "../../lib/trackerOrder";
 import {
   Activity, Archive, ArchiveRestore, Bike, BookOpen, Brain, Check, Code2, Coffee, Droplets, Dumbbell, Eye, EyeOff,
   FileText, FlaskConical, Footprints, GraduationCap, Heart, Languages, Moon, Music, PenLine, Plus, Salad, Settings2,
@@ -51,6 +53,8 @@ const FLAG_COPY: Array<{ key: keyof Pick<ProductivityTracker, "contributesToAcad
   { key: "contributesToHabitTracking", label: "Track as a habit", detail: "Keeps a linked habit checked from your entries, with a streak (Habits is an Early Feature)." },
 ];
 
+const trackerKey = (tracker: ProductivityTracker) => tracker.id;
+
 export function TrackerManager() {
   const trackers = useStore((s) => s.productivityTrackers);
   const logs = useStore((s) => s.logs);
@@ -63,8 +67,14 @@ export function TrackerManager() {
     () => new Map(trackers.map((tracker) => [tracker.id, summarizeTracker(tracker, logs, today)])),
     [trackers, logs, today],
   );
-  // Most-used first so the board reflects what you actually track.
-  const ordered = [...visible].sort((a, b) => (summaries.get(b.id)!.activeDays30 - summaries.get(a.id)!.activeDays30) || a.name.localeCompare(b.name));
+  const desired = useMemo(
+    () => [...visible].sort((a, b) => compareTrackersForBoard(a, b, summaries.get(a.id)!, summaries.get(b.id)!)),
+    // `visible` is derived from `trackers` on every render; key the memo on its source.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [trackers, summaries],
+  );
+  // I3-01: logging time must never slide a card out from under the next tap.
+  const { ordered, touch } = useSettledOrder(desired, trackerKey);
 
   return (
     <GlassCard pad className="tracker-board" data-module-tour="productivity-trackers">
@@ -74,7 +84,7 @@ export function TrackerManager() {
         sub="The variables you follow. Log in one tap; goals, streaks, energy comparisons and reports follow from the same entries."
         action={<GButton size="sm" variant="primary" onClick={() => setEditing("new")}><Plus size={ICON_SIZE.body} /> New tracker</GButton>}
       />
-      <div className="tracker-board-grid">
+      <div className="tracker-board-grid" onPointerDownCapture={touch} onKeyDownCapture={touch}>
         {ordered.map((tracker) => (
           <TrackerCard key={tracker.id} tracker={tracker} summary={summaries.get(tracker.id)!} onEdit={() => setEditing(tracker)} />
         ))}

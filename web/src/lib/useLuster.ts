@@ -6,7 +6,8 @@ const MAX_TILT = 1.6;
 
 /**
  * Pointer-follow luster for dashboard cards: a soft glare that tracks the
- * cursor, a one-time sheen sweep on entry, and a very small 3D lift. Attach
+ * cursor, a sheen sweep the first time a card is hovered (quieter after), and
+ * a very small 3D lift. Attach
  * the returned handlers to a container; any descendant with `data-luster`
  * reacts. Touch/pen input and reduced motion (OS or AXOM setting) opt out.
  */
@@ -38,6 +39,9 @@ export function useLuster() {
 }
 
 function reset(element: HTMLElement) {
+  // I1-15: the first hover gets the full sweep; after that the card answers
+  // with a quieter glare (motion.css keys off data-luster-seen).
+  if (element.classList.contains("is-lustering")) element.dataset.lusterSeen = "";
   element.classList.remove("is-lustering");
   element.style.setProperty("--rx", "0deg");
   element.style.setProperty("--ry", "0deg");

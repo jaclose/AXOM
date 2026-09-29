@@ -5754,3 +5754,7 @@
 .trend-week.dense .trend-week-bars { gap: 3px; }
 .trend-week.dense .trend-bar { left: 12%; right: 12%; }
 .trend-week.dense .trend-week-label b { font-size: var(--fs-micro); color: var(--text-45); }
+
+/* --- About: two tabs (I1-29) --- */
+.about-tabs { margin-bottom: 4px; }
+.about-panel { display: flex; flex-direction: column; gap: 20px; }

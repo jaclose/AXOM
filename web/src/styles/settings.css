@@ -43,6 +43,8 @@
 }
 .settings-card-head { display: flex; align-items: flex-start; gap: 12px; }
 .settings-card-head > div { flex: 1 1 auto; min-width: 0; display: grid; gap: 4px; }
+/* Header actions keep one line ("Run setup again" wrapped to three). */
+.settings-card-head > .gbtn { flex: 0 0 auto; white-space: nowrap; }
 .settings-card-head h4 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--fs-md); font-weight: var(--fw-bold); }
 .settings-card-head p { margin: 0; color: var(--text-60); font-size: var(--fs-sm); line-height: var(--leading-normal); }
 .settings-card-icon {

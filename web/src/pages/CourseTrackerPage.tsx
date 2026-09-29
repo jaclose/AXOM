@@ -140,7 +140,6 @@ export function CourseTrackerPage() {
   const [moduleOpen, setModuleOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
-  const [snoozeItem, setSnoozeItem] = useState<TrackerItem | null>(null);
   const [moduleHelpOpen, setModuleHelpOpen] = useState(false);
   const [moduleTourOpen, setModuleTourOpen] = useState(false);
   const [deleteScope, setDeleteScope] = useState<string | null>(null);
@@ -304,7 +303,7 @@ export function CourseTrackerPage() {
                       <div className="grow"><b>{sg.title}</b><span>{sg.reason}</span></div>
                       <small>~{suggestionEffortMinutes(item)} min</small>
                       <GButton size="tiny" onClick={() => sg.itemId ? focusItem(sg.itemId) : setBulkOpen(true)}>Open</GButton>
-                      {item && <GhostButton aria-label={`Defer ${item.label}`} title="Choose when this suggestion returns" onClick={() => setSnoozeItem(item)}>Not now</GhostButton>}
+                      {item && <GhostButton aria-label={`Defer ${item.label}`} title="Hide this suggestion until tomorrow" onClick={() => deferUntilTomorrow(item)}>Not now</GhostButton>}
                     </div>
                   );
                 })}
@@ -399,35 +398,25 @@ export function CourseTrackerPage() {
       {moduleOpen && <ModuleEditor onDone={(nextScope) => { setModuleOpen(false); if (nextScope) setScope(nextScope); }} />}
       {bulkOpen && <BulkImportModal defaultPath={scope} onClose={() => setBulkOpen(false)} />}
       {scheduleOpen && <ScheduleImportModal defaultPath={scope} onClose={() => setScheduleOpen(false)} />}
-      {snoozeItem && <RecommendationSnoozeModal item={snoozeItem} onClose={() => setSnoozeItem(null)} />}
       {deleteScope && <DeleteScopeModal scope={deleteScope} onSelect={setScope} onClose={() => setDeleteScope(null)} />}
       {moduleTourOpen && <ModuleTour name="Course Tracker" route="tracker" steps={COURSE_TRACKER_TOUR_STEPS} onExit={() => setModuleTourOpen(false)} />}
     </div>
   );
 }
 
-function RecommendationSnoozeModal({ item, onClose }: { item: TrackerItem; onClose: () => void }) {
-  const updateTrackerItem = useStore((state) => state.updateTrackerItem);
-  const [custom, setCustom] = useState("");
-  function defer(until: string) {
-    updateTrackerItem(item.id, { recommendationSnoozedUntil: until });
-    pushToast({ title: "Suggestion deferred", body: `${item.label} will return when the pause ends.`, tone: "success" });
-    onClose();
-  }
-  return (
-    <Modal title="When should this return?" onClose={onClose} footer={<GButton onClick={onClose}>Cancel</GButton>}>
-      <p className="sub"><b>{item.label}</b> stays in your Tracker. Deferring only removes it from suggestions temporarily.</p>
-      <div className="snooze-choice-grid">
-        <GButton onClick={() => defer(laterTodayIso())}>Later today</GButton>
-        <GButton onClick={() => defer(tomorrowIso())}>Tomorrow</GButton>
-        <GButton onClick={() => defer(daysFromNowIso(2))}>In 2 days</GButton>
-      </div>
-      <div className="row gap8 align-end">
-        <Field label="Custom return time" type="datetime-local" min={localDateTimeValue(new Date())} value={custom} onChange={(event) => setCustom(event.target.value)} />
-        <GButton variant="primary" disabled={!custom || Date.parse(custom) <= Date.now()} onClick={() => defer(new Date(custom).toISOString())}>Defer</GButton>
-      </div>
-    </Modal>
-  );
+/**
+ * I3-27: "Not now" is one tap. The suggestion rests until tomorrow morning and
+ * the item stays in the Tracker; Undo lives on the notice, no dialog asks when.
+ */
+function deferUntilTomorrow(item: TrackerItem) {
+  const { updateTrackerItem } = useStore.getState();
+  updateTrackerItem(item.id, { recommendationSnoozedUntil: tomorrowIso() });
+  pushToast({
+    title: "Back tomorrow",
+    body: `${item.label} stays in your Tracker; it just leaves today's suggestions.`,
+    tone: "success",
+    actions: [{ label: "Undo", onAction: () => updateTrackerItem(item.id, { recommendationSnoozedUntil: undefined }) }],
+  });
 }
 
 function ScheduleImportModal({ defaultPath, onClose }: { defaultPath: string; onClose: () => void }) {
@@ -640,9 +629,6 @@ function ItemStudyPlanEditor({ item, onClose }: { item: TrackerItem; onClose: ()
 }
 
 function tomorrowIso() { const date = new Date(); date.setDate(date.getDate() + 1); date.setHours(8, 0, 0, 0); return date.toISOString(); }
-function laterTodayIso() { return new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(); }
-function daysFromNowIso(days: number) { const date = new Date(); date.setDate(date.getDate() + days); date.setHours(8, 0, 0, 0); return date.toISOString(); }
-function localDateTimeValue(date: Date) { const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000); return local.toISOString().slice(0, 16); }
 
 function PQCompleteBlocks({ item }: { item: TrackerItem }) {
   const s = useStore();

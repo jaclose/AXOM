@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { Toaster } from "../components/shell/Toaster";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { STORAGE_KEYS } from "../lib/brand";
 import { makeSeed } from "../lib/seed";
@@ -164,15 +165,14 @@ describe("Course Tracker comprehension layout", () => {
     expect(useStore.getState().tracker.map((item) => ({ id: item.id, passes: item.passes }))).toEqual(before);
   });
 
-  it("defers a recommendation with explicit, reversible timing", () => {
-    render(<CourseTrackerPage />);
-    const deferButton = screen.getAllByRole("button", { name: /^Defer / })[0];
-    fireEvent.click(deferButton);
-    const dialog = screen.getByRole("dialog", { name: "When should this return?" });
-    expect(within(dialog).getByText(/stays in your Tracker/)).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole("button", { name: "In 2 days" }));
-    expect(useStore.getState().tracker.some((item) => item.recommendationSnoozedUntil && Date.parse(item.recommendationSnoozedUntil) > Date.now())).toBe(true);
+  it("defers a recommendation in one tap until tomorrow, with Undo", () => {
+    render(<><CourseTrackerPage /><Toaster /></>);
+    fireEvent.click(screen.getAllByRole("button", { name: /^Defer / })[0]);
     expect(screen.queryByRole("dialog", { name: "When should this return?" })).toBeNull();
+    const snoozed = useStore.getState().tracker.find((item) => item.recommendationSnoozedUntil);
+    expect(snoozed && Date.parse(snoozed.recommendationSnoozedUntil!) > Date.now()).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: /Undo/ }));
+    expect(useStore.getState().tracker.find((item) => item.id === snoozed!.id)?.recommendationSnoozedUntil).toBeUndefined();
   });
 
   it("exposes a plain Help entry point and stable module-tour anchors", () => {
