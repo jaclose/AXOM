@@ -2083,9 +2083,19 @@ function backfillTrackerHabit(tracker: ProductivityTracker, logs: StudyLog[], en
   return next;
 }
 
+// Focus-timer minutes are study time and belong on the Study tracker (every
+// Pomodoro preset declares defaultTrackerId "tracker-study"). Matching by name
+// alone left them off "Your trackers", so JD topped the tracker up by hand and
+// his study time doubled (Ideas 3: 384 -> 736).
+const STUDY_TIMER_TYPES = new Set(["pomodoro", "focus session"]);
+
 function matchProductivityTracker(trackers: ProductivityTracker[] = [], type: string): ProductivityTracker | undefined {
   const clean = cleanText(type);
   if (!clean) return trackers.find((tracker) => tracker.id === "tracker-study");
+  if (STUDY_TIMER_TYPES.has(clean)) {
+    const study = trackers.find((tracker) => tracker.id === "tracker-study" && !tracker.archived);
+    if (study) return study;
+  }
   return trackers.find((tracker) => !tracker.archived && cleanText(tracker.name) === clean);
 }
 
