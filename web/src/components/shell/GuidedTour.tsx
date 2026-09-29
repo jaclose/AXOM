@@ -18,47 +18,56 @@ export interface TourStep {
 
 export type TourExitReason = "complete" | "skip" | "escape";
 
+// Eight stops, most-used first (JD, Ideas 1: "no more than 8 guide items").
+// Everything else has a small help button where it lives.
 export const GUIDED_TOUR_STEPS: readonly TourStep[] = [
   {
     route: "dashboard",
     target: "command-brief",
-    title: "Up next",
-    body: "Up next suggests one step from your real work, with a smaller option beside it. It appears once you have added something, and nothing starts until you press Start.",
+    title: "Your day starts here",
+    body: "Up next picks one next step from your real work, with a smaller option beside it. Nothing starts until you press Start.",
+  },
+  {
+    route: "productivity",
+    target: "pomodoro",
+    title: "Focus timer",
+    body: "Start a focus block here. Focused minutes are logged for you, and the timer follows you to every page in the dock at the bottom.",
+  },
+  {
+    route: "dashboard",
+    target: "nav-soundscapes",
+    title: "Soundscapes",
+    body: "Background sound for deep work: focus frequencies, nature, or your own files. It keeps playing while you move around AXOM.",
   },
   {
     route: "tracker",
     target: "import",
     title: "Course Tracker",
-    body: "Map courses, modules, and study passes here. Import a list or add work manually, then keep the map current as you study.",
+    body: "Your courses, modules and study passes in one map. Import a list or add items, then mark each pass as you study.",
   },
   {
     route: "questions",
     target: "question-bank-entry",
     title: "Question Bank",
-    body: "Import → Review → Practice → Understand. Bring in a source, verify uncertain mappings, practise the finalized set, and let the results surface what needs work.",
+    body: "Import → Review → Practice → Understand. Bring in question sets, practise them in tutor or exam mode, and let the results show you what needs work.",
   },
   {
     route: "dashboard",
-    target: "recommendation-provenance",
-    title: "Why AXOM suggested this",
-    body: "Press Why? on Up next to see what led to a suggestion: the items, signals and how much each counted, plus the override you can change. AXOM calculations remain separate from optional AI wording.",
+    target: "requirements",
+    title: "Today's targets",
+    body: "Decide what makes today count. Timer minutes, questions and cards fill it in as you go.",
   },
   {
-    route: "reports",
-    target: "reports-top",
-    title: "Reports",
-    body: "Use reports to review today, the week, course distribution, and longer trends from the work you recorded.",
+    route: "dashboard",
+    target: "nav-journal",
+    title: "Journal",
+    body: "A few calm minutes at the end of the day. Over time it shows you how you are really doing, not just what you did.",
   },
   {
     route: "dashboard",
     target: "control-surface-menu",
-    title: "Customize",
-    body: "Use Customize to keep current workflows visible and return unused sections to the library. You can restore them at any time.",
-  },
-  {
-    route: "dashboard",
-    title: "Data safety",
-    body: "Your workspace stays on this device. Open Settings → Data and Backup to review storage health, local recovery snapshots, or export a portable backup.",
+    title: "Make AXOM yours",
+    body: "Customize hides what you don't use. Anything hidden can come back later, so keep only what helps.",
   },
 ] as const;
 
@@ -86,6 +95,10 @@ export function GuidedTour({
   const [index, setIndex] = useState(() => persistProgress ? readTourStep(steps.length) : 0);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const [ready, setReady] = useState(false);
+  // Above/below is decided once per stop so the tip never flips while the
+  // page settles from its smooth scroll.
+  const [side, setSide] = useState<{ index: number; below: boolean } | null>(null);
+  const routeRef = useRef<string | null>(null);
   const tipRef = useRef<HTMLDivElement>(null);
   const exitRef = useRef(onExit);
   const navigateRef = useRef(onNavigate);
@@ -123,8 +136,13 @@ export function GuidedTour({
       return;
     }
 
+    // On the same page the previous rect is kept so the spotlight glides to
+    // the next stop. Across pages it irises closed to the centre first, and
+    // waits longer for the lazily loaded screen before giving up on a target.
+    const changedPage = routeRef.current !== null && routeRef.current !== step.route;
+    routeRef.current = step.route;
     setReady(false);
-    setRect(null);
+    if (!step.target || changedPage) setRect(null);
     if (!step.target) {
       setReady(true);
       return;
@@ -132,7 +150,10 @@ export function GuidedTour({
 
     let cancelled = false;
     let scrolled = false;
-    const tick = () => {
+    let found = false;
+    let frame = 0;
+    const measure = () => {
+      frame = 0;
       if (cancelled) return;
       const element = document.querySelector(`[${targetAttribute}="${step.target}"]`) as HTMLElement | null;
       if (!element) return;
@@ -146,29 +167,35 @@ export function GuidedTour({
       }
       const nextRect = element.getBoundingClientRect();
       if (nextRect.height > 0) {
-        setRect(nextRect);
+        if (!found) setSide({ index, below: window.innerHeight - nextRect.bottom > TIP_HEIGHT + 24 });
+        found = true;
+        setRect((current) => (current && sameRect(current, nextRect) ? current : nextRect));
         setReady(true);
       }
     };
+    // Scroll and resize can fire many times per frame; measure once per frame.
+    const schedule = () => { if (!frame) frame = window.requestAnimationFrame(measure); };
 
-    tick();
+    measure();
     const start = Date.now();
     const interval = window.setInterval(() => {
-      tick();
+      schedule();
       if (Date.now() - start > 2000) window.clearInterval(interval);
-    }, 90);
+    }, 120);
     const grace = window.setTimeout(() => {
-      if (!cancelled) setReady(true);
-    }, 750);
-    const onMove = () => tick();
-    window.addEventListener("resize", onMove, true);
-    window.addEventListener("scroll", onMove, true);
+      if (cancelled) return;
+      if (!found) setRect(null);
+      setReady(true);
+    }, changedPage ? 1800 : 750);
+    window.addEventListener("resize", schedule, true);
+    window.addEventListener("scroll", schedule, true);
     return () => {
       cancelled = true;
+      if (frame) window.cancelAnimationFrame(frame);
       window.clearInterval(interval);
       window.clearTimeout(grace);
-      window.removeEventListener("resize", onMove, true);
-      window.removeEventListener("scroll", onMove, true);
+      window.removeEventListener("resize", schedule, true);
+      window.removeEventListener("scroll", schedule, true);
     };
   }, [currentRoute, index, restoreScrollOnExit, step.route, step.target, targetAttribute]);
 
@@ -221,12 +248,13 @@ export function GuidedTour({
 
   const onScreen = !!rect && rect.bottom > 48 && rect.top < window.innerHeight - 48 && rect.height > 0;
   const hasSpotlight = ready && onScreen;
-  const tooltip = tooltipStyle(rect);
+  // Always positioned by top/left (never a transform) so centre-to-target is
+  // one continuous glide.
+  const tooltip = hasSpotlight ? tooltipStyle(rect!, side?.index === index ? side.below : true) : centeredTip();
 
   const overlay = (
     <div className="tour-overlay">
-      {hasSpotlight ? <Spotlight rect={rect!} /> : <div className="tour-haze" aria-hidden="true" />}
-      {hasSpotlight && <div className="tour-ring" style={ringStyle(rect!)} aria-hidden="true" />}
+      <div className={`tour-spot ${hasSpotlight ? "" : "is-center"}`} style={hasSpotlight ? spotStyle(rect!) : centerSpot()} aria-hidden="true" />
 
       <div
         ref={tipRef}
@@ -274,43 +302,37 @@ export function GuidedTour({
   return typeof document === "undefined" ? overlay : createPortal(overlay, document.body);
 }
 
-function Spotlight({ rect }: { rect: DOMRect }) {
+const TIP_WIDTH = 340;
+const TIP_HEIGHT = 230;
+
+function sameRect(a: DOMRect, b: DOMRect): boolean {
+  return Math.abs(a.top - b.top) < 1 && Math.abs(a.left - b.left) < 1
+    && Math.abs(a.width - b.width) < 1 && Math.abs(a.height - b.height) < 1;
+}
+
+/** One cut-out whose box-shadow dims the page; it glides between stops. */
+function spotStyle(rect: DOMRect): React.CSSProperties {
   const top = clamp(rect.top - PAD, 0, window.innerHeight);
   const left = clamp(rect.left - PAD, 0, window.innerWidth);
   const right = clamp(rect.right + PAD, left, window.innerWidth);
   const bottom = clamp(rect.bottom + PAD, top, window.innerHeight);
-  return (
-    <>
-      <div className="tour-panel" style={{ top: 0, left: 0, right: 0, height: top }} aria-hidden="true" />
-      <div className="tour-panel" style={{ top: bottom, left: 0, right: 0, bottom: 0 }} aria-hidden="true" />
-      <div className="tour-panel" style={{ top, left: 0, width: left, height: bottom - top }} aria-hidden="true" />
-      <div className="tour-panel" style={{ top, left: right, right: 0, height: bottom - top }} aria-hidden="true" />
-    </>
-  );
+  return { top, left, width: right - left, height: bottom - top };
 }
 
-function ringStyle(rect: DOMRect): React.CSSProperties {
-  const top = clamp(rect.top - PAD, 0, window.innerHeight);
-  const left = clamp(rect.left - PAD, 0, window.innerWidth);
-  const right = clamp(rect.right + PAD, left, window.innerWidth);
-  const bottom = clamp(rect.bottom + PAD, top, window.innerHeight);
-  return {
-    top,
-    left,
-    width: right - left,
-    height: bottom - top,
-  };
+/** No target: the cut-out closes to the centre, leaving an even dim. */
+function centerSpot(): React.CSSProperties {
+  return { top: window.innerHeight / 2, left: window.innerWidth / 2, width: 0, height: 0 };
 }
 
-function tooltipStyle(rect: DOMRect | null): React.CSSProperties {
-  const onScreen = !!rect && rect.bottom > 48 && rect.top < window.innerHeight - 48;
-  if (!rect || !onScreen) return {};
-  const tipWidth = 340;
-  const tipHeight = 230;
-  const left = Math.min(Math.max(12, rect.left), window.innerWidth - tipWidth - 12);
-  const roomBelow = window.innerHeight - rect.bottom > tipHeight + 24;
-  let top = roomBelow ? rect.bottom + 14 : rect.top - 14 - tipHeight;
-  top = Math.min(Math.max(12, top), window.innerHeight - tipHeight - 12);
+function centeredTip(): React.CSSProperties {
+  const width = Math.min(TIP_WIDTH, window.innerWidth - 24);
+  return { top: Math.max(12, (window.innerHeight - TIP_HEIGHT) / 2), left: Math.max(12, (window.innerWidth - width) / 2) };
+}
+
+function tooltipStyle(rect: DOMRect, below: boolean): React.CSSProperties {
+  const left = Math.min(Math.max(12, rect.left), window.innerWidth - TIP_WIDTH - 12);
+  let top = below ? rect.bottom + 14 : rect.top - 14 - TIP_HEIGHT;
+  top = Math.min(Math.max(12, top), window.innerHeight - TIP_HEIGHT - 12);
   return { top, left };
 }
 

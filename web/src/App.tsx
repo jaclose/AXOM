@@ -3,6 +3,8 @@ import { Sidebar } from "./components/shell/Sidebar";
 import { TopBar } from "./components/shell/TopBar";
 import { RouteErrorBoundary } from "./components/shell/RouteErrorBoundary";
 import { TabPresence } from "./components/shell/TabPresence";
+import { GuideOffer } from "./components/shell/GuideOffer";
+import { clearTourProgress } from "./lib/onboardingProgress";
 import { SettingsModal, type SettingsTab } from "./components/shell/SettingsModal";
 import { OnboardingWizard } from "./components/shell/OnboardingWizard";
 import { GuidedTour, type TourExitReason } from "./components/shell/GuidedTour";
@@ -363,6 +365,10 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
 
       {settings && <SettingsModal onClose={() => setSettings(false)} initialTab={settingsTab} />}
       {showTour && <GuidedTour onExit={endTour} onNavigate={navigateTour} currentRoute={route} />}
+      <GuideOffer
+        active={!showTour && !settings && !promisePromptOpen && !promiseCutsceneOpen}
+        onStart={() => { clearTourProgress(); updateProfile({ tourDone: false }); }}
+      />
       {promisePromptOpen && !showTour && (
         <PromisePrompt
           onSign={() => { setPromisePromptOpen(false); setPromiseCutsceneOpen(true); }}

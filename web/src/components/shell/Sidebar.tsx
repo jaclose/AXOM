@@ -135,6 +135,7 @@ export function Sidebar({
     if (isHidden) return null;
     return (
       <button type="button" className={`nav-item ${active === id ? "on" : ""}`}
+        data-tour={`nav-${id}`}
         aria-label={accessibleLabel}
         aria-current={active === id ? "page" : undefined}
         onClick={() => { onSelect(id); onClose(); }}>
