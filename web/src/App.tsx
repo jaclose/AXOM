@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useSta
 import { Sidebar } from "./components/shell/Sidebar";
 import { TopBar } from "./components/shell/TopBar";
 import { RouteErrorBoundary } from "./components/shell/RouteErrorBoundary";
+import { TabPresence } from "./components/shell/TabPresence";
 import { SettingsModal, type SettingsTab } from "./components/shell/SettingsModal";
 import { OnboardingWizard } from "./components/shell/OnboardingWizard";
 import { GuidedTour, type TourExitReason } from "./components/shell/GuidedTour";
@@ -335,6 +336,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
         />
 
         <div className="surface">
+          <TabPresence page={nav.label} />
           <TopBar
             route={routeKey}
             title={nav.label}
