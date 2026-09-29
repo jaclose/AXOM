@@ -3909,12 +3909,34 @@
   display: flex; flex-direction: column; gap: 10px; width: min(360px, calc(100vw - 36px));
 }
 .toast {
+  position: relative; isolation: isolate;
   display: flex; align-items: flex-start; gap: 11px; padding: 13px 13px 13px 14px; border-radius: var(--radius-md);
-  background: linear-gradient(160deg, rgba(22,34,52,0.98), rgba(12,20,34,0.98));
-  border: 1px solid color-mix(in srgb, var(--cyan) 20%, transparent); box-shadow: var(--shadow-floating);
-  animation: toast-in .28s cubic-bezier(.22,1,.36,1) both;
+  /* Graphite glass tinted by the active palette (was a fixed navy gradient). */
+  background:
+    radial-gradient(140% 120% at 0% 0%, rgba(var(--accent-rgb),0.12), transparent 58%),
+    linear-gradient(160deg, rgba(30,30,33,0.97), rgba(15,15,18,0.97));
+  border: 1px solid var(--glass-card-border); box-shadow: var(--shadow-floating);
+  -webkit-backdrop-filter: var(--blur-panel); backdrop-filter: var(--blur-panel);
+  max-height: 320px;
+  animation: toast-in .34s cubic-bezier(.22,1,.36,1) both;
 }
-@keyframes toast-in { from { opacity: 0; transform: translateY(12px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes toast-in { from { opacity: 0; transform: translateY(12px) scale(0.98); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
+/* Leaving: the notice evaporates (lifts, softens into mist, fades), then its
+   slot collapses so the stack settles instead of jumping. */
+.toast.is-leaving { pointer-events: none; animation: toast-evaporate .56s cubic-bezier(.4,0,.2,1) forwards; }
+.toast.is-leaving::after {
+  content: ""; position: absolute; inset: -18% -8%; z-index: -1; pointer-events: none; border-radius: inherit;
+  background: radial-gradient(60% 70% at 50% 60%, rgba(var(--accent-hi-rgb),0.22), rgba(243,240,232,0.08) 45%, transparent 72%);
+  filter: blur(14px); opacity: 0;
+  animation: toast-mist .56s ease-out forwards;
+}
+@keyframes toast-evaporate {
+  0% { opacity: 1; filter: blur(0); transform: none; }
+  45% { opacity: .55; filter: blur(2.5px); transform: translateY(-7px) scale(1.012); }
+  72% { opacity: .12; filter: blur(9px); transform: translateY(-14px) scale(1.03); max-height: 320px; margin-top: 0; padding-block: 13px; }
+  100% { opacity: 0; filter: blur(14px); transform: translateY(-18px) scale(1.04); max-height: 0; margin-top: -10px; padding-block: 0; border-color: transparent; }
+}
+@keyframes toast-mist { 0% { opacity: 0; transform: scale(.7); } 35% { opacity: 1; } 100% { opacity: 0; transform: scale(1.35) translateY(-10px); } }
 .toast-icon { flex-shrink: 0; display: inline-flex; margin-top: 1px; }
 .toast-success { border-color: color-mix(in srgb, var(--green) 40%, transparent); }
 .toast-success .toast-icon { color: var(--green); }
@@ -3932,7 +3954,7 @@
 }
 .toast-close:hover { color: var(--text); background: rgba(255,255,255,0.07); }
 @media (max-width: 520px) { .toast-stack { right: 12px; left: 12px; bottom: 12px; width: auto; } }
-@media (prefers-reduced-motion: reduce) { .pomo-page-glow.active { animation: none; opacity: 0; } .toast { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .pomo-page-glow.active { animation: none; opacity: 0; } .toast, .toast.is-leaving, .toast.is-leaving::after { animation: none; } }
 
 /* ---- Streak chip (dashboard control card) ---- */
 .dashboard-control-titlerow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 2px; }

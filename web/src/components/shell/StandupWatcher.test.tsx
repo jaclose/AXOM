@@ -11,6 +11,9 @@ import type { JournalEntry, StudyLog } from "../../lib/types";
 import { StandupWatcher } from "./StandupWatcher";
 import { Toaster } from "./Toaster";
 
+/** A notice that is still active (dismissed ones evaporate for a moment). */
+const activeToast = (text: string) => screen.queryByText(text)?.closest(".toast:not(.is-leaving)") ?? null;
+
 function studyLog(day: string, id = day): StudyLog {
   return { id, dayKey: day, ts: `${day}T10:00:00`, type: "Study", minutes: 30, cards: 0 };
 }
@@ -146,6 +149,6 @@ describe("Toaster action compatibility", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
     expect(onAction).toHaveBeenCalledOnce();
-    expect(screen.queryByText("Legacy action")).toBeNull();
+    expect(activeToast("Legacy action")).toBeNull();
   });
 });
