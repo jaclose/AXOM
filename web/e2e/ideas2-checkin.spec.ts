@@ -14,7 +14,10 @@ test("Locked In survives route changes and reload, with explicit goal and timer 
   await openWorkspace(page);
   await page.evaluate(async () => {
     const { useStore } = await (window as DevWindow).__AXOM_DEV__!;
-    useStore.getState().updateProfile({ focusCheckIn: { enabled: true, intervalMinutes: 5, scope: "anytime", respectQuietHours: false } });
+    // Setup now starts new users with a Study target; this journey begins with none
+    // (an empty configured list, so no legacy minute goal fills in either).
+    const day = useStore.getState().activeDayKey;
+    useStore.getState().updateProfile({ focusCheckIn: { enabled: true, intervalMinutes: 5, scope: "anytime", respectQuietHours: false }, dailySuccess: { version: 1, configuredAt: day, requirements: [] } });
   });
   await page.evaluate(() => {
     const now = new Date();

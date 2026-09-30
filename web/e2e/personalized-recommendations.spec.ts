@@ -82,15 +82,22 @@ test("study defaults and item overrides drive the dashboard, survive reload, and
   expect([...(session?.resources ?? [])].sort()).toEqual(["Noji", "Notes"]);
   await page.goto("/#tracker");
   const sixthPass = row.getByTitle("6 lecture passes", { exact: true });
-  await sixthPass.focus();
-  await page.keyboard.press("Enter");
-  await expect(sixthPass).toHaveAttribute("aria-pressed", "true");
+  // Right after navigation a lazy part of the page can remount the row and
+  // swallow the key; press only while the sixth pass is still unset (pressing
+  // a set level steps back), and retry until the keyboard press lands.
+  await expect(async () => {
+    if ((await sixthPass.getAttribute("aria-pressed")) !== "true") {
+      await sixthPass.focus();
+      await page.keyboard.press("Enter");
+    }
+    await expect(sixthPass).toHaveAttribute("aria-pressed", "true", { timeout: 1_500 });
+  }).toPass({ timeout: 15_000 });
   await expect(page.getByText("This scope is complete", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => {
     const surface = document.querySelector<HTMLElement>(".surface-scroll")!;
     return surface.scrollWidth <= surface.clientWidth + 1;
   })).toBe(true);
-  await page.reload({ waitUntil: "networkidle" });
+  await reloadAfterSave(page);
   await expect(sixthPass).toHaveAttribute("aria-pressed", "true");
   expect(errors).toEqual([]);
 });

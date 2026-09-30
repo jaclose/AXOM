@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { deferPromisePrompt, expect, test } from "./fixtures";
+import { deferPromisePrompt, expect, reloadAfterSave, test } from "./fixtures";
 
 type DevWindow = Window & { __AXOM_DEV__?: Promise<{ useStore: typeof import("../src/lib/store").useStore }> };
 
@@ -58,14 +58,14 @@ test("real pointer selections extend into, out of and across persisted highlight
   await expect(page.locator("mark.question-highlight")).toHaveCount(1);
   const marked = await page.locator("mark.question-highlight").textContent();
   await page.screenshot({ path: info.outputPath("highlight-merged.png") });
-  await page.reload();
+  await reloadAfterSave(page);
   await page.getByRole("tab", { name: /^Bank/ }).click();
   await page.getByRole("button", { name: text, exact: true }).click();
   await expect(page.locator("mark.question-highlight")).toHaveText([marked!]);
   await page.locator("mark.question-highlight").focus();
   await page.keyboard.press("Delete");
   await expect(page.locator("mark.question-highlight")).toHaveCount(0);
-  await page.reload();
+  await reloadAfterSave(page);
   await page.getByRole("tab", { name: /^Bank/ }).click();
   await page.getByRole("button", { name: text, exact: true }).click();
   await expect(page.locator("mark.question-highlight")).toHaveCount(0);
