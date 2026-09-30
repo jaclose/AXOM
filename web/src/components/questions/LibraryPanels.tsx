@@ -17,6 +17,7 @@ import { QuestionSetCard } from "./QuestionSetCard";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { createQuestionSetShare } from "../../lib/sharing/questionSetShare";
 import { publishShare } from "../../lib/sharing/supabaseSharing";
+import { sortByNaturalTitle } from "../../lib/naturalSort";
 
 const NO_QUESTIONS: QuestionRecord[] = [];
 const NO_DOCUMENTS: SourceDocument[] = [];
@@ -36,11 +37,10 @@ export function SourceLibrary({
   const provider = useMemo(() => resolveActiveProvider(), []);
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
-    if (!term) return documents;
-    return documents.filter((document) =>
+    return sortByNaturalTitle(term ? documents.filter((document) =>
       document.title.toLowerCase().includes(term)
       || document.fileName.toLowerCase().includes(term)
-      || document.tags.some((tag) => tag.toLowerCase().includes(term)));
+      || document.tags.some((tag) => tag.toLowerCase().includes(term))) : documents);
   }, [documents, query]);
 
   return (
@@ -138,7 +138,8 @@ export function QuestionSetList({
   const [enhancing, setEnhancing] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const orderedSets = useMemo(
-    () => (recent ? sortQuestionSetsByRecency(sets, questions) : sets),
+    // Uploads land newest-first in the store; the library reads in lecture order (I3-26).
+    () => (recent ? sortQuestionSetsByRecency(sets, questions) : sortByNaturalTitle(sets)),
     [questions, recent, sets],
   );
   const filteredSets = useMemo(() => {

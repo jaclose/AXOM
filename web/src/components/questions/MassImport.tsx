@@ -20,8 +20,8 @@ import { assignDraftProvenancePages } from "../../lib/questionProvenance";
 import type { ImportSeed } from "./ImportPanel";
 import { draftImportStatus } from "../../lib/questionImportTrust";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { naturalCollator } from "../../lib/naturalSort";
 
-const NATURAL = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 type FileStatus = "queued" | "extracting" | "parsing" | "ready" | "needs-review" | "answer-source" | "no-text" | "error";
 
@@ -111,7 +111,7 @@ export function MassImport({
     // I3-26: batches arrive in whatever order the OS hands them over, and
     // workers finish out of order. Keep the queue in natural reading order
     // ("Lecture 2" before "Lecture 10", "Week 9 IMCQ 1" before "IMCQ 2").
-    setQueue((q) => [...q, ...added].sort((a, b) => NATURAL.compare(a.fileName, b.fileName)));
+    setQueue((q) => [...q, ...added].sort((a, b) => naturalCollator.compare(a.fileName, b.fileName)));
   }
 
   async function processAll() {
