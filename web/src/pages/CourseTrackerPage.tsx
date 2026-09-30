@@ -28,7 +28,6 @@ import {
 } from "../lib/pathUtils";
 import type { BlueprintNodeStatus, Course, InstalledBlueprint, InstalledBlueprintNode, Term, TrackerItem, TrackerKind, Yield } from "../lib/types";
 import { extractDocxText, extractPdfText, extractPlainText, type ExtractedText } from "../lib/extractText";
-import { dismissAnnouncement, isAnnouncementDismissed, readDismissedAnnouncements } from "../lib/announcements";
 import { pushToast } from "../lib/toast";
 import { ModuleTour, type ModuleTourStep } from "../components/shell/ModuleTour";
 import { ICON_SIZE } from "../lib/iconSize";
@@ -47,7 +46,6 @@ const BLUEPRINT_STATUS_LABEL: Record<BlueprintNodeStatus, string> = {
   done: "Done",
 };
 const BLUEPRINT_STATUS_ORDER: BlueprintNodeStatus[] = ["not-started", "in-progress", "blocked", "mastered", "done"];
-const TRACKER_INTRO_ANNOUNCEMENT_ID = "course-tracker-intro-v1";
 export const COURSE_TRACKER_TOUR_STEPS: readonly ModuleTourStep[] = [
   { target: "tracker-import-add", title: "Import or add", body: "Import a course list or add a course and module manually. A provider is not required." },
   { target: "tracker-structure", title: "Organize the structure", body: "Use the mastery tree to choose a course or module and keep related work together." },
@@ -59,36 +57,6 @@ export const TRACKER_IMPORT_EXAMPLE = `Week 1:
 Cell injury [Lecture] [high]
 Inflammation questions [PQ] [review]
 Daily learning activity [DLA]`;
-const trackerIntroSession = new Set<string>();
-
-type AnnouncementStorage = Pick<Storage, "getItem" | "setItem">;
-
-export function announceCourseTrackerIntroOnce({
-  storage = browserLocalStorage(),
-  session = trackerIntroSession,
-  notify = pushToast,
-}: {
-  storage?: AnnouncementStorage;
-  session?: Set<string>;
-  notify?: typeof pushToast;
-} = {}): boolean {
-  if (session.has(TRACKER_INTRO_ANNOUNCEMENT_ID)
-    || isAnnouncementDismissed(TRACKER_INTRO_ANNOUNCEMENT_ID, readDismissedAnnouncements(storage))) return false;
-  session.add(TRACKER_INTRO_ANNOUNCEMENT_ID);
-  notify({
-    title: "Course Tracker",
-    body: "Course Tracker keeps lectures, DLAs, practice questions, and passes in one place. Start by importing or adding a module.",
-    tone: "info",
-    dedupe: TRACKER_INTRO_ANNOUNCEMENT_ID,
-  });
-  dismissAnnouncement(TRACKER_INTRO_ANNOUNCEMENT_ID, storage);
-  return true;
-}
-
-function browserLocalStorage(): AnnouncementStorage | undefined {
-  try { return typeof window === "undefined" ? undefined : window.localStorage; } catch { return undefined; }
-}
-
 export async function extractTrackerImportFile(
   file: File,
   pdfExtractor: (buffer: ArrayBuffer) => Promise<ExtractedText> = extractPdfText,
@@ -148,8 +116,6 @@ export function CourseTrackerPage() {
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const focusItemId = useUi((u) => u.focusItemId);
   const clearFocus = useUi((u) => u.clearFocus);
-
-  useEffect(() => { announceCourseTrackerIntroOnce(); }, []);
 
   // Bring a specific item into view: select its scope, expand the tree, scroll
   // to it, and pulse a highlight briefly. Used by clickable suggested moves.

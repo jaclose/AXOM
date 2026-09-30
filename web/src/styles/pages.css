@@ -3588,6 +3588,7 @@
 
 /* ---- Help & Guide (Hub Folders) ---- */
 .help-card { background: linear-gradient(150deg, rgba(var(--accent-rgb),0.06), rgba(163,150,201,0.05)); border-color: rgba(var(--accent-rgb),0.16); }
+.help-hints-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--hairline); }
 .master-guide { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
 .guide-tile {
   display: flex; align-items: flex-start; gap: 11px;

@@ -116,7 +116,7 @@ describe("post-global-guide promise flow", () => {
     for (let step = 0; step < 3; step += 1) {
       fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     }
-    expect((screen.getByRole("checkbox", { name: /Show the optional seven-step guide after setup/ }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("checkbox", { name: /Show the optional eight-stop guide after setup/ }) as HTMLInputElement).checked).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Finish setup" }));
 
     expect(useStore.getState().profile).toMatchObject({ onboarded: true, tourDone: true });

@@ -3,7 +3,7 @@ import {
   PlayCircle, Sparkles, FileText, ExternalLink, Mail,
   Timer, LineChart, BadgeCheck, Brain, Database, Layers,
   Eye, AlertTriangle, ArrowRight, MessageCircle, Palette, Lock, Quote, Cloud, CalendarDays, Target, Trophy, FolderTree,
-  type LucideIcon,
+  Lightbulb, type LucideIcon,
 } from "lucide-react";
 import { useStore } from "../lib/store";
 import { GlassCard, GButton, PanelHeader } from "../components/ui/primitives";
@@ -13,6 +13,8 @@ import { DAILY_WORD_PUBLIC_METADATA } from "../data/dailyWordMetadata";
 import { buildFeedbackMailto, type FeedbackKind } from "../lib/feedback";
 import { SCHEMA_VERSION } from "../lib/seed";
 import { ICON_SIZE } from "../lib/iconSize";
+import { COACH_RESET_EVENT, readCoachLedger, resetPageHints, writeCoachLedger } from "../lib/coach";
+import { pushToast } from "../lib/toast";
 
 const FEEDBACK_EMAIL = "jafardabbagh@gmail.com";
 
@@ -230,7 +232,13 @@ export function HelpPage() {
           action={<GButton size="sm" variant="primary" onClick={() => { clearTourProgress(); s.updateProfile({ tourDone: false }); location.hash = "dashboard"; }}>
             <PlayCircle size={ICON_SIZE.body} /> Replay guided tour
           </GButton>} />
-        <div className="sub" style={{ marginTop: 2 }}>The optional seven-step tour can be skipped at any time. Replaying it never changes your data.</div>
+        <div className="sub" style={{ marginTop: 2 }}>The optional eight-stop tour can be skipped at any time. Replaying it never changes your data.</div>
+        <div className="help-hints-row">
+          <span className="sub">Small first-visit hints point at one thing per page, once.</span>
+          <GButton size="sm" onClick={showPageHintsAgain}>
+            <Lightbulb size={ICON_SIZE.body} /> Show page hints again
+          </GButton>
+        </div>
       </GlassCard>
 
       <GlassCard pad>
@@ -392,4 +400,10 @@ export function FeedbackForm() {
       <div className="feedback-fallback"><Sparkles size={ICON_SIZE.body} /> AXOM support is not an emergency service.</div>
     </GlassCard>
   );
+}
+
+function showPageHintsAgain() {
+  writeCoachLedger(resetPageHints(readCoachLedger()));
+  window.dispatchEvent(new CustomEvent(COACH_RESET_EVENT));
+  pushToast({ title: "Page hints are back on", body: "Each page will point at one thing, once.", tone: "info", dedupe: "coach-hints-reset" });
 }

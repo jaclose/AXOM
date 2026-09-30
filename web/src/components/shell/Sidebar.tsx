@@ -19,6 +19,7 @@ import {
 } from "./nav";
 import { applyNavOrder, moveNavItem, NAV_LAYOUT_VERSION, stepNavItem, upgradeNavLayout } from "../../lib/navLayout";
 import { storeHydration } from "../../lib/storeHydration";
+import { CUSTOMIZE_SIDEBAR_EVENT } from "../../lib/coach";
 import { DailyGameNavMeta } from "./DailyGameNavMeta";
 import { useStore } from "../../lib/store";
 import { AxomBrandLockup } from "../ui/BrandMark";
@@ -69,6 +70,12 @@ export function Sidebar({
   const accountStatus = useAccount((state) => state.protection);
   const updateProfile = useStore((s) => s.updateProfile);
   const [manage, setManage] = useState(false);
+  // "Overwhelmed?" -> Show me (CoachLayer) opens Customize.
+  useEffect(() => {
+    const open = () => setManage(true);
+    window.addEventListener(CUSTOMIZE_SIDEBAR_EVENT, open);
+    return () => window.removeEventListener(CUSTOMIZE_SIDEBAR_EVENT, open);
+  }, []);
   const [dismissedAnnouncements, setDismissedAnnouncements] = useState(readDismissedAnnouncements);
   const sidebarRef = useRef<HTMLElement>(null);
   const mobile = useMobileSidebar();

@@ -1,0 +1,168 @@
+/* Coach marks (F4): a ripple on the real element, a small bubble aimed at it,
+   and the one-time "Overwhelmed?" moment. Sits under dialogs (z 100). */
+
+.coach-ripple {
+  position: fixed;
+  z-index: 95;
+  pointer-events: none;
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.55), 0 0 22px rgba(var(--accent-rgb), 0.22);
+  animation: coach-ring-in .45s cubic-bezier(.22, 1, .36, 1) both;
+}
+/* Rings grow by the same few pixels on every side (a spread, not a scale),
+   so a wide target gets the same ripple as a small button. */
+.coach-ripple::before,
+.coach-ripple::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  animation: coach-ripple 1.9s cubic-bezier(.2, .7, .3, 1) 3 both;
+}
+.coach-ripple::after { animation-delay: .6s; }
+@keyframes coach-ripple {
+  from { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.55); }
+  to { box-shadow: 0 0 0 16px rgba(var(--accent-rgb), 0); }
+}
+@keyframes coach-ring-in { from { opacity: 0; } }
+
+.coach-bubble {
+  --arrow-x: 50%;
+  position: fixed;
+  z-index: 97;
+  width: min(300px, calc(100vw - 32px));
+  padding: 13px 14px 12px;
+  border: 1px solid rgba(var(--accent-rgb), 0.28);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(130% 120% at 0% 0%, rgba(var(--accent-rgb), 0.13), transparent 60%),
+    linear-gradient(160deg, rgba(30, 30, 33, 0.97), rgba(14, 14, 17, 0.98));
+  box-shadow: var(--shadow-floating);
+  -webkit-backdrop-filter: var(--blur-panel);
+  backdrop-filter: var(--blur-panel);
+  animation: coach-bubble-in .38s cubic-bezier(.22, 1, .36, 1) both;
+}
+.coach-bubble.is-measuring { visibility: hidden; top: 0; left: 0; animation: none; }
+.coach-bubble.is-above { --from-y: 6px; }
+.coach-bubble.is-below { --from-y: -6px; }
+.coach-bubble.is-right { --from-x: -6px; }
+@keyframes coach-bubble-in { from { opacity: 0; transform: translate(var(--from-x, 0), var(--from-y, 0)) scale(.98); } }
+
+/* The arrow: a rotated square sharing the bubble's border and fill. */
+.coach-bubble::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--arrow-x) - 6px);
+  width: 12px;
+  height: 12px;
+  border: inherit;
+  background: #1c1c1f;
+  transform: rotate(45deg);
+}
+.coach-bubble.is-below::before { top: -7px; border-right: 0; border-bottom: 0; }
+.coach-bubble.is-above::before { bottom: -7px; border-left: 0; border-top: 0; }
+.coach-bubble.is-right::before { left: -7px; top: calc(var(--arrow-y) - 6px); border-top: 0; border-right: 0; }
+
+.coach-bubble b { display: block; font-size: var(--fs-sm); font-weight: var(--fw-bold); color: var(--text); }
+.coach-bubble p { margin: 4px 0 11px; font-size: var(--fs-xs); line-height: var(--leading-normal); color: var(--text-60); }
+.coach-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
+.coach-off {
+  margin-right: auto;
+  padding: 4px 2px;
+  border: 0;
+  background: none;
+  color: var(--text-45, var(--text-60));
+  font-size: var(--fs-tiny);
+  cursor: pointer;
+}
+.coach-off:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+
+:root[data-theme="light"] .coach-bubble {
+  background:
+    radial-gradient(130% 120% at 0% 0%, rgba(var(--accent-rgb), 0.10), transparent 60%),
+    linear-gradient(160deg, #fffdf9, #f4eee3);
+  border-color: rgba(var(--ink-rgb), 0.16);
+  box-shadow: 0 18px 44px rgba(40, 32, 20, 0.18);
+}
+:root[data-theme="light"] .coach-bubble::before { background: #fdfaf4; border-color: rgba(var(--ink-rgb), 0.16); }
+
+/* "Overwhelmed?" -------------------------------------------------------- */
+/* A soft pool of shade (and a little blur) behind the word, so it reads over
+   any page without dimming the whole screen. */
+.coach-overwhelmed-haze {
+  position: fixed;
+  inset: 0;
+  z-index: 96;
+  pointer-events: none;
+  background: radial-gradient(ellipse 46% 34% at 50% 50%, rgba(8, 8, 10, 0.78), rgba(8, 8, 10, 0.4) 55%, transparent 100%);
+  -webkit-backdrop-filter: blur(5px);
+  backdrop-filter: blur(5px);
+  -webkit-mask-image: radial-gradient(ellipse 50% 38% at 50% 50%, #000 40%, transparent 100%);
+  mask-image: radial-gradient(ellipse 50% 38% at 50% 50%, #000 40%, transparent 100%);
+  animation: coach-haze-in .7s ease both;
+}
+.coach-overwhelmed-haze.is-leaving { animation: coach-haze-out .55s ease both; }
+@keyframes coach-haze-in { from { opacity: 0; } }
+@keyframes coach-haze-out { to { opacity: 0; } }
+:root[data-theme="light"] .coach-overwhelmed-haze {
+  background: radial-gradient(ellipse 46% 34% at 50% 50%, rgba(252, 248, 240, 0.88), rgba(252, 248, 240, 0.5) 55%, transparent 100%);
+}
+
+.coach-overwhelmed-word {
+  position: fixed;
+  z-index: 96;
+  top: 50%;
+  left: 50%;
+  margin: 0;
+  pointer-events: none;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: clamp(2.6rem, 6.4vw, 5.4rem);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 1;
+  white-space: nowrap;
+  text-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+  transform: translate(-50%, -50%);
+  animation: coach-word-in .9s cubic-bezier(.22, 1, .36, 1) both;
+}
+.coach-overwhelmed-word.is-leaving { animation: coach-word-out .55s cubic-bezier(.55, 0, .75, .25) both; }
+@keyframes coach-word-in {
+  from { opacity: 0; filter: blur(14px); transform: translate(-50%, -46%) scale(.97); }
+}
+@keyframes coach-word-out {
+  to { opacity: 0; filter: blur(10px); transform: translate(-50%, -58%) scale(1.02); }
+}
+:root[data-theme="light"] .coach-overwhelmed-word { text-shadow: 0 10px 40px rgba(255, 250, 240, 0.8); }
+
+.coach-arrow {
+  position: fixed;
+  inset: 0;
+  z-index: 96;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  overflow: visible;
+}
+.coach-arrow path {
+  fill: none;
+  stroke: rgb(var(--accent-rgb));
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  filter: drop-shadow(0 0 6px rgba(var(--accent-rgb), 0.45));
+  animation: coach-draw .7s cubic-bezier(.45, 0, .2, 1) forwards;
+}
+.coach-arrow .coach-arrow-head { fill: rgb(var(--accent-rgb)); opacity: 0; animation: coach-head .2s ease .62s forwards; }
+.coach-arrow.is-leaving { transition: opacity .5s ease; opacity: 0; }
+@keyframes coach-draw { to { stroke-dashoffset: 0; } }
+@keyframes coach-head { to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .coach-ripple, .coach-bubble, .coach-overwhelmed-word, .coach-overwhelmed-word.is-leaving,
+  .coach-overwhelmed-haze, .coach-overwhelmed-haze.is-leaving { animation: none; }
+  .coach-overwhelmed-word.is-leaving, .coach-overwhelmed-haze.is-leaving { opacity: 0; transition: opacity .3s ease; }
+  .coach-ripple::before, .coach-ripple::after { animation: none; }
+  .coach-arrow path { animation: none; stroke-dashoffset: 0; }
+  .coach-arrow .coach-arrow-head { animation: none; opacity: 1; }
+}

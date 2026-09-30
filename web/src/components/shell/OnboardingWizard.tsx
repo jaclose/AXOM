@@ -494,7 +494,7 @@ export function OnboardingWizard({
             <label className="onboarding-tour-choice">
               <input type="checkbox" checked={draft.launchTour}
                 onChange={(event) => updateDraft({ launchTour: event.target.checked })} />
-              <span><b>Show the optional seven-step guide after setup</b><small>You can skip or replay it later from Help.</small></span>
+              <span><b>Show the optional eight-stop guide after setup</b><small>You can skip or replay it later from Help.</small></span>
             </label>
             <div className="onboarding-summary compact">
               <div><span>Study path</span><b>{track.label}</b></div>

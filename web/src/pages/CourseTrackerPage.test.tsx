@@ -2,13 +2,11 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { Toaster } from "../components/shell/Toaster";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { STORAGE_KEYS } from "../lib/brand";
 import { makeSeed } from "../lib/seed";
 import { useStore } from "../lib/store";
 import { useToasts } from "../lib/toast";
 import type { TrackerItem } from "../lib/types";
 import {
-  announceCourseTrackerIntroOnce,
   CourseTrackerPage,
   descendantScopes,
   extractTrackerImportFile,
@@ -202,31 +200,7 @@ describe("Course Tracker comprehension layout", () => {
   });
 });
 
-describe("Course Tracker local intro and file extraction", () => {
-  it("shows the exact intro once and stores only its stable announcement id", () => {
-    const storage = memoryStorage();
-    const session = new Set<string>();
-    const notify = vi.fn();
-
-    expect(announceCourseTrackerIntroOnce({ storage, session, notify })).toBe(true);
-    expect(announceCourseTrackerIntroOnce({ storage, session, notify })).toBe(false);
-    expect(notify).toHaveBeenCalledOnce();
-    expect(notify.mock.calls[0][0].body).toBe("Course Tracker keeps lectures, DLAs, practice questions, and passes in one place. Start by importing or adding a module.");
-    expect(JSON.parse(storage.getItem(STORAGE_KEYS.dismissedAnnouncements)!)).toEqual(["course-tracker-intro-v1"]);
-  });
-
-  it("uses an in-memory guard when device storage is blocked", () => {
-    const storage = {
-      getItem: vi.fn(() => { throw new Error("blocked"); }),
-      setItem: vi.fn(() => { throw new Error("blocked"); }),
-    };
-    const session = new Set<string>();
-    const notify = vi.fn();
-    expect(announceCourseTrackerIntroOnce({ storage, session, notify })).toBe(true);
-    expect(announceCourseTrackerIntroOnce({ storage, session, notify })).toBe(false);
-    expect(notify).toHaveBeenCalledOnce();
-  });
-
+describe("Course Tracker file extraction", () => {
   it("routes a PDF through the production extractor seam and preserves its filename and warnings", async () => {
     const buffer = new Uint8Array([37, 80, 68, 70]).buffer;
     const file = { name: "course schedule.pdf", type: "application/pdf", arrayBuffer: vi.fn(async () => buffer) } as unknown as File;

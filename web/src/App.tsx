@@ -4,6 +4,7 @@ import { TopBar } from "./components/shell/TopBar";
 import { RouteErrorBoundary } from "./components/shell/RouteErrorBoundary";
 import { TabPresence } from "./components/shell/TabPresence";
 import { GuideOffer } from "./components/shell/GuideOffer";
+import { CoachLayer } from "./components/shell/CoachLayer";
 import { clearTourProgress } from "./lib/onboardingProgress";
 import { SettingsModal, type SettingsTab } from "./components/shell/SettingsModal";
 import { OnboardingWizard } from "./components/shell/OnboardingWizard";
@@ -369,6 +370,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
         active={!showTour && !settings && !promisePromptOpen && !promiseCutsceneOpen}
         onStart={() => { clearTourProgress(); updateProfile({ tourDone: false }); }}
       />
+      <CoachLayer route={routeKey} suspended={Boolean(showTour || settings || promisePromptOpen || promiseCutsceneOpen || drawer)} />
       {promisePromptOpen && !showTour && (
         <PromisePrompt
           onSign={() => { setPromisePromptOpen(false); setPromiseCutsceneOpen(true); }}
