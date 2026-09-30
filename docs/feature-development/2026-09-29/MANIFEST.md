@@ -135,7 +135,7 @@ This table supersedes older CODEX/DONE assumptions above for this lane. SHIPPED 
 | I2-03 | Productivity events | PARTIAL | Normalized activity and retry tests pass; Anki route-independent ingestion still missing; concurrent tracker edits under review. |
 | I2-04 | Exam countdown | PARTIAL | Split widget exists; configurable weighting and shared module/calendar date source unfinished. |
 | I2-05 | Soundscape lifecycle | PARTIAL | Persistent player exists; daily metadata refresh unfinished. |
-| I2-06 | Highlights | IMPLEMENTED, NOT VERIFIED | Baseline same-tone overlap rejection reproduced; real pointer merge/delete/reload passed; commit pending. |
+| I2-06 | Highlights | SHIPPED + VERIFIED | Compatible interval merging; real Chrome pointer merge/delete/reload; isolated commit snapshot passed 1902 tests, typecheck/lint/build. Local only. |
 | I2-07 | Quotes | IMPLEMENTED, NOT VERIFIED | Inherited originals and container; held until Wave A complete. |
 | I2-08 | Ambient spaces | PARTIAL | Local/owned media host; external WindowSwap route returned 404; never blindly embedded. |
 | I2-09 | Light mode | PARTIAL | Inherited tokens improve surfaces; full contrast audit remains. |

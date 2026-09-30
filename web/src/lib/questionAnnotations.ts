@@ -20,7 +20,7 @@ export interface QuestionTextAnnotation {
 }
 
 export type AnnotationCreationResult =
-  | { status: "created"; annotation: QuestionTextAnnotation }
+  | { status: "created"; annotation: QuestionTextAnnotation; annotations: QuestionTextAnnotation[]; mergedIds: string[] }
   | { status: "overlap"; existingAnnotationId: string; reason: string }
   | { status: "ignored"; reason: "collapsed" | "whitespace" | "duplicate-id" };
 
@@ -107,21 +107,44 @@ export function createTextAnnotationWithIntegrity(input: {
     return { status: "ignored", reason: "duplicate-id" };
   }
   const optionKey = input.target === "option" ? input.optionKey?.trim().toUpperCase() : undefined;
-  const overlap = input.existingAnnotations
+  const candidates = input.existingAnnotations
     .filter((annotation) => sameAnnotationTarget(annotation, input.target, optionKey))
-    .map((annotation) => reconcileTextAnnotation(annotation, input.sourceText))
-    .find((annotation) => (
-      input.startOffset < annotation.endOffset
-      && input.endOffset > annotation.startOffset
-    ));
+    .map((annotation) => ({ original: annotation, current: reconcileTextAnnotation(annotation, input.sourceText) }));
+  let startOffset = input.startOffset;
+  let endOffset = input.endOffset;
+  const merged = new Map<string, QuestionTextAnnotation>();
+  // Grow to a fixed point: a selection may bridge several existing marks.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const { original, current } of candidates) {
+      if (merged.has(current.id) || original.status !== "active" || current.status !== "active"
+        || current.tone !== input.tone || current.note !== (input.note?.trim() || undefined)
+        || current.startOffset > endOffset || current.endOffset < startOffset) continue;
+      merged.set(current.id, current);
+      startOffset = Math.min(startOffset, current.startOffset);
+      endOffset = Math.max(endOffset, current.endOffset);
+      changed = true;
+    }
+  }
+  const overlap = candidates.find(({ current }) => !merged.has(current.id)
+    && startOffset < current.endOffset && endOffset > current.startOffset);
   if (overlap) {
     return {
       status: "overlap",
-      existingAnnotationId: overlap.id,
-      reason: "Highlight overlaps an existing highlight.",
+      existingAnnotationId: overlap.current.id,
+      reason: "This selection crosses a different color, note, or a highlight needing repair. Erase that highlight first.",
     };
   }
-  return { status: "created", annotation: createTextAnnotation(input) };
+  const oldest = [...merged.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))[0];
+  const annotation = createTextAnnotation({ ...input, id: oldest?.id ?? input.id, startOffset, endOffset });
+  if (oldest) annotation.createdAt = oldest.createdAt;
+  return {
+    status: "created",
+    annotation,
+    mergedIds: [...merged.keys()],
+    annotations: [...input.existingAnnotations.filter((item) => !merged.has(item.id)), annotation],
+  };
 }
 
 export function removeTextAnnotationById(

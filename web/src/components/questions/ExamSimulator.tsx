@@ -213,7 +213,7 @@ export function ExamSimulator({ skin, mode, pool, timeLimitSeconds, title = "AXO
       existingAnnotations: existing,
     });
     if (result.status !== "created") return;
-    const nextAnnotations = [...existing, result.annotation];
+    const nextAnnotations = result.annotations;
     setAnnotations((current) => ({ ...current, [question.id]: nextAnnotations }));
     updateQuestion(question.id, { annotations: nextAnnotations });
     window.getSelection()?.removeAllRanges();

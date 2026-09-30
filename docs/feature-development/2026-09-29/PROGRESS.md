@@ -52,3 +52,10 @@ Baseline: feat/ideas2-integration at c04272d, substantial inherited unstaged imp
 - Current full working-tree validation (Node 22.23.1): 201 test files / 1964 tests pass, typecheck, lint, production build pass. Existing bundle-size and mixed-static/dynamic-import build warnings remain. Original Node 26 run exposed its experimental global localStorage mismatch; reran with supported Node 22.
 - Native canonical folder checks pass (2 Rust tests); explicit main-window permission boundary added after reviewing Tauri app-command defaults. Packaged/native interaction still pending.
 - Concurrent edits appeared in this same worktree from two Codex CLI processes. Do not stage incoming tracker/soundscape changes without resolving ownership. No merge, push, deployment, schema change or credentials used.
+
+### I2-06 annotation verification
+
+- Compatible adjacent/overlapping highlights merge through a fixed-point interval union, preserving the oldest ID. Different colors/notes remain protected; all three question surfaces replace the resulting annotation set atomically. Dragging in erase mode no longer deletes a mark.
+- Regression: old implementation rejected extending an existing highlight. Unit/component tests cover bridging marks, tone conflicts, persistent offsets and selection behavior. Real Chrome pointer drags verified plain selection, selection into/out of/across an existing mark, reload, keyboard deletion and reload again.
+- Browser artifact: `/tmp/axom-ideas2-wavea-evidence/ideas2-wave-a-real-pointer-18a13-across-persisted-highlights/highlight-merged.png`. The new standalone `ideas2-highlights.spec.ts` retains this journey.
+- Commit snapshot verification: 192 files / 1902 tests, typecheck, lint and production build passed on Node 22.23.1; Chrome journey passed against that isolated snapshot. Its temporary Vite harness explicitly allowed the existing symlinked dependencies. Existing bundle warnings remain. `git diff --check` passed.
