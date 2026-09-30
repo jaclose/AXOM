@@ -240,10 +240,17 @@
   display: flex; align-items: flex-start; gap: 14px;
   padding: 22px clamp(20px, 3vw, 40px) 4px;
 }
-.topbar-heading { min-width: 0; flex: 1 1 auto; }
+.topbar-heading { min-width: 0; flex: 1 1 18rem; } /* a small basis: long subtitles wrap inside the heading instead of pushing the clock to a new line */
 .topbar .tb-title { font-family: var(--font-display); font-size: clamp(23px, 3vw, 29px); font-weight: var(--fw-medium); letter-spacing: var(--tracking-tighter); }
 .topbar .tb-sub { font-size: var(--fs-base); color: var(--text-60); margin-top: 4px; line-height: var(--leading-normal); }
 .topbar .tb-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+/* Between phones and wide desktops there is no room for title, quote, clock
+   and Refresh on one line. The quote takes its own line under the title, so
+   the clock and Refresh stay top-right instead of dropping under the title. */
+@media (min-width: 881px) and (max-width: 1320px) {
+  .topbar .tb-quote:not(.collapsed) { order: 3; flex: 1 1 100%; max-width: 640px; margin-left: 0; }
+  .topbar .tb-quote:not(.collapsed) + .tb-actions { margin-left: auto; }
+}
 
 /* Compact clock utility. It is an anchored, non-modal dialog so it never
    creates a nested focus trap with Settings. */
