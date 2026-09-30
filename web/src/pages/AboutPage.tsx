@@ -56,7 +56,7 @@ export function AboutPage() {
   const [tab, setTab] = useState<"axom" | "developer">("axom");
   return (
     <>
-      <div className="ecosystem-tabs about-tabs" role="tablist" aria-label="About">
+      <div className="about-tabs" role="tablist" aria-label="About">
         <button role="tab" id="about-tab-axom" aria-controls="about-panel" aria-selected={tab === "axom"} onClick={() => setTab("axom")}>About AXOM</button>
         <button role="tab" id="about-tab-developer" aria-controls="about-panel" aria-selected={tab === "developer"} onClick={() => setTab("developer")}>The developer</button>
       </div>

@@ -5755,6 +5755,16 @@
 .trend-week.dense .trend-bar { left: 12%; right: 12%; }
 .trend-week.dense .trend-week-label b { font-size: var(--fs-micro); color: var(--text-45); }
 
-/* --- About: two tabs (I1-29) --- */
-.about-tabs { margin-bottom: 4px; }
+/* --- About: two tabs (I1-29) ---
+   Self-contained: ecosystem.css (Building's tab strip) only loads with the
+   lazy Building page, so borrowing it left default buttons on a cold load. */
+.about-tabs { display: flex; gap: 6px; margin-bottom: 4px; border-bottom: 1px solid var(--hairline); }
+.about-tabs button {
+  padding: 11px 15px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  background: transparent; color: var(--text-55); font: inherit; font-weight: var(--fw-semibold); cursor: pointer;
+}
+.about-tabs button:hover { color: var(--text-80); }
+.about-tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: rgb(var(--accent-rgb)); }
+.about-tabs button:focus-visible { outline: 2px solid var(--gold-line); outline-offset: 2px; border-radius: var(--radius-xs); }
 .about-panel { display: flex; flex-direction: column; gap: 20px; }
+@media (max-width: 430px) { .about-tabs button { flex: 1; } }

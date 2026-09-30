@@ -65,7 +65,7 @@ AI generation (I1-05, I1-07, I1-32, I1-33), exam interfaces and QB flow (I1-08, 
 
 | # | Decision | Recommendation |
 |---|---|---|
-| D1 | Your phone number in the crisis scene. The repo is public (github.com/jaclose/AXOM) and the web bundle is public. | Lead with 988 / findahelpline.com / Grenada numbers. If you still want a personal line, store it in Supabase and show it only in the signed-in app, never in git. |
+| D1 | Crisis scene contact | **Decided (JD, 2026-09-29): no developer phone number anywhere in the app, even behind sign-in.** The scene routes to professional crisis lines (988, local numbers such as Grenada, findahelpline.com) and to a trusted contact the user adds themselves. |
 | D2 | iPad wallpapers. The "myWallpaper" files live in iWallpaper's sandbox (licensed to that app), not in the repo. | Use AXOM's own scene art or generated originals; your own photos as an option. |
 | D3 | NCRS sheets + Resource/ PDFs (179 MB, one chart has a typo "Epimnphrine") | Host outside git (Supabase storage or Drive links); the library reads them by URL. |
 | D4 | The two Q-bank drive links | Link only if you have the right to share their contents publicly. |
@@ -73,7 +73,7 @@ AI generation (I1-05, I1-07, I1-32, I1-33), exam interfaces and QB flow (I1-08, 
 | D6 | "Is my account safe?" | Row-level security is on for all account tables and sessions are Supabase-managed. The Sep 28 hardening (server-authoritative AI quota, tighter workspace writes, safer definer functions, bounded snapshot storage) is written but still uncommitted in the main checkout, so it is not live yet. Land it first (merge order step 1). |
 | D7 | Menu bar timer not showing | Your installed /Applications/AXOM.app is from Sep 23; the menu bar timer landed Sep 24-26. A fresh desktop build shows it. |
 | D8 | Renal labs screenshot (bugs/15.43.52) | Need to know what is wrong in it. |
-| D9 | Blue orb (bugs/16.25.15) | Not drawn by AXOM; quit ChatGPT/Codex computer-use to confirm. |
+| D9 | Blue orb (bugs/16.25.15) | **Resolved:** it is the Codex Skysight lens (`Codex Computer Use.app` > Package_ComputerUse.bundle > LensSequence, 45 frames of a 48x48 blue orb), shown while Codex observes the screen for agent context. Not AXOM. |
 
 ## Capability map used for this plan
 

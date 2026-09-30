@@ -36,6 +36,19 @@ async function processReadyText(onInspect = vi.fn()) {
 }
 
 describe("Mass Import trust handoff", () => {
+  it("queues a batch in natural reading order, whatever order the OS hands over (I3-26)", async () => {
+    const user = userEvent.setup();
+    render(<MassImport onInspect={vi.fn()} />);
+    const files = ["NCRS Lecture 10.txt", "NCRS Lecture 2.txt", "Week 9 IMCQ 2.txt", "NCRS Lecture 1.txt", "Week 9 IMCQ 1.txt"]
+      .map((name) => new File(["1. Q?\nA. a\nB. b\nAnswer: A"], name, { type: "text/plain" }));
+    await user.upload(screen.getByLabelText("Choose multiple question files"), files);
+    const names = [...document.querySelectorAll("*")]
+      .map((element) => element.childNodes.length === 1 && element.textContent ? element.textContent : "")
+      .filter((text) => /\.txt$/.test(text));
+    const order = [...new Set(names)];
+    expect(order).toEqual(["NCRS Lecture 1.txt", "NCRS Lecture 2.txt", "NCRS Lecture 10.txt", "Week 9 IMCQ 1.txt", "Week 9 IMCQ 2.txt"]);
+  });
+
   it("never marks a high-confidence draft with no mapped answer ready", () => {
     expect(massImportFileStatus([{
       stem: "Unresolved despite a malformed confidence value",

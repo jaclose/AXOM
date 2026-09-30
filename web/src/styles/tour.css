@@ -382,6 +382,18 @@
 }
 @media (max-width: 560px) {
   .guide-offer { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .guide-offer-close { grid-row: 1; grid-column: 3; align-self: start; }
   .guide-offer-actions { grid-column: 1 / -1; justify-content: flex-end; }
 }
 @media (prefers-reduced-motion: reduce) { .guide-offer { animation: none; } }
+
+/* Light theme: the tour tip used a fixed dark surface with the theme's dark
+   ink, so its title nearly vanished. Cream glass, as the guide offer uses. */
+:root[data-theme="light"] .tour-tip {
+  background:
+    radial-gradient(130% 110% at 0% 0%, rgba(var(--accent-rgb), 0.10), transparent 58%),
+    linear-gradient(160deg, #fffdf9, #f4eee3);
+  border-color: rgba(var(--ink-rgb), 0.16);
+  box-shadow: 0 24px 60px rgba(40, 32, 20, 0.22), 0 0 0 1px rgba(255, 255, 255, 0.6) inset;
+}
+:root[data-theme="light"] .tour-progress { background: rgba(var(--ink-rgb), 0.08); }
