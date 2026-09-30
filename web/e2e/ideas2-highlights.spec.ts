@@ -1,11 +1,12 @@
-import { expect, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { deferPromisePrompt, expect, test } from "./fixtures";
 
 type DevWindow = Window & { __AXOM_DEV__?: Promise<{ useStore: typeof import("../src/lib/store").useStore }> };
 
 async function openWorkspace(page: Page, route: string) {
   await page.goto(`/#${route}`);
-  await page.getByRole("button", { name: "Skip setup", exact: true }).click();
-  await page.getByRole("button", { name: "Review later", exact: true }).click();
+  await page.getByRole("button", { name: "Skip for now", exact: true }).click();
+  await deferPromisePrompt(page);
   await page.evaluate((hash) => { location.hash = hash; }, route);
   await expect(page.locator(".route-loading")).toHaveCount(0);
 }
