@@ -16,15 +16,16 @@ Updated 2026-09-30 00:30. Every commit passed `npm run quality` (typecheck, lint
 | 7a85fe0 | I3-54, I3-55, I3-56, I3-57 | Daily Word win card, numbered share text, on-board how-to (ENVOY/EBONY), back link, no page scroll |
 | a77a59b | I3-53 | Daily Word hint ladder: key glow, then tile outline, then a confirmed reveal that keeps the streak |
 | 937a991 | I1-23, I3-52, I3-58 | Sidebar: daily-use Tools, Misc folder for Tasks/Methods/Prompts/Hub folders, drag or Alt+Arrow reordering, one-time upgrade for saved profiles; Daily Word and Doctordle countdowns + streak; Application Checker opens on Residency for med tracks |
+| 120a7ba | I1-18, I1-19, F4, I3-18 | "Overwhelmed?" once after the guide and Promise (arrow + ripple to Customize); one first-visit hint per page on a reusable CoachMark; Help can bring hints back; signing the Promise -> tour offer verified |
 | a030af0 | I1-21 | Dashboard: Daily Check-In, then the focus timer with a new Soundscape widget beside it, then targets, Question Bank, Course Tracker, Weekly; saved layouts carried forward once (defaultsRevision 2) |
 
-Test count: 1,906 at baseline, 1,949 now.
+Test count: 1,906 at baseline, 1,964 now.
 
 ## Next (Wave 1 remainder)
 
-1. F4 coach-mark primitive, then "Overwhelmed?" (I1-18) and first-visit page hints (I1-19) on it; verify the tour offer after signing the Promise (I3-18).
-2. "Did you get the Doctordle?" prompt + Doctordle back link (I3-59).
-3. Settings consumer-friendly rewrite (I1-22), Integrations copy honesty (I1-32), F7 DESIGN.md.
+1. "Did you get the Doctordle?" prompt + Doctordle back link (I3-59).
+2. Settings consumer-friendly rewrite (I1-22), Integrations copy honesty (I1-32), F7 DESIGN.md.
+3. Mini-guide help buttons on the remaining pages (I1-17).
 
 ## Waiting on JD
 
