@@ -384,7 +384,12 @@ export const useStore = create<Store>()(
         })),
       updateTrackerItem: (id, patch) =>
         set((s) => ({
-          tracker: s.tracker.map((t) => (t.id === id ? { ...t, ...patch, updated: now() } : t)),
+          // `updated` is the item's last real study touch: review timing and
+          // suggestion order read it. Resting a suggestion ("Not now", Undo)
+          // is not study, so it leaves the clock alone (I3-27).
+          tracker: s.tracker.map((t) => (t.id === id
+            ? { ...t, ...patch, updated: isRestOnlyPatch(patch) ? t.updated : now() }
+            : t)),
         })),
       renameTrackerScope: (oldPath, newPath) =>
         set((s) => {
@@ -2089,6 +2094,11 @@ function backfillTrackerHabit(tracker: ProductivityTracker, logs: StudyLog[], en
 // Pomodoro preset declares defaultTrackerId "tracker-study"). Matching by name
 // alone left them off "Your trackers", so JD topped the tracker up by hand and
 // his study time doubled (Ideas 3: 384 -> 736).
+function isRestOnlyPatch(patch: Partial<TrackerItem>): boolean {
+  const keys = Object.keys(patch);
+  return keys.length > 0 && keys.every((key) => key === "recommendationSnoozedUntil");
+}
+
 const STUDY_TIMER_TYPES = new Set(["pomodoro", "focus session"]);
 
 function matchProductivityTracker(trackers: ProductivityTracker[] = [], type: string): ProductivityTracker | undefined {
