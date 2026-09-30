@@ -22,10 +22,9 @@ import { RecoveryStatusCard } from "./RecoveryStatusCard";
 import { PromiseCutscene } from "./PromiseCutscene";
 import { FOCUS_OPTIONS, focusOption, normalizedFocusIds } from "../../lib/experience";
 import { EDUCATION_TRACKS, resolveTrack } from "../../lib/tracks";
-import { prettyDate } from "../../lib/scoring";
+import { SavedPromise } from "./PromiseCutscene";
 import type { DashboardWidgetId, EducationTrackId, ExperienceFocusId } from "../../lib/types";
 import { HardDrive } from "lucide-react";
-import { AxomWordmark } from "../ui/BrandMark";
 import { SCHEMA_VERSION, APP_BUILD_LABEL } from "../../lib/seed";
 import { lastBackupAt } from "../../lib/backup";
 import { listLocalBackups } from "../../lib/localBackup";
@@ -416,7 +415,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
       )}
 
       {resigning && <PromiseCutscene onDone={() => setResigning(false)} />}
-      {viewingPromise && promise && <PromiseSheet onClose={() => setViewingPromise(false)} />}
+      {viewingPromise && promise && <SavedPromise onClose={() => setViewingPromise(false)} />}
     </Modal>
   );
 }
@@ -802,49 +801,6 @@ function DevicePreferencePanel() {
         {permission === "default" && <GButton size="sm" onClick={requestNotifications}>Enable notifications</GButton>}
       </div>
     </section>
-  );
-}
-
-const PROMISE_LINES = [
-  "This is only a tool.",
-  "It will not save you.",
-  "It will not study for you.",
-  "It will not become disciplined on your behalf.",
-  "But if you return to it honestly,",
-  "if you record the work,",
-  "if you confront the missed days,",
-  "if you build again after falling behind,",
-  "then this becomes more than software.",
-  "It becomes a witness.",
-];
-
-// Read-only view of the already-signed promise, in the contract styling.
-function PromiseSheet({ onClose }: { onClose: () => void }) {
-  const { profile } = useStore();
-  const p = profile.promise;
-  return (
-    <div className="promise-scrim" onMouseDown={onClose}>
-      <div className="promise-orbs"><i /><i /><i /></div>
-      <div className="promise-paper open" onMouseDown={(e) => e.stopPropagation()}>
-        <header className="promise-contract-header">
-          <AxomWordmark size="lg" />
-          <span>Saved personal promise</span>
-          <h2>A promise to yourself</h2>
-          <p>A voluntary commitment, stored in your local AXOM profile. It is not a legal contract.</p>
-        </header>
-        <div className="promise-lines">
-          {PROMISE_LINES.map((line, i) => (
-            <p key={line} className={`promise-line in ${i === PROMISE_LINES.length - 1 ? "accent" : ""}`}>{line}</p>
-          ))}
-        </div>
-        <div className="promise-signed-row">
-          <div><span>Signed</span><b className="promise-sig">{p?.signedName}</b></div>
-          <div className="right"><span>Date</span><b>{p?.signedAt ? prettyDate(p.signedAt) : "—"}</b></div>
-        </div>
-        <div className="sub" style={{ marginTop: 8, color: "#8a7f63" }}>Promise text {p?.promiseTextVersion ?? "v1"}</div>
-        <button type="button" className="promise-btn" style={{ marginTop: 14 }} onClick={onClose}>Close</button>
-      </div>
-    </div>
   );
 }
 

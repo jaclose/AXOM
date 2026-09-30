@@ -7,7 +7,7 @@ afterEach(() => { document.body.innerHTML = ""; });
 describe("shellBusy", () => {
   it("is quiet on a plain page and busy under any first-run layer, check-in or rest", () => {
     expect(shellBusy()).toBe(false);
-    for (const cls of ["modal-scrim", "guide-offer", "tour-tip", "promise-scrim", "coach-bubble", "game-checkin", "focus-checkin", "rest-overlay"]) {
+    for (const cls of ["modal-scrim", "guide-offer", "tour-tip", "promise-stage", "coach-bubble", "game-checkin", "focus-checkin", "rest-overlay"]) {
       document.body.innerHTML = `<div class="${cls}"></div>`;
       expect(shellBusy(), cls).toBe(true);
     }

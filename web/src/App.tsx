@@ -269,14 +269,17 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
   }
 
   function completeOnboarding(destination: OnboardingDestination) {
+    const firstRun = setupMode !== "rerun";
     setSetupMode(null);
     go(destination);
     const profile = useStore.getState().profile;
-    // Finishing without the optional guide and skipping setup are both explicit
-    // guide decisions. Present the Promise only after onboarding has closed so
-    // it never competes with setup or traps the user's emergency exit.
+    // Present the Promise only after setup has closed so it never competes with
+    // setup or traps the user's emergency exit. A first run flows straight into
+    // it (setup, then the Promise, then AXOM; "Review later" is always there);
+    // anywhere else it is offered first.
     if (profile.tourDone === true && shouldOfferPromisePrompt(profile)) {
-      setPromisePromptOpen(true);
+      if (firstRun) setPromiseCutsceneOpen(true);
+      else setPromisePromptOpen(true);
     }
   }
 
