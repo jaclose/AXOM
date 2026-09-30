@@ -2,6 +2,8 @@
 // JSON export / import. The portable backup story for the browser-stored data.
 // ===========================================================================
 import type { ClockPreferences, DailyWordPuzzleState, NoctyriumState, TimeZonePreference } from "./types";
+import { normalizeNavOrder } from "./navLayout";
+import { normalizeHintFields } from "./dailyWordHints";
 import { normalizeEnergyChecks } from "./energyInsights";
 import { normalizePrimaryScopes } from "./trackerFocus";
 import {
@@ -356,6 +358,9 @@ export function parseImport(text: string): NoctyriumState {
       toolsCollapsed: typeof profile.toolsCollapsed === "boolean" ? profile.toolsCollapsed : undefined,
       prepCollapsed: typeof profile.prepCollapsed === "boolean" ? profile.prepCollapsed : undefined,
       dailyGamesCollapsed: typeof profile.dailyGamesCollapsed === "boolean" ? profile.dailyGamesCollapsed : undefined,
+      miscCollapsed: typeof profile.miscCollapsed === "boolean" ? profile.miscCollapsed : undefined,
+      navOrder: normalizeNavOrder(profile.navOrder),
+      navLayoutVersion: typeof profile.navLayoutVersion === "number" ? profile.navLayoutVersion : undefined,
       journalReviewTime: normalizeJournalReviewTime(profile.journalReviewTime),
       journalNotebook: profile.journalNotebook === undefined
         ? undefined
@@ -603,14 +608,16 @@ function normalizeDailyWordPuzzles(value: unknown): DailyWordPuzzleState[] {
         .map((guess) => guess.toUpperCase())
       : [];
     const completed = candidate.completed === true;
+    const won = completed && candidate.won === true;
     const puzzle: DailyWordPuzzleState = {
+      ...normalizeHintFields(candidate, completed, won),
       puzzleId,
       puzzleDate,
       timezone,
       wordListVersion,
       guesses,
       completed,
-      won: completed && candidate.won === true,
+      won,
       startedAt,
       completedAt: completed && typeof candidate.completedAt === "string" ? candidate.completedAt : undefined,
       updatedAt: typeof candidate.updatedAt === "string" && candidate.updatedAt

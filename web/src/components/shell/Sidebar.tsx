@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
-  Settings, Cloud, SlidersHorizontal, Check, ChevronDown, ChevronRight, Wrench, GraduationCap, MessageCircle,
+  Settings, Cloud, SlidersHorizontal, Check, ChevronDown, ChevronRight, Wrench, GraduationCap, MessageCircle, Archive,
 } from "lucide-react";
 import {
   DAILY_GAMES_FOLDER,
@@ -11,11 +11,16 @@ import {
   SIDEBAR_BOTTOM,
   SIDEBAR_LOCKED,
   SIDEBAR_LEARN,
+  SIDEBAR_MISC,
   SIDEBAR_PREP,
   SIDEBAR_REVIEW,
   SIDEBAR_TODAY,
   SIDEBAR_TOOLS,
 } from "./nav";
+import { applyNavOrder, moveNavItem, NAV_LAYOUT_VERSION, stepNavItem, upgradeNavLayout } from "../../lib/navLayout";
+import { storeHydration } from "../../lib/storeHydration";
+import { CUSTOMIZE_SIDEBAR_EVENT } from "../../lib/coach";
+import { DailyGameNavMeta } from "./DailyGameNavMeta";
 import { useStore } from "../../lib/store";
 import { AxomBrandLockup } from "../ui/BrandMark";
 import type { SettingsTab } from "./SettingsModal";
@@ -29,6 +34,9 @@ const PREP_FOLDER_TOGGLE_ID = "sidebar-academic-prep-toggle";
 const PREP_FOLDER_ITEMS_ID = "sidebar-academic-prep-items";
 const TOOLS_FOLDER_TOGGLE_ID = "sidebar-tools-toggle";
 const TOOLS_FOLDER_ITEMS_ID = "sidebar-tools-items";
+const MISC_FOLDER_TOGGLE_ID = "sidebar-misc-toggle";
+const MISC_FOLDER_ITEMS_ID = "sidebar-misc-items";
+const NAV_DRAG_TYPE = "text/x-axom-nav";
 
 function useMobileSidebar(): boolean {
   const [mobile, setMobile] = useState(() => (
@@ -62,6 +70,12 @@ export function Sidebar({
   const accountStatus = useAccount((state) => state.protection);
   const updateProfile = useStore((s) => s.updateProfile);
   const [manage, setManage] = useState(false);
+  // "Overwhelmed?" -> Show me (CoachLayer) opens Customize.
+  useEffect(() => {
+    const open = () => setManage(true);
+    window.addEventListener(CUSTOMIZE_SIDEBAR_EVENT, open);
+    return () => window.removeEventListener(CUSTOMIZE_SIDEBAR_EVENT, open);
+  }, []);
   const [dismissedAnnouncements, setDismissedAnnouncements] = useState(readDismissedAnnouncements);
   const sidebarRef = useRef<HTMLElement>(null);
   const mobile = useMobileSidebar();
@@ -88,9 +102,24 @@ export function Sidebar({
     setDismissedAnnouncements(dismissAnnouncement(announcementId));
   }, [active, dismissedAnnouncements]);
 
+  // One-time sidebar layout upgrade for saved profiles (lib/navLayout.ts).
+  // Waits for the saved workspace so it never writes over it before load.
+  useEffect(() => {
+    let cancelled = false;
+    storeHydration.wait().then(() => {
+      if (cancelled) return;
+      const current = useStore.getState().profile;
+      if ((current.navLayoutVersion ?? 1) >= NAV_LAYOUT_VERSION) return;
+      useStore.getState().updateProfile(upgradeNavLayout(current.hiddenNav ?? [], current.navLayoutVersion));
+    }).catch(() => { /* a failed load shows its own recovery screen */ });
+    return () => { cancelled = true; };
+  }, []);
+
   const hidden = new Set(profile.hiddenNav ?? []);
   const toolsOpen = !profile.toolsCollapsed;
   const prepOpen = !profile.prepCollapsed;
+  const miscOpen = !profile.miscCollapsed;
+  const ordered = (section: readonly string[]) => applyNavOrder(section, profile.navOrder);
 
   function toggleHidden(id: string) {
     if (SIDEBAR_LOCKED.has(id)) return;
@@ -100,7 +129,7 @@ export function Sidebar({
     updateProfile({ hiddenNav: [...next] });
   }
 
-  function Item({ id }: { id: string }) {
+  function Item({ id, section }: { id: string; section?: readonly string[] }) {
     const item = navById(id);
     if (!item) return null;
     const I = item.icon;
@@ -123,10 +152,31 @@ export function Sidebar({
     );
     if (manage) {
       const locked = SIDEBAR_LOCKED.has(id);
+      // Customize: drag onto another item in the same section, or Alt+Up/Down.
+      const reorder = section && !locked ? {
+        draggable: true,
+        onDragStart: (event: React.DragEvent) => { event.dataTransfer.setData(NAV_DRAG_TYPE, id); event.dataTransfer.effectAllowed = "move"; },
+        onDragOver: (event: React.DragEvent) => { if (event.dataTransfer.types.includes(NAV_DRAG_TYPE)) event.preventDefault(); },
+        onDrop: (event: React.DragEvent) => {
+          const from = event.dataTransfer.getData(NAV_DRAG_TYPE);
+          if (!from || from === id || !section.includes(from)) return;
+          event.preventDefault();
+          updateProfile({ navOrder: moveNavItem(section, profile.navOrder, from, id) });
+        },
+        onKeyDown: (event: React.KeyboardEvent) => {
+          if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
+          event.preventDefault();
+          const shown = [...document.querySelectorAll<HTMLElement>(`[data-nav-section="${section.join(",")}"]`)].map((element) => element.dataset.navId ?? "");
+          updateProfile({ navOrder: stepNavItem(section, profile.navOrder, id, event.key === "ArrowUp" ? -1 : 1, shown) });
+        },
+      } : {};
       return (
         <button type="button" className={`nav-item manage ${isHidden ? "off" : ""}`}
           aria-label={accessibleLabel} aria-pressed={!isHidden}
-          onClick={() => toggleHidden(id)} disabled={locked} title={locked ? "Always shown" : isHidden ? "Show" : "Hide"}>
+          aria-keyshortcuts={section && !locked ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
+          data-nav-section={section?.join(",")} data-nav-id={id}
+          {...reorder}
+          onClick={() => toggleHidden(id)} disabled={locked} title={locked ? "Always shown" : `${isHidden ? "Show" : "Hide"}. Drag or Alt+Arrow to reorder.`}>
           <span className={`nav-check ${!isHidden ? "on" : ""}`}>{!isHidden && <Check size={ICON_SIZE.microInline} />}</span>
           <I size={ICON_SIZE.emphasis} /><span className="nav-item-label">{item.label}</span>{statusBadge}
         </button>
@@ -135,10 +185,11 @@ export function Sidebar({
     if (isHidden) return null;
     return (
       <button type="button" className={`nav-item ${active === id ? "on" : ""}`}
+        data-tour={`nav-${id}`}
         aria-label={accessibleLabel}
         aria-current={active === id ? "page" : undefined}
         onClick={() => { onSelect(id); onClose(); }}>
-        <I size={ICON_SIZE.emphasis} /><span className="nav-item-label">{item.label}</span>{statusBadge}
+        <I size={ICON_SIZE.emphasis} /><span className="nav-item-label">{item.label}</span><DailyGameNavMeta id={id} />{statusBadge}
       </button>
     );
   }
@@ -147,10 +198,11 @@ export function Sidebar({
   // Settings → Early Features, even in manage mode.
   const habitsOn = profile.experimentalFlags?.habits === true;
   const navGate = (id: string) => id !== "habits" || habitsOn;
-  const toolItems = (manage ? SIDEBAR_TOOLS : SIDEBAR_TOOLS.filter((id) => !hidden.has(id))).filter(navGate);
-  const prepItems = (manage ? SIDEBAR_PREP : SIDEBAR_PREP.filter((id) => !hidden.has(id)));
+  const toolItems = ordered(manage ? SIDEBAR_TOOLS : SIDEBAR_TOOLS.filter((id) => !hidden.has(id))).filter(navGate);
+  const prepItems = ordered(manage ? SIDEBAR_PREP : SIDEBAR_PREP.filter((id) => !hidden.has(id)));
+  const miscItems = ordered(manage ? SIDEBAR_MISC : SIDEBAR_MISC.filter((id) => !hidden.has(id)));
   const dailyGamesOpen = !profile.dailyGamesCollapsed;
-  const dailyGameItems = (manage
+  const dailyGameItems = ordered(manage
     ? DAILY_GAMES_FOLDER.routes
     : DAILY_GAMES_FOLDER.routes.filter((id) => !hidden.has(id))
   );
@@ -193,7 +245,7 @@ export function Sidebar({
             <span>{manage ? "Done" : "Customize"}</span>
           </button>
           <div className="nav-manage-hint">
-            {manage ? "Tap sections to subscribe or hide them." : "Subscribe to sections you use; hide the rest."}
+            {manage ? "Tap to show or hide. Drag, or Alt+Arrow, to reorder." : "Subscribe to sections you use; hide the rest."}
           </div>
         </div>
 
@@ -201,9 +253,9 @@ export function Sidebar({
           <div className="nav-cat"><span>{manage ? "Customize sidebar" : "Today"}</span></div>
           {SIDEBAR_TODAY.map((id) => <Item key={id} id={id} />)}
           <div className="nav-cat"><span>Learn</span></div>
-          {SIDEBAR_LEARN.map((id) => <Item key={id} id={id} />)}
+          {ordered(SIDEBAR_LEARN).map((id) => <Item key={id} id={id} section={SIDEBAR_LEARN} />)}
           <div className="nav-cat"><span>Review &amp; reflect</span></div>
-          {SIDEBAR_REVIEW.map((id) => <Item key={id} id={id} />)}
+          {ordered(SIDEBAR_REVIEW).map((id) => <Item key={id} id={id} section={SIDEBAR_REVIEW} />)}
 
           {(prepItems.length > 0 || manage) && (
             <div className="nav-folder">
@@ -225,7 +277,7 @@ export function Sidebar({
                 aria-labelledby={PREP_FOLDER_TOGGLE_ID}
                 hidden={!prepOpen}
               >
-                {prepItems.map((id) => <Item key={id} id={id} />)}
+                {prepItems.map((id) => <Item key={id} id={id} section={SIDEBAR_PREP} />)}
               </div>
             </div>
           )}
@@ -250,7 +302,7 @@ export function Sidebar({
                 aria-labelledby={TOOLS_FOLDER_TOGGLE_ID}
                 hidden={!toolsOpen}
               >
-                {toolItems.map((id) => <Item key={id} id={id} />)}
+                {toolItems.map((id) => <Item key={id} id={id} section={SIDEBAR_TOOLS} />)}
               </div>
             </div>
           )}
@@ -275,9 +327,34 @@ export function Sidebar({
                 aria-labelledby={DAILY_GAMES_FOLDER.toggleId}
                 hidden={!dailyGamesOpen}
               >
-                {dailyGameItems.map((id) => <Item key={id} id={id} />)}
+                {dailyGameItems.map((id) => <Item key={id} id={id} section={DAILY_GAMES_FOLDER.routes} />)}
               </div>
           </div>
+
+          {(miscItems.length > 0 || manage) && (
+            <div className="nav-folder">
+              <button
+                id={MISC_FOLDER_TOGGLE_ID}
+                type="button"
+                className="nav-folder-head"
+                aria-controls={MISC_FOLDER_ITEMS_ID}
+                aria-expanded={miscOpen}
+                onClick={() => updateProfile({ miscCollapsed: !profile.miscCollapsed })}>
+                {miscOpen ? <ChevronDown size={ICON_SIZE.body} /> : <ChevronRight size={ICON_SIZE.body} />}
+                <Archive size={ICON_SIZE.body} /><span>Misc</span>
+                {!miscOpen && <span className="nav-folder-count">{miscItems.length}</span>}
+              </button>
+              <div
+                id={MISC_FOLDER_ITEMS_ID}
+                className="nav-folder-items"
+                role="group"
+                aria-labelledby={MISC_FOLDER_TOGGLE_ID}
+                hidden={!miscOpen}
+              >
+                {miscItems.map((id) => <Item key={id} id={id} section={SIDEBAR_MISC} />)}
+              </div>
+            </div>
+          )}
 
           {SIDEBAR_BOTTOM.map((id) => <Item key={id} id={id} />)}
         </nav>

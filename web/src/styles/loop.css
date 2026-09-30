@@ -316,9 +316,6 @@
 }
 .import-draft.excluded { opacity: 0.45; }
 
-/* Brand mark chip in onboarding */
-.onboarding-mark.axom { color: var(--bone); }
-
 /* Bank browser rows: selectable + openable halves */
 .question-row.selected { border-color: var(--cyan); background: rgba(var(--accent-rgb), 0.08); }
 .qrow-check {

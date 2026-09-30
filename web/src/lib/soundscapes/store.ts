@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { SoundscapeEngine, soundscapesSupported, type OutputMode } from "./engine";
 import { appendListeningInterval } from "./listeningLog";
-import { SOUNDSCAPES, isSoundscapeId, versionOf, type SoundscapeId } from "./presets";
+import { SOUNDSCAPES, isPlayable, isSoundscapeId, versionOf, type SoundscapeId } from "./presets";
 import { EMPTY_TASTE, normalizeTaste, type Taste } from "./taste";
 
 export type SoundscapeStatus = "idle" | "playing" | "paused";
@@ -25,6 +25,9 @@ interface SoundscapeState extends Prefs {
   supported: boolean;
   status: SoundscapeStatus;
   presetId: SoundscapeId | null;
+  /** Bumps whenever your own files change the catalog, so version lists re-render. */
+  catalog: number;
+  bumpCatalog: () => void;
   /** Epoch ms when the stop timer ends playback (fades out). */
   stopAt?: number;
   error?: string;
@@ -116,12 +119,31 @@ function updateMediaSession(presetId: SoundscapeId | null, status: SoundscapeSta
       return;
     }
     const preset = SOUNDSCAPES[presetId];
-    navigator.mediaSession.metadata = new MediaMetadata({ title: preset.name, artist: "AXOM Soundscapes", album: preset.band });
-    navigator.mediaSession.playbackState = status === "playing" ? "playing" : "paused";
     const store = useSoundscape.getState();
-    navigator.mediaSession.setActionHandler("play", () => { void store.resume(); });
-    navigator.mediaSession.setActionHandler("pause", () => { void store.pause(); });
-    navigator.mediaSession.setActionHandler("stop", () => { void store.stop(); });
+    const version = versionOf(preset, store.versions[presetId]);
+    const base = (import.meta.env.BASE_URL ?? "/").replace(/\/?$/, "/");
+    // macOS Now Playing / Control Center and the media keys read this.
+    const ownFile = "src" in version && (version.userFile || preset.band === "Yours" || preset.band === "Music");
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: ownFile ? version.label : preset.name,
+      artist: ownFile ? preset.name : version.label,
+      album: "AXOM Soundscapes",
+      artwork: [192, 512].map((size) => ({ src: `${base}icon-${size}.png`, sizes: `${size}x${size}`, type: "image/png" })),
+    });
+    navigator.mediaSession.playbackState = status === "playing" ? "playing" : "paused";
+    navigator.mediaSession.setActionHandler("play", () => { void useSoundscape.getState().resume(); });
+    navigator.mediaSession.setActionHandler("pause", () => { void useSoundscape.getState().pause(); });
+    navigator.mediaSession.setActionHandler("stop", () => { void useSoundscape.getState().stop(); });
+    // Next / previous step through the preset's versions.
+    const step = (delta: number) => {
+      const current = useSoundscape.getState();
+      if (!current.presetId) return;
+      const list = SOUNDSCAPES[current.presetId].versions;
+      const index = list.findIndex((item) => item.id === versionOf(SOUNDSCAPES[current.presetId!], current.versions[current.presetId!]).id);
+      current.setVersion(current.presetId, list[(index + delta + list.length) % list.length].id);
+    };
+    navigator.mediaSession.setActionHandler("nexttrack", () => step(1));
+    navigator.mediaSession.setActionHandler("previoustrack", () => step(-1));
   } catch { /* Media Session is optional polish */ }
 }
 
@@ -147,9 +169,17 @@ export const useSoundscape = create<SoundscapeState>((set, get) => {
     status: "idle",
     presetId: null,
     previewing: false,
+    catalog: 0,
+    bumpCatalog() {
+      set({ catalog: get().catalog + 1 });
+    },
 
     async play(id, options = {}) {
       const preset = SOUNDSCAPES[id];
+      if (!isPlayable(id)) {
+        set({ error: "Add a file first — this shelf is empty." });
+        return;
+      }
       const minutes = options.stopAfterMinutes === undefined ? preset.defaultStopMinutes : options.stopAfterMinutes ?? undefined;
       const keepTimer = get().status !== "idle" && options.stopAfterMinutes === undefined && !preset.defaultStopMinutes;
       const stopAt = keepTimer ? get().stopAt : minutes ? Date.now() + minutes * 60_000 : undefined;
@@ -177,7 +207,10 @@ export const useSoundscape = create<SoundscapeState>((set, get) => {
       const { status, presetId, lastPresetId } = get();
       if (status === "playing") await get().pause();
       else if (status === "paused") await get().resume();
-      else await get().play(presetId ?? lastPresetId);
+      else {
+        const target = presetId ?? lastPresetId;
+        await get().play(isPlayable(target) ? target : DEFAULT_PREFS.lastPresetId);
+      }
     },
     async pause() {
       if (get().status !== "playing") return;

@@ -58,7 +58,15 @@ export function ApplicationCheckerPage() {
   const [program, setProgram] = useState("all");
   const [checkFilter, setCheckFilter] = useState<EligibilityStatus | "all">("all");
   const [sort, setSort] = useState<SortKey>("name");
-  const [pathway, setPathway] = useState<Pathway>("medical");
+  // Medical students look ahead to residency (JD, Ideas 1); other tracks start
+  // on schools. A pathway the learner picked is remembered on this device.
+  const [pathway, setPathwayState] = useState<Pathway>(() => (
+    readPathway() ?? (MED_TRACKS.has(useStore.getState().profile.educationTrack ?? "") ? "residency" : "medical")
+  ));
+  const setPathway = (next: Pathway) => {
+    setPathwayState(next);
+    try { localStorage.setItem(PATHWAY_KEY, next); } catch { /* device preference only */ }
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -225,6 +233,17 @@ export function ApplicationCheckerPage() {
 }
 
 type Pathway = "medical" | "residency" | "undergraduate";
+const PATHWAY_KEY = "axom.appChecker.pathway.v1";
+
+function readPathway(): Pathway | null {
+  try {
+    const value = localStorage.getItem(PATHWAY_KEY);
+    return value === "medical" || value === "residency" || value === "undergraduate" ? value : null;
+  } catch {
+    return null;
+  }
+}
+const MED_TRACKS = new Set(["sgu", "usmd", "do", "img"]);
 
 const PATHWAYS: Array<{ id: Pathway; label: string; detail: string; icon: typeof School }> = [
   { id: "medical", label: "Medical school", detail: "MD / DO programs", icon: School },
@@ -250,40 +269,37 @@ function PathwayNotCollected({ pathway }: { pathway: Exclude<Pathway, "medical">
   return (
     <GlassCard pad className="application-pathway-empty">
       <PanelHeader
-        title={residency ? "Residency programs — dataset not collected yet" : "Undergraduate & pre-med — dataset not collected yet"}
-        sub="AXOM won’t invent program data. This pathway turns on as soon as a sourced dataset is added."
+        title={residency ? "Residency programs are on the way" : "Undergraduate and pre-med schools are on the way"}
+        sub="AXOM won't invent program data. This view switches on as soon as a sourced list is added. The other pathways above work today."
       />
       <div className="application-pathway-grid">
         <div>
-          <b>What you’ll be able to do</b>
+          <b>What you'll be able to do</b>
           <ul>
             {residency ? (
               <>
-                <li>Search programs by specialty, state, and track (categorical, preliminary, transitional, advanced).</li>
-                <li>See sourced requirements: Step 2 minimums, COMLEX acceptance, graduation-year limits, visa sponsorship (J-1/H-1B), signals.</li>
-                <li>Save programs, review each captured fact, and compare against your profile as review items — never as match odds.</li>
+                <li>Search programs by specialty, state and track (categorical, preliminary, transitional, advanced).</li>
+                <li>See sourced requirements: Step 2 minimums, COMLEX acceptance, graduation-year limits, visa sponsorship, signals.</li>
+                <li>Save programs and compare them with your profile as review items, never as match odds.</li>
               </>
             ) : (
               <>
-                <li>Find schools’ pre-health advising, committee-letter policies, and linkage or early-assurance programs.</li>
-                <li>Save institutions and track what you’ve verified, just like medical schools.</li>
+                <li>Find pre-health advising, committee-letter policies, and linkage or early-assurance programs.</li>
+                <li>Save institutions and track what you've verified, just like medical schools.</li>
               </>
             )}
           </ul>
         </div>
         <div>
-          <b>What the data needs</b>
+          <b>{residency ? "Until then" : "How it will work"}</b>
           {residency ? (
-            <ol className="sub residency-steps">
-              <li>Download the official program list from <a href="https://acgmecloud.org/analytics/explore-public-data/program-search" target="_blank" rel="noopener noreferrer">ACGME Cloud → Explore Public Data</a> (the “ProgramListing” spreadsheet).</li>
-              <li>Run <code>npm run residency:import -- path/to/ProgramListing.xlsx</code> from the repository root.</li>
-              <li>Reload — ~13,700 accredited programs appear with specialty, sponsor, location, length, and status. Requirement fields stay “Unknown” until sourced.</li>
-            </ol>
-          ) : (
             <p className="sub">
-              One JSON file with a source URL and retrieval date for every fact; missing facts stay “Unknown”. The exact contract is in
-              <code> docs/APPLICATION-PATHWAY-DATASETS.md</code>, matching the medical-school format so saved programs and backups work the same way.
+              The official list of accredited programs is public at{" "}
+              <a href="https://acgmecloud.org/analytics/explore-public-data/program-search" target="_blank" rel="noopener noreferrer">ACGME program search</a>.
+              When AXOM's list arrives, every fact will show its source and date, and anything unconfirmed will say Unknown.
             </p>
+          ) : (
+            <p className="sub">Every fact will carry its source and retrieval date; anything unconfirmed stays Unknown, the same way medical schools work.</p>
           )}
         </div>
       </div>

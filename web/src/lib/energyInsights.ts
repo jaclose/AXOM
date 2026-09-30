@@ -102,8 +102,10 @@ export interface HourBand {
   accuracy: number | null;
 }
 
+// A student's day runs 5 AM to 5 AM: late-night work (00:00-04:59) is its own
+// band at the end instead of being dropped (JD, Ideas 3: "some people stay up").
 const BANDS: Array<[string, number, number]> = [
-  ["Early morning", 5, 8], ["Morning", 8, 11], ["Midday", 11, 14], ["Afternoon", 14, 17], ["Evening", 17, 20], ["Night", 20, 24],
+  ["Early morning", 5, 8], ["Morning", 8, 11], ["Midday", 11, 14], ["Afternoon", 14, 17], ["Evening", 17, 20], ["Night", 20, 24], ["Late night", 0, 5],
 ];
 
 /** Energy, study minutes and question accuracy across the day (last N days). */

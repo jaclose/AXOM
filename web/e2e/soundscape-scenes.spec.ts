@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { completeSetup, expect, test } from "./fixtures";
 
 /** First visits open the "What are you into?" opener; tests that aren't about it skip it. */
 async function skipSoundscapeOpener(page: Page) {
@@ -11,11 +12,7 @@ async function skipSoundscapeOpener(page: Page) {
 
 async function openWorkspace(page: Page) {
   await page.goto("/#dashboard", { waitUntil: "networkidle" });
-  const name = page.getByLabel("Display name (optional)");
-  if (await name.isVisible()) {
-    await name.fill("Scenes test");
-    for (let step = 0; step < 3; step++) await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.getByRole("button", { name: "Finish setup", exact: true }).click();
+  if (await completeSetup(page, "Scenes test", { ifVisible: true })) {
     const later = page.getByRole("button", { name: "Review later", exact: true });
     if (await later.count()) await later.click();
   }
@@ -44,7 +41,9 @@ test("frequency cards, ambient sounds, scenes and Spotify load cleanly", async (
   expect(status).toBe(200);
 
   // The hero's scene picker swaps between scenes and the generative visual.
+  // Backgrounds live behind one "Background" button that opens over the stage.
   const hero = page.locator(".soundscape-hero");
+  await hero.getByRole("button", { name: /^Background/ }).click();
   await hero.getByRole("radio", { name: "Earth turning scene" }).click();
   await expect(hero.locator("video.scene-player")).toHaveAttribute("src", /scenes\/earth\.mp4$/);
   await hero.getByRole("radio", { name: "Generative" }).click();

@@ -23,6 +23,7 @@ import type { AnkiCard } from "./ankiCards";
 import { dueCards } from "./ankiCards";
 import type { QuestionSet, SourceDocument } from "./library";
 import { EDUCATION_TRACKS } from "./tracks";
+import { ACADEMIC_TEMPLATE_COURSES } from "./experience";
 import { normalizeTrackerPath, trackerItemKey } from "./pathUtils";
 import { entryFor, isScheduledDay, trackingStartKey } from "./habits";
 import type { DailyRequirementResult, DailySuccessResult } from "./dailySuccess";
@@ -205,9 +206,11 @@ const STARTER_TASK_TITLES = new Set([
   "save progress from settings",
 ].map(normalizeEvidenceText));
 
-const TEMPLATE_COURSE_FINGERPRINTS = new Set(
-  EDUCATION_TRACKS.flatMap((track) => track.terms.flatMap((term) => term.courses.map(courseFingerprint))),
-);
+const TEMPLATE_COURSE_FINGERPRINTS = new Set([
+  ...EDUCATION_TRACKS.flatMap((track) => track.terms.flatMap((term) => term.courses.map(courseFingerprint))),
+  // The pre-Wave 2 SGU seed map (lib/experience.ts) still lives in older workspaces and in makeSeed().
+  ...ACADEMIC_TEMPLATE_COURSES.map(courseFingerprint),
+]);
 
 const TEMPLATE_TRACKER_BASELINES = new Map<string, { passes: number; ankiPasses: number }>();
 for (const row of EDUCATION_TRACKS.flatMap((track) => track.trackerRows)) {

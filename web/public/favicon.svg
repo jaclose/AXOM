@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- AXOM orb: the brand-film mark (brushed ivory) set in a graphite sphere.
+       Used for browser tabs and notifications only; in-app branding stays unframed. -->
+  <defs>
+    <radialGradient id="orb" cx="36%" cy="30%" r="80%">
+      <stop offset="0" stop-color="#3b3a37"/>
+      <stop offset="0.52" stop-color="#1c1c1e"/>
+      <stop offset="1" stop-color="#0b0b0c"/>
+    </radialGradient>
+    <radialGradient id="sheen" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.20"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="metal" x1="0.15" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#f4f0e7"/>
+      <stop offset="0.55" stop-color="#d3ccbd"/>
+      <stop offset="1" stop-color="#a39c90"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#f3f0e8" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#f3f0e8" stop-opacity="0.06"/>
+    </linearGradient>
+  </defs>
+  <circle cx="32" cy="32" r="31" fill="url(#orb)"/>
+  <ellipse cx="25" cy="17" rx="17" ry="9.5" fill="url(#sheen)"/>
+  <circle cx="32" cy="32" r="30.5" fill="none" stroke="url(#rim)" stroke-width="1"/>
+  <g transform="translate(13.6 13.2) scale(0.368)" fill="url(#metal)">
+    <polygon points="50,6 72.4,45.5 58.1,58.1 65.3,44 50,21.3 34.7,44 41.9,58.1 27.6,45.5"/>
+    <polygon points="50,56.4 57.2,63.3 50,70.2 42.8,63.3"/>
+    <polygon points="22.88,54.34 28.97,56.55 6.83,94 0,93.1"/>
+    <polygon points="77.12,54.34 71.03,56.55 93.17,94 100,93.1"/>
+  </g>
+</svg>

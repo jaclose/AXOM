@@ -22,10 +22,9 @@ import { RecoveryStatusCard } from "./RecoveryStatusCard";
 import { PromiseCutscene } from "./PromiseCutscene";
 import { FOCUS_OPTIONS, focusOption, normalizedFocusIds } from "../../lib/experience";
 import { EDUCATION_TRACKS, resolveTrack } from "../../lib/tracks";
-import { prettyDate } from "../../lib/scoring";
+import { SavedPromise } from "./PromiseCutscene";
 import type { DashboardWidgetId, EducationTrackId, ExperienceFocusId } from "../../lib/types";
 import { HardDrive } from "lucide-react";
-import { AxomWordmark } from "../ui/BrandMark";
 import { SCHEMA_VERSION, APP_BUILD_LABEL } from "../../lib/seed";
 import { lastBackupAt } from "../../lib/backup";
 import { listLocalBackups } from "../../lib/localBackup";
@@ -53,6 +52,7 @@ import {
   applyDashboardLayoutPreset,
   dashboardWidgetCatalogItem,
   normalizeDashboardLayoutPreferences,
+  upgradeDashboardLayout,
 } from "../../lib/dashboardWidgets";
 
 type SettingsSection = "profile" | "account" | "appearance" | "personalization" | "data" | "backup" | "advanced";
@@ -266,8 +266,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
             <div>
               <div className="sync-title">Local-first workspace</div>
               <div className="sub">
-                Your AXOM workspace is stored on this device and changes save locally as you work.
-                When you deliberately link an account, acknowledged protected versions are also retained remotely.
+                Your workspace lives on this device and saves as you work. If you sign in, protected copies are also kept in your account.
               </div>
               <div style={{ marginTop: 8 }}><LastSavedLine /></div>
             </div>
@@ -416,7 +415,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
       )}
 
       {resigning && <PromiseCutscene onDone={() => setResigning(false)} />}
-      {viewingPromise && promise && <PromiseSheet onClose={() => setViewingPromise(false)} />}
+      {viewingPromise && promise && <SavedPromise onClose={() => setViewingPromise(false)} />}
     </Modal>
   );
 }
@@ -449,7 +448,7 @@ function StudyWorkflowSettings() {
           <span className="settings-card-icon"><BookOpen size={ICON_SIZE.body} aria-hidden="true" /></span>
           <div>
             <h4 id="study-methods-title">How you study</h4>
-            <p>Pick every method you actually use. AXOM uses this to shape recommendations and follow-ups — it never forces a method (not even Anki).</p>
+            <p>Pick every method you actually use. AXOM uses this to shape recommendations and follow-ups. It never forces a method (not even Anki).</p>
           </div>
         </div>
         <div className="settings-chip-row" aria-label="Study methods">
@@ -469,7 +468,7 @@ function StudyWorkflowSettings() {
             <h4 id="study-passes-title">Passes &amp; review timing</h4>
             <p>
               How many times you usually go through material, and when AXOM should bring it back. Course Tracker items without their own
-              setting use these — a course or single item can always override them.
+              setting use these, and any course or single item can override them.
             </p>
           </div>
         </div>
@@ -515,7 +514,7 @@ function StudyWorkflowSettings() {
           </div>
         </div>
         <label className="stack gap6">
-          <span className="field-label">Other — tell AXOM how you study</span>
+          <span className="field-label">Other: tell AXOM how you study</span>
           <textarea className="field" rows={3} value={workflow.customContext ?? ""} placeholder="e.g. First pass on lecture day, Anki that night, a week later I redo the PQs." onChange={(event) => save({ customContext: event.target.value })} />
         </label>
         <StudyTextSuggestions workflow={workflow} onApply={(studyWorkflow) => store.updateProfile({ studyWorkflow })} />
@@ -671,7 +670,7 @@ function DailyUtilitiesSettings() {
           <span className="settings-card-icon"><Clock3 size={ICON_SIZE.body} aria-hidden="true" /></span>
           <div>
             <h4 id="rhythm-clock-title">Clock</h4>
-            <p>The time in the top bar, with an optional analog clock when you click it. Only preferences are saved — never the time itself.</p>
+            <p>The time in the top bar, with an optional analog clock when you click it. Only preferences are saved, never the time itself.</p>
           </div>
           <label className="settings-switch">
             <input type="checkbox" checked={clock.enabled} onChange={(event) => updateClock({ enabled: event.target.checked })} />
@@ -742,10 +741,13 @@ function DailyUtilitiesSettings() {
 function DashboardVisibilitySettings() {
   const profile = useStore((state) => state.profile);
   const updateProfile = useStore((state) => state.updateProfile);
-  const layout = normalizeDashboardLayoutPreferences(profile.dashboardLayout, {
+  const stored = normalizeDashboardLayoutPreferences(profile.dashboardLayout, {
     order: profile.dashboardWidgetOrder,
     hiddenWidgetIds: profile.hiddenDashboardWidgets,
-  }) ?? applyDashboardLayoutPreset(adaptLegacyDashboardLayout(), "focused", "1970-01-01T00:00:00.000Z");
+  });
+  const layout = stored
+    ? upgradeDashboardLayout(stored)
+    : applyDashboardLayoutPreset(adaptLegacyDashboardLayout(), "focused", "1970-01-01T00:00:00.000Z");
   const hidden = new Set(layout.hiddenWidgetIds);
   function setVisible(id: DashboardWidgetId, visible: boolean) {
     const next = new Set(hidden);
@@ -767,7 +769,7 @@ function DashboardVisibilitySettings() {
         <span className="settings-card-icon"><LayoutGrid size={ICON_SIZE.body} aria-hidden="true" /></span>
         <div>
           <h4 id="dashboard-widgets-title">Dashboard widgets</h4>
-          <p>Choose what appears on the dashboard. This changes presentation only — hiding a widget never deletes data. Use “Edit dashboard” for sizes and order.</p>
+          <p>Choose what appears on the dashboard. This changes presentation only; hiding a widget never deletes data. Use “Edit dashboard” for sizes and order.</p>
         </div>
       </div>
       <div className="settings-widget-grid">
@@ -799,49 +801,6 @@ function DevicePreferencePanel() {
         {permission === "default" && <GButton size="sm" onClick={requestNotifications}>Enable notifications</GButton>}
       </div>
     </section>
-  );
-}
-
-const PROMISE_LINES = [
-  "This is only a tool.",
-  "It will not save you.",
-  "It will not study for you.",
-  "It will not become disciplined on your behalf.",
-  "But if you return to it honestly,",
-  "if you record the work,",
-  "if you confront the missed days,",
-  "if you build again after falling behind,",
-  "then this becomes more than software.",
-  "It becomes a witness.",
-];
-
-// Read-only view of the already-signed promise, in the contract styling.
-function PromiseSheet({ onClose }: { onClose: () => void }) {
-  const { profile } = useStore();
-  const p = profile.promise;
-  return (
-    <div className="promise-scrim" onMouseDown={onClose}>
-      <div className="promise-orbs"><i /><i /><i /></div>
-      <div className="promise-paper open" onMouseDown={(e) => e.stopPropagation()}>
-        <header className="promise-contract-header">
-          <AxomWordmark size="lg" />
-          <span>Saved personal promise</span>
-          <h2>A promise to yourself</h2>
-          <p>A voluntary commitment, stored in your local AXOM profile. It is not a legal contract.</p>
-        </header>
-        <div className="promise-lines">
-          {PROMISE_LINES.map((line, i) => (
-            <p key={line} className={`promise-line in ${i === PROMISE_LINES.length - 1 ? "accent" : ""}`}>{line}</p>
-          ))}
-        </div>
-        <div className="promise-signed-row">
-          <div><span>Signed</span><b className="promise-sig">{p?.signedName}</b></div>
-          <div className="right"><span>Date</span><b>{p?.signedAt ? prettyDate(p.signedAt) : "—"}</b></div>
-        </div>
-        <div className="sub" style={{ marginTop: 8, color: "#8a7f63" }}>Promise text {p?.promiseTextVersion ?? "v1"}</div>
-        <button type="button" className="promise-btn" style={{ marginTop: 14 }} onClick={onClose}>Close</button>
-      </div>
-    </div>
   );
 }
 
@@ -985,7 +944,7 @@ function PersonalizationPanel() {
           <span className="settings-card-icon"><Sparkles size={ICON_SIZE.body} aria-hidden="true" /></span>
           <div>
             <h4 id="labs-title">Early features <Tag tone="orange">Labs</Tag></h4>
-            <p>Opt into surfaces still under active development. They can change between releases — your data stays either way.</p>
+            <p>Opt into surfaces still under active development. They can change between releases; your data stays either way.</p>
           </div>
         </div>
         <label className="early-feature-row">
@@ -996,7 +955,7 @@ function PersonalizationPanel() {
               experimentalFlags: { ...(profile.experimentalFlags ?? {}), habits: e.target.checked },
             })}
           />
-          <span><b>Habit Tracker</b> — calm, recovery-friendly habit tracking. Adds a “Habit Tracker” entry under Tools.</span>
+          <span><b>Habit Tracker</b>: calm, recovery-friendly habit tracking. Adds a “Habit Tracker” entry under Tools.</span>
         </label>
       </section>
     </div>

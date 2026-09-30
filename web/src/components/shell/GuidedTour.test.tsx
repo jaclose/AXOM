@@ -45,24 +45,25 @@ function next(count: number) {
 }
 
 describe("GuidedTour", () => {
-  it("contains exactly seven meaningful steps and retains the accepted Question Bank workflow", () => {
-    expect(GUIDED_TOUR_STEPS).toHaveLength(7);
+  it("contains at most eight stops, most-used first, and retains the accepted Question Bank workflow", () => {
+    expect(GUIDED_TOUR_STEPS.length).toBeLessThanOrEqual(8);
     expect(GUIDED_TOUR_STEPS.map((step) => step.title)).toEqual([
-      "Up next",
+      "Your day starts here",
+      "Focus timer",
+      "Soundscapes",
       "Course Tracker",
       "Question Bank",
-      "Why AXOM suggested this",
-      "Reports",
-      "Customize",
-      "Data safety",
+      "Today's targets",
+      "Journal",
+      "Make AXOM yours",
     ]);
-    expect(GUIDED_TOUR_STEPS[2]).toMatchObject({
+    expect(GUIDED_TOUR_STEPS[4]).toMatchObject({
       route: "questions",
       target: "question-bank-entry",
       body: expect.stringContaining("Import → Review → Practice → Understand"),
     });
-    expect(GUIDED_TOUR_STEPS[3].target).toBe("recommendation-provenance");
-    expect(GUIDED_TOUR_STEPS[6].target).toBeUndefined();
+    expect(GUIDED_TOUR_STEPS[7].target).toBe("control-surface-menu");
+    for (const step of GUIDED_TOUR_STEPS) expect(step.body).not.toMatch(/[—–]/);
   });
 
   it.each([
@@ -86,7 +87,7 @@ describe("GuidedTour", () => {
     })));
 
     render(<TourHarness />);
-    next(2);
+    next(4);
 
     expect(screen.getByText("Question Bank", { selector: ".tour-tip-title" })).toBeTruthy();
     expect(screen.getByText(/Import → Review → Practice → Understand/)).toBeTruthy();
@@ -97,22 +98,22 @@ describe("GuidedTour", () => {
   });
 
   it("resumes a valid session step and clamps stale progress", async () => {
-    sessionStorage.setItem(TOUR_PROGRESS_KEY, "4");
+    sessionStorage.setItem(TOUR_PROGRESS_KEY, "3");
     const { unmount } = render(<TourHarness />);
-    expect(screen.getByText("Reports", { selector: ".tour-tip-title" })).toBeTruthy();
-    await waitFor(() => expect(screen.getByRole("status", { name: "Current tour route" }).textContent).toBe("reports"));
+    expect(screen.getByText("Course Tracker", { selector: ".tour-tip-title" })).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole("status", { name: "Current tour route" }).textContent).toBe("tracker"));
 
     unmount();
     sessionStorage.setItem(TOUR_PROGRESS_KEY, "99");
     render(<TourHarness />);
-    expect(screen.getByText("Up next", { selector: ".tour-tip-title" })).toBeTruthy();
+    expect(screen.getByText("Your day starts here", { selector: ".tour-tip-title" })).toBeTruthy();
   });
 
   it("keeps controls reachable when a target is missing and supports Escape", () => {
     const onExit = vi.fn();
     render(<TourHarness onExit={onExit} />);
 
-    const dialog = screen.getByRole("dialog", { name: "Up next" });
+    const dialog = screen.getByRole("dialog", { name: "Your day starts here" });
     expect(dialog.classList.contains("centered")).toBe(true);
     expect(screen.getByRole("button", { name: "Next" })).toBeTruthy();
     expect(document.activeElement).toBe(dialog);
@@ -122,7 +123,7 @@ describe("GuidedTour", () => {
     expect(sessionStorage.getItem(TOUR_PROGRESS_KEY)).toBeNull();
   });
 
-  it("skips immediately and finishes on the centered data-safety step", () => {
+  it("skips immediately and finishes on the Customize stop", () => {
     const onExit = vi.fn();
     const first = render(<TourHarness onExit={onExit} />);
     fireEvent.click(screen.getByRole("button", { name: "Skip guided tour" }));
@@ -131,10 +132,10 @@ describe("GuidedTour", () => {
 
     onExit.mockClear();
     render(<TourHarness onExit={onExit} />);
-    next(6);
-    const dialog = screen.getByRole("dialog", { name: "Data safety" });
-    expect(dialog.classList.contains("centered")).toBe(true);
-    expect(screen.getByText(/Settings → Data and Backup/)).toBeTruthy();
+    next(7);
+    const dialog = screen.getByRole("dialog", { name: "Make AXOM yours" });
+    expect(dialog.classList.contains("centered")).toBe(true); // target absent in this harness
+    expect(screen.getByText(/Customize hides what you don't use/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Finish" }));
     expect(onExit).toHaveBeenCalledWith("complete");
   });

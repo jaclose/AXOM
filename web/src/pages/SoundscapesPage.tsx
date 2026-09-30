@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { AudioWaveform, FlaskConical, Info, VolumeX, Wind } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AudioWaveform, Ear, FlaskConical, Info, Maximize2, Minimize2, VolumeX, Wind } from "lucide-react";
 import { GlassCard, PanelHeader } from "../components/ui/primitives";
 import { ICON_SIZE } from "../lib/iconSize";
 import { useStore } from "../lib/store";
@@ -20,6 +20,7 @@ import { AmbientCard, FrequencyCard } from "../components/soundscapes/FrequencyC
 import { SpotifySection } from "../components/soundscapes/SpotifySection";
 import { SoundscapeOpener } from "../components/soundscapes/SoundscapeOpener";
 import { ForYouRow } from "../components/soundscapes/ForYouRow";
+import { YourSounds } from "../components/soundscapes/YourSounds";
 import { PinButton } from "../components/soundscapes/PinButton";
 import { forYouOrder, preferFirst } from "../lib/soundscapes/taste";
 import {
@@ -47,10 +48,14 @@ export function SoundscapesPage() {
   const supported = useSoundscape((state) => state.supported);
   const error = useSoundscape((state) => state.error);
   const [focused, setFocused] = useState<SoundscapeId | null>(null);
+  const [previewScene, setPreviewScene] = useState<string | null>(null);
   const heroId = focused ?? presetId ?? lastPresetId;
   const hero = SOUNDSCAPES[heroId];
   const heroPair = carrierPair(hero, output);
   const stopLabel = useStopTimerLabel();
+  const { heroRef, heroEl, fullscreen, toggleFullscreen, awake, wake, rest } = useStageChrome();
+  // While a sound plays, the controls step back when you're not using them, leaving just the scene.
+  const calm = status === "playing" && !awake && !previewScene;
   // Lead with what the learner said they're into.
   const firstPick = taste.sounds.find((genre) => genre !== "music");
   const ambientFirst = Boolean(firstPick && firstPick !== "frequencies");
@@ -60,14 +65,24 @@ export function SoundscapesPage() {
     <div className="soundscapes-page">
       {openerOpen && <SoundscapeOpener onClose={() => setOpenerOpen(false)} />}
       <ForYouRow onPersonalize={() => setOpenerOpen(true)} />
-      <section className={`soundscape-hero ${status === "playing" && presetId === heroId ? "live" : ""}`}>
+      <section
+        ref={heroRef}
+        className={`soundscape-hero ${status === "playing" && presetId === heroId ? "live" : ""} ${calm ? "calm" : ""} ${fullscreen ? "is-fullscreen" : ""}`}
+        onPointerEnter={wake}
+        onPointerMove={wake}
+        onPointerLeave={rest}
+      >
         <SoundscapeStage
           preset={hero}
-          animate={status === "playing" || focused !== null}
+          animate={status === "playing" || focused !== null || previewScene !== null}
           reactive={status === "playing" && presetId === heroId}
           className="soundscape-hero-visual"
           label={`${hero.name} visual`}
+          sceneOverride={previewScene}
         />
+        <button type="button" className="soundscape-fullscreen" onClick={toggleFullscreen} aria-label={fullscreen ? "Exit full screen" : "Full screen"} title={fullscreen ? "Exit full screen (Esc)" : "Full screen: just the scene"}>
+          {fullscreen ? <Minimize2 size={ICON_SIZE.body} aria-hidden="true" /> : <Maximize2 size={ICON_SIZE.body} aria-hidden="true" />}
+        </button>
         <div className="soundscape-hero-copy">
           <span className="soundscape-kicker"><AudioWaveform size={ICON_SIZE.body} aria-hidden="true" /> Soundscapes</span>
           <h2>{hero.name}</h2>
@@ -77,12 +92,12 @@ export function SoundscapesPage() {
             {stopLabel && status !== "idle" ? ` · ${stopLabel}` : ""}
           </p>
           <VersionChips presetId={heroId} />
-          <ScenePicker presetId={heroId} />
           <div className="soundscape-hero-controls">
             <TransportButtons presetId={heroId} />
             <PinButton presetId={heroId} />
             <VolumeControl />
             <StopTimerControl />
+            <ScenePicker presetId={heroId} onPreview={setPreviewScene} host={heroEl} />
           </div>
           <div className="soundscape-hero-options">
             <OutputToggle />
@@ -92,6 +107,12 @@ export function SoundscapesPage() {
           {error && <p className="soundscape-warning" role="alert">{error}</p>}
         </div>
       </section>
+      <p className="soundscape-comfort">
+        <Ear size={ICON_SIZE.microInline} aria-hidden="true" />
+        <span><b>Hearing comfort is built in:</b> AXOM fades sound in, softens hiss, and caps sudden peaks. If a tone ever feels uncomfortable, stop it and pick a nature sound. On speakers, or AirPods with Spatial Audio, choose <b>Speakers</b> so the beat stays gentle.</span>
+      </p>
+
+      <YourSounds />
 
       <GlassCard pad>
         <PanelHeader
@@ -210,4 +231,47 @@ function ListeningExperiment() {
       )}
     </GlassCard>
   );
+}
+
+/**
+ * Full screen for the hero, plus "awake" chrome: controls show while the
+ * pointer is over the stage and fade when it leaves. In full screen they also
+ * fade after a few idle seconds (and the cursor hides), like a screensaver.
+ */
+function useStageChrome() {
+  const heroNode = useRef<HTMLElement | null>(null);
+  const [heroEl, setHeroEl] = useState<HTMLElement | null>(null);
+  const heroRef = useCallback((node: HTMLElement | null) => { heroNode.current = node; setHeroEl(node); }, []);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [awake, setAwake] = useState(true);
+  const timer = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    const onChange = () => setFullscreen(document.fullscreenElement === heroNode.current && heroNode.current !== null);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onChange);
+      window.clearTimeout(timer.current);
+    };
+  }, []);
+
+  const wake = useCallback(() => {
+    setAwake(true);
+    window.clearTimeout(timer.current);
+    if (document.fullscreenElement) timer.current = window.setTimeout(() => setAwake(false), 2600);
+  }, []);
+
+  const rest = useCallback(() => {
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setAwake(false), 450);
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    const element = heroNode.current;
+    if (!element) return;
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+    else void element.requestFullscreen?.().then(() => wake()).catch(() => undefined);
+  }, [wake]);
+
+  return { heroRef, heroEl, fullscreen, toggleFullscreen, awake, wake, rest };
 }

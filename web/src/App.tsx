@@ -1,8 +1,14 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentType } from "react";
 import { Sidebar } from "./components/shell/Sidebar";
 import { TopBar } from "./components/shell/TopBar";
+import { RouteErrorBoundary } from "./components/shell/RouteErrorBoundary";
+import { TabPresence } from "./components/shell/TabPresence";
+import { GuideOffer } from "./components/shell/GuideOffer";
+import { CoachLayer } from "./components/shell/CoachLayer";
+import { DoctordleCheckIn } from "./components/games/DoctordleCheckIn";
+import { clearTourProgress } from "./lib/onboardingProgress";
 import { SettingsModal, type SettingsTab } from "./components/shell/SettingsModal";
-import { OnboardingWizard } from "./components/shell/OnboardingWizard";
+import { SetupFlow } from "./components/setup/SetupFlow";
 import { GuidedTour, type TourExitReason } from "./components/shell/GuidedTour";
 import { PromisePrompt } from "./components/shell/PromisePrompt";
 import { PromiseCutscene } from "./components/shell/PromiseCutscene";
@@ -18,6 +24,7 @@ import { SessionOverlay } from "./components/session/SessionOverlay";
 import { FocusDock } from "./components/dock/FocusDock";
 import { RestOverlay } from "./components/rest/RestOverlay";
 import { SoundscapeTimerSync } from "./components/soundscapes/SoundscapeTimerSync";
+import { UserMediaBridge } from "./components/soundscapes/UserMediaBridge";
 import { FocusCheckIn } from "./components/shell/FocusCheckIn";
 import { AccountSyncWatcher } from "./components/shell/AccountSyncWatcher";
 import { NAV } from "./components/shell/nav";
@@ -26,7 +33,8 @@ import { useUi } from "./lib/uiStore";
 import { pushToast } from "./lib/toast";
 import { markAppReady, usePageEntrance } from "./lib/presentation";
 import type { StorageMigrationResult } from "./lib/storageMigrations";
-import { readOnboardingDraftMode, type OnboardingDestination, type OnboardingMode } from "./lib/onboardingProgress";
+import type { OnboardingDestination, OnboardingMode } from "./lib/onboardingProgress";
+import { readSetupDraftMode } from "./lib/setupPlan";
 import { promisePromptStatus, shouldOfferPromiseAfterGlobalTour, shouldOfferPromisePrompt } from "./lib/promisePrompt";
 
 import { DashboardPage } from "./pages/DashboardPage";
@@ -125,7 +133,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
   });
   const [promiseCutsceneOpen, setPromiseCutsceneOpen] = useState(false);
   const [setupMode, setSetupMode] = useState<OnboardingMode | null>(() =>
-    readOnboardingDraftMode() === "rerun" ? "rerun" : null,
+    readSetupDraftMode() === "rerun" ? "rerun" : null,
   );
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const restoreMenuFocusRef = useRef(false);
@@ -261,14 +269,17 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
   }
 
   function completeOnboarding(destination: OnboardingDestination) {
+    const firstRun = setupMode !== "rerun";
     setSetupMode(null);
     go(destination);
     const profile = useStore.getState().profile;
-    // Finishing without the optional guide and skipping setup are both explicit
-    // guide decisions. Present the Promise only after onboarding has closed so
-    // it never competes with setup or traps the user's emergency exit.
+    // Present the Promise only after setup has closed so it never competes with
+    // setup or traps the user's emergency exit. A first run flows straight into
+    // it (setup, then the Promise, then AXOM; "Review later" is always there);
+    // anywhere else it is offered first.
     if (profile.tourDone === true && shouldOfferPromisePrompt(profile)) {
-      setPromisePromptOpen(true);
+      if (firstRun) setPromiseCutsceneOpen(true);
+      else setPromisePromptOpen(true);
     }
   }
 
@@ -302,7 +313,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
         {onboarded && <MenuBarTimerBridge />}
         <DailyRolloverWatcher />
         <UpdateAvailableWatcher />
-        <OnboardingWizard
+        <SetupFlow
           mode={setupMode ?? "first-run"}
           onComplete={completeOnboarding}
           onCancel={() => setSetupMode(null)}
@@ -333,6 +344,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
         />
 
         <div className="surface">
+          <TabPresence page={nav.label} />
           <TopBar
             route={routeKey}
             title={nav.label}
@@ -345,11 +357,13 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
           />
           <div className="surface-scroll">
             <div className={route === "tracker" ? "page page-tracker" : "page"} data-enter={pageEnter ? "" : undefined}>
-              <Suspense fallback={<div className="route-loading" role="status" aria-live="polite">Opening your workspace…</div>}>
-                <Page />
-                {/* Commits with the page itself, so the film only hands over to real content. */}
-                <PresentationReady />
-              </Suspense>
+              <RouteErrorBoundary key={routeKey} onHome={() => go("dashboard")}>
+                <Suspense fallback={<div className="route-loading" role="status" aria-live="polite">Opening your workspace…</div>}>
+                  <Page />
+                  {/* Commits with the page itself, so the film only hands over to real content. */}
+                  <PresentationReady />
+                </Suspense>
+              </RouteErrorBoundary>
             </div>
           </div>
         </div>
@@ -357,6 +371,12 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
 
       {settings && <SettingsModal onClose={() => setSettings(false)} initialTab={settingsTab} />}
       {showTour && <GuidedTour onExit={endTour} onNavigate={navigateTour} currentRoute={route} />}
+      <GuideOffer
+        active={!showTour && !settings && !promisePromptOpen && !promiseCutsceneOpen}
+        onStart={() => { clearTourProgress(); updateProfile({ tourDone: false }); }}
+      />
+      <CoachLayer route={routeKey} suspended={Boolean(showTour || settings || promisePromptOpen || promiseCutsceneOpen || drawer)} />
+      <DoctordleCheckIn suspended={Boolean(showTour || settings || promisePromptOpen || promiseCutsceneOpen)} />
       {promisePromptOpen && !showTour && (
         <PromisePrompt
           onSign={() => { setPromisePromptOpen(false); setPromiseCutsceneOpen(true); }}
@@ -375,6 +395,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
       <FocusDock />
       <RestOverlay />
       <SoundscapeTimerSync />
+      <UserMediaBridge />
       <FocusCheckIn />
       <AccountSyncWatcher />
       <Toaster />

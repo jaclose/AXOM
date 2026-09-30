@@ -240,10 +240,17 @@
   display: flex; align-items: flex-start; gap: 14px;
   padding: 22px clamp(20px, 3vw, 40px) 4px;
 }
-.topbar-heading { min-width: 0; flex: 1 1 auto; }
+.topbar-heading { min-width: 0; flex: 1 1 18rem; } /* a small basis: long subtitles wrap inside the heading instead of pushing the clock to a new line */
 .topbar .tb-title { font-family: var(--font-display); font-size: clamp(23px, 3vw, 29px); font-weight: var(--fw-medium); letter-spacing: var(--tracking-tighter); }
 .topbar .tb-sub { font-size: var(--fs-base); color: var(--text-60); margin-top: 4px; line-height: var(--leading-normal); }
 .topbar .tb-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+/* Between phones and wide desktops there is no room for title, quote, clock
+   and Refresh on one line. The quote takes its own line under the title, so
+   the clock and Refresh stay top-right instead of dropping under the title. */
+@media (min-width: 881px) and (max-width: 1320px) {
+  .topbar .tb-quote:not(.collapsed) { order: 3; flex: 1 1 100%; max-width: 640px; margin-left: 0; }
+  .topbar .tb-quote:not(.collapsed) + .tb-actions { margin-left: auto; }
+}
 
 /* Compact clock utility. It is an anchored, non-modal dialog so it never
    creates a nested focus trap with Settings. */
@@ -352,3 +359,66 @@
   .sidebar { transition: none; }
   .analog-clock-hand { transition: none; }
 }
+
+/* --- Route error card: a failed screen stays inside the shell ------------- */
+.route-error {
+  display: grid;
+  place-items: center;
+  min-height: min(62dvh, 560px);
+  padding: 24px 16px;
+}
+.route-error-card {
+  width: min(520px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 26px 26px 20px;
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--glass-card-border);
+  background:
+    radial-gradient(120% 90% at 0% 0%, rgba(var(--accent-rgb), 0.10), transparent 58%),
+    var(--surface-2);
+  box-shadow: var(--shadow-floating);
+  -webkit-backdrop-filter: var(--blur-panel);
+  backdrop-filter: var(--blur-panel);
+  animation: route-error-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.route-error-card h2 {
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-tight);
+}
+.route-error-card p {
+  margin: 0;
+  color: var(--text-65);
+  line-height: var(--leading-relaxed);
+  max-width: 60ch;
+}
+.route-error-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+.route-error-details { color: var(--text-50); font-size: var(--fs-xs); }
+.route-error-details summary { cursor: pointer; width: fit-content; }
+.route-error-details pre {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  color: var(--text-60);
+}
+@keyframes route-error-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.99); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .route-error-card { animation: none; }
+}
+
+/* --- Daily game meta in the sidebar (I3-58): countdown + streak --- */
+.nav-game-meta {
+  display: inline-flex; align-items: center; gap: 6px; margin-left: auto; padding-left: 6px;
+  color: var(--text-45); font-size: var(--fs-tiny); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums;
+}
+.nav-game-streak { display: inline-flex; align-items: center; gap: 2px; color: #f0a35e; }
+.nav-game-streak svg { color: #ff8a3d; }
+/* Customize: items can be dragged within their section. */
+.nav-item.manage[draggable="true"] { cursor: grab; }
+.nav-item.manage[draggable="true"]:active { cursor: grabbing; }

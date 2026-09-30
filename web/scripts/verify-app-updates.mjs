@@ -8,6 +8,7 @@ import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { deferPromisePrompt } from './promise-prompt.mjs';
+import { completeSetup } from './setup-flow.mjs';
 
 const web = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const stage = await mkdtemp(join(tmpdir(), 'axom-update-browser-'));
@@ -45,9 +46,7 @@ try {
   const context = await browser.newContext({ reducedMotion: 'reduce' });
   const page = await context.newPage();
   await page.goto(origin, { waitUntil: 'networkidle' });
-  await page.getByLabel('Display name (optional)').fill('Update persistence check');
-  for (let step = 0; step < 3; step++) await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await page.getByRole('button', { name: 'Finish setup', exact: true }).click();
+  await completeSetup(page, 'Update persistence check');
   await deferPromisePrompt(page);
   await page.evaluate(async () => { await navigator.serviceWorker.ready; localStorage.setItem('axom.theme', 'light'); });
   await page.reload({ waitUntil: 'networkidle' });

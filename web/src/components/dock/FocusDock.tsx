@@ -12,7 +12,7 @@ import { findLiveSession, formatElapsed, sessionElapsedMs, QUICK_LOG_LABEL, type
 import { formatClock, pomodoroPhaseSeconds, usePomodoro } from "../../lib/pomodoro";
 import { useSessionUi } from "../../lib/sessionUi";
 import { useSoundscape } from "../../lib/soundscapes/store";
-import { EVIDENCE_LABEL, SOUNDSCAPES, lookFor } from "../../lib/soundscapes/presets";
+import { EVIDENCE_LABEL, SOUNDSCAPES, lookFor, versionOf } from "../../lib/soundscapes/presets";
 import { carrierPair } from "../../lib/soundscapes/engine";
 import { useReducedMotion } from "../../lib/motion";
 import { formatRestClock, useRest } from "../../lib/rest";
@@ -232,6 +232,8 @@ function SoundCapsule({ ghost, entering }: { ghost: boolean; entering: boolean }
   const presetId = useSoundscape((state) => state.presetId);
   const status = useSoundscape((state) => state.status);
   const output = useSoundscape((state) => state.output);
+  const versionChoice = useSoundscape((state) => (state.presetId ? state.versions[state.presetId] : undefined));
+  useSoundscape((state) => state.catalog);
   const { toggle, stop } = useSoundscape.getState();
   const stopLabel = useStopTimerLabel();
   const reduced = useReducedMotion();
@@ -260,6 +262,11 @@ function SoundCapsule({ ghost, entering }: { ghost: boolean; entering: boolean }
   if (!presetId) return null;
   const preset = SOUNDSCAPES[presetId];
   const pair = carrierPair(preset, output);
+  // Your own files show their own name, not the shelf's.
+  const chosenVersion = versionOf(preset, versionChoice);
+  const ownFile = "src" in chosenVersion && (chosenVersion.userFile || preset.band === "Yours" || preset.band === "Music");
+  const capsuleTitle = ownFile ? chosenVersion.label : preset.short;
+  const capsuleSub = ownFile ? preset.name : preset.band;
 
   const clear = () => {
     window.clearTimeout(timers.current.open);
@@ -306,8 +313,8 @@ function SoundCapsule({ ghost, entering }: { ghost: boolean; entering: boolean }
         >
           <Equalizer playing={status === "playing"} />
           <button type="button" className="dock-sound-name" onClick={() => (genie === "open" ? close(0) : open(0))} aria-expanded={genie === "open"} aria-label={`${preset.name} soundscape — show visual and controls`}>
-            <b>{preset.short}</b>
-            <small>{stopLabel ?? preset.band}</small>
+            <b>{capsuleTitle}</b>
+            <small>{stopLabel ?? capsuleSub}</small>
           </button>
           <IconButton label={status === "playing" ? "Pause sound" : "Play sound"} onClick={() => void toggle()} className="primary">
             {status === "playing" ? <Pause size={ICON_SIZE.body} /> : <Play size={ICON_SIZE.body} />}

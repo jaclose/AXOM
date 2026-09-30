@@ -6,6 +6,9 @@ import { runStorageMigrations } from "./lib/storageMigrations";
 import { installThemeSync } from "./lib/theme";
 import { installPaletteSync } from "./lib/palette";
 import { installMotionSync } from "./lib/motionPreference";
+// Chrome fires beforeinstallprompt once, early. Capture it at boot: the only
+// importer used to be the lazy About page, so the event was usually missed.
+import "./lib/pwaInstall";
 import { installChunkRecovery, registerWebWorker } from "./lib/webUpdates";
 import { storeHydration } from "./lib/storeHydration";
 import { startStartupIntro } from "./lib/startupIntro";
@@ -46,7 +49,12 @@ if (import.meta.env.DEV) {
     import("./lib/store"),
     import("./lib/pomodoro"),
     import("./lib/soundscapes/store"),
-  ]).then(([{ useStore }, { usePomodoro }, { useSoundscape, soundscapeAnalyser }]) => ({ useStore, usePomodoro, useSoundscape, soundscapeAnalyser }));
+    import("./lib/localVault"),
+  ]).then(([{ useStore }, { usePomodoro }, { useSoundscape, soundscapeAnalyser }, { flushLocalVaultWrites }]) => ({
+    useStore, usePomodoro, useSoundscape, soundscapeAnalyser,
+    /** Resolves once every save requested so far is on disk (tests reload after this). */
+    flushVault: flushLocalVaultWrites,
+  }));
 }
 
 installChunkRecovery();

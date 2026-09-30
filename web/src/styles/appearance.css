@@ -304,17 +304,6 @@
 }
 
 /* Onboarding palette choice */
-.onboarding-palette-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
-.onboarding-palette-row button {
-  min-width: 0; display: flex; align-items: center; gap: 8px; padding: 7px 9px;
-  color: var(--text-60); text-align: left; background: transparent;
-  border: 1px solid var(--hairline); border-radius: var(--radius-md); cursor: pointer;
-}
-.onboarding-palette-row button.on { color: var(--text); border-color: var(--gold-line); background: var(--gold-soft); }
-.onboarding-palette-row span { display: grid; min-width: 0; }
-.onboarding-palette-row b { font-size: var(--fs-xs); }
-.onboarding-palette-row small { overflow: hidden; color: var(--text-45); font-size: var(--fs-tiny); text-overflow: ellipsis; white-space: nowrap; }
-@media (max-width: 640px) { .onboarding-palette-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 /* --- Opening film (CinematicSettings) -------------------------------------- */
 .cinematic-frequency { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }

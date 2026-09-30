@@ -12,7 +12,7 @@
 // pre-med prerequisite actually mean something instead of "it's a lecture now".
 // ===========================================================================
 import type { AcademicStageId, EducationTrackId, ExperienceFocusId, TrackerKind, Yield } from "./types";
-import { ACADEMIC_TEMPLATE_COURSES, ACADEMIC_TEMPLATE_TERMS } from "./experience";
+import { SGU_CURRICULUM } from "./curricula";
 
 export type TrackGroup = "Medical School" | "Pre-Health" | "Other Health Professions";
 
@@ -126,13 +126,10 @@ export function isAcademicStageId(value: unknown): value is AcademicStageId {
 
 // --- Reusable blueprint pieces ---------------------------------------------
 
-const SGU_TERMS: BlueprintTerm[] = ACADEMIC_TEMPLATE_TERMS.map((term) => ({
+// One source for the SGU structure: lib/curricula.ts (JD's Term 1-5 + Boards).
+const SGU_TERMS: BlueprintTerm[] = SGU_CURRICULUM.terms.map((term) => ({
   name: term.name,
-  courses: ACADEMIC_TEMPLATE_COURSES.filter((c) => c.termId === term.id).map((c) => ({
-    code: c.code,
-    name: c.name,
-    modules: c.modules,
-  })),
+  courses: term.courses.map((course) => ({ code: course.code, name: course.name, modules: [...course.modules] })),
 }));
 
 const ORGAN_SYSTEMS = [

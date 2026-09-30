@@ -1,0 +1,92 @@
+# Reconciliation: claims vs. what actually works (2026-09-29, 20:10; updated 2026-09-30 00:30)
+
+Checked against IDEAS-1.md, IDEAS-3.md, MANIFEST.md, PLAN.md, PROGRESS.md and the Codex board. Branch `feat/ideas3-staging` (not merged, not pushed, not deployed).
+
+**Bottom line (updated 2026-09-30):** of ~106 items, 31 are shipped and verified in a browser, 3 are implemented but not yet verified the way a user would meet them, 12 are partial, 3 are blocked, 5 belong to Codex, and ~53 are planned or not started. That is about 29% fully done by item count (about 34% if partial work counts as half), and less by effort, because the unstarted items include the biggest ones (journal, onboarding, Wrapped, library, AI generation, exam interfaces). (It was 11, about 10%, on 2026-09-29.)
+
+Status words: **SHIPPED + VERIFIED** (user-facing behavior exercised in a real browser), **IMPLEMENTED, NOT YET VERIFIED** (code + automated tests only, or cannot be verified headless), **PARTIAL** (only part of the requested behavior), **PLANNED**, **BLOCKED**, **NOT STARTED**. A shared component change never counts as shipping the feature that sits on top of it.
+
+Verification environment: headless Chrome (Playwright, real Chrome channel) against the Vite dev server; 1440x900 and 390x844; dark and light; reduced motion on and off where animation mattered. Not available headless: macOS Now Playing, OS notification rendering, AirPods hardware, a production deploy.
+
+## The 20 areas flagged for over-broad claims
+
+| # | Area | Status | Evidence | Owner | Next action |
+|---|---|---|---|---|---|
+| 1 | Guide / walkthrough (I1-04, I1-17, I3-34, I3-18, I1-18, I1-19) | I1-04, I3-34, I3-18, I1-18, I1-19 SHIPPED + VERIFIED; I1-17 PARTIAL | 5492285 + 5fdd194. Tour: 8 stops, offer card, gliding spotlight. Browser: offer shown after the Promise (seeded user), tour run through all 8 stops, per-frame jitter sampled (largest tip jump 321px -> 58px same-page), light theme fixed in 5fdd194 | Claude | I1-17: mini-guide help buttons exist on only 3 pages. 69ae330: "Overwhelmed?" + first-visit hints on the new CoachMark primitive (F4); I3-18 run end to end |
+| 2 | Timer / menu bar (I1-11, I3-04, M-01, M-03) | M-01 SHIPPED + VERIFIED (web tab only); I1-11 PARTIAL; I3-04, M-03 NOT STARTED | f4a0b5c: live tab title + progress ring, browser-verified (title "24:58 · Focus · AXOM", ring at 65%). Native menu-bar pill exists on main (src-tauri menu_bar_pill.rs) but JD's installed app predates it | Claude (native after Codex posts its lib.rs is committed) | Fresh desktop build for JD; tray soundscape controls; finish tune + green edge; break pill |
+| 3 | Tracker ordering (I3-01, I3-36) | I3-01 SHIPPED + VERIFIED; I3-36 NOT STARTED | 0ab96bc. Browser: three taps on the last card, order unchanged; 10.6 s later it moved up. Unit: useSettledOrder.test.ts (3 cases) | Claude (hook); Codex (tracker model) | JD's `TODO(human)` in lib/trackerOrder.ts decides the settled order; frequency/non-timed trackers + flame after Codex's model lands |
+| 4 | Late-night study (I3-12) | SHIPPED + VERIFIED | 0ab96bc. Unit: energyInsights.test.ts "counts late-night study (00:00-04:59)". Browser: Reports > Your rhythm renders the Late night 12 AM-5 AM row (2026-09-30) | Claude | Done |
+| 5 | Soundscapes + headphones (I3-35) | PARTIAL | 0ab96bc: outputGuard.ts (+ test) pauses only when a known output id disappears, which most browsers hide. AirPods rely on the media-session pause handler from 09d65a1, not tested on hardware | Claude | Native CoreAudio route listener in the packaged app; test AirPods on JD's Mac |
+| 6 | Daily Games (I1-03, I3-53..I3-59) | I1-03, I3-53..I3-59 SHIPPED + VERIFIED | 47609d7. Browser: game chunk forced to 404 -> in-shell recovery card, sidebar alive, cleared on navigation. Build output: 5 game files now in the service-worker precache. Daily Word upgrades: see row 12. Sidebar countdowns: 6fc14d9. Doctordle check-in + reminder + back link: facfbd0 | Claude | "More words" for Daily Word; Doctordle + Daily Word split widget (I3-22) |
+| 7 | Course tracker / study plan (I3-28, I3-29, I3-26, I3-27, I3-23, I1-30) | I3-28, I3-27, I3-26, I3-29 SHIPPED + VERIFIED; I3-23, I1-30 NOT STARTED | 47609d7: dialog now a child of body, bottom edge hit-test inside the dialog (browser). 0ab96bc: Not now + Undo (jsdom test renders page + Toaster). I3-26: mass-import queue only (test in 5fdd194); course-tracker imports not checked | Claude | Check which upload JD meant; unify plan/edit forms; SGU structure |
+| 8 | Accounts / data safety (I1-14, I3-20, I3-31, I3-32) | I1-14 answered (PLAN D6); I3-20, I3-31, I3-32 BLOCKED | RLS enabled on all 7 account tables (migrations grep). Retention is 60 revisions (migration line 72). Hardening is uncommitted in the main checkout | Claude after merge | Land main-checkout hardening first, then fix Merge both, 10-save cap, restore-latest |
+| 9 | Widgets (I1-15, I1-16, I1-21, I3-22, I3-49) | I1-21, I1-15 SHIPPED + VERIFIED; I1-16, I3-22, I3-49 NOT STARTED | 9692ebc: new Focused order + Soundscape widget + one-time upgrade of saved layouts. 0ab96bc: luster memory (hover not exercised) | Claude | Verify hover; richer per-size widgets (I3-22) are Wave 2 |
+| 10 | Journal (I1-25, I1-26, I3-40..I3-48) | NOT STARTED (I1-26 PARTIAL: unlock mechanism only) | lib/unlocks.ts exists (09d65a1); nothing calls unlock("again") | Claude | Wave 2, after Wave 1 is clean |
+| 11 | Reports (I3-07, I3-63) | NOT STARTED | | Claude | Wave 2 |
+| 12 | Daily Word (I3-53..I3-58) | SHIPPED + VERIFIED | 224d44b (win card, share #N, on-board how-to, back link, no scroll), 3843a5f (hint ladder + reveal), 6fc14d9 (sidebar countdown + streak) | Claude | "More words" list growth is separate |
+| 13 | Question bank / exam UIs (I1-08, I3-33, I3-25) | NOT STARTED | ExamRunner lists every set even when one is preselected (ExamRunner.tsx:712-725), Codex edits that file | Claude after Codex | Wave 3 |
+| 14 | Anki / native flashcards (I1-07, I1-32) | I1-32 copy SHIPPED + VERIFIED; I1-07 NOT STARTED | ef981c3: Integrations says what Anki Lab really does (local drafts or your own AI chat, then CSV/TSV) | Claude | Wave 3 |
+| 15 | Generative questions (I1-05) | NOT STARTED | | Claude | Wave 3 |
+| 16 | Onboarding (I1-24, I3-13, I3-14, I3-16, I3-17, I3-19) | NOT STARTED | Baseline screenshots of every current step captured | Claude | Wave 2 flagship |
+| 17 | Apple Now Playing (I1-12) | IMPLEMENTED, NOT YET VERIFIED | 09d65a1 removed the MediaStream route that made Chrome treat playback as a one-shot player; media-session metadata + handlers registered. Headless Chrome has no macOS Now Playing | Claude | JD checks Control Center while a soundscape plays |
+| 18 | Custom soundscapes (I1-06, I3-08) | PARTIAL | File upload of sounds + backgrounds: 09d65a1 (userMedia.test.ts; browser screenshots in the earlier session). YouTube link: NOT STARTED (embed-only by YouTube's terms) | Claude | YouTube embed source |
+| 19 | Community / leaderboards (I3-51, I3-24) | NOT STARTED | | Claude | Wave 3 (needs backend + privacy model) |
+| 20 | Resource library (I3-30, I3-64, I3-65, I3-66) | NOT STARTED | Hosting decision pending (PLAN D3/D4) | Claude | Wave 2 |
+
+## Every SHIPPED + VERIFIED item
+
+| Item | Commit | Files | Automated test | Browser verification |
+|---|---|---|---|---|
+| I1-03 Daily games black screen | 47609d7 | RouteErrorBoundary.tsx, App.tsx, webUpdates.ts, build-metadata.ts, shell.css | RouteErrorBoundary.test.tsx (3) | Forced chunk 404 in dev: in-shell card, sidebar present, cleared after navigating; production build precache lists the 5 game files (2.56 MB total precache) |
+| I3-28 Study plan dialog | 47609d7 | Modal.tsx | Existing Modal/CourseTracker/QuestionWorkspace/FocusDock suites (33) | Opened from a tracker row: dialog is a child of body; hit-test at its bottom edge lands inside it; screenshot |
+| I3-37 Notices evaporate | ee7590e | Toaster.tsx, useExitingList.ts, pages.css, 3 test files | Toaster.test.tsx, toast.test.ts, DailyLoopReminderWatcher, StandupWatcher | Frame strip at 0/180/340/740 ms with motion on; light and 390 checks in the sweep |
+| M-01 Tab identity | f4a0b5c | favicon.svg, favicon-32.png, icon-192.png, icons/*, manifest, index.html, TabPresence.tsx | TabPresence.test.ts (3) | Idle title "Course Tracker · AXOM"; running "24:58 · Focus · AXOM"; favicon data-URL ring rendered and inspected |
+| I1-04 Guide restored | 5492285 | GuideOffer.tsx, guideOffer.ts, GuidedTour.tsx, Sidebar.tsx, App.tsx, tour.css | GuidedTour.test.tsx, guideOffer.test.ts, App.test.tsx | Offer shown, tour started, all 8 stops traversed |
+| I3-34 Guide smoothness + haze | 5492285, 5fdd194 | GuidedTour.tsx, tour.css | GuidedTour/ModuleTour suites (12) | rAF frame sampling per stop; screenshots dark 1440, light 1440, dark 390 |
+| I3-01 Tracker jump | 0ab96bc | useSettledOrder.ts, TrackerManager.tsx, trackerOrder.ts | useSettledOrder.test.ts (3) | Order held through 3 taps; re-sorted 10.6 s after the last tap |
+| I3-39 Doubled study time | f095e48 | store.ts (matchProductivityTracker) | pomodoroTrackerAttribution.test.ts (3), failed before the fix | Study tracker card reads "1h 30m" after a 90-minute Pomodoro log |
+| I1-28 Building page shift | 0ab96bc | ecosystem.css | none (CSS) | Card width 344 px before and after filtering; filter row top unchanged |
+| I1-29 About tabs | 0ab96bc, 5fdd194 | AboutPage.tsx, pages.css | none | Dark 1440 (developer tab embeds jafardabbagh.com), dark 390 cold load |
+| I3-03 Blue orb identified | 5fdd194 (docs) | PLAN.md D9 | n/a | Matched against Codex Computer Use LensSequence frames (48x48 blue orb) |
+| I3-53..I3-57 Daily Word | 224d44b, 3843a5f | DailyWordPage.tsx, DailyWordDemo.tsx, dailyWordDemo.ts, dailyWordHints.ts, dailyWord.ts, dailyWordStats.ts, store.ts + backup.ts normalizers, daily-games.css | dailyWord.test.ts, dailyWordDemo.test.ts, storeDailyGames.test.ts (hint fields survive the store), DailyWordPage.test.tsx | Demo frames, hint ladder (key glow, tile outline, confirm, reveal), win card, share text; 0 px overflow at 1440x900; dark 390 and light 1440 |
+| I1-23 / I3-52 Sidebar | 6fc14d9 | navLayout.ts, nav.ts, Sidebar.tsx, DailyGameNavMeta.tsx, ApplicationCheckerPage.tsx | navLayout.test.ts, SidebarAccessibility.test.tsx | Upgrade applied once to a pre-upgrade profile; Alt+Up reorder persisted across reload; Residency view for SGU |
+| I3-58 Game countdowns | 6fc14d9 | DailyGameNavMeta.tsx | DailyGameNavMeta.test.ts | "23h" / "52m" at 00:08 AST; Doctordle counts to 05:00 UTC |
+| I1-18 "Overwhelmed?" | 69ae330 | CoachLayer.tsx, CoachMark.tsx, coachPlacement.ts, coach.ts, coach.css, Sidebar.tsx (open Customize), App.tsx (mount) | CoachLayer.test.tsx (4), coach.test.ts (6), coachPlacement.test.ts (6) | Appeared at 88.7 s of visible time; word, drawn arrow, ripple + bubble right of Customize; Show me opened Customize. Dark 1440 + light 1440 with motion on; dark 390 (arrow to the menu button, Show me opened the drawer in Customize mode) |
+| I1-19 First-visit page hints | 69ae330 | coach.ts (5 hints), CoachLayer.tsx, HelpPage.tsx (Show page hints again), CourseTrackerPage.tsx (intro toast removed) | CoachLayer.test.tsx, coach.test.ts | Dashboard, Course Tracker, Question Bank, Productivity, Soundscapes (waited for the taste picker); No more hints stopped them; Help brought them back |
+| I3-18 Tour offered after signing | 5492285 (behavior), verified 2026-09-30 | App.tsx, GuideOffer.tsx | GuideOffer tests | Sign now -> signed -> cutscene closed -> "Want a 60-second tour?" shown |
+| I3-59 Doctordle "did you get it?" | facfbd0 | doctordle.ts, DoctordleCheckIn.tsx, DoctordleReminder.tsx, DoctordlePage.tsx, OptionalDailyGamesPage.tsx, DailyGameNavMeta.tsx, DashboardPage.tsx (1 line + import), App.tsx (mount) | doctordle.test.ts (5), DoctordleCheckIn.test.tsx (6), DoctordlePage.test.tsx | Open -> inline ask on the page; elsewhere the floating check-in 15 s later; Got it -> sidebar flame 1; regular's dashboard card Yes -> Got it -> "Logged. 3 in a row." Dark 1440, light 1440, dark 390 |
+| I1-32 Integrations copy | ef981c3 | IntegrationsPage.tsx | none (copy) | Read back at 390 dark: Anki card export copy, no em dashes |
+| I1-35 Portable backup entry | existing; verified 2026-09-30 | IntegrationsPage.tsx, SettingsModal.tsx | SettingsModal tests | Integrations > Open backups opened Settings on Emergency recovery; Export backup downloaded axom-backup-2026-09-30.json with the workspace (5 tracker items) |
+| I3-12 Late-night band | 0ab96bc | energyInsights.ts | energyInsights.test.ts (a 02:00 log lands in Late night) | Reports > Your rhythm shows the "Late night 12 AM-5 AM" row (dark 390, 2026-09-30) |
+| I1-15 Quieter luster after first hover | 0ab96bc | useLuster.ts, motion.css | none (pointer) | Motion on, dashboard card: first hover runs the sweep with glare opacity 1; after leaving and returning, no sweep and glare 0.4 |
+| I3-27 One-tap Not now | 0ab96bc, e86a51c | CourseTrackerPage.tsx, store.ts (rest-only patch keeps the study clock) | CourseTrackerPage tests, trackerSnoozeClock.test.ts (fails without e86a51c) | No dialog; "Back tomorrow" notice; Undo restores the exact suggestion order (it did not before e86a51c) |
+| I3-26 Uploads in lecture order | 0ab96bc (queue), f8e62ae (library) | MassImport.tsx, LibraryPanels.tsx, naturalSort.ts | MassImport tests, naturalSort.test.ts | Sets added L1, L2, L10 display L1, L2, L10 (the store prepends, so they showed L10, L2, L1 before) |
+| I3-29 One editor for item details and study plan | 1a6c504 | CourseTrackerPage.tsx (ItemEditor replaces prompt() rename + plan modal) | CourseTrackerPage.test.tsx (+1), e2e personalized-recommendations | Details and Study plan tabs, same field styles; PQ hides the lecture-pass field; dark 1440, light 1440, dark 390 |
+| I1-21 Dashboard order + Soundscape widget | 9692ebc | dashboardWidgets.ts, SoundscapeWidget.tsx, quickPicks.ts, DashboardPage.tsx (4 small hunks), SettingsModal.tsx, types.ts, dashboard-widgets.css | dashboardWidgets.test.ts (+5), quickPicks.test.ts (3), DashboardWidgetEngine.test.tsx | New student grid: Daily Check-In, Pomodoro, Soundscape, targets, Question Bank, Course Tracker, Weekly. Played, switched (Brown) and stopped from the widget; custom layout gained Soundscape right after the timer; dark 1440, light 1440, dark 390 |
+
+## IMPLEMENTED, NOT YET VERIFIED
+
+M-02 rounded notification icon (no OS notification rendered), I1-12 Now Playing (macOS only), I1-03b Daily Word widget gate (widget not on the default layout).
+
+## PARTIAL
+
+I1-17 (8-stop tour yes; mini-guides on Course Tracker, Question Bank, Productivity and Reports (f97fafc); Soundscapes waits for Codex's page restructure), I1-11 (native pill exists, JD's build is old), I3-35 (AirPods path untested, wired path mostly inert), I1-06/I3-08 (files yes, YouTube no), I1-09 (comfort and levels yes, more content no), I1-26 (unlock mechanism, no trigger), I1-22 (verified: "Run setup again" on one line; ef981c3 plain-language Account and Data tabs with a Technical details disclosure, checked dark 1440 and 390; 619a747 removed the remaining em dashes; Advanced stays technical on purpose; the Wave 2 restructure is not started), I3-60/M-04 (toast visuals yes, broader notification surfaces no).
+
+## BLOCKED
+
+I3-20, I3-31, I3-32 (accounts: wait for the main checkout's uncommitted hardening to land). The native half of I1-10 also waits for Codex's src-tauri changes.
+
+## CODEX (not verified by Claude)
+
+I1-01 persistent Locked In, I1-10 web notifications, I1-13 timer pill hover, I1-27 quotes, I3-09 auto-fill progress, I3-60 notification mechanics. Codex's own report says full browser/native verification of its branch is unfinished.
+
+## Regression layer (2026-09-30)
+
+- `npm run verify:all` = quality + verify:app-updates + verify:daily-games-offline + the Playwright suite. Exit 0 on de69c75 (2,014 unit tests; 25 e2e passed, 1 skipped: live accounts). The last full run also caught a lost install prompt (de69c75).
+- Running the full suite for the first time found real bugs, fixed in b5eb1fa and 1ebb916: the update panel crashed the whole app after a deploy (also on main), unreadable light-theme text (Promise prompt, active pills, tree node, kickers), a tour scroll race, focusable leaving toasts, a 4 px hover layout shift, and a forgotten App Checker pathway.
+- `e2e/contrast-sweep.spec.ts` checks 15 screens + Promise + Settings in dark and light, and 7 palettes x 2 themes x 4 screens, failing below 2:1.
+- Branch rebased onto main 2f9ebf4 (security hardening landed there) with no conflicts.
+
+## Known data follow-up for JD
+
+Pomodoro logs written before f095e48 carry no tracker, and the day JD topped up still holds the duplicate manual entry. Nothing was rewritten automatically. Options: delete the duplicate in Activity history, and approve (or not) a one-time backfill that attaches old Pomodoro logs to the Study tracker.

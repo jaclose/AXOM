@@ -19,7 +19,9 @@ export default defineConfig({
     ...(process.env.AXOM_E2E_CHANNEL ? { channel: process.env.AXOM_E2E_CHANNEL } : {}),
     baseURL,
     headless: true,
-    reducedMotion: "reduce",
+    // A context option: at the top of \`use\` Playwright ignores it silently, so
+    // the opening film used to play (and hold the app inert) in every spec.
+    contextOptions: { reducedMotion: "reduce" },
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },

@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, CircleDot, Clock3, Copy, Delete, Minus, ShieldCheck } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { ArrowLeft, BarChart3, Check, CircleDot, Clock3, Copy, Delete, HelpCircle, Lightbulb, Minus, ShieldCheck } from "lucide-react";
 import { GlassCard, GButton } from "../components/ui/primitives";
+import { Modal } from "../components/ui/Modal";
+import { DailyWordDemo } from "../components/games/DailyWordDemo";
 import {
   buildDailyWordShare,
+  dailyWordNumber,
   DAILY_WORD_MAX_GUESSES,
   deriveDailyWordStats,
   millisecondsUntilNextCalendarDate,
@@ -57,10 +60,20 @@ export function DailyWordPage() {
   const [status, setStatus] = useState("Enter a five-letter word.");
   const [unrecognizedWord, setUnrecognizedWord] = useState("");
   const [manualShare, setManualShare] = useState("");
-  const [howToOpen, setHowToOpen] = useState(() => !isAnnouncementDismissed(
+  // Opens the moment a puzzle is finished in this visit (Doctordle-style);
+  // on a return visit the compact results row offers it instead.
+  const [winOpen, setWinOpen] = useState(false);
+  const [revealAsk, setRevealAsk] = useState(false);
+  // First visit plays the on-board how-to once (JD, Ideas 3); later visits
+  // replay it from "How to play". Typing always skips it.
+  const [firstVisit] = useState(() => !isAnnouncementDismissed(
     DAILY_WORD_HOW_TO_ANNOUNCEMENT_ID,
     readDismissedAnnouncements(),
   ));
+  const [demo, setDemo] = useState(false);
+  const [legendOpen, setLegendOpen] = useState(false);
+  const demoStarted = useRef(false);
+  const endDemo = useCallback(() => setDemo(false), []);
   const submitting = useRef(false);
   const manualShareRef = useRef<HTMLTextAreaElement>(null);
   const initializedPuzzleId = useRef<string>();
@@ -100,6 +113,16 @@ export function DailyWordPage() {
     [answer, puzzle],
   );
   const keyStates = useMemo(() => deriveKeyStates(puzzle?.guesses ?? [], evaluations), [evaluations, puzzle?.guesses]);
+  // Hints (JD, Ideas 3): 1 glows a key, 2 outlines its spot in your row, 3 reveals.
+  // The target is the first position you have not solved, so a hint stays useful.
+  const hintsUsed = puzzle?.hintsUsed ?? 0;
+  const hintTarget = useMemo(() => {
+    if (!answer) return null;
+    for (let position = 0; position < answer.length; position += 1) {
+      if (!evaluations.some((row) => row[position] === "correct")) return { letter: answer[position], position };
+    }
+    return null;
+  }, [answer, evaluations]);
   const stats = useMemo(() => deriveDailyWordStats(history), [history]);
   const nextPuzzleCountdown = useMemo(
     () => puzzle?.completed ? formatCountdown(millisecondsUntilNextCalendarDate(now, puzzle.timezone)) : "",
@@ -111,8 +134,13 @@ export function DailyWordPage() {
   }, [selection?.created, selection?.puzzle, upsertPuzzle]);
 
   useEffect(() => {
-    if (words && puzzle) dismissAnnouncement(DAILY_WORD_HOW_TO_ANNOUNCEMENT_ID);
-  }, [puzzle, words]);
+    if (!words || !puzzle) return;
+    dismissAnnouncement(DAILY_WORD_HOW_TO_ANNOUNCEMENT_ID);
+    if (firstVisit && !demoStarted.current && !puzzle.completed && puzzle.guesses.length === 0) {
+      demoStarted.current = true;
+      setDemo(true);
+    }
+  }, [firstVisit, puzzle, words]);
 
   useEffect(() => {
     if (!puzzle || initializedPuzzleId.current === puzzle.puzzleId) return;
@@ -177,6 +205,7 @@ export function DailyWordPage() {
     const row = scoreGuess(draft, answer);
     setDraft("");
     setManualShare("");
+    if (completed) setWinOpen(true);
     setStatus(won
       ? `Correct. Solved in ${guesses.length} guess${guesses.length === 1 ? "" : "es"}.`
       : completed
@@ -186,12 +215,14 @@ export function DailyWordPage() {
 
   const enterLetter = useCallback((letter: string) => {
     if (!puzzle || puzzle.completed || !/^[A-Z]$/.test(letter)) return;
+    setDemo(false);
     setUnrecognizedWord("");
     setDraft((current) => current.length < 5 ? `${current}${letter}` : current);
   }, [puzzle]);
 
   const backspace = useCallback(() => {
     if (!puzzle || puzzle.completed) return;
+    setDemo(false);
     setUnrecognizedWord("");
     setDraft((current) => current.slice(0, -1));
   }, [puzzle]);
@@ -216,6 +247,24 @@ export function DailyWordPage() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [backspace, enterLetter, submit]);
+
+  function takeHint() {
+    if (!puzzle || puzzle.completed || !hintTarget) return;
+    if (hintsUsed >= 2) { setRevealAsk(true); return; }
+    setDemo(false);
+    upsertPuzzle({ ...puzzle, hintsUsed: hintsUsed + 1, updatedAt: new Date().toISOString() });
+    setStatus(hintsUsed === 0 ? "Hint: one key on the keyboard is glowing." : "Hint: its spot is outlined in your current row.");
+  }
+
+  function revealWord() {
+    if (!puzzle || puzzle.completed) return;
+    const timestamp = new Date().toISOString();
+    upsertPuzzle({ ...puzzle, hintsUsed: 3, completed: true, won: false, revealed: true, completedAt: timestamp, updatedAt: timestamp });
+    setRevealAsk(false);
+    setDraft("");
+    setStatus("Word revealed. Your streak is safe.");
+    setWinOpen(true);
+  }
 
   async function shareResult() {
     if (!puzzle?.completed) return;
@@ -244,25 +293,41 @@ export function DailyWordPage() {
 
   return (
     <div className="daily-word-page" data-list-marker={words.marker}>
-      <header className="daily-word-header">
-        <div>
-          <div className="eyebrow">Optional daily utility</div>
-          <h1>AXOM Daily Word</h1>
-          <p>A daily five-letter word puzzle.</p>
-        </div>
-        <div className="daily-word-date">
-          <b>{puzzle.puzzleDate}</b>
-          <span>{puzzle.timezone}</span>
-        </div>
+      <div className="daily-word-topline">
+        <a className="daily-word-back" href="#daily-games"><ArrowLeft size={ICON_SIZE.body} aria-hidden="true" /> Daily Games</a>
+        <button
+          type="button"
+          className="daily-word-howto"
+          aria-expanded={legendOpen || demo}
+          onClick={() => {
+            if (!puzzle.completed && puzzle.guesses.length === 0 && !draft) setDemo(true);
+            else setLegendOpen((open) => !open);
+          }}
+        >
+          <HelpCircle size={ICON_SIZE.body} aria-hidden="true" /> How to play
+        </button>
+        {!puzzle.completed && (
+          <button type="button" className={`daily-word-howto daily-word-hint ${hintsUsed ? "is-used" : ""}`} onClick={takeHint} disabled={!hintTarget}>
+            <Lightbulb size={ICON_SIZE.body} aria-hidden="true" /> {hintsUsed === 0 ? "Hint" : hintsUsed === 1 ? "Another hint" : "Reveal word"}
+          </button>
+        )}
+        <span className="daily-word-date"><b>#{dailyWordNumber(puzzle.puzzleDate)}</b><span>{puzzle.puzzleDate}</span></span>
+      </div>
+      {/* The top bar already shows the title; keep the page heading for assistive tech. */}
+      <header className="sr-only">
+        <h1>AXOM Daily Word</h1>
+        <p>A daily five-letter word puzzle.</p>
       </header>
 
       <GlassCard pad className="daily-word-board-card">
-        <details className="daily-word-instructions" open={howToOpen} onToggle={(event) => setHowToOpen(event.currentTarget.open)}>
-          <summary>How to play</summary>
-          <p>Submit a valid five-letter word in six guesses. A solid check means correct position, a ring means present elsewhere, and a dash means absent.</p>
-          <p className="daily-word-dictionary-note">Dictionary {words.version} · {words.allowed.size.toLocaleString()} local allowed words · no network lookup during play.</p>
-        </details>
-
+        {legendOpen && (
+          <div className="daily-word-legend" role="note">
+            <span><i className="correct" /> Right letter, right spot</span>
+            <span><i className="present" /> In the word, another spot</span>
+            <span><i className="absent" /> Not in the word</span>
+          </div>
+        )}
+        <div className="daily-word-grid-wrap">
         <div className="daily-word-grid" role="grid" aria-label={`Six-row Daily Word puzzle for ${puzzle.puzzleDate}`}>
           {Array.from({ length: DAILY_WORD_MAX_GUESSES }, (_, rowIndex) => {
             const submitted = puzzle.guesses[rowIndex];
@@ -275,8 +340,11 @@ export function DailyWordPage() {
                   const label = evaluation
                     ? `Row ${rowIndex + 1}, column ${columnIndex + 1}, letter ${letter}, ${EVALUATION_LABEL[evaluation]}.`
                     : `Row ${rowIndex + 1}, column ${columnIndex + 1}, ${letter.trim() ? `letter ${letter}` : "blank"}.`;
+                  const hintSlot = hintsUsed >= 2 && hintTarget && !puzzle.completed
+                    && rowIndex === puzzle.guesses.length && columnIndex === hintTarget.position && !letter.trim();
                   return (
-                    <div className={`daily-word-tile ${evaluation ?? ""} ${letter.trim() ? "filled" : ""}`} role="gridcell" aria-label={label} key={columnIndex}>
+                    <div className={`daily-word-tile ${evaluation ?? ""} ${letter.trim() ? "filled" : ""} ${hintSlot ? "hint-slot" : ""}`}
+                      role="gridcell" aria-label={label} key={columnIndex} data-hint={hintSlot ? hintTarget.letter : undefined}>
                       <span>{letter.trim()}</span>
                       {evaluation === "correct" && <Check size={ICON_SIZE.microInline} aria-hidden="true" />}
                       {evaluation === "present" && <CircleDot size={ICON_SIZE.microInline} aria-hidden="true" />}
@@ -287,6 +355,9 @@ export function DailyWordPage() {
               </div>
             );
           })}
+        </div>
+
+          {demo && <DailyWordDemo wordCount={words.allowed.size} onDone={endDemo} />}
         </div>
 
         <div className="daily-word-status" role="status" aria-live="polite" aria-atomic="true">{status}</div>
@@ -302,7 +373,7 @@ export function DailyWordPage() {
               {row.split("").map((letter) => (
                 <button
                   type="button"
-                  className={`daily-word-key ${keyStates[letter] ?? "unknown"}`}
+                  className={`daily-word-key ${keyStates[letter] ?? "unknown"} ${hintsUsed >= 1 && !puzzle.completed && hintTarget?.letter === letter ? "is-hint" : ""}`}
                   aria-label={`Letter ${letter}${keyStates[letter] ? `, ${EVALUATION_LABEL[keyStates[letter]!]}` : ""}`}
                   disabled={puzzle.completed}
                   onClick={() => enterLetter(letter)}
@@ -316,38 +387,65 @@ export function DailyWordPage() {
             <button type="button" className="daily-word-key wide" aria-label="Backspace" disabled={puzzle.completed} onClick={backspace}><Delete size={ICON_SIZE.emphasis} aria-hidden="true" /> Backspace</button>
           </div>
         </div>
+        <p className="daily-word-dictionary-note">Dictionary {words.version} · {words.allowed.size.toLocaleString()} words · works offline</p>
       </GlassCard>
 
       {puzzle.completed && (
-        <GlassCard pad className="daily-word-results">
-          <div className="spread wrap gap8">
-            <div>
-              <h2>{puzzle.won ? "Puzzle solved" : "Puzzle complete"}</h2>
-              <p className="sub">Answer: <b>{answer}</b>. The next puzzle appears after the calendar date changes in {puzzle.timezone}.</p>
-            </div>
-            <GButton onClick={shareResult}><Copy size={ICON_SIZE.body} /> Share result</GButton>
-          </div>
-          <div className="daily-word-countdown" aria-label={`Time until the next Daily Word puzzle: ${nextPuzzleCountdown}`}>
-            <Clock3 size={ICON_SIZE.body} aria-hidden="true" />
-            <span>Next puzzle in <b>{nextPuzzleCountdown}</b></span>
-          </div>
+        <div className="daily-word-done" role="group" aria-label="Today's result">
+          <span className="daily-word-done-score">
+            <b>{puzzle.won ? `Solved in ${puzzle.guesses.length}` : puzzle.revealed ? "Revealed. Streak kept." : "Not this time"}</b>
+            <span aria-label={`Time until the next Daily Word puzzle: ${nextPuzzleCountdown}`}><Clock3 size={ICON_SIZE.microInline} aria-hidden="true" /> Next word in {nextPuzzleCountdown}</span>
+          </span>
+          <GButton size="sm" variant="primary" onClick={shareResult}><Copy size={ICON_SIZE.body} /> Share result</GButton>
+          <GButton size="sm" onClick={() => setWinOpen(true)}><BarChart3 size={ICON_SIZE.body} /> See results</GButton>
+        </div>
+      )}
+      {puzzle.completed && !winOpen && manualShare && <ManualShare value={manualShare} textareaRef={manualShareRef} />}
+
+      {revealAsk && !puzzle.completed && (
+        <Modal title="Reveal today's word?" onClose={() => setRevealAsk(false)} className="daily-word-reveal"
+          footer={<>
+            <GButton onClick={revealWord}>Reveal the word</GButton>
+            <GButton variant="primary" onClick={() => setRevealAsk(false)}>Keep trying</GButton>
+          </>}>
+          <p>You keep your streak either way. But you have guesses left, and you are closer than you think.</p>
+        </Modal>
+      )}
+
+      {puzzle.completed && winOpen && (
+        <Modal title={puzzle.won ? "Puzzle solved" : puzzle.revealed ? "Word revealed" : "Puzzle complete"} onClose={() => setWinOpen(false)} className="daily-word-win">
+          <p className="daily-word-win-kicker">
+            Today's word · #{dailyWordNumber(puzzle.puzzleDate)} · {puzzle.won ? `solved in ${puzzle.guesses.length} ${puzzle.guesses.length === 1 ? "guess" : "guesses"}` : puzzle.revealed ? "revealed, streak kept" : "six guesses used"}
+          </p>
+          <p className="daily-word-answer">Answer: <b>{answer}</b></p>
           <div className="daily-word-stats" aria-label="Daily Word statistics">
             <Stat label="Played" value={stats.gamesPlayed} />
-            <Stat label="Wins" value={stats.wins} />
-            <Stat label="Current streak" value={stats.currentStreak} />
-            <Stat label="Maximum streak" value={stats.maxStreak} />
+            <Stat label="Win %" value={stats.gamesPlayed ? Math.round((stats.wins / stats.gamesPlayed) * 100) : 0} />
+            <Stat label="Streak" value={stats.currentStreak} />
+            <Stat label="Best" value={stats.maxStreak} />
           </div>
           <div className="daily-word-distribution">
             <h3>Guess distribution</h3>
-            {Array.from({ length: DAILY_WORD_MAX_GUESSES }, (_, index) => index + 1).map((guess) => (
-              <div className="daily-word-distribution-row" key={guess}>
-                <span>{guess}</span><div><i style={{ width: `${distributionWidth(stats.guessDistribution[guess] ?? 0, stats.wins)}%` }} /></div><b>{stats.guessDistribution[guess] ?? 0}</b>
-              </div>
-            ))}
+            {Array.from({ length: DAILY_WORD_MAX_GUESSES }, (_, index) => index + 1).map((guess) => {
+              const mine = puzzle.won && puzzle.guesses.length === guess;
+              return (
+                <div className={`daily-word-distribution-row ${mine ? "is-today" : ""}`} key={guess}>
+                  <span>{mine && <em aria-label="Today">You</em>}{guess}</span>
+                  <div><i style={{ width: `${distributionWidth(stats.guessDistribution[guess] ?? 0, stats.wins)}%` }} /></div>
+                  <b>{stats.guessDistribution[guess] ?? 0}</b>
+                </div>
+              );
+            })}
           </div>
-          {manualShare && <label className="stack gap6"><span className="field-label">Manual copy result</span><textarea ref={manualShareRef} className="field" readOnly value={manualShare} /></label>}
-          <div className="backup-note"><ShieldCheck size={ICON_SIZE.body} /><span>Sharing contains only the date, score, and symbolic grid—never the answer, guesses, or personal data.</span></div>
-        </GlassCard>
+          <div className="daily-word-win-foot">
+            <span className="daily-word-countdown" aria-label={`Time until the next Daily Word puzzle: ${nextPuzzleCountdown}`}>
+              <Clock3 size={ICON_SIZE.body} aria-hidden="true" /> Next word in <b>{nextPuzzleCountdown}</b>
+            </span>
+            <GButton variant="primary" onClick={shareResult}><Copy size={ICON_SIZE.body} /> Share result</GButton>
+          </div>
+          {manualShare && <ManualShare value={manualShare} textareaRef={manualShareRef} />}
+          <div className="backup-note"><ShieldCheck size={ICON_SIZE.body} /><span>Sharing shows the puzzle number, your score and coloured squares. Never the word or your guesses.</span></div>
+        </Modal>
       )}
     </div>
   );
@@ -385,6 +483,15 @@ function formatCountdown(milliseconds: number): string {
   const minutes = totalMinutes % 60;
   if (!hours) return `${minutes}m`;
   return `${hours}h ${minutes}m`;
+}
+
+function ManualShare({ value, textareaRef }: { value: string; textareaRef: RefObject<HTMLTextAreaElement> }) {
+  return (
+    <label className="stack gap6 daily-word-manual-share">
+      <span className="field-label">Manual copy result</span>
+      <textarea ref={textareaRef} className="field" readOnly value={value} rows={value.split("\n").length} />
+    </label>
+  );
 }
 
 function Stat({ label, value }: { label: string; value: number }) {

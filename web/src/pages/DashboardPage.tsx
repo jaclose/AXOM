@@ -6,7 +6,7 @@ import {
   SlidersHorizontal, GripVertical, PlusCircle, X,
   AlertTriangle, CalendarClock,
   BookOpenCheck, ListTodo, BatteryMedium, Activity, Flame, Gamepad2,
-  ChevronUp, ChevronDown, GraduationCap, Target, Gauge, Timer, BarChart3, Sparkles,
+  ChevronUp, ChevronDown, GraduationCap, Target, Gauge, Timer, BarChart3, Sparkles, AudioWaveform,
   CalendarDays, Map as MapIcon, TrendingUp, Stethoscope, Link2, LayoutGrid, Star } from "lucide-react";
 import { ICON_SIZE } from "../lib/iconSize";
 import { useLuster } from "../lib/useLuster";
@@ -31,6 +31,8 @@ import { pickFocusExam, buildExamCountdown, countdownHeadline, type PrepIntensit
 import { AnimatedProgressBar } from "../components/ui/motion";
 import { GlassCard, GButton, GhostButton, PanelHeader, Tag } from "../components/ui/primitives";
 import { Pomodoro } from "../components/productivity/Pomodoro";
+import { SoundscapeWidget } from "../components/dashboard/SoundscapeWidget";
+import { DoctordleReminder } from "../components/games/DoctordleReminder";
 import { UpNext } from "../components/brief/UpNext";
 import { pushToast } from "../lib/toast";
 import { CloseoutModal } from "../components/brief/CloseoutModal";
@@ -47,6 +49,7 @@ import {
   defaultDashboardWidgetPreferences,
   extraLargeWidgetRecommendation,
   normalizeDashboardLayoutPreferences,
+  upgradeDashboardLayout,
 } from "../lib/dashboardWidgets";
 import {
   DashboardWidgetFrame,
@@ -178,6 +181,7 @@ export function DashboardPage() {
       {!hiddenWidgets.has("commandBrief") && <UpNext readiness={readiness} onHide={hideUpNext} />}
 
       <StandupPrompt />
+      <DoctordleReminder />
 
       <div className="dashboard-edit-toolbar">
         <GhostButton
@@ -538,6 +542,7 @@ const WIDGET_GLYPHS: Record<DashboardWidgetId, { icon: typeof Database; tone: st
   todayScore: { icon: Gauge, tone: "green" },
   examCountdown: { icon: CalendarClock, tone: "rose" },
   pomodoro: { icon: Timer, tone: "orange" },
+  soundscapes: { icon: AudioWaveform, tone: "violet" },
   weekly: { icon: BarChart3, tone: "cool" },
   suggested: { icon: Sparkles, tone: "gold" },
   aiActions: { icon: Sparkles, tone: "violet" },
@@ -570,13 +575,13 @@ function resolveDashboardLayout(
     order: legacyOrder,
     hiddenWidgetIds: legacyHidden,
   });
-  if (normalized) return normalized;
+  if (normalized) return upgradeDashboardLayout(normalized);
   const legacy = adaptLegacyDashboardLayout({ order: legacyOrder, hiddenWidgetIds: legacyHidden });
   const isUntouchedLegacyDefault = sameStringList(legacyOrder, DEFAULT_DASHBOARD_WIDGETS)
     && sameStringList(legacyHidden, DEFAULT_HIDDEN_DASHBOARD_WIDGETS);
   return isUntouchedLegacyDefault
     ? applyDashboardLayoutPreset(legacy, "focused", "1970-01-01T00:00:00.000Z")
-    : legacy;
+    : upgradeDashboardLayout(legacy);
 }
 
 function sameStringList(value: unknown, expected: readonly string[]) {
@@ -620,6 +625,7 @@ function renderDashboardWidget(context: DashboardWidgetRenderContext) {
   if (widgetId === "todayScore") return <TodayScoreWidget result={dailyProgress} activeDayKey={activeDayKey} enabledFields={enabledFields} />;
   if (widgetId === "examCountdown") return <ExamCountdownWidget />;
   if (widgetId === "pomodoro") return <Pomodoro compact />;
+  if (widgetId === "soundscapes") return <SoundscapeWidget enabledFields={enabledFields} />;
   if (widgetId === "weekly") return <WeeklyWidget week={week} enabledFields={enabledFields} />;
   if (widgetId === "questionBank") return <QuestionBankWidget size={size} enabledFields={enabledFields} />;
   if (widgetId === "courseTracker") return <CourseTrackerDashboardWidget size={size} enabledFields={enabledFields} />;
@@ -650,7 +656,10 @@ function widgetDataStatus(id: DashboardWidgetId, s: ReturnType<typeof useStore.g
   if (id === "readiness") return s.profile.energyChecks?.length || s.journal.length || s.closeouts.length ? "Energy signals available" : "Waiting for a first energy check";
   if (id === "activity") return s.logs.some((log) => log.dayKey === s.activeDayKey) ? "Activity logged today" : "No activity today";
   if (id === "journal") return s.journal.length ? `${s.journal.length} local entr${s.journal.length === 1 ? "y" : "ies"}` : "No entries yet";
-  if (id === "dailyWord") return s.profile.experimentalFlags?.dailyGames ? "Daily Games enabled" : "Optional module is off";
+  if (id === "dailyWord") {
+    const today = s.dailyWordPuzzles.find((puzzle) => puzzle.puzzleDate === s.activeDayKey);
+    return today?.completed ? "Today's puzzle is done" : "Today's puzzle is ready";
+  }
   if (id === "todayScore") return s.profile.dailySuccess?.requirements.some((item) => item.enabled) ? "Targets configured" : "No targets selected";
   if (id === "examCountdown") return pickFocusExam(s.boardPrep) ? "Exam focus available" : "No exam focus yet";
   if (id === "premedHours") return s.premedExperiences.length ? `${s.premedExperiences.length} experiences` : "No experience entries yet";
@@ -658,6 +667,7 @@ function widgetDataStatus(id: DashboardWidgetId, s: ReturnType<typeof useStore.g
   if (id === "winDay") return s.dayPlans.some((plan) => plan.dayKey === s.activeDayKey) ? "Checked in today" : "Ready for today";
   if (id === "weekly" || id === "streak") return s.logs.length ? "History available" : "Learning your rhythm";
   if (id === "pomodoro") return "Ready to focus";
+  if (id === "soundscapes") return "Plays beside the timer";
   return "Available";
 }
 
@@ -908,23 +918,20 @@ function DailyWordDashboardWidget({
   activeDayKey: string;
   enabledFields: Set<string>;
 }) {
-  const enabled = useStore((s) => s.profile.experimentalFlags?.dailyGames === true);
+  // Daily Games is on for everyone (commit 3ae726e removed the opt-in); the
+  // old flag has no setter left, so gating on it stranded this widget.
   const puzzles = useStore((s) => s.dailyWordPuzzles);
   const stats = deriveDailyWordStatsFromNormalizedHistory(puzzles);
   const today = puzzles.find((puzzle) => puzzle.puzzleDate === activeDayKey);
   return (
     <GlassCard pad className="dashboard-core-widget daily-word-widget">
       <PanelHeader title="Daily Word" sub="Deterministic, local, and offline after first load"
-        action={<a className="gbtn sm primary" href="#daily-word"><Gamepad2 size={ICON_SIZE.body} /> {enabled ? "Play" : "Enable"}</a>} />
-      {!enabled ? <div className="dashboard-widget-empty"><Gamepad2 size={ICON_SIZE.control} /><b>Daily Games is optional</b><span>Open Daily Word to enable it explicitly. No puzzle data is deleted while hidden.</span></div> : (
-        <>
-          <div className="dashboard-widget-focal"><b>{today?.completed ? (today.won ? "Won" : "Complete") : today ? `${today.guesses.length}/6` : "Ready"}</b><span>today's puzzle</span></div>
-          <div className="dashboard-widget-metrics">
-            {enabledFields.has("streak") && <span><b>{stats.currentStreak}</b> streak</span>}
-            {enabledFields.has("distribution") && <span><b>{stats.wins}/{stats.gamesPlayed}</b> wins</span>}
-          </div>
-        </>
-      )}
+        action={<a className="gbtn sm primary" href="#daily-word"><Gamepad2 size={ICON_SIZE.body} /> {today?.completed ? "Review" : "Play"}</a>} />
+      <div className="dashboard-widget-focal"><b>{today?.completed ? (today.won ? "Won" : "Complete") : today ? `${today.guesses.length}/6` : "Ready"}</b><span>today's puzzle</span></div>
+      <div className="dashboard-widget-metrics">
+        {enabledFields.has("streak") && <span><b>{stats.currentStreak}</b> streak</span>}
+        {enabledFields.has("distribution") && <span><b>{stats.wins}/{stats.gamesPlayed}</b> wins</span>}
+      </div>
     </GlassCard>
   );
 }

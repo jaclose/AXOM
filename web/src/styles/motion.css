@@ -231,6 +231,12 @@
 [data-luster].is-lustering::before {
   animation: luster-sweep 1.1s cubic-bezier(0.22, 1, 0.36, 1) 1 both;
 }
+/* After the first hover: no sweep, a softer glare, half the tilt. */
+[data-luster][data-luster-seen].is-lustering {
+  transform: perspective(1200px) rotateX(calc(var(--rx) * 0.45)) rotateY(calc(var(--ry) * 0.45)) translateY(-1px);
+}
+[data-luster][data-luster-seen].is-lustering::before { animation: none; }
+[data-luster][data-luster-seen].is-lustering::after { opacity: 0.4; }
 @keyframes luster-sweep {
   0% { opacity: 0; background-position: 120% 0; }
   20% { opacity: 1; }

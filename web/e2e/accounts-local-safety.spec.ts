@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { completeSetup, deferPromisePrompt, expect, test } from "./fixtures";
 
 test("account foundation preserves local-only use and manual recovery at every launch viewport", async ({ page }) => {
   const errors: string[] = [];
@@ -24,9 +25,10 @@ test("account foundation preserves local-only use and manual recovery at every l
 
     await expect(page.getByRole("tab", { name: "Account", exact: true })).toHaveAttribute("aria-selected", "true");
     // Builds without cloud credentials say so; a dev server with .env.local shows sign-in instead.
-    const localOnly = await page.getByText(/Cloud credentials are absent/).isVisible();
+    const localOnly = await page.getByText(/Accounts aren’t available in this version/).isVisible();
     if (!localOnly) await expect(page.getByRole("tab", { name: "Sign in", exact: true })).toBeVisible();
-    await expect(page.getByText(/Portable JSON export/i)).toBeVisible();
+    // Plain language first (I1-22); the technical note sits behind a disclosure.
+    await expect(page.getByText(/export, restore, or merge a portable copy/i)).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
 
     await page.getByRole("tab", { name: "Emergency recovery" }).click();
@@ -39,14 +41,7 @@ test("account foundation preserves local-only use and manual recovery at every l
 });
 
 async function onboard(page: Page) {
-  const name = page.getByLabel("Display name (optional)");
-  if (!(await name.isVisible().catch(() => false))) return;
-
-  await name.fill("Account Safety Test");
-  for (let step = 0; step < 3; step += 1) {
-    await page.getByRole("button", { name: "Continue" }).click();
-  }
-  await page.getByRole("button", { name: "Finish setup", exact: true }).click();
-  const later = page.getByRole("button", { name: "Review later" });
-  if (await later.count()) await later.click();
+  if (!(await completeSetup(page, "Account Safety Test", { ifVisible: true }))) return;
+  // Defer the Promise and wait until the deferral is saved, or the reload below brings it back.
+  await deferPromisePrompt(page);
 }

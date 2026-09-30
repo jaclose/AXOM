@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { chromium } from "@playwright/test";
 import { deferPromisePrompt } from "./promise-prompt.mjs";
+import { completeSetup } from "./setup-flow.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const port = Number(process.env.AXOM_OFFLINE_VERIFY_PORT ?? 5191);
@@ -126,12 +127,6 @@ async function waitForServer(url) {
 }
 
 async function completeOnboarding(page) {
-  const name = page.getByLabel("Display name (optional)");
-  if (!await name.isVisible().catch(() => false)) return;
-  await name.fill("AXOM Offline Verification");
-  await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByRole("button", { name: "Finish setup", exact: true }).click();
+  if (!await completeSetup(page, "AXOM Offline Verification", { ifVisible: true })) return;
   await deferPromisePrompt(page);
 }

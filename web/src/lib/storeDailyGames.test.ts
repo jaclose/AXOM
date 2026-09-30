@@ -23,6 +23,18 @@ beforeEach(() => {
 });
 
 describe("Daily Games workspace persistence", () => {
+  it("keeps hints and a reveal through upserts and a whole-workspace replace", () => {
+    useStore.getState().upsertDailyWordPuzzle(puzzle({ hintsUsed: 2, updatedAt: "2026-07-12T10:02:00.000Z" }));
+    expect(useStore.getState().dailyWordPuzzles[0]).toMatchObject({ hintsUsed: 2 });
+    useStore.getState().upsertDailyWordPuzzle(puzzle({
+      hintsUsed: 3, revealed: true, completed: true, won: false,
+      completedAt: "2026-07-12T10:03:00.000Z", updatedAt: "2026-07-12T10:03:00.000Z",
+    }));
+    const saved = useStore.getState();
+    useStore.getState().replaceAll({ ...saved });
+    expect(useStore.getState().dailyWordPuzzles[0]).toMatchObject({ hintsUsed: 3, revealed: true, completed: true, won: false });
+  });
+
   it("upserts one record per puzzleId and never lets stale progress replace a completion", () => {
     const store = useStore.getState();
     store.upsertDailyWordPuzzle(puzzle({ guesses: ["APPLE"], updatedAt: "2026-07-12T10:01:00.000Z" }));
