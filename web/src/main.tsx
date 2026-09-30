@@ -6,6 +6,9 @@ import { runStorageMigrations } from "./lib/storageMigrations";
 import { installThemeSync } from "./lib/theme";
 import { installPaletteSync } from "./lib/palette";
 import { installMotionSync } from "./lib/motionPreference";
+// Chrome fires beforeinstallprompt once, early. Capture it at boot: the only
+// importer used to be the lazy About page, so the event was usually missed.
+import "./lib/pwaInstall";
 import { installChunkRecovery, registerWebWorker } from "./lib/webUpdates";
 import { storeHydration } from "./lib/storeHydration";
 import { startStartupIntro } from "./lib/startupIntro";
