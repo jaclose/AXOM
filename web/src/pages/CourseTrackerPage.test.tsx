@@ -64,6 +64,28 @@ describe("Course Tracker comprehension layout", () => {
     expect(useStore.getState().tracker[0].passes).toBe(4);
   });
 
+  it("edits name, type and note in the same dialog as the study plan (I3-29)", () => {
+    const state = useStore.getState();
+    useStore.setState({ tracker: [{ ...state.tracker[0], id: "edit-me", label: "Old name", kind: "Lecture", passes: 1, note: undefined }] });
+    const prompt = vi.fn();
+    vi.stubGlobal("prompt", prompt);
+    render(<CourseTrackerPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Old name" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit item · Old name" });
+    expect(prompt).not.toHaveBeenCalled();
+    expect(within(dialog).getByRole("tab", { name: "Details" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Renal clearance" } });
+    fireEvent.change(within(dialog).getByLabelText("Note (optional)"), { target: { value: "Weak on free water" } });
+    fireEvent.change(within(dialog).getByLabelText("Type"), { target: { value: "PQ" } });
+    fireEvent.click(within(dialog).getByRole("tab", { name: "Study plan" }));
+    expect(screen.getByRole("dialog", { name: "Study plan · Old name" })).toBeTruthy();
+    // Question sets complete in three rounds: no lecture-pass field to misread.
+    expect(within(dialog).queryByLabelText("Lecture passes")).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save plan" }));
+    expect(useStore.getState().tracker[0]).toMatchObject({ label: "Renal clearance", kind: "PQ", note: "Weak on free water" });
+  });
+
   it("keeps previously recorded passes visible when a learner lowers the target", () => {
     const state = useStore.getState();
     useStore.setState({ tracker: [{ ...state.tracker[0], kind: "Lecture", passes: 6, studyPlanOverride: { lecturePasses: 2 } }] });

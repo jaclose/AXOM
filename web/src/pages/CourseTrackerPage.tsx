@@ -504,7 +504,7 @@ function suggestionEffortMinutes(item?: TrackerItem) {
 
 function ItemRow({ item, highlight }: { item: TrackerItem; highlight?: boolean }) {
   const s = useStore();
-  const [planOpen, setPlanOpen] = useState(false);
+  const [editor, setEditor] = useState<EditorTab | null>(null);
   const questionStyle = isQuestionKind(item.kind);
   const completionStyle = isCompletionKind(item.kind);
   const { plan, target, complete } = trackerStudyProgress(item, { preferences: s.profile.studyWorkflow, courses: s.courses });
@@ -535,38 +535,54 @@ function ItemRow({ item, highlight }: { item: TrackerItem; highlight?: boolean }
         <AnkiBlocks item={item} />
       </>}
 
-      <GhostButton title="Rename item"
-        onClick={() => {
-          const label = prompt("Rename tracker item", item.label);
-          if (label?.trim()) s.updateTrackerItem(item.id, { label: label.trim() });
-        }}>
+      <GhostButton title="Edit item" aria-label={`Edit ${item.label}`} onClick={() => setEditor("details")}>
         <Pencil size={ICON_SIZE.body} />
       </GhostButton>
-      <GhostButton title="Edit study plan" onClick={() => setPlanOpen(true)}><Brain size={ICON_SIZE.body} /></GhostButton>
+      <GhostButton title="Edit study plan" onClick={() => setEditor("plan")}><Brain size={ICON_SIZE.body} /></GhostButton>
       <GhostButton className="danger" onClick={() => s.removeTrackerItem(item.id)}><Trash2 size={ICON_SIZE.body} /></GhostButton>
-      {planOpen && <ItemStudyPlanEditor item={item} onClose={() => setPlanOpen(false)} />}
+      {editor && <ItemEditor item={item} initialTab={editor} onClose={() => setEditor(null)} />}
     </div>
   );
 }
 
-function ItemStudyPlanEditor({ item, onClose }: { item: TrackerItem; onClose: () => void }) {
+type EditorTab = "details" | "plan";
+
+/**
+ * I3-29 (JD): "the study plan and edit for the lectures and the questions are
+ * not formatted the same; some are somewhere else." Rename used the browser's
+ * own prompt box. One editor now holds both, same fields and layout for every
+ * item type; the pencil opens Details, the brain opens Study plan.
+ */
+function ItemEditor({ item, initialTab, onClose }: { item: TrackerItem; initialTab: EditorTab; onClose: () => void }) {
   const store = useStore();
+  const [tab, setTab] = useState<EditorTab>(initialTab);
+  const [label, setLabel] = useState(item.label);
+  const [kind, setKind] = useState<TrackerKind>(item.kind);
+  const [note, setNote] = useState(item.note ?? "");
   const base = item.studyPlanOverride ?? {};
-  const plan = resolveStudyPlan(store.profile.studyWorkflow, studyPlanCourse(store.courses, item), { ...item, studyPlanOverride: undefined });
+  const plan = resolveStudyPlan(store.profile.studyWorkflow, studyPlanCourse(store.courses, item), { ...item, kind, studyPlanOverride: undefined });
   const [passes, setPasses] = useState(base.lecturePasses);
   const [methods, setMethods] = useState(() => new Map((base.methods ?? []).map((method) => [method.id, method.enabled])));
   const [difficulty, setDifficulty] = useState(item.difficulty ?? "");
   const [assessmentDate, setAssessmentDate] = useState(item.assessmentDate ?? "");
   const [priority, setPriority] = useState(item.explicitPriority?.toString() ?? "");
+  const questionStyle = isQuestionKind(kind);
+  const completionStyle = isCompletionKind(kind);
   const options: Array<[StudyMethodId, string]> = [["anki", "Anki"], ["practice-questions", "Practice questions"], ["notes", "Notes"], ["teach-aloud", "Teaching / retrieval"]];
+  const labelMissing = !label.trim();
+
   function save() {
+    if (labelMissing) { setTab("details"); return; }
     const override = { ...base };
-    if (passes === undefined) delete override.lecturePasses;
+    if (passes === undefined || questionStyle || completionStyle) delete override.lecturePasses;
     else override.lecturePasses = passes;
     if (methods.size) override.methods = [...methods].map(([id, enabled]) => ({
       ...base.methods?.find((method) => method.id === id), id, enabled,
     }));
     store.updateTrackerItem(item.id, {
+      label: label.trim(),
+      kind,
+      note: note.trim() || undefined,
       studyPlanOverride: Object.keys(override).length ? override : undefined,
       difficulty: difficulty as TrackerItem["difficulty"] || undefined,
       assessmentDate: assessmentDate || undefined,
@@ -574,22 +590,57 @@ function ItemStudyPlanEditor({ item, onClose }: { item: TrackerItem; onClose: ()
     });
     onClose();
   }
+
   return (
-    <Modal title={`Study plan · ${item.label}`} onClose={onClose} footer={<>
-      <GButton onClick={() => { store.updateTrackerItem(item.id, { studyPlanOverride: undefined }); onClose(); }}>Use inherited plan</GButton>
-      <GButton variant="primary" onClick={save}>Save plan</GButton>
+    <Modal title={`${tab === "plan" ? "Study plan" : "Edit item"} · ${item.label}`} onClose={onClose} className="tracker-item-editor" footer={<>
+      {tab === "plan" && <GButton onClick={() => { store.updateTrackerItem(item.id, { studyPlanOverride: undefined }); onClose(); }}>Use inherited plan</GButton>}
+      <GButton variant="primary" onClick={save} disabled={labelMissing}>{tab === "plan" ? "Save plan" : "Save"}</GButton>
     </>}>
-      <p className="sub">Only this item changes. Learner and course defaults remain intact.</p>
-      <label className="stack gap6"><span>Lecture passes</span><input className="field" type="number" min={1} max={6} value={passes ?? ""} placeholder={`Inherited: ${plan.lecturePasses}`} onChange={(event) => setPasses(event.target.value ? Number(event.target.value) : undefined)}/></label>
-      <div className="row wrap gap8">{options.map(([id, label]) => {
-        const active = methods.get(id) ?? plan.methods.find((method) => method.id === id)?.enabled ?? false;
-        return <button key={id} type="button" className={`filter-pill ${active ? "on" : ""}`} aria-pressed={active} onClick={() => setMethods((current) => new Map(current).set(id, !active))}>{label}</button>;
-      })}</div>
-      <div className="settings-target-grid">
-        <label className="stack gap6"><span>Difficulty</span><select className="field" value={difficulty} onChange={(event) => setDifficulty(event.target.value as typeof difficulty)}><option value="">Unknown</option><option value="easy">Easy</option><option value="moderate">Moderate</option><option value="hard">Hard</option><option value="very-hard">Very hard</option></select></label>
-        <label className="stack gap6"><span>Assessment date</span><input className="field" type="date" value={assessmentDate} onChange={(event) => setAssessmentDate(event.target.value)}/></label>
-        <label className="stack gap6"><span>Priority</span><select className="field" value={priority} onChange={(event) => setPriority(event.target.value)}><option value="">Normal</option>{[1,2,3,4,5].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+      <div className="filter-bar settings-tabs" role="tablist" aria-label="Item editor">
+        {([["details", "Details", Pencil], ["plan", "Study plan", Brain]] as const).map(([id, name, Icon]) => (
+          <button key={id} type="button" role="tab" aria-selected={tab === id} className={`filter-pill ${tab === id ? "on" : ""}`} onClick={() => setTab(id)}>
+            <Icon size={ICON_SIZE.body} aria-hidden="true" /> {name}
+          </button>
+        ))}
       </div>
+      {tab === "details" ? (
+        <>
+          <Field label="Name" value={label} onChange={(event) => setLabel(event.target.value)} autoFocus aria-invalid={labelMissing || undefined} />
+          <div className="settings-target-grid">
+            <SelectField label="Type" value={kind} onChange={(event) => setKind(event.target.value as TrackerKind)}>
+              {KINDS.map((option) => <option key={option}>{option}</option>)}
+            </SelectField>
+            <label className="stack gap6">
+              <span className="field-label">Folder</span>
+              <input className="field" value={item.path} readOnly title="Folders are organized in the Mastery tree" />
+            </label>
+          </div>
+          <TextAreaField label="Note (optional)" value={note} onChange={(event) => setNote(event.target.value)}
+            placeholder="A weak spot, a source, a question for the lecturer." />
+        </>
+      ) : (
+        <>
+          <p className="sub">
+            Only this item changes. Learner and course defaults remain intact.
+            {completionStyle ? ` ${kind} items are done or not done; they have no passes.` : questionStyle ? " Question sets complete in three rounds, tracked on the row." : ""}
+          </p>
+          {completionStyle || questionStyle ? null : (
+            <label className="stack gap6"><span className="field-label">Lecture passes</span><input className="field" type="number" min={1} max={6} value={passes ?? ""} placeholder={`Inherited: ${plan.lecturePasses}`} onChange={(event) => setPasses(event.target.value ? Number(event.target.value) : undefined)}/></label>
+          )}
+          <div className="stack gap6">
+            <span className="field-label">Methods</span>
+            <div className="row wrap gap8">{options.map(([id, name]) => {
+              const active = methods.get(id) ?? plan.methods.find((method) => method.id === id)?.enabled ?? false;
+              return <button key={id} type="button" className={`filter-pill ${active ? "on" : ""}`} aria-pressed={active} onClick={() => setMethods((current) => new Map(current).set(id, !active))}>{name}</button>;
+            })}</div>
+          </div>
+          <div className="settings-target-grid">
+            <SelectField label="Difficulty" value={difficulty} onChange={(event) => setDifficulty(event.target.value as typeof difficulty)}><option value="">Unknown</option><option value="easy">Easy</option><option value="moderate">Moderate</option><option value="hard">Hard</option><option value="very-hard">Very hard</option></SelectField>
+            <Field label="Assessment date" type="date" value={assessmentDate} onChange={(event) => setAssessmentDate(event.target.value)} />
+            <SelectField label="Priority" value={priority} onChange={(event) => setPriority(event.target.value)}><option value="">Normal</option>{[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value}</option>)}</SelectField>
+          </div>
+        </>
+      )}
     </Modal>
   );
 }
