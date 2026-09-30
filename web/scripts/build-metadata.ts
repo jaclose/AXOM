@@ -48,12 +48,17 @@ export function releaseMetadataPlugin(metadata: ReturnType<typeof buildMetadata>
       // hashed assets. Keep the save/checkpoint path with that build's shell,
       // even though it is lazy-loaded to preserve the pre-hydration guard.
       collect("src/lib/updateCheckpoint.ts");
-      // Every route screen ships with the shell. A tab left open across a
-      // deploy otherwise asks the host for hashes it no longer serves, and
-      // the screen fails (the Daily Games "black screen"). Heavy engines
-      // (xlsx, pdf) stay out: pages import them dynamically, not statically.
+      // Settings promises release notes "available offline", and the update
+      // panel shows them while an old build is still running.
+      collect("src/components/shell/ReleaseNotesHistory.tsx");
+      // Core route screens ship with the shell, so a tab left open across a
+      // deploy keeps working. Optional Daily Games (the Word engine and its
+      // dictionary, the Doctordle bridge) stay lazy and cache on first play
+      // (verify-app-updates enforces this); if their old hash is gone, the
+      // route error boundary offers a reload instead of a black screen.
+      const OPTIONAL = /^src\/pages\/(?:DailyWordPage|DoctordlePage|OptionalDailyGamesPage)\.tsx$/;
       Object.keys(manifest)
-        .filter((key) => /^src\/pages\/[^/]+Page\.tsx$/.test(key) || /^src\/data\/dailyWord\w*\.ts$/.test(key))
+        .filter((key) => /^src\/pages\/[^/]+Page\.tsx$/.test(key) && !OPTIONAL.test(key))
         .forEach(collect);
       const precache = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", ...assets];
       const sw = resolve(dist, "sw.js");

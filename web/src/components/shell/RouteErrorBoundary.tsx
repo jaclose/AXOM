@@ -2,12 +2,9 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 import { LayoutDashboard, RefreshCw, RotateCcw } from "lucide-react";
 import { GButton } from "../ui/primitives";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { isChunkLoadError } from "../../lib/chunkErrors";
 
-/** A lazy screen whose code is gone (a deploy replaced it) or unreachable (offline). */
-export function isChunkLoadError(error: unknown): boolean {
-  const text = error instanceof Error ? `${error.name} ${error.message}` : String(error);
-  return /dynamically imported module|Importing a module script failed|error loading dynamically imported module|ChunkLoadError|Loading chunk \S+ failed|MIME type of "text\/html"/i.test(text);
-}
+export { isChunkLoadError };
 
 type Props = { children: ReactNode; onHome: () => void };
 type State = { error: Error | null };

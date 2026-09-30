@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useState, useSyncExternalStore } from "react";
+import { Suspense, useEffect, useState, useSyncExternalStore } from "react";
 import { Download, RefreshCw, ShieldCheck } from "lucide-react";
 import { appUpdates, type UpdatePhase } from "../../lib/appUpdates";
 import { APP_RELEASE_VERSION } from "../../lib/brand";
@@ -6,8 +6,14 @@ import { GButton } from "../ui/primitives";
 import { useStore } from "../../lib/store";
 import { findLiveSession } from "../../lib/sessions";
 import { UPDATE_PREFS_EVENT, readUpdatePreferences, writeUpdatePreferences } from "../../lib/updatePreferences";
+import { lazyWithFallback } from "../../lib/lazyWithFallback";
 
-const ReleaseNotesHistory = lazy(() => import("./ReleaseNotesHistory").then((module) => ({ default: module.ReleaseNotesHistory })));
+// Lives outside any route boundary: a missing chunk (tab open across a deploy)
+// must degrade to a note, not crash the update panel that would fix it.
+const ReleaseNotesHistory = lazyWithFallback(
+  () => import("./ReleaseNotesHistory").then((module) => module.ReleaseNotesHistory),
+  () => <p className="sub">Release notes for this version load after you refresh. Your workspace is not affected.</p>,
+);
 
 export const UPDATE_BUSY_PHASES: UpdatePhase[] = ["checking", "downloading", "preparing", "installing", "restarting"];
 
