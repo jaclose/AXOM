@@ -13,10 +13,10 @@ Last full review: 2026-09-30, after Wave 1.1 (main 83d9fb8, pushed by JD).
 | ID | Idea | Status | Where |
 |---|---|---|---|
 | I1-24, I3-13, I3-14a, I3-16, I3-17 | Setup rebuilt after the intro: name, path, focus as chips, no SGU terms for non-SGU, no scrolling, palette orbs, no data-safety step, "what makes today count" automatic | VERIFIED | Wave 1.1 (a7603be) |
-| I3-13b | Remove the intro's "Skip intro" and "Don't show again" buttons | PLANNED | wave/1.2 |
+| I3-13b | Remove the intro's "Skip intro" and "Don't show again" buttons | IN PROGRESS | wave/1.2 (9eda971) |
 | I3-17b | Tracker boxes start at 4 (Study, Practice questions, Lecture, plus the card app chosen) | NEEDS JD / CODEX | Codex owns the tracker model; asked on the board |
 | I3-18 | Promise signing rebuilt: slower, cleaner, fades into AXOM; guide suggested after | VERIFIED | Wave 1.1 (c202cd7) |
-| I3-18b | After the Promise, the page's containers slot in slowly from top to bottom | PLANNED | wave/1.2 |
+| I3-18b | After the Promise, the page's containers slot in slowly from top to bottom | IN PROGRESS | wave/1.2 (69a5613) |
 | I1-04 | The guide is back (optional, offered after the Promise) | VERIFIED | 5492285 |
 | I1-17 | 8-stop guide; mini guides behind Help buttons elsewhere | PARTIAL | Soundscapes mini guide waits for Codex's page restructure |
 | I3-34 | Guide smoother, lighter haze | VERIFIED | 5492285, 5fdd194 |
@@ -55,9 +55,9 @@ Last full review: 2026-09-30, after Wave 1.1 (main 83d9fb8, pushed by JD).
 |---|---|---|---|
 | I1-01, I2-01 | "Are you locked in?" check-in, persistent, on whatever screen | CODEX (VERIFIED by Codex) | a89819e (Wave 1.1) |
 | I3-01 | Tracker boxes stay still while you tap | VERIFIED | 0ab96bc |
-| I3-01b | Once settled, trackers move up by how much is completed | PLANNED | wave/1.2 |
+| I3-01b | Once settled, trackers move up by how much is completed | IN PROGRESS | wave/1.2 (693bfde) |
 | I3-39 | Pomodoro logging no longer doubles study time | VERIFIED | f095e48 |
-| I3-04 | Timer start tone; soft completion chime with a fading green screen-edge glow (JD, 2026-09-30) | PLANNED | wave/1.2 (in-app); packaged-app screen overlay needs native work |
+| I3-04 | Timer start tone; soft completion chime with a fading green screen-edge glow (JD, 2026-09-30) | IN PROGRESS | wave/1.2 (3883daf): in-app; packaged-app screen overlay needs native work |
 | I3-04b | Menu bar timer + soundscape, orb personality, break pill style | PARTIAL | native pill exists; rest with Codex's native slice |
 | I1-20 | Goals: simplified view with templates, technical view, over-100% shown | PARTIAL | Codex's targets model, then simplified view |
 | I3-09, I2-03 | Questions, timer and cards fill the day automatically, past 100% | CODEX (PARTIAL) | Codex |
@@ -127,6 +127,7 @@ Last full review: 2026-09-30, after Wave 1.1 (main 83d9fb8, pushed by JD).
 | I1-06, I3-08 | Your own soundscapes (files; YouTube by embed only) | PARTIAL | files shipped (09d65a1); YouTube embed-only by design |
 | I4-22 | JD's alpha-waves track as the default pinned intro soundscape | NEEDS JD | licence for a YouTube-sourced track in a public app; works today on JD's device via Your sounds |
 | I4-23 | Fullscreen / larger soundscape experience | PLANNED | coordinate with Codex's page restructure |
+| I4-24 | Opening films: keep only the finished renders (JD: "remove these, terrible quality") | IN PROGRESS | wave/1.2 (9eda971) |
 | I1-09 | More soundscapes, better mapping, more backgrounds | PARTIAL | |
 | I1-12 | Soundscapes in Apple Now Playing | SHIPPED | 09d65a1 (macOS check pending) |
 | I3-35 | Pause when headphones come out | PARTIAL | web signal limited; native listener later |
@@ -137,8 +138,8 @@ Last full review: 2026-09-30, after Wave 1.1 (main 83d9fb8, pushed by JD).
 
 | ID | Idea | Status | Where |
 |---|---|---|---|
-| I4-21 | Bug: Profile says signed in while Account says sign in | PLANNED | wave/1.2 |
-| I4-19 | Sign-in and loading account details faster | PLANNED | wave/1.2 (measure first) |
+| I4-21 | Bug: Profile says signed in while Account says sign in | IN PROGRESS | wave/1.2 (f20f81e) |
+| I4-19 | Sign-in and loading account details faster | IN PROGRESS | wave/1.2 (f20f81e): saved session shows at once |
 | I4-18 | Email and password only (no code); welcome email with a beautiful, reactive graphic | PLANNED | coordinate with Codex's email templates (I2-15) |
 | I4-20 | Fully local account in the desktop app | PLANNED | feat/wave2-home |
 | I3-20 | Signing in loads the most recent backup (conflict-safe) | PLANNED | feat/wave2-home |
@@ -147,7 +148,7 @@ Last full review: 2026-09-30, after Wave 1.1 (main 83d9fb8, pushed by JD).
 | I1-14 | "Is my account and data safe?" | ANSWERED | PLAN D6 |
 | I1-35 | Portable backup still available | VERIFIED | |
 | I1-22 | Settings in plain language; technical details behind a disclosure | PARTIAL | ef981c3, 619a747 |
-| I4-17 | "How do you study" and all of Settings rebuilt in the setup style | PLANNED | wave/1.2 starts with How you study |
+| I4-17 | "How do you study" and all of Settings rebuilt in the setup style | PARTIAL | wave/1.2 (da9fcfd): How you study done on shared setup primitives; rest of Settings next |
 | I1-23, I3-52 | Sidebar defaults, Misc folder, drag to reorder | VERIFIED | 6fc14d9 |
 | I4-09 | Sidebar: make your own sections, move items between them | PLANNED | feat/wave2-home |
 

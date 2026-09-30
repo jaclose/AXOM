@@ -62,3 +62,19 @@ Do not make it a one-off implementation if the widget primitives need upgrading 
 
 Assign ownership based on overlap with Codex.
 ```
+
+## Mid-turn notes (2026-09-30, verbatim)
+
+```
+add this as a sound scape
+/Users/jd/Developer/AXOM/Alpha-Beta-Gamma-Theta Waves - 003 - Super Focus- Flow State Music - Alpha Binaural Beats, Study Music for Focus and Concentration.mp3 - i love this one
+```
+
+```
+Have a small tone play on starting a timer and a nice elegant soft tone play on completion of a timer with the edges of the screen lighting up with a fading green glow to show it is done
+```
+
+```
+remove these - these are terrible quality
+```
+(Screenshot: Settings > Appearance > Opening film, showing Slow sweep, Push sweep, Edge glint, Classic mark and Rotate.)

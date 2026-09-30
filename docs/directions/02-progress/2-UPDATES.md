@@ -4,6 +4,9 @@ Smaller improvements, newest first.
 
 | Date | Update | Ideas | Commit |
 |---|---|---|---|
+| 2026-09-30 | After the Promise, AXOM's regions slot in top to bottom; no daily reminder on a student's first day, and reminders wait for dialogs | I3-18b | 69a5613 |
+| 2026-09-30 | Once settled, trackers order by how much of the goal is done | I3-01b | 693bfde |
+| 2026-09-30 | Opening films: only the finished AXOM films remain; no buttons over the film | I4-24, I3-13b | 9eda971 |
 | 2026-09-30 | Ideas 4 recorded; manifest section for Tutor mode AI and the Clock widget | I4-01, I4-02 | edaa823 |
 | 2026-09-30 | Course Tracker: first-use card, template loader, curriculum order kept in the tree and scope list | I3-24, I3-15 | a7603be |
 | 2026-09-30 | Command Brief reads the older seed map as template, not evidence | - | a7603be |

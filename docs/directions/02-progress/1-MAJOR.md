@@ -2,6 +2,14 @@
 
 Waves and flagship features, newest first. Smaller improvements are in 2-UPDATES.md, fixes in 3-HOTFIXES.md. Earlier history: CHANGELOG.md at the repository root.
 
+## Wave 1.2 (in progress) · branch wave/1.2
+
+| Update | Ideas | Commit |
+|---|---|---|
+| **Directions.** docs/directions: the ideas bank (every idea indexed), progress by size, notes, completed, future; `npm run directions:check` keeps it honest. | JD's request | bc3d3a3 |
+| **Setup style for every form.** Setup's tiles, segments, chips and summary became shared primitives (setup pixel-identical); Settings > How you study rebuilt on them. | I4-17, I4-04 groundwork | da9fcfd |
+| **Timer cues.** A soft start tone, a bell-like finish chime and a green glow around the screen's edges. | I3-04 | 3883daf |
+
 ## Wave 1.1 (2026-09-30) · main 83d9fb8 · pushed by JD
 
 Integrated Claude's Ideas 1 + 3 branch and Codex's first Ideas 2 slices. Gate on the merged tree: typecheck, lint, 2,029 unit tests, build, update and offline checks, 27 Playwright journeys.
