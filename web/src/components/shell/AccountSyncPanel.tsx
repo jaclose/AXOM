@@ -13,6 +13,7 @@ import {
 } from "../../lib/account/accountStore";
 import type { AccountDevice, ProtectionStatus, RevisionSummary } from "../../lib/sync/syncTypes";
 import { useStore } from "../../lib/store";
+import { TechnicalDetails } from "./TechnicalDetails";
 
 type AuthMode = "sign-in" | "create" | "code" | "forgot";
 
@@ -64,10 +65,16 @@ export function AccountSyncPanel() {
         </div>
       )}
 
-      <p className="account-footnote">
-        Portable JSON export, restore, and merge remain available under Emergency recovery. Question attachment images stay on this device
-        unless you include them in a portable backup; account protection covers workspace data, not binary attachment sync.
-      </p>
+      <p className="account-footnote">You can always export, restore, or merge a portable copy in Emergency recovery.</p>
+      <TechnicalDetails>
+        {account.phase === "unconfigured" && (
+          <p>This build has no cloud credentials configured, so sign-in and cloud copies are switched off. Local autosave and manual JSON recovery are unchanged.</p>
+        )}
+        <p>
+          Portable JSON export, restore, and merge work with or without an account. Question attachment images stay on this device
+          unless you include them in a portable backup; account protection covers workspace data, not binary attachment sync.
+        </p>
+      </TechnicalDetails>
     </div>
   );
 }
@@ -84,14 +91,13 @@ function AccountHero({ user, status, phase, lastProtectedAt }: {
     <div className="account-hero-card">
       <div className="account-hero-avatar" aria-hidden="true">{initial}</div>
       <div className="account-hero-copy">
-        <span className="account-kicker">Account &amp; protection</span>
-        <h3>{user ? `Signed in as ${user.displayName}` : "Your work stays on this device — an account adds protection"}</h3>
+        <h3>{user ? `Signed in as ${user.displayName}` : "Your work stays on this device. An account adds protection."}</h3>
         <p>
           {user
             ? status === "protected" && lastProtectedAt
               ? `Last protected ${relativeTime(lastProtectedAt)}. Changes back up in the background.`
               : user.email
-            : "Local saving is always on and immediate. Signing in adds versioned cloud copies and lets you move between devices."}
+            : "Saving on this device is always on. Signing in adds cloud copies you can restore, and lets you pick up on another device."}
         </p>
       </div>
       <Tag tone={STATUS_TONE[status]}>{phase === "unconfigured" ? "Local only" : protectionLabel(status)}</Tag>
@@ -105,13 +111,13 @@ function UnconfiguredCard() {
       <div className="account-card-head">
         <CloudOff size={ICON_SIZE.emphasis} aria-hidden="true" />
         <div>
-          <h4>Accounts aren’t switched on in this build</h4>
-          <p>Cloud credentials are absent. Account controls are disabled; local autosave and manual JSON recovery remain unchanged.</p>
+          <h4>Accounts aren’t available in this version</h4>
+          <p>Everything still saves on this device automatically, and you can export a copy anytime in Emergency recovery.</p>
         </div>
       </div>
       <ul className="account-benefits">
         <li><ShieldCheck size={ICON_SIZE.body} aria-hidden="true" /> Versioned cloud copies of your whole workspace</li>
-        <li><Laptop size={ICON_SIZE.body} aria-hidden="true" /> Pick up on another device — web or desktop app</li>
+        <li><Laptop size={ICON_SIZE.body} aria-hidden="true" /> Pick up on another device, on the web or the desktop app</li>
         <li><History size={ICON_SIZE.body} aria-hidden="true" /> Restore any of your last 60 protected versions</li>
       </ul>
     </section>

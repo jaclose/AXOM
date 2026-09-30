@@ -267,8 +267,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
             <div>
               <div className="sync-title">Local-first workspace</div>
               <div className="sub">
-                Your AXOM workspace is stored on this device and changes save locally as you work.
-                When you deliberately link an account, acknowledged protected versions are also retained remotely.
+                Your workspace lives on this device and saves as you work. If you sign in, protected copies are also kept in your account.
               </div>
               <div style={{ marginTop: 8 }}><LastSavedLine /></div>
             </div>

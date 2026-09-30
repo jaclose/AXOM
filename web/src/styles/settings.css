@@ -225,3 +225,21 @@
   .lockin-choice, .settings-kind-grid { grid-template-columns: 1fr; }
   .settings-subnav small { display: none; }
 }
+
+/* I1-22: the technical layer of any settings card, closed by default. */
+.technical-details { border-top: 1px solid var(--hairline-soft); padding-top: 10px; }
+.technical-details > summary {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--text-50, var(--text-60)); font-size: var(--fs-xs); font-weight: var(--fw-semibold);
+  list-style: none; cursor: pointer; user-select: none;
+}
+.technical-details > summary::-webkit-details-marker { display: none; }
+.technical-details > summary svg { transition: transform .2s ease; }
+.technical-details[open] > summary svg { transform: rotate(90deg); }
+.technical-details > summary:hover { color: var(--text); }
+.technical-details-body { display: grid; gap: 8px; margin-top: 10px; color: var(--text-60); font-size: var(--fs-xs); line-height: var(--leading-normal); }
+.technical-details-body p { margin: 0; }
+@media (prefers-reduced-motion: reduce) { .technical-details > summary svg { transition: none; } }
+.data-health-warning { display: grid; gap: 3px; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--orange) 40%, transparent); border-radius: var(--radius-md); background: color-mix(in srgb, var(--orange) 8%, transparent); }
+.data-health-warning b { font-size: var(--fs-sm); }
+.data-health-warning span { color: var(--text-60); font-size: var(--fs-xs); line-height: var(--leading-normal); }

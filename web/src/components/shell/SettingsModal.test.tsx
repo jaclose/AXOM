@@ -124,8 +124,8 @@ describe("Settings information architecture", () => {
   it("states accurate local-first semantics without promising a cloud account", async () => {
     const user = userEvent.setup();
     render(<SettingsModal onClose={() => {}} initialTab="data" />);
-    expect(screen.getByText(/workspace is stored on this device/i)).toBeTruthy();
-    expect(screen.getByText(/deliberately link an account/i)).toBeTruthy();
+    expect(screen.getByText(/workspace lives on this device and saves as you work/i)).toBeTruthy();
+    expect(screen.getByText(/If you sign in, protected copies/i)).toBeTruthy();
     expect(screen.queryByText(/your account is synced/i)).toBeNull();
     expect(screen.queryByText(/workspace follows you across devices/i)).toBeNull();
 

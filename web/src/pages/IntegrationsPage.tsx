@@ -34,21 +34,21 @@ export function IntegrationsPage() {
 
   const cards: IntegrationCard[] = [
     {
-      id: "anki-export", name: "Anki — card export", icon: Layers, readiness: "ready",
-      what: "Turn lecture text into cards in Anki Lab, then export CSV/TSV that Anki imports directly.",
-      leaves: "Nothing — you download a file and import it into Anki yourself.",
+      id: "anki-export", name: "Anki card export", icon: Layers, readiness: "ready",
+      what: "Draft cards from lecture text in Anki Lab (quick local drafts, or paste what your own AI chat returns), then export CSV or TSV files that Anki imports.",
+      leaves: "Nothing. You download a file and import it into Anki yourself.",
       action: { label: "Open Anki Lab", href: "#anki" },
     },
     {
       id: "calendar", name: "Calendar file (.ics)", icon: CalendarDays, readiness: "ready",
       what: "Put task due dates, exam days, and daily intentions on Google, Apple, or Outlook Calendar.",
-      leaves: "Nothing — AXOM builds a calendar file you import. No calendar account is connected.",
+      leaves: "Nothing. AXOM builds a calendar file you import; no calendar account is connected.",
       action: { label: calendarOpen ? "Hide options" : "Create calendar file", onClick: () => setCalendarOpen((open) => !open) },
     },
     {
       id: "backup", name: "Portable backup (JSON)", icon: FileJson, readiness: "ready",
       what: "A complete copy of your workspace you can keep anywhere and restore or merge later.",
-      leaves: "Nothing — it downloads to your computer.",
+      leaves: "Nothing. It downloads to your computer.",
       action: { label: "Open backups", onClick: () => useUi.getState().requestSettings("backup") },
     },
     {
@@ -58,14 +58,14 @@ export function IntegrationsPage() {
       action: { label: "Account settings", onClick: () => useUi.getState().requestSettings("account") },
     },
     {
-      id: "ankiconnect", name: "Anki — live stats (AnkiConnect)", icon: Plug, readiness: "experimental",
+      id: "ankiconnect", name: "Anki live stats (AnkiConnect)", icon: Plug, readiness: "experimental",
       what: "Reads today’s review count from the Anki app on this computer and logs it to Productivity.",
-      leaves: "Nothing — AXOM talks to Anki on 127.0.0.1 only. Setup below.",
+      leaves: "Nothing leaves this computer: AXOM talks to Anki on 127.0.0.1 only. Setup below.",
       action: { label: "Set up below", onClick: () => document.getElementById("ankiconnect-setup")?.scrollIntoView({ behavior: "smooth", block: "start" }) },
     },
     { id: "gcal", name: "Google Calendar sync", icon: CalendarDays, readiness: "planned", what: "Read-only overlay of study blocks and class schedules; export first, write-back only with consent.", leaves: "Read-only calendar data you approve." },
-    { id: "drive", name: "Google Drive folders", icon: HardDrive, readiness: "planned", what: "Link course folders and lecture files to Course Tracker items and resources.", leaves: "Links only — no drive scanning without opt-in." },
-    { id: "noji", name: "Noji & other SRS apps", icon: Sparkles, readiness: "planned", what: "Export cards in formats Noji, RemNote, and Quizlet can import.", leaves: "Nothing — export files only." },
+    { id: "drive", name: "Google Drive folders", icon: HardDrive, readiness: "planned", what: "Link course folders and lecture files to Course Tracker items and resources.", leaves: "Links only. No drive scanning without opt-in." },
+    { id: "noji", name: "Noji & other SRS apps", icon: Sparkles, readiness: "planned", what: "Export cards in formats Noji, RemNote, and Quizlet can import.", leaves: "Nothing. Export files only." },
     { id: "notion", name: "Notion", icon: NotebookPen, readiness: "planned", what: "Import reference pages and study dashboards as resources.", leaves: "Import-only by default." },
     { id: "health", name: "Apple Health / Health Connect", icon: Smartphone, readiness: "planned", what: "Optional sleep and movement signals for the readiness score (desktop/mobile app only).", leaves: "Stays on device; explicit opt-in." },
     { id: "extension", name: "Browser extension", icon: Puzzle, readiness: "planned", what: "Send highlighted text to Tasks, Anki Lab, or Resources in one click.", leaves: "Only what you capture." },
@@ -78,7 +78,7 @@ export function IntegrationsPage() {
           <span className="integrations-hero-icon"><Link2 size={ICON_SIZE.control} aria-hidden="true" /></span>
           <div>
             <span className="integrations-kicker">How integrations work</span>
-            <h2>AXOM brings things in — it never quietly sends your data out</h2>
+            <h2>AXOM brings things in. It never quietly sends your data out.</h2>
             <p>Your workspace lives on this device. Integrations are either files you download and import yourself, a bridge to an app on this computer, or (later) an opt-in connection you can revoke.</p>
           </div>
         </div>
