@@ -72,6 +72,23 @@
 :root[data-reveal] .topbar .tb-actions { animation: axom-settle var(--reveal-dur) var(--reveal-ease) 300ms both; }
 
 /* --- Reduced motion: the interface is simply there. ---------------------------------- */
+/* --- After the Promise: the same regions, slower and top to bottom ------------------ */
+/* JD, Ideas 3: "a fade out and all the containers from top to bottom slotting
+   in slowly". Longer rise, wider stagger; nothing springs or glows. */
+@keyframes axom-slot {
+  from { opacity: 0; transform: translate3d(0, 18px, 0); }
+}
+:root[data-reveal="promise"] { --reveal-dur: 760ms; }
+:root[data-reveal="promise"] .page > :not(.dashboard-widget-grid):not(:only-child),
+:root[data-reveal="promise"] .page > :only-child:not(.dashboard-widget-grid) > * {
+  animation-name: axom-slot;
+  animation-delay: calc(240ms + var(--reveal-i, 0) * 120ms);
+}
+:root[data-reveal="promise"] .dashboard-widget-grid > * {
+  animation-name: axom-slot;
+  animation-delay: calc(360ms + var(--reveal-i, 0) * 110ms);
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root[data-reveal] :is(.sidebar, .sidebar .server-header, .sidebar .nav-manage-zone, .sidebar .nav, .sidebar .sidebar-foot, .topbar-heading, .topbar .tb-actions, .dashboard-widget-grid > *),
   :root[data-reveal] .page > *,

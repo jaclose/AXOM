@@ -11,7 +11,8 @@
 // ===========================================================================
 import { useLayoutEffect, useRef } from "react";
 
-export type RevealKind = "intro" | "open";
+/** "promise": after signing, a slower top-to-bottom slot-in (JD, Ideas 3). */
+export type RevealKind = "intro" | "open" | "promise";
 
 /** Timings shared by the film player and the CSS (keep them in step). */
 export const PRESENTATION_TIMING = {
@@ -25,6 +26,8 @@ export const PRESENTATION_TIMING = {
   readyHoldMs: 2500,
   /** Longest reveal: last region delay plus its duration, with margin. */
   settleMs: 1000,
+  /** The slower reveal after the Promise (see presentation.css). */
+  promiseSettleMs: 2300,
 } as const;
 
 function root(): HTMLElement | null {
@@ -101,7 +104,7 @@ export function revealApp(kind: RevealKind): void {
     settleTimer = setTimeout(() => {
       delete element.dataset.reveal;
       phase = "idle";
-    }, PRESENTATION_TIMING.settleMs);
+    }, kind === "promise" ? PRESENTATION_TIMING.promiseSettleMs : PRESENTATION_TIMING.settleMs);
   };
   // Settle only once content exists: a plain open (or an early skip) starts
   // before React mounts, and late regions must still finish their entrance.

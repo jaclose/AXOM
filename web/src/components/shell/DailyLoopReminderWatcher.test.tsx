@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDailyLoopReminderLedger } from "../../lib/dailyLoopReminders";
+import { markFirstRunDay } from "../../lib/firstRun";
 import { useStore } from "../../lib/store";
 import { REMINDER_TOAST_DURATION_MS, useToasts } from "../../lib/toast";
 import { Toaster } from "./Toaster";
@@ -54,6 +55,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
+  document.body.querySelectorAll(".modal-scrim").forEach((node) => node.remove());
   useToasts.setState({ toasts: [] });
   vi.restoreAllMocks();
 });
@@ -184,5 +187,27 @@ describe("DailyLoopReminderWatcher", () => {
     </StrictMode>);
     expect(await screen.findAllByText("Set today’s direction")).toHaveLength(1);
     expect(screen.getAllByRole("status")).toHaveLength(1);
+  });
+
+  it("stays quiet on the day a student finished setup on this device", async () => {
+    markFirstRunDay("2026-07-13");
+    renderWatcher(() => localTime(9));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(activeToast("Set today’s direction")).toBeNull();
+    cleanup();
+    renderWatcher(() => localTime(9, 0, 14));
+    expect(await screen.findByText("Set today’s direction")).toBeTruthy();
+  });
+
+  it("waits while a dialog is open instead of landing on top of it", async () => {
+    const scrim = document.createElement("div");
+    scrim.className = "modal-scrim";
+    document.body.append(scrim);
+    renderWatcher(() => localTime(9));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(activeToast("Set today’s direction")).toBeNull();
+    scrim.remove();
+    window.dispatchEvent(new Event("focus"));
+    expect(await screen.findByText("Set today’s direction")).toBeTruthy();
   });
 });
