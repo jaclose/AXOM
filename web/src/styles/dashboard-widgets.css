@@ -417,3 +417,121 @@
 .dashboard-targets-empty { gap: 6px 12px; }
 .dashboard-targets-empty .gbtn { grid-column: 2; justify-self: start; margin-top: 6px; }
 .daily-checkin-energy { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hairline); }
+
+/* Soundscape widget: sits beside the focus timer (JD, Ideas 1) ------------ */
+.soundscape-widget {
+  --sw-tint: rgb(var(--accent-rgb));
+  display: flex;
+  flex-direction: column;
+}
+
+.soundscape-widget-now {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  margin: 14px 0 12px;
+  padding: 12px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-1) 84%, transparent);
+  transition: border-color .4s ease, background-color .4s ease;
+}
+
+.soundscape-widget-now:has(.soundscape-widget-stop) { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+
+.soundscape-widget.is-playing .soundscape-widget-now {
+  border-color: color-mix(in srgb, var(--sw-tint) 42%, var(--hairline));
+  background:
+    radial-gradient(circle at 0% 50%, color-mix(in srgb, var(--sw-tint) 16%, transparent), transparent 62%),
+    color-mix(in srgb, var(--surface-1) 84%, transparent);
+}
+
+.soundscape-widget-play {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--sw-tint) 48%, var(--hairline));
+  border-radius: 50%;
+  color: var(--text);
+  background: color-mix(in srgb, var(--sw-tint) 16%, var(--surface-2));
+  cursor: pointer;
+  transition: transform .18s ease, background-color .2s ease;
+}
+.soundscape-widget-play:hover { background: color-mix(in srgb, var(--sw-tint) 26%, var(--surface-2)); }
+.soundscape-widget-play:active { transform: scale(.95); }
+
+.soundscape-widget-title { min-width: 0; display: grid; gap: 2px; }
+.soundscape-widget-title b,
+.soundscape-widget-title span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.soundscape-widget-title b { color: var(--text); font-size: var(--fs-sm); }
+.soundscape-widget-title span { color: var(--text-60); font-size: var(--fs-tiny); }
+
+.soundscape-widget-eq { display: inline-flex; align-items: flex-end; gap: 2.5px; width: 20px; height: 16px; }
+.soundscape-widget-eq i {
+  width: 3px;
+  height: 30%;
+  border-radius: 2px;
+  background: var(--sw-tint);
+  opacity: .45;
+  transform-origin: bottom;
+}
+.soundscape-widget-eq.playing i { opacity: 1; animation: soundscape-widget-eq 1.35s ease-in-out infinite alternate; }
+.soundscape-widget-eq.playing i:nth-child(2) { animation-duration: 1.7s; animation-delay: -.37s; }
+.soundscape-widget-eq.playing i:nth-child(3) { animation-duration: 1.15s; animation-delay: -.74s; }
+.soundscape-widget-eq.playing i:nth-child(4) { animation-duration: 1.95s; animation-delay: -1.11s; }
+@keyframes soundscape-widget-eq { from { transform: scaleY(.35); } to { transform: scaleY(3.1); } }
+
+.soundscape-widget-stop {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--hairline);
+  border-radius: 50%;
+  color: var(--text-60);
+  background: var(--surface-1);
+  cursor: pointer;
+}
+.soundscape-widget-stop:hover { color: var(--text); background: var(--neutral-hover); }
+
+.soundscape-widget-picks {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: auto;
+}
+.soundscape-widget-picks button {
+  min-height: 32px;
+  padding: 0 6px;
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  color: var(--text-60);
+  background: var(--surface-1);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.soundscape-widget-picks button:hover { color: var(--text); border-color: rgba(var(--accent-rgb), .4); }
+.soundscape-widget-picks button.on { color: var(--text); border-color: rgba(var(--accent-rgb), .45); background: rgba(var(--accent-rgb), .14); }
+
+.soundscape-widget-follow {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  margin-top: 11px;
+  color: var(--text-60);
+  font-size: var(--fs-xs);
+}
+.soundscape-widget-follow input { accent-color: rgb(var(--accent-rgb)); }
+.soundscape-widget-follow small { color: var(--text-40, var(--text-60)); }
+
+.soundscape-widget-error { margin: 9px 0 0; color: var(--red); font-size: var(--fs-xs); }
+
+@media (prefers-reduced-motion: reduce) {
+  .soundscape-widget-eq.playing i { animation: none; transform: scaleY(1.8); }
+}

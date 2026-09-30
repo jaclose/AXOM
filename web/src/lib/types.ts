@@ -583,6 +583,7 @@ export type DashboardWidgetId =
   | "todayScore"
   | "examCountdown"
   | "pomodoro"
+  | "soundscapes"
   | "weekly"
   | "suggested"
   /** Legacy storage-only ID; intentionally absent from current catalogs. */
@@ -623,6 +624,8 @@ export interface DashboardLayoutPreferences {
   hiddenWidgetIds: string[];
   widgets: Record<string, DashboardWidgetPreferences>;
   dismissedExtraLargeRecommendation?: boolean;
+  /** Which DASHBOARD_DEFAULTS_REVISION this layout has been upgraded to; absent means 1. */
+  defaultsRevision?: number;
   updatedAt?: string;
   [key: string]: unknown;
 }

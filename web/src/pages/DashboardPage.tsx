@@ -6,7 +6,7 @@ import {
   SlidersHorizontal, GripVertical, PlusCircle, X,
   AlertTriangle, CalendarClock,
   BookOpenCheck, ListTodo, BatteryMedium, Activity, Flame, Gamepad2,
-  ChevronUp, ChevronDown, GraduationCap, Target, Gauge, Timer, BarChart3, Sparkles,
+  ChevronUp, ChevronDown, GraduationCap, Target, Gauge, Timer, BarChart3, Sparkles, AudioWaveform,
   CalendarDays, Map as MapIcon, TrendingUp, Stethoscope, Link2, LayoutGrid, Star } from "lucide-react";
 import { ICON_SIZE } from "../lib/iconSize";
 import { useLuster } from "../lib/useLuster";
@@ -31,6 +31,7 @@ import { pickFocusExam, buildExamCountdown, countdownHeadline, type PrepIntensit
 import { AnimatedProgressBar } from "../components/ui/motion";
 import { GlassCard, GButton, GhostButton, PanelHeader, Tag } from "../components/ui/primitives";
 import { Pomodoro } from "../components/productivity/Pomodoro";
+import { SoundscapeWidget } from "../components/dashboard/SoundscapeWidget";
 import { UpNext } from "../components/brief/UpNext";
 import { pushToast } from "../lib/toast";
 import { CloseoutModal } from "../components/brief/CloseoutModal";
@@ -47,6 +48,7 @@ import {
   defaultDashboardWidgetPreferences,
   extraLargeWidgetRecommendation,
   normalizeDashboardLayoutPreferences,
+  upgradeDashboardLayout,
 } from "../lib/dashboardWidgets";
 import {
   DashboardWidgetFrame,
@@ -538,6 +540,7 @@ const WIDGET_GLYPHS: Record<DashboardWidgetId, { icon: typeof Database; tone: st
   todayScore: { icon: Gauge, tone: "green" },
   examCountdown: { icon: CalendarClock, tone: "rose" },
   pomodoro: { icon: Timer, tone: "orange" },
+  soundscapes: { icon: AudioWaveform, tone: "violet" },
   weekly: { icon: BarChart3, tone: "cool" },
   suggested: { icon: Sparkles, tone: "gold" },
   aiActions: { icon: Sparkles, tone: "violet" },
@@ -570,13 +573,13 @@ function resolveDashboardLayout(
     order: legacyOrder,
     hiddenWidgetIds: legacyHidden,
   });
-  if (normalized) return normalized;
+  if (normalized) return upgradeDashboardLayout(normalized);
   const legacy = adaptLegacyDashboardLayout({ order: legacyOrder, hiddenWidgetIds: legacyHidden });
   const isUntouchedLegacyDefault = sameStringList(legacyOrder, DEFAULT_DASHBOARD_WIDGETS)
     && sameStringList(legacyHidden, DEFAULT_HIDDEN_DASHBOARD_WIDGETS);
   return isUntouchedLegacyDefault
     ? applyDashboardLayoutPreset(legacy, "focused", "1970-01-01T00:00:00.000Z")
-    : legacy;
+    : upgradeDashboardLayout(legacy);
 }
 
 function sameStringList(value: unknown, expected: readonly string[]) {
@@ -620,6 +623,7 @@ function renderDashboardWidget(context: DashboardWidgetRenderContext) {
   if (widgetId === "todayScore") return <TodayScoreWidget result={dailyProgress} activeDayKey={activeDayKey} enabledFields={enabledFields} />;
   if (widgetId === "examCountdown") return <ExamCountdownWidget />;
   if (widgetId === "pomodoro") return <Pomodoro compact />;
+  if (widgetId === "soundscapes") return <SoundscapeWidget enabledFields={enabledFields} />;
   if (widgetId === "weekly") return <WeeklyWidget week={week} enabledFields={enabledFields} />;
   if (widgetId === "questionBank") return <QuestionBankWidget size={size} enabledFields={enabledFields} />;
   if (widgetId === "courseTracker") return <CourseTrackerDashboardWidget size={size} enabledFields={enabledFields} />;
@@ -661,6 +665,7 @@ function widgetDataStatus(id: DashboardWidgetId, s: ReturnType<typeof useStore.g
   if (id === "winDay") return s.dayPlans.some((plan) => plan.dayKey === s.activeDayKey) ? "Checked in today" : "Ready for today";
   if (id === "weekly" || id === "streak") return s.logs.length ? "History available" : "Learning your rhythm";
   if (id === "pomodoro") return "Ready to focus";
+  if (id === "soundscapes") return "Plays beside the timer";
   return "Available";
 }
 

@@ -53,6 +53,7 @@ import {
   applyDashboardLayoutPreset,
   dashboardWidgetCatalogItem,
   normalizeDashboardLayoutPreferences,
+  upgradeDashboardLayout,
 } from "../../lib/dashboardWidgets";
 
 type SettingsSection = "profile" | "account" | "appearance" | "personalization" | "data" | "backup" | "advanced";
@@ -742,10 +743,13 @@ function DailyUtilitiesSettings() {
 function DashboardVisibilitySettings() {
   const profile = useStore((state) => state.profile);
   const updateProfile = useStore((state) => state.updateProfile);
-  const layout = normalizeDashboardLayoutPreferences(profile.dashboardLayout, {
+  const stored = normalizeDashboardLayoutPreferences(profile.dashboardLayout, {
     order: profile.dashboardWidgetOrder,
     hiddenWidgetIds: profile.hiddenDashboardWidgets,
-  }) ?? applyDashboardLayoutPreset(adaptLegacyDashboardLayout(), "focused", "1970-01-01T00:00:00.000Z");
+  });
+  const layout = stored
+    ? upgradeDashboardLayout(stored)
+    : applyDashboardLayoutPreset(adaptLegacyDashboardLayout(), "focused", "1970-01-01T00:00:00.000Z");
   const hidden = new Set(layout.hiddenWidgetIds);
   function setVisible(id: DashboardWidgetId, visible: boolean) {
     const next = new Set(hidden);
