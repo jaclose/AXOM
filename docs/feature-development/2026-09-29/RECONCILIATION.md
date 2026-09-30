@@ -82,7 +82,7 @@ I1-01 persistent Locked In, I1-10 web notifications, I1-13 timer pill hover, I1-
 
 ## Regression layer (2026-09-30)
 
-- `npm run verify:all` = quality + verify:app-updates + verify:daily-games-offline + the Playwright suite. All green on be48c3d..1a6c504; the e2e suite passed twice in a row (24 passed, 1 skipped: live accounts).
+- `npm run verify:all` = quality + verify:app-updates + verify:daily-games-offline + the Playwright suite. Exit 0 on de69c75 (2,014 unit tests; 25 e2e passed, 1 skipped: live accounts). The last full run also caught a lost install prompt (de69c75).
 - Running the full suite for the first time found real bugs, fixed in b5eb1fa and 1ebb916: the update panel crashed the whole app after a deploy (also on main), unreadable light-theme text (Promise prompt, active pills, tree node, kickers), a tour scroll race, focusable leaving toasts, a 4 px hover layout shift, and a forgotten App Checker pathway.
 - `e2e/contrast-sweep.spec.ts` checks 15 screens + Promise + Settings in dark and light, and 7 palettes x 2 themes x 4 screens, failing below 2:1.
 - Branch rebased onto main 2f9ebf4 (security hardening landed there) with no conflicts.

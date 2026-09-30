@@ -16,6 +16,7 @@ Updated 2026-09-30 00:30. Every commit passed `npm run quality` (typecheck, lint
 | 224d44b | I3-54, I3-55, I3-56, I3-57 | Daily Word win card, numbered share text, on-board how-to (ENVOY/EBONY), back link, no page scroll |
 | 3843a5f | I3-53 | Daily Word hint ladder: key glow, then tile outline, then a confirmed reveal that keeps the streak |
 | 6fc14d9 | I1-23, I3-52, I3-58 | Sidebar: daily-use Tools, Misc folder for Tasks/Methods/Prompts/Hub folders, drag or Alt+Arrow reordering, one-time upgrade for saved profiles; Daily Word and Doctordle countdowns + streak; Application Checker opens on Residency for med tracks |
+| de69c75 | install | 'Install AXOM' works again: the browser's one-time install prompt is captured at boot, not by the lazy About page |
 | 1a6c504 | I3-29 | One item editor: Details (name, type, folder, note) and Study plan tabs; no more browser prompt() |
 | a9d8703 | nudges | Optional nudges also wait for Codex's focus check-in and rest overlay |
 | be48c3d | tooling | `npm run verify:all`; contrast sweep across all palettes |
@@ -33,7 +34,7 @@ Updated 2026-09-30 00:30. Every commit passed `npm run quality` (typecheck, lint
 | 69ae330 | I1-18, I1-19, F4, I3-18 | "Overwhelmed?" once after the guide and Promise (arrow + ripple to Customize); one first-visit hint per page on a reusable CoachMark; Help can bring hints back; signing the Promise -> tour offer verified |
 | 9692ebc | I1-21 | Dashboard: Daily Check-In, then the focus timer with a new Soundscape widget beside it, then targets, Question Bank, Course Tracker, Weekly; saved layouts carried forward once (defaultsRevision 2) |
 
-Test count: 1,906 at baseline, 2,014 unit tests now (main's hardening tests included after the rebase), plus 24 e2e specs green.
+Test count: 1,906 at baseline, 2,014 unit tests now (main's hardening tests included after the rebase), plus the Playwright suite (25 passed, 1 skipped) via `npm run verify:all`, exit 0.
 
 ## Next (Wave 1 remainder)
 
