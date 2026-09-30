@@ -8,7 +8,6 @@ export type AiFeature =
   | "daily-report";
 
 export interface AiRequestBody {
-  userId?: string;
   feature?: string;
   context?: Record<string, unknown>;
   notes?: string;
@@ -33,7 +32,6 @@ export async function runAiFeature(feature: AiFeature, body: AiRequestBody) {
   const result = await provider.run(feature, body);
 
   await logAiUsage({
-    userId: body.userId,
     feature,
     inputSummary: summarizeInput(feature, body),
     outputSummary: summarizeOutput(result),

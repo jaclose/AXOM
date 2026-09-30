@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createCloudProvider, cloudAiRemaining } from "./cloud";
-import { buildAnthropicRequest, parseJsonLoose, textFromAnthropic, upstreamError, validateBody } from "../../../../supabase/functions/ai-proxy/core";
+import { aiProxyCorsPolicy, buildAnthropicRequest, parseJsonLoose, readJsonRequest, textFromAnthropic, upstreamError, validateBody } from "../../../../supabase/functions/ai-proxy/core";
 
 function reply(status: number, body: unknown) {
   return Promise.resolve(new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }));
@@ -32,12 +32,60 @@ describe("AXOM Cloud AI client", () => {
 });
 
 describe("ai-proxy core", () => {
+  it("allows only explicit production origins and valid POST preflights", () => {
+    const policy = aiProxyCorsPolicy({
+      origin: "https://axom.app",
+      method: "OPTIONS",
+      requestedMethod: "POST",
+      requestedHeaders: "authorization, apikey, content-type, x-client-info",
+      configuredOrigins: "",
+      production: true,
+    });
+    expect(policy.allowed).toBe(true);
+    expect(policy.headers["Access-Control-Allow-Origin"]).toBe("https://axom.app");
+    expect(policy.headers.Vary).toBe("Origin");
+    expect(policy.headers["Access-Control-Allow-Origin"]).not.toBe("*");
+    expect(aiProxyCorsPolicy({ origin: "http://localhost:5173", method: "POST", requestedMethod: null, requestedHeaders: null, configuredOrigins: "", production: true }).allowed).toBe(false);
+    expect(aiProxyCorsPolicy({ origin: "https://preview.axom.test", method: "POST", requestedMethod: null, requestedHeaders: null, configuredOrigins: "https://preview.axom.test/", production: true }).allowed).toBe(true);
+  });
+
+  it("rejects opaque, malformed, path-bearing origins and invalid preflights", () => {
+    for (const origin of ["null", "not an origin", "https://axom.app/path", "https://evil.example"]) {
+      expect(aiProxyCorsPolicy({ origin, method: "POST", requestedMethod: null, requestedHeaders: null, configuredOrigins: "", production: true }).allowed).toBe(false);
+    }
+    expect(aiProxyCorsPolicy({ origin: "https://axom.app", method: "OPTIONS", requestedMethod: "DELETE", requestedHeaders: null, configuredOrigins: "", production: true }).allowed).toBe(false);
+    expect(aiProxyCorsPolicy({ origin: "https://axom.app", method: "OPTIONS", requestedMethod: "POST", requestedHeaders: "x-evil", configuredOrigins: "", production: true }).allowed).toBe(false);
+    expect(aiProxyCorsPolicy({ origin: "https://sub.axom.app", method: "POST", requestedMethod: null, requestedHeaders: null, configuredOrigins: "https://*.axom.app", production: true }).allowed).toBe(false);
+  });
+
+  it("preserves originless native/server requests without emitting wildcard CORS", () => {
+    const policy = aiProxyCorsPolicy({ origin: null, method: "POST", requestedMethod: null, requestedHeaders: null, configuredOrigins: "", production: true });
+    expect(policy.allowed).toBe(true);
+    expect(policy.headers["Access-Control-Allow-Origin"]).toBeUndefined();
+  });
+
+  it("allows only AXOM's exact Tauri webview origins", () => {
+    for (const origin of ["tauri://localhost", "http://tauri.localhost"]) {
+      const policy = aiProxyCorsPolicy({ origin, method: "POST", requestedMethod: null, requestedHeaders: null, configuredOrigins: "", production: true });
+      expect(policy.allowed).toBe(true);
+      expect(policy.headers["Access-Control-Allow-Origin"]).toBe(origin);
+    }
+    expect(aiProxyCorsPolicy({ origin: "custom://localhost", method: "POST", requestedMethod: null, requestedHeaders: null, configuredOrigins: "", production: true }).allowed).toBe(false);
+  });
+
   it("validates and bounds requests", () => {
     expect(validateBody(null)).toMatchObject({ ok: false });
     expect(validateBody({ prompt: "  " })).toMatchObject({ ok: false });
     expect(validateBody({ prompt: "x".repeat(24_001) })).toMatchObject({ ok: false, error: expect.stringContaining("too long") });
     expect(validateBody({ prompt: "hi", maxTokens: 99_999, tier: "quality" })).toMatchObject({ ok: true, body: { maxTokens: 2000, tier: "quality" } });
     expect(validateBody({ prompt: "hi", tier: "opus-please" })).toMatchObject({ ok: true, body: { tier: "fast", maxTokens: 800 } });
+    expect(validateBody({ prompt: "hi", schema: { description: "x".repeat(16_001) } })).toMatchObject({ ok: false, error: expect.stringContaining("schema is too large") });
+  });
+
+  it("limits raw request bytes and rejects malformed JSON before schema validation", async () => {
+    await expect(readJsonRequest(new Request("https://axom.app", { method: "POST", body: "{" }))).resolves.toEqual({ ok: false });
+    await expect(readJsonRequest(new Request("https://axom.app", { method: "POST", body: JSON.stringify({ prompt: "ok" }) }))).resolves.toEqual({ ok: true, value: { prompt: "ok" } });
+    await expect(readJsonRequest(new Request("https://axom.app", { method: "POST", body: "x".repeat(100) }), 32)).resolves.toEqual({ ok: false });
   });
 
   it("builds a Claude request with a server-chosen model and optional structured output", () => {

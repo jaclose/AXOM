@@ -1,0 +1,343 @@
+NCRS WEEK 1 OPLG
+Source file: NCRS Week 1 OPLG.pdf
+Total unique multiple-choice questions: 24
+
+Question 1: A 45-year-old woman comes to the office due to 3 days of progressive pain in the right upper quadrant, nausea and vomiting. In the preceding year, the patient had fatigue, weight loss, joint pain and intermittent abdominal pain. Lab studies show increased blood urea nitrogen and serum creatinine. Right upper quadrant ultrasound shows no evidence of gallstones but an inflamed gallbladder is present. The patient undergoes cholecystectomy and subsequent biopsy of the submucosal gallbladder vessels is shown in the image (medium-sized vessel with transmural necrotizing inflammation and fibrinoid change). Which of the following is the most likely diagnosis?
+
+A. Angiodysplasia
+B. Antiphospholipid-antibody syndrome
+C. Granulomatosis with polyangiitis
+D. Polyarteritis nodosa
+E. Thromboangiitis obliterans
+
+Answer: D
+Explanation: Systemic symptoms, renal injury, abdominal pain, and necrotizing inflammation of medium-sized gallbladder vessels indicate polyarteritis nodosa.
+Review: Polyarteritis nodosa: medium-vessel pathology, organ distribution, and hepatitis B association.
+
+____________________________________________________________________________________________________
+
+Question 2: A 68-year-old man presents to his primary care physician for follow-up of poorly controlled hypertension. He reports occasional headaches but denies chest pain, shortness of breath, or visual changes. His medical history is significant for type 2 diabetes mellitus, stage 3 chronic kidney disease, and a prior myocardial infarction 5 years ago. His current medications include metformin, atorvastatin, and lisinopril. He states that he has been compliant with his medications and diet. His blood pressure is 162/94 mmHg and heart rate is 78/min. Physical examination is notable for mild bilateral lower extremity edema. No murmurs or pulmonary crackles are appreciated. Laboratory studies show serum sodium: 138 mEq/L; serum potassium: 5.9 mEq/L; serum creatinine: 2.3 mg/dL (baseline 2.0 mg/dL); BUN: 34 mg/dL; HbA1c: 7.8%. Which of the following medications is most contraindicated in this patient?
+
+A. Metoprolol
+B. Betaxolol
+C. Furosemide
+D. Amlodipine
+E. Diltiazem
+F. Spironolactone
+
+Answer: F
+Explanation: Spironolactone would further impair potassium excretion in a patient with CKD, ACE-inhibitor use, and potassium of 5.9 mEq/L, creating a dangerous hyperkalemia risk.
+Review: Mineralocorticoid-receptor antagonists: potassium and renal contraindications.
+
+____________________________________________________________________________________________________
+
+Question 3: A 64-year-old man comes to the emergency department due to chest discomfort and shortness of breath. Medical history includes hypertension, type 2 diabetes mellitus, and severe osteoarthritis of the left knee. The patient is an active smoker with a 20-pack-year smoking history. He undergoes dobutamine infusion with simultaneous cardiac imaging. Before the infusion, there is normal left ventricular contractility, and an ejection fraction of 60%. During the infusion, decreased apical contractility and ejection fraction of 45% was seen. Five minutes after infusion, normal ventricular contractility and ejection fraction of 60% was observed. Which of the following best explains the observed findings?
+
+A. Coronary artery occlusion due to plaque thrombosis
+B. Coronary artery vasospasm
+C. Focal myocardial fibrosis
+D. Normal myocardial contractile response
+E. Supply-demand mismatch due to fixed coronary stenosis
+
+Answer: E
+Explanation: Dobutamine raises heart rate and contractility, increasing oxygen demand. Reversible regional hypokinesis during stress indicates inducible ischemia from a fixed coronary stenosis.
+Review: Dobutamine stress testing and myocardial supply-demand mismatch.
+
+____________________________________________________________________________________________________
+
+Question 4: A 45-year-old man with a history of chronic sinusitis presents to the emergency department because of a 2-day history of hemoptysis and dyspnea on exertion. He also reports weight loss of 7 kg (15.5 lb), decreased urine output, and malaise over the past 2 months. On physical examination, the patient appears ill and has bloody nasal discharge with crusting. Crackles are heard in both lungs. Laboratory results show a serum creatinine of 2 mg/dL. Urinalysis shows hematuria and proteinuria. Which of the following morphological features is most likely in this patient?
+
+A. Granulomatous inflammation in the aortic arch
+B. Caseous granulomas in the ophthalmic artery
+C. Crescentic glomerulonephritis
+D. Segmental thrombosis extending into veins and nerves
+E. Eosinophilic infiltration of capillary beds
+F. MPO-ANCA mediated destruction
+
+Answer: C
+Explanation: Chronic sinusitis, pulmonary hemorrhage, and glomerular disease indicate granulomatosis with polyangiitis, which produces pauci-immune crescentic glomerulonephritis.
+Review: Granulomatosis with polyangiitis and rapidly progressive glomerulonephritis.
+
+____________________________________________________________________________________________________
+
+Question 5: A 42-year-old man comes to the emergency department due to fatigue and exertional dyspnea. Over the past 2 weeks, his symptoms have progressively worsened to the point that he can no longer walk across his living room without becoming short of breath. He is admitted to the hospital but dies suddenly despite aggressive treatment. An autopsy is performed and a cross-section of the heart is shown (marked dilation of the ventricular chambers). Which of the following mechanisms is most likely to be primarily responsible for this patient’s symptoms?
+
+A. Decreased ventricular contraction force
+B. Dynamic left ventricular outflow obstruction
+C. Impaired left ventricular filling
+D. Increased pulmonary vascular resistance
+E. Reduced ventricular wall compliance
+
+Answer: A
+Explanation: The source image shows dilated ventricular chambers, indicating dilated cardiomyopathy. Its primary functional defect is reduced systolic contraction force.
+Review: Dilated cardiomyopathy morphology and systolic dysfunction.
+
+____________________________________________________________________________________________________
+
+Question 6: A 2-year-old boy is brought to the emergency department due to persistent fever for the past 7 days. His parents report that he has been increasingly irritable and refuses to eat. They also note redness of his eyes without discharge and swelling of his hands and feet earlier in the illness that has now begun to peel. On physical examination, his temperature is 39.5°C (103.1°F). He has dry, cracked lips and a diffusely erythematous tongue. A faint, diffuse rash is present over his trunk. Laboratory studies reveal elevated ESR and CRP. He is treated appropriately, and his symptoms resolve. If this patient was left untreated, which of the following sequelae would be most likely?
+
+A. Myocardial infarction
+B. Acute respiratory distress syndrome
+C. Blindness
+D. Neonatal respiratory distress
+E. Thoracic dissection
+F. Abdominal aortic aneurysm
+G. Type I diabetes mellitus
+
+Answer: A
+Explanation: The mucocutaneous findings identify Kawasaki disease. Untreated coronary arteritis can cause aneurysm and thrombosis, leading to myocardial infarction.
+Review: Kawasaki disease criteria, coronary complications, and IVIG treatment.
+
+____________________________________________________________________________________________________
+
+Question 7: A 60-year-old man comes to the office for a routine follow-up visit. He feels well overall except for an intermittent, mild, generalized headache. The patient has no known medical problems and takes no medications. He does not smoke, follows a healthy diet and exercises daily. On examination, his BP is 150/85 mmHg and he is started on lisinopril. At a follow-up visit, his BP is 128/78 mmHg. He also has a dry cough that began a few weeks after starting lisinopril. This drug is stopped and losartan is now prescribed. The patient seems to be compliant with his medication, the cough resolves and he experiences no other side effects. When compared with no treatment, this patient’s current therapy is most likely to result in which of the following changes? Renin Angiotensin I Angiotensin II Aldosterone Bradykinin
+
+A. Renin ↓; Angiotensin I ↓; Angiotensin II ↓; Aldosterone ↓; Bradykinin ↔
+B. Renin ↑; Angiotensin I ↓; Angiotensin II ↓; Aldosterone ↓; Bradykinin ↔
+C. Renin ↑; Angiotensin I ↑; Angiotensin II ↓; Aldosterone ↓; Bradykinin ↑
+D. Renin ↑; Angiotensin I ↑; Angiotensin II ↑; Aldosterone ↓; Bradykinin ↔
+E. Renin ↑; Angiotensin I ↑; Angiotensin II ↑; Aldosterone ↑; Bradykinin ↔
+
+Answer: D
+Explanation: Losartan blocks AT1 receptors, removing feedback inhibition so renin, angiotensin I, and angiotensin II rise; aldosterone falls and bradykinin remains unchanged.
+Review: RAAS laboratory changes with ARBs versus ACE inhibitors.
+
+____________________________________________________________________________________________________
+
+Question 8: A 65-year-old female presents to her cardiologist with intermittent chest pain. The pain initially occurred on exertion six months ago but now occurs spontaneously at rest. She states that the episodes last for about 30 seconds and resolve without intervention. She denies radiation to the arm or jaw, palpitations, visual changes, or weakness. A CT angiogram is ordered, showing an 80% obstruction of the right coronary artery. Which of the following best describes the pathogenesis behind the formation of this obstruction?
+
+A. Calcification of the tunica media
+B. Proliferation of skeletal muscle cells
+C. Increased deposition of collagen
+D. Deposition of triglycerides on the endothelium
+E. Accumulation of foam cells
+
+Answer: E
+Explanation: Atherosclerosis begins with intimal lipid accumulation and macrophage uptake of oxidized LDL, producing foam cells that form fatty streaks and contribute to plaque growth.
+Review: Atherosclerosis pathogenesis and foam-cell formation.
+
+____________________________________________________________________________________________________
+
+Question 9: A 44-year-old man comes to the office for a routine check-up. Medical history is significant for hypercholesterolemia, which he has controlled through diet. His father died of a myocardial infarction at age 56, and his mother who is still living has a history of stroke. Blood pressure is 160/100 mmHg and pulse is 70/min. Enalapril is prescribed. During the first 7 days of therapy, the patient’s glomerular filtration rate adjusts as shown. This response is best explained by an effect of the drug on which of the following renal structure?
+
+A. Afferent arterioles
+B. Distal tubules
+C. Efferent arterioles
+D. Proximal tubules
+E. Vasa recta
+
+Answer: C
+Explanation: Enalapril lowers angiotensin II and preferentially dilates the efferent arteriole, reducing intraglomerular pressure and producing the early fall in GFR shown.
+Review: ACE-inhibitor effects on efferent arteriolar tone and GFR.
+
+____________________________________________________________________________________________________
+
+Question 10: A 72-year-old woman presents with a 3-week history of fatigue, low-grade fever, and worsening headaches localized to the temporal region. She reports scalp tenderness when brushing her hair and jaw pain when chewing. Over the past 24 hours, she has developed transient episodes of vision loss in her right eye. Physical examination reveals a tender, thickened temporal artery with decreased pulsation. Laboratory studies show elevated ESR and CRP. A biopsy demonstrates granulomatous inflammation with multinucleated giant cells affecting the vessel wall. If left untreated, which of the following is the most likely complication in this patient?
+
+A. Rupture of abdominal aorta
+B. Development of coronary artery aneurysms
+C. Irreversible vision loss due to ischemia of optic nerve
+D. Pulmonary hypertension due to vascular remodeling
+E. Renal artery stenosis leading to secondary hypertension
+
+Answer: C
+Explanation: Giant cell arteritis can occlude branches supplying the optic nerve; without immediate glucocorticoids, ischemic optic neuropathy can cause irreversible blindness.
+Review: Giant cell arteritis recognition and prevention of vision loss.
+
+____________________________________________________________________________________________________
+
+Question 11: A 56-year-old man comes to the emergency department with acute, severe chest pain. His electrocardiogram is within normal limits. Contrast-enhanced computed tomography of his chest is shown below (an intimal flap dividing the aortic lumen). Which of the following is the single most important risk factor for this patient’s current condition?
+
+A. Diabetes mellitus
+B. High cholesterol
+C. Hypertension
+D. Limited physical activity
+E. Smoking
+F. Spirochete infection
+
+Answer: C
+Explanation: The source CT shows an aortic dissection. Long-standing hypertension is the most important acquired risk factor because it promotes medial degeneration and wall stress.
+Review: Aortic dissection risk factors and CT appearance.
+
+____________________________________________________________________________________________________
+
+Question 12: A 45-year-old man presents with progressive fatigue, dyspnea on exertion, and palpitations. He reports unintentional weight loss, heat intolerance, and frequent bowel movements over the past several months. On physical examination, his skin is warm and moist. His heart rate is 110/min, and blood pressure is 140/60 mm Hg. A bounding pulse is noted. Cardiac exam reveals a hyperdynamic precordium. No peripheral edema is present. Echocardiography shows increased cardiac output with normal ejection fraction. Systemic vascular resistance is decreased. Which of the following best explains the mechanism underlying this patient’s condition?
+
+A. Increased afterload leading to concentric hypertrophy
+B. Reduced myocardial contractility due to ischemia
+C. Increased metabolic demand causing persistent vasodilation
+D. Impaired ventricular relaxation leading to reduced filling
+E. Fixed obstruction of left ventricular outflow tract
+
+Answer: C
+Explanation: Hyperthyroidism raises tissue metabolism and oxygen demand, causing persistent peripheral vasodilation, reduced systemic resistance, and high-output heart failure physiology.
+Review: High-output heart failure due to thyrotoxicosis.
+
+____________________________________________________________________________________________________
+
+Question 13: A 30-year old Asian man comes to the clinic due to painful, ulcerated fingers. His symptoms began with pain and discoloration of the fingers several weeks ago, which progressed to ulceration at the fingertips. He also reports pain in the hands that occurs with activity and is relieved by rest. Medical history is unremarkable. The patient has smoked 2 packs of cigarettes a day for the last 5 years. He occasionally drinks alcohol but does not use illicit drugs. Vital signs are within normal limits. No heart murmurs are heard and the lungs are clear. Radial pulses are diminished. There is erythema and tenderness along a superficial vein of the left forearm. Hemoglobin HB1Ac and a fasting lipid panel are within normal limits. Which of the following pathologic findings is most likely to be seen within the affected vessels?
+
+A. Granulomatous inflammation of the media
+B. Lipid filled intimal plaques
+C. Onion skin appearing, concentric thickening of the arteriolar wall
+D. Segmental vasculitis extending into contiguous veins and nerves
+E. Transmural inflammation of the arterial wall with fibrinoid necrosis
+
+Answer: D
+Explanation: Distal ischemia, superficial thrombophlebitis, and heavy tobacco exposure in a young man indicate thromboangiitis obliterans, a segmental vasculitis involving adjacent veins and nerves.
+Review: Buerger disease: tobacco association and vessel pathology.
+
+____________________________________________________________________________________________________
+
+Question 14: A 69-year-old man with a history of long-standing hypertension and smoking presents with vague abdominal discomfort and a pulsatile sensation in his abdomen. On physical exam, a pulsatile mass is palpated in the midline abdomen. Imaging reveals a dilated abdominal aorta below the renal arteries. Histopathologic examination of the vessel wall shows destruction of elastic fibers and thinning of the media associated with atherosclerotic plaques. Which of the following is the most likely complication if this condition progresses?
+
+A. Dissection into the ascending aorta
+B. Rupture leading to massive retroperitoneal hemorrhage
+C. Formation of immune complexes in vessel walls
+D. Occlusion due to vasospasm
+E. Development of granulomatous inflammation
+
+Answer: B
+Explanation: An infrarenal atherosclerotic abdominal aortic aneurysm can enlarge and rupture into the retroperitoneum, causing massive hemorrhage and shock.
+Review: Abdominal aortic aneurysm location, progression, and rupture.
+
+____________________________________________________________________________________________________
+
+Question 15: A 56-year-old woman comes to the clinic for follow-up of heart failure with reduced ejection fraction. Over the last 3 months, the patient has been hospitalized twice due to acute decompensation of heart failure that required treatment with intravenous furosemide. Since her most recent discharge, she has been taking high doses of oral furosemide, but she continues to have progressive lower extremity edema and weight gain. Serum creatinine is 1.2 mg/dL and serum potassium is 4.1 mEq/L. The patient is started on metolazone. The addition of metolazone is likely to assist in treating this patient because of which of the following effects of furosemide?
+
+A. Increased calcium delivery to the distal tubules
+B. Increased sodium delivery to the distal tubules
+C. Increased tubular reabsorption to bicarbonate
+D. Increase tubular reabsorption of uric acid
+E. Reduced tubular reabsorption of glucose
+F. Reduce tubular reabsorption of potassium
+
+Answer: B
+Explanation: Loop blockade in the thick ascending limb increases sodium delivery to the distal nephron. Metolazone blocks distal sodium reabsorption, producing sequential nephron blockade in diuretic resistance.
+Review: Loop-thiazide synergy and sequential nephron blockade.
+
+____________________________________________________________________________________________________
+
+Question 16: A 66-year-old man presents with progressive fatigue, dyspnea on exertion, and lower extremity swelling. He also reports numbness in his hands and episodes of lightheadedness. Physical examination reveals elevated jugular venous pressure and bilateral pitting edema. Heart sounds are distant. Echocardiography shows preserved ejection fraction. Cardiac biopsy demonstrates extracellular deposition of amorphous eosinophilic material that stains positive with Congo red. Which of the following best explains the primary cardiac dysfunction in this patient?
+
+A. Decreased contractility due to ischemia
+B. Volume overload leading to eccentric hypertrophy
+C. Impaired ventricular filling due to decreased compliance
+D. Increased afterload causing systolic dysfunction
+E. Valve leaflet destruction causing regurgitation
+
+Answer: C
+Explanation: Congo-red-positive myocardial amyloid stiffens the ventricular walls, causing restrictive cardiomyopathy with impaired diastolic filling despite preserved ejection fraction.
+Review: Cardiac amyloidosis and restrictive cardiomyopathy.
+
+____________________________________________________________________________________________________
+
+Question 17: A 66-year-old man is brought to the hospital due to sudden-onset chest pain and nausea. Medical history includes diabetes mellitus. Blood pressure is 70/60 mmHg and pulse is 60/min. The lungs are clear on auscultation and the jugular veins are distended. ECG shows ST-segment elevation in leads II, III and avF. Chest x-ray is unremarkable. An inferior wall myocardial infarction is diagnosed and emergency cardiac catheterization reveals complete occlusion of the proximal right coronary artery. The patient is persistently hypotensive in the cardiac lab. Which of the following hemodynamic findings are most likely to be observed in this patient? Cardiac output Pulmonary capillary wedge pressure Central venous pressure
+
+A. Cardiac output ↓; Pulmonary capillary wedge pressure ↓; Central venous pressure ↓
+B. Cardiac output ↓; Pulmonary capillary wedge pressure ↓; Central venous pressure ↑
+C. Cardiac output ↓; Pulmonary capillary wedge pressure ↑; Central venous pressure ↓
+D. Cardiac output ↑; Pulmonary capillary wedge pressure ↓; Central venous pressure ↓
+E. Cardiac output ↑; Pulmonary capillary wedge pressure ↑; Central venous pressure ↑
+
+Answer: B
+Explanation: A proximal right-coronary infarct can involve the right ventricle. Reduced RV output lowers cardiac output and left-sided filling pressure, while systemic venous backup raises central venous pressure.
+Review: Right ventricular infarction: hypotension, clear lungs, and hemodynamics.
+
+____________________________________________________________________________________________________
+
+Question 18: A research scientist is using a mouse model to investigate cardiomyocyte adaptations in response to changes in afterload and intravascular volume status. She administers midodrine, an arterial vasoconstrictor, to simulate increased afterload in the mice. After one month of continuous administration, the mice are euthanized via CO 2 narcosis and cervical dislocation. Upon examination, the cardiac tissue showed signs of concentric hypertrophy. Which of the following changes were most likely observed by this researcher?
+
+A. Septal predominant hypertrophy
+B. Increased scar tissue deposition
+C. Increased width of sarcomere bundles
+D. Decreased sarcoplasmic reticulum calcium concentration
+E. Increased length of sarcomere bundles
+
+Answer: C
+Explanation: Pressure overload causes cardiomyocytes to add sarcomeres in parallel, increasing myocyte and sarcomere-bundle width and producing concentric hypertrophy.
+Review: Parallel versus serial sarcomere addition in cardiac hypertrophy.
+
+____________________________________________________________________________________________________
+
+Question 19: A 52-year old man with hypertension begins taking a new antihypertensive agent that is expected to enhance natriuresis while also causing a sustained decrease in serum angiotensin II concentration and aldosterone production. The effects of this medication are most similar to which of the following drug classes?
+
+A. Alpha-1 adrenergic blockers
+B. Angiotensin II receptor block
+C. Direct renin inhibitor
+D. Loop diuretic
+E. Mineralocorticoid receptor antagonist
+
+Answer: C
+Explanation: A direct renin inhibitor decreases formation of angiotensin I and therefore lowers angiotensin II and aldosterone, promoting natriuresis.
+Review: Aliskiren and direct renin inhibition.
+
+____________________________________________________________________________________________________
+
+Question 20: A 58-year-old woman with a history of hypertension and chronic lower extremity edema is started on a new medication. Two days later, she develops a diffuse erythematous rash, pruritus, and facial swelling. She also reports mild shortness of breath. Physical examination reveals urticaria and periorbital edema. Laboratory studies show mild eosinophilia. Her symptoms resolve after discontinuation of the offending agent. Which of the following medications most likely precipitated this reaction?
+
+A. Triamterene
+B. Acetazolamide
+C. Mannitol
+D. Torsemide
+E. Spironolactone
+
+Answer: D
+Explanation: Torsemide is a sulfonamide loop diuretic; the rapid urticaria, eosinophilia, facial swelling, and dyspnea indicate a hypersensitivity reaction.
+Review: Loop-diuretic sulfonamide hypersensitivity.
+
+____________________________________________________________________________________________________
+
+Question 21: A 42-year-old man comes to the emergency department due to severe chest pain that started abruptly 2 hours ago. The pain is midline, constant and 10/10 in intensity. He has had no fever, cough or shortness of breath. His only medical condition is hypertension. On examination, the patient is diaphoretic and in severe distress. Temperature is 37C/98.6F, pulse is 116/min, and respirations are 24/min. Systolic blood pressure is 82 mmHg in the right arm and 60 mmHg in the left arm. Jugular veins are distended with an estimated pressure of 13cm H2O. the lungs are clear to auscultation. The point of maximal impulse is not palpable. The extremities are cold with no peripheral edema. The patient develops cardiac arrest and dies soon after arrival. Autopsy would most likely reveal which of the following findings?
+
+A. Air within the pleural space
+B. Blood in the pericardial space
+C. Ruptured posteromedial papillary muscle
+D. Thrombus at the pulmonary artery bifurcation
+E. Transmural necrosis of the anterolateral myocardium
+
+Answer: B
+Explanation: Aortic dissection can rupture into the pericardial sac, producing hemopericardium and tamponade with hypotension, elevated JVP, and clear lungs.
+Review: Aortic dissection complicated by hemopericardium and tamponade.
+
+____________________________________________________________________________________________________
+
+Question 22: A 36-year-old man comes to the clinic because of several weeks of fever, anorexia, abdominal pain, weight loss, and arthritis. Physical examination shows cutaneous ulcerations and purplish lacy discolorations on the lower extremities. The patient has callouses and scars following the course of the veins in his upper extremities. Results of serum studies show a creatinine concentration of 3.2 mg/dL. Urinalysis shows proteinuria and hematuria. Angiography shows microaneurysms in medium and small visceral arteries. Which of the following serum studies is most likely to be elevated in this patient?
+
+A. Anti-dsDNA
+B. c-ANCA
+C. p-ANCA
+D. Hepatitis B core antibody
+E. Antiphospholipid antibody
+
+Answer: D
+Explanation: Microaneurysms of visceral medium-sized arteries with systemic symptoms and renal disease indicate polyarteritis nodosa, which is associated with hepatitis B infection.
+Review: Polyarteritis nodosa and hepatitis B serology.
+
+____________________________________________________________________________________________________
+
+Question 23: A 72-year-old man comes to the emergency department due to sudden-onset, severe abdominal pain accompanied by nausea. He has a history of coronary artery disease and recently underwent cardiac angiography. The patient is a current smoker with a 30-pack year history. After initial evaluation, he undergoes emergency laparotomy. A segment of small intestine is resected. On microscopic examination, there are several large-caliber vessels with needle-shaped cholesterol clefts in their lumens, as shown in the image. Given these findings, the patient is at highest risk for which of the following complications?
+
+A. Kidney injury
+B. Myelosuppression
+C. Nephrolithiasis
+D. Pulmonary infarction
+E. Septic arthritis
+
+Answer: A
+Explanation: Needle-shaped cholesterol clefts after angiography indicate cholesterol crystal embolization. Renal embolization commonly causes acute or subacute kidney injury.
+Review: Cholesterol emboli after vascular instrumentation.
+
+____________________________________________________________________________________________________
+
+Question 24: A 54-year-old man is brought to the emergency department after being found unconscious at home. According to family members, he had complained of severe headache, nausea, and confusion earlier in the day. On arrival, his vital signs are blood pressure: 190/100 mm Hg; heart rate: 52/min; respiratory rate: irregular. Physical examination reveals decreased level of consciousness and papilledema on fundoscopic exam. CT scan of the head shows a large intracerebral hemorrhage with surrounding edema and evidence of increased intracranial pressure. The patient is treated with an intravenous agent that increases his urine output significantly. Which of the following best describes the primary mechanism of action of this medication?
+
+A. Inhibition of Na ⁺/Cl⁻ reabsorption in the distal convoluted tubule
+B. Blockade of Na ⁺/K⁺/2Cl ⁻ transporter in the thick ascending limb
+C. Antagonism of aldosterone receptors in the collecting duct
+D. Inhibition of carbonic anhydrase in the proximal tubule
+E. Increase in tubular fluid osmolarity preventing water reabsorption
+
+Answer: E
+Explanation: The acute intracranial-pressure treatment is mannitol. As an osmotic diuretic, it raises tubular-fluid osmolarity and prevents water reabsorption.
+Review: Mannitol mechanism and use in elevated intracranial pressure.

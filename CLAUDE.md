@@ -1,0 +1,3 @@
+# Frontend Design Routing
+
+When work materially affects frontend UI, UX, interaction, visual design, responsive behavior, design systems, motion, animation, Figma, or design-to-code, automatically consult the global `design-production-router` Agent Skill and the specialist skills it selects. Preserve AXOM's existing design language and components; finish implementation work with `web-interface-guidelines` and relevant browser/tests.

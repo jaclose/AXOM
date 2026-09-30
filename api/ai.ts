@@ -10,7 +10,7 @@ const AI_FEATURES: AiFeature[] = [
 ];
 
 export default withApi(["POST"], async (req, res) => {
-  const body = requireBodyObject(req) as AiRequestBody;
+  const body = requireBodyObject(req, 64_000) as AiRequestBody;
   const feature = parseFeature(getOptionalParam(req, "feature") || body.feature);
   const result = await runAiFeature(feature, body);
   sendJson(res, result);

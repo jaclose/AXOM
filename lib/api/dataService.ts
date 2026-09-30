@@ -261,7 +261,6 @@ export async function restoreBackup(userId: string, backupId: string) {
 }
 
 export async function logAiUsage(input: {
-  userId?: string;
   feature: string;
   inputSummary?: string;
   outputSummary?: string;
@@ -270,8 +269,8 @@ export async function logAiUsage(input: {
   if (!hasDatabase()) return;
   const sql = await getReadySql();
   await sql`
-    INSERT INTO ai_usage_logs (user_id, feature, input_summary, output_summary, token_estimate)
-    VALUES (${input.userId ?? null}, ${input.feature}, ${input.inputSummary ?? null}, ${input.outputSummary ?? null}, ${input.tokenEstimate ?? null})
+    INSERT INTO ai_usage_logs (feature, input_summary, output_summary, token_estimate)
+    VALUES (${input.feature}, ${input.inputSummary ?? null}, ${input.outputSummary ?? null}, ${input.tokenEstimate ?? null})
   `;
 }
 

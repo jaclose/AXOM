@@ -117,7 +117,7 @@ function friendlyError(error: unknown): string {
       : "";
   if (/invalid login credentials/i.test(raw)) return "That email and password don’t match an account.";
   if (/email not confirmed/i.test(raw)) return "Confirm your email first — check your inbox for the AXOM message.";
-  if (/user already registered/i.test(raw)) return "An account with that email already exists. Sign in instead.";
+  if (/user already registered/i.test(raw)) return "If that address can be used, AXOM will send the next step. Try signing in or request a code.";
   if (/rate limit|too many/i.test(raw)) return "Too many attempts. Wait a minute and try again.";
   if (/token has expired|otp.*expired|invalid.*otp/i.test(raw)) return "That code is invalid or expired. Request a new one.";
   if (/failed to fetch|network/i.test(raw)) return "AXOM couldn’t reach the account service. Your work is still saved on this device.";
@@ -324,10 +324,17 @@ export const useAccount = create<AccountState>((set, get) => {
     },
 
     async signOut() {
-      await guarded("Signing out…", async () => {
+      const signedOut = await guarded("Signing out…", async () => {
+        const supabase = await loadSupabase();
+        if (!supabase && cloudConfigured()) throw new Error("The account service couldn’t load. Try again before signing out.");
+        if (supabase) {
+          const { error } = await supabase.auth.signOut();
+          if (error) throw error;
+        }
         coordinator?.dispose();
-        await (await loadSupabase())?.auth.signOut();
+        return true;
       });
+      if (!signedOut) return;
       clearAccountSync();
       set({
         phase: cloudConfigured() ? "signed-out" : "unconfigured",
@@ -469,11 +476,13 @@ export const useAccount = create<AccountState>((set, get) => {
     },
 
     async deleteCloudData() {
-      await guarded("Deleting cloud copies…", async () => {
+      const deleted = await guarded("Deleting cloud copies…", async () => {
         await transport.deleteCloudData();
         coordinator?.dispose();
         clearAccountSync();
+        return true;
       });
+      if (!deleted) return;
       set({ link: "unlinked", protection: "local-only", history: [], devices: [], conflictServerRevision: undefined, message: "Every server copy was deleted. This device’s workspace is untouched." });
     },
 

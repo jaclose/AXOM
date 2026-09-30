@@ -14,6 +14,99 @@ export interface ProxyRequestBody {
 }
 
 export const LIMITS = { promptChars: 24_000, systemChars: 6_000, maxTokens: 2_000, taskChars: 64 } as const;
+export const MAX_REQUEST_BYTES = 64_000;
+export const MAX_SCHEMA_BYTES = 16_000;
+
+const AI_PRODUCTION_ORIGINS = [
+  "https://axom.app",
+  "https://axom-jacloses-projects.vercel.app",
+  "tauri://localhost",
+  "http://tauri.localhost",
+];
+const AI_DEVELOPMENT_ORIGINS = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://localhost:5187",
+  "http://127.0.0.1:5187",
+];
+const AI_ALLOWED_HEADERS = ["authorization", "apikey", "content-type", "x-client-info", "x-supabase-api-version"];
+
+function canonicalOrigin(value: string): string | undefined {
+  try {
+    const parsed = new URL(value);
+    if (parsed.username || parsed.password) return undefined;
+    if (parsed.protocol === "tauri:" && parsed.host === "localhost" && ["", "/"].includes(parsed.pathname) && !parsed.search && !parsed.hash) return "tauri://localhost";
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return undefined;
+    if (parsed.pathname !== "/" || parsed.search || parsed.hash) return undefined;
+    return parsed.origin;
+  } catch {
+    return undefined;
+  }
+}
+
+export function aiProxyCorsPolicy(input: {
+  origin: string | null;
+  method: string;
+  requestedMethod: string | null;
+  requestedHeaders: string | null;
+  configuredOrigins: string;
+  production: boolean;
+}): { allowed: boolean; headers: Record<string, string> } {
+  const headers: Record<string, string> = {
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info, x-supabase-api-version",
+    "Vary": "Origin",
+  };
+  if (!input.origin) return { allowed: true, headers };
+
+  const origin = canonicalOrigin(input.origin);
+  const configured = input.configuredOrigins.split(",").map((value) => value.trim()).filter(Boolean);
+  const defaults = input.production ? AI_PRODUCTION_ORIGINS : [...AI_PRODUCTION_ORIGINS, ...AI_DEVELOPMENT_ORIGINS];
+  const allowlist = new Set([...defaults, ...configured.map(canonicalOrigin).filter((value): value is string => Boolean(value))]);
+  if (!origin || !allowlist.has(origin)) return { allowed: false, headers };
+
+  headers["Access-Control-Allow-Origin"] = origin;
+  if (input.method === "OPTIONS") {
+    if (input.requestedMethod && input.requestedMethod !== "POST") return { allowed: false, headers };
+    if (input.requestedHeaders && !input.requestedHeaders.split(",").every((name) => AI_ALLOWED_HEADERS.includes(name.trim().toLowerCase()))) {
+      return { allowed: false, headers };
+    }
+  }
+  return { allowed: true, headers };
+}
+
+export async function readJsonRequest(request: Request, maxBytes = MAX_REQUEST_BYTES): Promise<{ ok: true; value: unknown } | { ok: false }> {
+  const contentLength = Number(request.headers.get("Content-Length"));
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) return { ok: false };
+  if (!request.body) return { ok: false };
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      byteLength += value.byteLength;
+      if (byteLength > maxBytes) {
+        await reader.cancel();
+        return { ok: false };
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(byteLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return { ok: true, value: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown };
+  } catch {
+    return { ok: false };
+  } finally {
+    reader.releaseLock();
+  }
+}
 
 export const JSON_RULE =
   "Reply with a single JSON value only: no prose, no markdown fences. " +
@@ -30,6 +123,9 @@ export function validateBody(value: unknown): { ok: true; body: ProxyRequestBody
   const tier: AiTier = record.tier === "quality" ? "quality" : "fast";
   const maxTokens = Math.min(LIMITS.maxTokens, Math.max(64, Number(record.maxTokens) || 800));
   const schema = record.schema && typeof record.schema === "object" && !Array.isArray(record.schema) ? record.schema as Record<string, unknown> : undefined;
+  if (schema && new TextEncoder().encode(JSON.stringify(schema)).byteLength > MAX_SCHEMA_BYTES) {
+    return { ok: false, error: "Structured output schema is too large." };
+  }
   const task = typeof record.task === "string" ? record.task.slice(0, LIMITS.taskChars) : undefined;
   return { ok: true, body: { prompt, system, tier, maxTokens, schema, task } };
 }

@@ -280,7 +280,7 @@ export function ClientOnly({ children, fallback = null }: { children: ReactNode;
 ```tsx
 // [W] WebGL: lazy + ClientOnly so three/shaders never run during SSR
 const Scene = lazy(() => import("./scene")); // default export
-<ClientOnly fallback={<div className="min-h-dvh bg-[var(--bg)]" />}>
+<ClientOnly fallback={<div className="min-h-dvh bg-(--bg)" />}>
   <Suspense fallback={null}><Scene /></Suspense>
 </ClientOnly>
 ```

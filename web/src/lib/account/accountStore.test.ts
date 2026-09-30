@@ -139,6 +139,13 @@ describe("account lifecycle", () => {
     expect(useAccount.getState()).toMatchObject({ phase: "signed-in", pendingCodeEmail: undefined, pendingCodeKind: undefined });
   });
 
+  it("does not disclose existing-account status from signup errors", async () => {
+    auth.signUp.mockResolvedValueOnce({ data: { session: null }, error: { message: "User already registered" } } as never);
+
+    expect(await useAccount.getState().signUp("learner@example.com", "password123", "Learner")).toBe(false);
+    expect(useAccount.getState().error).not.toMatch(/already registered|already exists/i);
+  });
+
   it("resets a password with the recovery code, then asks for the new password", async () => {
     expect(await useAccount.getState().requestPasswordReset("learner@example.com")).toBe(true);
     expect(useAccount.getState().pendingCodeKind).toBe("recovery");
@@ -155,6 +162,30 @@ describe("account lifecycle", () => {
     await useAccount.getState().signOut();
     expect(useAccount.getState()).toMatchObject({ phase: "signed-out", user: null, link: "unlinked", protection: "local-only" });
     expect(useStore.getState().courses).toBe(courses);
+  });
+
+  it("keeps the signed-in state when the auth service rejects sign-out", async () => {
+    await useAccount.getState().signIn("learner@example.com", "password123");
+    auth.signOut.mockResolvedValueOnce({ error: { message: "Network unavailable" } } as never);
+
+    await useAccount.getState().signOut();
+
+    expect(useAccount.getState().phase).toBe("signed-in");
+    expect(useAccount.getState().user?.id).toBe("user-1");
+    expect(useAccount.getState().error).toBeTruthy();
+  });
+
+  it("does not report cloud deletion complete when the deletion RPC fails", async () => {
+    await useAccount.getState().signIn("learner@example.com", "password123");
+    useAccount.setState({ link: "linked", protection: "protected", history: [{ id: "r1" } as never] });
+    rpc.mockResolvedValueOnce({ data: null, error: { message: "Deletion unavailable" } });
+
+    await useAccount.getState().deleteCloudData();
+
+    expect(useAccount.getState()).toMatchObject({ link: "linked", protection: "protected" });
+    expect(useAccount.getState().history).toHaveLength(1);
+    expect(useAccount.getState().message).not.toMatch(/Every server copy was deleted/);
+    expect(useAccount.getState().error).toBeTruthy();
   });
 
   it("turns service errors into calm, specific guidance", async () => {
