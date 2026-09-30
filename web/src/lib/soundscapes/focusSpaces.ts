@@ -1,26 +1,28 @@
 import { create } from "zustand";
 import { SCENES } from "./scenes";
+import { experienceById, nextExperience } from "./experiences";
 
 export const FOCUS_SPACE_KEY = "axom.focus-space.v1";
 export const WINDOW_SWAP_URL = "https://www.window-swap.com/";
 export function validSpace(value: unknown): value is string {
-  return value === "axom" || value === "local" || SCENES.some((scene) => scene.id === value);
+  return typeof value === "string" && (value === "axom" || value === "local" || SCENES.some((scene) => scene.id === value) || Boolean(experienceById(value)));
 }
 function savedSpace(): string {
   try { const value = localStorage.getItem(FOCUS_SPACE_KEY); return validSpace(value) ? value : "axom"; }
   catch { return "axom"; }
 }
 export const useFocusSpace = create<{
-  selected: string; open: boolean; immersive: boolean; revision: number;
-  select: (id: string) => void; close: () => void;
-}>((set) => ({
-  selected: savedSpace(), open: false, immersive: false, revision: 0,
-  select(id) {
+  selected: string; open: boolean; immersive: boolean; compact: boolean; revision: number;
+  select: (id: string, compact?: boolean) => void; close: () => void; next: (direction?: number) => void;
+}>((set, get) => ({
+  selected: savedSpace(), open: false, immersive: false, compact: false, revision: 0,
+  select(id, compact = false) {
     if (!validSpace(id)) return;
     try { localStorage.setItem(FOCUS_SPACE_KEY, id); } catch { /* Selection can remain in memory. */ }
-    set({ selected: id, open: true });
+    set({ selected: id, open: true, compact });
   },
-  close() { set({ open: false, immersive: false }); },
+  close() { set({ open: false, immersive: false, compact: false }); },
+  next(direction = 1) { const state = get(); state.select(`site:${nextExperience(state.selected, direction).id}`, state.compact); },
 }));
 
 interface LocalVideo { name: string; blob: Blob }
