@@ -4,6 +4,7 @@
 import { Flame } from "lucide-react";
 import { useClockNow } from "../../lib/clock";
 import { deriveDailyWordStatsFromNormalizedHistory } from "../../lib/dailyWordStats";
+import { doctordleCaseNumber, doctordleStreak, useDoctordle } from "../../lib/doctordle";
 import { useStore } from "../../lib/store";
 
 /** Daily Word turns over at local midnight. */
@@ -38,7 +39,11 @@ export function DailyGameNavMeta({ id }: { id: string }) {
 function GameMeta({ game }: { game: "daily-word" | "doctordle" }) {
   const now = useClockNow("minute");
   const puzzles = useStore((state) => state.dailyWordPuzzles);
-  const streak = game === "daily-word" ? deriveDailyWordStatsFromNormalizedHistory(puzzles).currentStreak : 0;
+  const doctordleLog = useDoctordle((state) => state.log);
+  // Doctordle's streak is the learner's own "Got it" check-ins (lib/doctordle.ts).
+  const streak = game === "daily-word"
+    ? deriveDailyWordStatsFromNormalizedHistory(puzzles).currentStreak
+    : doctordleStreak(doctordleLog, doctordleCaseNumber(now.getTime()));
   const left = compactCountdown(game === "daily-word" ? msUntilLocalMidnight(now) : msUntilDoctordle(now));
   const title = `${game === "daily-word" ? "New word" : "New case"} in ${left}${streak ? ` · ${streak}-day streak` : ""}`;
   return (

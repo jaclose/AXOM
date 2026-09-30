@@ -1,0 +1,65 @@
+/* Game check-ins ("Did you get today's Doctordle?"): the guide offer's
+   quiet top-of-screen card, so AXOM's small asks all look like one family. */
+.game-checkin {
+  position: fixed;
+  z-index: 96;
+  top: max(16px, calc(env(safe-area-inset-top) + 10px));
+  left: 50%;
+  width: min(600px, calc(100vw - 28px));
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 10px 12px 14px;
+  border: 1px solid rgba(var(--accent-rgb), 0.24);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(120% 140% at 0% 0%, rgba(var(--accent-rgb), 0.14), transparent 60%),
+    linear-gradient(160deg, rgba(30, 30, 33, 0.96), rgba(14, 14, 17, 0.97));
+  box-shadow: var(--shadow-floating);
+  -webkit-backdrop-filter: var(--blur-panel);
+  backdrop-filter: var(--blur-panel);
+  transform: translateX(-50%);
+  animation: game-checkin-in .5s cubic-bezier(.22, 1, .36, 1) both;
+}
+.game-checkin.is-answered { grid-template-columns: auto minmax(0, 1fr); width: min(420px, calc(100vw - 28px)); }
+@keyframes game-checkin-in { from { opacity: 0; transform: translate(-50%, -10px) scale(.98); } }
+
+.game-checkin-icon {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: rgb(var(--accent-rgb));
+  background: rgba(var(--accent-rgb), 0.12);
+}
+.game-checkin.is-answered .game-checkin-icon { color: var(--orange); background: color-mix(in srgb, var(--orange) 14%, transparent); }
+.game-checkin-copy { min-width: 0; display: grid; gap: 2px; }
+.game-checkin-copy b { font-size: var(--fs-base); font-weight: var(--fw-bold); }
+.game-checkin-copy span { color: var(--text-60); font-size: var(--fs-sm); line-height: var(--leading-snug); }
+.game-checkin-actions { display: flex; gap: 6px; align-items: center; }
+.game-checkin-close {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-45);
+  background: transparent;
+  cursor: pointer;
+}
+.game-checkin-close:hover { color: var(--text); background: rgba(255, 255, 255, 0.07); }
+
+:root[data-theme="light"] .game-checkin {
+  background: radial-gradient(120% 140% at 0% 0%, rgba(var(--accent-rgb), 0.12), transparent 60%), linear-gradient(160deg, #fffdf9, #f4eee3);
+  border-color: rgba(var(--ink-rgb), 0.16);
+}
+
+@media (max-width: 600px) {
+  .game-checkin { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .game-checkin-close { grid-row: 1; grid-column: 3; align-self: start; }
+  .game-checkin-actions { grid-column: 1 / -1; justify-content: flex-end; }
+}
+@media (prefers-reduced-motion: reduce) { .game-checkin { animation: none; } }

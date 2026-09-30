@@ -5,6 +5,7 @@ import { RouteErrorBoundary } from "./components/shell/RouteErrorBoundary";
 import { TabPresence } from "./components/shell/TabPresence";
 import { GuideOffer } from "./components/shell/GuideOffer";
 import { CoachLayer } from "./components/shell/CoachLayer";
+import { DoctordleCheckIn } from "./components/games/DoctordleCheckIn";
 import { clearTourProgress } from "./lib/onboardingProgress";
 import { SettingsModal, type SettingsTab } from "./components/shell/SettingsModal";
 import { OnboardingWizard } from "./components/shell/OnboardingWizard";
@@ -371,6 +372,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
         onStart={() => { clearTourProgress(); updateProfile({ tourDone: false }); }}
       />
       <CoachLayer route={routeKey} suspended={Boolean(showTour || settings || promisePromptOpen || promiseCutsceneOpen || drawer)} />
+      <DoctordleCheckIn suspended={Boolean(showTour || settings || promisePromptOpen || promiseCutsceneOpen)} />
       {promisePromptOpen && !showTour && (
         <PromisePrompt
           onSign={() => { setPromisePromptOpen(false); setPromiseCutsceneOpen(true); }}

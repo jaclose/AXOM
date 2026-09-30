@@ -32,6 +32,7 @@ import { AnimatedProgressBar } from "../components/ui/motion";
 import { GlassCard, GButton, GhostButton, PanelHeader, Tag } from "../components/ui/primitives";
 import { Pomodoro } from "../components/productivity/Pomodoro";
 import { SoundscapeWidget } from "../components/dashboard/SoundscapeWidget";
+import { DoctordleReminder } from "../components/games/DoctordleReminder";
 import { UpNext } from "../components/brief/UpNext";
 import { pushToast } from "../lib/toast";
 import { CloseoutModal } from "../components/brief/CloseoutModal";
@@ -180,6 +181,7 @@ export function DashboardPage() {
       {!hiddenWidgets.has("commandBrief") && <UpNext readiness={readiness} onHide={hideUpNext} />}
 
       <StandupPrompt />
+      <DoctordleReminder />
 
       <div className="dashboard-edit-toolbar">
         <GhostButton

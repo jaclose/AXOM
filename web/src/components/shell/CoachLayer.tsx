@@ -10,17 +10,11 @@ import {
   type CoachLedger, type PageHint,
 } from "../../lib/coach";
 import { readGuideOffer } from "../../lib/guideOffer";
+import { shellBusy } from "../../lib/shellBusy";
 import { usePomodoro } from "../../lib/pomodoro";
 import { useStore } from "../../lib/store";
 import { CoachMark, type CoachDismissReason } from "./CoachMark";
 
-const BUSY_SELECTOR = ".modal-scrim, [aria-modal=\"true\"], .guide-offer, .tour-spot, .tour-tip, .promise-scrim";
-
-function shellBusy(): boolean {
-  if (document.querySelector(BUSY_SELECTOR)) return true;
-  const active = document.activeElement;
-  return active instanceof HTMLElement && (active.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName));
-}
 
 function onScreen(element: Element): boolean {
   const rect = element.getBoundingClientRect();

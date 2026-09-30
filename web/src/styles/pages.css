@@ -3986,6 +3986,10 @@
     var(--glass-card-fill);
 }
 .daily-closeout-actions { align-items: center; }
+/* Doctordle reminder (I3-59): actions line up under the text, not the icon. */
+.doctordle-reminder-actions { align-items: center; margin-top: 12px; padding-left: 50px; }
+.doctordle-reminder-actions .ghost-btn { min-height: 34px; }
+@media (max-width: 560px) { .doctordle-reminder-actions { padding-left: 0; } }
 .daily-closeout-actions .ghost-btn { min-height: 36px; }
 .daily-closeout-time {
   display: grid;
