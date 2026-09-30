@@ -1,6 +1,9 @@
 # Ideas 1 + 3 manifest (with Ideas 2 overlaps)
 
-Every item from JD's three idea dumps and the mid-turn notes, with its current status in code, who owns it, and the wave it ships in (see PLAN.md). Verbatim sources: IDEAS-1.md, IDEAS-2.md (Codex's brief), IDEAS-3.md, IDEAS-4.md.
+> **Superseded for day-to-day use (2026-09-30):** the ideas bank, statuses, progress and future additions now live in [`docs/directions/`](../../directions/README.md). JD's verbatim notes moved to `docs/directions/01-ideas/`. This file stays as history.
+
+
+Every item from JD's three idea dumps and the mid-turn notes, with its current status in code, who owns it, and the wave it ships in (see PLAN.md). Verbatim sources: IDEAS-1.md, IDEAS-2-BRIEF.md (Codex's brief), IDEAS-3.md, IDEAS-4.md.
 
 Baseline: branch `feat/ideas3-staging` = `main` (c04272d) + soundscape commit 09d65a1. Codex's Ideas 2 work is uncommitted in `/Users/jd/Developer/AXOM-ideas2` (`feat/ideas2-integration`).
 

@@ -1,5 +1,8 @@
 # Ideas 1 + 3 staging plan
 
+> **Superseded for day-to-day use (2026-09-30):** the ideas bank, statuses, progress and future additions now live in [`docs/directions/`](../../directions/README.md). JD's verbatim notes moved to `docs/directions/01-ideas/`. This file stays as history.
+
+
 Written for JD and Codex. Item IDs refer to MANIFEST.md. Codex owns Ideas 2 (IDEAS-2.md); this plan builds around it, not over it.
 
 ## Principles

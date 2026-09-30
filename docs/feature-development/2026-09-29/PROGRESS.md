@@ -1,5 +1,8 @@
 # Progress (feat/ideas3-staging)
 
+> **Superseded for day-to-day use (2026-09-30):** the ideas bank, statuses, progress and future additions now live in [`docs/directions/`](../../directions/README.md). JD's verbatim notes moved to `docs/directions/01-ideas/`. This file stays as history.
+
+
 Updated 2026-09-30 13:10. Every commit passed `npm run quality` (typecheck, lint, full vitest, build) and was checked in a real browser (headless Chrome, dark theme, screenshots read back).
 
 | Commit | Items | What changed |
