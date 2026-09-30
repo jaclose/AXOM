@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, openMedicalSchools, test } from "./fixtures";
+import { completeSetup, expect, openMedicalSchools, test } from "./fixtures";
 
 test("Application Checker consumes sourced records and remains usable on mobile", async ({ page }) => {
   const errors: string[] = [];
@@ -85,11 +85,7 @@ test("Application Checker renders a 271-row partial dataset and filters by progr
 });
 
 async function onboard(page: Page) {
-  const name = page.getByLabel("Display name (optional)");
-  if (!(await name.isVisible().catch(() => false))) return;
-  await name.fill("Beta Finishing Test");
-  for (let step = 0; step < 3; step += 1) await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByRole("button", { name: "Finish setup", exact: true }).click();
+  if (!(await completeSetup(page, "Beta Finishing Test", { ifVisible: true }))) return;
   const later = page.getByRole("button", { name: "Review later" });
   if (await later.count()) await later.click();
 }

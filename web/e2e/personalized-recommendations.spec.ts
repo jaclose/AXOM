@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, reloadAfterSave, test } from "./fixtures";
+import { completeSetup, expect, reloadAfterSave, test } from "./fixtures";
 
 /** Dev-only live-store handle installed by src/main.tsx (see comment there). */
 type DevWindow = Window & {
@@ -158,11 +158,7 @@ test("tracker progress follows edited targets, preserves history, and remains us
 
 async function prepareWorkspace(page: Page) {
   await page.goto("/#dashboard", { waitUntil: "networkidle" });
-  const name = page.getByLabel("Display name (optional)");
-  if (await name.isVisible()) {
-    await name.fill("Study workflow test");
-    for (let step = 0; step < 3; step++) await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.getByRole("button", { name: "Finish setup", exact: true }).click();
+  if (await completeSetup(page, "Study workflow test", { ifVisible: true })) {
     const later = page.getByRole("button", { name: "Review later", exact: true });
     if (await later.count()) await later.click();
   }

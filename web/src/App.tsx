@@ -8,7 +8,7 @@ import { CoachLayer } from "./components/shell/CoachLayer";
 import { DoctordleCheckIn } from "./components/games/DoctordleCheckIn";
 import { clearTourProgress } from "./lib/onboardingProgress";
 import { SettingsModal, type SettingsTab } from "./components/shell/SettingsModal";
-import { OnboardingWizard } from "./components/shell/OnboardingWizard";
+import { SetupFlow } from "./components/setup/SetupFlow";
 import { GuidedTour, type TourExitReason } from "./components/shell/GuidedTour";
 import { PromisePrompt } from "./components/shell/PromisePrompt";
 import { PromiseCutscene } from "./components/shell/PromiseCutscene";
@@ -33,7 +33,8 @@ import { useUi } from "./lib/uiStore";
 import { pushToast } from "./lib/toast";
 import { markAppReady, usePageEntrance } from "./lib/presentation";
 import type { StorageMigrationResult } from "./lib/storageMigrations";
-import { readOnboardingDraftMode, type OnboardingDestination, type OnboardingMode } from "./lib/onboardingProgress";
+import type { OnboardingDestination, OnboardingMode } from "./lib/onboardingProgress";
+import { readSetupDraftMode } from "./lib/setupPlan";
 import { promisePromptStatus, shouldOfferPromiseAfterGlobalTour, shouldOfferPromisePrompt } from "./lib/promisePrompt";
 
 import { DashboardPage } from "./pages/DashboardPage";
@@ -132,7 +133,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
   });
   const [promiseCutsceneOpen, setPromiseCutsceneOpen] = useState(false);
   const [setupMode, setSetupMode] = useState<OnboardingMode | null>(() =>
-    readOnboardingDraftMode() === "rerun" ? "rerun" : null,
+    readSetupDraftMode() === "rerun" ? "rerun" : null,
   );
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const restoreMenuFocusRef = useRef(false);
@@ -309,7 +310,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
         {onboarded && <MenuBarTimerBridge />}
         <DailyRolloverWatcher />
         <UpdateAvailableWatcher />
-        <OnboardingWizard
+        <SetupFlow
           mode={setupMode ?? "first-run"}
           onComplete={completeOnboarding}
           onCancel={() => setSetupMode(null)}

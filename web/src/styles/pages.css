@@ -1262,6 +1262,11 @@
 }
 .mastery-shard:hover::before,
 .mastery-shard:hover::after { transform: scale(1.03); }
+/* No flashcard app: passes fill the whole shard. */
+.mastery-shard.no-cards { width: 40px; flex-basis: 40px; }
+.mastery-shard.no-cards::before { clip-path: none; }
+.mastery-shard.no-cards::after { display: none; }
+.mastery-shard.no-cards .shard-pass { width: 100%; }
 .pass-blocks {
   display: inline-flex;
   align-items: center;

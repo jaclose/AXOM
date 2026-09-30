@@ -295,3 +295,39 @@ describe("Course Tracker primary focus", () => {
     expect(screen.getByRole("button", { name: "Primary focus" }).getAttribute("aria-pressed")).toBe("true");
   });
 });
+
+describe("Course Tracker first use (Wave 2)", () => {
+  const treeNames = (depth: number) => [...document.querySelectorAll(`.tree-node.depth${depth} > span:not(.tree-count)`)].map((node) => node.textContent).filter(Boolean);
+  const workflow = (methods: Array<[string, boolean]>) => ({ configured: true, methods: methods.map(([id, enabled]) => ({ id, enabled })) }) as never;
+
+  it("starts clean with the three ways in, and a template loads in teaching order", () => {
+    useStore.setState({ tracker: [], terms: [], courses: [] });
+    render(<CourseTrackerPage />);
+    expect(screen.getByRole("heading", { name: "Build it the way your school runs." })).toBeTruthy();
+    expect(screen.queryByText("No items here")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Load St\. George's University MD/ }));
+    expect(treeNames(0)).toEqual(["Term 1", "Term 2", "Term 3", "Term 4", "Term 5", "Boards"]);
+    fireEvent.click(screen.getByText("Term 1"));
+    fireEvent.click(screen.getByText("BPM 500"));
+    expect(treeNames(2)).toEqual(["FTM 1", "FTM 2", "MSK", "CPR 1", "CPR 2", "BSCE 1"]);
+    expect(screen.getByRole("heading", { name: "Add the lectures, and progress fills itself in." })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Paste a lecture list/ }));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+
+  it("shows card rounds under the student's own app, and none without one", () => {
+    const item: TrackerItem = { id: "l1", path: "Term 1/BPM 500/MSK", label: "Bone", kind: "Lecture", passes: 1, ankiPasses: 1, yield: "none", updated: "2026-09-01T12:00:00.000Z" };
+    useStore.setState((state) => ({ tracker: [item], profile: { ...state.profile, studyWorkflow: workflow([["noji", true], ["anki", false]]) } }));
+    const { unmount } = render(<CourseTrackerPage />);
+    expect(screen.getByTitle("Noji rounds (orange → yellow → purple)")).toBeTruthy();
+    expect(screen.queryByTitle(/^Anki rounds/)).toBeNull();
+    unmount();
+
+    useStore.setState((state) => ({ profile: { ...state.profile, studyWorkflow: workflow([["lecture-passes", true]]) } }));
+    render(<CourseTrackerPage />);
+    expect(screen.queryByTitle(/rounds \(orange/)).toBeNull();
+    expect(document.querySelector(".mastery-shard.no-cards")).toBeTruthy();
+  });
+});

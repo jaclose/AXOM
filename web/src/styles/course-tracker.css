@@ -1,0 +1,113 @@
+/* Course Tracker first use (components/tracker/TrackerFirstRun.tsx). */
+.tracker-first-run {
+  --tfr-ease: cubic-bezier(.22, 1, .36, 1);
+  display: grid;
+  gap: 20px;
+  padding: 6px 2px 2px;
+}
+.tfr-copy { display: grid; gap: 8px; max-width: 60ch; }
+.tfr-eyebrow {
+  justify-self: start;
+  padding: 4px 11px;
+  border: 1px solid rgba(var(--accent-rgb), .3);
+  border-radius: var(--radius-pill);
+  background: rgba(var(--accent-rgb), .06);
+  color: rgb(var(--accent-rgb));
+  font-size: var(--fs-tiny);
+  font-weight: var(--fw-semibold);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+}
+.tfr-copy h3 {
+  margin: 4px 0 0;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: clamp(1.3rem, 1.05rem + .9vw, 1.75rem);
+  letter-spacing: -.02em;
+  line-height: 1.15;
+  text-wrap: balance;
+}
+.tfr-copy p { margin: 0; color: var(--text-60); font-size: var(--fs-sm); line-height: 1.6; }
+
+.tfr-sample {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px dashed rgba(230, 226, 214, .16);
+  border-radius: 16px;
+  background: rgba(230, 226, 214, .02);
+}
+.tfr-sample .mastery-shard { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .18); }
+.tfr-sample-label { display: grid; flex: 1; gap: 2px; min-width: 0; }
+.tfr-sample-label b { color: var(--text); font-size: var(--fs-sm); }
+.tfr-sample-label small { color: var(--text-50, var(--text-60)); font-size: var(--fs-xs); }
+.tfr-sample-passes { display: inline-flex; gap: 5px; }
+.tfr-sample-passes i {
+  width: 20px;
+  height: 20px;
+  border: 1px solid rgba(230, 226, 214, .12);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, .05);
+}
+.tfr-sample-passes i.on { border-color: transparent; background: var(--pass-color); }
+
+.tfr-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.tfr-action {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  padding: 16px;
+  border: 1px solid var(--hairline);
+  border-radius: 18px;
+  background: rgba(230, 226, 214, .03);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: transform .45s var(--tfr-ease), border-color .3s var(--tfr-ease), background .3s var(--tfr-ease);
+}
+.tfr-action:hover { transform: translateY(-2px); border-color: rgba(var(--accent-rgb), .38); }
+.tfr-action:active { transform: translateY(0) scale(.99); }
+.tfr-action:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: 2px; }
+.tfr-action.primary { border-color: rgba(var(--accent-rgb), .34); background: rgba(var(--accent-rgb), .08); }
+.tfr-action-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 6px;
+  border-radius: 50%;
+  background: rgba(var(--accent-rgb), .1);
+  color: rgb(var(--accent-rgb));
+}
+.tfr-action b { font-size: var(--fs-sm); }
+.tfr-action small { color: var(--text-50, var(--text-60)); font-size: var(--fs-xs); line-height: 1.4; }
+
+.tfr-template { margin: 0; color: var(--text-50, var(--text-60)); font-size: var(--fs-xs); }
+.tfr-template button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: rgb(var(--accent-rgb));
+  font: inherit;
+  font-weight: var(--fw-semibold);
+  text-decoration: underline;
+  text-decoration-color: rgba(var(--accent-rgb), .35);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.tfr-template button + button { margin-left: 10px; }
+
+.tracker-tree-empty { margin: 0; padding: 26px 10px; color: var(--text-50, var(--text-60)); font-size: var(--fs-sm); text-align: center; }
+
+:root[data-theme="light"] .tfr-sample { border-color: rgba(40, 32, 20, .16); background: rgba(40, 32, 20, .02); }
+:root[data-theme="light"] .tfr-sample-passes i:not(.on) { border-color: rgba(40, 32, 20, .12); background: rgba(40, 32, 20, .04); }
+:root[data-theme="light"] .tfr-action { background: rgba(255, 255, 255, .55); }
+:root[data-theme="light"] .tfr-action.primary { background: rgba(var(--accent-rgb), .08); }
+:root[data-theme="light"] :is(.tfr-eyebrow, .tfr-action-icon, .tfr-template button) { color: rgb(var(--accent-ink-rgb, var(--accent-rgb))); }
+
+@media (prefers-reduced-motion: reduce) {
+  .tfr-action, .tfr-action:hover, .tfr-action:active { transform: none; transition: none; }
+}
+:root[data-motion="reduce"] :is(.tfr-action, .tfr-action:hover, .tfr-action:active) { transform: none; transition: none; }

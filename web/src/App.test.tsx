@@ -113,11 +113,10 @@ describe("post-global-guide promise flow", () => {
     useStore.setState(seed);
 
     render(<App />);
-    for (let step = 0; step < 3; step += 1) {
+    for (let step = 0; step < 2; step += 1) {
       fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     }
-    expect((screen.getByRole("checkbox", { name: /Show the optional eight-stop guide after setup/ }) as HTMLInputElement).checked).toBe(false);
-    fireEvent.click(screen.getByRole("button", { name: "Finish setup" }));
+    fireEvent.click(screen.getByRole("button", { name: "Enter AXOM" }));
 
     expect(useStore.getState().profile).toMatchObject({ onboarded: true, tourDone: true });
     expect(screen.getByRole("dialog", { name: "A promise to yourself" })).toBeTruthy();
@@ -132,7 +131,7 @@ describe("post-global-guide promise flow", () => {
     useStore.setState(seed);
 
     render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Skip setup" }));
+    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
 
     expect(useStore.getState().profile).toMatchObject({ onboarded: true, tourDone: true });
     expect(screen.getByRole("dialog", { name: "A promise to yourself" })).toBeTruthy();

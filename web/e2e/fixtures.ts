@@ -71,4 +71,5 @@ export async function seedOnboarded(page: import("@playwright/test").Page, patch
 }
 
 export { deferPromisePrompt } from "../scripts/promise-prompt.mjs";
+export { completeSetup, SETUP_NAME_LABEL } from "../scripts/setup-flow.mjs";
 export { expect };

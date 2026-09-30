@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { deferPromisePrompt, expect, test } from "./fixtures";
+import { completeSetup, deferPromisePrompt, expect, test } from "./fixtures";
 
 test("account foundation preserves local-only use and manual recovery at every launch viewport", async ({ page }) => {
   const errors: string[] = [];
@@ -41,14 +41,7 @@ test("account foundation preserves local-only use and manual recovery at every l
 });
 
 async function onboard(page: Page) {
-  const name = page.getByLabel("Display name (optional)");
-  if (!(await name.isVisible().catch(() => false))) return;
-
-  await name.fill("Account Safety Test");
-  for (let step = 0; step < 3; step += 1) {
-    await page.getByRole("button", { name: "Continue" }).click();
-  }
-  await page.getByRole("button", { name: "Finish setup", exact: true }).click();
+  if (!(await completeSetup(page, "Account Safety Test", { ifVisible: true }))) return;
   // Defer the Promise and wait until the deferral is saved, or the reload below brings it back.
   await deferPromisePrompt(page);
 }

@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { deferPromisePrompt, expect, openMedicalSchools, reloadAfterSave, test } from "./fixtures";
+import { deferPromisePrompt, expect, SETUP_NAME_LABEL, openMedicalSchools, reloadAfterSave, test } from "./fixtures";
 
 /** Dev-only live-store handle installed by src/main.tsx (see comment there). */
 type DevWindow = Window & {
@@ -21,7 +21,7 @@ const viewports = [{ width: 1440, height: 900 }, { width: 768, height: 900 }, { 
 
 async function skipSetup(page: Page) {
   await page.goto("/", { waitUntil: "networkidle" });
-  const skip = page.getByRole("button", { name: "Skip setup", exact: true });
+  const skip = page.getByRole("button", { name: "Skip for now", exact: true });
   if (await skip.isVisible()) {
     await skip.click();
     await deferPromisePrompt(page);
@@ -83,38 +83,41 @@ test("real school research supports search, saved schools, review checks and rel
   expect(errors).toEqual([]);
 });
 
-test("onboarding retains method follow-ups across refresh and makes them editable later", async ({ page }, testInfo) => {
+test("setup keeps its choices across refresh and they stay editable in Settings", async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/", { waitUntil: "networkidle" });
+  await page.getByLabel(SETUP_NAME_LABEL, { exact: true }).fill("Noji Learner");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByText("How do you usually study? (optional)", { exact: true }).click();
-  await page.getByLabel("Noji", { exact: true }).check();
-  await page.getByLabel("Quizlet", { exact: true }).check();
-  await page.getByText("How do you use Noji?", { exact: true }).click();
-  await page.getByLabel("When do you use Noji?").selectOption("ongoing");
-  const original = "  I make my own cards.\n".repeat(30);
-  await page.getByLabel("Your Noji approach (optional)").fill(original);
-  await page.getByLabel("Other: tell AXOM how you study").fill(original);
+  const tool = (name: string) => page.getByRole("button", { name: new RegExp(`^${name}`) });
+  await tool("Anki").click();
+  await tool("Noji").click();
+  await tool("Quizlet").click();
+  await tool("Something else").click();
+  await page.getByLabel("What else do you use?").fill("Sketchy");
+  await expect(page.locator(".setup-summary.at-end")).toContainText("Noji rounds");
   await noOverflow(page);
-  await page.screenshot({ path: testInfo.outputPath("onboarding-390.png"), animations: "disabled" });
+  await page.screenshot({ path: testInfo.outputPath("setup-390.png"), animations: "disabled" });
+  // A refresh mid-setup comes back to the same screen with the same choices.
   await page.reload({ waitUntil: "networkidle" });
-  await page.getByText("How do you usually study? (optional)", { exact: true }).click();
-  await expect(page.getByLabel("Noji", { exact: true })).toBeChecked();
-  await page.getByText("How do you use Noji?", { exact: true }).click();
-  await expect(page.getByLabel("When do you use Noji?")).toHaveValue("ongoing");
-  await expect(page.getByLabel("Your Noji approach (optional)")).toHaveValue(original);
+  await expect(page.getByRole("heading", { name: "What do you use?" })).toBeVisible();
+  await expect(tool("Noji")).toHaveAttribute("aria-pressed", "true");
+  await expect(tool("Anki")).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByLabel("What else do you use?")).toHaveValue("Sketchy");
+  await page.getByRole("button", { name: "Back" }).click();
+  await expect(page.getByLabel(SETUP_NAME_LABEL, { exact: true })).toHaveValue("Noji Learner");
   for (let step = 0; step < 2; step++) await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByRole("button", { name: "Finish setup", exact: true }).click();
+  await page.getByRole("button", { name: "Enter AXOM", exact: true }).click();
   await deferPromisePrompt(page);
   await page.reload({ waitUntil: "networkidle" });
   await page.getByRole("button", { name: "Open navigation menu" }).click();
   await page.getByTitle("Settings", { exact: true }).click();
   await page.getByRole("tab", { name: "Personalization", exact: true }).click();
   await expect(page.getByRole("button", { name: "Quizlet", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Noji", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Anki", exact: true })).toHaveAttribute("aria-pressed", "false");
   await page.getByText("How do you use Noji?", { exact: true }).click();
-  await expect(page.getByLabel("Your Noji approach (optional)")).toHaveValue(original);
   await page.getByLabel("Your Noji approach (optional)").fill("My edited approach");
   await noOverflow(page);
   await page.getByRole("button", { name: "Done", exact: true }).click();

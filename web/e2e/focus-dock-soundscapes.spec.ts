@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, test } from "./fixtures";
+import { completeSetup, expect, test } from "./fixtures";
 
 /** First visits open the "What are you into?" opener; tests that aren't about it skip it. */
 async function skipSoundscapeOpener(page: Page) {
@@ -20,11 +20,7 @@ type DevWindow = Window & {
 
 async function openWorkspace(page: Page) {
   await page.goto("/#dashboard", { waitUntil: "networkidle" });
-  const name = page.getByLabel("Display name (optional)");
-  if (await name.isVisible()) {
-    await name.fill("Dock test");
-    for (let step = 0; step < 3; step++) await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.getByRole("button", { name: "Finish setup", exact: true }).click();
+  if (await completeSetup(page, "Dock test", { ifVisible: true })) {
     const later = page.getByRole("button", { name: "Review later", exact: true });
     if (await later.count()) await later.click();
   }

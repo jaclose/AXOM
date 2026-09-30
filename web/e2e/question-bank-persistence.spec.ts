@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, test } from "./fixtures";
+import { completeSetup, expect, test } from "./fixtures";
 import { STORAGE_KEYS } from "../src/lib/brand";
 
 const PPD_FIXTURE = [
@@ -243,11 +243,7 @@ async function selectTutorText(page: Page, phrase: string): Promise<void> {
 }
 
 async function completeOnboarding(page: Page): Promise<void> {
-  await page.getByLabel("Display name (optional)").fill("AXOM E2E");
-  await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByRole("button", { name: "Finish setup", exact: true }).click();
+  await completeSetup(page, "AXOM E2E");
   const reviewLater = page.getByRole("button", { name: "Review later" });
   if (await reviewLater.count()) await reviewLater.click();
 }

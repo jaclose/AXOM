@@ -30,6 +30,8 @@ import type { BlueprintNodeStatus, Course, InstalledBlueprint, InstalledBlueprin
 import { extractDocxText, extractPdfText, extractPlainText, type ExtractedText } from "../lib/extractText";
 import { pushToast } from "../lib/toast";
 import { ModuleTour, type ModuleTourStep } from "../components/shell/ModuleTour";
+import { cardSystemFor, type CardSystem } from "../lib/cardSystem";
+import { TrackerFirstRun } from "../components/tracker/TrackerFirstRun";
 import { ICON_SIZE } from "../lib/iconSize";
 import { parseCourseSchedule, reconcileScheduleDuplicates, scheduleCandidatesToTracker, type ScheduleCandidate } from "../lib/courseScheduleImport";
 import { activePrimaryPaths, activePrimaryScopes, isPrimaryPath, itemsInPrimary, setPrimaryUntil, togglePrimaryScope, type PrimaryTrackerScope } from "../lib/trackerFocus";
@@ -91,6 +93,7 @@ const yieldTone: Record<Yield, "cyan" | "green" | "orange" | "neutral"> = {
 
 export function CourseTrackerPage() {
   const s = useStore();
+  const cardSystem = cardSystemFor(s.profile.studyWorkflow);
   // Open on the remembered view, else the first primary focus.
   const [scope, setScopeState] = useState<string>(() => {
     const saved = readSavedTrackerScope();
@@ -235,7 +238,7 @@ export function CourseTrackerPage() {
                   openNodes={openNodes} onToggle={toggle} active={scope} onSelect={setScope}
                   primaryPaths={primaryPaths} onTogglePrimary={togglePrimary} />
               ))}
-              {tree.length === 0 && <EmptyState title="Empty tree" hint="Import or add a module to begin." />}
+              {tree.length === 0 && <p className="tracker-tree-empty">Your terms, courses and modules will appear here.</p>}
               <BlueprintTree installs={s.blueprintInstalls} openNodes={openNodes} onToggle={toggle} active={scope} onSelect={setScope} />
             </div>
             <div className="tracker-immediate-actions" data-module-tour="tracker-import-add">
@@ -318,39 +321,44 @@ export function CourseTrackerPage() {
           </GlassCard>
 
           <GlassCard pad data-tour="tracker-help" data-module-tour="tracker-passes">
-          <PanelHeader title="Items" sub="Log passes toward your saved plan · Anki rounds are tracked separately"
+          <PanelHeader title="Items" sub={`Log passes toward your saved plan${cardSystem ? ` · ${cardSystem.label} rounds are tracked separately` : ""}`}
             action={
               <div className="row gap6">
                 {scope && <GhostButton title="Rename selected tracker group" onClick={renameCurrentScope}><Pencil size={ICON_SIZE.body} /></GhostButton>}
                 {scope && <GhostButton className="danger" title="Delete selected tracker group" onClick={deleteCurrentScope}><Trash2 size={ICON_SIZE.body} /></GhostButton>}
               </div>
             } />
-          <details className="tracker-pass-help" data-module-tour="tracker-weak-items"><summary>How passes work</summary><TrackerGuide /></details>
+          <details className="tracker-pass-help" data-module-tour="tracker-weak-items"><summary>How passes work</summary><TrackerGuide cards={cardSystem} /></details>
           {inBlueprintScope && activeBlueprintInstall ? (
             <BlueprintTrackerItems install={activeBlueprintInstall} nodes={activeBlueprintNodes} category={blueprintScope?.category} />
           ) : (
             <>
-              <div className="filter-bar" style={{ marginBottom: 12 }}>
-                {TABS.map((t) => (
-                  <button key={t} className={`filter-pill ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>{t}</button>
-                ))}
-              </div>
-              <TrackerScopeBar
-                scope={scope}
-                scopeOptions={scopeOptions}
-                onScope={(next) => {
-                  setScope(next);
-                  setOpenNodes((prev) => {
-                    const expanded = new Set(prev);
-                    let acc = "";
-                    for (const part of next.split("/").filter(Boolean)) { acc = acc ? `${acc}/${part}` : part; expanded.add(acc); }
-                    return expanded;
-                  });
-                }}
-                groupBySection={groupBySection}
-                onGroupBySection={setGroupBySection}
-              />
-              {items.length === 0 && <EmptyState title="No items here" hint="Pick another scope, switch tabs, or import." />}
+              {s.tracker.length > 0 && <>
+                <div className="filter-bar" style={{ marginBottom: 12 }}>
+                  {TABS.map((t) => (
+                    <button key={t} className={`filter-pill ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>{t}</button>
+                  ))}
+                </div>
+                <TrackerScopeBar
+                  scope={scope}
+                  scopeOptions={scopeOptions}
+                  onScope={(next) => {
+                    setScope(next);
+                    setOpenNodes((prev) => {
+                      const expanded = new Set(prev);
+                      let acc = "";
+                      for (const part of next.split("/").filter(Boolean)) { acc = acc ? `${acc}/${part}` : part; expanded.add(acc); }
+                      return expanded;
+                    });
+                  }}
+                  groupBySection={groupBySection}
+                  onGroupBySection={setGroupBySection}
+                />
+              </>}
+              {items.length === 0 && (s.tracker.length === 0
+                ? <TrackerFirstRun hasCourses={s.courses.length > 0} cards={cardSystem}
+                    onAction={(action) => action === "list" ? setBulkOpen(true) : action === "course" ? setModuleOpen(true) : setScheduleOpen(true)} />
+                : <EmptyState title="No items here" hint="Pick another scope, switch tabs, or import." />)}
               {groupBySection
                 ? <GroupedTrackerItems scope={scope} items={items} highlightId={highlightId} onFocusSection={setScope} primaryPaths={primaryPaths} onTogglePrimary={togglePrimary} />
                 : items.map((it) => <ItemRow key={it.id} item={it} highlight={it.id === highlightId} />)}
@@ -508,6 +516,7 @@ function ItemRow({ item, highlight }: { item: TrackerItem; highlight?: boolean }
   const questionStyle = isQuestionKind(item.kind);
   const completionStyle = isCompletionKind(item.kind);
   const { plan, target, complete } = trackerStudyProgress(item, { preferences: s.profile.studyWorkflow, courses: s.courses });
+  const cards = cardSystemFor(s.profile.studyWorkflow);
   const unit = questionStyle ? "practice round" : "pass";
   const pluralUnit = questionStyle ? "practice rounds" : "passes";
   const progressLabel = completionStyle ? (complete ? "Plan complete" : "Not started")
@@ -516,7 +525,7 @@ function ItemRow({ item, highlight }: { item: TrackerItem; highlight?: boolean }
   const planLabels = completionStyle ? [] : plan.methods.filter((method) => method.enabled && (!questionStyle || method.id !== "lecture-passes")).slice(0, 3).map((method) => method.id === "lecture-passes" ? `Pass ×${target}` : method.id === "practice-questions" ? "Questions" : method.id === "teach-aloud" ? "Teach" : method.label ?? method.id);
   return (
     <div className={`dense-row tracker-item-row ${questionStyle ? "pq-row" : ""} ${completionStyle ? "milestone-row" : ""} ${highlight ? "row-highlight" : ""}`} data-item-id={item.id}>
-      {!questionStyle && !completionStyle && <MasteryShard item={item} progressLabel={progressLabel} />}
+      {!questionStyle && !completionStyle && <MasteryShard item={item} progressLabel={progressLabel} cards={cards} />}
       <div className="grow">
         <div className="dr-label">{item.label}</div>
         <div className="dr-type">{item.path}</div>
@@ -532,7 +541,7 @@ function ItemRow({ item, highlight }: { item: TrackerItem; highlight?: boolean }
 
       {completionStyle ? <CompletionBlock item={item} /> : questionStyle ? <PQCompleteBlocks item={item} /> : <>
         <PassBlocks item={item} target={target} />
-        <AnkiBlocks item={item} />
+        {cards && <CardRounds item={item} cards={cards} />}
       </>}
 
       <GhostButton title="Edit item" aria-label={`Edit ${item.label}`} onClick={() => setEditor("details")}>
@@ -685,7 +694,8 @@ function CompletionBlock({ item }: { item: TrackerItem }) {
   );
 }
 
-function MasteryShard({ item, progressLabel }: { item: TrackerItem; progressLabel: string }) {
+/** Lecture passes on the left; the right half shows card rounds in the student's own app, and is absent when they use none. */
+function MasteryShard({ item, progressLabel, cards }: { item: TrackerItem; progressLabel: string; cards: CardSystem | null }) {
   const stage = passStage(item.passes);
   const ankiTone = item.ankiPasses > 0 ? ankiColor(item.ankiPasses) : "rgba(255,255,255,0.12)";
   const style = {
@@ -694,10 +704,10 @@ function MasteryShard({ item, progressLabel }: { item: TrackerItem; progressLabe
   } as CSSProperties;
 
   return (
-    <div className={`mastery-shard ${item.ankiPasses > 0 ? "" : "anki-off"}`} style={style}
-      title={`${progressLabel} · ${item.ankiPasses ? `Anki ${item.ankiPasses}/3` : "No Anki rounds yet"}`}>
+    <div className={`mastery-shard ${!cards ? "no-cards" : item.ankiPasses > 0 ? "" : "anki-off"}`} style={style}
+      title={!cards ? progressLabel : `${progressLabel} · ${item.ankiPasses ? `${cards.label} ${item.ankiPasses}/3` : `No ${cards.label} rounds yet`}`}>
       <span className="shard-pass"><Eye size={ICON_SIZE.body} /></span>
-      <span className="shard-anki">A</span>
+      {cards && <span className="shard-anki">{cards.label.charAt(0)}</span>}
     </div>
   );
 }
@@ -728,11 +738,12 @@ function PassBlocks({ item, target }: { item: TrackerItem; target: number }) {
   );
 }
 
-function AnkiBlocks({ item }: { item: TrackerItem }) {
+/** Card rounds (stored as `ankiPasses`, whatever the app), labelled with the student's own card app. */
+function CardRounds({ item, cards }: { item: TrackerItem; cards: CardSystem }) {
   const s = useStore();
   return (
-    <button className="anki-ctl" title="Anki rounds (orange → yellow → purple)" onClick={() => s.cycleAnki(item.id)}>
-      <span className="anki-label">Anki</span>
+    <button className="anki-ctl" title={`${cards.label} rounds (orange → yellow → purple)`} onClick={() => s.cycleAnki(item.id)}>
+      <span className="anki-label">{cards.label}</span>
       <span className="anki-blocks">
         {[1, 2, 3].map((j) => (
           <span key={j} className="anki-block"
@@ -743,11 +754,11 @@ function AnkiBlocks({ item }: { item: TrackerItem }) {
   );
 }
 
-function TrackerGuide() {
+function TrackerGuide({ cards }: { cards: CardSystem | null }) {
   return (
     <div className="tracker-guide">
       <p>Each focused review is one pass. Progress uses your learner defaults, course plan, item-kind defaults, and any item override. Edit an item's study plan to change its target; recorded passes are kept. Click the same level again to step back.</p>
-      <p>Plan complete means the recorded work meets your current target, not that mastery has been assessed. Anki rounds are tracked separately. Practice-question rows use three rounds; requirements and milestones use done/not done. Yield labels help prioritize work without changing its target.</p>
+      <p>Plan complete means the recorded work meets your current target, not that mastery has been assessed.{cards ? ` ${cards.label} rounds are tracked separately.` : ""} Practice-question rows use three rounds; requirements and milestones use done/not done. Yield labels help prioritize work without changing its target.</p>
     </div>
   );
 }
@@ -1035,11 +1046,18 @@ function moveBlueprintNode(
   update(install.id, target.id, { order: node.order });
 }
 
-interface TNode { path: string; name: string; children: TNode[]; count: number; }
+interface TNode {
+  path: string;
+  name: string;
+  children: TNode[];
+  count: number;
+  /** Position in the student's own term/course/module structure; unset for paths that exist only on items. */
+  order?: number;
+}
 
-function buildTree(items: TrackerItem[], extraScopes: string[] = []): TNode[] {
+function buildTree(items: TrackerItem[], structure: string[] = []): TNode[] {
   const root: TNode = { path: "", name: "", children: [], count: 0 };
-  for (const scope of extraScopes) addScope(root, scope, 0);
+  structure.forEach((scope, index) => addScope(root, scope, 0, index));
   for (const it of items) {
     addScope(root, it.path, 1);
   }
@@ -1047,7 +1065,7 @@ function buildTree(items: TrackerItem[], extraScopes: string[] = []): TNode[] {
   return root.children;
 }
 
-function addScope(root: TNode, path: string, countDelta: number) {
+function addScope(root: TNode, path: string, countDelta: number, order?: number) {
   const parts = path.split("/").filter(Boolean);
   let cur = root;
   let acc = "";
@@ -1055,13 +1073,20 @@ function addScope(root: TNode, path: string, countDelta: number) {
     acc = acc ? `${acc}/${p}` : p;
     let child = cur.children.find((c) => c.path === acc);
     if (!child) { child = { path: acc, name: p, children: [], count: 0 }; cur.children.push(child); }
+    if (order !== undefined && child.order === undefined) child.order = order;
     child.count += countDelta;
     cur = child;
   }
 }
 
+/** Structure keeps the order the school teaches it (FTM 1 before MSK, Boards after Term 5); loose paths follow, by name and week. */
 function sortTree(nodes: TNode[]) {
-  nodes.sort((a, b) => compareTrackerPathSegment(a.name, b.name));
+  nodes.sort((a, b) => {
+    if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
+    if (a.order !== undefined) return -1;
+    if (b.order !== undefined) return 1;
+    return compareTrackerPathSegment(a.name, b.name);
+  });
   nodes.forEach((n) => sortTree(n.children));
 }
 
@@ -1075,10 +1100,13 @@ function collectScopes(items: TrackerItem[]): string[] {
   return [...set].sort();
 }
 
+/** Every term/course/module path, in the order the student's structure lists them. */
 function collectCourseScopes(terms: Term[], courses: Course[]): string[] {
+  const termOrder = new Map(terms.map((t, index) => [t.id, index]));
   const termName = new Map(terms.map((t) => [t.id, t.name]));
+  const ordered = [...courses].sort((a, b) => (termOrder.get(a.termId) ?? terms.length) - (termOrder.get(b.termId) ?? terms.length));
   const scopes: string[] = [];
-  for (const c of courses) {
+  for (const c of ordered) {
     const term = termName.get(c.termId) ?? "Term";
     const courseBase = `${term}/${c.code}`;
     scopes.push(courseBase);
@@ -1088,8 +1116,10 @@ function collectCourseScopes(terms: Term[], courses: Course[]): string[] {
 }
 
 
-function mergeScopes(a: string[], b: string[]) {
-  return [...new Set([...a, ...b])].sort((x, y) => x.localeCompare(y));
+/** Structure paths first, in teaching order, then paths that exist only on items. */
+function mergeScopes(itemScopes: string[], structure: string[]) {
+  const inStructure = new Set(structure);
+  return [...new Set([...structure, ...itemScopes.filter((scope) => !inStructure.has(scope)).sort((x, y) => x.localeCompare(y))])];
 }
 
 const TRACKER_SCOPE_KEY = "axom.tracker.scope.v1";

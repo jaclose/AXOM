@@ -1,5 +1,5 @@
 import type { Browser, Page } from "@playwright/test";
-import { expect, test } from "./fixtures";
+import { completeSetup, expect, test } from "./fixtures";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 /**
@@ -60,11 +60,7 @@ async function mintCode(type: "signup" | "magiclink"): Promise<string> {
 
 async function openWorkspace(page: Page, taskTitle: string) {
   await page.goto("/#dashboard", { waitUntil: "networkidle" });
-  const name = page.getByLabel("Display name (optional)");
-  if (await name.isVisible()) {
-    await name.fill("Live account test");
-    for (let step = 0; step < 3; step++) await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.getByRole("button", { name: "Finish setup", exact: true }).click();
+  if (await completeSetup(page, "Live account test", { ifVisible: true })) {
     const later = page.getByRole("button", { name: "Review later", exact: true });
     if (await later.count()) await later.click();
   }

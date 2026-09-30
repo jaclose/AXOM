@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, test } from "./fixtures";
+import { completeSetup, expect, test } from "./fixtures";
 
 test("Dashboard widgets stay configurable, keyboard-reorderable, and responsive", async ({ page }) => {
   await page.goto("/#dashboard", { waitUntil: "networkidle" });
@@ -116,14 +116,7 @@ async function editorWidgetLabels(zone: ReturnType<Page["locator"]>): Promise<st
 }
 
 async function completeOnboarding(page: Page): Promise<void> {
-  const identityInput = page.getByLabel("Display name (optional)");
-  if (await identityInput.count()) {
-    await identityInput.fill("AXOM Widget E2E");
-    await page.getByRole("button", { name: "Continue" }).click();
-    await page.getByRole("button", { name: "Continue" }).click();
-    await page.getByRole("button", { name: "Continue" }).click();
-    await page.getByRole("button", { name: "Finish setup", exact: true }).click();
-  }
+  await completeSetup(page, "AXOM Widget E2E", { ifVisible: true });
   const reviewLater = page.getByRole("button", { name: "Review later" });
   if (await reviewLater.count()) await reviewLater.click();
 }
