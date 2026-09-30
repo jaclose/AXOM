@@ -50,8 +50,9 @@ if (import.meta.env.DEV) {
     import("./lib/pomodoro"),
     import("./lib/soundscapes/store"),
     import("./lib/localVault"),
-  ]).then(([{ useStore }, { usePomodoro }, { useSoundscape, soundscapeAnalyser }, { flushLocalVaultWrites }]) => ({
-    useStore, usePomodoro, useSoundscape, soundscapeAnalyser,
+    import("./lib/account/accountStore"),
+  ]).then(([{ useStore }, { usePomodoro }, { useSoundscape, soundscapeAnalyser }, { flushLocalVaultWrites }, { useAccount }]) => ({
+    useStore, usePomodoro, useSoundscape, soundscapeAnalyser, useAccount,
     /** Resolves once every save requested so far is on disk (tests reload after this). */
     flushVault: flushLocalVaultWrites,
   }));

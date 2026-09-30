@@ -4,6 +4,7 @@ import { TopBar } from "./components/shell/TopBar";
 import { RouteErrorBoundary } from "./components/shell/RouteErrorBoundary";
 import { TabPresence } from "./components/shell/TabPresence";
 import { GuideOffer } from "./components/shell/GuideOffer";
+import { SaveProgressBanner } from "./components/shell/SaveProgressBanner";
 import { CoachLayer } from "./components/shell/CoachLayer";
 import { DoctordleCheckIn } from "./components/games/DoctordleCheckIn";
 import { clearTourProgress } from "./lib/onboardingProgress";
@@ -374,6 +375,10 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
       <GuideOffer
         active={!showTour && !settings && !promisePromptOpen && !promiseCutsceneOpen}
         onStart={() => { clearTourProgress(); updateProfile({ tourDone: false }); }}
+      />
+      <SaveProgressBanner
+        suspended={Boolean(showTour || settings || promisePromptOpen || promiseCutsceneOpen || drawer)}
+        onCreateAccount={() => { setSettingsTab("account"); setSettings(true); }}
       />
       <CoachLayer route={routeKey} suspended={Boolean(showTour || settings || promisePromptOpen || promiseCutsceneOpen || drawer)} />
       <DoctordleCheckIn suspended={Boolean(showTour || settings || promisePromptOpen || promiseCutsceneOpen)} />

@@ -1,0 +1,42 @@
+/* "Save your progress" (components/shell/SaveProgressBanner.tsx): glass,
+   top-centred, slides down once; fade only under reduced motion. */
+.save-progress {
+  --sp-ease: cubic-bezier(.22, 1, .36, 1);
+  position: fixed;
+  top: max(14px, env(safe-area-inset-top));
+  left: 50%;
+  z-index: 350;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  width: min(640px, calc(100vw - 24px));
+  padding: 12px 12px 12px 14px;
+  border: 1px solid rgba(var(--accent-rgb), .28);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--bg-1, #0b0b0d) 72%, transparent);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255, 255, 255, .08);
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  transform: translateX(-50%);
+  animation: save-progress-in .9s var(--sp-ease) backwards;
+}
+@keyframes save-progress-in { from { opacity: 0; transform: translate(-50%, -140%); } }
+.save-progress-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: rgba(var(--accent-rgb), .12); color: rgb(var(--accent-rgb)); }
+.save-progress-copy { display: grid; gap: 2px; min-width: 0; }
+.save-progress-copy b { color: var(--text); font-size: var(--fs-sm); }
+.save-progress-copy span { color: var(--text-60); font-size: var(--fs-xs); line-height: 1.45; }
+.save-progress-actions { display: flex; gap: 8px; }
+.save-progress-close { display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 50%; background: transparent; color: var(--text-50, var(--text-60)); cursor: pointer; }
+.save-progress-close:hover { color: var(--text); background: rgba(230, 226, 214, .06); }
+:root[data-theme="light"] .save-progress { background: rgba(250, 247, 240, .82); box-shadow: 0 20px 50px rgba(40, 32, 20, .16), inset 0 1px 0 rgba(255, 255, 255, .9); }
+:root[data-theme="light"] .save-progress-icon { color: rgb(var(--accent-ink-rgb, var(--accent-rgb))); }
+@media (max-width: 560px) {
+  .save-progress { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .save-progress-actions { grid-column: 1 / -1; }
+  .save-progress-actions .gbtn { flex: 1; justify-content: center; min-height: 44px; }
+  .save-progress-close { grid-row: 1; grid-column: 3; }
+}
+@media (prefers-reduced-motion: reduce) { .save-progress { animation-name: save-progress-fade; } }
+:root[data-motion="reduce"] .save-progress { animation-name: save-progress-fade; }
+@keyframes save-progress-fade { from { opacity: 0; } }
