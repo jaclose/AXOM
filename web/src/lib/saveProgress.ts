@@ -3,6 +3,7 @@
 // protect it with an account. Pure rules here; SaveProgressBanner renders.
 // A UI courtesy, so the ledger lives in localStorage per device.
 import type { AccountPhase } from "./account/accountStore";
+import { isStarterTaskTitle } from "./starterContent";
 
 const KEY = "axom.saveProgress.v1";
 /** "Not now" the first time waits a week; the second time retires the banner to Settings. */
@@ -66,4 +67,19 @@ export function readSaveProgress(): SaveProgressLedger {
 
 export function writeSaveProgress(ledger: SaveProgressLedger): void {
   try { localStorage.setItem(KEY, JSON.stringify(ledger)); } catch { /* storage blocked */ }
+}
+
+/**
+ * Stricter than the banner's test: may signing in replace this workspace with
+ * the account's saved version? Only when nothing here is the student's own.
+ * Anything uncertain keeps the choice with the student.
+ */
+export function deviceHasOwnWork(input: MeaningfulDataInput & {
+  tasks?: ReadonlyArray<{ title: string }>;
+  habitEntries?: ReadonlyArray<unknown>;
+  closeouts?: ReadonlyArray<unknown>;
+}): boolean {
+  if (hasMeaningfulData(input)) return true;
+  if ((input.habitEntries?.length ?? 0) > 0 || (input.closeouts?.length ?? 0) > 0) return true;
+  return (input.tasks ?? []).some((task) => task.title.trim() && !isStarterTaskTitle(task.title));
 }

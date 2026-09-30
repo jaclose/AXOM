@@ -262,3 +262,60 @@ describe("account session consistency (Ideas 4: Profile and Account agree; sign-
     expect(useAccount.getState().error).toMatch(/still saved on this device/);
   });
 });
+
+describe("signing in brings your AXOM back (Priority 4), never over your own work", () => {
+  async function serverVersion() {
+    const { toPortableState } = await import("../backup");
+    const server = makeSeed();
+    server.tasks = [...server.tasks, { id: "laptop-task", title: "From the laptop", done: false, created: "2026-09-20T10:00:00Z" }];
+    tables.workspace_revisions = [{ id: "r5", revision: 5, schema_version: server.schemaVersion, content_hash: "b".repeat(64), snapshot_payload: toPortableState(server), reason: "automatic", created_at: "2026-09-28T18:00:00Z" }];
+  }
+  const accepting = async (name: string) => (name === "push_workspace_revision"
+    ? { data: { status: "accepted", revision: 6, revision_id: "r6", idempotent: false }, error: null }
+    : { data: null, error: null });
+
+  it("restores the account's latest version on a device with no work of its own", async () => {
+    await serverVersion();
+    rpc.mockImplementation(accepting as never);
+    expect(await useAccount.getState().signIn("learner@example.com", "password123")).toBe(true);
+    expect(useStore.getState().tasks.map((task) => task.id)).toContain("laptop-task");
+    expect(useAccount.getState()).toMatchObject({ link: "linked", restoreOffer: undefined });
+    expect(useAccount.getState().message).toMatch(/^Welcome back\. Your AXOM from/);
+    tables.workspace_revisions = [];
+  });
+
+  it("offers the choice instead when this device has work, and changes nothing until chosen", async () => {
+    await serverVersion();
+    useStore.setState({ logs: [{ id: "phone-log", dayKey: "2026-09-29", ts: "2026-09-29T09:00:00Z", type: "Pomodoro", minutes: 25, cards: 0 }] as never });
+    await useAccount.getState().signIn("learner@example.com", "password123");
+    expect(useAccount.getState().restoreOffer).toMatchObject({ id: "r5", revision: 5 });
+    expect(useStore.getState().tasks.map((task) => task.id)).not.toContain("laptop-task");
+    expect(rpc).not.toHaveBeenCalled();
+
+    rpc.mockImplementation(accepting as never);
+    await useAccount.getState().adoptAccountVersion();
+    expect(useStore.getState().tasks.map((task) => task.id)).toContain("laptop-task");
+    expect(useAccount.getState().restoreOffer).toBeUndefined();
+    tables.workspace_revisions = [];
+  });
+
+  it("keeps this device's work as the version that continues when chosen", async () => {
+    await serverVersion();
+    useStore.setState({ tasks: [...useStore.getState().tasks, { id: "phone-task", title: "Call the lab", done: false, created: "2026-09-29T10:00:00Z" }] });
+    await useAccount.getState().signIn("learner@example.com", "password123");
+    expect(useAccount.getState().restoreOffer).toBeDefined();
+    rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+      if (name === "push_workspace_revision") {
+        return args.p_base_revision === 0
+          ? { data: { status: "conflict", server_revision: 5, preserved_revision_id: "c2" }, error: null }
+          : { data: { status: "accepted", revision: 6, revision_id: "r6", idempotent: false }, error: null };
+      }
+      return { data: null, error: null };
+    });
+    await useAccount.getState().keepDeviceWork();
+    expect(useStore.getState().tasks.map((task) => task.id)).toContain("phone-task");
+    expect(useStore.getState().tasks.map((task) => task.id)).not.toContain("laptop-task");
+    expect(useAccount.getState()).toMatchObject({ link: "linked", protection: "protected", restoreOffer: undefined });
+    tables.workspace_revisions = [];
+  });
+});

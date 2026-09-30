@@ -9,6 +9,7 @@ import { useStore } from "../store";
 import { createLocalBackup } from "../localBackup";
 import { mergeStates, parseImport } from "../backup";
 import { recordRestoreEvent } from "../restoreHistory";
+import { deviceHasOwnWork } from "../saveProgress";
 
 /**
  * App-wide account state. The Settings panel, the sidebar status badge, and
@@ -51,6 +52,8 @@ interface AccountState {
   pendingCodeEmail?: string;
   /** Which email the code came from; recovery codes open the new-password step. */
   pendingCodeKind?: CodeKind;
+  /** After signing in on a device with its own work: the account's latest version, waiting for the student's choice. */
+  restoreOffer?: RevisionSummary;
 
   init(): void;
   signIn(email: string, password: string): Promise<boolean>;
@@ -67,6 +70,8 @@ interface AccountState {
   restoreRevision(summary: RevisionSummary): Promise<void>;
   keepThisDevice(): Promise<void>;
   adoptAccountVersion(): Promise<void>;
+  /** From the welcome-back choice: keep this device's work as the version that continues. */
+  keepDeviceWork(): Promise<void>;
   /** Resolve a conflict by combining both versions record-by-record. */
   mergeWithAccount(): Promise<void>;
   forgetDevice(id: string): Promise<void>;
@@ -208,6 +213,32 @@ export const useAccount = create<AccountState>((set, get) => {
     }
   }
 
+  /**
+   * After an explicit sign-in on a device not yet linked to this account
+   * (JD: "on sign in it should always load the most recent backup"): a device
+   * with no work of its own takes the account's latest version at once (a
+   * safety snapshot is saved first); a device with its own work keeps it and
+   * gets the choice. Nothing on this device is ever uploaded here.
+   */
+  async function welcomeBack(): Promise<void> {
+    const user = get().user;
+    if (!user || linkStateFor(user.id) !== "unlinked") return;
+    let latest: RevisionSummary | undefined;
+    try {
+      [latest] = await transport.summaries(1);
+    } catch {
+      return; // Offline or service trouble: the Account page still offers every option.
+    }
+    if (!latest) return;
+    const state = useStore.getState();
+    if (deviceHasOwnWork({ ...state, userSounds: 0 })) {
+      set({ restoreOffer: latest, message: "" });
+      return;
+    }
+    await get().restoreRevision(latest);
+    if (!get().error) set({ message: `Welcome back. Your AXOM from ${new Date(latest.createdAt).toLocaleDateString(undefined, { month: "long", day: "numeric" })} is on this device.` });
+  }
+
   // A saved, refreshable session is shown immediately (no wait for the SDK
   // download or the network); the SDK's first auth event confirms or clears it.
   const stored = cloudConfigured() ? readStoredSession() : null;
@@ -258,7 +289,10 @@ export const useAccount = create<AccountState>((set, get) => {
         applySession(data.session);
         return true;
       });
-      if (result) set({ message: "Signed in. Nothing on this device has changed." });
+      if (result) {
+        set({ message: "Signed in. Nothing on this device has changed." });
+        await welcomeBack();
+      }
       return Boolean(result);
     },
 
@@ -310,7 +344,10 @@ export const useAccount = create<AccountState>((set, get) => {
         return true;
       });
       if (result && recovery) set({ pendingCodeEmail: undefined, pendingCodeKind: undefined, phase: "recovering-password", message: "Code accepted. Choose a new password to finish." });
-      else if (result) set({ pendingCodeEmail: undefined, pendingCodeKind: undefined, message: "Signed in. Nothing on this device has changed." });
+      else if (result) {
+        set({ pendingCodeEmail: undefined, pendingCodeKind: undefined, message: "Signed in. Nothing on this device has changed." });
+        await welcomeBack();
+      }
       return Boolean(result);
     },
 
@@ -375,6 +412,7 @@ export const useAccount = create<AccountState>((set, get) => {
         history: [],
         devices: [],
         conflictServerRevision: undefined,
+        restoreOffer: undefined,
         message: "Signed out. This device’s workspace is still here.",
       });
     },
@@ -479,6 +517,7 @@ export const useAccount = create<AccountState>((set, get) => {
         // is deleted — the same guarantees as merging a portable backup.
         const merged = mergeStates(useStore.getState(), server);
         useStore.getState().replaceAll(merged);
+        set({ restoreOffer: undefined });
         recordRestoreEvent({ kind: "account-merge", detail: `Merged with protected version #${latest.revision}` });
         write({ ...read(), accountUserId: user.id, baseRevision: latest.revision, conflictServerRevision: undefined, pending: true, pendingIdempotencyKey: crypto.randomUUID() });
         const active = coordinator ?? new SyncCoordinator(transport, () => useStore.getState(), 0);
@@ -496,9 +535,18 @@ export const useAccount = create<AccountState>((set, get) => {
 
     async adoptAccountVersion() {
       const history = get().history.length ? get().history : await transport.summaries(1).catch(() => []);
-      const latest = history[0];
+      const latest = get().restoreOffer ?? history[0];
       if (!latest) { set({ error: "No account version is available yet." }); return; }
       await get().restoreRevision(latest);
+      if (!get().error) set({ restoreOffer: undefined });
+    },
+
+    async keepDeviceWork() {
+      // Link against base 0: the server keeps the account's version in
+      // history and reports the conflict, which "keep" then resolves.
+      await get().linkThisDevice();
+      if (get().protection === "conflict") await get().keepThisDevice();
+      if (!get().error) set({ restoreOffer: undefined });
     },
 
     async forgetDevice(id) {

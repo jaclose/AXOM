@@ -23,6 +23,7 @@ import type { AnkiCard } from "./ankiCards";
 import { dueCards } from "./ankiCards";
 import type { QuestionSet, SourceDocument } from "./library";
 import { EDUCATION_TRACKS } from "./tracks";
+import { isStarterTaskTitle } from "./starterContent";
 import { ACADEMIC_TEMPLATE_COURSES } from "./experience";
 import { normalizeTrackerPath, trackerItemKey } from "./pathUtils";
 import { entryFor, isScheduledDay, trackingStartKey } from "./habits";
@@ -200,11 +201,6 @@ export interface BriefStarterState {
 
 type EvidenceOrigin = "seed" | "template" | "user" | "import";
 
-const STARTER_TASK_TITLES = new Set([
-  "create today's standup",
-  "add your real lecture/DLA/PQ list",
-  "save progress from settings",
-].map(normalizeEvidenceText));
 
 const TEMPLATE_COURSE_FINGERPRINTS = new Set([
   ...EDUCATION_TRACKS.flatMap((track) => track.terms.flatMap((term) => term.courses.map(courseFingerprint))),
@@ -554,7 +550,7 @@ function isActionableTask(task: Task): boolean {
   if (task.done || task.archived || !task.title.trim()) return false;
   const origin = recordOrigin(task);
   if (origin === "seed" || origin === "template") return false;
-  return !STARTER_TASK_TITLES.has(normalizeEvidenceText(task.title));
+  return !isStarterTaskTitle(task.title);
 }
 
 function trustedDueQuestions(questions: QuestionRecord[], now: Date): QuestionRecord[] {
