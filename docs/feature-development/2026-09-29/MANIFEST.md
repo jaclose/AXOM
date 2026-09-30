@@ -130,7 +130,7 @@ This table supersedes older CODEX/DONE assumptions above for this lane. SHIPPED 
 
 | ID | Item | Status | Evidence / remaining work |
 |---|---|---|---|
-| I2-01 | Locked In | IMPLEMENTED, NOT VERIFIED | Portaled prompt; route/reload tests pass; reply exits after action. Visual review pending. |
+| I2-01 | Locked In | SHIPPED + VERIFIED | Persistent top portal, deliberate response then fade; truthful session/goal/no-goal copy; keyboard focus, reload and responsive dark/light Chrome checks passed. Local only. |
 | I2-02 | Spotify | PARTIAL | One shell player and observed playback adapter pass browser contract; live service check pending. |
 | I2-03 | Productivity events | PARTIAL | Normalized activity and retry tests pass; Anki route-independent ingestion still missing; concurrent tracker edits under review. |
 | I2-04 | Exam countdown | PARTIAL | Split widget exists; configurable weighting and shared module/calendar date source unfinished. |

@@ -59,3 +59,9 @@ Baseline: feat/ideas2-integration at c04272d, substantial inherited unstaged imp
 - Regression: old implementation rejected extending an existing highlight. Unit/component tests cover bridging marks, tone conflicts, persistent offsets and selection behavior. Real Chrome pointer drags verified plain selection, selection into/out of/across an existing mark, reload, keyboard deletion and reload again.
 - Browser artifact: `/tmp/axom-ideas2-wavea-evidence/ideas2-wave-a-real-pointer-18a13-across-persisted-highlights/highlight-merged.png`. The new standalone `ideas2-highlights.spec.ts` retains this journey.
 - Commit snapshot verification: 192 files / 1902 tests, typecheck, lint and production build passed on Node 22.23.1; Chrome journey passed against that isolated snapshot. Its temporary Vite harness explicitly allowed the existing symlinked dependencies. Existing bundle warnings remain. `git diff --check` passed.
+
+### I2-01 persistent check-in
+
+- A body portal owns the top-center prompt across routes. Only unanswered state is saved; no timeout removes it. Answered feedback holds 2.2 seconds, then fades over 240 ms (calm fade for reduced motion). Arrival does not steal focus; keyboard answers restore the prior task.
+- Focus-session remaining time takes precedence. Planned free-focus sessions exclude paused segments. Goal messages identify today/this week and only study goals; no timer/goal means no invented time. Expanded three existing voice libraries.
+- Verified the isolated commit snapshot: 17 focused tests, typecheck, lint and production build; real scheduled prompt, navigation/reload, goal/timer/no-goal copy, dark/light at 1440/390, reduced motion and no page errors. Mobile card reduced to about 186 px high with all three answers visible. Browser evidence: `/tmp/axom-ideas2-checkin-review-browser`; build: `/tmp/axom-ideas2-checkin-review-build.log`. System-notification deep linking remains a separate slice.

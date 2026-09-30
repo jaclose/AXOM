@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { STORAGE_KEYS } from "../../lib/brand";
 import { notify } from "../../lib/notify";
 import { Coffee, Lock, Play, Timer, Waves, X } from "lucide-react";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { useStore } from "../../lib/store";
 import { usePomodoro } from "../../lib/pomodoro";
-import { findLiveSession } from "../../lib/sessions";
+import { findLiveSession, sessionElapsedMs } from "../../lib/sessions";
 import { isoDate } from "../../lib/scoring";
 import { evaluateDailySuccess } from "../../lib/dailySuccess";
 import {
@@ -27,29 +29,48 @@ export const FOCUS_CHECKIN_TEST_EVENT = "axom:focus-checkin-preview";
 
 type Phase =
   | { kind: "hidden" }
-  | { kind: "prompt"; seed: number; progress: FocusProgressHint; preview: boolean }
-  | { kind: "reply"; response: FocusCheckInResponse; line: string };
+  | { kind: "prompt"; seed: number; preview: boolean }
+  | { kind: "reply"; response: FocusCheckInResponse; line: string; preview: boolean };
+
+function restorePrompt(): Phase {
+  try {
+    const value = JSON.parse(localStorage.getItem(STORAGE_KEYS.focusCheckInPending) ?? "null");
+    if (value?.kind === "prompt" && Number.isSafeInteger(value.seed)) return { kind: "prompt", seed: value.seed, preview: false };
+  } catch { /* A blocked device store must not prevent a check-in. */ }
+  return { kind: "hidden" };
+}
+
+const currentClock = () => new Date();
 
 /** What is left right now: the running sprint and the nearest unmet target. */
 export function focusProgressHint(
-  state: Pick<NoctyriumState, "profile" | "logs" | "productivityTrackers" | "habits" | "habitEntries" | "closeouts" | "activeDayKey">,
+  state: Pick<NoctyriumState, "profile" | "logs" | "productivityTrackers" | "habits" | "habitEntries" | "closeouts" | "activeDayKey"> & Partial<Pick<NoctyriumState, "sessions">>,
   pomodoro: { phase: string; running: boolean; secondsLeft: number },
+  now = new Date(),
 ): FocusProgressHint {
   const hint: FocusProgressHint = {};
   if (pomodoro.running && pomodoro.phase === "focus" && pomodoro.secondsLeft > 0) {
-    hint.sprint = `${formatMinutes(Math.ceil(pomodoro.secondsLeft / 60))} left in this sprint`;
+    hint.sprint = `${formatMinutes(Math.ceil(pomodoro.secondsLeft / 60))} left in this focus session`;
+    return hint;
+  }
+  const session = findLiveSession(state.sessions ?? []);
+  if (session?.status === "active" && session.plannedMinutes && session.plannedMinutes > 0) {
+    const remaining = Math.max(0, Math.ceil(session.plannedMinutes - sessionElapsedMs(session, now) / 60_000));
+    hint.sprint = remaining ? `${formatMinutes(remaining)} left in this focus session` : "Your planned focus time is complete";
+    return hint;
   }
   try {
     const result = evaluateDailySuccess(state);
-    const open = result.requirements.find((item) => (
-      item.eligible && item.status !== "met" && item.status !== "unavailable" && item.target > item.current
+    const studyGoals = result.requirements.filter((item) => item.requirement.source.kind === "study-minutes" && item.eligible);
+    const open = studyGoals.find((item) => ( item.status !== "met" && item.status !== "unavailable" && item.target > item.current
     ));
     if (open) {
       const remaining = open.target - open.current;
       const unit = open.requirement.unit.toLowerCase();
       const amount = /min/.test(unit) ? formatMinutes(remaining) : `${Math.round(remaining)} ${unit}`;
-      hint.target = `${amount} to go on ${open.requirement.label}`;
-    } else if (result.eligibleCount > 0 && result.metCount === result.eligibleCount) {
+      const period = ["weekly-total", "times-per-week"].includes(open.requirement.schedule.kind) ? "this week's" : "today's";
+      hint.target = `${amount} remaining toward ${period} ${open.requirement.label} goal`;
+    } else if (studyGoals.length > 0 && studyGoals.every((item) => item.status === "met")) {
       hint.targetsMet = true;
     }
   } catch {
@@ -60,14 +81,18 @@ export function focusProgressHint(
 
 /**
  * App-root watcher + the check-in card. It never steals focus from what the
- * learner is typing; the card is announced politely and dismisses itself.
+ * learner is typing; it remains until an explicit response or dismissal.
  */
-export function FocusCheckIn({ pollIntervalMs = 20_000, clock = () => new Date() }: { pollIntervalMs?: number; clock?: () => Date } = {}) {
+export function FocusCheckIn({ pollIntervalMs = 20_000, clock = currentClock }: { pollIntervalMs?: number; clock?: () => Date } = {}) {
   const preferencesRaw = useStore((state) => state.profile.focusCheckIn);
   const quietHours = useStore((state) => state.profile.dailyLoopReminders);
   const sessions = useStore((state) => state.sessions);
   const pomodoroRunning = usePomodoro((state) => state.running && state.phase === "focus");
-  const [phase, setPhase] = useState<Phase>({ kind: "hidden" });
+  const [phase, setPhase] = useState<Phase>(restorePrompt);
+  const [exiting, setExiting] = useState(false);
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const returnFocus = useRef<HTMLElement | null>(null);
+  const [, refreshProgress] = useState(0);
   const [ledger, setLedger] = useState<FocusCheckInLedger>(() => focusCheckInLedger.read(dayOf(clock())));
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
@@ -80,6 +105,7 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = () => new Date()
   }, []);
 
   const openPrompt = useCallback((preview: boolean) => {
+    setExiting(false);
     const now = clock();
     const state = useStore.getState();
     const pomodoro = usePomodoro.getState();
@@ -89,13 +115,12 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = () => new Date()
     setPhase({
       kind: "prompt",
       seed: next.prompts + now.getHours() * 7 + now.getMinutes(),
-      progress: focusProgressHint(state, pomodoro),
       preview,
     });
     // A desktop window is often visible but behind other apps: notify
     // whenever AXOM is not the focused window, not only when it is hidden.
     if (!preview && preferences.systemNotifications && typeof document !== "undefined" && (document.visibilityState === "hidden" || !document.hasFocus())) {
-      notifyLockIn(focusProgressHint(state, pomodoro));
+      notifyLockIn(focusProgressHint(state, pomodoro, now));
     }
   }, [clock, persist, preferences.systemNotifications]);
 
@@ -135,17 +160,59 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = () => new Date()
     return () => window.removeEventListener(FOCUS_CHECKIN_TEST_EVENT, onPreview);
   }, [openPrompt]);
 
-  // Unanswered prompts step aside after a minute; replies after a few seconds.
+  // Only this small device interaction survives reload. Progress is always
+  // derived live; persisting a countdown sentence would make it misleading.
+  useEffect(() => {
+    try {
+      if (phase.kind !== "prompt" || phase.preview || exiting) localStorage.removeItem(STORAGE_KEYS.focusCheckInPending);
+      else localStorage.setItem(STORAGE_KEYS.focusCheckInPending, JSON.stringify(phase));
+    } catch { /* In-memory interaction still works when storage is unavailable. */ }
+  }, [phase, exiting]);
+
+  // Only an answered prompt times out. An unanswered check-in has no deadline.
+  useEffect(() => {
+    if (phase.kind !== "reply") return;
+    const timeout = window.setTimeout(() => setExiting(true), 2200);
+    return () => window.clearTimeout(timeout);
+  }, [phase]);
+
+  useEffect(() => {
+    if (!exiting) return;
+    const timeout = window.setTimeout(() => {
+      if (overlayRef.current?.contains(document.activeElement) && returnFocus.current?.isConnected) returnFocus.current.focus();
+      setPhase({ kind: "hidden" });
+      setExiting(false);
+    }, 240);
+    return () => window.clearTimeout(timeout);
+  }, [exiting]);
+
   useEffect(() => {
     if (phase.kind === "hidden") return;
-    const handle = window.setTimeout(() => setPhase({ kind: "hidden" }), phase.kind === "prompt" ? 60_000 : 5_500);
-    return () => window.clearTimeout(handle);
-  }, [phase]);
+    const remember = () => {
+      if (document.activeElement instanceof HTMLElement && !overlayRef.current?.contains(document.activeElement)) returnFocus.current = document.activeElement;
+    };
+    remember();
+    document.addEventListener("focusin", remember);
+    return () => document.removeEventListener("focusin", remember);
+  }, [phase.kind]);
+
+  useEffect(() => {
+    if (phase.kind === "hidden") return;
+    const refresh = () => refreshProgress((value) => value + 1);
+    let minute = Math.ceil(usePomodoro.getState().secondsLeft / 60);
+    const stopTimer = usePomodoro.subscribe((next, previous) => {
+      const nextMinute = Math.ceil(next.secondsLeft / 60);
+      if (nextMinute !== minute || next.running !== previous.running || next.phase !== previous.phase) { minute = nextMinute; refresh(); }
+    });
+    const stopStore = useStore.subscribe(refresh);
+    const tick = window.setInterval(refresh, 30_000);
+    return () => { stopTimer(); stopStore(); window.clearInterval(tick); };
+  }, [phase.kind]);
 
   useEffect(() => {
     if (phase.kind === "hidden") return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setPhase({ kind: "hidden" });
+      if (event.key === "Escape") setExiting(true);
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
@@ -157,28 +224,32 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = () => new Date()
     const current = focusCheckInLedger.read(dayOf(now));
     const next = phase.preview ? current : recordResponse(current, response, now);
     if (!phase.preview) persist(next);
+    // Answer buttons disappear in the reply. Restore the prior task before
+    // removing keyboard focus from the document. The polite reply still speaks.
+    if (overlayRef.current?.contains(document.activeElement) && returnFocus.current?.isConnected) returnFocus.current.focus({ preventScroll: true });
     setPhase({
       kind: "reply",
       response,
-      line: responseLine(response, preferences.tone, phase.seed + next.lockedIn, phase.progress, next.streak),
+      preview: phase.preview,
+      line: responseLine(response, preferences.tone, phase.seed + next.lockedIn),
     });
   }
 
   function snoozeFor(minutes: number) {
     const now = clock();
     if (phase.kind === "prompt" && !phase.preview) persist(snooze(focusCheckInLedger.read(dayOf(now)), minutes, now));
-    setPhase({ kind: "hidden" });
+    setExiting(true);
   }
 
   if (phase.kind === "hidden") return null;
 
   const pomodoro = usePomodoro.getState();
-  const progress = phase.kind === "prompt" ? phase.progress : undefined;
+  const progress = focusProgressHint(useStore.getState(), pomodoro, clock());
 
-  return (
-    <div className={`focus-checkin ${phase.kind}`} role="dialog" aria-modal="false" aria-labelledby="focus-checkin-title" aria-live="polite">
+  return createPortal(
+    <div ref={overlayRef} className={`focus-checkin ${phase.kind}${exiting ? " is-exiting" : ""}`} role="dialog" aria-modal="false" aria-labelledby="focus-checkin-title" aria-live="polite">
       <div className="focus-checkin-glow" aria-hidden="true" />
-      <button type="button" className="focus-checkin-close" aria-label="Dismiss check-in" onClick={() => setPhase({ kind: "hidden" })}>
+      <button type="button" className="focus-checkin-close" aria-label="Dismiss check-in" onClick={() => setExiting(true)}>
         <X size={ICON_SIZE.body} aria-hidden="true" />
       </button>
       {phase.kind === "prompt" ? (
@@ -196,6 +267,7 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = () => new Date()
               {progress.target && <span><Waves size={ICON_SIZE.microInline} aria-hidden="true" /> {progress.target}</span>}
             </div>
           )}
+          {!progress.sprint && !progress.target && <p className="focus-checkin-sub">{progress.targetsMet ? "Your study goal is complete." : "Hope you're productive. Remember to log work done outside AXOM."}</p>}
           <div className="focus-checkin-actions">
             <button type="button" className="primary" onClick={() => answer("locked-in")}>
               <Lock size={ICON_SIZE.body} aria-hidden="true" /> Locked in
@@ -209,7 +281,7 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = () => new Date()
             <button type="button" onClick={() => snoozeFor(15)}>Snooze 15 min</button>
             <span aria-hidden="true">·</span>
             <button type="button" onClick={() => {
-              setPhase({ kind: "hidden" });
+              setExiting(true);
               useStore.getState().updateProfile({ focusCheckIn: { ...preferences, enabled: false } });
             }}>Turn off check-ins</button>
             {phase.preview && <em>Preview — nothing is recorded</em>}
@@ -222,11 +294,16 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = () => new Date()
             {phase.response === "break" ? <Coffee size={ICON_SIZE.emphasis} aria-hidden="true" /> : <Lock size={ICON_SIZE.emphasis} aria-hidden="true" />}
           </span>
           <div>
-            <div id="focus-checkin-title" className="focus-checkin-title">{phase.line}</div>
+            <div id="focus-checkin-title" className="focus-checkin-title">{phase.response === "locked-in" ? "Locked in" : phase.response === "break" ? "Taking a break" : "Back to the work"}</div>
+            <p className="focus-checkin-sub">{phase.line}</p>
+            {phase.response === "locked-in" && (progress.sprint || progress.target) && (
+              <p className="focus-checkin-sub">{progress.sprint ?? progress.target}</p>
+            )}
+            <button type="button" className="focus-checkin-restart" onClick={() => setExiting(true)}>Keep going</button>
             {phase.response === "drifted" && !pomodoro.running && (
               <button type="button" className="focus-checkin-restart" onClick={() => {
                 usePomodoro.getState().start();
-                setPhase({ kind: "hidden" });
+                setExiting(true);
               }}>
                 <Play size={ICON_SIZE.body} aria-hidden="true" /> Restart a focus sprint
               </button>
@@ -234,12 +311,12 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = () => new Date()
           </div>
         </div>
       )}
-    </div>
+    </div>, document.body,
   );
 }
 
 const dayOf = isoDate;
 
 function notifyLockIn(progress: FocusProgressHint) {
-  void notify("AXOM — are you locked in?", progress.target ?? progress.sprint ?? "Quick check-in. Come back when you can.", { tag: "axom-lock-in" });
+  void notify("AXOM — are you locked in?", progress.sprint ?? progress.target ?? "Quick check-in. Come back when you can.", { tag: "axom-lock-in" });
 }

@@ -211,48 +211,62 @@ export function snooze(ledger: FocusCheckInLedger, minutes: number, now: Date): 
 export interface FocusProgressHint {
   /** e.g. "18 min left in this sprint" */
   sprint?: string;
-  /** e.g. "42 min to go on Study time" */
+  /** Explicitly a target, never a running countdown. */
   target?: string;
-  /** All daily targets met. */
+  /** All eligible study goals met. */
   targetsMet?: boolean;
 }
 
 const PROMPT_LINES: Record<FocusCheckInTone, readonly string[]> = {
   gentle: [
-    "Just checking in — how’s the focus?",
+    "How is your focus holding up?",
     "A quick pulse check. Where’s your attention?",
     "Still with the material?",
+    "Is this still the task you meant to do?",
+    "A quiet check. Still here?",
+    "Do you need a pause, or another few minutes?",
   ],
   coach: [
     "Quick check. Still on the work?",
-    "Pulse check — is your attention where you put it?",
+    "Is your attention where you put it?",
     "Honest answer: are you on task right now?",
+    "Still working on what matters next?",
+    "Is the next step clear?",
+    "One check before you continue.",
   ],
   intense: [
     "Eyes up. Are you actually working?",
     "Status report. Locked in or drifting?",
-    "Your future self is asking: are you on it?",
+    "Are you moving the task forward?",
+    "Check your attention. Then continue.",
+    "On task, or time to reset?",
   ],
 };
 
 const LOCKED_IN_LINES: Record<FocusCheckInTone, readonly string[]> = {
-  gentle: ["Okay — just checking in.", "Lovely. Keep that pace.", "Good. Stay with it.", "Nice and steady."],
-  coach: ["Okay, just checking in.", "You got this.", "Push through.", "That’s the standard. Keep going.", "Good. Next question."],
-  intense: ["Good. Don’t let up.", "Push through.", "Stay dangerous.", "Lock it in. Keep moving.", "That’s it. Again."],
+  gentle: ["One good block at a time.", "Stay with the question in front of you.", "Keep a pace you can return to.", "Let this be a useful hour.", "There is room to think carefully.", "A little more clarity than before.", "Give the difficult part some time.", "Keep your attention close."],
+  coach: ["Make this one count.", "Put in a clean session.", "Build the day.", "Do the work worth remembering.", "Make the next hour useful.", "Leave one question clearer.", "Finish the thought you started.", "Keep moving.", "Put your attention where it matters.", "A clear next step is enough."],
+  intense: ["Stay on the work.", "Follow the question all the way through.", "Close the loop.", "Keep the standard precise.", "Give the hard part your full attention.", "Turn the next page with a reason.", "Bring the work into focus.", "One task. Your full attention."],
 };
 
 const DRIFTED_LINES: Record<FocusCheckInTone, readonly string[]> = {
   gentle: [
     "No judgment. One breath, one tab closed, one question.",
-    "It happens. Come back gently — start with something small.",
+    "It happens. Come back gently. Start with something small.",
+    "Choose one small place to begin again.",
+    "A pause can help. Return when you are ready.",
   ],
   coach: [
     "No shame. Reset: close one tab, start one question.",
     "Noticing is the win. Now take the next small step.",
+    "Name the next action, then take it.",
+    "Pick up the last unfinished thought.",
   ],
   intense: [
-    "Caught it. Phone away. Next question — now.",
+    "Reset your attention. Start the next question.",
     "Drift noted. Reset and get back in.",
+    "Make the next action specific.",
+    "Clear one distraction. Resume one task.",
   ],
 };
 
@@ -260,6 +274,9 @@ const BREAK_LINES: readonly string[] = [
   "Good. Rest is part of the protocol.",
   "Enjoy it. Stand up, drink water, look far away.",
   "Break well. I’ll check back in later.",
+  "Let the break be a break.",
+  "Leave the task somewhere easy to return to.",
+  "Take the space you need.",
 ];
 
 function pick<T>(list: readonly T[], seed: number): T {
@@ -282,10 +299,10 @@ export function responseLine(
   if (response === "drifted") return pick(DRIFTED_LINES[tone], seed);
   // Locked in: alternate between encouragement and "just this much to go".
   const specifics = [
-    progress.target ? `Just ${progress.target}.` : undefined,
-    progress.sprint ? `${capitalize(progress.sprint)} — push through.` : undefined,
-    progress.targetsMet ? "Today’s targets are already met. Anything now is a bonus." : undefined,
-    streak >= 3 ? `${streak} check-ins locked in today. That’s a real session.` : undefined,
+    progress.target ? `${capitalize(progress.target)}.` : undefined,
+    progress.sprint ? `${capitalize(progress.sprint)}.` : undefined,
+    progress.targetsMet ? "Your study goals are already met." : undefined,
+    streak >= 3 ? `${streak} check-ins locked in today.` : undefined,
   ].filter((line): line is string => Boolean(line));
   if (specifics.length && seed % 2 === 0) return pick(specifics, seed >>> 1);
   return pick(LOCKED_IN_LINES[tone], seed);
