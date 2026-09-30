@@ -290,7 +290,7 @@ describe("OnboardingWizard", () => {
     expect(screen.getByText(/fixed word rules \(not AI\).*never applied automatically/)).toBeTruthy();
 
     const original = "  I use Anki every day.\nI watch lectures three times.  ";
-    fireEvent.change(screen.getByLabelText("Other — tell AXOM how you study"), { target: { value: original } });
+    fireEvent.change(screen.getByLabelText("Other: tell AXOM how you study"), { target: { value: original } });
     const suggestions = screen.getByRole("region", { name: "Suggestions from your words" });
     expect(suggestions.textContent).toContain("You wrote “Anki”");
     expect(screen.getByRole("button", { name: "Apply: Turn on Anki" })).toBeTruthy();
@@ -307,7 +307,7 @@ describe("OnboardingWizard", () => {
     expect(screen.getByRole("button", { name: "Apply: Use Anki throughout the course" })).toBeTruthy();
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Apply: Use Anki throughout the course" }));
     expect(screen.getByRole("status").textContent).toBe("Applied: Turn on Anki.");
-    expect((screen.getByLabelText("Other — tell AXOM how you study") as HTMLTextAreaElement).value).toBe(original);
+    expect((screen.getByLabelText("Other: tell AXOM how you study") as HTMLTextAreaElement).value).toBe(original);
     expect(screen.getByRole("button", { name: "Apply: Set usual lecture passes to 3" })).toBeTruthy();
     expect((screen.getByLabelText("Lecture passes", { exact: true }) as HTMLInputElement).checked).toBe(false);
 

@@ -449,7 +449,7 @@ function StudyWorkflowSettings() {
           <span className="settings-card-icon"><BookOpen size={ICON_SIZE.body} aria-hidden="true" /></span>
           <div>
             <h4 id="study-methods-title">How you study</h4>
-            <p>Pick every method you actually use. AXOM uses this to shape recommendations and follow-ups — it never forces a method (not even Anki).</p>
+            <p>Pick every method you actually use. AXOM uses this to shape recommendations and follow-ups. It never forces a method (not even Anki).</p>
           </div>
         </div>
         <div className="settings-chip-row" aria-label="Study methods">
@@ -469,7 +469,7 @@ function StudyWorkflowSettings() {
             <h4 id="study-passes-title">Passes &amp; review timing</h4>
             <p>
               How many times you usually go through material, and when AXOM should bring it back. Course Tracker items without their own
-              setting use these — a course or single item can always override them.
+              setting use these, and any course or single item can override them.
             </p>
           </div>
         </div>
@@ -515,7 +515,7 @@ function StudyWorkflowSettings() {
           </div>
         </div>
         <label className="stack gap6">
-          <span className="field-label">Other — tell AXOM how you study</span>
+          <span className="field-label">Other: tell AXOM how you study</span>
           <textarea className="field" rows={3} value={workflow.customContext ?? ""} placeholder="e.g. First pass on lecture day, Anki that night, a week later I redo the PQs." onChange={(event) => save({ customContext: event.target.value })} />
         </label>
         <StudyTextSuggestions workflow={workflow} onApply={(studyWorkflow) => store.updateProfile({ studyWorkflow })} />
@@ -671,7 +671,7 @@ function DailyUtilitiesSettings() {
           <span className="settings-card-icon"><Clock3 size={ICON_SIZE.body} aria-hidden="true" /></span>
           <div>
             <h4 id="rhythm-clock-title">Clock</h4>
-            <p>The time in the top bar, with an optional analog clock when you click it. Only preferences are saved — never the time itself.</p>
+            <p>The time in the top bar, with an optional analog clock when you click it. Only preferences are saved, never the time itself.</p>
           </div>
           <label className="settings-switch">
             <input type="checkbox" checked={clock.enabled} onChange={(event) => updateClock({ enabled: event.target.checked })} />
@@ -770,7 +770,7 @@ function DashboardVisibilitySettings() {
         <span className="settings-card-icon"><LayoutGrid size={ICON_SIZE.body} aria-hidden="true" /></span>
         <div>
           <h4 id="dashboard-widgets-title">Dashboard widgets</h4>
-          <p>Choose what appears on the dashboard. This changes presentation only — hiding a widget never deletes data. Use “Edit dashboard” for sizes and order.</p>
+          <p>Choose what appears on the dashboard. This changes presentation only; hiding a widget never deletes data. Use “Edit dashboard” for sizes and order.</p>
         </div>
       </div>
       <div className="settings-widget-grid">
@@ -988,7 +988,7 @@ function PersonalizationPanel() {
           <span className="settings-card-icon"><Sparkles size={ICON_SIZE.body} aria-hidden="true" /></span>
           <div>
             <h4 id="labs-title">Early features <Tag tone="orange">Labs</Tag></h4>
-            <p>Opt into surfaces still under active development. They can change between releases — your data stays either way.</p>
+            <p>Opt into surfaces still under active development. They can change between releases; your data stays either way.</p>
           </div>
         </div>
         <label className="early-feature-row">
@@ -999,7 +999,7 @@ function PersonalizationPanel() {
               experimentalFlags: { ...(profile.experimentalFlags ?? {}), habits: e.target.checked },
             })}
           />
-          <span><b>Habit Tracker</b> — calm, recovery-friendly habit tracking. Adds a “Habit Tracker” entry under Tools.</span>
+          <span><b>Habit Tracker</b>: calm, recovery-friendly habit tracking. Adds a “Habit Tracker” entry under Tools.</span>
         </label>
       </section>
     </div>

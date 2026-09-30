@@ -425,7 +425,7 @@ export function OnboardingWizard({
               </div>
               {studyMethods.includes("lecture-passes") && <label className="stack gap6"><span>Usual lecture passes</span><input className="field" type="number" min={1} max={6} value={studyWorkflow.lecturePasses ?? 2} onChange={(event) => updateStudyWorkflow({ ...studyWorkflow, lecturePasses: Math.max(1, Math.min(6, Number(event.target.value))) })}/></label>}
               <StudyMethodFollowUps workflow={studyWorkflow} onChange={updateStudyWorkflow} />
-              <label className="stack gap6"><span>Other — tell AXOM how you study</span><textarea className="field" value={studyWorkflow.customContext ?? ""} onChange={(event) => updateStudyWorkflow({ ...studyWorkflow, customContext: event.target.value })} /></label>
+              <label className="stack gap6"><span>Other: tell AXOM how you study</span><textarea className="field" value={studyWorkflow.customContext ?? ""} onChange={(event) => updateStudyWorkflow({ ...studyWorkflow, customContext: event.target.value })} /></label>
               <p className="sub">Your words are kept exactly as written. AXOM may suggest settings from them using fixed word rules (not AI); each suggestion is shown for you to confirm and is never applied automatically.</p>
               <StudyTextSuggestions workflow={studyWorkflow} onApply={updateStudyWorkflow} />
             </details>
