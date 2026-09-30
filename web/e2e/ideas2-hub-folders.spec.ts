@@ -3,9 +3,12 @@ import { expect, test } from "@playwright/test";
 test("Hub folders validate, copy, clear and preserve local paths with an honest web fallback", async ({ page }, info) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/#folders");
   await page.getByRole("button", { name: "Skip setup", exact: true }).click();
   await page.getByRole("button", { name: "Review later", exact: true }).click();
+  const skipReminder = page.getByRole("button", { name: "Skip today", exact: true });
+  if (await skipReminder.isVisible()) await skipReminder.click();
   await page.evaluate(() => { location.hash = "folders"; });
   await page.getByRole("button", { name: "Add folder", exact: true }).first().click();
   await page.getByLabel("Name", { exact: true }).fill("Study QA");
@@ -24,6 +27,7 @@ test("Hub folders validate, copy, clear and preserve local paths with an honest 
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await card.scrollIntoViewIfNeeded();
+    await expect.poll(async () => (await card.boundingBox())!.x).toBeGreaterThanOrEqual(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: info.outputPath(`hub-${width}.png`) });
   }

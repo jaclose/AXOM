@@ -36,3 +36,14 @@ it("shows a native failure and allows a safe retry", async () => {
   await waitFor(() => expect(native.open).toHaveBeenCalledTimes(2));
   expect(screen.queryByRole("alert")).toBeNull();
 });
+
+it("does not keep a missing-folder error after changing its destination", async () => {
+  native.open.mockRejectedValueOnce(new Error("This folder is missing or inaccessible on this device."));
+  render(<HubFoldersPage />);
+  fireEvent.click(screen.getByRole("button", { name: "Open Study QA in file manager" }));
+  await screen.findByRole("alert");
+  await act(async () => { useStore.getState().updateFolder("qa", { localPath: "/tmp/new-folder" }); });
+  expect(screen.queryByRole("alert")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Open Study QA in file manager" }));
+  await waitFor(() => expect(native.open).toHaveBeenLastCalledWith("/tmp/new-folder", false));
+});

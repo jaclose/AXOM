@@ -45,7 +45,7 @@ export function HubFoldersPage() {
   const [view, setView] = useState<ViewMode>(() => { try { return localStorage.getItem("axom.folders.view") === "list" ? "list" : "grid"; } catch { return "grid"; } });
   const [copied, setCopied] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [errors, setErrors] = useState<Record<string, { path: string; message: string } | undefined>>({});
   const [details, setDetails] = useState<Record<string, { path: string; info: HubFolderInfo }>>({});
   const desktop = isDesktopShell();
   const deviceFolders = s.folders.map((folder) => ({ ...folder, localPath: localHubFolderPath(folder) }));
@@ -98,24 +98,24 @@ export function HubFoldersPage() {
   async function openLocal(folder: HubFolder, reveal = false) {
     if (!folder.localPath) return;
     setPending(folder.id);
-    setErrors((previous) => ({ ...previous, [folder.id]: "" }));
+    setErrors((previous) => ({ ...previous, [folder.id]: undefined }));
     try {
       await openHubFolder(folder.localPath, reveal);
       markOpened(folder);
     } catch (error) {
-      setErrors((previous) => ({ ...previous, [folder.id]: error instanceof Error ? error.message : String(error) }));
+      setErrors((previous) => ({ ...previous, [folder.id]: { path: folder.localPath!, message: error instanceof Error ? error.message : String(error) } }));
     } finally { setPending(null); }
   }
 
   async function inspectLocal(folder: HubFolder) {
     if (!folder.localPath) return;
     setPending(folder.id);
-    setErrors((previous) => ({ ...previous, [folder.id]: "" }));
+    setErrors((previous) => ({ ...previous, [folder.id]: undefined }));
     try {
       const info = await hubFolderInfo(folder.localPath);
       setDetails((previous) => ({ ...previous, [folder.id]: { path: folder.localPath!, info } }));
     } catch (error) {
-      setErrors((previous) => ({ ...previous, [folder.id]: error instanceof Error ? error.message : String(error) }));
+      setErrors((previous) => ({ ...previous, [folder.id]: { path: folder.localPath!, message: error instanceof Error ? error.message : String(error) } }));
     } finally { setPending(null); }
   }
 
@@ -123,6 +123,8 @@ export function HubFoldersPage() {
     const linkTarget = safeFolderLink(folder.link);
     const cached = details[folder.id];
     const info = cached?.path === folder.localPath ? cached?.info : undefined;
+    const failure = errors[folder.id];
+    const error = failure?.path === folder.localPath ? failure?.message : undefined;
     return (
       <GlassCard pad hoverable key={folder.id} className={`folder-card folder-card--${view}`} style={{ "--folder-color": folder.color || "var(--cyan)" } as React.CSSProperties}>
         <div className="folder-card-top">
@@ -147,7 +149,7 @@ export function HubFoldersPage() {
           {info && <span>{info.entries.toLocaleString()}{info.entriesCapped ? "+" : ""} items{info.modifiedAt ? ` · Modified ${new Date(info.modifiedAt * 1000).toLocaleDateString()}` : ""}</span>}
         </div>}
         {folder.link && !linkTarget && <p className="folder-native-meta">App links can be copied and opened in their own app.</p>}
-        {errors[folder.id] && <p className="folder-error" role="alert">{errors[folder.id]}</p>}
+        {error && <p className="folder-error" role="alert">{error}</p>}
         <div className="folder-card-foot">
           <div className="row wrap gap6">
             {(folder.tags ?? []).slice(0, 3).map((tag) => <span className="tag neutral" key={tag}>#{tag}</span>)}

@@ -141,7 +141,7 @@ This table supersedes older CODEX/DONE assumptions above for this lane. SHIPPED 
 | I2-09 | Light mode | PARTIAL | Inherited tokens improve surfaces; full contrast audit remains. |
 | I2-10 | Trackers and targets | PARTIAL | Unified target presentation exists; concurrent units/correction/frequency fixes arriving. |
 | I2-11 | Productivity layout | PARTIAL | Timer above activity; responsive and low-data verification remains. |
-| I2-12 | Hub folders | PARTIAL | Narrow canonical-directory commands plus main-window ACL; 2 Rust tests pass, isolated native QA pending. |
+| I2-12 | Hub folders | SHIPPED + VERIFIED | Local packaged QA: Finder Open/Reveal, details/errors; 2 Rust tests. Browser 1440/390, 1942-test isolated quality gate. |
 | I2-13 | Rest alarm | PARTIAL | Preview, custom files, synthesized defaults exist; full lifecycle/audio/native checks remain. |
 | I2-14 | Frequency support | PARTIAL | Media-session boundary exists; Claude owns the engine and mixing. |
 | I2-15 | Emails | IMPLEMENTED, NOT VERIFIED | Inherited shared HTML/text renderer; generated HTML QA pending. |

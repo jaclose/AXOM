@@ -7,5 +7,8 @@
 .folder-actions { flex-wrap: wrap; }
 .folder-spinner { animation: folder-spin 1s linear infinite; }
 @keyframes folder-spin { to { transform: rotate(360deg); } }
-@media (max-width: 580px) { .folder-card-top { flex-wrap: wrap; } .folder-tools { width: 100%; justify-content: flex-end; } .folder-card-foot { align-items: flex-start; gap: 12px; flex-direction: column; } }
+@media (max-width: 580px) { .folders-hero .sec-row { flex-wrap: wrap; } .folder-card-top { flex-wrap: wrap; } .folder-tools { width: 100%; justify-content: flex-end; opacity: 1; } .folder-card-foot { align-items: flex-start; gap: 12px; flex-direction: column; } }
 @media (prefers-reduced-motion: reduce) { .folder-card { transition: none; } .folder-spinner { animation: none; } }
+.folders-hero .sec-row { align-items: flex-start; gap: 16px; }
+.folders-hero .sec-row > .gbtn { flex-shrink: 0; white-space: nowrap; }
+.folders-hero .panel-sub { max-width: 68ch; margin-top: 6px; color: var(--text-60); font-size: var(--fs-sm); line-height: 1.6; }
