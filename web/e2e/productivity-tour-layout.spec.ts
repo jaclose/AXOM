@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { completeSetup, expect, test } from "./fixtures";
 
 interface LayoutSnapshot {
   bodyClass: string;
@@ -105,14 +106,7 @@ function layoutSnapshot(page: Page): Promise<LayoutSnapshot> {
 }
 
 async function completeOnboarding(page: Page): Promise<void> {
-  const identityInput = page.getByLabel("Display name (optional)");
-  if (await identityInput.count()) {
-    await identityInput.fill("AXOM Tour E2E");
-    await page.getByRole("button", { name: "Continue" }).click();
-    await page.getByRole("button", { name: "Continue" }).click();
-    await page.getByRole("button", { name: "Continue" }).click();
-    await page.getByRole("button", { name: "Finish setup", exact: true }).click();
-  }
+  await completeSetup(page, "AXOM Tour E2E", { ifVisible: true });
   const reviewLater = page.getByRole("button", { name: "Review later" });
   if (await reviewLater.count()) await reviewLater.click();
 }

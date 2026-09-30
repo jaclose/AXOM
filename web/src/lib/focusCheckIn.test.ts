@@ -97,8 +97,8 @@ describe("focus check-in ledger and copy", () => {
   });
 
   it("uses what is left when it knows it, and stays kind after a drift", () => {
-    const withTarget = Array.from({ length: 12 }, (_, seed) => responseLine("locked-in", "coach", seed, { target: "42 min to go on Study time" }));
-    expect(withTarget).toContain("Just 42 min to go on Study time.");
+    const withTarget = Array.from({ length: 12 }, (_, seed) => responseLine("locked-in", "coach", seed, { target: "42 min remaining toward today’s Study time goal" }));
+    expect(withTarget).toContain("42 min remaining toward today’s Study time goal.");
     expect(responseLine("drifted", "coach", 0)).toMatch(/No shame|Noticing/);
     expect(responseLine("break", "coach", 1)).toBeTruthy();
     expect(formatMinutes(42)).toBe("42 min");

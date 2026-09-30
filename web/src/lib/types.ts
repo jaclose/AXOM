@@ -278,6 +278,10 @@ export interface DailyWordPuzzleState {
   completedAt?: string;
   /** Supports deterministic local upserts and backup conflict resolution. */
   updatedAt: string;
+  /** Hints taken today (1: keyboard glow, 2: slot outline, 3: reveal). */
+  hintsUsed?: number;
+  /** Completed by revealing the word: counts as played, keeps the streak, never a win. */
+  revealed?: boolean;
 }
 
 export type ProductivityUnitType = "minutes" | "count" | "yesno" | "distance" | "custom";
@@ -579,6 +583,7 @@ export type DashboardWidgetId =
   | "todayScore"
   | "examCountdown"
   | "pomodoro"
+  | "soundscapes"
   | "weekly"
   | "suggested"
   /** Legacy storage-only ID; intentionally absent from current catalogs. */
@@ -619,6 +624,8 @@ export interface DashboardLayoutPreferences {
   hiddenWidgetIds: string[];
   widgets: Record<string, DashboardWidgetPreferences>;
   dismissedExtraLargeRecommendation?: boolean;
+  /** Which DASHBOARD_DEFAULTS_REVISION this layout has been upgraded to; absent means 1. */
+  defaultsRevision?: number;
   updatedAt?: string;
   [key: string]: unknown;
 }
@@ -721,6 +728,8 @@ export interface InstalledBlueprint {
 
 export interface Profile {
   name: string;
+  /** Easter eggs found (e.g. "again"); unlocks are permanent and follow the account. */
+  unlocks?: string[];
   userId: string; // local backend owner key derived from display name
   versionLabel: string;
   tagline: string;
@@ -733,6 +742,11 @@ export interface Profile {
   toolsCollapsed?: boolean;
   prepCollapsed?: boolean;
   dailyGamesCollapsed?: boolean;
+  miscCollapsed?: boolean;
+  /** The learner's sidebar order (ids); unmoved items keep their default place. */
+  navOrder?: string[];
+  /** Sidebar layout generation; see lib/navLayout.ts. */
+  navLayoutVersion?: number;
   // First-launch onboarding
   onboarded: boolean;
   tourDone?: boolean; // global guided tour completed or skipped

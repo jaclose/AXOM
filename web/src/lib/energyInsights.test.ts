@@ -22,6 +22,12 @@ describe("energy samples", () => {
 });
 
 describe("day rhythm and peak window", () => {
+  it("counts late-night study (00:00-04:59) instead of dropping it", () => {
+    const rhythm = dayRhythm({ logs: [log(24, 45, 2), log(24, 30, 23)] }, NOW);
+    expect(rhythm.at(-1)).toMatchObject({ label: "Late night", startHour: 0, endHour: 5, minutes: 45 });
+    expect(rhythm.reduce((sum, band) => sum + band.minutes, 0)).toBe(75);
+  });
+
   it("finds the sharpest band by accuracy once there are enough answers", () => {
     const attempts = [
       ...Array.from({ length: 12 }, (_, i) => ({ at: at(20, 9), status: i < 10 ? "correct" : "incorrect" })),

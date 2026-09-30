@@ -10,6 +10,7 @@ import {
   extraLargeWidgetRecommendation,
   mergeDashboardLayoutPreferences,
   normalizeDashboardLayoutPreferences,
+  upgradeDashboardLayout,
 } from "./dashboardWidgets";
 import { STORED_DASHBOARD_WIDGET_IDS } from "./seed";
 
@@ -165,3 +166,65 @@ describe("dashboard widget layout model", () => {
     expect(extraLargeWidgetRecommendation({ ...layout, dismissedExtraLargeRecommendation: true }).shouldShow).toBe(false);
   });
 });
+
+describe("dashboard defaults revision 2: check-in, timer, soundscapes", () => {
+  const gridOrder = (layout: { order: string[]; hiddenWidgetIds: string[] }) =>
+    layout.order.filter((id) => !layout.hiddenWidgetIds.includes(id) && id !== "welcome" && id !== "commandBrief");
+
+  it("leads a new Focused dashboard with the check-in, then the timer with soundscapes beside it", () => {
+    const focused = applyDashboardLayoutPreset(adaptLegacyDashboardLayout(), "focused", "2026-09-30T12:00:00.000Z");
+    expect(gridOrder(focused).slice(0, 3)).toEqual(["winDay", "pomodoro", "soundscapes"]);
+    expect(focused.widgets.pomodoro.size).toBe("small");
+    expect(focused.widgets.soundscapes.size).toBe("small");
+    expect(upgradeDashboardLayout(focused)).toBe(focused);
+  });
+
+  it("moves an untouched preset layout onto the new order without hiding anything it showed", () => {
+    const oldFocused = normalizeDashboardLayoutPreferences({
+      version: 1,
+      preset: "focused",
+      order: ["welcome", "commandBrief", "winDay", "todayScore", "tasks", "courseTracker", "questionBank", "pomodoro", "weekly"],
+      hiddenWidgetIds: ["journal", "dailyWord"],
+      widgets: { tasks: { size: "large" } },
+    })!;
+    const upgraded = upgradeDashboardLayout(oldFocused);
+    expect(gridOrder(upgraded).slice(0, 3)).toEqual(["winDay", "pomodoro", "soundscapes"]);
+    expect(gridOrder(upgraded)).toContain("tasks");
+    expect(upgraded.widgets.tasks.size).toBe("large");
+    expect(upgraded.defaultsRevision).toBe(2);
+    expect(upgradeDashboardLayout(upgraded)).toBe(upgraded);
+  });
+
+  it("keeps a custom order and slots soundscapes in right after the timer", () => {
+    const custom = normalizeDashboardLayoutPreferences({
+      version: 1,
+      preset: "custom",
+      order: ["questionBank", "pomodoro", "journal", "winDay"],
+      hiddenWidgetIds: [],
+      widgets: {},
+    })!;
+    expect(upgradeDashboardLayout(custom).order).toEqual(["questionBank", "pomodoro", "soundscapes", "journal", "winDay"]);
+  });
+
+  it("adds soundscapes hidden when the learner hid or never had the timer", () => {
+    const hiddenTimer = normalizeDashboardLayoutPreferences({
+      version: 1, preset: "custom", order: ["winDay", "pomodoro"], hiddenWidgetIds: ["pomodoro"], widgets: {},
+    })!;
+    expect(upgradeDashboardLayout(hiddenTimer).hiddenWidgetIds).toContain("soundscapes");
+    const noTimer = normalizeDashboardLayoutPreferences({
+      version: 1, preset: "custom", order: ["winDay"], hiddenWidgetIds: [], widgets: {},
+    })!;
+    const upgraded = upgradeDashboardLayout(noTimer);
+    expect(upgraded.order).toEqual(["winDay", "soundscapes"]);
+    expect(upgraded.hiddenWidgetIds).toContain("soundscapes");
+  });
+
+  it("never re-adds soundscapes after the learner removes it", () => {
+    const custom = upgradeDashboardLayout(normalizeDashboardLayoutPreferences({
+      version: 1, preset: "custom", order: ["pomodoro"], hiddenWidgetIds: [], widgets: {},
+    })!);
+    const removed = normalizeDashboardLayoutPreferences({ ...custom, hiddenWidgetIds: ["soundscapes"] })!;
+    expect(upgradeDashboardLayout(removed).hiddenWidgetIds).toEqual(["soundscapes"]);
+  });
+});
+

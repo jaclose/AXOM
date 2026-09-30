@@ -32,6 +32,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** Focused hides Tasks now (it left the sidebar defaults too); these flows start from a student who added it back. */
+function showTasksWidget() {
+  const layout = structuredClone(useStore.getState().profile.dashboardLayout!);
+  layout.hiddenWidgetIds = layout.hiddenWidgetIds.filter((id) => id !== "tasks");
+  useStore.getState().updateProfile({ dashboardLayout: layout });
+}
+
 describe("Dashboard widget engine", () => {
   it("renders the focused core grid and a catalog that omits removed recommendation widgets", async () => {
     const user = userEvent.setup();
@@ -40,7 +47,8 @@ describe("Dashboard widget engine", () => {
     expect(screen.getByRole("region", { name: "Dashboard widgets" })).toBeTruthy();
     expect(screen.getByText("Question Bank", { selector: ".panel-title" })).toBeTruthy();
     expect(screen.getByText("Course Tracker", { selector: ".panel-title" })).toBeTruthy();
-    expect(screen.getByText("Tasks", { selector: ".panel-title" })).toBeTruthy();
+    expect(screen.getByText("Soundscape", { selector: ".panel-title" })).toBeTruthy();
+    expect(screen.queryByText("Tasks", { selector: ".panel-title" })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Edit dashboard" }));
     expect(screen.getAllByText("Build your dashboard").length).toBeGreaterThan(0);
@@ -55,6 +63,7 @@ describe("Dashboard widget engine", () => {
 
   it("removes, restores, and keyboard-reorders widgets without deleting source data", async () => {
     const user = userEvent.setup();
+    showTasksWidget();
     render(<DashboardPage />);
     await user.click(screen.getByRole("button", { name: "Edit dashboard" }));
     const beforeTasks = structuredClone(useStore.getState().tasks);
@@ -70,15 +79,18 @@ describe("Dashboard widget engine", () => {
     await user.click(within(taskCatalogRow!).getByRole("button", { name: "Add" }));
     expect(useStore.getState().profile.dashboardLayout?.hiddenWidgetIds).not.toContain("tasks");
 
-    const beforeOrder = [...(useStore.getState().profile.dashboardLayout?.order ?? [])];
+    const before = useStore.getState().profile.dashboardLayout!;
+    const visibleBefore = before.order.filter((id) => !before.hiddenWidgetIds.includes(id));
+    const neighbour = visibleBefore[visibleBefore.indexOf("tasks") - 1];
     await user.click(screen.getByRole("button", { name: "Move Tasks up" }));
     const afterOrder = useStore.getState().profile.dashboardLayout?.order ?? [];
-    expect(afterOrder.indexOf("tasks")).toBe(beforeOrder.indexOf("tasks") - 1);
+    expect(afterOrder.indexOf("tasks")).toBeLessThan(afterOrder.indexOf(neighbour));
     expect(useStore.getState().tasks).toEqual(beforeTasks);
   });
 
   it("persists meaningful per-widget size and field settings atomically", async () => {
     const user = userEvent.setup();
+    showTasksWidget();
     render(<DashboardPage />);
     await user.click(screen.getByRole("button", { name: "Customize Tasks" }));
     const panel = screen.getByRole("region", { name: "Customize Tasks" });

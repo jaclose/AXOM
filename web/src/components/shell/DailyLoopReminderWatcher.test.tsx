@@ -6,6 +6,9 @@ import { createDailyLoopReminderLedger } from "../../lib/dailyLoopReminders";
 import { useStore } from "../../lib/store";
 import { REMINDER_TOAST_DURATION_MS, useToasts } from "../../lib/toast";
 import { Toaster } from "./Toaster";
+
+/** A notice that is still active (dismissed ones evaporate for a moment). */
+const activeToast = (text: string) => screen.queryByText(text)?.closest(".toast:not(.is-leaving)") ?? null;
 import {
   DAILY_LOOP_REMINDER_OPEN_EVENT,
   DailyLoopReminderWatcher,
@@ -79,11 +82,11 @@ describe("DailyLoopReminderWatcher", () => {
     let now = localTime(9);
     renderWatcher(() => now);
     fireEvent.click(await screen.findByRole("button", { name: "Snooze 30 min" }));
-    expect(screen.queryByText("Set today’s direction")).toBeNull();
+    expect(activeToast("Set today’s direction")).toBeNull();
 
     now = localTime(9, 29);
     fireEvent(window, new Event("pageshow"));
-    expect(screen.queryByText("Set today’s direction")).toBeNull();
+    expect(activeToast("Set today’s direction")).toBeNull();
 
     now = localTime(9, 30);
     fireEvent.focus(window);

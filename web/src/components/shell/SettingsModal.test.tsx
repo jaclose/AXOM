@@ -60,7 +60,7 @@ describe("Settings information architecture", () => {
     expect(screen.getByText(/keeps this text exactly as written.*fixed word rules \(not AI\).*never applied automatically/)).toBeTruthy();
 
     const original = "Noji every day. I review a week later — I don't use Quizlet.";
-    fireEvent.change(screen.getByLabelText("Other — tell AXOM how you study"), { target: { value: original } });
+    fireEvent.change(screen.getByLabelText("Other: tell AXOM how you study"), { target: { value: original } });
     const region = screen.getByRole("region", { name: "Suggestions from your words" });
     expect(region.textContent).toContain("You wrote “Noji every day”");
     expect(region.textContent).toContain("You wrote “review a week later”");
@@ -81,7 +81,7 @@ describe("Settings information architecture", () => {
     useStore.getState().updateProfile({ studyWorkflow: { configured: true, methods: [{ id: "anki", enabled: false, usage: "Own cards" }], lecturePasses: 2, reviewAfterDays: 3 } });
     render(<SettingsModal onClose={() => {}} initialTab="personalization" />);
     const original = "  Anki before exams, UWorld after lectures, and I rewatch lectures 3 times.  ";
-    fireEvent.change(screen.getByLabelText("Other — tell AXOM how you study"), { target: { value: original } });
+    fireEvent.change(screen.getByLabelText("Other: tell AXOM how you study"), { target: { value: original } });
     fireEvent.click(screen.getByRole("button", { name: "Apply all" }));
 
     const workflow = useStore.getState().profile.studyWorkflow!;
@@ -124,8 +124,8 @@ describe("Settings information architecture", () => {
   it("states accurate local-first semantics without promising a cloud account", async () => {
     const user = userEvent.setup();
     render(<SettingsModal onClose={() => {}} initialTab="data" />);
-    expect(screen.getByText(/workspace is stored on this device/i)).toBeTruthy();
-    expect(screen.getByText(/deliberately link an account/i)).toBeTruthy();
+    expect(screen.getByText(/workspace lives on this device and saves as you work/i)).toBeTruthy();
+    expect(screen.getByText(/If you sign in, protected copies/i)).toBeTruthy();
     expect(screen.queryByText(/your account is synced/i)).toBeNull();
     expect(screen.queryByText(/workspace follows you across devices/i)).toBeNull();
 

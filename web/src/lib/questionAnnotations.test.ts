@@ -154,22 +154,22 @@ describe("question annotation integrity", () => {
     });
   }
 
-  it("rejects partial and nested overlaps but permits touching edges", () => {
+  it("merges partial, enclosing and adjacent compatible highlights", () => {
     const existing = createTextAnnotation({
       id: "existing", target: "stem", sourceText: text,
       startOffset: 0, endOffset: 10, tone: "yellow", now: NOW,
     });
     expect(tryCreate("partial", 8, 15, [existing])).toMatchObject({
-      status: "overlap",
-      existingAnnotationId: "existing",
-      reason: "Highlight overlaps an existing highlight.",
+      status: "created",
+      annotation: { id: "existing", startOffset: 0, endOffset: 15 },
+      mergedIds: ["existing"],
     });
     const enclosing = createTextAnnotation({
       id: "enclosing", target: "stem", sourceText: text,
       startOffset: 0, endOffset: 20, tone: "yellow", now: NOW,
     });
-    expect(tryCreate("nested", 5, 10, [enclosing]).status).toBe("overlap");
-    expect(tryCreate("adjacent", 10, 20, [existing]).status).toBe("created");
+    expect(tryCreate("nested", 5, 10, [enclosing])).toMatchObject({ status: "created", annotation: { startOffset: 0, endOffset: 20 } });
+    expect(tryCreate("adjacent", 10, 20, [existing])).toMatchObject({ status: "created", annotation: { startOffset: 0, endOffset: 20 }, annotations: [expect.objectContaining({ id: "existing" })] });
   });
 
   it("isolates overlap checks by target", () => {
@@ -283,5 +283,23 @@ describe("question annotation integrity", () => {
       expect.objectContaining({ id: "second-overlap", status: "needs-repair" }),
       expect.objectContaining({ id: "first-active", status: "active" }),
     ]);
+  });
+});
+
+
+describe("merged annotation persistence", () => {
+  it("bridges multiple marks across lines and roundtrips through persisted JSON", () => {
+    const text = "First line\nSecond line\nThird line";
+    const existing = [
+      createTextAnnotation({ id: "first", target: "stem", sourceText: text, startOffset: 0, endOffset: 5, tone: "yellow", now: NOW }),
+      createTextAnnotation({ id: "second", target: "stem", sourceText: text, startOffset: 15, endOffset: 22, tone: "yellow", now: NOW }),
+    ];
+    const result = createTextAnnotationWithIntegrity({ id: "bridge", target: "stem", sourceText: text, startOffset: 4, endOffset: 18, tone: "yellow", now: NOW, existingAnnotations: existing });
+    expect(result.status).toBe("created");
+    if (result.status !== "created") return;
+    expect(result.annotations).toHaveLength(1);
+    const restored = normalizeQuestionAnnotations(JSON.parse(JSON.stringify(result.annotations)))!;
+    expect(reconcileTextAnnotation(restored[0], text)).toMatchObject({ startOffset: 0, endOffset: 22, status: "active", exactText: text.slice(0, 22) });
+    expect(removeTextAnnotationById(restored, restored[0].id)).toEqual([]);
   });
 });

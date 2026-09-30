@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { completeSetup, expect, test } from "./fixtures";
 
 test("Dashboard widgets stay configurable, keyboard-reorderable, and responsive", async ({ page }) => {
   await page.goto("/#dashboard", { waitUntil: "networkidle" });
@@ -6,16 +7,19 @@ test("Dashboard widgets stay configurable, keyboard-reorderable, and responsive"
   await page.evaluate(() => { window.location.hash = "dashboard"; });
 
   const widgetGrid = page.getByRole("region", { name: "Dashboard widgets" });
-  const tasksWidget = page.locator('[data-widget-id="tasks"]');
+  const trackerWidget = page.locator('[data-widget-id="courseTracker"]');
   await expect(widgetGrid).toBeVisible();
-  await expect(tasksWidget).toBeVisible();
+  await expect(trackerWidget).toBeVisible();
+  // I1-21 (JD): the check-in first, then the focus timer with soundscapes beside it.
+  await expect.poll(() => widgetGrid.locator("[data-widget-id]").evaluateAll((frames) => frames.slice(0, 3).map((frame) => frame.getAttribute("data-widget-id"))))
+    .toEqual(["winDay", "pomodoro", "soundscapes"]);
 
   // Widget settings behave like a contained editing surface: opening moves
   // focus inside, Cancel discards the draft, and focus returns to the trigger.
-  const customizeTasks = page.getByRole("button", { name: "Customize Tasks" });
+  const customizeTasks = page.getByRole("button", { name: "Customize Course Tracker" });
   await customizeTasks.focus();
   await page.keyboard.press("Enter");
-  const settings = page.getByRole("region", { name: "Customize Tasks" });
+  const settings = page.getByRole("region", { name: "Customize Course Tracker" });
   await expect(settings).toBeVisible();
   await expect(settings.locator('input[type="radio"]').first()).toBeFocused();
 
@@ -48,15 +52,15 @@ test("Dashboard widgets stay configurable, keyboard-reorderable, and responsive"
 
   const visibleZone = page.locator(".widget-editor-zone").first();
   const labelsBefore = await editorWidgetLabels(visibleZone);
-  const tasksIndexBefore = labelsBefore.indexOf("Tasks");
+  const tasksIndexBefore = labelsBefore.indexOf("Course Tracker");
   expect(tasksIndexBefore).toBeGreaterThan(0);
 
-  const moveTasksUp = page.getByRole("button", { name: "Move Tasks up" });
+  const moveTasksUp = page.getByRole("button", { name: "Move Course Tracker up" });
   await moveTasksUp.focus();
   await page.keyboard.press("Enter");
   await expect(page.locator('.dashboard-widget-editor .sr-only[aria-live="polite"]'))
-    .toContainText("Tasks moved earlier.");
-  await expect.poll(async () => (await editorWidgetLabels(visibleZone)).indexOf("Tasks"))
+    .toContainText("Course Tracker moved earlier.");
+  await expect.poll(async () => (await editorWidgetLabels(visibleZone)).indexOf("Course Tracker"))
     .toBe(tasksIndexBefore - 1);
 
   await page.getByRole("button", { name: "Done editing" }).click();
@@ -112,14 +116,7 @@ async function editorWidgetLabels(zone: ReturnType<Page["locator"]>): Promise<st
 }
 
 async function completeOnboarding(page: Page): Promise<void> {
-  const identityInput = page.getByLabel("Display name (optional)");
-  if (await identityInput.count()) {
-    await identityInput.fill("AXOM Widget E2E");
-    await page.getByRole("button", { name: "Continue" }).click();
-    await page.getByRole("button", { name: "Continue" }).click();
-    await page.getByRole("button", { name: "Continue" }).click();
-    await page.getByRole("button", { name: "Finish setup", exact: true }).click();
-  }
+  await completeSetup(page, "AXOM Widget E2E", { ifVisible: true });
   const reviewLater = page.getByRole("button", { name: "Review later" });
   if (await reviewLater.count()) await reviewLater.click();
 }

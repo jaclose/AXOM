@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { completeSetup, expect, test } from "./fixtures";
 
 test("Daily Games and Building remain honest and responsive", async ({ page }) => {
   const errors:string[]=[]; page.on("console",m=>{if(m.type()==="error")errors.push(m.text())}); page.on("pageerror",e=>errors.push(e.message));
@@ -20,7 +21,6 @@ test("Daily Games and Building remain honest and responsive", async ({ page }) =
 });
 
 async function completeOnboarding(page:Page){
-  const name=page.getByLabel("Display name (optional)"); if(!await name.isVisible().catch(()=>false))return;
-  await name.fill("AXOM Ecosystem E2E"); for(let i=0;i<3;i++)await page.getByRole("button",{name:"Continue"}).click();
-  await page.getByRole("button",{name:"Finish setup",exact:true}).click(); const later=page.getByRole("button",{name:"Review later"}); if(await later.count())await later.click();
+  if(!await completeSetup(page,"AXOM Ecosystem E2E",{ifVisible:true}))return;
+  const later=page.getByRole("button",{name:"Review later"}); if(await later.count())await later.click();
 }

@@ -5,6 +5,50 @@ export type OutputMode = "headphones" | "speakers";
 export { fillNoise };
 
 const CROSSFADE_S = 1.8;
+/** Seconds for the very first fade-in from silence (never a sudden start). */
+const FIRST_FADE_TAU_S = 1.4;
+/** Largest loudness trim any version may apply (dB). */
+export const MAX_TRIM_DB = 8;
+
+/** Hearing-comfort settings shared by every soundscape (see context()). */
+export const COMFORT = {
+  subsonicHz: 32,
+  shelfHz: 5200,
+  shelfDb: -5,
+  topHz: 10_500,
+  /** Pre-volume: bursts above this are squeezed (the beds sit ~6 dB below). */
+  tamerThresholdDb: -9,
+  /** Post-volume sample ceiling. */
+  ceilingDb: -9,
+  inputTrim: 0.57,
+} as const;
+
+/**
+ * A 12-second mono WAV of dither-level noise (±1 LSB, about -90 dBFS: far
+ * below hearing). Chrome only lists "persistent" media players in Now Playing
+ * and the media keys; the Web Audio stream alone counts as a one-shot call.
+ */
+function createSessionAnchor(): HTMLAudioElement | null {
+  if (typeof Audio === "undefined" || typeof URL === "undefined" || typeof URL.createObjectURL !== "function") return null;
+  try {
+    const rate = 8000;
+    const samples = rate * 12;
+    const buffer = new ArrayBuffer(44 + samples * 2);
+    const view = new DataView(buffer);
+    const text = (offset: number, value: string) => { for (let i = 0; i < value.length; i += 1) view.setUint8(offset + i, value.charCodeAt(i)); };
+    text(0, "RIFF"); view.setUint32(4, 36 + samples * 2, true); text(8, "WAVE");
+    text(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+    view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+    text(36, "data"); view.setUint32(40, samples * 2, true);
+    for (let i = 0; i < samples; i += 1) view.setInt16(44 + i * 2, Math.round(Math.random() * 2 - 1), true);
+    const element = new Audio(URL.createObjectURL(new Blob([buffer], { type: "audio/wav" })));
+    element.loop = true;
+    element.preload = "auto";
+    return element;
+  } catch {
+    return null;
+  }
+}
 
 interface Layer {
   bus: GainNode;
@@ -35,16 +79,19 @@ export function volumeToGain(volume: number): number {
 }
 
 /**
- * The live audio graph. One engine per app: versions crossfade on a shared
- * master → gentle limiter → analyser → output. Output goes through a media
- * element when the browser allows it, so macOS Now Playing and media keys
- * work and playback survives background tabs.
+ * The live audio graph. One engine per app: versions crossfade into a shared
+ * hearing-comfort chain → volume → peak ceiling → analyser → speakers. A
+ * near-silent anchor file makes AXOM a "persistent" media player, so macOS
+ * Now Playing, Control Center and the media keys see it.
  */
 export class SoundscapeEngine {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  /** Entry of the hearing-comfort chain every version feeds. */
+  private input: GainNode | null = null;
+  /** Near-silent looping file: gives the browser a real media player so macOS Now Playing and media keys see AXOM. */
+  private anchor: HTMLAudioElement | null = null;
   private analyser: AnalyserNode | null = null;
-  private element: HTMLAudioElement | null = null;
   private layer: Layer | null = null;
   private kit: LayerKit | null = null;
   private rooms = new Map<number, AudioBuffer>();
@@ -67,34 +114,54 @@ export class SoundscapeEngine {
     const Ctor = audioContextCtor();
     if (!Ctor) throw new Error("This browser can’t synthesize audio.");
     const ctx = new Ctor({ latencyHint: "playback" });
+    // Hearing comfort, before the volume so it works at every level:
+    //   subsonic high-pass (no ear pressure) → soft high shelf and gentle
+    //   top roll-off (no hiss fatigue) → transient tamer (no sudden chirps or
+    //   clicks more than a few dB above the bed).
+    const input = ctx.createGain();
+    // The tamer adds automatic make-up gain (Chrome ≈ +4.9 dB at these
+    // settings); take it back so a volume setting sounds as loud as before.
+    input.gain.value = COMFORT.inputTrim;
+    const subsonic = ctx.createBiquadFilter();
+    subsonic.type = "highpass";
+    subsonic.frequency.value = COMFORT.subsonicHz;
+    subsonic.Q.value = 0.6;
+    const shelf = ctx.createBiquadFilter();
+    shelf.type = "highshelf";
+    shelf.frequency.value = COMFORT.shelfHz;
+    shelf.gain.value = COMFORT.shelfDb;
+    const top = ctx.createBiquadFilter();
+    top.type = "lowpass";
+    top.frequency.value = COMFORT.topHz;
+    top.Q.value = 0.5;
+    const tamer = ctx.createDynamicsCompressor();
+    tamer.threshold.value = COMFORT.tamerThresholdDb;
+    tamer.knee.value = 6;
+    tamer.ratio.value = 10;
+    tamer.attack.value = 0.003;
+    tamer.release.value = 0.25;
     const master = ctx.createGain();
     master.gain.value = 0;
-    // Soft-knee limiting keeps stacked layers from clipping without pumping.
+    input.connect(subsonic).connect(shelf).connect(top).connect(tamer).connect(master);
+    // Final peak guard after the volume: nothing leaves AXOM above this ceiling.
     const limiter = ctx.createDynamicsCompressor();
-    limiter.threshold.value = -14;
-    limiter.knee.value = 12;
-    limiter.ratio.value = 4;
-    limiter.attack.value = 0.02;
-    limiter.release.value = 0.4;
+    limiter.threshold.value = COMFORT.ceilingDb;
+    limiter.knee.value = 0;
+    limiter.ratio.value = 20;
+    limiter.attack.value = 0.001;
+    limiter.release.value = 0.3;
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 512;
     analyser.smoothingTimeConstant = 0.86;
     master.connect(limiter).connect(analyser);
-    let routed = false;
-    if (typeof ctx.createMediaStreamDestination === "function" && typeof Audio !== "undefined") {
-      try {
-        const stream = ctx.createMediaStreamDestination();
-        analyser.connect(stream);
-        const element = new Audio();
-        element.srcObject = stream.stream;
-        await element.play();
-        this.element = element;
-        routed = true;
-      } catch {
-        routed = false;
-      }
-    }
-    if (!routed) analyser.connect(ctx.destination);
+    // Straight to the speakers. (A MediaStream <audio> route used to sit here;
+    // Chrome counts stream playback as a one-shot "call", and any one-shot
+    // player makes the whole tab uncontrollable, which hid AXOM from macOS
+    // Now Playing and the media keys. AudioContext output alone keeps the
+    // tab audible, so background tabs aren't throttled.)
+    analyser.connect(ctx.destination);
+    this.anchor = createSessionAnchor();
+    this.input = input;
     this.ctx = ctx;
     this.master = master;
     this.analyser = analyser;
@@ -115,19 +182,21 @@ export class SoundscapeEngine {
   /** Start (or crossfade to) a preset version. Must follow a user gesture the first time. */
   async play(preset: SoundscapePreset, options: { volume: number; output: OutputMode; versionId?: string }): Promise<void> {
     const ctx = await this.context();
-    await this.element?.play().catch(() => undefined);
     const version = versionOf(preset, options.versionId);
     const now = ctx.currentTime;
     const previous = this.layer;
     const bus = ctx.createGain();
-    const trim = "recipe" in version ? 10 ** ((version.recipe.trimDb ?? 0) / 20) : 1;
+    const trim = "recipe" in version ? 10 ** (Math.min(MAX_TRIM_DB, version.recipe.trimDb ?? 0) / 20) : 1;
     bus.gain.setValueAtTime(0, now);
     bus.gain.linearRampToValueAtTime(trim, now + CROSSFADE_S);
-    bus.connect(this.master!);
+    bus.connect(this.input!);
     const stops = this.build(ctx, bus, version, options.output);
     this.layer = { bus, stop: () => stops.forEach((stop) => stop()) };
+    // From silence, fade in slowly; between versions the crossfade already does the work.
+    const fromSilence = !previous || this.master!.gain.value < 0.002;
     this.master!.gain.cancelScheduledValues(now);
-    this.master!.gain.setTargetAtTime(volumeToGain(options.volume), now, 0.35);
+    this.master!.gain.setTargetAtTime(volumeToGain(options.volume), now, fromSilence ? FIRST_FADE_TAU_S : 0.35);
+    void this.anchor?.play().catch(() => undefined);
     if (previous) this.retire(previous, now);
   }
 
@@ -159,9 +228,11 @@ export class SoundscapeEngine {
 
   /** An imported recording: a pre-looped file streamed through the graph. */
   private recording(ctx: AudioContext, bus: GainNode, version: Extract<SoundscapeVersion, { src: string }>): Array<() => void> {
-    const element = new Audio(`${import.meta.env.BASE_URL}${version.src}`);
+    // Shipped files are relative to the app; your own files arrive as blob: URLs.
+    const url = /^(blob:|https?:|data:)/.test(version.src) ? version.src : `${import.meta.env.BASE_URL}${version.src}`;
+    const element = new Audio(url);
     element.loop = true;
-    element.crossOrigin = "anonymous";
+    if (!url.startsWith("blob:")) element.crossOrigin = "anonymous";
     const source = ctx.createMediaElementSource(element);
     const level = ctx.createGain();
     level.gain.value = version.gain ?? 0.8;
@@ -186,13 +257,13 @@ export class SoundscapeEngine {
   }
 
   async pause(): Promise<void> {
-    this.element?.pause();
+    this.anchor?.pause();
     await this.ctx?.suspend();
   }
 
   async resume(): Promise<void> {
     await this.ctx?.resume();
-    await this.element?.play().catch(() => undefined);
+    await this.anchor?.play().catch(() => undefined);
   }
 
   /** Fade out, then release the sources. A long fade suits the sleep timer. */
@@ -205,7 +276,7 @@ export class SoundscapeEngine {
     return new Promise((resolve) => {
       window.setTimeout(() => {
         if (!this.layer) {
-          this.element?.pause();
+          this.anchor?.pause();
           void ctx.suspend().catch(() => undefined);
         }
         resolve();

@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { completeSetup, expect, test } from "./fixtures";
 
 test("review-first schedule intake accepts files, corrections, deferral, and mobile reload", async ({ page }) => {
   const errors: string[] = [];
@@ -20,27 +21,23 @@ test("review-first schedule intake accepts files, corrections, deferral, and mob
   await dialog.getByLabel("Title").first().fill("Renal Clearance Lecture");
   await dialog.getByLabel("Type").first().selectOption("Lecture");
   await dialog.getByRole("button", { name: "Import selected (2)" }).click();
-  await expect(page.getByText("Renal Clearance Lecture")).toBeVisible();
+  await expect(page.locator(".dr-label").getByText("Renal Clearance Lecture", { exact: true })).toBeVisible();
 
   const defer = page.getByRole("button", { name: /^Defer / }).first();
+  // I3-27: one tap, no "when should this return?" question; the notice explains and offers Undo.
   await defer.click();
-  await expect(page.getByRole("dialog", { name: "When should this return?" })).toContainText("stays in your Tracker");
-  await page.getByRole("button", { name: "In 2 days" }).click();
-  await expect(page.getByRole("dialog", { name: "When should this return?" })).toHaveCount(0);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.locator(".toast:not(.is-leaving)").filter({ hasText: "Back tomorrow" })).toContainText("stays in your Tracker");
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload({ waitUntil: "networkidle" });
-  await expect(page.getByText("Renal Clearance Lecture")).toBeVisible();
+  await expect(page.locator(".dr-label").getByText("Renal Clearance Lecture", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   expect(errors).toEqual([]);
 });
 
 async function completeOnboarding(page: Page) {
-  const name = page.getByLabel("Display name (optional)");
-  if (!(await name.isVisible().catch(() => false))) return;
-  await name.fill("Schedule Intake Test");
-  for (let step = 0; step < 3; step += 1) await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByRole("button", { name: "Finish setup", exact: true }).click();
+  if (!(await completeSetup(page, "Schedule Intake Test", { ifVisible: true }))) return;
   const later = page.getByRole("button", { name: "Review later" });
   if (await later.count()) await later.click();
 }

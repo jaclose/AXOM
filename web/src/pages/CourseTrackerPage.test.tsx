@@ -1,13 +1,12 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { Toaster } from "../components/shell/Toaster";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { STORAGE_KEYS } from "../lib/brand";
 import { makeSeed } from "../lib/seed";
 import { useStore } from "../lib/store";
 import { useToasts } from "../lib/toast";
 import type { TrackerItem } from "../lib/types";
 import {
-  announceCourseTrackerIntroOnce,
   CourseTrackerPage,
   descendantScopes,
   extractTrackerImportFile,
@@ -63,6 +62,28 @@ describe("Course Tracker comprehension layout", () => {
     expect(progress.getAttribute("aria-valuenow")).toBe("67");
     expect(screen.queryByText("This scope is complete")).toBeNull();
     expect(useStore.getState().tracker[0].passes).toBe(4);
+  });
+
+  it("edits name, type and note in the same dialog as the study plan (I3-29)", () => {
+    const state = useStore.getState();
+    useStore.setState({ tracker: [{ ...state.tracker[0], id: "edit-me", label: "Old name", kind: "Lecture", passes: 1, note: undefined }] });
+    const prompt = vi.fn();
+    vi.stubGlobal("prompt", prompt);
+    render(<CourseTrackerPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Old name" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit item · Old name" });
+    expect(prompt).not.toHaveBeenCalled();
+    expect(within(dialog).getByRole("tab", { name: "Details" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Renal clearance" } });
+    fireEvent.change(within(dialog).getByLabelText("Note (optional)"), { target: { value: "Weak on free water" } });
+    fireEvent.change(within(dialog).getByLabelText("Type"), { target: { value: "PQ" } });
+    fireEvent.click(within(dialog).getByRole("tab", { name: "Study plan" }));
+    expect(screen.getByRole("dialog", { name: "Study plan · Old name" })).toBeTruthy();
+    // Question sets complete in three rounds: no lecture-pass field to misread.
+    expect(within(dialog).queryByLabelText("Lecture passes")).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save plan" }));
+    expect(useStore.getState().tracker[0]).toMatchObject({ label: "Renal clearance", kind: "PQ", note: "Weak on free water" });
   });
 
   it("keeps previously recorded passes visible when a learner lowers the target", () => {
@@ -164,15 +185,14 @@ describe("Course Tracker comprehension layout", () => {
     expect(useStore.getState().tracker.map((item) => ({ id: item.id, passes: item.passes }))).toEqual(before);
   });
 
-  it("defers a recommendation with explicit, reversible timing", () => {
-    render(<CourseTrackerPage />);
-    const deferButton = screen.getAllByRole("button", { name: /^Defer / })[0];
-    fireEvent.click(deferButton);
-    const dialog = screen.getByRole("dialog", { name: "When should this return?" });
-    expect(within(dialog).getByText(/stays in your Tracker/)).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole("button", { name: "In 2 days" }));
-    expect(useStore.getState().tracker.some((item) => item.recommendationSnoozedUntil && Date.parse(item.recommendationSnoozedUntil) > Date.now())).toBe(true);
+  it("defers a recommendation in one tap until tomorrow, with Undo", () => {
+    render(<><CourseTrackerPage /><Toaster /></>);
+    fireEvent.click(screen.getAllByRole("button", { name: /^Defer / })[0]);
     expect(screen.queryByRole("dialog", { name: "When should this return?" })).toBeNull();
+    const snoozed = useStore.getState().tracker.find((item) => item.recommendationSnoozedUntil);
+    expect(snoozed && Date.parse(snoozed.recommendationSnoozedUntil!) > Date.now()).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: /Undo/ }));
+    expect(useStore.getState().tracker.find((item) => item.id === snoozed!.id)?.recommendationSnoozedUntil).toBeUndefined();
   });
 
   it("exposes a plain Help entry point and stable module-tour anchors", () => {
@@ -202,31 +222,7 @@ describe("Course Tracker comprehension layout", () => {
   });
 });
 
-describe("Course Tracker local intro and file extraction", () => {
-  it("shows the exact intro once and stores only its stable announcement id", () => {
-    const storage = memoryStorage();
-    const session = new Set<string>();
-    const notify = vi.fn();
-
-    expect(announceCourseTrackerIntroOnce({ storage, session, notify })).toBe(true);
-    expect(announceCourseTrackerIntroOnce({ storage, session, notify })).toBe(false);
-    expect(notify).toHaveBeenCalledOnce();
-    expect(notify.mock.calls[0][0].body).toBe("Course Tracker keeps lectures, DLAs, practice questions, and passes in one place. Start by importing or adding a module.");
-    expect(JSON.parse(storage.getItem(STORAGE_KEYS.dismissedAnnouncements)!)).toEqual(["course-tracker-intro-v1"]);
-  });
-
-  it("uses an in-memory guard when device storage is blocked", () => {
-    const storage = {
-      getItem: vi.fn(() => { throw new Error("blocked"); }),
-      setItem: vi.fn(() => { throw new Error("blocked"); }),
-    };
-    const session = new Set<string>();
-    const notify = vi.fn();
-    expect(announceCourseTrackerIntroOnce({ storage, session, notify })).toBe(true);
-    expect(announceCourseTrackerIntroOnce({ storage, session, notify })).toBe(false);
-    expect(notify).toHaveBeenCalledOnce();
-  });
-
+describe("Course Tracker file extraction", () => {
   it("routes a PDF through the production extractor seam and preserves its filename and warnings", async () => {
     const buffer = new Uint8Array([37, 80, 68, 70]).buffer;
     const file = { name: "course schedule.pdf", type: "application/pdf", arrayBuffer: vi.fn(async () => buffer) } as unknown as File;
@@ -297,5 +293,41 @@ describe("Course Tracker primary focus", () => {
     cleanup();
     render(<CourseTrackerPage />);
     expect(screen.getByRole("button", { name: "Primary focus" }).getAttribute("aria-pressed")).toBe("true");
+  });
+});
+
+describe("Course Tracker first use (Wave 2)", () => {
+  const treeNames = (depth: number) => [...document.querySelectorAll(`.tree-node.depth${depth} > span:not(.tree-count)`)].map((node) => node.textContent).filter(Boolean);
+  const workflow = (methods: Array<[string, boolean]>) => ({ configured: true, methods: methods.map(([id, enabled]) => ({ id, enabled })) }) as never;
+
+  it("starts clean with the three ways in, and a template loads in teaching order", () => {
+    useStore.setState({ tracker: [], terms: [], courses: [] });
+    render(<CourseTrackerPage />);
+    expect(screen.getByRole("heading", { name: "Build it the way your school runs." })).toBeTruthy();
+    expect(screen.queryByText("No items here")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Load St\. George's University MD/ }));
+    expect(treeNames(0)).toEqual(["Term 1", "Term 2", "Term 3", "Term 4", "Term 5", "Boards"]);
+    fireEvent.click(screen.getByText("Term 1"));
+    fireEvent.click(screen.getByText("BPM 500"));
+    expect(treeNames(2)).toEqual(["FTM 1", "FTM 2", "MSK", "CPR 1", "CPR 2", "BSCE 1"]);
+    expect(screen.getByRole("heading", { name: "Add the lectures, and progress fills itself in." })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Paste a lecture list/ }));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+
+  it("shows card rounds under the student's own app, and none without one", () => {
+    const item: TrackerItem = { id: "l1", path: "Term 1/BPM 500/MSK", label: "Bone", kind: "Lecture", passes: 1, ankiPasses: 1, yield: "none", updated: "2026-09-01T12:00:00.000Z" };
+    useStore.setState((state) => ({ tracker: [item], profile: { ...state.profile, studyWorkflow: workflow([["noji", true], ["anki", false]]) } }));
+    const { unmount } = render(<CourseTrackerPage />);
+    expect(screen.getByTitle("Noji rounds (orange → yellow → purple)")).toBeTruthy();
+    expect(screen.queryByTitle(/^Anki rounds/)).toBeNull();
+    unmount();
+
+    useStore.setState((state) => ({ profile: { ...state.profile, studyWorkflow: workflow([["lecture-passes", true]]) } }));
+    render(<CourseTrackerPage />);
+    expect(screen.queryByTitle(/rounds \(orange/)).toBeNull();
+    expect(document.querySelector(".mastery-shard.no-cards")).toBeTruthy();
   });
 });

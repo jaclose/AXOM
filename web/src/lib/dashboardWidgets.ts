@@ -63,6 +63,7 @@ export const DASHBOARD_WIDGET_CATALOG: readonly DashboardWidgetCatalogItem[] = [
   { id: "todayScore", label: "Today's targets", description: "Scheduled target progress and provenance.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("progress", "targets", "sources") },
   { id: "examCountdown", label: "Exam countdown", description: "Exam date, phase, and daily question target.", defaultSize: "small", supportedSizes: COMPACT_SIZES, fields: fields("days", "phase", "questionTarget") },
   { id: "pomodoro", label: "Focus timer", description: "Current focus session and timer controls.", defaultSize: "small", supportedSizes: COMPACT_SIZES, fields: fields("timer", "intention", "sessions") },
+  { id: "soundscapes", label: "Soundscape", description: "Play, pause, and switch your study sound next to the timer.", defaultSize: "small", supportedSizes: COMPACT_SIZES, fields: fields(["quickPicks", "Quick picks"], ["followTimer", "Follow my Pomodoro"]) },
   { id: "weekly", label: "Weekly overview", description: "Seven-day effort and active-day rhythm.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("minutes", "activeDays", "trend") },
   { id: "suggested", label: "Suggested moves", description: "Merged into Up next; retained for old layouts.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("actions", "reasons", "effort"), storageOnly: true },
   { id: "schedule", label: "Schedule", description: "Legacy calendar widget retained for old layouts.", defaultSize: "large", supportedSizes: STANDARD_SIZES, fields: fields("calendar", "tasks", "activity"), storageOnly: true },
@@ -85,20 +86,28 @@ const CATALOG_BY_ID = new Map<string, DashboardWidgetCatalogItem>(
   DASHBOARD_WIDGET_CATALOG.map((item) => [item.id, item]),
 );
 
+/**
+ * JD (Ideas 1): check-in first, then the timer with soundscapes beside it,
+ * then the rest by how often a student reaches for them. Welcome and Up next
+ * render above the grid, so their slots here only matter to the editor.
+ */
 const FOCUSED_ORDER: DashboardWidgetId[] = [
-  "welcome", "commandBrief", "winDay", "todayScore", "tasks", "courseTracker", "questionBank",
-  "pomodoro", "weekly", "journal", "dailyWord", "examCountdown", "readiness",
+  "welcome", "commandBrief", "winDay", "pomodoro", "soundscapes", "todayScore", "questionBank",
+  "courseTracker", "weekly", "dailyWord", "tasks", "journal", "examCountdown", "readiness",
   "activity", "streak", "localData", "premedHours",
 ];
 
+/** Bump when default orders gain widgets; upgradeDashboardLayout carries saved layouts forward. */
+export const DASHBOARD_DEFAULTS_REVISION = 2;
+
 const STUDY_HEAVY_VISIBLE = new Set<DashboardWidgetId>([
   "welcome", "commandBrief", "todayScore", "tasks", "courseTracker", "questionBank",
-  "pomodoro", "weekly", "examCountdown", "activity", "streak",
+  "pomodoro", "soundscapes", "weekly", "examCountdown", "activity", "streak",
 ]);
 
 const WELLBEING_VISIBLE = new Set<DashboardWidgetId>([
   "welcome", "commandBrief", "winDay", "todayScore", "readiness", "activity", "journal",
-  "streak", "pomodoro", "weekly", "dailyWord",
+  "streak", "pomodoro", "soundscapes", "weekly", "dailyWord",
 ]);
 
 function hiddenExcept(visible: ReadonlySet<DashboardWidgetId>): DashboardWidgetId[] {
@@ -109,10 +118,10 @@ export const DASHBOARD_LAYOUT_PRESETS: readonly DashboardLayoutPreset[] = [
   {
     id: "focused",
     label: "Focused",
-    description: "Direction, next action, targets, and core study work.",
+    description: "Direction, focus timer and sound, targets, and core study work.",
     order: FOCUSED_ORDER,
-    hiddenWidgetIds: hiddenExcept(new Set(["welcome", "commandBrief", "winDay", "todayScore", "tasks", "courseTracker", "questionBank", "pomodoro", "weekly"])),
-    sizes: { welcome: "large", commandBrief: "large", winDay: "large", todayScore: "medium", tasks: "medium", courseTracker: "medium", questionBank: "medium", pomodoro: "small", weekly: "medium" },
+    hiddenWidgetIds: hiddenExcept(new Set(["welcome", "commandBrief", "winDay", "pomodoro", "soundscapes", "todayScore", "questionBank", "courseTracker", "weekly"])),
+    sizes: { welcome: "large", commandBrief: "large", winDay: "large", pomodoro: "small", soundscapes: "small", todayScore: "medium", questionBank: "medium", courseTracker: "medium", weekly: "medium" },
   },
   {
     id: "study-heavy",
@@ -120,7 +129,7 @@ export const DASHBOARD_LAYOUT_PRESETS: readonly DashboardLayoutPreset[] = [
     description: "More course, question, task, and trend detail.",
     order: FOCUSED_ORDER,
     hiddenWidgetIds: hiddenExcept(STUDY_HEAVY_VISIBLE),
-    sizes: { welcome: "medium", commandBrief: "large", courseTracker: "large", questionBank: "large", tasks: "medium" },
+    sizes: { welcome: "medium", commandBrief: "large", courseTracker: "large", questionBank: "large", tasks: "medium", pomodoro: "small", soundscapes: "small" },
   },
   {
     id: "wellbeing-balanced",
@@ -128,7 +137,7 @@ export const DASHBOARD_LAYOUT_PRESETS: readonly DashboardLayoutPreset[] = [
     description: "Daily direction, readiness, reflection, and sustainable rhythm.",
     order: FOCUSED_ORDER,
     hiddenWidgetIds: hiddenExcept(WELLBEING_VISIBLE),
-    sizes: { welcome: "large", commandBrief: "large", winDay: "medium", readiness: "small", activity: "medium", journal: "large", weekly: "medium" },
+    sizes: { welcome: "large", commandBrief: "large", winDay: "medium", readiness: "small", activity: "medium", journal: "large", weekly: "medium", pomodoro: "small", soundscapes: "small" },
   },
   {
     id: "custom",
@@ -276,8 +285,36 @@ export function applyDashboardLayoutPreset(
     hiddenWidgetIds: preset.hiddenWidgetIds,
     widgets,
     dismissedExtraLargeRecommendation: false,
+    defaultsRevision: DASHBOARD_DEFAULTS_REVISION,
     updatedAt,
   })!;
+}
+
+/**
+ * Carries a saved layout forward to the current defaults without undoing the
+ * learner's own choices. Any edit turns a layout "custom", so a named preset
+ * here means an untouched one: it takes the preset's new order. A custom
+ * layout only gains the new widget, placed where the defaults put it and
+ * shown only if its neighbour (the timer) is showing.
+ */
+export function upgradeDashboardLayout(layout: DashboardLayoutPreferences): DashboardLayoutPreferences {
+  if ((layout.defaultsRevision ?? 1) >= DASHBOARD_DEFAULTS_REVISION) return layout;
+  const hidden = new Set(layout.hiddenWidgetIds);
+  const widgets = { ...layout.widgets };
+  let order = [...layout.order];
+  const preset = layout.preset === "custom" ? undefined : PRESET_BY_ID.get(layout.preset);
+  if (preset) {
+    order = [...preset.order, ...order.filter((id) => !preset.order.includes(id as DashboardWidgetId))];
+    if (preset.hiddenWidgetIds.includes("soundscapes")) hidden.add("soundscapes");
+    else hidden.delete("soundscapes");
+    widgets.soundscapes ??= normalizeWidgetPreferences("soundscapes", { size: preset.sizes.soundscapes });
+  } else if (!order.includes("soundscapes")) {
+    const timer = order.indexOf("pomodoro");
+    order.splice(timer < 0 ? order.length : timer + 1, 0, "soundscapes");
+    if (timer < 0 || hidden.has("pomodoro")) hidden.add("soundscapes");
+    widgets.soundscapes ??= defaultDashboardWidgetPreferences("soundscapes");
+  }
+  return { ...layout, order, hiddenWidgetIds: [...hidden], widgets, defaultsRevision: DASHBOARD_DEFAULTS_REVISION };
 }
 
 export function countExtraLargeWidgets(value: unknown): number {

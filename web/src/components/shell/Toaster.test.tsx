@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { pushToast, REMINDER_TOAST_DURATION_MS, useToasts } from "../../lib/toast";
-import { Toaster } from "./Toaster";
+import { Toaster, TOAST_EXIT_MS } from "./Toaster";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -30,6 +30,9 @@ describe("Toaster", () => {
     showReminder();
     expect(screen.getByRole("status").textContent).toContain("Wrap up today");
     act(() => { vi.advanceTimersByTime(REMINDER_TOAST_DURATION_MS); });
+    // It evaporates in place (hidden from assistive tech), then is removed.
+    expect(document.querySelector(".toast.is-leaving")?.getAttribute("aria-hidden")).toBe("true");
+    act(() => { vi.advanceTimersByTime(TOAST_EXIT_MS); });
     expect(screen.queryByRole("region", { name: "Notifications" })).toBeNull();
   });
 
@@ -41,6 +44,7 @@ describe("Toaster", () => {
     expect(screen.getByText("Wrap up today")).toBeTruthy();
     fireEvent.mouseLeave(screen.getByRole("status"));
     act(() => { vi.advanceTimersByTime(REMINDER_TOAST_DURATION_MS); });
+    act(() => { vi.advanceTimersByTime(TOAST_EXIT_MS); });
     expect(screen.queryByText("Wrap up today")).toBeNull();
   });
 
@@ -55,6 +59,7 @@ describe("Toaster", () => {
     expect(screen.getByText("Wrap up today")).toBeTruthy();
     act(() => skip.blur());
     act(() => { vi.advanceTimersByTime(REMINDER_TOAST_DURATION_MS); });
+    act(() => { vi.advanceTimersByTime(TOAST_EXIT_MS); });
     expect(screen.queryByText("Wrap up today")).toBeNull();
   });
 
@@ -65,6 +70,8 @@ describe("Toaster", () => {
     expect(dismiss.getAttribute("type")).toBe("button");
     expect(dismiss.classList.contains("toast-close")).toBe(true);
     fireEvent.click(dismiss);
+    expect(useToasts.getState().toasts).toEqual([]);
+    act(() => { vi.advanceTimersByTime(TOAST_EXIT_MS); });
     expect(screen.queryByText("Wrap up today")).toBeNull();
   });
 });

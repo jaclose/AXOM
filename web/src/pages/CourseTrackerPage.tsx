@@ -28,9 +28,10 @@ import {
 } from "../lib/pathUtils";
 import type { BlueprintNodeStatus, Course, InstalledBlueprint, InstalledBlueprintNode, Term, TrackerItem, TrackerKind, Yield } from "../lib/types";
 import { extractDocxText, extractPdfText, extractPlainText, type ExtractedText } from "../lib/extractText";
-import { dismissAnnouncement, isAnnouncementDismissed, readDismissedAnnouncements } from "../lib/announcements";
 import { pushToast } from "../lib/toast";
 import { ModuleTour, type ModuleTourStep } from "../components/shell/ModuleTour";
+import { cardSystemFor, type CardSystem } from "../lib/cardSystem";
+import { TrackerFirstRun } from "../components/tracker/TrackerFirstRun";
 import { ICON_SIZE } from "../lib/iconSize";
 import { parseCourseSchedule, reconcileScheduleDuplicates, scheduleCandidatesToTracker, type ScheduleCandidate } from "../lib/courseScheduleImport";
 import { activePrimaryPaths, activePrimaryScopes, isPrimaryPath, itemsInPrimary, setPrimaryUntil, togglePrimaryScope, type PrimaryTrackerScope } from "../lib/trackerFocus";
@@ -47,7 +48,6 @@ const BLUEPRINT_STATUS_LABEL: Record<BlueprintNodeStatus, string> = {
   done: "Done",
 };
 const BLUEPRINT_STATUS_ORDER: BlueprintNodeStatus[] = ["not-started", "in-progress", "blocked", "mastered", "done"];
-const TRACKER_INTRO_ANNOUNCEMENT_ID = "course-tracker-intro-v1";
 export const COURSE_TRACKER_TOUR_STEPS: readonly ModuleTourStep[] = [
   { target: "tracker-import-add", title: "Import or add", body: "Import a course list or add a course and module manually. A provider is not required." },
   { target: "tracker-structure", title: "Organize the structure", body: "Use the mastery tree to choose a course or module and keep related work together." },
@@ -59,36 +59,6 @@ export const TRACKER_IMPORT_EXAMPLE = `Week 1:
 Cell injury [Lecture] [high]
 Inflammation questions [PQ] [review]
 Daily learning activity [DLA]`;
-const trackerIntroSession = new Set<string>();
-
-type AnnouncementStorage = Pick<Storage, "getItem" | "setItem">;
-
-export function announceCourseTrackerIntroOnce({
-  storage = browserLocalStorage(),
-  session = trackerIntroSession,
-  notify = pushToast,
-}: {
-  storage?: AnnouncementStorage;
-  session?: Set<string>;
-  notify?: typeof pushToast;
-} = {}): boolean {
-  if (session.has(TRACKER_INTRO_ANNOUNCEMENT_ID)
-    || isAnnouncementDismissed(TRACKER_INTRO_ANNOUNCEMENT_ID, readDismissedAnnouncements(storage))) return false;
-  session.add(TRACKER_INTRO_ANNOUNCEMENT_ID);
-  notify({
-    title: "Course Tracker",
-    body: "Course Tracker keeps lectures, DLAs, practice questions, and passes in one place. Start by importing or adding a module.",
-    tone: "info",
-    dedupe: TRACKER_INTRO_ANNOUNCEMENT_ID,
-  });
-  dismissAnnouncement(TRACKER_INTRO_ANNOUNCEMENT_ID, storage);
-  return true;
-}
-
-function browserLocalStorage(): AnnouncementStorage | undefined {
-  try { return typeof window === "undefined" ? undefined : window.localStorage; } catch { return undefined; }
-}
-
 export async function extractTrackerImportFile(
   file: File,
   pdfExtractor: (buffer: ArrayBuffer) => Promise<ExtractedText> = extractPdfText,
@@ -123,6 +93,7 @@ const yieldTone: Record<Yield, "cyan" | "green" | "orange" | "neutral"> = {
 
 export function CourseTrackerPage() {
   const s = useStore();
+  const cardSystem = cardSystemFor(s.profile.studyWorkflow);
   // Open on the remembered view, else the first primary focus.
   const [scope, setScopeState] = useState<string>(() => {
     const saved = readSavedTrackerScope();
@@ -140,7 +111,6 @@ export function CourseTrackerPage() {
   const [moduleOpen, setModuleOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
-  const [snoozeItem, setSnoozeItem] = useState<TrackerItem | null>(null);
   const [moduleHelpOpen, setModuleHelpOpen] = useState(false);
   const [moduleTourOpen, setModuleTourOpen] = useState(false);
   const [deleteScope, setDeleteScope] = useState<string | null>(null);
@@ -149,8 +119,6 @@ export function CourseTrackerPage() {
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const focusItemId = useUi((u) => u.focusItemId);
   const clearFocus = useUi((u) => u.clearFocus);
-
-  useEffect(() => { announceCourseTrackerIntroOnce(); }, []);
 
   // Bring a specific item into view: select its scope, expand the tree, scroll
   // to it, and pulse a highlight briefly. Used by clickable suggested moves.
@@ -270,7 +238,7 @@ export function CourseTrackerPage() {
                   openNodes={openNodes} onToggle={toggle} active={scope} onSelect={setScope}
                   primaryPaths={primaryPaths} onTogglePrimary={togglePrimary} />
               ))}
-              {tree.length === 0 && <EmptyState title="Empty tree" hint="Import or add a module to begin." />}
+              {tree.length === 0 && <p className="tracker-tree-empty">Your terms, courses and modules will appear here.</p>}
               <BlueprintTree installs={s.blueprintInstalls} openNodes={openNodes} onToggle={toggle} active={scope} onSelect={setScope} />
             </div>
             <div className="tracker-immediate-actions" data-module-tour="tracker-import-add">
@@ -304,7 +272,7 @@ export function CourseTrackerPage() {
                       <div className="grow"><b>{sg.title}</b><span>{sg.reason}</span></div>
                       <small>~{suggestionEffortMinutes(item)} min</small>
                       <GButton size="tiny" onClick={() => sg.itemId ? focusItem(sg.itemId) : setBulkOpen(true)}>Open</GButton>
-                      {item && <GhostButton aria-label={`Defer ${item.label}`} title="Choose when this suggestion returns" onClick={() => setSnoozeItem(item)}>Not now</GhostButton>}
+                      {item && <GhostButton aria-label={`Defer ${item.label}`} title="Hide this suggestion until tomorrow" onClick={() => deferUntilTomorrow(item)}>Not now</GhostButton>}
                     </div>
                   );
                 })}
@@ -353,39 +321,44 @@ export function CourseTrackerPage() {
           </GlassCard>
 
           <GlassCard pad data-tour="tracker-help" data-module-tour="tracker-passes">
-          <PanelHeader title="Items" sub="Log passes toward your saved plan · Anki rounds are tracked separately"
+          <PanelHeader title="Items" sub={`Log passes toward your saved plan${cardSystem ? ` · ${cardSystem.label} rounds are tracked separately` : ""}`}
             action={
               <div className="row gap6">
                 {scope && <GhostButton title="Rename selected tracker group" onClick={renameCurrentScope}><Pencil size={ICON_SIZE.body} /></GhostButton>}
                 {scope && <GhostButton className="danger" title="Delete selected tracker group" onClick={deleteCurrentScope}><Trash2 size={ICON_SIZE.body} /></GhostButton>}
               </div>
             } />
-          <details className="tracker-pass-help" data-module-tour="tracker-weak-items"><summary>How passes work</summary><TrackerGuide /></details>
+          <details className="tracker-pass-help" data-module-tour="tracker-weak-items"><summary>How passes work</summary><TrackerGuide cards={cardSystem} /></details>
           {inBlueprintScope && activeBlueprintInstall ? (
             <BlueprintTrackerItems install={activeBlueprintInstall} nodes={activeBlueprintNodes} category={blueprintScope?.category} />
           ) : (
             <>
-              <div className="filter-bar" style={{ marginBottom: 12 }}>
-                {TABS.map((t) => (
-                  <button key={t} className={`filter-pill ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>{t}</button>
-                ))}
-              </div>
-              <TrackerScopeBar
-                scope={scope}
-                scopeOptions={scopeOptions}
-                onScope={(next) => {
-                  setScope(next);
-                  setOpenNodes((prev) => {
-                    const expanded = new Set(prev);
-                    let acc = "";
-                    for (const part of next.split("/").filter(Boolean)) { acc = acc ? `${acc}/${part}` : part; expanded.add(acc); }
-                    return expanded;
-                  });
-                }}
-                groupBySection={groupBySection}
-                onGroupBySection={setGroupBySection}
-              />
-              {items.length === 0 && <EmptyState title="No items here" hint="Pick another scope, switch tabs, or import." />}
+              {s.tracker.length > 0 && <>
+                <div className="filter-bar" style={{ marginBottom: 12 }}>
+                  {TABS.map((t) => (
+                    <button key={t} className={`filter-pill ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>{t}</button>
+                  ))}
+                </div>
+                <TrackerScopeBar
+                  scope={scope}
+                  scopeOptions={scopeOptions}
+                  onScope={(next) => {
+                    setScope(next);
+                    setOpenNodes((prev) => {
+                      const expanded = new Set(prev);
+                      let acc = "";
+                      for (const part of next.split("/").filter(Boolean)) { acc = acc ? `${acc}/${part}` : part; expanded.add(acc); }
+                      return expanded;
+                    });
+                  }}
+                  groupBySection={groupBySection}
+                  onGroupBySection={setGroupBySection}
+                />
+              </>}
+              {items.length === 0 && (s.tracker.length === 0
+                ? <TrackerFirstRun hasCourses={s.courses.length > 0} cards={cardSystem}
+                    onAction={(action) => action === "list" ? setBulkOpen(true) : action === "course" ? setModuleOpen(true) : setScheduleOpen(true)} />
+                : <EmptyState title="No items here" hint="Pick another scope, switch tabs, or import." />)}
               {groupBySection
                 ? <GroupedTrackerItems scope={scope} items={items} highlightId={highlightId} onFocusSection={setScope} primaryPaths={primaryPaths} onTogglePrimary={togglePrimary} />
                 : items.map((it) => <ItemRow key={it.id} item={it} highlight={it.id === highlightId} />)}
@@ -399,35 +372,25 @@ export function CourseTrackerPage() {
       {moduleOpen && <ModuleEditor onDone={(nextScope) => { setModuleOpen(false); if (nextScope) setScope(nextScope); }} />}
       {bulkOpen && <BulkImportModal defaultPath={scope} onClose={() => setBulkOpen(false)} />}
       {scheduleOpen && <ScheduleImportModal defaultPath={scope} onClose={() => setScheduleOpen(false)} />}
-      {snoozeItem && <RecommendationSnoozeModal item={snoozeItem} onClose={() => setSnoozeItem(null)} />}
       {deleteScope && <DeleteScopeModal scope={deleteScope} onSelect={setScope} onClose={() => setDeleteScope(null)} />}
       {moduleTourOpen && <ModuleTour name="Course Tracker" route="tracker" steps={COURSE_TRACKER_TOUR_STEPS} onExit={() => setModuleTourOpen(false)} />}
     </div>
   );
 }
 
-function RecommendationSnoozeModal({ item, onClose }: { item: TrackerItem; onClose: () => void }) {
-  const updateTrackerItem = useStore((state) => state.updateTrackerItem);
-  const [custom, setCustom] = useState("");
-  function defer(until: string) {
-    updateTrackerItem(item.id, { recommendationSnoozedUntil: until });
-    pushToast({ title: "Suggestion deferred", body: `${item.label} will return when the pause ends.`, tone: "success" });
-    onClose();
-  }
-  return (
-    <Modal title="When should this return?" onClose={onClose} footer={<GButton onClick={onClose}>Cancel</GButton>}>
-      <p className="sub"><b>{item.label}</b> stays in your Tracker. Deferring only removes it from suggestions temporarily.</p>
-      <div className="snooze-choice-grid">
-        <GButton onClick={() => defer(laterTodayIso())}>Later today</GButton>
-        <GButton onClick={() => defer(tomorrowIso())}>Tomorrow</GButton>
-        <GButton onClick={() => defer(daysFromNowIso(2))}>In 2 days</GButton>
-      </div>
-      <div className="row gap8 align-end">
-        <Field label="Custom return time" type="datetime-local" min={localDateTimeValue(new Date())} value={custom} onChange={(event) => setCustom(event.target.value)} />
-        <GButton variant="primary" disabled={!custom || Date.parse(custom) <= Date.now()} onClick={() => defer(new Date(custom).toISOString())}>Defer</GButton>
-      </div>
-    </Modal>
-  );
+/**
+ * I3-27: "Not now" is one tap. The suggestion rests until tomorrow morning and
+ * the item stays in the Tracker; Undo lives on the notice, no dialog asks when.
+ */
+function deferUntilTomorrow(item: TrackerItem) {
+  const { updateTrackerItem } = useStore.getState();
+  updateTrackerItem(item.id, { recommendationSnoozedUntil: tomorrowIso() });
+  pushToast({
+    title: "Back tomorrow",
+    body: `${item.label} stays in your Tracker; it just leaves today's suggestions.`,
+    tone: "success",
+    actions: [{ label: "Undo", onAction: () => updateTrackerItem(item.id, { recommendationSnoozedUntil: undefined }) }],
+  });
 }
 
 function ScheduleImportModal({ defaultPath, onClose }: { defaultPath: string; onClose: () => void }) {
@@ -549,10 +512,11 @@ function suggestionEffortMinutes(item?: TrackerItem) {
 
 function ItemRow({ item, highlight }: { item: TrackerItem; highlight?: boolean }) {
   const s = useStore();
-  const [planOpen, setPlanOpen] = useState(false);
+  const [editor, setEditor] = useState<EditorTab | null>(null);
   const questionStyle = isQuestionKind(item.kind);
   const completionStyle = isCompletionKind(item.kind);
   const { plan, target, complete } = trackerStudyProgress(item, { preferences: s.profile.studyWorkflow, courses: s.courses });
+  const cards = cardSystemFor(s.profile.studyWorkflow);
   const unit = questionStyle ? "practice round" : "pass";
   const pluralUnit = questionStyle ? "practice rounds" : "passes";
   const progressLabel = completionStyle ? (complete ? "Plan complete" : "Not started")
@@ -561,7 +525,7 @@ function ItemRow({ item, highlight }: { item: TrackerItem; highlight?: boolean }
   const planLabels = completionStyle ? [] : plan.methods.filter((method) => method.enabled && (!questionStyle || method.id !== "lecture-passes")).slice(0, 3).map((method) => method.id === "lecture-passes" ? `Pass ×${target}` : method.id === "practice-questions" ? "Questions" : method.id === "teach-aloud" ? "Teach" : method.label ?? method.id);
   return (
     <div className={`dense-row tracker-item-row ${questionStyle ? "pq-row" : ""} ${completionStyle ? "milestone-row" : ""} ${highlight ? "row-highlight" : ""}`} data-item-id={item.id}>
-      {!questionStyle && !completionStyle && <MasteryShard item={item} progressLabel={progressLabel} />}
+      {!questionStyle && !completionStyle && <MasteryShard item={item} progressLabel={progressLabel} cards={cards} />}
       <div className="grow">
         <div className="dr-label">{item.label}</div>
         <div className="dr-type">{item.path}</div>
@@ -577,41 +541,57 @@ function ItemRow({ item, highlight }: { item: TrackerItem; highlight?: boolean }
 
       {completionStyle ? <CompletionBlock item={item} /> : questionStyle ? <PQCompleteBlocks item={item} /> : <>
         <PassBlocks item={item} target={target} />
-        <AnkiBlocks item={item} />
+        {cards && <CardRounds item={item} cards={cards} />}
       </>}
 
-      <GhostButton title="Rename item"
-        onClick={() => {
-          const label = prompt("Rename tracker item", item.label);
-          if (label?.trim()) s.updateTrackerItem(item.id, { label: label.trim() });
-        }}>
+      <GhostButton title="Edit item" aria-label={`Edit ${item.label}`} onClick={() => setEditor("details")}>
         <Pencil size={ICON_SIZE.body} />
       </GhostButton>
-      <GhostButton title="Edit study plan" onClick={() => setPlanOpen(true)}><Brain size={ICON_SIZE.body} /></GhostButton>
+      <GhostButton title="Edit study plan" onClick={() => setEditor("plan")}><Brain size={ICON_SIZE.body} /></GhostButton>
       <GhostButton className="danger" onClick={() => s.removeTrackerItem(item.id)}><Trash2 size={ICON_SIZE.body} /></GhostButton>
-      {planOpen && <ItemStudyPlanEditor item={item} onClose={() => setPlanOpen(false)} />}
+      {editor && <ItemEditor item={item} initialTab={editor} onClose={() => setEditor(null)} />}
     </div>
   );
 }
 
-function ItemStudyPlanEditor({ item, onClose }: { item: TrackerItem; onClose: () => void }) {
+type EditorTab = "details" | "plan";
+
+/**
+ * I3-29 (JD): "the study plan and edit for the lectures and the questions are
+ * not formatted the same; some are somewhere else." Rename used the browser's
+ * own prompt box. One editor now holds both, same fields and layout for every
+ * item type; the pencil opens Details, the brain opens Study plan.
+ */
+function ItemEditor({ item, initialTab, onClose }: { item: TrackerItem; initialTab: EditorTab; onClose: () => void }) {
   const store = useStore();
+  const [tab, setTab] = useState<EditorTab>(initialTab);
+  const [label, setLabel] = useState(item.label);
+  const [kind, setKind] = useState<TrackerKind>(item.kind);
+  const [note, setNote] = useState(item.note ?? "");
   const base = item.studyPlanOverride ?? {};
-  const plan = resolveStudyPlan(store.profile.studyWorkflow, studyPlanCourse(store.courses, item), { ...item, studyPlanOverride: undefined });
+  const plan = resolveStudyPlan(store.profile.studyWorkflow, studyPlanCourse(store.courses, item), { ...item, kind, studyPlanOverride: undefined });
   const [passes, setPasses] = useState(base.lecturePasses);
   const [methods, setMethods] = useState(() => new Map((base.methods ?? []).map((method) => [method.id, method.enabled])));
   const [difficulty, setDifficulty] = useState(item.difficulty ?? "");
   const [assessmentDate, setAssessmentDate] = useState(item.assessmentDate ?? "");
   const [priority, setPriority] = useState(item.explicitPriority?.toString() ?? "");
+  const questionStyle = isQuestionKind(kind);
+  const completionStyle = isCompletionKind(kind);
   const options: Array<[StudyMethodId, string]> = [["anki", "Anki"], ["practice-questions", "Practice questions"], ["notes", "Notes"], ["teach-aloud", "Teaching / retrieval"]];
+  const labelMissing = !label.trim();
+
   function save() {
+    if (labelMissing) { setTab("details"); return; }
     const override = { ...base };
-    if (passes === undefined) delete override.lecturePasses;
+    if (passes === undefined || questionStyle || completionStyle) delete override.lecturePasses;
     else override.lecturePasses = passes;
     if (methods.size) override.methods = [...methods].map(([id, enabled]) => ({
       ...base.methods?.find((method) => method.id === id), id, enabled,
     }));
     store.updateTrackerItem(item.id, {
+      label: label.trim(),
+      kind,
+      note: note.trim() || undefined,
       studyPlanOverride: Object.keys(override).length ? override : undefined,
       difficulty: difficulty as TrackerItem["difficulty"] || undefined,
       assessmentDate: assessmentDate || undefined,
@@ -619,30 +599,62 @@ function ItemStudyPlanEditor({ item, onClose }: { item: TrackerItem; onClose: ()
     });
     onClose();
   }
+
   return (
-    <Modal title={`Study plan · ${item.label}`} onClose={onClose} footer={<>
-      <GButton onClick={() => { store.updateTrackerItem(item.id, { studyPlanOverride: undefined }); onClose(); }}>Use inherited plan</GButton>
-      <GButton variant="primary" onClick={save}>Save plan</GButton>
+    <Modal title={`${tab === "plan" ? "Study plan" : "Edit item"} · ${item.label}`} onClose={onClose} className="tracker-item-editor" footer={<>
+      {tab === "plan" && <GButton onClick={() => { store.updateTrackerItem(item.id, { studyPlanOverride: undefined }); onClose(); }}>Use inherited plan</GButton>}
+      <GButton variant="primary" onClick={save} disabled={labelMissing}>{tab === "plan" ? "Save plan" : "Save"}</GButton>
     </>}>
-      <p className="sub">Only this item changes. Learner and course defaults remain intact.</p>
-      <label className="stack gap6"><span>Lecture passes</span><input className="field" type="number" min={1} max={6} value={passes ?? ""} placeholder={`Inherited: ${plan.lecturePasses}`} onChange={(event) => setPasses(event.target.value ? Number(event.target.value) : undefined)}/></label>
-      <div className="row wrap gap8">{options.map(([id, label]) => {
-        const active = methods.get(id) ?? plan.methods.find((method) => method.id === id)?.enabled ?? false;
-        return <button key={id} type="button" className={`filter-pill ${active ? "on" : ""}`} aria-pressed={active} onClick={() => setMethods((current) => new Map(current).set(id, !active))}>{label}</button>;
-      })}</div>
-      <div className="settings-target-grid">
-        <label className="stack gap6"><span>Difficulty</span><select className="field" value={difficulty} onChange={(event) => setDifficulty(event.target.value as typeof difficulty)}><option value="">Unknown</option><option value="easy">Easy</option><option value="moderate">Moderate</option><option value="hard">Hard</option><option value="very-hard">Very hard</option></select></label>
-        <label className="stack gap6"><span>Assessment date</span><input className="field" type="date" value={assessmentDate} onChange={(event) => setAssessmentDate(event.target.value)}/></label>
-        <label className="stack gap6"><span>Priority</span><select className="field" value={priority} onChange={(event) => setPriority(event.target.value)}><option value="">Normal</option>{[1,2,3,4,5].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+      <div className="filter-bar settings-tabs" role="tablist" aria-label="Item editor">
+        {([["details", "Details", Pencil], ["plan", "Study plan", Brain]] as const).map(([id, name, Icon]) => (
+          <button key={id} type="button" role="tab" aria-selected={tab === id} className={`filter-pill ${tab === id ? "on" : ""}`} onClick={() => setTab(id)}>
+            <Icon size={ICON_SIZE.body} aria-hidden="true" /> {name}
+          </button>
+        ))}
       </div>
+      {tab === "details" ? (
+        <>
+          <Field label="Name" value={label} onChange={(event) => setLabel(event.target.value)} autoFocus aria-invalid={labelMissing || undefined} />
+          <div className="settings-target-grid">
+            <SelectField label="Type" value={kind} onChange={(event) => setKind(event.target.value as TrackerKind)}>
+              {KINDS.map((option) => <option key={option}>{option}</option>)}
+            </SelectField>
+            <label className="stack gap6">
+              <span className="field-label">Folder</span>
+              <input className="field" value={item.path} readOnly title="Folders are organized in the Mastery tree" />
+            </label>
+          </div>
+          <TextAreaField label="Note (optional)" value={note} onChange={(event) => setNote(event.target.value)}
+            placeholder="A weak spot, a source, a question for the lecturer." />
+        </>
+      ) : (
+        <>
+          <p className="sub">
+            Only this item changes. Learner and course defaults remain intact.
+            {completionStyle ? ` ${kind} items are done or not done; they have no passes.` : questionStyle ? " Question sets complete in three rounds, tracked on the row." : ""}
+          </p>
+          {completionStyle || questionStyle ? null : (
+            <label className="stack gap6"><span className="field-label">Lecture passes</span><input className="field" type="number" min={1} max={6} value={passes ?? ""} placeholder={`Inherited: ${plan.lecturePasses}`} onChange={(event) => setPasses(event.target.value ? Number(event.target.value) : undefined)}/></label>
+          )}
+          <div className="stack gap6">
+            <span className="field-label">Methods</span>
+            <div className="row wrap gap8">{options.map(([id, name]) => {
+              const active = methods.get(id) ?? plan.methods.find((method) => method.id === id)?.enabled ?? false;
+              return <button key={id} type="button" className={`filter-pill ${active ? "on" : ""}`} aria-pressed={active} onClick={() => setMethods((current) => new Map(current).set(id, !active))}>{name}</button>;
+            })}</div>
+          </div>
+          <div className="settings-target-grid">
+            <SelectField label="Difficulty" value={difficulty} onChange={(event) => setDifficulty(event.target.value as typeof difficulty)}><option value="">Unknown</option><option value="easy">Easy</option><option value="moderate">Moderate</option><option value="hard">Hard</option><option value="very-hard">Very hard</option></SelectField>
+            <Field label="Assessment date" type="date" value={assessmentDate} onChange={(event) => setAssessmentDate(event.target.value)} />
+            <SelectField label="Priority" value={priority} onChange={(event) => setPriority(event.target.value)}><option value="">Normal</option>{[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value}</option>)}</SelectField>
+          </div>
+        </>
+      )}
     </Modal>
   );
 }
 
 function tomorrowIso() { const date = new Date(); date.setDate(date.getDate() + 1); date.setHours(8, 0, 0, 0); return date.toISOString(); }
-function laterTodayIso() { return new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(); }
-function daysFromNowIso(days: number) { const date = new Date(); date.setDate(date.getDate() + days); date.setHours(8, 0, 0, 0); return date.toISOString(); }
-function localDateTimeValue(date: Date) { const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000); return local.toISOString().slice(0, 16); }
 
 function PQCompleteBlocks({ item }: { item: TrackerItem }) {
   const s = useStore();
@@ -682,7 +694,8 @@ function CompletionBlock({ item }: { item: TrackerItem }) {
   );
 }
 
-function MasteryShard({ item, progressLabel }: { item: TrackerItem; progressLabel: string }) {
+/** Lecture passes on the left; the right half shows card rounds in the student's own app, and is absent when they use none. */
+function MasteryShard({ item, progressLabel, cards }: { item: TrackerItem; progressLabel: string; cards: CardSystem | null }) {
   const stage = passStage(item.passes);
   const ankiTone = item.ankiPasses > 0 ? ankiColor(item.ankiPasses) : "rgba(255,255,255,0.12)";
   const style = {
@@ -691,10 +704,10 @@ function MasteryShard({ item, progressLabel }: { item: TrackerItem; progressLabe
   } as CSSProperties;
 
   return (
-    <div className="mastery-shard" style={style}
-      title={`${progressLabel} · ${item.ankiPasses ? `Anki ${item.ankiPasses}/3` : "No Anki rounds yet"}`}>
+    <div className={`mastery-shard ${!cards ? "no-cards" : item.ankiPasses > 0 ? "" : "anki-off"}`} style={style}
+      title={!cards ? progressLabel : `${progressLabel} · ${item.ankiPasses ? `${cards.label} ${item.ankiPasses}/3` : `No ${cards.label} rounds yet`}`}>
       <span className="shard-pass"><Eye size={ICON_SIZE.body} /></span>
-      <span className="shard-anki">A</span>
+      {cards && <span className="shard-anki">{cards.label.charAt(0)}</span>}
     </div>
   );
 }
@@ -725,11 +738,12 @@ function PassBlocks({ item, target }: { item: TrackerItem; target: number }) {
   );
 }
 
-function AnkiBlocks({ item }: { item: TrackerItem }) {
+/** Card rounds (stored as `ankiPasses`, whatever the app), labelled with the student's own card app. */
+function CardRounds({ item, cards }: { item: TrackerItem; cards: CardSystem }) {
   const s = useStore();
   return (
-    <button className="anki-ctl" title="Anki rounds (orange → yellow → purple)" onClick={() => s.cycleAnki(item.id)}>
-      <span className="anki-label">Anki</span>
+    <button className="anki-ctl" title={`${cards.label} rounds (orange → yellow → purple)`} onClick={() => s.cycleAnki(item.id)}>
+      <span className="anki-label">{cards.label}</span>
       <span className="anki-blocks">
         {[1, 2, 3].map((j) => (
           <span key={j} className="anki-block"
@@ -740,11 +754,11 @@ function AnkiBlocks({ item }: { item: TrackerItem }) {
   );
 }
 
-function TrackerGuide() {
+function TrackerGuide({ cards }: { cards: CardSystem | null }) {
   return (
     <div className="tracker-guide">
       <p>Each focused review is one pass. Progress uses your learner defaults, course plan, item-kind defaults, and any item override. Edit an item's study plan to change its target; recorded passes are kept. Click the same level again to step back.</p>
-      <p>Plan complete means the recorded work meets your current target, not that mastery has been assessed. Anki rounds are tracked separately. Practice-question rows use three rounds; requirements and milestones use done/not done. Yield labels help prioritize work without changing its target.</p>
+      <p>Plan complete means the recorded work meets your current target, not that mastery has been assessed.{cards ? ` ${cards.label} rounds are tracked separately.` : ""} Practice-question rows use three rounds; requirements and milestones use done/not done. Yield labels help prioritize work without changing its target.</p>
     </div>
   );
 }
@@ -1032,11 +1046,18 @@ function moveBlueprintNode(
   update(install.id, target.id, { order: node.order });
 }
 
-interface TNode { path: string; name: string; children: TNode[]; count: number; }
+interface TNode {
+  path: string;
+  name: string;
+  children: TNode[];
+  count: number;
+  /** Position in the student's own term/course/module structure; unset for paths that exist only on items. */
+  order?: number;
+}
 
-function buildTree(items: TrackerItem[], extraScopes: string[] = []): TNode[] {
+function buildTree(items: TrackerItem[], structure: string[] = []): TNode[] {
   const root: TNode = { path: "", name: "", children: [], count: 0 };
-  for (const scope of extraScopes) addScope(root, scope, 0);
+  structure.forEach((scope, index) => addScope(root, scope, 0, index));
   for (const it of items) {
     addScope(root, it.path, 1);
   }
@@ -1044,7 +1065,7 @@ function buildTree(items: TrackerItem[], extraScopes: string[] = []): TNode[] {
   return root.children;
 }
 
-function addScope(root: TNode, path: string, countDelta: number) {
+function addScope(root: TNode, path: string, countDelta: number, order?: number) {
   const parts = path.split("/").filter(Boolean);
   let cur = root;
   let acc = "";
@@ -1052,13 +1073,20 @@ function addScope(root: TNode, path: string, countDelta: number) {
     acc = acc ? `${acc}/${p}` : p;
     let child = cur.children.find((c) => c.path === acc);
     if (!child) { child = { path: acc, name: p, children: [], count: 0 }; cur.children.push(child); }
+    if (order !== undefined && child.order === undefined) child.order = order;
     child.count += countDelta;
     cur = child;
   }
 }
 
+/** Structure keeps the order the school teaches it (FTM 1 before MSK, Boards after Term 5); loose paths follow, by name and week. */
 function sortTree(nodes: TNode[]) {
-  nodes.sort((a, b) => compareTrackerPathSegment(a.name, b.name));
+  nodes.sort((a, b) => {
+    if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
+    if (a.order !== undefined) return -1;
+    if (b.order !== undefined) return 1;
+    return compareTrackerPathSegment(a.name, b.name);
+  });
   nodes.forEach((n) => sortTree(n.children));
 }
 
@@ -1072,10 +1100,13 @@ function collectScopes(items: TrackerItem[]): string[] {
   return [...set].sort();
 }
 
+/** Every term/course/module path, in the order the student's structure lists them. */
 function collectCourseScopes(terms: Term[], courses: Course[]): string[] {
+  const termOrder = new Map(terms.map((t, index) => [t.id, index]));
   const termName = new Map(terms.map((t) => [t.id, t.name]));
+  const ordered = [...courses].sort((a, b) => (termOrder.get(a.termId) ?? terms.length) - (termOrder.get(b.termId) ?? terms.length));
   const scopes: string[] = [];
-  for (const c of courses) {
+  for (const c of ordered) {
     const term = termName.get(c.termId) ?? "Term";
     const courseBase = `${term}/${c.code}`;
     scopes.push(courseBase);
@@ -1085,8 +1116,10 @@ function collectCourseScopes(terms: Term[], courses: Course[]): string[] {
 }
 
 
-function mergeScopes(a: string[], b: string[]) {
-  return [...new Set([...a, ...b])].sort((x, y) => x.localeCompare(y));
+/** Structure paths first, in teaching order, then paths that exist only on items. */
+function mergeScopes(itemScopes: string[], structure: string[]) {
+  const inStructure = new Set(structure);
+  return [...new Set([...structure, ...itemScopes.filter((scope) => !inStructure.has(scope)).sort((x, y) => x.localeCompare(y))])];
 }
 
 const TRACKER_SCOPE_KEY = "axom.tracker.scope.v1";

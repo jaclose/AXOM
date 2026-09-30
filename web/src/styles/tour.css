@@ -1,5 +1,5 @@
 /* ===========================================================================
-   Guided tour (spotlight) + the "promise" cutscene.
+   Guided tour (spotlight) + the Promise offer.
    =========================================================================== */
 
 .tour-overlay {
@@ -10,33 +10,41 @@
   overscroll-behavior: contain;
   isolation: isolate;
 }
-.tour-haze { position: absolute; inset: 0; background: rgba(6, 6, 9, 0.78); -webkit-backdrop-filter: var(--blur-veil); backdrop-filter: var(--blur-veil); animation: fade .25s ease; }
-.tour-panel {
-  position: fixed; background: rgba(6, 6, 9, 0.74);
-  -webkit-backdrop-filter: var(--blur-veil); backdrop-filter: var(--blur-veil); transition: all .28s cubic-bezier(.4, 0, .2, 1);
-}
-.tour-ring {
+/* One cut-out: its spread shadow dims the page (no blur: JD found the old
+   frosted haze too heavy) and it glides between stops. */
+.tour-spot {
   position: fixed; pointer-events: none; border-radius: var(--radius-lg);
-  border: 2px solid rgba(var(--accent-rgb), 0.9);
-  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.25), 0 0 32px rgba(var(--accent-rgb), 0.5), inset 0 0 22px rgba(var(--accent-rgb), 0.1);
-  transition: all .28s cubic-bezier(.4, 0, .2, 1);
-  animation: ring-pulse 2.2s ease-in-out infinite;
+  border: 1.5px solid rgba(var(--accent-rgb), 0.85);
+  box-shadow:
+    0 0 0 200vmax rgba(8, 8, 10, 0.56),
+    0 0 0 4px rgba(var(--accent-rgb), 0.14),
+    0 0 28px rgba(var(--accent-rgb), 0.32);
+  transition:
+    top .46s cubic-bezier(.22, 1, .36, 1), left .46s cubic-bezier(.22, 1, .36, 1),
+    width .46s cubic-bezier(.22, 1, .36, 1), height .46s cubic-bezier(.22, 1, .36, 1),
+    border-color .3s ease, box-shadow .3s ease;
+  animation: fade .3s ease;
 }
-@keyframes ring-pulse { 0%, 100% { box-shadow: 0 0 0 2px rgba(var(--accent-rgb),0.25), 0 0 32px rgba(var(--accent-rgb),0.5); } 50% { box-shadow: 0 0 0 3px rgba(var(--accent-rgb),0.35), 0 0 44px rgba(var(--accent-rgb),0.7); } }
+.tour-spot.is-center {
+  border-color: transparent;
+  box-shadow: 0 0 0 200vmax rgba(8, 8, 10, 0.6);
+}
 
 .tour-tip {
   position: fixed; z-index: 320; width: 340px; max-width: calc(100vw - 24px);
   max-height: calc(100dvh - 24px); overflow-y: auto; overscroll-behavior: contain;
   padding: 16px 18px; border-radius: var(--radius-lg);
-  background: linear-gradient(150deg, rgba(22, 30, 48, 0.98), rgba(10, 15, 27, 0.99));
-  border: 1px solid rgba(var(--accent-rgb), 0.28);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255,255,255,0.04) inset;
+  background:
+    radial-gradient(130% 110% at 0% 0%, rgba(var(--accent-rgb), 0.12), transparent 58%),
+    linear-gradient(160deg, rgba(30, 30, 33, 0.98), rgba(14, 14, 17, 0.99));
+  border: 1px solid rgba(var(--accent-rgb), 0.26);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255,255,255,0.04) inset;
+  transition: top .46s cubic-bezier(.22, 1, .36, 1), left .46s cubic-bezier(.22, 1, .36, 1);
   animation: tip-in .26s cubic-bezier(.2, .8, .2, 1);
 }
-.tour-tip.centered { top: 50%; left: 50%; transform: translate(-50%, -50%); width: 420px; text-align: center; }
+.tour-tip.centered { text-align: center; }
 @keyframes tip-in { from { opacity: 0; transform: translateY(8px) scale(.98); } }
-.tour-tip.centered { animation: tip-in-c .3s ease; }
-@keyframes tip-in-c { from { opacity: 0; transform: translate(-50%, -46%) scale(.97); } }
+
 
 .tour-tip-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .tour-step-badge {
@@ -55,14 +63,12 @@
 .tour-progress span { display: block; height: 100%; background: linear-gradient(90deg, var(--cyan), var(--purple)); border-radius: 3px; transition: width .3s ease; }
 
 @media (prefers-reduced-motion: reduce) {
-  .tour-haze, .tour-ring, .tour-tip { animation: none; }
-  .tour-panel, .tour-ring, .tour-progress span { transition: none; }
-  .promise-scrim, .promise-paper, .promise-sign, .promise-sealed, .promise-sealed-ring, .promise-orbs i { animation: none; }
-  .promise-line, .promise-btn, .promise-sealed-signature svg path { transition: none; animation: none; stroke-dashoffset: 0; }
+  .tour-spot, .tour-tip { animation: none; }
+  .tour-spot, .tour-tip, .tour-progress span { transition: none; }
 }
 
-/* The first-presentation choice is compact; the full promise follows only if
-   the user chooses Sign now. */
+/* The Promise offer for existing users (a first run goes straight into the
+   signing sequence, promise.css); the full promise follows on Sign now. */
 .promise-prompt-scrim {
   position: fixed;
   inset: 0;
@@ -89,6 +95,17 @@
   outline: none;
 }
 .promise-prompt:focus-visible { box-shadow: 0 0 0 3px rgba(var(--accent-rgb),.3), 0 28px 90px rgba(0,0,0,.56); }
+/* Light theme: the card kept its graphite surface while the theme's ink went
+   dark, so the title and copy vanished for every first run in light mode.
+   Cream paper, like the guide offer and the promise itself. */
+:root[data-theme="light"] .promise-prompt-scrim { background: rgba(30, 26, 20, .38); }
+:root[data-theme="light"] .promise-prompt {
+  background:
+    radial-gradient(130% 110% at 0% 0%, rgba(var(--accent-rgb), .10), transparent 58%),
+    linear-gradient(160deg, #fffdf9, #f4eee3);
+  border-color: rgba(var(--ink-rgb), .16);
+  box-shadow: 0 28px 80px rgba(40, 32, 20, .28), inset 0 1px rgba(255, 255, 255, .7);
+}
 .promise-prompt-brand { color: var(--bone); margin-bottom: 24px; }
 .promise-prompt-kicker {
   display: block;
@@ -105,155 +122,10 @@
 .promise-prompt-skip { min-height: 44px; padding: 0 10px; border: 0; background: transparent; color: var(--text-45); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
 .promise-prompt-skip:hover { color: var(--text); }
 
-/* ============================ Promise cutscene ============================ */
-.promise-scrim {
-  position: fixed; inset: 0; z-index: 400;
-  display: flex; align-items: flex-start; justify-content: center;
-  padding: 24px;
-  padding:
-    max(24px, env(safe-area-inset-top))
-    max(24px, env(safe-area-inset-right))
-    max(24px, env(safe-area-inset-bottom))
-    max(24px, env(safe-area-inset-left));
-  background: radial-gradient(ellipse at 50% 30%, #14120e, #060606 70%);
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-  animation: fade .5s ease;
-}
-.promise-scrim.sealed {
-  align-items: center;
-  overflow: hidden;
-}
-.promise-orbs { pointer-events: none; }
-.promise-orbs i { position: absolute; border-radius: 50%; filter: blur(60px); opacity: 0.5; }
-.promise-orbs i:nth-child(1) { width: 480px; height: 480px; background: radial-gradient(circle, rgba(var(--accent-rgb),0.25), transparent 70%); top: -160px; left: -120px; animation: drift1 20s ease-in-out infinite; }
-.promise-orbs i:nth-child(2) { width: 560px; height: 560px; background: radial-gradient(circle, rgba(163,150,201,0.22), transparent 70%); bottom: -200px; right: -140px; animation: drift2 26s ease-in-out infinite; }
-.promise-orbs i:nth-child(3) { width: 360px; height: 360px; background: radial-gradient(circle, rgba(var(--accent-lo-rgb),0.18), transparent 70%); bottom: 10%; left: 35%; animation: drift3 30s ease-in-out infinite; }
-
-.promise-paper {
-  position: relative; z-index: 1; width: 100%; max-width: 560px;
-  margin-block: auto;
-  padding: 40px 44px 36px; text-align: center;
-  border-radius: var(--radius-xl);
-  background: linear-gradient(170deg, rgba(244, 240, 230, 0.97), rgba(232, 226, 212, 0.96));
-  color: #1a1712;
-  box-shadow: 0 40px 90px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255,255,255,0.6);
-  transform-origin: top center;
-  animation: paper-rise 1s cubic-bezier(.2, .8, .2, 1);
-  font-family: Georgia, "Cormorant Garamond", "Times New Roman", serif;
-}
-@keyframes paper-rise { from { opacity: 0; transform: translateY(24px) scale(.96) rotateX(8deg); } }
-.promise-contract-header { margin-bottom: 18px; text-align: center; }
-.promise-contract-header .axom-wordmark { color: #1a2742; margin-bottom: 14px; }
-.promise-contract-header > span { display: block; color: #8a7f63; font-size: var(--fs-tiny); font-weight: var(--fw-bold); letter-spacing: var(--tracking-caps); text-transform: uppercase; }
-.promise-contract-header h2 { margin: 7px 0 6px; color: #14110a; font-family: Georgia, "Cormorant Garamond", serif; font-size: var(--fs-3xl); font-weight: var(--fw-semibold); letter-spacing: var(--tracking-tighter); }
-.promise-contract-header p { max-width: 410px; margin: 0 auto; color: #756b52; font-family: system-ui, sans-serif; font-size: var(--fs-xs); line-height: var(--leading-normal); }
-.promise-seal-mark {
-  width: 46px; height: 46px; margin: 0 auto 16px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  font-weight: var(--fw-heavy); font-size: var(--fs-2xl); color: #f4f0e6;
-  background: linear-gradient(135deg, #1a2742, #0a1226);
-  box-shadow: 0 6px 16px rgba(0,0,0,0.35);
-}
-.promise-heading { font-size: var(--fs-base); letter-spacing: 0.26em; text-transform: uppercase; color: #8a7f63; margin-bottom: 18px; }
-.promise-lines { min-height: 300px; display: flex; flex-direction: column; gap: 9px; justify-content: center; }
-.promise-paper.open .promise-lines { min-height: 0; gap: 6px; justify-content: flex-start; }
-.promise-paper.open .promise-line { font-size: var(--fs-lg); line-height: var(--leading-tight); }
-.promise-paper.open .promise-line.accent { font-size: var(--fs-xl); }
-.promise-line {
-  margin: 0; font-size: var(--fs-xl); line-height: var(--leading-snug); color: #2a2519;
-  opacity: 0; transform: translateY(8px); transition: opacity .8s ease, transform .8s ease; font-style: italic;
-}
-.promise-line.in { opacity: 1; transform: translateY(0); }
-.promise-line.accent { font-size: var(--fs-2xl); font-weight: var(--fw-semibold); font-style: normal; color: #14110a; }
-
-.promise-sign { margin-top: 24px; display: flex; flex-direction: column; gap: 14px; animation: tip-in .5s ease; }
-.promise-field { display: flex; flex-direction: column; gap: 6px; text-align: left; }
-.promise-field span { font-size: var(--fs-xs); letter-spacing: var(--tracking-caps); text-transform: uppercase; color: #8a7f63; }
-.promise-field input {
-  font-family: "Segoe Script", "Brush Script MT", cursive; font-size: var(--fs-3xl); color: #14110a;
-  padding: 6px 4px; border: none; border-bottom: 2px solid #b9af93; background: transparent; outline: none;
-}
-.promise-field input:focus { border-color: #1a2742; }
-.promise-oath {
-  padding: 14px 16px;
-  border-radius: var(--radius-md);
-  background: rgba(26, 39, 66, 0.06);
-  border: 1px solid rgba(26, 39, 66, 0.12);
-  text-align: left;
-}
-.promise-oath summary { min-height: 30px; color: #2a2519; font-family: Georgia, serif; font-size: var(--fs-md); font-weight: var(--fw-semibold); cursor: pointer; }
-.promise-oath > div { padding-top: 8px; }
-.promise-oath p { margin: 0 0 6px; color: #2a2519; font-size: var(--fs-md); line-height: var(--leading-normal); }
-.promise-oath small { display: block; margin-top: 8px; color: #756b52; font-size: var(--fs-sm); letter-spacing: var(--tracking-wider); text-transform: uppercase; }
+/* Checkbox row in the paper style (used by the pre-med experience panel; the
+   signing sequence itself lives in promise.css). */
 .promise-check { display: flex; align-items: center; gap: 10px; font-size: var(--fs-md); color: #2a2519; cursor: pointer; font-family: Georgia, serif; }
 .promise-check input { width: 18px; height: 18px; accent-color: #1a2742; }
-.promise-btn {
-  min-height: 46px; margin-top: 4px; padding: 13px; border-radius: var(--radius-md); border: none; cursor: pointer;
-  font-family: Georgia, serif; font-size: var(--fs-lg); font-weight: var(--fw-semibold); letter-spacing: var(--tracking-wide);
-  color: #f4f0e6; background: linear-gradient(135deg, #1a2742, #0a1226);
-  box-shadow: 0 10px 24px rgba(0,0,0,0.3); transition: transform .12s ease, box-shadow .12s ease;
-}
-.promise-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 14px 30px rgba(0,0,0,0.4); }
-.promise-btn:disabled { opacity: 0.4; cursor: default; }
-.promise-signed-row { display: flex; gap: 14px; margin-top: 18px; padding-top: 14px; border-top: 1px solid rgba(26,39,66,0.14); text-align: left; }
-.promise-signed-row > div { flex: 1; }
-.promise-signed-row span { display: block; font-size: var(--fs-tiny); letter-spacing: var(--tracking-caps); text-transform: uppercase; color: #8a7f63; }
-.promise-signed-row b { font-size: var(--fs-lg); color: #14110a; }
-.promise-signed-row .right { text-align: right; }
-.promise-sig { font-family: "Segoe Script", "Brush Script MT", cursive; font-size: var(--fs-3xl) !important; }
-.promise-defer { min-height: 44px; border: none; background: transparent; color: #8a7f63; font-size: var(--fs-sm); cursor: pointer; }
-.promise-defer:hover { color: #5a5340; }
-
-/* Sealed state */
-.promise-sealed {
-  position: relative;
-  z-index: 1;
-  width: min(100%, 520px);
-  min-height: min(520px, calc(100dvh - 48px));
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  margin: auto;
-  text-align: center;
-  color: #fff;
-  animation: sealed-in 1s cubic-bezier(.2,.8,.2,1);
-}
-@keyframes sealed-in { from { opacity: 0; transform: scale(.9); } }
-.promise-sealed-ring {
-  width: 96px; height: 96px; margin: 0 auto 22px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, rgba(var(--accent-rgb),0.25), rgba(163,150,201,0.2));
-  border: 2px solid rgba(var(--accent-rgb),0.6);
-  box-shadow: 0 0 0 8px rgba(var(--accent-rgb),0.06), 0 0 50px rgba(var(--accent-rgb),0.4);
-  animation: seal-pop .7s cubic-bezier(.2,1.4,.4,1);
-}
-@keyframes seal-pop { 0% { transform: scale(0) rotate(-20deg); } 60% { transform: scale(1.12) rotate(4deg); } 100% { transform: scale(1) rotate(0); } }
-.promise-sealed-ring span { font-family: var(--font-display); font-size: var(--fs-hero); font-weight: var(--fw-medium); background: linear-gradient(120deg, var(--bone), var(--accent-hi), var(--gold)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
-.promise-sealed-ring img { width: 60px; height: 60px; border-radius: var(--radius-lg); object-fit: contain; filter: drop-shadow(0 4px 14px rgba(var(--accent-rgb),0.45)); }
-.promise-sealed-wordmark { color: var(--bone); margin-bottom: 28px; }
-.promise-sealed-title {
-  font-family: Georgia, "Cormorant Garamond", serif; font-size: var(--fs-hero); font-weight: var(--fw-semibold); letter-spacing: var(--tracking-tight);
-  background: linear-gradient(120deg, #ffffff, #cdecff 55%, #c3b4ff);
-  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
-}
-.promise-sealed-signature { position: relative; width: min(100%, 300px); margin-top: 13px; padding-bottom: 10px; color: var(--bone); }
-.promise-sealed-signature span { display: block; font-family: "Segoe Script", "Brush Script MT", cursive; font-size: var(--fs-3xl); overflow-wrap: anywhere; }
-.promise-sealed-signature svg { display: block; width: 100%; height: 22px; margin-top: -5px; overflow: visible; }
-.promise-sealed-signature svg path {
-  fill: none;
-  stroke: var(--gold);
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-dasharray: 300;
-  stroke-dashoffset: 300;
-  animation: promise-ink-stroke .72s cubic-bezier(.25,.75,.35,1) forwards;
-}
-@keyframes promise-ink-stroke { to { stroke-dashoffset: 0; } }
-.promise-sealed-sub { font-size: var(--fs-md); color: var(--text-45); margin-top: 16px; letter-spacing: var(--tracking-wide); }
 
 @media (max-width: 560px) {
   .tour-tip {
@@ -266,70 +138,83 @@
     max-height: calc(100dvh - 24px);
   }
   .tour-tip.centered {
-    left: 50% !important;
-    right: auto;
-    width: calc(100vw - 24px);
+    left: 12px !important;
+    right: 12px;
+    width: auto;
   }
   .tour-skip, .tour-tip-actions .gbtn { min-height: 44px; }
   .tour-tip-actions .gbtn { padding-inline: 12px; }
-  .promise-scrim {
-    padding: 12px;
-    padding:
-      max(12px, env(safe-area-inset-top))
-      max(12px, env(safe-area-inset-right))
-      max(12px, env(safe-area-inset-bottom))
-      max(12px, env(safe-area-inset-left));
-  }
-  .promise-orbs i { animation: none; opacity: 0.28; }
-  .promise-paper { padding: 22px 18px; border-radius: var(--radius-lg); }
   .promise-prompt { padding: 23px 20px; border-radius: var(--radius-xl); }
   .promise-prompt-actions { display: grid; grid-template-columns: 1fr; }
   .promise-prompt-actions > * { width: 100%; justify-content: center; }
-  .promise-contract-header h2 { font-size: var(--fs-2xl); }
-  .promise-seal-mark { width: 40px; height: 40px; margin-bottom: 12px; font-size: var(--fs-xl); }
-  .promise-heading { margin-bottom: 12px; font-size: var(--fs-xs); letter-spacing: var(--tracking-caps); }
-  .promise-lines { min-height: 240px; gap: 7px; }
-  .promise-line { font-size: var(--fs-lg); } .promise-line.accent { font-size: var(--fs-2xl); }
-  .promise-paper.open .promise-line { font-size: var(--fs-md); }
-  .promise-paper.open .promise-line.accent { font-size: var(--fs-xl); }
-  .promise-sign { margin-top: 18px; gap: 12px; }
-  .promise-field input { font-size: var(--fs-2xl); min-height: 44px; }
-  .promise-oath { padding: 12px; border-radius: var(--radius-md); }
-  .promise-oath p { font-size: var(--fs-md); }
   .promise-check { align-items: flex-start; line-height: var(--leading-snug); }
   .promise-check input { width: 22px; height: 22px; flex: 0 0 auto; margin-top: 0; }
-  .promise-sealed {
-    min-height: calc(100dvh - 24px);
-    padding: 18px;
-  }
-  .promise-sealed-ring { width: 84px; height: 84px; margin-bottom: 18px; }
-  .promise-sealed-title { font-size: var(--fs-display); }
-  .promise-sealed-name { max-width: 100%; font-size: var(--fs-2xl); overflow-wrap: anywhere; }
 }
 
 /* Promise declarations live below the shared tour motion block, so repeat the
    reduced-motion override after them to win the cascade deterministically. */
 @media (prefers-reduced-motion: reduce) {
   .promise-prompt-scrim,
-  .promise-prompt,
-  .promise-scrim,
-  .promise-paper,
-  .promise-sign,
-  .promise-sealed,
-  .promise-sealed-wordmark,
-  .promise-orbs i {
+  .promise-prompt {
     animation: none;
     transition: none;
     opacity: 1;
     transform: none;
   }
-  .promise-line {
-    transition: none;
-    animation: none;
-  }
-  .promise-sealed-signature svg path {
-    animation: none;
-    transition: none;
-    stroke-dashoffset: 0;
-  }
 }
+
+/* --- Guide offer: a quiet glass card that slides down from the top -------- */
+.guide-offer {
+  position: fixed; z-index: 260;
+  top: max(16px, calc(env(safe-area-inset-top) + 10px));
+  left: 50%; transform: translateX(-50%);
+  width: min(560px, calc(100vw - 28px));
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 12px;
+  padding: 12px 10px 12px 14px;
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(var(--accent-rgb), 0.24);
+  background:
+    radial-gradient(120% 140% at 0% 0%, rgba(var(--accent-rgb), 0.14), transparent 60%),
+    linear-gradient(160deg, rgba(30, 30, 33, 0.96), rgba(14, 14, 17, 0.97));
+  -webkit-backdrop-filter: var(--blur-panel); backdrop-filter: var(--blur-panel);
+  box-shadow: var(--shadow-floating);
+  animation: guide-offer-in .5s cubic-bezier(.22, 1, .36, 1) both;
+}
+@keyframes guide-offer-in {
+  from { opacity: 0; transform: translate(-50%, -18px); filter: blur(4px); }
+  to { opacity: 1; transform: translate(-50%, 0); filter: none; }
+}
+.guide-offer-icon {
+  display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%;
+  color: rgb(var(--accent-rgb)); background: rgba(var(--accent-rgb), 0.12);
+}
+.guide-offer-copy { display: grid; gap: 2px; min-width: 0; }
+.guide-offer-copy b { font-size: var(--fs-base); font-weight: var(--fw-bold); }
+.guide-offer-copy span { font-size: var(--fs-sm); color: var(--text-60); line-height: var(--leading-snug); }
+.guide-offer-actions { display: flex; gap: 8px; }
+.guide-offer-close {
+  display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-sm);
+  border: 0; background: transparent; color: var(--text-45); cursor: pointer;
+}
+.guide-offer-close:hover { color: var(--text); background: rgba(255, 255, 255, 0.07); }
+:root[data-theme="light"] .guide-offer {
+  background: radial-gradient(120% 140% at 0% 0%, rgba(var(--accent-rgb), 0.12), transparent 60%), linear-gradient(160deg, #fffdf9, #f4eee3);
+  border-color: rgba(var(--ink-rgb), 0.16);
+}
+@media (max-width: 560px) {
+  .guide-offer { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .guide-offer-close { grid-row: 1; grid-column: 3; align-self: start; }
+  .guide-offer-actions { grid-column: 1 / -1; justify-content: flex-end; }
+}
+@media (prefers-reduced-motion: reduce) { .guide-offer { animation: none; } }
+
+/* Light theme: the tour tip used a fixed dark surface with the theme's dark
+   ink, so its title nearly vanished. Cream glass, as the guide offer uses. */
+:root[data-theme="light"] .tour-tip {
+  background:
+    radial-gradient(130% 110% at 0% 0%, rgba(var(--accent-rgb), 0.10), transparent 58%),
+    linear-gradient(160deg, #fffdf9, #f4eee3);
+  border-color: rgba(var(--ink-rgb), 0.16);
+  box-shadow: 0 24px 60px rgba(40, 32, 20, 0.22), 0 0 0 1px rgba(255, 255, 255, 0.6) inset;
+}
+:root[data-theme="light"] .tour-progress { background: rgba(var(--ink-rgb), 0.08); }

@@ -128,3 +128,26 @@ describe("question annotation UI", () => {
     expect(document.activeElement).toBe(view.getByLabelText("Question stem"));
   });
 });
+
+
+it("captures offsets across an existing mark, including selection starting inside it", () => {
+  const text = "Start middle\nend passage";
+  const annotation = createTextAnnotation({ id: "middle", target: "stem", sourceText: text, startOffset: 6, endOffset: 12, tone: "yellow", now: "2026-09-28T12:00:00Z" });
+  const onSelection = vi.fn();
+  render(<AnnotatedQuestionText text={text} annotations={[annotation]} label="Cross-highlight stem" onSelection={onSelection} />);
+  const root = screen.getByLabelText("Cross-highlight stem");
+  const range = document.createRange();
+  range.setStart(root.childNodes[0], 3);
+  range.setEnd(root.childNodes[2], 5);
+  const selection = window.getSelection()!;
+  selection.removeAllRanges();
+  selection.addRange(range);
+  fireEvent.mouseUp(root);
+  expect(onSelection).toHaveBeenLastCalledWith({ startOffset: 3, endOffset: 17 });
+  range.setStart(root.querySelector("mark")!.firstChild!, 2);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  fireEvent.mouseUp(root);
+  expect(onSelection).toHaveBeenLastCalledWith({ startOffset: 8, endOffset: 17 });
+  selection.removeAllRanges();
+});

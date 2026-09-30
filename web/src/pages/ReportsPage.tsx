@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Flame, Target, Activity, CalendarCheck, Layers, ListChecks, Download, BatteryCharging, Gauge, AlertTriangle } from "lucide-react";
+import { Flame, Target, Activity, CalendarCheck, Layers, ListChecks, Download, BatteryCharging, Gauge, AlertTriangle, HelpCircle } from "lucide-react";
 import { useStore } from "../lib/store";
 import { GlassCard, GButton, PanelHeader, Tag } from "../components/ui/primitives";
 import { dayTotals, todayGrade, gradeColor, gradeLabel, gradeLegend, prettyDate } from "../lib/scoring";
@@ -31,6 +31,15 @@ import { ICON_SIZE } from "../lib/iconSize";
 import { EnergyFocusPanel, useEnergyInputs } from "../components/energy/EnergyInsights";
 import { TrackerReport } from "../components/reports/TrackerReport";
 import { todaysCapacity } from "../lib/energyInsights";
+import { ModuleTour, type ModuleTourStep } from "../components/shell/ModuleTour";
+
+/** I1-17 (JD): a mini guide behind a Help button, like Course Tracker, Question Bank and Productivity. */
+export const REPORTS_TOUR_STEPS: readonly ModuleTourStep[] = [
+  { target: "reports-today", title: "Start with today", body: "Today's targets, capacity and open work. Every card has How is this calculated?, so no number is a black box." },
+  { target: "reports-rhythm", title: "Find your best hours", body: "Energy checks, focus sessions and question accuracy by time of day. It fills in as you log." },
+  { target: "reports-trend", title: "Read the trend, not one day", body: "Weekly and monthly views compare you with your own history. Only days with scheduled targets count toward target comparisons." },
+  { target: "reports-trackers", title: "Your own variables", body: "Every tracker you follow, measured against the goal you set for it." },
+] as const;
 
 const RANGES = [14, 30] as const;
 const STAGES: PassStage[] = ["untouched", "red", "young", "mature", "mastered"];
@@ -39,6 +48,7 @@ const KINDS: TrackerKind[] = ["Lecture", "DLA", "PQ", "Lab", "Reading", "Require
 
 export function ReportsPage() {
   const s = useStore();
+  const [tourOpen, setTourOpen] = useState(false);
   const [range, setRange] = useState<number>(14);
   const [trendMetric, setTrendMetric] = useState<ReportTrendMetric>("minutes");
   const [selectedTrendDay, setSelectedTrendDay] = useState<string | null>(null);
@@ -224,7 +234,7 @@ export function ReportsPage() {
   return (
     <>
       <GlassCard pad>
-        <PanelHeader title="Reports" sub={`Traceable record for ${track.label} — every number is computed from your local study log, tracker, and tasks.`}
+        <PanelHeader title="Reports" sub={`Traceable record for ${track.label}. Every number is computed from your local study log, tracker, and tasks.`}
           action={
             <div className="row gap8">
               <div className="filter-bar" style={{ margin: 0 }}>
@@ -233,10 +243,11 @@ export function ReportsPage() {
                 ))}
               </div>
               <GButton size="sm" onClick={() => void exportStateWithAttachments(s)}><Download size={ICON_SIZE.body} /> Export</GButton>
+              <GButton size="sm" onClick={() => setTourOpen(true)} aria-label="Open Reports help tour"><HelpCircle size={ICON_SIZE.body} /> Help</GButton>
             </div>} />
       </GlassCard>
 
-      <section className="report-section" aria-labelledby="report-current-title">
+      <section className="report-section" aria-labelledby="report-current-title" data-module-tour="reports-today">
         <div className="report-section-heading"><div><span>Current state</span><h2 id="report-current-title">Today</h2></div><p>The signals that can help you decide what to do next.</p></div>
         <div className="grid grid-stats report-card-grid">
           <ReportInsightCard icon={<Target size={ICON_SIZE.emphasis} />} metric={todayMetric} />
@@ -245,14 +256,14 @@ export function ReportsPage() {
         </div>
       </section>
 
-      <section className="report-section" aria-labelledby="report-energy-title">
-        <div className="report-section-heading"><div><span>Energy &amp; focus</span><h2 id="report-energy-title">Your rhythm</h2></div><p>When you are sharpest, how much today can hold, and what seems to help — from your own check-ins, sessions and questions.</p></div>
+      <section className="report-section" aria-labelledby="report-energy-title" data-module-tour="reports-rhythm">
+        <div className="report-section-heading"><div><span>Energy &amp; focus</span><h2 id="report-energy-title">Your rhythm</h2></div><p>When you are sharpest, how much today can hold, and what seems to help, from your own check-ins, sessions and questions.</p></div>
         <GlassCard pad className="report-energy-card">
           <EnergyFocusPanel />
         </GlassCard>
       </section>
 
-      <section className="report-section" aria-labelledby="report-trend-title">
+      <section className="report-section" aria-labelledby="report-trend-title" data-module-tour="reports-trend">
         <div className="report-section-heading"><div><span>Pattern over time</span><h2 id="report-trend-title">Trend</h2></div><p>Only scheduled, tracked dates enter requirement comparisons.</p></div>
         <div className="grid grid-stats report-card-grid report-card-grid-two">
           <ReportInsightCard icon={<CalendarCheck size={ICON_SIZE.emphasis} />} metric={hasTargets ? reportSummary.metrics.consistency : activityRhythm.consistency} insight={hasTargets ? trendInsight : { change: weekSummary?.interpretation }} />
@@ -337,7 +348,7 @@ export function ReportsPage() {
         </div>
       </section>
 
-      <section className="report-section" aria-labelledby="report-trackers-title">
+      <section className="report-section" aria-labelledby="report-trackers-title" data-module-tour="reports-trackers">
         <div className="report-section-heading"><div><span>Your variables</span><h2 id="report-trackers-title">Trackers</h2></div><p>Everything you chose to follow, against your own goals and limits.</p></div>
         <GlassCard pad className="report-trackers-card">
           <TrackerReport />
@@ -524,6 +535,7 @@ export function ReportsPage() {
         </div>
       </details>
 
+      {tourOpen && <ModuleTour name="Reports" route="reports" steps={REPORTS_TOUR_STEPS} onExit={() => setTourOpen(false)} />}
     </>
   );
 }

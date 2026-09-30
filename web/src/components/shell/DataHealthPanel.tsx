@@ -11,6 +11,7 @@ import { STORAGE_KEYS } from "../../lib/brand";
 import { GhostButton, Tag } from "../ui/primitives";
 import { pushToast } from "../../lib/toast";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { TechnicalDetails } from "./TechnicalDetails";
 
 async function probeIndexedDb(): Promise<boolean> {
   return new Promise((resolve) => {
@@ -69,21 +70,10 @@ export function DataHealthPanel() {
 
   return (
     <div className="stack" style={{ gap: 12 }}>
-      <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
-        <Tag tone={idbOk === false ? "orange" : "green"}>
-          <Database size={ICON_SIZE.microInline} /> {idbOk === null ? "Checking storage…" : idbOk ? "IndexedDB vault active" : "localStorage fallback"}
-        </Tag>
-        <Tag tone="neutral"><HardDrive size={ICON_SIZE.microInline} /> Approx. storage used: {storageUsed}</Tag>
-        <Tag tone="green"><ShieldCheck size={ICON_SIZE.microInline} /> Autosave active</Tag>
-        <Tag tone={duplicateSources ? "orange" : "green"}>
-          <FileFingerprintIcon /> {duplicateSources ? `${duplicateSources} duplicate source${duplicateSources === 1 ? "" : "s"}` : "Source checksums healthy"}
-        </Tag>
-      </div>
-
       {idbOk === false && (
-        <div className="sub">
-          IndexedDB isn't reachable in this browser, so data is riding on the localStorage fallback. Everything works,
-          but export a JSON backup — localStorage is easier to lose to browser cleanup.
+        <div className="data-health-warning" role="status">
+          <b>This browser is using its backup storage</b>
+          <span>Everything works, but browser cleanup can clear it more easily. Export a copy in Emergency recovery to be safe.</span>
         </div>
       )}
 
@@ -96,24 +86,33 @@ export function DataHealthPanel() {
         ))}
       </div>
 
-      <div className="sub">Last saved: AXOM writes changes automatically; this build does not retain a user-visible write timestamp.</div>
-
-      <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-        <Wrench size={ICON_SIZE.body} style={{ color: "var(--cyan)" }} />
-        <span className="sub">
-          {orphans.totalIssues === 0
-            ? "Question-bank links are healthy — no orphaned questions, sets, or documents."
-            : `${orphans.totalIssues} dangling link${orphans.totalIssues === 1 ? "" : "s"} found (questions/sets/documents). Repair unlinks safely — it never deletes questions or history.`}
-        </span>
-        {orphans.totalIssues > 0 && (
+      {orphans.totalIssues > 0 && (
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <Wrench size={ICON_SIZE.body} style={{ color: "var(--cyan)" }} />
+          <span className="sub">
+            {orphans.totalIssues} question link{orphans.totalIssues === 1 ? " needs" : "s need"} a quick repair. Repair never deletes questions or history.
+          </span>
           <GhostButton onClick={() => {
             const fixed = s.repairQuestionBankOrphans();
-            pushToast({ title: fixed ? `Repaired ${fixed} dangling link${fixed === 1 ? "" : "s"}` : "Nothing to repair", tone: "success" });
+            pushToast({ title: fixed ? `Repaired ${fixed} link${fixed === 1 ? "" : "s"}` : "Nothing to repair", tone: "success" });
           }}>Repair links</GhostButton>
-        )}
-      </div>
+        </div>
+      )}
 
-      <div className="sub">Storage health and record counts are device-local. Backup status is shown once in the Backup section.</div>
+      <TechnicalDetails>
+        <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+          <Tag tone={idbOk === false ? "orange" : "green"}>
+            <Database size={ICON_SIZE.microInline} /> {idbOk === null ? "Checking storage…" : idbOk ? "IndexedDB vault active" : "localStorage fallback"}
+          </Tag>
+          <Tag tone="neutral"><HardDrive size={ICON_SIZE.microInline} /> Approx. storage used: {storageUsed}</Tag>
+          <Tag tone="green"><ShieldCheck size={ICON_SIZE.microInline} /> Autosave active</Tag>
+          <Tag tone={duplicateSources ? "orange" : "green"}>
+            <FileFingerprintIcon /> {duplicateSources ? `${duplicateSources} duplicate source${duplicateSources === 1 ? "" : "s"}` : "Source checksums healthy"}
+          </Tag>
+        </div>
+        <p>{orphans.totalIssues === 0 ? "Question-bank links are healthy: no orphaned questions, sets, or documents." : `${orphans.totalIssues} dangling link${orphans.totalIssues === 1 ? "" : "s"} across questions, sets, and documents.`}</p>
+        <p>Storage health and record counts describe this device only.</p>
+      </TechnicalDetails>
     </div>
   );
 }

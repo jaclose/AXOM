@@ -4,6 +4,8 @@
 // able, which is what makes the app "modular" rather than the fixed Swift build.
 // ===========================================================================
 import { create } from "zustand";
+import { normalizeNavOrder, upgradeNavLayout } from "./navLayout";
+import { normalizeHintFields } from "./dailyWordHints";
 import { normalizeEnergyChecks } from "./energyInsights";
 import { normalizePrimaryScopes, renamePrimaryScopes } from "./trackerFocus";
 import { habitCheckForDay, habitTypeForTracker, trackerDayTotals, trackerUnitLabel } from "./trackerStats";
@@ -382,7 +384,12 @@ export const useStore = create<Store>()(
         })),
       updateTrackerItem: (id, patch) =>
         set((s) => ({
-          tracker: s.tracker.map((t) => (t.id === id ? { ...t, ...patch, updated: now() } : t)),
+          // `updated` is the item's last real study touch: review timing and
+          // suggestion order read it. Resting a suggestion ("Not now", Undo)
+          // is not study, so it leaves the clock alone (I3-27).
+          tracker: s.tracker.map((t) => (t.id === id
+            ? { ...t, ...patch, updated: isRestOnlyPatch(patch) ? t.updated : now() }
+            : t)),
         })),
       renameTrackerScope: (oldPath, newPath) =>
         set((s) => {
@@ -2083,9 +2090,24 @@ function backfillTrackerHabit(tracker: ProductivityTracker, logs: StudyLog[], en
   return next;
 }
 
+// Focus-timer minutes are study time and belong on the Study tracker (every
+// Pomodoro preset declares defaultTrackerId "tracker-study"). Matching by name
+// alone left them off "Your trackers", so JD topped the tracker up by hand and
+// his study time doubled (Ideas 3: 384 -> 736).
+function isRestOnlyPatch(patch: Partial<TrackerItem>): boolean {
+  const keys = Object.keys(patch);
+  return keys.length > 0 && keys.every((key) => key === "recommendationSnoozedUntil");
+}
+
+const STUDY_TIMER_TYPES = new Set(["pomodoro", "focus session"]);
+
 function matchProductivityTracker(trackers: ProductivityTracker[] = [], type: string): ProductivityTracker | undefined {
   const clean = cleanText(type);
   if (!clean) return trackers.find((tracker) => tracker.id === "tracker-study");
+  if (STUDY_TIMER_TYPES.has(clean)) {
+    const study = trackers.find((tracker) => tracker.id === "tracker-study" && !tracker.archived);
+    if (study) return study;
+  }
   return trackers.find((tracker) => !tracker.archived && cleanText(tracker.name) === clean);
 }
 
@@ -2303,7 +2325,8 @@ function normalizeProfile(value: unknown): Profile {
   ).id;
   const dashboardWidgetOrder = normalizeDashboardWidgetOrder(profile.dashboardWidgetOrder);
   const hiddenDashboardWidgets = normalizeDashboardWidgetList(profile.hiddenDashboardWidgets);
-  const hiddenNav = normalizeHiddenNav(profile.hiddenNav, educationTrack);
+  const navLayout = upgradeNavLayout(normalizeHiddenNav(profile.hiddenNav, educationTrack) ?? [], profile.navLayoutVersion);
+  const hiddenNav = navLayout.hiddenNav;
   const journalReviewTime = typeof profile.journalReviewTime === "string" && /^\d{2}:\d{2}$/.test(profile.journalReviewTime)
     ? profile.journalReviewTime
     : "20:00";
@@ -2342,6 +2365,9 @@ function normalizeProfile(value: unknown): Profile {
     toolsCollapsed: typeof profile.toolsCollapsed === "boolean" ? profile.toolsCollapsed : undefined,
     prepCollapsed: typeof profile.prepCollapsed === "boolean" ? profile.prepCollapsed : undefined,
     dailyGamesCollapsed: typeof profile.dailyGamesCollapsed === "boolean" ? profile.dailyGamesCollapsed : undefined,
+    miscCollapsed: typeof profile.miscCollapsed === "boolean" ? profile.miscCollapsed : undefined,
+    navOrder: normalizeNavOrder(profile.navOrder),
+    navLayoutVersion: navLayout.navLayoutVersion,
     journalReviewTime,
     journalNotebook: profile.journalNotebook === undefined
       ? undefined
@@ -2373,6 +2399,9 @@ function normalizeProfile(value: unknown): Profile {
     studyWorkflow: normalizeStudyWorkflow(profile.studyWorkflow),
     applicationResearch: normalizeApplicationResearch(profile.applicationResearch),
     applicationProfile: normalizeApplicationProfile(profile.applicationProfile),
+    unlocks: Array.isArray(profile.unlocks)
+      ? [...new Set(profile.unlocks.filter((value): value is string => typeof value === "string" && /^[a-z0-9-]{1,40}$/.test(value)))].slice(0, 50)
+      : undefined,
   };
 }
 
@@ -2458,14 +2487,16 @@ function normalizeDailyWordPuzzle(value: unknown): DailyWordPuzzleState | null {
       .map((guess) => guess.toUpperCase())
     : [];
   const completed = value.completed === true;
+  const won = completed && value.won === true;
   return {
+    ...normalizeHintFields(value, completed, won),
     puzzleId,
     puzzleDate,
     timezone,
     wordListVersion,
     guesses,
     completed,
-    won: completed && value.won === true,
+    won,
     startedAt,
     completedAt: completed && typeof value.completedAt === "string" ? value.completedAt : undefined,
     updatedAt: typeof value.updatedAt === "string" && value.updatedAt

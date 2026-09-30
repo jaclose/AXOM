@@ -3,7 +3,15 @@
 /* Building v2 — stable header, reactive panels */
 .building-page .ecosystem-tabs { position: sticky; top: -26px; z-index: 3; padding-top: 6px; background: linear-gradient(180deg, color-mix(in srgb, var(--bg-2) 86%, transparent) 70%, transparent); backdrop-filter: var(--blur-soft); }
 .building-count { margin-left: 4px; padding: 1px 6px; color: var(--text-50); font-size: var(--fs-tiny); background: var(--neutral-hover); border-radius: var(--radius-pill); }
-.building-panel { min-height: 420px; }
+/* I1-28: switching views or filters must not move anything. Columns keep
+   their width whatever the card count (auto-fill, not auto-fit, which
+   stretched two cards across the row) and the panel keeps its height. */
+.building-panel { min-height: max(420px, 62dvh); }
+/* The page is a flex item with margin:auto, which disables stretching: it
+   shrink-wrapped its content, so filtering to fewer cards narrowed and
+   re-centred the whole page. Fill the column instead (also Daily Games). */
+.ecosystem-page { width: 100%; }
+.building-page .system-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); }
 .building-panel .glass-card { animation: building-in .45s cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: calc(var(--stagger, 0) * 45ms); }
 @keyframes building-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 .building-horizon { gap: 10px; transition: transform .2s ease, border-color .2s ease; }
@@ -41,3 +49,35 @@
 .doctordle-thanks { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--gold-line); border-radius: var(--radius-md); background: var(--gold-soft); }
 .doctordle-thanks svg { flex: 0 0 auto; margin-top: 3px; color: var(--red); }
 .doctordle-thanks p { margin: 0; color: var(--text-70); font-size: var(--fs-sm); line-height: var(--leading-normal); }
+
+/* Doctordle (I3-57, I3-59): a real way back, today's case, and the learner's own check-ins. */
+.doctordle-page { max-width: 720px; }
+.doctordle-page .external-game-bridge { max-width: none; }
+.doctordle-topline { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.doctordle-back {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 34px; padding: 0 12px 0 9px;
+  border: 1px solid var(--hairline); border-radius: var(--radius-pill);
+  color: var(--text-70); font-size: var(--fs-sm); font-weight: var(--fw-semibold); text-decoration: none;
+  background: rgba(230, 226, 214, 0.03);
+  transition: color .18s ease, border-color .18s ease, transform .18s ease;
+}
+.doctordle-back:hover { color: var(--text); border-color: var(--gold-line); transform: translateX(-1px); }
+.doctordle-case { color: var(--text-60); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.doctordle-log { display: grid; gap: 14px; }
+.doctordle-log-head h2 { margin: 0; font-size: var(--fs-md); }
+.doctordle-log-head p { margin: 4px 0 0; color: var(--text-60); font-size: var(--fs-sm); line-height: var(--leading-normal); }
+.doctordle-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.doctordle-stats span {
+  display: grid; gap: 2px; padding: 10px 12px;
+  border: 1px solid var(--hairline); border-radius: var(--radius-md);
+  color: var(--text-60); font-size: var(--fs-xs); background: var(--surface-1);
+}
+.doctordle-stats b { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font-family: var(--font-display); font-size: 1.5rem; line-height: 1; }
+.doctordle-stats b svg { color: var(--orange); }
+.doctordle-today { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid var(--hairline); color: var(--text-70); font-size: var(--fs-sm); }
+.doctordle-today > span { margin-right: auto; }
+.doctordle-reminder-toggle { display: flex; align-items: center; gap: 8px; color: var(--text-60); font-size: var(--fs-sm); }
+.doctordle-reminder-toggle input { accent-color: rgb(var(--accent-rgb)); }
+.doctordle-today.is-asking { margin: 0 -8px; padding: 12px 8px 4px; border-top-color: transparent; border-radius: var(--radius-md); box-shadow: 0 0 0 1px var(--gold-line); background: var(--gold-soft); color: var(--text); }
+.doctordle-page .external-game-bridge h1 { margin: 0; font-size: clamp(1.8rem, 4vw, 2.4rem); letter-spacing: -0.03em; }

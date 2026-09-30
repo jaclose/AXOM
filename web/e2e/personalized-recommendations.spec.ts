@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { completeSetup, expect, reloadAfterSave, test } from "./fixtures";
 
 /** Dev-only live-store handle installed by src/main.tsx (see comment there). */
 type DevWindow = Window & {
@@ -70,7 +71,7 @@ test("study defaults and item overrides drive the dashboard, survive reload, and
   // The running session moves to the focus dock; Up next steps aside until it ends.
   await expect(brief).toHaveCount(0);
   await expect(page.locator(".focus-dock")).toBeVisible();
-  await page.reload({ waitUntil: "networkidle" });
+  await reloadAfterSave(page);
   await expect(page.locator(".focus-dock")).toBeVisible();
   await expect(brief).toHaveCount(0);
   const session = await page.evaluate(async () => {
@@ -81,15 +82,22 @@ test("study defaults and item overrides drive the dashboard, survive reload, and
   expect([...(session?.resources ?? [])].sort()).toEqual(["Noji", "Notes"]);
   await page.goto("/#tracker");
   const sixthPass = row.getByTitle("6 lecture passes", { exact: true });
-  await sixthPass.focus();
-  await page.keyboard.press("Enter");
-  await expect(sixthPass).toHaveAttribute("aria-pressed", "true");
+  // Right after navigation a lazy part of the page can remount the row and
+  // swallow the key; press only while the sixth pass is still unset (pressing
+  // a set level steps back), and retry until the keyboard press lands.
+  await expect(async () => {
+    if ((await sixthPass.getAttribute("aria-pressed")) !== "true") {
+      await sixthPass.focus();
+      await page.keyboard.press("Enter");
+    }
+    await expect(sixthPass).toHaveAttribute("aria-pressed", "true", { timeout: 1_500 });
+  }).toPass({ timeout: 15_000 });
   await expect(page.getByText("This scope is complete", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => {
     const surface = document.querySelector<HTMLElement>(".surface-scroll")!;
     return surface.scrollWidth <= surface.clientWidth + 1;
   })).toBe(true);
-  await page.reload({ waitUntil: "networkidle" });
+  await reloadAfterSave(page);
   await expect(sixthPass).toHaveAttribute("aria-pressed", "true");
   expect(errors).toEqual([]);
 });
@@ -112,7 +120,7 @@ test("tracker progress follows edited targets, preserves history, and remains us
   await page.keyboard.press("Enter");
   await expect(row.getByText("4 of 6 passes · 2 remaining", { exact: true })).toBeVisible();
   await expect(progress).toHaveAttribute("aria-valuenow", "67");
-  await page.getByRole("button", { name: "Dismiss Course Tracker", exact: true }).click();
+  // The Course Tracker intro is an anchored first-visit hint now (quiet in e2e), not a toast.
 
   for (const viewport of [{ width: 1440, height: 900 }, { width: 768, height: 900 }, { width: 430, height: 880 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
@@ -139,7 +147,7 @@ test("tracker progress follows edited targets, preserves history, and remains us
   await expect(progress).toHaveAttribute("aria-valuenow", "100");
   await expect(row.getByText("4 passes recorded · Target of 2 reached", { exact: true })).toBeVisible();
   await expect(page.getByText("This scope is complete", { exact: true })).toBeVisible();
-  await page.reload({ waitUntil: "networkidle" });
+  await reloadAfterSave(page);
   await expect(progress).toHaveAttribute("aria-valuenow", "100");
   await expect(row.getByText("4 passes recorded · Target of 2 reached", { exact: true })).toBeVisible();
 
@@ -149,7 +157,7 @@ test("tracker progress follows edited targets, preserves history, and remains us
   await expect(row.getByText("4 of 6 passes · 2 remaining", { exact: true })).toBeVisible();
   await row.getByTitle("Cycle yield").click();
   await expect(progress).toHaveAttribute("aria-valuenow", "67");
-  await page.reload({ waitUntil: "networkidle" });
+  await reloadAfterSave(page);
   await expect(progress).toHaveAttribute("aria-valuenow", "67");
   await expect(row.getByTitle("4 lecture passes", { exact: true })).toHaveAttribute("aria-pressed", "true");
   expect(errors).toEqual([]);
@@ -157,11 +165,7 @@ test("tracker progress follows edited targets, preserves history, and remains us
 
 async function prepareWorkspace(page: Page) {
   await page.goto("/#dashboard", { waitUntil: "networkidle" });
-  const name = page.getByLabel("Display name (optional)");
-  if (await name.isVisible()) {
-    await name.fill("Study workflow test");
-    for (let step = 0; step < 3; step++) await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.getByRole("button", { name: "Finish setup", exact: true }).click();
+  if (await completeSetup(page, "Study workflow test", { ifVisible: true })) {
     const later = page.getByRole("button", { name: "Review later", exact: true });
     if (await later.count()) await later.click();
   }
