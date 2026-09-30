@@ -393,6 +393,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     if (mode === "tutor" && question && revealed && !recordedTutorAttempts.current.has(question.id)) {
       const a = answers.get(question.id);
       s.recordQuestionAttempt(question.id, {
+        eventId: `quiz:${startedAt}:${question.id}`, mode,
         answerKey: a?.answerKey,
         status: a?.correct === undefined ? "needs-review" : a.correct ? "correct" : "incorrect",
         timeSpentSeconds: a?.seconds,
@@ -458,8 +459,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     // Exam mode records attempts at the END so nothing leaks mid-block.
     if (mode === "exam") {
       for (const a of answerList) {
-        if (!a.answerKey && !a.flagged) continue;
         s.recordQuestionAttempt(a.questionId, {
+          eventId: `quiz:${startedAt}:${a.questionId}`, mode,
           answerKey: a.answerKey,
           status: a.correct === undefined ? "needs-review" : a.correct ? "correct" : "incorrect",
           timeSpentSeconds: a.seconds,
@@ -510,8 +511,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       simulation: { skin: simRun.skin, preset: simRun.resume ? undefined : presetId, elapsedSeconds: meta.elapsedSeconds },
     };
     for (const a of answerList) {
-      if (!a.answerKey && !a.flagged) continue;
       s.recordQuestionAttempt(a.questionId, {
+        eventId: `quiz:${meta.startedAt}:${a.questionId}`, mode,
         answerKey: a.answerKey,
         status: a.correct === undefined ? "needs-review" : a.correct ? "correct" : "incorrect",
         timeSpentSeconds: a.seconds,

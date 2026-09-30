@@ -132,7 +132,7 @@ This table supersedes older CODEX/DONE assumptions above for this lane. SHIPPED 
 |---|---|---|---|
 | I2-01 | Locked In | SHIPPED + VERIFIED | Persistent top portal, deliberate response then fade; truthful session/goal/no-goal copy; keyboard focus, reload and responsive dark/light Chrome checks passed. Local only. |
 | I2-02 | Spotify | PARTIAL | One shell player and observed playback adapter pass browser contract; live service check pending. |
-| I2-03 | Productivity events | PARTIAL | Normalized activity and retry tests pass; Anki route-independent ingestion still missing; concurrent tracker edits under review. |
+| I2-03 | Productivity events | PARTIAL | Native event pipeline, interval dedupe, Study/habit attribution and 384-minute retry regression locally committed and verified (1933 tests + Chrome). External ingestion remains unfinished. |
 | I2-04 | Exam countdown | PARTIAL | Split widget exists; configurable weighting and shared module/calendar date source unfinished. |
 | I2-05 | Soundscape lifecycle | PARTIAL | Persistent player exists; daily metadata refresh unfinished. |
 | I2-06 | Highlights | SHIPPED + VERIFIED | Compatible interval merging; real Chrome pointer merge/delete/reload; isolated commit snapshot passed 1902 tests, typecheck/lint/build. Local only. |

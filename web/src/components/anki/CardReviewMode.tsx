@@ -49,7 +49,7 @@ export function CardReviewMode() {
 
   function rate(rating: ReviewRating) {
     if (!card) return;
-    s.reviewAnkiCard(card.id, rating, Date.now() - shownAt);
+    s.reviewAnkiCard(card.id, rating, Date.now() - shownAt, `${card.id}:${shownAt}`);
     setRevealed(false);
     setShownAt(Date.now());
     setDoneCount((n) => n + 1);

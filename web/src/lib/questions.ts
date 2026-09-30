@@ -96,6 +96,10 @@ export interface QuestionOption {
 }
 
 export interface QuestionAttempt {
+  eventId?: string;
+  startedAt?: string;
+  endedAt?: string;
+  mode?: string;
   at: string; // ISO
   answerKey?: string;
   status: QuestionStatus;

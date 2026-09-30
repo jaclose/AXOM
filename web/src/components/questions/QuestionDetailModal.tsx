@@ -123,6 +123,7 @@ export function QuestionDetailModal({ question, onClose }: { question: QuestionR
     else if (isCorrect) status = guessed ? "guessed" : "correct";
     else status = "incorrect";
     s.recordQuestionAttempt(question.id, {
+      eventId: `question:${question.id}:${startedAt}`, startedAt: new Date(startedAt).toISOString(), mode: "study",
       answerKey: picked,
       status,
       confidence,

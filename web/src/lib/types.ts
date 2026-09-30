@@ -309,8 +309,10 @@ export interface ProductivityTracker {
 
 /** One study event — minutes and/or cards logged on a given study day. */
 export interface StudyLog {
+  /** Optional observed event metadata; old/manual activity remains compatible. */
+  activity?: import("./studyActivity").StudyActivity;
   id: ID;
-  dayKey: string; // yyyy-MM-dd (Axom 4am-shifted study day)
+  dayKey: string; // yyyy-MM-dd, local calendar date; legacy records retain their original day
   ts: string; // ISO datetime
   type: string; // "Lecture", "Anki", "Deep Study", "Manual"
   minutes: number;

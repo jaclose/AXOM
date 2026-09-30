@@ -4,6 +4,7 @@
 // able, which is what makes the app "modular" rather than the fixed Swift build.
 // ===========================================================================
 import { create } from "zustand";
+import { recordObservedActivity, type StudyActivity } from "./studyActivity";
 import { normalizeEnergyChecks } from "./energyInsights";
 import { normalizePrimaryScopes, renamePrimaryScopes } from "./trackerFocus";
 import { habitCheckForDay, habitTypeForTracker, trackerDayTotals, trackerUnitLabel } from "./trackerStats";
@@ -62,7 +63,7 @@ import { normalizeApplicationResearch } from "./applicationResearch";
 import { normalizeApplicationProfile } from "./applicationProfile";
 import { BRAND, STORAGE_KEYS } from "./brand";
 import {
-  closeOpenSegment, findLiveSession, openNewSegment, restoreSession, sessionElapsedMinutes,
+  closeOpenSegment, findLiveSession, openNewSegment, restoreSession,
   type SessionCapture, type SessionLink, type SessionQuickLog, type StudySession,
 } from "./sessions";
 import type { DailyCloseout } from "./closeout";
@@ -157,7 +158,8 @@ interface Actions {
   removeFolder: (id: string) => void;
 
   // productivity
-  logStudy: (entry: { type: string; minutes?: number; cards?: number; note?: string }) => void;
+  logStudy: (entry: { type: string; minutes?: number; cards?: number; note?: string; activity?: StudyActivity }) => void;
+  recordStudyActivity: (activity: StudyActivity, replace?: boolean) => void;
   logActivity: (entry: {
     label: string;
     trackerId?: string;
@@ -271,7 +273,7 @@ interface Actions {
   addAnkiCards: (inputs: unknown[]) => { saved: number; errors: string[] };
   updateAnkiCard: (id: string, patch: Partial<AnkiCard>) => void;
   removeAnkiCard: (id: string) => void;
-  reviewAnkiCard: (id: string, rating: ReviewRating, msToAnswer?: number) => void;
+  reviewAnkiCard: (id: string, rating: ReviewRating, msToAnswer?: number, eventId?: string) => void;
 
   // optional Daily Games — submitted guesses live in the IndexedDB workspace
   upsertDailyWordPuzzle: (puzzle: DailyWordPuzzleState) => void;
@@ -502,8 +504,10 @@ export const useStore = create<Store>()(
         set((s) => ({ folders: sortFolders(s.folders.map((f) => (f.id === id ? { ...f, ...patch, updatedAt: now() } : f))) })),
       removeFolder: (id) => set((s) => ({ folders: s.folders.filter((f) => f.id !== id) })),
 
-      logStudy: ({ type, minutes = 0, cards = 0, note }) =>
+      recordStudyActivity: (activity, replace = false) => set((s) => applyStudyActivity(s, activity, replace)),
+      logStudy: ({ type, minutes = 0, cards = 0, note, activity }) =>
         set((s) => {
+          if (activity) return applyStudyActivity(s, { ...activity, note: activity.note ?? note });
           const tracker = matchProductivityTracker(s.productivityTrackers, type);
           const current = s.logs.reduce((totals, log) => {
             if (log.dayKey !== s.activeDayKey || log.academic === false) return totals;
@@ -608,6 +612,7 @@ export const useStore = create<Store>()(
           const current = s.productivityTrackers.find((tracker) => tracker.id === id);
           if (!current) return {};
           let next: ProductivityTracker = { ...current, ...patch, updatedAt: now() };
+          if (id === "tracker-study") next = { ...next, id, name: "Study", unitType: "minutes", goal: "at-least", archived: false, contributesToAcademicStudy: true, contributesToTotalProductiveTime: true };
           let habits = s.habits ?? [];
           let habitEntries = s.habitEntries ?? [];
           if (next.contributesToHabitTracking && !next.archived) {
@@ -954,21 +959,18 @@ export const useStore = create<Store>()(
         const session = (get().sessions ?? []).find((item) => item.id === id);
         if (!session || session.status === "completed" || session.status === "abandoned") return;
         const closedSegments = closeOpenSegment(session.segments, at);
-        const minutes = sessionElapsedMinutes({ segments: closedSegments }, at);
+        // The session transition and its observed activity are one persisted write.
         set((s) => ({
+          ...applyStudyActivity(s, {
+            eventId: `session:${session.id}`, kind: "focus", source: "axom", endedAt: at.toISOString(),
+            intervals: closedSegments.map((segment) => ({ startedAt: segment.startedAt, endedAt: segment.endedAt! })),
+            completed: true, note: `Session: ${session.title}${capture.takeaway ? ` — ${capture.takeaway}` : ""}`,
+          }),
           sessions: (s.sessions ?? []).map((item) =>
             item.id === id
               ? { ...item, status: "completed" as const, segments: closedSegments, capture, endedAt: at.toISOString() }
               : item),
         }));
-        // Completed focus time feeds the study day like any other logged work.
-        if (minutes > 0) {
-          get().logStudy({
-            type: "Session",
-            minutes,
-            note: `Session: ${session.title}${capture.takeaway ? ` — ${capture.takeaway}` : ""}`,
-          });
-        }
         // A completed task-linked session closes its task.
         if (capture.outcome === "completed" && session.link.kind === "task" && session.link.id) {
           const task = get().tasks.find((t) => t.id === session.link.id);
@@ -1352,13 +1354,31 @@ export const useStore = create<Store>()(
         };
       }),
       recordQuestionAttempt: (id, attempt) =>
-        set((s) => ({
-          questions: (s.questions ?? []).map((q) => (q.id === id ? applyAttempt(q, attempt) : q)),
-        })),
+        set((s) => {
+          const question = s.questions.find((q) => q.id === id);
+          if (!question) return {};
+          const eventId = attempt.eventId ?? `question:${id}:${uid()}`;
+          if (s.logs.some((log) => log.activity?.eventId === eventId)) return {};
+          const endedAt = attempt.endedAt ?? now();
+          if (!Number.isFinite(Date.parse(endedAt))) return {};
+          const skipped = !attempt.answerKey && question.options.length > 0;
+          return {
+            questions: s.questions.map((q) => q.id === id ? applyAttempt(q, { ...attempt, eventId }, new Date(endedAt)) : q),
+            ...applyStudyActivity(s, {
+              eventId, kind: "questions", source: "axom", endedAt,
+              startedAt: attempt.startedAt, durationSeconds: attempt.timeSpentSeconds,
+              quantity: skipped ? 0 : 1, skipped: skipped ? 1 : 0,
+              correct: !skipped && (attempt.status === "correct" || attempt.status === "guessed") ? 1 : 0,
+              incorrect: !skipped && attempt.status === "incorrect" ? 1 : 0,
+              topic: question.category, mode: attempt.mode ?? "study",
+            }),
+          };
+        }),
 
       saveQuizSession: (session) =>
         set((s) => ({
           quizSessions: [session, ...(s.quizSessions ?? []).filter((q) => q.id !== session.id)].slice(0, 500),
+          ...(session.endedAt ? applyStudyActivity(s, { eventId: `quiz-block:${session.id}`, kind: "focus", source: "axom", endedAt: session.endedAt, durationSeconds: session.simulation?.elapsedSeconds ?? Math.max(0, (Date.parse(session.endedAt) - Date.parse(session.startedAt)) / 1000), mode: session.mode, note: "Question block time; individual answers are recorded separately.", completed: true }) : {}),
         })),
       toggleQuestionMarked: (id) =>
         set((s) => ({
@@ -1547,15 +1567,17 @@ export const useStore = create<Store>()(
           ankiCards: (s.ankiCards ?? []).filter((c) => c.id !== id),
           cardReviews: (s.cardReviews ?? []).filter((r) => r.cardId !== id),
         })),
-      reviewAnkiCard: (id, rating, msToAnswer) =>
+      reviewAnkiCard: (id, rating, msToAnswer, eventId) =>
         set((s) => {
           const card = (s.ankiCards ?? []).find((c) => c.id === id);
           if (!card) return {};
-          const review: CardReviewLog = { id: uid(), cardId: id, at: now(), rating, msToAnswer };
+          const review: CardReviewLog = { id: eventId ?? uid(), cardId: id, at: now(), rating, msToAnswer };
+          if (s.cardReviews.some((item) => item.id === review.id) || s.logs.some((log) => log.activity?.eventId === `card:${review.id}`)) return {};
           return {
             ankiCards: (s.ankiCards ?? []).map((c) =>
               c.id === id ? { ...c, schedule: nextSchedule(c.schedule, rating), updatedAt: now() } : c),
             cardReviews: [review, ...(s.cardReviews ?? [])].slice(0, 5000),
+            ...applyStudyActivity(s, { eventId: `card:${review.id}`, kind: "flashcards", source: "axom", endedAt: review.at, durationSeconds: msToAnswer == null ? undefined : msToAnswer / 1000, quantity: 1, mode: rating, deck: card.lectureLabel ?? card.source }),
           };
         }),
 
@@ -2025,6 +2047,17 @@ function buildTrackStructure(track: EducationTrack): { terms: Term[]; courses: C
   return { terms, courses, tracker };
 }
 
+/** The sole observed-activity write boundary: ledger and derived habits commit together. */
+function applyStudyActivity(s: NoctyriumState, activity: StudyActivity, replace = false): Partial<NoctyriumState> {
+  const logs = recordObservedActivity(s.logs, activity, replace);
+  if (logs === s.logs) return {};
+  const days = new Set([...s.logs, ...logs].filter((log) => log.activity?.eventId === activity.eventId).map((log) => log.dayKey));
+  const tracker = s.productivityTrackers.find((item) => item.id === "tracker-study" && !item.archived);
+  let next: Partial<NoctyriumState> = { logs };
+  for (const day of days) next = { ...next, ...withTrackerHabitSync({ ...s, ...next }, logs, tracker, day) };
+  return next;
+}
+
 /** Keep a habit-tracking tracker's linked habit checked for `dayKey`. */
 function withTrackerHabitSync(
   s: NoctyriumState,
@@ -2083,9 +2116,17 @@ function backfillTrackerHabit(tracker: ProductivityTracker, logs: StudyLog[], en
   return next;
 }
 
+// Keep Claude's I3-39 attribution contract: timer minutes and the Study tracker
+// read the same log, so completing a timer never needs a second manual entry.
+const STUDY_TIMER_TYPES = new Set(["pomodoro", "focus session"]);
+
 function matchProductivityTracker(trackers: ProductivityTracker[] = [], type: string): ProductivityTracker | undefined {
   const clean = cleanText(type);
   if (!clean) return trackers.find((tracker) => tracker.id === "tracker-study");
+  if (STUDY_TIMER_TYPES.has(clean)) {
+    const study = trackers.find((tracker) => tracker.id === "tracker-study" && !tracker.archived);
+    if (study) return study;
+  }
   return trackers.find((tracker) => !tracker.archived && cleanText(tracker.name) === clean);
 }
 

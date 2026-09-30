@@ -10,6 +10,7 @@
 // snapshot so a reload restores them before the vault rehydrates.
 // ===========================================================================
 import { create } from "zustand";
+import type { StudyActivity } from "./studyActivity";
 import { useStore } from "./store";
 import { effectivePomodoroPreferences } from "./pomodoroPreferences";
 
@@ -94,7 +95,13 @@ interface CustomDurations {
   customCycles: number;
 }
 
-interface PersistedPomodoro extends CustomDurations {
+interface FocusRun {
+  focusRunId?: string;
+  focusSegments?: Array<{ startedAt: string; endedAt: string }>;
+  focusSegmentStart?: string;
+}
+
+interface PersistedPomodoro extends CustomDurations, FocusRun {
   presetId: string;
   phase: PomodoroPhase;
   secondsLeft: number;
@@ -112,7 +119,7 @@ interface PersistedPomodoro extends CustomDurations {
   updatedAt: number;
 }
 
-interface PomodoroState extends CustomDurations {
+interface PomodoroState extends CustomDurations, FocusRun {
   presetId: string;
   phase: PomodoroPhase;
   secondsLeft: number;
@@ -253,6 +260,7 @@ function persistSnapshot(s: PomodoroState) {
       intention: s.intention,
       activeSavedPresetId: s.activeSavedPresetId,
       focusRunStarted: s.focusRunStarted,
+      focusRunId: s.focusRunId, focusSegments: s.focusSegments, focusSegmentStart: s.focusSegmentStart,
       customFocus: s.customFocus,
       customBreak: s.customBreak,
       customLongBreak: s.customLongBreak,
@@ -263,6 +271,20 @@ function persistSnapshot(s: PomodoroState) {
   } catch {
     /* storage unavailable */
   }
+}
+
+function focusActivity(state: PomodoroState, seconds: number, completed: boolean): StudyActivity {
+  const stamp = new Date().toISOString();
+  const segments = [...(state.focusSegments ?? []), ...(state.focusSegmentStart ? [{ startedAt: state.focusSegmentStart, endedAt: stamp }] : [])];
+  let remaining = seconds * 1000;
+  const intervals = segments.flatMap((segment) => {
+    const start = Date.parse(segment.startedAt);
+    const length = Math.min(remaining, Math.max(0, Date.parse(segment.endedAt) - start));
+    remaining -= length;
+    return length > 0 ? [{ startedAt: segment.startedAt, endedAt: new Date(start + length).toISOString() }] : [];
+  });
+  const endedAt = intervals.at(-1)?.endedAt ?? stamp;
+  return { eventId: `pomodoro:${state.focusRunId ?? `${state.anchorDay}:${state.lastTickAt}`}`, kind: "pomodoro", source: "axom", endedAt, durationSeconds: seconds, intervals: intervals.length ? intervals : undefined, completed };
 }
 
 function logNote(reason: "complete" | "reset" | "skip" | "switch", targetLabel?: string, intention?: string): string {
@@ -326,13 +348,15 @@ export const usePomodoro = create<PomodoroState>((set, get) => {
 
   const logPartialFocus = (reason: "reset" | "skip" | "switch") => {
     syncDay();
-    const { phase, secondsLeft, autoLog, targetLabel, intention } = get();
+    const { phase, secondsLeft, autoLog, targetLabel, intention, running, lastTickAt } = get();
     if (phase !== "focus" || !autoLog) return 0;
     const preset = effectivePreset(get());
-    const elapsedSeconds = Math.max(0, preset.focus * 60 - secondsLeft);
+    // A user action can arrive before the throttled clock's next tick.
+    const pendingSeconds = running ? Math.max(0, (Date.now() - lastTickAt) / 1000) : 0;
+    const elapsedSeconds = Math.min(preset.focus * 60, Math.max(0, preset.focus * 60 - secondsLeft + pendingSeconds));
     const minutes = Math.floor(elapsedSeconds / 60);
-    if (minutes <= 0) return 0;
-    useStore.getState().logStudy({ type: "Pomodoro", minutes, note: logNote(reason, targetLabel, intention) });
+    if (elapsedSeconds <= 0) return 0;
+    useStore.getState().logStudy({ type: "Pomodoro", minutes, note: logNote(reason, targetLabel, intention), activity: focusActivity(get(), elapsedSeconds, false) });
     set((s) => ({
       loggedMinutesToday: s.loggedMinutesToday + minutes,
     }));
@@ -350,7 +374,7 @@ export const usePomodoro = create<PomodoroState>((set, get) => {
     const preferences = effectivePomodoroPreferences(useStore.getState().profile.pomodoroPreferences);
     if (phase === "focus") {
       if (natural && autoLog) {
-        useStore.getState().logStudy({ type: "Pomodoro", minutes: preset.focus, note: logNote("complete", targetLabel, intention) });
+        useStore.getState().logStudy({ type: "Pomodoro", minutes: preset.focus, note: logNote("complete", targetLabel, intention), activity: focusActivity(get(), preset.focus * 60, true) });
       }
       if (natural) chime(true);
       // Completed focus sprints today (this one included only when natural — a
@@ -368,7 +392,7 @@ export const usePomodoro = create<PomodoroState>((set, get) => {
         secondsLeft: breakMinutes * 60,
         running: continueIntoBreak,
         lastTickAt: Date.now(),
-        focusRunStarted: false,
+        focusRunStarted: false, focusRunId: undefined, focusSegments: [], focusSegmentStart: undefined,
         sessionsToday: natural ? s.sessionsToday + 1 : s.sessionsToday,
         loggedMinutesToday: natural && autoLog ? s.loggedMinutesToday + preset.focus : s.loggedMinutesToday,
         completedAt: natural ? new Date().toISOString() : s.completedAt,
@@ -385,6 +409,7 @@ export const usePomodoro = create<PomodoroState>((set, get) => {
         secondsLeft: preset.focus * 60,
         running: continueIntoFocus,
         focusRunStarted: continueIntoFocus,
+        focusRunId: continueIntoFocus ? crypto.randomUUID() : undefined, focusSegments: [], focusSegmentStart: continueIntoFocus ? new Date().toISOString() : undefined,
         lastTickAt: Date.now(),
       });
       persistSnapshot(get());
@@ -407,6 +432,7 @@ export const usePomodoro = create<PomodoroState>((set, get) => {
     intention: initial.intention ?? "",
     activeSavedPresetId: initial.activeSavedPresetId,
     focusRunStarted: initial.focusRunStarted ?? false,
+    focusRunId: initial.focusRunId, focusSegments: initial.focusSegments ?? [], focusSegmentStart: initial.focusSegmentStart,
     customFocus: initial.customFocus ?? initialCustom.customFocus,
     customBreak: initial.customBreak ?? initialCustom.customBreak,
     customLongBreak: initial.customLongBreak ?? initialCustom.customLongBreak,
@@ -418,16 +444,13 @@ export const usePomodoro = create<PomodoroState>((set, get) => {
     start: () => {
       if (get().running) return;
       syncDay();
-      // Ask once (within this user gesture) so we can fire an OS notification
-      // when a sprint finishes while the tab is in the background.
-      if (typeof Notification !== "undefined" && Notification.permission === "default") {
-        Notification.requestPermission().catch(() => { /* ignore */ });
-      }
       const state = get();
       if (state.phase === "focus" && !state.focusRunStarted && state.activeSavedPresetId) {
         recordSavedPresetUse(state.activeSavedPresetId);
       }
       set({
+        focusRunId: state.phase === "focus" ? state.focusRunId ?? crypto.randomUUID() : undefined,
+        focusSegmentStart: state.phase === "focus" ? new Date().toISOString() : undefined,
         running: true,
         focusRunStarted: state.phase === "focus" ? true : state.focusRunStarted,
         lastTickAt: Date.now(),
@@ -437,7 +460,10 @@ export const usePomodoro = create<PomodoroState>((set, get) => {
     },
     pause: () => {
       stopInterval();
-      set({ running: false, lastTickAt: Date.now() });
+      if (get().running) get()._tick();
+      stopInterval();
+      const state = get();
+      set({ running: false, lastTickAt: Date.now(), focusSegments: state.focusSegmentStart ? [...(state.focusSegments ?? []), { startedAt: state.focusSegmentStart, endedAt: new Date().toISOString() }] : state.focusSegments, focusSegmentStart: undefined });
       persistSnapshot(get());
     },
     toggle: () => (get().running ? get().pause() : get().start()),
@@ -445,7 +471,7 @@ export const usePomodoro = create<PomodoroState>((set, get) => {
       stopInterval();
       logPartialFocus("reset");
       const preset = effectivePreset(get());
-      set({ running: false, phase: "focus", secondsLeft: preset.focus * 60, focusRunStarted: false, lastTickAt: Date.now() });
+      set({ running: false, phase: "focus", secondsLeft: preset.focus * 60, focusRunStarted: false, focusRunId: undefined, focusSegments: [], focusSegmentStart: undefined, lastTickAt: Date.now() });
       persistSnapshot(get());
     },
     skip: () => {
@@ -457,7 +483,7 @@ export const usePomodoro = create<PomodoroState>((set, get) => {
       logPartialFocus("switch");
       const presetId = PRESET_ALIASES[id] ?? id;
       const preset = effectivePreset({ presetId, customFocus: get().customFocus, customBreak: get().customBreak, customLongBreak: get().customLongBreak, customCycles: get().customCycles });
-      set({ presetId, phase: "focus", secondsLeft: preset.focus * 60, running: false, activeSavedPresetId: undefined, focusRunStarted: false, lastTickAt: Date.now() });
+      set({ presetId, phase: "focus", secondsLeft: preset.focus * 60, running: false, activeSavedPresetId: undefined, focusRunStarted: false, focusRunId: undefined, focusSegments: [], focusSegmentStart: undefined, lastTickAt: Date.now() });
       persistSnapshot(get());
     },
     setAutoLog: (autoLog) => { set({ autoLog }); persistSnapshot(get()); },
@@ -504,7 +530,7 @@ export const usePomodoro = create<PomodoroState>((set, get) => {
         customLongBreak: normalized.longBreak,
         customCycles: normalized.cyclesBeforeLongBreak,
         activeSavedPresetId: savedPresetId,
-        focusRunStarted: false,
+        focusRunStarted: false, focusRunId: undefined, focusSegments: [], focusSegmentStart: undefined,
         intention: input.intention?.trim().slice(0, 240) ?? get().intention,
         lastTickAt: Date.now(),
       });
@@ -523,6 +549,7 @@ export const usePomodoro = create<PomodoroState>((set, get) => {
     setIntention: (intention) => { set({ intention }); persistSnapshot(get()); },
     _tick: () => {
       const state = get();
+      if (!state.running) return;
       const elapsed = Math.floor((Date.now() - state.lastTickAt) / 1000);
       // An early interval fire counts nothing yet; the sub-second remainder carries
       // into the next tick so the clock never drifts slower than wall time.
