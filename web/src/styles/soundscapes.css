@@ -223,6 +223,8 @@
 /* --- Sections ------------------------------------------------------------------ */
 .soundscape-section { display: grid; gap: 14px; }
 .soundscape-section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
+/* Kickers default to light ink for the hero video; on the page they follow the theme. */
+.soundscape-section-head .soundscape-kicker { color: var(--text-60); }
 .soundscape-section-head h2 { margin: 4px 0 0; font-size: var(--fs-xl, 22px); letter-spacing: -0.01em; }
 .soundscape-section-head p { margin: 0; max-width: 520px; color: var(--text-60); font-size: var(--fs-sm); line-height: var(--leading-normal); }
 .version-own { margin-left: 6px; padding: 1px 6px; border-radius: 999px; font-size: 10px; font-weight: var(--fw-semibold); letter-spacing: 0.02em; color: rgb(var(--accent-rgb)); background: rgba(var(--accent-rgb), 0.14); }

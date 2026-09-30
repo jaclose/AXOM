@@ -103,6 +103,10 @@ export function GuidedTour({
   const exitRef = useRef(onExit);
   const navigateRef = useRef(onNavigate);
   const scrollSnapshotRef = useRef<ScrollSnapshot | null>(null);
+  // Set the moment the tour starts closing. React clears the measuring
+  // interval in a passive cleanup, after the layout cleanup restored scroll;
+  // a tick in between must not scroll the page again.
+  const closingRef = useRef(false);
   const titleId = useId();
   const bodyId = useId();
   const step = steps[index] ?? steps[0];
@@ -114,6 +118,7 @@ export function GuidedTour({
     const snapshot = captureScrollSnapshot();
     scrollSnapshotRef.current = snapshot;
     return () => {
+      closingRef.current = true;
       restoreScrollSnapshot(snapshot);
       if (scrollSnapshotRef.current === snapshot) scrollSnapshotRef.current = null;
     };
@@ -123,6 +128,7 @@ export function GuidedTour({
   }, [index, persistProgress]);
 
   const exitTour = useCallback((reason: TourExitReason) => {
+    closingRef.current = true;
     if (persistProgress) clearTourProgress();
     if (restoreScrollOnExit && scrollSnapshotRef.current) {
       restoreScrollSnapshot(scrollSnapshotRef.current);
@@ -154,7 +160,7 @@ export function GuidedTour({
     let frame = 0;
     const measure = () => {
       frame = 0;
-      if (cancelled) return;
+      if (cancelled || closingRef.current) return;
       const element = document.querySelector(`[${targetAttribute}="${step.target}"]`) as HTMLElement | null;
       if (!element) return;
       if (!scrolled) {
@@ -233,7 +239,8 @@ export function GuidedTour({
     window.addEventListener("keydown", onKeyDown);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
-      if (previouslyFocused?.isConnected) previouslyFocused.focus();
+      // Scroll was already restored exactly; returning focus must not move it again.
+      if (previouslyFocused?.isConnected) previouslyFocused.focus({ preventScroll: true });
     };
   }, [exitTour]);
 

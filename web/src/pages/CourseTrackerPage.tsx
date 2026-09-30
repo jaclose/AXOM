@@ -643,7 +643,7 @@ function MasteryShard({ item, progressLabel }: { item: TrackerItem; progressLabe
   } as CSSProperties;
 
   return (
-    <div className="mastery-shard" style={style}
+    <div className={`mastery-shard ${item.ankiPasses > 0 ? "" : "anki-off"}`} style={style}
       title={`${progressLabel} · ${item.ankiPasses ? `Anki ${item.ankiPasses}/3` : "No Anki rounds yet"}`}>
       <span className="shard-pass"><Eye size={ICON_SIZE.body} /></span>
       <span className="shard-anki">A</span>

@@ -1044,7 +1044,7 @@
   border: 1px solid transparent;
 }
 .tree-node:hover { background: rgba(255,255,255,0.04); color: var(--text); }
-.tree-node.on { background: rgba(var(--accent-rgb),0.12); border-color: rgba(var(--accent-rgb),0.25); color: #fff; }
+.tree-node.on { background: rgba(var(--accent-rgb),0.12); border-color: rgba(var(--accent-rgb),0.25); color: var(--text); }
 .tree-node .tree-count { margin-left: auto; font-size: var(--fs-xs); color: var(--text-45); }
 .tree-node.depth1 { margin-left: 8px; }
 .tree-node.depth2 { margin-left: 16px; font-weight: var(--fw-regular); }
@@ -1251,6 +1251,8 @@
   text-shadow: 0 1px 0 rgba(255,255,255,0.18);
 }
 .mastery-shard .shard-pass { left: 0; width: 31px; }
+/* No Anki rounds yet: the half is a faint glass tint, so the letter must be light, not ink. */
+.mastery-shard.anki-off .shard-anki { color: var(--text-50, var(--text-60)); text-shadow: none; }
 .mastery-shard .shard-anki {
   right: 0;
   width: 24px;
@@ -1532,24 +1534,21 @@
   background: var(--gold);
   opacity: .72;
 }
+/* The source line always holds its space, so hovering or focusing the
+   vessel never pushes the page down; it only brightens. */
 .daily-progress-peek {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 7px;
-  max-height: 0;
-  margin: 0 3px;
+  margin: 7px 3px 0;
   overflow: hidden;
-  opacity: 0;
+  opacity: .55;
   color: var(--text-45);
   font-size: var(--fs-tiny);
-  transition: max-height .18s ease, margin .18s ease, opacity .16s ease;
+  transition: opacity .16s ease;
 }
-.daily-progress-inspector.peek .daily-progress-peek {
-  max-height: 40px;
-  margin-top: 7px;
-  opacity: 1;
-}
+.daily-progress-inspector.peek .daily-progress-peek { opacity: 1; }
 .daily-progress-peek b {
   overflow: hidden;
   color: var(--text-60);
@@ -2113,6 +2112,9 @@
   border-color: rgba(var(--accent-rgb),0.5);
   box-shadow: 0 0 0 1px rgba(var(--accent-rgb),0.12), 0 4px 14px rgba(0,0,0,0.35);
 }
+/* The active pill stays an ink chip in light mode; its label must stay light
+   (--bone turns dark there). Found by e2e/contrast-sweep. */
+:root[data-theme="light"] :where(.filter-pill.on) { color: #f8f4ec; }
 
 /* ---- Tasks ---- */
 .task-row {

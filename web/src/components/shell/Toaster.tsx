@@ -42,6 +42,9 @@ export function Toaster() {
             key={toast.id}
             role="status"
             aria-hidden={leaving || undefined}
+            // A notice on its way out is gone for keyboard and pointer too
+            // (aria-hidden must not wrap focusable buttons).
+            ref={(element) => { if (element) element.toggleAttribute("inert", leaving); }}
             // Auto-dismiss waits while the notice is being read or operated.
             onMouseEnter={() => hold(toast.id, "hover")}
             onMouseLeave={() => release(toast.id, "hover")}

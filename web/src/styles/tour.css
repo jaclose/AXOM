@@ -97,6 +97,17 @@
   outline: none;
 }
 .promise-prompt:focus-visible { box-shadow: 0 0 0 3px rgba(var(--accent-rgb),.3), 0 28px 90px rgba(0,0,0,.56); }
+/* Light theme: the card kept its graphite surface while the theme's ink went
+   dark, so the title and copy vanished for every first run in light mode.
+   Cream paper, like the guide offer and the promise itself. */
+:root[data-theme="light"] .promise-prompt-scrim { background: rgba(30, 26, 20, .38); }
+:root[data-theme="light"] .promise-prompt {
+  background:
+    radial-gradient(130% 110% at 0% 0%, rgba(var(--accent-rgb), .10), transparent 58%),
+    linear-gradient(160deg, #fffdf9, #f4eee3);
+  border-color: rgba(var(--ink-rgb), .16);
+  box-shadow: 0 28px 80px rgba(40, 32, 20, .28), inset 0 1px rgba(255, 255, 255, .7);
+}
 .promise-prompt-brand { color: var(--bone); margin-bottom: 24px; }
 .promise-prompt-kicker {
   display: block;

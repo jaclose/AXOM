@@ -58,10 +58,15 @@ export function ApplicationCheckerPage() {
   const [program, setProgram] = useState("all");
   const [checkFilter, setCheckFilter] = useState<EligibilityStatus | "all">("all");
   const [sort, setSort] = useState<SortKey>("name");
-  // Medical students look ahead to residency (JD, Ideas 1); other tracks start on schools.
-  const [pathway, setPathway] = useState<Pathway>(() => (
-    MED_TRACKS.has(useStore.getState().profile.educationTrack ?? "") ? "residency" : "medical"
+  // Medical students look ahead to residency (JD, Ideas 1); other tracks start
+  // on schools. A pathway the learner picked is remembered on this device.
+  const [pathway, setPathwayState] = useState<Pathway>(() => (
+    readPathway() ?? (MED_TRACKS.has(useStore.getState().profile.educationTrack ?? "") ? "residency" : "medical")
   ));
+  const setPathway = (next: Pathway) => {
+    setPathwayState(next);
+    try { localStorage.setItem(PATHWAY_KEY, next); } catch { /* device preference only */ }
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -228,6 +233,16 @@ export function ApplicationCheckerPage() {
 }
 
 type Pathway = "medical" | "residency" | "undergraduate";
+const PATHWAY_KEY = "axom.appChecker.pathway.v1";
+
+function readPathway(): Pathway | null {
+  try {
+    const value = localStorage.getItem(PATHWAY_KEY);
+    return value === "medical" || value === "residency" || value === "undergraduate" ? value : null;
+  } catch {
+    return null;
+  }
+}
 const MED_TRACKS = new Set(["sgu", "usmd", "do", "img"]);
 
 const PATHWAYS: Array<{ id: Pathway; label: string; detail: string; icon: typeof School }> = [
