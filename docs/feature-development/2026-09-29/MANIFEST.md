@@ -1,6 +1,6 @@
 # Ideas 1 + 3 manifest (with Ideas 2 overlaps)
 
-Every item from JD's three idea dumps and the mid-turn notes, with its current status in code, who owns it, and the wave it ships in (see PLAN.md). Verbatim sources: IDEAS-1.md, IDEAS-2.md (Codex's brief), IDEAS-3.md.
+Every item from JD's three idea dumps and the mid-turn notes, with its current status in code, who owns it, and the wave it ships in (see PLAN.md). Verbatim sources: IDEAS-1.md, IDEAS-2.md (Codex's brief), IDEAS-3.md, IDEAS-4.md.
 
 Baseline: branch `feat/ideas3-staging` = `main` (c04272d) + soundscape commit 09d65a1. Codex's Ideas 2 work is uncommitted in `/Users/jd/Developer/AXOM-ideas2` (`feat/ideas2-integration`).
 
@@ -121,3 +121,10 @@ Evidence comes from code reading on 2026-09-29 (file:line on `feat/ideas3-stagin
 | I3-59 | "Did you get the Doctordle?" on return + dashboard reminder | MISSING (AXOM cannot see Doctordle results, so this is honest self-report). | C | 1 |
 | I1-16 / I3-49 / I3-22b | Custom widgets, link widgets, size-specific content, combos, edit previews | PARTIAL. Registry exists (lib/dashboardWidgets.ts); Codex does not touch it. | C | 2 |
 | I3-51 | Friends leaderboard, nicknames, widget | PARTIAL (LeaderboardsPage preview). Needs backend + privacy model. | C | 3 |
+
+## F. Ideas 4 (added 2026-09-30)
+
+| ID | Item | Status and evidence | Owner | Wave |
+|---|---|---|---|---|
+| I4-01 | Tutor mode AI for questions: explain reasoning, why an answer is wrong, compare alternatives, a hint ladder that never reveals the answer unless asked, grounded in the question and its source | MISSING (the AI part). What exists: ExamRunner's non-AI Tutor mode (reveal after each question, ExamRunner.tsx:238) and TutorUtilityDock (highlighter, calculator, notes, text size); the AI proxy serves five features and no tutor one (api/ai.ts: next-move, anki-generator, step-planner, weak-area-analysis, daily-report). Plan: a `tutor` AI feature whose prompt only sees the question, its choices, its explanation and linked source text; a four-rung hint ladder (nudge, concept, eliminate one choice, full reasoning) where the answer needs an explicit "Show me"; every reply cites the stem or source and is labelled AI and unverified, with a "Flag this explanation" path. Shares the verification step with the generative Q-bank (section D). | C (tutor engine, prompt, grounding, panel) + X (mount in ExamRunner / TutorUtilityDock, which Codex owns) | 3 |
+| I4-02 | Clock widget on the generalized widget system: local clock, analog or digital, exam countdown beside it, study-session context | PARTIAL. The clock engine already exists for the top bar (lib/clock.ts: time zones, precision, analog angles; components/shell/ClockControl.tsx); no dashboard widget. Build it as the first widget on the upgraded primitive (size-specific layouts, I1-16 / I3-49), not a one-off: small = digital time, medium = analog + date, wide = time + next exam days (reads Codex's `Profile.examCountdown`, read only) + the running Pomodoro or soundscape. | C (widgets registry); X only if exam countdown data changes | 2 |

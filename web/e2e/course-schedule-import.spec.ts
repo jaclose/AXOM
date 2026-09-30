@@ -21,7 +21,7 @@ test("review-first schedule intake accepts files, corrections, deferral, and mob
   await dialog.getByLabel("Title").first().fill("Renal Clearance Lecture");
   await dialog.getByLabel("Type").first().selectOption("Lecture");
   await dialog.getByRole("button", { name: "Import selected (2)" }).click();
-  await expect(page.getByText("Renal Clearance Lecture")).toBeVisible();
+  await expect(page.locator(".dr-label").getByText("Renal Clearance Lecture", { exact: true })).toBeVisible();
 
   const defer = page.getByRole("button", { name: /^Defer / }).first();
   // I3-27: one tap, no "when should this return?" question; the notice explains and offers Undo.
@@ -31,7 +31,7 @@ test("review-first schedule intake accepts files, corrections, deferral, and mob
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload({ waitUntil: "networkidle" });
-  await expect(page.getByText("Renal Clearance Lecture")).toBeVisible();
+  await expect(page.locator(".dr-label").getByText("Renal Clearance Lecture", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   expect(errors).toEqual([]);
 });

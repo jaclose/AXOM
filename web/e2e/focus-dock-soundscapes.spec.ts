@@ -96,7 +96,7 @@ test("opening-film settings persist and a preview can be skipped", async ({ page
 });
 
 test.describe("with motion allowed", () => {
-  test.use({ reducedMotion: "no-preference" });
+  test.use({ contextOptions: { reducedMotion: "no-preference" } });
 
   test("a first run plays the opening film once and Escape skips it", async ({ page }) => {
     await page.goto("/#dashboard");

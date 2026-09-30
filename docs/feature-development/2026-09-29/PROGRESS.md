@@ -1,6 +1,6 @@
 # Progress (feat/ideas3-staging)
 
-Updated 2026-09-30 00:30. Every commit passed `npm run quality` (typecheck, lint, full vitest, build) and was checked in a real browser (headless Chrome, dark theme, screenshots read back).
+Updated 2026-09-30 13:10. Every commit passed `npm run quality` (typecheck, lint, full vitest, build) and was checked in a real browser (headless Chrome, dark theme, screenshots read back).
 
 | Commit | Items | What changed |
 |---|---|---|
@@ -33,8 +33,11 @@ Updated 2026-09-30 00:30. Every commit passed `npm run quality` (typecheck, lint
 | facfbd0 | I3-59, I3-57 | Doctordle: "Did you get it?" when you're back (inline on its page), a dashboard reminder for regulars (Yes / No / Later / Don't show again), sidebar flame from your own check-ins, a real back link and today's case number |
 | 69ae330 | I1-18, I1-19, F4, I3-18 | "Overwhelmed?" once after the guide and Promise (arrow + ripple to Customize); one first-visit hint per page on a reusable CoachMark; Help can bring hints back; signing the Promise -> tour offer verified |
 | 9692ebc | I1-21 | Dashboard: Daily Check-In, then the focus timer with a new Soundscape widget beside it, then targets, Question Bank, Course Tracker, Weekly; saved layouts carried forward once (defaultsRevision 2) |
+| a7603be | I1-24, I3-13, I3-14a, I3-16, I3-17 (Wave 2) | First-run setup rebuilt: three screens (You, How you study, Make it yours) replace the wizard; SGU curriculum model (Terms 1-5 + Boards), clean tracker for everyone else; tool choices set card rounds and default targets; no data-safety step; Course Tracker first-use card, template loader, teaching-order tree |
+| c202cd7 | I3-18 (Wave 2) | Promise rebuilt: three movements you advance, one signing sheet, sealed signature, fade into AXOM; first run goes straight into it; Settings shows the saved sheet |
+| (this commit) | e2e, I4 | The e2e suite now really runs with reduced motion (Playwright ignored the old top-level option, so the opening film held the app inert and typed names were dropped); IDEAS-4.md and manifest section F (Tutor mode AI, Clock widget) |
 
-Test count: 1,906 at baseline, 2,014 unit tests now (main's hardening tests included after the rebase), plus the Playwright suite (25 passed, 1 skipped) via `npm run verify:all`, exit 0.
+Test count: 1,906 at baseline, 2,022 unit tests now (main's hardening tests included after the rebase), plus the Playwright suite (25 passed, 1 skipped) via `npm run verify:all`, exit 0.
 
 ## Next (Wave 1 remainder)
 
