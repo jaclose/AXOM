@@ -46,45 +46,10 @@
   transition: opacity var(--intro-to-black, 380ms) cubic-bezier(0.4, 0, 1, 1);
 }
 
-.axom-startup-intro.axom-startup-intro--exiting .axom-startup-intro__controls,
 .axom-startup-intro.axom-startup-intro--exiting .axom-startup-intro__caption {
   opacity: 0;
   transition: opacity 200ms ease-out;
   pointer-events: none;
-}
-
-.axom-startup-intro__controls {
-  position: absolute;
-  inset-inline: 16px;
-  bottom: max(16px, env(safe-area-inset-bottom));
-  display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-}
-
-.axom-startup-intro__controls button {
-  appearance: none;
-  min-height: 40px;
-  padding: 8px 12px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  color: #b9b7b2;
-  font: 500 12px/1.4 system-ui, sans-serif;
-  letter-spacing: 0.025em;
-  cursor: pointer;
-  box-shadow: none;
-}
-
-.axom-startup-intro__controls button:hover {
-  background: rgb(255 255 255 / 5%);
-  color: #f2eee6;
-}
-
-.axom-startup-intro__controls button:focus-visible {
-  outline: 2px solid #f2eee6;
-  outline-offset: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {

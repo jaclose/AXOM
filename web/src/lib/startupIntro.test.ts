@@ -180,12 +180,13 @@ describe("bounded startup cinematic", () => {
     }
   });
 
-  it("persists an explicit disable and starts no media when disabled", async () => {
+  it("shows no buttons over the film, and the Never setting starts no media", async () => {
     const player = start();
-    const disable = overlay()!.querySelectorAll("button")[1];
-    disable.click();
+    expect(overlay()!.querySelectorAll("button")).toHaveLength(0);
+    overlay()!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     await vi.advanceTimersByTimeAsync(QUICK + SETTLE);
     await player.finished;
+    writeCinematicPreferences({ frequency: "never" });
     expect(localStorage.getItem(STARTUP_INTRO_ENABLED_KEY)).toBe("false");
     const next = start(true);
     await next.finished;
@@ -257,7 +258,7 @@ describe("bounded startup cinematic", () => {
     player.dismiss();
     player.dismiss();
     video.dispatchEvent(new Event("ended"));
-    detachedOverlay.querySelectorAll("button")[1].click();
+    detachedOverlay.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     const escape = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
     window.dispatchEvent(escape);
     await player.finished;
@@ -274,7 +275,7 @@ describe("bounded startup cinematic", () => {
     }
     const player = start();
     expect(overlay()).not.toBeNull();
-    overlay()!.querySelectorAll("button")[1].click();
+    overlay()!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     await vi.advanceTimersByTimeAsync(QUICK + SETTLE);
     await player.finished;
     expect(overlay()).toBeNull();
@@ -304,8 +305,8 @@ describe("bounded startup cinematic", () => {
 
   it("previews a chosen film immediately, whatever the schedule", () => {
     writeCinematicPreferences({ frequency: "never" });
-    players.push(startStartupIntro({ native: true, preview: { film: CINEMATICS["edge-glint"] } }));
-    expect(film().src).toMatch(/luster-edge-glint\.mp4$/);
+    players.push(startStartupIntro({ native: true, preview: { film: CINEMATICS["wordmark-3s"] } }));
+    expect(film().src).toMatch(/wordmark-3s\.mp4$/);
   });
 
   it("honors AXOM's own reduced-motion setting, not only the OS", async () => {

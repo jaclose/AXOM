@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from "react";
-import { Clapperboard, Play, Repeat } from "lucide-react";
+import { Clapperboard, Play } from "lucide-react";
 import { ICON_SIZE } from "../../lib/iconSize";
 import {
   CINEMATICS,
@@ -43,12 +43,11 @@ export function CinematicSettings() {
   const groupId = useId();
   const prefs = useCinematicPreferences();
   const reduced = useReducedMotion();
-  const placeholders = [prefs.intro, prefs.update, prefs.installing].some((id) => id !== "rotate" && CINEMATICS[id].placeholder);
   return (
     <section className="appearance-block cinematic-settings" aria-labelledby={`${groupId}-films`}>
       <header>
         <h4 id={`${groupId}-films`}><Clapperboard size={ICON_SIZE.body} aria-hidden="true" /> Opening film</h4>
-        <p>A short brand film when AXOM opens. It never delays your work — click or press Escape to skip.</p>
+        <p>A short brand film when AXOM opens. It never delays your work: click anywhere or press Escape to skip.</p>
       </header>
 
       <div className="cinematic-frequency" role="radiogroup" aria-label="When the opening film plays" onKeyDown={onRadioGroupKeyDown}>
@@ -94,19 +93,6 @@ export function CinematicSettings() {
             </div>
           );
         })}
-        <div className={`cinematic-film rotate ${prefs.intro === "rotate" ? "on" : ""}`}>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={prefs.intro === "rotate"}
-            tabIndex={prefs.intro === "rotate" ? 0 : -1}
-            className="cinematic-film-pick"
-            onClick={() => writeCinematicPreferences({ intro: "rotate" })}
-          >
-            <span className="cinematic-rotate-glyph" aria-hidden="true"><Repeat size={ICON_SIZE.emphasis} /></span>
-            <span><b>Rotate</b><small>A different film each time.</small></span>
-          </button>
-        </div>
       </div>
 
       <div className="cinematic-moments">
@@ -132,9 +118,7 @@ export function CinematicSettings() {
       <p className="appearance-footnote">
         {reduced
           ? "Films are off while reduced motion is on."
-          : placeholders
-            ? "Some of your chosen films are early placeholders; the AXOM wordmark films are the finished renders."
-            : "Each film fades to black and AXOM settles in beneath it. Nothing waits on the film."}
+          : "Each film fades to black and AXOM settles in beneath it. Nothing waits on the film."}
       </p>
     </section>
   );

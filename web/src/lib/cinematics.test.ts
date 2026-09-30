@@ -62,20 +62,25 @@ describe("startup cinematic schedule", () => {
     expect(decide({ frequency: "always" }, ledger, monday, { playedThisTab: true }).decision.play).toBe(false);
   });
 
-  it("rotates through every film when asked", () => {
+  it("plays the chosen everyday film after the first-run ident", () => {
     let ledger: CinematicLedger = {};
     const seen: string[] = [];
-    for (let day = 21; day < 26; day += 1) {
-      const result = decide({ intro: "rotate" }, ledger, new Date(2026, 8, day, 9));
+    for (let day = 21; day < 24; day += 1) {
+      const result = decide({ intro: "wordmark-3s" }, ledger, new Date(2026, 8, day, 9));
       if (result.decision.play) seen.push(result.decision.film.id);
       ledger = result.nextLedger;
     }
-    // The first open is always the ident; the rotation starts on the next day.
-    expect(seen).toEqual(["ident", "wordmark-2s", "wordmark-3s", "ident", "slow-sweep"]);
+    expect(seen).toEqual(["ident", "wordmark-3s", "wordmark-3s"]);
   });
 
   it("repairs unknown stored preferences", () => {
-    expect(normalizeCinematicPreferences({ version: 2, frequency: "hourly", intro: "nope", update: "edge-glint" })).toEqual({ ...DEFAULT_CINEMATIC_PREFERENCES, update: "edge-glint" });
+    expect(normalizeCinematicPreferences({ version: 2, frequency: "hourly", intro: "nope", update: "ident" })).toEqual({ ...DEFAULT_CINEMATIC_PREFERENCES, update: "ident" });
+  });
+
+  it("moves retired stand-in films and the old Rotate choice to the finished films", () => {
+    expect(normalizeCinematicPreferences({ version: 2, frequency: "weekly", intro: "rotate", update: "push-sweep", installing: "edge-glint" }))
+      .toEqual({ ...DEFAULT_CINEMATIC_PREFERENCES, frequency: "weekly" });
+    expect(Object.keys(CINEMATICS).sort()).toEqual(["ident", "wordmark-2s", "wordmark-3s"]);
   });
 
   it("moves placeholder-era choices to the finished films but keeps the schedule", () => {

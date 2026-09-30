@@ -5,7 +5,6 @@ import {
   readCinematicLedger,
   readCinematicPreferences,
   writeCinematicLedger,
-  writeCinematicPreferences,
   type CinematicFilm,
 } from "./cinematics";
 import { APP_RELEASE_VERSION } from "./brand";
@@ -105,15 +104,8 @@ export function startStartupIntro(options: StartupIntroOptions = {}): StartupInt
   video.tabIndex = -1;
   video.setAttribute("aria-hidden", "true");
 
-  const controls = document.createElement("div");
-  controls.className = "axom-startup-intro__controls";
-  const skip = document.createElement("button");
-  skip.type = "button";
-  skip.textContent = "Skip intro";
-  const disable = document.createElement("button");
-  disable.type = "button";
-  disable.textContent = "Don’t show again";
-  controls.append(skip, disable);
+  // No on-screen buttons (JD, Ideas 3): the film is short, a click anywhere or
+  // Escape skips it, and "never" lives in Settings > Appearance > Opening film.
   overlay.append(video);
   if (caption) {
     const text = document.createElement("p");
@@ -121,7 +113,6 @@ export function startStartupIntro(options: StartupIntroOptions = {}): StartupInt
     text.textContent = caption;
     overlay.append(text);
   }
-  overlay.append(controls);
 
   const appRoot = options.appRoot ?? document.getElementById("root");
   const wasInert = appRoot?.hasAttribute("inert") ?? false;
@@ -246,7 +237,6 @@ export function startStartupIntro(options: StartupIntroOptions = {}): StartupInt
     // Consume the launch gesture; it must not click a freshly mounted setup UI.
     event.preventDefault();
     event.stopPropagation();
-    if (event.target === disable) writeCinematicPreferences({ frequency: "never" });
     leave(true);
   }
 
