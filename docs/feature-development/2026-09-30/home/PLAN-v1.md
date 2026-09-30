@@ -15,6 +15,10 @@ The first week in AXOM feels guided and alive: the dashboard tells you what to d
 5. **Wrapped** (D). Weekly, monthly and yearly stories from real logs: a full-width header on the dashboard when a week closes, saved in Reports ("It's in Reports if you want to see it again"). Honest low-data states.
 6. **Tracker order TODO** (C, from JD): trackers move up by share of today's target completed, settled 10 s after the last tap.
 7. **Tracker boxes start at 4** (Ideas 3): Study, Practice questions, Lectures, plus the card app if chosen. Needs Codex's sign-off on the tracker model (board).
+8. **Daily check-in rehaul** (Ideas 4, I4-11..I4-14): large and open by default; submit plays "intention logged" and leaves the intention on the page; elegant animated energy orbs (ripple high, melt low) with "Energy logged" rising from the orb row; a first-time note ("When you keep track of this, AXOM finds your best times"); optional mini writing prompts that feed the energy estimate.
+9. **Insights and a notifications button** (I4-15, I4-16): once enough energy data exists, "AXOM has some insights to show you" (Show me / Not now, then a persistent dashboard item); a guided reading that glows the best hours and marks the dips; a top-bar notifications button that appears only when something is unread (Wrapped, insights).
+10. **"Overwhelmed?" v2** (I4-07, I4-08, I4-09): trigger after logging data or about a minute of real browsing (3-4 sidebar tabs or widget links); arrows to Customize and Edit dashboard together; a hands-on sidebar how-to (drag between sections, make your own section), then the dashboard edit how-to. Widgets say what is recommended and why (I4-10).
+11. **Accounts** (I4-18, I4-20, I3-32): email and password sign-up without a code, a welcome email (design in the repo, JD applies it in production; coordinate with Codex's email templates), a fully local account in the desktop app, keep 10 saves.
 
 ## Not in v1
 
