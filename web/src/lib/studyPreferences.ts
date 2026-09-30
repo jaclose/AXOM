@@ -78,11 +78,12 @@ function normalizeSettings(source: Record<string, unknown>): StudyPlanSettings {
 }
 
 export const STUDY_METHOD_OPTIONS: Array<{ id: StudyMethodId; label: string }> = [
-  { id: "lecture-passes", label: "Lecture passes" }, { id: "practice-questions", label: "Question-based practice" },
+  // Display names match the How you study tiles; only ids are stored.
+  { id: "lecture-passes", label: "Lecture review" }, { id: "practice-questions", label: "Practice questions" },
   { id: "anki", label: "Anki" }, { id: "quizlet", label: "Quizlet" }, { id: "noji", label: "Noji" },
-  { id: "remnote", label: "RemNote" }, { id: "notes", label: "Notes / concept notes" },
-  { id: "teach-aloud", label: "Teaching aloud / Feynman" }, { id: "recall", label: "Recall sessions" },
-  { id: "external-resource", label: "External resources" }, { id: "custom", label: "Other" },
+  { id: "remnote", label: "RemNote" }, { id: "notes", label: "Notes" },
+  { id: "teach-aloud", label: "Teach aloud" }, { id: "recall", label: "Recall sessions" },
+  { id: "external-resource", label: "Resources" }, { id: "custom", label: "Something else" },
 ];
 
 /** Toggling a method must never erase its timing, label, or original words. */

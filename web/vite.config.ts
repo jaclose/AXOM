@@ -23,6 +23,9 @@ export default defineConfig({
   server: { fs: { allow: [fileURLToPath(new URL("..", import.meta.url))] } },
   test: {
     exclude: [...configDefaults.exclude, "e2e/**"],
+    // Whole-app render suites run ~0.5-3 s alone but pass 5 s on a busy
+    // machine (two agents building at once); 15 s still catches real hangs.
+    testTimeout: 15_000,
   },
   build: {
     manifest: true,
