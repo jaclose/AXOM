@@ -2,7 +2,7 @@
 
 Checked against IDEAS-1.md, IDEAS-3.md, MANIFEST.md, PLAN.md, PROGRESS.md and the Codex board. Branch `feat/ideas3-staging` (not merged, not pushed, not deployed).
 
-**Bottom line (updated 2026-09-30):** of ~106 items, 24 are shipped and verified in a browser, 6 are implemented but not yet verified the way a user would meet them, 12 are partial, 3 are blocked, 5 belong to Codex, and ~56 are planned or not started. That is about 23% fully done by item count (about 28% if partial work counts as half), and less by effort, because the unstarted items include the biggest ones (journal, onboarding, Wrapped, library, AI generation, exam interfaces). (It was 11, about 10%, on 2026-09-29.)
+**Bottom line (updated 2026-09-30):** of ~106 items, 26 are shipped and verified in a browser, 6 are implemented but not yet verified the way a user would meet them, 12 are partial, 3 are blocked, 5 belong to Codex, and ~54 are planned or not started. That is about 25% fully done by item count (about 30% if partial work counts as half), and less by effort, because the unstarted items include the biggest ones (journal, onboarding, Wrapped, library, AI generation, exam interfaces). (It was 11, about 10%, on 2026-09-29.)
 
 Status words: **SHIPPED + VERIFIED** (user-facing behavior exercised in a real browser), **IMPLEMENTED, NOT YET VERIFIED** (code + automated tests only, or cannot be verified headless), **PARTIAL** (only part of the requested behavior), **PLANNED**, **BLOCKED**, **NOT STARTED**. A shared component change never counts as shipping the feature that sits on top of it.
 
@@ -25,7 +25,7 @@ Verification environment: headless Chrome (Playwright, real Chrome channel) agai
 | 11 | Reports (I3-07, I3-63) | NOT STARTED | | Claude | Wave 2 |
 | 12 | Daily Word (I3-53..I3-58) | SHIPPED + VERIFIED | 7a85fe0 (win card, share #N, on-board how-to, back link, no scroll), a77a59b (hint ladder + reveal), 937a991 (sidebar countdown + streak) | Claude | "More words" list growth is separate |
 | 13 | Question bank / exam UIs (I1-08, I3-33, I3-25) | NOT STARTED | ExamRunner lists every set even when one is preselected (ExamRunner.tsx:712-725), Codex edits that file | Claude after Codex | Wave 3 |
-| 14 | Anki / native flashcards (I1-07, I1-32) | NOT STARTED | Integrations copy still over-claims | Claude | Wave 3 (copy fix sooner) |
+| 14 | Anki / native flashcards (I1-07, I1-32) | I1-32 copy SHIPPED + VERIFIED; I1-07 NOT STARTED | 67eb5c0: Integrations says what Anki Lab really does (local drafts or your own AI chat, then CSV/TSV) | Claude | Wave 3 |
 | 15 | Generative questions (I1-05) | NOT STARTED | | Claude | Wave 3 |
 | 16 | Onboarding (I1-24, I3-13, I3-14, I3-16, I3-17, I3-19) | NOT STARTED | Baseline screenshots of every current step captured | Claude | Wave 2 flagship |
 | 17 | Apple Now Playing (I1-12) | IMPLEMENTED, NOT YET VERIFIED | 2de3f7a removed the MediaStream route that made Chrome treat playback as a one-shot player; media-session metadata + handlers registered. Headless Chrome has no macOS Now Playing | Claude | JD checks Control Center while a soundscape plays |
@@ -55,6 +55,8 @@ Verification environment: headless Chrome (Playwright, real Chrome channel) agai
 | I1-19 First-visit page hints | 120a7ba | coach.ts (5 hints), CoachLayer.tsx, HelpPage.tsx (Show page hints again), CourseTrackerPage.tsx (intro toast removed) | CoachLayer.test.tsx, coach.test.ts | Dashboard, Course Tracker, Question Bank, Productivity, Soundscapes (waited for the taste picker); No more hints stopped them; Help brought them back |
 | I3-18 Tour offered after signing | dd5e5ba (behavior), verified 2026-09-30 | App.tsx, GuideOffer.tsx | GuideOffer tests | Sign now -> signed -> cutscene closed -> "Want a 60-second tour?" shown |
 | I3-59 Doctordle "did you get it?" | 3386844 | doctordle.ts, DoctordleCheckIn.tsx, DoctordleReminder.tsx, DoctordlePage.tsx, OptionalDailyGamesPage.tsx, DailyGameNavMeta.tsx, DashboardPage.tsx (1 line + import), App.tsx (mount) | doctordle.test.ts (5), DoctordleCheckIn.test.tsx (6), DoctordlePage.test.tsx | Open -> inline ask on the page; elsewhere the floating check-in 15 s later; Got it -> sidebar flame 1; regular's dashboard card Yes -> Got it -> "Logged. 3 in a row." Dark 1440, light 1440, dark 390 |
+| I1-32 Integrations copy | 67eb5c0 | IntegrationsPage.tsx | none (copy) | Read back at 390 dark: Anki card export copy, no em dashes |
+| I1-35 Portable backup entry | existing; verified 2026-09-30 | IntegrationsPage.tsx, SettingsModal.tsx | SettingsModal tests | Integrations > Open backups opened Settings on Emergency recovery; Export backup downloaded axom-backup-2026-09-30.json with the workspace (5 tracker items) |
 | I1-21 Dashboard order + Soundscape widget | a030af0 | dashboardWidgets.ts, SoundscapeWidget.tsx, quickPicks.ts, DashboardPage.tsx (4 small hunks), SettingsModal.tsx, types.ts, dashboard-widgets.css | dashboardWidgets.test.ts (+5), quickPicks.test.ts (3), DashboardWidgetEngine.test.tsx | New student grid: Daily Check-In, Pomodoro, Soundscape, targets, Question Bank, Course Tracker, Weekly. Played, switched (Brown) and stopped from the widget; custom layout gained Soundscape right after the timer; dark 1440, light 1440, dark 390 |
 
 ## IMPLEMENTED, NOT YET VERIFIED
@@ -63,7 +65,7 @@ I3-12 late-night band (chart not opened), I3-27 one-tap Not now (jsdom only), I1
 
 ## PARTIAL
 
-I1-17 (8-stop tour yes; mini-guide help buttons on only 3 pages), I1-11 (native pill exists, JD's build is old), I3-35 (AirPods path untested, wired path mostly inert), I3-26 (mass import only), I1-06/I3-08 (files yes, YouTube no), I1-09 (comfort and levels yes, more content no), I1-26 (unlock mechanism, no trigger), I1-22 (one verified layout fix: "Run setup again" is one line, 30 px tall, in light 1440 and dark 390; the consumer-friendly settings rewrite is not started), I3-60/M-04 (toast visuals yes, broader notification surfaces no).
+I1-17 (8-stop tour yes; mini-guide help buttons on only 3 pages), I1-11 (native pill exists, JD's build is old), I3-35 (AirPods path untested, wired path mostly inert), I3-26 (mass import only), I1-06/I3-08 (files yes, YouTube no), I1-09 (comfort and levels yes, more content no), I1-26 (unlock mechanism, no trigger), I1-22 (verified: "Run setup again" on one line; 67eb5c0 plain-language Account and Data tabs with a Technical details disclosure, checked dark 1440 and 390; Personalization and Advanced not yet rewritten), I3-60/M-04 (toast visuals yes, broader notification surfaces no).
 
 ## BLOCKED
 
