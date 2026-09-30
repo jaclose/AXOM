@@ -27,8 +27,8 @@ import { activePrimaryScopes, itemsInPrimary } from "../lib/trackerFocus";
 import { rankTrackerItems } from "../lib/recommendationFactors";
 import { scopeStudyProgress } from "../lib/studyProgress";
 import { collectEnergySamples, dailyEnergy } from "../lib/energyInsights";
-import { pickFocusExam, buildExamCountdown, countdownHeadline, type PrepIntensity } from "../lib/examPlan";
-import { AnimatedProgressBar } from "../components/ui/motion";
+import { pickFocusExam } from "../lib/examPlan";
+import { ExamCountdown } from "../components/dashboard/ExamCountdown";
 import { GlassCard, GButton, GhostButton, PanelHeader, Tag } from "../components/ui/primitives";
 import { Pomodoro } from "../components/productivity/Pomodoro";
 import { UpNext } from "../components/brief/UpNext";
@@ -669,7 +669,7 @@ function widgetIsSuggested(id: DashboardWidgetId, s: ReturnType<typeof useStore.
   if (id === "readiness") return true;
   if (id === "activity" || id === "weekly" || id === "streak") return s.logs.length > 0;
   if (id === "journal") return s.journal.length > 0;
-  if (id === "examCountdown") return Boolean(pickFocusExam(s.boardPrep));
+  if (id === "examCountdown") return true;
   if (id === "premedHours") return s.premedExperiences.length > 0;
   return false;
 }
@@ -1127,55 +1127,8 @@ function PremedHoursWidget() {
   );
 }
 
-// Exam countdown + adaptive daily-question goal (directive §20 + §21). Reads the
-// existing boardPrep data; self-hides when the user has no exam date or content
-// progress on any board lane, so it only appears when it's useful.
 function ExamCountdownWidget() {
-  const boardPrep = useStore((s) => s.boardPrep);
-  const focusId = pickFocusExam(boardPrep);
-  if (!focusId) return null;
-  const prep = boardPrep[focusId];
-  const intensity: PrepIntensity = prep.confidence === "low" ? "gentle" : prep.confidence === "high" ? "intense" : "balanced";
-  const c = buildExamCountdown(focusId, prep, intensity);
-  const hasDate = c.daysUntil !== null;
-  const examPast = c.awaitingPostExam;
-
-  return (
-    <GlassCard pad className={`exam-countdown ${examPast ? "past" : ""}`}>
-      <PanelHeader
-        title={`${c.meta.short} countdown`}
-        sub={c.examDate ? `Exam ${prettyDate(`${c.examDate.slice(0, 10)}T12:00:00`)}` : "No exam date set yet"}
-        action={<a className="gbtn sm" href={`#${c.meta.route}`}><CalendarClock size={ICON_SIZE.body} /> Open prep</a>}
-      />
-      <div className="exam-countdown-grid">
-        <div className="exam-countdown-num">
-          <b>{hasDate ? Math.abs(c.daysUntil as number) : "—"}</b>
-          <span>{!hasDate ? "set a date" : examPast ? "days since exam" : (c.daysUntil === 1 ? "day to go" : "days to go")}</span>
-        </div>
-        <div className="exam-countdown-meta">
-          <span className="exam-phase-pill">{c.phaseLabel} phase</span>
-          {c.milestone && <span className="exam-milestone">{c.milestone.label}</span>}
-        </div>
-      </div>
-
-      {c.recommendedDaily > 0 && !examPast && (
-        <>
-          <div className="exam-q-line">
-            <span>Today's questions</span>
-            <b>{c.answeredToday}/{c.recommendedDaily}{c.correctToday > 0 ? ` · ${Math.round((c.correctToday / Math.max(1, c.answeredToday)) * 100)}% correct` : ""}</b>
-          </div>
-          <AnimatedProgressBar
-            value={c.answeredToday}
-            max={c.recommendedDaily}
-            tone={c.questionProgress >= 100 ? "green" : "cyan"}
-            glow={c.questionProgress >= 100}
-            label={`${c.questionProgress}% of daily target`}
-          />
-        </>
-      )}
-      <div className="trend-comment">{countdownHeadline(c)}</div>
-    </GlassCard>
-  );
+  return <ExamCountdown />;
 }
 
 const OUTCOMES: { key: "won" | "partial" | "missed"; label: string; tone: "green" | "orange" | "red" }[] = [

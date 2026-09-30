@@ -272,8 +272,60 @@ export const AXOM_ORIGINALS_V2: readonly AxomQuote[] = Object.freeze(AXOM_ORIGIN
   attributionNote: "AXOM Original — library v2 (September 2026).",
 })));
 
+/** Product-authored lines are versioned separately from the supplied library. */
+export const AXOM_ORIGINALS_V3: readonly AxomQuote[] = Object.freeze([
+  "Make a small piece of the unknown more familiar.",
+  "A careful answer begins with a better question.",
+  "Give your attention a place to stay.",
+  "The page is a place to think, not a place to perform.",
+  "Leave room in your certainty for new evidence.",
+  "The useful detail is often the one you nearly passed over.",
+  "A good explanation makes its assumptions visible.",
+  "Keep the question open long enough to learn from it.",
+  "Aim for work you can stand behind when the room is quiet.",
+  "Build something your future attention can rely on.",
+  "You can revise the plan without abandoning the purpose.",
+  "Let the next attempt be informed by the last.",
+  "Some days the achievement is a clearer question.",
+  "The first draft gives your judgment something to work with.",
+  "Do the part that brings the rest into focus.",
+  "Your standards should make the work clearer, not impossible.",
+  "The margin is where a borrowed idea becomes your own question.",
+  "A precise uncertainty is more useful than a vague confidence.",
+  "Put the mechanism beside the fact.",
+  "Read until you can name what you still do not understand.",
+  "Good work leaves a path that another mind can follow.",
+  "A quiet hour can hold a difficult idea.",
+  "Leave a trace of the reasoning, not just the result.",
+  "The point of a system is to return your attention to the work.",
+  "Choose a stopping point that gives tomorrow a beginning.",
+  "A useful routine has room for an unusual day.",
+  "Let the evidence earn the conclusion.",
+  "The next revision is allowed to be smaller than the first ambition.",
+  "Learn the distinction that changes the decision.",
+  "There is a craft to noticing what matters.",
+  "Make the invisible assumption legible.",
+  "Care is a method as much as an intention.",
+  "The work becomes yours when you can explain your choices.",
+  "What you leave out should be a decision, too.",
+  "Follow the thread until the pieces fit.",
+  "A complete thought is worth giving time to.",
+  "Return to the difficult paragraph with a different question.",
+  "Keep a place for the evidence that changes your mind.",
+  "The next useful thing is often close at hand.",
+  "Let your tools carry the repetition. Keep the judgment.",
+  "Today’s task can be modest and still matter.",
+  "Build the understanding that makes the shortcut safe.",
+  "Do enough to see the next decision clearly.",
+  "A good stopping point preserves the thread.",
+  "Make the work easier to return to.",
+  "The question deserves your curiosity before your conclusion.",
+  "A careful revision is a form of respect for the reader.",
+  "Bring one more thing into focus before you leave.",
+].map((text, index) => ({ id: `axom-original-v3-${String(index + 1).padStart(3, "0")}`, text, author: "AXOM", category: "axom-original" as const, intensity: 2 as const, guilt: false, attributionStatus: "axom-original" as const, attributionNote: "Written for AXOM — Originals volume 3, September 2026." })));
+
 /** The full, append-only library. v1 is pinned; later volumes only append. */
-export const AXOM_QUOTES: readonly AxomQuote[] = Object.freeze([...AXOM_QUOTE_LIBRARY_V1, ...AXOM_ORIGINALS_V2]);
+export const AXOM_QUOTES: readonly AxomQuote[] = Object.freeze([...AXOM_QUOTE_LIBRARY_V1, ...AXOM_ORIGINALS_V2, ...AXOM_ORIGINALS_V3]);
 
 export const QUOTE_CATEGORY_LABELS: Record<QuoteCategory, string> = {
   "axom-original": "AXOM Originals",

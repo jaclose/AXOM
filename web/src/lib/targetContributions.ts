@@ -211,6 +211,7 @@ function sourceRecordIdsInStateOrder(
 
 export function normalizeTargetUnit(value: string): string {
   const unit = normalizeLabel(value);
+  if (["h", "hr", "hrs", "hour", "hours"].includes(unit)) return "hours";
   if (["min", "mins", "minute", "minutes"].includes(unit)) return "minutes";
   if (["card", "cards", "review", "reviews"].includes(unit)) return "cards";
   if (["question", "questions", "practice question", "practice questions"].includes(unit)) return "questions";
@@ -225,7 +226,7 @@ function targetUnit(
   trackers: ProductivityTracker[],
   habits: Habit[],
 ): string {
-  if (requirement.source.kind === "study-minutes") return "minutes";
+  if (requirement.source.kind === "study-minutes") return normalizeTargetUnit(requirement.unit) === "hours" ? "hours" : "minutes";
   if (requirement.source.kind === "cards-reviewed") return "cards";
   if (requirement.source.kind === "practice-questions") return "questions";
   if (requirement.source.kind === "journal-closeout") return "count";
@@ -255,7 +256,7 @@ function nativeLogValue(
   trackers: ProductivityTracker[],
 ): number | undefined {
   if (requirement.source.kind === "study-minutes") {
-    return log.academic === false ? undefined : nonZero(log.minutes);
+    return log.academic === false ? undefined : nonZero(unit === "hours" ? log.minutes / 60 : log.minutes);
   }
   if (requirement.source.kind === "cards-reviewed") {
     if (log.quantityKind !== "cards" && finite(log.cards) === 0) return undefined;
@@ -275,6 +276,7 @@ function nativeLogValue(
 }
 
 function valueInUnit(log: StudyLog, unit: string, explicitSemanticLink: boolean): number | undefined {
+  if (unit === "hours") return nonZero(log.minutes / 60);
   if (unit === "minutes") return nonZero(log.minutes);
   if (unit === "cards") {
     if (log.quantityKind === "cards" && finite(log.quantity) !== 0) return finite(log.quantity);
@@ -312,6 +314,13 @@ function addManualContributions(
 ) {
   const matching = canonicalManualContributions(requirement.manualContributions ?? [])
     .filter((item) => item.requirementId === requirement.id && item.dayKey === dayKey)
+    .map((item) => {
+      const sourceUnit = item.unit ? normalizeTargetUnit(item.unit) : unit;
+      // Stored adjustments keep their original unit across display-unit changes.
+      if (sourceUnit === "minutes" && unit === "hours") return { ...item, value: item.value / 60, unit };
+      if (sourceUnit === "hours" && unit === "minutes") return { ...item, value: item.value * 60, unit };
+      return item;
+    })
     .filter((item) => !item.unit || normalizeTargetUnit(item.unit) === unit);
   const additions = matching.filter((item) => item.mode === "add");
   for (const item of additions) {

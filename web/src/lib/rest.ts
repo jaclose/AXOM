@@ -13,6 +13,10 @@ import { useStore } from "./store";
 import { findLiveSession } from "./sessions";
 import { useSoundscape } from "./soundscapes/store";
 
+import { alarmLevel, primeRestAlarm, startRestAlarm, stopRestAlarm } from "./restAlarm";
+import { normalizeRestPreferences, readRestPreferences, REST_PREFERENCES_KEY, type RestPreferences, type RestPreset } from "./restPreferences";
+export { alarmLevel, primeRestAlarm };
+
 export type RestStatus = "idle" | "resting" | "ringing";
 
 export interface RestEntry {
@@ -35,6 +39,12 @@ interface Persisted {
 
 interface RestState extends Persisted {
   overlayOpen: boolean;
+  preferences: RestPreferences;
+  presets: RestPreset[];
+  audioError?: string;
+  setPreferences: (patch: Partial<RestPreferences>) => void;
+  savePreset: (name: string) => void;
+  removePreset: (id: string) => void;
   start: (minutes?: number) => void;
   extend: (minutes: number) => void;
   wakeNow: () => void;
@@ -90,72 +100,20 @@ function appendRestLog(entry: RestEntry): void {
   } catch { /* the log is optional */ }
 }
 
-// --- Gentle alarm ---------------------------------------------------------
-// A soft bell arpeggio (C major pentatonic) whose volume rises over ~40 s.
-// The AudioContext is created while starting the rest (a user gesture), so
-// it may play later from a timer without being blocked by autoplay rules.
-const CHIME_NOTES = [523.25, 659.25, 783.99, 1046.5, 783.99, 659.25];
-let alarmContext: AudioContext | null = null;
-let alarmTimer: ReturnType<typeof setInterval> | null = null;
-let alarmStartedAt = 0;
-
-function audioContext(): AudioContext | null {
-  if (typeof window === "undefined") return null;
-  const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (!Ctor) return null;
-  alarmContext ??= new Ctor();
-  return alarmContext;
+// Rest owns only its temporary audio adjustment. User volume stays untouched.
+let pausedSoundscape: { id: string; paused: boolean } | undefined;
+function adjustSoundscape(mode: RestPreferences["soundscapeMode"]) {
+  const soundscape = useSoundscape.getState();
+  if (soundscape.status !== "playing" || !soundscape.presetId) return;
+  pausedSoundscape = { id: soundscape.presetId, paused: mode === "pause" };
+  if (mode === "pause") void soundscape.pause();
+  if (mode === "duck") soundscape.setDucking(.2);
 }
-
-/** Called from the start gesture: unlocks audio for the later alarm. */
-export function primeRestAlarm(): void {
-  const ctx = audioContext();
-  if (ctx?.state === "suspended") void ctx.resume().catch(() => undefined);
-}
-
-function bell(ctx: AudioContext, frequency: number, at: number, level: number): void {
-  const out = ctx.createGain();
-  out.gain.setValueAtTime(0.0001, at);
-  out.gain.exponentialRampToValueAtTime(level, at + 0.012);
-  out.gain.exponentialRampToValueAtTime(0.0001, at + 2.6);
-  out.connect(ctx.destination);
-  // Inharmonic partials give a soft bell rather than a beep.
-  [[1, 1], [2.756, 0.32], [5.404, 0.1]].forEach(([ratio, amp]) => {
-    const osc = ctx.createOscillator();
-    osc.type = "sine";
-    osc.frequency.value = frequency * ratio;
-    const partial = ctx.createGain();
-    partial.gain.value = amp;
-    osc.connect(partial).connect(out);
-    osc.start(at);
-    osc.stop(at + 2.7);
-    osc.onended = () => { osc.disconnect(); partial.disconnect(); };
-  });
-}
-
-/** Volume rises from a whisper to a clear chime over the first 40 seconds. */
-export function alarmLevel(elapsedMs: number): number {
-  const t = Math.min(1, Math.max(0, elapsedMs / 40_000));
-  return 0.035 + (0.26 - 0.035) * t * t;
-}
-
-function startAlarm(): void {
-  stopAlarm();
-  const ctx = audioContext();
-  if (!ctx) return;
-  void ctx.resume().catch(() => undefined);
-  alarmStartedAt = Date.now();
-  const phrase = () => {
-    const level = alarmLevel(Date.now() - alarmStartedAt);
-    CHIME_NOTES.forEach((note, index) => bell(ctx, note, ctx.currentTime + 0.05 + index * 0.42, level));
-  };
-  phrase();
-  alarmTimer = setInterval(phrase, 5200);
-}
-
-function stopAlarm(): void {
-  if (alarmTimer) clearInterval(alarmTimer);
-  alarmTimer = null;
+function restoreSoundscape() {
+  const soundscape = useSoundscape.getState();
+  soundscape.setDucking(1);
+  if (pausedSoundscape?.paused && soundscape.status === "paused" && soundscape.presetId === pausedSoundscape.id) void soundscape.resume();
+  pausedSoundscape = undefined;
 }
 
 // --- State machine --------------------------------------------------------
@@ -189,9 +147,25 @@ export const useRest = create<RestState>((set, get) => {
 
   return {
     ...readPersisted(),
+    ...readRestPreferences(),
     overlayOpen: false,
 
-    start(minutes = DEFAULT_REST_MINUTES) {
+    setPreferences(patch) {
+      set({ preferences: normalizeRestPreferences({ ...get().preferences, ...patch }) });
+      try { localStorage.setItem(REST_PREFERENCES_KEY, JSON.stringify({ preferences: get().preferences, presets: get().presets })); } catch { /* device preferences */ }
+    },
+    savePreset(name) {
+      if (!name.trim()) return;
+      set({ presets: [...get().presets, { id: crypto.randomUUID(), name: name.trim().slice(0, 60), preferences: { ...get().preferences } }].slice(-12) });
+      get().setPreferences({});
+    },
+    removePreset(id) {
+      set({ presets: get().presets.filter((item) => item.id !== id) });
+      get().setPreferences({});
+    },
+    start(minutes = get().preferences.minutes) {
+      if (get().status !== "idle") { set({ overlayOpen: true }); return; }
+      minutes = normalizeRestPreferences({ minutes }).minutes;
       primeRestAlarm();
       const now = Date.now();
       const paused: Persisted["paused"] = {};
@@ -209,27 +183,31 @@ export const useRest = create<RestState>((set, get) => {
       persist({ status: "resting", startedAt: now, endsAt: now + minutes * 60_000, plannedMinutes: minutes, paused });
       set({ overlayOpen: true });
       if (get().withSound) void useSoundscape.getState().play("soft-rain", { stopAfterMinutes: minutes });
+      else adjustSoundscape(get().preferences.soundscapeMode);
       ensureTicker();
     },
 
     extend(minutes) {
       const { status, endsAt } = get();
-      if (status !== "resting" || !endsAt) return;
+      if (status !== "resting" || !endsAt || !Number.isFinite(minutes) || minutes <= 0) return;
       persist({ endsAt: endsAt + minutes * 60_000, plannedMinutes: get().plannedMinutes + minutes });
     },
 
     wakeNow() {
       if (get().status === "idle") return;
-      stopAlarm();
+      stopRestAlarm();
       finish(get().status === "ringing");
       persist({ status: "idle", startedAt: undefined, endsAt: undefined });
       set({ overlayOpen: false });
+      restoreSoundscape();
       stopTicker();
-      if (useSoundscape.getState().presetId === "soft-rain") void useSoundscape.getState().stop(2);
+      if (get().withSound && useSoundscape.getState().presetId === "soft-rain") void useSoundscape.getState().stop(2);
     },
 
     snooze(minutes = 5) {
-      stopAlarm();
+      if (get().status !== "ringing") return;
+      minutes = normalizeRestPreferences({ minutes }).minutes;
+      stopRestAlarm();
       const now = Date.now();
       persist({ status: "resting", endsAt: now + minutes * 60_000, plannedMinutes: get().plannedMinutes + minutes });
       ensureTicker();
@@ -259,16 +237,17 @@ export const useRest = create<RestState>((set, get) => {
           // Ended long ago while AXOM was closed: close it quietly.
           finish(true);
           persist({ status: "idle", startedAt: undefined, endsAt: undefined });
+          restoreSoundscape();
           stopTicker();
           return;
         }
         persist({ status: "ringing" });
         set({ overlayOpen: true });
-        startAlarm();
-        void notify("Time to lift your head", "Your rest is over — ease back in when you’re ready.", { tag: "axom-rest" });
+        void startRestAlarm(get().preferences, { onError: (audioError) => set({ audioError }) });
+        if (get().preferences.systemNotification) void notify("AXOM — time to lift your head", "Your rest is over. Ease back in when you’re ready.", { tag: "axom-rest", route: "productivity", action: "rest", dedupeKey: `rest:${endsAt}`, silent: true });
         return;
       }
-      if (status === "ringing" && endsAt && now - endsAt > RING_LIMIT_MS) stopAlarm();
+      if (status === "ringing" && endsAt && now - endsAt > RING_LIMIT_MS) stopRestAlarm();
     },
   };
 });

@@ -1,0 +1,39 @@
+.exam-deadlines { container-type: inline-size; }
+.exam-deadline-split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
+.exam-deadline-step, .exam-deadline-module { --deadline-accent: var(--text); }
+.exam-deadline-step { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+.exam-deadline-label { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; color: var(--text-70); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
+.exam-deadline-label > span { font-weight: var(--fw-regular); color: var(--text-60); }
+.exam-deadline-value { display: grid; gap: 6px; }
+.exam-deadline-value > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 7px; }
+.exam-deadline-value strong { font-size: clamp(30px, 8cqw, 54px); line-height: 1; letter-spacing: -.05em; font-weight: var(--fw-medium); color: var(--deadline-accent); font-variant-numeric: tabular-nums; }
+.exam-deadline-value span, .exam-deadline-value time, .exam-deadline-value small { font-size: var(--fs-xs); color: var(--text-65); }
+.exam-deadline-value.compact strong { font-size: var(--fs-xl); }
+.exam-deadline-modules { border-left: 1px solid var(--hairline); padding-left: 22px; min-width: 0; }
+.exam-deadline-module { padding: 14px 0; border-bottom: 1px solid var(--hairline-soft); }
+.exam-module-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.exam-module-heading b { font-weight: var(--fw-medium); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.exam-module-heading small { color: var(--gold); font-size: var(--fs-tiny); }
+.exam-row-actions { display: flex; gap: 4px; margin: 8px 0 -4px; }
+.exam-row-actions button { width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-65); }
+.exam-row-actions button:hover { color: var(--text); border-color: var(--hairline); background: var(--surface-1); }
+.exam-text-action { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 4px 0; border: 0; background: none; color: var(--text-75); font-size: var(--fs-xs); text-decoration: none; }
+.exam-text-action:hover { color: var(--gold); text-decoration: underline; text-underline-offset: 4px; }
+.exam-deadlines :is(button, a):focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+.exam-deadline-empty { font-size: var(--fs-sm); line-height: 1.6; color: var(--text-60); }
+.exam-completed { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: var(--fs-xs); color: var(--text-60); }
+.exam-editor-actions { display: flex; justify-content: flex-end; gap: 10px; }
+[data-urgency="watch"] { --deadline-accent: var(--cool-accent-strong); }
+[data-urgency="aware"] { --deadline-accent: var(--gold); }
+[data-urgency="approaching"] { --deadline-accent: var(--gold); }
+[data-urgency="soon"] { --deadline-accent: var(--orange); }
+[data-urgency="imminent"], [data-urgency="today"] { --deadline-accent: var(--red); }
+[data-urgency="past"] { --deadline-accent: var(--text-60); }
+@container (max-width: 380px) {
+  .exam-deadline-split { grid-template-columns: 1fr; }
+  .exam-deadline-modules { padding: 18px 0 0; border-left: 0; border-top: 1px solid var(--hairline); }
+}
+@media (max-width: 520px) {
+  .exam-row-actions button { width: 44px; height: 44px; }
+  .exam-text-action { min-height: 40px; }
+}

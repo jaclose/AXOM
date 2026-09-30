@@ -71,8 +71,10 @@ export function TopBarQuote({ dayKey, route }: { dayKey: string; route: string }
           onClick={() => setOpen(open === "quote" ? null : "quote")}
         >
           <Quote size={ICON_SIZE.microInline} aria-hidden="true" className="tb-quote-mark" />
-          <span className="tb-quote-text">{quote.text}</span>
-          <span className="tb-quote-author">— {quote.author}</span>
+          <span className="tb-quote-copy" key={quote.id}>
+            <span className="tb-quote-text">{quote.text}</span>
+            <span className="tb-quote-author">{quote.attributionStatus === "axom-original" ? "AXOM Originals" : quote.author}</span>
+          </span>
         </button>
       ) : null}
       <button

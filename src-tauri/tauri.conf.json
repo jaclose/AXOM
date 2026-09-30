@@ -25,8 +25,8 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https: http://localhost:11434 http://127.0.0.1:11434; worker-src 'self' blob:; frame-src 'self' blob: https:; media-src 'self' blob: data: https:; object-src 'none'; base-uri 'self'; form-action 'self'",
-      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https: http://localhost:11434 http://127.0.0.1:11434 ws://127.0.0.1:5173; worker-src 'self' blob:; frame-src 'self' blob: https:; object-src 'none'"
+      "csp": "default-src 'self'; script-src 'self' https://open.spotify.com https://embed-cdn.spotifycdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https: http://localhost:11434 http://127.0.0.1:11434; worker-src 'self' blob:; frame-src 'self' blob: https:; media-src 'self' blob: data: https:; object-src 'none'; base-uri 'self'; form-action 'self'",
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline' https://open.spotify.com https://embed-cdn.spotifycdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https: http://localhost:11434 http://127.0.0.1:11434 ws://127.0.0.1:5173; worker-src 'self' blob:; frame-src 'self' blob: https:; object-src 'none'"
     }
   },
   "bundle": {

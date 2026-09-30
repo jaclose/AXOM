@@ -29,6 +29,7 @@ describe("SoundscapeOpener", () => {
     expect(taste).toMatchObject({ sounds: ["water", "noise"], visuals: ["waves", "random"] });
     expect(taste.completedAt).toBeTruthy();
     expect(lastPresetId).toBe("soft-rain");
+    expect(JSON.parse(localStorage.getItem("axom.soundscapes.v1")!).lastPresetId).toBe("soft-rain");
     expect(JSON.parse(localStorage.getItem("axom.soundscapes.v1")!).taste.sounds).toEqual(["water", "noise"]);
   });
 

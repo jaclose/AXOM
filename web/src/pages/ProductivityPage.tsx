@@ -9,7 +9,6 @@ import { GlassCard, GButton, PanelHeader, Tag } from "../components/ui/primitive
 import { Pomodoro } from "../components/productivity/Pomodoro";
 import { ActivityLabelInput } from "../components/productivity/ActivityLabelInput";
 import { DailyProgressVessel } from "../components/productivity/DailyProgressVessel";
-import { DailyRequirementsEditor } from "../components/productivity/DailyRequirementsEditor";
 import { TrackerManager } from "../components/productivity/TrackerManager";
 import { useInView } from "../lib/useInView";
 import { missedStandupDays } from "../lib/journal";
@@ -17,6 +16,8 @@ import { gotoJournalDay } from "../lib/uiStore";
 import { evaluateDailySuccess } from "../lib/dailySuccess";
 import { frequentActivityShortcuts, recentActivityShortcuts, type ActivityShortcut } from "../lib/activityShortcuts";
 import { ModuleTour, type ModuleTourStep } from "../components/shell/ModuleTour";
+import "../styles/productivity-integration.css";
+import { studyActivityTotals } from "../lib/studyActivity";
 import { ICON_SIZE } from "../lib/iconSize";
 
 export const PRODUCTIVITY_TOUR_STEPS: readonly ModuleTourStep[] = [
@@ -67,7 +68,7 @@ export function ProductivityPage() {
   const recent = useMemo(() => recentActivityShortcuts(s.logs, s.profile.hiddenActivityShortcuts), [s.logs, s.profile.hiddenActivityShortcuts]);
   const recentSignatures = useMemo(() => new Set(recent.map((item) => item.signature)), [recent]);
   const frequent = useMemo(() => frequentActivityShortcuts(s.logs, s.profile.hiddenActivityShortcuts, 2, 3, recentSignatures), [s.logs, s.profile.hiddenActivityShortcuts, recentSignatures]);
-  const patternDays = new Set(s.logs.filter((log) => log.dayKey >= trackingFloor).map((log) => log.dayKey)).size;
+  const observed = studyActivityTotals(s.logs, viewKey);
 
   function logManual() {
     const minutes = Number(manualMinutes) || 0;
@@ -105,12 +106,61 @@ export function ProductivityPage() {
   }
 
   return (
-    <>
+    <div className="productivity-integrated">
+      <div className="productivity-analytics" data-module-tour="productivity-trends">
+        <GlassCard pad className="productivity-intel" data-tour="insights">
+          <PanelHeader title="Weekly activity" sub="Calendar-aligned 7-day view of minutes and optional quantities"
+            action={<Tag tone={weekly.activeDays ? scoreTone(weekly.grade) : "neutral"}>{weekly.activeDays}/{weekly.days.length} active</Tag>} />
+          <div className="period-metrics">
+            <Metric icon={<Clock size={ICON_SIZE.body} />} label="Study time" value={`${Math.floor(weekly.minutes / 60)}h ${weekly.minutes % 60}m`} note={`${weekly.avgMinutes}m / active day`} />
+            <Metric icon={<Layers size={ICON_SIZE.body} />} label="Cards" value={`${weekly.cards}`} note={`${weekly.avgCards} / active day`} />
+            <Metric icon={<TrendingUp size={ICON_SIZE.body} />} label="Consistency" value={`${weekly.consistency}%`} note={`${weekly.strongDays.length} strong day${weekly.strongDays.length === 1 ? "" : "s"}`} />
+            <Metric icon={<Target size={ICON_SIZE.body} />} label="Activity review" value={`${weekly.needsWorkDays.length}`} note="quiet or low-volume calendar days" />
+          </div>
+          <div className={`productivity-strip reveal-bars ${strip.inView ? "in-view" : ""}`} ref={strip.ref}>
+            {weekly.days.map((d) => <DayPillar key={d.key} day={d} onPick={() => setPickedDay(d.key)} />)}
+          </div>
+          <InsightList insights={weekly.insights} />
+        </GlassCard>
+
+        <GlassCard pad className="month-intel">
+          <PanelHeader title="Monthly activity calendar" sub={`${monthly.label} · each cell follows the real calendar day`}
+            action={<Tag tone={monthly.activeDays ? scoreTone(monthly.grade) : "neutral"}>{monthly.activeDays}/{monthly.days.length} active</Tag>} />
+          <div className="month-summary">
+            <Metric icon={<Activity size={ICON_SIZE.body} />} label="Month result" value={`${Math.round(monthly.minutes / 60)}h`} note={`${monthly.cards} cards`} />
+            <Metric icon={<CalendarDays size={ICON_SIZE.body} />} label="Best day" value={monthly.bestDay ? shortDate(monthly.bestDay.key) : "None"} note={monthly.bestDay ? `${monthly.bestDay.minutes}m · ${monthly.bestDay.cards} cards` : "log a session"} />
+          </div>
+          <div className="calendar-month">
+            {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => <span className="cal-head" key={d}>{d}</span>)}
+            {monthCells.map((cell, i) => cell
+              ? <button key={cell.key} className={`cal-day ${cell.key === viewKey ? "on" : ""} ${cell.key === calendarToday ? "today" : ""} ${missedSet.has(cell.key) ? "remediable" : ""}`}
+                  style={{ borderColor: !missedSet.has(cell.key) && cell.active ? gradeColor(cell.grade) : undefined }}
+                  title={missedSet.has(cell.key) ? `${prettyDate(cell.key)}: missed standup — click to remediate` : `${prettyDate(cell.key)}: ${cell.minutes}m, ${cell.cards} cards`}
+                  onClick={() => (missedSet.has(cell.key) ? gotoJournalDay(cell.key) : setPickedDay(cell.key))}>
+                  <span>{cell.date.getDate()}</span>
+                  <i style={{ background: cell.active ? gradeColor(cell.grade) : "var(--surface-2)" }} />
+                </button>
+              : <span className="cal-day blank" key={`blank-${i}`} />)}
+          </div>
+          <InsightList insights={monthly.insights} compact />
+          <div className="heat-legend">
+            {gradeLegend(gradeTargetsFor(s.profile)).map((row) => (
+              <span className="lg" key={row.grade}><span className="sw" style={{ background: gradeColor(row.grade) }} /> {row.label}</span>
+            ))}
+          </div>
+        </GlassCard>
+      </div>
+
+      <div className="productivity-focus-section" data-module-tour="productivity-focus"><Pomodoro /></div>
+      <div className="observed-study-summary" aria-label="Today automatically recorded study">
+        <span><b>{observed.cards}</b> cards reviewed</span><span><b>{observed.questions}</b> questions completed</span><span><b>{totals.minutes}</b> study minutes</span><span><b>{observed.pomodoros}</b> Pomodoros</span>
+      </div>
+      {isActive && <TrackerManager />}
       <GlassCard pad data-tour="log" data-module-tour="productivity-log">
         <PanelHeader
           title="Log an activity"
           headingLevel={2}
-          sub={isActive ? "Record study, questions, exercise, reading, or anything else that mattered." : `Viewing ${prettyDate(`${viewKey}T12:00:00`)}`}
+          sub={isActive ? "For work outside AXOM. Questions, card reviews, and focus sessions appear automatically." : `Viewing ${prettyDate(`${viewKey}T12:00:00`)}`}
           action={isActive ? (
             <div className="row wrap gap6">
               <GButton size="sm" onClick={() => setPickedDay(yesterdayKey)}><History size={ICON_SIZE.body} /> Yesterday</GButton>
@@ -154,13 +204,7 @@ export function ProductivityPage() {
                 {frequent.length > 0 && <ShortcutGroup title="Frequent" items={frequent} onFill={fillShortcut} onHide={hideShortcut} />}
               </div>
             )}
-            <section className="today-targets" aria-labelledby="today-targets-title" data-module-tour="productivity-targets">
-              <div>
-                <h3 id="today-targets-title">What makes today successful</h3>
-                <p>These are optional signals you chose. AXOM only scores the ones scheduled for today.</p>
-              </div>
-              <DailyRequirementsEditor />
-            </section>
+
           </>
         ) : (
           <div className="historical-log-lock">
@@ -175,59 +219,14 @@ export function ProductivityPage() {
         </div>
       </GlassCard>
 
-      {isActive && <TrackerManager />}
 
-      {patternDays >= 3 && <div className="productivity-analytics" data-module-tour="productivity-trends">
-        <GlassCard pad className="productivity-intel" data-tour="insights">
-          <PanelHeader title="Weekly activity" sub="Calendar-aligned 7-day view of minutes and optional quantities"
-            action={<Tag tone={weekly.activeDays ? scoreTone(weekly.grade) : "neutral"}>{weekly.activeDays}/{weekly.days.length} active</Tag>} />
-          <div className="period-metrics">
-            <Metric icon={<Clock size={ICON_SIZE.body} />} label="Study time" value={`${Math.round(weekly.minutes / 60)}h ${weekly.minutes % 60}m`} note={`${weekly.avgMinutes}m / active day`} />
-            <Metric icon={<Layers size={ICON_SIZE.body} />} label="Cards" value={`${weekly.cards}`} note={`${weekly.avgCards} / active day`} />
-            <Metric icon={<TrendingUp size={ICON_SIZE.body} />} label="Consistency" value={`${weekly.consistency}%`} note={`${weekly.strongDays.length} strong day${weekly.strongDays.length === 1 ? "" : "s"}`} />
-            <Metric icon={<Target size={ICON_SIZE.body} />} label="Activity review" value={`${weekly.needsWorkDays.length}`} note="quiet or low-volume calendar days" />
-          </div>
-          <div className={`productivity-strip reveal-bars ${strip.inView ? "in-view" : ""}`} ref={strip.ref}>
-            {weekly.days.map((d) => <DayPillar key={d.key} day={d} onPick={() => setPickedDay(d.key)} />)}
-          </div>
-          <InsightList insights={weekly.insights} />
-        </GlassCard>
-
-        <GlassCard pad className="month-intel">
-          <PanelHeader title="Monthly activity calendar" sub={`${monthly.label} · each cell follows the real calendar day`}
-            action={<Tag tone={monthly.activeDays ? scoreTone(monthly.grade) : "neutral"}>{monthly.activeDays}/{monthly.days.length} active</Tag>} />
-          <div className="month-summary">
-            <Metric icon={<Activity size={ICON_SIZE.body} />} label="Month result" value={`${Math.round(monthly.minutes / 60)}h`} note={`${monthly.cards} cards`} />
-            <Metric icon={<CalendarDays size={ICON_SIZE.body} />} label="Best day" value={monthly.bestDay ? shortDate(monthly.bestDay.key) : "None"} note={monthly.bestDay ? `${monthly.bestDay.minutes}m · ${monthly.bestDay.cards} cards` : "log a session"} />
-          </div>
-          <div className="calendar-month">
-            {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => <span className="cal-head" key={d}>{d}</span>)}
-            {monthCells.map((cell, i) => cell
-              ? <button key={cell.key} className={`cal-day ${cell.key === viewKey ? "on" : ""} ${cell.key === calendarToday ? "today" : ""} ${missedSet.has(cell.key) ? "remediable" : ""}`}
-                  style={{ borderColor: !missedSet.has(cell.key) && cell.active ? gradeColor(cell.grade) : undefined }}
-                  title={missedSet.has(cell.key) ? `${prettyDate(cell.key)}: missed standup — click to remediate` : `${prettyDate(cell.key)}: ${cell.minutes}m, ${cell.cards} cards`}
-                  onClick={() => (missedSet.has(cell.key) ? gotoJournalDay(cell.key) : setPickedDay(cell.key))}>
-                  <span>{cell.date.getDate()}</span>
-                  <i style={{ background: cell.active ? gradeColor(cell.grade) : "rgba(255,255,255,0.08)" }} />
-                </button>
-              : <span className="cal-day blank" key={`blank-${i}`} />)}
-          </div>
-          <InsightList insights={monthly.insights} compact />
-          <div className="heat-legend">
-            {gradeLegend(gradeTargetsFor(s.profile)).map((row) => (
-              <span className="lg" key={row.grade}><span className="sw" style={{ background: gradeColor(row.grade) }} /> {row.label}</span>
-            ))}
-          </div>
-        </GlassCard>
-      </div>}
 
       <ActivityLog logs={s.logs} activeDayKey={s.activeDayKey} />
 
-      <div data-module-tour="productivity-focus"><Pomodoro /></div>
       {moduleTourOpen && (
         <ModuleTour name="Productivity" route="productivity" steps={PRODUCTIVITY_TOUR_STEPS} onExit={() => setModuleTourOpen(false)} />
       )}
-    </>
+    </div>
   );
 }
 
@@ -504,7 +503,7 @@ function ActivityLog({ logs, activeDayKey }: { logs: StudyLog[]; activeDayKey: s
 
   return (
     <GlassCard pad className="activity-log-card">
-      <PanelHeader title="Activity Log" sub="Every logged block, newest first — a running history of your effort"
+      <PanelHeader title="Activity Log" sub="Observed study and manual activity, newest first"
         action={
           <div className="row gap6">
             <Tag tone={logs.length ? "cyan" : "neutral"}>{logs.length} event{logs.length === 1 ? "" : "s"}</Tag>
@@ -516,7 +515,7 @@ function ActivityLog({ logs, activeDayKey }: { logs: StudyLog[]; activeDayKey: s
           <History size={ICON_SIZE.control} />
           <div>
             <b>No activity yet</b>
-            <span>Log any named activity above and each entry will appear here as a timeline.</span>
+            <span>Complete a question, review a card, or run a focus session. AXOM records the work here.</span>
           </div>
         </div>
       ) : (
@@ -546,7 +545,7 @@ function ActivityLog({ logs, activeDayKey }: { logs: StudyLog[]; activeDayKey: s
           </div>
           {logs.length > 14 && (
             <button type="button" className="activity-toggle" onClick={() => setExpanded((open) => !open)}>
-              {expanded ? "Show less" : `Show all ${logs.length} events`}
+              {expanded ? "Show less" : `Show ${Math.min(200, logs.length)} recent events`}
             </button>
           )}
         </>
@@ -583,6 +582,10 @@ function describeLog(log: StudyLog): { text: string; tone: string; icon: ReactNo
     const unit = log.quantityLabel || log.quantityKind;
     parts.push(`${log.quantity} ${unit}`);
   }
+  if (log.activity?.skipped) parts.push(`${log.activity.skipped} skipped`);
+  if (log.activity?.correct) parts.push(`${log.activity.correct} correct`);
+  if (log.activity?.incorrect) parts.push(`${log.activity.incorrect} incorrect`);
+  if (log.activity) parts.push(log.activity.source === "axom" ? "automatic" : log.activity.source);
   if (log.minutes) parts.push(`${log.minutes > 0 ? "+" : ""}${log.minutes}m`);
   const detail = parts.length ? ` · ${parts.join(" · ")}` : "";
   const correction = log.minutes < 0 || log.cards < 0;

@@ -495,6 +495,7 @@ export type AcademicStageId =
 
 export type DailySuccessSchedule =
   | { kind: "daily" }
+  | { kind: "weekly-total"; weekStartsOn?: 0 | 1 }
   | { kind: "weekdays"; weekdays: number[] }
   | { kind: "times-per-week"; times: number; weekStartsOn?: 0 | 1 };
 
@@ -791,6 +792,8 @@ export interface Profile {
   studyWorkflow?: StudyWorkflowPreferences;
   applicationResearch?: import("./applicationResearch").ApplicationResearchEntry[];
   applicationProfile?: import("./applicationProfile").ApplicationProfile;
+  /** Exam intent travels with the existing account/profile snapshot. */
+  examCountdown?: import("./examDeadlines").ExamCountdownPreferences;
 }
 
 export interface DailyLoopReminderPreferences {

@@ -3,6 +3,8 @@ import { SoundscapeEngine, soundscapesSupported, type OutputMode } from "./engin
 import { appendListeningInterval } from "./listeningLog";
 import { SOUNDSCAPES, isSoundscapeId, versionOf, type SoundscapeId } from "./presets";
 import { EMPTY_TASTE, normalizeTaste, type Taste } from "./taste";
+import { pauseOtherMedia, useMediaSession } from "./mediaSession";
+import { useMediaLibrary } from "./library";
 
 export type SoundscapeStatus = "idle" | "playing" | "paused";
 
@@ -22,6 +24,9 @@ interface Prefs {
 }
 
 interface SoundscapeState extends Prefs {
+  /** Temporary attenuation (rest/alarm); never changes the saved volume. */
+  ducking: number;
+  setDucking: (multiplier: number) => void;
   supported: boolean;
   status: SoundscapeStatus;
   presetId: SoundscapeId | null;
@@ -35,7 +40,7 @@ interface SoundscapeState extends Prefs {
   setVersion: (id: SoundscapeId, version: string) => void;
   /** Choose the scene for a preset ("auto" clears the choice). */
   setScene: (id: SoundscapeId, scene: string) => void;
-  setTaste: (taste: Partial<Taste>) => void;
+  setTaste: (taste: Partial<Taste>, lastPresetId?: SoundscapeId) => void;
   togglePin: (id: SoundscapeId) => void;
   /** Start the audio context inside a click so hover previews can play. */
   unlockAudio: () => Promise<boolean>;
@@ -108,6 +113,13 @@ if (typeof window !== "undefined") {
 }
 
 function updateMediaSession(presetId: SoundscapeId | null, status: SoundscapeStatus): void {
+  if (!presetId || status === "idle") useMediaSession.getState().remove("native");
+  else {
+    const preset = SOUNDSCAPES[presetId];
+    useMediaSession.getState().publish({ id: "native", source: preset.beatHz ? "frequency" : "soundscape", title: preset.name, subtitle: preset.band, isPlaying: status === "playing",
+      controls: { play: () => void useSoundscape.getState().resume(), pause: () => void useSoundscape.getState().pause(), stop: () => void useSoundscape.getState().stop(), open: () => { window.location.hash = "soundscapes"; } },
+    });
+  }
   if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
   try {
     if (!presetId || status === "idle") {
@@ -143,6 +155,7 @@ export const useSoundscape = create<SoundscapeState>((set, get) => {
 
   return {
     ...readPrefs(),
+    ducking: 1,
     supported: typeof window !== "undefined" && soundscapesSupported(),
     status: "idle",
     presetId: null,
@@ -155,11 +168,12 @@ export const useSoundscape = create<SoundscapeState>((set, get) => {
       const stopAt = keepTimer ? get().stopAt : minutes ? Date.now() + minutes * 60_000 : undefined;
       const versionId = versionOf(preset, options.version ?? get().versions[id]).id;
       try {
-        await getEngine().play(preset, { volume: get().volume, output: get().output, versionId });
+        await getEngine().play(preset, { volume: get().volume * get().ducking, output: get().output, versionId });
       } catch (error) {
         set({ error: error instanceof Error ? error.message : "Audio couldn’t start." });
         return;
       }
+      pauseOtherMedia("native");
       if (options.preview) {
         // A taste of the sound only: no preference, timer or log changes.
         closeInterval();
@@ -168,6 +182,7 @@ export const useSoundscape = create<SoundscapeState>((set, get) => {
         return;
       }
       openIntervalFor(id);
+      useMediaLibrary.getState().remember(id);
       persist({ lastPresetId: id, versions: { ...get().versions, [id]: versionId } });
       set({ status: "playing", presetId: id, stopAt, error: undefined, previewing: false });
       armStopTimer(stopAt);
@@ -190,6 +205,7 @@ export const useSoundscape = create<SoundscapeState>((set, get) => {
       const { status, presetId } = get();
       if (status !== "paused" || !presetId) return;
       await getEngine().resume();
+      pauseOtherMedia("native");
       openIntervalFor(presetId);
       set({ status: "playing" });
       updateMediaSession(presetId, "playing");
@@ -204,7 +220,12 @@ export const useSoundscape = create<SoundscapeState>((set, get) => {
     },
     setVolume(volume) {
       persist({ volume });
-      engine?.setVolume(volume);
+      engine?.setVolume(volume * get().ducking);
+    },
+    setDucking(multiplier) {
+      const ducking = Number.isFinite(multiplier) ? Math.max(0, Math.min(1, multiplier)) : 1;
+      set({ ducking });
+      engine?.setVolume(get().volume * ducking);
     },
     setOutput(output) {
       persist({ output });
@@ -212,8 +233,8 @@ export const useSoundscape = create<SoundscapeState>((set, get) => {
       // Rebuild the graph for the new routing (a quick crossfade).
       if (status === "playing" && presetId) void get().play(presetId, { stopAfterMinutes: get().stopAt ? Math.max(1, (get().stopAt! - Date.now()) / 60_000) : null });
     },
-    setTaste(patch) {
-      persist({ taste: normalizeTaste({ ...get().taste, ...patch }) });
+    setTaste(patch, lastPresetId) {
+      persist({ taste: normalizeTaste({ ...get().taste, ...patch }), ...(lastPresetId ? { lastPresetId } : {}) });
     },
     togglePin(id) {
       const pinned = get().pinned;

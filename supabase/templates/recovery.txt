@@ -1,0 +1,10 @@
+Choose a new password.
+
+Enter this code in AXOM to reset your password, or continue in your browser using the link below.
+
+Code: {{ .Token }}
+Keep this code private.
+
+Reset password in your browser: {{ .ConfirmationURL }}
+
+If you did not request a reset, ignore this email. Your password has not changed.

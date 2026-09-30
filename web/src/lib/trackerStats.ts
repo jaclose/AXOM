@@ -18,11 +18,11 @@ export function trackerGoal(tracker: Pick<ProductivityTracker, "goal">): Tracker
 
 /** How much one log adds to its tracker, in the tracker's own unit. */
 export function trackerLogValue(log: StudyLog, tracker: Pick<ProductivityTracker, "unitType">): number {
-  if (tracker.unitType === "minutes") return Math.max(0, log.minutes || 0);
-  if (tracker.unitType === "yesno") return 1;
+  if (tracker.unitType === "minutes") return Number.isFinite(log.minutes) ? log.minutes : 0;
   const quantity = Number(log.quantity);
-  if (Number.isFinite(quantity) && quantity > 0) return quantity;
-  return Math.max(0, log.cards || 0) || (log.minutes ? 0 : 1);
+  if (log.quantity != null && Number.isFinite(quantity)) return quantity;
+  if (tracker.unitType === "yesno") return 1;
+  return (Number.isFinite(log.cards) ? log.cards : 0) || (log.minutes ? 0 : 1);
 }
 
 /** Totals per local day for one tracker. Yes/no trackers cap at 1 per day. */
@@ -32,7 +32,8 @@ export function trackerDayTotals(tracker: ProductivityTracker, logs: readonly St
     if (log.trackerId !== tracker.id) continue;
     totals.set(log.dayKey, (totals.get(log.dayKey) ?? 0) + trackerLogValue(log, tracker));
   }
-  if (tracker.unitType === "yesno") for (const [day, value] of totals) totals.set(day, value > 0 ? 1 : 0);
+  // Clamp after summing so a correction has the same effect in either log order.
+  for (const [day, value] of totals) totals.set(day, tracker.unitType === "yesno" ? (value > 0 ? 1 : 0) : Math.max(0, value));
   return totals;
 }
 

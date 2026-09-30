@@ -1,0 +1,287 @@
+- generic [ref=e3]:
+  - generic [ref=e68]:
+    - complementary "Primary navigation" [ref=e69]:
+      - button "AXOM Private academic OS" [ref=e70] [cursor=pointer]:
+        - generic [ref=e79]:
+          - img "AXOM" [ref=e81]
+          - generic [ref=e84]: Private academic OS
+      - generic [ref=e87]:
+        - button "Customize" [ref=e88] [cursor=pointer]
+        - generic [ref=e91]: Subscribe to sections you use; hide the rest.
+      - navigation [ref=e92]:
+        - generic [ref=e93]: Today
+        - button "Dashboard" [ref=e95] [cursor=pointer]
+        - generic [ref=e102]: Learn
+        - button "Course Tracker" [ref=e104] [cursor=pointer]
+        - button "Question Bank, New" [ref=e109] [cursor=pointer]:
+          - generic [ref=e113]: Question Bank
+          - generic "New" [ref=e114]: NEW
+        - button "Anki Lab, Work in progress" [ref=e115] [cursor=pointer]:
+          - generic [ref=e119]: Anki Lab
+          - generic "Work in progress" [ref=e120]: WIP
+        - generic [ref=e121]: Review & reflect
+        - button "Productivity" [ref=e123] [cursor=pointer]
+        - button "Journal" [ref=e127] [cursor=pointer]
+        - button "Reports" [ref=e131] [cursor=pointer]
+        - generic [ref=e136]:
+          - button "Academic Prep" [expanded] [ref=e137] [cursor=pointer]
+          - group "Academic Prep" [ref=e144]:
+            - button "USMLE / Shelf Prep, Work in progress" [ref=e145] [cursor=pointer]:
+              - generic [ref=e156]: USMLE / Shelf Prep
+              - generic "Work in progress" [ref=e157]: WIP
+            - button "Application Checker, Work in progress" [ref=e158] [cursor=pointer]:
+              - generic [ref=e163]: Application Checker
+              - generic "Work in progress" [ref=e164]: WIP
+        - generic [ref=e165]:
+          - button "Tools" [expanded] [ref=e166] [cursor=pointer]
+          - group "Tools" [ref=e172]:
+            - button "Tasks" [ref=e173] [cursor=pointer]
+            - button "Soundscapes, New" [ref=e178] [cursor=pointer]:
+              - generic [ref=e181]: Soundscapes
+              - generic "New" [ref=e182]: NEW
+            - button "Study Methods, New" [ref=e183] [cursor=pointer]:
+              - generic [ref=e187]: Study Methods
+              - generic "New" [ref=e188]: NEW
+            - button "Resources" [ref=e189] [cursor=pointer]
+            - button "Leaderboards, Work in progress" [ref=e194] [cursor=pointer]:
+              - generic [ref=e201]: Leaderboards
+              - generic "Work in progress" [ref=e202]: WIP
+        - generic [ref=e203]:
+          - button "Daily Games" [expanded] [ref=e204] [cursor=pointer]
+          - group "Daily Games" [ref=e210]:
+            - button "Daily Games, New" [ref=e211] [cursor=pointer]:
+              - generic [ref=e214]: Daily Games
+              - generic "New" [ref=e215]: NEW
+            - button "Daily Word, New" [ref=e216] [cursor=pointer]:
+              - generic [ref=e221]: Daily Word
+              - generic "New" [ref=e222]: NEW
+            - button "Doctordle" [ref=e223] [cursor=pointer]
+        - button "Building, New" [ref=e229] [cursor=pointer]:
+          - generic [ref=e233]: Building
+          - generic "New" [ref=e234]: NEW
+      - generic [ref=e235]:
+        - button "About" [ref=e236] [cursor=pointer]
+        - button "Help" [ref=e240] [cursor=pointer]
+        - link "AXOM Discord Channel" [ref=e249] [cursor=pointer]:
+          - /url: https://discord.gg/sTNuHa6qR
+        - generic [ref=e253]:
+          - button "A AXOM Private academic operating system" [ref=e254] [cursor=pointer]:
+            - generic [ref=e255]: A
+            - generic [ref=e258]:
+              - generic [ref=e259]: AXOM
+              - generic [ref=e260]: Private academic operating system
+          - generic [ref=e261]:
+            - 'button "Theme: System. Choose appearance" [ref=e263] [cursor=pointer]'
+            - 'button "Account and protection: Local only" [ref=e266] [cursor=pointer]'
+            - button "Settings" [ref=e269] [cursor=pointer]
+    - generic [ref=e273]:
+      - generic [ref=e274]:
+        - generic [ref=e275]:
+          - generic [ref=e276]: Dashboard
+          - generic [ref=e277]: Your command center at a glance
+        - generic [ref=e278]:
+          - button "Leave evidence of your effort. Unattributed" [ref=e279] [cursor=pointer]:
+            - generic [ref=e283]:
+              - generic [ref=e284]: Leave evidence of your effort.
+              - generic [ref=e285]: Unattributed
+          - button "Quote settings" [ref=e286] [cursor=pointer]
+        - generic [ref=e290]:
+          - button "Open clock, 9:09 AM, America/Grenada" [ref=e292] [cursor=pointer]:
+            - time [ref=e296]: 9:09 AM
+          - button "Refresh" [ref=e297] [cursor=pointer]
+      - generic [ref=e303]:
+        - generic [ref=e305]:
+          - generic [ref=e306]: Tuesday, September 29
+          - generic [ref=e307]: Welcome
+          - button "Add your name" [ref=e308] [cursor=pointer]
+          - paragraph [ref=e309]: You are not behind if you return with a plan.
+        - button "Edit dashboard" [ref=e311] [cursor=pointer]
+        - region "Dashboard widgets" [ref=e313]:
+          - article "Daily Check-In widget" [ref=e314]:
+            - generic [ref=e315]:
+              - button "Customize Daily Check-In" [ref=e316] [cursor=pointer]
+              - generic [ref=e321]:
+                - generic [ref=e322]:
+                  - generic [ref=e323]:
+                    - generic [ref=e324]: Daily Check-In
+                    - generic [ref=e325]: Optional. Add direction whenever it would help.
+                  - button "Open check-in" [ref=e326] [cursor=pointer]
+                - generic [ref=e328]:
+                  - generic [ref=e329]: Energy right now
+                  - group "Log your energy right now" [ref=e330]:
+                    - 'button "Log energy: Drained" [ref=e331] [cursor=pointer]':
+                      - generic [ref=e333]: Drained
+                    - 'button "Log energy: Low" [ref=e334] [cursor=pointer]':
+                      - generic [ref=e336]: Low
+                    - 'button "Log energy: Okay" [ref=e337] [cursor=pointer]':
+                      - generic [ref=e339]: Okay
+                    - 'button "Log energy: Good" [ref=e340] [cursor=pointer]':
+                      - generic [ref=e342]: Good
+                    - 'button "Log energy: Sharp" [ref=e343] [cursor=pointer]':
+                      - generic [ref=e345]: Sharp
+          - article "Today's targets widget" [ref=e346]:
+            - generic [ref=e347]:
+              - button "Customize Today's targets" [ref=e348] [cursor=pointer]
+              - generic [ref=e353]:
+                - generic [ref=e354]:
+                  - generic [ref=e355]:
+                    - generic [ref=e356]: Today's targets
+                    - generic [ref=e357]: Only the signals you selected for Sep 29, 2026
+                  - link "Adjust" [ref=e358] [cursor=pointer]:
+                    - /url: "#productivity"
+                - generic [ref=e359]:
+                  - generic [ref=e364]: Decide what makes a day count
+                  - generic [ref=e365]: Pick one to three signals — study minutes, questions, cards, a habit or a tracker. AXOM scores only what you choose.
+                  - link "Choose targets" [ref=e366] [cursor=pointer]:
+                    - /url: "#productivity"
+          - article "Tasks widget" [ref=e367]:
+            - generic [ref=e368]:
+              - button "Customize Tasks" [ref=e369] [cursor=pointer]
+              - generic [ref=e374]:
+                - generic [ref=e375]:
+                  - generic [ref=e376]:
+                    - generic [ref=e377]: Tasks
+                    - generic [ref=e378]: Due work without the setup examples
+                  - link "Open" [ref=e379] [cursor=pointer]:
+                    - /url: "#tasks"
+                - generic [ref=e383]:
+                  - generic [ref=e384]: "0"
+                  - generic [ref=e385]: open
+                - generic [ref=e386]:
+                  - generic [ref=e387]:
+                    - generic [ref=e388]: "0"
+                    - text: overdue
+                  - generic [ref=e389]:
+                    - generic [ref=e390]: "0"
+                    - text: due today
+                  - generic [ref=e391]:
+                    - generic [ref=e392]: "0"
+                    - text: completed
+                - paragraph [ref=e393]: No real open tasks. Add one only when it helps make the next action concrete.
+          - article "Course Tracker widget" [ref=e394]:
+            - generic [ref=e395]:
+              - button "Customize Course Tracker" [ref=e396] [cursor=pointer]
+              - generic [ref=e401]:
+                - generic [ref=e402]:
+                  - generic [ref=e403]:
+                    - generic [ref=e404]: Course Tracker
+                    - generic [ref=e405]: Real course items, passes, and untouched work
+                  - link "Open" [ref=e406] [cursor=pointer]:
+                    - /url: "#tracker"
+                - generic [ref=e409]:
+                  - generic [ref=e412]: Add or import your first study item
+                  - generic [ref=e413]: Shipped examples teach the interface but never count as your workload.
+          - article "Question Bank widget" [ref=e414]:
+            - generic [ref=e415]:
+              - button "Customize Question Bank" [ref=e416] [cursor=pointer]
+              - generic [ref=e421]:
+                - generic [ref=e422]:
+                  - generic [ref=e423]:
+                    - generic [ref=e424]: Question Bank
+                    - generic [ref=e425]: Only trusted mappings can enter a scored block
+                  - link "Open" [ref=e426] [cursor=pointer]:
+                    - /url: "#questions"
+                - generic [ref=e430]:
+                  - generic [ref=e434]: No practice questions yet
+                  - generic [ref=e435]: Import a source or save the document first. AXOM will not invent an answer key.
+          - article "Focus timer widget" [ref=e436]:
+            - generic [ref=e437]:
+              - button "Customize Focus timer" [ref=e438] [cursor=pointer]
+              - generic [ref=e443]:
+                - generic [ref=e444]:
+                  - generic [ref=e445]: Pomodoro
+                  - generic [ref=e447]: Focus
+                - generic [ref=e450]:
+                  - generic [ref=e455]:
+                    - generic [ref=e456]: 25:00
+                    - generic [ref=e457]: until break
+                  - generic [ref=e458]:
+                    - generic [ref=e459]:
+                      - button "90 / 20" [ref=e460] [cursor=pointer]
+                      - button "50 / 10" [ref=e461] [cursor=pointer]
+                      - button "120 / 25" [ref=e462] [cursor=pointer]
+                    - generic [ref=e463]:
+                      - button "Start" [ref=e464] [cursor=pointer]
+                      - button "Skip" [ref=e467] [cursor=pointer]
+                      - button "Reset" [ref=e470] [cursor=pointer]
+                    - generic [ref=e474]:
+                      - button "Put my head down 15 min" [ref=e475] [cursor=pointer]:
+                        - text: Put my head down
+                        - generic [ref=e479]: 15 min
+                      - button "Rest alarm settings" [ref=e480] [cursor=pointer]
+                    - generic [ref=e484]:
+                      - generic [ref=e485]: 0 sprints today
+                      - generic [ref=e489]: 0m logged
+                      - generic "Add finished focus minutes to today's study log" [ref=e492] [cursor=pointer]:
+                        - checkbox "Auto-log" [checked] [ref=e493]
+                        - generic [ref=e494]: Auto-log
+          - article "Weekly overview widget" [ref=e495]:
+            - generic [ref=e496]:
+              - button "Customize Weekly overview" [ref=e497] [cursor=pointer]
+              - generic [ref=e502]:
+                - generic [ref=e503]:
+                  - generic [ref=e504]:
+                    - generic [ref=e505]: Weekly Overview
+                    - generic [ref=e506]: Last 7 calendar days from your local study log
+                  - generic [ref=e507]: 0/7 active
+                - generic [ref=e508]:
+                  - generic [ref=e509]:
+                    - generic [ref=e510]: 0h
+                    - generic [ref=e511]: 0 minutes · 0 cards · 0 tasks done
+                  - generic [ref=e512]:
+                    - generic [ref=e513]: Below target
+                    - generic [ref=e514]: week result
+                - generic [ref=e515]:
+                  - button "W" [ref=e516] [cursor=pointer]
+                  - button "T" [ref=e520] [cursor=pointer]
+                  - button "F" [ref=e524] [cursor=pointer]
+                  - button "S" [ref=e528] [cursor=pointer]
+                  - button "S" [ref=e532] [cursor=pointer]
+                  - button "M" [ref=e536] [cursor=pointer]
+                  - button "T" [ref=e540] [cursor=pointer]
+                - generic [ref=e544]:
+                  - generic [ref=e545]:
+                    - generic [ref=e546]:
+                      - generic [ref=e547]: Tuesday, Sep 29
+                      - generic [ref=e548]: 2026-09-29
+                    - generic [ref=e549]: No energy logged
+                  - generic [ref=e550]:
+                    - generic [ref=e551]:
+                      - generic [ref=e552]: Study
+                      - generic [ref=e553]: 0m · 0 cards
+                    - generic [ref=e554]:
+                      - generic [ref=e555]: Productive
+                      - generic [ref=e556]: 0m
+                    - generic [ref=e557]:
+                      - generic [ref=e558]: Tasks
+                      - generic [ref=e559]: 0 done · 1 due
+                    - generic [ref=e560]:
+                      - generic [ref=e561]: Journal
+                      - generic [ref=e562]: No standup
+                    - generic [ref=e563]:
+                      - generic [ref=e564]: Top activity
+                      - generic [ref=e565]: No logged activity
+                    - generic [ref=e566]:
+                      - generic [ref=e567]: Strongest action
+                      - generic [ref=e568]: Needs one clear win
+                  - generic [ref=e569]: "Tomorrow: clear the oldest due task before adding volume."
+  - dialog [active] [ref=e574]:
+    - img "AXOM" [ref=e577]
+    - generic [ref=e580]:
+      - generic [ref=e581]: A personal checkpoint
+      - heading "A promise to yourself" [level=2] [ref=e582]
+      - paragraph [ref=e583]: Before you continue, AXOM will show its personal-use promise once. Signing is optional; it is not a legal contract and nothing is required to keep using your workspace.
+    - generic [ref=e584]:
+      - button "Sign now" [ref=e585] [cursor=pointer]
+      - button "Review later" [ref=e586] [cursor=pointer]
+      - button "Skip for now" [ref=e587] [cursor=pointer]
+  - region "Notifications":
+    - status [ref=e588]:
+      - generic [ref=e592]:
+        - generic [ref=e593]: Set today’s direction
+        - generic [ref=e594]: Choose one intention for today. It takes less than a minute, and it is optional.
+        - group "Set today’s direction actions" [ref=e595]:
+          - button "Open check-in" [ref=e596] [cursor=pointer]
+          - button "Snooze 30 min" [ref=e599] [cursor=pointer]
+          - button "Skip today" [ref=e602] [cursor=pointer]
+      - button "Dismiss Set today’s direction" [ref=e605] [cursor=pointer]

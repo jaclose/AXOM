@@ -89,7 +89,7 @@ export const PALETTES: readonly PaletteDefinition[] = [
     light: {
       accent: "#c8a96a", ink: "#8a6429", hi: "#dcc38a", lo: "#6f4d1d",
       cool: "#526171", coolStrong: "#354453",
-      bg: ["#eee7da", "#f7f3ec", "#e5dccd"], tint: "#c8a96a", surface: "#fffdf8",
+      bg: ["#eae8e2", "#f4f2ed", "#e2e0d9"], tint: "#c8a96a", surface: "#f6f4ef",
       paper: "#e5dbcb", structure: "#43331f",
     },
   },
@@ -417,8 +417,8 @@ export function derivePaletteVars(input: PaletteModeInput, mode: PaletteMode): R
     "--paper-rgb": channels(paper),
     "--ink-rgb": channels(structure),
     "--glass-card-fill": dark ? `rgba(${surface.join(", ")}, 0.6)` : `rgba(${surface.join(", ")}, 0.74)`,
-    "--surface-1": dark ? `rgba(${mixRgb(surface, [36, 36, 40], 0.4).join(", ")}, 0.62)` : "rgba(255, 255, 255, 0.62)",
-    "--surface-2": dark ? `rgba(${mixRgb(surface, [44, 44, 50], 0.4).join(", ")}, 0.72)` : "rgba(255, 255, 255, 0.78)",
+    "--surface-1": dark ? `rgba(${mixRgb(surface, [36, 36, 40], 0.4).join(", ")}, 0.62)` : `rgba(${surface.join(", ")}, 0.72)`,
+    "--surface-2": dark ? `rgba(${mixRgb(surface, [44, 44, 50], 0.4).join(", ")}, 0.72)` : `rgba(${surface.join(", ")}, 0.92)`,
     "--shell-fill": dark ? `rgba(${mixRgb(surface, [10, 10, 12], 0.35).join(", ")}, 0.66)` : `rgba(${channels(input.bg[1])}, 0.72)`,
   };
 }

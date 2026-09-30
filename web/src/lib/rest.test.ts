@@ -5,6 +5,8 @@ const notify = vi.fn(async () => true);
 vi.mock("./notify", () => ({ notify }));
 
 const { LATE_RING_LIMIT_MS, alarmLevel, formatRestClock, readRestLog, useRest } = await import("./rest");
+const { DEFAULT_REST_PREFERENCES, normalizeRestPreferences, readRestPreferences } = await import("./restPreferences");
+const { useSoundscape } = await import("./soundscapes/store");
 const { usePomodoro } = await import("./pomodoro");
 const { useStore } = await import("./store");
 const { makeSeed } = await import("./seed");
@@ -16,7 +18,7 @@ beforeEach(() => {
   notify.mockClear();
   useStore.setState(makeSeed());
   usePomodoro.getState().reset();
-  useRest.setState({ status: "idle", startedAt: undefined, endsAt: undefined, paused: undefined, overlayOpen: false, withSound: false });
+  useRest.setState({ status: "idle", startedAt: undefined, endsAt: undefined, paused: undefined, overlayOpen: false, withSound: false, preferences: { ...DEFAULT_REST_PREFERENCES } });
 });
 afterEach(() => {
   useRest.getState().wakeNow();
@@ -35,7 +37,7 @@ describe("put my head down", () => {
     expect(useRest.getState().status).toBe("resting");
     vi.advanceTimersByTime(60_000 + 1000);
     expect(useRest.getState().status).toBe("ringing");
-    expect(notify).toHaveBeenCalledWith("Time to lift your head", expect.any(String), { tag: "axom-rest" });
+    expect(notify).toHaveBeenCalledWith("AXOM — time to lift your head", expect.any(String), expect.objectContaining({ tag: "axom-rest", route: "productivity", action: "rest", dedupeKey: expect.any(String) }));
 
     useRest.getState().dismiss({ resume: true });
     expect(useRest.getState().status).toBe("idle");
@@ -84,4 +86,40 @@ describe("put my head down", () => {
     expect(alarmLevel(20_000)).toBeLessThan(alarmLevel(40_000));
     expect(alarmLevel(120_000)).toBeCloseTo(0.26);
   });
+});
+
+
+it("normalizes rest preferences and saves duration with a reusable preset", () => {
+  expect(normalizeRestPreferences({ minutes: -3, volume: 300 })).toMatchObject({ minutes: 1, volume: 100 });
+  useRest.getState().setPreferences({ minutes: 20, volume: 25, fadeIn: false });
+  useRest.getState().savePreset("After rounds");
+  const saved = readRestPreferences();
+  expect(saved.preferences).toMatchObject({ minutes: 20, volume: 25, fadeIn: false });
+  expect(saved.presets.at(-1)).toMatchObject({ name: "After rounds", preferences: { minutes: 20 } });
+  useRest.getState().start();
+  expect(useRest.getState().endsAt).toBe(Date.now() + 20 * 60_000);
+});
+
+it("does not send a system notification when opted out, or restart an active rest", () => {
+  useRest.getState().setPreferences({ systemNotification: false });
+  useRest.getState().start(10);
+  const endsAt = useRest.getState().endsAt;
+  useRest.getState().start(20);
+  expect(useRest.getState().endsAt).toBe(endsAt);
+  vi.advanceTimersByTime(10 * 60_000 + 1000);
+  expect(useRest.getState().status).toBe("ringing");
+  expect(notify).not.toHaveBeenCalled();
+});
+
+it("ducks soundscapes without modifying user volume and restores it on waking", () => {
+  const setDucking = vi.spyOn(useSoundscape.getState(), "setDucking");
+  useSoundscape.setState({ status: "playing", presetId: "soft-rain", volume: 43 });
+  useRest.getState().start(10);
+  expect(setDucking).toHaveBeenCalledWith(.2);
+  expect(useSoundscape.getState().volume).toBe(43);
+  useRest.getState().wakeNow();
+  expect(setDucking).toHaveBeenLastCalledWith(1);
+  expect(useSoundscape.getState().volume).toBe(43);
+  useSoundscape.setState({ status: "idle", presetId: null });
+  setDucking.mockRestore();
 });

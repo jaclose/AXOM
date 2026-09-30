@@ -70,7 +70,8 @@ describe("ProductivityPage daily console", () => {
     fireEvent.change(pages, { target: { value: "18" } });
     fireEvent.click(screen.getByRole("button", { name: "Log" }));
     expect(useStore.getState().logs[0]).toMatchObject({ quantity: 18, quantityKind: "count", quantityLabel: "pages" });
-    expect(screen.getByText("What makes today successful")).toBeTruthy();
+    expect(screen.getByText("Targets")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Configure targets" }));
     expect(screen.getByText("Choose targets")).toBeTruthy();
   });
 

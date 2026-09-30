@@ -7,16 +7,19 @@ import { useStore } from "../../lib/store";
 import { GlassCard, GButton, PanelHeader, Tag } from "../ui/primitives";
 import {
   AnkiError, DEFAULT_ANKI_ENDPOINT, fetchAnkiSnapshot, getAnkiAutoSync, getAnkiEndpoint,
-  setAnkiAutoSync, setAnkiEndpoint, pendingSyncDelta, commitSync, alreadySyncedToday,
+  setAnkiAutoSync, setAnkiEndpoint,
   ANKI_DIAGNOSTIC_TEMPLATE,
 } from "../../lib/ankiConnect";
 import type { AnkiDiagnosticStatus, AnkiDiagnosticStepId, AnkiSnapshot } from "../../lib/ankiConnect";
+import { localDateKey } from "../../lib/dailyRollover";
 import { ICON_SIZE } from "../../lib/iconSize";
 
 type Status = "idle" | "connecting" | "connected" | "error";
 
 export function AnkiConnectPanel() {
-  const logStudy = useStore((s) => s.logStudy);
+  const logs = useStore((s) => s.logs);
+  const today = localDateKey();
+  const synced = logs.filter((log) => log.dayKey === today && (log.activity?.source === "anki" || log.note === "Anki review sync")).reduce((sum, log) => sum + log.cards, 0);
   const [endpoint, setEndpointState] = useState(getAnkiEndpoint());
   const [status, setStatus] = useState<Status>("idle");
   const [snapshot, setSnapshot] = useState<AnkiSnapshot | null>(null);
@@ -84,19 +87,22 @@ export function AnkiConnectPanel() {
   }
 
   function doSync(reviewsToday: number, silent = false) {
-    const delta = pendingSyncDelta(reviewsToday);
+    const state = useStore.getState();
+    const day = localDateKey();
+    const previous = state.logs.filter((log) => log.dayKey === day && (log.activity?.source === "anki" || log.note === "Anki review sync")).reduce((sum, log) => sum + log.cards, 0);
+    const delta = Math.max(0, reviewsToday - previous);
     if (delta <= 0) {
-      if (!silent) setSyncNote(`Already up to date — ${alreadySyncedToday()} review${alreadySyncedToday() === 1 ? "" : "s"} synced today.`);
+      if (!silent) setSyncNote(`Already up to date — ${previous} reviews recorded.`);
       return;
     }
-    logStudy({ type: "Anki", cards: delta, note: "Anki review sync" });
-    commitSync(reviewsToday);
-    setSyncNote(`Logged ${delta} review${delta === 1 ? "" : "s"} to today's productivity.`);
+    const legacy = state.logs.filter((log) => log.dayKey === day && !log.activity && log.note === "Anki review sync").reduce((sum, log) => sum + log.cards, 0);
+    state.recordStudyActivity({ eventId: `anki:daily:${day}`, source: "anki", kind: "flashcards", endedAt: new Date().toISOString(), quantity: Math.max(0, reviewsToday - legacy), note: "Anki daily count snapshot; review duration is unavailable." }, true);
+    setSyncNote(`Recorded ${delta} new reviews. Refreshing this snapshot will not count them twice.`);
   }
 
   async function refresh() {
     setBusy(true);
-    try { await connect(false); } finally { setBusy(false); }
+    try { await connect(autoSync); } finally { setBusy(false); }
   }
 
   // Reflect the manual auto-sync toggle to storage.
@@ -104,7 +110,7 @@ export function AnkiConnectPanel() {
 
   const reviewedRecent = (snapshot?.byDay ?? []).slice(-7);
   const maxReviewed = Math.max(1, ...reviewedRecent.map(([, n]) => n));
-  const pending = snapshot ? pendingSyncDelta(snapshot.today) : 0;
+  const pending = snapshot ? Math.max(0, snapshot.today - synced) : 0;
 
   return (
     <GlassCard pad className="anki-connect-card">

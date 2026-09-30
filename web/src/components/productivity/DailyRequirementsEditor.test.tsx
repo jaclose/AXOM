@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeDailyRequirement } from "../../lib/dailySuccess";
+import { evaluateDailySuccess } from "../../lib/dailySuccess";
 import { makeSeed } from "../../lib/seed";
 import { useStore } from "../../lib/store";
 import { useToasts } from "../../lib/toast";
@@ -44,6 +45,35 @@ afterEach(() => {
 });
 
 describe("DailyRequirementsEditor scoring boundaries", () => {
+  it("changes study display units without losing weekly history or manual corrections", () => {
+    seedRequirement({ kind: "weekly-total", weekStartsOn: 1 });
+    const state = useStore.getState();
+    const day = "2026-09-30";
+    today = day;
+    const requirement = { ...currentRequirement(), target: 120, trackingStartsAt: "2026-09-28", manualContributions: [{ id: "adjustment", requirementId: "minutes", dayKey: day, value: 30, unit: "minutes", mode: "add" as const, createdAt: `${day}T12:00:00Z`, updatedAt: `${day}T12:00:00Z` }] };
+    useStore.setState({ activeDayKey: day, logs: [{ id: "earlier", dayKey: "2026-09-29", ts: "2026-09-29T12:00:00Z", type: "Study", minutes: 90, cards: 0 }], profile: { ...state.profile, dailySuccess: { ...state.profile.dailySuccess!, requirements: [requirement] } } });
+    render(<DailyRequirementsEditor expanded />);
+    fireEvent.change(screen.getByLabelText("Study target unit"), { target: { value: "hours" } });
+    expect(currentRequirement()).toMatchObject({ target: 2, unit: "hours", trackingStartsAt: "2026-09-28" });
+    expect(evaluateDailySuccess(useStore.getState()).requirements[0]).toMatchObject({ current: 2, target: 2, status: "met" });
+    fireEvent.change(screen.getByLabelText("Study target unit"), { target: { value: "minutes" } });
+    expect(evaluateDailySuccess(useStore.getState()).requirements[0]).toMatchObject({ current: 120, target: 120, status: "met" });
+  });
+
+  it.each(["weekly-total", "times-per-week"] as const)("edits today's manual value separately from a %s result", (kind) => {
+    const state = useStore.getState();
+    today = "2026-09-30";
+    const requirement = makeDailyRequirement({ id: "pages", label: "Pages", source: { kind: "manual" }, target: 5, unit: "pages", trackingStartsAt: "2026-09-28", schedule: kind === "weekly-total" ? { kind, weekStartsOn: 1 } : { kind, times: 3, weekStartsOn: 1 }, manualContributions: [
+      { id: "yesterday", requirementId: "pages", dayKey: "2026-09-29", value: 5, unit: "pages", mode: "override", createdAt: "2026-09-29T12:00:00Z", updatedAt: "2026-09-29T12:00:00Z" },
+      { id: "today", requirementId: "pages", dayKey: today, value: 2, unit: "pages", mode: "override", createdAt: `${today}T12:00:00Z`, updatedAt: `${today}T12:00:00Z` },
+    ] });
+    useStore.setState({ activeDayKey: today, profile: { ...state.profile, dailySuccess: { version: 1, configuredAt: today, requirements: [requirement] } } });
+    render(<DailyRequirementsEditor expanded />);
+    const input = screen.getByLabelText("Today’s value") as HTMLInputElement;
+    expect(input.value).toBe("2");
+    fireEvent.blur(input);
+    expect(currentRequirement().manualContributions?.find((item) => item.dayKey === today)?.value).toBe(2);
+  });
   it("starts a target change today instead of rescoring older dates", () => {
     render(<DailyRequirementsEditor />);
     fireEvent.change(screen.getAllByLabelText("Target")[0], { target: { value: "90" } });

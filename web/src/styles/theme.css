@@ -76,10 +76,10 @@
   --text: #f3f0e8;
   --text-80: rgba(243, 240, 232, 0.86);
   --text-60: rgba(243, 240, 232, 0.60);
-  --text-45: rgba(243, 240, 232, 0.44);
-  --text-30: rgba(243, 240, 232, 0.30);
-  --text-35: rgba(243, 240, 232, 0.35);
-  --text-40: rgba(243, 240, 232, 0.40);
+  --text-45: rgba(243, 240, 232, 0.58);
+  --text-30: rgba(243, 240, 232, 0.55);
+  --text-35: rgba(243, 240, 232, 0.55);
+  --text-40: rgba(243, 240, 232, 0.56);
   --text-50: rgba(243, 240, 232, 0.50);
   --text-52: rgba(243, 240, 232, 0.52);
   --text-55: rgba(243, 240, 232, 0.55);
@@ -110,6 +110,17 @@
   --btn-radius: var(--radius-md);
 
   --surface-1: rgba(24, 24, 27, 0.62);
+  --surface-elevated: color-mix(in srgb, var(--bg-2) 92%, var(--text) 8%);
+  --text-primary: var(--text);
+  --text-secondary: var(--text-75);
+  --text-muted: var(--text-60);
+  --border: var(--hairline);
+  --accent: var(--gold);
+  --accent-muted: var(--gold-soft);
+  --destructive: var(--red);
+  --success: var(--green);
+  --warning: var(--orange);
+  --on-success: #102419;
   --surface-2: rgba(30, 30, 34, 0.72);
   --glass-card-fill: rgba(22, 22, 25, 0.60);
   --glass-card-border: rgba(230, 226, 214, 0.09);
@@ -276,10 +287,10 @@
   --grade-red: #a63f39;
 
   --text: #211d18;
-  --text-30: rgba(33, 29, 24, 0.38);
-  --text-35: rgba(33, 29, 24, 0.43);
-  --text-40: rgba(33, 29, 24, 0.48);
-  --text-45: rgba(33, 29, 24, 0.56);
+  --text-30: rgba(33, 29, 24, 0.62);
+  --text-35: rgba(33, 29, 24, 0.62);
+  --text-40: rgba(33, 29, 24, 0.62);
+  --text-45: rgba(33, 29, 24, 0.64);
   --text-50: rgba(33, 29, 24, 0.60);
   --text-52: rgba(33, 29, 24, 0.62);
   --text-55: rgba(33, 29, 24, 0.65);
@@ -295,6 +306,8 @@
   --text-95: rgba(33, 29, 24, 0.97);
 
   --surface-1: rgba(255, 255, 255, 0.62);
+  --surface-elevated: color-mix(in srgb, var(--bg-2) 85%, white 15%);
+  --on-success: #ffffff;
   --surface-2: rgba(255, 255, 255, 0.78);
   --glass-card-fill: rgba(255, 253, 248, 0.74);
   --glass-card-border: rgba(var(--ink-rgb), 0.12);

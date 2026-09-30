@@ -132,9 +132,8 @@ export function SoundscapeOpener({ onClose }: { onClose: () => void }) {
   function finish(skip = false) {
     stopPreview();
     const next = skip ? { completedAt: new Date().toISOString() } : { sounds, visuals, completedAt: new Date().toISOString() };
-    setTaste(next);
     const first = forYouOrder({ sounds: skip ? taste.sounds : sounds, visuals }, pinned)[0];
-    if (first) useSoundscape.setState({ lastPresetId: first });
+    setTaste(next, first);
     onClose();
   }
 

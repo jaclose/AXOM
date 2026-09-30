@@ -1,4 +1,4 @@
-import type { AxomQuote, QuoteCategory } from "../data/quotes";
+import { AXOM_ORIGINALS_V3, type AxomQuote, type QuoteCategory } from "../data/quotes";
 import { STORAGE_KEYS } from "./brand";
 
 /**
@@ -72,6 +72,7 @@ function quoteIds(value: unknown): string[] {
 
 function validQuoteId(value: unknown): value is string {
   if (typeof value !== "string") return false;
+  if (AXOM_ORIGINALS_V3.some((quote) => quote.id === value)) return true;
   const match = value.match(/^quote-(\d{3})$/);
   if (!match) return false;
   const number = Number(match[1]);

@@ -147,7 +147,7 @@ export function evaluateRequirement(
     return { ...base, eligible: false, status: "not-eligible" };
   }
 
-  if (requirement.schedule.kind === "times-per-week") {
+  if (requirement.schedule.kind === "times-per-week" || requirement.schedule.kind === "weekly-total") {
     return evaluateWeeklyRequirement(requirement, state, dayKey, today, base);
   }
 
@@ -182,7 +182,7 @@ function evaluateWeeklyRequirement(
   today: string,
   base: Omit<DailyRequirementResult, "eligible" | "status">,
 ): DailyRequirementResult {
-  const schedule = requirement.schedule as Extract<DailySuccessSchedule, { kind: "times-per-week" }>;
+  const schedule = requirement.schedule as Extract<DailySuccessSchedule, { kind: "times-per-week" | "weekly-total" }>;
   const weekStartsOn = schedule.weekStartsOn === 1 ? 1 : 0;
   const start = weekStart(dayKey, weekStartsOn);
   const end = addLocalDays(start, 6);
@@ -207,6 +207,16 @@ function evaluateWeeklyRequirement(
     const observed = observedValue(requirement, state, date);
     observedDays.push(observed);
     if (observed.value >= base.target) matching.push(observed);
+  }
+  if (schedule.kind === "weekly-total") {
+    const current = observedDays.reduce((total, day) => total + day.value, 0);
+    const met = current >= base.target;
+    return { ...base, eligible: true, current, ratio: clampRatio(current / base.target),
+      status: met ? "met" : dayKey < today && dayKey === end ? "missed" : current > 0 ? "in-progress" : "awaiting",
+      sourceRecordIds: [...new Set(observedDays.flatMap((result) => result.ids))],
+      contributions: observedDays.flatMap((result) => result.contributions),
+      calculation: `${formatNumber(current)} of ${formatNumber(base.target)} ${requirement.unit} this week`,
+    };
   }
   // A requirement created late in its first week can never demand more
   // occurrences than calendar opportunities that remained in that week.
@@ -367,6 +377,7 @@ function normalizeSchedule(value: unknown): DailySuccessSchedule {
       : [];
     return weekdays.length ? { kind: "weekdays", weekdays } : { kind: "daily" };
   }
+  if (value.kind === "weekly-total") return { kind: "weekly-total", weekStartsOn: value.weekStartsOn === 0 ? 0 : 1 };
   if (value.kind === "times-per-week") {
     return {
       kind: "times-per-week",

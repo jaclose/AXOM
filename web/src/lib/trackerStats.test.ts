@@ -21,6 +21,14 @@ function log(day: string, patch: Partial<StudyLog> = {}): StudyLog {
 }
 
 describe("tracker stats", () => {
+  it("applies signed corrections in each unit before clamping the daily sum", () => {
+    for (const unitType of ["minutes", "count", "yesno"] as const) {
+      const logs = [log(TODAY, { minutes: -3, quantity: -3 }), log(TODAY, { minutes: 5, quantity: 5 })];
+      expect(trackerDayTotals(tracker({ unitType }), logs).get(TODAY)).toBe(unitType === "yesno" ? 1 : 2);
+      expect(trackerDayTotals(tracker({ unitType }), [logs[0]]).get(TODAY)).toBe(0);
+    }
+    expect(trackerDayTotals(tracker({ unitType: "yesno" }), [log(TODAY, { quantity: 1 }), log(TODAY, { quantity: -1 })]).get(TODAY)).toBe(0);
+  });
   it("totals per day in the tracker's unit and caps yes/no at one", () => {
     expect(trackerDayTotals(tracker(), [log(TODAY), log(TODAY, { quantity: 7 })]).get(TODAY)).toBe(12);
     expect(trackerDayTotals(tracker({ unitType: "yesno" }), [log(TODAY), log(TODAY)]).get(TODAY)).toBe(1);

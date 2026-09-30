@@ -1,0 +1,11 @@
+.folder-card { border-radius: 16px; transition: border-color 160ms ease, transform 160ms ease; }
+.folder-card .folder-icon { width: 44px; height: 44px; display: inline-grid; place-items: center; border: 1px solid color-mix(in srgb, var(--folder-color) 25%, var(--border)); border-radius: 12px; background: color-mix(in srgb, var(--folder-color) 8%, var(--surface)); }
+.folder-card .fc-name { font-size: 16px; letter-spacing: -.025em; }
+.folder-card .fc-path { margin-block: 14px 8px; font-family: var(--font-mono, monospace); font-size: 11px; }
+.folder-native-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--text-secondary); font-size: 11px; margin-bottom: 14px; }
+.folder-error { color: var(--red); font-size: 12px; line-height: 1.5; }
+.folder-actions { flex-wrap: wrap; }
+.folder-spinner { animation: folder-spin 1s linear infinite; }
+@keyframes folder-spin { to { transform: rotate(360deg); } }
+@media (max-width: 580px) { .folder-card-top { flex-wrap: wrap; } .folder-tools { width: 100%; justify-content: flex-end; } .folder-card-foot { align-items: flex-start; gap: 12px; flex-direction: column; } }
+@media (prefers-reduced-motion: reduce) { .folder-card { transition: none; } .folder-spinner { animation: none; } }

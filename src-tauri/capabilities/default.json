@@ -6,6 +6,7 @@
   "permissions": [
     "allow-hub-folders",
     "allow-app-shell",
+    "allow-rest-sounds",
     "core:default",
     "sql:default",
     "sql:allow-execute",

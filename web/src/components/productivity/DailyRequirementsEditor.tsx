@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { CalendarDays, Check, Plus, RotateCcw, SlidersHorizontal, Trash2 } from "lucide-react";
 import { localDateKey } from "../../lib/dailyRollover";
 import { evaluateDailySuccess, makeDailyRequirement } from "../../lib/dailySuccess";
+import { buildTargetContributionLedger } from "../../lib/targetContributions";
 import { useStore } from "../../lib/store";
 import type { DailySuccessRequirement, DailySuccessSchedule, DailySuccessSource, HabitType } from "../../lib/types";
 import { dismissAnnouncement, isAnnouncementDismissed, readDismissedAnnouncements } from "../../lib/announcements";
@@ -21,7 +22,7 @@ const STANDARD: Array<{
   { kind: "journal-closeout", label: "Daily closeout", target: 1, unit: "closeout" },
 ];
 
-export function DailyRequirementsEditor() {
+export function DailyRequirementsEditor({ expanded = false }: { expanded?: boolean }) {
   const store = useStore();
   const [customName, setCustomName] = useState("");
   const [customTarget, setCustomTarget] = useState("1");
@@ -46,12 +47,12 @@ export function DailyRequirementsEditor() {
     });
   }
 
-  function update(id: string, patch: Partial<DailySuccessRequirement>) {
-    const changesScoringSemantics = Object.hasOwn(patch, "target")
+  function update(id: string, patch: Partial<DailySuccessRequirement>, displayUnitOnly = false) {
+    const changesScoringSemantics = !displayUnitOnly && (Object.hasOwn(patch, "target")
       || Object.hasOwn(patch, "schedule")
       || Object.hasOwn(patch, "source")
       || Object.hasOwn(patch, "aliases")
-      || Object.hasOwn(patch, "weight");
+      || Object.hasOwn(patch, "weight"));
     save(shown.map((requirement) => requirement.id === id
       ? {
           ...requirement,
@@ -63,6 +64,7 @@ export function DailyRequirementsEditor() {
   }
 
   function remove(id: string) {
+    if (shown.find((item) => item.id === id)?.source.kind === "study-minutes") return;
     save(shown.filter((requirement) => requirement.id !== id));
   }
 
@@ -237,7 +239,7 @@ export function DailyRequirementsEditor() {
   }
 
   return (
-    <details className="daily-requirements-editor" data-tour="requirements">
+    <details className="daily-requirements-editor" data-tour="requirements" open={expanded || undefined}>
       <summary><SlidersHorizontal size={ICON_SIZE.body} aria-hidden="true" /> Choose targets <span>{shown.length}</span></summary>
       <div className="daily-requirements-body">
         <p>
@@ -254,6 +256,9 @@ export function DailyRequirementsEditor() {
               ? store.habits.find((habit) => habit.id === linkedHabitId)
               : undefined;
             const complete = result?.status === "met";
+            const weekly = requirement.schedule.kind === "weekly-total" || requirement.schedule.kind === "times-per-week";
+            const todayValue = manual || linkedHabit ? buildTargetContributionLedger({ requirement, dayKey: today, logs: store.logs, productivityTrackers: store.productivityTrackers, habits: store.habits, habitEntries: store.habitEntries, closeouts: store.closeouts }).value : 0;
+            const todayComplete = todayValue >= requirement.target;
             const matchedActivityRows = result?.contributions.filter((row) => row.sourceRecord === "study-log") ?? [];
             const excludedActivityRows = (requirement.excludedSourceRecordIds ?? [])
               .map((sourceRecordId) => store.logs.find((log) => log.id === sourceRecordId && log.dayKey === today))
@@ -266,23 +271,23 @@ export function DailyRequirementsEditor() {
                   <span><b>{requirement.label}</b><small>{completionSourceDescription(requirement)}</small></span>
                 </label>
                 <div className="daily-requirement-progress">
-                  <span>Today</span>
+                  <span>{weekly ? "This week" : "Today"}</span>
                   <b>{result?.calculation ?? "Not scheduled"}</b>
                   <Tag tone={complete ? "green" : result?.status === "in-progress" ? "cyan" : "neutral"}>{complete ? "Complete" : result?.status === "in-progress" ? "In progress" : "Pending"}</Tag>
                 </div>
                 {(manual || linkedHabit) && (
                   <div className="daily-requirement-check">
                     {requirement.target <= 1 ? (
-                      <GButton size="sm" variant={complete ? "default" : "primary"} onClick={() => {
+                      <GButton size="sm" variant={todayComplete ? "default" : "primary"} onClick={() => {
                         if (linkedHabit) {
-                          if (complete) store.clearHabitCheck(linkedHabit.id, today);
+                          if (todayComplete) store.clearHabitCheck(linkedHabit.id, today);
                           else store.checkHabit(linkedHabit.id, today, "done", requirement.target);
-                        } else setManualValue(requirement, complete ? 0 : requirement.target);
+                        } else setManualValue(requirement, todayComplete ? 0 : requirement.target);
                       }}>
-                        {complete ? <RotateCcw size={ICON_SIZE.body} /> : <Check size={ICON_SIZE.body} />} {complete ? "Undo" : "Mark complete"}
+                        {todayComplete ? <RotateCcw size={ICON_SIZE.body} /> : <Check size={ICON_SIZE.body} />} {todayComplete ? "Undo" : "Mark complete"}
                       </GButton>
                     ) : (
-                      <label><span>Today’s value</span><input className="field" type="number" min="0" defaultValue={result?.current || ""} onBlur={(event) => {
+                      <label><span>Today’s value</span><input key={`${requirement.id}:${today}:${todayValue}`} className="field" type="number" min="0" step="any" defaultValue={todayValue || ""} onBlur={(event) => {
                         const value = Math.max(0, Number(event.target.value) || 0);
                         if (linkedHabit) {
                           if (!value) store.clearHabitCheck(linkedHabit.id, today);
@@ -322,11 +327,13 @@ export function DailyRequirementsEditor() {
               <details className="daily-requirement-settings">
                 <summary>Target settings <span>{scheduleDescription(requirement.schedule)} · weight {requirement.weight ?? 1}</span></summary>
               <div className="daily-requirement-row">
-              <label><span>Target</span><input className="field" aria-label="Target" type="number" min="1" value={requirement.target} onChange={(event) => update(requirement.id, { target: Math.max(1, Number(event.target.value) || 1) })} /></label>
+              <label><span>Target</span><input className="field" aria-label="Target" type="number" min="0.1" step="0.1" value={requirement.target} onChange={(event) => update(requirement.id, { target: Math.max(0.1, Number(event.target.value) || 1) })} /></label>
+              {requirement.source.kind === "study-minutes" && <label><span>Unit</span><select className="field" aria-label="Study target unit" value={requirement.unit} onChange={(event) => update(requirement.id, { unit: event.target.value, target: event.target.value === "hours" ? requirement.target / 60 : requirement.target * 60 }, true)}><option value="minutes">Minutes</option><option value="hours">Hours</option></select></label>}
               <label><span>Schedule</span><select className="field" aria-label="Schedule" value={requirement.schedule.kind} onChange={(event) => update(requirement.id, { schedule: scheduleFromKind(event.target.value) })}>
                 <option value="daily">Daily</option>
                 <option value="weekdays">Selected weekdays</option>
-                <option value="times-per-week">Times per week</option>
+                <option value="weekly-total">Weekly total</option>
+                <option value="times-per-week">Days meeting target per week</option>
               </select></label>
               <label><span>Weight toward today</span><input className="field" aria-label={`Weight for ${requirement.label}`} type="number" min="0.1" max="5" step="0.1" value={requirement.weight ?? 1} onChange={(event) => update(requirement.id, { weight: Math.max(.1, Math.min(5, Number(event.target.value) || 1)) })} /></label>
               <label className="daily-requirement-aliases"><span>Activity aliases</span><input className="field" aria-label={`Activity aliases for ${requirement.label}`} placeholder="gym, workout, lifting" defaultValue={(requirement.aliases ?? []).join(", ")} onBlur={(event) => updateAliases(requirement, event.target.value)} /></label>
@@ -336,7 +343,7 @@ export function DailyRequirementsEditor() {
               {requirement.schedule.kind === "times-per-week" && (
                 <label><span>Times</span><input className="field" type="number" min="1" max="7" value={requirement.schedule.times} onChange={(event) => update(requirement.id, { schedule: { kind: "times-per-week", times: Math.max(1, Math.min(7, Number(event.target.value) || 1)), weekStartsOn: 1 } })} /></label>
               )}
-              <button type="button" className="daily-requirement-remove" aria-label={`Remove ${requirement.label} target`} onClick={() => remove(requirement.id)}><Trash2 size={ICON_SIZE.body} /></button>
+              {requirement.source.kind === "study-minutes" ? <Tag tone="neutral">System target</Tag> : <button type="button" className="daily-requirement-remove" aria-label={`Remove ${requirement.label} target`} onClick={() => remove(requirement.id)}><Trash2 size={ICON_SIZE.body} /></button>}
               </div>
               <div className="daily-requirement-meta">
                 <span><b>Completion source:</b> {completionSourceDescription(requirement)}</span>
@@ -372,7 +379,8 @@ export function DailyRequirementsEditor() {
             <label><span>Schedule</span><select className="field" value={customSchedule.kind} onChange={(event) => setCustomSchedule(scheduleFromKind(event.target.value))}>
               <option value="daily">Daily</option>
               <option value="weekdays">Monday–Friday</option>
-              <option value="times-per-week">Times per week</option>
+              <option value="weekly-total">Weekly total</option>
+              <option value="times-per-week">Days meeting target per week</option>
             </select></label>
             {customCompletion === "activity" && <label className="daily-custom-alias"><span>Activity aliases</span><input className="field" placeholder="gym, workout, lifting" value={customAliases} onChange={(event) => setCustomAliases(event.target.value)} /></label>}
             {customSchedule.kind === "times-per-week" && <label><span>Times</span><input className="field" type="number" min="1" max="7" value={customSchedule.times} onChange={(event) => setCustomSchedule({ ...customSchedule, times: Math.max(1, Math.min(7, Number(event.target.value) || 1)) })} /></label>}
@@ -393,6 +401,7 @@ function legacyPreview(minutes: number, cards: number, today: string): DailySucc
 
 function scheduleFromKind(kind: string): DailySuccessSchedule {
   if (kind === "weekdays") return { kind: "weekdays", weekdays: [1, 2, 3, 4, 5] };
+  if (kind === "weekly-total") return { kind: "weekly-total", weekStartsOn: 1 };
   if (kind === "times-per-week") return { kind: "times-per-week", times: 3, weekStartsOn: 1 };
   return { kind: "daily" };
 }
@@ -425,6 +434,7 @@ function completionSourceDescription(requirement: DailySuccessRequirement): stri
 }
 
 function scheduleDescription(schedule: DailySuccessSchedule): string {
+  if (schedule.kind === "weekly-total") return "Total this week";
   if (schedule.kind === "daily") return "Every day";
   if (schedule.kind === "weekdays") return schedule.weekdays.map((day) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][day]).join(", ");
   return `${schedule.times} times per week`;

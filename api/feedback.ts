@@ -1,10 +1,11 @@
 import { optionalString, requireBodyObject, requireString, sendJson, withApi } from "../lib/api/http.js";
+import { renderFeedbackEmail } from "../lib/api/emailTemplates.js";
 
 // Alpha feedback intake. Sends an email via Resend when RESEND_API_KEY is set;
 // otherwise returns 501 so the client shows the clean "copy + email" fallback.
 // No secrets are ever exposed to the client.
 const TO = process.env.FEEDBACK_TO || "jdabbagh@sgu.edu";
-const FROM = process.env.FEEDBACK_FROM || "Noctyrium Alpha <onboarding@resend.dev>";
+const FROM = process.env.FEEDBACK_FROM || "AXOM <onboarding@resend.dev>";
 
 export default withApi(["POST"], async (req, res) => {
   const body = requireBodyObject(req);
@@ -22,18 +23,14 @@ export default withApi(["POST"], async (req, res) => {
     return;
   }
 
-  const text = [
-    `Type: ${type}`, `Area: ${area}`, "", message, "",
-    `App: ${version}`, `Contact: ${email || "(none)"}`, `Browser: ${ua}`,
-    `Received: ${new Date().toISOString()}`,
-  ].join("\n");
+  const rendered = renderFeedbackEmail({ type, area, message, email, version, ua, receivedAt: new Date().toISOString() });
 
   const r = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       from: FROM, to: [TO], reply_to: email || undefined,
-      subject: `Noctyrium Alpha Feedback — ${type} — ${area}`, text,
+      ...rendered,
     }),
   });
 

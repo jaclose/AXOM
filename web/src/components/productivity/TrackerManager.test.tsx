@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeSeed } from "../../lib/seed";
 import { useStore } from "../../lib/store";
 import { TrackerManager } from "./TrackerManager";
+import { makeDailyRequirement } from "../../lib/dailySuccess";
 
 beforeEach(() => {
   const seed = makeSeed();
@@ -12,6 +13,14 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("TrackerManager", () => {
+  it("labels weekly frequency progress in days rather than study minutes", () => {
+    const state = useStore.getState();
+    const today = state.activeDayKey;
+    state.updateProfile({ dailySuccess: { version: 1, configuredAt: today, requirements: [makeDailyRequirement({ id: "study-days", label: "Study", source: { kind: "study-minutes" }, target: 60, unit: "minutes", schedule: { kind: "times-per-week", times: 3, weekStartsOn: 1 }, trackingStartsAt: "2026-09-01" })] } });
+    state.logStudy({ type: "Study", minutes: 60 });
+    render(<TrackerManager />);
+    expect(screen.getByRole("button", { name: "Edit Study target" }).textContent).toContain("1 / 3 days");
+  });
   it("logs a tracker in one tap", () => {
     render(<TrackerManager />);
     const gym = screen.getByRole("article", { name: "Gym" });

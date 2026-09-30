@@ -19,6 +19,9 @@ import { FocusDock } from "./components/dock/FocusDock";
 import { RestOverlay } from "./components/rest/RestOverlay";
 import { SoundscapeTimerSync } from "./components/soundscapes/SoundscapeTimerSync";
 import { FocusCheckIn } from "./components/shell/FocusCheckIn";
+import { NotificationActionBridge } from "./components/shell/NotificationActionBridge";
+import { PersistentMediaHost } from "./components/soundscapes/PersistentMediaHost";
+import { FocusSpaceHost } from "./components/soundscapes/FocusSpaceHost";
 import { AccountSyncWatcher } from "./components/shell/AccountSyncWatcher";
 import { NAV } from "./components/shell/nav";
 import { useStore } from "./lib/store";
@@ -373,9 +376,12 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
       <DailyLoopReminderWatcher />
       <SessionOverlay />
       <FocusDock />
+      <FocusSpaceHost />
+      <PersistentMediaHost />
       <RestOverlay />
       <SoundscapeTimerSync />
       <FocusCheckIn />
+      <NotificationActionBridge />
       <AccountSyncWatcher />
       <Toaster />
     </div>

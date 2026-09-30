@@ -1,0 +1,10 @@
+Back to your work.
+
+Enter this one-time code in AXOM to sign in. Use the code if you are signing in through the desktop app.
+
+Code: {{ .Token }}
+Keep this code private.
+
+Sign in through your browser: {{ .ConfirmationURL }}
+
+If you did not request this sign-in, do not share the code or follow the link. You can ignore this email.

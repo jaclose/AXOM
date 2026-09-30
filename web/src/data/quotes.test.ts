@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AXOM_ORIGINALS_V2, AXOM_QUOTES, AXOM_QUOTE_LIBRARY_V1 } from "./quotes";
+import { AXOM_ORIGINALS_V2, AXOM_ORIGINALS_V3, AXOM_QUOTES, AXOM_QUOTE_LIBRARY_V1 } from "./quotes";
 
 describe("normalized AXOM quote library v1", () => {
   it("pins the exact 100 source entries and stable numbered ids", () => {
@@ -28,7 +28,7 @@ describe("normalized AXOM quote library v1", () => {
     expect(count("discipline")).toBe(20);
     expect(count("perspective")).toBe(15);
     expect(count("success-ambition")).toBe(15);
-    expect(count("axom-original")).toBe(10 + AXOM_ORIGINALS_V2.length);
+    expect(count("axom-original")).toBe(10 + AXOM_ORIGINALS_V2.length + AXOM_ORIGINALS_V3.length);
     expect(AXOM_QUOTES.filter((quote) => quote.guilt).map((quote) => quote.id)).toEqual(
       Array.from({ length: 20 }, (_, index) => `quote-${String(index + 21).padStart(3, "0")}`),
     );

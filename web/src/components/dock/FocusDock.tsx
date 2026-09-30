@@ -12,6 +12,7 @@ import { findLiveSession, formatElapsed, sessionElapsedMs, QUICK_LOG_LABEL, type
 import { formatClock, pomodoroPhaseSeconds, usePomodoro } from "../../lib/pomodoro";
 import { useSessionUi } from "../../lib/sessionUi";
 import { useSoundscape } from "../../lib/soundscapes/store";
+import { activeMediaSession, useMediaSession, type AxomMediaSession } from "../../lib/soundscapes/mediaSession";
 import { EVIDENCE_LABEL, SOUNDSCAPES, lookFor } from "../../lib/soundscapes/presets";
 import { carrierPair } from "../../lib/soundscapes/engine";
 import { useReducedMotion } from "../../lib/motion";
@@ -47,12 +48,13 @@ export function FocusDock() {
   const sessions = useStore((state) => state.sessions);
   const session = findLiveSession(sessions ?? []);
   const { pomodoro, total, visible: pomodoroVisible } = usePomodoroView();
-  const soundStatus = useSoundscape((state) => state.status);
+  const mediaSessions = useMediaSession((state) => state.sessions);
+  const media = activeMediaSession(mediaSessions);
   const restStatus = useRest((state) => state.status);
   const resting = restStatus !== "idle";
   // While resting, the rest capsule stands in for the (paused) timer.
   const timerActive = resting || Boolean(session) || pomodoroVisible;
-  const soundActive = soundStatus !== "idle";
+  const soundActive = Boolean(media);
   const [expanded, setExpanded] = useState(false);
   if (!timerActive && !soundActive) return null;
   const split = timerActive && soundActive;
@@ -70,7 +72,7 @@ export function FocusDock() {
           phaseTotal={total}
         />
       )}
-      {soundActive && <SoundCapsule ghost={ghost} entering={split} />}
+      {media && (media.id === "native" ? <SoundCapsule ghost={ghost} entering={split} /> : <MediaCapsule ghost={ghost} media={media} />)}
     </>
   );
 
@@ -84,10 +86,22 @@ export function FocusDock() {
         </filter>
       </svg>
       {/* The goo layer holds only the capsule shapes; the crisp content sits on top. */}
-      <div className="focus-dock-row focus-dock-goo" aria-hidden="true">{capsules(true)}</div>
+      <div className="focus-dock-row focus-dock-goo" aria-hidden="true" ref={(node) => { if (node) node.inert = true; }}>{capsules(true)}</div>
       <div className="focus-dock-row focus-dock-content">{capsules(false)}</div>
     </div>
   );
+}
+
+function MediaCapsule({ ghost, media }: { ghost: boolean; media: AxomMediaSession }) {
+  return <Capsule ghost={ghost} className={`dock-media ${media.isPlaying ? "" : "paused"}`}>
+    <Equalizer playing={media.isPlaying} />
+    <button type="button" className="dock-sound-name" onClick={media.controls.open} aria-label={`Show ${media.source} player`}>
+      <b>{media.title}</b><small>{media.subtitle}{!media.isPlaying && !media.isBuffering ? " · paused" : ""}</small>
+    </button>
+    <IconButton label={media.isPlaying ? "Pause Spotify" : "Resume Spotify"} onClick={media.isPlaying ? media.controls.pause : media.controls.play} className="primary">
+      {media.isPlaying ? <Pause size={ICON_SIZE.body} /> : <Play size={ICON_SIZE.body} />}
+    </IconButton>
+  </Capsule>;
 }
 
 function Capsule({ ghost, className, children, ...rest }: { ghost: boolean; className: string; children: ReactNode } & HTMLAttributes<HTMLDivElement>) {

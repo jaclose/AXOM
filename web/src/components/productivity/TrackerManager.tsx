@@ -16,7 +16,8 @@ import {
 } from "../../lib/trackerStats";
 import { GButton, GhostButton, GlassCard, PanelHeader, Tag } from "../ui/primitives";
 import { Modal } from "../ui/Modal";
-import { StreakEmber } from "../ui/motion";
+import { DailyRequirementsEditor } from "./DailyRequirementsEditor";
+import { evaluateDailySuccess, evaluateRequirement, makeDailyRequirement } from "../../lib/dailySuccess";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { pushToast } from "../../lib/toast";
 
@@ -52,7 +53,14 @@ const FLAG_COPY: Array<{ key: keyof Pick<ProductivityTracker, "contributesToAcad
 ];
 
 export function TrackerManager() {
-  const trackers = useStore((s) => s.productivityTrackers);
+  const state = useStore();
+  const trackers = state.productivityTrackers;
+  const [targetDetails, setTargetDetails] = useState(false);
+  const targetResults = evaluateDailySuccess(state).requirements.filter((result) => result.requirement.enabled);
+  if (!targetResults.some((result) => result.requirement.source.kind === "study-minutes")) {
+    const study = trackers.find((tracker) => tracker.id === "tracker-study");
+    if (study) targetResults.unshift(evaluateRequirement(makeDailyRequirement({ id: "system-study-preview", label: "Study", source: { kind: "study-minutes" }, target: study.dailyTarget ?? study.weeklyTarget ?? 240, unit: "minutes", schedule: study.dailyTarget ? { kind: "daily" } : { kind: "weekly-total", weekStartsOn: 1 }, trackingStartsAt: study.createdAt.slice(0, 10) }), state, state.activeDayKey, state.activeDayKey));
+  }
   const logs = useStore((s) => s.logs);
   const today = useStore((s) => s.activeDayKey);
   const [editing, setEditing] = useState<ProductivityTracker | "new" | null>(null);
@@ -67,7 +75,23 @@ export function TrackerManager() {
   const ordered = [...visible].sort((a, b) => (summaries.get(b.id)!.activeDays30 - summaries.get(a.id)!.activeDays30) || a.name.localeCompare(b.name));
 
   return (
-    <GlassCard pad className="tracker-board" data-module-tour="productivity-trackers">
+    <GlassCard pad className="tracker-board" data-module-tour="productivity-targets">
+      <PanelHeader title="Targets" sub="One progress view of the work you intend to do." action={<GButton size="sm" onClick={() => setTargetDetails(true)}><Settings2 size={ICON_SIZE.body} /> Configure targets</GButton>} />
+      <div className="target-progress-list">
+        {targetResults.map((result) => {
+          const requirement = result.requirement;
+          const weekly = requirement.schedule.kind === "weekly-total" || requirement.schedule.kind === "times-per-week";
+          const unit = requirement.schedule.kind === "times-per-week" ? "days" : requirement.unit;
+          const value = (amount: number) => unit === "minutes" ? `${Math.floor(Math.round(amount) / 60)}h ${Math.round(amount) % 60}m` : `${Math.round(amount * 10) / 10}`;
+          return <button type="button" key={requirement.id} className="target-progress-row" onClick={() => { if (requirement.id === "system-study-preview") setEditing(trackers.find((tracker) => tracker.id === "tracker-study")!); else setTargetDetails(true); }} aria-label={`Edit ${requirement.label} target`}>
+            <span><b>{requirement.source.kind === "study-minutes" ? "Study" : requirement.label}</b><small>{!result.eligible ? "Day off" : weekly ? "This week" : "Today"}</small></span>
+            <span className="target-progress-value">{value(result.current)} <small>/ {value(result.target)}{unit !== "minutes" ? ` ${unit}` : ""}</small></span>
+            <span className="target-progress-meter" aria-hidden="true"><i style={{ width: `${Math.min(100, result.ratio * 100)}%` }} /></span><strong>{Math.round(result.ratio * 100)}%</strong>
+          </button>;
+        })}
+      </div>
+      {targetDetails && <Modal title="Targets" onClose={() => setTargetDetails(false)}><DailyRequirementsEditor expanded /></Modal>}
+      <details className="tracker-categories-disclosure"><summary>Activity categories <span>Manual entries and advanced settings</span></summary>
       <PanelHeader
         title="Your trackers"
         headingLevel={2}
@@ -98,6 +122,7 @@ export function TrackerManager() {
           )}
         </div>
       )}
+      </details>
       {editing && <TrackerEditor tracker={editing === "new" ? undefined : editing} onClose={() => setEditing(null)} />}
     </GlassCard>
   );
@@ -106,11 +131,12 @@ export function TrackerManager() {
 function TrackerCard({ tracker, summary, onEdit }: { tracker: ProductivityTracker; summary: TrackerSummary; onEdit: () => void }) {
   const logProductivity = useStore((s) => s.logProductivity);
   const goal = trackerGoal(tracker);
-  const target = tracker.dailyTarget && tracker.dailyTarget > 0 ? tracker.dailyTarget : undefined;
-  const ratio = target ? Math.min(1, summary.today / target) : summary.today > 0 ? 1 : 0;
+  const weekly = !tracker.dailyTarget && Boolean(tracker.weeklyTarget);
+  const target = weekly ? tracker.weeklyTarget : tracker.dailyTarget && tracker.dailyTarget > 0 ? tracker.dailyTarget : undefined;
+  const current = weekly ? summary.week : summary.today;
+  const ratio = target ? Math.min(1, current / target) : summary.today > 0 ? 1 : 0;
   const over = goal === "at-most" && target !== undefined && summary.today > target;
   const doneToday = tracker.unitType === "yesno" && summary.today > 0;
-  const max = Math.max(target ?? 0, ...summary.last14.map((day) => day.value), 1);
   const style = { "--tracker": tracker.color } as CSSProperties;
 
   function log(amount: number) {
@@ -126,29 +152,21 @@ function TrackerCard({ tracker, summary, onEdit }: { tracker: ProductivityTracke
           <b>{tracker.name}</b>
           <small>{tracker.category}{goal === "at-most" ? " · limit" : ""}</small>
         </div>
-        {summary.streak > 0 && <StreakEmber count={summary.streak} size={13} />}
         <button type="button" className="tracker-edit" onClick={onEdit} aria-label={`Edit ${tracker.name}`}><Settings2 size={ICON_SIZE.body} /></button>
       </header>
 
       <div className="tracker-today">
         <span className="tracker-ring" style={{ "--p": ratio } as CSSProperties} aria-hidden="true" />
         <div>
-          <b>{tracker.unitType === "yesno" ? (doneToday ? "Done today" : "Not yet today") : formatTrackerValue(tracker, summary.today)}</b>
+          <b>{tracker.unitType === "yesno" ? (doneToday ? "Done today" : "Not yet today") : formatTrackerValue(tracker, current)}</b>
           <small>
             {target !== undefined && tracker.unitType !== "yesno"
-              ? `${goal === "at-most" ? "limit" : "goal"} ${formatTrackerValue(tracker, target)} a day`
+              ? `${goal === "at-most" ? "limit" : "goal"} ${formatTrackerValue(tracker, target)} ${weekly ? "this week" : "a day"}`
               : summary.todayMet ? "Goal met" : "today"}
           </small>
         </div>
       </div>
 
-      <div className="tracker-strip" role="img" aria-label={`Last 14 days: ${summary.last14.filter((day) => day.value > 0).length} active`}>
-        {summary.last14.map((day) => (
-          <i key={day.day} className={day.met === true ? "met" : day.met === false && day.value > 0 ? "short" : ""}
-            style={{ height: `${Math.max(8, (day.value / max) * 100)}%`, opacity: day.value > 0 ? 1 : 0.35 }}
-            title={`${day.day}: ${formatTrackerValue(tracker, day.value)}`} />
-        ))}
-      </div>
 
       <footer>
         <span className="tracker-week">
@@ -198,6 +216,7 @@ export function TrackerEditor({ tracker, onClose }: { tracker?: ProductivityTrac
   const categories = useMemo(() => [...new Set(allTrackers.map((item) => item.category))].sort(), [allTrackers]);
   const [draft, setDraft] = useState<Draft>(() => (tracker ? { ...tracker } : emptyDraft()));
   const patch = (value: Partial<Draft>) => setDraft((current) => ({ ...current, ...value }));
+  const protectedStudy = tracker?.id === "tracker-study";
   const unit = trackerUnitLabel(draft);
   const valid = draft.name.trim().length > 0;
 
@@ -231,7 +250,7 @@ export function TrackerEditor({ tracker, onClose }: { tracker?: ProductivityTrac
       onClose={onClose}
       footer={(
         <>
-          {tracker && (
+          {tracker && !protectedStudy && (
             <GhostButton onClick={toggleArchive}>
               {tracker.archived ? <ArchiveRestore size={ICON_SIZE.body} /> : <Archive size={ICON_SIZE.body} />} {tracker.archived ? "Restore" : "Archive"}
             </GhostButton>
@@ -242,9 +261,10 @@ export function TrackerEditor({ tracker, onClose }: { tracker?: ProductivityTrac
       )}
     >
       <div className="tracker-editor">
+        {protectedStudy && <p className="tracker-editor-note">Study is a system target. Focus time contributes automatically. Change the amount or icon here; choose weekdays or a weekly total in Targets.</p>}
         <label className="tracker-field wide">
           <span>Name</span>
-          <input className="field" value={draft.name} autoFocus maxLength={40} placeholder="Exercise, Reading, Social media…" onChange={(event) => patch({ name: event.target.value })} />
+          <input className="field" value={draft.name} disabled={protectedStudy} autoFocus maxLength={40} placeholder="Exercise, Reading, Social media…" onChange={(event) => patch({ name: event.target.value })} />
         </label>
 
         <fieldset className="tracker-field wide">
@@ -271,7 +291,7 @@ export function TrackerEditor({ tracker, onClose }: { tracker?: ProductivityTrac
             <button type="button" role="radio" aria-checked={draft.goal !== "at-most"} className={draft.goal !== "at-most" ? "on" : ""} onClick={() => patch({ goal: "at-least" })}>
               Build it up <small>at least a daily amount</small>
             </button>
-            <button type="button" role="radio" aria-checked={draft.goal === "at-most"} className={draft.goal === "at-most" ? "on" : ""}
+            <button type="button" role="radio" disabled={protectedStudy} aria-checked={draft.goal === "at-most"} className={draft.goal === "at-most" ? "on" : ""}
               onClick={() => patch({ goal: "at-most", contributesToAcademicStudy: false, contributesToTotalProductiveTime: false })}>
               Keep it under <small>a daily limit</small>
             </button>
@@ -280,7 +300,7 @@ export function TrackerEditor({ tracker, onClose }: { tracker?: ProductivityTrac
 
         <label className="tracker-field">
           <span>Measured in</span>
-          <select className="field" value={draft.unitType} onChange={(event) => patch({ unitType: event.target.value as ProductivityUnitType })}>
+          <select className="field" disabled={protectedStudy} value={draft.unitType} onChange={(event) => patch({ unitType: event.target.value as ProductivityUnitType })}>
             {UNIT_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
         </label>
@@ -313,7 +333,7 @@ export function TrackerEditor({ tracker, onClose }: { tracker?: ProductivityTrac
           <legend>What it counts toward</legend>
           {FLAG_COPY.map((flag) => (
             <label key={flag.key} className="tracker-flag">
-              <input type="checkbox" checked={Boolean(draft[flag.key])} onChange={(event) => patch({ [flag.key]: event.target.checked })} />
+              <input type="checkbox" disabled={protectedStudy && (flag.key === "contributesToAcademicStudy" || flag.key === "contributesToTotalProductiveTime")} checked={Boolean(draft[flag.key])} onChange={(event) => patch({ [flag.key]: event.target.checked })} />
               <span><b>{flag.label}</b><small>{flag.detail}</small></span>
             </label>
           ))}

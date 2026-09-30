@@ -1,6 +1,7 @@
 import { configDefaults, defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
+import { realpathSync } from "node:fs";
 import packageJson from "./package.json";
 import { buildMetadata, releaseMetadataPlugin } from "./scripts/build-metadata";
 
@@ -20,7 +21,7 @@ export default defineConfig({
   // releaseNotes.ts imports ../CHANGELOG.md?raw from the repo root. Vite 8
   // denies ?raw loads outside server.fs.allow (dev server and vitest alike),
   // and a file entry can't match the ?raw id, so allow the repo root.
-  server: { fs: { allow: [fileURLToPath(new URL("..", import.meta.url))] } },
+  server: { fs: { allow: [fileURLToPath(new URL("..", import.meta.url)), realpathSync(fileURLToPath(new URL("./node_modules", import.meta.url)))] } },
   test: {
     exclude: [...configDefaults.exclude, "e2e/**"],
   },

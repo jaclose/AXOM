@@ -1,4 +1,5 @@
 mod hub_folders;
+mod rest_sounds;
 mod menu_bar_pill;
 mod menu_bar_timer;
 mod webview_dialogs;
@@ -88,6 +89,8 @@ pub fn run() {
             desktop_status,
             hub_folders::hub_folder_open,
             hub_folders::hub_folder_info,
+            rest_sounds::rest_system_sounds,
+            rest_sounds::rest_system_sound,
             menu_bar_timer::menu_bar_timer_update,
             menu_bar_timer::menu_bar_timer_clear,
         ])

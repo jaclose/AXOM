@@ -57,6 +57,7 @@ import { normalizeDailySuccessConfig } from "./dailySuccess";
 import { normalizePomodoroPreferences } from "./pomodoroPreferences";
 import { normalizeDailyLoopReminderPreferences } from "./dailyLoopReminders";
 import { normalizeFocusCheckInPreferences } from "./focusCheckIn";
+import { normalizeExamCountdown } from "./examDeadlines";
 import { normalizeDashboardLayoutPreferences } from "./dashboardWidgets";
 import { normalizeJournalEntries, normalizeJournalNotebookPreferences } from "./journalNotebook";
 import { normalizeStudyWorkflow } from "./studyPreferences";
@@ -2400,6 +2401,7 @@ function normalizeProfile(value: unknown): Profile {
     focusCheckIn: profile.focusCheckIn === undefined
       ? undefined
       : normalizeFocusCheckInPreferences(profile.focusCheckIn),
+    examCountdown: profile.examCountdown === undefined ? undefined : normalizeExamCountdown(profile.examCountdown),
     energyChecks: normalizeEnergyChecks(profile.energyChecks),
     primaryTrackerScopes: normalizePrimaryScopes(profile.primaryTrackerScopes),
     // Preserve optional opt-in fields so they survive reset/migration.

@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-rest-sounds"
+description = "List and play rest alarm sounds from the local AXOM main window."
+commands.allow = ["rest_system_sounds", "rest_system_sound"]
