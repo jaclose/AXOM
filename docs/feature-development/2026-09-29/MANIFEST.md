@@ -2,7 +2,7 @@
 
 Every item from JD's three idea dumps and the mid-turn notes, with its current status in code, who owns it, and the wave it ships in (see PLAN.md). Verbatim sources: IDEAS-1.md, IDEAS-2.md (Codex's brief), IDEAS-3.md.
 
-Baseline: branch `feat/ideas3-staging` = `main` (c04272d) + soundscape commit 2de3f7a. Codex's Ideas 2 work is uncommitted in `/Users/jd/Developer/AXOM-ideas2` (`feat/ideas2-integration`).
+Baseline: branch `feat/ideas3-staging` = `main` (c04272d) + soundscape commit 09d65a1. Codex's Ideas 2 work is uncommitted in `/Users/jd/Developer/AXOM-ideas2` (`feat/ideas2-integration`).
 
 Status words: **DONE**, **PARTIAL**, **MISSING**, **BUG** (root cause known), **CODEX** (Ideas 2 owns it), **VERIFY** (needs a check before work). Owner: C = Claude, X = Codex, JD = decision needed. Waves: 0 foundations, 1 bugs and quick wins, 2 flagship experiences, 3 deep integrations.
 
@@ -98,9 +98,9 @@ Evidence comes from code reading on 2026-09-29 (file:line on `feat/ideas3-stagin
 
 | ID | Item | Status and evidence | Owner | Wave |
 |---|---|---|---|---|
-| I1-06 / I3-08 | Upload own soundscapes; YouTube link | PARTIAL. File upload DONE in 2de3f7a (IndexedDB, device only, not synced). YouTube: embed-only via IFrame API (downloading audio breaks YouTube ToS). | C | 3 |
-| I1-09 | More soundscapes, better mapping, more backgrounds | PARTIAL. Comfort chain + level calibration DONE in 2de3f7a. Licensing-safe sources: Pixabay videos (in JD's bookmarks), generated beds. | C | 3 |
-| I1-12 | Soundscapes in Apple Now Playing | DONE in 2de3f7a (not yet on main/production, so JD has not seen it). | C | ship with W1 |
+| I1-06 / I3-08 | Upload own soundscapes; YouTube link | PARTIAL. File upload DONE in 09d65a1 (IndexedDB, device only, not synced). YouTube: embed-only via IFrame API (downloading audio breaks YouTube ToS). | C | 3 |
+| I1-09 | More soundscapes, better mapping, more backgrounds | PARTIAL. Comfort chain + level calibration DONE in 09d65a1. Licensing-safe sources: Pixabay videos (in JD's bookmarks), generated beds. | C | 3 |
+| I1-12 | Soundscapes in Apple Now Playing | DONE in 09d65a1 (not yet on main/production, so JD has not seen it). | C | ship with W1 |
 | I3-35 | Stop soundscapes when headphones are removed | MISSING. AirPods: macOS sends pause to Now Playing, handled by the media-session pause handler; wired: `devicechange`, pause when a known output disappears. | C | 1 |
 | I1-13 | Timer pill hover should push soundscapes right | CODEX. FocusDock is heavily edited by Codex. | X | - |
 | I1-11 / I3-04 / M-03 | Menu bar timer + soundscape, Raycast finish (tune + green edge), orb personality, custom desktop notification HUD, break pill style | PARTIAL. Native menu-bar pill exists (menu_bar_pill.rs, menu_bar_timer.rs) but JD's installed /Applications/AXOM.app is dated Sep 23, before it landed (Sep 24-26). HUD + tray soundscape controls MISSING. Codex edits src-tauri/src/lib.rs. | C (coordinate) | 3 |

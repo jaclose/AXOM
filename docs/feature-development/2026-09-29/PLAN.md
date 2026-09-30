@@ -59,7 +59,7 @@ AI generation (I1-05, I1-07, I1-32, I1-33), exam interfaces and QB flow (I1-08, 
 
 1. Main checkout's uncommitted security hardening (4 Supabase migrations + API/account changes, Codex, Sep 28) lands first on its own branch.
 2. Codex `feat/ideas2-integration` rebases on that and lands.
-3. `feat/ideas3-staging` rebases last. Known conflicts: `lib/soundscapes/store.ts` (`updateMediaSession` edited on both sides), `SoundscapesPage.tsx`, `FocusDock.tsx`, `App.tsx`, `types.ts`, `store.ts`; two parallel device-video stores (`axom-user-media` from 2de3f7a vs `axom-device-focus-spaces` from Codex) to unify into one.
+3. `feat/ideas3-staging` rebases last. Known conflicts: `lib/soundscapes/store.ts` (`updateMediaSession` edited on both sides), `SoundscapesPage.tsx`, `FocusDock.tsx`, `App.tsx`, `types.ts`, `store.ts`; two parallel device-video stores (`axom-user-media` from 09d65a1 vs `axom-device-focus-spaces` from Codex) to unify into one.
 
 ## Decisions for JD
 
