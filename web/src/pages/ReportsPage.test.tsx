@@ -19,6 +19,16 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("ReportsPage", () => {
+  it("opens a four-stop Help guide on the page itself (I1-17)", () => {
+    render(<ReportsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Open Reports help tour" }));
+    for (const title of ["Start with today", "Find your best hours", "Read the trend, not one day"]) {
+      expect(screen.getByRole("dialog", { name: title })).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    }
+    expect(screen.getByRole("dialog", { name: "Your own variables" })).toBeTruthy();
+  });
+
   it("uses honest low-data states and removes future/developer placeholders", () => {
     render(<ReportsPage />);
     expect(screen.getByText("No targets", { selector: ".stat-value" })).toBeTruthy();
