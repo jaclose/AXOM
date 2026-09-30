@@ -883,7 +883,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       setAnnotationStatus(result.status === "overlap" ? result.reason : undefined);
       return;
     }
-    const next = [...localAnnotationsRef.current, result.annotation];
+    const next = result.annotations;
     localAnnotationsRef.current = next;
     setLocalAnnotations(next);
     setPool((current) => current.map((item) => item.id === question.id ? { ...item, annotations: next } : item));

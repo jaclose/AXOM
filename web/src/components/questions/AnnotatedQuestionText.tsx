@@ -77,7 +77,7 @@ export function AnnotatedQuestionText({
         data-annotation-id={annotation.id}
         data-erase-active={eraseMode || undefined}
         onClick={() => {
-          if (eraseMode && onDelete) onDelete(annotation.id);
+          if (eraseMode && onDelete && window.getSelection()?.isCollapsed !== false) onDelete(annotation.id);
         }}
         onKeyDown={(event) => {
           if (onDelete && (event.key === "Delete" || event.key === "Backspace" || (eraseMode && (event.key === "Enter" || event.key === " ")))) {
@@ -104,6 +104,8 @@ export function AnnotatedQuestionText({
     "aria-label": label,
     onMouseUp: captureSelection,
     onKeyUp: captureSelection,
+    onTouchEnd: captureSelection,
+    style: { userSelect: "text" as const, WebkitUserSelect: "text" as const },
   };
   return inline ? (
     <span {...common}>

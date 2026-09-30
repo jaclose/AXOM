@@ -94,7 +94,7 @@ export function QuestionDetailModal({ question, onClose }: { question: QuestionR
       setAnnotationStatus(result.status === "overlap" ? result.reason : undefined);
       return;
     }
-    const next = [...annotationsRef.current, result.annotation];
+    const next = result.annotations;
     annotationsRef.current = next;
     setAnnotations(next);
     s.updateQuestion(question.id, { annotations: next });

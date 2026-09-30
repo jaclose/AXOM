@@ -47,3 +47,30 @@ Test count: 1,906 at baseline, 2,022 unit tests now (main's hardening tests incl
 ## Waiting on JD
 
 Decisions D1-D9 in PLAN.md (phone number in a public repo, iPad wallpapers licensing, NCRS hosting, drive links, generated assets, renal labs screenshot, blue orb check).
+
+## Ideas 2 current session, 2026-09-30 (Codex, feat/ideas2-integration)
+
+Baseline: feat/ideas2-integration at c04272d, substantial inherited unstaged implementation. No Ideas 2 feature is SHIPPED + VERIFIED yet. Recovery patch and untracked files preserved in .coordination/recovery-* (never staged). Planning documents were missing here and restored from ideas3 as an attributed baseline. Current statuses and evidence follow in later entries.
+
+### Checkpoint evidence
+
+- Baseline reproduction: 32 manual + 352 Pomodoro minutes yields academic=384 but Study tracker=32. Coordinated Claude d626082 matcher makes both 384. Browser exercise retries the same observed 352-minute event through recordStudyActivity and logStudy: one event, total and tracker remain 384 after reload.
+- Highlight baseline rejects extending a compatible mark as overlap. Current interval merge passes real Chrome pointer selection into/out of/across a mark, deletion and reload. Screenshots: /tmp/axom-ideas2-wavea-evidence.
+- Spotify contract browser test creates exactly one iframe across Soundscapes/Productivity; observed playback drives dock, hide preserves instance, disconnect destroys it. This is a controlled API fixture, not evidence of authenticated Spotify playback.
+- Locked In real scheduled prompt persists across routes/reload, distinguishes no goal / 42-minute daily study goal / active timer. Latest user instruction: stay until acted on, then fade. Unit test proves no unanswered timeout and 2200 ms response + 240 ms exit.
+- Current full working-tree validation (Node 22.23.1): 201 test files / 1964 tests pass, typecheck, lint, production build pass. Existing bundle-size and mixed-static/dynamic-import build warnings remain. Original Node 26 run exposed its experimental global localStorage mismatch; reran with supported Node 22.
+- Native canonical folder checks pass (2 Rust tests); explicit main-window permission boundary added after reviewing Tauri app-command defaults. Packaged/native interaction still pending.
+- Concurrent edits appeared in this same worktree from two Codex CLI processes. Do not stage incoming tracker/soundscape changes without resolving ownership. No merge, push, deployment, schema change or credentials used.
+
+### I2-06 annotation verification
+
+- Compatible adjacent/overlapping highlights merge through a fixed-point interval union, preserving the oldest ID. Different colors/notes remain protected; all three question surfaces replace the resulting annotation set atomically. Dragging in erase mode no longer deletes a mark.
+- Regression: old implementation rejected extending an existing highlight. Unit/component tests cover bridging marks, tone conflicts, persistent offsets and selection behavior. Real Chrome pointer drags verified plain selection, selection into/out of/across an existing mark, reload, keyboard deletion and reload again.
+- Browser artifact: `/tmp/axom-ideas2-wavea-evidence/ideas2-wave-a-real-pointer-18a13-across-persisted-highlights/highlight-merged.png`. The new standalone `ideas2-highlights.spec.ts` retains this journey.
+- Commit snapshot verification: 192 files / 1902 tests, typecheck, lint and production build passed on Node 22.23.1; Chrome journey passed against that isolated snapshot. Its temporary Vite harness explicitly allowed the existing symlinked dependencies. Existing bundle warnings remain. `git diff --check` passed.
+
+### I2-01 persistent check-in
+
+- A body portal owns the top-center prompt across routes. Only unanswered state is saved; no timeout removes it. Answered feedback holds 2.2 seconds, then fades over 240 ms (calm fade for reduced motion). Arrival does not steal focus; keyboard answers restore the prior task.
+- Focus-session remaining time takes precedence. Planned free-focus sessions exclude paused segments. Goal messages identify today/this week and only study goals; no timer/goal means no invented time. Expanded three existing voice libraries.
+- Verified the isolated commit snapshot: 17 focused tests, typecheck, lint and production build; real scheduled prompt, navigation/reload, goal/timer/no-goal copy, dark/light at 1440/390, reduced motion and no page errors. Mobile card reduced to about 186 px high with all three answers visible. Browser evidence: `/tmp/axom-ideas2-checkin-review-browser`; build: `/tmp/axom-ideas2-checkin-review-build.log`. System-notification deep linking remains a separate slice.

@@ -79,3 +79,7 @@ AI generation (I1-05, I1-07, I1-32, I1-33), exam interfaces and QB flow (I1-08, 
 
 - Bookmarks: Ankimon (economy/item shop), Anki Leaderboard (friends), Review Heatmap, Advanced Browser (resource list); mynoise.net (mixer model); Pixabay motion backgrounds (licensing-safe videos); Raycast (timer finish); Jitter (authored motion); Streamline icons.
 - Connected tools: Figma, Canva, Higgsfield (image/3D/audio generation), Google Drive (inspect linked folders), PubMed/bio-research (fact sourcing), Playwright driver for browser checks.
+
+## Ideas 2 execution, 2026-09-30 (Codex, feat/ideas2-integration)
+
+The current user brief overrides the older IDEAS-2 wording and sequence. Wave A: timer/tracker accounting, highlight selection, Spotify persistence, explicit Locked In time semantics, safe Hub actions. Wave B: observed activity, unified targets, audio lifecycle, notifications. Wave C: overlay, weighted exams, layout, light theme, alarms, emails. Wave D only after A passes: quotes, ambient spaces, library. Schema 34; no merge/push; exact-path small commits. Inherited code remains unverified until recorded below in PROGRESS.

@@ -128,3 +128,27 @@ Evidence comes from code reading on 2026-09-29 (file:line on `feat/ideas3-stagin
 |---|---|---|---|---|
 | I4-01 | Tutor mode AI for questions: explain reasoning, why an answer is wrong, compare alternatives, a hint ladder that never reveals the answer unless asked, grounded in the question and its source | MISSING (the AI part). What exists: ExamRunner's non-AI Tutor mode (reveal after each question, ExamRunner.tsx:238) and TutorUtilityDock (highlighter, calculator, notes, text size); the AI proxy serves five features and no tutor one (api/ai.ts: next-move, anki-generator, step-planner, weak-area-analysis, daily-report). Plan: a `tutor` AI feature whose prompt only sees the question, its choices, its explanation and linked source text; a four-rung hint ladder (nudge, concept, eliminate one choice, full reasoning) where the answer needs an explicit "Show me"; every reply cites the stem or source and is labelled AI and unverified, with a "Flag this explanation" path. Shares the verification step with the generative Q-bank (section D). | C (tutor engine, prompt, grounding, panel) + X (mount in ExamRunner / TutorUtilityDock, which Codex owns) | 3 |
 | I4-02 | Clock widget on the generalized widget system: local clock, analog or digital, exam countdown beside it, study-session context | PARTIAL. The clock engine already exists for the top bar (lib/clock.ts: time zones, precision, analog angles; components/shell/ClockControl.tsx); no dashboard widget. Build it as the first widget on the upgraded primitive (size-specific layouts, I1-16 / I3-49), not a one-off: small = digital time, medium = analog + date, wide = time + next exam days (reads Codex's `Profile.examCountdown`, read only) + the running Pomodoro or soundscape. | C (widgets registry); X only if exam countdown data changes | 2 |
+
+## Ideas 2 current reconciliation, 2026-09-30 (Codex, feat/ideas2-integration)
+
+This table supersedes older CODEX/DONE assumptions above for this lane. SHIPPED + VERIFIED means locally committed and checked, never deployed. The current user brief controls scope and sequence.
+
+| ID | Item | Status | Evidence / remaining work |
+|---|---|---|---|
+| I2-01 | Locked In | SHIPPED + VERIFIED | Persistent top portal, deliberate response then fade; truthful session/goal/no-goal copy; keyboard focus, reload and responsive dark/light Chrome checks passed. Local only. |
+| I2-02 | Spotify | PARTIAL | One shell player and observed playback adapter pass browser contract; live service check pending. |
+| I2-03 | Productivity events | PARTIAL | Normalized activity and retry tests pass; Anki route-independent ingestion still missing; concurrent tracker edits under review. |
+| I2-04 | Exam countdown | PARTIAL | Split widget exists; configurable weighting and shared module/calendar date source unfinished. |
+| I2-05 | Soundscape lifecycle | PARTIAL | Persistent player exists; daily metadata refresh unfinished. |
+| I2-06 | Highlights | SHIPPED + VERIFIED | Compatible interval merging; real Chrome pointer merge/delete/reload; isolated commit snapshot passed 1902 tests, typecheck/lint/build. Local only. |
+| I2-07 | Quotes | IMPLEMENTED, NOT VERIFIED | Inherited originals and container; held until Wave A complete. |
+| I2-08 | Ambient spaces | PARTIAL | Local/owned media host; external WindowSwap route returned 404; never blindly embedded. |
+| I2-09 | Light mode | PARTIAL | Inherited tokens improve surfaces; full contrast audit remains. |
+| I2-10 | Trackers and targets | PARTIAL | Unified target presentation exists; concurrent units/correction/frequency fixes arriving. |
+| I2-11 | Productivity layout | PARTIAL | Timer above activity; responsive and low-data verification remains. |
+| I2-12 | Hub folders | PARTIAL | Narrow canonical-directory commands plus main-window ACL; 2 Rust tests pass, isolated native QA pending. |
+| I2-13 | Rest alarm | PARTIAL | Preview, custom files, synthesized defaults exist; full lifecycle/audio/native checks remain. |
+| I2-14 | Frequency support | PARTIAL | Media-session boundary exists; Claude owns the engine and mixing. |
+| I2-15 | Emails | IMPLEMENTED, NOT VERIFIED | Inherited shared HTML/text renderer; generated HTML QA pending. |
+| I2-16 | Notifications | PARTIAL | Delivery and deep-link bridge exists; native HUD remains coordinated with Claude. |
+| I2-17 | Quality bar | PARTIAL | Current working-tree quality: 1964 tests pass, typecheck/lint/build pass; no lane-wide shipped claim. |

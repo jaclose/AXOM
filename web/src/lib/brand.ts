@@ -55,6 +55,8 @@ export const STORAGE_KEYS = {
   motionPreference: "axom.motion",
   /** Lock-in check-in delivery ledger: date key, timestamps, and response counts only. */
   focusCheckIns: "axom.focus-checkins.v1",
+  /** Unanswered device check-in, with no progress or workspace content. */
+  focusCheckInPending: "axom.focus-checkins.pending.v1",
   /** Device-only ledger of restore/merge/reset events; never workspace content. */
   restoreHistory: "axom.restore-history.v1",
   /** Timestamp of the latest successful local workspace write. */
