@@ -64,3 +64,33 @@ for (const theme of ["dark", "light"] as const) {
     expect(unreadable.map(({ where, text, ratio, selector }) => `${where} · "${text}" ${ratio}:1 · ${selector}`), `Unreadable text (< ${UNREADABLE}:1) in ${theme}`).toEqual([]);
   });
 }
+
+/** Accent palettes recolour pills, chips and kickers; each gets a lighter pass in both themes. */
+const PALETTE_IDS = ["ivory", "amethyst", "sapphire", "midnight", "emerald", "rose", "platinum"];
+const PALETTE_ROUTES = ["dashboard", "tracker", "reports", "daily-word"];
+
+test("no unreadable text under any accent palette", async ({ page }, testInfo) => {
+  test.setTimeout(240_000);
+  await page.goto("/", { waitUntil: "networkidle" });
+  await seedOnboarded(page);
+  const findings: Array<ContrastFinding & { where: string }> = [];
+  for (const theme of ["dark", "light"] as const) {
+    for (const id of PALETTE_IDS) {
+      await page.evaluate(async ({ theme: value, id: palette }) => {
+        localStorage.setItem("axom.theme", value);
+        const module = await import("/src/lib/palette.ts");
+        module.setPalettePreference({ id: palette });
+      }, { theme, id });
+      for (const route of PALETTE_ROUTES) {
+        await page.goto(`/#${route}`);
+        await page.reload({ waitUntil: "networkidle" });
+        await settle(page);
+        await sweep(page, `${theme}/${id}: ${route}`, findings);
+      }
+    }
+  }
+  await page.evaluate(() => localStorage.removeItem("axom.palette.v1"));
+  await testInfo.attach("contrast-palettes.json", { body: JSON.stringify(findings.sort((a, b) => a.ratio - b.ratio), null, 2), contentType: "application/json" });
+  const unreadable = findings.filter((finding) => finding.ratio < UNREADABLE);
+  expect(unreadable.map(({ where, text, ratio, selector }) => `${where} · "${text}" ${ratio}:1 · ${selector}`), "Unreadable text under a palette").toEqual([]);
+});
