@@ -1,0 +1,94 @@
+/* Daily Check-In (components/dashboard/DailyCheckIn.tsx), in the setup style:
+   the primitives come from choice.css and setup.css (eyebrow, big underlined
+   field, pill); this file lays them out and plays the "Intention set" moment. */
+.daily-checkin { --dc-ease: cubic-bezier(.22, 1, .36, 1); }
+.daily-checkin-form { display: grid; gap: 18px; }
+.daily-checkin-head { display: grid; gap: 10px; }
+.daily-checkin-head .setup-eyebrow { justify-self: start; }
+.daily-checkin-head h3 {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: clamp(1.35rem, 1.1rem + .8vw, 1.8rem);
+  font-weight: var(--fw-semibold);
+  letter-spacing: -.02em;
+  line-height: 1.15;
+}
+.daily-checkin-intention input { font-size: clamp(1.3rem, 1.05rem + .9vw, 1.75rem); }
+.daily-checkin-context-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px 18px;
+  margin-top: 14px;
+}
+.daily-checkin-context-grid .setup-followup { grid-column: 1 / -1; }
+.daily-checkin-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; }
+.daily-checkin-actions .setup-next { min-height: 46px; }
+.daily-checkin-actions .setup-next .setup-next-icon { width: 32px; height: 32px; }
+.daily-checkin-actions .setup-next:disabled { opacity: .45; cursor: not-allowed; }
+
+/* The intention, once set: large, with its underline drawn in. */
+.daily-checkin-set { display: grid; gap: 8px; }
+/* Left-aligned: the widget's own settings button owns the top-right corner. */
+.daily-checkin-set-head { display: flex; align-items: center; gap: 12px; padding-right: 52px; }
+.daily-checkin-change {
+  padding: 2px 4px;
+  border: 0;
+  background: none;
+  color: var(--text-50, var(--text-60));
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+  transition: color .2s var(--dc-ease);
+}
+.daily-checkin-change:hover { color: var(--text); }
+.daily-checkin-change:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: 2px; border-radius: 6px; }
+.daily-checkin-intent {
+  position: relative;
+  justify-self: start;
+  margin: 2px 0 4px;
+  padding-bottom: 8px;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: clamp(1.25rem, 1.05rem + .8vw, 1.65rem);
+  font-weight: var(--fw-semibold);
+  letter-spacing: -.015em;
+  line-height: 1.25;
+}
+.daily-checkin-intent svg { position: absolute; right: 0; bottom: 0; left: 0; width: 100%; height: 10px; overflow: visible; }
+.daily-checkin-intent path { fill: none; stroke: rgba(var(--accent-rgb), .7); stroke-width: 2.2; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 0; }
+.daily-checkin-intent.is-new span { display: inline-block; animation: dc-intent 900ms var(--dc-ease) both; }
+.daily-checkin-intent.is-new path { stroke-dashoffset: 1; animation: dc-draw 1100ms var(--dc-ease) 350ms forwards; }
+@keyframes dc-intent { from { opacity: 0; transform: translateY(10px); filter: blur(4px); } }
+@keyframes dc-draw { to { stroke-dashoffset: 0; } }
+.daily-checkin-logged {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 11px;
+  border: 1px solid rgba(var(--accent-rgb), .35);
+  border-radius: var(--radius-pill);
+  background: rgba(var(--accent-rgb), .1);
+  color: rgb(var(--accent-rgb));
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  animation: dc-logged 1800ms var(--dc-ease) both;
+}
+@keyframes dc-logged {
+  0% { opacity: 0; transform: translateY(6px) scale(.96); }
+  18% { opacity: 1; transform: none; }
+  75% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-4px); }
+}
+:root[data-theme="light"] .daily-checkin-logged { color: rgb(var(--accent-ink-rgb, var(--accent-rgb))); }
+
+.daily-checkin-energy { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--hairline); }
+
+@media (prefers-reduced-motion: reduce) {
+  .daily-checkin-intent.is-new span, .daily-checkin-intent.is-new path, .daily-checkin-logged { animation: none; }
+  .daily-checkin-intent.is-new path { stroke-dashoffset: 0; }
+}
+:root[data-motion="reduce"] :is(.daily-checkin-intent.is-new span, .daily-checkin-intent.is-new path, .daily-checkin-logged) { animation: none; }
+:root[data-motion="reduce"] .daily-checkin-intent.is-new path { stroke-dashoffset: 0; }

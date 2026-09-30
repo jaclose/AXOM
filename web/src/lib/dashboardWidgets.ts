@@ -12,6 +12,14 @@ export interface DashboardWidgetFieldDefinition {
   defaultEnabled: boolean;
 }
 
+/** A behaviour the widget can switch on, kept in its `preferences` bag. */
+export interface DashboardWidgetOptionDefinition {
+  id: string;
+  label: string;
+  description?: string;
+  defaultOn: boolean;
+}
+
 export interface DashboardWidgetCatalogItem {
   id: DashboardWidgetId;
   label: string;
@@ -19,6 +27,7 @@ export interface DashboardWidgetCatalogItem {
   defaultSize: DashboardWidgetSize;
   supportedSizes: readonly DashboardWidgetSize[];
   fields: readonly DashboardWidgetFieldDefinition[];
+  options?: readonly DashboardWidgetOptionDefinition[];
   /** Retained for backup compatibility but never offered as a current widget. */
   storageOnly?: boolean;
 }
@@ -59,7 +68,10 @@ export const DASHBOARD_WIDGET_CATALOG: readonly DashboardWidgetCatalogItem[] = [
   { id: "journal", label: "Journal", description: "Latest reflection and unfinished loops.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("latest", "energy", "unfinished") },
   { id: "streak", label: "Consistency", description: "Current and best eligible-day streaks.", defaultSize: "small", supportedSizes: COMPACT_SIZES, fields: fields("current", "best", "eligibleDays") },
   { id: "dailyWord", label: "Daily Word", description: "Local puzzle state, streak, and next puzzle.", defaultSize: "small", supportedSizes: COMPACT_SIZES, fields: fields("board", "streak", "countdown", "distribution") },
-  { id: "winDay", label: "Daily Check-In", description: "Set direction and close the daily loop.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("intention", "winConditions", "closeout") },
+  {
+    id: "winDay", label: "Daily Check-In", description: "Set direction and close the daily loop.", defaultSize: "large", supportedSizes: ALL_SIZES, fields: fields("intention", "winConditions", "closeout"),
+    options: [{ id: "writing", label: "A short note after an energy check", description: "A question that fits how you feel, kept with the check.", defaultOn: false }],
+  },
   { id: "todayScore", label: "Today's targets", description: "Scheduled target progress and provenance.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("progress", "targets", "sources") },
   { id: "examCountdown", label: "Exam countdown", description: "Exam date, phase, and daily question target.", defaultSize: "small", supportedSizes: COMPACT_SIZES, fields: fields("days", "phase", "questionTarget") },
   { id: "pomodoro", label: "Focus timer", description: "Current focus session and timer controls.", defaultSize: "small", supportedSizes: COMPACT_SIZES, fields: fields("timer", "intention", "sessions") },
@@ -137,7 +149,7 @@ export const DASHBOARD_LAYOUT_PRESETS: readonly DashboardLayoutPreset[] = [
     description: "Daily direction, readiness, reflection, and sustainable rhythm.",
     order: FOCUSED_ORDER,
     hiddenWidgetIds: hiddenExcept(WELLBEING_VISIBLE),
-    sizes: { welcome: "large", commandBrief: "large", winDay: "medium", readiness: "small", activity: "medium", journal: "large", weekly: "medium", pomodoro: "small", soundscapes: "small" },
+    sizes: { welcome: "large", commandBrief: "large", winDay: "large", readiness: "small", activity: "medium", journal: "large", weekly: "medium", pomodoro: "small", soundscapes: "small" },
   },
   {
     id: "custom",
@@ -175,6 +187,14 @@ export function defaultDashboardWidgetPreferences(id: string): DashboardWidgetPr
     enabledFields: item.fields.filter((field) => field.defaultEnabled).map((field) => field.id),
     preferences: {},
   };
+}
+
+/** Each option's saved value, or its default when never saved. */
+export function dashboardWidgetOptions(id: string, preferences?: DashboardWidgetPreferences): Record<string, boolean> {
+  const saved = preferences?.preferences ?? {};
+  return Object.fromEntries((dashboardWidgetCatalogItem(id).options ?? []).map((option) => (
+    [option.id, typeof saved[option.id] === "boolean" ? saved[option.id] as boolean : option.defaultOn]
+  )));
 }
 
 export function adaptLegacyDashboardLayout(options: {

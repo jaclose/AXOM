@@ -20,9 +20,19 @@ export type DashboardWidgetField = {
   disabled?: boolean;
 };
 
+/** A behaviour toggle, as opposed to a shown detail. */
+export type DashboardWidgetOption = {
+  id: string;
+  label: string;
+  checked: boolean;
+  description?: string;
+};
+
 export type DashboardWidgetFrameSettings = {
   size: DashboardWidgetFrameSize;
   fields: Record<string, boolean>;
+  /** Present only when the widget offers options. */
+  options?: Record<string, boolean>;
 };
 
 type DashboardWidgetFrameProps = {
@@ -31,6 +41,7 @@ type DashboardWidgetFrameProps = {
   size: DashboardWidgetFrameSize;
   children: ReactNode;
   fields?: readonly DashboardWidgetField[];
+  options?: readonly DashboardWidgetOption[];
   allowedSizes?: readonly DashboardWidgetFrameSize[];
   settingsDescription?: string;
   className?: string;
@@ -48,7 +59,7 @@ const SIZE_OPTIONS: ReadonlyArray<{
   { value: "extra-large", label: "Extra large", description: "The fullest view." },
 ];
 
-function fieldState(fields: readonly DashboardWidgetField[]) {
+function fieldState(fields: readonly { id: string; checked: boolean }[]) {
   return Object.fromEntries(fields.map((field) => [field.id, field.checked]));
 }
 
@@ -69,6 +80,7 @@ export function DashboardWidgetFrame({
   size,
   children,
   fields = [],
+  options = [],
   allowedSizes = SIZE_OPTIONS.map((option) => option.value),
   settingsDescription,
   className = "",
@@ -83,6 +95,7 @@ export function DashboardWidgetFrame({
   const [editing, setEditing] = useState(false);
   const [draftSize, setDraftSize] = useState<DashboardWidgetFrameSize>(size);
   const [draftFields, setDraftFields] = useState<Record<string, boolean>>(() => fieldState(fields));
+  const [draftOptions, setDraftOptions] = useState<Record<string, boolean>>(() => fieldState(options));
   const sizeOptions = SIZE_OPTIONS.filter((option) => allowedSizes.includes(option.value));
 
   useLayoutEffect(() => {
@@ -99,6 +112,7 @@ export function DashboardWidgetFrame({
   function openSettings() {
     setDraftSize(size);
     setDraftFields(fieldState(fields));
+    setDraftOptions(fieldState(options));
     setEditing(true);
   }
 
@@ -131,7 +145,7 @@ export function DashboardWidgetFrame({
   }
 
   function saveSettings() {
-    onSave({ size: draftSize, fields: { ...draftFields } });
+    onSave({ size: draftSize, fields: { ...draftFields }, ...(options.length ? { options: { ...draftOptions } } : {}) });
     closeSettings();
   }
 
@@ -213,6 +227,30 @@ export function DashboardWidgetFrame({
                   <span>
                     <strong>{field.label}</strong>
                     {field.description && <small>{field.description}</small>}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        )}
+
+        {options.length > 0 && (
+          <fieldset className="dashboard-widget-frame__control-group">
+            <legend>Options</legend>
+            <div className="dashboard-widget-frame__field-options">
+              {options.map((option) => (
+                <label key={option.id}>
+                  <input
+                    type="checkbox"
+                    checked={draftOptions[option.id] ?? false}
+                    onChange={(event) => setDraftOptions((current) => ({
+                      ...current,
+                      [option.id]: event.target.checked,
+                    }))}
+                  />
+                  <span>
+                    <strong>{option.label}</strong>
+                    {option.description && <small>{option.description}</small>}
                   </span>
                 </label>
               ))}

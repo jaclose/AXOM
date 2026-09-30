@@ -1,0 +1,132 @@
+/* Energy orbs (components/energy/EnergyOrbs.tsx). Each orb's colour follows
+   its level (--level 0..1): cool and dim when drained, warm and bright when
+   sharp. Transform and opacity only; still under reduced motion. */
+.energy-orbs {
+  --eo-ease: cubic-bezier(.22, 1, .36, 1);
+  position: relative;
+  display: grid;
+  gap: 10px;
+}
+.energy-orbs-label { color: var(--text-50, var(--text-60)); font-size: var(--fs-xs); font-weight: var(--fw-semibold); letter-spacing: .06em; text-transform: uppercase; }
+.energy-orbs-row { display: flex; flex-wrap: wrap; gap: 10px 14px; }
+.energy-orb-choice {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 4px 2px;
+  border: 0;
+  background: none;
+  color: var(--text-60);
+  font: inherit;
+  cursor: pointer;
+  transition: opacity .45s var(--eo-ease), transform .45s var(--eo-ease);
+  transition-delay: calc(var(--i, 0) * 30ms);
+}
+.energy-orb-choice small { font-size: var(--fs-xs); }
+.energy-orb-choice:hover:not(:disabled) .energy-orb { transform: translateY(-2px) scale(1.06); box-shadow: 0 0 0 1px rgba(255, 255, 255, .12), 0 8px 22px color-mix(in srgb, var(--orb-glow) 45%, transparent); }
+.energy-orb-choice:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: 3px; border-radius: 12px; }
+.energy-orb-choice.aside { opacity: 0; transform: scale(.82); pointer-events: none; }
+.energy-orb-choice.on small { color: var(--text); font-weight: var(--fw-semibold); }
+
+.energy-orb {
+  --orb-glow: color-mix(in srgb, #8fa0c7 calc((1 - var(--level, .5)) * 100%), #f2c66d);
+  position: relative;
+  display: block;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 34% 28%, rgba(255, 255, 255, calc(.35 + var(--level, .5) * .4)), transparent 42%),
+    radial-gradient(circle at 50% 60%, var(--orb-glow), color-mix(in srgb, var(--orb-glow) 55%, #14110a) 88%);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .08), 0 6px 16px color-mix(in srgb, var(--orb-glow) calc(var(--level, .5) * 40%), transparent);
+  transition: transform .45s var(--eo-ease), box-shadow .45s var(--eo-ease);
+}
+.energy-orb.small { width: 18px; height: 18px; }
+
+/* High energy: fast rings ripple outward from the chosen orb. */
+.energy-orb-choice.on .energy-orb.mood-high { animation: eo-bright 900ms var(--eo-ease) both; }
+.energy-ring {
+  position: absolute;
+  inset: 0;
+  border: 1.5px solid color-mix(in srgb, var(--orb-glow) 80%, transparent);
+  border-radius: 50%;
+  opacity: 0;
+  animation: eo-ripple 1100ms var(--eo-ease) forwards;
+}
+.energy-ring:nth-child(2) { animation-delay: 160ms; }
+.energy-ring:nth-child(3) { animation-delay: 320ms; }
+@keyframes eo-ripple { 0% { opacity: .9; transform: scale(1); } 100% { opacity: 0; transform: scale(2.8); } }
+@keyframes eo-bright { 40% { transform: scale(1.18); } 100% { transform: scale(1.06); } }
+
+/* Low energy: the orb melts a little and settles. */
+.energy-orb-choice.on .energy-orb.mood-low { animation: eo-melt 1200ms cubic-bezier(.5, 0, .3, 1) both; }
+@keyframes eo-melt {
+  0% { transform: none; border-radius: 50%; }
+  45% { transform: translateY(4px) scale(1.12, .82); border-radius: 50% 50% 46% 46% / 60% 60% 40% 40%; }
+  100% { transform: translateY(2px) scale(1.04, .94); border-radius: 50% 50% 48% 48% / 56% 56% 44% 44%; opacity: .92; }
+}
+
+/* In between: one calm breath. */
+.energy-orb-choice.on .energy-orb.mood-middle { animation: eo-breathe 900ms var(--eo-ease) both; }
+@keyframes eo-breathe { 50% { transform: scale(1.1); } 100% { transform: scale(1.02); } }
+
+/* The confirmation rises from the orb row itself. */
+.energy-orbs-bubble {
+  justify-self: start;
+  display: grid;
+  gap: 2px;
+  max-width: 420px;
+  padding: 9px 13px;
+  border: 1px solid rgba(var(--accent-rgb), .3);
+  border-radius: 14px;
+  background: rgba(var(--accent-rgb), .08);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  animation: eo-rise .7s var(--eo-ease) .15s both;
+}
+.energy-orbs-why { color: var(--text-60); font-size: var(--fs-xs); line-height: 1.45; }
+@keyframes eo-rise { from { opacity: 0; transform: translateY(8px); } }
+.energy-orbs-last { color: var(--text-45); font-size: var(--fs-xs); }
+
+/* Optional writing, in the Promise's serif; the question arrives word by word. */
+.energy-orbs-writing { display: grid; gap: 6px; max-width: 520px; }
+.energy-orbs-writing label { color: var(--text-70, var(--text-60)); font-family: Georgia, "Iowan Old Style", "Times New Roman", serif; font-size: 1.12rem; font-style: italic; }
+.energy-orbs-writing label span { display: inline-block; animation: eo-word .8s var(--eo-ease) both; animation-delay: calc(.45s + var(--w, 0) * 70ms); }
+.energy-orbs-writing input { animation: eo-rise .7s var(--eo-ease) .9s both; }
+@keyframes eo-word { from { opacity: 0; transform: translateY(6px); filter: blur(3px); } }
+.energy-orbs-writing input {
+  width: 100%;
+  padding: 6px 2px 8px;
+  border: 0;
+  border-bottom: 1px solid rgba(var(--accent-rgb), .35);
+  background: transparent;
+  color: var(--text);
+  font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+  font-size: 1.05rem;
+  outline: none;
+}
+.energy-orbs-writing input:focus { border-bottom-color: rgb(var(--accent-rgb)); }
+.energy-orbs-writing-actions { display: flex; justify-content: flex-end; }
+.energy-orbs-writing-actions button, .energy-orbs-again {
+  padding: 4px 2px;
+  border: 0;
+  background: none;
+  color: rgb(var(--accent-rgb));
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+}
+.energy-orbs-kept { margin: 0; color: var(--text-60); font-size: var(--fs-xs); }
+
+.energy-orbs.settled { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--text-60); font-size: var(--fs-sm); }
+.energy-orbs.settled b { color: var(--text); }
+:root[data-theme="light"] .energy-orbs-writing-actions button,
+:root[data-theme="light"] .energy-orbs-again { color: rgb(var(--accent-ink-rgb, var(--accent-rgb))); }
+
+@media (prefers-reduced-motion: reduce) {
+  .energy-orbs *, .energy-orbs *::before, .energy-orbs *::after { animation: none !important; transition: none !important; }
+  .energy-ring { display: none; }
+}
+:root[data-motion="reduce"] :is(.energy-orbs *, .energy-orbs *::before, .energy-orbs *::after) { animation: none !important; transition: none !important; }
+:root[data-motion="reduce"] .energy-ring { display: none; }

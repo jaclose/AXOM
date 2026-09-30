@@ -1,9 +1,8 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { BatteryCharging, Clock3, FlaskConical, Info, TrendingDown, TrendingUp } from "lucide-react";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { useStore } from "../../lib/store";
 import {
-  ENERGY_LEVELS,
   dayRhythm,
   energyDrivers,
   peakWindow,
@@ -12,7 +11,7 @@ import {
 } from "../../lib/energyInsights";
 import { readRestLog } from "../../lib/rest";
 import { readListeningLog } from "../../lib/soundscapes/listeningLog";
-import { pushToast } from "../../lib/toast";
+import { EnergyOrbs } from "./EnergyOrbs";
 
 /** Everything the energy model reads, from the workspace and device ledgers. */
 export function useEnergyInputs(): EnergyInputs {
@@ -38,37 +37,6 @@ export function useEnergyInputs(): EnergyInputs {
   }), [profile.energyChecks, journal, closeouts, sessions, logs, questions, energyFactors, productivityTrackers]);
 }
 
-/** One tap: how is your energy right now? */
-export function EnergyCheckRow({ compact = false }: { compact?: boolean }) {
-  const checks = useStore((state) => state.profile.energyChecks);
-  const [justLogged, setJustLogged] = useState<string | null>(null);
-  const last = checks?.at(-1);
-  const lastLabel = last ? ENERGY_LEVELS.reduce((best, level) => (Math.abs(level.score - last.score) < Math.abs(best.score - last.score) ? level : best)).label : null;
-  function log(score: number, label: string) {
-    const store = useStore.getState();
-    const next = [...(store.profile.energyChecks ?? []), { at: new Date().toISOString(), score }].slice(-400);
-    store.updateProfile({ energyChecks: next });
-    setJustLogged(label);
-    pushToast({ title: `Energy logged: ${label}`, body: "Thanks — AXOM uses these to find your best hours.", tone: "success", duration: 3500, dedupe: "energy-check" });
-  }
-  return (
-    <div className={`energy-check ${compact ? "compact" : ""}`}>
-      <span className="energy-check-label">Energy right now</span>
-      <div className="energy-check-levels" role="group" aria-label="Log your energy right now">
-        {ENERGY_LEVELS.map((level) => (
-          <button key={level.label} type="button" className={justLogged === level.label ? "on" : ""} onClick={() => log(level.score, level.label)} aria-label={`Log energy: ${level.label}`}>
-            <i style={{ "--level": level.score / 100 } as React.CSSProperties} aria-hidden="true" />
-            <span>{level.label}</span>
-          </button>
-        ))}
-      </div>
-      {last && !compact && (
-        <small className="energy-check-last">Last: {lastLabel} · {new Date(last.at).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}</small>
-      )}
-    </div>
-  );
-}
-
 export function CapacitySummary({ showCheck = true, showReasons = true, showHead = true }: { showCheck?: boolean; showReasons?: boolean; showHead?: boolean }) {
   const inputs = useEnergyInputs();
   const today = useStore((state) => state.activeDayKey);
@@ -88,7 +56,7 @@ export function CapacitySummary({ showCheck = true, showReasons = true, showHead
       {peak && (
         <p className="capacity-peak"><Clock3 size={ICON_SIZE.microInline} aria-hidden="true" /> Sharpest: <b>{peak.band.label.toLowerCase()}</b> ({formatBand(peak.band.startHour, peak.band.endHour)}){peak.basis === "accuracy" && peak.band.accuracy !== null ? ` · ${peak.band.accuracy}% accuracy on ${peak.band.answered} questions` : " · highest energy"}</p>
       )}
-      {showCheck && <EnergyCheckRow compact />}
+      {showCheck && <EnergyOrbs compact />}
     </div>
   );
 }
@@ -126,12 +94,12 @@ export function EnergyFocusPanel() {
             <span role="cell" className="energy-bar-cell">
               {band.energy !== null
                 ? <><i className="energy-bar" style={{ width: `${band.energy}%` }} /><em>{band.energy}</em></>
-                : <small>{band.energySamples ? `${band.energySamples} check${band.energySamples === 1 ? "" : "s"} — need 2` : "—"}</small>}
+                : <small>{band.energySamples ? `${band.energySamples} check${band.energySamples === 1 ? "" : "s"}, 2 needed` : "—"}</small>}
             </span>
             <span role="cell" className="energy-bar-cell">
               {band.minutes > 0 ? <><i className="energy-bar minutes" style={{ width: `${(band.minutes / maxMinutes) * 100}%` }} /><em>{Math.round((band.minutes / Math.max(1, totalMinutes)) * 100)}% · {formatMinutes(band.minutes)}</em></> : <small>—</small>}
             </span>
-            <span role="cell">{band.accuracy !== null ? `${band.accuracy}%` : band.answered ? <small>{band.answered} answered — need 10</small> : <small>—</small>}</span>
+            <span role="cell">{band.accuracy !== null ? `${band.accuracy}%` : band.answered ? <small>{band.answered} answered, 10 needed</small> : <small>—</small>}</span>
           </div>
         ))}
       </div>
@@ -151,7 +119,7 @@ export function EnergyFocusPanel() {
         )}
         <p className="energy-honesty"><Info size={ICON_SIZE.microInline} aria-hidden="true" /> Observational: days differ in many ways, so treat these as leads to test, not causes. {samples ? `${samples} energy observation${samples === 1 ? "" : "s"} in the last 30 days.` : "No energy observations yet."}</p>
       </div>
-      <EnergyCheckRow />
+      <EnergyOrbs />
     </div>
   );
 }

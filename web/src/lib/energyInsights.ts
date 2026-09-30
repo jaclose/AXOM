@@ -15,6 +15,8 @@ export interface EnergyCheck {
   at: string;
   /** 0–100 */
   score: number;
+  /** An optional line from the check-in's writing prompt (Ideas 4). */
+  note?: string;
 }
 
 export type EnergySampleSource = "check" | "journal" | "closeout" | "session";
@@ -291,6 +293,10 @@ export function normalizeEnergyChecks(value: unknown): EnergyCheck[] | undefined
   if (!Array.isArray(value)) return undefined;
   return value
     .filter((item): item is EnergyCheck => Boolean(item) && typeof item.at === "string" && Number.isFinite(Date.parse(item.at)) && typeof item.score === "number")
-    .map((item) => ({ at: item.at, score: Math.max(0, Math.min(100, Math.round(item.score))) }))
+    .map((item) => ({
+      at: item.at,
+      score: Math.max(0, Math.min(100, Math.round(item.score))),
+      ...(typeof item.note === "string" && item.note.trim() ? { note: item.note.trim().slice(0, 280) } : {}),
+    }))
     .slice(-400);
 }
