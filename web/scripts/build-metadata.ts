@@ -48,6 +48,8 @@ export function releaseMetadataPlugin(metadata: ReturnType<typeof buildMetadata>
       // hashed assets. Keep the save/checkpoint path with that build's shell,
       // even though it is lazy-loaded to preserve the pre-hydration guard.
       collect("src/lib/updateCheckpoint.ts");
+      // The update panel lazy-loads release notes, which it promises offline.
+      collect("src/components/shell/ReleaseNotesHistory.tsx");
       const precache = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", ...assets];
       const sw = resolve(dist, "sw.js");
       writeFileSync(sw, readFileSync(sw, "utf8").replaceAll("__AXOM_BUILD_ID__", metadata.buildId)
