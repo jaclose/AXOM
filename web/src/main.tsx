@@ -46,7 +46,12 @@ if (import.meta.env.DEV) {
     import("./lib/store"),
     import("./lib/pomodoro"),
     import("./lib/soundscapes/store"),
-  ]).then(([{ useStore }, { usePomodoro }, { useSoundscape, soundscapeAnalyser }]) => ({ useStore, usePomodoro, useSoundscape, soundscapeAnalyser }));
+    import("./lib/localVault"),
+  ]).then(([{ useStore }, { usePomodoro }, { useSoundscape, soundscapeAnalyser }, { flushLocalVaultWrites }]) => ({
+    useStore, usePomodoro, useSoundscape, soundscapeAnalyser,
+    /** Resolves once every save requested so far is on disk (tests reload after this). */
+    flushVault: flushLocalVaultWrites,
+  }));
 }
 
 installChunkRecovery();

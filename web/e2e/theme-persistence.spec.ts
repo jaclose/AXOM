@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 import { STORAGE_KEYS } from "../src/lib/brand";
 
 test("pre-paint theme resolution persists light/dark/system without touching workspace storage", async ({ page }) => {

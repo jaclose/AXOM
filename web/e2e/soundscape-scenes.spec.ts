@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 /** First visits open the "What are you into?" opener; tests that aren't about it skip it. */
 async function skipSoundscapeOpener(page: Page) {
@@ -44,7 +45,9 @@ test("frequency cards, ambient sounds, scenes and Spotify load cleanly", async (
   expect(status).toBe(200);
 
   // The hero's scene picker swaps between scenes and the generative visual.
+  // Backgrounds live behind one "Background" button that opens over the stage.
   const hero = page.locator(".soundscape-hero");
+  await hero.getByRole("button", { name: /^Background/ }).click();
   await hero.getByRole("radio", { name: "Earth turning scene" }).click();
   await expect(hero.locator("video.scene-player")).toHaveAttribute("src", /scenes\/earth\.mp4$/);
   await hero.getByRole("radio", { name: "Generative" }).click();

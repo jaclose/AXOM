@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 test("review-first schedule intake accepts files, corrections, deferral, and mobile reload", async ({ page }) => {
   const errors: string[] = [];
@@ -23,10 +24,10 @@ test("review-first schedule intake accepts files, corrections, deferral, and mob
   await expect(page.getByText("Renal Clearance Lecture")).toBeVisible();
 
   const defer = page.getByRole("button", { name: /^Defer / }).first();
+  // I3-27: one tap, no "when should this return?" question; the notice explains and offers Undo.
   await defer.click();
-  await expect(page.getByRole("dialog", { name: "When should this return?" })).toContainText("stays in your Tracker");
-  await page.getByRole("button", { name: "In 2 days" }).click();
-  await expect(page.getByRole("dialog", { name: "When should this return?" })).toHaveCount(0);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.locator(".toast:not(.is-leaving)").filter({ hasText: "Back tomorrow" })).toContainText("stays in your Tracker");
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload({ waitUntil: "networkidle" });

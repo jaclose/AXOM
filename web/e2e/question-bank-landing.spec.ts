@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { expect, test } from "./fixtures";
 import { STORAGE_KEYS } from "../src/lib/brand";
 
 test("Question Bank first use stays focused, themed, responsive, and route-scroll safe", async ({ page }) => {

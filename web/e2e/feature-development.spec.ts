@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { deferPromisePrompt, expect, openMedicalSchools, reloadAfterSave, test } from "./fixtures";
 
 /** Dev-only live-store handle installed by src/main.tsx (see comment there). */
 type DevWindow = Window & {
@@ -23,7 +24,7 @@ async function skipSetup(page: Page) {
   const skip = page.getByRole("button", { name: "Skip setup", exact: true });
   if (await skip.isVisible()) {
     await skip.click();
-    await page.getByRole("button", { name: "Review later", exact: true }).click();
+    await deferPromisePrompt(page);
   }
 }
 
@@ -51,6 +52,7 @@ test("real school research supports search, saved schools, review checks and rel
   page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
   await skipSetup(page);
   await page.goto("/#appchecker");
+  await openMedicalSchools(page);
   await expect(page.getByText("292 schools", { exact: true })).toBeVisible();
   await page.getByLabel("Has collected research").check();
   await expect(page.getByRole("status").filter({ hasText: "Showing 24 of 60" })).toBeVisible();
@@ -62,7 +64,7 @@ test("real school research supports search, saved schools, review checks and rel
   await review.check();
   await expect(school).toContainText("Official-page capture");
   await expect(school.getByRole("link", { name: "Review source" }).first()).toHaveAttribute("href", /^https:\/\//);
-  await page.reload({ waitUntil: "networkidle" });
+  await reloadAfterSave(page);
   await page.getByRole("checkbox", { name: /Saved schools/ }).check();
   await expect(school.getByRole("button", { name: "Saved school" })).toHaveAttribute("aria-pressed", "true");
   await school.locator("summary").click();
@@ -94,7 +96,7 @@ test("onboarding retains method follow-ups across refresh and makes them editabl
   await page.getByLabel("When do you use Noji?").selectOption("ongoing");
   const original = "  I make my own cards.\n".repeat(30);
   await page.getByLabel("Your Noji approach (optional)").fill(original);
-  await page.getByLabel("Other — tell AXOM how you study").fill(original);
+  await page.getByLabel("Other: tell AXOM how you study").fill(original);
   await noOverflow(page);
   await page.screenshot({ path: testInfo.outputPath("onboarding-390.png"), animations: "disabled" });
   await page.reload({ waitUntil: "networkidle" });
@@ -105,7 +107,7 @@ test("onboarding retains method follow-ups across refresh and makes them editabl
   await expect(page.getByLabel("Your Noji approach (optional)")).toHaveValue(original);
   for (let step = 0; step < 2; step++) await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page.getByRole("button", { name: "Finish setup", exact: true }).click();
-  await page.getByRole("button", { name: "Review later", exact: true }).click();
+  await deferPromisePrompt(page);
   await page.reload({ waitUntil: "networkidle" });
   await page.getByRole("button", { name: "Open navigation menu" }).click();
   await page.getByTitle("Settings", { exact: true }).click();
@@ -145,8 +147,9 @@ test("personal standings use real logs, separate partial weeks and survive reloa
     await page.setViewportSize(viewport);
     await settleViewport(page, viewport.width);
     // Close actual reminders through their controls so they do not cover the review.
-    const dismiss = page.locator(".toast-close");
-    for (let count = 0; count < 5 && await dismiss.count() > 0; count++) await dismiss.first().click();
+    const dismiss = page.locator(".toast:not(.is-leaving) .toast-close");
+    // A notice can start leaving on its own between count() and click(); that is fine.
+    for (let count = 0; count < 5 && await dismiss.count() > 0; count++) await dismiss.first().click({ timeout: 2_000 }).catch(() => undefined);
     await standings.scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath(`standings-${viewport.width}.png`), animations: "disabled" });
   }

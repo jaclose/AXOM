@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { expect, openMedicalSchools, test } from "./fixtures";
 
 test("Application Checker consumes sourced records and remains usable on mobile", async ({ page }) => {
   const errors: string[] = [];
@@ -24,6 +25,7 @@ test("Application Checker consumes sourced records and remains usable on mobile"
   await onboard(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.evaluate(() => { window.location.hash = "appchecker"; });
+  await openMedicalSchools(page);
   await expect(page.getByText("Synthetic School of Medicine")).toBeVisible();
   await expect(page.getByRole("article").getByText("Verified", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Source" })).toHaveAttribute("href", "https://example.edu/admissions");
@@ -69,6 +71,7 @@ test("Application Checker renders a 271-row partial dataset and filters by progr
   await onboard(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.evaluate(() => { window.location.hash = "appchecker"; });
+  await openMedicalSchools(page);
   await expect(page.getByText("271 schools")).toBeVisible();
   await expect(page.getByRole("status").filter({ hasText: "Showing 24 of 271" })).toBeVisible();
   await page.getByLabel("Search schools").fill("Synthetic Medical School 270");

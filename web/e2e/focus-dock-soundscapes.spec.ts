@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 /** First visits open the "What are you into?" opener; tests that aren't about it skip it. */
 async function skipSoundscapeOpener(page: Page) {
@@ -57,9 +58,13 @@ test("the focus dock splits for a soundscape, genies its visual, and stops clean
   await expect(dock).toHaveClass(/split/);
 
   const capsule = dock.getByRole("button", { name: /20 Hz Beta soundscape/ });
-  await capsule.hover();
   const genie = page.getByRole("dialog", { name: "20 Hz Beta soundscape" });
-  await expect(genie).toBeVisible();
+  // Hover intent can miss under a loaded runner; re-hover until the genie opens.
+  await expect(async () => {
+    await page.mouse.move(0, 0);
+    await capsule.hover();
+    await expect(genie).toBeVisible({ timeout: 1_500 });
+  }).toPass({ timeout: 10_000 });
   await expect(genie).toContainText("Low evidence");
   await page.keyboard.press("Escape");
   await expect(genie).toBeHidden();
