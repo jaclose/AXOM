@@ -32,19 +32,28 @@ const auth = {
   resetPasswordForEmail: vi.fn(async () => ({ error: null })),
 };
 
+let storedSession: unknown = null;
+let loadFails = false;
 vi.mock("./supabase", () => ({
   cloudConfigured: () => true,
   getSupabase: () => ({ auth, rpc, from: (table: string) => chain(table) }),
-  loadSupabase: async () => ({ auth, rpc, from: (table: string) => chain(table) }),
+  loadSupabase: async () => {
+    if (loadFails) throw new Error("offline");
+    return { auth, rpc, from: (table: string) => chain(table) };
+  },
+  readStoredSession: () => storedSession,
   authRedirectUrl: () => "http://localhost/",
 }));
 
-const { useAccount, validateEmail, validatePassword } = await import("./accountStore");
+const { useAccount, validateEmail, validatePassword, resetAccountInitForTests } = await import("./accountStore");
 const { useStore } = await import("../store");
 const { makeSeed } = await import("../seed");
 
 beforeEach(() => {
   localStorage.clear();
+  storedSession = null;
+  loadFails = false;
+  resetAccountInitForTests();
   rpc.mockReset();
   Object.values(auth).forEach((fn) => fn.mockClear());
   Object.defineProperty(navigator, "onLine", { value: true, configurable: true });
@@ -192,5 +201,64 @@ describe("account lifecycle", () => {
     auth.signInWithPassword.mockResolvedValueOnce({ data: { session: null }, error: { message: "Invalid login credentials" } } as never);
     expect(await useAccount.getState().signIn("learner@example.com", "wrongpass1")).toBe(false);
     expect(useAccount.getState().error).toMatch(/don’t match/);
+  });
+});
+
+describe("account session consistency (Ideas 4: Profile and Account agree; sign-in shows fast)", () => {
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("shows a saved session at once, before the account service loads", async () => {
+    storedSession = { ...session, refresh_token: "refresh" };
+    useAccount.setState({ phase: "loading", user: null });
+    auth.onAuthStateChange.mockImplementationOnce((() => ({ data: { subscription: { unsubscribe: vi.fn() } } })) as never);
+    useAccount.getState().init();
+    expect(useAccount.getState()).toMatchObject({ phase: "signed-in", user: { email: "learner@example.com" } });
+  });
+
+  it("takes the auth events as the only truth: a slow empty session read cannot sign you out", async () => {
+    auth.getSession.mockResolvedValue({ data: { session: null } } as never);
+    auth.onAuthStateChange.mockImplementationOnce(((callback: (event: string, value: unknown) => void) => {
+      callback("INITIAL_SESSION", session);
+      return { data: { subscription: { unsubscribe: vi.fn() } } };
+    }) as never);
+    useAccount.getState().init();
+    await flush();
+    await flush();
+    expect(useAccount.getState().phase).toBe("signed-in");
+    expect(auth.getSession).not.toHaveBeenCalled();
+  });
+
+  it("follows a real sign-out event", async () => {
+    let emit: (event: string, value: unknown) => void = () => undefined;
+    auth.onAuthStateChange.mockImplementationOnce(((callback: (event: string, value: unknown) => void) => {
+      emit = callback;
+      callback("INITIAL_SESSION", session);
+      return { data: { subscription: { unsubscribe: vi.fn() } } };
+    }) as never);
+    useAccount.getState().init();
+    await flush();
+    emit("SIGNED_OUT", null);
+    expect(useAccount.getState()).toMatchObject({ phase: "signed-out", user: null });
+  });
+
+  it("keeps a signed-in user signed in when the account service fails to load", async () => {
+    storedSession = { ...session, refresh_token: "refresh" };
+    loadFails = true;
+    useAccount.setState({ phase: "loading", user: null });
+    useAccount.getState().init();
+    await flush();
+    await flush();
+    expect(useAccount.getState()).toMatchObject({ phase: "signed-in", user: { id: "user-1" } });
+    expect(useAccount.getState().error).toMatch(/Couldn’t reach the account service/);
+  });
+
+  it("without a saved session, a failed load reads as signed out with a calm note", async () => {
+    loadFails = true;
+    useAccount.setState({ phase: "loading", user: null });
+    useAccount.getState().init();
+    await flush();
+    await flush();
+    expect(useAccount.getState().phase).toBe("signed-out");
+    expect(useAccount.getState().error).toMatch(/still saved on this device/);
   });
 });
