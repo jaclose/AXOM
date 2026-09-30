@@ -1,6 +1,0 @@
-- generic [active] [ref=f1e1]:
-  - status [ref=f1e2]: Opening AXOM — loading your saved workspace…
-  - dialog "Opening AXOM" [ref=f1e3]:
-    - generic [ref=f1e4]:
-      - button "Skip intro" [ref=f1e5] [cursor=pointer]
-      - button "Don’t show again" [ref=f1e6] [cursor=pointer]
