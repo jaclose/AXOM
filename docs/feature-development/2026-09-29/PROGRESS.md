@@ -16,6 +16,13 @@ Updated 2026-09-30 00:30. Every commit passed `npm run quality` (typecheck, lint
 | 7a85fe0 | I3-54, I3-55, I3-56, I3-57 | Daily Word win card, numbered share text, on-board how-to (ENVOY/EBONY), back link, no page scroll |
 | a77a59b | I3-53 | Daily Word hint ladder: key glow, then tile outline, then a confirmed reveal that keeps the streak |
 | 937a991 | I1-23, I3-52, I3-58 | Sidebar: daily-use Tools, Misc folder for Tasks/Methods/Prompts/Hub folders, drag or Alt+Arrow reordering, one-time upgrade for saved profiles; Daily Word and Doctordle countdowns + streak; Application Checker opens on Residency for med tracks |
+| 1a6c504 | I3-29 | One item editor: Details (name, type, folder, note) and Study plan tabs; no more browser prompt() |
+| a9d8703 | nudges | Optional nudges also wait for Codex's focus check-in and rest overlay |
+| be48c3d | tooling | `npm run verify:all`; contrast sweep across all palettes |
+| 835f2d1 | tooling | e2e suite green on this branch; fixtures; contrast sweep |
+| 1ebb916 | bugs | Nine issues found by e2e + contrast sweep (light-theme unreadable text, tour scroll race, inert leaving toasts, hover shift, App Checker pathway memory) |
+| b5eb1fa | updates | The update panel no longer crashes AXOM after a deploy (pre-existing on main); optional games stay out of the precache again |
+| f8e62ae | I3-26 | Question library reads in lecture order |
 | 708e5aa | I3-27 | "Not now" no longer resets an item's review clock; Undo restores the exact order (found while verifying I3-27) |
 | 2c24bf6 | I1-22 (part) | No em dashes left in Settings prose |
 | c823b2a | I1-17 (part) | Reports gets a Help mini guide (4 stops), like Course Tracker, Question Bank and Productivity |
@@ -26,7 +33,7 @@ Updated 2026-09-30 00:30. Every commit passed `npm run quality` (typecheck, lint
 | 120a7ba | I1-18, I1-19, F4, I3-18 | "Overwhelmed?" once after the guide and Promise (arrow + ripple to Customize); one first-visit hint per page on a reusable CoachMark; Help can bring hints back; signing the Promise -> tour offer verified |
 | a030af0 | I1-21 | Dashboard: Daily Check-In, then the focus timer with a new Soundscape widget beside it, then targets, Question Bank, Course Tracker, Weekly; saved layouts carried forward once (defaultsRevision 2) |
 
-Test count: 1,906 at baseline, 1,979 now.
+Test count: 1,906 at baseline, 2,014 unit tests now (main's hardening tests included after the rebase), plus 24 e2e specs green.
 
 ## Next (Wave 1 remainder)
 
