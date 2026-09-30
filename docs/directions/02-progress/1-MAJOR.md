@@ -2,7 +2,9 @@
 
 Waves and flagship features, newest first. Smaller improvements are in 2-UPDATES.md, fixes in 3-HOTFIXES.md. Earlier history: CHANGELOG.md at the repository root.
 
-## Wave 1.2 (in progress) · branch wave/1.2
+## Wave 1.2 (2026-09-30) · tag wave-1.2 · merged into local main, not pushed
+
+Gate on the merged tree: typecheck, lint, 2,048 unit tests, build, update and offline checks, 27 Playwright journeys.
 
 | Update | Ideas | Commit |
 |---|---|---|

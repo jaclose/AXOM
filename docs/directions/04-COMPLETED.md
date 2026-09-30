@@ -2,6 +2,17 @@
 
 Done and on main, by wave. VERIFIED means exercised in a real browser (or a real build for native items); SHIPPED means merged with automated tests but not yet exercised the way a person would meet it. Each ID links back to the bank (01-ideas/INDEX.md).
 
+## Wave 1.2 · 2026-09-30 · tag wave-1.2
+
+| ID | Done | Level | Commit |
+|---|---|---|---|
+| I4-24, I3-13b | Only the finished opening films; no buttons over the film | VERIFIED | 9eda971 |
+| I3-04 | Timer start tone, finish chime, green screen-edge glow | VERIFIED (glow), tones unit-tested | 3883daf |
+| I3-18b | Containers slot in after the Promise; no reminder over a first day | VERIFIED | 69a5613 |
+| I3-01b | Settled tracker order by share of goal done | SHIPPED | 693bfde |
+| I4-21, I4-19 | Profile and Account agree; saved session shows at once | SHIPPED | f20f81e |
+| I4-17 (part) | How you study in the setup style, on shared primitives | VERIFIED | da9fcfd |
+
 ## Wave 1.1 · 2026-09-30 · main 83d9fb8
 
 | ID | Done | Level | Commit |
