@@ -1,4 +1,5 @@
 import type { DailyWordPuzzleState, TimeZonePreference } from "./types";
+import { normalizeHintFields } from "./dailyWordHints";
 import { isCalendarDateKey } from "./dailyWordCalendar";
 import {
   DAILY_WORD_MAX_GUESSES,
@@ -266,6 +267,7 @@ export function normalizeDailyWordPuzzle(value: unknown): DailyWordPuzzleState |
   const updatedAt = validIsoTimestamp(value.updatedAt) ?? validIsoTimestamp(value.completedAt) ?? startedAt;
   const completed = value.completed === true;
   const completedAt = completed ? validIsoTimestamp(value.completedAt) ?? updatedAt : undefined;
+  const won = completed && value.won === true;
   return {
     puzzleId: expectedId,
     puzzleDate,
@@ -273,12 +275,15 @@ export function normalizeDailyWordPuzzle(value: unknown): DailyWordPuzzleState |
     wordListVersion,
     guesses,
     completed,
-    won: completed && value.won === true,
+    won,
     startedAt,
     updatedAt,
     completedAt,
+    ...normalizeHintFields(value, completed, won),
   };
 }
+
+
 
 export function normalizeDailyWordHistory(value: unknown): DailyWordPuzzleState[] {
   if (!Array.isArray(value)) return [];
@@ -305,7 +310,6 @@ export function deriveDailyWordStats(history: readonly DailyWordPuzzleState[]): 
   return deriveDailyWordStatsFromNormalizedHistory(normalizeDailyWordHistory(history));
 }
 
-/** Build a result-only share block. It accepts evaluations, not the answer. */
 /** Daily Word launched on this date (commit ba9c4a8): puzzle #1. */
 export const DAILY_WORD_FIRST_DATE = "2026-07-12";
 export const AXOM_PUBLIC_URL = "https://axom.info";
@@ -329,10 +333,13 @@ export function buildDailyWordShare(
   if (rows.length !== puzzle.guesses.length || rows.some((row) => row.length !== 5)) {
     throw new Error("A complete evaluation row is required for every submitted guess.");
   }
-  const result = puzzle.won ? `${puzzle.guesses.length}/${DAILY_WORD_MAX_GUESSES}` : `X/${DAILY_WORD_MAX_GUESSES}`;
+  const result = puzzle.revealed
+    ? "revealed"
+    : puzzle.won ? `${puzzle.guesses.length}/${DAILY_WORD_MAX_GUESSES}` : `X/${DAILY_WORD_MAX_GUESSES}`;
+  const hints = puzzle.hintsUsed && !puzzle.revealed ? ` 💡${puzzle.hintsUsed}` : "";
   const symbol: Record<LetterEvaluation, string> = { correct: "🟩", present: "🟨", absent: "⬛" };
   const grid = rows.map((row) => row.map((evaluation) => symbol[evaluation]).join("")).join("\n");
-  return `AXOM Daily Word #${dailyWordNumber(puzzle.puzzleDate)} ${result}\n${grid}\n${AXOM_PUBLIC_URL.replace("https://", "")}`;
+  return `AXOM Daily Word #${dailyWordNumber(puzzle.puzzleDate)} ${result}${hints}${grid ? `\n${grid}` : ""}\n${AXOM_PUBLIC_URL.replace("https://", "")}`;
 }
 
 function normalizeFiveLetterWord(value: string, label: string): string {

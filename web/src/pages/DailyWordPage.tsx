@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { ArrowLeft, BarChart3, Check, CircleDot, Clock3, Copy, Delete, HelpCircle, Minus, ShieldCheck } from "lucide-react";
+import { ArrowLeft, BarChart3, Check, CircleDot, Clock3, Copy, Delete, HelpCircle, Lightbulb, Minus, ShieldCheck } from "lucide-react";
 import { GlassCard, GButton } from "../components/ui/primitives";
 import { Modal } from "../components/ui/Modal";
 import { DailyWordDemo } from "../components/games/DailyWordDemo";
@@ -63,6 +63,7 @@ export function DailyWordPage() {
   // Opens the moment a puzzle is finished in this visit (Doctordle-style);
   // on a return visit the compact results row offers it instead.
   const [winOpen, setWinOpen] = useState(false);
+  const [revealAsk, setRevealAsk] = useState(false);
   // First visit plays the on-board how-to once (JD, Ideas 3); later visits
   // replay it from "How to play". Typing always skips it.
   const [firstVisit] = useState(() => !isAnnouncementDismissed(
@@ -112,6 +113,16 @@ export function DailyWordPage() {
     [answer, puzzle],
   );
   const keyStates = useMemo(() => deriveKeyStates(puzzle?.guesses ?? [], evaluations), [evaluations, puzzle?.guesses]);
+  // Hints (JD, Ideas 3): 1 glows a key, 2 outlines its spot in your row, 3 reveals.
+  // The target is the first position you have not solved, so a hint stays useful.
+  const hintsUsed = puzzle?.hintsUsed ?? 0;
+  const hintTarget = useMemo(() => {
+    if (!answer) return null;
+    for (let position = 0; position < answer.length; position += 1) {
+      if (!evaluations.some((row) => row[position] === "correct")) return { letter: answer[position], position };
+    }
+    return null;
+  }, [answer, evaluations]);
   const stats = useMemo(() => deriveDailyWordStats(history), [history]);
   const nextPuzzleCountdown = useMemo(
     () => puzzle?.completed ? formatCountdown(millisecondsUntilNextCalendarDate(now, puzzle.timezone)) : "",
@@ -237,6 +248,24 @@ export function DailyWordPage() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [backspace, enterLetter, submit]);
 
+  function takeHint() {
+    if (!puzzle || puzzle.completed || !hintTarget) return;
+    if (hintsUsed >= 2) { setRevealAsk(true); return; }
+    setDemo(false);
+    upsertPuzzle({ ...puzzle, hintsUsed: hintsUsed + 1, updatedAt: new Date().toISOString() });
+    setStatus(hintsUsed === 0 ? "Hint: one key on the keyboard is glowing." : "Hint: its spot is outlined in your current row.");
+  }
+
+  function revealWord() {
+    if (!puzzle || puzzle.completed) return;
+    const timestamp = new Date().toISOString();
+    upsertPuzzle({ ...puzzle, hintsUsed: 3, completed: true, won: false, revealed: true, completedAt: timestamp, updatedAt: timestamp });
+    setRevealAsk(false);
+    setDraft("");
+    setStatus("Word revealed. Your streak is safe.");
+    setWinOpen(true);
+  }
+
   async function shareResult() {
     if (!puzzle?.completed) return;
     const result = buildDailyWordShare(puzzle, evaluations);
@@ -277,6 +306,11 @@ export function DailyWordPage() {
         >
           <HelpCircle size={ICON_SIZE.body} aria-hidden="true" /> How to play
         </button>
+        {!puzzle.completed && (
+          <button type="button" className={`daily-word-howto daily-word-hint ${hintsUsed ? "is-used" : ""}`} onClick={takeHint} disabled={!hintTarget}>
+            <Lightbulb size={ICON_SIZE.body} aria-hidden="true" /> {hintsUsed === 0 ? "Hint" : hintsUsed === 1 ? "Another hint" : "Reveal word"}
+          </button>
+        )}
         <span className="daily-word-date"><b>#{dailyWordNumber(puzzle.puzzleDate)}</b><span>{puzzle.puzzleDate}</span></span>
       </div>
       {/* The top bar already shows the title; keep the page heading for assistive tech. */}
@@ -306,8 +340,11 @@ export function DailyWordPage() {
                   const label = evaluation
                     ? `Row ${rowIndex + 1}, column ${columnIndex + 1}, letter ${letter}, ${EVALUATION_LABEL[evaluation]}.`
                     : `Row ${rowIndex + 1}, column ${columnIndex + 1}, ${letter.trim() ? `letter ${letter}` : "blank"}.`;
+                  const hintSlot = hintsUsed >= 2 && hintTarget && !puzzle.completed
+                    && rowIndex === puzzle.guesses.length && columnIndex === hintTarget.position && !letter.trim();
                   return (
-                    <div className={`daily-word-tile ${evaluation ?? ""} ${letter.trim() ? "filled" : ""}`} role="gridcell" aria-label={label} key={columnIndex}>
+                    <div className={`daily-word-tile ${evaluation ?? ""} ${letter.trim() ? "filled" : ""} ${hintSlot ? "hint-slot" : ""}`}
+                      role="gridcell" aria-label={label} key={columnIndex} data-hint={hintSlot ? hintTarget.letter : undefined}>
                       <span>{letter.trim()}</span>
                       {evaluation === "correct" && <Check size={ICON_SIZE.microInline} aria-hidden="true" />}
                       {evaluation === "present" && <CircleDot size={ICON_SIZE.microInline} aria-hidden="true" />}
@@ -336,7 +373,7 @@ export function DailyWordPage() {
               {row.split("").map((letter) => (
                 <button
                   type="button"
-                  className={`daily-word-key ${keyStates[letter] ?? "unknown"}`}
+                  className={`daily-word-key ${keyStates[letter] ?? "unknown"} ${hintsUsed >= 1 && !puzzle.completed && hintTarget?.letter === letter ? "is-hint" : ""}`}
                   aria-label={`Letter ${letter}${keyStates[letter] ? `, ${EVALUATION_LABEL[keyStates[letter]!]}` : ""}`}
                   disabled={puzzle.completed}
                   onClick={() => enterLetter(letter)}
@@ -356,7 +393,7 @@ export function DailyWordPage() {
       {puzzle.completed && (
         <div className="daily-word-done" role="group" aria-label="Today's result">
           <span className="daily-word-done-score">
-            <b>{puzzle.won ? `Solved in ${puzzle.guesses.length}` : "Not this time"}</b>
+            <b>{puzzle.won ? `Solved in ${puzzle.guesses.length}` : puzzle.revealed ? "Revealed. Streak kept." : "Not this time"}</b>
             <span aria-label={`Time until the next Daily Word puzzle: ${nextPuzzleCountdown}`}><Clock3 size={ICON_SIZE.microInline} aria-hidden="true" /> Next word in {nextPuzzleCountdown}</span>
           </span>
           <GButton size="sm" variant="primary" onClick={shareResult}><Copy size={ICON_SIZE.body} /> Share result</GButton>
@@ -365,10 +402,20 @@ export function DailyWordPage() {
       )}
       {puzzle.completed && !winOpen && manualShare && <ManualShare value={manualShare} textareaRef={manualShareRef} />}
 
+      {revealAsk && !puzzle.completed && (
+        <Modal title="Reveal today's word?" onClose={() => setRevealAsk(false)} className="daily-word-reveal"
+          footer={<>
+            <GButton onClick={revealWord}>Reveal the word</GButton>
+            <GButton variant="primary" onClick={() => setRevealAsk(false)}>Keep trying</GButton>
+          </>}>
+          <p>You keep your streak either way. But you have guesses left, and you are closer than you think.</p>
+        </Modal>
+      )}
+
       {puzzle.completed && winOpen && (
-        <Modal title={puzzle.won ? "Puzzle solved" : "Puzzle complete"} onClose={() => setWinOpen(false)} className="daily-word-win">
+        <Modal title={puzzle.won ? "Puzzle solved" : puzzle.revealed ? "Word revealed" : "Puzzle complete"} onClose={() => setWinOpen(false)} className="daily-word-win">
           <p className="daily-word-win-kicker">
-            Today's word · #{dailyWordNumber(puzzle.puzzleDate)} · {puzzle.won ? `solved in ${puzzle.guesses.length} ${puzzle.guesses.length === 1 ? "guess" : "guesses"}` : "six guesses used"}
+            Today's word · #{dailyWordNumber(puzzle.puzzleDate)} · {puzzle.won ? `solved in ${puzzle.guesses.length} ${puzzle.guesses.length === 1 ? "guess" : "guesses"}` : puzzle.revealed ? "revealed, streak kept" : "six guesses used"}
           </p>
           <p className="daily-word-answer">Answer: <b>{answer}</b></p>
           <div className="daily-word-stats" aria-label="Daily Word statistics">

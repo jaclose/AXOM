@@ -278,6 +278,10 @@ export interface DailyWordPuzzleState {
   completedAt?: string;
   /** Supports deterministic local upserts and backup conflict resolution. */
   updatedAt: string;
+  /** Hints taken today (1: keyboard glow, 2: slot outline, 3: reveal). */
+  hintsUsed?: number;
+  /** Completed by revealing the word: counts as played, keeps the streak, never a win. */
+  revealed?: boolean;
 }
 
 export type ProductivityUnitType = "minutes" | "count" | "yesno" | "distance" | "custom";

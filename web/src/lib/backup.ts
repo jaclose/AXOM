@@ -2,6 +2,7 @@
 // JSON export / import. The portable backup story for the browser-stored data.
 // ===========================================================================
 import type { ClockPreferences, DailyWordPuzzleState, NoctyriumState, TimeZonePreference } from "./types";
+import { normalizeHintFields } from "./dailyWordHints";
 import { normalizeEnergyChecks } from "./energyInsights";
 import { normalizePrimaryScopes } from "./trackerFocus";
 import {
@@ -603,14 +604,16 @@ function normalizeDailyWordPuzzles(value: unknown): DailyWordPuzzleState[] {
         .map((guess) => guess.toUpperCase())
       : [];
     const completed = candidate.completed === true;
+    const won = completed && candidate.won === true;
     const puzzle: DailyWordPuzzleState = {
+      ...normalizeHintFields(candidate, completed, won),
       puzzleId,
       puzzleDate,
       timezone,
       wordListVersion,
       guesses,
       completed,
-      won: completed && candidate.won === true,
+      won,
       startedAt,
       completedAt: completed && typeof candidate.completedAt === "string" ? candidate.completedAt : undefined,
       updatedAt: typeof candidate.updatedAt === "string" && candidate.updatedAt

@@ -438,3 +438,21 @@
 /* Light theme: accent gold on cream is ~2:1; darken the small accent text for AA. */
 :root[data-theme="light"] .daily-word-win-kicker,
 :root[data-theme="light"] .daily-word-distribution-row em { color: color-mix(in srgb, rgb(var(--accent-rgb)) 50%, #1f1b16); }
+
+/* --- Hints ladder (I3-53) --- */
+.daily-word-hint.is-used { color: rgb(var(--accent-rgb)); border-color: rgba(var(--accent-rgb), 0.4); }
+.daily-word-hint:disabled { opacity: .45; cursor: default; }
+.daily-word-key.is-hint {
+  border-color: rgba(var(--accent-rgb), 0.9);
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.5), 0 0 16px rgba(var(--accent-rgb), 0.45);
+  animation: dw-hint-glow 1.8s ease-in-out infinite;
+}
+.daily-word-tile.hint-slot { border-color: rgba(var(--accent-rgb), 0.7); box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.25); }
+.daily-word-tile.hint-slot::after {
+  content: attr(data-hint); position: absolute; inset: 0; display: grid; place-items: center;
+  font-family: var(--font-display); font-size: clamp(18px, 4vw, 22px); font-weight: var(--fw-semibold);
+  color: transparent; -webkit-text-stroke: 1px rgba(var(--accent-rgb), 0.85);
+  animation: dw-hint-glow 1.8s ease-in-out infinite;
+}
+@keyframes dw-hint-glow { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .daily-word-key.is-hint, .daily-word-tile.hint-slot::after { animation: none; } }

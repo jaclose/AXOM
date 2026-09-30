@@ -266,6 +266,26 @@ describe("DailyWordPage persistence, sharing, and accessibility", () => {
     expect(document.querySelector('[data-list-marker="AXOM_WORD_LIST_SENTINEL_GENERAL_2_SCOWL_2026_02_25"]')).toBeTruthy();
   });
 
+  it("climbs the hint ladder: key glow, slot outline, then reveal with the streak kept", async () => {
+    render(<DailyWordPage />);
+    await openPuzzle();
+    fireEvent.click(screen.getByRole("button", { name: "Hint" }));
+    // Answer APPLE: the first unsolved position is A.
+    expect(screen.getByRole("button", { name: /^Letter A/ }).className).toContain("is-hint");
+    expect(screen.getByRole("status").textContent).toContain("glowing");
+    fireEvent.click(screen.getByRole("button", { name: "Another hint" }));
+    expect(document.querySelector(".daily-word-tile.hint-slot")?.getAttribute("data-hint")).toBe("A");
+    fireEvent.click(screen.getByRole("button", { name: "Reveal word" }));
+    const ask = screen.getByRole("dialog", { name: "Reveal today's word?" });
+    fireEvent.click(within(ask).getByRole("button", { name: "Keep trying" }));
+    expect(useStore.getState().dailyWordPuzzles[0]).toMatchObject({ completed: false, hintsUsed: 2 });
+    fireEvent.click(screen.getByRole("button", { name: "Reveal word" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Reveal today's word?" })).getByRole("button", { name: "Reveal the word" }));
+    expect(await screen.findByRole("heading", { name: "Word revealed" })).toBeTruthy();
+    expect(useStore.getState().dailyWordPuzzles[0]).toMatchObject({ completed: true, won: false, revealed: true, hintsUsed: 3 });
+    expect(screen.getByText(/Answer:/).textContent).toContain("APPLE");
+  });
+
   it("shows a deterministic next-puzzle countdown after completion", async () => {
     act(() => { useStore.setState({ dailyWordPuzzles: [completedPuzzle(["APPLE"], true)] }); });
     render(<DailyWordPage />);

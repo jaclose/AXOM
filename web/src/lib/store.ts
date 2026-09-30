@@ -4,6 +4,7 @@
 // able, which is what makes the app "modular" rather than the fixed Swift build.
 // ===========================================================================
 import { create } from "zustand";
+import { normalizeHintFields } from "./dailyWordHints";
 import { normalizeEnergyChecks } from "./energyInsights";
 import { normalizePrimaryScopes, renamePrimaryScopes } from "./trackerFocus";
 import { habitCheckForDay, habitTypeForTracker, trackerDayTotals, trackerUnitLabel } from "./trackerStats";
@@ -2471,14 +2472,16 @@ function normalizeDailyWordPuzzle(value: unknown): DailyWordPuzzleState | null {
       .map((guess) => guess.toUpperCase())
     : [];
   const completed = value.completed === true;
+  const won = completed && value.won === true;
   return {
+    ...normalizeHintFields(value, completed, won),
     puzzleId,
     puzzleDate,
     timezone,
     wordListVersion,
     guesses,
     completed,
-    won: completed && value.won === true,
+    won,
     startedAt,
     completedAt: completed && typeof value.completedAt === "string" ? value.completedAt : undefined,
     updatedAt: typeof value.updatedAt === "string" && value.updatedAt

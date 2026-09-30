@@ -3,6 +3,7 @@ import type { DailyWordPuzzleState } from "./types";
 import {
   buildDailyWordPuzzleId,
   buildDailyWordShare,
+  normalizeDailyWordPuzzle,
   dailyWordNumber,
   canonicalTimeZone,
   createDailyWordPuzzle,
@@ -22,6 +23,34 @@ import {
   type LetterEvaluation,
 } from "./dailyWord";
 import { deriveDailyWordStatsFromNormalizedHistory } from "./dailyWordStats";
+
+describe("hints and reveal", () => {
+  it("keeps the streak through a revealed day without counting it as a win", () => {
+    const revealed = { ...completedPuzzle("2026-07-13", false, 2, "2026-07-13T20:00:00Z"), revealed: true, hintsUsed: 3 };
+    const stats = deriveDailyWordStats([
+      completedPuzzle("2026-07-12", true, 3, "2026-07-12T20:00:00Z"),
+      revealed,
+      completedPuzzle("2026-07-14", true, 4, "2026-07-14T20:00:00Z"),
+    ]);
+    expect(stats).toMatchObject({ gamesPlayed: 3, wins: 2, currentStreak: 3, maxStreak: 3 });
+    expect(Object.values(stats.guessDistribution).reduce((sum, n) => sum + n, 0)).toBe(2);
+  });
+
+  it("normalizes hint fields and never lets a won puzzle also be revealed", () => {
+    const won = normalizeDailyWordPuzzle({ ...completedPuzzle("2026-07-12", true, 3, "2026-07-12T20:00:00Z"), revealed: true, hintsUsed: 9 });
+    expect(won).toMatchObject({ won: true, hintsUsed: 3 });
+    expect(won?.revealed).toBeUndefined();
+    const plain = normalizeDailyWordPuzzle(completedPuzzle("2026-07-12", true, 3, "2026-07-12T20:00:00Z"));
+    expect(plain && "hintsUsed" in plain).toBe(false);
+  });
+
+  it("marks hints and reveals in the share text", () => {
+    const withHints = { ...completedPuzzle("2026-07-12", true, 1, "2026-07-12T20:00:00Z"), hintsUsed: 2 };
+    expect(buildDailyWordShare(withHints, [scoreGuess("APPLE", "APPLE")]).split("\n")[0]).toBe("AXOM Daily Word #1 1/6 💡2");
+    const revealed = { ...completedPuzzle("2026-07-12", false, 1, "2026-07-12T20:00:00Z"), revealed: true, hintsUsed: 3 };
+    expect(buildDailyWordShare(revealed, [scoreGuess("CRANE", "APPLE")]).split("\n")[0]).toBe("AXOM Daily Word #1 revealed");
+  });
+});
 
 describe("daily word number", () => {
   it("counts from launch day and stays stable across time zones", () => {
