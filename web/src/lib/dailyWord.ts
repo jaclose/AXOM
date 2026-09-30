@@ -306,6 +306,21 @@ export function deriveDailyWordStats(history: readonly DailyWordPuzzleState[]): 
 }
 
 /** Build a result-only share block. It accepts evaluations, not the answer. */
+/** Daily Word launched on this date (commit ba9c4a8): puzzle #1. */
+export const DAILY_WORD_FIRST_DATE = "2026-07-12";
+export const AXOM_PUBLIC_URL = "https://axom.info";
+
+/** A stable, shared puzzle number for a calendar date (#1 = launch day). */
+export function dailyWordNumber(puzzleDate: string): number {
+  const start = Date.UTC(2026, 6, 12);
+  const [y, m, d] = puzzleDate.split("-").map(Number);
+  return Math.max(1, Math.round((Date.UTC(y, m - 1, d) - start) / 86_400_000) + 1);
+}
+
+/**
+ * Share text in the convention players already know (NYT Wordle, Doctordle):
+ * number and score, colour squares, a link. Never the answer or the guesses.
+ */
 export function buildDailyWordShare(
   puzzle: DailyWordPuzzleState,
   rows: readonly (readonly LetterEvaluation[])[],
@@ -315,9 +330,9 @@ export function buildDailyWordShare(
     throw new Error("A complete evaluation row is required for every submitted guess.");
   }
   const result = puzzle.won ? `${puzzle.guesses.length}/${DAILY_WORD_MAX_GUESSES}` : `X/${DAILY_WORD_MAX_GUESSES}`;
-  const symbol: Record<LetterEvaluation, string> = { correct: "◆", present: "◇", absent: "·" };
-  const grid = rows.map((row) => row.map((evaluation) => symbol[evaluation]).join(" ")).join("\n");
-  return `AXOM Daily Word ${puzzle.puzzleDate}\n${result}\n\n${grid}`;
+  const symbol: Record<LetterEvaluation, string> = { correct: "🟩", present: "🟨", absent: "⬛" };
+  const grid = rows.map((row) => row.map((evaluation) => symbol[evaluation]).join("")).join("\n");
+  return `AXOM Daily Word #${dailyWordNumber(puzzle.puzzleDate)} ${result}\n${grid}\n${AXOM_PUBLIC_URL.replace("https://", "")}`;
 }
 
 function normalizeFiveLetterWord(value: string, label: string): string {

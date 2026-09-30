@@ -318,3 +318,123 @@
   .daily-word-key { transition: none; }
   .daily-word-key:hover:not(:disabled) { transform: none; }
 }
+
+/* --- Back link, compact results row, win card (Ideas 3: Doctordle-inspired) --- */
+.daily-word-back {
+  justify-self: start;
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 34px; padding: 0 12px 0 9px;
+  border: 1px solid var(--hairline); border-radius: var(--radius-pill);
+  color: var(--text-70); font-size: var(--fs-sm); font-weight: var(--fw-semibold); text-decoration: none;
+  background: rgba(230, 226, 214, 0.03);
+  transition: color .15s ease, border-color .15s ease, transform .15s ease;
+}
+.daily-word-back:hover { color: var(--text); border-color: var(--gold-line); transform: translateX(-1px); }
+.daily-word-date b { font-size: var(--fs-md); }
+
+.daily-word-done {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  padding: 12px 14px; border-radius: var(--radius-lg);
+  border: 1px solid var(--glass-card-border);
+  background: radial-gradient(120% 140% at 0% 0%, rgba(var(--accent-rgb), 0.10), transparent 60%), var(--glass-card-fill);
+}
+.daily-word-done-score { flex: 1 1 180px; display: grid; gap: 2px; }
+.daily-word-done-score b { font-size: var(--fs-md); }
+.daily-word-done-score span { display: inline-flex; align-items: center; gap: 5px; color: var(--text-55); font-size: var(--fs-xs); }
+
+.daily-word-win.modal { width: min(460px, calc(100vw - 24px)); }
+.daily-word-win .modal-body { gap: 16px; }
+.daily-word-win-kicker {
+  margin: -4px 0 0; color: rgb(var(--accent-rgb)); font-size: var(--fs-tiny);
+  font-weight: var(--fw-bold); letter-spacing: var(--tracking-caps); text-transform: uppercase;
+}
+.daily-word-answer {
+  margin: 0; padding-bottom: 10px; border-bottom: 2px solid var(--text-85);
+  color: var(--text-50); font-size: var(--fs-xs); letter-spacing: var(--tracking-wide); text-transform: uppercase;
+}
+.daily-word-answer b {
+  display: block; margin-top: 2px; color: var(--text);
+  font-family: var(--font-display); font-size: clamp(30px, 7vw, 40px);
+  letter-spacing: 0.16em; text-transform: uppercase; line-height: 1.05;
+}
+.daily-word-win .daily-word-stats > div { border: 0; background: transparent; }
+.daily-word-win .daily-word-stats > div + div { border-left: 1px solid var(--hairline); border-radius: 0; }
+.daily-word-distribution-row span { display: inline-flex; align-items: center; justify-content: flex-end; gap: 4px; }
+.daily-word-distribution-row em {
+  font-style: normal; font-size: var(--fs-tiny); font-weight: var(--fw-bold); color: rgb(var(--accent-rgb));
+}
+.daily-word-distribution-row em::after { content: " ▸"; }
+.daily-word-distribution-row.is-today i { background: rgb(var(--accent-rgb)); }
+.daily-word-distribution-row.is-today b { color: var(--text); }
+.daily-word-win-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.daily-word-manual-share textarea { font-family: var(--font-mono); line-height: 1.35; resize: none; }
+@media (prefers-reduced-motion: no-preference) {
+  .daily-word-win .daily-word-distribution-row i { animation: dw-bar-in .6s cubic-bezier(.22, 1, .36, 1) both; transform-origin: left; }
+}
+@keyframes dw-bar-in { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.daily-word-win .daily-word-distribution-row { grid-template-columns: 58px minmax(0, 1fr) 28px; font-size: var(--fs-xs); }
+.daily-word-win .daily-word-distribution-row > div { height: 14px; }
+
+/* --- Top line + on-board how-to (Ideas 3: ENVOY demo, then clear and play) --- */
+.daily-word-topline { display: flex; align-items: center; gap: 10px; }
+.daily-word-topline .daily-word-date { margin-left: auto; text-align: right; }
+.daily-word-howto {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 12px;
+  border: 1px solid var(--hairline); border-radius: var(--radius-pill); background: transparent;
+  color: var(--text-60); font-size: var(--fs-sm); font-weight: var(--fw-semibold); cursor: pointer;
+}
+.daily-word-howto:hover { color: var(--text); border-color: var(--gold-line); }
+.daily-word-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 14px; color: var(--text-60); font-size: var(--fs-xs); }
+.daily-word-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.daily-word-legend i { width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--hairline); }
+.daily-word-legend i.correct { background: color-mix(in srgb, var(--green) 60%, transparent); }
+.daily-word-legend i.present { background: color-mix(in srgb, var(--gold) 55%, transparent); }
+.daily-word-legend i.absent { background: rgba(230, 226, 214, 0.12); }
+.daily-word-grid-wrap { position: relative; width: fit-content; max-width: 100%; }
+.daily-word-dictionary-note { margin: 0; text-align: center; }
+
+.daily-word-demo {
+  position: absolute; inset: 0 0 auto 0; z-index: 2;
+  display: grid; gap: 4px; align-content: start;
+  animation: dw-demo-in .35s ease both;
+}
+.daily-word-demo .daily-word-tile { background: color-mix(in srgb, var(--surface-2) 92%, transparent); }
+.daily-word-demo .daily-word-tile.correct,
+.daily-word-demo .daily-word-tile.present,
+.daily-word-demo .daily-word-tile.absent { animation: dw-pop .42s cubic-bezier(.22, 1, .36, 1) both; animation-delay: var(--flip-delay, 0ms); }
+.daily-word-demo .daily-word-tile.is-focus {
+  outline: 2px solid rgb(var(--accent-rgb)); outline-offset: 2px;
+  animation: dw-focus 1.2s ease-in-out infinite;
+}
+.daily-word-demo-caption {
+  position: relative; margin-top: 12px; padding: 10px 12px;
+  border: 1px solid rgba(var(--accent-rgb), 0.28); border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-2) 96%, transparent);
+  box-shadow: var(--shadow-floating);
+  color: var(--text-85); font-size: var(--fs-sm); line-height: var(--leading-snug); text-align: center;
+  animation: dw-caption .3s ease both;
+}
+.daily-word-demo-caption[data-caret]::before {
+  content: ""; position: absolute; top: -6px; width: 10px; height: 10px; transform: rotate(45deg);
+  left: calc(var(--caret-col) * (clamp(42px, 7vw, 48px) + 4px) + clamp(42px, 7vw, 48px) / 2 - 5px);
+  background: inherit; border-left: 1px solid rgba(var(--accent-rgb), 0.28); border-top: 1px solid rgba(var(--accent-rgb), 0.28);
+}
+.daily-word-demo.is-leaving { animation: dw-demo-out .6s ease forwards; }
+.daily-word-demo-skip {
+  position: absolute; right: 0; bottom: 0; z-index: 3;
+  display: inline-flex; align-items: center; gap: 4px; min-height: 30px; padding: 0 10px;
+  border: 1px solid var(--hairline); border-radius: var(--radius-pill);
+  background: var(--surface-2); color: var(--text-55); font-size: var(--fs-xs); cursor: pointer;
+}
+.daily-word-demo-skip:hover { color: var(--text); }
+@keyframes dw-demo-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes dw-demo-out { to { opacity: 0; filter: blur(6px); } }
+@keyframes dw-pop { from { transform: rotateX(80deg) scale(.94); } to { transform: none; } }
+@keyframes dw-focus { 0%, 100% { outline-color: rgba(var(--accent-rgb), 0.95); } 50% { outline-color: rgba(var(--accent-rgb), 0.35); } }
+@keyframes dw-caption { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .daily-word-demo, .daily-word-demo .daily-word-tile, .daily-word-demo-caption { animation: none !important; }
+}
+/* Light theme: accent gold on cream is ~2:1; darken the small accent text for AA. */
+:root[data-theme="light"] .daily-word-win-kicker,
+:root[data-theme="light"] .daily-word-distribution-row em { color: color-mix(in srgb, rgb(var(--accent-rgb)) 50%, #1f1b16); }

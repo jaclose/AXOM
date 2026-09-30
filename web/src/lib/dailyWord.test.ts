@@ -3,6 +3,7 @@ import type { DailyWordPuzzleState } from "./types";
 import {
   buildDailyWordPuzzleId,
   buildDailyWordShare,
+  dailyWordNumber,
   canonicalTimeZone,
   createDailyWordPuzzle,
   deriveDailyWordStats,
@@ -21,6 +22,14 @@ import {
   type LetterEvaluation,
 } from "./dailyWord";
 import { deriveDailyWordStatsFromNormalizedHistory } from "./dailyWordStats";
+
+describe("daily word number", () => {
+  it("counts from launch day and stays stable across time zones", () => {
+    expect(dailyWordNumber("2026-07-12")).toBe(1);
+    expect(dailyWordNumber("2026-07-13")).toBe(2);
+    expect(dailyWordNumber("2026-09-29")).toBe(80);
+  });
+});
 
 describe("Daily Word calendar and deterministic answer selection", () => {
   it("formats calendar parts in the explicit IANA timezone", () => {
@@ -229,9 +238,9 @@ describe("Daily Word history, statistics, and sharing", () => {
     const puzzle = completedPuzzle("2026-07-12", true, 2, "2026-07-12T18:00:00Z");
     const rows = puzzle.guesses.map((guess) => scoreGuess(guess, "APPLE"));
     const shared = buildDailyWordShare(puzzle, rows);
-    expect(shared).toContain("AXOM Daily Word 2026-07-12");
-    expect(shared).toContain("2/6");
-    expect(shared).toContain("◆");
+    expect(shared.split("\n")[0]).toBe("AXOM Daily Word #1 2/6");
+    expect(shared).toContain("🟩🟩🟩🟩🟩");
+    expect(shared.trim().endsWith("axom.info")).toBe(true);
     expect(shared).not.toContain("APPLE");
     expect(shared).not.toContain("CRANE");
     expect(shared).not.toContain("answer");

@@ -228,8 +228,8 @@ describe("DailyWordPage persistence, sharing, and accessibility", () => {
     fireEvent.click(screen.getByRole("button", { name: "Share result" }));
     await waitFor(() => expect(clipboardWrite).toHaveBeenCalledOnce());
     const shared = clipboardWrite.mock.calls[0][0];
-    expect(shared).toContain("AXOM Daily Word 2026-07-12");
-    expect(shared).toContain("2/6");
+    expect(shared).toContain("AXOM Daily Word #1 2/6");
+    expect(shared).toContain("axom.info");
     expect(shared).not.toContain("APPLE");
     expect(shared).not.toContain("CRANE");
     expect(shared).not.toContain(useStore.getState().profile.name);
@@ -255,8 +255,7 @@ describe("DailyWordPage persistence, sharing, and accessibility", () => {
 
     expect(screen.getByRole("heading", { level: 1, name: "AXOM Daily Word" })).toBeTruthy();
     expect(screen.getByText("A daily five-letter word puzzle.")).toBeTruthy();
-    expect(screen.getByText(/Submit a valid five-letter word in six guesses/)).toBeTruthy();
-    expect((screen.getByText("How to play").closest("details") as HTMLDetailsElement).open).toBe(true);
+    expect(screen.getByRole("button", { name: "How to play" })).toBeTruthy();
     expect(screen.getByText(/Dictionary general-2/)).toBeTruthy();
     const grid = screen.getByRole("grid", { name: "Six-row Daily Word puzzle for 2026-07-12" });
     expect(within(grid).getAllByRole("row")).toHaveLength(6);
@@ -272,20 +271,23 @@ describe("DailyWordPage persistence, sharing, and accessibility", () => {
     render(<DailyWordPage />);
     await openPuzzle();
 
-    expect(screen.getByText(/Next puzzle in/).textContent).toMatch(/Next puzzle in \d+h \d+m/);
+    expect(screen.getByText(/Next word in/).textContent).toMatch(/Next word in \d+h \d+m/);
     expect(screen.getByLabelText(/Time until the next Daily Word puzzle:/)).toBeTruthy();
   });
 
-  it("opens instructions once per announcement version and collapses them on a later visit", async () => {
+  it("plays the on-board how-to once per announcement version, and typing skips it", async () => {
     const first = render(<DailyWordPage />);
     await openPuzzle();
-    expect((screen.getByText("How to play").closest("details") as HTMLDetailsElement).open).toBe(true);
+    expect(await screen.findByRole("button", { name: /Skip/ })).toBeTruthy();
     await waitFor(() => expect(localStorage.getItem("axom.announcements.dismissed.v1")).toContain("daily-word-how-to-v1"));
+    fireEvent.keyDown(window, { key: "a" });
+    expect(screen.queryByRole("button", { name: /Skip/ })).toBeNull();
     first.unmount();
 
     render(<DailyWordPage />);
     await screen.findByRole("heading", { level: 1, name: "AXOM Daily Word" });
-    expect((screen.getByText("How to play").closest("details") as HTMLDetailsElement).open).toBe(false);
+    expect(screen.queryByRole("button", { name: /Skip/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "How to play" })).toBeTruthy();
   });
 
   it("keeps first-view help safe when device metadata storage is blocked", async () => {
@@ -303,7 +305,7 @@ describe("DailyWordPage persistence, sharing, and accessibility", () => {
     render(<DailyWordPage />);
     await openPuzzle();
 
-    expect((screen.getByText("How to play").closest("details") as HTMLDetailsElement).open).toBe(true);
+    expect(await screen.findByRole("button", { name: /Skip/ })).toBeTruthy();
     expect(screen.getByRole("grid")).toBeTruthy();
   });
 });
