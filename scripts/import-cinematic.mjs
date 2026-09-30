@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Drop a rendered film (Higgsfield, Blender, anything ffmpeg reads) into AXOM:
 //
-//   npm run cinematic:import -- ~/Downloads/render.mp4 --id slow-sweep [--final] [--as-is]
+//   npm run cinematic:import -- ~/Downloads/render.mp4 --id wordmark-2s [--final] [--as-is]
 //
 // Transcodes to a small web/desktop-safe H.264 file (≤1920 px, ≤60 fps, no
 // audio, fast start). --as-is keeps a finished H.264 master untouched (only a

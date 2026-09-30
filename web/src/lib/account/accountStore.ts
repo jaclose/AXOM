@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
-import { authRedirectUrl, cloudConfigured, loadSupabase } from "./supabase";
+import { authRedirectUrl, cloudConfigured, loadSupabase, readStoredSession } from "./supabase";
 import { SyncCoordinator } from "../sync/syncCoordinator";
 import { SupabaseSyncTransport } from "../sync/supabaseTransport";
 import { clearAccountSync, deviceId, read, write } from "../sync/syncMetadata";
@@ -78,6 +78,13 @@ interface AccountState {
 
 let authSubscription: { unsubscribe(): void } | null = null;
 let initializing = false;
+
+/** Test hook: forget the auth subscription so init() can run again. */
+export function resetAccountInitForTests(): void {
+  authSubscription?.unsubscribe();
+  authSubscription = null;
+  initializing = false;
+}
 let coordinator: SyncCoordinator | null = null;
 const transport = new SupabaseSyncTransport();
 
@@ -137,6 +144,23 @@ function toUser(session: Session | null, profileName?: string): AccountUser | nu
   };
 }
 
+/** Everything the account UI shows for a session, derived in one place. */
+function sessionState(session: Session | null): Pick<AccountState, "phase" | "user" | "link" | "lastProtectedAt" | "conflictServerRevision" | "protection"> {
+  const user = toUser(session);
+  const meta = read();
+  const link = linkStateFor(user?.id);
+  return {
+    phase: user ? "signed-in" : "signed-out",
+    user,
+    link,
+    lastProtectedAt: meta.lastProtectedAt,
+    conflictServerRevision: meta.conflictServerRevision,
+    protection: user && link === "linked"
+      ? (meta.conflictServerRevision !== undefined ? "conflict" : meta.pending ? "saved-locally" : meta.lastProtectedAt ? "protected" : "saved-locally")
+      : "local-only",
+  };
+}
+
 function linkStateFor(userId: string | undefined): LinkState {
   const linkedTo = read().accountUserId;
   if (!userId || !linkedTo) return "unlinked";
@@ -163,19 +187,14 @@ export const useAccount = create<AccountState>((set, get) => {
   }
 
   function applySession(session: Session | null) {
-    const user = toUser(session);
-    const meta = read();
-    set({
-      phase: user ? "signed-in" : "signed-out",
-      user,
-      link: linkStateFor(user?.id),
-      lastProtectedAt: meta.lastProtectedAt,
-      conflictServerRevision: meta.conflictServerRevision,
-      protection: user && linkStateFor(user.id) === "linked"
-        ? (meta.conflictServerRevision !== undefined ? "conflict" : meta.pending ? "saved-locally" : meta.lastProtectedAt ? "protected" : "saved-locally")
-        : "local-only",
-    });
-    if (user) void loadProfileName(user.id);
+    const next = sessionState(session);
+    // Keep a display name the profile table already supplied for this user.
+    const current = get().user;
+    if (next.user && current?.id === next.user.id && current.displayName && !session?.user?.user_metadata?.display_name) {
+      next.user = { ...next.user, displayName: current.displayName };
+    }
+    set(next);
+    if (next.user) void loadProfileName(next.user.id);
   }
 
   async function loadProfileName(userId: string) {
@@ -189,11 +208,11 @@ export const useAccount = create<AccountState>((set, get) => {
     }
   }
 
+  // A saved, refreshable session is shown immediately (no wait for the SDK
+  // download or the network); the SDK's first auth event confirms or clears it.
+  const stored = cloudConfigured() ? readStoredSession() : null;
   return {
-    phase: cloudConfigured() ? "loading" : "unconfigured",
-    user: null,
-    link: "unlinked",
-    protection: "local-only",
+    ...(stored ? sessionState(stored) : { phase: cloudConfigured() ? "loading" as const : "unconfigured" as const, user: null, link: "unlinked" as const, protection: "local-only" as const }),
     history: [],
     devices: [],
     busy: false,
@@ -203,9 +222,16 @@ export const useAccount = create<AccountState>((set, get) => {
     init() {
       if (authSubscription || initializing || !cloudConfigured()) return;
       initializing = true;
+      if (get().phase === "loading") {
+        const stored = readStoredSession();
+        if (stored) applySession(stored);
+      }
       void loadSupabase().then((supabase) => {
         if (!supabase || authSubscription) return;
-        void supabase.auth.getSession().then(({ data }) => applySession(data.session));
+        // One source of truth: the SDK emits INITIAL_SESSION on subscribe and
+        // every later change. (A separate getSession() used to race it, and a
+        // refresh that failed on a flaky network read as "signed out" while
+        // the SDK still held the session: Profile and Account then disagreed.)
         const { data } = supabase.auth.onAuthStateChange((event, session) => {
           if (event === "PASSWORD_RECOVERY") {
             set({ phase: "recovering-password", user: toUser(session), message: "Choose a new password to finish recovery." });
@@ -214,8 +240,13 @@ export const useAccount = create<AccountState>((set, get) => {
           applySession(session);
         });
         authSubscription = data.subscription;
-      }).catch(() => set({ phase: "signed-out", error: "The account service couldn’t load. Your work is still saved on this device." }))
-        .finally(() => { initializing = false; });
+      }).catch(() => {
+        // The account service did not load (offline, blocked). A signed-in user
+        // stays signed in; the next launch or reconnect confirms the session.
+        set(get().user
+          ? { error: "Couldn’t reach the account service just now. Your work is saved on this device." }
+          : { phase: "signed-out", error: "The account service couldn’t load. Your work is still saved on this device." });
+      }).finally(() => { initializing = false; });
     },
 
     async signIn(email, password) {

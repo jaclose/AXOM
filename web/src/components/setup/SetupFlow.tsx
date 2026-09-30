@@ -5,13 +5,13 @@
 // and the optional guide follow in App.
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
-  ArrowLeft, ArrowRight, Bell, BookMarked, BookOpen, Check, Compass, FlaskConical, Globe2, GraduationCap,
+  ArrowLeft, ArrowRight, Bell, BookMarked, BookOpen, Compass, FlaskConical, Globe2, GraduationCap,
   HeartHandshake, Layers, ListChecks, Monitor, Moon, Plus, ShieldCheck, Sparkles, SquareStack, Stethoscope, Sun, Target,
   type LucideIcon,
 } from "lucide-react";
 import { AxomWordmark } from "../ui/BrandMark";
 import { PaletteOrbs } from "./PaletteOrbs";
-import { onRadioGroupKeyDown } from "../shell/AppearanceStudio";
+import { ChoiceChips, ChoiceSegment, ChoiceSummary, ChoiceTiles, type ChoiceSummaryRows } from "../ui/Choice";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { useStore } from "../../lib/store";
 import { setThemePreference, type ThemePreference } from "../../lib/theme";
@@ -175,34 +175,17 @@ function YouStep({ choices, update, titleId, headingRef, rerun }: Omit<StepProps
         </label>
         <div className="setup-field">
           <span className="setup-label" id={`${titleId}-path`}>Your path</span>
-          <div className="setup-tiles six" role="radiogroup" aria-labelledby={`${titleId}-path`} onKeyDown={onRadioGroupKeyDown}>
-            {PATH_OPTIONS.map((option) => {
-              const Icon = PATH_ICONS[option.id];
-              const on = choices.path === option.id;
-              return (
-                <button key={option.id} type="button" role="radio" aria-checked={on} tabIndex={on ? 0 : -1} className={`setup-tile ${on ? "on" : ""}`}
-                  onClick={() => update({ path: option.id, focus: focusChoices(option.id)[0].id })}>
-                  <Icon size={ICON_SIZE.control} strokeWidth={1.5} aria-hidden="true" />
-                  <b>{option.label}</b>
-                  <small>{option.detail}</small>
-                  {on && <span className="setup-tile-check" aria-hidden="true"><Check size={ICON_SIZE.microInline} strokeWidth={2.5} /></span>}
-                </button>
-              );
-            })}
-          </div>
+          <ChoiceTiles
+            columns="six"
+            labelledBy={`${titleId}-path`}
+            options={PATH_OPTIONS.map((option) => ({ ...option, icon: PATH_ICONS[option.id] }))}
+            value={choices.path}
+            onChange={(path) => update({ path, focus: focusChoices(path)[0].id })}
+          />
         </div>
         <div className="setup-field setup-reveal" key={choices.path}>
           <span className="setup-label" id={`${titleId}-focus`}>{choices.path === "sgu" ? "Where are you now?" : choices.path === "other" ? "Which program?" : "What are you focused on?"}</span>
-          <div className="setup-chips" role="radiogroup" aria-labelledby={`${titleId}-focus`} onKeyDown={onRadioGroupKeyDown}>
-            {focusOptions.map((option) => {
-              const on = choices.focus === option.id;
-              return (
-                <button key={option.id} type="button" role="radio" aria-checked={on} tabIndex={on ? 0 : -1} className={`setup-chip ${on ? "on" : ""}`} onClick={() => update({ focus: option.id })}>
-                  {option.label}
-                </button>
-              );
-            })}
-          </div>
+          <ChoiceChips labelledBy={`${titleId}-focus`} options={focusOptions} value={choices.focus} onChange={(focus) => update({ focus })} />
         </div>
         <SetupSummary rows={summary} placement="end" />
       </div>
@@ -232,20 +215,14 @@ function StudyStep({ choices, update, titleId, headingRef }: StepProps) {
         <SetupSummary live rows={summary} placement="side" />
       </StepCopy>
       <div className="setup-controls">
-        <div className="setup-tiles four" role="group" aria-label="What you use">
-          {TOOL_OPTIONS.map((option) => {
-            const Icon = TOOL_ICONS[option.id];
-            const on = choices.tools.includes(option.id);
-            return (
-              <button key={option.id} type="button" aria-pressed={on} className={`setup-tile compact ${on ? "on" : ""}`} onClick={() => toggle(option.id)}>
-                <Icon size={ICON_SIZE.emphasis} strokeWidth={1.5} aria-hidden="true" />
-                <b>{option.label}</b>
-                <small>{option.detail}</small>
-                {on && <span className="setup-tile-check" aria-hidden="true"><Check size={ICON_SIZE.microInline} strokeWidth={2.5} /></span>}
-              </button>
-            );
-          })}
-        </div>
+        <ChoiceTiles
+          multiple
+          compact
+          label="What you use"
+          options={TOOL_OPTIONS.map((option) => ({ ...option, icon: TOOL_ICONS[option.id] }))}
+          selected={choices.tools}
+          onToggle={toggle}
+        />
         {choices.tools.includes("other") && (
           <label className="setup-inline-field setup-reveal">
             <span>What else do you use?</span>
@@ -255,23 +232,15 @@ function StudyStep({ choices, update, titleId, headingRef }: StepProps) {
         {usesLectures(choices.tools) && (
           <div className="setup-followup setup-reveal">
             <span className="setup-label" id={`${titleId}-passes`}>Passes per lecture</span>
-            <div className="setup-segment" role="radiogroup" aria-labelledby={`${titleId}-passes`} onKeyDown={onRadioGroupKeyDown}>
-              {[1, 2, 3, 4].map((count) => {
-                const on = choices.lecturePasses === count;
-                return <button key={count} type="button" role="radio" aria-checked={on} tabIndex={on ? 0 : -1} className={on ? "on" : ""} onClick={() => update({ lecturePasses: count })}>{count}</button>;
-              })}
-            </div>
+            <ChoiceSegment labelledBy={`${titleId}-passes`} options={[1, 2, 3, 4].map((count) => ({ value: count, label: count }))}
+              value={choices.lecturePasses} onChange={(lecturePasses) => update({ lecturePasses })} />
           </div>
         )}
         {usesQuestions(choices.tools) && (
           <div className="setup-followup setup-reveal">
             <span className="setup-label" id={`${titleId}-timing`}>When do you do questions?</span>
-            <div className="setup-segment wide" role="radiogroup" aria-labelledby={`${titleId}-timing`} onKeyDown={onRadioGroupKeyDown}>
-              {QUESTION_TIMINGS.map((timing) => {
-                const on = choices.questionTiming === timing.id;
-                return <button key={timing.id} type="button" role="radio" aria-checked={on} tabIndex={on ? 0 : -1} className={on ? "on" : ""} onClick={() => update({ questionTiming: timing.id })}>{timing.label}</button>;
-              })}
-            </div>
+            <ChoiceSegment wide labelledBy={`${titleId}-timing`} options={QUESTION_TIMINGS.map((timing) => ({ value: timing.id, label: timing.label }))}
+              value={choices.questionTiming} onChange={(questionTiming) => update({ questionTiming })} />
           </div>
         )}
         <details className="setup-more">
@@ -316,17 +285,12 @@ function YoursStep({ titleId, headingRef }: { titleId: string; headingRef: StepP
         <PaletteOrbs />
         <div className="setup-row">
           <span className="setup-label" id={`${titleId}-theme`}>Mode</span>
-          <div className="setup-segment" role="radiogroup" aria-labelledby={`${titleId}-theme`} onKeyDown={onRadioGroupKeyDown}>
-            {THEMES.map((option) => {
-              const Icon = option.icon;
-              const on = theme === option.value;
-              return (
-                <button key={option.value} type="button" role="radio" aria-checked={on} tabIndex={on ? 0 : -1} className={on ? "on" : ""} onClick={() => setThemePreference(option.value)}>
-                  <Icon size={ICON_SIZE.body} strokeWidth={1.75} aria-hidden="true" /> {option.label}
-                </button>
-              );
-            })}
-          </div>
+          <ChoiceSegment
+            labelledBy={`${titleId}-theme`}
+            options={THEMES.map(({ value, label, icon: Icon }) => ({ value, label: <><Icon size={ICON_SIZE.body} strokeWidth={1.75} aria-hidden="true" /> {label}</> }))}
+            value={theme}
+            onChange={setThemePreference}
+          />
         </div>
         <div className="setup-notify">
           <Bell size={ICON_SIZE.emphasis} strokeWidth={1.5} aria-hidden="true" />
@@ -355,17 +319,11 @@ function YoursStep({ titleId, headingRef }: { titleId: string; headingRef: StepP
   );
 }
 
-type SummaryRows = Array<[label: string, value: string]>;
+type SummaryRows = ChoiceSummaryRows;
 
 /** What these choices will build. Rendered beside the controls on wide screens and after them on narrow ones (CSS shows one). */
 function SetupSummary({ rows, live = false, placement }: { rows: SummaryRows; live?: boolean; placement: "side" | "end" }) {
-  return (
-    <dl className={`setup-summary at-${placement}`} aria-live={live ? "polite" : undefined}>
-      {rows.filter(([, value]) => value).map(([label, value]) => (
-        <div key={label}><dt>{label}</dt><dd>{value}</dd></div>
-      ))}
-    </dl>
-  );
+  return <ChoiceSummary rows={rows} live={live} className={`at-${placement}`} />;
 }
 
 /** A small piece of the real dashboard, painted in the palette being chosen. */

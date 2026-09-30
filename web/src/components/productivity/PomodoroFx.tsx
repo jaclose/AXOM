@@ -3,15 +3,15 @@
 // the Productivity page is mounted. Watches for a completed focus sprint and
 // fires the whole-page glow + a completion toast (and an OS notification if the
 // user granted permission).
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { notify } from "../../lib/notify";
 import { usePomodoro, ensurePomodoroClock, reconcilePomodoro } from "../../lib/pomodoro";
 import { pushToast } from "../../lib/toast";
+import { TimerEdgeGlow } from "../shell/TimerEdgeGlow";
 
 export function PomodoroFx() {
   const completedAt = usePomodoro((s) => s.completedAt);
   const completedMinutes = usePomodoro((s) => s.completedMinutes);
-  const [glow, setGlow] = useState(false);
 
   // Root-level clock ownership: start ticking on load if a sprint was running,
   // and reconcile against wall-clock time whenever the tab regains focus or is
@@ -32,7 +32,6 @@ export function PomodoroFx() {
 
   useEffect(() => {
     if (!completedAt) return;
-    setGlow(true);
     const minutes = completedMinutes;
     pushToast({
       title: "Focus sprint complete",
@@ -46,9 +45,8 @@ export function PomodoroFx() {
     if (typeof document !== "undefined" && (document.visibilityState === "hidden" || !document.hasFocus())) {
       void notify("AXOM — focus sprint complete", minutes ? `${minutes} minutes logged. Take your break.` : "Take your break.", { tag: `axom-pomodoro-${completedAt}` });
     }
-    const timer = setTimeout(() => setGlow(false), 2800);
-    return () => clearTimeout(timer);
   }, [completedAt, completedMinutes]);
 
-  return <div className={`pomo-page-glow ${glow ? "active" : ""}`} aria-hidden="true" />;
+  // Start tone and finish glow (the chime itself comes from the timer's natural finish).
+  return <TimerEdgeGlow />;
 }

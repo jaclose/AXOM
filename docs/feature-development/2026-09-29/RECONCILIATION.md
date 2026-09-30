@@ -1,5 +1,8 @@
 # Reconciliation: claims vs. what actually works (2026-09-29, 20:10; updated 2026-09-30 00:30)
 
+> **Superseded for day-to-day use (2026-09-30):** the ideas bank, statuses, progress and future additions now live in [`docs/directions/`](../../directions/README.md). JD's verbatim notes moved to `docs/directions/01-ideas/`. This file stays as history.
+
+
 Checked against IDEAS-1.md, IDEAS-3.md, MANIFEST.md, PLAN.md, PROGRESS.md and the Codex board. Branch `feat/ideas3-staging` (not merged, not pushed, not deployed).
 
 **Bottom line (updated 2026-09-30):** of ~106 items, 31 are shipped and verified in a browser, 3 are implemented but not yet verified the way a user would meet them, 12 are partial, 3 are blocked, 5 belong to Codex, and ~53 are planned or not started. That is about 29% fully done by item count (about 34% if partial work counts as half), and less by effort, because the unstarted items include the biggest ones (journal, onboarding, Wrapped, library, AI generation, exam interfaces). (It was 11, about 10%, on 2026-09-29.)

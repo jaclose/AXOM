@@ -353,12 +353,8 @@
 }
 .cinematic-film-preview:hover:not(:disabled) { color: var(--text); border-color: var(--gold-line); }
 .cinematic-film-preview:disabled { opacity: .45; cursor: default; }
-.cinematic-film.rotate .cinematic-film-pick > span:last-child { padding-bottom: 10px; }
-.cinematic-rotate-glyph {
-  display: grid; place-items: center; aspect-ratio: 16 / 9;
-  color: var(--gold);
-  background: radial-gradient(circle at 50% 40%, rgba(var(--accent-rgb), 0.16), transparent 70%), var(--neutral-hover);
-}
 .cinematic-moments { display: flex; flex-wrap: wrap; gap: 10px 18px; margin-top: 12px; }
-.cinematic-moments label { display: flex; align-items: center; gap: 8px; font-size: var(--fs-xs); color: var(--text-60); }
+.cinematic-moments label,
+.cinematic-moment-fixed { display: flex; align-items: center; gap: 8px; font-size: var(--fs-xs); color: var(--text-60); }
+.cinematic-moment-fixed b { color: var(--text); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
 .cinematic-moments select.field { width: auto; min-width: 140px; padding: 4px 8px; }

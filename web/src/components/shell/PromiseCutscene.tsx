@@ -7,6 +7,7 @@ import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEv
 import { ArrowRight, PenLine } from "lucide-react";
 import { useStore } from "../../lib/store";
 import { prefersReducedMotion } from "../../lib/motion";
+import { revealApp } from "../../lib/presentation";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { PROMISE_MOVEMENTS, PROMISE_TEXT_VERSION, PROMISE_VOWS } from "../../lib/promiseText";
 import { AxomMark, AxomWordmark } from "../ui/BrandMark";
@@ -111,6 +112,8 @@ export function PromiseCutscene({ onDone }: { onDone: () => void }) {
 
   function enter() {
     if (reduceMotion) { onDoneRef.current(); return; }
+    // AXOM's regions slot in from top to bottom while the stage fades above them.
+    revealApp("promise");
     setLeaving(true);
     schedule(() => onDoneRef.current(), FADE_OUT_MS);
   }

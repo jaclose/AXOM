@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Session, SupabaseClient } from "@supabase/supabase-js";
 
 /**
  * The optional AXOM account backend. When the two public env values are
@@ -41,6 +41,34 @@ export function loadSupabase(): Promise<SupabaseClient | null> {
     return client;
   });
   return loading;
+}
+
+/** Where supabase-js keeps this device's session (its default storage key). */
+export function authStorageKey(): string | null {
+  const url = import.meta.env.VITE_SUPABASE_URL;
+  if (!url) return null;
+  try {
+    return `sb-${new URL(url).hostname.split(".")[0]}-auth-token`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The session supabase-js saved on this device, read without loading the SDK,
+ * so AXOM can show who is signed in at once while the SDK confirms it. Only a
+ * session that can still be refreshed counts; the SDK has the final word.
+ */
+export function readStoredSession(): Session | null {
+  const key = authStorageKey();
+  if (!key || typeof localStorage === "undefined") return null;
+  try {
+    const raw = JSON.parse(localStorage.getItem(key) ?? "null") as (Session & { currentSession?: Session }) | null;
+    const session = raw?.currentSession ?? raw;
+    return session?.user?.id && typeof session.refresh_token === "string" && session.refresh_token ? session : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The already-loaded client (null before loadSupabase resolves or when unconfigured). */

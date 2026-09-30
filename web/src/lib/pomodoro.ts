@@ -10,6 +10,7 @@
 // snapshot so a reload restores them before the vault rehydrates.
 // ===========================================================================
 import { create } from "zustand";
+import { timerFinished } from "./timerCues";
 import { useStore } from "./store";
 import { effectivePomodoroPreferences } from "./pomodoroPreferences";
 
@@ -291,28 +292,10 @@ function recordSavedPresetUse(id: string) {
   });
 }
 
-// A short, gentle two-tone chime so a finished sprint is noticeable without a
-// jarring alarm. Best-effort: silently no-op if WebAudio is unavailable/blocked.
+// A natural finish (never a skip): the shared timer cues chime and light the
+// screen's edges (lib/timerCues.ts). Best effort, silent without Web Audio.
 function chime(up: boolean) {
-  try {
-    const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Ctx) return;
-    const ctx = new Ctx();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(up ? 523.25 : 392, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(up ? 783.99 : 261.63, ctx.currentTime + 0.18);
-    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.16, ctx.currentTime + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.6);
-    osc.connect(gain).connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.62);
-    osc.onended = () => ctx.close();
-  } catch {
-    /* no audio available */
-  }
+  timerFinished(up ? "focus" : "break");
 }
 
 export const usePomodoro = create<PomodoroState>((set, get) => {

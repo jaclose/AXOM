@@ -34,7 +34,7 @@ test("study defaults and item overrides drive the dashboard, survive reload, and
   // Edit the real settings controls; no test-only settings UI or persistence path.
   await page.getByTitle("Settings", { exact: true }).click();
   await page.getByRole("tab", { name: "Personalization", exact: true }).click();
-  await page.getByLabel("Usual lecture passes").fill("5");
+  await page.getByRole("radiogroup", { name: "Usual lecture passes" }).getByRole("radio", { name: "5", exact: true }).click();
   await page.getByLabel("Review again after (days)").fill("6");
   await page.getByRole("button", { name: "Noji", exact: true }).click();
   await page.getByRole("button", { name: "Done", exact: true }).click();
@@ -109,7 +109,7 @@ test("tracker progress follows edited targets, preserves history, and remains us
   await prepareWorkspace(page);
   await page.getByTitle("Settings", { exact: true }).click();
   await page.getByRole("tab", { name: "Personalization", exact: true }).click();
-  await page.getByLabel("Usual lecture passes").fill("6");
+  await page.getByRole("radiogroup", { name: "Usual lecture passes" }).getByRole("radio", { name: "6", exact: true }).click();
   await page.getByRole("button", { name: "Done", exact: true }).click();
   await page.goto("/#tracker");
 

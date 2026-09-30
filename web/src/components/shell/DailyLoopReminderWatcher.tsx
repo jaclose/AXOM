@@ -7,7 +7,9 @@ import {
   type DailyLoopReminderLedger,
   type DailyLoopReminderSignal,
 } from "../../lib/dailyLoopReminders";
+import { isFirstRunDay } from "../../lib/firstRun";
 import { isoDate } from "../../lib/scoring";
+import { shellBusy } from "../../lib/shellBusy";
 import { useStore } from "../../lib/store";
 import { pushToast, REMINDER_TOAST_DURATION_MS } from "../../lib/toast";
 import { useUi } from "../../lib/uiStore";
@@ -45,6 +47,10 @@ export function DailyLoopReminderWatcher({
       const now = clock();
       const preferences = normalizeDailyLoopReminderPreferences(reminderPreferences);
       const dayKey = isoDate(now);
+      // A brand-new student's first day is setup, the Promise and the
+      // dashboard's own check-in; and no nudge lands over a modal, tour or the
+      // Promise (the next poll or refocus tries again).
+      if (isFirstRunDay(dayKey) || shellBusy()) return;
       const evaluation = evaluateDailyLoopReminder({
         now,
         preferences,

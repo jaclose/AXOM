@@ -87,8 +87,8 @@ test("opening-film settings persist and a preview can be skipped", async ({ page
   await page.getByRole("tab", { name: "Appearance", exact: true }).click();
   const schedule = page.getByRole("radiogroup", { name: "When the opening film plays" });
   await schedule.getByRole("radio", { name: /First open of the week/ }).click();
-  await page.getByRole("radiogroup", { name: "Everyday opening film" }).getByRole("radio", { name: /Edge glint/ }).click();
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("axom.cinematics.v1") ?? "{}"))).toMatchObject({ frequency: "weekly", intro: "edge-glint" });
+  await page.getByRole("radiogroup", { name: "Everyday opening film" }).getByRole("radio", { name: /Wordmark, long/ }).click();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("axom.cinematics.v1") ?? "{}"))).toMatchObject({ frequency: "weekly", intro: "wordmark-3s" });
   await page.reload({ waitUntil: "networkidle" });
   await page.getByTitle("Settings", { exact: true }).click();
   await page.getByRole("tab", { name: "Appearance", exact: true }).click();

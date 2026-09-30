@@ -15,6 +15,7 @@ import {
 import { setMotionPreference } from "../../lib/motionPreference";
 import { useMotionPreference, usePalettePreference, useResolvedTheme } from "../../lib/useAppearance";
 import { CinematicSettings } from "./CinematicSettings";
+import { TimerCueSettings } from "./TimerCueSettings";
 
 const MODES: Array<{ value: ThemePreference; label: string; detail: string; icon: typeof Sun }> = [
   { value: "light", label: "Light", detail: "Paper", icon: Sun },
@@ -222,6 +223,7 @@ export function AppearanceStudio() {
       </section>
 
       <CinematicSettings />
+      <TimerCueSettings />
       <p className="appearance-footnote">Appearance is saved on this device only, so each device can look the way you like.</p>
     </div>
   );

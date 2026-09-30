@@ -34,6 +34,7 @@ import { requestOnboardingRerun } from "../../lib/uiStore";
 import { canonicalTimeZone, normalizeClockPreferences, normalizeTimeZonePreference, systemTimeZone } from "../../lib/clock";
 import { normalizeDailyLoopReminderPreferences } from "../../lib/dailyLoopReminders";
 import { AccountSyncPanel } from "./AccountSyncPanel";
+import { StudyWorkflowSettings } from "./StudyWorkflowSettings";
 import { AppearanceStudio } from "./AppearanceStudio";
 import {
   BackupStatusCard,
@@ -43,9 +44,6 @@ import {
   RestoreHistoryCard,
 } from "./SettingsSections";
 import { recordRestoreEvent } from "../../lib/restoreHistory";
-import { DEFAULT_STUDY_WORKFLOW, normalizeStudyWorkflow, toggleStudyMethod, type StudyMethodId } from "../../lib/studyPreferences";
-import { StudyMethodFollowUps } from "./StudyMethodFollowUps";
-import { StudyTextSuggestions } from "./StudyTextSuggestions";
 import {
   CURRENT_DASHBOARD_WIDGET_IDS,
   adaptLegacyDashboardLayout,
@@ -417,109 +415,6 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
       {resigning && <PromiseCutscene onDone={() => setResigning(false)} />}
       {viewingPromise && promise && <SavedPromise onClose={() => setViewingPromise(false)} />}
     </Modal>
-  );
-}
-
-const STUDY_METHOD_OPTIONS: Array<{ id: StudyMethodId; label: string }> = [
-  { id: "lecture-passes", label: "Lecture passes" }, { id: "practice-questions", label: "Practice questions" },
-  { id: "anki", label: "Anki" }, { id: "quizlet", label: "Quizlet" }, { id: "noji", label: "Noji" },
-  { id: "remnote", label: "RemNote" }, { id: "notes", label: "Notes / concept notes" },
-  { id: "teach-aloud", label: "Teaching aloud / Feynman" }, { id: "recall", label: "Recall sessions" },
-  { id: "external-resource", label: "External resources" }, { id: "custom", label: "Other" },
-];
-
-function StudyWorkflowSettings() {
-  const store = useStore();
-  const workflow = normalizeStudyWorkflow(store.profile.studyWorkflow ?? DEFAULT_STUDY_WORKFLOW);
-  const enabled = new Set((workflow.methods ?? []).filter((method) => method.enabled).map((method) => method.id));
-  function toggle(id: StudyMethodId) {
-    store.updateProfile({ studyWorkflow: toggleStudyMethod(workflow, id) });
-  }
-  function save(patch: Partial<typeof workflow>) {
-    store.updateProfile({ studyWorkflow: { ...workflow, configured: true, ...patch } });
-  }
-  function setKindPasses(kind: "Lecture" | "DLA" | "PQ", lecturePasses: number) {
-    save({ itemKindDefaults: { ...workflow.itemKindDefaults, [kind]: { ...workflow.itemKindDefaults?.[kind], lecturePasses } } });
-  }
-  return (
-    <div className="settings-stack">
-      <section className="settings-card" aria-labelledby="study-methods-title">
-        <div className="settings-card-head">
-          <span className="settings-card-icon"><BookOpen size={ICON_SIZE.body} aria-hidden="true" /></span>
-          <div>
-            <h4 id="study-methods-title">How you study</h4>
-            <p>Pick every method you actually use. AXOM uses this to shape recommendations and follow-ups. It never forces a method (not even Anki).</p>
-          </div>
-        </div>
-        <div className="settings-chip-row" aria-label="Study methods">
-          {STUDY_METHOD_OPTIONS.map((option) => (
-            <button key={option.id} type="button" className={`filter-pill ${enabled.has(option.id) ? "on" : ""}`} aria-pressed={enabled.has(option.id)} onClick={() => toggle(option.id)}>
-              {enabled.has(option.id) && <Check size={ICON_SIZE.microInline} aria-hidden="true" />} {option.label}
-            </button>
-          ))}
-        </div>
-        <StudyMethodFollowUps workflow={workflow} onChange={(studyWorkflow) => store.updateProfile({ studyWorkflow })} />
-      </section>
-
-      <section className="settings-card" aria-labelledby="study-passes-title">
-        <div className="settings-card-head">
-          <span className="settings-card-icon"><RotateCcw size={ICON_SIZE.body} aria-hidden="true" /></span>
-          <div>
-            <h4 id="study-passes-title">Passes &amp; review timing</h4>
-            <p>
-              How many times you usually go through material, and when AXOM should bring it back. Course Tracker items without their own
-              setting use these, and any course or single item can override them.
-            </p>
-          </div>
-        </div>
-        <div className="settings-target-grid">
-          <label className="stack gap6">
-            <span className="field-label">Usual lecture passes</span>
-            <input className="field" type="number" min={1} max={6} value={workflow.lecturePasses ?? 2} onChange={(event) => save({ lecturePasses: Number(event.target.value) })} />
-          </label>
-          <label className="stack gap6">
-            <span className="field-label">Review again after (days)</span>
-            <input className="field" type="number" min={1} max={14} value={workflow.reviewAfterDays ?? 3} onChange={(event) => save({ reviewAfterDays: Number(event.target.value) })} />
-          </label>
-        </div>
-        <div className="settings-kind-defaults">
-          <span className="field-label">Passes by item type</span>
-          <p className="sub">Example: set PQ to 6 if you usually do six rounds of practice questions. Leave a type alone to use your usual passes.</p>
-          <div className="settings-kind-grid">
-            {(["Lecture", "DLA", "PQ"] as const).map((kind) => (
-              <label className="settings-kind" key={kind}>
-                <b>{kind}</b>
-                <input
-                  className="field"
-                  aria-label={`${kind} default passes`}
-                  type="number"
-                  min={1}
-                  max={6}
-                  value={workflow.itemKindDefaults?.[kind]?.lecturePasses ?? workflow.lecturePasses ?? 2}
-                  onChange={(event) => setKindPasses(kind, Number(event.target.value))}
-                />
-                <small>{workflow.itemKindDefaults?.[kind]?.lecturePasses ? "Custom" : "Uses usual"}</small>
-              </label>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="settings-card" aria-labelledby="study-words-title">
-        <div className="settings-card-head">
-          <span className="settings-card-icon"><Sparkles size={ICON_SIZE.body} aria-hidden="true" /></span>
-          <div>
-            <h4 id="study-words-title">In your own words</h4>
-            <p>Anything the options above miss. AXOM keeps this text exactly as written. Suggestions below come from fixed word rules (not AI), are shown for you to confirm, and are never applied automatically.</p>
-          </div>
-        </div>
-        <label className="stack gap6">
-          <span className="field-label">Other: tell AXOM how you study</span>
-          <textarea className="field" rows={3} value={workflow.customContext ?? ""} placeholder="e.g. First pass on lecture day, Anki that night, a week later I redo the PQs." onChange={(event) => save({ customContext: event.target.value })} />
-        </label>
-        <StudyTextSuggestions workflow={workflow} onApply={(studyWorkflow) => store.updateProfile({ studyWorkflow })} />
-      </section>
-    </div>
   );
 }
 

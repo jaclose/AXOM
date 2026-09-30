@@ -1,0 +1,35 @@
+# Future additions
+
+Parked ideas, items waiting on JD, and additions worth considering. Anything here can move back into a branch plan.
+
+## Waiting on JD
+
+| ID | What is needed |
+|---|---|
+| I4-22 | A licence (or the creator's permission) for the alpha-waves track before it ships to everyone. Today it works on JD's own device: Soundscapes > Your sounds > add the file > "Put it in: Alpha focus". At 288 MB it would also need re-encoding (Opus at about 64-96 kbps) and streaming rather than bundling. |
+| I1-25b | Licence for any myWallpaper images shown on the journal iPad; until then, original or generated art. |
+| I3-64 | Where JD's NCRS sheets and Q-bank drives may be hosted (the repository is public). |
+| I3-17b | Codex's call on how new students get four starter tracker boxes (board request 2026-09-30). |
+| I4-18 | Production email settings (sign-up without a code, welcome email template) are a production change: design lands in the repo, JD applies it. |
+
+## Parked
+
+| ID | Idea | Why parked |
+|---|---|---|
+| I3-11 | Progress reveal animation (orbs per 30 min, fluid fill, speech bubble) | after Codex's targets model settles |
+| I3-06 | Day overview calendar with click-to-create study time | after Codex's event model |
+| I3-02 | DJ-style mixer, per-ear frequencies, saved mixes | engine supports per-ear tones; UI after the soundscape page restructure |
+| I3-66 | Token economy and cosmetic unlocks | needs the journal and library first |
+| I3-51 | Friends leaderboard | needs a backend and a privacy model |
+| I3-24b | Community submissions (templates, soundscapes, drives, question sets) to JD | needs a moderated backend |
+| I1-33 | Simulations tab | after exam UIs |
+| I1-02 | Daily medical fact | needs a reviewed, sourced fact set |
+| I3-23b | Dedicated, Step 2, Step 3 structures | research the exams' structure first |
+| I3-61, I3-62 | Study methods and habit visuals | after trackers settle |
+| M-03 | Custom notification HUD in the packaged app | native work, with Codex |
+
+## Worth considering (Claude)
+
+- A shared form system built from the setup primitives (tiles, chips, segments, summaries), so Settings, schedule import and journal setup reach the setup standard without one-off styling.
+- A small "directions check" script that validates the index (unique IDs, allowed statuses, commits that exist) so this bank cannot quietly drift.
+- A native screen-edge glow for timer completion in the packaged app (a transparent always-on-top window), matching the in-app cue.

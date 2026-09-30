@@ -57,10 +57,10 @@ describe("Settings information architecture", () => {
     useStore.getState().updateProfile({ studyWorkflow: { configured: true, methods, lecturePasses: 2, reviewAfterDays: 3, itemKindDefaults: { Lab: { lecturePasses: 3 } } } });
     render(<SettingsModal onClose={() => {}} initialTab="personalization" />);
     expect(screen.queryByText("Suggestions from your words")).toBeNull();
-    expect(screen.getByText(/keeps this text exactly as written.*fixed word rules \(not AI\).*never applied automatically/)).toBeTruthy();
+    expect(screen.getByText(/keeps this exactly as written.*fixed word rules \(not AI\).*never applied without you/)).toBeTruthy();
 
     const original = "Noji every day. I review a week later — I don't use Quizlet.";
-    fireEvent.change(screen.getByLabelText("Other: tell AXOM how you study"), { target: { value: original } });
+    fireEvent.change(screen.getByLabelText("In your own words"), { target: { value: original } });
     const region = screen.getByRole("region", { name: "Suggestions from your words" });
     expect(region.textContent).toContain("You wrote “Noji every day”");
     expect(region.textContent).toContain("You wrote “review a week later”");
@@ -81,7 +81,7 @@ describe("Settings information architecture", () => {
     useStore.getState().updateProfile({ studyWorkflow: { configured: true, methods: [{ id: "anki", enabled: false, usage: "Own cards" }], lecturePasses: 2, reviewAfterDays: 3 } });
     render(<SettingsModal onClose={() => {}} initialTab="personalization" />);
     const original = "  Anki before exams, UWorld after lectures, and I rewatch lectures 3 times.  ";
-    fireEvent.change(screen.getByLabelText("Other: tell AXOM how you study"), { target: { value: original } });
+    fireEvent.change(screen.getByLabelText("In your own words"), { target: { value: original } });
     fireEvent.click(screen.getByRole("button", { name: "Apply all" }));
 
     const workflow = useStore.getState().profile.studyWorkflow!;
@@ -328,7 +328,7 @@ describe("Settings information architecture", () => {
   it("opens Personalization on Study style and switches sub-sections without losing the tab", async () => {
     const user = userEvent.setup();
     render(<SettingsModal onClose={() => {}} initialTab="personalization" />);
-    expect(screen.getByText("Passes & review timing")).toBeTruthy();
+    expect(screen.getByRole("radiogroup", { name: "Usual lecture passes" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: /Daily rhythm/ }));
     expect(screen.getByRole("checkbox", { name: "Enable lock-in check-ins" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: /Program & lanes/ }));

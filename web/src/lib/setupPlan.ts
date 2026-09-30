@@ -5,6 +5,7 @@
 // sensible targets the student edits later.
 import type { AcademicStageId, DailySuccessRequirement, DashboardLayoutPreferences, EducationTrackId, ExperienceFocusId, Profile } from "./types";
 import type { OnboardingMode } from "./onboardingProgress";
+import { markFirstRunDay } from "./firstRun";
 import { makeDailyRequirement } from "./dailySuccess";
 import { adaptLegacyDashboardLayout, applyDashboardLayoutPreset } from "./dashboardWidgets";
 import { focusOption } from "./experience";
@@ -222,6 +223,7 @@ export function applySetup(choices: SetupChoices, mode: "first-run" | "rerun"): 
     seedStructure: false,
   });
   if (!firstRun) return;
+  markFirstRunDay(today);
   // SGU gets its real term/module map; every other path starts clean (the
   // Course Tracker's first-use card shows how to add or import a structure).
   const state = useStore.getState();
