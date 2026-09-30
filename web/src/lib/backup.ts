@@ -2,6 +2,7 @@
 // JSON export / import. The portable backup story for the browser-stored data.
 // ===========================================================================
 import type { ClockPreferences, DailyWordPuzzleState, NoctyriumState, TimeZonePreference } from "./types";
+import { normalizeNavOrder } from "./navLayout";
 import { normalizeHintFields } from "./dailyWordHints";
 import { normalizeEnergyChecks } from "./energyInsights";
 import { normalizePrimaryScopes } from "./trackerFocus";
@@ -357,6 +358,9 @@ export function parseImport(text: string): NoctyriumState {
       toolsCollapsed: typeof profile.toolsCollapsed === "boolean" ? profile.toolsCollapsed : undefined,
       prepCollapsed: typeof profile.prepCollapsed === "boolean" ? profile.prepCollapsed : undefined,
       dailyGamesCollapsed: typeof profile.dailyGamesCollapsed === "boolean" ? profile.dailyGamesCollapsed : undefined,
+      miscCollapsed: typeof profile.miscCollapsed === "boolean" ? profile.miscCollapsed : undefined,
+      navOrder: normalizeNavOrder(profile.navOrder),
+      navLayoutVersion: typeof profile.navLayoutVersion === "number" ? profile.navLayoutVersion : undefined,
       journalReviewTime: normalizeJournalReviewTime(profile.journalReviewTime),
       journalNotebook: profile.journalNotebook === undefined
         ? undefined

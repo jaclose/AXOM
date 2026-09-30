@@ -4,6 +4,7 @@
 // able, which is what makes the app "modular" rather than the fixed Swift build.
 // ===========================================================================
 import { create } from "zustand";
+import { normalizeNavOrder, upgradeNavLayout } from "./navLayout";
 import { normalizeHintFields } from "./dailyWordHints";
 import { normalizeEnergyChecks } from "./energyInsights";
 import { normalizePrimaryScopes, renamePrimaryScopes } from "./trackerFocus";
@@ -2314,7 +2315,8 @@ function normalizeProfile(value: unknown): Profile {
   ).id;
   const dashboardWidgetOrder = normalizeDashboardWidgetOrder(profile.dashboardWidgetOrder);
   const hiddenDashboardWidgets = normalizeDashboardWidgetList(profile.hiddenDashboardWidgets);
-  const hiddenNav = normalizeHiddenNav(profile.hiddenNav, educationTrack);
+  const navLayout = upgradeNavLayout(normalizeHiddenNav(profile.hiddenNav, educationTrack) ?? [], profile.navLayoutVersion);
+  const hiddenNav = navLayout.hiddenNav;
   const journalReviewTime = typeof profile.journalReviewTime === "string" && /^\d{2}:\d{2}$/.test(profile.journalReviewTime)
     ? profile.journalReviewTime
     : "20:00";
@@ -2353,6 +2355,9 @@ function normalizeProfile(value: unknown): Profile {
     toolsCollapsed: typeof profile.toolsCollapsed === "boolean" ? profile.toolsCollapsed : undefined,
     prepCollapsed: typeof profile.prepCollapsed === "boolean" ? profile.prepCollapsed : undefined,
     dailyGamesCollapsed: typeof profile.dailyGamesCollapsed === "boolean" ? profile.dailyGamesCollapsed : undefined,
+    miscCollapsed: typeof profile.miscCollapsed === "boolean" ? profile.miscCollapsed : undefined,
+    navOrder: normalizeNavOrder(profile.navOrder),
+    navLayoutVersion: navLayout.navLayoutVersion,
     journalReviewTime,
     journalNotebook: profile.journalNotebook === undefined
       ? undefined

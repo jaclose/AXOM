@@ -118,8 +118,11 @@ export const SIDEBAR_LEARN = ["courses", "tracker", "questions", "anki"] as cons
 export const SIDEBAR_REVIEW = ["productivity", "journal", "reports"] as const;
 export const SIDEBAR_TOP = [...SIDEBAR_TODAY, ...SIDEBAR_LEARN, ...SIDEBAR_REVIEW];
 export const SIDEBAR_PREP = ["step", "premed", "appchecker"];
-export const SIDEBAR_TOOLS = ["tasks", "habits", "soundscapes", "methods", "resources", "prompts", "integrations", "leaderboards"];
-export const SIDEBAR_BOTTOM = ["folders", "building"];
+// Tools are the daily-use tools, Soundscapes first (JD, Ideas 1 + 3). Rarely
+// used modules live in Misc and start hidden (lib/navLayout.ts).
+export const SIDEBAR_TOOLS = ["soundscapes", "habits", "resources", "integrations", "leaderboards"];
+export const SIDEBAR_MISC = ["tasks", "methods", "prompts", "folders"];
+export const SIDEBAR_BOTTOM = ["building"];
 // Dashboard can't be hidden; everything else is subscribe/unsubscribe-able.
 export const SIDEBAR_LOCKED = new Set(["dashboard"]);
 

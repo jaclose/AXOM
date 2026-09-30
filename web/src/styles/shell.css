@@ -404,3 +404,14 @@
 @media (prefers-reduced-motion: reduce) {
   .route-error-card { animation: none; }
 }
+
+/* --- Daily game meta in the sidebar (I3-58): countdown + streak --- */
+.nav-game-meta {
+  display: inline-flex; align-items: center; gap: 6px; margin-left: auto; padding-left: 6px;
+  color: var(--text-45); font-size: var(--fs-tiny); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums;
+}
+.nav-game-streak { display: inline-flex; align-items: center; gap: 2px; color: #f0a35e; }
+.nav-game-streak svg { color: #ff8a3d; }
+/* Customize: items can be dragged within their section. */
+.nav-item.manage[draggable="true"] { cursor: grab; }
+.nav-item.manage[draggable="true"]:active { cursor: grabbing; }

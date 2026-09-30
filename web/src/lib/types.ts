@@ -739,6 +739,11 @@ export interface Profile {
   toolsCollapsed?: boolean;
   prepCollapsed?: boolean;
   dailyGamesCollapsed?: boolean;
+  miscCollapsed?: boolean;
+  /** The learner's sidebar order (ids); unmoved items keep their default place. */
+  navOrder?: string[];
+  /** Sidebar layout generation; see lib/navLayout.ts. */
+  navLayoutVersion?: number;
   // First-launch onboarding
   onboarded: boolean;
   tourDone?: boolean; // global guided tour completed or skipped
