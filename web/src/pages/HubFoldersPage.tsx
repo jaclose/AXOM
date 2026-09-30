@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { ChangeEvent } from "react";
 import {
-  Archive, ArrowDown, ArrowUp, Check, Clock3, Copy, ExternalLink, LayoutGrid, List, Pencil, Plus, Search, Star, Trash2,
+  Archive, ArrowDown, ArrowUp, Check, Clock3, Copy, ExternalLink, FolderOpen, Info, LayoutGrid, List, Loader2, Pencil, Plus, Search, Star, Trash2,
 } from "lucide-react";
 import { useStore } from "../lib/store";
 import { GlassCard, GButton, GhostButton, EmptyState } from "../components/ui/primitives";
@@ -10,6 +10,10 @@ import { Icon, ICON_NAMES } from "../lib/icons";
 import type { HubFolder } from "../lib/types";
 import { ICON_SIZE } from "../lib/iconSize";
 import { isTauriShell as isDesktopShell } from "../lib/desktopShell";
+
+import { localHubFolderPath } from "../lib/localHubFolders";
+import { hubFolderInfo, openHubFolder, safeFolderLink, validFolderPath, type HubFolderInfo } from "../lib/hubFolders";
+import "../styles/hub-native.css";
 
 const FOLDER_COLORS: Array<{ label: string; value: string }> = [
   { label: "Cool", value: "var(--cyan)" },
@@ -38,10 +42,15 @@ export function HubFoldersPage() {
   const [query, setQuery] = useState("");
   const [group, setGroup] = useState<string | null>(null);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
-  const [view, setView] = useState<ViewMode>(() => (localStorage.getItem("axom.folders.view") === "list" ? "list" : "grid"));
+  const [view, setView] = useState<ViewMode>(() => { try { return localStorage.getItem("axom.folders.view") === "list" ? "list" : "grid"; } catch { return "grid"; } });
   const [copied, setCopied] = useState<string | null>(null);
-  const activeFolders = s.folders.filter((folder) => !folder.archived);
-  const archivedFolders = s.folders.filter((folder) => folder.archived);
+  const [pending, setPending] = useState<string | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [details, setDetails] = useState<Record<string, { path: string; info: HubFolderInfo }>>({});
+  const desktop = isDesktopShell();
+  const deviceFolders = s.folders.map((folder) => ({ ...folder, localPath: localHubFolderPath(folder) }));
+  const activeFolders = deviceFolders.filter((folder) => !folder.archived);
+  const archivedFolders = deviceFolders.filter((folder) => folder.archived);
   const groups = useMemo(() => [...new Set(activeFolders.map((folder) => folder.group ?? "Ungrouped"))].sort(), [activeFolders]);
   const visible = filterFolders(activeFolders, query, group, favoritesOnly);
   const favorites = visible.filter((folder) => folder.favorite);
@@ -86,8 +95,34 @@ export function HubFoldersPage() {
     }
   }
 
-  function renderFolder(folder: HubFolder, index: number, list: HubFolder[]) {
-    const linkTarget = folder.link || (folder.localPath && isDesktopShell() ? fileUrl(folder.localPath) : "");
+  async function openLocal(folder: HubFolder, reveal = false) {
+    if (!folder.localPath) return;
+    setPending(folder.id);
+    setErrors((previous) => ({ ...previous, [folder.id]: "" }));
+    try {
+      await openHubFolder(folder.localPath, reveal);
+      markOpened(folder);
+    } catch (error) {
+      setErrors((previous) => ({ ...previous, [folder.id]: error instanceof Error ? error.message : String(error) }));
+    } finally { setPending(null); }
+  }
+
+  async function inspectLocal(folder: HubFolder) {
+    if (!folder.localPath) return;
+    setPending(folder.id);
+    setErrors((previous) => ({ ...previous, [folder.id]: "" }));
+    try {
+      const info = await hubFolderInfo(folder.localPath);
+      setDetails((previous) => ({ ...previous, [folder.id]: { path: folder.localPath!, info } }));
+    } catch (error) {
+      setErrors((previous) => ({ ...previous, [folder.id]: error instanceof Error ? error.message : String(error) }));
+    } finally { setPending(null); }
+  }
+
+  function renderFolder(folder: HubFolder) {
+    const linkTarget = safeFolderLink(folder.link);
+    const cached = details[folder.id];
+    const info = cached?.path === folder.localPath ? cached?.info : undefined;
     return (
       <GlassCard pad hoverable key={folder.id} className={`folder-card folder-card--${view}`} style={{ "--folder-color": folder.color || "var(--cyan)" } as React.CSSProperties}>
         <div className="folder-card-top">
@@ -100,18 +135,31 @@ export function HubFoldersPage() {
             <GhostButton title={folder.favorite ? "Unfavorite" : "Favorite"} aria-label={`${folder.favorite ? "Unfavorite" : "Favorite"} ${folder.name}`} onClick={() => s.updateFolder(folder.id, { favorite: !folder.favorite })}>
               <Star size={ICON_SIZE.body} fill={folder.favorite ? "currentColor" : "none"} />
             </GhostButton>
-            <GhostButton title="Move up" aria-label={`Move ${folder.name} up`} onClick={() => move(folder, -1)} disabled={index === 0 && list === activeFolders}><ArrowUp size={ICON_SIZE.body} /></GhostButton>
-            <GhostButton title="Move down" aria-label={`Move ${folder.name} down`} onClick={() => move(folder, 1)}><ArrowDown size={ICON_SIZE.body} /></GhostButton>
+            <GhostButton title="Move up" aria-label={`Move ${folder.name} up`} onClick={() => move(folder, -1)} disabled={activeFolders[0]?.id === folder.id}><ArrowUp size={ICON_SIZE.body} /></GhostButton>
+            <GhostButton title="Move down" aria-label={`Move ${folder.name} down`} onClick={() => move(folder, 1)} disabled={activeFolders.at(-1)?.id === folder.id}><ArrowDown size={ICON_SIZE.body} /></GhostButton>
             <GhostButton title="Edit" aria-label={`Edit ${folder.name}`} onClick={() => setEditing(folder)}><Pencil size={ICON_SIZE.body} /></GhostButton>
             <GhostButton title="Archive" aria-label={`Archive ${folder.name}`} onClick={() => s.updateFolder(folder.id, { archived: true })}><Archive size={ICON_SIZE.body} /></GhostButton>
           </div>
         </div>
         {folder.localPath && <div className="fc-path truncate" title={folder.localPath}>{folder.localPath}</div>}
+        {folder.localPath && <div className="folder-native-meta">
+          <span>{desktop ? "Local folder · this device" : "Local folder · desktop required"}</span>
+          {info && <span>{info.entries.toLocaleString()}{info.entriesCapped ? "+" : ""} items{info.modifiedAt ? ` · Modified ${new Date(info.modifiedAt * 1000).toLocaleDateString()}` : ""}</span>}
+        </div>}
+        {folder.link && !linkTarget && <p className="folder-native-meta">App links can be copied and opened in their own app.</p>}
+        {errors[folder.id] && <p className="folder-error" role="alert">{errors[folder.id]}</p>}
         <div className="folder-card-foot">
           <div className="row wrap gap6">
             {(folder.tags ?? []).slice(0, 3).map((tag) => <span className="tag neutral" key={tag}>#{tag}</span>)}
           </div>
           <div className="folder-actions">
+            {folder.localPath && desktop && <>
+              <GButton variant="primary" size="sm" disabled={pending === folder.id} onClick={() => void openLocal(folder)} aria-label={`Open ${folder.name} in file manager`}>
+                {pending === folder.id ? <Loader2 className="folder-spinner" size={ICON_SIZE.body} /> : <FolderOpen size={ICON_SIZE.body} />} Open folder
+              </GButton>
+              <GhostButton disabled={pending === folder.id} onClick={() => void openLocal(folder, true)} aria-label={`Reveal ${folder.name} in file manager`} title="Reveal folder"><ExternalLink size={ICON_SIZE.body} /></GhostButton>
+              <GhostButton disabled={pending === folder.id} onClick={() => void inspectLocal(folder)} aria-label={`Refresh details for ${folder.name}`} title="Read folder details"><Info size={ICON_SIZE.body} /></GhostButton>
+            </>}
             {(folder.localPath || folder.link) && (
               <GButton size="sm" onClick={() => void copyPath(folder)} aria-label={`Copy ${folder.localPath ? "path" : "link"} for ${folder.name}`}>
                 {copied === folder.id ? <><Check size={ICON_SIZE.body} /> Copied</> : <><Copy size={ICON_SIZE.body} /> Copy {folder.localPath ? "path" : "link"}</>}
@@ -134,7 +182,7 @@ export function HubFoldersPage() {
         <div className="sec-row">
           <div>
             <div className="panel-title">Hub Folders</div>
-            <div className="panel-sub">One place for the folders, drives, repos, and sites you open every day. Links open directly; local folders copy their path{isDesktopShell() ? " or open in the desktop app" : " (browsers can’t open local folders)"}.</div>
+            <div className="panel-sub">One place for the folders, drives, repos, and sites you open every day. Links open directly. {desktop ? "Local folders open in your file manager." : "Local folders open in the desktop app; copy their path here."}</div>
           </div>
           <GButton variant="primary" size="sm" onClick={() => setEditing("new")}><Plus size={ICON_SIZE.body} /> Add folder</GButton>
         </div>
@@ -159,7 +207,7 @@ export function HubFoldersPage() {
           <div className="folders-recent">
             <span><Clock3 size={ICON_SIZE.microInline} aria-hidden="true" /> Recently used</span>
             {recent.map((folder) => (
-              <button type="button" key={folder.id} onClick={() => folder.link ? (markOpened(folder), window.open(folder.link, "_blank", "noopener")) : void copyPath(folder)}>
+              <button type="button" key={folder.id} onClick={() => folder.localPath && desktop ? void openLocal(folder) : safeFolderLink(folder.link) ? (markOpened(folder), window.open(safeFolderLink(folder.link), "_blank", "noopener,noreferrer")) : void copyPath(folder)}>
                 <Icon name={folder.icon} size={ICON_SIZE.microInline} /> {folder.name}
               </button>
             ))}
@@ -173,14 +221,14 @@ export function HubFoldersPage() {
       {favorites.length > 0 && (
         <section className="folders-section" aria-label="Pinned folders">
           <h3><Star size={ICON_SIZE.body} aria-hidden="true" /> Pinned</h3>
-          <div className={view === "grid" ? "grid grid-courses" : "folders-list"}>{favorites.map((folder, index) => renderFolder(folder, index, favorites))}</div>
+          <div className={view === "grid" ? "grid grid-courses" : "folders-list"}>{favorites.map((folder) => renderFolder(folder))}</div>
         </section>
       )}
       {sections.map(([name, folders]) => (
         <section className="folders-section" key={name} aria-label={`${name} folders`}>
           <h3>{name} <small>{folders.length}</small></h3>
           <div className={view === "grid" ? "grid grid-courses" : "folders-list"}>
-            {folders.map((folder, index) => renderFolder(folder, index, folders))}
+            {folders.map((folder) => renderFolder(folder))}
             {name === sections.at(-1)?.[0] && view === "grid" && (
               <button type="button" className="add-tile" onClick={() => setEditing("new")} style={{ minHeight: 132 }}>
                 <Plus size={ICON_SIZE.emphasis} /> Add folder
@@ -228,14 +276,15 @@ function FolderEditor({ folder, groups, onClose }: { folder: HubFolder | null; g
   const [tags, setTags] = useState((folder?.tags ?? []).join(", "));
   const [favorite, setFavorite] = useState(folder?.favorite ?? false);
   const linkInvalid = Boolean(link.trim()) && !/^(https?:\/\/|mailto:|obsidian:|notion:)/i.test(link.trim());
+  const pathInvalid = Boolean(localPath.trim()) && !validFolderPath(localPath.trim());
 
   function save() {
-    if (!name.trim() || linkInvalid) return;
+    if (!name.trim() || linkInvalid || pathInvalid) return;
     const payload = {
       name: name.trim(),
       description: description.trim(),
       link: link.trim() || undefined,
-      localPath: localPath.trim() || undefined,
+      localPath: localPath.trim(),
       icon,
       color,
       group: group.trim() || undefined,
@@ -259,7 +308,7 @@ function FolderEditor({ folder, groups, onClose }: { folder: HubFolder | null; g
 
   return (
     <Modal title={folder ? "Edit folder" : "Add folder"} onClose={onClose}
-      footer={<><GButton onClick={onClose}>Cancel</GButton><GButton variant="primary" onClick={save} disabled={!name.trim() || linkInvalid}>Save</GButton></>}>
+      footer={<><GButton onClick={onClose}>Cancel</GButton><GButton variant="primary" onClick={save} disabled={!name.trim() || linkInvalid || pathInvalid}>Save</GButton></>}>
       <Field label="Name" value={name} list="hub-folder-name-options" onChange={(e) => setName(e.target.value)} autoFocus />
       <datalist id="hub-folder-name-options">
         {s.folders.map((existing) => <option key={existing.id} value={existing.name} />)}
@@ -268,6 +317,7 @@ function FolderEditor({ folder, groups, onClose }: { folder: HubFolder | null; g
       <Field label="Link (optional)" placeholder="https://drive.google.com/…" value={link} onChange={(e) => setLink(e.target.value)} />
       {linkInvalid && <div className="field-error" role="alert">Links should start with https:// (or mailto:, obsidian:, notion:).</div>}
       <Field label="Local path (optional)" placeholder="/Users/you/Medical School/01 BPM 501" value={localPath} onChange={(e) => setLocalPath(e.target.value)} />
+      {pathInvalid && <div className="field-error" role="alert">Use an absolute folder path without parent-directory shortcuts.</div>}
       <div className="row gap12">
         <Field label="Group" placeholder="Study folders, Drives…" value={group} list="hub-folder-groups" onChange={(e) => setGroup(e.target.value)} />
         <datalist id="hub-folder-groups">{groups.map((name) => <option key={name} value={name} />)}</datalist>
@@ -293,10 +343,4 @@ function FolderEditor({ folder, groups, onClose }: { folder: HubFolder | null; g
       </SelectField>
     </Modal>
   );
-}
-
-function fileUrl(path?: string): string {
-  if (!path) return "";
-  if (/^(https?:|file:)/i.test(path)) return path;
-  return `file://${encodeURI(path)}`;
 }

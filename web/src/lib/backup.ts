@@ -1,3 +1,4 @@
+import { withoutLocalFolderPath } from "./localHubFolders";
 // ===========================================================================
 // JSON export / import. The portable backup story for the browser-stored data.
 // ===========================================================================
@@ -48,6 +49,7 @@ export function toPortableState(state: NoctyriumState): NoctyriumState {
   const payload: Record<string, unknown> = {};
   const src = state as unknown as Record<string, unknown>;
   for (const k of DATA_KEYS) payload[k] = src[k];
+  payload.folders = (state.folders ?? []).map(withoutLocalFolderPath);
   return payload as unknown as NoctyriumState;
 }
 

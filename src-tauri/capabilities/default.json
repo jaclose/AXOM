@@ -4,6 +4,8 @@
   "description": "Local AXOM main window only. Remote web content has no native permissions.",
   "windows": ["main"],
   "permissions": [
+    "allow-hub-folders",
+    "allow-app-shell",
     "core:default",
     "sql:default",
     "sql:allow-execute",

@@ -1,3 +1,4 @@
+mod hub_folders;
 mod menu_bar_pill;
 mod menu_bar_timer;
 mod webview_dialogs;
@@ -85,6 +86,8 @@ pub fn run() {
         .manage(menu_bar_timer::MenuBarTimerState::default())
         .invoke_handler(tauri::generate_handler![
             desktop_status,
+            hub_folders::hub_folder_open,
+            hub_folders::hub_folder_info,
             menu_bar_timer::menu_bar_timer_update,
             menu_bar_timer::menu_bar_timer_clear,
         ])

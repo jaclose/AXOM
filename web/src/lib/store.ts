@@ -1,3 +1,4 @@
+import { localHubFolderPath, localizeHubFolder } from "./localHubFolders";
 // ===========================================================================
 // The single source of truth. Zustand + an IndexedDB-first persistent vault so
 // every change survives reloads, works offline, and needs no backend. All lists are CRUD-
@@ -501,7 +502,7 @@ export const useStore = create<Store>()(
 
       addFolder: (f) => set((s) => upsertFolder(s.folders, f)),
       updateFolder: (id, patch) =>
-        set((s) => ({ folders: sortFolders(s.folders.map((f) => (f.id === id ? { ...f, ...patch, updatedAt: now() } : f))) })),
+        set((s) => ({ folders: sortFolders(s.folders.map((f) => (f.id === id ? localizeHubFolder({ ...f, ...patch, updatedAt: now() }, "localPath" in patch) : f))) })),
       removeFolder: (id) => set((s) => ({ folders: s.folders.filter((f) => f.id !== id) })),
 
       recordStudyActivity: (activity, replace = false) => set((s) => applyStudyActivity(s, activity, replace)),
@@ -1625,6 +1626,11 @@ export const useStore = create<Store>()(
       version: SCHEMA_VERSION,
       storage: createJSONStorage(() => localVaultStorage),
       migrate: (persisted, fromVersion) => migratePersistedState(persisted, fromVersion),
+      // Same-schema installs also need the additive device-path migration.
+      merge: (persisted, current) => {
+        const saved = persisted as Partial<NoctyriumState> | undefined;
+        return { ...current, ...saved, folders: normalizeFolders(saved?.folders ?? current.folders) };
+      },
       onRehydrateStorage: () => {
         storeHydration.start();
         return (state, error) => {
@@ -2216,26 +2222,26 @@ function upsertFolder(folders: HubFolder[], folder: Omit<HubFolder, "id">): { fo
   if (existing) {
     return {
       folders: sortFolders(folders.map((candidate) =>
-        candidate.id === existing.id ? { ...candidate, ...folder, id: candidate.id, updatedAt: timestamp } : candidate)),
+        candidate.id === existing.id ? localizeHubFolder({ ...candidate, ...folder, id: candidate.id, updatedAt: timestamp }, true) : candidate)),
     };
   }
   const sortOrder = typeof folder.sortOrder === "number" ? folder.sortOrder : nextFolderSortOrder(folders);
   return {
     folders: sortFolders([
       ...folders,
-      { ...folder, id: uid(), sortOrder, archived: folder.archived ?? false, favorite: folder.favorite ?? false, tags: folder.tags ?? [], createdAt: timestamp, updatedAt: timestamp },
+      localizeHubFolder({ ...folder, id: uid(), sortOrder, archived: folder.archived ?? false, favorite: folder.favorite ?? false, tags: folder.tags ?? [], createdAt: timestamp, updatedAt: timestamp }, true),
     ]),
   };
 }
 
 function normalizeFolders(value: unknown): HubFolder[] {
   const timestamp = new Date().toISOString();
-  return sortFolders(arrayOfRecords(value).map((record, index) => ({
+  return sortFolders(arrayOfRecords(value).map((record, index) => localizeHubFolder({
     id: typeof record.id === "string" && record.id ? record.id : uid(),
     name: String(record.name ?? "Untitled folder").trim() || "Untitled folder",
     description: typeof record.description === "string" ? record.description : undefined,
     link: typeof record.link === "string" ? record.link : undefined,
-    localPath: typeof record.localPath === "string" ? record.localPath : "",
+    localPath: typeof record.localPath === "string" ? record.localPath : undefined,
     icon: typeof record.icon === "string" ? record.icon : "Folder",
     color: typeof record.color === "string" ? record.color : "var(--cyan)",
     tags: Array.isArray(record.tags) ? record.tags.filter((item): item is string => typeof item === "string") : [],
@@ -2260,8 +2266,9 @@ function nextFolderSortOrder(folders: HubFolder[]): number {
   return folders.reduce((max, folder) => Math.max(max, folder.sortOrder ?? 0), -1) + 1;
 }
 
-function folderIdentity(folder: Pick<HubFolder, "name" | "link" | "localPath">): string {
-  const destination = String(folder.link || folder.localPath || "").trim().toLowerCase();
+function folderIdentity(folder: Pick<HubFolder, "name" | "link" | "localPath"> & Partial<Pick<HubFolder, "id">>): string {
+  const path = folder.id ? localHubFolderPath({ id: folder.id, localPath: folder.localPath }) : folder.localPath;
+  const destination = String(folder.link || path || "").trim().toLowerCase();
   return destination || cleanText(folder.name);
 }
 

@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-app-shell"
+description = "Preserve AXOM desktop status and native timer controls in the local main window."
+commands.allow = ["desktop_status", "menu_bar_timer_update", "menu_bar_timer_clear"]

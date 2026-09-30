@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-hub-folders"
+description = "Open or reveal a validated local directory and read its summary from AXOM's main window. No shell commands or file contents."
+commands.allow = ["hub_folder_open", "hub_folder_info"]
