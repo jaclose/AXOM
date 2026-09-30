@@ -1,0 +1,39 @@
+/* Timer finish glow (components/shell/TimerEdgeGlow.tsx): a crisp emerald line
+   at the very edge, softening inward, that blooms and fades. Pointer-transparent
+   and above everything for its two and a half seconds. */
+.timer-edge-glow {
+  --cue-green: 74, 222, 128;
+  position: fixed;
+  inset: 0;
+  z-index: 450;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow:
+    inset 0 0 0 1.5px rgba(var(--cue-green), .85),
+    inset 0 0 18px 2px rgba(var(--cue-green), .5),
+    inset 0 0 72px 10px rgba(var(--cue-green), .24),
+    inset 0 0 190px 24px rgba(var(--cue-green), .1);
+  animation: timer-edge-glow 2.6s cubic-bezier(.22, 1, .36, 1) forwards;
+}
+@keyframes timer-edge-glow {
+  0% { opacity: 0; }
+  12% { opacity: 1; }
+  40% { opacity: .9; }
+  100% { opacity: 0; }
+}
+:root[data-theme="light"] .timer-edge-glow { --cue-green: 22, 163, 74; }
+@media (prefers-reduced-motion: reduce) { .timer-edge-glow { animation: none; opacity: .75; } }
+:root[data-motion="reduce"] .timer-edge-glow { animation: none; opacity: .75; }
+
+.timer-cue-rows { display: grid; gap: 8px; margin-top: 10px; }
+.timer-cue-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+}
+.timer-cue-row b { display: block; color: var(--text); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
+.timer-cue-row small { color: var(--text-45); font-size: var(--fs-tiny); line-height: 1.4; }
