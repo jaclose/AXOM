@@ -4,6 +4,8 @@ Bug fixes, newest first. Root cause stated so the same class of bug is easy to s
 
 | Date | Fix | Root cause | Commit |
 |---|---|---|---|
+| 2026-10-01 | "I am locked out" no longer breaks onto two lines in the Locked In card | the three answers sat in equal columns and the new wording is longer than "I drifted"; found by looking at the card, not by its tests | 06c7d61 |
+| 2026-10-01 | The stage sphere reads as glass on pale scenes (water, smoke), not as a ring with a speck | its shading only showed on dark scenes; it now shows the scene through the ball, small, soft and upside down | 657c8c3 |
 | 2026-10-01 | Account uploads are no longer refused for a large workspace (server). Needs the migration applied in production | the storage bound refused every new version once history passed 50 MB, raised as SQLSTATE 54000, which reads as HTTP 500; history was also measured by converting every kept snapshot to text on each call | 28c004d |
 | 2026-10-01 | A refused or failing account upload is sent once and then waits, instead of re-uploading the whole workspace for ever | every failure was treated as temporary: retry on a 1 s to 60 s clock, again 8 s after every change, from every tab, with no memory across reloads (13 uploads in two minutes in a browser; now 1) | e932a9d |
 | 2026-10-01 | A failed "Protect now" explains itself; it used to leave "Protecting now…" on screen | the notice was only replaced on success | e932a9d |

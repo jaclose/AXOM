@@ -2,6 +2,14 @@
 
 Done and on main, by wave. VERIFIED means exercised in a real browser (or a real build for native items); SHIPPED means merged with automated tests but not yet exercised the way a person would meet it. Each ID links back to the bank (01-ideas/INDEX.md).
 
+## Wave 1.3.2 · 2026-10-01 · tag wave-1.3.2
+
+| ID | Done | Level | Commit |
+|---|---|---|---|
+| I5-27 | Your sounds keep a rename and a preset assignment across a reload | VERIFIED (browser test) | f90e7be |
+| I5-28, I5-11, I5-12 | Locked In: quiet chime, "I am locked out" on one line | VERIFIED (browser test, and seen at four widths) | 06c7d61 |
+| I5-26 | Stage orb checked by eye at three widths and full screen; reads as glass on pale scenes | VERIFIED | 657c8c3 |
+
 ## Wave 1.3.1 · 2026-10-01 · tag wave-1.3.1
 
 | ID | Done | Level | Commit |

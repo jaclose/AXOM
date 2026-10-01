@@ -54,9 +54,9 @@ Last full review: 2026-10-01, with Wave 1.3.1 (the work order of 2026-10-01 bank
 | ID | Idea | Status | Where |
 |---|---|---|---|
 | I1-01, I2-01 | "Are you locked in?" check-in, persistent, on whatever screen | CODEX (VERIFIED by Codex) | a89819e (Wave 1.1) |
-| I5-11 | An elegant sound when the Locked In check-in pops up | SHIPPED | Wave 1.3 (1fbdcac): three quiet rising bells, behind the timer-sound preference; unit-tested, not yet heard in a real session |
-| I5-12 | "I am locked out" with the tired face as an answer to "Are you locked in?" | SHIPPED | Wave 1.3 (1fbdcac): replaces "I drifted"; the recorded response is unchanged |
-| I5-28 | Locked In keeps the quiet chime and "I am locked out", verified in a real browser; never obnoxious or gamified | PLANNED | audit after Wave 1.3.1 |
+| I5-11 | An elegant sound when the Locked In check-in pops up | VERIFIED | Wave 1.3 (1fbdcac): three quiet rising bells, behind the timer-sound preference. Wave 1.3.2 (06c7d61) checks in a browser what the page asks the audio engine to play; JD has not yet said how it sounds to him |
+| I5-12 | "I am locked out" with the tired face as an answer to "Are you locked in?" | VERIFIED | Wave 1.3 (1fbdcac): replaces "I drifted"; the recorded response is unchanged. Wave 1.3.2 (06c7d61): one line at every width |
+| I5-28 | Locked In keeps the quiet chime and "I am locked out", verified in a real browser; never obnoxious or gamified | VERIFIED | Wave 1.3.2 (06c7d61): three bells under 4% of full scale, silent when timer sounds are off (`e2e/locked-in-cue.spec.ts`); the answer had been wrapping onto two lines, fixed |
 | I3-01 | Tracker boxes stay still while you tap | VERIFIED | 0ab96bc |
 | I3-01b | Once settled, trackers move up by how much is completed | SHIPPED | Wave 1.2 (693bfde) |
 | I3-39 | Pomodoro logging no longer doubles study time | VERIFIED | f095e48 |
@@ -149,8 +149,8 @@ Last full review: 2026-10-01, with Wave 1.3.1 (the work order of 2026-10-01 bank
 | I1-06, I3-08 | Your own soundscapes (files; YouTube by embed only) | PARTIAL | files shipped (09d65a1); YouTube embed-only by design |
 | I5-01 | Assigning one of your sounds to a preset works, and renaming always saves | VERIFIED | Wave 1.3 (255d527): the file becomes what that preset plays, even over an earlier pick; rename saves on Enter, the tick or clicking away |
 | I5-02 | Stage sphere and ring take the scene's colours, sit centred, and move with the sound | VERIFIED | Wave 1.3 (932b212): measured at four window sizes and full screen (centre within 1 px, nothing inside the orb's reach, 60 fps); look reviewed from screenshots by a second agent, not by JD yet |
-| I5-26 | The stage orb is verified in a real browser, not redone: centred, a true circle, the scene's colours, sound-reactive, elegant, no collisions at desktop / tablet / phone widths, reduced motion | PLANNED | audit after Wave 1.3.1 |
-| I5-27 | Assigning one of your sounds to a preset changes what it plays, and a rename persists, both across a reload | PLANNED | audit after Wave 1.3.1 (Wave 1.3 verified both without the reload) |
+| I5-26 | The stage orb is verified in a real browser, not redone: centred, a true circle, the scene's colours, sound-reactive, elegant, no collisions at desktop / tablet / phone widths, reduced motion | VERIFIED | Wave 1.3.2 (657c8c3): looked at by eye at 1440, 1024 and 390 px, four scenes, full screen. Centre, circle, colours and collisions held; on pale scenes the sphere was a ring with a speck, so it now shows the scene through the glass. 60 fps, still frame under reduced motion |
+| I5-27 | Assigning one of your sounds to a preset changes what it plays, and a rename persists, both across a reload | VERIFIED | Wave 1.3.2 (f90e7be): nothing had regressed; now a browser test (`e2e/your-sounds-persistence.spec.ts`) |
 | I4-22 | JD's alpha-waves track as the default pinned intro soundscape | NEEDS JD | licence for a YouTube-sourced track in a public app; works today on JD's device via Your sounds |
 | I4-23 | Fullscreen / larger soundscape experience | PLANNED | coordinate with Codex's page restructure |
 | I4-24 | Opening films: keep only the finished renders (JD: "remove these, terrible quality") | VERIFIED | Wave 1.2 (9eda971) |

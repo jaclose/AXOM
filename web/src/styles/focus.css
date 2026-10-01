@@ -87,7 +87,10 @@
   border-radius: var(--radius-pill);
 }
 .focus-checkin-progress svg { color: var(--gold); }
-.focus-checkin-actions { position: relative; display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 7px; }
+/* The middle answer ("I am locked out") is the longest: it takes the width its
+   words need and the other two share the rest, so no label breaks in two. */
+.focus-checkin-actions { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) max-content minmax(0, 1fr); gap: 7px; }
+.focus-checkin-actions button { white-space: nowrap; }
 .focus-checkin-actions button,
 .focus-checkin-restart {
   min-height: 44px;
@@ -132,9 +135,14 @@
 
 @media (max-width: 520px) {
   .focus-checkin { gap: 10px; padding: 16px 14px 12px; }
-  .focus-checkin-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .focus-checkin-actions { gap: 6px; }
   .focus-checkin-actions button { padding: 0 5px; gap: 4px; font-size: var(--fs-xs); }
   .focus-checkin-actions svg { width: 14px; flex-shrink: 0; }
+}
+/* The narrowest phones cannot hold three one-line labels: equal columns, and the words may wrap. */
+@media (max-width: 359px) {
+  .focus-checkin-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .focus-checkin-actions button { white-space: normal; }
 }
 @media (prefers-reduced-motion: reduce) {
   .focus-checkin, .focus-checkin-glow, .focus-checkin.prompt .focus-checkin-icon { animation: none; }
