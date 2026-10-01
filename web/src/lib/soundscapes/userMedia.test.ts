@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { labelFromFileName, validateUserFile, MAX_USER_SOUND_BYTES } from "./userMedia";
+import { labelFromFileName, validateUserFile, MAX_USER_SOUND_BYTES, summarizeUserMediaAsset } from "./userMedia";
 import { SOUNDSCAPES, applyUserSounds, isPlayable, versionOf } from "./presets";
 import { SCENES, applyUserScenes, sceneById, sceneUrl } from "./scenes";
 
@@ -19,6 +19,17 @@ describe("your own sounds and backgrounds", () => {
     expect(validateUserFile({ type: "image/png", size: 1024 }, "sound")).toMatch(/audio file/);
     expect(validateUserFile({ type: "audio/mpeg", size: MAX_USER_SOUND_BYTES + 1 }, "sound")).toMatch(/limit/);
     expect(validateUserFile({ type: "image/jpeg", size: 2048 }, "scene")).toBeNull();
+  });
+
+  it("tracks optimization metadata and percent savings for imported media", () => {
+    const result = summarizeUserMediaAsset({ name: "Focus Mix.mp3", type: "audio/mpeg", size: 10_000_000 }, "sound");
+    expect(result.kind).toBe("sound");
+    expect(result.processingStatus).toBe("original");
+    expect(result.sourceSize).toBe(10_000_000);
+    expect(result.optimizedSize).toBeGreaterThanOrEqual(0);
+    expect(result.percentSaved).toBeGreaterThanOrEqual(0);
+    expect(result.percentSaved).toBeLessThanOrEqual(100);
+    expect(result.provenance).toMatch(/device|local/i);
   });
 
   it("puts a file in front of the preset it belongs to, and restores the preset when removed", () => {

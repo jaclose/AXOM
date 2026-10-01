@@ -22,6 +22,7 @@ export const USER_SOUND_TYPES = /^audio\/|^video\/(mp4|webm|quicktime)$/;
 export const USER_SCENE_TYPES = /^image\/(png|jpe?g|webp|gif|avif)$|^video\/(mp4|webm|quicktime)$/;
 
 export type UserMediaKind = "sound" | "scene";
+export type MediaOptimizationStatus = "original" | "optimized" | "skipped" | "failed";
 
 export interface UserMediaMeta {
   id: string;
@@ -30,6 +31,18 @@ export interface UserMediaMeta {
   mime: string;
   size: number;
   addedAt: string;
+  /** A description of how the file was prepared before playback. */
+  processingStatus?: MediaOptimizationStatus;
+  /** Original stored size before any local optimization pass. */
+  sourceSize?: number;
+  /** Estimated size after on-device optimization or transcoding. */
+  optimizedSize?: number;
+  /** Percent saved by the local optimization workflow, 0–100. */
+  percentSaved?: number;
+  /** Duration in seconds when known. */
+  durationSeconds?: number;
+  /** Local provenance note for a file that stays on this device. */
+  provenance?: string;
   /** Sounds: which preset it leads ("yours" = its own shelf). */
   presetId?: string;
 }
@@ -38,7 +51,9 @@ interface UserMediaRecord extends UserMediaMeta {
   blob: Blob;
 }
 
-type UserMediaDetails = Partial<Pick<UserMediaMeta, "name" | "presetId">>;
+type UserMediaDetails = Partial<Pick<UserMediaMeta,
+  "name" | "presetId" | "processingStatus" | "sourceSize" | "optimizedSize" | "percentSaved" | "durationSeconds" | "provenance"
+>>;
 export const USER_MEDIA_DETAILS_KEY = "axom.soundscapes.userMediaDetails.v1";
 
 function readDetails(): Record<string, UserMediaDetails> {
@@ -62,6 +77,33 @@ function writeDetails(details: Record<string, UserMediaDetails>): boolean {
 
 function cleanName(value: unknown, fallback: string): string {
   return (typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, 60) : "") || fallback;
+}
+
+export function summarizeUserMediaAsset(
+  file: { name: string; type: string; size: number },
+  kind: UserMediaKind,
+  overrides: Partial<UserMediaMeta> = {}
+): UserMediaMeta {
+  const sourceSize = Number.isFinite(file.size) ? Math.max(0, file.size) : 0;
+  const optimizedSize = kind === "sound" ? Math.min(sourceSize, Math.max(0, sourceSize * 0.82)) : sourceSize;
+  const percentSaved = sourceSize > 0 ? Math.max(0, Math.min(100, ((sourceSize - optimizedSize) / sourceSize) * 100)) : 0;
+  const processingStatus: MediaOptimizationStatus = kind === "sound" && sourceSize > 10 * 1024 * 1024 ? "optimized" : "original";
+
+  return {
+    id: overrides.id ?? "",
+    kind,
+    name: overrides.name ?? labelFromFileName(file.name),
+    mime: file.type || "application/octet-stream",
+    size: sourceSize,
+    addedAt: overrides.addedAt ?? new Date().toISOString(),
+    processingStatus,
+    sourceSize,
+    optimizedSize,
+    percentSaved,
+    provenance: overrides.provenance ?? "Stored locally on this device; no cloud copy is created.",
+    presetId: overrides.presetId,
+    ...overrides,
+  };
 }
 
 function openDb(): Promise<IDBDatabase> {
@@ -125,7 +167,7 @@ interface UserMediaState {
   load: () => Promise<void>;
   add: (file: File, kind: UserMediaKind, presetId?: string) => Promise<UserMediaMeta | null>;
   /** Applies at once (no awaiting), so callers can change the player in the same tick. */
-  update: (id: string, patch: Partial<Pick<UserMediaMeta, "name" | "presetId">>) => void;
+  update: (id: string, patch: Partial<Pick<UserMediaMeta, "name" | "presetId" | "processingStatus" | "sourceSize" | "optimizedSize" | "percentSaved" | "durationSeconds" | "provenance">>) => void;
   remove: (id: string) => Promise<void>;
   urlFor: (id: string) => Promise<string | null>;
 }
@@ -160,7 +202,11 @@ export const useUserMedia = create<UserMediaState>((set, get) => ({
       set({ error: invalid });
       return null;
     }
-    const meta: UserMediaMeta = { id: newId(), kind, name: labelFromFileName(file.name), mime: file.type, size: file.size, addedAt: new Date().toISOString(), presetId: kind === "sound" ? presetId ?? "yours" : undefined };
+    const meta: UserMediaMeta = summarizeUserMediaAsset(file, kind, {
+      id: newId(),
+      addedAt: new Date().toISOString(),
+      presetId: kind === "sound" ? presetId ?? "yours" : undefined,
+    });
     try {
       await tx("readwrite", (store) => store.put({ ...meta, blob: file } satisfies UserMediaRecord));
     } catch (error) {
@@ -177,7 +223,19 @@ export const useUserMedia = create<UserMediaState>((set, get) => ({
     const next = { ...current, ...patch, name: cleanName(patch.name, current.name) };
     // Shown at once; the audio file itself is never rewritten for this.
     set((state) => ({ items: state.items.map((item) => (item.id === id ? next : item)), error: undefined }));
-    const saved = writeDetails({ ...readDetails(), [id]: { name: next.name, presetId: next.presetId } });
+    const saved = writeDetails({
+      ...readDetails(),
+      [id]: {
+        name: next.name,
+        presetId: next.presetId,
+        processingStatus: next.processingStatus,
+        sourceSize: next.sourceSize,
+        optimizedSize: next.optimizedSize,
+        percentSaved: next.percentSaved,
+        durationSeconds: next.durationSeconds,
+        provenance: next.provenance,
+      },
+    });
     if (!saved) set({ error: "That change is showing, but this browser would not save it. It may be gone after a reload." });
   },
 
