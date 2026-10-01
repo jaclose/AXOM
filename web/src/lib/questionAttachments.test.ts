@@ -106,6 +106,17 @@ describe("metadata normalization", () => {
     expect(normalized).toHaveLength(1);
     expect(normalized?.[0]).toMatchObject({ id: "dup", altText: "new" });
   });
+
+  it("keeps an exhibit an exhibit through a save and reload, and ignores any other role", () => {
+    const [exhibit, note, odd] = normalizeQuestionAttachments([
+      metadata({ id: "a", role: "exhibit" }),
+      metadata({ id: "b" }),
+      { ...metadata({ id: "c" }), role: "banner" },
+    ])!;
+    expect(exhibit.role).toBe("exhibit");
+    expect("role" in note).toBe(false);
+    expect("role" in odd).toBe(false);
+  });
 });
 
 describe("blob store", () => {
