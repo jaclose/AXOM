@@ -41,6 +41,8 @@ export interface ParsedQuestionDraft {
   reference?: string;
   category?: string;
   tags?: string[];
+  /** Image file names the source names for this question ("Attachment: ecg.png"). */
+  attachmentNames?: string[];
   /** The document's own question number, when present ("12." → 12). */
   questionNumber?: number;
   /** Page in the source document this question came from (PDF imports). */
@@ -120,6 +122,17 @@ const PROSE_ANSWER_RE = /\b(?:the\s+answer\s+is|correct\s+answer\s+is|correct\s+
 const META_RE = /^\s*(topic|system|source|category|subject|tags)\s*[:\-–]\s*(.+\S)\s*$/i;
 const OBJECTIVE_RE = /^\s*(learning\s+objectives?|objectives?|this\s+question\s+addresses\s+objectives?)\s*[:\-–]\s*(.*)$/i;
 const REFERENCE_RE = /^\s*(references?|citation)\s*[:\-–]\s*(.*)$/i;
+/** "Review: renal; diuretics" — short topic labels the source files under a question. */
+const REVIEW_RE = /^\s*(?:review|tags?\s*\/\s*review|review\s*\/\s*tags?)\s*[:\-–]\s*(.*)$/i;
+/** "Attachment: figure-12.png" — an image the source says belongs to the question. */
+const ATTACHMENT_RE = /^\s*(?:attachments?|image\s*\/\s*attachment|image\s+file)\s*[:\-–]\s*(.*)$/i;
+const ATTACHMENT_NONE_RE = /^(?:none|no(?:ne)?\s+attached|no\s+(?:image|attachment)s?|n\/?a|nil|-+)?$/i;
+/** "Status: SOURCE-KEY CONFLICT" — the source's own warning about its answer key. */
+const STATUS_RE = /^\s*status\s*[:\-–]\s*(.+\S)\s*$/i;
+/** "Source marks: A and D" — every answer the source itself marked. */
+const SOURCE_MARKS_RE = /^\s*source\s+marks?\s*[:\-–]\s*(.+\S)\s*$/i;
+/** "Correct Answer: UNRESOLVED" is the source declining to give a key, not answer text. */
+const UNRESOLVED_ANSWER_RE = /^(?:unresolved|unknown|undetermined|tbd|n\/?a|none|\?+)\.?$/i;
 
 interface AnswerSignal {
   key?: string;
@@ -325,8 +338,15 @@ export function parseQuestionText(raw: string): ParsedQuestionDraft {
   let feedbackFlow = false;
   // Options decorated with a correct-marker (✓, leading/trailing *, "(correct)").
   const markedLetters: string[] = [];
+  const reviewLines: string[] = [];
+  const attachmentNames: string[] = [];
+  /** The source's own verdict on its key: more than one answer marked, or one flagged as doubtful. */
+  let sourceKeyConflict: string | undefined;
+  let sourceKeyFlag: string | undefined;
+  let sourceMarks: string | undefined;
+  let answerDeclared = false;
   let phase: "stem" | "options" | "explanation" = "stem";
-  let metadataFlow: "objective" | "reference" | undefined;
+  let metadataFlow: "objective" | "reference" | "review" | undefined;
   let explanationMarkerDetected = false;
   let malformedNextQuestionDetected = false;
 
@@ -341,8 +361,64 @@ export function parseQuestionText(raw: string): ParsedQuestionDraft {
     const trail = line.match(/^(\s*\(?[A-Ha-h][).:\-–]\s.*\S)\s*[*✓✔☑]\s*$/);
     if (trail) { line = trail[1]; lineMarked = true; }
 
+    // "Correct Answer from source: D" is an answer line with a note in it.
+    line = line.replace(/^(\s*(?:the\s+)?(?:correct\s+)?answer)\s+(?:from|per|in)\s+(?:the\s+)?source\b/i, "$1");
+
+    // Lines a source files under a question that are neither question,
+    // answer nor explanation: its image, its review labels, its key warnings.
+    const attachmentMatch = line.match(ATTACHMENT_RE);
+    if (attachmentMatch) {
+      const names = attachmentMatch[1].split(/[,;]/).map((name) => name.trim().replace(/^[`'"]+|[`'"]+$/g, "")).filter((name) => !ATTACHMENT_NONE_RE.test(name));
+      // In a stem, only a line that names real image files is taken as a field.
+      if (phase !== "stem" || names.length === 0 || names.every((name) => /\.(?:png|jpe?g|webp|gif|bmp|tiff?|svg|heic)$/i.test(name))) {
+        attachmentNames.push(...names);
+        parserRuleIds.add("metadata.attachment");
+        feedbackFlow = false;
+        metadataFlow = undefined;
+        continue;
+      }
+    }
+    if (phase !== "stem") {
+      const reviewMatch = line.match(REVIEW_RE);
+      if (reviewMatch) {
+        if (reviewMatch[1].trim()) reviewLines.push(reviewMatch[1].trim());
+        parserRuleIds.add("metadata.review");
+        feedbackFlow = false;
+        metadataFlow = "review";
+        continue;
+      }
+      const statusMatch = line.match(STATUS_RE);
+      if (statusMatch) {
+        if (/conflict|unresolved/i.test(statusMatch[1])) sourceKeyConflict = statusMatch[1].trim();
+        else if (/flag|question|uncertain|disputed|doubt|check|verify/i.test(statusMatch[1])) sourceKeyFlag = statusMatch[1].trim();
+        parserRuleIds.add("metadata.status");
+        feedbackFlow = false;
+        metadataFlow = undefined;
+        continue;
+      }
+      const marksMatch = line.match(SOURCE_MARKS_RE);
+      if (marksMatch) {
+        sourceMarks = marksMatch[1].trim();
+        parserRuleIds.add("metadata.source-marks");
+        feedbackFlow = false;
+        metadataFlow = undefined;
+        continue;
+      }
+    }
+
     const optionMatch = line.match(OPTION_RE);
-    const answerSignal = parseAnswerSignal(line);
+    const parsedAnswerSignal = parseAnswerSignal(line);
+    // The source declined to give a key: record that, and read no answer from it.
+    const declinedAnswer = Boolean(parsedAnswerSignal && phase !== "stem" && UNRESOLVED_ANSWER_RE.test(parsedAnswerSignal.payload.trim()));
+    if (declinedAnswer) {
+      answerDeclared = true;
+      parserRuleIds.add("answer.source-unresolved");
+      phase = "explanation";
+      feedbackFlow = false;
+      metadataFlow = undefined;
+      continue;
+    }
+    const answerSignal = parsedAnswerSignal;
     const explanationMatch = line.match(EXPLANATION_RE);
     const metaMatch = line.match(META_RE);
     const objectiveMatch = line.match(OBJECTIVE_RE);
@@ -481,6 +557,10 @@ export function parseQuestionText(raw: string): ParsedQuestionDraft {
         referenceLines.push(line.trim());
         continue;
       }
+      if (metadataFlow === "review") {
+        reviewLines.push(line.trim());
+        continue;
+      }
       // Feedback started on a prior option line — keep collecting it.
       if (feedbackFlow) {
         explanationLines.push(line.trim());
@@ -514,6 +594,7 @@ export function parseQuestionText(raw: string): ParsedQuestionDraft {
     } else if (phase === "explanation") {
       if (metadataFlow === "objective") objectiveLines.push(line.trim());
       else if (metadataFlow === "reference") referenceLines.push(line.trim());
+      else if (metadataFlow === "review") { if (line.trim()) reviewLines.push(line.trim()); }
       else {
         explanationLines.push(line);
         explanationCandidateLines.push(rawLine);
@@ -697,13 +778,39 @@ export function parseQuestionText(raw: string): ParsedQuestionDraft {
       parserRuleIds.add("answer.explanation-text-match");
     }
   }
+  // The source's own word on its key outranks anything the parser inferred.
+  const markedBySource = [...new Set((sourceMarks ?? "").toUpperCase().match(/\b[A-H]\b/g) ?? [])];
+  if (sourceKeyConflict || markedBySource.length > 1) {
+    const marks = markedBySource.length > 1 ? `The source marks ${markedBySource.slice(0, -1).join(", ")} and ${markedBySource[markedBySource.length - 1]}` : "The source reports a conflict in its answer key";
+    warnings.push(`${marks}. No answer was set: choose one after checking the source.`);
+    correctKey = undefined;
+    answerDetectionConfidence = 0.05;
+    needsReview = true;
+    parserRuleIds.add("conflict.source-key");
+  } else if (answerDeclared && !correctKey) {
+    warnings.push("The source leaves this answer unresolved. Set it after checking.");
+    answerDetectionConfidence = 0.05;
+    needsReview = true;
+  } else if (sourceKeyFlag) {
+    warnings.push(`The source flags this answer key (${sourceKeyFlag}). Confirm ${correctKey ? `answer ${correctKey}` : "the answer"} before relying on it.`);
+    needsReview = true;
+    parserRuleIds.add("answer.source-key-flag");
+  }
   if (!correctKey && !needsReview) {
     warnings.push("No correct answer was reliably detected — set it after checking the source.");
     needsReview = true;
   }
 
   const explanationCleanup = sanitizeExplanationCandidate(explanationCandidate, { stem, options, correctKey });
-  const explanation = explanationCleanup.cleanedText || undefined;
+  // Review lines are topic labels when they are short; a longer note is kept
+  // with the explanation, labelled, so nothing the source wrote is lost.
+  const reviewText = reviewLines.join("\n").trim();
+  const reviewLabels = reviewText.split(/[;\n|]|,(?!\s*\d)/).map((label) => label.trim().replace(/[.]+$/, "")).filter(Boolean);
+  const reviewIsLabels = reviewLabels.length > 0 && reviewLabels.length <= 12
+    && reviewLabels.every((label) => label.length <= 48 && label.split(/\s+/).length <= 6);
+  const explanation = [explanationCleanup.cleanedText, reviewText && !reviewIsLabels ? `Review: ${reviewText}` : ""].filter(Boolean).join("\n\n") || undefined;
+  const metaTags = meta.tags ? meta.tags.split(/[,;]/).map((t) => t.trim()).filter(Boolean) : [];
+  const tags = [...new Set([...metaTags, ...(reviewIsLabels ? reviewLabels : [])])];
   const explanationBoundaryAmbiguous = explanationCleanup.cleanupOperations.includes("stop-at-next-question");
   if (explanationBoundaryAmbiguous) {
     warnings.push("Question-like numbered content touched this explanation without a clear separator — verify the boundary against the source.");
@@ -761,7 +868,8 @@ export function parseQuestionText(raw: string): ParsedQuestionDraft {
     objective: objectiveLines.join("\n").trim() || undefined,
     reference: referenceLines.join("\n").trim() || undefined,
     category: meta.category ?? meta.subject,
-    tags: meta.tags ? meta.tags.split(/[,;]/).map((t) => t.trim()).filter(Boolean) : undefined,
+    tags: tags.length ? tags : undefined,
+    attachmentNames: attachmentNames.length ? [...new Set(attachmentNames)] : undefined,
     needsReview: needsReview || undefined,
     confidence,
     warnings,
@@ -879,6 +987,7 @@ export function parseQuestionBlocks(raw: string): ParsedQuestionDraft[] {
   });
 
   let drafts: ParsedQuestionDraft[];
+  const draftSection = new Map<ParsedQuestionDraft, number>();
   if (starts.length === 0) {
     const draft = parseQuestionText(body);
     if (protectedUnnumberedStemThrough !== undefined) {
@@ -893,21 +1002,43 @@ export function parseQuestionBlocks(raw: string): ParsedQuestionDraft[] {
     drafts = draft.stem || draft.options.length ? [draft] : [];
   } else {
     drafts = [];
+    // One paste can hold several quizzes, each under its own "Source:" header
+    // with numbering that starts over. Each is a section: its questions take
+    // that source, and a repeated number in another section is not a clash.
+    const blockEnd: Array<number | undefined> = [];
+    const blockSection: Array<{ index: number; source?: string }> = [];
+    let section: { index: number; source?: string } = { index: 0, source: sectionHeaderBefore(lines, starts[0].index, 0)?.source };
+    for (let b = 0; b < starts.length; b++) {
+      if (b > 0 && starts[b].number <= starts[b - 1].number) {
+        const header = sectionHeaderBefore(lines, starts[b].index, starts[b - 1].index + 1);
+        if (header) {
+          blockEnd[b - 1] = header.from;
+          section = { index: section.index + 1, source: header.source };
+        }
+      }
+      blockSection[b] = section;
+    }
     const preamble = lines.slice(0, starts[0].index).join("\n").trim();
     if (preamble) {
       const preambleDraft = parseQuestionText(preamble);
       if (preambleDraft.options.length >= 2 || /\?/.test(preambleDraft.stem)) {
         markUnnumberedPreambleDraft(preambleDraft, preamble);
         drafts.push(preambleDraft);
+        draftSection.set(preambleDraft, 0);
       }
     }
     for (let b = 0; b < starts.length; b++) {
       const start = starts[b];
       const from = start.index;
-      const to = b + 1 < starts.length ? starts[b + 1].index : lines.length;
+      const to = blockEnd[b] ?? (b + 1 < starts.length ? starts[b + 1].index : lines.length);
       const block = lines.slice(from, to).join("\n");
       const draft = parseQuestionText(stripQuestionStart(block, start));
       draft.questionNumber = start.number;
+      draftSection.set(draft, blockSection[b].index);
+      if (!draft.sourceLabel && blockSection[b].source) {
+        draft.sourceLabel = blockSection[b].source;
+        draft.parserRuleIds = [...new Set([...(draft.parserRuleIds ?? []), "metadata.section-source"])];
+      }
       if (start.malformed) markMalformedNumberedDraft(draft, block);
       else markNumberedDraft(draft, block);
       if (start.nestedStemList) {
@@ -927,7 +1058,9 @@ export function parseQuestionBlocks(raw: string): ParsedQuestionDraft[] {
     }
   }
 
-  const numbers = drafts.map((d) => d.questionNumber).filter((n): n is number => n !== undefined);
+  const numbers = drafts
+    .filter((d) => d.questionNumber !== undefined)
+    .map((d) => `${draftSection.get(d) ?? 0}:${d.sourceLabel ?? ""}:${d.questionNumber}`);
   if (new Set(numbers).size !== numbers.length) {
     for (const d of drafts) {
       d.warnings.push("Duplicate question numbers in this document — check the split.");
@@ -939,6 +1072,28 @@ export function parseQuestionBlocks(raw: string): ParsedQuestionDraft[] {
   }
 
   return entries.size ? applyAnswerEntries(drafts, entries) : drafts;
+}
+
+/**
+ * The quiz header sitting directly above a question start: a "Source: X"
+ * line, optionally with "Questions: 1–25" and one short title line above it.
+ * `from` is the first header line, so the previous question can stop there.
+ */
+function sectionHeaderBefore(lines: string[], startIndex: number, floor: number): { from: number; source: string } | undefined {
+  let source: string | undefined;
+  let from = startIndex;
+  for (let i = startIndex - 1; i >= floor; i--) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const sourceLine = line.match(/^source\s*[:\-–]\s*(.+\S)$/i);
+    if (sourceLine && !source) { source = sourceLine[1]; from = i; continue; }
+    if (/^questions?\s*[:\-–]\s*\d+\s*(?:[-–—]|to)\s*\d+$/i.test(line)) { from = i; continue; }
+    // One title line may sit on top ("Renal quiz 5"); it ends the header.
+    if (source && line.length <= 80 && !/[.?!:;,]$/.test(line) && !OPTION_RE.test(line) && !parseAnswerSignal(line)
+      && !EXPLANATION_RE.test(line) && !META_RE.test(line) && !REVIEW_RE.test(line) && !ATTACHMENT_RE.test(line) && !STATUS_RE.test(line)) from = i;
+    break;
+  }
+  return source ? { from, source } : undefined;
 }
 
 interface QuestionBlockStart {
