@@ -4,7 +4,7 @@ What each branch is doing right now. Update when a branch starts, changes scope,
 
 | Branch | Worktree | Owner | Plan | State |
 |---|---|---|---|---|
-| `fix/wave1.3.2-audit` | /Users/jd/Developer/AXOM-wave-1.3.1 (same worktree as 1.3.1) | Claude | Browser audit of what Wave 1.3 shipped: your sounds across a reload, Locked In chime and wording, the stage orb by eye; two small repairs | Wave 1.3.2 |
+| `fix/wave1.3.2-audit` | /Users/jd/Developer/AXOM-wave-1.3.1 (same worktree as 1.3.1) | Claude | Browser audit of what Wave 1.3 shipped: your sounds across a reload, Locked In chime and wording, the stage orb by eye; two small repairs | on local main (tag wave-1.3.2), not pushed |
 | `fix/wave1.3.1-sync` | /Users/jd/Developer/AXOM-wave-1.3.1 | Claude | The production upload failure: server migration, bounded client, profile photo size, browser replay of the incident; Ideas 5 work order banked | on local main (tag wave-1.3.1), not pushed; production needs the migration and a deploy (JD) |
 | `fix/wave1.3` | /Users/jd/Developer/AXOM-wave-1.3 | Claude | Ideas 5 fixes: question import layouts and images, Your sounds, exam time and marks, Locked In chime, stage orb | on main (ef3e6b5, tag wave-1.3), pushed by JD |
 | `wave/1.2` | /Users/jd/Developer/AXOM-wave-1.2 | Claude | directions, opening films, timer cues, tracker order, account fix, post-Promise reveal, quiet first day, How you study | on main (2915b46, tag wave-1.2), pushed by JD |

@@ -2,6 +2,16 @@
 
 Waves and flagship features, newest first. Smaller improvements are in 2-UPDATES.md, fixes in 3-HOTFIXES.md. Earlier history: CHANGELOG.md at the repository root.
 
+## Wave 1.3.2 (2026-10-01) · tag wave-1.3.2
+
+A browser audit of what Wave 1.3 shipped, done by looking, plus the two things looking found. Gate on the branch: typecheck, lint, 2,146 unit tests, build, update and offline checks, 33 Playwright tests passed (live accounts skipped).
+
+| Update | Ideas | Commit |
+|---|---|---|
+| **Your sounds hold.** Rename and "plays for" survive a reload; pressing play on the preset plays your file. Nothing had regressed; it is now a browser test. | I5-01, I5-27 | f90e7be |
+| **Locked In, heard and seen.** The page asks for three quiet bells (under 4% of full scale) and none when timer sounds are off. "I am locked out" no longer breaks onto two lines. | I5-11, I5-12, I5-28 | 06c7d61 |
+| **The stage sphere is glass on every scene.** Centre, circle, colours and spacing held at desktop, tablet and phone widths; on pale scenes the sphere had been a ring with a speck, and now shows the scene through the ball. | I5-02, I5-26 | 657c8c3 |
+
 ## Wave 1.3.1 (2026-10-01) · tag wave-1.3.1
 
 The production upload failure. Gate on the branch: typecheck, lint, 2,146 unit tests, build, update and offline checks, 30 Playwright tests passed (the live-accounts journey is skipped without real credentials). **Production still needs the migration applied and a deploy; both are JD's.** Record: `docs/release/2026-10-01-ACCOUNT-SYNC-INCIDENT.md`.
