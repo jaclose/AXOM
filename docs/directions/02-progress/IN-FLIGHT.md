@@ -4,7 +4,7 @@ What each branch is doing right now. Update when a branch starts, changes scope,
 
 | Branch | Worktree | Owner | Plan | State |
 |---|---|---|---|---|
-| `fix/wave1.3.1-sync` | /Users/jd/Developer/AXOM-wave-1.3.1 | Claude | The production upload failure: server migration, bounded client, profile photo size, browser replay of the incident; Ideas 5 work order banked | Wave 1.3.1 |
+| `fix/wave1.3.1-sync` | /Users/jd/Developer/AXOM-wave-1.3.1 | Claude | The production upload failure: server migration, bounded client, profile photo size, browser replay of the incident; Ideas 5 work order banked | on local main (tag wave-1.3.1), not pushed; production needs the migration and a deploy (JD) |
 | `fix/wave1.3` | /Users/jd/Developer/AXOM-wave-1.3 | Claude | Ideas 5 fixes: question import layouts and images, Your sounds, exam time and marks, Locked In chime, stage orb | on main (ef3e6b5, tag wave-1.3), pushed by JD |
 | `wave/1.2` | /Users/jd/Developer/AXOM-wave-1.2 | Claude | directions, opening films, timer cues, tracker order, account fix, post-Promise reveal, quiet first day, How you study | on main (2915b46, tag wave-1.2), pushed by JD |
 | `feat/wave2-home` | /Users/jd/Developer/AXOM-wave2-home | Claude | ../../feature-development/2026-09-30/home/PLAN-v1.md on that branch | in progress: save-progress banner, sign-in restore, Daily Check-In rebuild done on the branch; Up Next, widget primitive, Wrapped open |
