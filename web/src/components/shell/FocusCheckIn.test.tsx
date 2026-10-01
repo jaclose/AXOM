@@ -114,7 +114,7 @@ describe("FocusCheckIn", () => {
     render(<FocusCheckIn clock={clock} pollIntervalMs={0} />);
     act(() => { window.dispatchEvent(new CustomEvent(FOCUS_CHECKIN_TEST_EVENT)); });
     expect(screen.getByText(/Preview — nothing is recorded/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /I drifted/ }));
+    fireEvent.click(screen.getByRole("button", { name: "I am locked out" }));
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.focusCheckIns) ?? "{}").drifted ?? 0).toBe(0);
 
     act(() => { window.dispatchEvent(new CustomEvent(FOCUS_CHECKIN_TEST_EVENT)); });

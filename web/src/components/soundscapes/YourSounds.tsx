@@ -4,13 +4,15 @@ import { ICON_SIZE } from "../../lib/iconSize";
 import { SOUNDSCAPES, FREQUENCY_ORDER, AMBIENT_ORDER, type SoundscapeId } from "../../lib/soundscapes/presets";
 import { useSoundscape } from "../../lib/soundscapes/store";
 import { useUserMedia, type UserMediaMeta } from "../../lib/soundscapes/userMedia";
+import { assignUserSound, homeOf, renameUserSound, syncUserSoundCatalog, userVersionId } from "../../lib/soundscapes/userSounds";
+import { pushToast } from "../../lib/toast";
 import { useUnlocked } from "../../lib/unlocks";
 
 const HOMES: SoundscapeId[] = ["yours", ...FREQUENCY_ORDER, ...AMBIENT_ORDER];
 
 function homeLabel(id: string | undefined): string {
-  const preset = id && id in SOUNDSCAPES ? SOUNDSCAPES[id as SoundscapeId] : SOUNDSCAPES.yours;
-  return preset.id === "yours" ? "Your sounds" : `Leads ${preset.name}`;
+  const home = homeOf({ presetId: id });
+  return home === "yours" ? "Your sounds" : `Plays for ${SOUNDSCAPES[home].name}`;
 }
 
 function sizeLabel(bytes: number): string {
@@ -31,7 +33,14 @@ export function YourSounds() {
   async function addFiles(files: FileList | File[]) {
     setBusy(true);
     try {
-      for (const file of Array.from(files)) await add(file, "sound", home);
+      for (const file of Array.from(files)) {
+        const added = await add(file, "sound", home);
+        // Added straight into a preset: it becomes what that preset plays.
+        if (added && home !== "yours") {
+          syncUserSoundCatalog();
+          useSoundscape.getState().setVersion(home, userVersionId(added.id));
+        }
+      }
     } finally {
       setBusy(false);
     }
@@ -64,7 +73,7 @@ export function YourSounds() {
           <label className="your-sounds-home">
             <span>Put it in</span>
             <select className="field" value={home} onChange={(event) => setHome(event.target.value as SoundscapeId)}>
-              {HOMES.map((id) => <option key={id} value={id}>{id === "yours" ? "Your sounds" : `${SOUNDSCAPES[id].name} (as its first version)`}</option>)}
+              {HOMES.map((id) => <option key={id} value={id}>{id === "yours" ? "Your sounds only" : `Play it for ${SOUNDSCAPES[id].name}`}</option>)}
             </select>
           </label>
           <button type="button" className="gbtn primary" disabled={busy} onClick={() => input.current?.click()}>
@@ -98,33 +107,72 @@ function PlayToggle({ presetId, versionId, label }: { presetId: SoundscapeId; ve
 }
 
 function YourSoundRow({ item }: { item: UserMediaMeta }) {
-  const update = useUserMedia((state) => state.update);
   const remove = useUserMedia((state) => state.remove);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(item.name);
-  const presetId = (item.presetId && item.presetId in SOUNDSCAPES ? item.presetId : "yours") as SoundscapeId;
+  const presetId = homeOf(item);
+
+  function startRename() {
+    setName(item.name);
+    setEditing(true);
+  }
+
+  /** Enter, the tick, or clicking away all keep the new name; Escape drops it. */
+  function saveName() {
+    setEditing(false);
+    const next = name.replace(/\s+/g, " ").trim();
+    if (next && next !== item.name) renameUserSound(item.id, next);
+  }
+
+  function assign(to: SoundscapeId) {
+    const done = assignUserSound(item.id, to);
+    if (!done) return;
+    pushToast(to === "yours"
+      ? { title: `${done.sound} is back on Your sounds`, tone: "info", duration: 4500, dedupe: `sound-home-${item.id}` }
+      : { title: `${done.sound} now plays for ${done.preset}`, body: "It is the one you hear there: in the dock, your rotation, and when your Pomodoro picks it.", tone: "success", duration: 6000, dedupe: `sound-home-${item.id}` });
+  }
+
   return (
     <div className="your-sound">
-      <PlayToggle presetId={presetId} versionId={`user-${item.id}`} label={item.name} />
+      <PlayToggle presetId={presetId} versionId={userVersionId(item.id)} label={item.name} />
       <FileAudio size={ICON_SIZE.body} aria-hidden="true" className="your-sound-icon" />
       <div className="your-sound-copy">
         {editing ? (
-          <form onSubmit={(event) => { event.preventDefault(); void update(item.id, { name }); setEditing(false); }}>
-            <input className="field" value={name} autoFocus maxLength={60} aria-label="Sound name" onChange={(event) => setName(event.target.value)} />
-            <button type="submit" className="gbtn sm icon" aria-label="Save name"><Check size={ICON_SIZE.body} aria-hidden="true" /></button>
-          </form>
+          <input
+            className="field your-sound-name"
+            value={name}
+            autoFocus
+            maxLength={60}
+            aria-label="Sound name"
+            onFocus={(event) => event.currentTarget.select()}
+            onChange={(event) => setName(event.target.value)}
+            onBlur={saveName}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") { event.preventDefault(); saveName(); }
+              if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setEditing(false); }
+            }}
+          />
         ) : (
           <b>{item.name}</b>
         )}
         <small>{homeLabel(item.presetId)} · {sizeLabel(item.size)} · on this device only</small>
       </div>
-      <select className="field your-sound-move" aria-label={`Where ${item.name} lives`} value={presetId} onChange={(event) => void update(item.id, { presetId: event.target.value })}>
-        {HOMES.map((id) => <option key={id} value={id}>{id === "yours" ? "Your sounds" : SOUNDSCAPES[id].name}</option>)}
-      </select>
-      <button type="button" className="gbtn sm icon" aria-label={`Rename ${item.name}`} onClick={() => setEditing(true)}><Pencil size={ICON_SIZE.body} aria-hidden="true" /></button>
+      <label className="your-sound-move">
+        <span>Plays for</span>
+        <select className="field" aria-label={`What ${item.name} plays for`} value={presetId} onChange={(event) => assign(event.target.value as SoundscapeId)}>
+          {HOMES.map((id) => <option key={id} value={id}>{id === "yours" ? "Your sounds only" : SOUNDSCAPES[id].name}</option>)}
+        </select>
+      </label>
+      {editing ? (
+        // onMouseDown keeps the field from blurring (and saving) before this click lands.
+        <button type="button" className="gbtn sm icon primary" aria-label="Save name" onMouseDown={(event) => event.preventDefault()} onClick={saveName}><Check size={ICON_SIZE.body} aria-hidden="true" /></button>
+      ) : (
+        <button type="button" className="gbtn sm icon" aria-label={`Rename ${item.name}`} onClick={startRename}><Pencil size={ICON_SIZE.body} aria-hidden="true" /></button>
+      )}
       <button type="button" className="gbtn sm icon danger" aria-label={`Remove ${item.name}`} onClick={() => {
         if (window.confirm(`Remove “${item.name}” from this device?`)) {
-          if (useSoundscape.getState().versions[presetId] === `user-${item.id}` && useSoundscape.getState().status !== "idle") void useSoundscape.getState().stop();
+          const versionId = userVersionId(item.id);
+          if (useSoundscape.getState().versions[presetId] === versionId && useSoundscape.getState().status !== "idle") void useSoundscape.getState().stop();
           void remove(item.id);
         }
       }}><Trash2 size={ICON_SIZE.body} aria-hidden="true" /></button>

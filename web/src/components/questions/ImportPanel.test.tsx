@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import "fake-indexeddb/auto";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,6 +17,7 @@ const mocked = vi.hoisted(() => ({
   removeQuestion: vi.fn(),
   removeQuestionSet: vi.fn(),
   updateDocument: vi.fn(),
+  updateQuestion: vi.fn(),
   documents: [] as SourceDocument[],
 }));
 
@@ -307,6 +309,42 @@ describe("source-document-first import", () => {
 
     expect(mocked.addQuestion).toHaveBeenCalledTimes(1);
     expect(mocked.addQuestionSet).toHaveBeenCalledWith(expect.objectContaining({ questionIds: ["question-1"] }));
+  });
+
+  it("lists the images an import names, takes the files, and attaches each to its question as an exhibit", async () => {
+    const user = userEvent.setup();
+    mocked.updateQuestion = vi.fn();
+    mocked.addQuestion
+      .mockReturnValueOnce({ ok: true, errors: [], id: "question-1" })
+      .mockReturnValueOnce({ ok: true, errors: [], id: "question-2" });
+    render(<ImportPanel seed={{
+      drafts: [
+        { ...draft, questionNumber: 1 },
+        { ...draft, questionNumber: 2, stem: "Which rhythm is shown?", attachmentNames: ["ecg-2.png", "slide-2.jpg"] },
+      ],
+      rawText: "Two source questions", title: "With images", fileName: "images.txt", fileType: "text",
+    }} />);
+
+    const images = screen.getByRole("region", { name: "Images" });
+    expect(within(images).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["ecg-2.pngnot added yet", "slide-2.jpgnot added yet"]);
+    expect(screen.getByRole("button", { name: /Which rhythm is shown/ }).textContent).toContain("image ecg-2.png (not added yet)");
+
+    await user.upload(within(images).getByLabelText("Add image files for this import"), [
+      new File([new Uint8Array(32)], "ECG-2.png", { type: "image/png" }),
+      new File([new Uint8Array(32)], "holiday.png", { type: "image/png" }),
+    ]);
+    expect(within(images).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["ecg-2.pngready", "slide-2.jpgnot added yet"]);
+    expect(within(images).getByText(/Not named by any question, so left out: holiday.png/)).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Finalize import" }));
+    await waitFor(() => expect(mocked.updateQuestion).toHaveBeenCalledTimes(1));
+    expect(mocked.updateQuestion).toHaveBeenCalledWith("question-2", {
+      attachments: [expect.objectContaining({ fileName: "ECG-2.png", mimeType: "image/png", role: "exhibit" })],
+    });
+    await waitFor(() => expect(pushToast).toHaveBeenCalledWith(expect.objectContaining({
+      title: "1 image attached to its question",
+      body: expect.stringContaining("1 named image was not added"),
+    })));
   });
 
   it("returns to the full source text without losing it and reparses an edit", async () => {

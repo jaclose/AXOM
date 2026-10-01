@@ -24,6 +24,7 @@ import {
   type FocusProgressHint,
 } from "../../lib/focusCheckIn";
 import type { NoctyriumState } from "../../lib/types";
+import { playLockInCue } from "../../lib/timerCues";
 
 export const FOCUS_CHECKIN_TEST_EVENT = "axom:focus-checkin-preview";
 
@@ -117,6 +118,8 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = currentClock }: 
       seed: next.prompts + now.getHours() * 7 + now.getMinutes(),
       preview,
     });
+    // JD (Ideas 5): the check-in arrives with a quiet, rising chime.
+    playLockInCue();
     // A desktop window is often visible but behind other apps: notify
     // whenever AXOM is not the focused window, not only when it is hidden.
     if (!preview && preferences.systemNotifications && typeof document !== "undefined" && (document.visibilityState === "hidden" || !document.hasFocus())) {
@@ -272,7 +275,7 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = currentClock }: 
             <button type="button" className="primary" onClick={() => answer("locked-in")}>
               <Lock size={ICON_SIZE.body} aria-hidden="true" /> Locked in
             </button>
-            <button type="button" onClick={() => answer("drifted")}>I drifted</button>
+            <button type="button" onClick={() => answer("drifted")}><span aria-hidden="true">😩</span> I am locked out</button>
             <button type="button" onClick={() => answer("break")}>
               <Coffee size={ICON_SIZE.body} aria-hidden="true" /> On a break
             </button>

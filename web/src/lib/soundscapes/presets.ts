@@ -392,8 +392,15 @@ export function isPlayable(id: SoundscapeId): boolean {
   return SOUNDSCAPES[id].versions.length > 0;
 }
 
+/**
+ * Stands in for a preset with nothing to play (an empty "Your sounds", or the
+ * moment before your files load), so no reader is ever handed undefined.
+ * `isPlayable` stays false for such a preset and the player refuses to start it.
+ */
+const NO_VERSION: SoundscapeVersion = { id: "none", label: "Nothing here yet", description: "Add a file to play it here.", src: "" };
+
 export function versionOf(preset: SoundscapePreset, versionId?: string): SoundscapeVersion {
-  return preset.versions.find((version) => version.id === versionId) ?? preset.versions[0];
+  return preset.versions.find((version) => version.id === versionId) ?? preset.versions[0] ?? NO_VERSION;
 }
 
 /** The scene for a preset's selected version (versions can re-skin or layer it). */

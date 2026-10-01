@@ -53,10 +53,10 @@ export function VersionChips({ presetId }: { presetId: SoundscapeId }) {
           role="radio"
           aria-checked={current === version.id}
           className={current === version.id ? "on" : ""}
-          title={version.description}
+          title={"src" in version ? `${version.label}. ${version.description}` : version.description}
           onClick={() => setVersion(presetId, version.id)}
         >
-          {version.label}{"src" in version && <span className="version-own">your file</span>}
+          <span className="version-label">{version.label}</span>{"src" in version && <span className="version-own">your file</span>}
         </button>
       ))}
     </div>

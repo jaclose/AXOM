@@ -39,3 +39,15 @@ Things learned the hard way, conventions that keep work fast, and decisions that
 - **Trap: a percentage height on a grid item with an auto row is ignored.** The check-in's intention underline also taught one: `vector-effect: non-scaling-stroke` breaks `pathLength`-based dash drawing in Chrome (the line stops short). Draw without it.
 - **Trap: `.win-task span { flex: 1 }` matched the Tag inside the row too** and stretched it; scope such rules to the element they mean.
 - JD commits from his editor as well ("Wave1.2A" captured this branch's working tree). Check `git log` before assuming a file is uncommitted.
+
+## 2026-10-01: Wave 1.3 (Ideas 5 fixes)
+
+- **A normalizer in front of a mature parser beats a new parsing branch.** The labelled-record layouts are rewritten into the wording `questionParse.ts` already reads (`lib/questionLabelledRecords.ts`), and only when the text holds an unmistakable record label. All 371 existing question tests passed untouched, which is the point: new input shapes should not be able to change how old ones parse.
+- **The source's word on its own key outranks inference.** "Status: SOURCE-KEY CONFLICT", "Source marks: A and D" and "Correct Answer: UNRESOLVED" never set an answer; a flag keeps it but forces review.
+- **Assigning a file to a preset must also make it the pick.** `play()` saves `versions[preset]` every time, so "first in the list" only wins for presets never played. `assignUserSound` updates details, catalog and player in one tick; an `await` between them let React render a half-moved file (an empty "Your sounds" still selected) and crash.
+- **Keep what a user can edit apart from the bytes.** Renaming a 111 MB track used to rewrite the track in IndexedDB. Name and "plays for" are now a small device preference (`axom.soundscapes.userMediaDetails.v1`); the audio record is written once.
+- **Trap: a percentage height on a grid item in an auto row is ignored.** The stage ring was sized from the stage's width and hung below the middle (481 px in a 380 px stage). Pin with `top/left: 50%` and `translate`, or draw on a canvas that owns its geometry.
+- **Trap: reading a clock inside a state updater.** `setItems((c) => commitTime(c))` read and reset a ref inside the updater; React may run updaters twice. Read once per event (`takeSpent()`), pass the number in.
+- **Trap: tests that share a module singleton.** `lib/timerCues.ts` keeps one audio engine; a second `installAudio()` in the same file gets a new recorder the engine never sees. Assert within one test, or reset the module.
+- **I could not view screenshots for part of this session** (the image limit was reached). Layout was verified by measuring the rendered DOM and canvas pixels, and a separate reviewer agent read the screenshots. Numbers are in the hotfix and completed logs.
+- Private course material never goes in this public repository, including inside a "verbatim" ideas file: redact the content, keep the structure, and say so at the top of the file.
