@@ -4,6 +4,7 @@ Bug fixes, newest first. Root cause stated so the same class of bug is easy to s
 
 | Date | Fix | Root cause | Commit |
 |---|---|---|---|
+| 2026-10-01 | Import never drops or misfiles a line that only looks like a field (caught in review before shipping) | any "Status:" line was consumed; "Answer: None" read as no answer even when None is a choice; a question's trailing "Source:" was taken as the next quiz's header | b9a6a99 |
 | 2026-10-01 | The stage ring sits in the centre | as a grid item its percentage height was ignored, so it was sized from the stage's width (481 px in a 380 px stage) and hung 347 px low; it also drifted by design | 932b212 |
 | 2026-10-01 | Assigning one of your sounds to a preset now makes it play there | the file was only listed first; `play` saves a pick for every preset you have ever played, so the earlier pick kept winning | 255d527 |
 | 2026-10-01 | Removing or moving your only sound no longer breaks the page | `versionOf` returned undefined for an empty preset and five readers dereferenced it; a rebuild of the catalog could also render before the player moved off the emptied shelf | 255d527 |
