@@ -86,14 +86,23 @@ export function ExamSimulator({ skin, mode, pool, timeLimitSeconds, title = "AXO
     setItems((current) => ({ ...current, [id]: { ...(current[id] ?? emptyItem()), ...patch } }));
   }, []);
 
-  /** Add the time spent on the current item since it was shown. */
-  const commitTime = useCallback((base: Record<string, ExamItemState>) => {
-    const current = pool[index];
-    if (!current) return base;
+  /** Seconds since the current item was shown; restarts the count. Call once per event, outside state updaters. */
+  const takeSpent = useCallback(() => {
     const spent = (Date.now() - shownAt.current) / 1000;
     shownAt.current = Date.now();
+    return spent;
+  }, []);
+
+  /**
+   * Add the time spent on the current item since it was shown. In tutor mode
+   * an item's clock stops when its answer is submitted, so "Time spent" is the
+   * time taken to answer, not the time spent reading the explanation after.
+   */
+  const commitTime = useCallback((base: Record<string, ExamItemState>, spent: number) => {
+    const current = pool[index];
+    if (!current) return base;
     const previous = base[current.id] ?? emptyItem();
-    return { ...base, [current.id]: { ...previous, visited: true, seconds: previous.seconds + spent } };
+    return { ...base, [current.id]: { ...previous, visited: true, seconds: previous.submitted ? previous.seconds : previous.seconds + spent } };
   }, [index, pool]);
 
   // Exam focus: hide AXOM's own overlays (dock, toasts, check-ins) while the block runs.
@@ -126,10 +135,10 @@ export function ExamSimulator({ skin, mode, pool, timeLimitSeconds, title = "AXO
   const finish = useCallback(() => {
     if (finished.current) return;
     finished.current = true;
-    const finalItems = commitTime(items);
+    const finalItems = commitTime(items, takeSpent());
     const answers = answersFromItems(ids, finalItems, (id) => trustedKey(pool.find((q) => q.id === id)));
     onFinish(answers, { startedAt, elapsedSeconds: Math.floor(clockElapsedMs(clock) / 1000) });
-  }, [clock, commitTime, ids, items, onFinish, pool, startedAt]);
+  }, [clock, commitTime, ids, items, onFinish, pool, startedAt, takeSpent]);
 
   // Time is up: the block ends, exactly like the real thing.
   useEffect(() => {
@@ -142,14 +151,15 @@ export function ExamSimulator({ skin, mode, pool, timeLimitSeconds, title = "AXO
 
   function go(target: number) {
     if (target < 0 || target >= pool.length) return;
-    setItems((current) => commitTime(current));
+    const spent = takeSpent();
+    setItems((current) => commitTime(current, spent));
     setIndex(target);
     setNavigatorOpen(false);
   }
 
   function next() {
     if (index + 1 < pool.length) go(index + 1);
-    else if (skin === "nbme") { setItems((current) => commitTime(current)); setReview("all"); }
+    else if (skin === "nbme") { const spent = takeSpent(); setItems((current) => commitTime(current, spent)); setReview("all"); }
     else setConfirmEnd(true);
   }
 
@@ -172,12 +182,18 @@ export function ExamSimulator({ skin, mode, pool, timeLimitSeconds, title = "AXO
 
   function submitTutor() {
     if (!question || !item.answerKey || revealed) return;
-    patchItem(question.id, { submitted: true });
+    // Bank the time first: the explanation shows it the moment the answer is revealed.
+    const spent = takeSpent();
+    const id = question.id;
+    setItems((current) => {
+      const timed = commitTime(current, spent);
+      return { ...timed, [id]: { ...(timed[id] ?? emptyItem()), submitted: true } };
+    });
   }
 
   function suspend() {
     finished.current = true;
-    const finalItems = commitTime(items);
+    const finalItems = commitTime(items, takeSpent());
     const paused = pauseClock(clock);
     onSuspend({
       version: 1, skin, mode, poolIds: ids, index, items: finalItems, elapsedMs: paused.elapsedMs,
@@ -186,7 +202,8 @@ export function ExamSimulator({ skin, mode, pool, timeLimitSeconds, title = "AXO
   }
 
   function endBlockRequested() {
-    setItems((current) => commitTime(current));
+    const spent = takeSpent();
+    setItems((current) => commitTime(current, spent));
     if (skin === "nbme") setReview("all");
     else setConfirmEnd(true);
   }
@@ -338,8 +355,10 @@ export function ExamSimulator({ skin, mode, pool, timeLimitSeconds, title = "AXO
               return (
                 <button key={entry.id} type="button" className={`sim-side-item ${position === index ? "current" : ""} ${answeredState}`}
                   onClick={() => go(position)} aria-current={position === index ? "true" : undefined}
-                  aria-label={`Item ${position + 1}${state?.answerKey ? ", answered" : ", unanswered"}${state?.marked ? ", marked" : ""}`}>
-                  <span className={`sim-dot ${state?.answerKey ? "filled" : ""}`} aria-hidden="true" />
+                  aria-label={`Item ${position + 1}${answeredState === "right" ? ", correct" : answeredState === "wrong" ? ", incorrect" : state?.answerKey ? ", answered" : ", unanswered"}${state?.marked ? ", marked" : ""}`}>
+                  {answeredState === "right" ? <Check size={13} className="sim-result ok" aria-hidden="true" />
+                    : answeredState === "wrong" ? <X size={13} className="sim-result bad" aria-hidden="true" />
+                    : <span className={`sim-dot ${state?.answerKey ? "filled" : ""}`} aria-hidden="true" />}
                   <span>{position + 1}</span>
                   {state?.marked && <Flag size={13} className="sim-flag" aria-hidden="true" />}
                 </button>
@@ -365,11 +384,16 @@ export function ExamSimulator({ skin, mode, pool, timeLimitSeconds, title = "AXO
             <div className="sim-pane-list">
               {reviewIndices(ids, items, navFilter).map((position) => {
                 const state = items[ids[position]];
+                // Tutor mode, once revealed: a tick for right, a cross for wrong.
+                const key = mode === "tutor" && state?.submitted ? trustedKey(pool[position]) : undefined;
+                const result = key ? (state?.answerKey === key ? "correct" : "incorrect") : undefined;
                 return (
                   <button key={ids[position]} type="button" className={`sim-pane-item ${position === index ? "current" : ""}`} onClick={() => go(position)}
-                    aria-current={position === index ? "true" : undefined} aria-label={`Question ${position + 1}${state?.answerKey ? ", answered" : ""}${state?.marked ? ", flagged" : ""}`}>
+                    aria-current={position === index ? "true" : undefined} aria-label={`Question ${position + 1}${result ? `, ${result}` : state?.answerKey ? ", answered" : ""}${state?.marked ? ", flagged" : ""}`}>
                     <span>{position + 1}</span>
-                    {state?.answerKey ? <Check size={14} className="sim-answered" aria-hidden="true" /> : <span className="sim-dot" aria-hidden="true" />}
+                    {result === "incorrect" ? <X size={14} className="sim-answered bad" aria-hidden="true" />
+                      : state?.answerKey ? <Check size={14} className={`sim-answered ${result ? "" : "neutral"}`} aria-hidden="true" />
+                      : <span className="sim-dot" aria-hidden="true" />}
                     {state?.marked && <Flag size={13} className="sim-flag" aria-hidden="true" />}
                   </button>
                 );
