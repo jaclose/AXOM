@@ -2,7 +2,20 @@
 
 Waves and flagship features, newest first. Smaller improvements are in 2-UPDATES.md, fixes in 3-HOTFIXES.md. Earlier history: CHANGELOG.md at the repository root.
 
-## Wave 1.2 (2026-09-30) · tag wave-1.2 · merged into local main, not pushed
+## Wave 1.3 (2026-10-01) · tag wave-1.3
+
+Ideas 5, the same night JD sent them. Gate on the merged tree: typecheck, lint, 2,096 unit tests, build, update and offline checks, 28 Playwright tests passed (the live-accounts journey is skipped without real credentials, as in earlier waves).
+
+| Update | Ideas | Commit |
+|---|---|---|
+| **Question import reads how questions are really written down.** Labelled records, the mapped-paste layout (Question N, choices, Answer, Explanation, Review, Attachment), labels on their own line; Review becomes tags; several quizzes in one paste keep their own source and numbering; a key the source disputes is never guessed. | I5-03, I5-04, I5-05 | b5594a5, 77b0335, b9a6a99 |
+| **Images come in with their questions.** Name the image in the text, add the files in the review step, and each attaches to its question and shows with the stem before you answer. | I5-06 | 1267f2d |
+| **Stage orb.** A centred glass sphere and ring in the scene's own colours that move with the sound; the copy keeps to its side so nothing collides; full screen lets it grow. | I5-02 | 932b212, 2a2d4f4 |
+| **Your sounds work.** Assigning a file makes it what that preset plays; rename saves however you finish; edits never rewrite the audio. | I5-01 | 255d527 |
+| **Exam fixes.** A cross for a wrong answer; time spent is right when you answer and adds up across visits; a changed last answer is kept. | I5-08, I5-09 | f1f309d, 3a5d006 |
+| **Locked In.** A quiet rising chime when it appears; "I am locked out". | I5-11, I5-12 | 1fbdcac |
+
+## Wave 1.2 (2026-09-30) · tag wave-1.2 · main 2915b46 · pushed by JD
 
 Gate on the merged tree: typecheck, lint, 2,048 unit tests, build, update and offline checks, 27 Playwright journeys.
 

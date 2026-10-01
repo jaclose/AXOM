@@ -60,6 +60,40 @@ describe("ExamSimulator", () => {
     expect(within(explanation).getByText("Because q1.")).toBeTruthy();
   });
 
+  it("shows the time taken to answer the moment the answer is revealed, and stops the item's clock there", () => {
+    vi.useFakeTimers();
+    const onFinish = vi.fn();
+    render(<ExamSimulator skin="uworld" mode="tutor" pool={pool} onFinish={onFinish} onSuspend={vi.fn()} />);
+    act(() => { vi.advanceTimersByTime(47_000); });
+    fireEvent.click(screen.getByRole("radio", { name: "B. Beta" }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    expect(within(screen.getByRole("region", { name: "Explanation" })).getByText("Time spent: 00:47")).toBeTruthy();
+
+    // Reading the explanation for a minute is not time spent answering.
+    act(() => { vi.advanceTimersByTime(60_000); });
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    fireEvent.keyDown(window, { key: "ArrowLeft" });
+    expect(within(screen.getByRole("region", { name: "Explanation" })).getByText("Time spent: 00:47")).toBeTruthy();
+  });
+
+  it("marks a wrong tutor answer with a cross and a right one with a tick in the question list", () => {
+    render(<ExamSimulator skin="examsoft" mode="tutor" pool={pool} onFinish={vi.fn()} onSuspend={vi.fn()} />);
+    const list = screen.getByRole("navigation", { name: "Question list" });
+    fireEvent.click(screen.getByRole("radio", { name: "C. Gamma" }));
+    // Picked but not yet submitted: answered, with no verdict.
+    expect(within(list).getByRole("button", { name: "Question 1, answered" }).querySelector(".sim-answered.neutral")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Submit|Check/ }));
+    const wrong = within(list).getByRole("button", { name: "Question 1, incorrect" });
+    expect(wrong.querySelector(".sim-answered.bad.lucide-x")).toBeTruthy();
+
+    fireEvent.click(within(list).getByRole("button", { name: "Question 2" }));
+    fireEvent.click(screen.getByRole("radio", { name: "B. Beta" }));
+    fireEvent.click(screen.getByRole("button", { name: /Submit|Check/ }));
+    const right = within(list).getByRole("button", { name: "Question 2, correct" });
+    expect(right.querySelector(".sim-answered.lucide-check")).toBeTruthy();
+    expect(right.querySelector(".lucide-x")).toBeNull();
+  });
+
   it("suspends with answers, marks, notes and a paused clock", () => {
     const onSuspend = vi.fn();
     render(<ExamSimulator skin="uworld" mode="exam" pool={pool} timeLimitSeconds={270} onFinish={vi.fn()} onSuspend={onSuspend} />);

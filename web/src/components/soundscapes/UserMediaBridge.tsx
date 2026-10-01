@@ -2,10 +2,10 @@
 // this device and folds them into the soundscape catalog, so the dock, the
 // Soundscapes page and the media keys all see the same list.
 import { useEffect } from "react";
-import { applyUserSounds } from "../../lib/soundscapes/presets";
 import { applyUserScenes } from "../../lib/soundscapes/scenes";
 import { useSoundscape } from "../../lib/soundscapes/store";
 import { useUserMedia } from "../../lib/soundscapes/userMedia";
+import { syncUserSoundCatalog } from "../../lib/soundscapes/userSounds";
 import { watchOutputRemoval } from "../../lib/soundscapes/outputGuard";
 
 export function UserMediaBridge() {
@@ -22,9 +22,8 @@ export function UserMediaBridge() {
   }), []);
 
   useEffect(() => {
-    applyUserSounds(items.filter((item) => item.kind === "sound" && urls[item.id]).map((item) => ({ id: item.id, name: item.name, presetId: item.presetId, url: urls[item.id] })));
     applyUserScenes(items.filter((item) => item.kind === "scene" && urls[item.id]).map((item) => ({ id: item.id, name: item.name, url: urls[item.id], image: item.mime.startsWith("image/") })));
-    useSoundscape.getState().bumpCatalog();
+    syncUserSoundCatalog();
   }, [items, urls]);
 
   return null;

@@ -115,6 +115,19 @@ export function playTimerEndCue(kind: TimerKind = "focus", { force = false } = {
   notes.forEach((frequency, index) => note(cue, frequency, index * 0.11, 0.06 - index * 0.006, 2.4 - index * 0.2));
 }
 
+/**
+ * The "Are you locked in?" check-in arriving: three quiet bells that rise like
+ * a question (G5, C6, then a softer E6). Follows the same sound preference.
+ */
+export function playLockInCue({ force = false } = {}): void {
+  if (!force && !readTimerCues().sound) return;
+  const cue = engine();
+  if (!cue) return;
+  note(cue, 783.99, 0, 0.038, 1.1);
+  note(cue, 1046.5, 0.13, 0.034, 1.3);
+  note(cue, 1318.51, 0.34, 0.022, 1.7);
+}
+
 // --- Glow --------------------------------------------------------------------
 
 /** Lights the screen's edges (TimerEdgeGlow renders it). */

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_TIMER_CUES,
   flashTimerGlow,
+  playLockInCue,
   playTimerEndCue,
   playTimerStartCue,
   readTimerCues,
@@ -55,8 +56,13 @@ describe("timer cues", () => {
     tones.length = 0;
     playTimerEndCue("break");
     expect(tones.filter((_, index) => index % 3 === 0)).toEqual([783.99, 659.25, 523.25]);
+    // The Locked In check-in asks with three rising bells.
+    tones.length = 0;
+    playLockInCue();
+    expect(tones.filter((_, index) => index % 3 === 0)).toEqual([783.99, 1046.5, 1318.51]);
     tones.length = 0;
     writeTimerCues({ sound: false });
+    playLockInCue();
     playTimerStartCue();
     timerFinished("focus");
     expect(tones).toEqual([]);

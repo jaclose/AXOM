@@ -147,7 +147,8 @@
   border-radius: 10px;
   cursor: pointer;
 }
-.dock-sound-name b { font-size: 13px; font-weight: 600; }
+/* A long track name shortens instead of wrapping the pill onto several lines. */
+.dock-sound-name b { display: block; max-width: min(44vw, 460px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
 .dock-sound-name small { font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(var(--dock-ink), 0.5); white-space: nowrap; }
 .dock-eq { display: inline-flex; align-items: flex-end; gap: 2.5px; height: 16px; width: 20px; margin-left: 4px; }
 .dock-eq i {

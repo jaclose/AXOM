@@ -76,6 +76,7 @@ export function SoundscapesPage() {
           preset={hero}
           animate={status === "playing" || focused !== null || previewScene !== null}
           reactive={status === "playing" && presetId === heroId}
+          orb
           className="soundscape-hero-visual"
           label={`${hero.name} visual`}
           sceneOverride={previewScene}

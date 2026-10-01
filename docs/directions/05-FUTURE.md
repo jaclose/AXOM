@@ -6,11 +6,12 @@ Parked ideas, items waiting on JD, and additions worth considering. Anything her
 
 | ID | What is needed |
 |---|---|
-| I4-22 | A licence (or the creator's permission) for the alpha-waves track before it ships to everyone. Today it works on JD's own device: Soundscapes > Your sounds > add the file > "Put it in: Alpha focus". At 288 MB it would also need re-encoding (Opus at about 64-96 kbps) and streaming rather than bundling. |
+| I4-22 | A licence (or the creator's permission) for the alpha-waves track before it ships to everyone. Today it works on JD's own device: Soundscapes > Your sounds > add the file, then choose what it "Plays for". At 288 MB it would also need re-encoding (Opus at about 64-96 kbps) and streaming rather than bundling. |
 | I1-25b | Licence for any myWallpaper images shown on the journal iPad; until then, original or generated art. |
 | I3-64 | Where JD's NCRS sheets and Q-bank drives may be hosted (the repository is public). |
 | I3-17b | Codex's call on how new students get four starter tracker boxes (board request 2026-09-30). |
 | I4-18 | Production email settings (sign-up without a code, welcome email template) are a production change: design lands in the repo, JD applies it. |
+| I5-10 | Examplify / ExamSoft "carbon copy": reference screenshots of the real exam screen (question view, navigation pane, flag and strike-out, calculator and notes, review, the 5-minute warning), and a yes to this boundary: layout, controls, behaviour, type and colour match; their logo, brand name and artwork are not shipped. AMBOSS: deferred or removed, JD's call. |
 
 ## Parked
 
@@ -33,3 +34,8 @@ Parked ideas, items waiting on JD, and additions worth considering. Anything her
 - A shared form system built from the setup primitives (tiles, chips, segments, summaries), so Settings, schedule import and journal setup reach the setup standard without one-off styling.
 - A small "directions check" script that validates the index (unique IDs, allowed statuses, commits that exist) so this bank cannot quietly drift.
 - A native screen-edge glow for timer completion in the packaged app (a transparent always-on-top window), matching the in-app cue.
+
+## Known limits after Wave 1.3
+
+- **Question images stay on the device that imported them.** Their bytes live in the device vault; a portable backup carries them, account sync does not yet. On another device the question says the image is not there. Worth closing before a second device is in daily use.
+- **A full-file import of images from a PDF's pages** is not built; images are added as separate files and matched by name.

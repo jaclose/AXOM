@@ -9,7 +9,7 @@
 // ===========================================================================
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowLeft, CheckCircle2, ClipboardPaste, FileUp, Save, Sparkles,
+  ArrowLeft, CheckCircle2, ClipboardPaste, FileUp, ImagePlus, Save, Sparkles,
   RefreshCw, ChevronDown, ChevronUp, Trash2, X,
 } from "lucide-react";
 import { useStore } from "../../lib/store";
@@ -48,6 +48,7 @@ import {
 import { ICON_SIZE } from "../../lib/iconSize";
 import { MassImport } from "./MassImport";
 import { flagImportDuplicates } from "../../lib/questionDuplicates";
+import { attachNamedImages, imageNameKey, matchNamedImages, namedImages } from "../../lib/questionImportImages";
 
 export type ImportTab = "paste" | "file" | "batch" | "ai";
 type SaveMode = "set" | "doc" | "both";
@@ -238,6 +239,9 @@ export function ImportPanel({
   const [finalizedBatchQueueId, setFinalizedBatchQueueId] = useState<string | undefined>();
   const finalizingRef = useRef(false);
   const mountedRef = useRef(true);
+  // Image files the learner adds for questions that name one ("Attachment: ecg.png").
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -530,6 +534,39 @@ export function ImportPanel({
     const questionIds = persisted.questionIds;
     const savedSetId = persisted.questionSetId;
     const savedDocumentId = persisted.documentId;
+
+    // Named images: each added file becomes its question's exhibit. A file
+    // that cannot be saved is reported; it never undoes the import.
+    if (savedSetId && !coordinated.joined && questionIds.length === approvedEntries.length) {
+      const imageProblems: string[] = [];
+      let attachedImages = 0;
+      let missingImages = 0;
+      for (const [entryIndex, { draft }] of approvedEntries.entries()) {
+        const names = draft.attachmentNames ?? [];
+        // Saved ids come back in the order the questions were approved.
+        const questionId = questionIds[entryIndex];
+        if (!names.length || !questionId) continue;
+        missingImages += matchNamedImages(names, imageFiles).filter((match) => !match.file).length;
+        if (!imageFiles.length) continue;
+        const result = await attachNamedImages({ names, files: imageFiles, questionId });
+        if (result.attachments.length) {
+          s.updateQuestion(questionId, { attachments: result.attachments });
+          attachedImages += result.attachments.length;
+        }
+        imageProblems.push(...result.problems);
+      }
+      if (mountedRef.current && (attachedImages || missingImages || imageProblems.length)) {
+        pushToast({
+          title: attachedImages ? `${attachedImages} image${attachedImages === 1 ? "" : "s"} attached to ${attachedImages === 1 ? "its question" : "their questions"}` : "Images still to add",
+          body: [
+            missingImages ? `${missingImages} named image${missingImages === 1 ? " was" : "s were"} not added. Open the question and add the image there.` : "",
+            ...imageProblems.slice(0, 2),
+          ].filter(Boolean).join(" ") || undefined,
+          tone: imageProblems.length || (missingImages && !attachedImages) ? "warn" : "success",
+          duration: 8000,
+        });
+      }
+    }
     if (mountedRef.current) pushToast({
       title: savedSetId
         ? `${questionIds.length} reviewed question${questionIds.length === 1 ? "" : "s"} finalized`
@@ -818,6 +855,10 @@ export function ImportPanel({
     ));
   }, [drafts, evaluations, includedDrafts, includedEvaluations]);
   const includedCount = includedDrafts.length;
+  const imageMatches = matchNamedImages(namedImages(includedDrafts), imageFiles);
+  const matchedImageKeys = new Set(imageMatches.filter((match) => match.file).map((match) => imageNameKey(match.name)));
+  const usedImages = new Set(imageMatches.map((match) => match.file).filter(Boolean));
+  const unusedImages = imageFiles.filter((file) => !usedImages.has(file));
   const blockedCount = includedDrafts.filter((draft, index) => (
     !includedEvaluations[index]?.isValid
     || (includedEvaluations[index]?.level === "Needs Review" && !draft.reviewAcknowledged)
@@ -1024,6 +1065,42 @@ export function ImportPanel({
             </section>
           )}
 
+          {imageMatches.length > 0 && (
+            <section className="import-images" aria-labelledby="import-images-title">
+              <div className="spread wrap gap8">
+                <div>
+                  <b id="import-images-title">Images</b>
+                  <div className="sub">
+                    {imageMatches.length} image{imageMatches.length === 1 ? " is" : "s are"} named by {imageMatches.length === 1 ? "a question" : "these questions"}.
+                    Add the file{imageMatches.length === 1 ? "" : "s"} and each one is attached to its question by name, to show with the question.
+                  </div>
+                </div>
+                <GButton size="sm" onClick={() => imageInputRef.current?.click()}>
+                  <ImagePlus size={ICON_SIZE.body} aria-hidden="true" /> {imageFiles.length ? "Add more images" : "Add images"}
+                </GButton>
+                <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden
+                  aria-label="Add image files for this import"
+                  onChange={(event) => {
+                    const picked = [...(event.target.files ?? [])];
+                    event.target.value = "";
+                    if (picked.length) setImageFiles((current) => [...current.filter((file) => !picked.some((next) => imageNameKey(next.name) === imageNameKey(file.name))), ...picked]);
+                  }} />
+              </div>
+              <ul className="import-image-list" aria-label="Named images">
+                {imageMatches.map((match) => (
+                  <li key={match.name} className={match.file ? "matched" : "missing"}>
+                    {match.file ? <CheckCircle2 size={ICON_SIZE.microInline} aria-hidden="true" /> : <X size={ICON_SIZE.microInline} aria-hidden="true" />}
+                    <span>{match.name}</span>
+                    <small>{match.file ? (imageNameKey(match.file.name) === imageNameKey(match.name) ? "ready" : `using ${match.file.name}`) : "not added yet"}</small>
+                  </li>
+                ))}
+              </ul>
+              {unusedImages.length > 0 && (
+                <div className="sub">Not named by any question, so left out: {unusedImages.map((file) => file.name).join(", ")}.</div>
+              )}
+            </section>
+          )}
+
           <fieldset className="import-destination">
             <legend className="field-label">Finalize as</legend>
             <div className="row wrap gap6">
@@ -1092,6 +1169,9 @@ export function ImportPanel({
                         {draft.options.length} choices{draft.correctKey ? ` · answer ${draft.correctKey}` : " · answer missing"}
                         {draft.explanation ? " · explanation present" : " · explanation missing"}
                         {draft.sourcePage ? ` · page ${draft.sourcePage}` : ""}
+                        {(draft.attachmentNames?.length ?? 0) > 0 && ` · image ${draft.attachmentNames!.map((name) => (
+                          `${name}${matchedImageKeys.has(imageNameKey(name)) ? "" : " (not added yet)"}`
+                        )).join(", ")}`}
                       </span>
                     </button>
                     <Tag tone={tone}>{evaluation.level}</Tag>
