@@ -17,6 +17,7 @@ import {
   sanitizeExplanationCandidate,
   type ExplanationCleanupOperation,
 } from "./questionExplanation";
+import { hasLabelledRecords, normalizeLabelledRecords } from "./questionLabelledRecords";
 
 export interface ParsedQuestionDraft {
   stem: string;
@@ -294,7 +295,12 @@ export function expandInlineOptions(line: string): string[] {
 export function parseQuestionText(raw: string): ParsedQuestionDraft {
   const warnings: string[] = [];
   const parserRuleIds = new Set<string>();
-  const normalized = normalizeSourceText(raw);
+  const cleaned = normalizeSourceText(raw);
+  // One labelled record pasted on its own: read its fields, minus the
+  // "Question N" line the record pass adds for the multi-question splitter.
+  const normalized = hasLabelledRecords(cleaned)
+    ? normalizeLabelledRecords(cleaned).replace(/^\s*Question \d+\n/, "")
+    : cleaned;
   const lines: string[] = [];
   for (const line of normalized.split("\n")) {
     const expanded = expandInlineOptions(line);
@@ -807,7 +813,7 @@ function matchExplanationToOption(explanation: string, options: QuestionOption[]
  * flagged, never invented.
  */
 export function parseQuestionBlocks(raw: string): ParsedQuestionDraft[] {
-  const { body, entries } = parseAnswerSections(normalizeSourceText(raw));
+  const { body, entries } = parseAnswerSections(normalizeLabelledRecords(normalizeSourceText(raw)));
   const lines = body.split("\n");
   const protectedUnnumberedStemThrough = unnumberedNestedStemFirstOptionIndex(lines);
   const starts: QuestionBlockStart[] = [];
