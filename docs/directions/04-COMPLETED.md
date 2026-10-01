@@ -2,6 +2,16 @@
 
 Done and on main, by wave. VERIFIED means exercised in a real browser (or a real build for native items); SHIPPED means merged with automated tests but not yet exercised the way a person would meet it. Each ID links back to the bank (01-ideas/INDEX.md).
 
+## Wave 1.3 · 2026-10-01 · tag wave-1.3
+
+| ID | Done | Level | Commit |
+|---|---|---|---|
+| I5-03, I5-04, I5-05 | Import reads labelled and mapped-paste question files, honours the source's key warnings, treats several quizzes in one paste as sections | VERIFIED | b5594a5, 77b0335 |
+| I5-06 | Images an import names attach to their questions and show with the stem | VERIFIED | 1267f2d, f4db063 |
+| I5-01 | Assigning your sound makes it play there; rename always saves | VERIFIED | 255d527 |
+| I5-08, I5-09 | A cross for a wrong answer; time spent right when you answer | VERIFIED | f1f309d, 3a5d006 |
+| I5-11, I5-12 | Locked In chime; "I am locked out" | SHIPPED | 1fbdcac |
+
 ## Wave 1.2 · 2026-09-30 · tag wave-1.2
 
 | ID | Done | Level | Commit |

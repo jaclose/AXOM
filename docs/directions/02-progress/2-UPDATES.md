@@ -4,6 +4,9 @@ Smaller improvements, newest first.
 
 | Date | Update | Ideas | Commit |
 |---|---|---|---|
+| 2026-10-01 | The Locked In check-in arrives with three quiet rising bells; "I am locked out" replaces "I drifted" | I5-11, I5-12 | 1fbdcac |
+| 2026-10-01 | Your sounds: rename with the pencil (it becomes a tick), Enter or clicking away; "Plays for" is labelled, confirms with a notice and stays on phones | I5-01 | 255d527 |
+| 2026-10-01 | Ideas 5 recorded (private quiz text redacted from the public file) | I5 | 1789491 |
 | 2026-09-30 | After the Promise, AXOM's regions slot in top to bottom; no daily reminder on a student's first day, and reminders wait for dialogs | I3-18b | 69a5613 |
 | 2026-09-30 | Once settled, trackers order by how much of the goal is done | I3-01b | 693bfde |
 | 2026-09-30 | Opening films: only the finished AXOM films remain; no buttons over the film | I4-24, I3-13b | 9eda971 |

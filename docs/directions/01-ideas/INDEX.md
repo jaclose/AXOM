@@ -1,12 +1,12 @@
 # Ideas bank: index (read this first)
 
-Every idea JD has given, as one tracked item. The verbatim notes sit beside this file (IDEAS-1.md to IDEAS-4.md) and are never edited; this index is where status changes. When JD sends new notes: save them verbatim as the next IDEAS-N.md, then add each actionable idea below with the next ID.
+Every idea JD has given, as one tracked item. The verbatim notes sit beside this file (IDEAS-1.md to IDEAS-5.md) and are never edited; this index is where status changes. When JD sends new notes: save them verbatim as the next IDEAS-N.md, then add each actionable idea below with the next ID.
 
 **Status:** `NEW` not yet planned · `PLANNED` in a branch plan · `IN PROGRESS` being built · `PARTIAL` part shipped · `SHIPPED` on main · `VERIFIED` on main and exercised in a real browser · `CODEX` Codex's lane (status as Codex reports it) · `NEEDS JD` waiting on a decision, licence or credential · `FUTURE` parked, see ../05-FUTURE.md · `ANSWERED` a question, not a feature.
 
-**Where:** a commit or wave on main, or the branch that owns the work: `wave/1.2` (polish + directions), `feat/wave2-home` (dashboard, widgets, Up Next, Wrapped, check-in, accounts nudge), `feat/wave2-journal-library`, `feat/wave2-study-ai` (schedule, Q-bank AI, tutor, exam UIs), Codex's `feat/ideas2-integration`.
+**Where:** a commit or wave on main, or the branch that owns the work: `wave/1.2` (polish + directions), `fix/wave1.3` (import, Your sounds, exam fixes, stage orb), `feat/wave2-home` (dashboard, widgets, Up Next, Wrapped, check-in, accounts nudge), `feat/wave2-journal-library`, `feat/wave2-study-ai` (schedule, Q-bank AI, tutor, exam UIs), Codex's `feat/ideas2-integration`.
 
-Last full review: 2026-09-30, after Wave 1.2 (tag wave-1.2; Wave 1.1 is main 83d9fb8, pushed by JD).
+Last full review: 2026-10-01, with Wave 1.3 (Ideas 5 added; Wave 1.2 is main 2915b46, pushed by JD).
 
 ## 1. First run: intro, setup, Promise, guide
 
@@ -54,6 +54,8 @@ Last full review: 2026-09-30, after Wave 1.2 (tag wave-1.2; Wave 1.1 is main 83d
 | ID | Idea | Status | Where |
 |---|---|---|---|
 | I1-01, I2-01 | "Are you locked in?" check-in, persistent, on whatever screen | CODEX (VERIFIED by Codex) | a89819e (Wave 1.1) |
+| I5-11 | An elegant sound when the Locked In check-in pops up | SHIPPED | Wave 1.3 (1fbdcac): three quiet rising bells, behind the timer-sound preference; unit-tested, not yet heard in a real session |
+| I5-12 | "I am locked out" with the tired face as an answer to "Are you locked in?" | SHIPPED | Wave 1.3 (1fbdcac): replaces "I drifted"; the recorded response is unchanged |
 | I3-01 | Tracker boxes stay still while you tap | VERIFIED | 0ab96bc |
 | I3-01b | Once settled, trackers move up by how much is completed | SHIPPED | Wave 1.2 (693bfde) |
 | I3-39 | Pomodoro logging no longer doubles study time | VERIFIED | f095e48 |
@@ -100,6 +102,15 @@ Last full review: 2026-09-30, after Wave 1.2 (tag wave-1.2; Wave 1.1 is main 83d
 | I1-08 | Examplify, AMBOSS, Step 1 and native exam UIs (UWorld mode is loved) | PLANNED | feat/wave2-study-ai + Codex |
 | I3-33 | Q-bank selector less crowded; timed/tutor choice; hide other sets once one is chosen | PLANNED | feat/wave2-study-ai + Codex |
 | I3-25 | Q-bank headings; import takes any file exactly | PLANNED | feat/wave2-study-ai |
+| I5-03 | Import reads labelled and mapped-paste question files (QUESTION_NUMBER / STEM / CORRECT_ANSWER; "Question N ... Answer / Explanation / Review / Attachment"; labels on their own line) | VERIFIED | Wave 1.3 (b5594a5, 77b0335): JD's Quiz 4 layout reproduced as one invalid question, now one question per record |
+| I5-04 | The source's own key warnings are honoured: a conflict or two marks never sets an answer; UNRESOLVED reads as no key; a flag keeps the answer and sends it to review | VERIFIED | Wave 1.3 (77b0335) |
+| I5-05 | Several quizzes in one paste: each "Source:" header starts a section with its own numbering | VERIFIED | Wave 1.3 (77b0335) |
+| I5-06 | Images named by an import attach to their questions and show with the question | VERIFIED | Wave 1.3 (1267f2d, f4db063): add the files in the review step; shown under the stem before answering, with an enlarged view |
+| I5-07 | A full working import system | PARTIAL | Wave 1.3 covers text layouts, tags, sources, key warnings and images. Still open: images cut from a PDF's pages, a folder or zip of mixed files, per-quiz source prompts; feat/wave2-study-ai |
+| I5-08 | A wrong answer is marked with a cross, not a tick | VERIFIED | Wave 1.3 (f1f309d): ExamSoft question list and UWorld item list, once a tutor answer is revealed |
+| I5-09 | Time spent is correct when you answer | VERIFIED | Wave 1.3 (f1f309d, 3a5d006): banked at submit in the simulator (read 00:00); adds up across visits in the AXOM player |
+| I5-10 | Carbon-copy Examplify / ExamSoft interface; AMBOSS deferred or removed; UWorld is good | PLANNED | feat/wave2-study-ai with Codex (his simulator); needs reference screenshots of the real interfaces |
+| I5-13 | Questions easy to navigate and use | PLANNED | feat/wave2-study-ai with Codex |
 | I2-06 | Extending a highlight over a highlight | CODEX (VERIFIED by Codex) | 691c23a (Wave 1.1) |
 | I1-33 | Simulations tab (WIP) | FUTURE | |
 | I1-02 | Daily medical fact from a local, sourced library | FUTURE | |
@@ -125,6 +136,8 @@ Last full review: 2026-09-30, after Wave 1.2 (tag wave-1.2; Wave 1.1 is main 83d
 | ID | Idea | Status | Where |
 |---|---|---|---|
 | I1-06, I3-08 | Your own soundscapes (files; YouTube by embed only) | PARTIAL | files shipped (09d65a1); YouTube embed-only by design |
+| I5-01 | Assigning one of your sounds to a preset works, and renaming always saves | VERIFIED | Wave 1.3 (255d527): the file becomes what that preset plays, even over an earlier pick; rename saves on Enter, the tick or clicking away |
+| I5-02 | Stage sphere and ring take the scene's colours, sit centred, and move with the sound | IN PROGRESS | fix/wave1.3 |
 | I4-22 | JD's alpha-waves track as the default pinned intro soundscape | NEEDS JD | licence for a YouTube-sourced track in a public app; works today on JD's device via Your sounds |
 | I4-23 | Fullscreen / larger soundscape experience | PLANNED | coordinate with Codex's page restructure |
 | I4-24 | Opening films: keep only the finished renders (JD: "remove these, terrible quality") | VERIFIED | Wave 1.2 (9eda971) |
@@ -151,6 +164,8 @@ Last full review: 2026-09-30, after Wave 1.2 (tag wave-1.2; Wave 1.1 is main 83d
 | I4-17 | "How do you study" and all of Settings rebuilt in the setup style | PARTIAL | Wave 1.2 (da9fcfd): How you study VERIFIED on the shared setup primitives; the rest of Settings next |
 | I1-23, I3-52 | Sidebar defaults, Misc folder, drag to reorder | VERIFIED | 6fc14d9 |
 | I4-09 | Sidebar: make your own sections, move items between them | PLANNED | feat/wave2-home |
+| I5-14 | Every wrap-up reports the branches: what is new, how many changes each holds, and when to combine and publish | ANSWERED | standing practice from 2026-10-01 |
+| I5-15 | Use the directions pipeline, and read Codex's work before touching shared files | ANSWERED | standing practice; coordination board entry 2026-10-01 00:05 |
 
 ## 9. Look, feel, notices, identity
 

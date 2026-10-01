@@ -4,6 +4,12 @@ Bug fixes, newest first. Root cause stated so the same class of bug is easy to s
 
 | Date | Fix | Root cause | Commit |
 |---|---|---|---|
+| 2026-10-01 | Assigning one of your sounds to a preset now makes it play there | the file was only listed first; `play` saves a pick for every preset you have ever played, so the earlier pick kept winning | 255d527 |
+| 2026-10-01 | Removing or moving your only sound no longer breaks the page | `versionOf` returned undefined for an empty preset and five readers dereferenced it; a rebuild of the catalog could also render before the player moved off the emptied shelf | 255d527 |
+| 2026-10-01 | A labelled question file imports as one question per record, not one invalid question | QUESTION_NUMBER was not a question boundary, STEM stayed in the stem, CORRECT_ANSWER (underscore) was not an answer line | b5594a5 |
+| 2026-10-01 | "Time spent" is right the moment a tutor answer is revealed | time was banked only on leaving an item, so it read 00:00 after a first answer and grew while the explanation was read | f1f309d |
+| 2026-10-01 | A wrong answer gets a cross in the ExamSoft and UWorld item lists | every answered item got the same green tick | f1f309d |
+| 2026-10-01 | Exam mode: time adds up across visits; a changed last answer is kept | resubmitting replaced the time with the last visit; finishing ignored a new pick on a question already answered | 3a5d006 |
 | 2026-09-30 | Profile and Account could disagree about sign-in; sign-in details loaded slowly | a second session read raced the SDK's auth events, and a failed token refresh read as signed out; nothing showed until the SDK downloaded | f20f81e |
 | 2026-09-30 | Three e2e races (highlight delete, study-plan reload, keyboard pass) | reloads raced the IndexedDB write; a lazy remount swallowed a key | f221dc3 |
 | 2026-09-30 | e2e suite now really runs with reduced motion; a name typed into setup was being dropped | Playwright 1.61 ignores `reducedMotion` at the top of `use`; the opening film held the app inert | edaa823 |

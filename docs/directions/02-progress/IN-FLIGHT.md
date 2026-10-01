@@ -4,7 +4,8 @@ What each branch is doing right now. Update when a branch starts, changes scope,
 
 | Branch | Worktree | Owner | Plan | State |
 |---|---|---|---|---|
-| `wave/1.2` | /Users/jd/Developer/AXOM-wave-1.2 | Claude | directions, opening films, timer cues, tracker order, account fix, post-Promise reveal, quiet first day, How you study | merged into local main (tag wave-1.2), not pushed |
+| `fix/wave1.3` | /Users/jd/Developer/AXOM-wave-1.3 | Claude | Ideas 5 fixes: question import layouts and images, Your sounds, exam time and marks, Locked In chime, stage orb | Wave 1.3 |
+| `wave/1.2` | /Users/jd/Developer/AXOM-wave-1.2 | Claude | directions, opening films, timer cues, tracker order, account fix, post-Promise reveal, quiet first day, How you study | on main (2915b46, tag wave-1.2), pushed by JD |
 | `feat/wave2-home` | /Users/jd/Developer/AXOM-wave2-home | Claude | ../../feature-development/2026-09-30/home/PLAN-v1.md on that branch | plan v1 |
 | `feat/wave2-journal-library` | /Users/jd/Developer/AXOM-wave2-journal | Claude | ../../feature-development/2026-09-30/journal-library/PLAN-v1.md on that branch | plan v1 |
 | `feat/wave2-study-ai` | /Users/jd/Developer/AXOM-wave2-study | Claude | ../../feature-development/2026-09-30/study-ai/PLAN-v1.md on that branch (gains the cohort schedule, .ics export and skip tracker from Ideas 4) | plan v1 |
