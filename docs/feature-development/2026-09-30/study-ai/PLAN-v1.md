@@ -19,7 +19,15 @@ From a lecture to good questions and cards, with the student in control of accur
 2. **Verification built in.** Every generated item lands in a review queue with its source excerpt; the student accepts, edits or rejects; unreviewed items never enter scores or schedules. Medical content is labelled AI-generated until reviewed.
 3. **Tutor mode AI (I4-01).** A `tutor` feature on the existing AI proxy: explain reasoning, why an answer is wrong, compare alternatives, a four-rung hint ladder (nudge, concept, eliminate one, full reasoning) where the answer needs an explicit "Show me", every reply grounded in the stem, choices, explanation and linked source.
 4. **Decks.** AXOM native deck, plus honest Anki export (never advertise Anki as complete before it is).
-5. **Exam UIs.** Keep an original AXOM identity for UWorld-, AMBOSS-, Examplify- and Step-style modes; no pixel copies.
+5. **Exam UIs.** Keep an original AXOM identity for UWorld-, AMBOSS- and Step-style modes; no pixel copies. (Examplify and ExamSoft: see item 7, added from Ideas 5.)
+
+## Added from Ideas 5 (2026-10-01)
+
+Shipped ahead of this branch in Wave 1.3 (`fix/wave1.3`), because JD needed them at once: the mapped-paste and labelled import layouts, review tags, source-key warnings, quiz sections, images named by an import (attached as exhibits and shown with the stem), a cross for a wrong answer, and correct time spent. What is left for this branch:
+
+6. **Import, the rest (I5-07).** Images cut from a PDF's pages when the source has no separate files; a folder or zip of mixed files in one go; a prompt for the source name per quiz when a paste has none; "import takes any file exactly" (I3-25).
+7. **Examplify / ExamSoft to match the real thing (I5-10).** JD: UWorld is good, AMBOSS can be deferred or removed, Examplify and ExamSoft should be a carbon copy. This supersedes item 5's "no pixel copies" for those two, within one limit: layout, controls, behaviour, type and colour can match so exam day feels familiar; their logo, name-as-brand and artwork are not ours to ship. Needs reference screenshots of the real exam screen from JD before any work (question view, navigation pane, flag and strike-out, calculator and notes, review screen, the 5-minute warning). Codex owns the simulator: split the work on the board first.
+8. **Questions easy to navigate and use (I5-13).** A question navigator in the AXOM player (jump to any item, see answered, flagged, right and wrong at a glance), keyboard next/previous everywhere, and the same marks in every list.
 
 ## Not in v1
 
