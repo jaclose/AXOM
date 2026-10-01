@@ -36,6 +36,16 @@ interface SoundscapeState extends Prefs {
   previewing: boolean;
   /** Choose a version; crossfades immediately when that preset is playing. */
   setVersion: (id: SoundscapeId, version: string) => void;
+  /**
+   * One of your files changed what it plays for: it becomes the pick in its
+   * new preset and stops being the pick in the old one. If it is the file
+   * playing now, playback follows it instead of restarting.
+   */
+  moveVersion: (from: SoundscapeId, to: SoundscapeId, version: string) => void;
+  /** Re-publish Now Playing (after a rename). */
+  refreshNowPlaying: () => void;
+  /** After your files change: never leave the player pointing at an empty preset. */
+  settleCatalog: () => void;
   /** Choose the scene for a preset ("auto" clears the choice). */
   setScene: (id: SoundscapeId, scene: string) => void;
   setTaste: (taste: Partial<Taste>) => void;
@@ -266,6 +276,34 @@ export const useSoundscape = create<SoundscapeState>((set, get) => {
       if (status === "playing" && presetId === id) {
         void get().play(id, { version, stopAfterMinutes: stopAt ? Math.max(1, (stopAt - Date.now()) / 60_000) : null });
       }
+    },
+    moveVersion(from, to, version) {
+      if (from === to) return;
+      const { status, presetId, versions, stopAt } = get();
+      const loaded = status !== "idle" && presetId === from && versionOf(SOUNDSCAPES[to], version).id === version && versions[from] === version;
+      const next = { ...versions, [to]: version };
+      if (next[from] === version) delete next[from];
+      persist({ versions: next, ...(loaded ? { lastPresetId: to } : {}) });
+      if (loaded) {
+        // Same audio, new home: follow the file rather than restart it.
+        set({ presetId: to });
+        if (status === "playing") openIntervalFor(to);
+        updateMediaSession(to, status);
+      } else if (status === "playing" && presetId === to) {
+        void get().play(to, { version, stopAfterMinutes: stopAt ? Math.max(1, (stopAt - Date.now()) / 60_000) : null });
+      }
+    },
+    refreshNowPlaying() {
+      const { presetId, status } = get();
+      if (presetId && status !== "idle") updateMediaSession(presetId, status);
+    },
+    settleCatalog() {
+      const { presetId, lastPresetId, status } = get();
+      if (presetId && !isPlayable(presetId)) {
+        if (status !== "idle") void get().stop();
+        set({ presetId: null });
+      }
+      if (!isPlayable(lastPresetId)) persist({ lastPresetId: DEFAULT_PREFS.lastPresetId });
     },
     setFollowTimer(value) {
       persist({ followTimer: value });

@@ -22,3 +22,9 @@ Use the new pipeline we developed then take a look at the subsequent codex workf
 (Followed by Codex's status on soundscape and Spotify persistence in the Ideas 2 worktree, and JD's strategic-checkpoint prompt: research, reassess, choose, execute, verify, improve, ship.)
 
 (Screenshot, no words: Question Bank > Import Center on axom.info. "Examsoft Quiz 4 (With Answers).pdf" parsed into one question marked Invalid. The stem begins "SOURCE: Examsoft Quiz 4 QUESTION_NUMBER: 1 STEM: A 65-year-old man ..."; "5 choices, answer missing, explanation present".)
+
+```
+Need to work on the proper examsoft UI as well as the amboss - The uworld is pretty good - but I need carbon copy examplify and examsoft and (amboss can be deffered) or removed.
+also if you get. a question wrong - have it mark and X instyead of the checkmark - and continue working on making the questions easy to navigate and use
+```
+(A screenshot came with this note; it was too large to open, so it is not described here.)

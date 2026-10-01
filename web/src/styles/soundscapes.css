@@ -375,9 +375,10 @@
 .your-sound-copy { display: grid; gap: 2px; min-width: 0; }
 .your-sound-copy b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .your-sound-copy small { color: var(--text-45); font-size: var(--fs-tiny); }
-.your-sound-copy form { display: flex; gap: 6px; }
+.your-sound-name { height: 32px; padding-block: 0; font-weight: var(--fw-semibold); }
 .your-sound-icon { color: var(--text-45); }
-.your-sound-move { width: auto; min-width: 160px; height: 36px; padding-block: 0; font-size: var(--fs-xs); }
+.your-sound-move { display: flex; align-items: center; gap: 8px; color: var(--text-45); font-size: var(--fs-tiny); white-space: nowrap; }
+.your-sound-move select { width: auto; min-width: 170px; height: 36px; padding-block: 0; font-size: var(--fs-xs); }
 .your-sound-play { display: grid; place-items: center; width: 36px; height: 36px; color: var(--on-accent, #16120b); background: rgb(var(--accent-rgb)); border: 0; border-radius: 999px; cursor: pointer; box-shadow: 0 6px 16px rgba(var(--accent-rgb), 0.28); }
 .your-sound.again { grid-template-columns: auto auto minmax(0, 1fr); background: linear-gradient(120deg, rgba(var(--accent-rgb), 0.16), rgba(140, 110, 255, 0.12)); border-color: rgba(var(--accent-rgb), 0.35); }
 .again-badge { display: grid; place-items: center; width: 24px; color: rgb(var(--accent-rgb)); font-size: 18px; }
@@ -394,7 +395,10 @@
 @media (max-width: 760px) {
   .your-sounds-add { grid-template-columns: 1fr; }
   .your-sound { grid-template-columns: auto minmax(0, 1fr) auto auto; }
-  .your-sound-icon, .your-sound-move { display: none; }
+  .your-sound-icon { display: none; }
+  /* What it plays for drops to its own row instead of disappearing. */
+  .your-sound-move { grid-column: 1 / -1; grid-row: 2; justify-content: space-between; }
+  .your-sound-move select { flex: 1; min-width: 0; }
 }
 
 /* --- Music ------------------------------------------------------------------------ */

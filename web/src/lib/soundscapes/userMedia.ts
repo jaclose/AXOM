@@ -4,6 +4,11 @@
 // cloud backups) and play through blob: URLs. A sound can lead one of the
 // presets (e.g. your alpha-waves track becomes the first 10 Hz version) or sit
 // under "Your sounds"; a background joins the scene picker.
+//
+// What you can change about a file (its name, what it plays for) is kept
+// apart from the bytes, as a small device preference. Renaming or reassigning
+// a 100 MB track therefore never rewrites the track: it is instant and cannot
+// fail for lack of space.
 // ===========================================================================
 import { create } from "zustand";
 
@@ -31,6 +36,32 @@ export interface UserMediaMeta {
 
 interface UserMediaRecord extends UserMediaMeta {
   blob: Blob;
+}
+
+type UserMediaDetails = Partial<Pick<UserMediaMeta, "name" | "presetId">>;
+export const USER_MEDIA_DETAILS_KEY = "axom.soundscapes.userMediaDetails.v1";
+
+function readDetails(): Record<string, UserMediaDetails> {
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(USER_MEDIA_DETAILS_KEY) ?? "{}") as unknown;
+    return raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, UserMediaDetails> : {};
+  } catch {
+    return {};
+  }
+}
+
+/** False when the browser refuses the write (the change then lasts for this visit only). */
+function writeDetails(details: Record<string, UserMediaDetails>): boolean {
+  try {
+    window.localStorage.setItem(USER_MEDIA_DETAILS_KEY, JSON.stringify(details));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function cleanName(value: unknown, fallback: string): string {
+  return (typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, 60) : "") || fallback;
 }
 
 function openDb(): Promise<IDBDatabase> {
@@ -93,7 +124,8 @@ interface UserMediaState {
   error?: string;
   load: () => Promise<void>;
   add: (file: File, kind: UserMediaKind, presetId?: string) => Promise<UserMediaMeta | null>;
-  update: (id: string, patch: Partial<Pick<UserMediaMeta, "name" | "presetId">>) => Promise<void>;
+  /** Applies at once (no awaiting), so callers can change the player in the same tick. */
+  update: (id: string, patch: Partial<Pick<UserMediaMeta, "name" | "presetId">>) => void;
   remove: (id: string) => Promise<void>;
   urlFor: (id: string) => Promise<string | null>;
 }
@@ -109,7 +141,13 @@ export const useUserMedia = create<UserMediaState>((set, get) => ({
       const records = await tx<UserMediaRecord[]>("readonly", (store) => store.getAll() as IDBRequest<UserMediaRecord[]>);
       const urls: Record<string, string> = {};
       for (const record of records) urls[record.id] = URL.createObjectURL(record.blob);
-      const items = records.map(({ blob: _blob, ...meta }) => meta).sort((a, b) => a.addedAt.localeCompare(b.addedAt));
+      const details = readDetails();
+      const items = records
+        .map(({ blob: _blob, ...meta }) => {
+          const saved = details[meta.id];
+          return saved ? { ...meta, name: cleanName(saved.name, meta.name), presetId: typeof saved.presetId === "string" ? saved.presetId : meta.presetId } : meta;
+        })
+        .sort((a, b) => a.addedAt.localeCompare(b.addedAt));
       set({ loaded: true, items, urls, error: undefined });
     } catch (error) {
       set({ loaded: true, error: error instanceof Error ? error.message : "Couldn’t read your files." });
@@ -133,17 +171,23 @@ export const useUserMedia = create<UserMediaState>((set, get) => ({
     return meta;
   },
 
-  async update(id, patch) {
+  update(id, patch) {
     const current = get().items.find((item) => item.id === id);
     if (!current) return;
-    const next = { ...current, ...patch, name: (patch.name ?? current.name).trim().slice(0, 60) || current.name };
-    const record = await tx<UserMediaRecord | undefined>("readonly", (store) => store.get(id) as IDBRequest<UserMediaRecord | undefined>);
-    if (record) await tx("readwrite", (store) => store.put({ ...record, ...next }));
-    set((state) => ({ items: state.items.map((item) => (item.id === id ? next : item)) }));
+    const next = { ...current, ...patch, name: cleanName(patch.name, current.name) };
+    // Shown at once; the audio file itself is never rewritten for this.
+    set((state) => ({ items: state.items.map((item) => (item.id === id ? next : item)), error: undefined }));
+    const saved = writeDetails({ ...readDetails(), [id]: { name: next.name, presetId: next.presetId } });
+    if (!saved) set({ error: "That change is showing, but this browser would not save it. It may be gone after a reload." });
   },
 
   async remove(id) {
     await tx("readwrite", (store) => store.delete(id));
+    const details = readDetails();
+    if (id in details) {
+      delete details[id];
+      writeDetails(details);
+    }
     const url = get().urls[id];
     if (url) URL.revokeObjectURL(url);
     set((state) => {
