@@ -1,6 +1,8 @@
 /* ==========================================================================
    Exam simulator (components/questions/ExamSimulator.tsx)
    Deliberately *not* AXOM-styled: it mimics the interfaces you will sit.
+   UWorld and NBME are here; Examplify is in exam-examplify.css. The shared
+   parts (lab values, explanation, review cells) are styled here for all three.
    ========================================================================== */
 body.exam-sim-active .focus-dock,
 body.exam-sim-active .toast-stack,
@@ -42,11 +44,6 @@ body.exam-sim-active .rest-overlay { display: none !important; }
   font-family: Arial, "Helvetica Neue", sans-serif;
 }
 .exam-sim.skin-nbme.theme-dark { --sim-bar: #1d2126; --sim-bar-2: #181b1f; --sim-bar-text: #e3e7eb; --sim-select: #1d3147; --sim-accent: #6aa6e8; }
-.exam-sim.skin-examsoft {
-  --sim-bar: #1f2d3a; --sim-bar-2: #f3f5f7; --sim-bar-text: #ffffff; --sim-accent: #1b75bb; --sim-flag: #f39c12; --sim-side: #f7f8fa;
-  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-}
-.exam-sim.skin-examsoft.theme-dark { --sim-bar-2: #1b1e22; --sim-side: #17191c; --sim-select: #1d3147; --sim-accent: #4a9be0; }
 .exam-sim button { font: inherit; color: inherit; }
 .exam-sim .sim-flag { color: var(--sim-flag); }
 
@@ -103,28 +100,13 @@ body.exam-sim-active .rest-overlay { display: none !important; }
 .sim-sidebar-toggle { position: absolute; left: 64px; top: 8px; z-index: 2; display: grid; place-items: center; width: 16px; height: 36px; border: 1px solid var(--sim-line); border-left: 0; border-radius: 0 4px 4px 0; background: var(--sim-side); cursor: pointer; color: var(--sim-muted); }
 .exam-sim-main > .sim-sidebar-toggle:first-child { left: 0; }
 
-.sim-pane { width: 200px; flex: none; display: grid; grid-template-rows: auto 1fr auto; background: var(--sim-side); border-right: 1px solid var(--sim-line); }
-.sim-pane-filter { display: flex; gap: 2px; padding: 8px; border-bottom: 1px solid var(--sim-line); }
-.sim-pane-filter button { flex: 1; padding: 5px 4px; border: 1px solid var(--sim-line); border-radius: 3px; background: var(--sim-bg); cursor: pointer; font-size: 11.5px; }
-.sim-pane-filter button.on { background: var(--sim-accent); border-color: var(--sim-accent); color: #fff; }
-.sim-pane-list { overflow-y: auto; padding: 4px 0; }
-.sim-pane-item { display: grid; grid-template-columns: 34px 18px 18px; align-items: center; width: 100%; padding: 7px 14px; border: 0; border-left: 3px solid transparent; background: transparent; cursor: pointer; font-size: 13px; text-align: left; }
-.sim-pane-item.current { border-left-color: var(--sim-accent); background: var(--sim-select); font-weight: 700; }
-.sim-answered { color: var(--sim-ok); }
-.sim-answered.bad { color: var(--sim-bad); }
-/* Exam mode gives nothing away: answered is a plain mark, not a verdict. */
-.sim-answered.neutral { color: var(--sim-accent); }
 .sim-side-item .sim-result { position: absolute; left: 4px; }
 .sim-result.ok { color: var(--sim-ok); }
 .sim-result.bad { color: var(--sim-bad); }
 .sim-side-item.current .sim-result { color: #fff; }
-.sim-pane-counts { padding: 8px 12px; font-size: 12px; color: var(--sim-muted); border-top: 1px solid var(--sim-line); }
 
 .exam-sim-item { flex: 1; min-width: 0; overflow-y: auto; padding: 28px clamp(20px, 5vw, 64px) 48px; font-size: calc(15.5px * var(--sim-scale)); line-height: 1.6; }
 .exam-sim-item > * { max-width: 920px; }
-.sim-es-qhead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--sim-line); font-size: 15px; }
-.sim-es-flag { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--sim-line); border-radius: 3px; background: var(--sim-bg); cursor: pointer; font-size: 13px; }
-.sim-es-flag.on { border-color: var(--sim-flag); color: var(--sim-flag); font-weight: 700; }
 .sim-stem { margin-bottom: 22px; }
 .sim-stem-text { white-space: pre-wrap; outline: none; }
 .sim-stem.tool-highlight .sim-stem-text { cursor: text; }
@@ -133,8 +115,9 @@ body.exam-sim-active .rest-overlay { display: none !important; }
 .exam-sim.theme-dark mark { color: #111; }
 
 .sim-exhibits { display: flex; flex-wrap: wrap; gap: 16px; margin: 0 0 22px; }
-.sim-exhibit { margin: 0; display: grid; gap: 6px; }
-.sim-exhibit-img { position: relative; padding: 0; border: 1px solid var(--sim-line); background: #000; cursor: zoom-in; }
+.sim-exhibit { margin: 0; display: grid; gap: 6px; justify-items: start; }
+/* The frame hugs the image: a wide strip no longer sits beside a black block. */
+.sim-exhibit-img { position: relative; display: inline-block; max-width: 100%; padding: 0; border: 1px solid var(--sim-line); background: #000; cursor: zoom-in; line-height: 0; }
 .sim-exhibit-img img { display: block; max-width: min(520px, 100%); max-height: 360px; }
 .sim-exhibit-zoom { position: absolute; right: 6px; bottom: 6px; color: #fff; filter: drop-shadow(0 1px 2px #000); }
 .sim-exhibit figcaption { display: flex; align-items: center; gap: 14px; font-size: 12px; color: var(--sim-muted); }
@@ -150,10 +133,7 @@ body.exam-sim-active .rest-overlay { display: none !important; }
 .sim-choice input { margin: 6px 2px 0 0; accent-color: var(--sim-accent); width: 15px; height: 15px; flex: none; }
 .sim-choice-key { font-weight: 400; min-width: 1.4em; }
 .skin-nbme .sim-choice.selected { background: var(--sim-select); border-radius: 3px; }
-.skin-examsoft .sim-choice { margin: 4px 0; border: 1px solid transparent; border-radius: 4px; }
-.skin-examsoft .sim-choice.selected { border-color: var(--sim-accent); background: var(--sim-select); }
 .sim-choice.struck .sim-choice-text, .sim-choice.struck .sim-choice-key { text-decoration: line-through; color: var(--sim-muted); }
-.skin-examsoft .sim-choice.struck { opacity: 0.55; }
 .sim-choice.correct .sim-choice-text { color: var(--sim-ok); font-weight: 700; }
 .sim-choice.wrong .sim-choice-text { color: var(--sim-bad); }
 .sim-choice-mark { position: absolute; right: 38px; top: 7px; }
@@ -161,7 +141,6 @@ body.exam-sim-active .rest-overlay { display: none !important; }
 .sim-choice-mark.bad { color: var(--sim-bad); }
 .sim-strike { position: absolute; right: 8px; top: 5px; display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 4px; background: transparent; color: var(--sim-muted); cursor: pointer; opacity: 0; transition: opacity .12s ease; }
 .sim-choice:hover .sim-strike, .sim-strike:focus-visible, .sim-strike[aria-pressed="true"] { opacity: 1; }
-.skin-examsoft .sim-strike { opacity: 0.8; }
 .sim-strike:hover { background: rgba(127,127,127,0.15); }
 @media (hover: none) { .sim-strike { opacity: 0.8; } }
 .sim-submit { margin-top: 16px; padding: 8px 26px; border: 0; border-radius: 3px; background: var(--sim-accent); color: #fff !important; font-weight: 700; cursor: pointer; }
@@ -219,22 +198,19 @@ body.exam-sim-active .rest-overlay { display: none !important; }
 
 /* --- bottom bar ------------------------------------------------------------- */
 .exam-sim-bottom { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 4px 14px; background: var(--sim-bar-2); color: var(--sim-bar-text); border-top: 1px solid rgba(0,0,0,0.18); }
-.skin-nbme .exam-sim-bottom, .skin-examsoft .exam-sim-bottom { color: var(--sim-text); border-top: 1px solid var(--sim-line); }
+.skin-nbme .exam-sim-bottom { color: var(--sim-text); border-top: 1px solid var(--sim-line); }
 .sim-bottom-left, .sim-bottom-right { display: flex; align-items: center; gap: 10px; }
 .sim-time { font-size: 13.5px; font-variant-numeric: tabular-nums; }
 .sim-time.low b { color: #ff8a80; }
 .skin-nbme .sim-time.low b { color: var(--sim-bad); }
-.sim-time.muted { opacity: 0.8; }
+/* `color: inherit` because AXOM's own .muted utility would otherwise paint dark text on the navy bar. */
+.exam-sim .sim-time.muted { color: inherit; opacity: 0.8; }
 .sim-mode { padding: 2px 8px; border-radius: 3px; background: rgba(255,255,255,0.16); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
 .skin-nbme .sim-mode { background: var(--sim-select); color: var(--sim-accent); }
 .sim-bottom-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; background: transparent; cursor: pointer; font-size: 13px; }
-.skin-nbme .sim-bottom-btn, .skin-examsoft .sim-bottom-btn, .sim-review .sim-bottom-btn { border-color: var(--sim-line); background: var(--sim-bg); color: var(--sim-text); }
+.skin-nbme .sim-bottom-btn, .sim-review .sim-bottom-btn { border-color: var(--sim-line); background: var(--sim-bg); color: var(--sim-text); }
 .sim-bottom-btn:hover { background: rgba(255,255,255,0.12); }
 .sim-bottom-btn.end { border-color: transparent; background: #b3261e; color: #fff !important; }
-.sim-es-btn { display: inline-flex; align-items: center; gap: 4px; padding: 7px 14px; border: 1px solid var(--sim-line); border-radius: 4px; background: var(--sim-bg); cursor: pointer; font-size: 13px; }
-.sim-es-btn.primary { background: var(--sim-accent); border-color: var(--sim-accent); color: #fff !important; }
-.sim-es-btn.submit { background: #2e7d32; border-color: #2e7d32; color: #fff !important; font-weight: 700; }
-.sim-es-btn:disabled { opacity: 0.4; cursor: default; }
 
 /* --- overlays --------------------------------------------------------------- */
 .sim-navigator { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); z-index: 5; width: min(640px, 92vw); max-height: 70vh; overflow: auto; background: var(--sim-bg); border: 1px solid var(--sim-line); border-radius: 6px; box-shadow: 0 12px 40px rgba(0,0,0,0.25); }
@@ -255,6 +231,9 @@ body.exam-sim-active .rest-overlay { display: none !important; }
 .sim-review-cell.incomplete small { color: var(--sim-bad); }
 .sim-review-cell.current { border-color: var(--sim-accent); box-shadow: inset 0 0 0 1px var(--sim-accent); }
 .sim-review-cell .sim-flag { position: absolute; right: 8px; top: 9px; }
+.sim-review-cell .sim-result { position: absolute; right: 8px; bottom: 8px; }
+.sim-review-cell.right small { color: var(--sim-ok); }
+.sim-review-cell.wrong small { color: var(--sim-bad); }
 .sim-review-empty { color: var(--sim-muted); font-size: 13px; }
 .sim-review-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .sim-alert { position: absolute; top: 68px; left: 50%; transform: translateX(-50%); z-index: 7; display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 6px; background: #fff4e5; color: #663c00; border: 1px solid #ffb74d; box-shadow: 0 8px 24px rgba(0,0,0,0.18); font-size: 14px; }
@@ -273,7 +252,6 @@ body.exam-sim-active .rest-overlay { display: none !important; }
   .exam-sim-top { grid-template-columns: 1fr auto; }
   .sim-top-right { grid-column: 1 / -1; justify-content: flex-start; overflow-x: auto; flex-wrap: nowrap; }
   .sim-tool span, .sim-nav span { display: none; }
-  .sim-pane { width: 120px; }
   .sim-panel { position: absolute; inset: 0 0 0 auto; width: min(420px, 100%); z-index: 4; }
 }
 
@@ -282,4 +260,6 @@ body.exam-sim-active .rest-overlay { display: none !important; }
 .exam-sim mark.question-highlight.tone-yellow { background: #ffe066; }
 .exam-sim mark.question-highlight.tone-cyan { background: #8ee6ef; }
 .exam-sim mark.question-highlight.tone-purple { background: #d7b8ff; }
+.exam-sim mark.question-highlight.tone-red { background: #ffb3b0; }
+.exam-sim mark.question-highlight.tone-green { background: #b6f09c; }
 .exam-sim mark.question-highlight:focus-visible { outline: 2px solid var(--sim-accent); }

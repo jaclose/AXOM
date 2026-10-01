@@ -682,6 +682,11 @@
 .question-highlight.tone-cyan { --annotation-color: color-mix(in srgb, #49c6d4 42%, transparent); }
 .annotation-tone.tone-purple,
 .question-highlight.tone-purple { --annotation-color: color-mix(in srgb, #a77ae8 42%, transparent); }
+/* Made in the Examplify interface (its highlighter has five colours). */
+.annotation-tone.tone-red,
+.question-highlight.tone-red { --annotation-color: color-mix(in srgb, #e5484d 40%, transparent); }
+.annotation-tone.tone-green,
+.question-highlight.tone-green { --annotation-color: color-mix(in srgb, #46a758 42%, transparent); }
 .question-highlight {
   color: inherit;
   background: var(--annotation-color);

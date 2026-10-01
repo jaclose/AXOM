@@ -1,5 +1,6 @@
 export type QuestionAnnotationTarget = "stem" | "explanation" | "option";
-export type QuestionAnnotationTone = "yellow" | "cyan" | "purple";
+/** Yellow, cyan and purple are AXOM's; red and green complete the five an Examplify highlighter offers. */
+export type QuestionAnnotationTone = "yellow" | "cyan" | "purple" | "red" | "green";
 export type QuestionAnnotationStatus = "active" | "needs-repair";
 
 export interface QuestionTextAnnotation {
@@ -25,7 +26,8 @@ export type AnnotationCreationResult =
   | { status: "ignored"; reason: "collapsed" | "whitespace" | "duplicate-id" };
 
 const CONTEXT_LENGTH = 24;
-const TONES = new Set<QuestionAnnotationTone>(["yellow", "cyan", "purple"]);
+export const ANNOTATION_TONES: readonly QuestionAnnotationTone[] = ["yellow", "cyan", "purple", "red", "green"];
+const TONES = new Set<QuestionAnnotationTone>(ANNOTATION_TONES);
 const TARGETS = new Set<QuestionAnnotationTarget>(["stem", "explanation", "option"]);
 
 export function sourceTextHash(value: string): string {

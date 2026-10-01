@@ -15,7 +15,7 @@
 // 18–20 items in May 2026 (usmle.org, "Test Delivery Software Updates").
 // ===========================================================================
 import type { QuizAnswer } from "./quiz";
-import type { QuestionAnnotationTone } from "./questionAnnotations";
+import { ANNOTATION_TONES, type QuestionAnnotationTone } from "./questionAnnotations";
 
 export type ExamSkin = "uworld" | "nbme" | "examsoft";
 
@@ -162,7 +162,7 @@ export function readExamSimPrefs(): ExamSimPrefs {
     const prefs = { ...DEFAULT_EXAM_SIM_PREFS, ...(value ?? {}) };
     prefs.textScale = Math.min(2, Math.max(1, Number(prefs.textScale) || 1));
     if (prefs.theme !== "dark") prefs.theme = "light";
-    if (!["yellow", "cyan", "purple"].includes(prefs.highlightColor)) prefs.highlightColor = "yellow";
+    if (!ANNOTATION_TONES.includes(prefs.highlightColor)) prefs.highlightColor = "yellow";
     return prefs;
   } catch {
     return DEFAULT_EXAM_SIM_PREFS;

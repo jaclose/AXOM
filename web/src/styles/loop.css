@@ -241,6 +241,10 @@
 .option-row.picked { border-color: var(--gold-line); background: var(--gold-soft); }
 .option-row.correct { border-color: var(--green); background: rgba(127, 184, 148, 0.12); }
 .option-row.wrong { border-color: var(--red); background: rgba(217, 122, 114, 0.11); }
+/* The result is also a shape, not only a colour: a tick for the right answer, a cross for a wrong pick. */
+.option-result { flex: none; display: grid; place-items: center; width: 44px; align-self: stretch; }
+.option-result.ok { color: var(--green); }
+.option-result.bad { color: var(--red); }
 /* Eliminated: reduced emphasis + strike, but never illegible; correctness
    styling still coexists (green/red border) so history is not erased. */
 .option-row.struck .option-text { text-decoration: line-through; opacity: 0.62; }

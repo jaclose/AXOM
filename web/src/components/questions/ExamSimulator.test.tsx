@@ -76,22 +76,70 @@ describe("ExamSimulator", () => {
     expect(within(screen.getByRole("region", { name: "Explanation" })).getByText("Time spent: 00:47")).toBeTruthy();
   });
 
-  it("marks a wrong tutor answer with a cross and a right one with a tick in the question list", () => {
-    render(<ExamSimulator skin="examsoft" mode="tutor" pool={pool} onFinish={vi.fn()} onSuspend={vi.fn()} />);
-    const list = screen.getByRole("navigation", { name: "Question list" });
+  it("marks a wrong tutor answer with a cross and a right one with a tick in the UWorld item list, and nothing before submitting", () => {
+    render(<ExamSimulator skin="uworld" mode="tutor" pool={pool} onFinish={vi.fn()} onSuspend={vi.fn()} />);
+    const list = screen.getByRole("navigation", { name: "Items" });
     fireEvent.click(screen.getByRole("radio", { name: "C. Gamma" }));
     // Picked but not yet submitted: answered, with no verdict.
-    expect(within(list).getByRole("button", { name: "Question 1, answered" }).querySelector(".sim-answered.neutral")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /Submit|Check/ }));
-    const wrong = within(list).getByRole("button", { name: "Question 1, incorrect" });
-    expect(wrong.querySelector(".sim-answered.bad.lucide-x")).toBeTruthy();
+    const answered = within(list).getByRole("button", { name: "Item 1, answered" });
+    expect(answered.querySelector(".sim-dot.filled")).toBeTruthy();
+    expect(answered.querySelector(".sim-result")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    expect(within(list).getByRole("button", { name: "Item 1, incorrect" }).querySelector(".sim-result.bad.lucide-x")).toBeTruthy();
+    // On the choices: a cross on the wrong pick, a tick on the right answer, never a tick on the pick.
+    expect(screen.getByText("Gamma").closest(".sim-choice")!.querySelector(".sim-choice-mark.bad.lucide-x")).toBeTruthy();
+    expect(screen.getByText("Gamma").closest(".sim-choice")!.querySelector(".lucide-check")).toBeNull();
+    expect(screen.getByText("Beta").closest(".sim-choice")!.querySelector(".sim-choice-mark.ok.lucide-check")).toBeTruthy();
 
-    fireEvent.click(within(list).getByRole("button", { name: "Question 2" }));
+    fireEvent.click(within(list).getByRole("button", { name: "Item 2, unanswered" }));
     fireEvent.click(screen.getByRole("radio", { name: "B. Beta" }));
-    fireEvent.click(screen.getByRole("button", { name: /Submit|Check/ }));
-    const right = within(list).getByRole("button", { name: "Question 2, correct" });
-    expect(right.querySelector(".sim-answered.lucide-check")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    const right = within(list).getByRole("button", { name: "Item 2, correct" });
+    expect(right.querySelector(".sim-result.ok.lucide-check")).toBeTruthy();
     expect(right.querySelector(".lucide-x")).toBeNull();
+  });
+
+  it("shows no verdict anywhere while an exam block is being sat", () => {
+    for (const skin of ["uworld", "nbme", "examsoft"] as const) {
+      const { unmount } = render(<ExamSimulator skin={skin} mode="exam" pool={pool} onFinish={vi.fn()} onSuspend={vi.fn()} />);
+      // The exam renders at the document root (full screen), not inside the test container.
+      const container = screen.getByRole("dialog");
+      fireEvent.click(screen.getByRole("radio", { name: "C. Gamma" }));
+      fireEvent.keyDown(window, { key: "ArrowRight" });
+      fireEvent.click(screen.getByRole("radio", { name: "B. Beta" }));
+      fireEvent.keyDown(window, { key: "ArrowLeft" });
+      expect(container.querySelector(".sim-result, .sim-choice-mark, .correct, .wrong, .right, .xfy-num-result, .xfy-choice-side.ok, .xfy-choice-side.bad"), skin).toBeNull();
+      expect(screen.queryByRole("region", { name: "Explanation" }), skin).toBeNull();
+      expect(container.textContent, skin).not.toMatch(/Correct answer|Incorrect/i);
+      unmount();
+    }
+  });
+
+  it("reads a finished block back in the same interface, with every result shown and nothing changeable", () => {
+    const answers = [
+      { questionId: "q1", answerKey: "B", correct: true, flagged: false, seconds: 30 },
+      { questionId: "q2", answerKey: "A", correct: false, flagged: true, seconds: 12 },
+      { questionId: "q3", flagged: false, seconds: 0 },
+    ];
+    const onClose = vi.fn();
+    const onFinish = vi.fn();
+    render(<ExamSimulator skin="nbme" mode="exam" pool={pool} review={{ answers, startedAt: "2026-10-01T10:00:00.000Z", elapsedSeconds: 95 }} onFinish={onFinish} onSuspend={vi.fn()} onClose={onClose} />);
+    expect(screen.getByText(/Review · block time 00:01:35/)).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: "Explanation" })).getByText("Correct")).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: "Explanation" })).getByText("Time spent: 00:30")).toBeTruthy();
+    // Nothing can be changed.
+    expect((screen.getByRole("radio", { name: "A. Alpha" }) as HTMLInputElement).disabled).toBe(true);
+    fireEvent.keyDown(window, { key: "a" });
+    expect((screen.getByRole("radio", { name: "B. Beta" }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole("button", { name: "Mark item for review" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Navigator" }));
+    const navigator = screen.getByRole("dialog", { name: "Navigator" });
+    expect(within(navigator).getByRole("listitem", { name: "Item 1: correct" })).toBeTruthy();
+    expect(within(navigator).getByRole("listitem", { name: "Item 2: incorrect, marked" })).toBeTruthy();
+    expect(within(navigator).getByRole("listitem", { name: "Item 3: incomplete" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Close review/ }));
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(onFinish).not.toHaveBeenCalled();
   });
 
   it("suspends with answers, marks, notes and a paused clock", () => {

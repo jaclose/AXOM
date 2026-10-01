@@ -5,7 +5,7 @@
 // every answer is recorded on the question for spaced retry.
 // ===========================================================================
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { BookOpenCheck, ChevronLeft, Flag, ListPlus, Play, WandSparkles, Sparkles, Minus, RotateCcw, Timer } from "lucide-react";
+import { BookOpenCheck, Check, ChevronLeft, Flag, ListPlus, Play, WandSparkles, Sparkles, Minus, RotateCcw, Timer, X } from "lucide-react";
 import { useStore } from "../../lib/store";
 import { STORAGE_KEYS } from "../../lib/brand";
 import {
@@ -45,7 +45,8 @@ import {
 const ERROR_TYPES = Object.keys(ERROR_TYPE_LABEL) as QuestionErrorType[];
 const EXAM_TYPES = Object.keys(EXAM_TYPE_LABEL) as QuestionExamType[];
 
-type Stage = "setup" | "running" | "results" | "sim";
+/** "sim-review": a finished simulation, read back in the interface it was sat in. */
+type Stage = "setup" | "running" | "results" | "sim" | "sim-review";
 type ExamInterface = "axom" | ExamSkin;
 const INTERFACE_KEY = "axom.examSim.interface.v1";
 function readInterface(): ExamInterface {
@@ -806,6 +807,20 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     );
   }
 
+  if (stage === "sim-review" && session?.simulation && session.simulation.skin in EXAM_SKINS) {
+    return (
+      <ExamSimulator
+        skin={session.simulation.skin as ExamSkin}
+        mode={session.mode}
+        pool={pool}
+        review={{ answers: session.answers, startedAt: session.startedAt, elapsedSeconds: session.simulation.elapsedSeconds }}
+        onFinish={() => undefined}
+        onSuspend={() => undefined}
+        onClose={() => setStage("results")}
+      />
+    );
+  }
+
   if (stage === "results" && session) {
     const missed = missedQuestionIds(session);
     const byId = new Map(questions.map((q) => [q.id, q]));
@@ -828,6 +843,9 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
                 setShownAt(Date.now());
                 setStage("running");
               }}>Retake {retakePool.length} missed</GhostButton>
+            )}
+            {session.simulation && session.simulation.skin in EXAM_SKINS && (
+              <GhostButton onClick={() => setStage("sim-review")}>Review in the exam interface</GhostButton>
             )}
             <GButton variant="primary" onClick={onClose}>Done</GButton>
           </>
@@ -1035,13 +1053,18 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
                   <span className="mono option-key">{opt.key}</span>
                   <span className="option-text">{opt.text}</span>
                 </button>
-                <button type="button" className="option-strike"
-                  aria-label={`${isStruck ? "Restore" : "Eliminate"} option ${opt.key}`}
-                  aria-pressed={isStruck}
-                  disabled={revealed}
-                  onClick={() => toggleStrike(opt.key)}>
-                  <Minus size={ICON_SIZE.body} />
-                </button>
+                {/* Once revealed: a tick on the right answer, a cross on a wrong pick. Never a tick on the pick itself. */}
+                {showCorrect ? <span className="option-result ok" role="img" aria-label="Correct answer"><Check size={ICON_SIZE.emphasis} /></span>
+                  : showWrong ? <span className="option-result bad" role="img" aria-label="Your answer (incorrect)"><X size={ICON_SIZE.emphasis} /></span>
+                  : (
+                    <button type="button" className="option-strike"
+                      aria-label={`${isStruck ? "Restore" : "Eliminate"} option ${opt.key}`}
+                      aria-pressed={isStruck}
+                      disabled={revealed}
+                      onClick={() => toggleStrike(opt.key)}>
+                      <Minus size={ICON_SIZE.body} />
+                    </button>
+                  )}
               </div>
             );
           })}
