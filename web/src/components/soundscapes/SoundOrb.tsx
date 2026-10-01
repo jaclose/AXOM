@@ -3,8 +3,10 @@
 // scene behind it (sampled from the video, image or generative canvas), sits
 // dead centre, and answers the sound: bass swells the ring, loudness lights
 // it, and the spectrum bends the corona. The ring itself is always a true
-// circle. One canvas; it only repaints the square around the orb. Reduced
-// motion draws a still frame.
+// circle. The sphere reads as glass because it does what glass does: it shows
+// the scene behind it small, soft and upside down, under a crescent of light.
+// One canvas; it only repaints the square around the orb. Reduced motion
+// draws a still frame.
 import { useEffect, useRef } from "react";
 import { useReducedMotion } from "../../lib/motion";
 import { CORONA_WAVES, SILENT, coronaShape, follow, orbPose, readBands } from "../../lib/soundscapes/orbMotion";
@@ -25,6 +27,10 @@ const CORONA_REACH = 0.058;
 const CORONA_DRIFT = [0.11, -0.07, 0.16, -0.13, 0.21];
 /** The specular highlight never grows past this (CSS px), so a large orb keeps a point of light, not a bead. */
 const GLINT_MAX_PX = 9;
+/** The scene as the glass shows it: a few soft pixels, turned upside down. */
+const LENS_SIZE = 24;
+/** How much of the sphere's face the refracted scene covers. */
+const LENS_STRENGTH = 0.5;
 const MAX_RATIO = 1.5;
 const TAU = Math.PI * 2;
 const WHITE: Rgb = [255, 255, 255];
@@ -99,11 +105,18 @@ export function SoundOrb({ active, reactive = false, tint = "rgb(var(--accent-rg
     sampler.height = SAMPLE_HEIGHT;
     const samplerContext = sampler.getContext("2d", { willReadFrequently: true });
     const posters = new Map<string, HTMLImageElement>();
+    // A glass ball shows the whole scene behind it, small and upside down. The
+    // lens holds that picture at a few pixels across, so it arrives blurred.
+    const lens = document.createElement("canvas");
+    lens.width = LENS_SIZE;
+    lens.height = LENS_SIZE;
+    const lensContext = lens.getContext("2d");
+    let lensReady = false;
 
-    const sampleScene = () => {
+    /** The scene as something a canvas can draw right now, or null. */
+    const sceneDrawable = (): CanvasImageSource | null => {
       const source = stage.querySelector<HTMLVideoElement | HTMLImageElement | HTMLCanvasElement>(".scene-player, .soundscape-visual");
-      if (!source || !samplerContext || width < 1 || height < 1) return;
-      let drawable: CanvasImageSource | null = source;
+      if (!source) return null;
       if (source instanceof HTMLVideoElement && source.readyState < 2) {
         // No frame yet (reduced motion keeps the poster up): read the poster.
         const url = source.poster;
@@ -114,10 +127,24 @@ export function SoundOrb({ active, reactive = false, tint = "rgb(var(--accent-rg
           poster.src = url;
           posters.set(url, poster);
         }
-        drawable = poster?.complete && poster.naturalWidth > 0 ? poster : null;
-      } else if (source instanceof HTMLImageElement && !(source.complete && source.naturalWidth > 0)) {
-        drawable = null;
+        return poster?.complete && poster.naturalWidth > 0 ? poster : null;
       }
+      if (source instanceof HTMLImageElement && !(source.complete && source.naturalWidth > 0)) return null;
+      return source;
+    };
+
+    const refreshLens = () => {
+      const drawable = sceneDrawable();
+      if (!drawable || !lensContext) return;
+      try {
+        lensContext.drawImage(drawable, 0, 0, LENS_SIZE, LENS_SIZE);
+        lensReady = true;
+      } catch { /* a frame the browser will not hand over: keep the last one */ }
+    };
+
+    const sampleScene = () => {
+      if (!samplerContext || width < 1 || height < 1) return;
+      const drawable = sceneDrawable();
       if (!drawable) return;
       try {
         samplerContext.clearRect(0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
@@ -218,6 +245,24 @@ export function SoundOrb({ active, reactive = false, tint = "rgb(var(--accent-rg
       wash(aura);
 
       // --- the sphere: a clear glass ball -----------------------------------
+      // 0. Refraction: the scene inside the ball, soft and upside down. This is
+      //    what tells the eye "glass" on a pale scene, where shading alone does
+      //    not show.
+      if (moving) refreshLens();
+      else if (!lensReady) refreshLens();
+      if (lensReady) {
+        context.save();
+        circle(radius * 0.99);
+        context.clip();
+        context.translate(cx, cy);
+        context.rotate(Math.PI);
+        context.imageSmoothingEnabled = true;
+        context.imageSmoothingQuality = "high";
+        context.globalAlpha *= LENS_STRENGTH;
+        // Drawn a little larger than the ball, as the middle of a lens magnifies.
+        context.drawImage(lens, -radius * 1.15, -radius * 1.15, radius * 2.3, radius * 2.3);
+        context.restore();
+      }
       // 1. Body: the scene seen through glass is a touch darker, never opaque.
       circle(radius);
       context.fillStyle = `rgba(5, 7, 12, ${onBright ? 0.06 : 0.12})`;
@@ -237,9 +282,36 @@ export function SoundOrb({ active, reactive = false, tint = "rgb(var(--accent-rg
       edge.addColorStop(1, rgba(rim, 0.15 + 0.11 * glow));
       context.fillStyle = edge;
       context.fill();
-      // 4. Specular: one small, sharp point of light inside a faint bloom. On a
-      //    pale scene it is smaller and softer, where a hard white bead would
-      //    look stuck on.
+      // 4. Light on glass. A lone point of light reads as a speck on the scene,
+      //    so the point sits inside what a real sphere shows around it: a soft
+      //    crescent where the light meets the near surface (upper left) and a
+      //    fainter crescent of light leaving through the far side (lower right).
+      const crescent = (middle: number, spread: number, inset: number, thickness: number, colour: Rgb, alpha: number) => {
+        let stroke: string | CanvasGradient = rgba(colour, alpha * 0.6);
+        if (typeof context.createConicGradient === "function") {
+          // Fades to nothing at both ends, so the arc has no cut edge.
+          const taper = context.createConicGradient(middle - spread, cx, cy);
+          const share = (spread * 2) / TAU;
+          taper.addColorStop(0, rgba(colour, 0));
+          taper.addColorStop(share * 0.5, rgba(colour, alpha));
+          taper.addColorStop(share, rgba(colour, 0));
+          taper.addColorStop(1, rgba(colour, 0));
+          stroke = taper;
+        }
+        context.beginPath();
+        context.arc(cx, cy, radius * inset, middle - spread, middle + spread);
+        context.lineCap = "round";
+        context.lineWidth = thickness;
+        context.shadowColor = rgba(colour, alpha);
+        context.shadowBlur = thickness * 1.6 * ratio;
+        context.strokeStyle = stroke;
+        context.stroke();
+        context.shadowBlur = 0;
+        context.lineCap = "butt";
+      };
+      const glassLight = onBright ? WHITE : mixRgb(primary, WHITE, 0.78);
+      crescent(Math.PI * 1.25, 0.62, 0.86, Math.max(1.5, radius * 0.05), glassLight, (onBright ? 0.3 : 0.2) + 0.1 * glow);
+      crescent(Math.PI * 0.25, 0.46, 0.9, Math.max(1, radius * 0.032), mixRgb(secondary, WHITE, 0.5), 0.1 + 0.08 * glow);
       const glint = (reachPx: number, alpha: number) => {
         const x = cx - radius * 0.41;
         const y = cy - radius * 0.45;
@@ -252,8 +324,8 @@ export function SoundOrb({ active, reactive = false, tint = "rgb(var(--accent-rg
         context.arc(x, y, reachPx, 0, TAU);
         context.fill();
       };
-      glint(radius * 0.24, 0.07 + 0.04 * glow);
-      glint(Math.min(GLINT_MAX_PX, radius * 0.062) * (1 - 0.2 * pale), 0.92 - 0.16 * pale);
+      glint(radius * 0.3, 0.1 + 0.05 * glow);
+      glint(Math.min(GLINT_MAX_PX, radius * 0.05) * (1 - 0.2 * pale), 0.8 - 0.16 * pale);
 
       // --- the ring: always a true circle -----------------------------------
       context.lineJoin = "round";
