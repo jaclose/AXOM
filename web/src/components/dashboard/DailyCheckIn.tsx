@@ -257,7 +257,7 @@ export function DailyCheckIn({ writing = false }: { writing?: boolean }) {
               ))}
             </div>
           )}
-          {!todayPlan.outcome && reviewDue && (
+          {!todayPlan.outcome && reviewDue && !showWrapPrompt && (
             <div className="journal-follow-nudge">
               <BookText size={ICON_SIZE.body} />
               <span>It is past your journal follow-up time. Review today’s intention, then write the standup.</span>

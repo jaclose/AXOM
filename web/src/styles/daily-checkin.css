@@ -92,3 +92,27 @@
 }
 :root[data-motion="reduce"] :is(.daily-checkin-intent.is-new span, .daily-checkin-intent.is-new path, .daily-checkin-logged) { animation: none; }
 :root[data-motion="reduce"] .daily-checkin-intent.is-new path { stroke-dashoffset: 0; }
+
+/* "Wrap up the day" sits in the card, above the intention, instead of
+   floating over the page where it covered the energy row on small screens. */
+.daily-checkin .journal-wrap-popover {
+  position: relative;
+  right: auto;
+  bottom: auto;
+  z-index: auto;
+  max-width: none;
+  margin-bottom: 16px;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  animation: dc-wrap .6s var(--dc-ease) both;
+}
+:root[data-theme="light"] .daily-checkin .journal-wrap-popover { background: rgba(var(--accent-rgb), .07); }
+@keyframes dc-wrap { from { opacity: 0; transform: translateY(-6px); } }
+@media (prefers-reduced-motion: reduce) { .daily-checkin .journal-wrap-popover { animation: none; } }
+:root[data-motion="reduce"] .daily-checkin .journal-wrap-popover { animation: none; }
+
+/* Phones: the end-of-day note takes its own row above the outcome buttons. */
+@media (max-width: 560px) {
+  .daily-checkin .win-review .field { flex-basis: 100%; }
+}

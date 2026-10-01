@@ -29,7 +29,8 @@ describe("EnergyOrbs", () => {
     const bubble = screen.getByRole("status");
     expect(bubble.textContent).toContain("Energy logged. Check in again later.");
     expect(bubble.textContent).toContain("AXOM finds your best times of day");
-    expect((screen.getByRole("button", { name: "Log energy: Low" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Log energy: Low" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Log energy: Sharp" }).getAttribute("aria-pressed")).toBe("true");
 
     act(() => { vi.runAllTimers(); });
     expect(screen.getByText(/at \d/).textContent).toContain("Energy sharp");

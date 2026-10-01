@@ -25,7 +25,6 @@
 .energy-orb-choice small { font-size: var(--fs-xs); }
 .energy-orb-choice:hover:not(:disabled) .energy-orb { transform: translateY(-2px) scale(1.06); box-shadow: 0 0 0 1px rgba(255, 255, 255, .12), 0 8px 22px color-mix(in srgb, var(--orb-glow) 45%, transparent); }
 .energy-orb-choice:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: 3px; border-radius: 12px; }
-.energy-orb-choice.aside { opacity: 0; transform: scale(.82); pointer-events: none; }
 .energy-orb-choice.on small { color: var(--text); font-weight: var(--fw-semibold); }
 
 .energy-orb {
@@ -70,20 +69,39 @@
 .energy-orb-choice.on .energy-orb.mood-middle { animation: eo-breathe 900ms var(--eo-ease) both; }
 @keyframes eo-breathe { 50% { transform: scale(1.1); } 100% { transform: scale(1.02); } }
 
-/* The confirmation rises from the orb row itself. */
+/* Logged: the chosen orb leads the row and the confirmation comes off it,
+   joined by a short tether that draws from the orb outward. */
+.energy-orbs.is-logged .energy-orbs-row { flex-wrap: nowrap; align-items: center; gap: 14px; }
+.energy-orbs.is-logged .energy-orb-choice { flex: none; cursor: default; }
 .energy-orbs-bubble {
-  justify-self: start;
+  position: relative;
   display: grid;
   gap: 2px;
-  max-width: 420px;
+  min-width: 0;
+  max-width: 440px;
   padding: 9px 13px;
   border: 1px solid rgba(var(--accent-rgb), .3);
   border-radius: 14px;
   background: rgba(var(--accent-rgb), .08);
   color: var(--text);
   font-size: var(--fs-sm);
-  animation: eo-rise .7s var(--eo-ease) .15s both;
+  line-height: 1.4;
+  transform-origin: left center;
+  animation: eo-bubble .7s var(--eo-ease) .3s both;
 }
+.energy-orbs-bubble::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 100%;
+  width: 14px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), .55));
+  transform-origin: left center;
+  animation: eo-tether .45s var(--eo-ease) .2s both;
+}
+@keyframes eo-bubble { from { opacity: 0; transform: translateX(-12px) scale(.9); } }
+@keyframes eo-tether { from { opacity: 0; transform: scaleX(0); } }
 .energy-orbs-why { color: var(--text-60); font-size: var(--fs-xs); line-height: 1.45; }
 @keyframes eo-rise { from { opacity: 0; transform: translateY(8px); } }
 .energy-orbs-last { color: var(--text-45); font-size: var(--fs-xs); }
@@ -119,7 +137,8 @@
 }
 .energy-orbs-kept { margin: 0; color: var(--text-60); font-size: var(--fs-xs); }
 
-.energy-orbs.settled { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--text-60); font-size: var(--fs-sm); }
+.energy-orbs.settled { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--text-60); font-size: var(--fs-sm); animation: eo-rise .5s var(--eo-ease) both; }
+.energy-orbs-again:focus-visible, .energy-orbs-writing-actions button:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: 2px; border-radius: 6px; }
 .energy-orbs.settled b { color: var(--text); }
 :root[data-theme="light"] .energy-orbs-writing-actions button,
 :root[data-theme="light"] .energy-orbs-again { color: rgb(var(--accent-ink-rgb, var(--accent-rgb))); }
