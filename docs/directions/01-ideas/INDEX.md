@@ -137,7 +137,7 @@ Last full review: 2026-10-01, with Wave 1.3 (Ideas 5 added; Wave 1.2 is main 291
 |---|---|---|---|
 | I1-06, I3-08 | Your own soundscapes (files; YouTube by embed only) | PARTIAL | files shipped (09d65a1); YouTube embed-only by design |
 | I5-01 | Assigning one of your sounds to a preset works, and renaming always saves | VERIFIED | Wave 1.3 (255d527): the file becomes what that preset plays, even over an earlier pick; rename saves on Enter, the tick or clicking away |
-| I5-02 | Stage sphere and ring take the scene's colours, sit centred, and move with the sound | IN PROGRESS | fix/wave1.3 |
+| I5-02 | Stage sphere and ring take the scene's colours, sit centred, and move with the sound | VERIFIED | Wave 1.3 (932b212): measured at four window sizes and full screen (centre within 1 px, nothing inside the orb's reach, 60 fps); look reviewed from screenshots by a second agent, not by JD yet |
 | I4-22 | JD's alpha-waves track as the default pinned intro soundscape | NEEDS JD | licence for a YouTube-sourced track in a public app; works today on JD's device via Your sounds |
 | I4-23 | Fullscreen / larger soundscape experience | PLANNED | coordinate with Codex's page restructure |
 | I4-24 | Opening films: keep only the finished renders (JD: "remove these, terrible quality") | VERIFIED | Wave 1.2 (9eda971) |
