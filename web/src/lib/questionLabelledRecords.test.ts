@@ -69,6 +69,14 @@ Answer: A`;
     expect(normalizeLabelledRecords(ordinary)).toBe(ordinary);
   });
 
+  it("keeps each record's own source when one file holds two quizzes with numbering that starts over", () => {
+    const quiz = (source: string, n: number) => record(n).replace("SOURCE: Sample Quiz 4", `SOURCE: ${source}`);
+    const drafts = parseQuestionBlocks([quiz("Quiz 4", 1), quiz("Quiz 4", 2), quiz("Quiz 5", 1), quiz("Quiz 5", 2)].join("\n"));
+    expect(drafts.map((draft) => `${draft.sourceLabel} #${draft.questionNumber}`)).toEqual(["Quiz 4 #1", "Quiz 4 #2", "Quiz 5 #1", "Quiz 5 #2"]);
+    expect(drafts.some((draft) => draft.warnings.some((warning) => /Duplicate question numbers/.test(warning)))).toBe(false);
+    expect(drafts.every((draft) => draft.explanation === draft.explanation?.replace(/Quiz \d/, ""))).toBe(true);
+  });
+
   it("is idempotent", () => {
     const once = normalizeLabelledRecords([1, 2].map(record).join("\n"));
     expect(normalizeLabelledRecords(once)).toBe(once);

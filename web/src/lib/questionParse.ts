@@ -387,10 +387,14 @@ export function parseQuestionText(raw: string): ParsedQuestionDraft {
         metadataFlow = "review";
         continue;
       }
+      // Only a verdict on the answer key is a field. Any other "Status: ..."
+      // line (a patient's status in an explanation, say) stays where it is.
       const statusMatch = line.match(STATUS_RE);
-      if (statusMatch) {
-        if (/conflict|unresolved/i.test(statusMatch[1])) sourceKeyConflict = statusMatch[1].trim();
-        else if (/flag|question|uncertain|disputed|doubt|check|verify/i.test(statusMatch[1])) sourceKeyFlag = statusMatch[1].trim();
+      const keyConflict = Boolean(statusMatch && /conflict|unresolved/i.test(statusMatch[1]));
+      const keyFlag = Boolean(statusMatch && !keyConflict && /\b(?:source|answer)[- ]key\b|\bkey\s+(?:flag|check)|\bflag(?:ged)?\b|disputed|needs?\s+(?:review|verification)/i.test(statusMatch[1]));
+      if (statusMatch && (keyConflict || keyFlag)) {
+        if (keyConflict) sourceKeyConflict = statusMatch[1].trim();
+        else sourceKeyFlag = statusMatch[1].trim();
         parserRuleIds.add("metadata.status");
         feedbackFlow = false;
         metadataFlow = undefined;
@@ -409,7 +413,9 @@ export function parseQuestionText(raw: string): ParsedQuestionDraft {
     const optionMatch = line.match(OPTION_RE);
     const parsedAnswerSignal = parseAnswerSignal(line);
     // The source declined to give a key: record that, and read no answer from it.
-    const declinedAnswer = Boolean(parsedAnswerSignal && phase !== "stem" && UNRESOLVED_ANSWER_RE.test(parsedAnswerSignal.payload.trim()));
+    const declinedAnswer = Boolean(parsedAnswerSignal && phase !== "stem" && UNRESOLVED_ANSWER_RE.test(parsedAnswerSignal.payload.trim())
+      // "Answer: None" names a choice when one of the choices is "None".
+      && !options.some((option) => option.text.trim().replace(/[.]+$/, "").toLowerCase() === parsedAnswerSignal.payload.trim().replace(/[.]+$/, "").toLowerCase()));
     if (declinedAnswer) {
       answerDeclared = true;
       parserRuleIds.add("answer.source-unresolved");
@@ -1076,24 +1082,41 @@ export function parseQuestionBlocks(raw: string): ParsedQuestionDraft[] {
 
 /**
  * The quiz header sitting directly above a question start: a "Source: X"
- * line, optionally with "Questions: 1–25" and one short title line above it.
- * `from` is the first header line, so the previous question can stop there.
+ * line, with "Questions: 1–25" under it and/or a short title line directly
+ * above it ("Renal quiz 5"). `from` is the first header line, so the previous
+ * question can stop there.
+ *
+ * Between two questions a bare "Source:" line is NOT a header: it is the
+ * previous question's own source, and taking it would both strip that
+ * question and mislabel the next quiz. There a header needs the "Questions:"
+ * line or the title. At the top of a document (`atTop`) nothing sits above it
+ * to steal from, so "Source:" alone is enough.
  */
-function sectionHeaderBefore(lines: string[], startIndex: number, floor: number): { from: number; source: string } | undefined {
+function sectionHeaderBefore(lines: string[], startIndex: number, floor: number, atTop = floor === 0): { from: number; source: string } | undefined {
   let source: string | undefined;
+  let sourceIndex = -1;
   let from = startIndex;
-  for (let i = startIndex - 1; i >= floor; i--) {
+  let counted = false;
+  let i = startIndex - 1;
+  for (; i >= floor; i--) {
     const line = lines[i].trim();
     if (!line) continue;
     const sourceLine = line.match(/^source\s*[:\-–]\s*(.+\S)$/i);
-    if (sourceLine && !source) { source = sourceLine[1]; from = i; continue; }
-    if (/^questions?\s*[:\-–]\s*\d+\s*(?:[-–—]|to)\s*\d+$/i.test(line)) { from = i; continue; }
-    // One title line may sit on top ("Renal quiz 5"); it ends the header.
-    if (source && line.length <= 80 && !/[.?!:;,]$/.test(line) && !OPTION_RE.test(line) && !parseAnswerSignal(line)
-      && !EXPLANATION_RE.test(line) && !META_RE.test(line) && !REVIEW_RE.test(line) && !ATTACHMENT_RE.test(line) && !STATUS_RE.test(line)) from = i;
+    if (sourceLine && !source) { source = sourceLine[1]; sourceIndex = i; from = i; continue; }
+    if (!source && /^questions?\s*[:\-–]\s*\d+\s*(?:[-–—]|to)\s*\d+$/i.test(line)) { counted = true; from = i; continue; }
     break;
   }
-  return source ? { from, source } : undefined;
+  if (!source) return undefined;
+  // One title line may sit directly on top of "Source:", set off by a blank
+  // line (or the top of the document) above it.
+  const titleIndex = sourceIndex - 1;
+  const title = titleIndex >= floor ? lines[titleIndex].trim() : "";
+  const titled = Boolean(title) && title.length <= 80 && title.split(/\s+/).length <= 10 && !/[.?!:;,]$/.test(title)
+    && (titleIndex === 0 || !lines[titleIndex - 1].trim())
+    && !OPTION_RE.test(title) && !parseAnswerSignal(title) && !EXPLANATION_RE.test(title) && !META_RE.test(title)
+    && !REVIEW_RE.test(title) && !ATTACHMENT_RE.test(title) && !STATUS_RE.test(title) && !matchQuestionStart(title);
+  if (!atTop && !counted && !titled) return undefined;
+  return { from: titled ? titleIndex : from, source };
 }
 
 interface QuestionBlockStart {

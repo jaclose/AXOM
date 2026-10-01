@@ -66,6 +66,39 @@ ${Array.from({ length: count }, (_, index) => item(index + 1)).join("\n")}`;
     expect(drafts[2].tags).toEqual(["Renal", "Diuretics", "Acid base"]);
   });
 
+  it("leaves a question's own trailing Source with that question, even where numbering starts over", () => {
+    // No header between the two quizzes: each question carries its own source.
+    const own = (n: number, source: string) => item(n, `\nSource: ${source}\n`);
+    const drafts = parseQuestionBlocks([own(1, "Quiz A"), own(2, "Quiz A"), own(1, "Quiz B")].join("\n"));
+    expect(drafts.map((draft) => `${draft.sourceLabel} #${draft.questionNumber}`)).toEqual(["Quiz A #1", "Quiz A #2", "Quiz B #1"]);
+    expect(drafts.some((draft) => draft.warnings.some((warning) => /Duplicate question numbers/.test(warning)))).toBe(false);
+  });
+
+  it("never drops explanation text that only looks like a field", () => {
+    const [draft] = parseQuestionBlocks(item(1).replace(
+      "Explanation: Mechanism 1 explains the finding.",
+      "Explanation: Mechanism 1 explains the finding.\nStatus: post-operative day 2, stable.",
+    ));
+    expect(draft.explanation).toBe("Mechanism 1 explains the finding.\nStatus: post-operative day 2, stable.");
+    expect(draft.needsReview).toBeFalsy();
+  });
+
+  it("reads \"Answer: None\" as the choice when one of the choices is None", () => {
+    const text = `Question 1
+Which of these applies?
+A. First
+B. Second
+C. None
+
+Answer: None
+Explanation: Neither applies.`;
+    const [draft] = parseQuestionBlocks(text);
+    expect(draft.correctKey).toBe("C");
+    const [declined] = parseQuestionBlocks(text.replace("C. None", "C. Third"));
+    expect(declined.correctKey).toBeUndefined();
+    expect(declined.warnings.join(" ")).toMatch(/leaves this answer unresolved/);
+  });
+
   it("still flags a number repeated inside one quiz", () => {
     const drafts = parseQuestionBlocks(`${item(1)}\n${item(1)}`);
     expect(drafts.every((draft) => draft.warnings.some((warning) => /Duplicate question numbers/.test(warning)))).toBe(true);
