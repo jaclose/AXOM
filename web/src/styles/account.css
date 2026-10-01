@@ -94,8 +94,17 @@
 .account-status-dot { flex: 0 0 auto; width: 10px; height: 10px; border-radius: var(--radius-pill); background: var(--text-30); }
 .account-status-dot.protected { background: var(--green); box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 18%, transparent); }
 .account-status-dot.syncing, .account-status-dot.saved-locally { background: var(--cyan); }
-.account-status-dot.offline, .account-status-dot.retrying { background: var(--orange); }
-.account-status-dot.conflict { background: var(--red); }
+.account-status-dot.offline, .account-status-dot.retrying, .account-status-dot.paused { background: var(--orange); }
+.account-status-dot.conflict, .account-status-dot.blocked { background: var(--red); }
+.account-protection-detail {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding-top: 10px;
+  color: var(--text-70);
+  font-size: var(--fs-sm);
+  line-height: var(--leading-snug);
+  border-top: 1px solid var(--hairline);
+}
 
 .account-section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .account-section-head > div { display: grid; gap: 3px; }
@@ -137,8 +146,10 @@
 .user-icon-btn.account-status[data-status="syncing"]::after,
 .user-icon-btn.account-status[data-status="saved-locally"]::after { background: var(--cyan); }
 .user-icon-btn.account-status[data-status="offline"]::after,
-.user-icon-btn.account-status[data-status="retrying"]::after { background: var(--orange); }
-.user-icon-btn.account-status[data-status="conflict"]::after { background: var(--red); }
+.user-icon-btn.account-status[data-status="retrying"]::after,
+.user-icon-btn.account-status[data-status="paused"]::after { background: var(--orange); }
+.user-icon-btn.account-status[data-status="conflict"]::after,
+.user-icon-btn.account-status[data-status="blocked"]::after { background: var(--red); }
 
 @media (max-width: 560px) {
   .account-hero-card { flex-wrap: wrap; }

@@ -1,8 +1,9 @@
 import { useEffect } from "react";
-import { deviceLabel, platformName, useAccount } from "../../lib/account/accountStore";
+import { deviceLabel, platformName, protectionView, useAccount } from "../../lib/account/accountStore";
 import { SyncCoordinator } from "../../lib/sync/syncCoordinator";
 import { SupabaseSyncTransport } from "../../lib/sync/supabaseTransport";
-import { deviceId, read } from "../../lib/sync/syncMetadata";
+import { SYNC_METADATA_KEY, deviceId, read } from "../../lib/sync/syncMetadata";
+import { restingStatus } from "../../lib/sync/syncPolicy";
 import { useStore } from "../../lib/store";
 
 /** Debounce for background protection after the last change. */
@@ -12,7 +13,8 @@ const SYNC_DELAY_MS = 8000;
  * App-root owner of background protection. Before this existed, uploads only
  * ran while Settings → Account was open; now a linked, signed-in workspace is
  * protected on every page, resumes after reloads, and retries when the
- * network returns. Renders nothing.
+ * network returns. How often it may upload, and when it stops repeating a
+ * failed upload, is decided in lib/sync/syncPolicy.ts. Renders nothing.
  */
 export function AccountSyncWatcher() {
   const phase = useAccount((state) => state.phase);
@@ -27,17 +29,9 @@ export function AccountSyncWatcher() {
     if (phase !== "signed-in" || link !== "linked" || !userId) return;
     const meta = read();
     const transport = new SupabaseSyncTransport();
-    const initial = meta.conflictServerRevision !== undefined ? "conflict" : meta.pending ? "saved-locally" : meta.lastProtectedAt ? "protected" : "saved-locally";
-    const coordinator = new SyncCoordinator(transport, () => useStore.getState(), SYNC_DELAY_MS, initial);
+    const coordinator = new SyncCoordinator(transport, () => useStore.getState(), SYNC_DELAY_MS, restingStatus(meta));
     useAccount.getState().attachCoordinator(coordinator);
-    const offStatus = coordinator.subscribe((status) => {
-      const current = read();
-      useAccount.setState({
-        protection: status,
-        lastProtectedAt: current.lastProtectedAt,
-        conflictServerRevision: current.conflictServerRevision,
-      });
-    });
+    const offStatus = coordinator.subscribe((status) => useAccount.setState(protectionView(status)));
     let previous = useStore.getState();
     const offStore = useStore.subscribe((state) => {
       if (state === previous) return;
@@ -46,12 +40,18 @@ export function AccountSyncWatcher() {
     });
     const onOnline = () => coordinator.reconnect();
     window.addEventListener("online", onOnline);
-    if (meta.pending) coordinator.reconnect();
+    // Another tab uploaded, failed or started waiting: follow the shared state.
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === SYNC_METADATA_KEY) coordinator.adopt();
+    };
+    window.addEventListener("storage", onStorage);
+    coordinator.resume();
     void transport.touchDevice({ deviceId: deviceId(), label: deviceLabel(), platform: platformName(), revision: meta.baseRevision }).catch(() => undefined);
     return () => {
       offStatus();
       offStore();
       window.removeEventListener("online", onOnline);
+      window.removeEventListener("storage", onStorage);
       coordinator.dispose();
       useAccount.getState().attachCoordinator(null);
     };

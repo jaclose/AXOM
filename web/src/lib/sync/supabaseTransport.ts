@@ -1,4 +1,5 @@
 import { loadSupabase } from "../account/supabase";
+import { SyncPushError, classifyPushFailure } from "./syncFailure";
 import type {
   AccountDevice,
   ProtectedRevision,
@@ -18,8 +19,13 @@ export class SupabaseSyncTransport implements SyncTransport {
     return value;
   }
 
+  /**
+   * Upload one snapshot. Every failure is thrown as a SyncPushError that says
+   * whether another try can help, and the request gives up after a bounded
+   * time, so the caller is never left waiting on a silent connection.
+   */
   async push(envelope: SnapshotEnvelope): Promise<PushResult> {
-    const { data, error } = await (await this.client()).rpc("push_workspace_revision", {
+    const request = (await this.client()).rpc("push_workspace_revision", {
       p_base_revision: envelope.baseRevision,
       p_schema_version: envelope.schemaVersion,
       p_content_hash: envelope.contentHash,
@@ -28,11 +34,10 @@ export class SupabaseSyncTransport implements SyncTransport {
       p_idempotency_key: envelope.idempotencyKey,
       p_reason: envelope.reason,
     });
-    if (error) throw new Error(error.message);
-    const row = data as Record<string, unknown>;
-    return row.status === "conflict"
-      ? { status: "conflict", serverRevision: Number(row.server_revision), preservedRevisionId: String(row.preserved_revision_id) }
-      : { status: "accepted", revision: Number(row.revision), revisionId: String(row.revision_id), idempotent: Boolean(row.idempotent) };
+    const signal = timeoutSignal(pushTimeout(envelope.payloadBytes));
+    const { data, error, status } = await (signal && typeof request.abortSignal === "function" ? request.abortSignal(signal) : request);
+    if (error) throw new SyncPushError(classifyPushFailure(error, status ?? 0), error.message);
+    return readPushResult(data, status ?? 200);
   }
 
   /** Full revisions (with payload). Prefer summaries() for lists. */
@@ -119,6 +124,38 @@ export class SupabaseSyncTransport implements SyncTransport {
     const { error } = await (await this.client()).rpc("delete_my_cloud_data");
     if (error) throw new Error(error.message);
   }
+}
+
+/**
+ * Only the two answers this version knows count. Anything else is a failure:
+ * an answer AXOM cannot read must never be recorded as "protected".
+ */
+export function readPushResult(data: unknown, status = 200): PushResult {
+  const row = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
+  const text = (value: unknown) => (typeof value === "string" && value ? value : undefined);
+  const revision = (value: unknown) => ((typeof value === "number" || typeof value === "string") && value !== "" && Number.isFinite(Number(value)) ? Number(value) : undefined);
+  const serverRevision = revision(row.server_revision);
+  if (row.status === "conflict" && serverRevision !== undefined) {
+    return { status: "conflict", serverRevision, preservedRevisionId: text(row.preserved_revision_id) };
+  }
+  const accepted = revision(row.revision);
+  if (row.status === "accepted" && accepted !== undefined) {
+    return { status: "accepted", revision: accepted, revisionId: String(row.revision_id), idempotent: Boolean(row.idempotent), contentHash: text(row.content_hash) };
+  }
+  throw new SyncPushError({ kind: "rejected", rejection: "refused", status }, "The account answered in a way this version of AXOM does not understand.");
+}
+
+/** Allow for a slow uplink (about 40 KB a second) on top of the account's own time, up to five minutes. */
+export function pushTimeout(payloadBytes: number): number {
+  return Math.min(300_000, 45_000 + Math.round(payloadBytes / 40));
+}
+
+function timeoutSignal(ms: number): AbortSignal | undefined {
+  if (typeof AbortSignal === "undefined") return undefined;
+  if (typeof AbortSignal.timeout === "function") return AbortSignal.timeout(ms);
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller.signal;
 }
 
 function mapRevision(row: Record<string, unknown>): ProtectedRevision {

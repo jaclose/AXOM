@@ -7,6 +7,8 @@ import { ICON_SIZE } from "../../lib/iconSize";
 import { GButton, Tag } from "../ui/primitives";
 import {
   PASSWORD_MIN_LENGTH,
+  failureSummary,
+  protectionDetail,
   protectionLabel,
   useAccount,
   type AccountUser,
@@ -24,6 +26,8 @@ const STATUS_TONE: Record<ProtectionStatus, "green" | "red" | "orange" | "neutra
   protected: "green",
   offline: "orange",
   retrying: "orange",
+  paused: "orange",
+  blocked: "red",
   conflict: "red",
 };
 
@@ -74,6 +78,7 @@ export function AccountSyncPanel() {
           Portable JSON export, restore, and merge work with or without an account. Question attachment images stay on this device
           unless you include them in a portable backup; account protection covers workspace data, not binary attachment sync.
         </p>
+        {account.syncFailure && <p>{failureSummary(account)}</p>}
       </TechnicalDetails>
     </div>
   );
@@ -267,7 +272,7 @@ function IdentityCard({ user }: { user: AccountUser }) {
 }
 
 function ProtectionCard() {
-  const { link, protection, lastProtectedAt, conflictServerRevision, busy, linkThisDevice, syncNow, keepThisDevice, adoptAccountVersion, mergeWithAccount, signOut } = useAccount();
+  const { link, protection, lastProtectedAt, conflictServerRevision, syncFailure, nextAttemptAt, busy, linkThisDevice, syncNow, keepThisDevice, adoptAccountVersion, mergeWithAccount, signOut } = useAccount();
   if (link === "linked-elsewhere") {
     return (
       <section className="account-card account-warning">
@@ -334,6 +339,8 @@ function ProtectionCard() {
       </section>
     );
   }
+  // Why protection is behind and what happens next. Null while everything is fine.
+  const detail = protectionDetail({ protection, syncFailure, nextAttemptAt });
   return (
     <section className="account-card account-protection">
       <div className="account-protection-status">
@@ -344,8 +351,9 @@ function ProtectionCard() {
         </div>
       </div>
       <GButton size="sm" onClick={() => void syncNow()} disabled={busy || protection === "syncing"}>
-        <RefreshCw size={ICON_SIZE.body} aria-hidden="true" className={protection === "syncing" ? "spin" : ""} /> Protect now
+        <RefreshCw size={ICON_SIZE.body} aria-hidden="true" className={protection === "syncing" ? "spin" : ""} /> {detail ? "Try again" : "Protect now"}
       </GButton>
+      {detail && <p className="account-protection-detail" role="status">{detail}</p>}
     </section>
   );
 }
