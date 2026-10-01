@@ -38,7 +38,12 @@ move between devices, and delete every cloud copy.
 
 ## Turning it on
 
-1. **Migrations** — already applied to production. For a new project: connect
+1. **Migrations** — applied to production through `20260928130000`.
+   **`20261001090000_prune_revision_history_within_budget.sql` is not applied
+   yet and is needed** (accounts with a large workspace cannot upload without
+   it): see `docs/release/2026-10-01-ACCOUNT-SYNC-INCIDENT.md`. It replaces one
+   function, keeps its signature and answers, and is safe to run twice. For a
+   new project: connect
    GitHub in the Supabase dashboard (**Working directory: `.`**) or run
    `npx supabase link --project-ref <ref>` then `npx supabase db push`. Never
    apply `db/migrations/001–002` (legacy PIN backend without row-level security).

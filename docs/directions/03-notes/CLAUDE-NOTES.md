@@ -43,3 +43,16 @@ Things learned the hard way, conventions that keep work fast, and decisions that
 - **Trap: tests that share a module singleton.** `lib/timerCues.ts` keeps one audio engine; a second `installAudio()` in the same file gets a new recorder the engine never sees. Assert within one test, or reset the module.
 - **I could not view screenshots for part of this session** (the image limit was reached). Layout was verified by measuring the rendered DOM and canvas pixels, and a separate reviewer agent read the screenshots. Numbers are in the hotfix and completed logs.
 - Private course material never goes in this public repository, including inside a "verbatim" ideas file: redact the content, keep the structure, and say so at the top of the file.
+
+## 2026-10-01: Wave 1.3.1 (the production upload failure)
+
+- **A limit that refuses the newest write is a broken limit.** The storage bound refused every new protected version once history was full. Bounds on history are enforced by dropping the oldest history.
+- **Know what status your SQLSTATE becomes.** PostgREST turns class 54 and 57 into HTTP 500, P0001 into 400, PTxyz into xyz. A deliberate refusal raised as 54000 looks exactly like a crash to the client and to monitoring. Use PT4xx for refusals.
+- **Measure stored values where they are stored.** `pg_column_size(column)` reads the TOAST pointer; `octet_length(column::text)` reads the value back and converts it. Summed over a history of multi-megabyte snapshots on every call, that was the hidden cost of the old bound.
+- **Retry policy needs three answers, not one:** did it reach the server, did the server say no, and how long since the last try. One file (`lib/sync/syncPolicy.ts`) now holds every number, the wait is stored where reloads and other tabs can see it, and only the learner's own click skips it.
+- **A new answer shape is a breaking change for clients already in the field.** The old client read any status other than "conflict" as accepted. The function keeps two answers; refusals are exceptions. The new client treats an unreadable answer as a failure.
+- **Reproduce with the real engine.** PGlite replays every migration in about a second, so the refusal was reproduced, and the fix proven, without touching production.
+- **Prove a regression test can fail.** The new database tests were run against the old function (3 failed) and the browser replay against the old client (13 uploads against 1).
+- **A browser test can own the backend.** `window.__AXOM_E2E_ACCOUNT__` (dev servers only) points the account client at a host that Playwright answers; a stored session with a far expiry signs in without any auth call. See `e2e/accounts-sync-failure.spec.ts`.
+- Investigation rule kept: nothing was sent to production on the affected account's behalf. Evidence came from device bookkeeping, the deployed code, and a local replay.
+

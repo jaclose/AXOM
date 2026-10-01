@@ -6,7 +6,7 @@ Every idea JD has given, as one tracked item. The verbatim notes sit beside this
 
 **Where:** a commit or wave on main, or the branch that owns the work: `wave/1.2` (polish + directions), `fix/wave1.3` (import, Your sounds, exam fixes, stage orb), `feat/wave2-home` (dashboard, widgets, Up Next, Wrapped, check-in, accounts nudge), `feat/wave2-journal-library`, `feat/wave2-study-ai` (schedule, Q-bank AI, tutor, exam UIs), Codex's `feat/ideas2-integration`.
 
-Last full review: 2026-10-01, with Wave 1.3 (Ideas 5 added; Wave 1.2 is main 2915b46, pushed by JD).
+Last full review: 2026-10-01, with Wave 1.3.1 (the work order of 2026-10-01 banked as I5-16 to I5-33; Wave 1.3 is main ef3e6b5, pushed by JD).
 
 ## 1. First run: intro, setup, Promise, guide
 
@@ -56,6 +56,7 @@ Last full review: 2026-10-01, with Wave 1.3 (Ideas 5 added; Wave 1.2 is main 291
 | I1-01, I2-01 | "Are you locked in?" check-in, persistent, on whatever screen | CODEX (VERIFIED by Codex) | a89819e (Wave 1.1) |
 | I5-11 | An elegant sound when the Locked In check-in pops up | SHIPPED | Wave 1.3 (1fbdcac): three quiet rising bells, behind the timer-sound preference; unit-tested, not yet heard in a real session |
 | I5-12 | "I am locked out" with the tired face as an answer to "Are you locked in?" | SHIPPED | Wave 1.3 (1fbdcac): replaces "I drifted"; the recorded response is unchanged |
+| I5-28 | Locked In keeps the quiet chime and "I am locked out", verified in a real browser; never obnoxious or gamified | PLANNED | audit after Wave 1.3.1 |
 | I3-01 | Tracker boxes stay still while you tap | VERIFIED | 0ab96bc |
 | I3-01b | Once settled, trackers move up by how much is completed | SHIPPED | Wave 1.2 (693bfde) |
 | I3-39 | Pomodoro logging no longer doubles study time | VERIFIED | f095e48 |
@@ -111,6 +112,16 @@ Last full review: 2026-10-01, with Wave 1.3 (Ideas 5 added; Wave 1.2 is main 291
 | I5-09 | Time spent is correct when you answer | VERIFIED | Wave 1.3 (f1f309d, 3a5d006): banked at submit in the simulator (read 00:00); adds up across visits in the AXOM player |
 | I5-10 | Carbon-copy Examplify / ExamSoft interface; AMBOSS deferred or removed; UWorld is good | PLANNED | feat/wave2-study-ai with Codex (his simulator); needs reference screenshots of the real interfaces |
 | I5-13 | Questions easy to navigate and use | PLANNED | feat/wave2-study-ai with Codex |
+| I5-16 | Examplify / ExamSoft fidelity is the top exam priority: layout, pane proportions, type hierarchy, choice spacing, selected state, strike-out, flagging, navigation, progress, timer placement, controls, review state, image position, modals, keyboard, responsive. Match behaviour, layout and colour; never their logo, artwork or assets | PLANNED | next branch after Wave 1.3.1; Codex owns the simulator files, so it starts with a board agreement |
+| I5-17 | One engine, many looks: a shared question engine, then a behaviour / exam profile, then a renderer / theme / layout. Examplify is a profile over the shared engine, not a second engine | PLANNED | same branch as I5-16 |
+| I5-18 | Question navigator: jump to any question; answered / unanswered, flagged and current at a glance; right / wrong only in review; nothing in testing that a real exam would not show | PLANNED | same branch as I5-16 |
+| I5-19 | Every exam renderer marks a wrong pick with a cross, never a tick, and shows the correct answer separately in review | PARTIAL | Wave 1.3 (f1f309d) covers the ExamSoft and UWorld item lists; an audit of every renderer is open |
+| I5-20 | Per-question time is the active time on that question, across visits; the rule lives in one shared place with tests | PARTIAL | Wave 1.3 (f1f309d, 3a5d006) fixed both players; the rule is not yet one shared module |
+| I5-21 | Import contract: the mapping format (Question X, A. to H., Answer, Explanation, Review, Attachment, source) stays supported; `Answer:` is the key; a tick mark is never read as correctness; quiz provenance is kept | VERIFIED | Wave 1.3 (b5594a5, 77b0335) |
+| I5-22 | Import robustness, tested: 1, 25+ and 100+ questions; A-E and A-H; blank lines; multiline stems, explanations and review; missing attachments; attachments in another order; duplicate filenames; duplicate numbers across sources; malformed records; unresolved answers; flags. A malformed record never turns the paste into one giant question | PLANNED | import hardening branch |
+| I5-23 | A clear review screen before import that shows source conflicts instead of smoothing them away | PARTIAL | Wave 1.3 (77b0335) shows each draft's key warning; a conflict summary for the whole import is open |
+| I5-24 | Images: map from `Attachment:` deterministically, preview during import review, keep the aspect ratio, enlarge cleanly, never break the layout on a phone or a desktop, stay with the question through edits | PARTIAL | Wave 1.3 (1267f2d, f4db063): attach, show under the stem, enlarged view; preview in review and the edit path are open |
+| I5-25 | Cross-device images belong to a later storage / media layer: design that boundary now, and keep binaries out of the revision payload | PLANNED | design note, import hardening branch |
 | I2-06 | Extending a highlight over a highlight | CODEX (VERIFIED by Codex) | 691c23a (Wave 1.1) |
 | I1-33 | Simulations tab (WIP) | FUTURE | |
 | I1-02 | Daily medical fact from a local, sourced library | FUTURE | |
@@ -138,6 +149,8 @@ Last full review: 2026-10-01, with Wave 1.3 (Ideas 5 added; Wave 1.2 is main 291
 | I1-06, I3-08 | Your own soundscapes (files; YouTube by embed only) | PARTIAL | files shipped (09d65a1); YouTube embed-only by design |
 | I5-01 | Assigning one of your sounds to a preset works, and renaming always saves | VERIFIED | Wave 1.3 (255d527): the file becomes what that preset plays, even over an earlier pick; rename saves on Enter, the tick or clicking away |
 | I5-02 | Stage sphere and ring take the scene's colours, sit centred, and move with the sound | VERIFIED | Wave 1.3 (932b212): measured at four window sizes and full screen (centre within 1 px, nothing inside the orb's reach, 60 fps); look reviewed from screenshots by a second agent, not by JD yet |
+| I5-26 | The stage orb is verified in a real browser, not redone: centred, a true circle, the scene's colours, sound-reactive, elegant, no collisions at desktop / tablet / phone widths, reduced motion | PLANNED | audit after Wave 1.3.1 |
+| I5-27 | Assigning one of your sounds to a preset changes what it plays, and a rename persists, both across a reload | PLANNED | audit after Wave 1.3.1 (Wave 1.3 verified both without the reload) |
 | I4-22 | JD's alpha-waves track as the default pinned intro soundscape | NEEDS JD | licence for a YouTube-sourced track in a public app; works today on JD's device via Your sounds |
 | I4-23 | Fullscreen / larger soundscape experience | PLANNED | coordinate with Codex's page restructure |
 | I4-24 | Opening films: keep only the finished renders (JD: "remove these, terrible quality") | VERIFIED | Wave 1.2 (9eda971) |
@@ -166,6 +179,11 @@ Last full review: 2026-10-01, with Wave 1.3 (Ideas 5 added; Wave 1.2 is main 291
 | I4-09 | Sidebar: make your own sections, move items between them | PLANNED | feat/wave2-home |
 | I5-14 | Every wrap-up reports the branches: what is new, how many changes each holds, and when to combine and publish | ANSWERED | standing practice from 2026-10-01 |
 | I5-15 | Use the directions pipeline, and read Codex's work before touching shared files | ANSWERED | standing practice; coordination board entry 2026-10-01 00:05 |
+| I5-29 | Judge UI in the real browser, not from measurements alone; use the Examplify reference pack if one exists; build reusable visual reference / regression tooling where it cuts guesswork | PLANNED | with I5-16 |
+| I5-30 | Production `push_workspace_revision` answered HTTP 500 again and again: find the real mismatch, stop endless retries, make failure bounded and visible, cover it with tests, verify production once deployed | SHIPPED | Wave 1.3.1 (28c004d, e932a9d, 1ceea9e). Production still needs the migration and a deploy, both JD's: docs/release/2026-10-01-ACCOUNT-SYNC-INCIDENT.md |
+| I5-31 | Finish staged work before new branches: `feat/ideas3-staging` | ANSWERED | it reached main in Wave 1.1; its one later commit (933419f) is a leftover note that Wave 1.2 superseded, so there is nothing to merge |
+| I5-32 | Every checkpoint ends with the branch table (owner, commits, files, verification, state, recommendation), what is ready to combine and when to publish | ANSWERED | standing practice (extends I5-14) |
+| I5-33 | Directions stay authoritative for every batch; nothing is completed because a first implementation exists | ANSWERED | standing practice |
 
 ## 9. Look, feel, notices, identity
 
