@@ -31,3 +31,11 @@ Things learned the hard way, conventions that keep work fast, and decisions that
 - YouTube-sourced audio is not bundled into the public app; users add their own tracks through Your sounds (device only).
 - Coalesced vault writes: tests and features that reload must flush first.
 - The contrast sweep fails below 2:1; light-theme accent text uses `--accent-ink-rgb`.
+
+## 2026-09-30 (late): check-in rebuild, widget options
+
+- **Widget options.** A dashboard widget can now offer behaviours as well as shown details: `options` on its catalog entry (`lib/dashboardWidgets.ts`), saved in the widget's own `preferences` bag (so it travels with the layout, no schema change), read with `dashboardWidgetOptions(id, preferences)`. The frame's Customize panel lists them under "Options". First use: the Daily Check-In's "A short note after an energy check".
+- **One energy check.** `components/energy/EnergyOrbs.tsx` replaced the old pill row everywhere (check-in, capacity widget, Reports). `EnergyCheck.note` is optional and additive.
+- **Trap: a percentage height on a grid item with an auto row is ignored.** The check-in's intention underline also taught one: `vector-effect: non-scaling-stroke` breaks `pathLength`-based dash drawing in Chrome (the line stops short). Draw without it.
+- **Trap: `.win-task span { flex: 1 }` matched the Tag inside the row too** and stretched it; scope such rules to the element they mean.
+- JD commits from his editor as well ("Wave1.2A" captured this branch's working tree). Check `git log` before assuming a file is uncommitted.

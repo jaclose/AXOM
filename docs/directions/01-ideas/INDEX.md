@@ -38,10 +38,10 @@ Last full review: 2026-09-30, after Wave 1.2 (tag wave-1.2; Wave 1.1 is main 83d
 | I3-22a | Weekly overview widget more alive; less dead space in widgets | PLANNED | feat/wave2-home |
 | I3-22c | Journal widget as a keyframe of the journal desk | PLANNED | feat/wave2-journal-library |
 | I3-22d | Doctordle and Daily Word split widget | PLANNED | feat/wave2-home |
-| I4-11 | Daily check-in always open, large by default, rehauled | PLANNED | feat/wave2-home |
-| I4-12 | Check-in submit: "intention logged" animation, then the intention stays on the page | PLANNED | feat/wave2-home |
-| I3-05, I4-13 | Energy check: elegant animated orbs (ripple for high, melt for low), "Energy logged" from the orb row, first-time "AXOM finds your best times" | PLANNED | feat/wave2-home |
-| I4-14 | Optional mini writing in the check-in ("What's eating you up?", "What's got you feeling so good?") feeding energy | PLANNED | feat/wave2-home |
+| I4-11 | Daily check-in always open, large by default, rehauled | IN PROGRESS | feat/wave2-home (e4626d0, a91a05d): built in the setup style, large by default, only an explicit Skip collapses it; browser-checked dark, light and 390; ships with the home wave |
+| I4-12 | Check-in submit: "intention logged" animation, then the intention stays on the page | IN PROGRESS | feat/wave2-home (e4626d0, a91a05d): "Intention set" moment, the intention stays large with its underline drawn in; "Change" reopens it with your words |
+| I3-05, I4-13 | Energy check: elegant animated orbs (ripple for high, melt for low), "Energy logged" from the orb row, first-time "AXOM finds your best times" | IN PROGRESS | feat/wave2-home (e4626d0, a91a05d): one energy check everywhere (check-in, capacity widget, Reports); the chosen orb glides to the front and the notice comes off it |
+| I4-14 | Optional mini writing in the check-in ("What's eating you up?", "What's got you feeling so good?") feeding energy | IN PROGRESS | feat/wave2-home (e4626d0): an option in the check-in's own settings (widget options, off by default); the note is kept on the energy check. Using notes in the energy model comes with I4-15 |
 | I4-15 | "AXOM has some insights to show you" once enough energy data exists; guided reading with glowing highs and red dips | PLANNED | feat/wave2-home |
 | I4-16 | Notifications button at the top, only when something is unread; dashboard holds Wrapped and insights | PLANNED | feat/wave2-home |
 | I3-21 | Recovery plan and Up Next adapt to yesterday and to a hard start; weekly summary | PLANNED | feat/wave2-home |
