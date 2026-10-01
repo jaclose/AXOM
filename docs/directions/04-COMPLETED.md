@@ -2,6 +2,12 @@
 
 Done and on main, by wave. VERIFIED means exercised in a real browser (or a real build for native items); SHIPPED means merged with automated tests but not yet exercised the way a person would meet it. Each ID links back to the bank (01-ideas/INDEX.md).
 
+## Wave 1.3.1 · 2026-10-01 · tag wave-1.3.1
+
+| ID | Done | Level | Commit |
+|---|---|---|---|
+| I5-30 | Account uploads: history pruned instead of the newest version refused; failures bounded, remembered and explained; a large profile photo stored at display size | VERIFIED on a local database replay and in a browser replay of the incident. Production waits on JD (migration, deploy), so it is not verified there yet | 28c004d, e932a9d, 113479f, 1ceea9e |
+
 ## Wave 1.3 · 2026-10-01 · tag wave-1.3
 
 | ID | Done | Level | Commit |

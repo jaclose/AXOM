@@ -4,6 +4,11 @@ Bug fixes, newest first. Root cause stated so the same class of bug is easy to s
 
 | Date | Fix | Root cause | Commit |
 |---|---|---|---|
+| 2026-10-01 | Account uploads are no longer refused for a large workspace (server). Needs the migration applied in production | the storage bound refused every new version once history passed 50 MB, raised as SQLSTATE 54000, which reads as HTTP 500; history was also measured by converting every kept snapshot to text on each call | 28c004d |
+| 2026-10-01 | A refused or failing account upload is sent once and then waits, instead of re-uploading the whole workspace for ever | every failure was treated as temporary: retry on a 1 s to 60 s clock, again 8 s after every change, from every tab, with no memory across reloads (13 uploads in two minutes in a browser; now 1) | e932a9d |
+| 2026-10-01 | A failed "Protect now" explains itself; it used to leave "Protecting now…" on screen | the notice was only replaced on success | e932a9d |
+| 2026-10-01 | A retry of an upload that had been kept as a conflict no longer answers "accepted" | the idempotency lookup did not look at the kept row's kind | 28c004d |
+| 2026-10-01 | A profile photo no longer adds megabytes to every save, backup and upload | the picked file was stored as it was (2.5 MB shown at 76 px) | 113479f |
 | 2026-10-01 | Import never drops or misfiles a line that only looks like a field (caught in review before shipping) | any "Status:" line was consumed; "Answer: None" read as no answer even when None is a choice; a question's trailing "Source:" was taken as the next quiz's header | b9a6a99 |
 | 2026-10-01 | The stage ring sits in the centre | as a grid item its percentage height was ignored, so it was sized from the stage's width (481 px in a 380 px stage) and hung 347 px low; it also drifted by design | 932b212 |
 | 2026-10-01 | Assigning one of your sounds to a preset now makes it play there | the file was only listed first; `play` saves a pick for every preset you have ever played, so the earlier pick kept winning | 255d527 |

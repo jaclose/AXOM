@@ -45,7 +45,7 @@ vi.mock("./supabase", () => ({
   authRedirectUrl: () => "http://localhost/",
 }));
 
-const { useAccount, validateEmail, validatePassword, resetAccountInitForTests } = await import("./accountStore");
+const { useAccount, validateEmail, validatePassword, resetAccountInitForTests, protectionDetail, protectionLabel, failureSummary } = await import("./accountStore");
 const { useStore } = await import("../store");
 const { makeSeed } = await import("../seed");
 
@@ -58,7 +58,7 @@ beforeEach(() => {
   Object.values(auth).forEach((fn) => fn.mockClear());
   Object.defineProperty(navigator, "onLine", { value: true, configurable: true });
   useStore.setState(makeSeed());
-  useAccount.setState({ phase: "signed-out", user: null, link: "unlinked", protection: "local-only", history: [], devices: [], message: "", error: "", conflictServerRevision: undefined });
+  useAccount.setState({ phase: "signed-out", user: null, link: "unlinked", protection: "local-only", history: [], devices: [], message: "", error: "", conflictServerRevision: undefined, syncFailure: undefined, nextAttemptAt: undefined, snapshotBytes: undefined });
 });
 
 describe("account validation", () => {
@@ -260,5 +260,62 @@ describe("account session consistency (Ideas 4: Profile and Account agree; sign-
     await flush();
     expect(useAccount.getState().phase).toBe("signed-out");
     expect(useAccount.getState().error).toMatch(/still saved on this device/);
+  });
+});
+
+describe("a refused upload (the production failure of 2026-09-30)", () => {
+  /** What an account before migration 20261001090000 answers once its history is full. */
+  const historyFull = { data: null, error: { code: "54000", message: "workspace snapshot storage limit reached; reduce the snapshot size before syncing", details: null, hint: null }, status: 500 };
+  const pushes = () => rpc.mock.calls.filter(([name]) => name === "push_workspace_revision");
+
+  it("says what happened, stops repeating it, and recovers when the account accepts again", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await useAccount.getState().signIn("learner@example.com", "password123");
+    let answer: unknown = historyFull;
+    rpc.mockImplementation(async (name: string) => (name === "push_workspace_revision" ? answer : { data: null, error: null }));
+
+    await useAccount.getState().linkThisDevice();
+    expect(useAccount.getState()).toMatchObject({ link: "linked", protection: "blocked", syncFailure: { kind: "rejected", rejection: "storage-limit", status: 500, code: "54000" } });
+    expect(useAccount.getState().message).toMatch(/version history is full/);
+    expect(useAccount.getState().message).toMatch(/saved on this device/);
+    expect(pushes()).toHaveLength(1);
+    // Bookkeeping never holds what the account wrote back.
+    expect(localStorage.getItem("axom.sync.metadata.v1")).not.toMatch(/storage limit/);
+
+    // "Try again" is the learner's call: one upload, and no stale "Protecting now…" notice.
+    await useAccount.getState().syncNow();
+    expect(pushes()).toHaveLength(2);
+    expect(useAccount.getState()).toMatchObject({ protection: "blocked", message: "", busy: false });
+    expect(Date.parse(useAccount.getState().nextAttemptAt!)).toBeGreaterThan(Date.now() + 59 * 60_000);
+
+    answer = { data: { status: "accepted", revision: 72, revision_id: "r72", idempotent: false }, error: null, status: 200 };
+    await useAccount.getState().syncNow();
+    expect(useAccount.getState()).toMatchObject({ protection: "protected", message: "Protected just now.", syncFailure: undefined, nextAttemptAt: undefined });
+    vi.restoreAllMocks();
+  });
+
+  it("explains each kind of trouble in plain words", () => {
+    const at = "2026-10-01T10:00:00.000Z";
+    const soon = new Date(Date.now() + 30 * 60_000).toISOString();
+    expect(protectionDetail({ protection: "protected" })).toBeNull();
+    expect(protectionDetail({ protection: "saved-locally" })).toBeNull();
+    expect(protectionDetail({ protection: "conflict" })).toBeNull();
+    const tooLarge = protectionDetail({ protection: "blocked", syncFailure: { kind: "rejected", rejection: "too-large", status: 0, at } });
+    expect(tooLarge).toMatch(/larger than an account copy can be \(15 MB\)/);
+    expect(tooLarge).toMatch(/Emergency recovery/);
+    expect(protectionDetail({ protection: "blocked", syncFailure: { kind: "rejected", rejection: "refused", status: 400, at }, nextAttemptAt: soon })).toMatch(/refused this upload.*tries again by itself around/);
+    expect(protectionDetail({ protection: "paused", syncFailure: { kind: "server", status: 500, at }, nextAttemptAt: soon })).toMatch(/after several tries.*checks less often.*tries again by itself around/);
+    expect(protectionDetail({ protection: "retrying", syncFailure: { kind: "network", status: 0, at } })).toMatch(/could not reach your account/);
+    expect(protectionDetail({ protection: "retrying", syncFailure: { kind: "auth", status: 401, at } })).toMatch(/sign out and sign in again/);
+    for (const status of ["retrying", "paused", "blocked"] as const) {
+      const detail = protectionDetail({ protection: status, syncFailure: { kind: "server", status: 500, at } })!;
+      expect(detail).toMatch(/saved on this device/);
+      expect(detail).not.toMatch(/—/);
+      expect(protectionLabel(status)).not.toMatch(/—/);
+    }
+    expect(failureSummary({ syncFailure: { kind: "rejected", rejection: "storage-limit", status: 500, code: "54000", at }, snapshotBytes: 9_628_115 }))
+      .toMatch(/refused \(storage-limit\), HTTP 500, code 54000\. Snapshot size 9\.6 MB\./);
+    expect(failureSummary({ syncFailure: { kind: "network", status: 0, at } })).toMatch(/network, no answer\./);
+    expect(failureSummary({})).toBe("");
   });
 });

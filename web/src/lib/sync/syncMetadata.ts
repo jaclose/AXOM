@@ -1,7 +1,8 @@
 import type { SyncMetadata } from "./syncTypes";
 
 /** Device-only sync bookkeeping. Never contains tokens or workspace content. */
-const KEY = "axom.sync.metadata.v1";
+export const SYNC_METADATA_KEY = "axom.sync.metadata.v1";
+const KEY = SYNC_METADATA_KEY;
 
 export function deviceId(): string {
   const meta = read();

@@ -4,7 +4,8 @@ import { authRedirectUrl, cloudConfigured, loadSupabase, readStoredSession } fro
 import { SyncCoordinator } from "../sync/syncCoordinator";
 import { SupabaseSyncTransport } from "../sync/supabaseTransport";
 import { clearAccountSync, deviceId, read, write } from "../sync/syncMetadata";
-import type { AccountDevice, ProtectionStatus, RevisionSummary } from "../sync/syncTypes";
+import { restingStatus } from "../sync/syncPolicy";
+import type { AccountDevice, ProtectionStatus, RevisionSummary, SyncFailure } from "../sync/syncTypes";
 import { useStore } from "../store";
 import { createLocalBackup } from "../localBackup";
 import { mergeStates, parseImport } from "../backup";
@@ -42,6 +43,11 @@ interface AccountState {
   protection: ProtectionStatus;
   lastProtectedAt?: string;
   conflictServerRevision?: number;
+  /** The last failed upload, until one succeeds, and when AXOM tries next by itself. */
+  syncFailure?: SyncFailure;
+  nextAttemptAt?: string;
+  /** Size of the last snapshot built on this device. */
+  snapshotBytes?: number;
   history: RevisionSummary[];
   devices: AccountDevice[];
   busy: boolean;
@@ -144,20 +150,30 @@ function toUser(session: Session | null, profileName?: string): AccountUser | nu
   };
 }
 
-/** Everything the account UI shows for a session, derived in one place. */
-function sessionState(session: Session | null): Pick<AccountState, "phase" | "user" | "link" | "lastProtectedAt" | "conflictServerRevision" | "protection"> {
-  const user = toUser(session);
+type ProtectionView = Pick<AccountState, "protection" | "lastProtectedAt" | "conflictServerRevision" | "syncFailure" | "nextAttemptAt" | "snapshotBytes">;
+
+/** What the account UI shows about protection: a status plus the stored times and the last failure. */
+export function protectionView(status: ProtectionStatus): ProtectionView {
   const meta = read();
+  return {
+    protection: status,
+    lastProtectedAt: meta.lastProtectedAt,
+    conflictServerRevision: meta.conflictServerRevision,
+    syncFailure: meta.lastError,
+    nextAttemptAt: meta.nextAttemptAt,
+    snapshotBytes: meta.lastPayloadBytes,
+  };
+}
+
+/** Everything the account UI shows for a session, derived in one place. */
+function sessionState(session: Session | null): Pick<AccountState, "phase" | "user" | "link"> & ProtectionView {
+  const user = toUser(session);
   const link = linkStateFor(user?.id);
   return {
     phase: user ? "signed-in" : "signed-out",
     user,
     link,
-    lastProtectedAt: meta.lastProtectedAt,
-    conflictServerRevision: meta.conflictServerRevision,
-    protection: user && link === "linked"
-      ? (meta.conflictServerRevision !== undefined ? "conflict" : meta.pending ? "saved-locally" : meta.lastProtectedAt ? "protected" : "saved-locally")
-      : "local-only",
+    ...protectionView(user && link === "linked" ? restingStatus(read()) : "local-only"),
   };
 }
 
@@ -195,6 +211,17 @@ export const useAccount = create<AccountState>((set, get) => {
     }
     set(next);
     if (next.user) void loadProfileName(next.user.id);
+  }
+
+  /** The watcher's coordinator when one is running; otherwise a short-lived one. */
+  async function withCoordinator<T>(run: (active: SyncCoordinator) => Promise<T>): Promise<T> {
+    if (coordinator) return run(coordinator);
+    const temporary = new SyncCoordinator(transport, () => useStore.getState(), 0);
+    try {
+      return await run(temporary);
+    } finally {
+      temporary.dispose();
+    }
   }
 
   async function loadProfileName(userId: string) {
@@ -371,10 +398,9 @@ export const useAccount = create<AccountState>((set, get) => {
         phase: cloudConfigured() ? "signed-out" : "unconfigured",
         user: null,
         link: "unlinked",
-        protection: "local-only",
+        ...protectionView("local-only"),
         history: [],
         devices: [],
-        conflictServerRevision: undefined,
         message: "Signed out. This device’s workspace is still here.",
       });
     },
@@ -388,18 +414,19 @@ export const useAccount = create<AccountState>((set, get) => {
         // holds work from another device, the server keeps BOTH and reports a
         // conflict for the learner to resolve — never a silent overwrite.
         write({ ...meta, accountUserId: user.id, baseRevision: meta.accountUserId === user.id ? meta.baseRevision : 0 });
-        const linkCoordinator = coordinator ?? new SyncCoordinator(transport, () => useStore.getState(), 0);
-        linkCoordinator.queue();
-        await linkCoordinator.flush("foundation");
-        const status = linkCoordinator.currentStatus();
-        set({ link: "linked", protection: status, lastProtectedAt: read().lastProtectedAt, conflictServerRevision: read().conflictServerRevision });
+        const status = await withCoordinator(async (active) => {
+          active.queue();
+          await active.flush("foundation");
+          return active.currentStatus();
+        });
+        set({ link: "linked", ...protectionView(status) });
         await transport.touchDevice({ deviceId: deviceId(), label: deviceLabel(), platform: platformName(), revision: read().baseRevision }).catch(() => undefined);
         set({
           message: status === "conflict"
             ? "Your account already has work from another device. Both versions are kept — choose which one continues."
-            : status === "retrying"
-              ? "AXOM couldn’t reach the account yet. Your work is saved here and will upload automatically."
-              : "This workspace is protected. Changes now back up in the background.",
+            : status === "protected"
+              ? "This workspace is protected. Changes now back up in the background."
+              : protectionDetail(protectionView(status)) ?? "Your work is saved here and will upload when the account can be reached.",
         });
       });
       await get().refresh();
@@ -408,12 +435,15 @@ export const useAccount = create<AccountState>((set, get) => {
     async syncNow() {
       if (get().link !== "linked") return;
       await guarded("Protecting now…", async () => {
-        const active = coordinator ?? new SyncCoordinator(transport, () => useStore.getState(), 0);
-        active.queue();
-        await active.flush("manual");
-        set({ protection: active.currentStatus(), lastProtectedAt: read().lastProtectedAt, conflictServerRevision: read().conflictServerRevision });
+        const status = await withCoordinator(async (active) => {
+          active.queue();
+          await active.flush("manual");
+          return active.currentStatus();
+        });
+        set(protectionView(status));
       });
-      set({ message: get().protection === "protected" ? "Protected just now." : get().message });
+      // The card under the button explains a failure; the notice only confirms success.
+      set({ message: get().protection === "protected" ? "Protected just now." : "" });
       void get().refresh();
     },
 
@@ -441,13 +471,13 @@ export const useAccount = create<AccountState>((set, get) => {
         recordRestoreEvent({ kind: "account-restore", detail: `Protected version #${summary.revision} from ${new Date(summary.createdAt).toLocaleString()}` });
         const latest = await transport.latestRevision().catch(() => summary.revision);
         write({ ...read(), accountUserId: user.id, baseRevision: latest, conflictServerRevision: undefined, pending: true, pendingIdempotencyKey: crypto.randomUUID() });
-        const active = coordinator ?? new SyncCoordinator(transport, () => useStore.getState(), 0);
-        await active.flush("restore");
+        const status = await withCoordinator(async (active) => {
+          await active.flush("restore");
+          return active.currentStatus();
+        });
         set({
           link: "linked",
-          protection: active.currentStatus(),
-          conflictServerRevision: read().conflictServerRevision,
-          lastProtectedAt: read().lastProtectedAt,
+          ...protectionView(status),
           message: "Restored. A safety snapshot of the previous device state was saved first, and the restore is recorded as a new version.",
         });
       });
@@ -458,9 +488,11 @@ export const useAccount = create<AccountState>((set, get) => {
       const server = get().conflictServerRevision ?? read().conflictServerRevision;
       if (server === undefined) return;
       await guarded("Keeping this device’s version…", async () => {
-        const active = coordinator ?? new SyncCoordinator(transport, () => useStore.getState(), 0);
-        await active.keepThisDevice(server);
-        set({ protection: active.currentStatus(), conflictServerRevision: read().conflictServerRevision, lastProtectedAt: read().lastProtectedAt });
+        const status = await withCoordinator(async (active) => {
+          await active.keepThisDevice(server);
+          return active.currentStatus();
+        });
+        set(protectionView(status));
       });
       set({ message: "This device’s version now continues. The other version stays in history." });
       void get().refresh();
@@ -481,13 +513,13 @@ export const useAccount = create<AccountState>((set, get) => {
         useStore.getState().replaceAll(merged);
         recordRestoreEvent({ kind: "account-merge", detail: `Merged with protected version #${latest.revision}` });
         write({ ...read(), accountUserId: user.id, baseRevision: latest.revision, conflictServerRevision: undefined, pending: true, pendingIdempotencyKey: crypto.randomUUID() });
-        const active = coordinator ?? new SyncCoordinator(transport, () => useStore.getState(), 0);
-        await active.flush("manual");
+        const status = await withCoordinator(async (active) => {
+          await active.flush("manual");
+          return active.currentStatus();
+        });
         set({
           link: "linked",
-          protection: active.currentStatus(),
-          conflictServerRevision: read().conflictServerRevision,
-          lastProtectedAt: read().lastProtectedAt,
+          ...protectionView(status),
           message: "Merged. Both devices’ records are combined (newer copies win, nothing deleted) and saved as a new version. A safety snapshot was taken first.",
         });
       });
@@ -514,7 +546,7 @@ export const useAccount = create<AccountState>((set, get) => {
         return true;
       });
       if (!deleted) return;
-      set({ link: "unlinked", protection: "local-only", history: [], devices: [], conflictServerRevision: undefined, message: "Every server copy was deleted. This device’s workspace is untouched." });
+      set({ link: "unlinked", ...protectionView("local-only"), history: [], devices: [], message: "Every server copy was deleted. This device’s workspace is untouched." });
     },
 
     clearNotice() {
@@ -540,6 +572,47 @@ export function protectionLabel(status: ProtectionStatus): string {
     protected: "Protected",
     offline: "Offline — saved locally",
     retrying: "Retrying",
+    paused: "Retrying later",
+    blocked: "Not protected",
     conflict: "Action needed",
   }[status];
+}
+
+/**
+ * One plain sentence about why protection is not up to date and what happens
+ * next, or null when there is nothing to explain.
+ */
+export function protectionDetail(view: Pick<AccountState, "protection" | "syncFailure" | "nextAttemptAt">): string | null {
+  const { protection, syncFailure, nextAttemptAt } = view;
+  if (protection !== "retrying" && protection !== "paused" && protection !== "blocked") return null;
+  const saved = "Your work is saved on this device.";
+  const next = nextAttemptAt && Date.parse(nextAttemptAt) > Date.now()
+    ? ` AXOM tries again by itself around ${new Date(nextAttemptAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.`
+    : "";
+  if (protection === "blocked") {
+    if (syncFailure?.rejection === "too-large") {
+      return `This workspace is larger than an account copy can be (15 MB), so nothing is uploading. ${saved} Emergency recovery can still export all of it.`;
+    }
+    if (syncFailure?.rejection === "storage-limit") {
+      return `Your account’s version history is full, so it refused this upload and AXOM stopped repeating it. ${saved}${next}`;
+    }
+    return `Your account refused this upload, so AXOM stopped repeating it. ${saved} Updating AXOM may help.${next}`;
+  }
+  if (syncFailure?.kind === "auth") {
+    return `Your account could not confirm this sign-in. ${saved} If this continues, sign out and sign in again.${next}`;
+  }
+  return protection === "paused"
+    ? `AXOM could not reach your account after several tries, so it now checks less often. ${saved}${next}`
+    : `AXOM could not reach your account. ${saved}${next}`;
+}
+
+/** The last failed upload in technical terms, for the Technical details disclosure. */
+export function failureSummary(view: Pick<AccountState, "syncFailure" | "nextAttemptAt" | "snapshotBytes">): string {
+  const failure = view.syncFailure;
+  if (!failure) return "";
+  const what = failure.kind === "rejected" ? `refused (${failure.rejection ?? "refused"})` : failure.kind;
+  const answer = failure.status ? `HTTP ${failure.status}` : "no answer";
+  const size = view.snapshotBytes ? ` Snapshot size ${(view.snapshotBytes / 1_000_000).toFixed(1)} MB.` : "";
+  const next = view.nextAttemptAt ? ` Next automatic try ${new Date(view.nextAttemptAt).toLocaleString()}.` : "";
+  return `Last upload failed ${new Date(failure.at).toLocaleString()}: ${what}, ${answer}${failure.code ? `, code ${failure.code}` : ""}.${size}${next}`;
 }

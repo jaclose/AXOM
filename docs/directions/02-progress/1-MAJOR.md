@@ -2,6 +2,18 @@
 
 Waves and flagship features, newest first. Smaller improvements are in 2-UPDATES.md, fixes in 3-HOTFIXES.md. Earlier history: CHANGELOG.md at the repository root.
 
+## Wave 1.3.1 (2026-10-01) · tag wave-1.3.1
+
+The production upload failure. Gate on the branch: typecheck, lint, 2,146 unit tests, build, update and offline checks, 30 Playwright tests passed (the live-accounts journey is skipped without real credentials). **Production still needs the migration applied and a deploy; both are JD's.** Record: `docs/release/2026-10-01-ACCOUNT-SYNC-INCIDENT.md`.
+
+| Update | Ideas | Commit |
+|---|---|---|
+| **A large workspace can be protected again.** The account's storage bound now drops the oldest protected versions instead of refusing the newest one, and measures history without reading it back. | I5-30 | 28c004d |
+| **A failed upload waits instead of repeating.** Failures are sorted by what the account said; waits grow from seconds to half an hour and are remembered across reloads and tabs; a refusal is not repeated; "Protect now" always runs. Settings says what happened and when AXOM tries next. | I5-30 | e932a9d |
+| **The incident as a browser test.** A stand-in account refuses each upload the way production did; the app must send it once, explain itself and recover. 13 uploads in two minutes before, 1 after. | I5-30 | 1ceea9e |
+| **Profile photo stored at display size.** A 2.5 MB photo was a quarter of every save, backup and upload. | I5-30 | 113479f |
+| **Ideas 5 work order banked.** JD's instructions of 2026-10-01 saved word for word and indexed (I5-16 to I5-33). | I5-33 | a108722 |
+
 ## Wave 1.3 (2026-10-01) · tag wave-1.3
 
 Ideas 5, the same night JD sent them. Gate on the merged tree: typecheck, lint, 2,096 unit tests, build, update and offline checks, 28 Playwright tests passed (the live-accounts journey is skipped without real credentials, as in earlier waves).

@@ -13,13 +13,27 @@ import type { Session, SupabaseClient } from "@supabase/supabase-js";
 let client: SupabaseClient | null | undefined;
 let loading: Promise<SupabaseClient | null> | undefined;
 
+/**
+ * Dev servers only: a browser test points the account client at a stand-in
+ * backend it answers itself (e2e/accounts-sync-failure.spec.ts). The branch is
+ * compiled out of every build, where the two env values are the only source.
+ */
+function standIn(): { url?: string; key?: string } | undefined {
+  if (!import.meta.env.DEV || typeof window === "undefined") return undefined;
+  return (window as Window & { __AXOM_E2E_ACCOUNT__?: { url?: string; key?: string } }).__AXOM_E2E_ACCOUNT__;
+}
+
+function projectUrl(): string | undefined {
+  return standIn()?.url ?? import.meta.env.VITE_SUPABASE_URL;
+}
+
 /** Supabase's newer "publishable" key and the legacy anon key are both public client keys. */
 function publicKey(): string | undefined {
-  return import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY;
+  return standIn()?.key ?? (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY);
 }
 
 export function cloudConfigured(): boolean {
-  return Boolean(import.meta.env.VITE_SUPABASE_URL && publicKey());
+  return Boolean(projectUrl() && publicKey());
 }
 
 /** Load (once) and return the client, or null when accounts are not configured. */
@@ -30,7 +44,7 @@ export function loadSupabase(): Promise<SupabaseClient | null> {
     return Promise.resolve(null);
   }
   loading ??= import("@supabase/supabase-js").then(({ createClient }) => {
-    client = createClient(import.meta.env.VITE_SUPABASE_URL, publicKey()!, {
+    client = createClient(projectUrl()!, publicKey()!, {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
@@ -45,7 +59,7 @@ export function loadSupabase(): Promise<SupabaseClient | null> {
 
 /** Where supabase-js keeps this device's session (its default storage key). */
 export function authStorageKey(): string | null {
-  const url = import.meta.env.VITE_SUPABASE_URL;
+  const url = projectUrl();
   if (!url) return null;
   try {
     return `sb-${new URL(url).hostname.split(".")[0]}-auth-token`;

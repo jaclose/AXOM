@@ -11,6 +11,7 @@ Parked ideas, items waiting on JD, and additions worth considering. Anything her
 | I3-64 | Where JD's NCRS sheets and Q-bank drives may be hosted (the repository is public). |
 | I3-17b | Codex's call on how new students get four starter tracker boxes (board request 2026-09-30). |
 | I4-18 | Production email settings (sign-up without a code, welcome email template) are a production change: design lands in the repo, JD applies it. |
+| I5-30 | Production: apply migration `20261001090000` and push `main`, then check Settings > Account on the affected device. Steps and what to expect: `docs/release/2026-10-01-ACCOUNT-SYNC-INCIDENT.md`. Until then large workspaces cannot be protected. |
 | I5-10 | Examplify / ExamSoft "carbon copy": reference screenshots of the real exam screen (question view, navigation pane, flag and strike-out, calculator and notes, review, the 5-minute warning), and a yes to this boundary: layout, controls, behaviour, type and colour match; their logo, brand name and artwork are not shipped. AMBOSS: deferred or removed, JD's call. |
 
 ## Parked
@@ -34,6 +35,14 @@ Parked ideas, items waiting on JD, and additions worth considering. Anything her
 - A shared form system built from the setup primitives (tiles, chips, segments, summaries), so Settings, schedule import and journal setup reach the setup standard without one-off styling.
 - A small "directions check" script that validates the index (unique IDs, allowed statuses, commits that exist) so this bank cannot quietly drift.
 - A native screen-edge glow for timer completion in the packaged app (a transparent always-on-top window), matching the in-app cue.
+
+## After the upload incident (Wave 1.3.1)
+
+- **Protection re-sends the whole workspace on every change.** It is now paced (about 5 MB a minute) and bounded, but the cost still grows with the workspace instead of with the change. The record-level journal in `docs/architecture/accounts-sync-v1.md` (V2) is the real fix.
+- **Import provenance is heavy.** In a 9.6 MB workspace, 3.7 MB was `extraction` snippets that mostly repeat the stem and explanation. Keep one copy, or drop them once a question is accepted.
+- **History under a byte budget is short for a large workspace** (about ten versions at 5 MB stored each). Thinning older versions (keep hourly, then daily) would make the same budget reach back weeks.
+- **`create_question_set_share` still reports its storage limit as SQLSTATE 54000** (HTTP 500). A deliberate action, not a loop, but the wrong status; Codex wrote that function.
+- **The snapshot is built and stringified on the main thread, twice** (once to hash, once by the SDK). A worker and one serialisation would remove a visible hitch on large workspaces.
 
 ## Known limits after Wave 1.3
 

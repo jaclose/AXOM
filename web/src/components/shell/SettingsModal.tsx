@@ -9,6 +9,7 @@ import { ICON_SIZE } from "../../lib/iconSize";
 import { Modal, Field } from "../ui/Modal";
 import { GButton, Tag } from "../ui/primitives";
 import { useStore } from "../../lib/store";
+import { compactAvatarDataUrl } from "../../lib/avatarImage";
 import { exportStateWithAttachments, mergeStates, parseImport } from "../../lib/backup";
 import {
   extractQuestionAttachmentPayloads,
@@ -204,7 +205,8 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
 
   function setAvatar(file: File) {
     const reader = new FileReader();
-    reader.onload = () => store.updateProfile({ avatarDataUrl: String(reader.result) });
+    // Stored at display size: the photo travels in every save, backup and account upload.
+    reader.onload = () => void compactAvatarDataUrl(String(reader.result)).then((avatarDataUrl) => store.updateProfile({ avatarDataUrl }));
     reader.readAsDataURL(file);
   }
 
