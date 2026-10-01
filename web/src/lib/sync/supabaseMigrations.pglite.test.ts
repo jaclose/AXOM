@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
@@ -212,8 +213,10 @@ describe("Supabase migrations on real Postgres", () => {
     for (let index = 0; index < 20; index += 1) {
       await push(0, `55555555-5555-4555-8555-${String(index).padStart(12, "0")}`);
     }
-    await expect(push(0, "66666666-6666-4666-8666-666666666666")).rejects.toThrow(/storage limit/);
+    // At the limit the caller still learns it is in conflict; no further copy is stored.
+    expect((await push(0, "66666666-6666-4666-8666-666666666666")).rows[0].r).toEqual({ status: "conflict", server_revision: 1, preserved_revision_id: null, preserved: false });
     expect(Number((await db.query<{ n: number }>("select count(*)::int as n from public.workspace_revisions where user_id=$1 and reason='conflict'", [A])).rows[0].n)).toBe(20);
+    expect(Number((await db.query<{ n: number }>("select count(*)::int as n from public.sync_conflicts where user_id=$1 and resolved_at is null", [A])).rows[0].n)).toBe(20);
     const resolution = await push(1, "77777777-7777-4777-8777-777777777777", "manual");
     expect(resolution.rows[0].r).toMatchObject({ status: "accepted", revision: 2 });
     expect(Number((await db.query<{ n: number }>("select count(*)::int as n from public.sync_conflicts where user_id=$1 and resolved_at is null", [A])).rows[0].n)).toBe(0);
@@ -242,20 +245,70 @@ describe("Supabase migrations on real Postgres", () => {
     await db.close();
   }, 30_000);
 
-  it("caps aggregate retained canonical snapshot payloads", async () => {
+  it("prunes canonical history to the storage budget instead of refusing new revisions", async () => {
     const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
     await db.query("insert into auth.users(id, email) values ($1, 'a@x.com')", [A]);
-    const snapshot = JSON.stringify({ payload: "x".repeat(12_500_000) });
-    const push = async (base: number, key: string) => as(db, "authenticated", A,
-      "select public.push_workspace_revision($1,33,$2,$3::jsonb,gen_random_uuid(),$4::uuid,'automatic') as r",
-      [base, HASH, snapshot, key]);
+    // Random base64 does not compress, so each revision stores about 9 MB.
+    const snapshot = JSON.stringify({ blob: randomBytes(6_750_000).toString("base64") });
+    const kept = async () => (await db.query<{ revision: number }>("select revision::int as revision from public.workspace_revisions where user_id=$1 and reason<>'conflict' order by revision", [A])).rows.map((row) => row.revision);
+    const stored = async () => Number((await db.query<{ bytes: string }>("select coalesce(sum(pg_column_size(snapshot_payload)),0)::bigint as bytes from public.workspace_revisions where user_id=$1 and reason<>'conflict'", [A])).rows[0].bytes);
+    const push = async (base: number) => (await as(db, "authenticated", A,
+      "select public.push_workspace_revision($1,34,$2,$3::jsonb,gen_random_uuid(),gen_random_uuid(),'automatic') as r",
+      [base, HASH, snapshot])).rows[0].r as { status: string; revision: number };
 
-    for (let revision = 0; revision < 3; revision += 1) {
-      const key = `99999999-9999-4999-8999-${String(revision).padStart(12, "0")}`;
-      await push(revision, key);
+    // An account that grew past the budget before it existed: eight revisions, about 72 MB.
+    await db.query("insert into public.workspaces(user_id, current_revision, current_hash) values ($1, 8, $2)", [A, HASH]);
+    await db.query(`insert into public.workspace_revisions(workspace_id,user_id,revision,base_revision,schema_version,content_hash,snapshot_payload,device_id,idempotency_key,reason)
+      select w.id, w.user_id, n, n - 1, 34, $2, $3::jsonb, gen_random_uuid(), gen_random_uuid(), 'automatic'
+      from public.workspaces w, generate_series(1, 8) n where w.user_id = $1`, [A, HASH, snapshot]);
+    expect(await stored()).toBeGreaterThan(50_000_000);
+
+    // The next upload is accepted (it used to be refused forever) and the oldest history goes.
+    expect(await push(8)).toMatchObject({ status: "accepted", revision: 9 });
+    expect(await kept()).toEqual([5, 6, 7, 8, 9]);
+    expect(await stored()).toBeLessThanOrEqual(50_000_000);
+    for (const base of [9, 10]) expect(await push(base)).toMatchObject({ status: "accepted", revision: base + 1 });
+    expect(await kept()).toEqual([7, 8, 9, 10, 11]);
+    expect(await stored()).toBeLessThanOrEqual(50_000_000);
+    await db.close();
+  }, 120_000);
+
+  it("keeps small histories at sixty revisions", async () => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
+    await db.query("insert into auth.users(id, email) values ($1, 'a@x.com')", [A]);
+    for (let base = 0; base < 63; base += 1) {
+      await as(db, "authenticated", A, "select public.push_workspace_revision($1,34,$2,'{\"ok\":true}'::jsonb,gen_random_uuid(),gen_random_uuid(),'automatic')", [base, HASH]);
     }
-    await expect(push(3, "99999999-9999-4999-8999-999999999999")).rejects.toThrow(/storage limit/);
-    expect(Number((await db.query<{ n: number }>("select count(*)::int as n from public.workspace_revisions where user_id=$1 and reason<>'conflict'", [A])).rows[0].n)).toBe(3);
+    const { rows } = await db.query<{ n: number; oldest: number; newest: number }>("select count(*)::int as n, min(revision)::int as oldest, max(revision)::int as newest from public.workspace_revisions where user_id=$1", [A]);
+    expect(rows[0]).toEqual({ n: 60, oldest: 4, newest: 63 });
+    await db.close();
+  }, 60_000);
+
+  it("refuses with client errors, never a server error, and replays retries faithfully", async () => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
+    await db.query("insert into auth.users(id, email) values ($1, 'a@x.com')", [A]);
+    const call = (base: number | null, key: string, payload: string, hash = HASH) => as(db, "authenticated", A,
+      "select public.push_workspace_revision($1,34,$2,$3::jsonb,'33333333-3333-4333-8333-333333333333'::uuid,$4::uuid,'automatic') as r",
+      [base, hash, payload, key]);
+
+    // PostgREST turns SQLSTATE PT413 into HTTP 413; class 54 would be HTTP 500.
+    await expect(call(0, "44444444-4444-4444-8444-444444444444", JSON.stringify({ payload: "x".repeat(15_000_001) })))
+      .rejects.toMatchObject({ code: "PT413", message: expect.stringMatching(/too large/) });
+    await expect(call(null, "44444444-4444-4444-8444-444444444444", "{}")).rejects.toMatchObject({ code: "P0001", message: expect.stringMatching(/invalid snapshot metadata/) });
+    const { rows: [definition] } = await db.query<{ sql: string }>("select pg_get_functiondef('public.push_workspace_revision(bigint,integer,text,jsonb,uuid,uuid,text)'::regprocedure) as sql");
+    expect(definition.sql).not.toMatch(/errcode\s*=\s*'5/);
+    // Retained snapshots are measured where they are stored, never converted to text.
+    expect(definition.sql).not.toMatch(/(?<!p_)snapshot_payload\s*::\s*text/);
+
+    // A retry of an accepted upload returns the stored hash, so newer content is not mistaken for protected.
+    const other = "b".repeat(64);
+    expect((await call(0, "55555555-5555-4555-8555-555555555555", "{\"v\":1}")).rows[0].r).toMatchObject({ status: "accepted", revision: 1, idempotent: false });
+    expect((await call(0, "55555555-5555-4555-8555-555555555555", "{\"v\":2}", other)).rows[0].r).toMatchObject({ status: "accepted", revision: 1, idempotent: true, content_hash: HASH });
+    // A retry of an upload that was preserved as a conflict stays a conflict.
+    const conflict = (await call(0, "66666666-6666-4666-8666-666666666666", "{\"v\":3}")).rows[0].r as { preserved_revision_id: string };
+    expect(conflict).toMatchObject({ status: "conflict", server_revision: 1, preserved: true });
+    expect((await call(0, "66666666-6666-4666-8666-666666666666", "{\"v\":3}")).rows[0].r).toEqual({ status: "conflict", server_revision: 1, preserved_revision_id: conflict.preserved_revision_id, preserved: true });
+    expect(Number((await db.query<{ n: number }>("select count(*)::int as n from public.workspace_revisions where user_id=$1", [A])).rows[0].n)).toBe(2);
     await db.close();
   }, 60_000);
 });
