@@ -155,6 +155,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const [aiBusy, setAiBusy] = useState(false);
   const [editingMapping, setEditingMapping] = useState(false);
   const recordedTutorAttempts = useRef(new Set<string>());
+  /** Seconds spent on questions the learner stepped away from before answering. */
+  const bankedSeconds = useRef(new Map<string, number>());
 
   // --- Q2a player toolkit: strikeout (session-transient per question), reading
   // scale (persisted device pref), calculator, and scroll-to-top on advance.
@@ -375,12 +377,28 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     setStage("running");
   }
 
-  function recordCurrent(answerKey: string | undefined, flagged: boolean) {
-    if (!question) return;
+  /** Whole seconds the question on screen has been showing this visit. */
+  const secondsThisVisit = () => Math.round((Date.now() - shownAt) / 1000);
+
+  /**
+   * The record for the question on screen. Time adds up across visits: what an
+   * earlier answer already counted, what was banked when the learner stepped
+   * back without answering, and this visit.
+   */
+  function currentAnswer(answerKey: string | undefined, flagged: boolean): QuizAnswer | undefined {
+    if (!question) return undefined;
     const correctKey = trustedCorrectKey(question);
     const correct = correctKey ? (answerKey ? answerKey === correctKey : false) : undefined;
-    const seconds = Math.round((Date.now() - shownAt) / 1000);
-    setAnswers((prev) => new Map(prev).set(question.id, { questionId: question.id, answerKey, correct, flagged, seconds }));
+    const earlier = (answers.get(question.id)?.seconds ?? 0) + (bankedSeconds.current.get(question.id) ?? 0);
+    return { questionId: question.id, answerKey, correct, flagged, seconds: earlier + secondsThisVisit() };
+  }
+
+  function recordCurrent(answerKey: string | undefined, flagged: boolean): QuizAnswer | undefined {
+    const record = currentAnswer(answerKey, flagged);
+    if (!record) return undefined;
+    bankedSeconds.current.delete(record.questionId);
+    setAnswers((prev) => new Map(prev).set(record.questionId, record));
+    return record;
   }
 
   function submitTutor() {
@@ -414,14 +432,18 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   }
 
   function submitExamAndNext() {
-    recordCurrent(picked, answers.get(question!.id)?.flagged ?? false);
+    const record = recordCurrent(picked, answers.get(question!.id)?.flagged ?? false);
     setPicked(undefined);
-    if (index + 1 >= pool.length) finishBlock(picked);
+    if (index + 1 >= pool.length) finishBlock(picked, record);
     else { setIndex(index + 1); setShownAt(Date.now()); }
   }
 
   function goPrevious() {
     if (index <= 0) return;
+    // Stepping back before answering still spent time on this question.
+    if (question && !revealed) {
+      bankedSeconds.current.set(question.id, (bankedSeconds.current.get(question.id) ?? 0) + secondsThisVisit());
+    }
     const previous = pool[index - 1];
     const saved = answers.get(previous.id);
     setIndex((value) => Math.max(0, value - 1));
@@ -434,14 +456,18 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     setShownAt(Date.now());
   }
 
-  function finishBlock(lastPick?: string) {
+  function finishBlock(lastPick?: string, justRecorded?: QuizAnswer) {
     // Ensure the in-flight answer is captured before scoring.
     const all = new Map(answers);
-    if (question && !all.has(question.id) && (lastPick ?? picked)) {
-      const key = lastPick ?? picked;
-      const correctKey = trustedCorrectKey(question);
-      const correct = correctKey ? key === correctKey : undefined;
-      all.set(question.id, { questionId: question.id, answerKey: key, correct, flagged: false, seconds: Math.round((Date.now() - shownAt) / 1000) });
+    const key = lastPick ?? picked;
+    if (justRecorded) {
+      // Recorded a moment ago; state has not caught up with it yet.
+      all.set(justRecorded.questionId, justRecorded);
+    } else if (question && key && (mode === "exam" || !all.has(question.id))) {
+      // In an exam the pick on screen is the answer, even on a question answered
+      // on an earlier visit (a changed last answer used to be dropped here).
+      const record = currentAnswer(key, all.get(question.id)?.flagged ?? false);
+      if (record) all.set(question.id, record);
     }
     const answerList = pool.map((q) => all.get(q.id) ?? ({ questionId: q.id, flagged: false } as QuizAnswer));
     const result: QuizSession = {

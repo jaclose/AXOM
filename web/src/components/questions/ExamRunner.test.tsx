@@ -249,6 +249,52 @@ describe("ExamRunner saved blocks and selection semantics", () => {
     expect(screen.getByText(edited).textContent).toBe(edited);
   });
 
+  it("adds up the time across visits when an exam answer is revisited", () => {
+    let now = 1_700_000_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    setStore();
+    const second = { ...question, id: "question-two", stem: "Second stem: which is right?" };
+    mocked.store = { ...mocked.store, questions: [question, second] };
+    render(<ExamRunner mode="exam" retakeIds={[question.id, second.id]} onClose={() => {}} />);
+
+    now += 20_000;
+    fireEvent.click(screen.getByRole("button", { name: "A. Alpha" }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit & next" }));
+    now += 5_000;
+    fireEvent.click(screen.getByRole("button", { name: /Previous/ }));
+    now += 7_000;
+    fireEvent.click(screen.getByRole("button", { name: "Submit & next" }));
+    now += 3_000;
+    fireEvent.click(screen.getByRole("button", { name: "A. Alpha" }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit & finish" }));
+
+    // Question 1: 20 s, then 7 s on the second visit. Question 2: 5 s before
+    // stepping back, then 3 s.
+    const spent = Object.fromEntries(mocked.recordQuestionAttempt.mock.calls.map(([id, attempt]) => [id, attempt.timeSpentSeconds]));
+    expect(spent).toEqual({ [question.id]: 27, [second.id]: 8 });
+    vi.restoreAllMocks();
+  });
+
+  it("keeps a changed last answer when the exam is submitted", () => {
+    setStore();
+    const second = { ...question, id: "question-two", stem: "Second stem: which is right?" };
+    mocked.store = { ...mocked.store, questions: [question, second] };
+    render(<ExamRunner mode="exam" retakeIds={[question.id, second.id]} onClose={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "A. Alpha" }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit & next" }));
+    fireEvent.click(screen.getByRole("button", { name: /Previous/ }));
+    // Back on question 1, change the answer, go forward, then finish.
+    fireEvent.click(screen.getByRole("button", { name: "B. Beta" }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit & next" }));
+    fireEvent.click(screen.getByRole("button", { name: "A. Alpha" }));
+    fireEvent.click(screen.getByRole("button", { name: /Previous/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit & next" }));
+    fireEvent.click(screen.getByRole("button", { name: "B. Beta" }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit & finish" }));
+    const picked = Object.fromEntries(mocked.recordQuestionAttempt.mock.calls.map(([id, attempt]) => [id, attempt.answerKey]));
+    expect(picked).toEqual({ [question.id]: "B", [second.id]: "B" });
+  });
+
   it("turns missed results into a fixed review set and Tracker review work", async () => {
     setStore();
     mocked.store = { ...mocked.store, questions: [{ ...question, topic: "Renal clearance", category: "Physiology" }] };
