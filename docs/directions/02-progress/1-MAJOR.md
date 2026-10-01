@@ -4,7 +4,7 @@ Waves and flagship features, newest first. Smaller improvements are in 2-UPDATES
 
 ## Wave 1.3 (2026-10-01) · tag wave-1.3
 
-Ideas 5, the same night JD sent them. Gate on the merged tree: typecheck, lint, 2,096 unit tests, build, update and offline checks, 29 Playwright tests.
+Ideas 5, the same night JD sent them. Gate on the merged tree: typecheck, lint, 2,096 unit tests, build, update and offline checks, 28 Playwright tests passed (the live-accounts journey is skipped without real credentials, as in earlier waves).
 
 | Update | Ideas | Commit |
 |---|---|---|
