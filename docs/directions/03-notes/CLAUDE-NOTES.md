@@ -56,3 +56,10 @@ Things learned the hard way, conventions that keep work fast, and decisions that
 - **A browser test can own the backend.** `window.__AXOM_E2E_ACCOUNT__` (dev servers only) points the account client at a host that Playwright answers; a stored session with a far expiry signs in without any auth call. See `e2e/accounts-sync-failure.spec.ts`.
 - Investigation rule kept: nothing was sent to production on the affected account's behalf. Evidence came from device bookkeeping, the deployed code, and a local replay.
 
+## 2026-10-01: Wave 1.3.2 (browser audit of Wave 1.3)
+
+- **Screenshots can be read again in this session.** Looking found two things that measurements and unit tests had passed: a label wrapping onto two lines, and a "glass sphere" that was only a ring on pale scenes. Measure for geometry, look for quality.
+- **A glass ball is recognised by what it does to the scene, not by shading.** Shading vanishes on a pale background. Drawing the scene inside the ball small, soft and upside down (a 24 px copy of the frame, rotated half a turn) reads as glass everywhere and costs 0.3 ms a frame.
+- **A browser test can listen.** `e2e/locked-in-cue.spec.ts` wraps `createOscillator` and the gain ramps in an init script and asserts the notes and their level. Headless Chromium keeps the context suspended, so this checks what is asked for, not what is heard.
+- **Three equal columns break when one label grows.** `minmax(0, 1fr) max-content minmax(0, 1fr)` lets the long one take what it needs.
+
