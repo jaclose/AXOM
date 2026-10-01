@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { deviceLabel, platformName, protectionView, useAccount } from "../../lib/account/accountStore";
+import { useCompactAvatar } from "../../lib/avatarImage";
 import { SyncCoordinator } from "../../lib/sync/syncCoordinator";
 import { SupabaseSyncTransport } from "../../lib/sync/supabaseTransport";
 import { SYNC_METADATA_KEY, deviceId, read } from "../../lib/sync/syncMetadata";
@@ -20,6 +21,9 @@ export function AccountSyncWatcher() {
   const phase = useAccount((state) => state.phase);
   const link = useAccount((state) => state.link);
   const userId = useAccount((state) => state.user?.id);
+  // Lives here because this is the always-mounted owner of what gets uploaded;
+  // it also keeps local saves and backup files small without an account.
+  useCompactAvatar();
 
   useEffect(() => {
     useAccount.getState().init();
