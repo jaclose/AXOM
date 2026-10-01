@@ -20,9 +20,11 @@ const POINTS = 144;
 /** The corona's resting radius, as a multiple of the ring's. */
 const CORONA_GAP = 1.11;
 /** How far the corona may bend, as a fraction of the ring's radius. */
-const CORONA_REACH = 0.075;
+const CORONA_REACH = 0.058;
 /** How fast each corona wave drifts round (radians per second); mixed directions keep it from spinning. */
 const CORONA_DRIFT = [0.11, -0.07, 0.16, -0.13, 0.21];
+/** The specular highlight never grows past this (CSS px), so a large orb keeps a point of light, not a bead. */
+const GLINT_MAX_PX = 9;
 const MAX_RATIO = 1.5;
 const TAU = Math.PI * 2;
 const WHITE: Rgb = [255, 255, 255];
@@ -235,24 +237,23 @@ export function SoundOrb({ active, reactive = false, tint = "rgb(var(--accent-rg
       edge.addColorStop(1, rgba(rim, 0.15 + 0.11 * glow));
       context.fillStyle = edge;
       context.fill();
-      // 4. Specular: a small, sharp point of light inside a faint bloom, and a
-      //    smaller echo opposite. The echo is dropped on pale scenes, where it
-      //    only reads as a smudge.
-      const glint = (dx: number, dy: number, size: number, alpha: number) => {
-        const x = cx + radius * dx;
-        const y = cy + radius * dy;
-        const spot = context.createRadialGradient(x, y, 0, x, y, radius * size);
+      // 4. Specular: one small, sharp point of light inside a faint bloom. On a
+      //    pale scene it is smaller and softer, where a hard white bead would
+      //    look stuck on.
+      const glint = (reachPx: number, alpha: number) => {
+        const x = cx - radius * 0.41;
+        const y = cy - radius * 0.45;
+        const spot = context.createRadialGradient(x, y, 0, x, y, reachPx);
         spot.addColorStop(0, `rgba(255, 255, 255, ${alpha})`);
         spot.addColorStop(0.42, `rgba(255, 255, 255, ${alpha * 0.72})`);
         spot.addColorStop(1, "rgba(255, 255, 255, 0)");
         context.fillStyle = spot;
         context.beginPath();
-        context.arc(x, y, radius * size, 0, TAU);
+        context.arc(x, y, reachPx, 0, TAU);
         context.fill();
       };
-      glint(-0.41, -0.45, 0.24, 0.07 + 0.04 * glow);
-      glint(-0.41, -0.45, 0.062, 0.92);
-      if (pale < 0.5) glint(0.43, 0.5, 0.034, 0.34);
+      glint(radius * 0.24, 0.07 + 0.04 * glow);
+      glint(Math.min(GLINT_MAX_PX, radius * 0.062) * (1 - 0.2 * pale), 0.92 - 0.16 * pale);
 
       // --- the ring: always a true circle -----------------------------------
       context.lineJoin = "round";

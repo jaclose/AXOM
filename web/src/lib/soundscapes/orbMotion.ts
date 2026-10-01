@@ -80,7 +80,7 @@ export function follow(current: number, target: number, attack: number, release:
  * The corona is a circle bent by a few slow waves. These are how many waves
  * of each kind fit around it; `coronaShape` says how strong each one is.
  */
-export const CORONA_WAVES = [2, 3, 4, 5, 7] as const;
+export const CORONA_WAVES = [3, 4, 5, 6, 8] as const;
 
 /**
  * Strength of each corona wave (0..1, summing to at most 1). Low sound makes
@@ -91,11 +91,13 @@ export function coronaShape(bands: OrbBands): number[] {
   const bass = Math.min(1, bands.bass);
   const mid = Math.min(1, bands.mid);
   const high = Math.min(1, bands.high);
+  // No two-wave term: that one only turns the circle into an oval, which in a
+  // still looks like a ring drawn off centre.
   return [
-    bass * 0.34,
-    (bass * 0.4 + mid * 0.6) * 0.26,
+    bass * 0.3,
+    (bass * 0.4 + mid * 0.6) * 0.24,
     mid * 0.2,
-    (mid * 0.5 + high * 0.5) * 0.12,
-    high * 0.08,
+    (mid * 0.5 + high * 0.5) * 0.14,
+    high * 0.1,
   ];
 }
