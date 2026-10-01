@@ -29,6 +29,7 @@ import { formatSeconds, pacingInsight, summarizePacing } from "../../lib/quizPac
 import { createTextAnnotationWithIntegrity, removeTextAnnotationById, type QuestionAnnotationTarget, type QuestionAnnotationTone } from "../../lib/questionAnnotations";
 import { AnnotatedQuestionText, type QuestionTextSelection } from "./AnnotatedQuestionText";
 import { QuestionAttachmentsPanel } from "./QuestionAttachmentsPanel";
+import { QuestionExhibits } from "./QuestionExhibits";
 import {
   TutorUtilityDock,
   type AnnotationTool,
@@ -861,6 +862,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const annotations = localAnnotations;
   const stemAnnotations = annotations.filter((annotation) => annotation.target === "stem");
   const explanationAnnotations = annotations.filter((annotation) => annotation.target === "explanation");
+  /** Images that are part of the question itself, shown with the stem. */
+  const exhibits = (question.attachments ?? []).filter((attachment) => attachment.role === "exhibit");
 
   function saveAnnotation(
     selection = annotationSelection,
@@ -986,6 +989,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           focusRef={stemRef}
           onSelection={(range) => handleAnnotationSelection("stem", range)}
         />
+
+        <QuestionExhibits attachments={exhibits} />
 
         <div className="tutor-answer-options">
           {question.options.map((opt) => {
@@ -1130,8 +1135,10 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           )}
           <QuestionAttachmentsPanel
             questionId={question.id}
-            attachments={question.attachments ?? []}
-            onChange={(next) => {
+            attachments={(question.attachments ?? []).filter((attachment) => attachment.role !== "exhibit")}
+            onChange={(noteImages) => {
+              // The question's own exhibits stay with the stem; this panel manages note images only.
+              const next = [...exhibits, ...noteImages];
               const value = next.length ? next : undefined;
               setPool((current) => current.map((item) => item.id === question.id ? { ...item, attachments: value } : item));
               s.updateQuestion(question.id, { attachments: value });

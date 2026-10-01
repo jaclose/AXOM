@@ -27,6 +27,12 @@ export interface QuestionImageAttachment {
   updatedAt: string;
   /** Stable key into the questionAttachmentBlobs store (today equal to id). */
   blobKey: string;
+  /**
+   * "exhibit": part of the question itself (an ECG, a slide, a graph), shown
+   * with the stem before answering. Absent: an image the learner added to
+   * their own notes, shown with the review.
+   */
+  role?: "exhibit";
 }
 
 export interface QuestionAttachmentBlobRecord {
@@ -64,6 +70,7 @@ export function normalizeQuestionAttachments(value: unknown): QuestionImageAttac
       createdAt,
       updatedAt,
       blobKey: typeof item.blobKey === "string" && item.blobKey.trim() ? item.blobKey.trim() : id,
+      ...(item.role === "exhibit" ? { role: "exhibit" as const } : {}),
     };
     const existing = byId.get(id);
     if (!existing || attachment.updatedAt >= existing.updatedAt) byId.set(id, attachment);
