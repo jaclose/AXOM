@@ -1,6 +1,6 @@
 import type { MediaJob, MediaJobQueue } from "./jobs";
 import { BrowserFingerprintService, type BrowserFingerprintProgress } from "./browserFingerprint";
-import { mediaAssetId, type MediaAsset, type MediaAssetId, type MediaAssetInput, type MediaAssetRepository, type MediaInspectionResult, type MediaKind, type MediaMetadata } from "./model";
+import { mediaAssetId, type MediaAsset, type MediaAssetInput, type MediaAssetRepository, type MediaInspectionResult, type MediaKind, type MediaMetadata } from "./model";
 
 export interface MediaMetadataInspector {
   inspect(input: Pick<MediaAssetInput, "blob" | "declaredMimeType" | "kind">, signal?: AbortSignal): Promise<Omit<MediaMetadata, "declaredMimeType">>;
@@ -112,7 +112,7 @@ export class BrowserMediaMetadataInspector implements MediaMetadataInspector {
  * concurrent same-file imports cannot create two canonical originals.
  */
 export class MediaAssetService {
-  private readonly fingerprinter: BrowserFingerprintService;
+  private readonly fingerprinter: MediaFingerprintService;
   private readonly inspector: MediaMetadataInspector;
   private readonly now: () => Date;
   private readonly unsubscribeJobs: () => void;
@@ -135,7 +135,7 @@ export class MediaAssetService {
         onProgress: ({ fraction }: BrowserFingerprintProgress) => reportProgress(fraction),
       })),
     });
-    const fingerprintResult = resultOf<Awaited<ReturnType<BrowserFingerprintService["fingerprint"]>>>(await fingerprintJob.completed);
+    const fingerprintResult = resultOf<Awaited<ReturnType<MediaFingerprintService["fingerprint"]>>>(await fingerprintJob.completed);
     const inspectionJob = this.options.jobs.enqueue({
       assetId: fingerprintResult.sha256,
       type: "inspect",

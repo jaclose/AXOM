@@ -80,7 +80,7 @@ describe("MediaAssetService", () => {
   it("lets the repository resolve concurrent duplicate imports atomically", async () => {
     const repository = memoryRepository();
     const queue = new MediaJobQueue({ concurrency: 2 });
-    const service = new MediaAssetService({ jobs: queue, fingerprinter: fingerprintService(), inspector: { inspect: vi.fn(async () => ({ inspection: "partial", warnings: ["duration unavailable"] })) }, repository: repository.repository });
+    const service = new MediaAssetService({ jobs: queue, fingerprinter: fingerprintService(), inspector: { inspect: vi.fn(async () => ({ inspection: "partial" as const, warnings: ["duration unavailable"] })) }, repository: repository.repository });
     const makeInput = (name: string) => ({ blob: new Blob(["race"]), name, declaredMimeType: "audio/unknown", kind: "audio" as const, provenance: { category: "user-supplied" as const } });
     const results = await Promise.all([service.ingest(makeInput("a.mp3")), service.ingest(makeInput("b.mp3"))]);
 
