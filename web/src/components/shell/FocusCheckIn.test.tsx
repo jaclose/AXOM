@@ -65,6 +65,17 @@ describe("FocusCheckIn", () => {
     state.profile.dailySuccess!.requirements = [];
     expect(focusProgressHint(state, stopped)).toEqual({});
   });
+
+  it("groups follow-up actions in a single stacked reply area", () => {
+    render(<FocusCheckIn clock={clock} pollIntervalMs={0} />);
+    act(() => { window.dispatchEvent(new CustomEvent(FOCUS_CHECKIN_TEST_EVENT)); });
+    fireEvent.click(screen.getByRole("button", { name: "I am locked out" }));
+
+    const actions = screen.getByRole("group", { name: "Follow-up actions" });
+    expect(actions).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Keep going" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Restart a focus sprint/ })).toBeTruthy();
+  });
   it("leaves the current task focused and restores it after a keyboard answer", () => {
     const view = render(<><button>Current task</button><FocusCheckIn clock={clock} pollIntervalMs={0} /></>);
     const task = screen.getByRole("button", { name: "Current task" });

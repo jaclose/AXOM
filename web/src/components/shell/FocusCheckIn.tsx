@@ -302,15 +302,17 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = currentClock }: 
             {phase.response === "locked-in" && (progress.sprint || progress.target) && (
               <p className="focus-checkin-sub">{progress.sprint ?? progress.target}</p>
             )}
-            <button type="button" className="focus-checkin-restart" onClick={() => setExiting(true)}>Keep going</button>
-            {phase.response === "drifted" && !pomodoro.running && (
-              <button type="button" className="focus-checkin-restart" onClick={() => {
-                usePomodoro.getState().start();
-                setExiting(true);
-              }}>
-                <Play size={ICON_SIZE.body} aria-hidden="true" /> Restart a focus sprint
-              </button>
-            )}
+            <div className="focus-checkin-reply-actions" role="group" aria-label="Follow-up actions">
+              <button type="button" className="focus-checkin-restart" onClick={() => setExiting(true)}>Keep going</button>
+              {phase.response === "drifted" && !pomodoro.running && (
+                <button type="button" className="focus-checkin-restart" onClick={() => {
+                  usePomodoro.getState().start();
+                  setExiting(true);
+                }}>
+                  <Play size={ICON_SIZE.body} aria-hidden="true" /> Restart a focus sprint
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

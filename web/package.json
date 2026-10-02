@@ -32,12 +32,14 @@
     "test:accounts:live": "AXOM_LIVE_ACCOUNTS=1 AXOM_E2E_CHANNEL=chrome playwright test e2e/live-accounts.spec.ts",
     "release:setup-updater": "node ../scripts/setup-updater.mjs",
     "cinematic:import": "node ../scripts/import-cinematic.mjs",
-    "soundscapes:import": "node ../scripts/import-soundscapes.mjs"
+    "soundscapes:import": "node ../scripts/import-soundscapes.mjs",
+    "media:audit": "node --import tsx ./scripts/media-audit.ts"
   },
   "engines": {
     "node": ">=22.12.0"
   },
   "dependencies": {
+    "@noble/hashes": "^2.4.0",
     "@supabase/supabase-js": "^2.112.2",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-notification": "^2.5.0",
