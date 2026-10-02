@@ -83,6 +83,7 @@ export class MediaJobQueue {
   private readonly concurrency: number;
   private readonly createId: () => string;
   private readonly now: () => Date;
+  private disposed = false;
 
   constructor(options: MediaJobQueueOptions = {}) {
     this.concurrency = options.concurrency ?? 1;
@@ -94,6 +95,7 @@ export class MediaJobQueue {
   }
 
   enqueue(task: MediaJobTask): MediaJobHandle {
+    if (this.disposed) throw new Error("This media job queue has been disposed.");
     if (!task.assetId.trim()) throw new Error("A media job needs an asset ID.");
     const id = this.createId();
     if (this.records.has(id)) throw new Error(`Duplicate media job ID: ${id}`);
@@ -132,6 +134,7 @@ export class MediaJobQueue {
   }
 
   cancel(id: string): boolean {
+    if (this.disposed) return false;
     const record = this.records.get(id);
     if (!record || (record.job.state !== "queued" && record.job.state !== "running")) return false;
     record.job = { ...record.job, state: "cancelled", finishedAt: this.now().toISOString() };
@@ -148,6 +151,7 @@ export class MediaJobQueue {
   }
 
   retry(id: string): MediaJobHandle {
+    if (this.disposed) throw new Error("This media job queue has been disposed.");
     const record = this.records.get(id);
     if (!record || (record.job.state !== "failed" && record.job.state !== "cancelled")) {
       throw new Error("Only failed or cancelled media jobs can be retried.");
@@ -177,6 +181,29 @@ export class MediaJobQueue {
     return true;
   }
 
+  /** Abort all active tasks and reject queued work. This queue cannot be reused. */
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    const now = this.now().toISOString();
+    for (const id of this.pending.splice(0)) {
+      const record = this.records.get(id);
+      if (!record || record.job.state !== "queued") continue;
+      record.job = { ...record.job, state: "cancelled", finishedAt: now };
+      record.deferred.reject(abortError());
+    }
+    for (const [id, controller] of this.active) {
+      const record = this.records.get(id);
+      if (record && record.job.state === "running") {
+        record.job = { ...record.job, state: "cancelled", finishedAt: now };
+        record.deferred.reject(abortError());
+      }
+      controller.abort();
+    }
+    this.publish();
+    this.listeners.clear();
+  }
+
   private publish(): void {
     const jobs = this.list();
     for (const listener of this.listeners) {
@@ -185,6 +212,7 @@ export class MediaJobQueue {
   }
 
   private pump(): void {
+    if (this.disposed) return;
     while (this.active.size < this.concurrency && this.pending.length > 0) {
       const id = this.pending.shift()!;
       const record = this.records.get(id);

@@ -106,6 +106,26 @@ describe("MediaJobQueue", () => {
     expect(queue.get(first.id)).toBeUndefined();
   });
 
+  it("disposes queued and running jobs and permanently closes the queue", async () => {
+    const queue = new MediaJobQueue({ concurrency: 1, createId: (() => { let id = 0; return () => `dispose-${++id}`; })() });
+    const running = queue.enqueue({
+      assetId: "asset-running",
+      type: "fingerprint",
+      run: async ({ signal }) => await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true })),
+    });
+    const queued = queue.enqueue({ assetId: "asset-queued", type: "inspect", run: async () => "must not run" });
+    const runningCancelled = expect(running.completed).rejects.toMatchObject({ name: "AbortError" });
+    const queuedCancelled = expect(queued.completed).rejects.toMatchObject({ name: "AbortError" });
+
+    queue.dispose();
+    await Promise.all([runningCancelled, queuedCancelled]);
+    expect(queue.get(running.id)?.state).toBe("cancelled");
+    expect(queue.get(queued.id)?.state).toBe("cancelled");
+    expect(() => queue.enqueue({ assetId: "late", type: "inspect", run: async () => undefined })).toThrow(/disposed/i);
+    expect(() => queue.retry(running.id)).toThrow(/disposed/i);
+    expect(queue.cancel(running.id)).toBe(false);
+  });
+
   it("rejects invalid concurrency and does not let a subscriber break a task", async () => {
     expect(() => new MediaJobQueue({ concurrency: 0 })).toThrow(/positive integer/i);
     const queue = new MediaJobQueue();

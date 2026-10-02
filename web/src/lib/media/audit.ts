@@ -1,18 +1,9 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { fingerprintFile } from "./fingerprints";
+import type { MediaProvenance } from "./model";
 
 export type MediaAuditType = "audio" | "background-image" | "background-video" | "preview" | "unknown";
-
-export interface MediaProvenance {
-  category: "first-party" | "external" | "user-supplied" | "generated" | "unknown";
-  sourceName?: string;
-  sourceUrl?: string;
-  creator?: string;
-  license?: string;
-  retrievedAt?: string;
-  modifications?: string;
-}
 
 export interface MediaAuditFinding {
   path: string;

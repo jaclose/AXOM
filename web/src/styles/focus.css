@@ -117,7 +117,19 @@
 .focus-checkin-foot button:focus-visible,
 .focus-checkin-close:focus-visible,
 .focus-checkin-restart:focus-visible { outline: 2px solid var(--gold-line); outline-offset: 2px; }
-.focus-checkin-restart { margin-top: 8px; min-height: 34px; font-size: var(--fs-xs); }
+.focus-checkin-reply-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  align-items: stretch;
+}
+.focus-checkin-restart {
+  width: fit-content;
+  max-width: 100%;
+  min-height: 34px;
+  font-size: var(--fs-xs);
+}
 .focus-checkin-foot {
   position: relative;
   display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
