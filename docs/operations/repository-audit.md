@@ -81,11 +81,10 @@ Exact duplicates found: root `AGAIN*. .m4a` and runtime `again.m4a`; three cinem
 source/output pairs; app/notification icon PNGs. These are retained: source variants and
 stable public asset URLs are not safe deletion candidates merely because bytes match.
 
-Context budgets use characters/4 as an explicitly approximate token estimate, not a
-model tokenizer. AGENTS and AI_STATE each have a 12,000-character ceiling; tool bridges
-1,500 each. Initial AGENTS + AI_STATE are roughly 2,300 estimated tokens rather than
-a mandatory 161 KB directions preload. User/global instructions and the task are
-additional context beyond this repository's control.
+The initial migration replaced a mandatory 161 KB directions preload with a small
+policy/state pair. Current budgets and measurement limits are documented
+[below](#bootstrap-measurement-and-enforcement-limits); `npm run repo:check` prints
+live sizes rather than relying on a stale token count in documentation.
 
 ## Source organization findings
 
@@ -129,6 +128,42 @@ tracked even when a new ignore rule covers future output.
 large-file boundaries, grandfathered growth and the ignored-file boundary. The checker
 runs before the local full web gate and in web CI; root release tests also include its
 tests. No dependency was added. Build/deploy upload boundaries remain unchanged.
+
+## Bootstrap measurement and enforcement limits
+
+`repo:check` enforces 12,000 Unicode characters each for AGENTS and AI_STATE, 1,500
+each for Claude/Copilot bridges, and 4,000 estimated tokens per repository bootstrap
+profile. It sums `ceil(characters / 4)` per file, not a model tokenizer. Reports include
+whitespace-delimited words, UTF-8 bytes, per-file budget results, startup-import status,
+broken routing-link count and archive-integrity status. Missing files fail the check;
+partial bootstrap sums are marked INCOMPLETE.
+
+- **Bootstrap context:** AGENTS + AI_STATE, the required repository working set.
+- **Claude effective bootstrap:** that pair plus CLAUDE bridge text, with its two
+  required imports counted once. The separate import check rejects extra imports.
+- **Copilot routed bootstrap:** that pair plus the Copilot bridge. This measures
+  the required read set; a link does not guarantee a client's automatic preload.
+
+These are repository estimates, not total prompt measurements. User/task text, global
+or ancestor instructions, client-managed memory/rules, skills/tool definitions and
+conversation/tool output can add context. Repository files cannot suppress these.
+Other checkouts must contain the protocol to inherit it. Additional subtree instructions
+or client-specific auto-load rules require their own scoped review; the fixed profiles
+do not measure arbitrary client import graphs. The tracked instruction surfaces at this
+checkpoint are root AGENTS, root CLAUDE and the Copilot bridge only.
+
+AGENTS makes relevance-based retrieval mandatory, with a concrete unresolved question
+before each expansion. CLI/CI can enforce budgets, known import boundaries, links and
+preservation; they cannot prove an agent followed a reasoning checkpoint, prevent every
+unnecessary tool read, or create a fresh session. No invasive read hook or external
+telemetry was added. Keep canonical rules in AGENTS instead of duplicating them here.
+
+AI_STATE's usual target is 1,000–3,000 estimated tokens, with shorter useful handoffs
+allowed. Preserve essential current information: compress or route history first, and
+review an explicit budget change if a legitimate task needs it. For the next 10–20
+ordinary tasks, observe the printed bootstrap size, unjustified broad reads and ability
+to resume from state. Change this system further only when those observations show a
+problem; no new tracking service or per-task transcript is required.
 
 ## Strategic checkpoint: loading behavior and tools
 

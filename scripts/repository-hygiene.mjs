@@ -6,6 +6,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const MAX_FILE_BYTES = 5 * 1024 * 1024;
+export const BOOTSTRAP_TOKEN_BUDGET = 4_000;
+const BOOTSTRAP_FILES = ['AGENTS.md', 'docs/AI_STATE.md'];
+const BOOTSTRAP_PROFILES = {
+  'Bootstrap context': BOOTSTRAP_FILES,
+  'Claude effective bootstrap': [...BOOTSTRAP_FILES, 'CLAUDE.md'],
+  'Copilot routed bootstrap': [...BOOTSTRAP_FILES, '.github/copilot-instructions.md'],
+};
 export const DOCUMENT_BUDGETS = Object.freeze({
   'AGENTS.md': 12_000,
   'docs/AI_STATE.md': 12_000,
@@ -80,6 +87,14 @@ export function checkFiles(files, baseline) {
   return errors;
 }
 
+function measureContext(content) {
+  const characters = [...content].length;
+  return {
+    characters, words: content.match(/\S+/gu)?.length ?? 0,
+    bytes: Buffer.byteLength(content, 'utf8'), estimatedTokens: Math.ceil(characters / 4),
+  };
+}
+
 export function checkDocumentBudgets(documents) {
   const byPath = new Map(documents.map((document) => [document.path, document.content]));
   const errors = [];
@@ -90,11 +105,30 @@ export function checkDocumentBudgets(documents) {
       errors.push(`${filePath}: required context document is missing.`);
       continue;
     }
-    const characters = [...content].length;
-    estimates.push({ path: filePath, characters, estimatedTokens: Math.ceil(characters / 4), limit });
+    const measurement = measureContext(content);
+    const { characters } = measurement;
+    estimates.push({ path: filePath, ...measurement, limit });
     if (characters > limit) errors.push(`${filePath}: ${characters} characters exceeds ${limit}; move detail to a linked document.`);
   }
   return { errors, estimates };
+}
+
+export function checkBootstrapContext(documents) {
+  const byPath = new Map(documents.map((document) => [document.path, document.content]));
+  const errors = [];
+  const profiles = Object.entries(BOOTSTRAP_PROFILES).map(([label, paths]) => {
+    const complete = paths.every((filePath) => byPath.has(filePath));
+    const measurements = paths.map((filePath) => measureContext(byPath.get(filePath) ?? ''));
+    const totals = { characters: 0, words: 0, bytes: 0, estimatedTokens: 0 };
+    for (const measurement of measurements) {
+      for (const key of Object.keys(totals)) totals[key] += measurement[key];
+    }
+    const withinBudget = totals.estimatedTokens <= BOOTSTRAP_TOKEN_BUDGET;
+    if (!withinBudget) errors.push(`${label}: ~${totals.estimatedTokens} tokens exceeds ${BOOTSTRAP_TOKEN_BUDGET}; compress current guidance or move detail to routed docs, preserving critical state.`);
+    // Missing documents are errors in checkDocumentBudgets; never label partial sums PASS.
+    return { label, paths, ...totals, limit: BOOTSTRAP_TOKEN_BUDGET, complete, withinBudget };
+  });
+  return { errors, profiles };
 }
 
 function withoutCode(markdown) {
@@ -293,26 +327,41 @@ export function runRepositoryHygiene(repoRoot) {
   const documents = files.filter((file) => isActiveDocument(file.path) && !file.symbolicLink)
     .map((file) => ({ path: file.path, content: readFileSync(path.join(repoRoot, file.path), 'utf8') }));
   const budgets = checkDocumentBudgets(documents);
+  const bootstrap = checkBootstrapContext(documents);
+  const startupErrors = checkStartupImports(documents);
+  const routingErrors = checkMarkdownLinks(documents, files.map((file) => file.path));
   const preservation = checkPreservationManifests(repoRoot, baseline.preservationManifests, files.map((file) => file.path));
   const errors = [
     ...files.filter((file) => file.symbolicLink && isActiveDocument(file.path))
       .map((file) => `${file.path}: active context documents must be regular files, not symbolic links.`),
     ...budgets.errors,
-    ...checkStartupImports(documents),
-    ...checkMarkdownLinks(documents, files.map((file) => file.path)),
+    ...bootstrap.errors,
+    ...startupErrors,
+    ...routingErrors,
     ...checkFiles(files, baseline),
     ...preservation.errors,
   ];
-  return { errors, estimates: budgets.estimates, filesChecked: files.length, documentsChecked: documents.length, snapshotsChecked: preservation.snapshotsChecked };
+  return {
+    errors, estimates: budgets.estimates, bootstrap: bootstrap.profiles,
+    startupProblems: startupErrors.length, routingProblems: routingErrors.length,
+    archiveProblems: preservation.errors.length,
+    filesChecked: files.length, documentsChecked: documents.length, snapshotsChecked: preservation.snapshotsChecked,
+  };
 }
 
 const scriptPath = fileURLToPath(import.meta.url);
 if (process.argv[1] && path.resolve(process.argv[1]) === scriptPath) {
   try {
     const result = runRepositoryHygiene(path.resolve(path.dirname(scriptPath), '..'));
-    for (const estimate of result.estimates) {
-      console.log(`${estimate.path}: ${estimate.characters}/${estimate.limit} chars, ~${estimate.estimatedTokens} tokens (estimate: chars / 4).`);
+    for (const profile of result.bootstrap) {
+      const status = !profile.complete ? 'INCOMPLETE' : profile.withinBudget ? 'PASS' : 'FAIL';
+      console.log(`${profile.label}: ~${profile.estimatedTokens.toLocaleString('en-US')} tokens | Budget: ${profile.limit.toLocaleString('en-US')} | ${status} | ${profile.words} words, ${profile.bytes} bytes`);
     }
+    console.log('Estimates sum chars/4 per file, including bridge text; repository files only, excluding task/client/global context.');
+    for (const estimate of result.estimates) {
+      console.log(`${estimate.path}: ${estimate.characters}/${estimate.limit} chars, ~${estimate.estimatedTokens} tokens, ${estimate.words} words, ${estimate.bytes} bytes | ${estimate.characters <= estimate.limit ? 'PASS' : 'FAIL'}`);
+    }
+    console.log(`Startup imports: ${result.startupProblems ? 'FAIL' : 'PASS'} | Routing links: ${result.routingProblems} problems | Archive integrity: ${result.archiveProblems ? 'FAIL' : 'PASS'} (${result.snapshotsChecked} snapshots checked)`);
     for (const error of result.errors) console.error(`FAIL ${error}`);
     console.log(`Repository hygiene: ${result.errors.length ? 'FAIL' : 'PASS'} (${result.documentsChecked} active docs, ${result.filesChecked} candidate files, ${result.snapshotsChecked} preserved snapshots, ${result.errors.length} problems).`);
     process.exitCode = result.errors.length ? 1 : 0;

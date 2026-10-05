@@ -1,6 +1,6 @@
 # AXOM current AI state
 
-Snapshot: 2026-10-05. This describes the local context-protocol migration, not production.
+Snapshot: 2026-10-05. This describes local progressive-context enforcement, not production.
 Recheck branch, HEAD and status before applying it in another checkout.
 
 ## Current stable state
@@ -12,33 +12,34 @@ account/data endpoints are retired. No runtime or schema change belongs to this 
 
 ## Active branch and work
 
-Prepared and tested on `codex/repository-context-protocol` in `AXOM-context-protocol`,
-based on `9f29327`. Applied to the normal `AXOM` checkout on `feat/media-pipeline-v1` after verifying
-every touched original against the base. The context architecture and fresh-session
-policy form a separate local checkpoint; locate it with `git log -1 -- AGENTS.md`.
-No Git merge, push or deployment has occurred.
+The context architecture is committed as `1540ad2` on `feat/media-pipeline-v1` in
+the normal `AXOM` checkout. Its enforcement follow-up adds explicit retrieval levels,
+relevance checkpoints and a 4,000 estimated-token aggregate bootstrap budget. Locate
+the latest protocol checkpoint with `git log -1 -- AGENTS.md`. No merge, push or
+deployment belongs to this work. The earlier isolated `AXOM-context-protocol` worktree
+is a migration preparation tree, not the current handoff; do not reset or remove it.
 
-The original `AXOM` checkout has unrelated root package edits and untracked private/reference
-imports. Dependency changes, the lockfile and all 22 private/reference files were
-preserved; only two script entries were added to the existing root package. Other worktrees contain independent work; their
-status is not inferred from this handoff. Consult the coordination board before shared edits.
+Root `package.json` and `package-lock.json` retain unrelated uncommitted dependency
+edits owned by the media task. Preserve them and the 22 ignored private/reference files.
+Other worktrees contain independent work; their status is not inferred here. Consult
+the coordination board before shared edits.
 
 ## Recently completed
 
-- Canonical AGENTS protocol; small Claude/Copilot bridges; current-state and task routers.
-- Current source maps replace stale readme/schema/name-login/persistence assumptions.
-- Exact copies of replaced guidance and one relocated research document are recorded in
-  [archive manifest](archive/2026-10-05-context-migration/manifest.json).
-- Existing product/governance/ideas/evidence paths retained; broad history preload removed.
-- Dependency-free context budgets, active-document links and artifact checks added to
-  `npm run repo:check`, local full gate and web CI. No new dependencies.
-- Fresh sessions are the default for new independent tasks; same-task follow-ups may
-  continue. Small requests and repository handoffs replace large catch-up prompts.
+- AGENTS owns the conditional levels 0–5 and engineering checkpoints. Expand one logical
+  dependency level only to answer an unresolved question; directory proximity is secondary.
+- Claude imports only AGENTS + AI_STATE. Copilot links the same policy/state; INDEX is
+  retrieved on demand. Fresh sessions are the default for independent tasks.
+- `repo:check` reports per-file words/bytes/tokens, aggregate repository bootstrap and
+  bridge overhead, budget status, routing failures and archive integrity. Local/CI gates
+  reject growth and invalid imports without runtime telemetry or new dependencies.
+- Product reasoning and original guidance remain available through the
+  [archive manifest](archive/2026-10-05-context-migration/manifest.json) and existing routes.
 
 ## Important current decisions
 
-Read only this file, AGENTS and the task initially. Use [INDEX](INDEX.md) for additional
-context. Repository documentation is durable memory. Preserve historical product reasoning;
+Read only this file, AGENTS and the task initially. Use search and/or [INDEX](INDEX.md)
+to locate missing context. Repository documentation is durable memory. Preserve reasoning;
 archiving does not reject an idea, approve a proposal or authorize deletion.
 
 Root `src-tauri/` and `supabase/migrations/` are active; `web/src-tauri/`, Swift prototype
@@ -48,43 +49,40 @@ Sign-in must preserve local work; cloud snapshots do not imply cloud storage of 
 ## Relevant areas
 
 - `AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, `docs/AI_STATE.md`, `docs/INDEX.md`
-- New architecture/feature/product/operations/decision routes and archive snapshots
-- `scripts/repository-hygiene*`, package scripts, `.gitignore`, web quality CI hook
+- `scripts/repository-hygiene*`, local full gate and web quality CI hook
+- [Protocol decision](decisions/001-progressive-context.md) and
+  [measurement limits](operations/repository-audit.md#bootstrap-measurement-and-enforcement-limits)
 
 ## Validation state
 
-Final validation on 2026-10-05 in the normal AXOM checkout, Node 22.23.1:
+Enforcement follow-up, Node 22.23.1: `npm run repo:check`, `npm run test:repo` (32),
+`npm run test:release` (51, including those 32) and `git diff --check` pass.
+Regressions cover aggregate growth, bridge overhead, missing
+bootstrap files, Unicode/UTF-8 measurements and exclusion of on-demand documents.
+Run `repo:check` for live sizes; the 4,000-token budget includes each bridge separately.
 
-- `cd web && npm run verify:all`: PASS. Hygiene, typecheck, lint, 231 test files /
-  2,178 unit tests, production build, update recovery, offline reopening, 33 browser tests.
-  One opt-in live-account test skipped.
-- `npm run test:release`: 45 passed, including 26 repository-hygiene regression cases.
-- `npm run typecheck:api`, `npm run directions:check`, `git diff --check`: PASS.
-- Session-policy follow-up: `npm run repo:check`, all 26 repository tests and staged
-  diff checks pass. No runtime changes required another full application run.
-- Preservation: all 10 manifest entries verified against hashes and base-commit bytes;
-  all 783 tracked runtime files match the isolated validation tree.
-- Native execution, live accounts and production deployment were not exercised.
-
-The first isolated browser run had one intermittent settings-tab contrast reading;
-focused repeats passed on both checkouts, and the final full gate passed. Existing
-large-chunk/mixed-import build warnings remain. [Audit](operations/repository-audit.md)
-contains scope, evidence and the checkpoint research.
+The original migration's full web gate passed (2,178 unit tests, 33 browser tests,
+one optional live-account test skipped). Runtime code is unchanged by this follow-up;
+web/native/live-account validation was not repeated. Detailed preservation evidence,
+prior validation and existing build/contrast observations remain in the
+[audit](operations/repository-audit.md#validation-evidence).
 
 ## Known blockers
 
-None for this migration. Large reference documents, root media and duplicate originals
+None for this follow-up. Large reference documents, root media and duplicate originals
 remain preserved for ownership/licence review before any removal or publication decision.
 Other feature branches and live deployment state are not certified by these local checks.
+The checker cannot prevent unnecessary agent reads or count client/global instructions,
+managed memory, skills, conversation and tool output. Its numbers cover repository files.
 
 ## Next actions
 
-1. Root `package.json` and its lockfile retain pre-existing, uncommitted dependency
-   edits outside the context checkpoint. Preserve them for their owning task.
-2. Start a fresh session for the next independent task, retrieve one feature route,
-   and update this handoff after work. Commit only within the task's authority.
-3. Separate improvements: inspect the settings helper import cycle and legacy asset
-   ownership only when those tasks are authorized; see the audit for exact paths.
+1. Start the next independent task in a fresh session with the small bootstrap; retrieve
+   relevant context, validate, update this handoff and commit only within task authority.
+2. Leave the context system stable unless the next 10–20 tasks show excessive bootstrap
+   size, unjustified broad retrieval or failure to resume from state. Observe actual work.
+3. Preserve unrelated dependency work. Deferred import-cycle/asset-ownership tasks remain
+   in the audit and require their own scope.
 
 ## Context routes
 

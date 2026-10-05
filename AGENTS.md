@@ -4,22 +4,36 @@
 This is the canonical repository operating policy for Codex, Claude Code, Copilot,
 and other coding agents. The user's current instructions take precedence.
 
-## Orient, locate, retrieve
+## Mandatory progressive retrieval
 
-1. Begin with this file, [docs/AI_STATE.md](docs/AI_STATE.md), and the current task.
-2. Check `git status --short --branch` and `git worktree list`; state is a dated
-   checkout snapshot, never proof of what another branch or production contains.
-3. Determine the smallest relevant subsystem. Consult [docs/INDEX.md](docs/INDEX.md)
-   only when you need more context, then follow the relevant route.
-4. Search before reading: `rg --files <area>`, then `rg -n '<symbol>' <area>`,
-   then read the matching region. Expand only when dependencies or failures justify it.
-5. Before a substantial read, ask internally: does this materially affect this task?
-   Do not reread understood content. Filter logs to the failure and surrounding lines.
+Bootstrap with only this file, [docs/AI_STATE.md](docs/AI_STATE.md), and the current
+request. Do not preload INDEX, architecture, directions, completed work or conversation
+history. Check `git status --short --branch` and `git worktree list`; state describes
+a dated checkout, never another branch or production.
 
-Never recursively read the repository, all docs, the entire ideas bank, all progress
-notes, or product-memory ledgers by default. Do not read lockfiles, generated data,
-media, build output or full logs as orientation. Investigate independent unrelated
-areas in isolated agent contexts when supported; request concise evidence and paths.
+| Level | Retrieve only what the task requires |
+| --- | --- |
+| 0: Orient | Identify the likely subsystem, local or cross-cutting scope, and missing information from bootstrap. |
+| 1: Locate | Search and/or consult [INDEX](docs/INDEX.md) to locate relevant docs, source and tests. |
+| 2: Retrieve | Search → identify → targeted read. Use `rg --files <area>`, `rg -n '<symbol>' <area>`, then matching regions. |
+| 3: Expand | If an unknown remains, expand ONE logical dependency level, then reassess. |
+| 4: Cross-cutting | Broad architecture/product context requires a demonstrated subsystem boundary or architectural decision. |
+| 5: History | Retrieve archives/old reasoning only when current docs are insufficient, investigating history/regressions/old decisions, or explicitly requested. |
+
+**Breadth must be earned: every increase must answer a concrete unresolved engineering
+question.** These levels are conditional, not a reading checklist. Before significant
+expansion, internally checkpoint: objective → known facts → specific unknown → smallest
+source that resolves it. Stop retrieving once the question is answered.
+
+Dependency relevance beats directory proximity. Follow dependencies, code references,
+imports, documentation routes, tests and search before folder hierarchy. Do not
+mechanically climb parent directories. A failing test may lead to its implementation,
+then a dependency, then shared infrastructure only if necessary.
+
+Never recursively read all source/docs, idea banks, progress notes or product-memory
+ledgers by default. Filter logs/search results before reading; avoid full test output,
+generated/bundled code, huge JSON, database dumps, unrelated screenshots, old threads
+and lockfiles unless specifically needed. Do not reread understood material.
 
 ## Protect work and knowledge
 
@@ -53,6 +67,8 @@ created when the tool cannot create one. Keep commit and push authority separate
 
 ## Implement locally
 
+Before editing, confirm intended behavior/root cause, affected files and important
+invariants; exclude unrelated areas. Resolve missing evidence through retrieval first.
 Make the smallest coherent change in the existing stack. No speculative rewrites.
 Keep data, logic and presentation boundaries; generalize only after real reuse.
 Use installed versions/configuration for API decisions. Do not rename Noctyrium storage
@@ -86,12 +102,23 @@ At the end of meaningful work update [AI_STATE](docs/AI_STATE.md) with only what
 current work, blockers, next action, validation and relevant paths. Keep it concise
 (normally 1,000–3,000 estimated tokens or less). Replace stale state; put historical
 evidence in the relevant progress/archive file with a link, not an ever-growing changelog.
+Remove resolved blockers and completed detail that no longer affects the next task.
+Never discard critical current information merely to hit a number; document a justified
+budget revision if compression and moving historical detail cannot preserve it.
 
 One concept has one canonical explanation. Update the relevant feature/architecture
 page when behavior changes and a decision record for durable architectural choices.
 New docs belong in a routed category; update the index when adding a major area.
+Choose the canonical location before creating any source, test, script, doc or artifact.
+Resolve conflicting docs against authoritative behavior; retain useful old reasoning
+in archives and replace duplicate explanations with references.
 Do not create random root notes, duplicate manuals, new instruction files without
 subtree-specific constraints, or generated dumps in source folders.
+
+Before completion: verify implementation, run impact-appropriate validation, update
+canonical docs/state, run `npm run repo:check`, and report unresolved issues. Keep
+auto-loaded instructions small: rules here, explanations in routed docs. The checker
+reports repository bootstrap size; it cannot police agent reads or client/global context.
 
 Use [directions](docs/directions/README.md) only for ideas/execution history: preserve
 new user ideas verbatim and index them; update shipment records only on actual shipment.

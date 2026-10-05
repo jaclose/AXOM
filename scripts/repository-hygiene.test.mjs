@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
-  MAX_FILE_BYTES, DOCUMENT_BUDGETS, artifactRules, checkDocumentBudgets,
+  MAX_FILE_BYTES, DOCUMENT_BUDGETS, artifactRules, checkDocumentBudgets, checkBootstrapContext,
   checkFiles, checkMarkdownLinks, extractMarkdownLinks, isActiveDocument,
   readRepositoryFiles, runRepositoryHygiene, checkStartupImports,
   isSafeRepositoryPath, checkSnapshotIntegrity, checkPreservationManifests,
@@ -54,6 +54,81 @@ test('over-budget context documents and missing bridges fail', () => {
   assert.equal(result.errors.length, 2);
   assert.match(result.errors[0], /12001 characters exceeds 12000/);
   assert.match(result.errors[1], /copilot-instructions\.md: required context document is missing/);
+});
+
+test('context telemetry distinguishes Unicode characters, UTF-8 bytes, words and estimated tokens', () => {
+  const documents = contextDocuments();
+  documents[0].content = 'A é 🧠\n';
+  const measurement = checkDocumentBudgets(documents).estimates[0];
+  assert.equal(measurement.characters, 6);
+  assert.equal(measurement.bytes, 10);
+  assert.equal(measurement.words, 3);
+  assert.equal(measurement.estimatedTokens, 2);
+});
+
+test('aggregate bootstrap growth fails even when individual documents fit their budgets', () => {
+  const documents = contextDocuments();
+  documents[0].content = 'a'.repeat(9_000);
+  documents[1].content = 'b'.repeat(9_000);
+  assert.deepEqual(checkDocumentBudgets(documents).errors, []);
+  const result = checkBootstrapContext(documents);
+  assert.equal(result.profiles[0].estimatedTokens, 4_500);
+  assert.equal(result.errors.length, 3);
+  assert.match(result.errors[0], /Bootstrap context: ~4500 tokens exceeds 4000/);
+});
+
+test('the aggregate limit is inclusive and each bridge must fit within its effective budget', () => {
+  const documents = contextDocuments();
+  documents[0].content = 'a'.repeat(8_000);
+  documents[1].content = 'b'.repeat(8_000);
+  documents[2].content = '';
+  documents[3].content = '';
+  assert.deepEqual(checkBootstrapContext(documents).errors, []);
+  documents[2].content = 'x';
+  let result = checkBootstrapContext(documents);
+  assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0], /Claude effective bootstrap: ~4001/);
+  assert.equal(result.profiles[0].withinBudget, true);
+  documents[2].content = '';
+  documents[3].content = 'x';
+  result = checkBootstrapContext(documents);
+  assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0], /Copilot routed bootstrap: ~4001/);
+});
+
+test('routed documents are excluded from bootstrap totals and bridge files are counted once', () => {
+  const documents = contextDocuments();
+  const before = checkBootstrapContext(documents);
+  const estimates = checkDocumentBudgets(documents).estimates;
+  documents.push({ path: 'docs/INDEX.md', content: 'unrelated '.repeat(10_000) });
+  const after = checkBootstrapContext(documents);
+  assert.deepEqual(after, before);
+  for (const key of ['characters', 'words', 'bytes', 'estimatedTokens']) {
+    assert.equal(after.profiles[0][key], estimates[0][key] + estimates[1][key]);
+    assert.equal(after.profiles[1][key], after.profiles[0][key] + estimates[2][key]);
+    assert.equal(after.profiles[2][key], after.profiles[0][key] + estimates[3][key]);
+  }
+});
+
+test('a missing bootstrap document cannot produce a complete passing profile', () => {
+  const documents = contextDocuments().filter((document) => document.path !== 'docs/AI_STATE.md');
+  assert.match(checkDocumentBudgets(documents).errors[0], /required context document is missing/);
+  assert.ok(checkBootstrapContext(documents).profiles.every((profile) => !profile.complete));
+});
+
+test('aggregate budgets participate in the repository gate and report routing and archive status', () => {
+  withRepository(({ directory, write }) => {
+    for (const document of contextDocuments()) write(document.path, document.content);
+    write('scripts/repository-hygiene-baseline.json', JSON.stringify(emptyBaseline));
+    write('AGENTS.md', 'a'.repeat(9_000));
+    write('docs/AI_STATE.md', 'b'.repeat(9_000));
+    const result = runRepositoryHygiene(directory);
+    assert.equal(result.errors.length, 3);
+    assert.ok(result.errors.every((error) => /tokens exceeds 4000/.test(error)));
+    assert.equal(result.routingProblems, 0);
+    assert.equal(result.archiveProblems, 0);
+    assert.equal(result.startupProblems, 0);
+  });
 });
 
 test('active-document scope excludes historical archive sources and legacy uppercase plans', () => {
