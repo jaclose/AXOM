@@ -1,22 +1,14 @@
 # Directions
 
-User ideas, execution tracking and historical progress live here. For a normal coding
-session start with [AGENTS](../../AGENTS.md) and [AI_STATE](../AI_STATE.md).
-This directory is retrieved only for a relevant idea, branch or historical question.
+The one place that says what AXOM should become, what is done, and what comes next, so nobody works from guesswork. JD, Claude and Codex all start here.
 
-## Locate the relevant record
+## Read in this order
 
-| Need | Read only |
-| --- | --- |
-| An idea's ID/status/owner | Search [01-ideas/INDEX.md](01-ideas/INDEX.md), then the matching verbatim note |
-| A branch's last recorded work | Search [IN-FLIGHT.md](02-progress/IN-FLIGHT.md); verify with Git |
-| A particular shipped change | Search [major](02-progress/1-MAJOR.md), [updates](02-progress/2-UPDATES.md), or [hotfixes](02-progress/3-HOTFIXES.md) |
-| A known implementation trap | Matching agent note in [03-notes](03-notes/) |
-| Completion evidence or parked work | [Completed](04-COMPLETED.md) or [future](05-FUTURE.md) |
-
-Do not read all rows, notes or progress files to begin a localized task. Historical
-status and branch ownership can drift; the current checkout and coordination board
-must be checked before edits. Governance retains product-authority ownership.
+1. **[01-ideas/INDEX.md](01-ideas/INDEX.md): the ideas bank.** Every idea JD has given, one row each, with an ID, a status and where it lives. The verbatim notes (IDEAS-1.md to IDEAS-4.md) sit beside it.
+2. **[02-progress/](02-progress/): what has been built,** biggest first: [1-MAJOR.md](02-progress/1-MAJOR.md) (waves and flagship features), [2-UPDATES.md](02-progress/2-UPDATES.md) (smaller improvements), [3-HOTFIXES.md](02-progress/3-HOTFIXES.md) (bug fixes), and [IN-FLIGHT.md](02-progress/IN-FLIGHT.md) (what each branch is doing right now).
+3. **[03-notes/](03-notes/): working notes** from each agent: decisions, conventions and traps worth remembering.
+4. **[04-COMPLETED.md](04-COMPLETED.md): done and verified,** by wave.
+5. **[05-FUTURE.md](05-FUTURE.md): possible future additions,** parked ideas, and anything waiting on JD.
 
 ## When JD sends new ideas
 

@@ -1,3 +1,6 @@
-# Frontend Design Routing
+# AXOM
 
-When work materially affects frontend UI, UX, interaction, visual design, responsive behavior, design systems, motion, animation, Figma, or design-to-code, automatically consult the global `design-production-router` Agent Skill and the specialist skills it selects. Preserve AXOM's existing design language and components; finish implementation work with `web-interface-guidelines` and relevant browser/tests.
+Follow [AGENTS.md](../AGENTS.md), the canonical repository context protocol.
+Begin with [docs/AI_STATE.md](../docs/AI_STATE.md) and the current task.
+Use [docs/INDEX.md](../docs/INDEX.md) only to locate needed context.
+Design routing, validation, preservation and session handoff rules live in AGENTS.md.

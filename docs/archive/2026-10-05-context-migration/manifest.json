@@ -1,0 +1,65 @@
+{
+  "baseCommit": "9f29327",
+  "files": [
+    {
+      "original": "README.md",
+      "snapshot": "docs/archive/2026-10-05-context-migration/README.md",
+      "sha256": "dd5ee824c4ae12cdb1d49d915a36e77812293347f84f644a3539f72419062aa8",
+      "action": "snapshot before replacing active guidance"
+    },
+    {
+      "original": "web/README.md",
+      "snapshot": "docs/archive/2026-10-05-context-migration/web/README.md",
+      "sha256": "1e147e6a35a849b01189d8017d192bbb52fc50dfaea585f5f869064189a5b7ac",
+      "action": "snapshot before replacing active guidance"
+    },
+    {
+      "original": "AGENTS.md",
+      "snapshot": "docs/archive/2026-10-05-context-migration/AGENTS.md.txt",
+      "sha256": "41e00cfe4f635d9be095b31d9b207adaf55b29fdd49304c22698a79ae1d4eec2",
+      "action": "snapshot before replacing active guidance"
+    },
+    {
+      "original": "CLAUDE.md",
+      "snapshot": "docs/archive/2026-10-05-context-migration/CLAUDE.md.txt",
+      "sha256": "625601b77fbbcb492754c9960ec33550b24f9e857a4bf1527003c51f399189a4",
+      "action": "snapshot before replacing active guidance"
+    },
+    {
+      "original": ".github/copilot-instructions.md",
+      "snapshot": "docs/archive/2026-10-05-context-migration/.github/copilot-instructions.md.txt",
+      "sha256": "6728665492fdac7310462dbc9bec0c6a0305a5b2d79bd758b9d1c5d8997f7719",
+      "action": "snapshot before replacing active guidance"
+    },
+    {
+      "original": "docs/directions/README.md",
+      "snapshot": "docs/archive/2026-10-05-context-migration/docs/directions/README.md",
+      "sha256": "b1f3c3384951849ad62b54101e02775f45bbd4518d75586ff6b51605a29eb3fc",
+      "action": "snapshot before replacing active guidance"
+    },
+    {
+      "original": "docs/architecture/AI_INFRA.md",
+      "snapshot": "docs/archive/2026-10-05-context-migration/docs/architecture/AI_INFRA.md",
+      "sha256": "04023eb4521a7ff97cc884e8a625feac8a8484c7242e27a3bc240d597bfeac98",
+      "action": "snapshot before replacing active guidance"
+    },
+    {
+      "original": "docs/architecture/DATA_STRATEGY.md",
+      "snapshot": "docs/archive/2026-10-05-context-migration/docs/architecture/DATA_STRATEGY.md",
+      "sha256": "489ba2df226923e71db1937cacb173de6b3ef15831650bed19f544ea4d2e0b33",
+      "action": "snapshot before replacing active guidance"
+    },
+    {
+      "original": "docs/architecture/LIFECYCLE.md",
+      "snapshot": "docs/archive/2026-10-05-context-migration/docs/architecture/LIFECYCLE.md",
+      "sha256": "cc56cab871a19fcee24850daf3b967ddbf1b1022f28a2541189515ce7467bb11",
+      "action": "snapshot before replacing active guidance"
+    },
+    {
+      "original": "AXOM_Competitive_Intelligence_Report.md",
+      "snapshot": "docs/product/research/AXOM_Competitive_Intelligence_Report.md",
+      "sha256": "45993859a54d10608c7d9615d5a97ac2e3aea29348793ec48c170c316386f3d8",
+      "action": "move unchanged; no inbound repository references found"
+    }
+  ]
+}

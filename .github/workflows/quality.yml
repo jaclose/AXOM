@@ -27,6 +27,8 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: web/package-lock.json
+      - name: Repository context and hygiene
+        run: node scripts/repository-hygiene.mjs
       - run: npm --prefix web ci
       - name: Release tool regression tests
         run: node --test scripts/*.test.mjs
