@@ -2,33 +2,39 @@
 
 **Project knowledge may be large. Active context must be small.**
 This is the canonical repository operating policy for Codex, Claude Code, Copilot,
-and other coding agents. The user's current instructions take precedence.
+and other coding agents, permanently by default unless the user overrides it.
 
 ## Mandatory progressive retrieval
 
 Bootstrap with only this file, [docs/AI_STATE.md](docs/AI_STATE.md), and the current
-request. Do not preload INDEX, architecture, directions, completed work or conversation
-history. Check `git status --short --branch` and `git worktree list`; state describes
+request. Do not preload INDEX, domain docs, history, previous conversations, broad
+repository listings or unrelated source. Check branch/HEAD with `git status --short --branch`,
+`git rev-parse --short HEAD` and `git worktree list`; state describes
 a dated checkout, never another branch or production.
 
 | Level | Retrieve only what the task requires |
 | --- | --- |
-| 0: Orient | Identify the likely subsystem, local or cross-cutting scope, and missing information from bootstrap. |
-| 1: Locate | Search and/or consult [INDEX](docs/INDEX.md) to locate relevant docs, source and tests. |
-| 2: Retrieve | Search → identify → targeted read. Use `rg --files <area>`, `rg -n '<symbol>' <area>`, then matching regions. |
-| 3: Expand | If an unknown remains, expand ONE logical dependency level, then reassess. |
-| 4: Cross-cutting | Broad architecture/product context requires a demonstrated subsystem boundary or architectural decision. |
-| 5: History | Retrieve archives/old reasoning only when current docs are insufficient, investigating history/regressions/old decisions, or explicitly requested. |
+| 0: Bootstrap | Identify likely subsystem, task scope and missing information from policy, state and task. |
+| 1: Discovery | Search filenames/symbols. Consult [INDEX](docs/INDEX.md) only if location or authority is unclear. |
+| 2: Domain | Retrieve the relevant feature, architecture or operations document. |
+| 3: Implementation | Read the relevant source region and tests. |
+| 4: Dependencies | Follow necessary contracts, schemas, services or configuration across subsystem boundaries. |
+| 5: Historical/deep | Retrieve decisions, directions, progress or archives only when historical reasoning matters, current docs are insufficient/conflicting, or explicitly requested. |
 
 **Breadth must be earned: every increase must answer a concrete unresolved engineering
-question.** These levels are conditional, not a reading checklist. Before significant
-expansion, internally checkpoint: objective → known facts → specific unknown → smallest
-source that resolves it. Stop retrieving once the question is answered.
+question.** Levels are permissions, not mandatory steps; jump directly to the smallest
+relevant level without loading preceding levels. Before any expansion, internally check:
+QUESTION (what is unknown?), NEED (does it affect correctness, architecture, implementation,
+testing or safety?), SOURCE (smallest authoritative source?), SCOPE (targeted search/section?).
+If immaterial, do not retrieve. Expand one logical dependency level at a time and reassess.
+Once evidence is sufficient for safe implementation, **stop retrieving and implement**.
+Correctness outranks token minimization; the bootstrap budget does not cap needed task context.
 
 Dependency relevance beats directory proximity. Follow dependencies, code references,
 imports, documentation routes, tests and search before folder hierarchy. Do not
-mechanically climb parent directories. A failing test may lead to its implementation,
-then a dependency, then shared infrastructure only if necessary.
+mechanically climb parent directories or read neighboring files because they are nearby.
+Search → identify → targeted read: `rg --files <area>`, then `rg -n '<symbol>' <area>`.
+A component may lead to its hook, service and shared contract only as questions require.
 
 Never recursively read all source/docs, idea banks, progress notes or product-memory
 ledgers by default. Filter logs/search results before reading; avoid full test output,
@@ -84,7 +90,7 @@ for unrelated work.
 
 Run the narrowest meaningful check first, then affected module tests, typecheck/lint,
 build and relevant browser/integration checks. Fix regressions caused by your change.
-Do not repeatedly rerun the full suite for trivial edits.
+Do not repeatedly rerun the full suite for trivial edits. Retain concise results, not raw logs.
 
 - Repository navigation/instructions: `npm run repo:check` and `npm run test:repo`.
 - Full web integration/release gate: `cd web && npm run verify:all`.
@@ -110,6 +116,7 @@ One concept has one canonical explanation. Update the relevant feature/architect
 page when behavior changes and a decision record for durable architectural choices.
 New docs belong in a routed category; update the index when adding a major area.
 Choose the canonical location before creating any source, test, script, doc or artifact.
+Keep hygiene scoped to task-created debt; do not perform unrelated repository-wide cleanup.
 Resolve conflicting docs against authoritative behavior; retain useful old reasoning
 in archives and replace duplicate explanations with references.
 Do not create random root notes, duplicate manuals, new instruction files without
@@ -117,7 +124,9 @@ subtree-specific constraints, or generated dumps in source folders.
 
 Before completion: verify implementation, run impact-appropriate validation, update
 canonical docs/state, run `npm run repo:check`, and report unresolved issues. Keep
-auto-loaded instructions small: rules here, explanations in routed docs. The checker
+auto-loaded instructions small. Permanent rules must be broadly applicable, repeatedly
+important, costly/dangerous to rediscover, or prevent recurring failure; one-off details
+belong in domain docs. Move obsolete detail out of bootstrap files. The checker
 reports repository bootstrap size; it cannot police agent reads or client/global context.
 
 Use [directions](docs/directions/README.md) only for ideas/execution history: preserve

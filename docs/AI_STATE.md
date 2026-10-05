@@ -12,9 +12,9 @@ account/data endpoints are retired. No runtime or schema change belongs to this 
 
 ## Active branch and work
 
-The context architecture is committed as `1540ad2` on `feat/media-pipeline-v1` in
-the normal `AXOM` checkout. Its enforcement follow-up adds explicit retrieval levels,
-relevance checkpoints and a 4,000 estimated-token aggregate bootstrap budget. Locate
+The context architecture (`1540ad2`) and bootstrap enforcement (`4b41201`) are committed
+on `feat/media-pipeline-v1` in the normal `AXOM` checkout. Final policy clarifications
+make each retrieval conditional on question/need/source/scope and stop at sufficient evidence. Locate
 the latest protocol checkpoint with `git log -1 -- AGENTS.md`. No merge, push or
 deployment belongs to this work. The earlier isolated `AXOM-context-protocol` worktree
 is a migration preparation tree, not the current handoff; do not reset or remove it.
@@ -26,10 +26,9 @@ the coordination board before shared edits.
 
 ## Recently completed
 
-- AGENTS owns the conditional levels 0–5 and engineering checkpoints. Expand one logical
-  dependency level only to answer an unresolved question; directory proximity is secondary.
-- Claude imports only AGENTS + AI_STATE. Copilot links the same policy/state; INDEX is
-  retrieved on demand. Fresh sessions are the default for independent tasks.
+- Canonical retrieval/session rules live in AGENTS; small Claude/Copilot bridges share
+  them. The final clarification adds direct level jumps, an explicit stop rule,
+  correctness priority and criteria for admitting permanent instructions. No new tooling.
 - `repo:check` reports per-file words/bytes/tokens, aggregate repository bootstrap and
   bridge overhead, budget status, routing failures and archive integrity. Local/CI gates
   reject growth and invalid imports without runtime telemetry or new dependencies.
@@ -38,9 +37,8 @@ the coordination board before shared edits.
 
 ## Important current decisions
 
-Read only this file, AGENTS and the task initially. Use search and/or [INDEX](INDEX.md)
-to locate missing context. Repository documentation is durable memory. Preserve reasoning;
-archiving does not reject an idea, approve a proposal or authorize deletion.
+The context system is ready for observation across ordinary tasks, not more speculative
+infrastructure. Archiving does not reject ideas, approve proposals or authorize deletion.
 
 Root `src-tauri/` and `supabase/migrations/` are active; `web/src-tauri/`, Swift prototype
 and `db/` are legacy. Keep Noctyrium storage identifiers. Schema changes require coordination.
@@ -55,8 +53,9 @@ Sign-in must preserve local work; cloud snapshots do not imply cloud storage of 
 
 ## Validation state
 
-Enforcement follow-up, Node 22.23.1: `npm run repo:check`, `npm run test:repo` (32),
-`npm run test:release` (51, including those 32) and `git diff --check` pass.
+Final policy clarification, Node 22.23.1: `npm run repo:check`, `npm run test:repo` (32)
+and `git diff --check` pass. The preceding tooling change also passed
+`npm run test:release` (51, including those 32).
 Regressions cover aggregate growth, bridge overhead, missing
 bootstrap files, Unicode/UTF-8 measurements and exclusion of on-demand documents.
 Run `repo:check` for live sizes; the 4,000-token budget includes each bridge separately.
