@@ -1,0 +1,135 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<title>AXOM Medical Intelligence</title>
+
+<style>
+
+body {
+  background:#080808;
+  color:#eee;
+  font-family:system-ui,-apple-system,sans-serif;
+  max-width:850px;
+  margin:60px auto;
+  padding:24px;
+}
+
+h1 {
+  font-weight:500;
+}
+
+textarea {
+  width:100%;
+  height:160px;
+  box-sizing:border-box;
+  background:#121212;
+  border:1px solid #333;
+  border-radius:12px;
+  color:white;
+  padding:16px;
+  font-size:16px;
+}
+
+button {
+  margin-top:14px;
+  padding:12px 22px;
+  border-radius:8px;
+  border:0;
+  cursor:pointer;
+  font-size:15px;
+}
+
+#status {
+  margin-top:20px;
+  opacity:.7;
+}
+
+#answer {
+  margin-top:25px;
+  white-space:pre-wrap;
+  line-height:1.6;
+}
+
+</style>
+</head>
+
+<body>
+
+<h1>AXOM Medical Intelligence</h1>
+
+<textarea id="question">Why do loop diuretics cause hypokalemic metabolic alkalosis?</textarea>
+
+<br>
+
+<button id="ask">
+Ask AXOM
+</button>
+
+<div id="status"></div>
+
+<div id="answer"></div>
+
+<script>
+
+const ask = document.getElementById("ask");
+const question = document.getElementById("question");
+const answer = document.getElementById("answer");
+const status = document.getElementById("status");
+
+ask.onclick = async () => {
+
+  ask.disabled = true;
+
+  status.textContent = "AXOM is reasoning...";
+  answer.textContent = "";
+
+  try {
+
+    const response = await fetch("/api/ai/medical", {
+
+      method:"POST",
+
+      headers:{
+        "Content-Type":"application/json"
+      },
+
+      body:JSON.stringify({
+        question:question.value
+      })
+
+    });
+
+    const data = await response.json();
+
+    if(!response.ok){
+      throw new Error(data.error || "Request failed");
+    }
+
+    status.textContent =
+      "Model: " + data.model;
+
+    answer.textContent =
+      data.answer;
+
+  } catch(error){
+
+    status.textContent = "Error";
+
+    answer.textContent =
+      error.message;
+
+  } finally {
+
+    ask.disabled = false;
+
+  }
+
+};
+
+</script>
+
+</body>
+</html>

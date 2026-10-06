@@ -43,9 +43,16 @@
     "directions:check": "node scripts/directions-check.mjs"
   },
   "dependencies": {
-    "@neondatabase/serverless": "^1.0.2"
+    "@modelcontextprotocol/server": "^2.3.1",
+    "@neondatabase/serverless": "^1.0.2",
+    "@react-three/drei": "^10.7.9",
+    "@react-three/fiber": "^9.8.1",
+    "openai": "^7.28.0",
+    "three": "^0.186.1",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@gltf-transform/cli": "^4.5.1",
     "@tauri-apps/cli": "^2.11.2",
     "@types/node": "^22.20.1",
     "@wdio/cli": "^9.29.1",
