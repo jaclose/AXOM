@@ -31,6 +31,7 @@ Each layer owns one thing and reads the layer before it by id.
 | What a tutor view shows for one question; questions that teach the same rule | `lib/decode/teaching.ts` |
 | Teaching read from a deck's own answer and explanation slides | `lib/decode/deckTeaching.ts`, on `lib/deckPages.ts` |
 | A model's reading of a question's source, checked before it is kept | `lib/decode/aiAnalysis.ts`, through `lib/ai/` |
+| The teaching block in the tutor's feedback; a source page as it was drawn | `components/questions/SourceTeaching.tsx`, `SourcePagePreview.tsx`, mounted by `ExamRunner.tsx` |
 
 ## Invariants
 
@@ -44,6 +45,12 @@ Each layer owns one thing and reads the layer before it by id.
   text stays on the document; a citation keeps at most a short verbatim excerpt.
 - **A proposal is not teaching.** Only an analysis the learner reviewed is taught from.
   The source's own teaching comes before a model's reading of it.
+- **Shown only after the learner commits to an answer.** The block is part of the tutor's
+  feedback and never appears while a question is still open, or in an exam block.
+- **Nothing is stored until the learner decides.** What a deck's slides teach is read when
+  the feedback opens and shown as a proposal. Keep stores it as reviewed; Discard stores it
+  as rejected so it is not offered again. Either can be undone while the question is on
+  screen. A model is asked only when the learner presses the button, one request a time.
 - **Teaching goes stale with its question.** An analysis carries a fingerprint of the
   question's wording, key, explanation and source pages. A corrected key or a re-imported
   source makes it stale and it stops being shown. An attempt, a tag, a note or a move to
@@ -88,10 +95,22 @@ ported by intent, not merged.
 | question identity and duplicate grouping | `lib/questionDuplicates.ts` (`questionSignature`) |
 | `decodeMetrics`, `nextDecodeAction` | `lib/learning-intelligence/` (attempt events, patterns, review) |
 | `SourceTrace`, `DecodeDistractor`, `QuestionAnalysis`, the source fingerprint | `lib/decode/` |
+| `DecodeTutor.tsx` with six depth modes (full, high-yield, presenter, handout, visual, repair), no styles and no mount | one block in the tutor's feedback, in the feedback's own styles. The modes were not ported: presenting to a group and printing a handout are other tasks |
 | `reviewPacketImport.ts`: its own page grouping, question and answer reading, and header lines of one learner's decks written into the code | the course engine's deck reader (`lib/deckPages.ts`), which drops running lines by counting them; only the reading of teaching sections was kept |
 
 Tests: `lib/decode/decode.test.ts`, `lib/decode/sources.test.ts`, `lib/decode/teaching.test.ts`,
-`lib/decode/deckTeaching.test.ts`, `lib/decode/aiAnalysis.test.ts`.
+`lib/decode/deckTeaching.test.ts`, `lib/decode/aiAnalysis.test.ts`,
+`components/questions/SourceTeaching.test.tsx`; E2E `web/e2e/source-teaching.spec.ts` (a deck PDF
+is imported, an answer checked, the teaching kept, the page reloaded and the source page drawn
+from the attached original).
+
+## Known limits
+
+No lecture line was read in the two real decks; why was not looked into. A drawn page is
+small on a phone and cannot be enlarged yet; its text is offered beside it. The original
+file is not kept at import: the learner attaches it the first time a page is opened.
+Concept groups and "questions without teaching" have no screen. Teaching is not shown on
+the block results screen or in the Question Bank's question view.
 
 Measured on the learner's own files on 2026-10-07 (counts only): of 471 readable PDFs, 118
 are decks holding 1,860 questions. Two decks lay their teaching out in headed sections, and

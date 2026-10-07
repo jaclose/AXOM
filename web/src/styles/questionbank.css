@@ -336,6 +336,19 @@
 .source-evidence pre { max-height: 180px; overflow: auto; margin: 0; padding: 10px; border-radius: var(--radius-sm); color: var(--text-60); background: rgba(0,0,0,.24); white-space: pre-wrap; font: var(--fs-tiny)/var(--leading-normal) var(--font-mono); }
 .source-rules { color: var(--text-30); font: var(--fs-tiny)/var(--leading-snug) var(--font-mono); }
 .question-provenance { display: grid; gap: 10px; padding: 13px; border: 1px solid rgba(230,226,214,.08); border-radius: var(--radius-md); background: rgba(230,226,214,.025); }
+/* Source teaching (lib/decode): the same card as provenance, holding the
+   feedback blocks that already exist. Only the list, the page and the
+   problem line are new. */
+.source-teaching { display: grid; gap: 10px; margin-block: 4px; padding: 13px; border: 1px solid rgba(230,226,214,.08); border-radius: var(--radius-md); background: rgba(230,226,214,.025); }
+.source-teaching-title { display: inline-flex; align-items: center; gap: 6px; }
+.source-teaching-list { margin: 7px 0 0; padding-left: 18px; display: grid; gap: 4px; color: var(--text-80); font-size: var(--fs-base); line-height: var(--leading-relaxed); max-width: 68ch; }
+.source-teaching .rationale-lead p + p { margin-top: 4px; }
+.source-teaching-trace { display: grid; gap: 10px; }
+.source-page-preview { display: grid; gap: 8px; margin: 0; min-width: 0; }
+.source-page-preview canvas { display: block; width: 100%; height: auto; border-radius: var(--radius-sm); border: 1px solid var(--hairline); background: #fff; }
+.source-page-preview canvas[hidden] { display: none; }
+.source-page-missing { display: grid; gap: 8px; justify-items: start; }
+.source-page-problem { margin: 0; color: var(--red); font-size: var(--fs-sm); }
 .question-provenance [id^="question-provenance-"] { display: inline-flex; align-items: center; gap: 6px; }
 .question-provenance-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
 .question-provenance-item { min-width: 0; padding: 10px; border: 1px solid rgba(230,226,214,.07); border-radius: var(--radius-sm); background: rgba(0,0,0,.12); }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { classifyDeckPages } from "../deckPages";
 import type { SourceDocument } from "../library";
+import { parsePdfQuestions } from "../pdfQuestionImport";
 import type { QuestionRecord } from "../questions";
 import { normalizeQuestionAnalyses } from "./normalize";
 import { analysisIsCurrent, questionSourceFingerprint } from "./analysis";
@@ -113,6 +114,30 @@ describe("teaching read from a deck's own slides", () => {
     expect(sourceTeachingProposals(document, [imported(0), imported(1, { sourcePage: 2 })], NOW)).toEqual([]);
     expect(sourceTeachingProposals({ ...document, pageTexts: undefined }, questions, NOW)).toEqual([]);
     expect(sourceTeachingProposals({ ...document, pageTexts: ["One page of running text with no questions on it."] }, questions, NOW)).toEqual([]);
+  });
+});
+
+describe("a deck that is imported and then read for its teaching", () => {
+  it("gives each imported question its page and key, and its teaching by that page", () => {
+    // The same deck with a written answer line on each answer slide, as the PDF importer would see it.
+    const answered = [pages[0], questionSlide(0), answerSlide(0, "Answer: C"), TEACHING[0], questionSlide(1), answerSlide(1, "Answer: D"), TEACHING[1], questionSlide(2), answerSlide(2, "Answer: A"), TEACHING[2]];
+    const read = parsePdfQuestions(answered.join("\n\n"), answered);
+    expect(read.deck).toMatchObject({ questions: 3, paired: true });
+    expect(read.drafts.map((draft) => [draft.sourcePage, draft.correctKey])).toEqual([[2, "C"], [5, "D"], [8, "A"]]);
+
+    const stored = { ...document, pageTexts: answered };
+    const saved = read.drafts.map((draft, index): QuestionRecord => ({
+      id: `q-${index + 1}`, source: "pdf", stem: draft.stem, options: draft.options, correctKey: draft.correctKey, explanation: draft.explanation,
+      status: "unseen", tags: [], attempts: [], sourceDocumentId: "doc-1", sourcePage: draft.sourcePage,
+      createdAt: "2026-10-01T09:00:00.000Z", updatedAt: "2026-10-01T09:00:00.000Z",
+    }));
+    const proposals = sourceTeachingProposals(stored, saved, NOW);
+    expect(proposals.map((analysis) => [analysis.questionId, analysis.rule])).toEqual([
+      ["q-1", "Match the leads to the wall, then the wall to the artery."],
+      ["q-2", "Venous entry, right-sided valve."],
+    ]);
+    // The importer's explanation for the first question came from the same slide: it is not stored twice.
+    expect(proposals[0].distractors.map((note) => note.key)).toEqual(["A", "B", "D"]);
   });
 });
 

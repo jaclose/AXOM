@@ -24,6 +24,7 @@ import { Modal, SelectField } from "../ui/Modal";
 import { GButton, GhostButton, Tag } from "../ui/primitives";
 import { pushToast } from "../../lib/toast";
 import { QuizFeedback } from "./QuizFeedback";
+import { SourceTeaching } from "./SourceTeaching";
 import { accuracyTone } from "../../lib/library";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { formatSeconds, pacingInsight, summarizePacing } from "../../lib/quizPacing";
@@ -1043,6 +1044,9 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   if (!question) return null;
   const item = itemState(block, question.id);
   const correctKey = trustedCorrectKey(question);
+  // The question's source and the other questions imported from it, for what the source teaches (lib/decode).
+  const sourceDocument = question.sourceDocumentId ? (s.documents ?? []).find((entry) => entry.id === question.sourceDocumentId) : undefined;
+  const sourceSiblings = sourceDocument ? questions.filter((entry) => entry.sourceDocumentId === sourceDocument.id) : undefined;
   const isCorrect = revealed && correctKey && picked === correctKey;
   const annotations = localAnnotations;
   const stemAnnotations = annotations.filter((annotation) => annotation.target === "stem");
@@ -1269,6 +1273,16 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
               {question.options.map((option) => <option key={option.key} value={option.key}>{option.key}. {option.text}</option>)}
             </SelectField>
           )}
+          <SourceTeaching
+            question={question}
+            document={sourceDocument}
+            siblings={sourceSiblings}
+            provider={provider}
+            onChange={(analyses) => {
+              setPool((current) => current.map((item) => item.id === question.id ? { ...item, analyses } : item));
+              s.updateQuestion(question.id, { analyses });
+            }}
+          />
           {question.choiceRationales && Object.keys(question.choiceRationales).length > 0 && (() => {
             const rationales = question.choiceRationales!;
             const correctWhy = correctKey ? rationales[correctKey] : undefined;
