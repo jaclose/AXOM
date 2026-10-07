@@ -419,10 +419,18 @@
 .import-image-list li.matched svg { color: var(--green); }
 .import-image-list li.missing { border-style: dashed; }
 .import-image-list li.missing svg { color: var(--orange); }
+.import-image-detach { display: inline-grid; place-items: center; width: 24px; height: 24px; margin: -2px -6px -2px 0; padding: 0; border: 0; border-radius: var(--radius-pill); background: none; color: var(--text-45); cursor: pointer; }
+.import-image-detach:hover, .import-image-detach:focus-visible { color: var(--text); background: color-mix(in srgb, var(--text) 8%, transparent); }
+.import-image-list li .import-image-detach svg { color: currentColor; }
 .import-destination,
 .import-options { min-width: 0; margin: 0; padding: 0; border: 0; }
 .import-destination > legend,
 .import-options > legend { margin-bottom: 7px; padding: 0; }
+/* A queued file: its name keeps the first line, and its actions drop under it when there is no room beside it. */
+.mass-import-row { flex-wrap: wrap; gap: 8px; }
+.mass-import-file { flex: 1 1 170px; gap: 2px; min-width: 0; }
+.mass-import-actions { flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; gap: 4px 6px; margin-left: auto; }
+.mass-import-actions > .tag { white-space: nowrap; }
 .import-draft.invalid { border-color: color-mix(in srgb, var(--red) 48%, var(--hairline)); }
 .import-draft.needs-review { border-color: color-mix(in srgb, var(--orange) 36%, var(--hairline)); }
 .import-draft-editor { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--hairline); }

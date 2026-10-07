@@ -461,3 +461,117 @@ describe("Import Center persistence invariant", () => {
     expect(state.questions.some((item) => item.questionNumber === 2)).toBe(false);
   });
 });
+
+// Invented teaching content.
+const THORAX = [
+  "1. Which vessel carries oxygenated blood from the lungs to the heart?",
+  "A. Pulmonary vein", "B. Pulmonary artery", "C. Aorta", "D. Vena cava",
+  "Answer: A", "Explanation: The pulmonary veins return oxygenated blood to the left atrium.",
+  "",
+  "2. Which nerve supplies the diaphragm?",
+  "A. Vagus nerve", "B. Phrenic nerve", "C. Intercostal nerve", "D. Accessory nerve",
+  "Answer: B", "Explanation: The phrenic nerve arises from the third to fifth cervical roots.",
+].join("\n");
+const THORAX_REVISED = [
+  THORAX,
+  "",
+  "3. Which hormone lowers the concentration of glucose in blood?",
+  "A. Glucagon", "B. Cortisol", "C. Insulin", "D. Adrenaline",
+  "Answer: C", "Explanation: Insulin moves glucose into muscle and fat.",
+].join("\n");
+
+describe("Importing a file again", () => {
+  const thoraxSeed = (rawText = THORAX, checksum = "thorax-checksum") => ({
+    drafts: parseQuestionBlocks(rawText), rawText, title: "Thorax quiz", fileName: "thorax-quiz.txt", fileType: "text", checksum,
+  });
+
+  async function importThorax(user: ReturnType<typeof userEvent.setup>) {
+    const view = render(<ImportPanel seed={thoraxSeed()} />);
+    await user.click(screen.getByRole("button", { name: "Finalize import" }));
+    await waitFor(() => {
+      expect(useStore.getState().questions).toHaveLength(2);
+      expect(screen.queryByRole("button", { name: "Finalize import" })).toBeNull();
+    });
+    view.unmount();
+  }
+
+  it("adds nothing, and leaves alone what the learner changed since the first import", async () => {
+    const user = userEvent.setup();
+    await importThorax(user);
+
+    // The learner's own corrections: the set renamed and moved, a question refiled, retagged and annotated.
+    const before = useStore.getState();
+    const [first] = before.questionSets[0].questionIds;
+    before.updateQuestionSet(before.questionSets[0].id, { title: "Thorax, week 4", scope: { module: "CPR", week: 4 } });
+    before.updateQuestion(first, { module: "CPR", week: 4, tags: ["high-yield"], explanation: "My own note on the pulmonary veins." });
+    await waitFor(() => expect(useStore.getState().questions.find((question) => question.id === first)?.week).toBe(4));
+
+    render(<ImportPanel seed={thoraxSeed()} />);
+    expect(screen.getByText(/^This file was imported on \d{4}-\d{2}-\d{2} as "Thorax, week 4"\. Every question here is already in your bank, so none is selected\./)).toBeTruthy();
+    expect(screen.getAllByText("Already imported")).toHaveLength(2);
+    expect((screen.getByRole("checkbox", { name: "Include question 1" }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("checkbox", { name: "Include question 2" }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("button", { name: "Finalize import" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("Include at least one question before finalizing.")).toBeTruthy();
+
+    const after = useStore.getState();
+    expect([after.questions.length, after.questionSets.length, after.documents.length]).toEqual([2, 1, 1]);
+    expect(after.questionSets[0]).toMatchObject({ title: "Thorax, week 4", scope: { module: "CPR", week: 4 } });
+    expect(after.questions.find((question) => question.id === first)).toMatchObject({
+      module: "CPR", week: 4, tags: ["high-yield"], explanation: "My own note on the pulmonary veins.",
+    });
+  });
+
+  it("brings in only what a changed version of the file adds", async () => {
+    const user = userEvent.setup();
+    await importThorax(user);
+    const earlier = useStore.getState().questions.map((question) => question.id);
+
+    render(<ImportPanel seed={thoraxSeed(THORAX_REVISED, "thorax-checksum-v2")} />);
+    expect(screen.getByText(/^A different version of this file was imported on .* 2 of these 3 questions are already in your bank and are not selected\. 1 is new\./)).toBeTruthy();
+    expect((screen.getByRole("checkbox", { name: "Include question 1" }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("checkbox", { name: "Include question 3" }) as HTMLInputElement).checked).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "Finalize import" }));
+    await waitFor(() => {
+      expect(useStore.getState().questions).toHaveLength(3);
+      expect(screen.queryByRole("button", { name: "Finalize import" })).toBeNull();
+    });
+    const state = useStore.getState();
+    const added = state.questions.filter((question) => !earlier.includes(question.id));
+    expect(added.map((question) => [question.stem, question.correctKey])).toEqual([["Which hormone lowers the concentration of glucose in blood?", "C"]]);
+    expect(earlier.every((id) => state.questions.some((question) => question.id === id))).toBe(true);
+    // The new version is its own source record: both stay in the library.
+    expect(state.documents.map((document) => document.checksum).sort()).toEqual(["thorax-checksum", "thorax-checksum-v2"]);
+    expect(state.questionSets).toHaveLength(2);
+  });
+
+  it("lets the learner take a question again on purpose, and says what that does", async () => {
+    const user = userEvent.setup();
+    await importThorax(user);
+    render(<ImportPanel seed={thoraxSeed()} />);
+    await user.click(screen.getByRole("button", { name: "Toggle editor for question 1" }));
+    expect(screen.getByText(/already in your bank from an earlier import of this file, so it is not selected\. Select it only to bring in a second copy\./)).toBeTruthy();
+    await user.click(screen.getByRole("checkbox", { name: "Include question 1" }));
+    expect((screen.getByRole("button", { name: "Finalize import" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("keeps a question's source, page and evidence through a save and a reload of the store", async () => {
+    const user = userEvent.setup();
+    const drafts = parseQuestionBlocks(THORAX).map((draft, index) => ({ ...draft, sourcePage: index + 2, questionSourcePage: index + 2, answerEvidencePage: 7 }));
+    render(<ImportPanel seed={{ ...thoraxSeed(), drafts, fileType: "pdf", pageTexts: ["title", "one", "two"] }} />);
+    await user.click(screen.getByRole("button", { name: "Finalize import" }));
+    await waitFor(() => expect(useStore.getState().questions).toHaveLength(2));
+
+    // What the store would read back from the device after a reload.
+    await useStore.persist.rehydrate();
+    const state = useStore.getState();
+    const document = state.documents[0];
+    expect(document).toMatchObject({ fileName: "thorax-quiz.txt", checksum: "thorax-checksum", pageTexts: ["title", "one", "two"], rawText: THORAX });
+    const ordered = state.questionSets[0].questionIds.map((id) => state.questions.find((question) => question.id === id)!);
+    expect(ordered.map((question) => [question.sourcePage, question.sourceDocumentId, question.sourceFile?.name, question.questionNumber]))
+      .toEqual([[2, document.id, "thorax-quiz.txt", 1], [3, document.id, "thorax-quiz.txt", 2]]);
+    expect(ordered[0].extraction).toMatchObject({ reviewed: true, questionSourcePage: 2, answerEvidencePage: 7, answerEvidence: "Answer: A" });
+  });
+});
+

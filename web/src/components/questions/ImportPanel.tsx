@@ -18,13 +18,11 @@ import { detectImportFormat, importFromCsv, importFromJson, importFromText } fro
 import { extractDocxText, extractPdfText, extractPlainText } from "../../lib/extractText";
 import { attachPdfFigures } from "../../lib/pdfFigures";
 import { parsePdfQuestions } from "../../lib/pdfQuestionImport";
-import { documentTitleFromFile, type QuestionSet, type SourceDocument } from "../../lib/library";
+import { documentTitleFromFile, type SourceDocument } from "../../lib/library";
 import {
   EXAM_TYPE_LABEL, QUESTION_CATEGORIES,
-  validateQuestionRecord,
-  type ExtractionConfidence, type QuestionDifficulty, type QuestionExamType, type QuestionRecord, type QuestionSource,
+  type QuestionDifficulty, type QuestionExamType, type QuestionRecord, type QuestionSource,
 } from "../../lib/questions";
-import { normalizeTags, suggestCategory } from "../../lib/taxonomy";
 import {
   checkProviderHealth, cleanExplanation as cleanExplanationWithAi, enhanceQuestionSet,
   generateQuestionDrafts, loadAiSettings, mapAnswerFromText, resolveActiveProvider,
@@ -34,26 +32,19 @@ import { GlassCard, GButton, GhostButton, PanelHeader, Tag, EmptyState } from ".
 import { Field, SelectField, TextAreaField } from "../ui/Modal";
 import { MAPPING_STATUS_LABEL, inferSourceMapping } from "../../lib/course-engine/sourceMapping";
 import { moduleAliases } from "../../lib/course-engine/templateParse";
-import { moduleKey, vocabularyFromCourses } from "../../lib/course-engine/vocabulary";
+import { vocabularyFromCourses } from "../../lib/course-engine/vocabulary";
 import { pushToast } from "../../lib/toast";
 import { sha256Hex } from "../../lib/checksum";
 import { assignDraftProvenancePages } from "../../lib/questionProvenance";
-import {
-  evaluateImportDraft, evaluateImportDrafts, summarizeImportDrafts,
-  type DraftImportEvaluation,
-} from "../../lib/questionImportTrust";
-import {
-  findEquivalentReviewedSet,
-  isReviewedImportInFlight,
-  persistReviewedImportOnce,
-  reviewedImportFingerprint,
-  type ImportDocumentWrite,
-  type ReviewedQuestionInput,
-} from "../../lib/questionImportFinalization";
+import { evaluateImportDraft, evaluateImportDrafts, summarizeImportDrafts } from "../../lib/questionImportTrust";
+import { ALREADY_IMPORTED_RULE, applyPriorImport } from "../../lib/questionImportHistory";
+import { hasReviewedImportInFlight } from "../../lib/questionImportFinalization";
+import { prepareReviewedImport, saveReviewedImport, type ImportSourceFile } from "../../lib/questionImportSave";
+import { scopeFromMapping } from "../../lib/massImportCandidate";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { MassImport } from "./MassImport";
 import { flagImportDuplicates } from "../../lib/questionDuplicates";
-import { attachNamedImages, imageNameKey, matchNamedImages, namedImages } from "../../lib/questionImportImages";
+import { imageNameKey, matchNamedImages, namedImages } from "../../lib/questionImportImages";
 
 export type ImportTab = "paste" | "file" | "batch" | "ai";
 type SaveMode = "set" | "doc" | "both";
@@ -69,16 +60,7 @@ interface ReviewDraft extends ParsedQuestionDraft {
   reviewAcknowledged?: boolean;
 }
 
-interface PendingDocument {
-  existingDocumentId?: string;
-  title: string;
-  fileName: string;
-  fileType: string;
-  sizeBytes: number;
-  rawText: string;
-  pageTexts?: string[];
-  checksum?: string;
-}
+type PendingDocument = ImportSourceFile;
 
 const EXAM_TYPES = Object.keys(EXAM_TYPE_LABEL) as QuestionExamType[];
 const uid = () => crypto.randomUUID();
@@ -213,17 +195,24 @@ export function ImportPanel({
   const s = useStore();
   const [tab, setTab] = useState<ImportTab>(seed?.reference ? "ai" : initialTab);
   const [step, setStep] = useState<ImportStep>(seed?.drafts ? "review" : "source");
-  const [drafts, setDrafts] = useState<ReviewDraft[]>(() =>
-    seed?.drafts
-      ? flagImportDuplicates(
-        preserveUserReviewedMappings(seed.drafts, s.questions ?? [], seed.sourceDocumentId),
-        s.questions ?? [],
+  const library = () => ({ questions: s.questions ?? [], questionSets: s.questionSets ?? [], documents: s.documents ?? [] });
+  // What an earlier import brought in is only read from settled state: while a
+  // save is still being written, the store may hold records that get rolled back.
+  const settledLibrary = () => (hasReviewedImportInFlight() ? { questions: [], questionSets: [], documents: [] } : library());
+  // Read once: what the seed's file already brought in, if it was imported before.
+  const [seeded] = useState(() => (seed?.drafts
+    ? applyPriorImport(
+        flagImportDuplicates(preserveUserReviewedMappings(seed.drafts, s.questions ?? [], seed.sourceDocumentId), s.questions ?? []),
+        seed.rawText != null ? { checksum: seed.checksum, fileName: seed.fileName ?? "import", existingDocumentId: seed.sourceDocumentId } : null,
+        settledLibrary(),
       )
-        .map((d) => ({ ...d, reviewId: uid(), include: true, source: seed.source ?? "imported" }))
-      : []);
+    : undefined));
+  const [drafts, setDrafts] = useState<ReviewDraft[]>(() => (seeded
+    ? seeded.drafts.map((d, index) => ({ ...d, reviewId: uid(), include: seeded.selected[index], source: seed?.source ?? "imported" }))
+    : []));
   const [sourceText, setSourceText] = useState(seed?.rawText ?? "");
   const [sourceType, setSourceType] = useState<QuestionSource>(seed?.source ?? "pasted");
-  const [batchWarnings, setBatchWarnings] = useState<string[]>(() => seed?.warnings ?? []);
+  const [batchWarnings, setBatchWarnings] = useState<string[]>(() => [...(seeded?.note ? [seeded.note] : []), ...(seed?.warnings ?? [])]);
   const [pendingDoc, setPendingDoc] = useState<PendingDocument | null>(() =>
     seed?.drafts && seed.rawText != null
       ? {
@@ -282,25 +271,10 @@ export function ImportPanel({
     if (scopeEdited || !proposedScope) return;
     // The name is matched against the learner's own modules, so the proposal
     // is always one of the choices in the list.
-    const module = proposedScope.module
-      ? courseModules.find((name) => moduleKey(name) === moduleKey(proposedScope.module!.value))
-      : undefined;
-    setScopeModule(module ?? "");
-    setScopeWeek(module && proposedScope.week ? String(proposedScope.week.value) : "");
+    const proposed = scopeFromMapping(proposedScope, courseModules);
+    setScopeModule(proposed?.module ?? "");
+    setScopeWeek(proposed?.week ? String(proposed.week) : "");
   }, [courseModules, proposedScope, scopeEdited]);
-
-  // Auto-categorize only when the user hasn't set a batch category and the
-  // draft has none: high-confidence heuristic assigns, otherwise left blank.
-  const draftText = (d: ReviewDraft) => `${d.stem} ${d.options.map((o) => o.text).join(" ")} ${d.explanation ?? ""}`;
-  function resolveCategory(d: ReviewDraft): string | undefined {
-    if (d.category) return d.category;
-    if (category) return category;
-    const suggestion = suggestCategory(draftText(d));
-    return suggestion.autoAssign ? suggestion.category : undefined;
-  }
-  function autoTags(d: ReviewDraft): string[] {
-    return suggestCategory(draftText(d)).tags;
-  }
 
   function reset(preserveFinalizedGuard = false) {
     setDrafts([]);
@@ -323,9 +297,10 @@ export function ImportPanel({
     // Figures cut from a PDF arrive with its questions and go through the same
     // path as images the learner adds by hand.
     if (images.length) setImageFiles(images);
-    const duplicateAware = flagImportDuplicates(parsed, s.questions ?? []);
-    setDrafts(duplicateAware.map((d) => ({ ...d, reviewId: uid(), include: true, aiGenerated: ai, source })));
-    setBatchWarnings(warnings);
+    // A file imported before comes in with what it already brought left unselected.
+    const known = applyPriorImport(flagImportDuplicates(parsed, s.questions ?? []), doc, settledLibrary());
+    setDrafts(known.drafts.map((d, index) => ({ ...d, reviewId: uid(), include: known.selected[index], aiGenerated: ai, source })));
+    setBatchWarnings(known.note ? [known.note, ...warnings] : warnings);
     setPendingDoc(doc);
     setSourceType(source);
     if (doc) setSourceText(doc.rawText);
@@ -357,285 +332,108 @@ export function ImportPanel({
     if (finalizingRef.current) return;
 
     const approved = drafts.filter((draft) => draft.include);
-    const approvedEvaluations = evaluateImportDrafts(approved);
-    const approvedEntries = approved.map((draft, index) => ({ draft, evaluation: approvedEvaluations[index] }));
-    const wantsSet = modeOverride !== "doc" && approved.length > 0;
-    const wantsDoc = modeOverride !== "set" && pendingDoc !== null;
-    if (!wantsSet && !wantsDoc) {
-      pushToast({ title: "Nothing to finalize", body: "Include at least one valid question, or keep the source document for later review.", tone: "warn" });
-      return;
-    }
+    const week = Number(scopeWeek);
+    // Checked, shaped and written by lib/questionImportSave: the same path
+    // mass import's "Accept" takes.
+    const prepared = prepareReviewedImport({
+      drafts: approved,
+      destination: modeOverride,
+      document: pendingDoc,
+      sourceType,
+      setTitle,
+      scope: scopeModule
+        ? { module: scopeModule, ...(Number.isInteger(week) && week > 0 && week < 100 ? { week } : {}) }
+        : undefined,
+      category: category || undefined,
+      examType: examType || undefined,
+      difficulty: difficulty || undefined,
+      parserWarnings: batchWarnings,
+      aiProviderLabel: provider?.info.label,
+    }, library());
 
-    if (wantsSet) {
-      const blocked = approvedEntries.filter(({ draft, evaluation }) => (
-          !evaluation.isValid || (evaluation.level === "Needs Review" && !draft.reviewAcknowledged)
-        ));
-      if (blocked.length > 0) {
-        const blockedDrafts = new Set(blocked.map(({ draft }) => draft));
+    if (!prepared.ok) {
+      if (prepared.reason === "nothing-to-save") {
+        pushToast({ title: "Nothing to finalize", body: "Include at least one valid question, or keep the source document for later review.", tone: "warn" });
+      } else if (prepared.reason === "review-incomplete") {
+        const blockedDrafts = new Set(prepared.blocked.map((index) => approved[index]));
         setDrafts((all) => all.map((draft) => blockedDrafts.has(draft) ? { ...draft, expanded: true } : draft));
         pushToast({
           title: "Review is not complete",
-          body: `${blocked.length} included question${blocked.length === 1 ? " needs" : "s need"} correction or explicit review before finalization.`,
+          body: `${prepared.blocked.length} included question${prepared.blocked.length === 1 ? " needs" : "s need"} correction or explicit review before finalization.`,
           tone: "warn",
         });
-        return;
+      } else {
+        pushToast({ title: "Finalization blocked", body: prepared.errors.slice(0, 2).join(" "), tone: "warn" });
       }
+      return;
     }
 
-    const duplicateDoc = pendingDoc
-      ? (s.documents ?? []).find((document) => document.id === pendingDoc.existingDocumentId)
-        ?? (pendingDoc.checksum
-          ? (s.documents ?? []).find((document) => document.checksum === pendingDoc.checksum)
-          : undefined)
-      : undefined;
-    const documentId = pendingDoc ? (duplicateDoc?.id ?? (wantsDoc ? uid() : undefined)) : undefined;
-    const setId = wantsSet ? uid() : undefined;
-    const reviewedAt = new Date().toISOString();
-    const normalizedSetTitle = setTitle.trim() || "Untitled set";
-    const week = Number(scopeWeek);
-    const scope = scopeModule
-      ? { module: scopeModule, ...(Number.isInteger(week) && week > 0 && week < 100 ? { week } : {}) }
-      : undefined;
-    const extractionConfidence = (evaluation: DraftImportEvaluation): ExtractionConfidence => (
-      evaluation.level === "High" ? "high" : "medium"
-    );
-    const questionInputs: ReviewedQuestionInput[] = approvedEntries.map(({ draft, evaluation }) => {
-      return {
-        id: uid(),
-        source: draft.source,
-        stem: draft.stem,
-        options: draft.options,
-        correctKey: draft.correctKey,
-        // Always derive this from the current edited option list at the boundary.
-        correctAnswerText: draft.options.find((option) => option.key === draft.correctKey)?.text,
-        explanation: draft.explanation,
-        choiceRationales: draft.choiceRationales,
-        needsReview: undefined,
-        topic: draft.topic,
-        system: draft.system,
-        objective: draft.objective,
-        category: resolveCategory(draft),
-        bank: normalizedSetTitle,
-        // Stamped on each question as well as the set, so a question keeps its
-        // place in the course when it is later drawn into another set.
-        module: scope?.module,
-        week: scope?.week,
-        setId,
-        sourceDocumentId: documentId,
-        sourceFile: pendingDoc ? {
-          name: pendingDoc.fileName,
-          type: pendingDoc.fileType,
-          size: pendingDoc.sizeBytes,
-          addedAt: reviewedAt,
-        } : undefined,
-        questionNumber: draft.questionNumber,
-        sourcePage: draft.sourcePage,
-        examType: (examType || undefined) as QuestionExamType | undefined,
-        difficulty: (difficulty || undefined) as QuestionDifficulty | undefined,
-        citation: draft.reference !== undefined
-          ? (draft.reference.trim() || undefined)
-          : draft.sourceLabel ?? pendingDoc?.fileName,
-        tags: normalizeTags([...(draft.tags ?? []), ...autoTags(draft)]),
-        status: "unseen",
-        ai: draft.aiGenerated ? { generated: true, provider: provider?.info.label } : undefined,
-        extraction: {
-          confidence: extractionConfidence(evaluation),
-          reviewed: true,
-          reviewedAt,
-          questionDetectionConfidence: draft.questionDetectionConfidence,
-          answerDetectionConfidence: draft.answerDetectionConfidence,
-          explanationDetectionConfidence: draft.explanationDetectionConfidence,
-          overallImportConfidence: draft.overallImportConfidence,
-          warnings: draft.warnings,
-          parserRuleIds: [...new Set([
-            ...(draft.parserRuleIds ?? []),
-            ...(draft.reviewAcknowledged ? ["import.user-reviewed"] : []),
-          ])],
-          sourceSnippet: draft.sourceSnippet,
-          questionSourceSnippet: draft.questionSourceSnippet,
-          questionSourcePage: draft.questionSourcePage,
-          answerEvidence: draft.answerEvidence,
-          answerEvidenceSnippet: draft.answerEvidenceSnippet,
-          answerEvidencePage: draft.answerEvidencePage,
-          explanationSourceSnippet: draft.explanationSourceSnippet,
-          explanationSourcePage: draft.explanationSourcePage,
-          explanationSource: draft.explanationSource,
-          explanationRawCandidate: draft.explanationRawCandidate,
-          explanationCleanupOperations: draft.explanationCleanupOperations,
-        },
-      };
-    });
-
-    if (wantsSet) {
-      const preflightErrors = questionInputs.flatMap((input, index) => {
-        const result = validateQuestionRecord(input);
-        return result.ok ? [] : result.errors.map((error) => `Question ${input.questionNumber ?? index + 1}: ${error}`);
-      });
-      if (preflightErrors.length > 0) {
-        pushToast({ title: "Finalization blocked", body: preflightErrors.slice(0, 2).join(" "), tone: "warn" });
-        return;
-      }
-    }
-
-    const fingerprint = reviewedImportFingerprint({
-      title: normalizedSetTitle,
-      destination: modeOverride,
-      sourceIdentity: pendingDoc
-        ? pendingDoc.checksum
-          ? `checksum:${pendingDoc.checksum}`
-          : `file:${pendingDoc.fileName}:${pendingDoc.fileType}:${pendingDoc.sizeBytes}`
-        : `source:${sourceType}`,
-      candidates: wantsSet ? questionInputs : [],
-    });
-    const equivalent = wantsSet && !isReviewedImportInFlight(fingerprint)
-      ? findEquivalentReviewedSet({
-          sets: s.questionSets ?? [],
-          questions: s.questions ?? [],
-          title: normalizedSetTitle,
-          sourceDocumentId: duplicateDoc?.id,
-          candidates: questionInputs,
-        })
-      : undefined;
-    if (equivalent) {
-      finalizingRef.current = true;
+    finalizingRef.current = true;
+    if (prepared.equivalent) {
       pushToast({
         title: "Import already finalized",
         body: "AXOM found the same reviewed questions and reused the existing set instead of creating duplicates.",
         tone: "success",
       });
-      finishSuccessfulImport({
-        setId: equivalent.set.id,
-        documentId: wantsDoc ? duplicateDoc?.id : undefined,
-        questionIds: equivalent.questionIds,
-      });
-      return;
+    } else {
+      setFinalizing(true);
+      setStep("finalize");
     }
-
-    const questionSet: QuestionSet | undefined = wantsSet ? {
-      id: setId!,
-      title: normalizedSetTitle,
-      sourceDocumentIds: documentId ? [documentId] : [],
-      createdAt: reviewedAt,
-      questionIds: questionInputs.map((question) => question.id),
-      tags: category ? [category] : [],
-      aiEnhanced: false,
-      parserWarnings: batchWarnings,
-      kind: "source",
-      ...(scope ? { scope } : {}),
-    } : undefined;
-    let documentWrite: ImportDocumentWrite | undefined;
-    if (pendingDoc && duplicateDoc && (wantsDoc || Boolean(setId))) {
-      documentWrite = {
-        kind: "update",
-        id: duplicateDoc.id,
-        original: duplicateDoc,
-        patch: {
-          linkedQuestionSetIds: setId
-            ? [...new Set([...duplicateDoc.linkedQuestionSetIds, setId])]
-            : duplicateDoc.linkedQuestionSetIds,
-          libraryOnly: duplicateDoc.libraryOnly && !setId,
-        },
-      };
-    } else if (wantsDoc && pendingDoc && documentId) {
-      documentWrite = {
-        kind: "create",
-        document: {
-          id: documentId,
-          title: pendingDoc.title,
-          fileName: pendingDoc.fileName,
-          fileType: pendingDoc.fileType,
-          uploadedAt: reviewedAt,
-          rawText: pendingDoc.rawText,
-          pageTexts: pendingDoc.pageTexts,
-          sizeBytes: pendingDoc.sizeBytes,
-          checksum: pendingDoc.checksum,
-          tags: category ? [category] : [],
-          linkedQuestionSetIds: setId ? [setId] : [],
-          libraryOnly: !setId,
-        },
-      };
-    }
-
-    finalizingRef.current = true;
-    setFinalizing(true);
-    setStep("finalize");
-    const coordinated = await persistReviewedImportOnce(fingerprint, s, {
-      questions: wantsSet ? questionInputs : [],
-      questionSet,
-      documentWrite,
-    });
-    const persisted = coordinated.result;
-    if (!persisted.ok) {
+    const saved = await saveReviewedImport(prepared, s, imageFiles);
+    if (!saved.ok) {
       if (!mountedRef.current) return;
       finalizingRef.current = false;
       setFinalizing(false);
       setStep("review");
       pushToast({
-        title: persisted.rollbackFailures.length
+        title: saved.rollbackFailures.length
           ? "Finalization failed — cleanup incomplete"
           : "Nothing was finalized",
-        body: persisted.rollbackFailures.length
-          ? `${persisted.message} AXOM could not confirm cleanup for ${persisted.rollbackFailures.join(", ")}. Review the Question Bank and Source Library before retrying.`
-          : persisted.message,
+        body: saved.rollbackFailures.length
+          ? `${saved.message} AXOM could not confirm cleanup for ${saved.rollbackFailures.join(", ")}. Review the Question Bank and Source Library before retrying.`
+          : saved.message,
         tone: "warn",
       });
       return;
     }
+    if (saved.reused) {
+      finishSuccessfulImport({ setId: saved.setId, documentId: saved.documentId, questionIds: saved.questionIds });
+      return;
+    }
 
-    const questionIds = persisted.questionIds;
-    const savedSetId = persisted.questionSetId;
-    const savedDocumentId = persisted.documentId;
-
-    // Named images: each added file becomes its question's exhibit. A file
-    // that cannot be saved is reported; it never undoes the import.
-    if (savedSetId && !coordinated.joined && questionIds.length === approvedEntries.length) {
-      const imageProblems: string[] = [];
-      let attachedImages = 0;
-      let missingImages = 0;
-      for (const [entryIndex, { draft }] of approvedEntries.entries()) {
-        const names = draft.attachmentNames ?? [];
-        // Saved ids come back in the order the questions were approved.
-        const questionId = questionIds[entryIndex];
-        if (!names.length || !questionId) continue;
-        missingImages += matchNamedImages(names, imageFiles).filter((match) => !match.file).length;
-        if (!imageFiles.length) continue;
-        const result = await attachNamedImages({ names, files: imageFiles, questionId });
-        if (result.attachments.length) {
-          s.updateQuestion(questionId, { attachments: result.attachments });
-          attachedImages += result.attachments.length;
-        }
-        imageProblems.push(...result.problems);
-      }
-      if (mountedRef.current && (attachedImages || missingImages || imageProblems.length)) {
-        pushToast({
-          title: attachedImages ? `${attachedImages} image${attachedImages === 1 ? "" : "s"} attached to ${attachedImages === 1 ? "its question" : "their questions"}` : "Images still to add",
-          body: [
-            missingImages ? `${missingImages} named image${missingImages === 1 ? " was" : "s were"} not added. Open the question and add the image there.` : "",
-            ...imageProblems.slice(0, 2),
-          ].filter(Boolean).join(" ") || undefined,
-          tone: imageProblems.length || (missingImages && !attachedImages) ? "warn" : "success",
-          duration: 8000,
-        });
-      }
+    const questionIds = saved.questionIds;
+    const savedSetId = saved.setId;
+    const savedDocumentId = saved.documentId;
+    const { attached: attachedImages, missing: missingImages, problems: imageProblems } = saved.images;
+    if (mountedRef.current && (attachedImages || missingImages || imageProblems.length)) {
+      pushToast({
+        title: attachedImages ? `${attachedImages} image${attachedImages === 1 ? "" : "s"} attached to ${attachedImages === 1 ? "its question" : "their questions"}` : "Images still to add",
+        body: [
+          missingImages ? `${missingImages} named image${missingImages === 1 ? " was" : "s were"} not added. Open the question and add the image there.` : "",
+          ...imageProblems.slice(0, 2),
+        ].filter(Boolean).join(" ") || undefined,
+        tone: imageProblems.length || (missingImages && !attachedImages) ? "warn" : "success",
+        duration: 8000,
+      });
     }
     if (mountedRef.current) pushToast({
       title: savedSetId
         ? `${questionIds.length} reviewed question${questionIds.length === 1 ? "" : "s"} finalized`
         : "Source document saved for later review",
-      body: duplicateDoc
+      body: saved.reusedDocument
         ? "AXOM reused the existing source record and linked the new reviewed set."
         : savedSetId ? "The imported set is available in Question Sets and the Question Bank." : undefined,
       tone: "success",
     });
 
     // Optional AI enhancement — after save, clearly labeled, never blocking.
-    if (aiEnhance && savedSetId && provider && !coordinated.joined) {
+    if (aiEnhance && savedSetId && provider && !saved.joined) {
       const forDigest = approved.map((draft) => ({
         stem: draft.stem,
         correct: draft.options.find((option) => option.key === draft.correctKey)?.text,
         explanation: draft.explanation,
       }));
-      enhanceQuestionSet(provider, { title: normalizedSetTitle, questions: forDigest })
+      enhanceQuestionSet(provider, { title: prepared.setTitle, questions: forDigest })
         .then((digest) => {
           s.updateQuestionSet(savedSetId, {
             aiEnhanced: true,
@@ -643,7 +441,7 @@ export function ImportPanel({
           });
           void saveAiGeneration({
             kind: "summary",
-            title: `${normalizedSetTitle} digest`,
+            title: `${prepared.setTitle} digest`,
             inputHash: hashGenerationInput({ kind: "question-set-digest", setId: savedSetId, questionIds }),
             sourceIds: [savedSetId, ...(savedDocumentId ? [savedDocumentId] : [])],
             model: provider.info.label,
@@ -660,7 +458,7 @@ export function ImportPanel({
 
     finishSuccessfulImport({
       setId: savedSetId,
-      documentId: wantsDoc ? savedDocumentId : undefined,
+      documentId: prepared.wantsDoc ? savedDocumentId : undefined,
       questionIds,
     });
   }
@@ -803,6 +601,22 @@ export function ImportPanel({
     editDraft(index, { options: [...draft.options, { key, text: "" }] });
   }
 
+  /** Put an image the import could not place on the question the learner picks. */
+  function attachImage(name: string, reviewId: string) {
+    if (!reviewId) return;
+    setDrafts((all) => all.map((draft) => (draft.reviewId === reviewId
+      ? { ...draft, attachmentNames: [...new Set([...(draft.attachmentNames ?? []), name])] }
+      : draft)));
+  }
+
+  /** Take an image off every question that names it. It stays in the import, unplaced. */
+  function detachImage(name: string) {
+    const key = imageNameKey(name);
+    setDrafts((all) => all.map((draft) => ((draft.attachmentNames ?? []).some((entry) => imageNameKey(entry) === key)
+      ? { ...draft, attachmentNames: draft.attachmentNames!.filter((entry) => imageNameKey(entry) !== key) }
+      : draft)));
+  }
+
   function returnToSource() {
     setStep("source");
     if (tab === "batch") {
@@ -934,7 +748,9 @@ export function ImportPanel({
         ? "Include at least one question before finalizing."
         : saveMode !== "doc" && blockedCount > 0
           ? `${blockedCount} included question${blockedCount === 1 ? " still needs" : "s still need"} correction or explicit review before finalization.`
-          : "The reviewed import is ready to finalize.";
+          : unusedImages.length > 0 && saveMode !== "doc"
+            ? `The reviewed import is ready to finalize. ${unusedImages.length} image${unusedImages.length === 1 ? " is" : "s are"} not on any question and will be left out.`
+            : "The reviewed import is ready to finalize.";
 
   return (
     <GlassCard className="question-import-flow">
@@ -1039,6 +855,8 @@ export function ImportPanel({
                   checksum: payload.checksum,
                 }
               : null,
+            false,
+            payload.images ?? [],
           );
         }} />
       </div>
@@ -1120,14 +938,15 @@ export function ImportPanel({
             </section>
           )}
 
-          {imageMatches.length > 0 && (
+          {(imageMatches.length > 0 || imageFiles.length > 0) && (
             <section className="import-images" aria-labelledby="import-images-title">
               <div className="spread wrap gap8">
                 <div>
                   <b id="import-images-title">Images</b>
                   <div className="sub">
-                    {imageMatches.length} image{imageMatches.length === 1 ? " is" : "s are"} named by {imageMatches.length === 1 ? "a question" : "these questions"}.
-                    Add the file{imageMatches.length === 1 ? "" : "s"} and each one is attached to its question by name, to show with the question.
+                    {imageMatches.length > 0
+                      ? `${imageMatches.length} image${imageMatches.length === 1 ? " is" : "s are"} named by ${imageMatches.length === 1 ? "a question" : "these questions"}. Add the file${imageMatches.length === 1 ? "" : "s"} and each one is attached to its question by name, to show with the question.`
+                      : "No question names an image yet. Attach one below to show it with its question."}
                   </div>
                 </div>
                 <GButton size="sm" onClick={() => imageInputRef.current?.click()}>
@@ -1141,17 +960,39 @@ export function ImportPanel({
                     if (picked.length) setImageFiles((current) => [...current.filter((file) => !picked.some((next) => imageNameKey(next.name) === imageNameKey(file.name))), ...picked]);
                   }} />
               </div>
-              <ul className="import-image-list" aria-label="Named images">
-                {imageMatches.map((match) => (
-                  <li key={match.name} className={match.file ? "matched" : "missing"}>
-                    {match.file ? <CheckCircle2 size={ICON_SIZE.microInline} aria-hidden="true" /> : <X size={ICON_SIZE.microInline} aria-hidden="true" />}
-                    <span>{match.name}</span>
-                    <small>{match.file ? (imageNameKey(match.file.name) === imageNameKey(match.name) ? "ready" : `using ${match.file.name}`) : "not added yet"}</small>
-                  </li>
-                ))}
-              </ul>
+              {imageMatches.length > 0 && (
+                <ul className="import-image-list" aria-label="Named images">
+                  {imageMatches.map((match) => (
+                    <li key={match.name} className={match.file ? "matched" : "missing"}>
+                      {match.file ? <CheckCircle2 size={ICON_SIZE.microInline} aria-hidden="true" /> : <X size={ICON_SIZE.microInline} aria-hidden="true" />}
+                      <span>{match.name}</span>
+                      <small>{match.file ? (imageNameKey(match.file.name) === imageNameKey(match.name) ? "ready" : `using ${match.file.name}`) : "not added yet"}</small>
+                      <button type="button" className="import-image-detach" aria-label={`Take ${match.name} off its question`} title="Take this image off its question"
+                        onClick={() => detachImage(match.name)}>
+                        <X size={ICON_SIZE.microInline} aria-hidden="true" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
               {unusedImages.length > 0 && (
-                <div className="sub">Not named by any question, so left out: {unusedImages.map((file) => file.name).join(", ")}.</div>
+                <>
+                  <div className="sub">Not named by any question, so left out: {unusedImages.map((file) => file.name).join(", ")}. To keep one, attach it to its question here.</div>
+                  <ul className="import-image-list" aria-label="Images not on a question">
+                    {unusedImages.map((file) => (
+                      <li key={file.name} className="missing">
+                        <span>{file.name}</span>
+                        <select className="field week-move" aria-label={`Attach ${file.name} to a question`} value=""
+                          onChange={(event) => attachImage(file.name, event.target.value)}>
+                          <option value="">Attach to a question</option>
+                          {drafts.map((draft, index) => (draft.include
+                            ? <option key={draft.reviewId} value={draft.reviewId}>Question {draft.questionNumber ?? index + 1}{draft.sourcePage ? `, page ${draft.sourcePage}` : ""}</option>
+                            : null))}
+                        </select>
+                      </li>
+                    ))}
+                  </ul>
+                </>
               )}
             </section>
           )}
@@ -1248,6 +1089,7 @@ export function ImportPanel({
                       </span>
                     </button>
                     <Tag tone={tone}>{evaluation.level}</Tag>
+                    {(draft.parserRuleIds ?? []).includes(ALREADY_IMPORTED_RULE) && <Tag tone="cyan">Already imported</Tag>}
                     {draft.reviewAcknowledged && <Tag tone="cyan">Reviewed</Tag>}
                     {draft.aiGenerated && <Tag tone="purple">AI</Tag>}
                     <GhostButton aria-label={`Remove question ${draft.questionNumber ?? index + 1}`}
