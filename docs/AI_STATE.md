@@ -40,6 +40,11 @@ and the course engine, whose contract is [course engine](features/course-engine.
   recognised by wording (`lib/questionImportHistory.ts`), and review and mass import save
   through one path (`lib/questionImportSave.ts`).
 
+Also here: the shared exam engine (`lib/exam/engine.ts`, one rule for time spent in
+`lib/exam/questionTime.ts`, `components/exam/useExamBlock.ts`), the Examplify interface and
+`ExamSimulator` on that engine. A finished simulation is saved through `commitQuizRun`. The
+AXOM player in `ExamRunner.tsx` uses the engine's time rule and still keeps its own answer state.
+
 Not on this line yet: any Decode code, Ideas 2.
 
 ## Important current decisions
@@ -64,7 +69,10 @@ historical authority only; graph links never approve a proposal or establish shi
 
 ## Open
 
-- `reviewPriority` in `learning-intelligence/review.ts` holds a `TODO(human)` placeholder.
+- `reviewPriority` in `learning-intelligence/review.ts` holds a `TODO(human)` placeholder: the
+  next Learning Intelligence task.
+- The AXOM player's answers, flags and strike-outs are not on the exam reducer yet. The mapping
+  and its rules are in the ledger. A blank scores as wrong in a simulation, unscored in the player.
 - Most real question files still need review: decks mark answers in colour, which is not read.
   The slide reader's unresolved cases are listed in the course engine contract.
 - Skipped import files are remembered in this device's local storage, not in the workspace.
@@ -86,9 +94,10 @@ branch; medical AI goes through the authenticated AI proxy.
 
 ## Next actions
 
-1. Decode code once its scope types are replaced by the course engine's, with tests.
-2. Ideas 2 and the remaining remote-only work by intent, never by whole-branch merge.
-3. The full gate and a real browser at 1440 and 390, then retirement of finished worktrees.
+1. The AXOM player onto the exam reducer, keeping the course engine's save rules.
+2. Decode code once its scope types are replaced by the course engine's, with tests.
+3. Ideas 2 and the remaining remote-only work by intent, never by whole-branch merge.
+4. The full gate and a real browser at 1440 and 390, then retirement of finished worktrees.
 
 ## Context routes
 
