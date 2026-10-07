@@ -6,3 +6,7 @@ export {
   analysisIsCurrent, analysisPages, currentTeaching, pendingAnalyses, questionSourceFingerprint, questionSourcePages,
   withAnalysis, withAnalysisStatus,
 } from "./analysis";
+export {
+  SOURCE_ORIGINALS_DB, SPARSE_PAGE_CHARACTERS, SourceOriginalError, deleteSourceOriginal, readSourceOriginal, saveSourceOriginal,
+  sourceCoverage, type SourceCoverage, type SourceOriginalProblem,
+} from "./sources";

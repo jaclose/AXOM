@@ -27,6 +27,7 @@ Each layer owns one thing and reads the layer before it by id.
 | The analysis record and its bounds | `lib/decode/types.ts` |
 | Analyses back from storage, a backup or another device | `lib/decode/normalize.ts` |
 | Whether an analysis still fits, and which one is taught from | `lib/decode/analysis.ts` |
+| A source's original file on this device, and how much of it gave text | `lib/decode/sources.ts` |
 
 ## Invariants
 
@@ -46,6 +47,10 @@ Each layer owns one thing and reads the layer before it by id.
   another week does not.
 - **A broken analysis is dropped whole.** A reviewed statement is never kept without the
   citation it rested on.
+- **The original file stays on the device.** A source in the workspace is its text and a
+  checksum. The file itself is kept in its own IndexedDB database, never exported or
+  synced, and goes when its source is removed. A file is accepted only when its bytes
+  match the source's checksum, so page numbers keep pointing at the same pages.
 - **Bounded.** A few analyses per question and capped text (`ANALYSIS_LIMITS`), so
   teaching cannot swell a workspace past what sync carries.
 
@@ -63,4 +68,4 @@ ported by intent, not merged.
 | `decodeMetrics`, `nextDecodeAction` | `lib/learning-intelligence/` (attempt events, patterns, review) |
 | `SourceTrace`, `DecodeDistractor`, `QuestionAnalysis`, the source fingerprint | `lib/decode/` |
 
-Tests: `lib/decode/decode.test.ts`.
+Tests: `lib/decode/decode.test.ts`, `lib/decode/sources.test.ts`.

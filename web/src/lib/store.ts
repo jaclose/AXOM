@@ -71,6 +71,7 @@ import type { DailyCloseout } from "./closeout";
 import type { RecoveryPlan } from "./recovery";
 import type { CourseActivity } from "./course-engine/activity";
 import { normalizeQuestionAnalyses } from "./decode/normalize";
+import { deleteSourceOriginal } from "./decode/sources";
 import { applyAttempt, normalizeQuestionTaxonomy, validateQuestionRecord, withCorrectAnswerText, type QuestionAttempt, type QuestionRecord } from "./questions";
 import { normalizeTagList, mergeTagsInList } from "./questionTags";
 import {
@@ -1491,7 +1492,9 @@ export const useStore = create<Store>()(
         set((s) => ({ documents: [doc, ...(s.documents ?? []).filter((d) => d.id !== doc.id)] })),
       updateDocument: (id, patch) =>
         set((s) => ({ documents: (s.documents ?? []).map((d) => (d.id === id ? { ...d, ...patch } : d)) })),
-      removeDocument: (id) =>
+      removeDocument: (id) => {
+        // The original file kept on this device goes with its source (fire-and-forget).
+        void deleteSourceOriginal(id).catch(() => {});
         set((s) => ({
           documents: (s.documents ?? []).filter((d) => d.id !== id),
           questionSets: (s.questionSets ?? []).map((qs) => ({
@@ -1500,7 +1503,8 @@ export const useStore = create<Store>()(
           })),
           questions: (s.questions ?? []).map((q) =>
             q.sourceDocumentId === id ? { ...q, sourceDocumentId: undefined } : q),
-        })),
+        }));
+      },
       addQuestionSet: (qset) =>
         set((s) => ({ questionSets: [qset, ...(s.questionSets ?? []).filter((x) => x.id !== qset.id)] })),
       updateQuestionSet: (id, patch) =>
