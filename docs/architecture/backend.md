@@ -1,3 +1,8 @@
+---
+tags:
+  - axom/architecture
+authority: canonical
+---
 # Backend and AI boundaries
 
 | System | Role | Relevant files / guide |

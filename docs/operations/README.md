@@ -1,3 +1,8 @@
+---
+tags:
+  - axom/navigation
+authority: navigation
+---
 # Operations routes
 
 - [Development and environment](development.md)
@@ -5,5 +10,6 @@
 - [Deployment and updates](deployment.md)
 - [Troubleshooting](troubleshooting.md)
 - [Repository audit and hygiene policy](repository-audit.md)
+- [Active protection and deferred maintenance](repository-audit.md#maintenance-registry)
 
 Read the procedure relevant to the task; deployment instructions do not authorize production changes.

@@ -1,6 +1,14 @@
+---
+tags:
+  - axom/architecture
+authority: canonical
+---
 # AXOM Accounts & Sync V1
 
 AXOM remains local-first. IndexedDB Local Vault is the immediate interactive store and manual JSON export/import remains an emergency portable recovery path. A signed-in account adds server-acknowledged, immutable protected versions; it never makes network availability a prerequisite for ordinary work.
+
+Extends: [workspace persistence](data-model.md). Governed by:
+[additive account protection](../decisions/002-local-workspace-and-accounts.md).
 
 ```text
 React/Zustand → IndexedDB Local Vault → persisted pending revision

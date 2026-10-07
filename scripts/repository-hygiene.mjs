@@ -16,9 +16,16 @@ const BOOTSTRAP_PROFILES = {
 export const DOCUMENT_BUDGETS = Object.freeze({
   'AGENTS.md': 12_000,
   'docs/AI_STATE.md': 12_000,
-  'CLAUDE.md': 1_500,
-  '.github/copilot-instructions.md': 1_500,
+  'CLAUDE.md': 800,
+  '.github/copilot-instructions.md': 800,
 });
+export const MAINTENANCE_DOCUMENT = 'docs/operations/repository-audit.md';
+export const REQUIRED_ROUTES = Object.freeze([
+  'docs/INDEX.md', MAINTENANCE_DOCUMENT,
+  'docs/graph/README.md', 'docs/graph/AXOM-System-Map.md',
+  ...['architecture', 'features', 'operations', 'product', 'decisions', 'archive']
+    .map((section) => `docs/${section}/README.md`),
+]);
 const ENTRYPOINTS = new Set([
   ...Object.keys(DOCUMENT_BUDGETS), 'README.md', 'web/README.md', 'docs/INDEX.md',
   'docs/directions/README.md',
@@ -29,12 +36,14 @@ const GENERATED_DIRS = new Set([
   'node_modules', 'dist', 'build', '.build', '.cache', '.next', '.nuxt', '.output',
   'coverage', 'target', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache',
   '.turbo', '.parcel-cache', '.vite', 'deriveddata', '.swiftpm', 'playwright-report',
-  'test-results', 'artifacts', 'output', 'tmp', 'temp', 'logs', 'screenshots',
+  'test-results', 'artifacts', 'output', 'tmp', 'temp', 'logs', 'screenshots', '.obsidian', '.trash',
 ]);
+const SHARED_OBSIDIAN_CONFIG = new Set(['docs/.obsidian/app.json', 'docs/.obsidian/graph.json']);
 const RULES = new Set(['large-file', 'generated-artifact', 'root-media']);
 
 export function isActiveDocument(filePath) {
   if (ENTRYPOINTS.has(filePath)) return true;
+  if (/^docs\/graph\/.+\.md$/.test(filePath)) return true;
   // Archived source links describe their original location and remain frozen.
   return /^docs\/(?:architecture|features|operations|product|decisions)\/(?:[^/]+\/)*[a-z0-9][a-z0-9._-]*\.md$/.test(filePath);
 }
@@ -43,7 +52,7 @@ export function artifactRules(filePath, bytes) {
   const rules = [];
   if (bytes > MAX_FILE_BYTES) rules.push('large-file');
   const segments = filePath.toLowerCase().split('/');
-  if (segments.slice(0, -1).some((segment) => GENERATED_DIRS.has(segment))
+  if ((segments.slice(0, -1).some((segment) => GENERATED_DIRS.has(segment)) && !SHARED_OBSIDIAN_CONFIG.has(filePath))
     || /\.(?:log|pyc|tsbuildinfo)$/i.test(filePath)
     || /(?:^|\/)\.DS_Store$/.test(filePath)) rules.push('generated-artifact');
   if (segments.length === 1 && /\.(?:pdf|mp3|wav|m4a|aac|flac|ogg|aiff?|opus|mp4|mov|webm|mkv|png|jpe?g|webp|gif|heic|tiff?|avif)$/i.test(filePath)) {
@@ -129,6 +138,71 @@ export function checkBootstrapContext(documents) {
     return { label, paths, ...totals, limit: BOOTSTRAP_TOKEN_BUDGET, complete, withinBudget };
   });
   return { errors, profiles };
+}
+
+export function checkRequiredRoutes(filePaths) {
+  const paths = new Set(filePaths);
+  return REQUIRED_ROUTES.filter((filePath) => !paths.has(filePath))
+    .map((filePath) => `${filePath}: required canonical route is missing; restore the intended infrastructure checkpoint.`);
+}
+
+export function checkConflictMarkers(documents) {
+  return documents.flatMap(({ path: filePath, content }) => content.split('\n')
+    .flatMap((line, index) => /^(?:<{7,}|>{7,}|\|{7,})(?:\s|$)/.test(line)
+      ? [`${filePath}:${index + 1}: unresolved conflict marker in repository guidance/configuration.`] : []));
+}
+
+export function checkMaintenanceRegistry(content = '') {
+  const sections = content.split(/^## Maintenance registry\r?$/m);
+  if (sections.length !== 2) return ['Maintenance registry: one required section must exist.'];
+  const section = sections[1].split(/^## /m)[0];
+  const tableLines = section.split('\n').filter((line) => line.trim().startsWith('|'));
+  if (tableLines.some((line) => !line.trim().endsWith('|'))) return ['Maintenance registry: table rows must end with a pipe.'];
+  const rows = tableLines
+    .map((line) => line.trim().slice(1, -1).split('|').map((cell) => cell.trim()));
+  const header = ['Area / path', 'Status', 'Owner / task', 'Why protected', 'Cleanup opportunity', 'Safe condition', 'Date / reference'];
+  if (JSON.stringify(rows[0]) !== JSON.stringify(header) || rows[1]?.length !== 7
+    || !rows[1].every((cell) => /^:?-{3,}:?$/.test(cell))) {
+    return ['Maintenance registry: expected the seven-column header and separator.'];
+  }
+  const errors = [];
+  const seen = new Set();
+  for (const [index, cells] of rows.slice(2).entries()) {
+    const label = `Maintenance registry row ${index + 1}`;
+    if (cells.length !== 7 || cells.some((cell) => !cell)) {
+      errors.push(`${label}: all seven fields are required.`);
+      continue;
+    }
+    const [area, status, , , , , reference] = cells;
+    if (!['ACTIVE', 'DEFERRED', 'READY'].includes(status)) errors.push(`${label}: status must be ACTIVE, DEFERRED or READY.`);
+    const paths = [...area.matchAll(/`([^`]+)`/g)].map((match) => match[1].replace(/\/$/, ''));
+    // Owners may name paths in another branch, so require safe paths, not local existence.
+    if (!paths.length || paths.some((filePath) => !isSafeRepositoryPath(filePath))) {
+      errors.push(`${label}: use backtick-quoted repository-relative paths, without traversal.`);
+    }
+    if (seen.has(area)) errors.push(`${label}: duplicate area; update the existing record.`);
+    seen.add(area);
+    const date = reference.match(/^(\d{4}-\d{2}-\d{2}):\s+\S/);
+    const timestamp = date ? Date.parse(`${date[1]}T00:00:00Z`) : NaN;
+    if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString().slice(0, 10) !== date?.[1]) {
+      errors.push(`${label}: Date / reference requires a valid YYYY-MM-DD: evidence locator.`);
+    }
+  }
+  return errors;
+}
+
+export function checkGraphMetadata(documents) {
+  const errors = [];
+  for (const document of documents) {
+    const metadata = document.content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1];
+    const curated = metadata && /axom\//.test(metadata);
+    if (!curated && !document.path.startsWith('docs/graph/')) continue;
+    if (!metadata || !/^  - axom\/(?:feature|architecture|decision|operations|navigation|state)\s*$/m.test(metadata)
+      || !/^authority: (?:canonical|navigation|current-state)\s*$/m.test(metadata)) {
+      errors.push(`${document.path}: curated graph notes require an axom category tag and explicit authority.`);
+    }
+  }
+  return errors;
 }
 
 function withoutCode(markdown) {
@@ -329,7 +403,13 @@ export function runRepositoryHygiene(repoRoot) {
   const budgets = checkDocumentBudgets(documents);
   const bootstrap = checkBootstrapContext(documents);
   const startupErrors = checkStartupImports(documents);
-  const routingErrors = checkMarkdownLinks(documents, files.map((file) => file.path));
+  const routingErrors = [...checkRequiredRoutes(files.filter((file) => !file.symbolicLink).map((file) => file.path)),
+    ...checkMarkdownLinks(documents, files.map((file) => file.path))];
+  const configFiles = files.filter((file) => !file.symbolicLink && ['.gitignore', 'package.json', 'web/package.json'].includes(file.path))
+    .map((file) => ({ path: file.path, content: readFileSync(path.join(repoRoot, file.path), 'utf8') }));
+  const conflictErrors = checkConflictMarkers([...documents, ...configFiles]);
+  const maintenanceErrors = checkMaintenanceRegistry(documents.find((document) => document.path === MAINTENANCE_DOCUMENT)?.content);
+  const graphErrors = checkGraphMetadata(documents);
   const preservation = checkPreservationManifests(repoRoot, baseline.preservationManifests, files.map((file) => file.path));
   const errors = [
     ...files.filter((file) => file.symbolicLink && isActiveDocument(file.path))
@@ -338,6 +418,9 @@ export function runRepositoryHygiene(repoRoot) {
     ...bootstrap.errors,
     ...startupErrors,
     ...routingErrors,
+    ...conflictErrors,
+    ...maintenanceErrors,
+    ...graphErrors,
     ...checkFiles(files, baseline),
     ...preservation.errors,
   ];
@@ -345,6 +428,7 @@ export function runRepositoryHygiene(repoRoot) {
     errors, estimates: budgets.estimates, bootstrap: bootstrap.profiles,
     startupProblems: startupErrors.length, routingProblems: routingErrors.length,
     archiveProblems: preservation.errors.length,
+    conflictProblems: conflictErrors.length, maintenanceProblems: maintenanceErrors.length, graphProblems: graphErrors.length,
     filesChecked: files.length, documentsChecked: documents.length, snapshotsChecked: preservation.snapshotsChecked,
   };
 }
@@ -362,6 +446,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === scriptPath) {
       console.log(`${estimate.path}: ${estimate.characters}/${estimate.limit} chars, ~${estimate.estimatedTokens} tokens, ${estimate.words} words, ${estimate.bytes} bytes | ${estimate.characters <= estimate.limit ? 'PASS' : 'FAIL'}`);
     }
     console.log(`Startup imports: ${result.startupProblems ? 'FAIL' : 'PASS'} | Routing links: ${result.routingProblems} problems | Archive integrity: ${result.archiveProblems ? 'FAIL' : 'PASS'} (${result.snapshotsChecked} snapshots checked)`);
+    console.log(`Conflict markers: ${result.conflictProblems} | Maintenance registry: ${result.maintenanceProblems} | Graph metadata: ${result.graphProblems}`);
     for (const error of result.errors) console.error(`FAIL ${error}`);
     console.log(`Repository hygiene: ${result.errors.length ? 'FAIL' : 'PASS'} (${result.documentsChecked} active docs, ${result.filesChecked} candidate files, ${result.snapshotsChecked} preserved snapshots, ${result.errors.length} problems).`);
     process.exitCode = result.errors.length ? 1 : 0;

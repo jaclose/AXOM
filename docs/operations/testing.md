@@ -1,3 +1,8 @@
+---
+tags:
+  - axom/operations
+authority: canonical
+---
 # Validation routes
 
 Start with the affected behavior. A successful command validates its checkout, not
@@ -11,6 +16,29 @@ another worktree or production. Save full logs outside active context and report
 | Account sync/migrations | Focused `web/src/lib/sync/` tests (including PGlite) | Account safety E2E; live tests separately authorized |
 | Release/update tooling | `npm run test:release` | Production build + `verify:app-updates` |
 | Native Rust | `cargo test --manifest-path src-tauri/Cargo.toml --lib --locked` | `cargo fmt --manifest-path src-tauri/Cargo.toml --check`, `cargo check --manifest-path src-tauri/Cargo.toml --locked`, launch/exercise |
+
+## Narrow commands
+
+Use Node from `.nvmrc` (22.23.1 on this maintenance checkout). Repository checks use
+only Node built-ins; no install is needed for documentation/tooling-only work.
+
+| Need | Command from repository root |
+| --- | --- |
+| One unit/component file | `npm --prefix web test -- src/lib/courseScheduleImport.test.ts` |
+| A subsystem | `npm --prefix web test -- src/lib/sync/` |
+| Typecheck | `npm --prefix web run typecheck` |
+| Lint | `npm --prefix web run lint` |
+| Build | `npm --prefix web run build` |
+| One browser spec | `npm --prefix web run test:e2e -- e2e/question-bank-persistence.spec.ts` |
+| Repository gate without npm aliases | `node scripts/repository-hygiene.mjs` |
+| Repository tests without npm aliases | `node --test scripts/repository-hygiene.test.mjs` |
+
+Do not add another test runner or move adjacent unit tests. Full logs belong in a
+unique `/tmp/axom-<task>.log`; preserve the command exit status before filtering it.
+Node 26's experimental global localStorage can break jsdom: prefer the pinned Node,
+or the documented `NODE_OPTIONS=--no-experimental-webstorage` workaround.
+
+## Integration and release
 
 Full web integration gate, required before integration/release:
 
