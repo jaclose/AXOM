@@ -49,9 +49,12 @@ export interface FigurePlacement {
   basis?: FigurePlacementBasis;
   /** Why it was left unplaced, in plain words. */
   reason?: string;
-  /** In a deck: the kind of slide that kept it back. */
-  held?: "answer-slide" | "no-question";
+  /** What kept it back, when that is a rule and not a failure to read the page. */
+  held?: "answer-slide" | "below-answer" | "no-question";
 }
+
+/** The rule id a draft carries for a figure attached to it on this basis. */
+export const figureRule = (basis: FigurePlacementBasis) => `figure.${basis}`;
 
 type Matrix = [number, number, number, number, number, number];
 
@@ -187,6 +190,17 @@ export function locateQuestionPages(
   });
 }
 
+/** A line that gives or explains the answer: "Answer: C", "Correct answer is B", "Rationale: ...". */
+const ANSWER_MARKER = /^(?:the\s+)?(?:correct\s+)?answers?\s*(?:is\b|[:\-–=])|^(?:explanation|rationale|discussion|(?:in)?correct\s+feedback|feedback)\s*[:\-–]/i;
+
+/**
+ * Is there an answer or explanation line between where the question starts and
+ * the figure? Then the figure illustrates the answer, not the question.
+ */
+function belowAnswer(figureTop: number, questionTop: number | undefined, lines: readonly PageLine[]): boolean {
+  return lines.some((line) => line.top <= figureTop && (questionTop === undefined || line.top > questionTop) && ANSWER_MARKER.test(line.text.trim()));
+}
+
 /** The line a question starts on, found by its opening words. */
 function startTop(stem: string, lines: readonly PageLine[]): number | undefined {
   const opening = squash(stem).slice(0, 28);
@@ -231,7 +245,15 @@ export function placeFigures(
     if (role?.kind === "question" && onPage.length === 0) {
       return { name: figure.name, page: figure.page, reason: `Page ${figure.page} is a question slide, but none of the imported questions was matched to it.` };
     }
-    if (onPage.length === 1) return { name: figure.name, page: figure.page, draftIndex: onPage[0].index, basis: "only-question-on-page" };
+    const underAnswer = (): FigurePlacement => ({
+      name: figure.name, page: figure.page, held: "below-answer",
+      reason: `On page ${figure.page} this image sits below the answer or explanation, so it was kept out of the question to avoid giving the answer away.`,
+    });
+    if (onPage.length === 1) {
+      const lines = linesByPage.get(figure.page) ?? [];
+      if (belowAnswer(figure.top, startTop(onPage[0].draft.stem, lines), lines)) return underAnswer();
+      return { name: figure.name, page: figure.page, draftIndex: onPage[0].index, basis: "only-question-on-page" };
+    }
 
     if (onPage.length > 1) {
       const lines = linesByPage.get(figure.page) ?? [];
@@ -242,6 +264,7 @@ export function placeFigures(
       // Every question on the page has to be found before "nearest above" means anything.
       if (starts.length === onPage.length) {
         const above = starts.filter((entry) => entry.top <= figure.top).sort((a, b) => b.top - a.top)[0];
+        if (above && belowAnswer(figure.top, above.top, lines)) return underAnswer();
         if (above) return { name: figure.name, page: figure.page, draftIndex: above.index, basis: "below-question-start" };
       }
       return {
@@ -362,7 +385,7 @@ export async function extractPdfFigures(buffer: ArrayBuffer, fileName: string): 
  * saying why it was attached). Returns the image files, placed or not, and the
  * notes to show the learner. A failure here never loses the questions.
  */
-export async function attachPdfFigures<T extends { stem: string; sourcePage?: number; attachmentNames?: string[]; warnings?: string[] }>(
+export async function attachPdfFigures<T extends { stem: string; sourcePage?: number; attachmentNames?: string[]; warnings?: string[]; parserRuleIds?: string[] }>(
   buffer: ArrayBuffer,
   fileName: string,
   drafts: T[],
@@ -383,14 +406,16 @@ export async function attachPdfFigures<T extends { stem: string; sourcePage?: nu
     let placed = 0;
     // A deck can hold an image on every answer slide. Past a few, they are
     // reported together, with their pages, instead of one line each.
-    const heldTogether = new Set((["answer-slide", "no-question"] as const).filter((kind) => placements.filter((placement) => placement.held === kind).length > 3));
+    const heldTogether = new Set((["answer-slide", "below-answer", "no-question"] as const).filter((kind) => placements.filter((placement) => placement.held === kind).length > 3));
     for (const kind of heldTogether) {
       const held = placements.filter((placement) => placement.held === kind);
       const pages = [...new Set(held.map((placement) => placement.page))];
       const where = `page${pages.length === 1 ? "" : "s"} ${pages.slice(0, 12).join(", ")}${pages.length > 12 ? ` and ${pages.length - 12} more` : ""}`;
       notes.push(kind === "answer-slide"
-        ? `${held.length} images are on answer or explanation slides (${where}). They were kept out of their questions so the answer is not given away, and are in the image list to attach by hand.`
-        : `${held.length} images are on slides with no question (${where}). They were not attached, and are in the image list.`);
+        ? `${held.length} images are on answer or explanation slides (${where}). They were kept out of their questions so the answer is not given away. They are listed under Images.`
+        : kind === "below-answer"
+          ? `${held.length} images sit below an answer or explanation on their page (${where}). They were kept out of their questions so the answer is not given away. They are listed under Images.`
+          : `${held.length} images are on slides with no question (${where}). They were not attached. They are listed under Images.`);
     }
     for (const placement of placements) {
       if (placement.draftIndex === undefined) {
@@ -400,6 +425,7 @@ export async function attachPdfFigures<T extends { stem: string; sourcePage?: nu
       }
       const draft = drafts[placement.draftIndex];
       draft.attachmentNames = [...(draft.attachmentNames ?? []), placement.name];
+      draft.parserRuleIds = [...new Set([...(draft.parserRuleIds ?? []), figureRule(placement.basis!)])];
       draft.warnings = [
         ...(draft.warnings ?? []),
         `Image from page ${placement.page}, attached because this is ${FIGURE_BASIS_LABEL[placement.basis!]}.${located[placement.draftIndex].byFirstAppearance ? " The question's page is the first one its opening words appear on." : ""} Check it is the right one.`,
@@ -411,7 +437,7 @@ export async function attachPdfFigures<T extends { stem: string; sourcePage?: nu
     }
     return { images: found.figures.map((figure) => figure.file), notes: [...notes, ...found.warnings] };
   } catch {
-    return { images: [], notes: ["AXOM could not read the images in this PDF. The questions were imported without them: add any image by hand below."] };
+    return { images: [], notes: ["AXOM could not read the images in this PDF. The questions were imported without them. Add an image to a question after it is saved, from the question itself."] };
   }
 }
 

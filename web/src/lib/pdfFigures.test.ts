@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { figureBoxes, imageBoxes, locateQuestionPages, placeFigures, withoutDecorations } from "./pdfFigures";
+import { figureBoxes, figureRule, imageBoxes, locateQuestionPages, placeFigures, withoutDecorations } from "./pdfFigures";
 
 const OPS = { save: 1, restore: 2, transform: 3, paintImageXObject: 4 };
 const PAGE = { width: 612, height: 792 };
@@ -175,3 +175,40 @@ describe("figures in a deck that was read slide by slide", () => {
     });
   });
 });
+
+describe("a figure under the answer on its page", () => {
+  // An answer-key document prints a question, its answer and its rationale on
+  // one page. A figure above the answer is the question's; one below it is not.
+  const lines = new Map([[1, [
+    { top: 80, text: "1. A tracing is shown. Which rhythm is present?" },
+    { top: 100, text: "A. Rhythm one" },
+    { top: 120, text: "B. Rhythm two" },
+    { top: 300, text: "Correct answer: B" },
+    { top: 320, text: "Rationale: the second rhythm matches the tracing." },
+    { top: 500, text: "2. A second tracing is shown. Which rhythm is present now?" },
+    { top: 520, text: "A. Rhythm three" },
+  ]]]);
+  const one = [{ stem: "A tracing is shown. Which rhythm is present?", sourcePage: 1 }];
+  const two = [...one, { stem: "A second tracing is shown. Which rhythm is present now?", sourcePage: 1 }];
+  const held = "On page 1 this image sits below the answer or explanation, so it was kept out of the question to avoid giving the answer away.";
+
+  it("is kept out of the only question on the page", () => {
+    const [above, below] = placeFigures([{ name: "stem.png", page: 1, top: 200 }, { name: "rationale.png", page: 1, top: 400 }], one, lines);
+    expect(above).toEqual({ name: "stem.png", page: 1, draftIndex: 0, basis: "only-question-on-page" });
+    expect(below).toEqual({ name: "rationale.png", page: 1, held: "below-answer", reason: held });
+  });
+
+  it("is kept out of the question above it on a shared page, and the next question still gets its own", () => {
+    const placed = placeFigures([
+      { name: "stem.png", page: 1, top: 200 }, { name: "rationale.png", page: 1, top: 400 }, { name: "second.png", page: 1, top: 600 },
+    ], two, lines);
+    expect(placed.map((item) => [item.draftIndex, item.basis ?? item.held])).toEqual([[0, "below-question-start"], [undefined, "below-answer"], [1, "below-question-start"]]);
+    expect(placed[1].reason).toBe(held);
+  });
+
+  it("names the basis a figure was attached on, for the checks that follow", () => {
+    expect(figureRule("question-runs-onto-page")).toBe("figure.question-runs-onto-page");
+    expect(figureRule("only-question-on-page")).toBe("figure.only-question-on-page");
+  });
+});
+

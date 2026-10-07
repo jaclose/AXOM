@@ -92,12 +92,25 @@ export function parsePdfQuestions(text: string, pages: string[]): PdfQuestions {
       if (page) draft.answerEvidencePage = page;
     }
     const warnings: string[] = [];
-    if (source.continuationPages.length) warnings.push(`This question runs over pages ${pageList([source.questionPage, ...source.continuationPages])}. Check it is complete.`);
-    if (source.scattered) warnings.push(`On page ${source.questionPage} the answer options are not drawn in order. They were put back in order: check each option is whole.`);
-    else if (source.optionsFirst) warnings.push(`On page ${source.questionPage} the answer options are drawn before the question text. Check where the last option ends and the question begins.`);
-    if (source.looseTail) warnings.push(`Page ${source.questionPage} has text after its answer options, usually a table or the labels of a figure. It was added to the end of the question: check it belongs there.`);
+    const rules: string[] = [];
+    if (source.continuationPages.length) {
+      rules.push("deck.runs-over-slides");
+      warnings.push(`This question runs over pages ${pageList([source.questionPage, ...source.continuationPages])}. Check it is complete.`);
+    }
+    if (source.scattered) {
+      rules.push("deck.options-out-of-order");
+      warnings.push(`On page ${source.questionPage} the answer options are not drawn in order. They were put back in order: check each option is whole.`);
+    } else if (source.optionsFirst) {
+      rules.push("deck.options-before-stem");
+      warnings.push(`On page ${source.questionPage} the answer options are drawn before the question text. Check where the last option ends and the question begins.`);
+    }
+    if (source.looseTail) {
+      rules.push("deck.loose-text");
+      warnings.push(`Page ${source.questionPage} has text after its answer options, usually a table or the labels of a figure. It was added to the end of the question: check it belongs there.`);
+    }
     if (warnings.length) {
       draft.warnings = [...(draft.warnings ?? []), ...warnings];
+      draft.parserRuleIds = [...new Set([...(draft.parserRuleIds ?? []), ...rules])];
       draft.needsReview = true;
     }
   });

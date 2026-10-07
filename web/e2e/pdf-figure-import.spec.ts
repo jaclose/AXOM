@@ -5,7 +5,7 @@ import { expect, reloadAfterSave, seedOnboarded, test } from "./fixtures";
 // typed in, and the image survives a reload. The PDF is built here from
 // invented content.
 
-/** One page: a question as text, and a small image drawn below it. */
+/** One page: a question as text, a small image drawn under its options, and the answer below that. */
 function questionPdfWithFigure(): Buffer {
   const lines = [
     "1. A tracing is shown. Which rhythm is present?",
@@ -16,7 +16,8 @@ function questionPdfWithFigure(): Buffer {
     "Answer: C",
     "Explanation: The third rhythm matches the tracing.",
   ];
-  const text = lines.map((line, index) => `BT /F1 12 Tf 72 ${720 - index * 18} Td (${line}) Tj ET`).join("\n");
+  // The stem and options sit above the image (which spans 420 to 540 points); the answer and explanation sit below it.
+  const text = lines.map((line, index) => `BT /F1 12 Tf 72 ${index < 5 ? 720 - index * 18 : 390 - (index - 5) * 18} Td (${line}) Tj ET`).join("\n");
   // The image fills the unit square scaled to 200 x 120 points at (72, 420).
   const content = Buffer.from(`${text}\nq 200 0 0 120 72 420 cm /Im1 Do Q\n`, "latin1");
   const pixels = Buffer.from([200, 30, 30, 30, 160, 60, 40, 60, 200, 230, 210, 40]);
