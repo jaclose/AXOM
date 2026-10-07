@@ -1,12 +1,36 @@
 # Ideas bank: index (read this first)
 
-Every idea JD has given, as one tracked item. The verbatim notes sit beside this file (IDEAS-1.md to IDEAS-5.md) and are never edited; this index is where status changes. When JD sends new notes: save them verbatim as the next IDEAS-N.md, then add each actionable idea below with the next ID.
+Every idea JD has given, as one tracked item. The verbatim notes sit beside this file (IDEAS-1.md to IDEAS-6.md) and are never edited; this index is where status changes. When JD sends new notes: save them verbatim as the next IDEAS-N.md, then add each actionable idea below with the next ID.
 
 **Status:** `NEW` not yet planned · `PLANNED` in a branch plan · `IN PROGRESS` being built · `PARTIAL` part shipped · `SHIPPED` on main · `VERIFIED` on main and exercised in a real browser · `CODEX` Codex's lane (status as Codex reports it) · `NEEDS JD` waiting on a decision, licence or credential · `FUTURE` parked, see ../05-FUTURE.md · `ANSWERED` a question, not a feature.
 
 **Where:** a commit or wave on main, or the branch that owns the work: `wave/1.2` (polish + directions), `fix/wave1.3` (import, Your sounds, exam fixes, stage orb), `feat/wave2-home` (dashboard, widgets, Up Next, Wrapped, check-in, accounts nudge), `feat/wave2-journal-library`, `feat/wave2-study-ai` (schedule, Q-bank AI, tutor, exam UIs), Codex's `feat/ideas2-integration`.
 
 Last full review: 2026-10-01, with Wave 1.3.1 (the work order of 2026-10-01 banked as I5-16 to I5-33; Wave 1.3 is main ef3e6b5, pushed by JD).
+
+## Current priority: Learning Intelligence and AXOM Decode (2026-10-04)
+
+The [doctrine](../../product/AXOM-LEARNING-INTELLIGENCE-DOCTRINE.md) governs [Ideas 1–6 reconciliation](../../product/IDEAS-RECONCILIATION-2026-10-04.md). The original [Ideas 6](IDEAS-6.md) and [Question-First Plan](../../feature-development/2026-10-04/QUESTION-FIRST-PLAN.md) remain intact as the first wedge. I6-07 onward records the 2026-10-04 doctrine/Tutor follow-up and Master Product Blueprint, not edits to the verbatim Ideas 6 file. [Decode implementation and acceptance](../../feature-development/2026-10-04/DECODE-IMPLEMENTATION.md) owns current scope. Owner: Codex in `codex/axom-decode-v1`, respecting existing shared-file contracts. This is a priority/architecture reconciliation, not a new full production audit; no new runtime item is marked shipped or verified.
+
+| ID | Idea | Status | Where |
+|---|---|---|---|
+| I6-01 | Prioritize the question workflow as the first Learning Intelligence wedge, with relevant data integrity checks first | PLANNED | codex/axom-decode-v1; Decode slices 1–6; original question-first worktree retained |
+| I6-02 | Saved Questions first priority with explainable recommendations, alternatives and learner override | PLANNED | codex/axom-decode-v1; question-first section 1; blueprint pp34–35 confirms the learner-level preference |
+| I6-03 | AI analyzes uploaded sets for recurring themes, breadth, question styles, clues, answer reasoning and distractor traps with source evidence | PLANNED | codex/axom-decode-v1; Decode slices 2–3; question-first section 3 |
+| I6-04 | Assign question sets to courses/modules/weeks and show canonical practice progress in Course Tracker | PLANNED | codex/axom-decode-v1; Decode slice 1; question-first section 2 |
+| I6-05 | One-page question-derived exam review, saved and surfaced the calendar day before the exam | PLANNED | codex/axom-decode-v1; Decode slice 6; question-first section 4 |
+| I6-06 | Use JD's seven-second opening MP4 and sonic master with synchronized audio and reliable playback fallbacks | PLANNED | codex/question-first-plan-2026-10-04; brief section 5 |
+| I6-07 | Learning Intelligence doctrine above Ideas manifests: learning change leads; productivity is instrumentation | ANSWERED | docs/product/AXOM-LEARNING-INTELLIGENCE-DOCTRINE.md; blueprint pp6–9/55/98–101; product decision, not runtime delivery |
+| I6-08 | Decode shares term/module/week/lecture scope across academic surfaces, with reversible focus and prerequisite/cumulative context | PLANNED | codex/axom-decode-v1; Decode slices 1/5; blueprint pp12–17/73–75; extends I6-04 |
+| I6-09 | DM-inspired Tutor FULL/HIGH-YIELD/PRESENTER/HANDOUT/VISUAL/CALCULATION and repair views over one source chain, without answer leakage | PLANNED | codex/axom-decode-v1; Decode Tutor contract; blueprint pp27–29/78–79; extends I4-01/I3-33 |
+| I6-10 | Private source packs preserve review/teaching roles, source revisions, attribution, rights and evidence; no implicit public bank | PLANNED | codex/axom-decode-v1; Decode source packet contract; blueprint pp25–26/51/54/85; extends I5-07/21/25 |
+| I6-11 | Cumulative Assessment Atlas opens selected modules/terms and indexes concepts, recurrence and personal gaps | PLANNED | Decode broader P1.5; blueprint pp30–31/86–87; extends I3-23/I6-03/04 |
+| I6-12 | Pattern Map and Source Trace show reviewed causal rules, exact deduplicated counts, confidence and inspectable evidence | PLANNED | Decode slices 2–3; blueprint pp21–22/76–77/82–83; extends I6-03 |
+| I6-13 | Reuse attempt evidence for missed/slow/flagged overlays, correctable error classification and targeted repair | PLANNED | Decode slice 4; blueprint pp29/32–33/79–84; extends existing question error taxonomy |
+| I6-14 | Qualify high-yield and choose diagnose/repair/consolidate/transfer with reasons, overrides and later learning evidence | PLANNED | Decode recommendation contract; blueprint pp22/34–38/88/91; extends I6-02/I3-21/63 |
+| I6-15 | The Page and Exam Eve compress reviewed rules, images, formulas, personal traps and source conflicts with readable export | PLANNED | Decode slice 6; blueprint pp36/61; extends I6-05 |
+| I6-16 | Historical templates stay separate from current confirmed schedules; reused mappings are reviewable and contributions moderated | PLANNED | broader P2 course intelligence; blueprint pp25–26/85; extends I3-24b/I4-03..06 |
+| I6-17 | Living idea records connect doctrine, dependencies, ownership, implementation, tests and supersession; agents inspect current reality | ANSWERED | Directions reading order and docs/product/IDEAS-RECONCILIATION-2026-10-04.md; blueprint pp55–56/71–72; extends I5-14/15/32/33 |
 
 ## 1. First run: intro, setup, Promise, guide
 

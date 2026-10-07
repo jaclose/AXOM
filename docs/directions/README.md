@@ -13,6 +13,8 @@ This directory is retrieved only for a relevant idea, branch or historical quest
 | A particular shipped change | Search [major](02-progress/1-MAJOR.md), [updates](02-progress/2-UPDATES.md), or [hotfixes](02-progress/3-HOTFIXES.md) |
 | A known implementation trap | Matching agent note in [03-notes](03-notes/) |
 | Completion evidence or parked work | [Completed](04-COMPLETED.md) or [future](05-FUTURE.md) |
+| What governs feature priority (since 2026-10-04) | [Learning Intelligence doctrine](../product/AXOM-LEARNING-INTELLIGENCE-DOCTRINE.md), then the [Ideas 1 to 6 reconciliation](../product/IDEAS-RECONCILIATION-2026-10-04.md) |
+| The first implementation wedge | [Question-first plan](../feature-development/2026-10-04/QUESTION-FIRST-PLAN.md), then the [Decode sequence](../feature-development/2026-10-04/DECODE-IMPLEMENTATION.md) |
 
 Do not read all rows, notes or progress files to begin a localized task. Historical
 status and branch ownership can drift; the current checkout and coordination board

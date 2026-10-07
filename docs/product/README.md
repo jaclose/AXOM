@@ -11,6 +11,7 @@ These are routes to existing canonical sources, not a new product authority.
 | Normative UX requirements | [UX standards](../governance/AX-0010-UX-STANDARDS.md) |
 | Implementing the current visual language | [Design contract](../design/DESIGN.md) |
 | Raw user ideas and execution status | [Directions](../directions/README.md) |
+| Feature priority since 2026-10-04 | [Learning Intelligence doctrine](AXOM-LEARNING-INTELLIGENCE-DOCTRINE.md) and the [Ideas 1 to 6 reconciliation](IDEAS-RECONCILIATION-2026-10-04.md) |
 | Competitive reasoning, not an approved roadmap | [Competitive report](research/AXOM_Competitive_Intelligence_Report.md) and [opportunities](../../PRODUCT_RESEARCH_AND_OPPORTUNITIES.md) |
 
 Governance's stable IDs/paths are preserved. Directions tracks ideas and execution;
