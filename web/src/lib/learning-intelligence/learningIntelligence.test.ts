@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { QuestionAttempt, QuestionRecord } from "../questions";
 import {
   attemptEvents, buildPatternReport, buildReviewSet, calibrateDifficulty, describeQuestionStyle, empiricalDifficulty,
-  questionFeatures, reviewCandidates, reviewPriority, structuralDifficulty, styleObservations, tally,
+  questionFeatures, rankByReasons, reviewCandidates, reviewPriority, structuralDifficulty, styleObservations, tally,
+  type ReviewSignals,
 } from "./index";
 
 let counter = 0;
@@ -312,6 +313,32 @@ describe("what to look at again after a block", () => {
     const candidates = reviewCandidates(attemptEvents(block));
     const priorities = candidates.map((candidate) => candidate.priority);
     expect(priorities).toEqual([...priorities].sort((a, b) => b - a));
+  });
+
+  it("hands a ranker the facts of each attempt, and lets the ranker be replaced", () => {
+    const block = [
+      question({ attempts: [attempt(2, "incorrect"), attempt(9, "incorrect", { certainty: "sure", errorType: "missed-clue", timeSpentSeconds: 70, quizSessionId: "run" })] }),
+      question({ attempts: [attempt(9, "correct", { certainty: "unsure", timeSpentSeconds: 30, quizSessionId: "run" })] }),
+    ];
+    const events = attemptEvents([...history, ...block]);
+    const seen: ReviewSignals[] = [];
+    // A ranker of another kind: slowest first. It reads the signals and nothing else.
+    const slowestFirst = (signals: ReviewSignals) => { seen.push(signals); return signals.seconds ?? 0; };
+    const candidates = reviewCandidates(events.filter((event) => event.quizSessionId === "run"), events, slowestFirst);
+
+    expect(candidates.map((candidate) => candidate.questionId)).toEqual([block[0].id, block[1].id]);
+    expect(candidates.map((candidate) => candidate.priority)).toEqual([70, 30]);
+    expect(seen.find((signals) => signals.questionId === block[0].id)).toMatchObject({
+      reasons: ["sure-and-wrong", "repeat-miss"], correct: false, firstAttemptCorrect: false, exposure: 2, earlierMisses: 1,
+      // The learner's usual time on a right answer: the middle of 30, 40, 45, 50, 55 and 60 seconds.
+      certainty: "sure", errorType: "missed-clue", seconds: 70, usualSeconds: 47.5,
+    });
+    expect(seen.find((signals) => signals.questionId === block[1].id)).toMatchObject({ correct: true, firstAttemptCorrect: true, exposure: 1, earlierMisses: 0 });
+    // The reasons stay with the candidate whatever ranked it, so a ranking can say why.
+    expect(candidates[0].reasons).toEqual(["sure-and-wrong", "repeat-miss"]);
+    // Without a ranker, the order is today's rule.
+    const usual = reviewCandidates(events.filter((event) => event.quizSessionId === "run"), events);
+    expect(usual.map((candidate) => candidate.priority)).toEqual(usual.map((candidate) => rankByReasons({ ...seen[0], reasons: candidate.reasons })));
   });
 
   it("builds a review set that points at the same questions and keeps its place in the course", () => {

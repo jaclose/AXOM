@@ -30,6 +30,6 @@ export {
   type CueRate, type Share, type StyleSignature,
 } from "./style";
 export {
-  RETRY_WHEN_LABEL, REVIEW_REASON_LABEL, buildReviewSet, reviewCandidates, reviewCandidatesForSession, reviewPriority,
-  type RetryWhen, type ReviewCandidate, type ReviewReason,
+  RETRY_WHEN_LABEL, REVIEW_REASON_LABEL, buildReviewSet, rankByReasons, reviewCandidates, reviewCandidatesForSession, reviewPriority,
+  type RetryWhen, type ReviewCandidate, type ReviewRanker, type ReviewReason, type ReviewSignals,
 } from "./review";

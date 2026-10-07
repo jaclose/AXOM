@@ -11,7 +11,7 @@
 // ===========================================================================
 import type { ID } from "../types";
 import type { QuestionSet } from "../library";
-import type { QuestionRecord } from "../questions";
+import type { AnswerCertainty, QuestionErrorType, QuestionRecord } from "../questions";
 import { attemptEvents, median, type AttemptEvent } from "./attempts";
 
 export type ReviewReason = "sure-and-wrong" | "repeat-miss" | "wrong" | "unsure-right" | "slow-right" | "unscored";
@@ -55,6 +55,52 @@ export function reviewPriority(reasons: readonly ReviewReason[]): number {
   return reasons.length;
 }
 
+/**
+ * Everything the order of review may be decided from, for one answered
+ * question of a block. This is the whole boundary between what happened and
+ * how it is ranked: a ranker reads these facts and returns a number, and it
+ * reads nothing else. So the rule below can be replaced, by a better rule or
+ * one day by a ranker fitted to the learner's own history, without touching
+ * the course engine, Decode or the screens. The reasons stay beside the
+ * number, so a ranking can always say why.
+ *
+ * The optional fields at the end are not supplied yet. A ranker must work
+ * without them.
+ */
+export interface ReviewSignals {
+  questionId: ID;
+  /** Why the question was flagged, as facts about the attempt. */
+  reasons: readonly ReviewReason[];
+  /** Undefined when the answer could not be scored. */
+  correct: boolean | undefined;
+  /** Whether the first answer the learner ever gave to this question was right. */
+  firstAttemptCorrect?: boolean;
+  /** 1 the first time the learner answered this question. */
+  exposure: number;
+  /** Misses on this question before this block. */
+  earlierMisses: number;
+  /** What the learner said before the answer was checked. */
+  certainty?: AnswerCertainty;
+  /** The reason the learner gave for a miss. */
+  errorType?: QuestionErrorType;
+  seconds?: number;
+  /** The learner's usual time on a right answer, once enough answers are timed. */
+  usualSeconds?: number;
+  /** When it was answered. */
+  at: string;
+  /** Not supplied yet: how hard the question is, where it sits in the course, and how near the exam is. */
+  difficulty?: "easier" | "middle" | "harder";
+  module?: string;
+  week?: number;
+  daysToExam?: number;
+}
+
+/** Higher is worked through first. */
+export type ReviewRanker = (signals: ReviewSignals) => number;
+
+/** Today's ranking: by the reasons alone. */
+export const rankByReasons: ReviewRanker = (signals) => reviewPriority(signals.reasons);
+
 function retryFor(reasons: readonly ReviewReason[]): RetryWhen[] {
   if (reasons.includes("sure-and-wrong")) return ["today", "in-a-week"];
   if (reasons.includes("repeat-miss")) return ["today", "this-week"];
@@ -71,12 +117,21 @@ function retryFor(reasons: readonly ReviewReason[]): RetryWhen[] {
 export function reviewCandidates(
   block: readonly AttemptEvent[],
   history: readonly AttemptEvent[] = block,
+  rank: ReviewRanker = rankByReasons,
 ): ReviewCandidate[] {
   const usual = median(history.filter((event) => event.correct && event.seconds).map((event) => event.seconds!));
-  const earlierMisses = new Set<ID>();
+  // Needs a few timed answers before "usual" means anything.
+  const usualSeconds = usual && history.filter((item) => item.seconds).length >= 6 ? usual : undefined;
+  const earlierMisses = new Map<ID, number>();
+  const firstAnswers = new Map<ID, boolean | undefined>();
   const blockKeys = new Set(block.map((event) => `${event.questionId}\u001f${event.at}`));
+  for (const event of [...history, ...block]) {
+    if (event.exposure === 1) firstAnswers.set(event.questionId, event.correct);
+  }
   for (const event of history) {
-    if (event.correct === false && !blockKeys.has(`${event.questionId}\u001f${event.at}`)) earlierMisses.add(event.questionId);
+    if (event.correct === false && !blockKeys.has(`${event.questionId}\u001f${event.at}`)) {
+      earlierMisses.set(event.questionId, (earlierMisses.get(event.questionId) ?? 0) + 1);
+    }
   }
 
   const candidates: ReviewCandidate[] = [];
@@ -89,11 +144,23 @@ export function reviewCandidates(
       if (!reasons.length) reasons.push("wrong");
     } else {
       if (event.certainty === "guess" || event.certainty === "unsure") reasons.push("unsure-right");
-      // Needs a few timed answers before "usual" means anything.
-      if (usual && event.seconds && event.seconds >= usual * SLOW_FACTOR && history.filter((item) => item.seconds).length >= 6) reasons.push("slow-right");
+      if (usualSeconds && event.seconds && event.seconds >= usualSeconds * SLOW_FACTOR) reasons.push("slow-right");
     }
     if (reasons.length) {
-      candidates.push({ questionId: event.questionId, reasons, priority: reviewPriority(reasons), retry: retryFor(reasons) });
+      const signals: ReviewSignals = {
+        questionId: event.questionId,
+        reasons,
+        correct: event.correct,
+        firstAttemptCorrect: firstAnswers.get(event.questionId),
+        exposure: event.exposure,
+        earlierMisses: earlierMisses.get(event.questionId) ?? 0,
+        certainty: event.certainty,
+        errorType: event.errorType,
+        seconds: event.seconds,
+        usualSeconds,
+        at: event.at,
+      };
+      candidates.push({ questionId: event.questionId, reasons, priority: rank(signals), retry: retryFor(reasons) });
     }
   }
   return candidates.sort((left, right) => right.priority - left.priority);

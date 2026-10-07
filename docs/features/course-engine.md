@@ -51,6 +51,13 @@ do next. The learner reports nothing AXOM can observe.
 - **Every finding states its footing.** Observed, computed, or inferred from wording, with
   the number of answers behind it. A comparison needs 8 first-time answers on each side;
   otherwise the report lists what it is waiting for.
+- **The order of review has one input and can be replaced.** `reviewCandidates` hands a
+  ranker `ReviewSignals` (the reasons, correctness, the first answer, exposure, earlier
+  misses, certainty, error reason, time against the learner's usual, when) and takes back a
+  number. The reasons stay on the candidate, so a ranking can say why. `rankByReasons` is
+  today's ranker. Difficulty, place in the course and days to the exam are named in the
+  type and not supplied yet. Learning intelligence and Decode do not import each other
+  (`lib/decode/boundary.test.ts`).
 - **Certainty is only what the learner said before checking.** The older `confidence`
   field is asked after a miss and is never used for calibration.
 - **A figure is placed on evidence or not at all.** It shares a page with one question,
