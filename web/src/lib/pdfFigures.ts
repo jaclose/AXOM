@@ -14,6 +14,7 @@
 // needs a browser (pdf.js and a canvas).
 // ===========================================================================
 import browserPdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import type { DeckPage } from "./deckPages";
 
 export interface FigureBox {
   /** Page coordinates in points, origin at the top left. */
@@ -48,6 +49,8 @@ export interface FigurePlacement {
   basis?: FigurePlacementBasis;
   /** Why it was left unplaced, in plain words. */
   reason?: string;
+  /** In a deck: the kind of slide that kept it back. */
+  held?: "answer-slide" | "no-question";
 }
 
 type Matrix = [number, number, number, number, number, number];
@@ -197,14 +200,37 @@ function startTop(stem: string, lines: readonly PageLine[]): number | undefined 
 /**
  * Decide which question each figure belongs to. Drafts are in document order
  * with the page each starts on.
+ *
+ * In a slide deck every page has a role (lib/deckPages), and the role decides
+ * before position does: an image on an answer or explanation slide never goes
+ * on the question, and an image on a title slide belongs to no question.
  */
 export function placeFigures(
   figures: ReadonlyArray<Pick<PdfFigure, "name" | "page" | "top">>,
   drafts: ReadonlyArray<{ stem: string; sourcePage?: number; repeatsOn?: readonly number[] }>,
   linesByPage: ReadonlyMap<number, readonly PageLine[]> = new Map(),
+  deckPages: readonly DeckPage[] = [],
 ): FigurePlacement[] {
+  const roles = new Map(deckPages.map((entry) => [entry.page, entry]));
   return figures.map((figure): FigurePlacement => {
     const onPage = drafts.flatMap((draft, index) => (draft.sourcePage === figure.page ? [{ draft, index }] : []));
+    const role = roles.get(figure.page);
+    if (role?.kind === "answer" || role?.kind === "explanation") {
+      return {
+        name: figure.name, page: figure.page, held: "answer-slide",
+        reason: `Page ${figure.page} is the ${role.kind} slide for the question on page ${role.questionPage}, so this image was kept out of the question to avoid giving the answer away.`,
+      };
+    }
+    if (role?.kind === "continuation") {
+      const index = drafts.findIndex((draft) => draft.sourcePage === role.questionPage);
+      if (index >= 0) return { name: figure.name, page: figure.page, draftIndex: index, basis: "question-runs-onto-page" };
+    }
+    if (role && role.kind !== "question" && onPage.length === 0) {
+      return { name: figure.name, page: figure.page, held: "no-question", reason: `Page ${figure.page} is a slide with no question on it.` };
+    }
+    if (role?.kind === "question" && onPage.length === 0) {
+      return { name: figure.name, page: figure.page, reason: `Page ${figure.page} is a question slide, but none of the imported questions was matched to it.` };
+    }
     if (onPage.length === 1) return { name: figure.name, page: figure.page, draftIndex: onPage[0].index, basis: "only-question-on-page" };
 
     if (onPage.length > 1) {
@@ -341,6 +367,7 @@ export async function attachPdfFigures<T extends { stem: string; sourcePage?: nu
   fileName: string,
   drafts: T[],
   pageTexts: readonly string[],
+  deckPages: readonly DeckPage[] = [],
 ): Promise<{ images: File[]; notes: string[] }> {
   if (drafts.length === 0) return { images: [], notes: [] };
   try {
@@ -350,13 +377,25 @@ export async function attachPdfFigures<T extends { stem: string; sourcePage?: nu
       found.figures,
       drafts.map((draft, index) => ({ stem: draft.stem, sourcePage: located[index].page, repeatsOn: located[index].repeatsOn })),
       found.linesByPage,
+      deckPages,
     );
     const notes: string[] = [];
     let placed = 0;
+    // A deck can hold an image on every answer slide. Past a few, they are
+    // reported together, with their pages, instead of one line each.
+    const heldTogether = new Set((["answer-slide", "no-question"] as const).filter((kind) => placements.filter((placement) => placement.held === kind).length > 3));
+    for (const kind of heldTogether) {
+      const held = placements.filter((placement) => placement.held === kind);
+      const pages = [...new Set(held.map((placement) => placement.page))];
+      const where = `page${pages.length === 1 ? "" : "s"} ${pages.slice(0, 12).join(", ")}${pages.length > 12 ? ` and ${pages.length - 12} more` : ""}`;
+      notes.push(kind === "answer-slide"
+        ? `${held.length} images are on answer or explanation slides (${where}). They were kept out of their questions so the answer is not given away, and are in the image list to attach by hand.`
+        : `${held.length} images are on slides with no question (${where}). They were not attached, and are in the image list.`);
+    }
     for (const placement of placements) {
       if (placement.draftIndex === undefined) {
         // Kept in the image list and named here: never dropped, never guessed onto a question.
-        notes.push(`${placement.name} was not attached. ${placement.reason}`);
+        if (!placement.held || !heldTogether.has(placement.held)) notes.push(`${placement.name} was not attached. ${placement.reason}`);
         continue;
       }
       const draft = drafts[placement.draftIndex];

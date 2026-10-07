@@ -13,6 +13,7 @@ import { associateAnswerSource, parseAnswerSections, parseQuestionBlocks, type P
 import { importFromCsv, importFromJson } from "../../lib/questionImport";
 import { extractDocxText, extractPdfText, extractPlainText } from "../../lib/extractText";
 import { attachPdfFigures } from "../../lib/pdfFigures";
+import { parsePdfQuestions } from "../../lib/pdfQuestionImport";
 import { useStore } from "../../lib/store";
 import { MAPPING_STATUS_LABEL, describeMapping, inferSourceMapping } from "../../lib/course-engine/sourceMapping";
 import { moduleAliases } from "../../lib/course-engine/templateParse";
@@ -21,7 +22,6 @@ import { documentTitleFromFile } from "../../lib/library";
 import type { QuestionSource } from "../../lib/questions";
 import { GlassCard, GButton, GhostButton, PanelHeader, Tag, EmptyState } from "../ui/primitives";
 import { sha256Hex } from "../../lib/checksum";
-import { assignDraftProvenancePages } from "../../lib/questionProvenance";
 import type { ImportSeed } from "./ImportPanel";
 import { draftImportStatus } from "../../lib/questionImportTrust";
 import { ICON_SIZE } from "../../lib/iconSize";
@@ -209,12 +209,14 @@ export function MassImport({
       }
 
       patch(id, { status: "parsing", rawText, pageTexts, checksum });
-      const result = kind === "csv" ? importFromCsv(rawText) : kind === "json" ? importFromJson(rawText) : { drafts: parseQuestionBlocks(rawText), warnings: [] };
+      // A PDF is read with its pages, so a slide deck is read slide by slide.
+      const read = kind === "pdf" && pageTexts ? parsePdfQuestions(rawText, pageTexts) : undefined;
+      const result = read ? { drafts: read.drafts, warnings: read.notes }
+        : kind === "csv" ? importFromCsv(rawText) : kind === "json" ? importFromJson(rawText) : { drafts: parseQuestionBlocks(rawText), warnings: [] };
       const drafts = result.drafts;
-      if (kind === "pdf" && pageTexts) assignSourcePages(drafts, pageTexts);
       warnings = [...warnings, ...result.warnings];
       const figures = figureBytes && pageTexts
-        ? await attachPdfFigures(figureBytes, file.name, drafts, pageTexts)
+        ? await attachPdfFigures(figureBytes, file.name, drafts, pageTexts, read?.deckPages)
         : { images: [], notes: [] };
       warnings.push(...figures.notes);
       const answerKeyDetected = drafts.some((d) => d.correctKey);
@@ -389,10 +391,6 @@ function fileKind(file: File): string {
 function sourceKind(file: File): QuestionSource {
   const k = fileKind(file);
   return k === "pdf" ? "pdf" : "imported";
-}
-
-function assignSourcePages(drafts: ParsedQuestionDraft[], pages: string[]) {
-  assignDraftProvenancePages(drafts, pages);
 }
 
 function StatusIcon({ status }: { status: FileStatus }) {

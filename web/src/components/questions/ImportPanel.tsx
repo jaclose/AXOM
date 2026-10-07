@@ -17,6 +17,7 @@ import { createImportMappingLedger, parseQuestionBlocks, type ParsedQuestionDraf
 import { detectImportFormat, importFromCsv, importFromJson, importFromText } from "../../lib/questionImport";
 import { extractDocxText, extractPdfText, extractPlainText } from "../../lib/extractText";
 import { attachPdfFigures } from "../../lib/pdfFigures";
+import { parsePdfQuestions } from "../../lib/pdfQuestionImport";
 import { documentTitleFromFile, type QuestionSet, type SourceDocument } from "../../lib/library";
 import {
   EXAM_TYPE_LABEL, QUESTION_CATEGORIES,
@@ -112,6 +113,12 @@ export interface ImportFinalizationResult {
 /** Re-open a saved source with the deterministic local parser; no provider is required. */
 export function parseStoredDocument(document: SourceDocument): { drafts: ParsedQuestionDraft[]; warnings: string[] } {
   const kind = document.fileType.toLowerCase();
+  // A PDF is read again the way it was read at import, so a slide deck comes
+  // back as the same questions and not as running text.
+  if (kind === "pdf" && document.pageTexts?.length) {
+    const read = parsePdfQuestions(document.rawText, document.pageTexts);
+    return { drafts: read.drafts, warnings: read.notes };
+  }
   const result = kind === "csv"
     ? importFromCsv(document.rawText)
     : kind === "json"
@@ -972,6 +979,10 @@ export function ImportPanel({
               onRawChange={setSourceText}
               parseSource={(raw) => {
                 const format = pendingDoc?.fileType.toLowerCase();
+                if (format === "pdf" && pendingDoc?.pageTexts?.length && raw === pendingDoc.rawText) {
+                  const read = parsePdfQuestions(raw, pendingDoc.pageTexts);
+                  return { drafts: read.drafts, warnings: read.notes };
+                }
                 const result = format === "csv"
                   ? importFromCsv(raw)
                   : format === "json"
@@ -1505,15 +1516,16 @@ function FileTab({ busyFile, setBusyFile, onParsed }: {
           onParsed([], extracted.warnings, isPdf ? "pdf" : "imported", doc);
           return;
         }
-        const drafts = parseQuestionBlocks(extracted.text);
-        if (isPdf) assignSourcePages(drafts, extracted.pages);
+        const read = isPdf ? parsePdfQuestions(extracted.text, extracted.pages) : { drafts: parseQuestionBlocks(extracted.text), notes: [], deckPages: undefined };
+        const drafts = read.drafts;
         const { images, notes: figureNotes } = figureBytes
-          ? await attachPdfFigures(figureBytes, file.name, drafts, extracted.pages ?? [])
+          ? await attachPdfFigures(figureBytes, file.name, drafts, extracted.pages ?? [], read.deckPages)
           : { images: [], notes: [] };
         onParsed(
           drafts,
           [
             ...extracted.warnings,
+            ...read.notes,
             ...figureNotes,
             ...(drafts.length === 0 ? ["Text was extracted but no question pattern was found — review the file, or keep it as a library document."] : []),
           ],
@@ -1599,11 +1611,6 @@ function FileTab({ busyFile, setBusyFile, onParsed }: {
       </div>
     </div>
   );
-}
-
-/** Best-effort page attribution: find each stem's first line inside page texts. */
-function assignSourcePages(drafts: ParsedQuestionDraft[], pages: string[]) {
-  assignDraftProvenancePages(drafts, pages);
 }
 
 // --- AI generate tab -----------------------------------------------------------
