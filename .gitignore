@@ -58,6 +58,8 @@ xcuserdata/
 99 */
 ANKI Decks/
 Medical School/
+/Materials/
+/AXOM Templates Completed/
 *.csv
 *.md.bak
 active_study_day.txt
@@ -109,6 +111,12 @@ __pycache__/
 *.log
 *.tsbuildinfo
 
+# Obsidian: share only portable link/filter defaults, never personal vault state.
+**/.obsidian/*
+!docs/.obsidian/app.json
+!docs/.obsidian/graph.json
+.trash/
+
 # Loose private/reference imports do not belong at the repository root.
 # Tracked licensed runtime assets are unaffected; place new reviewed assets in their subsystem.
 /*.pdf
@@ -120,3 +128,5 @@ __pycache__/
 /*.png
 /*.jpg
 /*.jpeg
+.vercel
+.env*

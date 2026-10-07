@@ -1,3 +1,8 @@
+---
+tags:
+  - axom/navigation
+authority: navigation
+---
 # Product knowledge
 
 These are routes to existing canonical sources, not a new product authority.

@@ -1,3 +1,8 @@
+---
+tags:
+  - axom/architecture
+authority: canonical
+---
 # Frontend and lifecycle
 
 **Boundary:** Vite/React/TypeScript in `web/`; Zustand stores model workspace and

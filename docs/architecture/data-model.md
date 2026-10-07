@@ -1,7 +1,14 @@
+---
+tags:
+  - axom/architecture
+authority: canonical
+---
 # Workspace data and persistence
 
 **Purpose:** Preserve a learner's local workspace, support portable JSON export and
 optional cloud protection without replacing local work on sign-in.
+
+Governed by: [local workspace with additive account protection](../decisions/002-local-workspace-and-accounts.md).
 
 | Responsibility | Source of truth |
 | --- | --- |

@@ -1,3 +1,8 @@
+---
+tags:
+  - axom/decision
+authority: canonical
+---
 # 002: Local workspace with optional account protection
 
 **Status:** records the existing implementation at base `9f29327`, not a new product decision.

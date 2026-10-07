@@ -36,6 +36,10 @@ mechanically climb parent directories or read neighboring files because they are
 Search → identify → targeted read: `rg --files <area>`, then `rg -n '<symbol>' <area>`.
 A component may lead to its hook, service and shared contract only as questions require.
 
+Graph metadata is optional routing, never bootstrap. Inspect a target and only relevant
+direct relationships, normally at most one semantic hop; reassess an unresolved question
+before another. Never preload neighbors or traverse recursively. Dependency relevance wins.
+
 Never recursively read all source/docs, idea banks, progress notes or product-memory
 ledgers by default. Filter logs/search results before reading; avoid full test output,
 generated/bundled code, huge JSON, database dumps, unrelated screenshots, old threads
