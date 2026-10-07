@@ -42,6 +42,9 @@ import {
   BLOCK_PRESETS, EXAM_SKINS, blockCounts, formatClock, readSuspendedBlock, writeSuspendedBlock,
   type BlockPreset, type ExamSkin, type SuspendedBlock,
 } from "../../lib/examSim";
+import {
+  NO_QUESTION_TIME, closeVisit, openVisit, questionTimesFrom, recordedSeconds, sealQuestion, type QuestionTimes,
+} from "../../lib/exam/questionTime";
 
 const ERROR_TYPES = Object.keys(ERROR_TYPE_LABEL) as QuestionErrorType[];
 const EXAM_TYPES = Object.keys(EXAM_TYPE_LABEL) as QuestionExamType[];
@@ -165,7 +168,6 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   /** Optional, and only ever set before the answer is checked. */
   const [certainty, setCertainty] = useState<AnswerCertainty | undefined>(restored?.certainty);
   const [startedAt, setStartedAt] = useState<string>(() => restored?.startedAt ?? new Date().toISOString());
-  const [shownAt, setShownAt] = useState(() => Date.now());
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [annotationTool, setAnnotationTool] = useState<AnnotationTool>(null);
   const [annotationSelection, setAnnotationSelection] = useState<{
@@ -183,8 +185,19 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const [aiText, setAiText] = useState<string | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [editingMapping, setEditingMapping] = useState(false);
-  /** Seconds spent on questions the learner stepped away from before answering. */
-  const bankedSeconds = useRef(new Map<string, number>());
+  /**
+   * Time spent on each question, kept in the ledger every exam interface uses
+   * (lib/exam/questionTime): visits add up, a checked answer stops counting, and
+   * time while AXOM is hidden is not counted. A restored block starts from what
+   * its answers already recorded.
+   */
+  const restoredTimes = useMemo(() => (restored
+    ? questionTimesFrom(
+      Object.fromEntries(restored.answers.map((answer) => [answer.questionId, answer.seconds])),
+      restored.mode === "tutor" ? restored.answers.filter((answer) => answer.answerKey).map((answer) => answer.questionId) : [],
+    )
+    : NO_QUESTION_TIME), [restored]);
+  const times = useRef<QuestionTimes>(restoredTimes);
 
   // --- Q2a player toolkit: strikeout (session-transient per question), reading
   // scale (persisted device pref), calculator, and scroll-to-top on advance.
@@ -259,6 +272,24 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // The question on screen has an open visit. Leaving it by any route closes the
+  // visit, and so does AXOM going behind another tab or app.
+  const questionId = question?.id;
+  useEffect(() => {
+    if (stage !== "running" || !questionId) return;
+    times.current = openVisit(times.current, questionId, Date.now());
+    const onVisibility = () => {
+      times.current = document.hidden
+        ? closeVisit(times.current, Date.now())
+        : openVisit(times.current, questionId, Date.now());
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      times.current = closeVisit(times.current, Date.now());
+    };
+  }, [stage, questionId]);
 
   // Timer display tick (display only — limits derive from timestamps).
   useEffect(() => {
@@ -423,7 +454,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     const runStartedAt = new Date().toISOString();
     setPool(built);
     setStartedAt(runStartedAt);
-    setShownAt(Date.now());
+    times.current = NO_QUESTION_TIME;
     if (runBlockId) {
       const savedBlock = (s.quizBlocks ?? []).find((block) => block.id === runBlockId);
       if (savedBlock) s.saveQuizBlock({ ...savedBlock, lastRunAt: runStartedAt });
@@ -431,21 +462,13 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     setStage("running");
   }
 
-  /** Whole seconds the question on screen has been showing this visit. */
-  const secondsThisVisit = () => Math.round((Date.now() - shownAt) / 1000);
-
-  /**
-   * The record for the question on screen. Time adds up across visits: what an
-   * earlier answer already counted, what was banked when the learner stepped
-   * back without answering, and this visit.
-   */
+  /** The record for the question on screen, with its time read from the shared ledger. */
   function currentAnswer(answerKey: string | undefined, flagged: boolean): QuizAnswer | undefined {
     if (!question) return undefined;
     const correctKey = trustedCorrectKey(question);
     const correct = correctKey ? (answerKey ? answerKey === correctKey : false) : undefined;
-    const earlier = (answers.get(question.id)?.seconds ?? 0) + (bankedSeconds.current.get(question.id) ?? 0);
     return {
-      questionId: question.id, answerKey, correct, flagged, seconds: earlier + secondsThisVisit(),
+      questionId: question.id, answerKey, correct, flagged, seconds: recordedSeconds(times.current, question.id, Date.now()),
       ...(certainty ? { certainty } : {}),
     };
   }
@@ -453,7 +476,6 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   function recordCurrent(answerKey: string | undefined, flagged: boolean): QuizAnswer | undefined {
     const record = currentAnswer(answerKey, flagged);
     if (!record) return undefined;
-    bankedSeconds.current.delete(record.questionId);
     setAnswers((prev) => new Map(prev).set(record.questionId, record));
     return record;
   }
@@ -483,6 +505,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   function submitTutor() {
     if (!picked || !question) return;
     const record = recordCurrent(picked, answers.get(question.id)?.flagged ?? false);
+    // Checking the answer seals the question: reading the explanation is not time spent answering.
+    times.current = sealQuestion(times.current, question.id, Date.now());
     setRevealed(true);
     // Saved when it is checked, not when the learner moves on: leaving the
     // block from the explanation used to drop the answer altogether.
@@ -509,7 +533,6 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     setCertainty(undefined);
     setAiText(null);
     setEditingMapping(false);
-    setShownAt(Date.now());
     if (index + 1 >= pool.length) finishBlock();
     else setIndex(index + 1);
   }
@@ -519,15 +542,13 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     setPicked(undefined);
     setCertainty(undefined);
     if (index + 1 >= pool.length) finishBlock(picked, record);
-    else { setIndex(index + 1); setShownAt(Date.now()); }
+    else setIndex(index + 1);
   }
 
   function goPrevious() {
     if (index <= 0) return;
-    // Stepping back before answering still spent time on this question.
-    if (question && !revealed) {
-      bankedSeconds.current.set(question.id, (bankedSeconds.current.get(question.id) ?? 0) + secondsThisVisit());
-    }
+    // Stepping back before answering still spent time on this question: the
+    // ledger banks the visit when the question leaves the screen.
     const previous = pool[index - 1];
     const saved = answers.get(previous.id);
     setIndex((value) => Math.max(0, value - 1));
@@ -540,7 +561,6 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     setCertainty(saved?.certainty);
     setAiText(null);
     setEditingMapping(false);
-    setShownAt(Date.now());
   }
 
   function finishBlock(lastPick?: string, justRecorded?: QuizAnswer) {
@@ -967,7 +987,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
                 // A retake is its own run: its answers are new attempts.
                 setRunId(crypto.randomUUID());
                 setStartedAt(new Date().toISOString());
-                setShownAt(Date.now());
+                times.current = NO_QUESTION_TIME;
                 setStage("running");
               }}>Retake {retakePool.length} missed</GhostButton>
             )}

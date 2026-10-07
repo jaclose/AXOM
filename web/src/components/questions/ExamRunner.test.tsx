@@ -283,6 +283,30 @@ describe("ExamRunner saved blocks and selection semantics", () => {
     vi.restoreAllMocks();
   });
 
+  it("does not count the time AXOM spends hidden behind another tab", () => {
+    let now = 1_700_000_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    setStore();
+    render(<ExamRunner mode="exam" retakeIds={[question.id]} onClose={() => {}} />);
+    const setHidden = (hidden: boolean) => {
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+
+    now += 10_000;
+    setHidden(true);
+    now += 60_000;
+    setHidden(false);
+    now += 5_000;
+    fireEvent.click(screen.getByRole("button", { name: "A. Alpha" }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit & finish" }));
+
+    // 10 s before the tab was hidden and 5 s after it came back. The minute away is not time on the question.
+    expect(committedAttempts().map(({ attempt }) => attempt.timeSpentSeconds)).toEqual([15]);
+    delete (document as { hidden?: boolean }).hidden;
+    vi.restoreAllMocks();
+  });
+
   it("keeps a changed last answer when the exam is submitted", () => {
     setStore();
     const second = { ...question, id: "question-two", stem: "Second stem: which is right?" };
