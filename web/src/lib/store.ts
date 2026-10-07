@@ -70,6 +70,7 @@ import {
 import type { DailyCloseout } from "./closeout";
 import type { RecoveryPlan } from "./recovery";
 import type { CourseActivity } from "./course-engine/activity";
+import { normalizeQuestionAnalyses } from "./decode/normalize";
 import { applyAttempt, normalizeQuestionTaxonomy, validateQuestionRecord, withCorrectAnswerText, type QuestionAttempt, type QuestionRecord } from "./questions";
 import { normalizeTagList, mergeTagsInList } from "./questionTags";
 import {
@@ -1359,6 +1360,7 @@ export const useStore = create<Store>()(
             if (q.id !== id) return q;
             const merged = { ...q, ...patch, updatedAt: now() };
             if (patch.tags) merged.tags = normalizeTagList(patch.tags);
+            if ("analyses" in patch) merged.analyses = normalizeQuestionAnalyses(patch.analyses);
             return reconcileQuestionAnnotationSources(withCorrectAnswerText(merged));
           }),
         })),

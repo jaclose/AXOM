@@ -17,6 +17,7 @@ import { normalizeQuestionTaxonomy } from "./questions";
 import { normalizeTagList } from "./questionTags";
 import { normalizeSavedQuestionFilters } from "./questionFilters";
 import { normalizeQuestionAnnotations, reconcileQuestionAnnotationSources } from "./questionAnnotations";
+import { mergeQuestionAnalyses, normalizeQuestionAnalyses } from "./decode/normalize";
 import {
   ATTACHMENT_EXPORT_KEY,
   collectQuestionAttachmentPayloads,
@@ -217,6 +218,8 @@ function mergeQuestionsById(
       attempts: mergeQuestionAttempts(older.attempts, newer.attempts),
       annotations: mergeQuestionAnnotations(older.annotations, newer.annotations),
       attachments: mergeQuestionAttachmentsMetadata(older.attachments, newer.attachments),
+      // Teaching reviewed on one device and proposed on another: both are kept.
+      analyses: mergeQuestionAnalyses(older.analyses, newer.analyses),
     });
   }
   const unkeyed = [...current, ...imported].filter((record) => !String(record.id ?? ""));
@@ -451,6 +454,7 @@ function migrateImportedQuestion(value: unknown, fromVersion: number): unknown {
   const question = { ...value };
   question.annotations = normalizeQuestionAnnotations(question.annotations);
   question.attachments = normalizeQuestionAttachments(question.attachments);
+  question.analyses = normalizeQuestionAnalyses(question.analyses);
   question.tags = normalizeTagList(question.tags);
   if (fromVersion < 31) {
     question.taxonomy = normalizeQuestionTaxonomy(question.taxonomy, question) ?? {};

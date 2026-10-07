@@ -5,8 +5,8 @@
 // read into the same scope here, so the three surfaces count the same things
 // and none of them keeps a second copy of anyone's progress.
 //
-// The resolver is the single place to change when a reviewed assignment
-// overlay (lib/decode on its own branch) becomes the authority for scope.
+// Decode (lib/decode) reads scope from here and keeps none of its own: a
+// question's place is its own module and week, or its set's.
 // ===========================================================================
 import type { ID } from "../types";
 import type { QuestionSet } from "../library";

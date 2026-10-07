@@ -12,6 +12,8 @@ import {
   type QuestionTextAnnotation,
 } from "./questionAnnotations";
 import { normalizeQuestionAttachments, type QuestionImageAttachment } from "./questionAttachments";
+import { normalizeQuestionAnalyses } from "./decode/normalize";
+import type { QuestionAnalysis } from "./decode/types";
 
 export type QuestionStatus =
   | "unseen"
@@ -212,6 +214,12 @@ export interface QuestionRecord {
   annotations?: QuestionTextAnnotation[];
   /** Note image metadata only — bytes live in the questionAttachmentBlobs store. */
   attachments?: QuestionImageAttachment[];
+  /**
+   * What the question's source teaches about it (lib/decode): the rule, why
+   * each other option is wrong, the pages it rests on. About the question,
+   * never about the learner.
+   */
+  analyses?: QuestionAnalysis[];
   attempts: QuestionAttempt[];
   attemptedAt?: string;
   reviewDueAt?: string;
@@ -500,6 +508,7 @@ export function validateQuestionRecord(input: unknown, now: Date = new Date()): 
       notes: cleanString(input.notes),
       annotations: normalizeQuestionAnnotations(input.annotations),
       attachments: normalizeQuestionAttachments(input.attachments),
+      analyses: normalizeQuestionAnalyses(input.analyses),
       attempts: Array.isArray(input.attempts) ? (input.attempts as QuestionAttempt[]) : [],
       attemptedAt: typeof input.attemptedAt === "string" ? input.attemptedAt : undefined,
       reviewDueAt: typeof input.reviewDueAt === "string" ? input.reviewDueAt : undefined,
