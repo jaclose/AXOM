@@ -13,7 +13,8 @@ build a tutor/exam block, answer and retain results/source evidence.
 | Workspace and import UI | `pages/QuestionWorkspacePage.tsx`, `components/questions/ImportPanel.tsx` |
 | Extraction/parse/review staging | `lib/questionImport.ts`, `lib/questionParse.ts` |
 | Reviewed atomic finalization | `lib/questionImportFinalization.ts` (`persistReviewedImportOnce`), `lib/store.ts` (`commitReviewedImport`) |
-| Practice UI | `components/questions/ExamRunner.tsx`, `ExamSimulator.tsx` |
+| Practice UI | `components/questions/ExamRunner.tsx`, `ExamSimulator.tsx`, `components/exam/` |
+| Exam block engine (one for every player) | `lib/exam/engine.ts`, `lib/exam/questionTime.ts`, `lib/exam/profiles.ts`; the AXOM player's own rules in `lib/exam/playerBlock.ts` |
 | State | Question/document/set/session types in `lib/types.ts`; persistence/backup boundary in [data model](../architecture/data-model.md) |
 
 Invariants: uncertainty remains visible; do not invent answer keys or silently bypass
