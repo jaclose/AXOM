@@ -2,9 +2,12 @@
 
 The one place that says what AXOM should become, what is done, and what comes next, so nobody works from guesswork. JD, Claude and Codex all start here.
 
+**Current priority, 2026-10-04:** [Learning Intelligence doctrine](../product/AXOM-LEARNING-INTELLIGENCE-DOCTRINE.md) governs the [complete Ideas 1–6 reconciliation and roadmap](../product/IDEAS-RECONCILIATION-2026-10-04.md). [AXOM Decode](../feature-development/2026-10-04/DECODE-IMPLEMENTATION.md) links term, module, week, lecture, question pattern, personal error and repair. [Questions first](../feature-development/2026-10-04/QUESTION-FIRST-PLAN.md) is the first implementation wedge, not the product endpoint. Current work includes private source-pack/Tutor architecture; runtime progress and validation must be reported separately. Preserve shipped work and other worktrees.
+
 ## Read in this order
 
-1. **[01-ideas/INDEX.md](01-ideas/INDEX.md): the ideas bank.** Every idea JD has given, one row each, with an ID, a status and where it lives. The verbatim notes (IDEAS-1.md to IDEAS-4.md) sit beside it.
+0. **[Product doctrine](../product/AXOM-LEARNING-INTELLIGENCE-DOCTRINE.md) and [current reconciliation](../product/IDEAS-RECONCILIATION-2026-10-04.md):** learning change leads; productivity supports it. Read the relevant feature plan and inspect actual branch/worktree ownership before editing.
+1. **[01-ideas/INDEX.md](01-ideas/INDEX.md): the ideas bank.** Every idea JD has given, one row each, with an ID, a status and where it lives. The verbatim notes (IDEAS-1.md to IDEAS-6.md) sit beside it.
 2. **[02-progress/](02-progress/): what has been built,** biggest first: [1-MAJOR.md](02-progress/1-MAJOR.md) (waves and flagship features), [2-UPDATES.md](02-progress/2-UPDATES.md) (smaller improvements), [3-HOTFIXES.md](02-progress/3-HOTFIXES.md) (bug fixes), and [IN-FLIGHT.md](02-progress/IN-FLIGHT.md) (what each branch is doing right now).
 3. **[03-notes/](03-notes/): working notes** from each agent: decisions, conventions and traps worth remembering.
 4. **[04-COMPLETED.md](04-COMPLETED.md): done and verified,** by wave.
@@ -15,6 +18,7 @@ The one place that says what AXOM should become, what is done, and what comes ne
 1. Save them word for word as the next `01-ideas/IDEAS-N.md` (never edit a verbatim file).
 2. Add each actionable idea to `01-ideas/INDEX.md` with the next ID (`I<N>-<nn>`), a status of `NEW`, and its area.
 3. Give it a home: a branch plan (`PLANNED`), or `05-FUTURE.md`.
+4. Record its domain, thesis/problem, benefit, dependencies, priority, owner, source/date, related or superseded ideas, implementation links and tests in its feature record. Keep status distinct from verification; use the [Decode work records](../product/IDEAS-RECONCILIATION-2026-10-04.md) as the current example.
 
 ## When work ships
 
