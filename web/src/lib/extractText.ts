@@ -21,6 +21,13 @@ export interface ExtractedText {
 /** Rough cap on stored raw text so a giant textbook can't bloat the vault. */
 export const RAW_TEXT_CAP = 400_000;
 
+export interface PdfExtractionOptions {
+  /** Larger reviewed corpora opt in; ordinary imports keep their existing cap. */
+  maxCharacters?: number;
+  onProgress?: (page: number, total: number) => void;
+  signal?: AbortSignal;
+}
+
 /** TXT/Markdown extraction keeps author line breaks intact; only newline
  * encoding and the storage cap are normalized. */
 export function extractPlainText(raw: string): ExtractedText {
@@ -38,6 +45,7 @@ export async function extractPdfText(
   buffer: ArrayBuffer,
   pdfjsOverride?: typeof import("pdfjs-dist"),
   workerSrcOverride?: string,
+  options: PdfExtractionOptions = {},
 ): Promise<ExtractedText> {
   // Tests may inject pdf.js's legacy Node adapter. Production imports only the
   // modern browser build, keeping the extra legacy runtime out of the app.
@@ -48,8 +56,10 @@ export async function extractPdfText(
   const loadingTask = pdfjs.getDocument({ data: buffer });
   const doc = await loadingTask.promise;
   const pages: string[] = [];
+  const cap = options.maxCharacters ?? RAW_TEXT_CAP;
   try {
     for (let p = 1; p <= doc.numPages; p++) {
+      options.signal?.throwIfAborted();
       const page = await doc.getPage(p);
       const content = await page.getTextContent();
       // Rebuild line structure from item positions: a new baseline = new line.
@@ -64,6 +74,8 @@ export async function extractPdfText(
         lastY = y;
       }
       pages.push(text.trim());
+      page.cleanup();
+      options.onProgress?.(p, doc.numPages);
     }
   } finally {
     await doc.cleanup();
@@ -76,12 +88,12 @@ export async function extractPdfText(
       "This PDF has no extractable text layer — it's likely a scan or image export. OCR isn't available in-app yet; the file is kept as a source record.",
     );
   }
-  if (joined.length > RAW_TEXT_CAP) {
-    warnings.push(`Text truncated at ${Math.round(RAW_TEXT_CAP / 1000)}k characters to protect local storage.`);
+  if (joined.length > cap) {
+    warnings.push(`Text truncated at ${Math.round(cap / 1000)}k characters to protect local storage.`);
   }
   return {
-    pages: capPages(pages),
-    text: joined.slice(0, RAW_TEXT_CAP),
+    pages: capPages(pages, cap),
+    text: joined.slice(0, cap),
     empty: !joined,
     warnings,
   };
@@ -106,8 +118,8 @@ export async function extractDocxText(buffer: ArrayBuffer): Promise<ExtractedTex
   return { pages: [text.slice(0, RAW_TEXT_CAP)], text: text.slice(0, RAW_TEXT_CAP), empty: !text, warnings: warnings.slice(0, 5) };
 }
 
-function capPages(pages: string[]): string[] {
-  let budget = RAW_TEXT_CAP;
+function capPages(pages: string[], limit = RAW_TEXT_CAP): string[] {
+  let budget = limit;
   const out: string[] = [];
   for (const page of pages) {
     if (budget <= 0) break;

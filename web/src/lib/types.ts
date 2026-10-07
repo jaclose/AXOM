@@ -5,6 +5,7 @@
 // ===========================================================================
 
 import type { JournalNotebookEntryFields, JournalNotebookPreferences } from "./journalNotebook";
+import type { DecodeState } from "./decodeTypes";
 import type { StudyPlanSettings, StudyWorkflowPreferences } from "./studyPreferences";
 
 export type ID = string;
@@ -861,6 +862,8 @@ export interface NoctyriumState {
   // Question-bank library (schema v30)
   documents: SourceDocument[];
   questionSets: QuestionSet[];
+  /** Learning overlays share the canonical question and attempt records. */
+  decode?: DecodeState;
   /** Q2b-3: locally-saved Question Bank filter presets. */
   savedQuestionFilters: SavedQuestionFilter[];
   quizBlocks: QuizBlock[]; // schema v29

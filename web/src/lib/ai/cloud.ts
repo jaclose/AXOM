@@ -42,6 +42,7 @@ export function createCloudProvider(options: CloudProviderOptions): AIProvider &
       if (!token) throw new Error("Sign in to your AXOM account to use Cloud AI.");
       const response = await doFetch(options.endpoint, {
         method: "POST",
+        signal: req.signal ?? AbortSignal.timeout(120_000),
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
@@ -53,7 +54,7 @@ export function createCloudProvider(options: CloudProviderOptions): AIProvider &
           prompt: req.prompt,
           maxTokens: req.maxTokens,
           tier: req.tier ?? options.tier ?? "fast",
-          schema: req.schema,
+          schema: req.schema ?? req.jsonSchema,
         }),
       });
       let payload: { result?: unknown; error?: string; remaining?: number } = {};

@@ -4,6 +4,7 @@
 // able, which is what makes the app "modular" rather than the fixed Swift build.
 // ===========================================================================
 import { create } from "zustand";
+import { normalizeDecodeState } from "./decode";
 import { normalizeNavOrder, upgradeNavLayout } from "./navLayout";
 import { normalizeHintFields } from "./dailyWordHints";
 import { normalizeEnergyChecks } from "./energyInsights";
@@ -1626,13 +1627,13 @@ export const useStore = create<Store>()(
           profile, terms, courses, tracker, productivityTrackers, resources, tasks, journal, premedExperiences, prompts,
           folders, logs, integrations, boardPrep, dayPlans, blueprintInstalls, activeDayKey,
           lastActiveLocalDate, lastTimezoneOffset, dailyArchives, dailyRolloverEvents, energyFactors,
-          habits, habitEntries, sessions, closeouts, recoveryPlans, questions, quizSessions, documents, questionSets, savedQuestionFilters, quizBlocks, ankiCards, cardReviews, dailyWordPuzzles, schemaVersion,
+          habits, habitEntries, sessions, closeouts, recoveryPlans, questions, quizSessions, documents, questionSets, decode, savedQuestionFilters, quizBlocks, ankiCards, cardReviews, dailyWordPuzzles, schemaVersion,
         } = s;
         return {
           profile, terms, courses, tracker, productivityTrackers, resources, tasks, journal, premedExperiences, prompts,
           folders, logs, integrations, boardPrep, dayPlans, blueprintInstalls, activeDayKey,
           lastActiveLocalDate, lastTimezoneOffset, dailyArchives, dailyRolloverEvents, energyFactors,
-          habits, habitEntries, sessions, closeouts, recoveryPlans, questions, quizSessions, documents, questionSets, savedQuestionFilters, quizBlocks, ankiCards, cardReviews, dailyWordPuzzles, schemaVersion,
+          habits, habitEntries, sessions, closeouts, recoveryPlans, questions, quizSessions, documents, questionSets, decode, savedQuestionFilters, quizBlocks, ankiCards, cardReviews, dailyWordPuzzles, schemaVersion,
         } as NoctyriumState;
       },
     },
@@ -1982,6 +1983,7 @@ export function migratePersistedState(persisted: unknown, fromVersion: number): 
     tags: normalizeTagList(question.tags),
   }));
   s.savedQuestionFilters = normalizeSavedQuestionFilters(s.savedQuestionFilters);
+  if (s.decode) s.decode = normalizeDecodeState(s.decode);
   s.tracker = arrayOfRecords(s.tracker).map((item) => {
     const difficulty = ["easy", "moderate", "hard", "very-hard"].includes(String(item.difficulty)) ? item.difficulty : undefined;
     const assessmentDate = typeof item.assessmentDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(item.assessmentDate) ? item.assessmentDate : undefined;

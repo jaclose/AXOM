@@ -27,6 +27,9 @@ export interface AiAvailability {
 }
 
 export interface AiJsonRequest {
+  /** Optional output shape; still validate the returned values and evidence. */
+  jsonSchema?: Record<string, unknown>;
+  signal?: AbortSignal;
   system?: string;
   prompt: string;
   /** Rough cap; providers map it to their own parameter. */

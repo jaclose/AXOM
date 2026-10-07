@@ -33,13 +33,14 @@ import { normalizeJournalEntries, normalizeJournalNotebookPreferences } from "./
 import { normalizeApplicationResearch } from "./applicationResearch";
 import { normalizeApplicationProfile } from "./applicationProfile";
 import { normalizeStudyWorkflow } from "./studyPreferences";
+import { normalizeDecodeState } from "./decode";
 
 const DATA_KEYS = [
   "profile", "terms", "courses", "tracker", "productivityTrackers", "resources", "tasks", "journal",
   "premedExperiences", "prompts", "folders", "logs", "integrations", "boardPrep", "blueprintInstalls", "dayPlans", "activeDayKey", "schemaVersion",
   "lastActiveLocalDate", "lastTimezoneOffset", "dailyArchives", "dailyRolloverEvents", "energyFactors", "habits", "habitEntries",
   "sessions", "closeouts", "recoveryPlans", "questions", "quizSessions", "documents", "questionSets", "savedQuestionFilters", "quizBlocks", "ankiCards", "cardReviews",
-  "dailyWordPuzzles",
+  "dailyWordPuzzles", "decode",
 ] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -155,6 +156,21 @@ export function mergeStates(current: NoctyriumState, imported: NoctyriumState): 
     prep[lane] = !other || String(value?.updated ?? "") >= String(other.updated ?? "") ? value : other;
   }
   merged.boardPrep = prep;
+  if (current.decode || imported.decode) {
+    const left = normalizeDecodeState(current.decode);
+    const right = normalizeDecodeState(imported.decode);
+    const combine = <T extends { id: string }>(a: T[], b: T[]): T[] => {
+      const entries = new Map(b.map((item) => [item.id, item]));
+      for (const item of a) entries.set(item.id, item);
+      return [...entries.values()];
+    };
+    merged.decode = normalizeDecodeState({ ...right, ...left,
+      assignments: combine(left.assignments, right.assignments),
+      analyses: combine(left.analyses, right.analyses),
+      packs: combine(left.packs, right.packs),
+      sheets: combine(left.sheets, right.sheets),
+    });
+  }
   // Bring in new saved schools without replacing the learner's current review
   // decisions (including deliberately unchecked facts) for an existing school.
   const research = new Map(normalizeApplicationResearch(imported.profile.applicationResearch).map(entry => [entry.schoolId, entry]));
@@ -325,6 +341,7 @@ export function parseImport(text: string): NoctyriumState {
   const importedSchemaVersion = typeof data.schemaVersion === "number" ? data.schemaVersion : 0;
   return {
     schemaVersion: SCHEMA_VERSION,
+    ...(data.decode ? { decode: normalizeDecodeState(data.decode) } : {}),
     profile: {
       name,
       userId: typeof profile.userId === "string" && profile.userId.trim() ? profile.userId : userIdFromName(name),

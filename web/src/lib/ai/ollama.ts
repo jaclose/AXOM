@@ -49,11 +49,12 @@ export function createOllamaProvider(
       const res = await fetchFn(`${endpoint}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: req.signal ?? AbortSignal.timeout(120_000),
         body: JSON.stringify({
           model,
           stream: false,
-          format: "json",
-          options: { num_predict: req.maxTokens ?? 1200, temperature: 0.4 },
+          format: req.jsonSchema ?? "json",
+          options: { num_predict: req.maxTokens ?? 1200, temperature: req.jsonSchema ? 0 : 0.4 },
           messages: [
             ...(req.system ? [{ role: "system", content: req.system }] : []),
             { role: "user", content: req.prompt },
