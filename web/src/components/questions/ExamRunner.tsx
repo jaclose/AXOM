@@ -13,11 +13,12 @@ import {
   type QuizAnswer, type QuizFilters, type QuizMode, type QuizSession,
 } from "../../lib/quiz";
 import {
-  ERROR_TYPE_LABEL, EXAM_TYPE_LABEL, QUESTION_CATEGORIES,
+  ANSWER_CERTAINTY_LABEL, ERROR_TYPE_LABEL, EXAM_TYPE_LABEL, QUESTION_CATEGORIES,
   questionMappingStatus,
-  type QuestionErrorType, type QuestionExamType, type QuestionRecord,
+  type AnswerCertainty, type QuestionAttempt, type QuestionErrorType, type QuestionExamType, type QuestionRecord,
 } from "../../lib/questions";
 import { newSchedule } from "../../lib/ankiCards";
+import { REVIEW_REASON_LABEL, reviewCandidatesForSession, type ReviewReason } from "../../lib/learning-intelligence";
 import { explainSimply, explainWhyWrong, memoryHook, resolveActiveProvider } from "../../lib/ai";
 import { Modal, SelectField } from "../ui/Modal";
 import { GButton, GhostButton, Tag } from "../ui/primitives";
@@ -44,6 +45,7 @@ import {
 
 const ERROR_TYPES = Object.keys(ERROR_TYPE_LABEL) as QuestionErrorType[];
 const EXAM_TYPES = Object.keys(EXAM_TYPE_LABEL) as QuestionExamType[];
+const CERTAINTY_LEVELS = Object.keys(ANSWER_CERTAINTY_LABEL) as AnswerCertainty[];
 
 type Stage = "setup" | "running" | "results" | "sim";
 type ExamInterface = "axom" | ExamSkin;
@@ -59,6 +61,9 @@ const SECONDS_PER_ITEM = 90;
 interface ActiveQuizSnapshot {
   mode: QuizMode; poolIds: string[]; index: number; answers: QuizAnswer[];
   picked?: string; revealed: boolean; startedAt: string; timed: boolean; filters: QuizFilters;
+  /** Absent on a snapshot written before runs carried an id. */
+  runId?: string;
+  certainty?: AnswerCertainty;
 }
 function readActiveQuiz(): ActiveQuizSnapshot | undefined {
   try {
@@ -69,6 +74,17 @@ function readActiveQuiz(): ActiveQuizSnapshot | undefined {
 
 function trustedCorrectKey(question: QuestionRecord): string | undefined {
   return questionMappingStatus(question) === "ready" ? question.correctKey : undefined;
+}
+
+/** The attempt a run has already saved for a question, read from the live workspace. */
+function savedRunAttempt(
+  questions: readonly QuestionRecord[],
+  questionId: string | undefined,
+  runId: string,
+): QuestionAttempt | undefined {
+  if (!questionId) return undefined;
+  return questions.find((item) => item.id === questionId)?.attempts
+    .find((attempt) => attempt.quizSessionId === runId);
 }
 
 // Device-only reading preference for the quiz player (Q2a). A UI preference,
@@ -100,8 +116,11 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const questions = s.questions ?? [];
   const questionSets = s.questionSets ?? [];
   const restored = useMemo(() => readActiveQuiz(), []);
-  const [mode, setMode] = useState<QuizMode>(initialMode);
+  // A resumed block keeps the mode it was started in, whichever button reopened it.
+  const [mode, setMode] = useState<QuizMode>(restored?.mode ?? initialMode);
   const [stage, setStage] = useState<Stage>(restored || retakeIds?.length ? "running" : "setup");
+  /** Identifies this run on every attempt it saves, and becomes its session id. */
+  const [runId, setRunId] = useState<string>(() => restored?.runId ?? crypto.randomUUID());
 
   // --- setup state
   const [count, setCount] = useState(presetFilters?.count ?? (simulate ? 20 : 10));
@@ -135,8 +154,15 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const [answers, setAnswers] = useState<Map<string, QuizAnswer>>(() => new Map((restored?.answers ?? []).map((answer) => [answer.questionId, answer])));
   const [picked, setPicked] = useState<string | undefined>(restored?.picked);
   const [revealed, setRevealed] = useState(restored?.revealed ?? false); // tutor mode reveal
-  const [errorType, setErrorType] = useState<QuestionErrorType | "">("");
-  const [confidence, setConfidence] = useState<1 | 2 | 3 | 4 | 5 | undefined>();
+  // A resumed, already-checked question shows the classification it was saved with.
+  const [errorType, setErrorType] = useState<QuestionErrorType | "">(() => (
+    restored?.revealed ? savedRunAttempt(questions, pool[index]?.id, runId)?.errorType ?? "" : ""
+  ));
+  const [confidence, setConfidence] = useState<1 | 2 | 3 | 4 | 5 | undefined>(() => (
+    restored?.revealed ? savedRunAttempt(questions, pool[index]?.id, runId)?.confidence : undefined
+  ));
+  /** Optional, and only ever set before the answer is checked. */
+  const [certainty, setCertainty] = useState<AnswerCertainty | undefined>(restored?.certainty);
   const [startedAt, setStartedAt] = useState<string>(() => restored?.startedAt ?? new Date().toISOString());
   const [shownAt, setShownAt] = useState(() => Date.now());
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -150,11 +176,12 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const [annotationStatus, setAnnotationStatus] = useState<string>();
   const [session, setSession] = useState<QuizSession | null>(null);
   const [reviewSetCreated, setReviewSetCreated] = useState(false);
+  /** Also put answers that were right but unsure or slow into the review set. */
+  const [includeShaky, setIncludeShaky] = useState(false);
   const [trackerReviewAdded, setTrackerReviewAdded] = useState(false);
   const [aiText, setAiText] = useState<string | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [editingMapping, setEditingMapping] = useState(false);
-  const recordedTutorAttempts = useRef(new Set<string>());
   /** Seconds spent on questions the learner stepped away from before answering. */
   const bankedSeconds = useRef(new Map<string, number>());
 
@@ -198,18 +225,39 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
 
   const timeLimitSeconds = timed ? Math.round(pool.length * minutesPerQ * 60) : undefined;
   const question = pool[index];
+  // Why each answered question of the finished block is worth another look,
+  // read from the saved attempts rather than asked of the learner.
+  const review = useMemo(
+    () => (session ? reviewCandidatesForSession(session.id, s.questions ?? []) : []),
+    [s.questions, session],
+  );
   const provider = useMemo(() => resolveActiveProvider(), []);
 
   useEffect(() => {
     if (stage !== "running" || pool.length === 0) return;
     const filters: QuizFilters = { count, status, categories: category ? [category] : undefined, examTypes: examType ? [examType] : undefined, setIds: setIds.length ? setIds : undefined, ordered: ordered || undefined };
-    const snapshot: ActiveQuizSnapshot = { mode, poolIds: pool.map((item) => item.id), index, answers: [...answers.values()], picked, revealed, startedAt, timed, filters };
+    const snapshot: ActiveQuizSnapshot = { mode, poolIds: pool.map((item) => item.id), index, answers: [...answers.values()], picked, revealed, startedAt, timed, filters, runId, certainty };
     try { localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify(snapshot)); } catch { /* Local Vault remains authoritative for saved work. */ }
-  }, [answers, category, count, examType, index, mode, ordered, picked, pool, revealed, setIds, stage, startedAt, status, timed]);
+  }, [answers, category, certainty, count, examType, index, mode, ordered, picked, pool, revealed, runId, setIds, stage, startedAt, status, timed]);
 
   function clearActiveQuiz() {
     try { localStorage.removeItem(STORAGE_KEYS.quizActiveSession); } catch { /* non-fatal */ }
   }
+
+  // The resume snapshot is written synchronously; the workspace save is not. If
+  // the page closed between "Check answer" and that save, the snapshot knows an
+  // answer the workspace never received. Write only what is missing, so a
+  // classification saved for an earlier question is never replaced.
+  useEffect(() => {
+    if (!restored?.runId || restored.mode !== "tutor") return;
+    const missing = restored.answers.filter((answer) => (
+      answer.answerKey && !savedRunAttempt(questions, answer.questionId, restored.runId!)
+    ));
+    if (missing.length) {
+      s.commitQuizRun({ attempts: missing.map((answer) => ({ questionId: answer.questionId, attempt: attemptFor(answer) })) });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Timer display tick (display only — limits derive from timestamps).
   useEffect(() => {
@@ -246,7 +294,12 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         e.preventDefault();
       } else if (/^[1-5]$/.test(e.key) && mode === "tutor" && revealed) {
         // 1–5 sets confidence once the answer is revealed.
-        setConfidence(Number(e.key) as 1 | 2 | 3 | 4 | 5);
+        classifyTutorAttempt({ confidence: Number(e.key) as 1 | 2 | 3 | 4 | 5 });
+        e.preventDefault();
+      } else if (/^[1-3]$/.test(e.key)) {
+        // Before the answer is checked, 1–3 says how sure the learner is.
+        const level = CERTAINTY_LEVELS[Number(e.key) - 1];
+        setCertainty((current) => (current === level ? undefined : level));
         e.preventDefault();
       } else if (e.key === "ArrowLeft" && index > 0) {
         goPrevious();
@@ -260,7 +313,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stage, question?.id, revealed, picked, mode, errorType, confidence]);
+  }, [stage, question?.id, revealed, picked, mode, errorType, confidence, certainty]);
 
   // Tutor tools consume Escape before the containing modal. The first press
   // closes the utility/mode; a later press retains the established leave-block
@@ -390,7 +443,10 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     const correctKey = trustedCorrectKey(question);
     const correct = correctKey ? (answerKey ? answerKey === correctKey : false) : undefined;
     const earlier = (answers.get(question.id)?.seconds ?? 0) + (bankedSeconds.current.get(question.id) ?? 0);
-    return { questionId: question.id, answerKey, correct, flagged, seconds: earlier + secondsThisVisit() };
+    return {
+      questionId: question.id, answerKey, correct, flagged, seconds: earlier + secondsThisVisit(),
+      ...(certainty ? { certainty } : {}),
+    };
   }
 
   function recordCurrent(answerKey: string | undefined, flagged: boolean): QuizAnswer | undefined {
@@ -401,29 +457,55 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     return record;
   }
 
+  /**
+   * The saved form of one answer in this run. Every write carries the run id,
+   * so writing the same question again amends its attempt instead of adding one.
+   */
+  function attemptFor(
+    answer: QuizAnswer,
+    review: { errorType?: QuestionErrorType | ""; confidence?: 1 | 2 | 3 | 4 | 5 } = {},
+    attemptMode: QuestionAttempt["mode"] = mode,
+    sessionId: string = runId,
+  ): Omit<QuestionAttempt, "at"> {
+    return {
+      answerKey: answer.answerKey,
+      status: answer.correct === undefined ? "needs-review" : answer.correct ? "correct" : "incorrect",
+      timeSpentSeconds: answer.seconds,
+      confidence: review.confidence,
+      errorType: answer.correct === false ? (review.errorType || undefined) : undefined,
+      ...(answer.certainty ? { certainty: answer.certainty } : {}),
+      quizSessionId: sessionId,
+      mode: attemptMode,
+    };
+  }
+
   function submitTutor() {
-    if (!picked) return;
-    recordCurrent(picked, answers.get(question!.id)?.flagged ?? false);
+    if (!picked || !question) return;
+    const record = recordCurrent(picked, answers.get(question.id)?.flagged ?? false);
     setRevealed(true);
+    // Saved when it is checked, not when the learner moves on: leaving the
+    // block from the explanation used to drop the answer altogether.
+    if (record) s.recordQuestionAttempt(question.id, attemptFor(record, { errorType, confidence }));
+  }
+
+  /** The reason for a miss and the confidence afterwards are saved as they are chosen. */
+  function classifyTutorAttempt(patch: { errorType?: QuestionErrorType | ""; confidence?: 1 | 2 | 3 | 4 | 5 }) {
+    const review = {
+      errorType: patch.errorType !== undefined ? patch.errorType : errorType,
+      confidence: patch.confidence !== undefined ? patch.confidence : confidence,
+    };
+    setErrorType(review.errorType);
+    setConfidence(review.confidence);
+    const record = question ? answers.get(question.id) : undefined;
+    if (question && record?.answerKey) s.recordQuestionAttempt(question.id, attemptFor(record, review));
   }
 
   function nextQuestion() {
-    // Tutor mode saves the attempt (with error type) as the user moves on.
-    if (mode === "tutor" && question && revealed && !recordedTutorAttempts.current.has(question.id)) {
-      const a = answers.get(question.id);
-      s.recordQuestionAttempt(question.id, {
-        answerKey: a?.answerKey,
-        status: a?.correct === undefined ? "needs-review" : a.correct ? "correct" : "incorrect",
-        timeSpentSeconds: a?.seconds,
-        confidence,
-        errorType: a?.correct === false ? (errorType || undefined) : undefined,
-      });
-      recordedTutorAttempts.current.add(question.id);
-    }
     setPicked(undefined);
     setRevealed(false);
     setErrorType("");
     setConfidence(undefined);
+    setCertainty(undefined);
     setAiText(null);
     setEditingMapping(false);
     setShownAt(Date.now());
@@ -434,6 +516,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   function submitExamAndNext() {
     const record = recordCurrent(picked, answers.get(question!.id)?.flagged ?? false);
     setPicked(undefined);
+    setCertainty(undefined);
     if (index + 1 >= pool.length) finishBlock(picked, record);
     else { setIndex(index + 1); setShownAt(Date.now()); }
   }
@@ -449,8 +532,11 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     setIndex((value) => Math.max(0, value - 1));
     setPicked(saved?.answerKey);
     setRevealed(mode === "tutor" && Boolean(saved?.answerKey));
-    setErrorType("");
-    setConfidence(undefined);
+    // Show what was saved for it, so changing one field cannot blank the other.
+    const savedAttempt = mode === "tutor" ? savedRunAttempt(questions, previous.id, runId) : undefined;
+    setErrorType(savedAttempt?.errorType ?? "");
+    setConfidence(savedAttempt?.confidence);
+    setCertainty(saved?.certainty);
     setAiText(null);
     setEditingMapping(false);
     setShownAt(Date.now());
@@ -469,9 +555,30 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       const record = currentAnswer(key, all.get(question.id)?.flagged ?? false);
       if (record) all.set(question.id, record);
     }
+    const result = runSession(all);
+    // Exam mode records attempts at the END so nothing leaks mid-block. They go
+    // in with the session as one save. Tutor answers were saved as each was
+    // checked, so a tutor block only adds its result here.
+    if (mode === "exam") {
+      s.commitQuizRun({
+        attempts: result.answers
+          .filter((a) => a.answerKey || a.flagged)
+          .map((a) => ({ questionId: a.questionId, attempt: attemptFor(a) })),
+        session: result,
+      });
+    } else {
+      s.saveQuizSession(result);
+    }
+    clearActiveQuiz();
+    setSession(result);
+    setStage("results");
+  }
+
+  /** This run's session record: every pool question, answered or not. */
+  function runSession(all: ReadonlyMap<string, QuizAnswer>, endedEarly = false): QuizSession {
     const answerList = pool.map((q) => all.get(q.id) ?? ({ questionId: q.id, flagged: false } as QuizAnswer));
-    const result: QuizSession = {
-      id: crypto.randomUUID(),
+    return {
+      id: runId,
       mode,
       startedAt,
       endedAt: new Date().toISOString(),
@@ -481,22 +588,30 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       questionIds: pool.map((q) => q.id),
       answers: answerList,
       score: scoreSession(answerList),
+      ...(endedEarly ? { endedEarly: true } : {}),
     };
-    // Exam mode records attempts at the END so nothing leaks mid-block.
-    if (mode === "exam") {
-      for (const a of answerList) {
-        if (!a.answerKey && !a.flagged) continue;
-        s.recordQuestionAttempt(a.questionId, {
-          answerKey: a.answerKey,
-          status: a.correct === undefined ? "needs-review" : a.correct ? "correct" : "incorrect",
-          timeSpentSeconds: a.seconds,
-        });
-      }
+  }
+
+  /**
+   * Leaving a block keeps what was answered. The dialog has always said only
+   * unanswered questions are discarded; an exam block used to discard the lot.
+   */
+  function leaveBlock() {
+    if (!confirm("Leave this block? Answered questions are saved. Unanswered ones are not scored.")) return;
+    const answered = pool.flatMap((q) => {
+      const a = answers.get(q.id);
+      return a?.answerKey ? [a] : [];
+    });
+    if (answered.length) {
+      s.commitQuizRun({
+        attempts: mode === "exam"
+          ? answered.map((a) => ({ questionId: a.questionId, attempt: attemptFor(a) }))
+          : [],
+        session: runSession(answers, true),
+      });
     }
-    s.saveQuizSession(result);
     clearActiveQuiz();
-    setSession(result);
-    setStage("results");
+    onClose();
   }
 
   function resumeSuspended() {
@@ -536,15 +651,12 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       score: scoreSession(answerList),
       simulation: { skin: simRun.skin, preset: simRun.resume ? undefined : presetId, elapsedSeconds: meta.elapsedSeconds },
     };
-    for (const a of answerList) {
-      if (!a.answerKey && !a.flagged) continue;
-      s.recordQuestionAttempt(a.questionId, {
-        answerKey: a.answerKey,
-        status: a.correct === undefined ? "needs-review" : a.correct ? "correct" : "incorrect",
-        timeSpentSeconds: a.seconds,
-      });
-    }
-    s.saveQuizSession(result);
+    s.commitQuizRun({
+      attempts: answerList
+        .filter((a) => a.answerKey || a.flagged)
+        .map((a) => ({ questionId: a.questionId, attempt: attemptFor(a, {}, "simulation", result.id) })),
+      session: result,
+    });
     writeSuspendedBlock(null);
     setSuspended(undefined);
     setPool(simRun.pool);
@@ -574,6 +686,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       correct: existing?.correct,
       flagged: !(existing?.flagged ?? false),
       seconds: existing?.seconds,
+      ...(existing?.certainty ? { certainty: existing.certainty } : {}),
     }));
     s.updateQuestion(question.id, { marked: !(existing?.flagged ?? false) });
   }
@@ -602,16 +715,23 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   function createMissedReviewSet(questionIds: string[]) {
     if (!questionIds.length || reviewSetCreated) return;
     const createdAt = new Date().toISOString();
+    // A block drawn from one set keeps that set's place in the course, so the
+    // review set files itself under the same module and week.
+    const parent = setIds.length === 1 ? questionSets.find((item) => item.id === setIds[0]) : undefined;
     s.addQuestionSet({
       id: crypto.randomUUID(),
       title: `Missed review — ${new Date(createdAt).toLocaleDateString()}`,
       sourceDocumentIds: [],
       createdAt,
+      // Ids only: the questions and their attempts stay where they are.
       questionIds: [...questionIds],
       tags: ["missed-review"],
       aiEnhanced: false,
       parserWarnings: [],
       ordering: "import",
+      kind: "review",
+      ...(parent ? { parentSetId: parent.id } : {}),
+      ...(parent?.scope ? { scope: parent.scope } : {}),
     });
     setReviewSetCreated(true);
     pushToast({ title: "Review set created", body: `${questionIds.length} missed question${questionIds.length === 1 ? "" : "s"} saved as a fixed Question Set.`, tone: "success" });
@@ -813,6 +933,12 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       questions.filter((question) => missed.includes(question.id)),
       { count: Math.max(1, missed.length), status: "all", ordered: true },
     );
+    const reasonCounts = new Map<ReviewReason, number>();
+    for (const candidate of review) for (const reason of candidate.reasons) reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1);
+    const reviewReasons = [...reasonCounts.entries()].filter(([reason]) => reason !== "unscored");
+    const shaky = review
+      .filter((candidate) => candidate.reasons.some((reason) => reason === "unsure-right" || reason === "slow-right"))
+      .map((candidate) => candidate.questionId);
     return (
       <Modal title="Block results" onClose={onClose}
         footer={
@@ -823,7 +949,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
                 setAnswers(new Map());
                 setIndex(0);
                 setSession(null);
-                recordedTutorAttempts.current = new Set();
+                // A retake is its own run: its answers are new attempts.
+                setRunId(crypto.randomUUID());
                 setStartedAt(new Date().toISOString());
                 setShownAt(Date.now());
                 setStage("running");
@@ -848,8 +975,23 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         <PacingPanel session={session} />
         <section className="quiz-results-next" aria-labelledby="quiz-results-next-heading">
           <div><b id="quiz-results-next-heading">What next?</b><span className="sub">Continue with the missed material without rebuilding the session.</span></div>
-          {missed.length > 0 ? <div className="row gap8" style={{ flexWrap: "wrap" }}>
-            <GButton size="sm" onClick={() => createMissedReviewSet(missed)} disabled={reviewSetCreated}><ListPlus size={ICON_SIZE.body} /> {reviewSetCreated ? "Review set created" : "Create set from missed"}</GButton>
+          {reviewReasons.length > 0 && (
+            <div className="row gap6" style={{ flexWrap: "wrap" }} aria-label="Why these are worth another look">
+              {reviewReasons.map(([reason, count]) => (
+                <Tag key={reason} tone={reason === "sure-and-wrong" || reason === "repeat-miss" ? "red" : reason === "wrong" ? "orange" : "neutral"}>
+                  {count} {REVIEW_REASON_LABEL[reason].toLowerCase()}
+                </Tag>
+              ))}
+            </div>
+          )}
+          {shaky.length > 0 && !reviewSetCreated && (
+            <label className="row" style={{ gap: 6, cursor: "pointer" }}>
+              <input type="checkbox" checked={includeShaky} onChange={() => setIncludeShaky((value) => !value)} />
+              <span className="sub">Also include {shaky.length} you got right but were unsure of or slow on</span>
+            </label>
+          )}
+          {missed.length > 0 || (includeShaky && shaky.length > 0) ? <div className="row gap8" style={{ flexWrap: "wrap" }}>
+            <GButton size="sm" onClick={() => createMissedReviewSet(includeShaky ? [...new Set([...missed, ...shaky])] : missed)} disabled={reviewSetCreated}><ListPlus size={ICON_SIZE.body} /> {reviewSetCreated ? "Review set created" : "Create set from missed"}</GButton>
             <GButton size="sm" onClick={() => addMissedTopicsToTracker(missed)} disabled={trackerReviewAdded}><BookOpenCheck size={ICON_SIZE.body} /> {trackerReviewAdded ? "Topics added to Tracker" : "Add weak topics to Tracker"}</GButton>
           </div> : <span className="sub">You cleared this block. Close results or start another filtered block when ready.</span>}
         </section>
@@ -958,7 +1100,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       title={`${mode === "exam" ? "Exam" : "Tutor"} · ${index + 1} of ${pool.length}`}
       className="quiz-player-modal"
       bodyClassName="quiz-player-body"
-      onClose={() => { if (confirm("Leave this block? Progress in unanswered questions is discarded.")) { clearActiveQuiz(); onClose(); } }}
+      onClose={leaveBlock}
       footer={
         mode === "tutor"
           ? (
@@ -1046,6 +1188,21 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             );
           })}
         </div>
+
+        {!(mode === "tutor" && revealed) && (
+          <div className="quiz-certainty" role="group" aria-label="How sure are you?">
+            <span className="field-label">How sure are you? Optional (press 1–3)</span>
+            <div className="row gap6">
+              {CERTAINTY_LEVELS.map((level) => (
+                <button type="button" key={level} className={`filter-pill ${certainty === level ? "on" : ""}`}
+                  aria-pressed={certainty === level}
+                  onClick={() => setCertainty(certainty === level ? undefined : level)}>
+                  {ANSWER_CERTAINTY_LABEL[level]}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {mode === "tutor" && revealed && (
@@ -1128,7 +1285,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           {!isCorrect && correctKey && (
             <>
               <SelectField label="Why did this go wrong?" value={errorType}
-                onChange={(e) => setErrorType(e.target.value as QuestionErrorType | "")}>
+                onChange={(e) => classifyTutorAttempt({ errorType: e.target.value as QuestionErrorType | "" })}>
                 <option value="">Pick an error type (recommended)</option>
                 {ERROR_TYPES.map((t) => <option key={t} value={t}>{ERROR_TYPE_LABEL[t]}</option>)}
               </SelectField>
@@ -1138,7 +1295,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
                   {([1, 2, 3, 4, 5] as const).map((n) => (
                     <button type="button" key={n} className={`filter-pill ${confidence === n ? "on" : ""}`}
                       aria-label={`Confidence ${n} of 5`} aria-pressed={confidence === n}
-                      onClick={() => setConfidence(n)}>{n}</button>
+                      onClick={() => classifyTutorAttempt({ confidence: n })}>{n}</button>
                   ))}
                 </div>
               </div>

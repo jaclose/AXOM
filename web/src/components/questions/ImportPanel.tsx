@@ -30,6 +30,9 @@ import {
 import { hashGenerationInput, saveAiGeneration } from "../../lib/aiGenerations";
 import { GlassCard, GButton, GhostButton, PanelHeader, Tag, EmptyState } from "../ui/primitives";
 import { Field, SelectField, TextAreaField } from "../ui/Modal";
+import { MAPPING_STATUS_LABEL, inferSourceMapping } from "../../lib/course-engine/sourceMapping";
+import { moduleAliases } from "../../lib/course-engine/templateParse";
+import { moduleKey, vocabularyFromCourses } from "../../lib/course-engine/vocabulary";
 import { pushToast } from "../../lib/toast";
 import { sha256Hex } from "../../lib/checksum";
 import { assignDraftProvenancePages } from "../../lib/questionProvenance";
@@ -230,6 +233,11 @@ export function ImportPanel({
     seed?.drafts ? (seed.drafts.length > 0 ? "both" : "doc") : "both");
   const [aiEnhance, setAiEnhance] = useState(false);
   const [setTitle, setSetTitle] = useState(seed?.title ?? "");
+  // Where the set sits in the course. AXOM proposes it from the file's name;
+  // once the learner changes either field, their choice stands.
+  const [scopeModule, setScopeModule] = useState("");
+  const [scopeWeek, setScopeWeek] = useState("");
+  const [scopeEdited, setScopeEdited] = useState(false);
   const [category, setCategory] = useState("");
   const [examType, setExamType] = useState<QuestionExamType | "">("");
   const [difficulty, setDifficulty] = useState<QuestionDifficulty | "">("");
@@ -250,6 +258,26 @@ export function ImportPanel({
 
   const provider = useMemo(() => resolveActiveProvider(), []);
   const reviewing = step === "review" || step === "finalize";
+
+  const courseModules = useMemo(
+    () => [...new Set((s.courses ?? []).flatMap((course) => course.modules.map((module) => module.name)))],
+    [s.courses],
+  );
+  const proposedScope = useMemo(() => {
+    const name = pendingDoc?.fileName ?? "";
+    if (!name) return undefined;
+    return inferSourceMapping(name, vocabularyFromCourses(s.terms ?? [], s.courses ?? [], moduleAliases));
+  }, [pendingDoc?.fileName, s.courses, s.terms]);
+  useEffect(() => {
+    if (scopeEdited || !proposedScope) return;
+    // The name is matched against the learner's own modules, so the proposal
+    // is always one of the choices in the list.
+    const module = proposedScope.module
+      ? courseModules.find((name) => moduleKey(name) === moduleKey(proposedScope.module!.value))
+      : undefined;
+    setScopeModule(module ?? "");
+    setScopeWeek(module && proposedScope.week ? String(proposedScope.week.value) : "");
+  }, [courseModules, proposedScope, scopeEdited]);
 
   // Auto-categorize only when the user hasn't set a batch category and the
   // draft has none: high-confidence heuristic assigns, otherwise left blank.
@@ -351,6 +379,10 @@ export function ImportPanel({
     const setId = wantsSet ? uid() : undefined;
     const reviewedAt = new Date().toISOString();
     const normalizedSetTitle = setTitle.trim() || "Untitled set";
+    const week = Number(scopeWeek);
+    const scope = scopeModule
+      ? { module: scopeModule, ...(Number.isInteger(week) && week > 0 && week < 100 ? { week } : {}) }
+      : undefined;
     const extractionConfidence = (evaluation: DraftImportEvaluation): ExtractionConfidence => (
       evaluation.level === "High" ? "high" : "medium"
     );
@@ -371,6 +403,10 @@ export function ImportPanel({
         objective: draft.objective,
         category: resolveCategory(draft),
         bank: normalizedSetTitle,
+        // Stamped on each question as well as the set, so a question keeps its
+        // place in the course when it is later drawn into another set.
+        module: scope?.module,
+        week: scope?.week,
         setId,
         sourceDocumentId: documentId,
         sourceFile: pendingDoc ? {
@@ -471,6 +507,8 @@ export function ImportPanel({
       tags: category ? [category] : [],
       aiEnhanced: false,
       parserWarnings: batchWarnings,
+      kind: "source",
+      ...(scope ? { scope } : {}),
     } : undefined;
     let documentWrite: ImportDocumentWrite | undefined;
     if (pendingDoc && duplicateDoc && (wantsDoc || Boolean(setId))) {
@@ -1128,6 +1166,24 @@ export function ImportPanel({
           {saveMode !== "doc" && (
             <div className="grid grid-2">
               <Field label="Set title" value={setTitle} onChange={(event) => setSetTitle(event.target.value)} />
+              {courseModules.length > 0 && (
+                <>
+                  <SelectField label="Module" value={scopeModule}
+                    onChange={(event) => { setScopeEdited(true); setScopeModule(event.target.value); if (!event.target.value) setScopeWeek(""); }}>
+                    <option value="">Not filed under a module</option>
+                    {courseModules.map((name) => <option key={name} value={name}>{name}</option>)}
+                  </SelectField>
+                  <Field label="Week" type="number" inputMode="numeric" min={1} max={60} value={scopeWeek}
+                    disabled={!scopeModule} placeholder={scopeModule ? "Optional" : "Choose a module first"}
+                    onChange={(event) => { setScopeEdited(true); setScopeWeek(event.target.value); }} />
+                  {!scopeEdited && proposedScope?.module && scopeModule && (
+                    <p className="sub import-scope-note" role="status">
+                      {MAPPING_STATUS_LABEL[proposedScope.status]}: {proposedScope.module.evidence.replace(/^file /, "the file name ")}.
+                      {proposedScope.status !== "mapped" && " Check it before saving."}
+                    </p>
+                  )}
+                </>
+              )}
               <SelectField label="Category (applies to all)" value={category} onChange={(event) => setCategory(event.target.value)}>
                 <option value="">None</option>
                 {QUESTION_CATEGORIES.map((item) => <option key={item} value={item}>{item}</option>)}

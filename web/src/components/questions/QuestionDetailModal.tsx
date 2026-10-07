@@ -130,6 +130,7 @@ export function QuestionDetailModal({ question, onClose }: { question: QuestionR
       changedFromKey: changed ? firstPick : undefined,
       errorType: status === "incorrect" || status === "guessed" ? (errorType || undefined) : undefined,
       note: note.trim() || undefined,
+      mode: "manual",
     });
     onClose();
   }
