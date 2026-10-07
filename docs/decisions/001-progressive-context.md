@@ -34,3 +34,13 @@ distinguish the repository working set from the full client context.
 New independent tasks normally use fresh sessions. Same-task follow-ups may stay in
 the current session. A concise repository handoff replaces large catch-up prompts;
 scoped commits require task authorization and never imply push/deployment authority.
+
+
+Maintenance extension, 2026-10-07: the existing repository audit owns the single
+[maintenance registry](../operations/repository-audit.md#maintenance-registry).
+Coordination remains the source for live ownership; the registry retains cleanup
+opportunities and explicit safe conditions across sessions. ACTIVE, DEFERRED and
+READY are not inferred automatically from Git cleanliness. Small regression checks
+validate these records, canonical routes and conflict markers. No second task system,
+retrieval service or new dependency is introduced. Current measurements and research
+are in the [maintenance audit](../operations/repository-audit.md#maintenance-pass-2026-10-07).

@@ -28,3 +28,10 @@ file-and-line citations. The migration moved only the unreferenced competitive r
 to [product research](../product/research/AXOM_Competitive_Intelligence_Report.md).
 The [repository audit](../operations/repository-audit.md) classifies ambiguous media,
 large files and legacy code without deleting any of them.
+
+
+Policy/handoff before the 2026-10-07 maintenance pass remain retrievable without
+copying another manual: `git show 42eeacb:AGENTS.md` and
+`git show 42eeacb:docs/AI_STATE.md`. The graph extension handoff is preserved at
+`93badf8:docs/AI_STATE.md`. Use the [current registry](../operations/repository-audit.md#maintenance-registry)
+for protection and cleanup status; historical inventory is not maintenance authority.

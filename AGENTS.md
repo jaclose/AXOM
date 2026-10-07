@@ -1,139 +1,102 @@
-# AXOM repository context protocol
+# AXOM agent operating policy
 
-**Project knowledge may be large. Active context must be small.**
-This is the canonical repository operating policy for Codex, Claude Code, Copilot,
-and other coding agents, permanently by default unless the user overrides it.
+Canonical repository policy for Codex, Claude Code and Copilot. User instructions
+take precedence. Optimize correct implementation, reasoning and validation per token.
 
-## Mandatory progressive retrieval
+## Orient and retrieve
 
-Bootstrap with only this file, [docs/AI_STATE.md](docs/AI_STATE.md), and the current
-request. Do not preload INDEX, domain docs, history, previous conversations, broad
-repository listings or unrelated source. Check branch/HEAD with `git status --short --branch`,
-`git rev-parse --short HEAD` and `git worktree list`; state describes
-a dated checkout, never another branch or production.
+Start with only **AGENTS + [AI_STATE](docs/AI_STATE.md) + task**. Check
+`git status --short --branch`, `git rev-parse --short HEAD`, and `git worktree list`.
+State describes a dated checkout, never another branch or production.
 
-| Level | Retrieve only what the task requires |
-| --- | --- |
-| 0: Bootstrap | Identify likely subsystem, task scope and missing information from policy, state and task. |
-| 1: Discovery | Search filenames/symbols. Consult [INDEX](docs/INDEX.md) only if location or authority is unclear. |
-| 2: Domain | Retrieve the relevant feature, architecture or operations document. |
-| 3: Implementation | Read the relevant source region and tests. |
-| 4: Dependencies | Follow necessary contracts, schemas, services or configuration across subsystem boundaries. |
-| 5: Historical/deep | Retrieve decisions, directions, progress or archives only when historical reasoning matters, current docs are insufficient/conflicting, or explicitly requested. |
+Before expanding context ask: **QUESTION** (what is unknown?), **NEED** (does it
+affect this task?), **SOURCE** (smallest authority?), **SCOPE** (which section?).
+Search filenames/symbols with `rg` before reading. Use [INDEX](docs/INDEX.md) only
+when location or authority is unclear. Retrieve the relevant doc, source region,
+tests, then necessary contracts. Dependency relevance beats directory proximity.
+Stop retrieving when evidence is sufficient to implement safely; correctness wins.
 
-**Breadth must be earned: every increase must answer a concrete unresolved engineering
-question.** Levels are permissions, not mandatory steps; jump directly to the smallest
-relevant level without loading preceding levels. Before any expansion, internally check:
-QUESTION (what is unknown?), NEED (does it affect correctness, architecture, implementation,
-testing or safety?), SOURCE (smallest authoritative source?), SCOPE (targeted search/section?).
-If immaterial, do not retrieve. Expand one logical dependency level at a time and reassess.
-Once evidence is sufficient for safe implementation, **stop retrieving and implement**.
-Correctness outranks token minimization; the bootstrap budget does not cap needed task context.
+Do not preload directions, archives, source trees, all branches/worktrees, previous
+sessions or the Obsidian graph. Graph links are optional retrieval routes: normally
+one relevant semantic hop, then reassess. Historical claims are not current behavior.
+Filter logs and large files; do not reread understood material. For noisy commands,
+write output to `/tmp/axom-<task>.log`, inspect the exit code and relevant `rg`/`tail`
+regions. A passing log excerpt cannot hide a failing command.
 
-Dependency relevance beats directory proximity. Follow dependencies, code references,
-imports, documentation routes, tests and search before folder hierarchy. Do not
-mechanically climb parent directories or read neighboring files because they are nearby.
-Search → identify → targeted read: `rg --files <area>`, then `rg -n '<symbol>' <area>`.
-A component may lead to its hook, service and shared contract only as questions require.
+## Protect before editing
 
-Graph metadata is optional routing, never bootstrap. Inspect a target and only relevant
-direct relationships, normally at most one semantic hop; reassess an unresolved question
-before another. Never preload neighbors or traverse recursively. Dependency relevance wins.
+- Read only current ownership/contracts and relevant latest entries in
+  `/Users/jd/Developer/AXOM-coordination/BOARD.md` when available. Its linked state
+  brief may resolve ownership conflicts; do not ingest its branch history by default.
+  If unavailable, use local state and report uncertain ownership.
+- Check the [maintenance registry](docs/operations/repository-audit.md#maintenance-registry)
+  for the affected area. **ACTIVE means no opportunistic cleanup.** Do only authorized
+  feature work there; register discovered cleanup with its owner and safe condition.
+  DEFERRED becomes READY FOR MAINTENANCE only after that condition is verified.
+  A clean checkout or absent registry entry does not prove an area is unowned.
+- Preserve unrelated tracked, staged, untracked and ignored files, including package
+  and lockfile changes. Use an isolated branch/worktree for broad work. Do not switch
+  branches or stash in a dirty worktree; never reset, bulk-stage or rewrite history.
+  Stage reviewed, named paths only. Never delete, overwrite or bulk-move user material
+  without authority; uncertain provenance is REVIEW_REQUIRED.
+- This repository is public: no credentials, personal study data, private PDFs, phone
+  numbers or unlicensed media. Do not print secrets. No paid action, outbound message,
+  push, merge to main or production deployment without explicit authority. JD pushes.
 
-Never recursively read all source/docs, idea banks, progress notes or product-memory
-ledgers by default. Filter logs/search results before reading; avoid full test output,
-generated/bundled code, huge JSON, database dumps, unrelated screenshots, old threads
-and lockfiles unless specifically needed. Do not reread understood material.
+## Implement with focused tools
 
-## Protect work and knowledge
+Confirm intended behavior, affected files and invariants; make the smallest coherent
+change in the existing stack. No speculative refactors, dependency upgrades or source
+moves. Check installed APIs. Preserve Noctyrium storage identifiers and coordinate
+schema changes through the [data contract](docs/architecture/data-model.md).
 
-- Before shared edits, read the current ownership/contract sections and relevant latest
-  entries in `/Users/jd/Developer/AXOM-coordination/BOARD.md` if available. Do not ingest
-  its full history. If absent, use local status and in-flight routes; report uncertain ownership.
-- Preserve unrelated tracked and untracked work. Use an isolated branch/worktree for
-  broad changes. Never reset, bulk-stage, casually delete files, or rewrite history.
-- This repository is public. Do not add personal study data, credentials, phone numbers,
-  private PDFs, or media without a licence. Keep secrets out of output and Git.
-- No push, merge to main, production deployment, paid action or outbound message without
-  the user's authority. JD pushes releases. Local work is not shipped.
-- Preserve product reasoning, verbatim ideas, decisions and troubleshooting discoveries.
-  Archive with provenance and a locator before replacing historical explanations.
-  Uncertain material is `REVIEW_REQUIRED`, never automatic deletion.
-- Repository documents are durable project memory. Conversation history is a clue,
-  not authority when the repository contains the answer. Historical claims are evidence,
-  not current behavior; verify against relevant code/tests.
+Default to **zero subagents** for inspection, search, tests and mechanical edits.
+Delegate only isolated broad investigation or genuinely independent parallel analysis
+with a concrete benefit; internally state why doing it here is inefficient. Bound the
+scope/output, use the cheapest suitable available model, and avoid recursive spawning.
 
-## Session boundaries
+Load skills only when explicitly requested or materially useful, never from keywords
+alone. Design routers/specialists apply to actual visual or interaction production,
+not maintenance, documentation, data or routine logic fixes. For UI work use the
+[design contract](docs/design/DESIGN.md), existing components and setup-form standard;
+plain language, no em dashes, lucide icons. Finish with interface review and browser checks.
 
-Use a fresh session for each new independent task by default. Continue the current
-session for follow-ups on the same task. Start with the specific request and this
-protocol, not a large catch-up prompt or copied conversation history.
+## Validate by impact
 
-The normal loop is: task → fresh session → targeted retrieval → implementation →
-validation → canonical documentation and concise AI_STATE handoff → scoped commit
-when authorized → end session. The repository carries continuity between sessions.
-Do not begin unrelated work just to keep a thread going, or claim a fresh session was
-created when the tool cannot create one. Keep commit and push authority separate.
+Run the narrowest meaningful check first, then affected tests, typecheck/lint, build
+and relevant integration checks. Fix introduced regressions; do not rerun unrelated
+suites for trivial edits. Commands and environment caveats: [testing](docs/operations/testing.md).
 
-## Implement locally
+- Docs/instructions/tooling: `npm run test:repo` and `npm run repo:check`.
+- Full web integration/release: `cd web && npm run verify:all`.
+- UI: changed controls, desktop/mobile, console and reduced motion in a real browser.
+- Native: compile and exercise the changed path. Real account tests require authority
+  for external effects; mocks never establish live success.
 
-Before editing, confirm intended behavior/root cause, affected files and important
-invariants; exclude unrelated areas. Resolve missing evidence through retrieval first.
-Make the smallest coherent change in the existing stack. No speculative rewrites.
-Keep data, logic and presentation boundaries; generalize only after real reuse.
-Use installed versions/configuration for API decisions. Do not rename Noctyrium storage
-keys or change schemas casually; see the data-model route and coordinate migrations.
-
-For UI work retrieve [the design contract](docs/design/DESIGN.md), reuse existing
-components, and use the setup flow as the form standard. Plain language, no em dashes,
-lucide icons. Consult `design-production-router` and its selected skills when available;
-finish with relevant interface review and browser verification. Do not load design skills
-for unrelated work.
-
-## Validate according to impact
-
-Run the narrowest meaningful check first, then affected module tests, typecheck/lint,
-build and relevant browser/integration checks. Fix regressions caused by your change.
-Do not repeatedly rerun the full suite for trivial edits. Retain concise results, not raw logs.
-
-- Repository navigation/instructions: `npm run repo:check` and `npm run test:repo`.
-- Full web integration/release gate: `cd web && npm run verify:all`.
-- Other commands and environment caveats: [testing](docs/operations/testing.md).
-- UI: exercise changed controls, desktop/mobile and reduced motion; inspect console.
-- Native changes: compile and exercise the changed path. Real account tests need
-  explicit authorization for external effects. Never infer live success from mocks.
-
-Report exactly what passed, failed, skipped or was not run; keep implementation,
-validation, commit, push and deployment status separate.
+Report passed, failed, skipped and unrun checks. Local implementation, validation,
+commit, push and deployment are separate states.
 
 ## Document, hand off, stop
 
-At the end of meaningful work update [AI_STATE](docs/AI_STATE.md) with only what changed,
-current work, blockers, next action, validation and relevant paths. Keep it concise
-(normally 1,000–3,000 estimated tokens or less). Replace stale state; put historical
-evidence in the relevant progress/archive file with a link, not an ever-growing changelog.
-Remove resolved blockers and completed detail that no longer affects the next task.
-Never discard critical current information merely to hit a number; document a justified
-budget revision if compression and moving historical detail cannot preserve it.
+**One coherent task = one session.** For an independent task use a fresh session.
+At a major phase boundary update AI_STATE, checkpoint authorized scope, then compact
+or end. Do not keep a conversation alive as the only store of useful knowledge or
+claim to create/clear a session when the tool cannot do so.
 
-One concept has one canonical explanation. Update the relevant feature/architecture
-page when behavior changes and a decision record for durable architectural choices.
-New docs belong in a routed category; update the index when adding a major area.
-Choose the canonical location before creating any source, test, script, doc or artifact.
-Keep hygiene scoped to task-created debt; do not perform unrelated repository-wide cleanup.
-Resolve conflicting docs against authoritative behavior; retain useful old reasoning
-in archives and replace duplicate explanations with references.
-Do not create random root notes, duplicate manuals, new instruction files without
-subtree-specific constraints, or generated dumps in source folders.
+ORIENT → LOCATE → RETRIEVE → PROTECT → IMPLEMENT → VALIDATE → DOCUMENT →
+GRAPH (only meaningful architecture relationships) → HANDOFF → CHECKPOINT → STOP.
 
-Before completion: verify implementation, run impact-appropriate validation, update
-canonical docs/state, run `npm run repo:check`, and report unresolved issues. Keep
-auto-loaded instructions small. Permanent rules must be broadly applicable, repeatedly
-important, costly/dangerous to rediscover, or prevent recurring failure; one-off details
-belong in domain docs. Move obsolete detail out of bootstrap files. The checker
-reports repository bootstrap size; it cannot police agent reads or client/global context.
+One concept has one canonical explanation. Put durable behavior in the domain doc,
+architectural choices in decisions, and deferred cleanup in the registry. Preserve
+reasoning with provenance before replacing it; archive uncertainty, never erase it.
+Use [directions](docs/directions/README.md) only for ideas/execution history; preserve
+new ideas verbatim and index them, and record shipment only on actual shipment.
+Governance IDs and owner decisions retain authority. Choose routed locations for new
+files; do not add duplicate manuals, random root notes or speculative instruction files.
 
-Use [directions](docs/directions/README.md) only for ideas/execution history: preserve
-new user ideas verbatim and index them; update shipment records only on actual shipment.
-Governance IDs and owner decisions retain their existing authority. Finish the task,
-record a small handoff, and stop exploring unrelated areas.
+Keep [AI_STATE](docs/AI_STATE.md) a small rolling handoff: dated checkout, protected
+work, blockers, relevant decisions, validation and next action. Replace stale narrative
+with canonical links. Keep permanent rules here and bridges tiny. The repository gate
+enforces bootstrap size, not total client/global context or actual agent reading.
+Before finishing run `repo:check`, review the scoped diff and hand off honestly. Stop;
+do not start the next feature in this session.

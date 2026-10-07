@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -10,6 +10,8 @@ import {
   checkFiles, checkMarkdownLinks, extractMarkdownLinks, isActiveDocument,
   readRepositoryFiles, runRepositoryHygiene, checkStartupImports,
   isSafeRepositoryPath, checkSnapshotIntegrity, checkPreservationManifests,
+  REQUIRED_ROUTES, MAINTENANCE_DOCUMENT, checkRequiredRoutes, checkConflictMarkers,
+  checkMaintenanceRegistry, checkGraphMetadata,
 } from './repository-hygiene.mjs';
 
 const emptyBaseline = { schemaVersion: 1, exceptions: [], preservationManifests: [] };
@@ -22,6 +24,21 @@ const exceptionFor = (filePath, bytes) => ({
   path: filePath, bytes, rules: artifactRules(filePath, bytes),
   rationale: 'Existing tracked evidence preserved; no new artifacts approved.',
 });
+const registryHeader = [
+  '## Maintenance registry', '',
+  '| Area / path | Status | Owner / task | Why protected | Cleanup opportunity | Safe condition | Date / reference |',
+  '| --- | --- | --- | --- | --- | --- | --- |',
+].join('\n');
+const registryRow = '| `web/src/owner-branch-only/` | ACTIVE | Course owner | Live changes | Remove adapter | Owner releases after integration | 2026-10-07: BOARD |';
+const graphFrontmatter = '---\ntags:\n  - axom/navigation\nauthority: navigation\n---\n';
+
+function writeContextFixture(write) {
+  for (const document of contextDocuments()) write(document.path, document.content);
+  for (const filePath of REQUIRED_ROUTES) {
+    write(filePath, filePath === MAINTENANCE_DOCUMENT ? registryHeader
+      : `${filePath.startsWith('docs/graph/') ? graphFrontmatter : ''}# Route\n`);
+  }
+}
 
 function withRepository(run) {
   const directory = mkdtempSync(path.join(os.tmpdir(), 'axom-hygiene-'));
@@ -118,7 +135,7 @@ test('a missing bootstrap document cannot produce a complete passing profile', (
 
 test('aggregate budgets participate in the repository gate and report routing and archive status', () => {
   withRepository(({ directory, write }) => {
-    for (const document of contextDocuments()) write(document.path, document.content);
+    writeContextFixture(write);
     write('scripts/repository-hygiene-baseline.json', JSON.stringify(emptyBaseline));
     write('AGENTS.md', 'a'.repeat(9_000));
     write('docs/AI_STATE.md', 'b'.repeat(9_000));
@@ -265,7 +282,7 @@ test('Git candidate boundary includes tracked and proposed files, excludes ignor
 
 test('end-to-end repository fixture passes, then rejects a missing link and generated artifact', () => {
   withRepository(({ directory, write }) => {
-    for (const document of contextDocuments()) write(document.path, document.content);
+    writeContextFixture(write);
     write('scripts/repository-hygiene-baseline.json', JSON.stringify(emptyBaseline));
     write('docs/INDEX.md', '[entry](../AGENTS.md)');
     assert.deepEqual(runRepositoryHygiene(directory).errors, []);
@@ -280,7 +297,7 @@ test('end-to-end repository fixture passes, then rejects a missing link and gene
 
 test('active-document symlinks are rejected without following private targets', () => {
   withRepository(({ directory, write }) => {
-    for (const document of contextDocuments()) write(document.path, document.content);
+    writeContextFixture(write);
     write('scripts/repository-hygiene-baseline.json', JSON.stringify(emptyBaseline));
     write('.gitignore', 'private/\n');
     write('private/hidden.md', '[must not be read](secret-missing.md)');
@@ -397,7 +414,7 @@ test('preservation rejects symlink parent directories and ignored snapshot paths
 
 test('end-to-end hygiene checks both startup imports and the configured preservation manifest', () => {
   withRepository(({ directory, write }) => {
-    for (const document of contextDocuments()) write(document.path, document.content);
+    writeContextFixture(write);
     const manifestPath = 'docs/archive/manifest.json';
     const snapshot = 'docs/archive/original.md';
     write('scripts/repository-hygiene-baseline.json', JSON.stringify({ ...emptyBaseline, preservationManifests: [manifestPath] }));
@@ -410,5 +427,81 @@ test('end-to-end hygiene checks both startup imports and the configured preserva
     assert.equal(result.errors.length, 2);
     assert.match(result.errors[0], /missing exact standalone/);
     assert.match(result.errors[1], /SHA-256 mismatch/);
+  });
+});
+
+test('canonical routes are required even when no remaining link points at them', () => {
+  assert.deepEqual(checkRequiredRoutes(REQUIRED_ROUTES), []);
+  assert.match(checkRequiredRoutes(REQUIRED_ROUTES.filter((filePath) => filePath !== 'docs/INDEX.md'))[0], /docs\/INDEX.md: required canonical route is missing/);
+});
+
+test('merge and diff3 conflict markers fail with locations, ordinary prose does not', () => {
+  assert.deepEqual(checkConflictMarkers([{ path: 'AGENTS.md', content: '# Policy\nUse clear instructions.\n' }]), []);
+  const errors = checkConflictMarkers([{ path: '.gitignore', content: '<<<<<<< Updated upstream\n||||||| base\n=======\n>>>>>>> Stashed changes\n' }]);
+  assert.equal(errors.length, 3);
+  assert.match(errors[0], /\.gitignore:1: unresolved conflict marker/);
+});
+
+test('registry accepts owner-branch paths and all three maintenance states', () => {
+  for (const status of ['ACTIVE', 'DEFERRED', 'READY']) {
+    assert.deepEqual(checkMaintenanceRegistry(`${registryHeader}\n${registryRow.replace('ACTIVE', status)}\n\n## History\n| old | incomplete |`), []);
+  }
+});
+
+test('registry rejects absent sections, headers, unknown states and incomplete records', () => {
+  assert.match(checkMaintenanceRegistry()[0], /required section/);
+  assert.match(checkMaintenanceRegistry('## Maintenance registry\n| Wrong |')[0], /seven-column/);
+  assert.match(checkMaintenanceRegistry(`${registryHeader}\n${registryRow.replace('ACTIVE', 'CLEAR')}`)[0], /status must be/);
+  assert.match(checkMaintenanceRegistry(`${registryHeader}\n${registryRow.replace('Owner releases after integration', '')}`)[0], /all seven fields/);
+  assert.match(checkMaintenanceRegistry(`${registryHeader}\n${registryRow.slice(0, -1)}`)[0], /end with a pipe/);
+  assert.match(checkMaintenanceRegistry(`${registryHeader}\n${registryHeader}`)[0], /one required section/);
+});
+
+test('registry rejects duplicate areas, traversal and dates without real evidence', () => {
+  assert.match(checkMaintenanceRegistry(`${registryHeader}\n${registryRow}\n${registryRow}`)[0], /duplicate area/);
+  assert.match(checkMaintenanceRegistry(`${registryHeader}\n${registryRow.replace('web/src/owner-branch-only/', '../private')}`)[0], /repository-relative/);
+  for (const reference of ['2026-02-30: BOARD', '2026-10-07', '2026-10-07: ']) {
+    assert.match(checkMaintenanceRegistry(`${registryHeader}\n${registryRow.replace('2026-10-07: BOARD', reference)}`)[0], /Date \/ reference/);
+  }
+});
+
+test('curated graph nodes declare authority without forcing metadata onto historical docs', () => {
+  assert.deepEqual(checkGraphMetadata([{ path: 'docs/graph/map.md', content: `${graphFrontmatter}# Map` }]), []);
+  assert.deepEqual(checkGraphMetadata([{ path: 'docs/features/old-contract.md', content: '# Contract' }]), []);
+  assert.match(checkGraphMetadata([{ path: 'docs/graph/map.md', content: '# Map' }])[0], /explicit authority/);
+  assert.match(checkGraphMetadata([{ path: 'docs/features/course.md', content: graphFrontmatter.replace('navigation\n---', 'unknown\n---') }])[0], /explicit authority/);
+});
+
+test('bridge text stays small independently of the combined bootstrap ceiling', () => {
+  const documents = contextDocuments();
+  documents[2].content = 'a'.repeat(801);
+  assert.match(checkDocumentBudgets(documents).errors[0], /801 characters exceeds 800/);
+  assert.deepEqual(checkBootstrapContext(documents).errors, []);
+});
+
+test('real ignore rules exclude machine state while preserving portable config, Bases and source assets', () => {
+  withRepository(({ directory, write }) => {
+    write('.gitignore', readFileSync(new URL('../.gitignore', import.meta.url), 'utf8'));
+    const ignored = ['docs/.obsidian/workspace.json', 'docs/.obsidian/plugins/local/data.json', '.trash/old.md', 'web/.cache/test', 'test-results/trace.zip', '.env.local', 'Materials/private.pdf'];
+    const kept = ['docs/.obsidian/app.json', 'docs/.obsidian/graph.json', 'docs/Working Directory.base', '.env.example', 'web/public/scenes/licensed.webp', 'web/src/feature.ts'];
+    for (const filePath of [...ignored, ...kept]) write(filePath, '{}');
+    const candidates = new Set(readRepositoryFiles(directory).map((file) => file.path));
+    for (const filePath of ignored) assert.equal(candidates.has(filePath), false, filePath);
+    for (const filePath of kept) assert.equal(candidates.has(filePath), true, filePath);
+  });
+});
+
+test('repository gate catches the observed conflict and missing-route failure, plus invalid maintenance status', () => {
+  withRepository(({ directory, write }) => {
+    writeContextFixture(write);
+    write('scripts/repository-hygiene-baseline.json', JSON.stringify(emptyBaseline));
+    rmSync(path.join(directory, 'docs/architecture/README.md'));
+    write('.gitignore', '<<<<<<< Updated upstream\n>>>>>>> Stashed changes\n');
+    write(MAINTENANCE_DOCUMENT, `${registryHeader}\n${registryRow.replace('ACTIVE', 'CLEAR')}`);
+    const result = runRepositoryHygiene(directory);
+    assert.equal(result.conflictProblems, 2);
+    assert.equal(result.maintenanceProblems, 1);
+    assert.equal(result.routingProblems, 1);
+    assert.equal(result.errors.length, 4);
   });
 });

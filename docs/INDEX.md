@@ -20,6 +20,8 @@ Start a session with [AGENTS](../AGENTS.md) and [AI_STATE](AI_STATE.md).
 | Durable engineering decisions | [Decision index](decisions/README.md) |
 | User idea ID, branch plan, progress | [Directions router](directions/README.md) |
 | Older evidence, original reasoning, preserved snapshots | [Archive locator](archive/README.md) |
+| Is this area protected? Where does cleanup wait? | [Maintenance registry](operations/repository-audit.md#maintenance-registry) |
+| Which branches are integrated, held or preserved for recovery? | [Recovery matrix](operations/branch-recovery-2026-10-07.md) |
 | File classification, token costs, deferred refactors | [Repository audit](operations/repository-audit.md) |
 
 Search a routed file for a heading/symbol/idea ID before reading a large section.

@@ -110,8 +110,13 @@ __pycache__/
 *.pyc
 *.log
 *.tsbuildinfo
+.cache/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.turbo/
 
-# Obsidian: share only portable link/filter defaults, never personal vault state.
+# Obsidian: portable defaults only. Bases are user-authored, not disposable caches.
 **/.obsidian/*
 !docs/.obsidian/app.json
 !docs/.obsidian/graph.json
@@ -130,3 +135,4 @@ __pycache__/
 /*.jpeg
 .vercel
 .env*
+!.env.example
