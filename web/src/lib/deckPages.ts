@@ -87,6 +87,8 @@ export interface SlideDeck {
   answerKeyPages: number[];
   /** How many header, footer or slide-number lines were dropped. */
   runningLinesDropped: number;
+  /** Every page's lines once those were dropped, by page (index 0 is page 1). */
+  lines: string[][];
 }
 
 /** An answer option, with or without a mark in front of it. */
@@ -590,5 +592,6 @@ export function readSlideDeck(pages: readonly string[]): SlideDeck | undefined {
     ownNumbers,
     answerKeyPages: slides.keyPages,
     runningLinesDropped: slides.dropped,
+    lines: slides.cleaned,
   };
 }

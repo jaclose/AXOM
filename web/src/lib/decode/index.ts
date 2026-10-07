@@ -11,3 +11,4 @@ export {
   sourceCoverage, type SourceCoverage, type SourceOriginalProblem,
 } from "./sources";
 export { conceptGroups, questionsWithoutTeaching, teachingView, type ConceptGroup, type TeachingOption, type TeachingView } from "./teaching";
+export { readSlideTeaching, sourceTeachingProposals, type SlideTeaching } from "./deckTeaching";

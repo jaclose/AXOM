@@ -29,6 +29,7 @@ Each layer owns one thing and reads the layer before it by id.
 | Whether an analysis still fits, and which one is taught from | `lib/decode/analysis.ts` |
 | A source's original file on this device, and how much of it gave text | `lib/decode/sources.ts` |
 | What a tutor view shows for one question; questions that teach the same rule | `lib/decode/teaching.ts` |
+| Teaching read from a deck's own answer and explanation slides | `lib/decode/deckTeaching.ts`, on `lib/deckPages.ts` |
 
 ## Invariants
 
@@ -48,6 +49,13 @@ Each layer owns one thing and reads the layer before it by id.
   another week does not.
 - **A broken analysis is dropped whole.** A reviewed statement is never kept without the
   citation it rested on.
+- **A deck's teaching is read from headed sections only.** "Why it's right", "Why not the
+  others", "High-yield" and their like, on the slides the deck reader already ties to a
+  question. Unheaded prose is already the question's explanation; no rule is guessed out
+  of it. A single common word ("why", "answer") counts as a title only when it stands
+  alone, has a colon, or is in capitals. Only another option of the same question can be
+  a distractor. The result is a proposal, and it is not offered again for a question whose
+  source analysis the learner already has in hand.
 - **A group never claims more than the sources show.** Questions are grouped only when
   their reviewed rules match word for word, a question printed in two decks counts once,
   and one question is called an instance, not a pattern. No screen uses the groups yet.
@@ -71,5 +79,7 @@ ported by intent, not merged.
 | question identity and duplicate grouping | `lib/questionDuplicates.ts` (`questionSignature`) |
 | `decodeMetrics`, `nextDecodeAction` | `lib/learning-intelligence/` (attempt events, patterns, review) |
 | `SourceTrace`, `DecodeDistractor`, `QuestionAnalysis`, the source fingerprint | `lib/decode/` |
+| `reviewPacketImport.ts`: its own page grouping, question and answer reading, and header lines of one learner's decks written into the code | the course engine's deck reader (`lib/deckPages.ts`), which drops running lines by counting them; only the reading of teaching sections was kept |
 
-Tests: `lib/decode/decode.test.ts`, `lib/decode/sources.test.ts`, `lib/decode/teaching.test.ts`.
+Tests: `lib/decode/decode.test.ts`, `lib/decode/sources.test.ts`, `lib/decode/teaching.test.ts`,
+`lib/decode/deckTeaching.test.ts`.
