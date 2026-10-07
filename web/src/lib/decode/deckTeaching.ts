@@ -167,6 +167,22 @@ export function readSlideTeaching(
 type DeckPlace = Pick<DeckQuestion, "questionPage" | "answerPages" | "explanationPages">;
 
 /**
+ * A document's pages read as a deck, once. The teaching block asks again on
+ * every render, and reading a few hundred slides each time would be felt.
+ * A stored document's page list is never changed in place, so the list itself
+ * is the key; when the document is replaced, the old reading goes with it.
+ */
+const DECKS = new WeakMap<readonly string[], ReturnType<typeof readSlideDeck> | null>();
+function deckOf(pages: readonly string[]) {
+  let deck = DECKS.get(pages);
+  if (deck === undefined) {
+    deck = readSlideDeck(pages) ?? null;
+    DECKS.set(pages, deck);
+  }
+  return deck ?? undefined;
+}
+
+/**
  * Source analyses a stored deck can offer for the questions that came from
  * it, as proposals. A question is matched to its slide by its page. Nothing is
  * offered for a question that already has a source analysis that still fits
@@ -181,7 +197,7 @@ export function sourceTeachingProposals(
 ): QuestionAnalysis[] {
   const pages = document.pageTexts;
   if (!pages?.length) return [];
-  const deck = readSlideDeck(pages);
+  const deck = deckOf(pages);
   if (!deck) return [];
   const places = new Map<number, DeckPlace | null>();
   for (const place of deck.questions) places.set(place.questionPage, places.has(place.questionPage) ? null : place);

@@ -43,6 +43,18 @@ export function questionSourcePages(question: Pick<QuestionRecord, "sourcePage" 
  */
 export function questionSourceFingerprint(question: SourceBearing, document?: PageSource): string {
   const source = document && document.id === question.sourceDocumentId ? document : undefined;
+  // Asked for on every render of a question's teaching. A question and a
+  // document are replaced, never changed in place, so the pair is the key.
+  const known = FINGERPRINTS.get(question);
+  if (known && known.source === source) return known.value;
+  const value = computeFingerprint(question, source);
+  FINGERPRINTS.set(question, { source, value });
+  return value;
+}
+
+const FINGERPRINTS = new WeakMap<object, { source: PageSource | undefined; value: string }>();
+
+function computeFingerprint(question: SourceBearing, source: PageSource | undefined): string {
   return hash([
     question.id,
     question.stem,

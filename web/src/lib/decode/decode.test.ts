@@ -111,6 +111,16 @@ describe("whether an analysis still fits its question", () => {
     expect(questionSourceFingerprint(question, reimported)).not.toBe(before);
   });
 
+  it("gives the same answer when asked again, and a new one for a new copy of the question or the source", () => {
+    // The fingerprint is remembered per question object. A changed question is a new object, so nothing stale is served.
+    const before = questionSourceFingerprint(question, document);
+    expect(questionSourceFingerprint(question, document)).toBe(before);
+    expect(questionSourceFingerprint(question)).not.toBe(before);
+    expect(questionSourceFingerprint(question, document)).toBe(before);
+    expect(questionSourceFingerprint({ ...question }, document)).toBe(before);
+    expect(questionSourceFingerprint(question, { ...document, pageTexts: ["Changed.", "Changed."] })).not.toBe(before);
+  });
+
   it("reads only the pages the question's own provenance points at", () => {
     expect(questionSourcePages(question)).toEqual([1, 2]);
     const elsewhere = { ...document, pageTexts: [...document.pageTexts!, "A page about something else."] };
