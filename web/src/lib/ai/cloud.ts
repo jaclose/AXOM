@@ -17,7 +17,6 @@ export interface CloudProviderOptions {
 
 export interface CloudJsonRequest extends AiJsonRequest {
   task?: string;
-  schema?: Record<string, unknown>;
   tier?: "fast" | "quality";
 }
 
@@ -47,6 +46,7 @@ export function createCloudProvider(options: CloudProviderOptions): AIProvider &
           Authorization: `Bearer ${token}`,
           ...(options.apiKey ? { apikey: options.apiKey } : {}),
         },
+        signal: req.signal,
         body: JSON.stringify({
           task: req.task,
           system: req.system,

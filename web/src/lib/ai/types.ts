@@ -31,6 +31,10 @@ export interface AiJsonRequest {
   prompt: string;
   /** Rough cap; providers map it to their own parameter. */
   maxTokens?: number;
+  /** The shape the reply must have, where the provider can enforce one. The caller still validates what comes back. */
+  schema?: Record<string, unknown>;
+  /** Stops the request when the learner cancels. */
+  signal?: AbortSignal;
 }
 
 /** The base capability every provider implements. */

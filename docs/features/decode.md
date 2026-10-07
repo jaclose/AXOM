@@ -30,6 +30,7 @@ Each layer owns one thing and reads the layer before it by id.
 | A source's original file on this device, and how much of it gave text | `lib/decode/sources.ts` |
 | What a tutor view shows for one question; questions that teach the same rule | `lib/decode/teaching.ts` |
 | Teaching read from a deck's own answer and explanation slides | `lib/decode/deckTeaching.ts`, on `lib/deckPages.ts` |
+| A model's reading of a question's source, checked before it is kept | `lib/decode/aiAnalysis.ts`, through `lib/ai/` |
 
 ## Invariants
 
@@ -56,6 +57,14 @@ Each layer owns one thing and reads the layer before it by id.
   alone, has a colon, or is in capitals. Only another option of the same question can be
   a distractor. The result is a proposal, and it is not offered again for a question whose
   source analysis the learner already has in hand.
+- **A model's reading is checked, then reviewed.** It is asked about one question with a
+  confirmed answer and the text of that question's own pages. A reply is refused whole
+  unless every quotation is in that text on the page it names, it cites something when it
+  was given text, it explains only the other options, and it carries no field that was
+  not asked for (so it cannot carry a new answer key). What passes is a proposal.
+- **One route to a model.** Requests go through `AIProvider`: the signed-in `ai-proxy`
+  (account, daily allowance, model chosen on the server) or a local model. Decode adds no
+  endpoint. A request is sized to the proxy's limits and a batch is six questions.
 - **A group never claims more than the sources show.** Questions are grouped only when
   their reviewed rules match word for word, a question printed in two decks counts once,
   and one question is called an instance, not a pattern. No screen uses the groups yet.
@@ -82,4 +91,10 @@ ported by intent, not merged.
 | `reviewPacketImport.ts`: its own page grouping, question and answer reading, and header lines of one learner's decks written into the code | the course engine's deck reader (`lib/deckPages.ts`), which drops running lines by counting them; only the reading of teaching sections was kept |
 
 Tests: `lib/decode/decode.test.ts`, `lib/decode/sources.test.ts`, `lib/decode/teaching.test.ts`,
-`lib/decode/deckTeaching.test.ts`.
+`lib/decode/deckTeaching.test.ts`, `lib/decode/aiAnalysis.test.ts`.
+
+Measured on the learner's own files on 2026-10-07 (counts only): of 471 readable PDFs, 118
+are decks holding 1,860 questions. Two decks lay their teaching out in headed sections, and
+the reader offers a source analysis for 65 of their questions: all 65 with a rule, 61 with
+reasons against other options (228 reasons), 62 with the slide's own title. The other decks
+explain in unheaded prose, which import already keeps as the question's explanation.

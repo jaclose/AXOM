@@ -7,12 +7,37 @@ import type { AIProvider, AiJsonRequest } from "./types";
 
 export const MOCK_LABEL = "Demo (mock output — not real analysis)";
 
+/**
+ * A canned Decode analysis for the question in the prompt. Its one quotation
+ * is copied from the evidence that was sent, so it passes the same checks a
+ * real reply must pass.
+ */
+function demoDecodeAnalysis(prompt: string): unknown {
+  let request: { options?: Array<{ key: string }>; correctKey?: string; evidence?: Array<{ documentId: string; page: number; text: string }> } = {};
+  try { request = JSON.parse(prompt); } catch { /* an empty analysis below still fails validation loudly */ }
+  const excerpt = request.evidence?.[0];
+  return {
+    concept: "[DEMO] The concept this question tests",
+    task: "[DEMO] Pick the option the stem's key finding points to.",
+    rule: "[DEMO] Canned rule for development. Connect a real provider for an actual analysis.",
+    explanation: "[DEMO] Canned explanation for development.",
+    decisiveClues: ["[DEMO] The finding the stem turns on"],
+    mechanism: [],
+    distractors: (request.options ?? []).filter((option) => option.key !== request.correctKey)
+      .map((option) => ({ key: option.key, whyWrong: "[DEMO] Canned reason this option does not fit.", wouldFitIf: "" })),
+    references: excerpt
+      ? [{ documentId: excerpt.documentId, page: excerpt.page, quote: excerpt.text.replace(/\s+/g, " ").trim().slice(0, 80), role: "question" }]
+      : [],
+  };
+}
+
 export function createMockProvider(): AIProvider {
   return {
     info: { kind: "mock", label: MOCK_LABEL, local: true, requiresKey: false },
     available: async () => ({ ok: true, detail: "Demo mode active — responses are canned examples.", models: ["demo"] }),
     async completeJson(req: AiJsonRequest): Promise<unknown> {
       // Deterministic: keyed off the prompt so tests are stable.
+      if (/AXOM Decode/.test(req.system ?? "")) return demoDecodeAnalysis(req.prompt);
       if (/card/i.test(req.prompt)) {
         return {
           cards: [

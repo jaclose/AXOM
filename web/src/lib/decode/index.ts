@@ -12,3 +12,7 @@ export {
 } from "./sources";
 export { conceptGroups, questionsWithoutTeaching, teachingView, type ConceptGroup, type TeachingOption, type TeachingView } from "./teaching";
 export { readSlideTeaching, sourceTeachingProposals, type SlideTeaching } from "./deckTeaching";
+export {
+  DECODE_BATCH_LIMIT, DECODE_PROMPT_VERSION, analysisRequest, evidenceFor, proposeAnalyses, validateAnalysisProposal,
+  type AnalysisBatch, type EvidenceExcerpt,
+} from "./aiAnalysis";
