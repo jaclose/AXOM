@@ -1,3 +1,4 @@
+import { isIcsCalendar, parseIcsEvents, type IcsParseOptions } from "./icsCalendar";
 import type { TrackerItem, TrackerKind } from "./types";
 
 export interface ScheduleCandidate {
@@ -22,16 +23,21 @@ const KIND_MAP: Array<[RegExp, TrackerKind]> = [
   [/\b(assignment|deadline|requirement)\b/i, "Requirement"],
 ];
 
+/**
+ * A pasted schedule or a calendar (.ics) file as candidates for review. A
+ * calendar is read by lib/icsCalendar, which puts every timed event on the
+ * learner's own calendar day: an 11:59 pm deadline written in another time
+ * zone or in UTC does not land a day late. `options.timeZone` names the
+ * learner's zone and defaults to the device's.
+ */
 export function parseCourseSchedule(
   text: string,
   existing: readonly TrackerItem[] = [],
   sourceName?: string,
+  options: IcsParseOptions = {},
 ): ScheduleCandidate[] {
-  const normalizedText = unfoldIcsLines(text);
-  if (/BEGIN:VCALENDAR/i.test(normalizedText)) {
-    return parseIcsSchedule(normalizedText, existing, sourceName);
-  }
-  return parseDelimitedSchedule(normalizedText, existing, sourceName);
+  if (isIcsCalendar(text)) return parseIcsSchedule(text, existing, sourceName, options);
+  return parseDelimitedSchedule(text, existing, sourceName);
 }
 
 export function scheduleCandidatesToTracker(
@@ -88,15 +94,12 @@ function parseDelimitedSchedule(text: string, existing: readonly TrackerItem[], 
   return reconcileScheduleDuplicates(rows, existing);
 }
 
-function parseIcsSchedule(text: string, existing: readonly TrackerItem[], sourceName?: string): ScheduleCandidate[] {
-  const events = text.match(/BEGIN:VEVENT[\s\S]*?END:VEVENT/gi) ?? [];
-  const rows = events.map((event, index) => {
-    const summary = icsValue(event, "SUMMARY");
-    const date = parseIcsDate(icsValue(event, "DTSTART"));
-    const description = icsValue(event, "DESCRIPTION");
-    const label = decodeIcs(summary).trim();
-    const problem = label ? undefined : `Calendar event ${index + 1} has no title.`;
-    return candidate(`ics-${index + 1}`, label, detectKind(`${label} ${description}`), date, index + 1, sourceName, problem);
+function parseIcsSchedule(text: string, existing: readonly TrackerItem[], sourceName: string | undefined, options: IcsParseOptions): ScheduleCandidate[] {
+  const rows = parseIcsEvents(text, options).map((event) => {
+    // A learning platform's feed ends every title with the course in brackets; the title alone is the label.
+    const label = event.title;
+    const problem = label ? undefined : `Calendar event ${event.index + 1} has no title.`;
+    return candidate(`ics-${event.index + 1}`, label, detectKind(`${label} ${event.description ?? ""}`), event.start?.date, event.index + 1, sourceName, problem);
   });
   return reconcileScheduleDuplicates(rows, existing);
 }
@@ -141,10 +144,6 @@ function parseDate(value: string): string | undefined {
   if (us) return `${us[3].length === 2 ? `20${us[3]}` : us[3]}-${us[1].padStart(2, "0")}-${us[2].padStart(2, "0")}`;
   return undefined;
 }
-function parseIcsDate(value: string): string | undefined { const match = value.match(/(\d{4})(\d{2})(\d{2})/); return match ? `${match[1]}-${match[2]}-${match[3]}` : undefined; }
-function icsValue(event: string, key: string): string { return event.match(new RegExp(`^${key}(?:;[^:]*)?:(.*)$`, "mi"))?.[1] ?? ""; }
-function unfoldIcsLines(value: string): string { return value.replace(/\r?\n[ \t]/g, ""); }
-function decodeIcs(value: string): string { return value.replace(/\\n/gi, " ").replace(/\\,/g, ",").replace(/\\;/g, ";").replace(/\\\\/g, "\\"); }
 function provenanceNote(candidate: ScheduleCandidate): string | undefined {
   const parts = [candidate.date ? `Scheduled ${candidate.date}` : "", candidate.sourceName ? `Imported from ${candidate.sourceName}` : ""].filter(Boolean);
   return parts.length ? parts.join(" · ") : undefined;

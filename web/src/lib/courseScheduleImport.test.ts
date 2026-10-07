@@ -25,6 +25,25 @@ describe("course schedule intake", () => {
     expect(scheduleCandidatesToTracker(rows, "T1/BPM")[0].note).toBe("Scheduled 2026-08-14 · Imported from BPM schedule.ics");
   });
 
+  it("puts a deadline on the learner's own day, whatever zone the calendar wrote it in", () => {
+    // 11:59 pm on 14 September in New York is 03:59 on the 15th in UTC. Read by its digits it lands a day late.
+    const calendar = [
+      "BEGIN:VCALENDAR",
+      "BEGIN:VEVENT", "UID:event-assignment-1", "DTSTART:20260915T035900Z", "SUMMARY:Problem set 3 [BIOL 101]", "END:VEVENT",
+      "BEGIN:VEVENT", "DTSTART;TZID=America/New_York:20260914T235900", "SUMMARY:Reading\\, chapters 4 and 5 [BIOL 101]",
+      "BEGIN:VALARM", "TRIGGER:-PT1H", "DESCRIPTION:Quiz reminder", "END:VALARM", "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\r\n");
+    const rows = parseCourseSchedule(calendar, [], "course.ics", { timeZone: "America/New_York" });
+    expect(rows.map((row) => [row.date, row.label, row.kind])).toEqual([
+      ["2026-09-14", "Problem set 3", "Lecture"],
+      // The reminder inside the event is not part of it, so its wording does not make this a quiz.
+      ["2026-09-14", "Reading, chapters 4 and 5", "Reading"],
+    ]);
+    // The same feed read by a learner in Tokyo: both are due on the 15th there.
+    expect(parseCourseSchedule(calendar, [], "course.ics", { timeZone: "Asia/Tokyo" }).map((row) => row.date)).toEqual(["2026-09-15", "2026-09-15"]);
+  });
+
   it("marks duplicates across both the existing tracker and one incoming batch", () => {
     const existing: TrackerItem[] = [
       { id: "x", path: "T1", label: "Renal Physiology", kind: "Lecture", passes: 0, ankiPasses: 0, yield: "none", updated: "2026-08-01", note: "Scheduled 2026-08-14" },
