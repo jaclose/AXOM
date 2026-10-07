@@ -16,6 +16,7 @@ do next. The learner reports nothing AXOM can observe.
 | One scope for questions and tracker rows | `lib/course-engine/scope.ts` |
 | The course by week: progress, question progress, absences | `lib/course-engine/weekView.ts`, `components/tracker/WeekOverview.tsx` |
 | Activity kinds beside `TrackerKind` | `lib/course-engine/activity.ts` |
+| Figures in a question PDF: find, cut out, place | `lib/pdfFigures.ts`, called from `components/questions/ImportPanel.tsx` |
 | Answers as events, first and repeat | `lib/learning-intelligence/attempts.ts` |
 | What a question asks, read from wording | `lib/learning-intelligence/questionFeatures.ts` |
 | Structural and empirical difficulty | `lib/learning-intelligence/difficulty.ts` |
@@ -47,6 +48,14 @@ do next. The learner reports nothing AXOM can observe.
   otherwise the report lists what it is waiting for.
 - **Certainty is only what the learner said before checking.** The older `confidence`
   field is asked after a miss and is never used for calibration.
+- **A figure is placed on evidence or not at all.** It shares a page with one question,
+  sits under a question's first line, or is on the page a question runs onto. Anything
+  else is listed as unplaced with the reason. An image on a page that repeats a question
+  (its answer page) is kept out of the question so it cannot give the answer away. Images
+  drawn in the same place on most pages are treated as a logo and left out. Figures are
+  cut from the rendered page and go through the existing named-image path as exhibits.
+- **A learner's week placement stands.** Template rows record `weekSource` (template,
+  inferred, learner). A re-import may retitle a row the learner moved, never move it.
 - **Sets list ids.** A review or custom set points at the same question records as its
   source set and inherits that set's place in the course.
 - **Private material stays local.** The inventory manifest names course files and is
@@ -56,12 +65,15 @@ do next. The learner reports nothing AXOM can observe.
 
 Lecture weeks are not stated in the learner's current templates, so the planner spreads
 teaching-day groups across the module's weeks and marks them for confirmation; a
-`Week N:` line in a template states them. PDF images are not extracted at import. The
+`Week N:` line in a template states them. Figure placement depends on the importer
+finding each question's page: on four real files it placed 5 of 6, 4 of 6 and 6 of 7
+figures in text PDFs, and 2 of 20 in a slide-deck answer key where 15 of about 39
+questions were not parsed at all. Figures are not extracted in `MassImport.tsx` yet. The
 week view lists only rows filed as `Term/Module/Week N`; older rows stay in the tracker
 tree. A row counts as done at one pass. Question type and difficulty are keyword
 readings of wording, not analysis by a model.
 
-Tests: `lib/course-engine/courseEngine.test.ts`, `lib/course-engine/weekView.test.ts`,
+Tests: `lib/pdfFigures.test.ts`, `lib/course-engine/courseEngine.test.ts`, `lib/course-engine/weekView.test.ts`,
 `lib/learning-intelligence/learningIntelligence.test.ts`, `lib/quizRunCommit.test.ts`;
-E2E `web/e2e/course-engine-slice.spec.ts`, `course-template-load.spec.ts`,
+E2E `web/e2e/pdf-figure-import.spec.ts`, `course-engine-slice.spec.ts`, `course-template-load.spec.ts`,
 `question-block-save.spec.ts`.

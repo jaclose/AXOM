@@ -16,6 +16,7 @@ import { useStore } from "../../lib/store";
 import { createImportMappingLedger, parseQuestionBlocks, type ParsedQuestionDraft } from "../../lib/questionParse";
 import { detectImportFormat, importFromCsv, importFromJson, importFromText } from "../../lib/questionImport";
 import { extractDocxText, extractPdfText, extractPlainText } from "../../lib/extractText";
+import { FIGURE_BASIS_LABEL, extractPdfFigures, locateQuestionPages, placeFigures } from "../../lib/pdfFigures";
 import { documentTitleFromFile, type QuestionSet, type SourceDocument } from "../../lib/library";
 import {
   EXAM_TYPE_LABEL, QUESTION_CATEGORIES,
@@ -307,9 +308,12 @@ export function ImportPanel({
     setFinalizing(false);
   }
 
-  function loadDrafts(parsed: ParsedQuestionDraft[], warnings: string[], source: QuestionSource, doc: PendingDocument | null, ai = false) {
+  function loadDrafts(parsed: ParsedQuestionDraft[], warnings: string[], source: QuestionSource, doc: PendingDocument | null, ai = false, images: File[] = []) {
     finalizingRef.current = false;
     setFinalizing(false);
+    // Figures cut from a PDF arrive with its questions and go through the same
+    // path as images the learner adds by hand.
+    if (images.length) setImageFiles(images);
     const duplicateAware = flagImportDuplicates(parsed, s.questions ?? []);
     setDrafts(duplicateAware.map((d) => ({ ...d, reviewId: uid(), include: true, aiGenerated: ai, source })));
     setBatchWarnings(warnings);
@@ -1470,7 +1474,7 @@ function PasteTab({ raw, label, onRawChange, parseSource, onParsed }: {
 function FileTab({ busyFile, setBusyFile, onParsed }: {
   busyFile: string | null;
   setBusyFile: (name: string | null) => void;
-  onParsed: (drafts: ParsedQuestionDraft[], warnings: string[], source: QuestionSource, doc: PendingDocument | null, ai?: boolean) => void;
+  onParsed: (drafts: ParsedQuestionDraft[], warnings: string[], source: QuestionSource, doc: PendingDocument | null, ai?: boolean, images?: File[]) => void;
 }) {
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -1483,6 +1487,8 @@ function FileTab({ busyFile, setBusyFile, onParsed }: {
       if (isPdf || isDocx) {
         const buffer = await file.arrayBuffer();
         const checksum = await sha256Hex(buffer);
+        // pdf.js takes ownership of the bytes it is given, so the figure pass reads its own copy.
+        const figureBytes = isPdf ? buffer.slice(0) : undefined;
         const extracted = isPdf ? await extractPdfText(buffer) : await extractDocxText(buffer);
         const doc: PendingDocument = {
           title: documentTitleFromFile(file.name),
@@ -1499,14 +1505,49 @@ function FileTab({ busyFile, setBusyFile, onParsed }: {
         }
         const drafts = parseQuestionBlocks(extracted.text);
         if (isPdf) assignSourcePages(drafts, extracted.pages);
+        const figureNotes: string[] = [];
+        let images: File[] = [];
+        if (figureBytes && drafts.length > 0) {
+          try {
+            const found = await extractPdfFigures(figureBytes, file.name);
+            const located = locateQuestionPages(drafts, extracted.pages ?? []);
+            const placements = placeFigures(
+              found.figures,
+              drafts.map((draft, index) => ({ stem: draft.stem, sourcePage: located[index].page, repeatsOn: located[index].repeatsOn })),
+              found.linesByPage,
+            );
+            let placed = 0;
+            for (const placement of placements) {
+              if (placement.draftIndex === undefined) {
+                // Kept in the image list and named here: never dropped, never guessed onto a question.
+                figureNotes.push(`${placement.name} was not attached. ${placement.reason}`);
+                continue;
+              }
+              const draft = drafts[placement.draftIndex];
+              draft.attachmentNames = [...(draft.attachmentNames ?? []), placement.name];
+              draft.warnings = [...(draft.warnings ?? []), `Image from page ${placement.page}, attached because this is ${FIGURE_BASIS_LABEL[placement.basis!]}.${located[placement.draftIndex].byFirstAppearance ? " The question's page is the first one its opening words appear on." : ""} Check it is the right one.`];
+              placed += 1;
+            }
+            images = found.figures.map((figure) => figure.file);
+            if (found.figures.length > 0) {
+              figureNotes.unshift(`${found.figures.length} image${found.figures.length === 1 ? "" : "s"} found in this PDF, ${placed} attached to a question by its place on the page.`);
+            }
+            figureNotes.push(...found.warnings);
+          } catch {
+            figureNotes.push("AXOM could not read the images in this PDF. The questions were imported without them: add any image by hand below.");
+          }
+        }
         onParsed(
           drafts,
           [
             ...extracted.warnings,
+            ...figureNotes,
             ...(drafts.length === 0 ? ["Text was extracted but no question pattern was found — review the file, or keep it as a library document."] : []),
           ],
           isPdf ? "pdf" : "imported",
           doc,
+          false,
+          images,
         );
         return;
       }
