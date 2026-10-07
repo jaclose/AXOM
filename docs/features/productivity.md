@@ -1,7 +1,14 @@
+---
+tags:
+  - axom/feature
+authority: canonical
+---
 # Productivity and study accounting
 
 **Purpose/user behavior:** Record meaningful study activity, run focus sessions, and
 project that activity into daily/weekly targets without duplicate credit.
+
+Persists through: [workspace data and compatibility](../architecture/data-model.md).
 
 | Responsibility | Files under `web/src/` |
 | --- | --- |

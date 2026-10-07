@@ -10,6 +10,7 @@ Start a session with [AGENTS](../AGENTS.md) and [AI_STATE](AI_STATE.md).
 | Authentication, revision sync, sharing | [Accounts and sync contract](architecture/accounts-sync-v1.md) |
 | Backend endpoints, AI proxy, retired APIs | [Backend map](architecture/backend.md) |
 | A feature's files, invariants and tests | [Feature router](features/README.md) |
+| Visual navigation, semantic relationships, Obsidian setup | [Graph guide](graph/README.md) |
 | Product vision, terminology, normative authority | [Product router](product/README.md) |
 | UI tokens, primitives, voice, motion | [Design contract](design/DESIGN.md) |
 | Local setup, scripts, environment | [Development](operations/development.md) |

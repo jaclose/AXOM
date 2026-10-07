@@ -109,6 +109,12 @@ __pycache__/
 *.log
 *.tsbuildinfo
 
+# Obsidian: share only portable link/filter defaults, never personal vault state.
+**/.obsidian/*
+!docs/.obsidian/app.json
+!docs/.obsidian/graph.json
+.trash/
+
 # Loose private/reference imports do not belong at the repository root.
 # Tracked licensed runtime assets are unaffected; place new reviewed assets in their subsystem.
 /*.pdf

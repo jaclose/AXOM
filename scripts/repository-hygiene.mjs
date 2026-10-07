@@ -29,12 +29,14 @@ const GENERATED_DIRS = new Set([
   'node_modules', 'dist', 'build', '.build', '.cache', '.next', '.nuxt', '.output',
   'coverage', 'target', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache',
   '.turbo', '.parcel-cache', '.vite', 'deriveddata', '.swiftpm', 'playwright-report',
-  'test-results', 'artifacts', 'output', 'tmp', 'temp', 'logs', 'screenshots',
+  'test-results', 'artifacts', 'output', 'tmp', 'temp', 'logs', 'screenshots', '.obsidian', '.trash',
 ]);
+const SHARED_OBSIDIAN_CONFIG = new Set(['docs/.obsidian/app.json', 'docs/.obsidian/graph.json']);
 const RULES = new Set(['large-file', 'generated-artifact', 'root-media']);
 
 export function isActiveDocument(filePath) {
   if (ENTRYPOINTS.has(filePath)) return true;
+  if (/^docs\/graph\/.+\.md$/.test(filePath)) return true;
   // Archived source links describe their original location and remain frozen.
   return /^docs\/(?:architecture|features|operations|product|decisions)\/(?:[^/]+\/)*[a-z0-9][a-z0-9._-]*\.md$/.test(filePath);
 }
@@ -43,7 +45,7 @@ export function artifactRules(filePath, bytes) {
   const rules = [];
   if (bytes > MAX_FILE_BYTES) rules.push('large-file');
   const segments = filePath.toLowerCase().split('/');
-  if (segments.slice(0, -1).some((segment) => GENERATED_DIRS.has(segment))
+  if ((segments.slice(0, -1).some((segment) => GENERATED_DIRS.has(segment)) && !SHARED_OBSIDIAN_CONFIG.has(filePath))
     || /\.(?:log|pyc|tsbuildinfo)$/i.test(filePath)
     || /(?:^|\/)\.DS_Store$/.test(filePath)) rules.push('generated-artifact');
   if (segments.length === 1 && /\.(?:pdf|mp3|wav|m4a|aac|flac|ogg|aiff?|opus|mp4|mov|webm|mkv|png|jpe?g|webp|gif|heic|tiff?|avif)$/i.test(filePath)) {

@@ -164,6 +164,27 @@ test('missing relative targets include file and line in the failure', () => {
   ]);
 });
 
+test('Obsidian maps use the active Markdown link gate, including title-cased filenames', () => {
+  assert.equal(isActiveDocument('docs/graph/AXOM-System-Map.md'), true);
+  assert.equal(isActiveDocument('docs/graph/README.md'), true);
+  const documents = [{ path: 'docs/graph/AXOM-System-Map.md', content: '[Feature](../features/missing.md)' }];
+  assert.match(checkMarkdownLinks(documents, ['docs/graph/AXOM-System-Map.md'])[0], /missing relative link target/);
+  assert.deepEqual(checkMarkdownLinks(documents, ['docs/graph/AXOM-System-Map.md', 'docs/features/missing.md']), []);
+});
+
+test('personal Obsidian state is rejected if staged, while two portable defaults remain allowed', () => {
+  const files = [
+    'docs/.obsidian/app.json', 'docs/.obsidian/graph.json',
+    'docs/.obsidian/workspace.json', 'docs/.obsidian/workspace-mobile.json',
+    'docs/.obsidian/plugins/example/main.js', 'docs/.obsidian/themes/example/theme.css',
+    'docs/.trash/deleted.md', '.obsidian/app.json',
+  ].map((filePath) => ({ path: filePath, bytes: 50 }));
+  const errors = checkFiles(files, emptyBaseline);
+  assert.equal(errors.length, 6);
+  assert.ok(errors.every((error) => /generated\/cache\/log artifact/.test(error)));
+  assert.match(checkFiles([{ path: 'docs/.obsidian/app.json', bytes: MAX_FILE_BYTES + 1 }], emptyBaseline)[0], /exceeds 5 MiB/);
+});
+
 test('links inside backtick/tilde fences and inline code are not interpreted', () => {
   const markdown = [
     '```markdown', '[not a link to check](missing-1.md)', '```',

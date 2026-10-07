@@ -1,7 +1,18 @@
+---
+tags:
+  - axom/feature
+authority: canonical
+---
 # Soundscapes and media
 
 **Purpose/user behavior:** Keep study audio and immersive scenes usable through route,
 focus-session and playback changes; preserve imported originals on the device.
+
+| Relationship | Canonical route |
+| --- | --- |
+| Lifecycle contract | [Frontend and persistent services](../architecture/frontend.md) |
+| Storage boundary, not cloud media upload | [Workspace data and portability](../architecture/data-model.md) |
+| Related study-session feature | [Productivity and timers](productivity.md) |
 
 | Boundary | Files under `web/src/` |
 | --- | --- |

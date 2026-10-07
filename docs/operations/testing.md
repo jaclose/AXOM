@@ -1,3 +1,8 @@
+---
+tags:
+  - axom/operations
+authority: canonical
+---
 # Validation routes
 
 Start with the affected behavior. A successful command validates its checkout, not
