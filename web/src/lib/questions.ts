@@ -95,15 +95,35 @@ export interface QuestionOption {
   text: string;
 }
 
+/** How the question was presented. Absent on attempts logged before it was recorded. */
+export type QuestionAttemptMode = "tutor" | "exam" | "simulation" | "manual";
+
+/** How sure the learner said they were BEFORE seeing the result. Never inferred. */
+export type AnswerCertainty = "guess" | "unsure" | "sure";
+
+export const ANSWER_CERTAINTY_LABEL: Record<AnswerCertainty, string> = {
+  guess: "Guessing",
+  unsure: "Not sure",
+  sure: "Sure",
+};
+
 export interface QuestionAttempt {
   at: string; // ISO
   answerKey?: string;
   status: QuestionStatus;
+  /** Confidence in the material after review. The tutor asks this after a miss,
+   * so it is not a measure of how sure the answer was: see `certainty`. */
   confidence?: 1 | 2 | 3 | 4 | 5;
   timeSpentSeconds?: number;
   changedFromKey?: string;
   errorType?: QuestionErrorType;
   note?: string;
+  /** The block run (QuizSession id) that produced this attempt. A run holds one
+   * attempt per question: a later write for the same run amends it. */
+  quizSessionId?: ID;
+  mode?: QuestionAttemptMode;
+  /** Stated before the answer was checked; the only basis for calibration. */
+  certainty?: AnswerCertainty;
 }
 
 export type ExtractionConfidence = "high" | "medium" | "low";
@@ -165,6 +185,8 @@ export interface QuestionRecord {
   timeSpentSeconds?: number;
   courseId?: ID;
   module?: string;
+  /** Week of the module this question belongs to (lib/course-engine/scope). */
+  week?: number;
   system?: string;
   topic?: string;
   objective?: string;
@@ -454,6 +476,7 @@ export function validateQuestionRecord(input: unknown, now: Date = new Date()): 
       timeSpentSeconds: typeof input.timeSpentSeconds === "number" && input.timeSpentSeconds >= 0 ? input.timeSpentSeconds : undefined,
       courseId: typeof input.courseId === "string" ? input.courseId : undefined,
       module: cleanString(input.module),
+      week: weekNumber(input.week),
       system: cleanString(input.system),
       topic: cleanString(input.topic),
       objective: cleanString(input.objective),
@@ -540,6 +563,13 @@ function positiveInteger(value: unknown): number | undefined {
     : undefined;
 }
 
+/** A week number, also read from "Week 3" so older exports and pasted metadata survive. */
+function weekNumber(value: unknown): number | undefined {
+  const parsed = typeof value === "string" ? Number(value.match(/\d{1,2}/)?.[0]) : value;
+  const week = positiveInteger(parsed);
+  return week !== undefined && week < 100 ? week : undefined;
+}
+
 function stringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const result = value
@@ -597,6 +627,11 @@ const REVIEW_INTERVALS: Partial<Record<QuestionStatus, number>> = {
 };
 
 export function applyAttempt(question: QuestionRecord, attempt: Omit<QuestionAttempt, "at">, now: Date = new Date()): QuestionRecord {
+  const amendIndex = attempt.quizSessionId
+    ? question.attempts.findIndex((item) => item.quizSessionId === attempt.quizSessionId)
+    : -1;
+  if (amendIndex >= 0) return amendAttempt(question, amendIndex, attempt, now);
+
   const at = now.toISOString();
   const full: QuestionAttempt = { ...attempt, at };
   const interval = REVIEW_INTERVALS[attempt.status];
@@ -615,6 +650,47 @@ export function applyAttempt(question: QuestionRecord, attempt: Omit<QuestionAtt
     reviewDueAt,
     updatedAt: at,
   };
+}
+
+/**
+ * The same block run answering the same question again replaces its attempt:
+ * the answer keeps its original time and nothing is counted twice. This is what
+ * lets the tutor save at "Check answer" and add the error type afterwards, and
+ * what makes a resumed or re-committed block safe to write again.
+ */
+function amendAttempt(
+  question: QuestionRecord,
+  index: number,
+  attempt: Omit<QuestionAttempt, "at">,
+  now: Date,
+): QuestionRecord {
+  const previous = question.attempts[index];
+  const full: QuestionAttempt = { ...attempt, at: previous.at };
+  const attempts = question.attempts.map((item, position) => (position === index ? full : item));
+  const updatedAt = now.toISOString();
+  // An older attempt being corrected must not overwrite the latest outcome.
+  if (index !== question.attempts.length - 1) return { ...question, attempts, updatedAt };
+
+  const answeredAt = parsedTimestamp(previous.at) ?? now.getTime();
+  const interval = REVIEW_INTERVALS[attempt.status];
+  return {
+    ...question,
+    userAnswerKey: attempt.answerKey ?? question.userAnswerKey,
+    status: attempt.status,
+    confidence: carriedValue(attempt.confidence, previous.confidence, question.confidence),
+    timeSpentSeconds: attempt.timeSpentSeconds ?? question.timeSpentSeconds,
+    errorType: carriedValue(attempt.errorType, previous.errorType, question.errorType),
+    attempts,
+    reviewDueAt: interval
+      ? new Date(answeredAt + interval * 24 * 60 * 60 * 1000).toISOString()
+      : question.reviewDueAt,
+    updatedAt,
+  };
+}
+
+/** A value the amended attempt set and has now cleared is cleared on the question too. */
+function carriedValue<T>(next: T | undefined, before: T | undefined, current: T | undefined): T | undefined {
+  return next ?? (current === before ? undefined : current);
 }
 
 export function dueQuestions(questions: QuestionRecord[], now: Date = new Date()): QuestionRecord[] {

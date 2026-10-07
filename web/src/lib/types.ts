@@ -6,6 +6,7 @@
 
 import type { JournalNotebookEntryFields, JournalNotebookPreferences } from "./journalNotebook";
 import type { StudyPlanSettings, StudyWorkflowPreferences } from "./studyPreferences";
+import type { CourseActivity } from "./course-engine/activity";
 
 export type ID = string;
 export type BoardExamId = "step1" | "step2" | "step3" | "shelf" | "mcat" | "premed";
@@ -14,6 +15,11 @@ export type BoardExamId = "step1" | "step2" | "step3" | "shelf" | "mcat" | "prem
 export interface Term {
   id: ID;
   name: string;
+  /**
+   * Sessions the learner may miss in this term, per attended activity. Comes
+   * from the course template; the app holds no school's numbers of its own.
+   */
+  absenceAllowances?: Partial<Record<CourseActivity, number>>;
 }
 
 /** A module inside a course (e.g. "FTM 1", "MSK"). */
@@ -72,6 +78,12 @@ export interface TrackerItem {
   assessmentDate?: string; // yyyy-MM-dd; explicit learner/course evidence only
   explicitPriority?: 1 | 2 | 3 | 4 | 5;
   recommendationSnoozedUntil?: string; // ISO timestamp; defers, never deletes
+  /** The finer label a course template gave this row; `kind` stays the grouping. */
+  activity?: CourseActivity;
+  /** Identity of the template line this row came from, so a re-import updates it. */
+  templateKey?: string;
+  /** For activities a learner attends. Absent: not recorded. */
+  attendance?: "attended" | "missed";
 }
 
 export interface Task {

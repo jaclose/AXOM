@@ -60,6 +60,59 @@ describe("attempts + spaced review", () => {
     expect(missed.attempts).toHaveLength(1);
   });
 
+  it("amends the attempt when the same block run answers the question again", () => {
+    const checkedAt = new Date("2026-07-07T08:00:00.000Z");
+    const classifiedAt = new Date("2026-07-07T08:02:00.000Z");
+    const checked = applyAttempt(makeQuestion(), { status: "incorrect", answerKey: "B", quizSessionId: "run-1", mode: "tutor" }, checkedAt);
+    const classified = applyAttempt(checked, {
+      status: "incorrect", answerKey: "B", errorType: "missed-clue", confidence: 2, quizSessionId: "run-1", mode: "tutor",
+    }, classifiedAt);
+
+    expect(classified.attempts).toHaveLength(1);
+    // The answer keeps the time it was given; the review date does not drift.
+    expect(classified.attempts[0]).toEqual({
+      at: checkedAt.toISOString(), status: "incorrect", answerKey: "B", errorType: "missed-clue", confidence: 2,
+      quizSessionId: "run-1", mode: "tutor",
+    });
+    expect(classified.attemptedAt).toBe(checkedAt.toISOString());
+    expect(classified.reviewDueAt).toBe(checked.reviewDueAt);
+    expect(classified.errorType).toBe("missed-clue");
+    expect(classified.updatedAt).toBe(classifiedAt.toISOString());
+  });
+
+  it("clears a classification the same run set and then removed", () => {
+    const now = new Date("2026-07-07T08:00:00.000Z");
+    const classified = applyAttempt(makeQuestion(), { status: "incorrect", errorType: "overthinking", confidence: 4, quizSessionId: "run-1" }, now);
+    const cleared = applyAttempt(classified, { status: "incorrect", quizSessionId: "run-1" }, now);
+
+    expect(cleared.attempts[0].errorType).toBeUndefined();
+    expect(cleared.errorType).toBeUndefined();
+    expect(cleared.confidence).toBeUndefined();
+  });
+
+  it("counts a new run, and an attempt without a run, as a separate attempt", () => {
+    const now = new Date("2026-07-07T08:00:00.000Z");
+    const first = applyAttempt(makeQuestion(), { status: "incorrect", quizSessionId: "run-1" }, now);
+    const retake = applyAttempt(first, { status: "correct", quizSessionId: "run-2" }, now);
+    const manual = applyAttempt(applyAttempt(retake, { status: "correct" }, now), { status: "correct" }, now);
+
+    expect(retake.attempts).toHaveLength(2);
+    expect(manual.attempts).toHaveLength(4);
+  });
+
+  it("corrects an older run's attempt without overwriting the latest outcome", () => {
+    const now = new Date("2026-07-07T08:00:00.000Z");
+    const later = new Date("2026-07-08T08:00:00.000Z");
+    const first = applyAttempt(makeQuestion(), { status: "incorrect", answerKey: "B", quizSessionId: "run-1" }, now);
+    const second = applyAttempt(first, { status: "correct", answerKey: "A", quizSessionId: "run-2" }, later);
+    const amended = applyAttempt(second, { status: "incorrect", answerKey: "C", errorType: "misread-stem", quizSessionId: "run-1" }, later);
+
+    expect(amended.attempts.map((attempt) => attempt.answerKey)).toEqual(["C", "A"]);
+    expect(amended.status).toBe("correct");
+    expect(amended.userAnswerKey).toBe("A");
+    expect(amended.reviewDueAt).toBe(second.reviewDueAt);
+  });
+
   it("surfaces questions whose review is due", () => {
     const due = makeQuestion({ reviewDueAt: "2026-07-01T00:00:00.000Z" });
     const later = makeQuestion({ reviewDueAt: "2999-01-01T00:00:00.000Z" });

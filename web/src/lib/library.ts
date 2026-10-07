@@ -63,6 +63,30 @@ export interface QuestionSet {
   ordering?: QuestionOrdering;
   /** Seed for `ordering: "random"` — re-running the seed reproduces the order. */
   seed?: string;
+  /** Where the set sits in the course. Its questions inherit this unless they say otherwise. */
+  scope?: { module?: string; week?: number; courseId?: ID };
+  /** What the set is. Absent on sets saved before this was recorded: treat as "source". */
+  kind?: QuestionSetKind;
+  /** The set this one was drawn from, for review and custom sets. */
+  parentSetId?: ID;
+}
+
+/**
+ * A set never copies questions: it lists their ids. So a review set, a custom
+ * mix and the source set it came from all point at the same question records.
+ */
+export type QuestionSetKind = "source" | "custom" | "review" | "generated";
+
+export const QUESTION_SET_KIND_LABEL: Record<QuestionSetKind, string> = {
+  source: "Source",
+  custom: "Custom",
+  review: "Review",
+  generated: "AXOM generated",
+};
+
+/** Older review sets are recognised by the tag the block results gave them. */
+export function questionSetKind(set: Pick<QuestionSet, "kind" | "tags">): QuestionSetKind {
+  return set.kind ?? (set.tags.includes("missed-review") ? "review" : "source");
 }
 
 /** Build a deterministic static snapshot from a live filter over the bank.

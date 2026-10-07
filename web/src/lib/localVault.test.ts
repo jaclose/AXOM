@@ -9,6 +9,7 @@ import {
   writeLocalFallback,
 } from "./localVault";
 import { STORAGE_KEYS } from "./brand";
+import { readVaultWriteFailure } from "./vaultActivity";
 
 const values = new Map<string, string>();
 const storage = {
@@ -111,6 +112,135 @@ describe("IndexedDB-first local vault", () => {
     oldConnection.close();
   });
 });
+
+describe("a save that could not reach IndexedDB", () => {
+  const key = STORAGE_KEYS.persistedState;
+  const snapshot = (label: string) => JSON.stringify({ state: { profile: { userId: "jd" }, label }, version: 34 });
+
+  it("is read back at the next start instead of the older copy still in IndexedDB", async () => {
+    // Regression: an old tab blocks the vault upgrade, so the save lands in
+    // localStorage. The next start read IndexedDB first, returned the older
+    // workspace, and the following save deleted the newer copy.
+    const oldTab = await openVersionOneVault();
+    await putDirect(oldTab, key, snapshot("older"));
+    await localVaultStorage.setItem(key, snapshot("newer"));
+    expect(localStorage.getItem(key)).toBe(snapshot("newer"));
+    oldTab.close();
+
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot("newer"));
+    // Once the vault is writable the copy moves across and the fallback goes.
+    await waitFor(async () => {
+      await localVaultStorage.getItem(key);
+      return localStorage.getItem(key) === null;
+    });
+    expect(localStorage.getItem(`${key}:fallback-newer`)).toBeNull();
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot("newer"));
+  });
+
+  it("keeps saving to the fallback while the upgrade stays blocked", async () => {
+    // Regression: the browser queues later open requests behind the blocked
+    // one in silence, so the second save never returned and nothing after it
+    // was written anywhere.
+    const oldTab = await openVersionOneVault();
+    const saves = (async () => {
+      await localVaultStorage.setItem(key, snapshot("first"));
+      await localVaultStorage.setItem(key, snapshot("second"));
+      await localVaultStorage.setItem(key, snapshot("third"));
+    })();
+    await expect(Promise.race([
+      saves,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("a later save hung")), 500)),
+    ])).resolves.toBeUndefined();
+    expect(localStorage.getItem(key)).toBe(snapshot("third"));
+    oldTab.close();
+
+    // Once the other tab is gone the vault takes over again.
+    await waitFor(async () => {
+      await localVaultStorage.setItem(key, snapshot("fourth"));
+      return localStorage.getItem(key) === null;
+    });
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot("fourth"));
+  });
+
+  it("stays readable from the fallback while IndexedDB is still not writable", async () => {
+    const oldTab = await openVersionOneVault();
+    await putDirect(oldTab, key, snapshot("older"));
+    await localVaultStorage.setItem(key, snapshot("newer"));
+
+    // The old tab is still open, so the copy cannot be moved across yet.
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot("newer"));
+    expect(localStorage.getItem(key)).toBe(snapshot("newer"));
+    oldTab.close();
+  });
+
+  it("never lets an unmarked localStorage copy override the vault", async () => {
+    // A copy mirrored by an older build carries no marker and may be stale.
+    await localVaultStorage.setItem(key, snapshot("newer"));
+    localStorage.setItem(key, snapshot("stale mirror"));
+
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot("newer"));
+  });
+
+  it("ignores a marker that does not describe the copy beside it", async () => {
+    await localVaultStorage.setItem(key, snapshot("newer"));
+    localStorage.setItem(key, snapshot("stale mirror"));
+    localStorage.setItem(`${key}:fallback-newer`, "12:deadbeef");
+
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot("newer"));
+  });
+
+  it("is kept when only the per-profile duplicate ran out of room", async () => {
+    vi.stubGlobal("indexedDB", undefined);
+    const scopedKey = `${key}:user:jd`;
+    vi.stubGlobal("localStorage", {
+      ...storage,
+      setItem: (name: string, value: string) => {
+        if (name === scopedKey) throw new Error("QuotaExceededError");
+        storage.setItem(name, value);
+      },
+    });
+    const checkpoint = getVaultWriteCheckpoint();
+
+    await localVaultStorage.setItem(key, snapshot("newer"));
+
+    // The workspace itself is on disk, so this is a save, not a failure.
+    expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot("newer"));
+  });
+
+  it("is reported while no store accepts it, and the report clears once saving works", async () => {
+    await localVaultStorage.setItem(key, snapshot("saved"));
+    expect(readVaultWriteFailure()).toBeNull();
+
+    vi.stubGlobal("indexedDB", undefined);
+    vi.stubGlobal("localStorage", { ...storage, setItem: () => { throw new Error("QuotaExceededError"); } });
+    await localVaultStorage.setItem(key, snapshot("lost"));
+    expect(readVaultWriteFailure()).not.toBeNull();
+
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    vi.stubGlobal("localStorage", storage);
+    await localVaultStorage.setItem(key, snapshot("saved again"));
+    expect(readVaultWriteFailure()).toBeNull();
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot("saved again"));
+  });
+});
+
+async function waitFor(check: () => Promise<boolean>, attempts = 20): Promise<void> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (await check()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Condition was not met in time.");
+}
+
+function putDirect(db: IDBDatabase, key: string, value: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("state", "readwrite");
+    tx.objectStore("state").put(value, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
 
 function openVersionOneVault(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {

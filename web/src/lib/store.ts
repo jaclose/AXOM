@@ -69,6 +69,7 @@ import {
 } from "./sessions";
 import type { DailyCloseout } from "./closeout";
 import type { RecoveryPlan } from "./recovery";
+import type { CourseActivity } from "./course-engine/activity";
 import { applyAttempt, normalizeQuestionTaxonomy, validateQuestionRecord, withCorrectAnswerText, type QuestionAttempt, type QuestionRecord } from "./questions";
 import { normalizeTagList, mergeTagsInList } from "./questionTags";
 import {
@@ -103,6 +104,8 @@ interface Actions {
   // terms
   addTerm: (name: string) => void;
   renameTerm: (id: string, name: string) => void;
+  /** Sessions of one attended activity the term lets a learner miss; undefined clears it. */
+  setTermAbsenceAllowance: (termId: string, activity: CourseActivity, allowed: number | undefined) => void;
   removeTerm: (id: string) => void;
 
   // courses
@@ -235,6 +238,11 @@ interface Actions {
 
   // quiz sessions (tutor/exam blocks, schema v29)
   saveQuizSession: (session: QuizSession) => void;
+  /** Save a block's attempts and its session as one workspace snapshot. */
+  commitQuizRun: (run: {
+    attempts: Array<{ questionId: string; attempt: Omit<QuestionAttempt, "at"> }>;
+    session?: QuizSession;
+  }) => void;
   toggleQuestionMarked: (id: string) => void;
   /** Bulk-apply category/tags to many questions (Question Bank bulk edit). */
   bulkUpdateQuestions: (ids: string[], patch: { category?: string; tags?: string[]; addTags?: string[] }) => void;
@@ -337,6 +345,16 @@ export const useStore = create<Store>()(
       addTerm: (name) => set((s) => ({ terms: [...s.terms, { id: uid(), name }] })),
       renameTerm: (id, name) =>
         set((s) => ({ terms: s.terms.map((t) => (t.id === id ? { ...t, name } : t)) })),
+      setTermAbsenceAllowance: (termId, activity, allowed) =>
+        set((s) => ({
+          terms: s.terms.map((term) => {
+            if (term.id !== termId) return term;
+            const allowances = { ...term.absenceAllowances };
+            if (allowed === undefined || !Number.isFinite(allowed) || allowed < 0) delete allowances[activity];
+            else allowances[activity] = Math.floor(allowed);
+            return { ...term, absenceAllowances: Object.keys(allowances).length ? allowances : undefined };
+          }),
+        })),
       removeTerm: (id) =>
         set((s) => ({
           terms: s.terms.filter((t) => t.id !== id),
@@ -1367,6 +1385,26 @@ export const useStore = create<Store>()(
         set((s) => ({
           quizSessions: [session, ...(s.quizSessions ?? []).filter((q) => q.id !== session.id)].slice(0, 500),
         })),
+      // One set() is one serialized snapshot: the block's answers and its
+      // result reach the vault together, instead of one full-workspace save
+      // per answered question.
+      commitQuizRun: ({ attempts, session }) =>
+        set((s) => {
+          const byQuestion = new Map(attempts.map((entry) => [entry.questionId, entry.attempt]));
+          return {
+            ...(byQuestion.size
+              ? {
+                  questions: (s.questions ?? []).map((q) => {
+                    const attempt = byQuestion.get(q.id);
+                    return attempt ? applyAttempt(q, attempt) : q;
+                  }),
+                }
+              : {}),
+            ...(session
+              ? { quizSessions: [session, ...(s.quizSessions ?? []).filter((q) => q.id !== session.id)].slice(0, 500) }
+              : {}),
+          };
+        }),
       toggleQuestionMarked: (id) =>
         set((s) => ({
           questions: (s.questions ?? []).map((q) => (q.id === id ? { ...q, marked: !q.marked, updatedAt: now() } : q)),

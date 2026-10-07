@@ -7,7 +7,7 @@
 import type { ID } from "./types";
 import {
   questionMappingStatus,
-  type QuestionDifficulty, type QuestionExamType, type QuestionRecord,
+  type AnswerCertainty, type QuestionDifficulty, type QuestionExamType, type QuestionRecord,
 } from "./questions";
 import type { QuestionSet } from "./library";
 
@@ -47,6 +47,8 @@ export interface QuizAnswer {
   correct?: boolean; // undefined when the question has no correct key set
   flagged: boolean;
   seconds?: number;
+  /** What the learner said before the answer was checked, when they said it. */
+  certainty?: AnswerCertainty;
 }
 
 export interface QuizSession {
@@ -63,6 +65,8 @@ export interface QuizSession {
   score?: { correct: number; scored: number; total: number; pct: number };
   /** Set when the block ran in an exam-interface simulation (lib/examSim). */
   simulation?: { skin: string; preset?: string; elapsedSeconds?: number };
+  /** The learner left before the last question; unanswered ones are unscored. */
+  endedEarly?: boolean;
 }
 
 // --- pool building -----------------------------------------------------------

@@ -265,10 +265,16 @@ function mergeQuestionAttempts(left: unknown, right: unknown): Array<Record<stri
     .filter(isRecord);
   const byFingerprint = new Map<string, Record<string, unknown>>();
   for (const attempt of attempts) {
-    const fingerprint = [
-      attempt.at, attempt.answerKey, attempt.status, attempt.confidence,
-      attempt.timeSpentSeconds, attempt.changedFromKey, attempt.errorType, attempt.note,
-    ].map((value) => String(value ?? "")).join("\u001f");
+    // A block run holds one attempt per question, and that attempt is amended
+    // in place (an error type added after the answer). Two copies of a
+    // workspace can therefore hold different versions of it: keep the one from
+    // the newer record, which is passed second, instead of counting it twice.
+    const fingerprint = typeof attempt.quizSessionId === "string" && attempt.quizSessionId
+      ? `run\u001f${attempt.quizSessionId}`
+      : [
+          attempt.at, attempt.answerKey, attempt.status, attempt.confidence,
+          attempt.timeSpentSeconds, attempt.changedFromKey, attempt.errorType, attempt.note,
+        ].map((value) => String(value ?? "")).join("\u001f");
     byFingerprint.set(fingerprint, attempt);
   }
   return [...byFingerprint.values()].sort((a, b) => String(a.at ?? "").localeCompare(String(b.at ?? "")));
