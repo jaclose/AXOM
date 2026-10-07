@@ -53,6 +53,12 @@ for (const theme of ["dark", "light"] as const) {
     for (const tab of ["Profile", "Account", "Appearance", "Data", "Emergency recovery", "Advanced"]) {
       await page.getByRole("tab", { name: tab, exact: true }).click();
       await page.waitForTimeout(200);
+      // The tab just left fades its label and fill for 0.13 s. Read mid-fade, the two are the
+      // same colour, so a slow machine reported it as unreadable. Wait for the tab row to finish.
+      await page.waitForFunction(() => document.getAnimations().every((animation) => {
+        const target = animation.effect instanceof KeyframeEffect ? animation.effect.target : null;
+        return animation.playState !== "running" || !target?.closest(".settings-tabs");
+      }));
       await sweep(page, `settings: ${tab}`, findings);
     }
 
