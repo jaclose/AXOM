@@ -28,6 +28,7 @@ Each layer owns one thing and reads the layer before it by id.
 | Analyses back from storage, a backup or another device | `lib/decode/normalize.ts` |
 | Whether an analysis still fits, and which one is taught from | `lib/decode/analysis.ts` |
 | A source's original file on this device, and how much of it gave text | `lib/decode/sources.ts` |
+| What a tutor view shows for one question; questions that teach the same rule | `lib/decode/teaching.ts` |
 
 ## Invariants
 
@@ -47,6 +48,9 @@ Each layer owns one thing and reads the layer before it by id.
   another week does not.
 - **A broken analysis is dropped whole.** A reviewed statement is never kept without the
   citation it rested on.
+- **A group never claims more than the sources show.** Questions are grouped only when
+  their reviewed rules match word for word, a question printed in two decks counts once,
+  and one question is called an instance, not a pattern. No screen uses the groups yet.
 - **The original file stays on the device.** A source in the workspace is its text and a
   checksum. The file itself is kept in its own IndexedDB database, never exported or
   synced, and goes when its source is removed. A file is accepted only when its bytes
@@ -68,4 +72,4 @@ ported by intent, not merged.
 | `decodeMetrics`, `nextDecodeAction` | `lib/learning-intelligence/` (attempt events, patterns, review) |
 | `SourceTrace`, `DecodeDistractor`, `QuestionAnalysis`, the source fingerprint | `lib/decode/` |
 
-Tests: `lib/decode/decode.test.ts`, `lib/decode/sources.test.ts`.
+Tests: `lib/decode/decode.test.ts`, `lib/decode/sources.test.ts`, `lib/decode/teaching.test.ts`.
