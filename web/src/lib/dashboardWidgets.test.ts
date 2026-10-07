@@ -7,6 +7,7 @@ import {
   applyDashboardLayoutPreset,
   countExtraLargeWidgets,
   dashboardWidgetCatalogItem,
+  dashboardWidgetOptions,
   extraLargeWidgetRecommendation,
   mergeDashboardLayoutPreferences,
   normalizeDashboardLayoutPreferences,
@@ -226,5 +227,12 @@ describe("dashboard defaults revision 2: check-in, timer, soundscapes", () => {
     const removed = normalizeDashboardLayoutPreferences({ ...custom, hiddenWidgetIds: ["soundscapes"] })!;
     expect(upgradeDashboardLayout(removed).hiddenWidgetIds).toEqual(["soundscapes"]);
   });
-});
 
+  it("reads widget options from saved preferences, falling back to their defaults", () => {
+    expect(dashboardWidgetCatalogItem("winDay").defaultSize).toBe("large");
+    expect(dashboardWidgetOptions("winDay")).toEqual({ writing: false });
+    expect(dashboardWidgetOptions("winDay", { size: "large", preferences: { writing: true } })).toEqual({ writing: true });
+    expect(dashboardWidgetOptions("winDay", { size: "large", preferences: { writing: "yes" } })).toEqual({ writing: false });
+    expect(dashboardWidgetOptions("tasks")).toEqual({});
+  });
+});

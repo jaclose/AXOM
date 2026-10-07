@@ -119,7 +119,7 @@ describe("ReportsPage", () => {
 
   it("logs a one-tap energy check from the rhythm panel", () => {
     render(<ReportsPage />);
-    const group = screen.getAllByRole("group", { name: "Log your energy right now" })[0];
+    const group = screen.getAllByRole("group", { name: "Energy right now" })[0];
     fireEvent.click(within(group).getByRole("button", { name: "Log energy: Good" }));
     expect(useStore.getState().profile.energyChecks).toEqual([expect.objectContaining({ score: 75 })]);
     expect(screen.queryByText("No energy check today")).toBeNull();

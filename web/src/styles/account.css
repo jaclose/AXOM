@@ -160,3 +160,27 @@
 .account-choice.recommended { border-color: color-mix(in srgb, var(--green) 45%, transparent); }
 .account-choice b { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 @media (max-width: 720px) { .account-choice-grid.three { grid-template-columns: 1fr; } }
+
+/* Welcome back: the account's saved AXOM or this device's work (AccountSyncPanel). */
+.account-welcome-options { display: grid; gap: 8px; margin-top: 14px; }
+.account-welcome-option {
+  display: grid;
+  gap: 3px;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: rgba(230, 226, 214, .03);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .25s cubic-bezier(.22, 1, .36, 1), transform .35s cubic-bezier(.22, 1, .36, 1);
+}
+.account-welcome-option:hover:not(:disabled) { border-color: rgba(var(--accent-rgb), .4); transform: translateY(-1px); }
+.account-welcome-option.primary { border-color: rgba(var(--accent-rgb), .45); background: rgba(var(--accent-rgb), .08); }
+.account-welcome-option b { font-size: var(--fs-sm); }
+.account-welcome-option small { color: var(--text-60); font-size: var(--fs-xs); line-height: 1.45; }
+.account-welcome-option:disabled { opacity: .5; cursor: default; }
+.account-welcome-option:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: 2px; }
+:root[data-theme="light"] .account-welcome-option { background: rgba(255, 255, 255, .6); }
+@media (prefers-reduced-motion: reduce) { .account-welcome-option { transition: none; } .account-welcome-option:hover:not(:disabled) { transform: none; } }

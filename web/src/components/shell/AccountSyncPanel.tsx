@@ -272,7 +272,35 @@ function IdentityCard({ user }: { user: AccountUser }) {
 }
 
 function ProtectionCard() {
-  const { link, protection, lastProtectedAt, conflictServerRevision, syncFailure, nextAttemptAt, busy, linkThisDevice, syncNow, keepThisDevice, adoptAccountVersion, mergeWithAccount, signOut } = useAccount();
+  const { link, protection, lastProtectedAt, conflictServerRevision, syncFailure, nextAttemptAt, busy, linkThisDevice, syncNow, keepThisDevice, adoptAccountVersion, mergeWithAccount, signOut, restoreOffer, keepDeviceWork } = useAccount();
+  if (restoreOffer && link === "unlinked") {
+    const saved = new Date(restoreOffer.createdAt).toLocaleString(undefined, { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" });
+    return (
+      <section className="account-card account-welcome" aria-labelledby="account-welcome-title">
+        <div className="account-card-head">
+          <History size={ICON_SIZE.emphasis} aria-hidden="true" />
+          <div>
+            <h4 id="account-welcome-title">Welcome back</h4>
+            <p>Your account has an AXOM saved {saved}. This device has work of its own too, so nothing has changed yet. Choose what continues. Nothing is deleted: whichever you pick, the other version stays recoverable.</p>
+          </div>
+        </div>
+        <div className="account-welcome-options">
+          <button type="button" className="account-welcome-option primary" onClick={() => void adoptAccountVersion()} disabled={busy}>
+            <b>Use my account’s AXOM</b>
+            <small>Bring the saved version here. This device’s work stays recoverable in Emergency recovery.</small>
+          </button>
+          <button type="button" className="account-welcome-option" onClick={() => void mergeWithAccount()} disabled={busy}>
+            <b>Merge both</b>
+            <small>Keep everything from both; where the same item differs, the newer copy wins.</small>
+          </button>
+          <button type="button" className="account-welcome-option" onClick={() => void keepDeviceWork()} disabled={busy}>
+            <b>Keep this device’s work</b>
+            <small>This device continues; the account’s version stays in history.</small>
+          </button>
+        </div>
+      </section>
+    );
+  }
   if (link === "linked-elsewhere") {
     return (
       <section className="account-card account-warning">

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   BookText, ArrowRight,
   Database, Download, ShieldCheck, PackageCheck,
-  Sunrise, Trophy, Check, Circle, ArrowRightCircle, ExternalLink,
+  Sunrise, Check, Circle, ArrowRightCircle, ExternalLink,
   SlidersHorizontal, GripVertical, PlusCircle, X,
   AlertTriangle, CalendarClock,
   BookOpenCheck, ListTodo, BatteryMedium, Activity, Flame, Gamepad2,
@@ -22,7 +22,7 @@ import { gotoJournalDay, useUi } from "../lib/uiStore";
 import { useInView } from "../lib/useInView";
 import { DEFAULT_DASHBOARD_WIDGETS, DEFAULT_HIDDEN_DASHBOARD_WIDGETS } from "../lib/seed";
 import { calculateReadiness } from "../lib/energy";
-import { CapacitySummary, EnergyCheckRow } from "../components/energy/EnergyInsights";
+import { CapacitySummary } from "../components/energy/EnergyInsights";
 import { activePrimaryScopes, itemsInPrimary } from "../lib/trackerFocus";
 import { rankTrackerItems } from "../lib/recommendationFactors";
 import { scopeStudyProgress } from "../lib/studyProgress";
@@ -32,6 +32,8 @@ import { AnimatedProgressBar } from "../components/ui/motion";
 import { GlassCard, GButton, GhostButton, PanelHeader, Tag } from "../components/ui/primitives";
 import { Pomodoro } from "../components/productivity/Pomodoro";
 import { SoundscapeWidget } from "../components/dashboard/SoundscapeWidget";
+import { DailyCheckIn } from "../components/dashboard/DailyCheckIn";
+import { isAfterLocalTime } from "../lib/dailyCheckIn";
 import { DoctordleReminder } from "../components/games/DoctordleReminder";
 import { UpNext } from "../components/brief/UpNext";
 import { pushToast } from "../lib/toast";
@@ -46,6 +48,7 @@ import {
   adaptLegacyDashboardLayout,
   applyDashboardLayoutPreset,
   dashboardWidgetCatalogItem,
+  dashboardWidgetOptions,
   defaultDashboardWidgetPreferences,
   extraLargeWidgetRecommendation,
   normalizeDashboardLayoutPreferences,
@@ -128,6 +131,7 @@ export function DashboardPage() {
           ...current,
           size: settings.size,
           enabledFields: Object.entries(settings.fields).filter(([, enabled]) => enabled).map(([id]) => id),
+          ...(settings.options ? { preferences: { ...(current.preferences ?? {}), ...settings.options } } : {}),
         },
       },
       updatedAt: new Date().toISOString(),
@@ -145,10 +149,12 @@ export function DashboardPage() {
     const preferences = layout.widgets[widgetId] ?? defaultDashboardWidgetPreferences(widgetId);
     const enabledFields = new Set(preferences.enabledFields ?? []);
     const configurableFields = widgetConfigurableFields(widgetId, preferences);
+    const options = dashboardWidgetOptions(widgetId, preferences);
     const content = renderDashboardWidget({
       widgetId,
       size: preferences.size,
       enabledFields,
+      options,
       dailyProgress,
       week,
       activeDayKey: s.activeDayKey,
@@ -163,6 +169,7 @@ export function DashboardPage() {
         size={preferences.size}
         allowedSizes={meta.supportedSizes}
         fields={configurableFields}
+        options={meta.options?.map((option) => ({ id: option.id, label: option.label, description: option.description, checked: options[option.id] }))}
         settingsDescription="Choose the amount of space and detail this widget deserves."
         onSave={(settings) => saveWidgetSettings(widgetId, settings)}
       >
@@ -320,19 +327,6 @@ const DASHBOARD_MESSAGES = [
 function dailyDashboardMessage(key: string) {
   const code = key.split("").reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
   return DASHBOARD_MESSAGES[code % DASHBOARD_MESSAGES.length];
-}
-
-const WRAP_MESSAGES = [
-  "Close the loop while the day is still fresh.",
-  "A short honest review is enough.",
-  "Record the signal before memory edits it.",
-  "Name the blocker, keep the useful part.",
-  "End clean so tomorrow starts lighter.",
-];
-
-function wrapUpMessage(key: string) {
-  const code = key.split("").reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
-  return WRAP_MESSAGES[code % WRAP_MESSAGES.length];
 }
 
 function DashboardWidgetEditor({
@@ -613,6 +607,7 @@ interface DashboardWidgetRenderContext {
   widgetId: DashboardWidgetId;
   size: DashboardWidgetSize;
   enabledFields: Set<string>;
+  options: Readonly<Record<string, boolean>>;
   dailyProgress: DailySuccessResult;
   week: ReturnType<typeof weeklySummary>;
   activeDayKey: string;
@@ -620,8 +615,8 @@ interface DashboardWidgetRenderContext {
 }
 
 function renderDashboardWidget(context: DashboardWidgetRenderContext) {
-  const { widgetId, size, enabledFields, dailyProgress, week, activeDayKey, state } = context;
-  if (widgetId === "winDay") return <WinTheDay />;
+  const { widgetId, size, enabledFields, options, dailyProgress, week, activeDayKey, state } = context;
+  if (widgetId === "winDay") return <DailyCheckIn writing={options.writing === true} />;
   if (widgetId === "todayScore") return <TodayScoreWidget result={dailyProgress} activeDayKey={activeDayKey} enabledFields={enabledFields} />;
   if (widgetId === "examCountdown") return <ExamCountdownWidget />;
   if (widgetId === "pomodoro") return <Pomodoro compact />;
@@ -1185,11 +1180,6 @@ function ExamCountdownWidget() {
   );
 }
 
-const OUTCOMES: { key: "won" | "partial" | "missed"; label: string; tone: "green" | "orange" | "red" }[] = [
-  { key: "won", label: "Won it", tone: "green" },
-  { key: "partial", label: "Partial", tone: "orange" },
-  { key: "missed", label: "Missed", tone: "red" },
-];
 
 // Conditional dashboard banner: shows the standup prompt inside the review
 // window, or a "you missed your standup" remediation strip once it lapses. It
@@ -1298,231 +1288,6 @@ function StandupPrompt() {
 
 // Daily Check-In: optional first-open direction plus a gentle carry-over nudge.
 // It never infers an intention and never steals focus on app launch.
-function WinTheDay() {
-  const s = useStore();
-  const dailyLoopRequest = useUi((state) => state.dailyLoopRequest);
-  const clearDailyLoopRequest = useUi((state) => state.clearDailyLoopRequest);
-  const today = s.activeDayKey;
-  const todayPlan = s.dayPlans.find((p) => p.dayKey === today);
-  const pendingPast = s.dayPlans
-    .filter((p) => p.dayKey < today && !p.reviewedAt)
-    .sort((a, b) => b.dayKey.localeCompare(a.dayKey))[0];
-
-  const [intention, setIntention] = useState("");
-  const [wins, setWins] = useState("");
-  const [note, setNote] = useState("");
-  const [expectedMinutes, setExpectedMinutes] = useState("");
-  const [personalNote, setPersonalNote] = useState("");
-  const [priority, setPriority] = useState("");
-  const [obstacle, setObstacle] = useState("");
-  const [commitment, setCommitment] = useState<1 | 2 | 3 | 4 | 5>(3);
-  const [showContext, setShowContext] = useState(false);
-  const [promptDismissed, setPromptDismissed] = useState(() => (
-    dailyLoopReminderLedger.read(today).checkIn.disposition !== "pending"
-  ));
-  const [showWrapPrompt, setShowWrapPrompt] = useState(false);
-
-  const openTasks = s.tasks.filter((t) => !t.done && !t.archived).slice(0, 3);
-  const reviewDue = isAfterLocalTime(s.profile.journalReviewTime ?? "20:00");
-  const selectedTargets = useMemo(
-    () => evaluateDailySuccess(s, today, today).requirements
-      .filter((item) => item.eligible && item.status !== "unavailable")
-      .map((item) => item.requirement.label),
-    [s, today],
-  );
-
-  useEffect(() => {
-    if (todayPlan && !todayPlan.outcome && reviewDue) setShowWrapPrompt(true);
-  }, [reviewDue, todayPlan]);
-
-  useEffect(() => {
-    setPromptDismissed(dailyLoopReminderLedger.read(today).checkIn.disposition !== "pending");
-    setIntention("");
-    setWins("");
-    setNote("");
-    setExpectedMinutes("");
-    setPersonalNote("");
-    setPriority("");
-    setObstacle("");
-    setCommitment(3);
-    setShowContext(false);
-    setShowWrapPrompt(false);
-  }, [today]);
-
-  useEffect(() => {
-    if (dailyLoopRequest?.kind !== "check-in" || dailyLoopRequest.dayKey !== today) return;
-    setPromptDismissed(false);
-    clearDailyLoopRequest();
-  }, [clearDailyLoopRequest, dailyLoopRequest, today]);
-
-  function save() {
-    if (!intention.trim()) return;
-    s.setDayPlan(
-      today,
-      intention.trim(),
-      wins.split("\n").map((w) => w.trim()).filter(Boolean).slice(0, 3),
-      {
-        expectedStudyMinutes: expectedMinutes ? Math.max(0, Number(expectedMinutes) || 0) : undefined,
-        personalNote: personalNote.trim() || undefined,
-        priority: priority.trim() || undefined,
-        anticipatedObstacle: obstacle.trim() || undefined,
-        commitmentLevel: commitment,
-      },
-    );
-    dailyLoopReminderLedger.markShown(today, "check-in");
-    setIntention(""); setWins("");
-  }
-
-  function useTargets() {
-    if (!selectedTargets.length) {
-      location.hash = "productivity";
-      return;
-    }
-    s.setDayPlan(today, "Complete today’s chosen targets", selectedTargets.slice(0, 3), { commitmentLevel: commitment });
-    dailyLoopReminderLedger.markShown(today, "check-in");
-  }
-
-  function skipCheckIn() {
-    dailyLoopReminderLedger.skip(today, "check-in");
-    setPromptDismissed(true);
-  }
-
-  return (
-    <GlassCard pad className="win-day" data-tour="intention">
-      {showWrapPrompt && todayPlan && !todayPlan.outcome && (
-        <div className="journal-wrap-popover">
-          <button className="ghost-btn" onClick={() => setShowWrapPrompt(false)} title="Dismiss"><X size={ICON_SIZE.body} /></button>
-          <div className="journal-wrap-mark"><BookText size={ICON_SIZE.emphasis} /></div>
-          <div>
-            <b>Wrap up the day</b>
-            <span>{wrapUpMessage(today)} Review “{todayPlan.intention}”, then turn it into a useful standup.</span>
-          </div>
-          <a className="gbtn sm primary" href="#journal">Open Journal</a>
-        </div>
-      )}
-      {pendingPast && (
-        <div className="carry-over">
-          <ArrowRightCircle size={ICON_SIZE.emphasis} />
-          <div className="grow">
-            <b>You planned {prettyDate(`${pendingPast.dayKey}T12:00:00`)} but never closed it out.</b>
-            <span>“{pendingPast.intention}” — did you get it done?</span>
-          </div>
-          <div className="row gap6">
-            {OUTCOMES.map((o) => (
-              <button key={o.key} className={`gbtn tiny ${o.tone === "green" ? "primary" : ""}`}
-                onClick={() => s.reviewDayPlan(pendingPast.dayKey, o.key)}>{o.label}</button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {!todayPlan && promptDismissed ? (
-        <div className="daily-checkin-collapsed">
-          <div>
-            <div className="panel-title">Daily Check-In</div>
-            <div className="panel-sub">Optional. Add direction whenever it would help.</div>
-          </div>
-          <GButton size="sm" onClick={() => setPromptDismissed(false)}>Open check-in</GButton>
-        </div>
-      ) : null}
-      {!todayPlan && promptDismissed ? (
-        <div className="daily-checkin-energy">
-          <EnergyCheckRow />
-        </div>
-      ) : !todayPlan ? (
-        <>
-          <PanelHeader title="Daily Check-In" sub="Before the day runs away from you, what would make today count?" />
-          <div className="stack gap8">
-            <label className="stack gap6"><span className="field-label">Primary intention</span><input className="field" placeholder="e.g. Finish the renal review before lunch"
-              value={intention} onChange={(e) => setIntention(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} /></label>
-            <label className="stack gap6"><span className="field-label">One to three win conditions (optional)</span><textarea className="field" rows={2} placeholder="One per line"
-              value={wins} onChange={(e) => setWins(e.target.value)} />
-            </label>
-            <details className="daily-checkin-context" open={showContext} onToggle={(event) => setShowContext(event.currentTarget.open)}>
-              <summary>Add context (optional)</summary>
-              <div className="daily-checkin-context-grid">
-                <label><span>Expected study block</span><input className="field" type="number" min="0" inputMode="numeric" placeholder="minutes" value={expectedMinutes} onChange={(event) => setExpectedMinutes(event.target.value)} /></label>
-                <label><span>Priority course or topic</span><input className="field" value={priority} onChange={(event) => setPriority(event.target.value)} /></label>
-                <label><span>Anticipated obstacle</span><input className="field" value={obstacle} onChange={(event) => setObstacle(event.target.value)} /></label>
-                <label><span>Personal note</span><input className="field" value={personalNote} onChange={(event) => setPersonalNote(event.target.value)} /></label>
-                <fieldset><legend>Commitment level</legend><div className="row gap6">{([1, 2, 3, 4, 5] as const).map((level) => <button key={level} type="button" className={`filter-pill ${commitment === level ? "on" : ""}`} aria-pressed={commitment === level} onClick={() => setCommitment(level)}>{level}</button>)}</div></fieldset>
-              </div>
-            </details>
-            <div className="row wrap gap8 daily-checkin-actions">
-              <GButton variant="primary" onClick={save} disabled={!intention.trim()}><Sunrise size={ICON_SIZE.body} /> Set today’s focus</GButton>
-              <GButton onClick={useTargets}>Use my targets</GButton>
-              <GhostButton onClick={skipCheckIn}>Skip for now</GhostButton>
-            </div>
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="panel-head">
-            <div>
-              <div className="panel-title">Daily Check-In</div>
-              <div className="panel-sub">“{todayPlan.intention}”</div>
-            </div>
-            {todayPlan.outcome
-              ? <Tag tone={OUTCOMES.find((o) => o.key === todayPlan.outcome)?.tone ?? "neutral"}>
-                  <Trophy size={ICON_SIZE.microInline} /> {OUTCOMES.find((o) => o.key === todayPlan.outcome)?.label}
-                </Tag>
-              : <button className="gbtn tiny" onClick={() => s.setDayPlan(today, "", [])}>Reset</button>}
-          </div>
-
-          {todayPlan.wins.length > 0 && (
-            <div className="win-conditions">
-              {todayPlan.wins.map((w, i) => <span key={i} className="win-cond"><Check size={ICON_SIZE.microInline} /> {w}</span>)}
-            </div>
-          )}
-
-          {(todayPlan.priority || todayPlan.expectedStudyMinutes || todayPlan.anticipatedObstacle) && (
-            <div className="daily-checkin-snapshot">
-              {todayPlan.priority && <span><b>Priority</b>{todayPlan.priority}</span>}
-              {todayPlan.expectedStudyMinutes ? <span><b>Expected block</b>{todayPlan.expectedStudyMinutes} min</span> : null}
-              {todayPlan.anticipatedObstacle && <span><b>Watch for</b>{todayPlan.anticipatedObstacle}</span>}
-            </div>
-          )}
-
-          {openTasks.length > 0 && (
-            <div className="win-tasks">
-              <div className="field-label" style={{ marginBottom: 6 }}>Check off as you go</div>
-              {openTasks.map((t) => (
-                <button key={t.id} className="win-task" onClick={() => s.toggleTask(t.id)}>
-                  <Circle size={ICON_SIZE.body} /> <span>{t.title}</span>
-                  {t.scope && <Tag tone="neutral">{t.scope}</Tag>}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {!todayPlan.outcome && (
-            <div className="win-review">
-              <input className="field grow" placeholder="End-of-day note (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
-              {OUTCOMES.map((o) => (
-                <GButton key={o.key} size="sm" variant={o.tone === "green" ? "primary" : "default"}
-                  onClick={() => s.reviewDayPlan(today, o.key, note.trim() || undefined)}>{o.label}</GButton>
-              ))}
-            </div>
-          )}
-          {!todayPlan.outcome && reviewDue && (
-            <div className="journal-follow-nudge">
-              <BookText size={ICON_SIZE.body} />
-              <span>It is past your journal follow-up time. Review today’s intention, then write the standup.</span>
-              <a className="gbtn tiny" href="#journal">Open Journal</a>
-            </div>
-          )}
-          {todayPlan.outcome && (
-            <div className="row gap8" style={{ marginTop: 10 }}>
-              <GhostButton onClick={() => s.reviewDayPlan(today, undefined)} title="Re-open review"><ArrowRight size={ICON_SIZE.body} /></GhostButton>
-              <span className="sub">Reviewed{todayPlan.reviewNote ? ` — “${todayPlan.reviewNote}”` : ""}. Want to log it as a standup? Open Journal.</span>
-            </div>
-          )}
-        </>
-      )}
-    </GlassCard>
-  );
-}
-
 function ProgressBar({
   label, value, target, pct, color,
 }: { label: string; value: number; target: number; pct: number; color: string }) {
@@ -1638,12 +1403,3 @@ function truncateText(value: string, max: number) {
   return clean.length > max ? `${clean.slice(0, max - 1)}...` : clean;
 }
 
-function isAfterLocalTime(value: string): boolean {
-  const match = value.match(/^(\d{2}):(\d{2})$/);
-  if (!match) return false;
-  const [, hh, mm] = match;
-  const now = new Date();
-  const target = new Date();
-  target.setHours(Number(hh), Number(mm), 0, 0);
-  return now >= target;
-}

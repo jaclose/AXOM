@@ -81,7 +81,7 @@ describe("Dashboard Daily Check-In", () => {
     fireEvent.change(within(context!).getByLabelText("Priority course or topic"), { target: { value: "Renal physiology" } });
     fireEvent.change(within(context!).getByLabelText("Anticipated obstacle"), { target: { value: "Late lab" } });
     fireEvent.change(within(context!).getByLabelText("Personal note"), { target: { value: "Take a short break first" } });
-    fireEvent.click(within(context!).getByRole("button", { name: "5" }));
+    fireEvent.click(within(context!).getByRole("radio", { name: "5" }));
     fireEvent.click(screen.getByRole("button", { name: "Set today’s focus" }));
 
     expect(useStore.getState().dayPlans).toHaveLength(1);
@@ -149,6 +149,32 @@ describe("Dashboard Daily Check-In", () => {
     expect(dailyLoopReminderLedger.read(day).checkIn.disposition).toBe("shown");
     expect(screen.getByText("Focused study")).toBeTruthy();
     expect(screen.getByText("Review cards")).toBeTruthy();
+  });
+
+  it("marks a freshly set intention with a short status", () => {
+    setCheckInState("2035-04-13");
+    render(<DashboardPage />);
+    fireEvent.change(screen.getByLabelText("Primary intention"), { target: { value: "Cardio block" } });
+    fireEvent.click(screen.getByRole("button", { name: "Set today’s focus" }));
+    expect(screen.getByText("Today’s intention")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("Intention set");
+    expect(screen.getByText("Cardio block", { selector: ".daily-checkin-intent span" }).parentElement?.classList.contains("is-new")).toBe(true);
+  });
+
+  it("turns on the writing prompt from the check-in's own settings", () => {
+    setCheckInState("2035-04-14");
+    render(<DashboardPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Customize Daily Check-In" }));
+    const option = screen.getByRole("checkbox", { name: /A short note after an energy check/ }) as HTMLInputElement;
+    expect(option.checked).toBe(false);
+    fireEvent.click(option);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(useStore.getState().profile.dashboardLayout?.widgets.winDay?.preferences).toMatchObject({ writing: true });
+
+    fireEvent.click(screen.getByRole("button", { name: "Log energy: Low" }));
+    fireEvent.change(screen.getByLabelText(/weighing|eating|lighter/), { target: { value: "Too little sleep" } });
+    fireEvent.click(screen.getByRole("button", { name: "Keep it" }));
+    expect(useStore.getState().profile.energyChecks?.at(-1)).toMatchObject({ score: 35, note: "Too little sleep" });
   });
 });
 
