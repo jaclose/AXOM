@@ -84,6 +84,11 @@ export interface TrackerItem {
   templateKey?: string;
   /** For activities a learner attends. Absent: not recorded. */
   attendance?: "attended" | "missed";
+  /**
+   * Who put this row in its week: the template said so, AXOM worked it out, or
+   * the learner moved it. A learner's placement is never undone by a re-import.
+   */
+  weekSource?: "template" | "inferred" | "learner";
 }
 
 export interface Task {

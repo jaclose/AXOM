@@ -113,6 +113,7 @@ function ModuleBlock({ module, open, onToggle, openWeek, onToggleWeek }: {
                     <b>Week {week.week}</b>
                     {week.week === module.currentWeek && <Tag tone="gold">Current</Tag>}
                     {week.missed > 0 && <Tag tone="orange">{week.missed} missed</Tag>}
+                    {week.items.some((item) => item.weekSource === "inferred") && <Tag tone="neutral">{week.items.filter((item) => item.weekSource === "inferred").length} placed by AXOM</Tag>}
                   </span>
                   <span className="sub">
                     {week.done} of {week.items.length} done
@@ -130,6 +131,17 @@ function ModuleBlock({ module, open, onToggle, openWeek, onToggleWeek }: {
                             onChange={() => s.setPasses(item.id, item.passes >= 1 ? 0 : 1)} />
                           <span>{item.label}</span>
                         </label>
+                        {item.weekSource === "inferred" && (
+                          // The template did not say which week this belongs to. Moving it
+                          // records the learner's choice, which a re-import then keeps.
+                          <select className="field week-move" aria-label={`Week for ${item.label}`} value={week.week}
+                            onChange={(event) => s.updateTrackerItem(item.id, {
+                              path: item.path.replace(/\/[^/]+$/, `/Week ${event.target.value}`),
+                              weekSource: "learner",
+                            })}>
+                            {module.weeks.map((option) => <option key={option.week} value={option.week}>Week {option.week}</option>)}
+                          </select>
+                        )}
                         {isAttended(item.activity) && (
                           <button type="button" className={`filter-pill ${item.attendance === "missed" ? "on" : ""}`}
                             aria-pressed={item.attendance === "missed"} aria-label={`Missed ${item.label}`}

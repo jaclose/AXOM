@@ -113,10 +113,11 @@ export function CourseTemplateLoader({ onClose }: { onClose: () => void }) {
       yield: "none" as const,
       activity: item.activity,
       templateKey: item.templateKey,
+      weekSource: item.weekSource,
     })));
     if (rows.length) s.bulkAddTrackerItems(rows);
     for (const preview of previews) {
-      for (const change of preview.changes.update) s.updateTrackerItem(change.id, { path: change.path, label: change.label });
+      for (const change of preview.changes.update) s.updateTrackerItem(change.id, { path: change.path, label: change.label, weekSource: change.weekSource });
     }
     pushToast({
       title: "Course template loaded",

@@ -217,8 +217,25 @@ describe("course templates", () => {
 
     const retitled = planCourseTemplate([parseCourseTemplate(ACTIVITIES.replace("DEMO SG 01 Introduction", "DEMO SG 01 Orientation"))]);
     expect(reconcileCourseTemplate(retitled, applied)).toEqual({
-      create: [], update: [{ id: "row-0", path: "DEMO 1/Week 1", label: "DEMO SG 01 Orientation" }], unchanged: 5,
+      create: [], update: [{ id: "row-0", path: "DEMO 1/Week 1", label: "DEMO SG 01 Orientation", weekSource: "template" }], unchanged: 5,
     });
+  });
+
+  it("records who placed each row, and never moves a row the learner placed", () => {
+    const plan = planCourseTemplate([parseCourseTemplate(LECTURES), parseCourseTemplate(ACTIVITIES)]);
+    expect(plan.items.find((item) => item.activity === "esoft")?.weekSource).toBe("template");
+    const lecture = plan.items.find((item) => item.label.startsWith("DEMO Lecture 03"))!;
+    expect(lecture).toMatchObject({ week: 2, weekSource: "inferred" });
+
+    // The learner moved lecture 3 into week 1. Loading the template again leaves it there.
+    const applied = plan.items.map((item, index) => ({ id: `row-${index}`, path: item.path, label: item.label, templateKey: item.templateKey, weekSource: item.weekSource }));
+    const moved = applied.map((row) => (row.label.startsWith("DEMO Lecture 03") ? { ...row, path: "DEMO 1/Week 1", weekSource: "learner" as const } : row));
+    expect(reconcileCourseTemplate(plan, moved)).toEqual({ create: [], update: [], unchanged: plan.items.length });
+    // A new title still reaches it, without moving it.
+    const retitled = planCourseTemplate([parseCourseTemplate(LECTURES.replace("Third topic", "Third topic, revised")), parseCourseTemplate(ACTIVITIES)]);
+    expect(reconcileCourseTemplate(retitled, moved).update).toEqual([
+      { id: moved.find((row) => row.weekSource === "learner")!.id, path: "DEMO 1/Week 1", label: "DEMO Lecture 03 Third topic, revised", weekSource: "learner" },
+    ]);
   });
 
   it("maps template kinds onto tracker groupings every build understands", () => {

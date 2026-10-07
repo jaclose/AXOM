@@ -1002,3 +1002,5 @@ ul.template-note { padding-left: 26px; }
 .week-items > li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid var(--hairline-soft, var(--hairline)); }
 .week-item-done { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text-80); font-size: var(--fs-sm); cursor: pointer; }
 .week-module-head:focus-visible, .week-row-head:focus-visible, .week-absences > summary:focus-visible { outline: 2px solid rgba(var(--accent-rgb), .7); outline-offset: -2px; border-radius: var(--radius-sm); }
+.week-items > li { flex-wrap: wrap; }
+.week-move { width: auto; min-height: 30px; padding: 4px 26px 4px 10px; font-size: var(--fs-tiny); }

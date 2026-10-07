@@ -134,6 +134,8 @@ export interface PlannedCourseItem {
   templateKey: string;
   week?: number;
   weekBasis: WeekBasis;
+  /** What to record on the row: only a stated or group-ordered week is the template's own. */
+  weekSource?: "template" | "inferred";
 }
 
 export interface CourseTemplatePlan {
@@ -205,6 +207,7 @@ export function planCourseTemplate(
         templateKey: templateKey(module, item),
         week,
         weekBasis,
+        weekSource: weekBasis === "stated" || weekBasis === "group-order" ? "template" : week ? "inferred" : undefined,
       });
     }
   }
@@ -223,7 +226,7 @@ export interface TemplateReconciliation {
   /** Rows the workspace does not have yet. */
   create: PlannedCourseItem[];
   /** Rows that exist under the same template identity with a different title or week. */
-  update: Array<{ id: string; path: string; label: string }>;
+  update: Array<{ id: string; path: string; label: string; weekSource?: "template" | "inferred" | "learner" }>;
   unchanged: number;
 }
 
@@ -234,7 +237,7 @@ export interface TemplateReconciliation {
  */
 export function reconcileCourseTemplate(
   plan: CourseTemplatePlan,
-  existing: ReadonlyArray<{ id: string; path: string; label: string; templateKey?: string }>,
+  existing: ReadonlyArray<{ id: string; path: string; label: string; templateKey?: string; weekSource?: "template" | "inferred" | "learner" }>,
 ): TemplateReconciliation {
   const byKey = new Map(existing.flatMap((item) => (item.templateKey ? [[item.templateKey, item] as const] : [])));
   const byPlace = new Set(existing.map((item) => `${item.path}|${item.label}`.toLowerCase()));
@@ -242,8 +245,10 @@ export function reconcileCourseTemplate(
   for (const item of plan.items) {
     const match = byKey.get(item.templateKey);
     if (match) {
-      if (match.path === item.path && match.label === item.label) result.unchanged += 1;
-      else result.update.push({ id: match.id, path: item.path, label: item.label });
+      // A week the learner chose stands: a re-import may retitle the row, never move it.
+      const path = match.weekSource === "learner" ? match.path : item.path;
+      if (match.path === path && match.label === item.label) result.unchanged += 1;
+      else result.update.push({ id: match.id, path, label: item.label, weekSource: match.weekSource === "learner" ? "learner" : item.weekSource });
     } else if (byPlace.has(`${item.path}|${item.label}`.toLowerCase())) {
       result.unchanged += 1;
     } else {

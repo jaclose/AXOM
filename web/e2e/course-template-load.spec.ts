@@ -99,10 +99,19 @@ test("a course template fills the tracker week by week and is safe to load twice
   await reloadAfterSave(page);
   await expect(page.locator(".week-absences summary")).toContainText("Small group: 1 missed of 10 allowed");
 
+  // A lecture AXOM placed can be moved; the learner's choice is then the record.
+  const ftmAgain = page.locator(".week-overview").getByRole("region", { name: "FTM 1 by week" });
+  const week4 = ftmAgain.locator("li.week-row").filter({ hasText: "Week 4" });
+  await expect(week4).toContainText("placed by AXOM");
+  await week4.getByRole("button", { name: /Week 4/ }).click();
+  await week4.getByLabel("Week for FTM Lecture 04 Fourth sample topic").selectOption("3");
+  await expect(ftmAgain.locator("li.week-row").first()).toContainText("1 of 7 done");
+
   // Loading the same files again finds everything already there.
   await page.getByRole("button", { name: "Load course template" }).click();
   await dialog.getByLabel("Choose course template files").setInputFiles(FILES);
   await preview.getByLabel("FTM 1 starts in week").fill("3");
+  // The moved lecture is not pulled back to the week AXOM first gave it.
   await expect(preview).toContainText("0 new, 10 already in your tracker.");
   await expect(dialog.getByRole("button", { name: "Nothing to add" })).toBeDisabled();
   expect(errors).toEqual([]);
