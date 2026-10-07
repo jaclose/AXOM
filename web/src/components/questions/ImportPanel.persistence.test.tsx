@@ -10,6 +10,7 @@ import { importFromCsv } from "../../lib/questionImport";
 import { questionMappingStatus } from "../../lib/questions";
 import { parseImport, toPortableState } from "../../lib/backup";
 import { DB_NAME } from "../../lib/localVault";
+import { hasReviewedImportInFlight } from "../../lib/questionImportFinalization";
 
 vi.mock("../../lib/toast", () => ({ pushToast: vi.fn() }));
 vi.mock("../../lib/ai", () => ({
@@ -491,6 +492,9 @@ describe("Importing a file again", () => {
     await waitFor(() => {
       expect(useStore.getState().questions).toHaveLength(2);
       expect(screen.queryByRole("button", { name: "Finalize import" })).toBeNull();
+      // The panel reads an earlier import only from settled state, so the next
+      // panel must not open while this save is still being written.
+      expect(hasReviewedImportInFlight()).toBe(false);
     });
     view.unmount();
   }
