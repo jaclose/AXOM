@@ -58,6 +58,8 @@ xcuserdata/
 99 */
 ANKI Decks/
 Medical School/
+/Materials/
+/AXOM Templates Completed/
 *.csv
 *.md.bak
 active_study_day.txt
@@ -126,3 +128,5 @@ __pycache__/
 /*.png
 /*.jpg
 /*.jpeg
+.vercel
+.env*

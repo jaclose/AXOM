@@ -10,3 +10,6 @@ Noctyrium-mac-*.zip
 Noctyrium-web-v*/
 Noctyrium.app/
 .snapshots/
+.env.local
+.env.*.local
+.vercel
