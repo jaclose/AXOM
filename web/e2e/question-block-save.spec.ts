@@ -61,6 +61,37 @@ test("the answered questions of an exam block survive leaving it early", async (
   expect(saved.quizSessions[0]).toMatchObject({ mode: "exam", endedEarly: true, score: { correct: 1, scored: 2, total: 3 } });
 });
 
+test("a block in progress comes back after a reload as it was left", async ({ page }) => {
+  await openSeededSet(page, 3);
+  await page.getByRole("button", { name: "Exam (feedback at the end)" }).click();
+  await page.getByRole("button", { name: /Start exam block/ }).click();
+
+  // Question 1 answered; on question 2 a pick that was not submitted yet.
+  await page.getByRole("button", { name: "B. Beta" }).click();
+  await page.getByRole("button", { name: "Submit & next" }).click();
+  await expect(page.getByRole("heading", { name: "Exam · 2 of 3" })).toBeVisible();
+  await page.getByRole("button", { name: "A. Alpha" }).click();
+
+  await reloadAfterSave(page);
+  await page.evaluate(() => { window.location.hash = "questions"; });
+
+  // The Question Bank reopens the block by itself: same question, same pick.
+  await expect(page.getByRole("heading", { name: "Exam · 2 of 3" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "A. Alpha" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Previous" }).click();
+  await expect(page.getByRole("button", { name: "B. Beta" })).toHaveAttribute("aria-pressed", "true");
+
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await reloadAfterSave(page);
+  const saved = await readPersistedWorkspace(page);
+  const answered = saved.questions.filter((question: SavedQuestion) => question.attempts.length > 0);
+  expect(answered.map((question: SavedQuestion) => question.attempts[0].answerKey).sort()).toEqual(["A", "B"]);
+  expect(saved.quizSessions).toHaveLength(1);
+  expect(saved.quizSessions[0]).toMatchObject({ mode: "exam", endedEarly: true, score: { correct: 1, scored: 2, total: 3 } });
+});
+
 interface SavedQuestion {
   attempts: Array<{ status: string; answerKey?: string; quizSessionId?: string }>;
 }

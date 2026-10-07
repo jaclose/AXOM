@@ -77,33 +77,68 @@ export function startBlock(input: { ids: readonly string[]; mode: "exam" | "tuto
   };
 }
 
-/** Pick a suspended block back up. The clock and the item on screen start again from now. */
-export function resumeBlock(block: SuspendedBlock, ids: readonly string[], now: number): ExamBlock {
-  const index = Math.min(Math.max(0, block.index), Math.max(0, ids.length - 1));
+/** What a saved record knows about one item of a block that is being picked up again. */
+export interface RestoredItem {
+  answerKey?: string;
+  marked?: boolean;
+  struck?: readonly string[];
+  visited?: boolean;
+  /** Tutor mode: the answer was submitted, so its time no longer grows. */
+  revealed?: boolean;
+  seconds?: number;
+}
+
+/**
+ * A running block rebuilt from what was saved of it. The clock and the item on
+ * screen start again from now. Every way of picking a block up goes through
+ * here: a suspended exam block, and the AXOM player's resume snapshot.
+ */
+export function restoreBlock(input: {
+  ids: readonly string[];
+  mode: "exam" | "tutor";
+  index: number;
+  items: Readonly<Record<string, RestoredItem | undefined>>;
+  elapsedMs?: number;
+  notes?: string;
+  startedAt: string;
+  now: number;
+}): ExamBlock {
+  const { ids, now } = input;
+  const index = Math.min(Math.max(0, input.index), Math.max(0, ids.length - 1));
   const items: Record<string, ItemState> = {};
-  const seconds: Record<string, number> = {};
+  const seconds: Record<string, number | undefined> = {};
   const sealed: string[] = [];
   for (const id of ids) {
-    const saved = block.items[id];
+    const saved = input.items[id];
     if (!saved) continue;
-    items[id] = { answerKey: saved.answerKey, marked: Boolean(saved.marked), struck: saved.struck ?? [], visited: Boolean(saved.visited), revealed: Boolean(saved.submitted) };
+    items[id] = { answerKey: saved.answerKey, marked: Boolean(saved.marked), struck: saved.struck ?? [], visited: Boolean(saved.visited), revealed: Boolean(saved.revealed) };
     seconds[id] = saved.seconds;
-    if (saved.submitted) sealed.push(id);
+    if (saved.revealed) sealed.push(id);
   }
   const current = ids[index];
   if (current) items[current] = { ...(items[current] ?? BLANK_ITEM), visited: true };
   const times = questionTimesFrom(seconds, sealed);
   return {
     ids,
-    mode: block.mode,
+    mode: input.mode,
     phase: "testing",
     index,
     items,
     times: current ? openVisit(times, current, now) : times,
-    clock: { elapsedMs: Math.max(0, block.elapsedMs), runningSince: now },
-    notes: block.notes ?? "",
-    startedAt: block.startedAt,
+    clock: { elapsedMs: Math.max(0, input.elapsedMs ?? 0), runningSince: now },
+    notes: input.notes ?? "",
+    startedAt: input.startedAt,
   };
+}
+
+/** Pick a suspended block back up. The clock and the item on screen start again from now. */
+export function resumeBlock(block: SuspendedBlock, ids: readonly string[], now: number): ExamBlock {
+  const items: Record<string, RestoredItem> = {};
+  for (const id of ids) {
+    const saved = block.items[id];
+    if (saved) items[id] = { answerKey: saved.answerKey, marked: saved.marked, struck: saved.struck, visited: saved.visited, revealed: saved.submitted, seconds: saved.seconds };
+  }
+  return restoreBlock({ ids, mode: block.mode, index: block.index, items, elapsedMs: block.elapsedMs, notes: block.notes, startedAt: block.startedAt, now });
 }
 
 /** A finished block opened for review: read-only, every result shown, no clock. */

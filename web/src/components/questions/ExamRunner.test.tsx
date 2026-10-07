@@ -682,6 +682,107 @@ describe("ExamRunner keeps what was answered", () => {
       .toEqual([run.session.id, run.session.id]);
   });
 
+  it("keeps a pick and its strike-outs on a question the learner steps away from", async () => {
+    // Before the block was held by the exam engine, stepping back dropped the
+    // pick on screen, and every move cleared the strike-outs.
+    setStore();
+    mocked.store = { ...mocked.store, questions: [question, second] };
+    const user = userEvent.setup();
+    render(<ExamRunner mode="exam" retakeIds={[question.id, second.id]} onClose={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "A. Alpha" }));
+    await user.click(screen.getByRole("button", { name: "Submit & next" }));
+    await user.click(screen.getByRole("button", { name: "B. Beta" }));
+    await user.click(screen.getByRole("button", { name: "Eliminate option A" }));
+    await user.click(screen.getByRole("button", { name: /Previous/ }));
+    expect(screen.getByRole("button", { name: "A. Alpha" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.queryByRole("button", { name: "Restore option A" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Submit & next" }));
+    expect(screen.getByRole("button", { name: "B. Beta" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Restore option A" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("counts the pick on screen as the answer when an exam block is left", async () => {
+    // "End block" has always taken the pick on screen as the answer. Leaving
+    // through Close now follows the same rule.
+    setStore();
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<ExamRunner mode="exam" retakeIds={[question.id]} onClose={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "B. Beta" }));
+    await user.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(committedAttempts()).toEqual([{ questionId: question.id, attempt: expect.objectContaining({ answerKey: "B", status: "correct" }) }]);
+    confirm.mockRestore();
+  });
+
+  it("does not count a tutor pick that was never checked", async () => {
+    setStore();
+    mocked.store = { ...mocked.store, questions: [question, second] };
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<ExamRunner mode="tutor" retakeIds={[question.id, second.id]} onClose={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "B. Beta" }));
+    await user.click(screen.getByRole("button", { name: "Check answer" }));
+    await user.click(screen.getByRole("button", { name: "Next question" }));
+    await user.click(screen.getByRole("button", { name: "A. Alpha" }));
+    await user.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(mocked.recordQuestionAttempt).toHaveBeenCalledTimes(1);
+    const { session } = mocked.commitQuizRun.mock.calls[0][0];
+    expect(session.answers).toEqual([
+      expect.objectContaining({ questionId: question.id, answerKey: "B", correct: true }),
+      { questionId: second.id, flagged: false },
+    ]);
+    expect(session.score).toEqual({ correct: 1, scored: 1, total: 2, pct: 100 });
+    confirm.mockRestore();
+  });
+
+  it("shows a checked tutor question as checked however the learner comes back to it", async () => {
+    setStore();
+    mocked.store = { ...mocked.store, questions: [question, second] };
+    const user = userEvent.setup();
+    render(<ExamRunner mode="tutor" retakeIds={[question.id, second.id]} onClose={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "A. Alpha" }));
+    await user.click(screen.getByRole("button", { name: "Check answer" }));
+    await user.click(screen.getByRole("button", { name: "Next question" }));
+    await user.click(screen.getByRole("button", { name: "B. Beta" }));
+    await user.click(screen.getByRole("button", { name: "Check answer" }));
+    const result = () => document.querySelector(".result-banner[role='status']")?.textContent ?? "";
+    await user.click(screen.getByRole("button", { name: /Previous/ }));
+    expect(result()).toContain("Incorrect");
+
+    // Forward again: the second question is still checked, not offered as new.
+    await user.click(screen.getByRole("button", { name: "Next question" }));
+    expect(result()).toMatch(/^Correct/);
+    expect(screen.queryByRole("button", { name: "Check answer" })).toBeNull();
+    expect(mocked.recordQuestionAttempt).toHaveBeenCalledTimes(2);
+  });
+
+  it("writes the resume snapshot in the shape it had before the exam engine", async () => {
+    setStore();
+    mocked.store = { ...mocked.store, questions: [question, second] };
+    const user = userEvent.setup();
+    render(<ExamRunner mode="exam" retakeIds={[question.id, second.id]} onClose={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "A. Alpha" }));
+    await user.click(screen.getByRole("button", { name: "Sure" }));
+    await user.click(screen.getByRole("button", { name: "Submit & next" }));
+    await user.click(screen.getByRole("button", { name: "B. Beta" }));
+
+    const snapshot = JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession)!);
+    expect(Object.keys(snapshot).sort()).toEqual(["answers", "filters", "index", "mode", "picked", "poolIds", "revealed", "runId", "startedAt", "timed"]);
+    expect(snapshot).toMatchObject({ mode: "exam", poolIds: [question.id, second.id], index: 1, picked: "B", revealed: false });
+    expect(snapshot.answers).toEqual([
+      { questionId: question.id, answerKey: "A", correct: false, flagged: false, seconds: expect.any(Number), certainty: "sure" },
+      { questionId: second.id, answerKey: "B", correct: true, flagged: false, seconds: expect.any(Number) },
+    ]);
+  });
+
   it("resumes a block in the mode it was started in, whichever button reopened it", () => {
     setStore();
     localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify({

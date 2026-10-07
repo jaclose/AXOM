@@ -4,7 +4,7 @@
 // flagging, end-of-block review). Results persist as QuizSession records and
 // every answer is recorded on the question for spaced retry.
 // ===========================================================================
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { BookOpenCheck, Check, ChevronLeft, Flag, ListPlus, Play, WandSparkles, Sparkles, Minus, RotateCcw, Timer, X } from "lucide-react";
 import { useStore } from "../../lib/store";
 import { STORAGE_KEYS } from "../../lib/brand";
@@ -42,9 +42,8 @@ import {
   BLOCK_PRESETS, EXAM_SKINS, blockCounts, formatClock, readSuspendedBlock, writeSuspendedBlock,
   type BlockPreset, type ExamSkin, type SuspendedBlock,
 } from "../../lib/examSim";
-import {
-  NO_QUESTION_TIME, closeVisit, openVisit, questionTimesFrom, recordedSeconds, sealQuestion, type QuestionTimes,
-} from "../../lib/exam/questionTime";
+import { examReducer, itemState, startBlock, type ExamAction, type ExamBlock } from "../../lib/exam/engine";
+import { blockFromPlayerSnapshot, certaintiesFromPlayerSnapshot, checkedFromPlayerSnapshot, playerAnswer } from "../../lib/exam/playerBlock";
 
 const ERROR_TYPES = Object.keys(ERROR_TYPE_LABEL) as QuestionErrorType[];
 const EXAM_TYPES = Object.keys(EXAM_TYPE_LABEL) as QuestionExamType[];
@@ -154,19 +153,55 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           { count: Math.max(1, retakeIds.length), status: "all", ordered: true },
         )
       : []);
-  const [index, setIndex] = useState(restored?.index ?? 0);
-  const [answers, setAnswers] = useState<Map<string, QuizAnswer>>(() => new Map((restored?.answers ?? []).map((answer) => [answer.questionId, answer])));
-  const [picked, setPicked] = useState<string | undefined>(restored?.picked);
-  const [revealed, setRevealed] = useState(restored?.revealed ?? false); // tutor mode reveal
+  /**
+   * The block on screen, held by the engine every exam interface uses
+   * (lib/exam/engine): the position, each question's pick, flag, strike-outs
+   * and checked state, and the time spent on each (visits add up, a checked
+   * answer stops counting, time while AXOM is hidden is not counted). A resumed
+   * block is rebuilt from the snapshot this player writes.
+   */
+  const [block, setBlock] = useState<ExamBlock>(() => {
+    const ids = pool.map((item) => item.id);
+    return restored
+      ? blockFromPlayerSnapshot(restored, ids, Date.now())
+      : startBlock({ ids, mode: initialMode, now: Date.now() });
+  });
+  const blockRef = useRef(block);
+  /** Run one engine action and return the block it made, so a handler can save from it at once. */
+  const act = useCallback((action: ExamAction): ExamBlock => {
+    const next = examReducer(blockRef.current, action);
+    if (next !== blockRef.current) {
+      blockRef.current = next;
+      setBlock(next);
+    }
+    return next;
+  }, []);
+  function openBlock(next: ExamBlock) {
+    blockRef.current = next;
+    setBlock(next);
+  }
+  const index = block.index;
+  const picked = itemState(block, pool[index]?.id).answerKey;
+  /** Tutor mode: the question on screen has been checked and its result is showing. */
+  const revealed = mode === "tutor" && itemState(block, pool[index]?.id).revealed;
   // A resumed, already-checked question shows the classification it was saved with.
   const [errorType, setErrorType] = useState<QuestionErrorType | "">(() => (
-    restored?.revealed ? savedRunAttempt(questions, pool[index]?.id, runId)?.errorType ?? "" : ""
+    revealed ? savedRunAttempt(questions, pool[index]?.id, runId)?.errorType ?? "" : ""
   ));
   const [confidence, setConfidence] = useState<1 | 2 | 3 | 4 | 5 | undefined>(() => (
-    restored?.revealed ? savedRunAttempt(questions, pool[index]?.id, runId)?.confidence : undefined
+    revealed ? savedRunAttempt(questions, pool[index]?.id, runId)?.confidence : undefined
   ));
-  /** Optional, and only ever set before the answer is checked. */
-  const [certainty, setCertainty] = useState<AnswerCertainty | undefined>(restored?.certainty);
+  /** How sure the learner said they were, by question. Optional, and only ever set before the answer is checked. */
+  const [certainties, setCertainties] = useState<Record<string, AnswerCertainty>>(() => (
+    restored ? certaintiesFromPlayerSnapshot(restored, pool.map((item) => item.id)) : {}
+  ));
+  const certainty = pool[index] ? certainties[pool[index].id] : undefined;
+  /**
+   * Tutor mode: each answer as it was when it was checked and saved. Its
+   * verdict stands for the rest of the block, even if the learner then marks
+   * the answer key as wrong.
+   */
+  const [checked, setChecked] = useState<Record<string, QuizAnswer>>(() => (restored ? checkedFromPlayerSnapshot(restored) : {}));
   const [startedAt, setStartedAt] = useState<string>(() => restored?.startedAt ?? new Date().toISOString());
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [annotationTool, setAnnotationTool] = useState<AnnotationTool>(null);
@@ -185,23 +220,9 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const [aiText, setAiText] = useState<string | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [editingMapping, setEditingMapping] = useState(false);
-  /**
-   * Time spent on each question, kept in the ledger every exam interface uses
-   * (lib/exam/questionTime): visits add up, a checked answer stops counting, and
-   * time while AXOM is hidden is not counted. A restored block starts from what
-   * its answers already recorded.
-   */
-  const restoredTimes = useMemo(() => (restored
-    ? questionTimesFrom(
-      Object.fromEntries(restored.answers.map((answer) => [answer.questionId, answer.seconds])),
-      restored.mode === "tutor" ? restored.answers.filter((answer) => answer.answerKey).map((answer) => answer.questionId) : [],
-    )
-    : NO_QUESTION_TIME), [restored]);
-  const times = useRef<QuestionTimes>(restoredTimes);
 
-  // --- Q2a player toolkit: strikeout (session-transient per question), reading
-  // scale (persisted device pref), calculator, and scroll-to-top on advance.
-  const [struck, setStruck] = useState<Set<string>>(() => new Set());
+  // --- Q2a player toolkit: reading scale (persisted device pref), calculator,
+  // and scroll-to-top on advance. Strike-outs live in the block, per question.
   const [activePanel, setActivePanel] = useState<TutorPanel | null>(null);
   const [calculatorValue, setCalculatorValue] = useState<QuizCalculatorValue>({ expression: "", result: "" });
   const [readingScale, setReadingScale] = useState(() => readReadingScale());
@@ -210,11 +231,12 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   });
   const stemRef = useRef<HTMLDivElement>(null);
 
-  function toggleStrike(key: string) {
-    setStruck((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
+  function chooseCertainty(level: AnswerCertainty) {
+    const id = pool[index]?.id;
+    if (!id) return;
+    setCertainties((all) => {
+      const { [id]: current, ...rest } = all;
+      return current === level ? rest : { ...rest, [id]: level };
     });
   }
   function adjustReadingScale(direction: 1 | -1) {
@@ -250,9 +272,13 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   useEffect(() => {
     if (stage !== "running" || pool.length === 0) return;
     const filters: QuizFilters = { count, status, categories: category ? [category] : undefined, examTypes: examType ? [examType] : undefined, setIds: setIds.length ? setIds : undefined, ordered: ordered || undefined };
-    const snapshot: ActiveQuizSnapshot = { mode, poolIds: pool.map((item) => item.id), index, answers: [...answers.values()], picked, revealed, startedAt, timed, filters, runId, certainty };
+    // The snapshot keeps the shape it had before the engine: answered or flagged questions, and the pick on screen.
+    const at = Date.now();
+    const answers = pool.map((item) => answerIn(block, item.id, at)).filter((answer) => answer.answerKey || answer.flagged);
+    const snapshot: ActiveQuizSnapshot = { mode, poolIds: pool.map((item) => item.id), index, answers, picked, revealed, startedAt, timed, filters, runId, certainty };
     try { localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify(snapshot)); } catch { /* Local Vault remains authoritative for saved work. */ }
-  }, [answers, category, certainty, count, examType, index, mode, ordered, picked, pool, revealed, runId, setIds, stage, startedAt, status, timed]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [block, category, certainties, checked, count, examType, mode, ordered, pool, runId, setIds, stage, startedAt, status, timed]);
 
   function clearActiveQuiz() {
     try { localStorage.removeItem(STORAGE_KEYS.quizActiveSession); } catch { /* non-fatal */ }
@@ -273,23 +299,14 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // The question on screen has an open visit. Leaving it by any route closes the
-  // visit, and so does AXOM going behind another tab or app.
-  const questionId = question?.id;
+  // A question's time only runs while it can be seen: AXOM going behind another
+  // tab or app stops it, and coming back starts it again.
   useEffect(() => {
-    if (stage !== "running" || !questionId) return;
-    times.current = openVisit(times.current, questionId, Date.now());
-    const onVisibility = () => {
-      times.current = document.hidden
-        ? closeVisit(times.current, Date.now())
-        : openVisit(times.current, questionId, Date.now());
-    };
+    if (stage !== "running") return;
+    const onVisibility = () => act({ type: document.hidden ? "hide" : "show", now: Date.now() });
     document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      document.removeEventListener("visibilitychange", onVisibility);
-      times.current = closeVisit(times.current, Date.now());
-    };
-  }, [stage, questionId]);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [act, stage]);
 
   // Timer display tick (display only — limits derive from timestamps).
   useEffect(() => {
@@ -317,8 +334,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         e.preventDefault();
       } else if (/^[A-E]$/.test(letter) && question!.options.some((o) => o.key === letter)) {
         // Shift+letter eliminates/restores a choice; plain letter picks it.
-        if (e.shiftKey) toggleStrike(letter);
-        else if (!(mode === "tutor" && revealed)) setPicked(letter);
+        if (e.shiftKey) act({ type: "strike", key: letter });
+        else act({ type: "pick", key: letter });
         e.preventDefault();
       } else if (e.key === "Enter") {
         if (mode === "tutor") { if (!revealed && picked) submitTutor(); else if (revealed) nextQuestion(); }
@@ -330,8 +347,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         e.preventDefault();
       } else if (/^[1-3]$/.test(e.key)) {
         // Before the answer is checked, 1–3 says how sure the learner is.
-        const level = CERTAINTY_LEVELS[Number(e.key) - 1];
-        setCertainty((current) => (current === level ? undefined : level));
+        chooseCertainty(CERTAINTY_LEVELS[Number(e.key) - 1]);
         e.preventDefault();
       } else if (e.key === "ArrowLeft" && index > 0) {
         goPrevious();
@@ -373,12 +389,10 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     return () => window.removeEventListener("keydown", onToolEscape, true);
   }, [activePanel, annotationTool, stage]);
 
-  // On advancing to a new question, clear this question's eliminations and reset
-  // the reading surface to the top of the stem, moving focus there so assistive
-  // tech announces the new question. Instant (no smooth scroll) respects
-  // reduced-motion by construction.
+  // On advancing to a new question, reset the reading surface to the top of the
+  // stem, moving focus there so assistive tech announces the new question.
+  // Instant (no smooth scroll) respects reduced-motion by construction.
   useEffect(() => {
-    setStruck(new Set());
     setLocalAnnotations(question?.annotations ?? []);
     localAnnotationsRef.current = question?.annotations ?? [];
     setAnnotationSelection(null);
@@ -454,7 +468,9 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     const runStartedAt = new Date().toISOString();
     setPool(built);
     setStartedAt(runStartedAt);
-    times.current = NO_QUESTION_TIME;
+    openBlock(startBlock({ ids: built.map((item) => item.id), mode, now: Date.now(), startedAt: runStartedAt }));
+    setCertainties({});
+    setChecked({});
     if (runBlockId) {
       const savedBlock = (s.quizBlocks ?? []).find((block) => block.id === runBlockId);
       if (savedBlock) s.saveQuizBlock({ ...savedBlock, lastRunAt: runStartedAt });
@@ -462,22 +478,10 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     setStage("running");
   }
 
-  /** The record for the question on screen, with its time read from the shared ledger. */
-  function currentAnswer(answerKey: string | undefined, flagged: boolean): QuizAnswer | undefined {
-    if (!question) return undefined;
-    const correctKey = trustedCorrectKey(question);
-    const correct = correctKey ? (answerKey ? answerKey === correctKey : false) : undefined;
-    return {
-      questionId: question.id, answerKey, correct, flagged, seconds: recordedSeconds(times.current, question.id, Date.now()),
-      ...(certainty ? { certainty } : {}),
-    };
-  }
-
-  function recordCurrent(answerKey: string | undefined, flagged: boolean): QuizAnswer | undefined {
-    const record = currentAnswer(answerKey, flagged);
-    if (!record) return undefined;
-    setAnswers((prev) => new Map(prev).set(record.questionId, record));
-    return record;
+  /** One question's record as this player counts it (lib/exam/playerBlock), read from a block. */
+  function answerIn(source: ExamBlock, id: string, at: number): QuizAnswer {
+    const record = pool.find((item) => item.id === id);
+    return playerAnswer(source, id, at, record ? trustedCorrectKey(record) : undefined, { certainty: certainties[id], checked: checked[id] });
   }
 
   /**
@@ -503,14 +507,13 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   }
 
   function submitTutor() {
-    if (!picked || !question) return;
-    const record = recordCurrent(picked, answers.get(question.id)?.flagged ?? false);
+    if (!picked || !question || revealed) return;
     // Checking the answer seals the question: reading the explanation is not time spent answering.
-    times.current = sealQuestion(times.current, question.id, Date.now());
-    setRevealed(true);
+    const record = answerIn(act({ type: "reveal", now: Date.now() }), question.id, Date.now());
+    setChecked((all) => ({ ...all, [question.id]: record }));
     // Saved when it is checked, not when the learner moves on: leaving the
     // block from the explanation used to drop the answer altogether.
-    if (record) s.recordQuestionAttempt(question.id, attemptFor(record, { errorType, confidence }));
+    s.recordQuestionAttempt(question.id, attemptFor(record, { errorType, confidence }));
   }
 
   /** The reason for a miss and the confidence afterwards are saved as they are chosen. */
@@ -521,62 +524,44 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     };
     setErrorType(review.errorType);
     setConfidence(review.confidence);
-    const record = question ? answers.get(question.id) : undefined;
+    const record = question ? answerIn(blockRef.current, question.id, Date.now()) : undefined;
     if (question && record?.answerKey) s.recordQuestionAttempt(question.id, attemptFor(record, review));
   }
 
-  function nextQuestion() {
-    setPicked(undefined);
-    setRevealed(false);
-    setErrorType("");
-    setConfidence(undefined);
-    setCertainty(undefined);
+  /**
+   * Put another question on screen. The engine keeps what was done on each
+   * (its pick, strike-outs and checked state), so coming back to a question
+   * shows it as it was left. The time on the question being left is banked.
+   */
+  function showQuestion(target: number) {
+    const moved = act({ type: "go", index: target, now: Date.now() });
+    const id = moved.ids[moved.index];
+    // Show what this run saved for a checked question, so changing one field cannot blank the other.
+    const savedAttempt = mode === "tutor" && itemState(moved, id).revealed ? savedRunAttempt(questions, id, runId) : undefined;
+    setErrorType(savedAttempt?.errorType ?? "");
+    setConfidence(savedAttempt?.confidence);
     setAiText(null);
     setEditingMapping(false);
-    if (index + 1 >= pool.length) finishBlock();
-    else setIndex(index + 1);
   }
 
+  function nextQuestion() {
+    if (index + 1 >= pool.length) finishBlock();
+    else showQuestion(index + 1);
+  }
+
+  /** In an exam the pick is the answer: moving on keeps it, and there is nothing else to record. */
   function submitExamAndNext() {
-    const record = recordCurrent(picked, answers.get(question!.id)?.flagged ?? false);
-    setPicked(undefined);
-    setCertainty(undefined);
-    if (index + 1 >= pool.length) finishBlock(picked, record);
-    else setIndex(index + 1);
+    if (!picked) return;
+    if (index + 1 >= pool.length) finishBlock();
+    else showQuestion(index + 1);
   }
 
   function goPrevious() {
-    if (index <= 0) return;
-    // Stepping back before answering still spent time on this question: the
-    // ledger banks the visit when the question leaves the screen.
-    const previous = pool[index - 1];
-    const saved = answers.get(previous.id);
-    setIndex((value) => Math.max(0, value - 1));
-    setPicked(saved?.answerKey);
-    setRevealed(mode === "tutor" && Boolean(saved?.answerKey));
-    // Show what was saved for it, so changing one field cannot blank the other.
-    const savedAttempt = mode === "tutor" ? savedRunAttempt(questions, previous.id, runId) : undefined;
-    setErrorType(savedAttempt?.errorType ?? "");
-    setConfidence(savedAttempt?.confidence);
-    setCertainty(saved?.certainty);
-    setAiText(null);
-    setEditingMapping(false);
+    if (index > 0) showQuestion(index - 1);
   }
 
-  function finishBlock(lastPick?: string, justRecorded?: QuizAnswer) {
-    // Ensure the in-flight answer is captured before scoring.
-    const all = new Map(answers);
-    const key = lastPick ?? picked;
-    if (justRecorded) {
-      // Recorded a moment ago; state has not caught up with it yet.
-      all.set(justRecorded.questionId, justRecorded);
-    } else if (question && key && (mode === "exam" || !all.has(question.id))) {
-      // In an exam the pick on screen is the answer, even on a question answered
-      // on an earlier visit (a changed last answer used to be dropped here).
-      const record = currentAnswer(key, all.get(question.id)?.flagged ?? false);
-      if (record) all.set(question.id, record);
-    }
-    const result = runSession(all);
+  function finishBlock() {
+    const result = runSession(blockRef.current);
     // Exam mode records attempts at the END so nothing leaks mid-block. They go
     // in with the session as one save. Tutor answers were saved as each was
     // checked, so a tutor block only adds its result here.
@@ -596,8 +581,9 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   }
 
   /** This run's session record: every pool question, answered or not. */
-  function runSession(all: ReadonlyMap<string, QuizAnswer>, endedEarly = false): QuizSession {
-    const answerList = pool.map((q) => all.get(q.id) ?? ({ questionId: q.id, flagged: false } as QuizAnswer));
+  function runSession(source: ExamBlock, endedEarly = false): QuizSession {
+    const at = Date.now();
+    const answerList = pool.map((q) => answerIn(source, q.id, at));
     return {
       id: runId,
       mode,
@@ -619,16 +605,14 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
    */
   function leaveBlock() {
     if (!confirm("Leave this block? Answered questions are saved. Unanswered ones are not scored.")) return;
-    const answered = pool.flatMap((q) => {
-      const a = answers.get(q.id);
-      return a?.answerKey ? [a] : [];
-    });
+    const left = runSession(blockRef.current, true);
+    const answered = left.answers.filter((a) => a.answerKey);
     if (answered.length) {
       s.commitQuizRun({
         attempts: mode === "exam"
           ? answered.map((a) => ({ questionId: a.questionId, attempt: attemptFor(a) }))
           : [],
-        session: runSession(answers, true),
+        session: left,
       });
     }
     clearActiveQuiz();
@@ -700,16 +684,9 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
 
   function toggleFlag() {
     if (!question) return;
-    const existing = answers.get(question.id);
-    setAnswers((prev) => new Map(prev).set(question.id, {
-      questionId: question.id,
-      answerKey: existing?.answerKey,
-      correct: existing?.correct,
-      flagged: !(existing?.flagged ?? false),
-      seconds: existing?.seconds,
-      ...(existing?.certainty ? { certainty: existing.certainty } : {}),
-    }));
-    s.updateQuestion(question.id, { marked: !(existing?.flagged ?? false) });
+    const flagged = itemState(act({ type: "mark" }), question.id).marked;
+    // A flag belongs to the question, so it is there in the bank after the block.
+    s.updateQuestion(question.id, { marked: flagged });
   }
 
   function makeRepairCard(q: QuestionRecord) {
@@ -981,13 +958,15 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             {retakePool.length > 0 && (
               <GhostButton onClick={() => {
                 setPool(retakePool);
-                setAnswers(new Map());
-                setIndex(0);
+                openBlock(startBlock({ ids: retakePool.map((item) => item.id), mode, now: Date.now() }));
+                setCertainties({});
+                setChecked({});
+                setErrorType("");
+                setConfidence(undefined);
                 setSession(null);
                 // A retake is its own run: its answers are new attempts.
                 setRunId(crypto.randomUUID());
                 setStartedAt(new Date().toISOString());
-                times.current = NO_QUESTION_TIME;
                 setStage("running");
               }}>Retake {retakePool.length} missed</GhostButton>
             )}
@@ -1062,7 +1041,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   }
 
   if (!question) return null;
-  const answer = answers.get(question.id);
+  const item = itemState(block, question.id);
   const correctKey = trustedCorrectKey(question);
   const isCorrect = revealed && correctKey && picked === correctKey;
   const annotations = localAnnotations;
@@ -1144,8 +1123,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           ? (
             <>
               <GhostButton disabled={index === 0} onClick={goPrevious}><ChevronLeft size={ICON_SIZE.body} /> Previous</GhostButton>
-              <GhostButton onClick={toggleFlag} aria-label="Flag question" aria-pressed={answer?.flagged ?? false}>
-                <Flag size={ICON_SIZE.body} /> {answer?.flagged ? "Flagged" : "Mark review"}
+              <GhostButton onClick={toggleFlag} aria-label="Flag question" aria-pressed={item.marked}>
+                <Flag size={ICON_SIZE.body} /> {item.marked ? "Flagged" : "Mark review"}
               </GhostButton>
               {!revealed
                 ? <GButton variant="primary" disabled={!picked} onClick={submitTutor}>Check answer</GButton>
@@ -1155,7 +1134,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           : (
             <>
               <GhostButton disabled={index === 0} onClick={goPrevious}><ChevronLeft size={ICON_SIZE.body} /> Previous</GhostButton>
-              <GhostButton onClick={() => finishBlock()}>End block</GhostButton>
+              <GhostButton onClick={finishBlock}>End block</GhostButton>
               <GButton variant="primary" disabled={!picked} onClick={submitExamAndNext}>
                 {index + 1 >= pool.length ? "Submit & finish" : "Submit & next"}
               </GButton>
@@ -1177,8 +1156,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         {question.examType && <Tag tone="neutral">{EXAM_TYPE_LABEL[question.examType]}</Tag>}
         {question.sourcePage && <Tag tone="neutral">p.{question.sourcePage}</Tag>}
         {question.bank && <span className="sub truncate" style={{ maxWidth: 200 }}>{question.bank}</span>}
-        {struck.size > 0 && (
-          <GhostButton className="quiz-tool" onClick={() => setStruck(new Set())} aria-label="Reset eliminations">
+        {item.struck.length > 0 && !revealed && (
+          <GhostButton className="quiz-tool" onClick={() => item.struck.forEach((key) => act({ type: "strike", key }))} aria-label="Reset eliminations">
             <RotateCcw size={ICON_SIZE.microInline} /> Reset eliminations
           </GhostButton>
         )}
@@ -1203,7 +1182,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             const isPicked = picked === opt.key;
             const showCorrect = revealed && correctKey === opt.key;
             const showWrong = revealed && isPicked && Boolean(correctKey) && correctKey !== opt.key;
-            const isStruck = struck.has(opt.key);
+            const isStruck = item.struck.includes(opt.key);
             return (
               <div key={opt.key}
                 className={`option-row ${isPicked ? "picked" : ""} ${showCorrect ? "correct" : ""} ${showWrong ? "wrong" : ""} ${isStruck ? "struck" : ""}`}>
@@ -1211,7 +1190,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
                   aria-label={`${opt.key}. ${opt.text}`}
                   aria-pressed={isPicked}
                   disabled={revealed}
-                  onClick={() => setPicked(opt.key)}>
+                  onClick={() => act({ type: "pick", key: opt.key })}>
                   <span className="mono option-key">{opt.key}</span>
                   <span className="option-text">{opt.text}</span>
                 </button>
@@ -1223,7 +1202,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
                       aria-label={`${isStruck ? "Restore" : "Eliminate"} option ${opt.key}`}
                       aria-pressed={isStruck}
                       disabled={revealed}
-                      onClick={() => toggleStrike(opt.key)}>
+                      onClick={() => act({ type: "strike", key: opt.key })}>
                       <Minus size={ICON_SIZE.body} />
                     </button>
                   )}
@@ -1239,7 +1218,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
               {CERTAINTY_LEVELS.map((level) => (
                 <button type="button" key={level} className={`filter-pill ${certainty === level ? "on" : ""}`}
                   aria-pressed={certainty === level}
-                  onClick={() => setCertainty(certainty === level ? undefined : level)}>
+                  onClick={() => chooseCertainty(level)}>
                   {ANSWER_CERTAINTY_LABEL[level]}
                 </button>
               ))}
