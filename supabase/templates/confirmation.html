@@ -1,5 +1,13 @@
-<h2>Confirm your AXOM account</h2>
-<p>Enter this code in AXOM to confirm your email (it works in the browser and the desktop app):</p>
-<p style="font-size:28px;font-weight:700;letter-spacing:6px;">{{ .Token }}</p>
-<p>Or, in a browser, <a href="{{ .ConfirmationURL }}">confirm with this link</a>.</p>
-<p style="color:#666;">If you didn’t create an AXOM account, you can ignore this email.</p>
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light"><title>Confirm your AXOM account</title></head>
+<body style="margin:0;padding:0;background:#eeeae3;color:#28251f;font-family:Arial,Helvetica,sans-serif">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0">Make this workspace yours.</div>
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#eeeae3"><tr><td align="center" style="padding:32px 16px">
+<table role="presentation" width="560" cellspacing="0" cellpadding="0" style="width:100%;max-width:560px;background:#faf8f3;border:1px solid #d6d0c5">
+<tr><td style="background:#141416;padding:28px 30px;border-bottom:2px solid #c8a96a;color:#e6e2d6;font-family:Georgia,serif;font-size:25px;letter-spacing:5px">AXOM</td></tr>
+<tr><td style="padding:32px 30px"><p style="margin:0 0 12px;color:#726042;font-size:11px;font-weight:bold;letter-spacing:1.5px;text-transform:uppercase">Account verification</p>
+<h1 style="margin:0 0 22px;font-family:Georgia,serif;font-size:29px;line-height:1.2;font-weight:normal;color:#24221e">Make this workspace yours.</h1><p style="margin:0 0 18px;font-size:16px;line-height:1.65;color:#35322c;white-space:pre-line">Enter this code in AXOM to confirm your email. It works in the browser and the desktop app.</p>
+<p style="margin:24px 0;padding:20px 12px;border:1px solid #d6d0c5;background:#f0ece4;text-align:center;font-family:Consolas,monospace;font-size:28px;font-weight:bold;letter-spacing:4px;color:#24221e">{{ .Token }}</p><p style="font-size:13px;line-height:1.5;color:#5d574d">Keep this code private. AXOM will never ask you to share it.</p>
+<p style="margin:26px 0"><a href="{{ .ConfirmationURL }}" style="display:inline-block;background:#24221e;color:#f7f1e6;text-decoration:none;padding:15px 22px;font-size:14px;font-weight:bold">Confirm in your browser</a></p>
+<p style="margin:28px 0 0;padding-top:20px;border-top:1px solid #ded8cd;font-size:13px;line-height:1.6;color:#5d574d">If you did not create an AXOM account, you can ignore this email. No action is needed.</p></td></tr></table>
+</td></tr></table></body></html>

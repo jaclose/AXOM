@@ -1,0 +1,10 @@
+Make this workspace yours.
+
+Enter this code in AXOM to confirm your email. It works in the browser and the desktop app.
+
+Code: {{ .Token }}
+Keep this code private.
+
+Confirm in your browser: {{ .ConfirmationURL }}
+
+If you did not create an AXOM account, you can ignore this email. No action is needed.
