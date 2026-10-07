@@ -39,7 +39,7 @@ template-loader work are integrated here; their canonical contract is
 ## Settings and analysis
 
 Settings checks start at `web/src/components/shell/SettingsModal.test.tsx`.
-Analysis uses the integrated Course Engine. This recovery checkout predates the
-canonical line's Decode port at c8f6ceb; locate that line's `docs/features/decode.md`
-before planning more analysis work. The older a33a01e prototype remains preserved.
+Analysis uses the integrated Course Engine, and source analysis follows the
+[Decode contract](decode.md). The older a33a01e prototype remains preserved and has been
+ported by intent; nothing more is taken from it.
 Check the registry and do not create parallel question-attempt or assignment stores.
