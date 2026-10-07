@@ -12,7 +12,9 @@ optional Supabase accounts protect portable workspace revisions.
 ## Active branch and work
 
 Worktree `/Users/jd/Developer/AXOM-course-engine-v1`, branch `feat/course-engine-v1`,
-base `42eeacb`. Committed locally in place (JD approved local commits, no push, no merge).
+base `42eeacb`. Committed locally in place (JD approved local commits; no agent pushed or
+merged). `origin/feat/course-engine-v1` holds the first six commits, up to `8662cbd`: an
+editor Sync pushed them on 2026-10-07. Everything after that is local only.
 The milestone is course engine + question bank + learning intelligence. Schema stays 34:
 every addition is an optional field or derived at read time.
 
