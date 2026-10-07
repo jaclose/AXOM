@@ -199,6 +199,13 @@ including Git-level blocking behavior. No coordination guard file or hook was ed
 
 ## Validation and stopping point
 
+Maintenance merge commit: `78e2bf3`, parents ac67549 and f5e2ac2. Post-commit recheck
+confirmed all protected files and non-target refs unchanged. The canonical owner then
+advanced again to `f1fd462` (accounts doctor, build configuration notice). That new port
+is another reason to compare remaining intent from the remote Claude branch before
+any future reconciliation. The matrix above is a dated inventory, not a lock on live
+branch tips; this pass did not write to the canonical checkout or validate its new code.
+
 Executed on Node 22.23.1:
 
 - `npm run repo:check`: pass, 32 active documents, zero routing/registry/graph/conflict
@@ -217,9 +224,9 @@ Executed on Node 22.23.1:
 - Read-only merge preview against c8f6ceb: clean. Canonical checkout was clean when
   rechecked but remains protected because another session is advancing it.
 
-Bootstrap AGENTS + AI_STATE: about **3,744 → 2,737 estimated tokens** relative to
+Bootstrap AGENTS + AI_STATE: about **3,744 → 2,741 estimated tokens** relative to
 the integration base (27% smaller). The standalone maintenance snapshot was 2,351;
-the extra 386 here carry the integrated contracts and recovery/concurrency handoff.
+the extra handoff context carries the integrated contracts and recovery/concurrency state.
 These are repository character estimates, not measured total model context.
 
 No application build/typecheck/lint/browser rerun: this recovery checkpoint has no

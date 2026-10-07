@@ -8,8 +8,8 @@ authority: current-state
 Snapshot: 2026-10-07. Canonical development line:
 `integration/axom-convergence-2026-10-07`, worktree `AXOM-integration`.
 This recovery checkout: `codex/integration-recovery-2026-10-07`, based on `ac67549` plus
-maintenance `f5e2ac2`. The active canonical line advanced independently to `c8f6ceb`
-during this pass; this checkout does not contain those nine newer commits. No write to
+maintenance `f5e2ac2`, merged at `78e2bf3`. The active canonical line advanced independently
+(last observed `f1fd462`, ten newer commits); this checkout does not contain them. No write to
 that owner's checkout was attempted. Recheck branch, HEAD and status. Local integration is not production;
 `main` remains `5fbe8a4`. No push, deployment or branch/worktree removal is authorized.
 
