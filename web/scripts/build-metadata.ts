@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve, relative } from "node:path";
-import type { Plugin } from "vite";
+import { loadEnv, type Plugin } from "vite";
 import { formatReleaseNotes, parseReleaseNotes, requireReleaseNotes } from "../../scripts/release-notes.mjs";
 
 export function buildMetadata(root: string, version: string) {
@@ -18,7 +18,12 @@ export function buildMetadata(root: string, version: string) {
   const release = process.env.AXOM_REQUIRE_RELEASE_NOTES === "1"
     ? requireReleaseNotes(changelog, version)
     : parseReleaseNotes(changelog).find((entry: { version: string }) => entry.version === version);
-  return { version, buildId, builtAt, commit, notes: release ? formatReleaseNotes(release) : "" };
+  // Whether this build received the public Supabase config (never the values).
+  // A deployment built without it runs local-only; `npm run accounts:doctor`
+  // reads this from the live version.json to catch a missing Vercel variable.
+  const env = loadEnv("production", root, "VITE_SUPABASE_");
+  const accountsConfigured = Boolean(env.VITE_SUPABASE_URL && (env.VITE_SUPABASE_PUBLISHABLE_KEY || env.VITE_SUPABASE_ANON_KEY));
+  return { version, buildId, builtAt, commit, notes: release ? formatReleaseNotes(release) : "", accountsConfigured };
 }
 
 export function releaseMetadataPlugin(metadata: ReturnType<typeof buildMetadata>): Plugin {

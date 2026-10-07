@@ -39,6 +39,7 @@
     "residency:import": "node --experimental-strip-types web/scripts/residency-pipeline.mjs import",
     "residency:validate": "node --experimental-strip-types web/scripts/residency-pipeline.mjs validate",
     "test:accounts:live": "npm --prefix web run test:accounts:live",
+    "accounts:doctor": "node scripts/accounts-doctor.mjs",
     "soundscapes:import": "node scripts/import-soundscapes.mjs",
     "directions:check": "node scripts/directions-check.mjs",
     "repo:check": "node scripts/repository-hygiene.mjs",

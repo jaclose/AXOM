@@ -232,15 +232,20 @@ otp_length = 8
 # Number of seconds before the email OTP expires (defaults to 1 hour).
 otp_expiry = 3600
 
-# Use a production-ready SMTP server
+# Production auth email goes through Resend (docs/ACCOUNTS-SETUP.md step 2).
+# It is configured in the dashboard, so this block stays commented and local
+# `supabase start` keeps its own mail catcher. Uncomment it, with the verified
+# sender, before any `config push` once Resend SMTP is live, so the push keeps
+# SMTP on; also raise [auth.rate_limit] email_sent (30+). RESEND_API_KEY is read
+# from your shell and never committed.
 # [auth.email.smtp]
 # enabled = true
-# host = "smtp.sendgrid.net"
-# port = 587
-# user = "apikey"
-# pass = "env(SENDGRID_API_KEY)"
-# admin_email = "admin@email.com"
-# sender_name = "Admin"
+# host = "smtp.resend.com"
+# port = 465
+# user = "resend"
+# pass = "env(RESEND_API_KEY)"
+# admin_email = "auth@your-verified-domain"
+# sender_name = "AXOM"
 
 # Uncomment to customize email template
 # [auth.email.template.invite]

@@ -48,11 +48,19 @@ move between devices, and delete every cloud copy.
    `npx supabase link --project-ref <ref>` then `npx supabase db push`. Never
    apply `db/migrations/001–002` (legacy PIN backend without row-level security).
 2. **Email delivery (required before real users)** — Supabase's built-in
-   mailer sends only a few emails per hour and only to project team members.
-   Add custom SMTP under Authentication → Emails → SMTP. With Resend (already
-   in your bookmarks): host `smtp.resend.com`, port `465`, user `resend`,
-   password = a Resend API key, sender e.g. `AXOM <auth@your-domain>` on a
-   domain verified in Resend. Then raise Authentication → Rate limits → emails.
+   mailer sends only a few emails per hour and only to project team members,
+   so sign-up and sign-in codes never reach anyone else. Use Resend:
+   - Verify your sending domain in Resend → Domains (publish its DNS records).
+   - Connect it: Resend → Integrations → **Supabase** sets up SMTP for the
+     project in one step. To do it by hand, go to Supabase → Authentication →
+     Emails → SMTP: host `smtp.resend.com`, port `465`, user `resend`,
+     password = a Resend API key (sending access is enough), sender e.g.
+     `AXOM <auth@your-domain>` on the verified domain.
+   - Raise Authentication → Rate limits → emails sent to 30+ per hour. The
+     default of 2 runs out after a couple of sign-ups ("email rate limit
+     exceeded").
+   - Before any `config push`, uncomment the `[auth.email.smtp]` block in
+     `supabase/config.toml` with the same sender, so the push keeps SMTP on.
 3. **Templates** — every auth email carries the code *and* the link, because a
    link opened from the desktop app lands in a browser. Paste into
    Authentication → Emails: **Confirm signup** ← `supabase/templates/confirmation.html`,
@@ -73,7 +81,22 @@ move between devices, and delete every cloud copy.
    Environment Variables, add `VITE_SUPABASE_URL` and
    `VITE_SUPABASE_PUBLISHABLE_KEY` for Production and Preview, then redeploy.
    Never put a secret/service-role key in any `VITE_` variable.
-6. **Verify live** — `cd web && AXOM_LIVE_EMAIL=<fresh address> SUPABASE_SECRET_KEY=<secret key> npm run test:accounts:live`.
+6. **Check the setup** — `npm run accounts:doctor -- --site https://<production origin>`
+   is read-only and never prints a key. It checks:
+   - the env values and that the key is publishable, not secret;
+   - Auth health and email sign-in settings;
+   - that migrations and the `ai-proxy` function exist;
+   - the deployed `version.json` reports `accountsConfigured`, which means the
+     Vercel variables were present at build time.
+
+   With `SUPABASE_ACCESS_TOKEN=sbp_…` (Account → Access Tokens) it also checks:
+   - SMTP and the email rate limit;
+   - the Site URL and redirect URLs;
+   - the `ANTHROPIC_API_KEY` secret and the function status.
+
+   With a full-access `RESEND_API_KEY` it confirms the sender domain is
+   verified.
+7. **Verify live** — `cd web && AXOM_LIVE_EMAIL=<fresh address> SUPABASE_SECRET_KEY=<secret key> npm run test:accounts:live`.
    The secret key stays in that one shell command; the test uses it only to
    mint the same one-time codes the emails carry and to delete its throwaway
    user afterwards. It covers: create account → confirm by code → password
