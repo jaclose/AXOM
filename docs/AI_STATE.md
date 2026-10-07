@@ -1,87 +1,69 @@
 # AXOM current AI state
 
-Snapshot: 2026-10-05. This describes local progressive-context enforcement, not production.
-Recheck branch, HEAD and status before applying it in another checkout.
+Snapshot: 2026-10-06. Local worktree handoff, not production evidence.
+Recheck branch, HEAD and status before applying it elsewhere.
 
 ## Current stable state
 
 Current app: React/TypeScript web in `web/`, canonical Tauri shell at root `src-tauri/`.
 Workspace schema is 34 (`web/src/lib/seed.ts`). Local Vault and JSON backup are primary;
-optional Supabase accounts protect portable workspace revisions. Name/PIN Vercel
-account/data endpoints are retired. No runtime or schema change belongs to this migration.
+optional Supabase accounts protect portable workspace revisions.
 
 ## Active branch and work
 
-The context architecture (`1540ad2`) and bootstrap enforcement (`4b41201`) are committed
-on `feat/media-pipeline-v1` in the normal `AXOM` checkout. Final policy clarifications
-make each retrieval conditional on question/need/source/scope and stop at sufficient evidence. Locate
-the latest protocol checkpoint with `git log -1 -- AGENTS.md`. No merge, push or
-deployment belongs to this work. The earlier isolated `AXOM-context-protocol` worktree
-is a migration preparation tree, not the current handoff; do not reset or remove it.
-
-Root `package.json` and `package-lock.json` retain unrelated uncommitted dependency
-edits owned by the media task. Preserve them and the 22 ignored private/reference files.
-Other worktrees contain independent work; their status is not inferred here. Consult
-the coordination board before shared edits.
+Worktree `/Users/jd/Developer/AXOM-course-engine-v1`, branch `feat/course-engine-v1`,
+base `42eeacb`. Everything below is uncommitted. Nothing is merged, pushed or deployed.
+The milestone is course engine + question bank + learning intelligence. Schema stays 34:
+every addition is an optional field or derived at read time.
 
 ## Recently completed
 
-- Canonical retrieval/session rules live in AGENTS; small Claude/Copilot bridges share
-  them. The final clarification adds direct level jumps, an explicit stop rule,
-  correctness priority and criteria for admitting permanent instructions. No new tooling.
-- `repo:check` reports per-file words/bytes/tokens, aggregate repository bootstrap and
-  bridge overhead, budget status, routing failures and archive integrity. Local/CI gates
-  reject growth and invalid imports without runtime telemetry or new dependencies.
-- Product reasoning and original guidance remain available through the
-  [archive manifest](archive/2026-10-05-context-migration/manifest.json) and existing routes.
+- Save path: a tutor answer is saved at "Check answer" (it was only saved by "Next
+  question"); leaving a block keeps answered work; a block's attempts and session are
+  one store change (`commitQuizRun`); attempts carry `quizSessionId`, `mode`, `certainty`
+  and a second write for the same run amends instead of appending.
+- Local vault: a marked newer localStorage copy is read before a stale IndexedDB copy;
+  saves no longer hang behind a blocked upgrade; a save that reaches no store is reported
+  (`VaultSaveWatcher`, Settings line).
+- `web/src/lib/course-engine/`: source mapping from file and folder names, course template
+  parsing and planning, one scope for questions and tracker rows.
+- `web/src/lib/learning-intelligence/`: attempt events, question features, structural and
+  empirical difficulty, pattern findings, source style, review reasons. All derived.
+- UI: Analysis panel on Question Bank > Insights; import proposes module and week; sets
+  grouped by module and week; review reasons on block results; optional "How sure are you?";
+  Course Tracker > "Load course template" lays a module out by week and is safe to repeat;
+  the Weeks card shows each week's progress, question progress read from attempts, and
+  absences against a term allowance (`setTermAbsenceAllowance`).
+- Contract: [course engine and learning intelligence](features/course-engine.md).
+- `web/scripts/source-inventory.ts` (`npm run sources:inventory`); its manifest stays under
+  the ignored `artifacts/`.
 
-## Important current decisions
+## Open
 
-The context system is ready for observation across ordinary tasks, not more speculative
-infrastructure. Archiving does not reject ideas, approve proposals or authorize deletion.
-
-Root `src-tauri/` and `supabase/migrations/` are active; `web/src-tauri/`, Swift prototype
-and `db/` are legacy. Keep Noctyrium storage identifiers. Schema changes require coordination.
-Sign-in must preserve local work; cloud snapshots do not imply cloud storage of media bytes.
-
-## Relevant areas
-
-- `AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, `docs/AI_STATE.md`, `docs/INDEX.md`
-- `scripts/repository-hygiene*`, local full gate and web quality CI hook
-- [Protocol decision](decisions/001-progressive-context.md) and
-  [measurement limits](operations/repository-audit.md#bootstrap-measurement-and-enforcement-limits)
+- `reviewPriority` in `learning-intelligence/review.ts` holds a `TODO(human)` placeholder:
+  JD is writing the ranking.
+- Not started: PDF image extraction at import, bulk import review, "More like this",
+  settings and data page redesign, graph notes (the graph files are not on this branch).
+- Lecture weeks in the current templates are worked out, not stated: adding `Week N:` lines
+  to a template states them.
+- The main checkout sits on `feat/exam-fidelity` with conflict markers committed in 93badf8;
+  `stash@{0}` still holds the media-pipeline state including the staged graph checkpoint.
 
 ## Validation state
 
-Final policy clarification, Node 22.23.1: `npm run repo:check`, `npm run test:repo` (32)
-and `git diff --check` pass. The preceding tooling change also passed
-`npm run test:release` (51, including those 32).
-Regressions cover aggregate growth, bridge overhead, missing
-bootstrap files, Unicode/UTF-8 measurements and exclusion of on-demand documents.
-Run `repo:check` for live sizes; the 4,000-token budget includes each bridge separately.
-
-The original migration's full web gate passed (2,178 unit tests, 33 browser tests,
-one optional live-account test skipped). Runtime code is unchanged by this follow-up;
-web/native/live-account validation was not repeated. Detailed preservation evidence,
-prior validation and existing build/contrast observations remain in the
-[audit](operations/repository-audit.md#validation-evidence).
-
-## Known blockers
-
-None for this follow-up. Large reference documents, root media and duplicate originals
-remain preserved for ownership/licence review before any removal or publication decision.
-Other feature branches and live deployment state are not certified by these local checks.
-The checker cannot prevent unnecessary agent reads or count client/global instructions,
-managed memory, skills, conversation and tool output. Its numbers cover repository files.
+Node 22.23.1: typecheck and lint clean, 2,262 unit tests and the production build pass,
+`repo:check` passes. Full browser suite after the week view: 36 passed, 1 skipped, 1 failed.
+The failure is `contrast-sweep` (light): it flags Settings tab pills at about 1.1:1, a
+different pill each run, and passes when repeated alone. That reads as a pill measured
+mid-transition; no code here touches those pills, but the cause is not confirmed. A first
+run under machine load 38 timed out in unrelated specs; each passed when rerun. New specs:
+`question-block-save`, `course-engine-slice`, `course-template-load` under `web/e2e/`.
 
 ## Next actions
 
-1. Start the next independent task in a fresh session with the small bootstrap; retrieve
-   relevant context, validate, update this handoff and commit only within task authority.
-2. Leave the context system stable unless the next 10–20 tasks show excessive bootstrap
-   size, unjustified broad retrieval or failure to resume from state. Observe actual work.
-3. Preserve unrelated dependency work. Deferred import-cycle/asset-ownership tasks remain
-   in the audit and require their own scope.
+1. JD: write `reviewPriority`, then review and commit this worktree in place on its branch.
+2. PDF image extraction at import: sampled IMCQ and ESoft files carry images on most pages.
+3. Bulk import: run `inferSourceMapping` over a dropped folder and confirm mappings in one pass.
 
 ## Context routes
 

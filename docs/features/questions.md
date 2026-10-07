@@ -13,6 +13,10 @@ build a tutor/exam block, answer and retain results/source evidence.
 
 Invariants: uncertainty remains visible; do not invent answer keys or silently bypass
 review; source provenance and attachment references must survive save/reload/export.
+A tutor answer is saved when it is checked, and leaving a block keeps what was answered;
+a block's attempts and its session are one store change (`commitQuizRun`). Filing by
+module and week, findings and review reasons are in
+[course engine and learning intelligence](course-engine.md).
 Optional AI uses the [provider boundary](../architecture/backend.md), with validated,
 reviewed outputs. A specification is not proof all source formats are implemented.
 
