@@ -92,3 +92,31 @@ web/src/data/scenes.personal.json
 /Alpha-Beta-Gamma-Theta Waves - 003 - Super Focus- Flow State Music - Alpha Binaural Beats, Study Music for Focus and Concentration.mp3
 # JD's personal course schedules stay on his machine (the repository is public).
 /*SOM*.pdf
+
+# Local credentials and provider CLI caches (templates remain public).
+.env.*
+!.env.example
+supabase/.temp/
+supabase/.branches/
+
+# New generated evidence and recovery output stay local; existing tracked evidence remains.
+artifacts/
+.playwright-cli/
+.coordination/
+coverage/
+__pycache__/
+*.pyc
+*.log
+*.tsbuildinfo
+
+# Loose private/reference imports do not belong at the repository root.
+# Tracked licensed runtime assets are unaffected; place new reviewed assets in their subsystem.
+/*.pdf
+/*.wav
+/*.mp3
+/*.m4a
+/*.mp4
+/*.mov
+/*.png
+/*.jpg
+/*.jpeg

@@ -26,18 +26,20 @@
     "verify:app-updates": "node scripts/verify-app-updates.mjs",
     "tauri": "node ../scripts/tauri.mjs",
     "quality": "npm run typecheck && npm run lint && npm run test && npm run build",
-    "verify:all": "npm run quality && npm run verify:app-updates && npm run verify:daily-games-offline && npm run test:e2e",
+    "verify:all": "node ../scripts/repository-hygiene.mjs && npm run quality && npm run verify:app-updates && npm run verify:daily-games-offline && npm run test:e2e",
     "snapshots": "node scripts/visual-snapshots.mjs",
     "test:e2e:chrome": "AXOM_E2E_CHANNEL=chrome playwright test",
     "test:accounts:live": "AXOM_LIVE_ACCOUNTS=1 AXOM_E2E_CHANNEL=chrome playwright test e2e/live-accounts.spec.ts",
     "release:setup-updater": "node ../scripts/setup-updater.mjs",
     "cinematic:import": "node ../scripts/import-cinematic.mjs",
-    "soundscapes:import": "node ../scripts/import-soundscapes.mjs"
+    "soundscapes:import": "node ../scripts/import-soundscapes.mjs",
+    "media:audit": "node --import tsx ./scripts/media-audit.ts"
   },
   "engines": {
     "node": ">=22.12.0"
   },
   "dependencies": {
+    "@noble/hashes": "^2.4.0",
     "@supabase/supabase-js": "^2.112.2",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-notification": "^2.5.0",

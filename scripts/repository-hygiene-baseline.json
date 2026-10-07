@@ -1,0 +1,371 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "9f29327b51ac72f24a2488c4958155445c52d29e",
+  "source": "Measured from git ls-tree -rlz HEAD before the context migration, using Git blob sizes rather than working-tree files.",
+  "policy": "Exact-path maximum byte sizes preserve existing material without approving growth. Any new exception requires review and a specific rationale. Removal or relocation is a separate decision.",
+  "preservationManifests": [
+    "docs/archive/2026-10-05-context-migration/manifest.json"
+  ],
+  "exceptions": [
+    {
+      "path": "AGAIN*. .m4a",
+      "bytes": 1252378,
+      "rules": [
+        "root-media"
+      ],
+      "rationale": "Existing tracked root asset retained during the non-destructive context migration; ownership, licence and relocation need separate review."
+    },
+    {
+      "path": "AXOM_Opening_Cinematic_v1/AXOM_ident_4K_30p_hevc10.mp4",
+      "bytes": 7957760,
+      "rules": [
+        "large-file"
+      ],
+      "rationale": "Existing tracked large asset retained during the non-destructive context migration; this ceiling does not approve new assets or establish licensing."
+    },
+    {
+      "path": "PQRST and time heals.39.48.png",
+      "bytes": 1819204,
+      "rules": [
+        "root-media"
+      ],
+      "rationale": "Existing tracked root asset retained during the non-destructive context migration; ownership, licence and relocation need separate review."
+    },
+    {
+      "path": "Resource/JD Comprehensive Histology Chart.pdf",
+      "bytes": 44618123,
+      "rules": [
+        "large-file"
+      ],
+      "rationale": "Existing tracked large asset retained during the non-destructive context migration; this ceiling does not approve new assets or establish licensing."
+    },
+    {
+      "path": "Resource/JD's FTM1+2MSK Lists (Drugs, Diseases, Etc.)  (1).xlsx",
+      "bytes": 6696564,
+      "rules": [
+        "large-file"
+      ],
+      "rationale": "Existing tracked large asset retained during the non-destructive context migration; this ceiling does not approve new assets or establish licensing."
+    },
+    {
+      "path": "Resource/JD_NCRS_Comprehensive_Annotated_Histology_Atlas.pdf",
+      "bytes": 45787214,
+      "rules": [
+        "large-file"
+      ],
+      "rationale": "Existing tracked large asset retained during the non-destructive context migration; this ceiling does not approve new assets or establish licensing."
+    },
+    {
+      "path": "Resource/NCRS HY Review C&S.pdf",
+      "bytes": 50001432,
+      "rules": [
+        "large-file"
+      ],
+      "rationale": "Existing tracked large asset retained during the non-destructive context migration; this ceiling does not approve new assets or establish licensing."
+    },
+    {
+      "path": "Resource/Renal_Pathology_Master_Atlas_High_Yield_LARGE_LABELED.pdf",
+      "bytes": 6989790,
+      "rules": [
+        "large-file"
+      ],
+      "rationale": "Existing tracked large asset retained during the non-destructive context migration; this ceiling does not approve new assets or establish licensing."
+    },
+    {
+      "path": "artifacts/beta-audit-v3/report.json",
+      "bytes": 32136,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/beta-audit-v3/report.md",
+      "bytes": 28528,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/beta-audit-v3/screenshots/complete-configured-onboarding-dashboard-after.png",
+      "bytes": 463730,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/beta-audit-v3/screenshots/complete-configured-onboarding-step-1-before.png",
+      "bytes": 552067,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/beta-audit-v3/screenshots/import-known-question-set-failure.png",
+      "bytes": 2178143,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/beta-audit-v3/screenshots/render-known-hash-routes-course-tracker.png",
+      "bytes": 2263368,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/beta-audit-v3/screenshots/render-known-hash-routes-dashboard.png",
+      "bytes": 1974672,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/beta-audit-v3/screenshots/render-known-hash-routes-productivity.png",
+      "bytes": 1872859,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/beta-audit-v3/screenshots/render-known-hash-routes-question-bank.png",
+      "bytes": 2072069,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/site-audit-v2/report.json",
+      "bytes": 15881,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/site-audit-v2/report.md",
+      "bytes": 6164,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/site-audit-v2/screenshots/dashboard-desktop.png",
+      "bytes": 621732,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/site-audit-v2/screenshots/dashboard-mobile-mobile.png",
+      "bytes": 200994,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/site-audit-v2/screenshots/onboarding-step-2-desktop.png",
+      "bytes": 573930,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/site-audit-v2/screenshots/onboarding-step-3-desktop.png",
+      "bytes": 594575,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/site-audit-v2/screenshots/onboarding-step-4-desktop.png",
+      "bytes": 663523,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/site-audit-v2/screenshots/profile-settings-desktop.png",
+      "bytes": 743970,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/site-audit-v2/screenshots/profile-settings-mobile-mobile.png",
+      "bytes": 224640,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/site-audit-v2/screenshots/subscribe-or-unsubscribe-sections-desktop.png",
+      "bytes": 2016511,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/site-audit-v2/screenshots/subscribe-or-unsubscribe-sections-mobile-mobile.pdf",
+      "bytes": 2512814,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/site-audit/report.json",
+      "bytes": 2861,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/site-audit/report.md",
+      "bytes": 1692,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/site-audit/screenshots/001-www-axom-info.png",
+      "bytes": 524914,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/site-audit/screenshots/responsive-desktop-1440.png",
+      "bytes": 2009360,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/site-audit/screenshots/responsive-laptop-1280.png",
+      "bytes": 1198040,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/site-audit/screenshots/responsive-mobile-390.png",
+      "bytes": 600255,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/site-audit/screenshots/responsive-mobile-430.png",
+      "bytes": 673408,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "artifacts/site-audit/screenshots/responsive-tablet-768.png",
+      "bytes": 1082592,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked audit evidence retained for design and verification history; no new output is approved by this exception."
+    },
+    {
+      "path": "blue-prints/Science Topic Outline For The MCAT Exam - MCAT Content.pdf",
+      "bytes": 8482260,
+      "rules": [
+        "large-file"
+      ],
+      "rationale": "Existing tracked large asset retained during the non-destructive context migration; this ceiling does not approve new assets or establish licensing."
+    },
+    {
+      "path": "doctrodle display.10.31.png",
+      "bytes": 1514264,
+      "rules": [
+        "root-media"
+      ],
+      "rationale": "Existing tracked root asset retained during the non-destructive context migration; ownership, licence and relocation need separate review."
+    },
+    {
+      "path": "examsoft/amboss/uworld/noji/AMBOSS Onboarding video Term4 students.mp4",
+      "bytes": 29276450,
+      "rules": [
+        "large-file"
+      ],
+      "rationale": "Existing tracked large asset retained during the non-destructive context migration; this ceiling does not approve new assets or establish licensing."
+    },
+    {
+      "path": "examsoft/amboss/uworld/noji/Amboss.03.51 2.pdf",
+      "bytes": 27489879,
+      "rules": [
+        "large-file"
+      ],
+      "rationale": "Existing tracked large asset retained during the non-destructive context migration; this ceiling does not approve new assets or establish licensing."
+    },
+    {
+      "path": "examsoft/amboss/uworld/noji/NOJI.pdf",
+      "bytes": 21001646,
+      "rules": [
+        "large-file"
+      ],
+      "rationale": "Existing tracked large asset retained during the non-destructive context migration; this ceiling does not approve new assets or establish licensing."
+    },
+    {
+      "path": "examsoft/amboss/uworld/noji/STEP1.pdf",
+      "bytes": 32415548,
+      "rules": [
+        "large-file"
+      ],
+      "rationale": "Existing tracked large asset retained during the non-destructive context migration; this ceiling does not approve new assets or establish licensing."
+    },
+    {
+      "path": "examsoft/amboss/uworld/noji/UWORLD.57.36.pdf",
+      "bytes": 17613475,
+      "rules": [
+        "large-file"
+      ],
+      "rationale": "Existing tracked large asset retained during the non-destructive context migration; this ceiling does not approve new assets or establish licensing."
+    },
+    {
+      "path": "scripts/startup-ident/__pycache__/render_ident.cpython-311.pyc",
+      "bytes": 74225,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked generated file retained during the non-destructive context migration; removal requires a separate reviewed decision."
+    },
+    {
+      "path": "web/scripts/__pycache__/build-application-research.cpython-314.pyc",
+      "bytes": 33268,
+      "rules": [
+        "generated-artifact"
+      ],
+      "rationale": "Existing tracked generated file retained during the non-destructive context migration; removal requires a separate reviewed decision."
+    }
+  ]
+}

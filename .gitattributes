@@ -7,3 +7,6 @@
 *.pdf binary
 *.zip binary
 *.app binary
+
+# Preserve the original trailing space in this hash-protected historical snapshot.
+docs/archive/2026-10-05-context-migration/docs/architecture/LIFECYCLE.md whitespace=-blank-at-eol
