@@ -3,18 +3,34 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { extractPdfText } from "../../lib/extractText";
+import { attachPdfFigures } from "../../lib/pdfFigures";
+import { useStore } from "../../lib/store";
 import { MassImport, massImportFileStatus } from "./MassImport";
 
 vi.mock("../../lib/checksum", () => ({ sha256Hex: vi.fn(async () => "sha256-test") }));
+// The PDF bytes here are a stand-in, so the figure pass is stubbed like the text pass.
+vi.mock("../../lib/pdfFigures", () => ({ attachPdfFigures: vi.fn(async () => ({ images: [], notes: [] })) }));
 vi.mock("../../lib/extractText", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../lib/extractText")>(),
   extractPdfText: vi.fn(),
 }));
 
-beforeEach(() => {
+const original = {
+  questions: useStore.getState().questions,
+  questionSets: useStore.getState().questionSets,
+  documents: useStore.getState().documents,
+  courses: useStore.getState().courses,
+};
+
+// An empty library and no modules: nothing a file could repeat, and nowhere it has to be filed.
+beforeEach(async () => {
   vi.clearAllMocks();
+  await useStore.setState({ questions: [], questionSets: [], documents: [], courses: [] });
 });
-afterEach(cleanup);
+afterEach(async () => {
+  cleanup();
+  await useStore.setState(original);
+});
 
 async function processReadyText(onInspect = vi.fn()) {
   const user = userEvent.setup();
@@ -31,7 +47,7 @@ async function processReadyText(onInspect = vi.fn()) {
   const file = new File([contents], "mapped.txt", { type: "text/plain" });
   await user.upload(screen.getByLabelText("Choose multiple question files"), file);
   await user.click(screen.getByRole("button", { name: "Import files" }));
-  await screen.findByText("ready to inspect");
+  await screen.findByText("ready to accept");
   return { user, file, onInspect };
 }
 
@@ -59,13 +75,11 @@ describe("Mass Import trust handoff", () => {
     }])).toBe("needs-review");
   });
 
-  it("requires a ready file to hand off with every source field instead of persisting directly", async () => {
+  it("hands a file to the editor with every source field", async () => {
     const onInspect = vi.fn();
     const { user, file } = await processReadyText(onInspect);
 
-    expect(screen.queryByRole("button", { name: /save/i })).toBeNull();
-    expect(screen.queryByText(/batch-save/i)).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Inspect mapped.txt" }));
+    await user.click(screen.getByRole("button", { name: "Edit mapped.txt" }));
     expect(onInspect).toHaveBeenCalledWith(expect.objectContaining({
       title: "mapped",
       fileName: "mapped.txt",
@@ -96,8 +110,8 @@ describe("Mass Import trust handoff", () => {
     const file = new File(["pdf bytes"], "mapped.pdf", { type: "application/pdf" });
     await user.upload(screen.getByLabelText("Choose multiple question files"), file);
     await user.click(screen.getByRole("button", { name: "Import files" }));
-    await screen.findByText("ready to inspect");
-    await user.click(screen.getByRole("button", { name: "Inspect mapped.pdf" }));
+    await screen.findByText("ready to accept");
+    await user.click(screen.getByRole("button", { name: "Edit mapped.pdf" }));
 
     expect(onInspect).toHaveBeenCalledWith(expect.objectContaining({
       fileName: "mapped.pdf",
@@ -107,6 +121,35 @@ describe("Mass Import trust handoff", () => {
       checksum: "sha256-test",
       warnings: ["PDF extraction warning"],
       source: "pdf",
+    }));
+  });
+
+  it("carries a PDF's figures and why each was attached into the review", async () => {
+    vi.mocked(extractPdfText).mockResolvedValue({
+      text: ["1. Which PDF option is correct?", "A. Alpha", "B. Beta", "C. Gamma", "D. Delta", "Answer: B"].join("\n"),
+      pages: ["1. Which PDF option is correct? A. Alpha B. Beta"],
+      warnings: [],
+      empty: false,
+    });
+    const figure = new File(["png"], "mapped-p1-fig1.png", { type: "image/png" });
+    vi.mocked(attachPdfFigures).mockImplementationOnce(async (_buffer, _name, drafts) => {
+      drafts[0].attachmentNames = [figure.name];
+      return { images: [figure], notes: ["1 image found in this PDF, 1 attached to a question by its place on the page."] };
+    });
+    const user = userEvent.setup();
+    const onInspect = vi.fn();
+    render(<MassImport onInspect={onInspect} />);
+    await user.upload(screen.getByLabelText("Choose multiple question files"), new File(["pdf bytes"], "mapped.pdf", { type: "application/pdf" }));
+    await user.click(screen.getByRole("button", { name: "Import files" }));
+    await screen.findByText("ready to accept");
+    // The queue says what came with the file before it is opened.
+    expect(screen.getByText(/1 image$/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Edit mapped.pdf" }));
+
+    expect(onInspect).toHaveBeenCalledWith(expect.objectContaining({
+      images: [figure],
+      warnings: ["1 image found in this PDF, 1 attached to a question by its place on the page."],
+      drafts: [expect.objectContaining({ attachmentNames: ["mapped-p1-fig1.png"] })],
     }));
   });
 
@@ -124,8 +167,11 @@ describe("Mass Import trust handoff", () => {
     await user.click(screen.getByRole("button", { name: "Import files" }));
     await screen.findByText("needs review");
 
-    expect(screen.queryByRole("button", { name: /save/i })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Inspect unmapped.txt" }));
+    // A file with an unanswered question cannot be accepted as it is: only edited or skipped.
+    expect(screen.queryByRole("button", { name: "Accept unmapped.txt" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Accept all valid/ })).toBeNull();
+    expect(screen.getByText("1 question has no certain answer.")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Edit unmapped.txt" }));
     expect(onInspect).toHaveBeenCalledWith(expect.objectContaining({
       fileName: "unmapped.txt",
       rawText: expect.stringContaining("Which option is correct?"),
@@ -143,12 +189,12 @@ describe("Mass Import trust handoff", () => {
       new File([valid], "third.txt", { type: "text/plain" }),
     ]);
     await user.click(screen.getByRole("button", { name: "Import files" }));
-    await screen.findByRole("button", { name: "Inspect third.txt" });
+    await screen.findByRole("button", { name: "Edit third.txt" });
 
     await user.click(screen.getByRole("button", { name: "Remove invalid.txt" }));
     expect(screen.queryByText("invalid.txt")).toBeNull();
-    expect(screen.getByRole("button", { name: "Inspect first.txt" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Inspect third.txt" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Edit first.txt" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Edit third.txt" })).toBeTruthy();
     await waitFor(() => expect(document.activeElement).toBe(
       screen.getByRole("button", { name: "Remove third.txt" }),
     ));
@@ -166,7 +212,7 @@ describe("Mass Import trust handoff", () => {
     await screen.findByRole("button", { name: "Match answers.txt to questions" });
     await user.click(screen.getByRole("button", { name: "Match answers.txt to questions" }));
     expect(await screen.findByText("answers matched")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Inspect questions.txt" }));
+    await user.click(screen.getByRole("button", { name: "Edit questions.txt" }));
     expect(onInspect).toHaveBeenCalledWith(expect.objectContaining({
       drafts: [expect.objectContaining({ correctKey: "B" })],
     }));

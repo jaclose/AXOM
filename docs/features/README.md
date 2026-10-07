@@ -9,6 +9,7 @@ Choose one row. Existing feature contracts remain canonical at their established
 | Soundscapes, focus media, media pipeline | [Soundscapes](soundscapes.md) | `pages/SoundscapesPage.tsx`, `lib/soundscapes/`, `lib/media/` |
 | Dashboard widgets/next action | [Widget contract](../DASHBOARD-WIDGET-ARCHITECTURE.md), [brief evidence](../COMMAND-BRIEF-EVIDENCE.md) | `pages/DashboardPage.tsx`, `lib/dashboardWidgets.ts`, `lib/commandBrief.ts` |
 | Courses, tracker, schedule import | [Course design proposal](../COURSE-CENTRAL-ARCHITECTURE.md), not proof of live integrations | `pages/CoursesPage.tsx`, `pages/CourseTrackerPage.tsx`, `lib/courseScheduleImport.ts` |
+| Course templates, file mapping, patterns, review | [Course engine and learning intelligence](course-engine.md) | `lib/course-engine/`, `lib/learning-intelligence/`, `components/questions/AnalysisPanel.tsx` |
 | Journal | [Notebook contract](../JOURNAL-NOTEBOOK-ARCHITECTURE.md) | `pages/JournalPage.tsx`, `lib/journalNotebook.ts`, `lib/journalExtras.ts` |
 | Anki | Existing code/tests; [AI boundary](../architecture/backend.md) if generation changes | `pages/AnkiLabPage.tsx`, `components/anki/`, `lib/ankiCards.ts`, `lib/ankiConnect.ts` |
 | Accounts/restore/sharing | [Accounts contract](../architecture/accounts-sync-v1.md) | `lib/account/`, `lib/sync/` |

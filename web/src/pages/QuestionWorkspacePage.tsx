@@ -22,6 +22,7 @@ import { ImportPanel, parseStoredDocument, type ImportSeed } from "../components
 import { ExamRunner } from "../components/questions/ExamRunner";
 import { EXAM_SKINS, blockCounts, readSuspendedBlock } from "../lib/examSim";
 import { PerformancePanel } from "../components/questions/PerformancePanel";
+import { AnalysisPanel } from "../components/questions/AnalysisPanel";
 import { QuestionDetailModal } from "../components/questions/QuestionDetailModal";
 import { SourceLibrary, QuestionSetList } from "../components/questions/LibraryPanels";
 import { BlockBuilder } from "../components/questions/BlockBuilder";
@@ -520,6 +521,10 @@ export function QuestionWorkspacePage() {
 
       {tab === "insights" && (
         <>
+          <AnalysisPanel onPractice={(ids) => ids.length && setRunner({ mode: "tutor", retakeIds: ids })} />
+          {/* The older breakdowns stay available, one step back from the findings. */}
+          <details className="qb-breakdowns">
+            <summary>Session history and breakdowns</summary>
           <div className="grid grid-2">
             <PerformancePanel onRetakeMissed={(ids) => setRunner({ mode: "tutor", retakeIds: ids })} />
             <GlassCard>
@@ -563,6 +568,7 @@ export function QuestionWorkspacePage() {
               </div>
             )}
           </GlassCard>
+          </details>
         </>
       )}
       </section>

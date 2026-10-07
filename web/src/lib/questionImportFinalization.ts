@@ -210,6 +210,15 @@ export function isReviewedImportInFlight(fingerprint: string): boolean {
 }
 
 /**
+ * True while any reviewed import is still being written. What the store shows
+ * then may yet be rolled back, so nothing should be read from it as "already
+ * imported".
+ */
+export function hasReviewedImportInFlight(): boolean {
+  return inFlightReviewedImports.size > 0;
+}
+
+/**
  * Serialize production atomic commits that share the same store action. This
  * keeps one failed transaction's targeted rollback from interleaving with a
  * second reviewed-import transaction. Narrow CRUD adapters intentionally keep

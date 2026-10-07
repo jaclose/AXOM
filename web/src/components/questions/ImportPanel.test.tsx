@@ -333,8 +333,10 @@ describe("source-document-first import", () => {
       new File([new Uint8Array(32)], "ECG-2.png", { type: "image/png" }),
       new File([new Uint8Array(32)], "holiday.png", { type: "image/png" }),
     ]);
-    expect(within(images).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["ecg-2.pngready", "slide-2.jpgnot added yet"]);
+    expect(within(within(images).getByRole("list", { name: "Named images" })).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["ecg-2.pngready", "slide-2.jpgnot added yet"]);
     expect(within(images).getByText(/Not named by any question, so left out: holiday.png/)).toBeTruthy();
+    // A file no question names is offered a question to go on, and is left out unless it gets one.
+    expect(within(within(images).getByRole("list", { name: "Images not on a question" })).getByLabelText("Attach holiday.png to a question")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Finalize import" }));
     await waitFor(() => expect(mocked.updateQuestion).toHaveBeenCalledTimes(1));
@@ -425,12 +427,12 @@ describe("source-document-first import", () => {
     ];
     await user.upload(screen.getByLabelText("Choose multiple question files"), files);
     await user.click(screen.getByRole("button", { name: "Import files" }));
-    await screen.findByRole("button", { name: "Inspect first.txt" });
-    await screen.findByRole("button", { name: "Inspect second.txt" });
-    await screen.findByRole("button", { name: "Inspect third.txt" });
-    await user.click(screen.getByRole("button", { name: "Inspect first.txt" }));
+    await screen.findByRole("button", { name: "Edit first.txt" });
+    await screen.findByRole("button", { name: "Edit second.txt" });
+    await screen.findByRole("button", { name: "Edit third.txt" });
+    await user.click(screen.getByRole("button", { name: "Edit first.txt" }));
     await user.click(screen.getByRole("button", { name: "Back to source" }));
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Inspect first.txt" })));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Edit first.txt" })));
     await user.click(screen.getByRole("button", { name: "Paste text" }));
     const source = screen.getByLabelText("Edit extracted source text from first.txt");
     await user.clear(source);
@@ -440,18 +442,18 @@ describe("source-document-first import", () => {
     await user.click(screen.getByRole("button", { name: "Mark source review complete" }));
     await user.click(screen.getByRole("button", { name: "Finalize import" }));
 
-    const secondInspect = await screen.findByRole("button", { name: "Inspect second.txt" });
+    const secondInspect = await screen.findByRole("button", { name: "Edit second.txt" });
     await waitFor(() => expect(document.activeElement).toBe(secondInspect));
-    expect(screen.getByRole("button", { name: "Inspect third.txt" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Inspect first.txt" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit third.txt" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Edit first.txt" })).toBeNull();
 
-    await user.click(screen.getByRole("button", { name: "Inspect second.txt" }));
+    await user.click(screen.getByRole("button", { name: "Edit second.txt" }));
     await user.click(screen.getByRole("button", { name: "Back to source" }));
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Inspect second.txt" })));
-    expect(screen.queryByRole("button", { name: "Inspect first.txt" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Inspect second.txt" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Inspect third.txt" })).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Inspect second.txt" }));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Edit second.txt" })));
+    expect(screen.queryByRole("button", { name: "Edit first.txt" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit second.txt" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Edit third.txt" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Edit second.txt" }));
     await user.click(screen.getByRole("button", { name: /Stable question/ }));
     const beta = screen.getByLabelText("Option B");
     await user.clear(beta);
@@ -459,9 +461,9 @@ describe("source-document-first import", () => {
     await user.click(screen.getByRole("button", { name: "Remove question 2" }));
     await user.click(screen.getByRole("button", { name: "Finalize import" }));
 
-    const thirdInspect = await screen.findByRole("button", { name: "Inspect third.txt" });
+    const thirdInspect = await screen.findByRole("button", { name: "Edit third.txt" });
     await waitFor(() => expect(document.activeElement).toBe(thirdInspect));
-    expect(screen.queryByRole("button", { name: "Inspect second.txt" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit second.txt" })).toBeNull();
     expect(onFinalized).not.toHaveBeenCalled();
   });
 

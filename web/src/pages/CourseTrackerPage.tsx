@@ -34,6 +34,8 @@ import { cardSystemFor, type CardSystem } from "../lib/cardSystem";
 import { TrackerFirstRun } from "../components/tracker/TrackerFirstRun";
 import { ICON_SIZE } from "../lib/iconSize";
 import { parseCourseSchedule, reconcileScheduleDuplicates, scheduleCandidatesToTracker, type ScheduleCandidate } from "../lib/courseScheduleImport";
+import { CourseTemplateLoader } from "../components/tracker/CourseTemplateLoader";
+import { WeekOverview } from "../components/tracker/WeekOverview";
 import { activePrimaryPaths, activePrimaryScopes, isPrimaryPath, itemsInPrimary, setPrimaryUntil, togglePrimaryScope, type PrimaryTrackerScope } from "../lib/trackerFocus";
 
 const KINDS: TrackerKind[] = ["Lecture", "DLA", "PQ", "Lab", "Reading", "Requirement", "Milestone", "Evidence", "Question Block", "Assessment", "Review Loop"];
@@ -111,6 +113,7 @@ export function CourseTrackerPage() {
   const [moduleOpen, setModuleOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [templateOpen, setTemplateOpen] = useState(false);
   const [moduleHelpOpen, setModuleHelpOpen] = useState(false);
   const [moduleTourOpen, setModuleTourOpen] = useState(false);
   const [deleteScope, setDeleteScope] = useState<string | null>(null);
@@ -249,8 +252,11 @@ export function CourseTrackerPage() {
                 <BookOpen size={ICON_SIZE.body} /> Add course or module
               </GButton>
               <GButton size="sm" onClick={() => setScheduleOpen(true)}><Upload size={ICON_SIZE.body}/> Import schedule</GButton>
+              <GButton size="sm" onClick={() => setTemplateOpen(true)}><Upload size={ICON_SIZE.body}/> Load course template</GButton>
             </div>
           </GlassCard>
+
+          <WeekOverview />
 
           <GlassCard pad className="tracker-suggestions-card" data-module-tour="tracker-suggestions">
             <PanelHeader title="Suggested next moves" sub={primaries.length ? "Your primary focus is weighted first, then progress, yield, timing and workflow" : "Stable guidance based on progress, yield, timing, and your study workflow"}
@@ -372,6 +378,7 @@ export function CourseTrackerPage() {
       {moduleOpen && <ModuleEditor onDone={(nextScope) => { setModuleOpen(false); if (nextScope) setScope(nextScope); }} />}
       {bulkOpen && <BulkImportModal defaultPath={scope} onClose={() => setBulkOpen(false)} />}
       {scheduleOpen && <ScheduleImportModal defaultPath={scope} onClose={() => setScheduleOpen(false)} />}
+      {templateOpen && <CourseTemplateLoader onClose={() => setTemplateOpen(false)} />}
       {deleteScope && <DeleteScopeModal scope={deleteScope} onSelect={setScope} onClose={() => setDeleteScope(null)} />}
       {moduleTourOpen && <ModuleTour name="Course Tracker" route="tracker" steps={COURSE_TRACKER_TOUR_STEPS} onExit={() => setModuleTourOpen(false)} />}
     </div>

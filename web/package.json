@@ -33,7 +33,8 @@
     "release:setup-updater": "node ../scripts/setup-updater.mjs",
     "cinematic:import": "node ../scripts/import-cinematic.mjs",
     "soundscapes:import": "node ../scripts/import-soundscapes.mjs",
-    "media:audit": "node --import tsx ./scripts/media-audit.ts"
+    "media:audit": "node --import tsx ./scripts/media-audit.ts",
+    "sources:inventory": "node --experimental-strip-types ./scripts/source-inventory.ts"
   },
   "engines": {
     "node": ">=22.12.0"

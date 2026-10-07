@@ -28,6 +28,7 @@ import { SoundscapeTimerSync } from "./components/soundscapes/SoundscapeTimerSyn
 import { UserMediaBridge } from "./components/soundscapes/UserMediaBridge";
 import { FocusCheckIn } from "./components/shell/FocusCheckIn";
 import { AccountSyncWatcher } from "./components/shell/AccountSyncWatcher";
+import { VaultSaveWatcher } from "./components/shell/VaultSaveWatcher";
 import { NAV } from "./components/shell/nav";
 import { useStore } from "./lib/store";
 import { useUi } from "./lib/uiStore";
@@ -403,6 +404,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
       <UserMediaBridge />
       <FocusCheckIn />
       <AccountSyncWatcher />
+      <VaultSaveWatcher />
       <Toaster />
     </div>
   );

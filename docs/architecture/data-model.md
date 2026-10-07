@@ -23,7 +23,12 @@ Governed by: [local workspace with additive account protection](../decisions/002
 
 IndexedDB-backed Local Vault is primary persisted workspace storage, with the existing
 fallback/recovery paths. Native SQLite is used by update checkpoint support; it is not
-a replacement for normal Zustand/Local Vault persistence. Account sessions are outside
+a replacement for normal Zustand/Local Vault persistence. A save that cannot reach
+IndexedDB is written to localStorage beside a marker; the next start reads that marked
+copy first and moves it into the vault, so a stale IndexedDB copy never shadows it. While
+a vault upgrade waits on another tab, later saves go to that fallback instead of queueing
+behind it. A save that reaches neither store is reported to the learner
+(`vaultActivity.ts`, `components/shell/VaultSaveWatcher.tsx`). Account sessions are outside
 portable workspace data. Cloud revision snapshots do not imply upload of local attachment
 or generated-media binary bytes.
 

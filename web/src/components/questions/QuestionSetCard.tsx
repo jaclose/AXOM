@@ -1,6 +1,6 @@
 import { AlertTriangle, BarChart3, Edit3, Play, RotateCcw, Share2 } from "lucide-react";
 import type { ReactNode } from "react";
-import type { QuestionSet, QuestionSetMetrics } from "../../lib/library";
+import { QUESTION_SET_KIND_LABEL, questionSetKind, type QuestionSet, type QuestionSetMetrics } from "../../lib/library";
 import { GButton, GhostButton, Tag } from "../ui/primitives";
 import { ICON_SIZE } from "../../lib/iconSize";
 
@@ -32,6 +32,9 @@ export function QuestionSetCard({
   const confidence = metrics.importConfidence === null ? "Legacy" : `${metrics.importConfidence}%`;
   const mappingIssueCount = metrics.mapping?.issueCount ?? metrics.needsReview;
   const partial = metrics.completed > 0 && metrics.remaining > 0;
+  // A source set is the default and needs no label; anything built from other
+  // sets says what it is, and generated questions are never left unmarked.
+  const kind = questionSetKind(set);
   const primaryAction = mappingIssueCount > 0 && onReviewIssues
     ? { label: "Review issues", icon: <AlertTriangle size={ICON_SIZE.body} />, onClick: onReviewIssues }
     : { label: partial ? "Continue" : "Start", icon: <Play size={ICON_SIZE.body} />, onClick: onStart };
@@ -47,6 +50,7 @@ export function QuestionSetCard({
           </span>
           <h3>{set.title}</h3>
           <div className="row wrap gap6">
+            {kind !== "source" && <Tag tone={kind === "generated" ? "purple" : "cyan"}>{QUESTION_SET_KIND_LABEL[kind]}</Tag>}
             {metrics.category && <Tag tone="neutral">{metrics.category}</Tag>}
             {!compact && set.aiEnhanced && <Tag tone="purple">AI digest</Tag>}
             {mappingIssueCount > 0 && <Tag tone="orange">{mappingIssueCount} mapping issue{mappingIssueCount === 1 ? "" : "s"}</Tag>}

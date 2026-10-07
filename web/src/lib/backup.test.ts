@@ -240,6 +240,30 @@ describe("portable backup safety", () => {
     expect(merged.questions[0].annotations?.[0]).toMatchObject({ id: "ann-1", tone: "cyan" });
   });
 
+  it("keeps one attempt per block run when two copies hold different versions of it", () => {
+    const base = {
+      id: "q-run", source: "manual" as const, stem: "Stem", options: [], status: "incorrect" as const,
+      tags: [], createdAt: "2026-07-16T09:00:00.000Z",
+    };
+    const checked = { at: "2026-07-16T10:00:00.000Z", answerKey: "A", status: "incorrect" as const, quizSessionId: "run-1", mode: "tutor" as const, certainty: "sure" as const };
+    const manual = { at: "2026-07-15T10:00:00.000Z", answerKey: "B", status: "correct" as const };
+    const current = makeSeed();
+    current.questions = [{ ...base, updatedAt: "2026-07-16T10:00:00.000Z", attempts: [manual, checked] }];
+    const imported = makeSeed();
+    imported.questions = [{
+      ...base, updatedAt: "2026-07-16T10:05:00.000Z",
+      attempts: [manual, { ...checked, errorType: "missed-clue" as const }],
+    }];
+
+    for (const merged of [mergeStates(current, imported), mergeStates(imported, current)]) {
+      expect(merged.questions[0].attempts).toHaveLength(2);
+      // The newer record's version wins, with the run context intact.
+      expect(merged.questions[0].attempts[1]).toEqual({ ...checked, errorType: "missed-clue" });
+    }
+    const restored = parseImport(JSON.stringify({ _app: "AXOM", ...toPortableState(imported) }));
+    expect(restored.questions[0].attempts[1]).toEqual({ ...checked, errorType: "missed-clue" });
+  });
+
   it("surfaces different-id overlaps as repair-needed after portable restore and merge", () => {
     const stem = "0123456789abcdefghij";
     const base = {

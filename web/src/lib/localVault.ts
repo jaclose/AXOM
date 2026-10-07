@@ -1,7 +1,7 @@
 import type { StateStorage } from "zustand/middleware";
 import { userIdFromName } from "./userIdentity";
 import { STORAGE_KEYS } from "./brand";
-import { markVaultWrite } from "./vaultActivity";
+import { markVaultWrite, markVaultWriteFailure } from "./vaultActivity";
 
 export const DB_NAME = STORAGE_KEYS.vaultDb;
 export const STORE_NAME = "state";
@@ -19,6 +19,8 @@ export function ensureVaultStores(db: IDBDatabase) {
 }
 const activeUserKey = (name: string) => `${name}:active-user`;
 const scopedStateKey = (name: string, userId: string) => `${name}:user:${userId}`;
+/** Present only while the localStorage copy is ahead of IndexedDB. */
+const fallbackMarkerKey = (name: string) => `${name}:fallback-newer`;
 let vaultWriteSequence = 0;
 const vaultWriteFailures = new Map<number, Error>();
 
@@ -80,10 +82,49 @@ export function writeLocalFallback(
   }
 }
 
+/** Enough to tell one saved snapshot from another; never a security measure. */
+function snapshotFingerprint(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `${value.length}:${(hash >>> 0).toString(16)}`;
+}
+
+/**
+ * The localStorage copy, but only when a save marked it as newer than
+ * IndexedDB. A copy mirrored by an older build carries no marker and can be
+ * stale, so it never overrides the vault.
+ */
+function newerFallbackCopy(fallbackStore: Storage | null, name: string): string | null {
+  try {
+    const marker = fallbackStore?.getItem(fallbackMarkerKey(name));
+    if (!marker) return null;
+    const value = fallbackStore?.getItem(name) ?? null;
+    return value !== null && snapshotFingerprint(value) === marker ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+const UPGRADE_BLOCKED_MESSAGE = "Local vault upgrade is blocked by another tab";
+/**
+ * True while a vault upgrade waits on another tab. The browser queues every
+ * later open request for this database behind that one without telling them,
+ * so a second save would wait for ever and nothing after it would be written.
+ * Failing fast keeps each save going to the fallback until the upgrade lands.
+ */
+let upgradeBlocked = false;
+
 function openVault(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (typeof indexedDB === "undefined") {
       reject(new Error("IndexedDB is unavailable"));
+      return;
+    }
+    if (upgradeBlocked) {
+      reject(new Error(UPGRADE_BLOCKED_MESSAGE));
       return;
     }
     const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -91,16 +132,21 @@ function openVault(): Promise<IDBDatabase> {
     req.onupgradeneeded = () => ensureVaultStores(req.result);
     req.onsuccess = () => {
       if (blocked) {
+        upgradeBlocked = false;
         req.result.close();
         return;
       }
       req.result.onversionchange = () => req.result.close();
       resolve(req.result);
     };
-    req.onerror = () => reject(req.error ?? new Error("Unable to open local vault"));
+    req.onerror = () => {
+      if (blocked) upgradeBlocked = false;
+      reject(req.error ?? new Error("Unable to open local vault"));
+    };
     req.onblocked = () => {
       blocked = true;
-      reject(new Error("Local vault upgrade is blocked by another tab"));
+      upgradeBlocked = true;
+      reject(new Error(UPGRADE_BLOCKED_MESSAGE));
     };
   });
 }
@@ -109,6 +155,10 @@ function openExistingVault(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (typeof indexedDB === "undefined") {
       reject(new Error("IndexedDB is unavailable"));
+      return;
+    }
+    if (upgradeBlocked) {
+      reject(new Error(UPGRADE_BLOCKED_MESSAGE));
       return;
     }
     const req = indexedDB.open(DB_NAME);
@@ -151,8 +201,47 @@ async function withStore<T>(
   });
 }
 
+/** One transaction: the workspace, the active-profile pointer and the per-profile copy. */
+function writeVault(name: string, value: string, userId: string): Promise<unknown> {
+  return withStore("readwrite", (store) => {
+    store.put(value, name);
+    if (userId) {
+      store.put(userId, activeUserKey(name));
+      store.put(value, scopedStateKey(name, userId));
+    }
+    return store.get(name);
+  });
+}
+
+// IndexedDB owns the large serialized workspace. localStorage keeps only the
+// tiny active-profile pointer and device preferences; remove the mirrored
+// state, and the marker that called it newer, after a confirmed vault write.
+function clearFallbackCopy(fallbackStore: Storage | null, name: string, userId: string): void {
+  fallbackStore?.removeItem(name);
+  fallbackStore?.removeItem(fallbackMarkerKey(name));
+  if (userId) {
+    fallbackStore?.setItem(activeUserKey(name), userId);
+    fallbackStore?.removeItem(scopedStateKey(name, userId));
+  }
+}
+
 const vaultStorage: StateStorage = {
   async getItem(name) {
+    // A save that could not reach IndexedDB leaves its snapshot here, ahead of
+    // the vault. Reading the vault first used to hand back the older copy, and
+    // the next successful save then deleted the newer one.
+    const newer = newerFallbackCopy(localFallback(), name);
+    if (newer !== null) {
+      const userId = persistedUserId(newer);
+      try {
+        await writeVault(name, newer, userId);
+        clearFallbackCopy(localFallback(), name, userId);
+      } catch {
+        // Still not writable: the copy stays in localStorage for the next start.
+      }
+      return newer;
+    }
+
     try {
       const value = await withStore<string | undefined>("readonly", (store) => store.get(name), openExistingVault);
       if (value) return value;
@@ -185,36 +274,35 @@ const vaultStorage: StateStorage = {
     const userId = persistedUserId(value);
     const fallbackStore = localFallback();
     try {
-      await withStore("readwrite", (store) => {
-        store.put(value, name);
-        if (userId) {
-          store.put(userId, activeUserKey(name));
-          store.put(value, scopedStateKey(name, userId));
-        }
-        return store.get(name);
-      });
-      // IndexedDB owns the large serialized workspace. localStorage keeps only
-      // the tiny active-profile pointer and device preferences; remove legacy
-      // mirrored state after a confirmed vault write.
-      fallbackStore?.removeItem(name);
-      if (userId) {
-        fallbackStore?.setItem(activeUserKey(name), userId);
-        fallbackStore?.removeItem(scopedStateKey(name, userId));
-      }
+      await writeVault(name, value, userId);
+      clearFallbackCopy(fallbackStore, name, userId);
       markVaultWrite("indexeddb");
     } catch (indexedDbError) {
       // IndexedDB can be blocked/private-mode unavailable. In that case retain
       // the full localStorage fallback so the app stays usable and data-safe.
+      let saved: boolean;
+      let failure: unknown;
       try {
+        // Marker first: it is tiny, and one that does not match the copy beside
+        // it is ignored, so a copy that failed to land is never read as newer.
+        fallbackStore?.setItem(fallbackMarkerKey(name), snapshotFingerprint(value));
         writeLocalFallback(fallbackStore, name, value, userId, indexedDbError);
-        markVaultWrite("local-fallback");
+        saved = true;
       } catch (fallbackError) {
+        failure = fallbackError;
+        // The workspace copy can land before the per-profile copy runs out of room.
+        try { saved = fallbackStore?.getItem(name) === value; } catch { saved = false; }
+      }
+      if (saved) {
+        markVaultWrite("local-fallback");
+      } else {
+        try { fallbackStore?.removeItem(fallbackMarkerKey(name)); } catch { /* nothing to unmark */ }
         vaultWriteFailures.set(
           writeSequence,
-          fallbackError instanceof Error
-            ? fallbackError
-            : new Error("AXOM could not persist the local workspace."),
+          failure instanceof Error ? failure : new Error("AXOM could not persist the local workspace."),
         );
+        // Ordinary saves are best-effort, so say so: this one is on no disk.
+        markVaultWriteFailure();
       }
     }
   },
@@ -230,6 +318,7 @@ const vaultStorage: StateStorage = {
       }
     }
     fallback?.removeItem(name);
+    fallback?.removeItem(fallbackMarkerKey(name));
     fallback?.removeItem(activeUserKey(name));
     if (active) fallback?.removeItem(scopedStateKey(name, active));
     try {

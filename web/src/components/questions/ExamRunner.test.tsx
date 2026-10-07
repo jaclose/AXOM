@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { QuestionSet } from "../../lib/library";
-import type { QuestionRecord } from "../../lib/questions";
+import type { QuestionAttempt, QuestionRecord } from "../../lib/questions";
 import type { QuizBlock } from "../../lib/quiz";
 import { ExamRunner } from "./ExamRunner";
 import { createTextAnnotation } from "../../lib/questionAnnotations";
@@ -14,6 +14,8 @@ const mocked = vi.hoisted(() => ({
   saveQuizBlock: vi.fn(),
   updateQuestion: vi.fn(),
   recordQuestionAttempt: vi.fn(),
+  commitQuizRun: vi.fn(),
+  saveQuizSession: vi.fn(),
   addQuestionSet: vi.fn(),
   bulkAddTrackerItems: vi.fn(),
 }));
@@ -70,8 +72,9 @@ function setStore() {
     quizBlocks: [savedBlock],
     quizSessions: [],
     saveQuizBlock: mocked.saveQuizBlock,
-    saveQuizSession: vi.fn(),
+    saveQuizSession: mocked.saveQuizSession,
     recordQuestionAttempt: mocked.recordQuestionAttempt,
+    commitQuizRun: mocked.commitQuizRun,
     updateQuestion: mocked.updateQuestion,
     addAnkiCards: vi.fn(() => ({ saved: 1, errors: [] })),
     addQuestionSet: mocked.addQuestionSet,
@@ -101,6 +104,11 @@ afterEach(() => {
   localStorage.clear();
   vi.unstubAllGlobals();
 });
+
+/** The attempts an exam block saved, in the one commit that carries its result. */
+function committedAttempts(): Array<{ questionId: string; attempt: Omit<QuestionAttempt, "at"> }> {
+  return mocked.commitQuizRun.mock.calls.at(-1)?.[0].attempts ?? [];
+}
 
 describe("ExamRunner saved blocks and selection semantics", () => {
   it("restores an active question, picked answer, and position after refresh", () => {
@@ -270,7 +278,7 @@ describe("ExamRunner saved blocks and selection semantics", () => {
 
     // Question 1: 20 s, then 7 s on the second visit. Question 2: 5 s before
     // stepping back, then 3 s.
-    const spent = Object.fromEntries(mocked.recordQuestionAttempt.mock.calls.map(([id, attempt]) => [id, attempt.timeSpentSeconds]));
+    const spent = Object.fromEntries(committedAttempts().map(({ questionId, attempt }) => [questionId, attempt.timeSpentSeconds]));
     expect(spent).toEqual({ [question.id]: 27, [second.id]: 8 });
     vi.restoreAllMocks();
   });
@@ -291,7 +299,7 @@ describe("ExamRunner saved blocks and selection semantics", () => {
     fireEvent.click(screen.getByRole("button", { name: "Submit & next" }));
     fireEvent.click(screen.getByRole("button", { name: "B. Beta" }));
     fireEvent.click(screen.getByRole("button", { name: "Submit & finish" }));
-    const picked = Object.fromEntries(mocked.recordQuestionAttempt.mock.calls.map(([id, attempt]) => [id, attempt.answerKey]));
+    const picked = Object.fromEntries(committedAttempts().map(({ questionId, attempt }) => [questionId, attempt.answerKey]));
     expect(picked).toEqual({ [question.id]: "B", [second.id]: "B" });
   });
 
@@ -516,6 +524,191 @@ describe("ExamRunner saved blocks and selection semantics", () => {
     expect(screen.getByText(/Highlight stays active/)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Got it" }));
     expect(localStorage.getItem("axom.quiz.tutor-tips.v1")).toBe("dismissed");
+  });
+});
+
+describe("ExamRunner keeps what was answered", () => {
+  const second: QuestionRecord = { ...question, id: "question-two", stem: "Second stem: which is right?" };
+
+  it("saves a tutor answer when it is checked, not when the learner moves on", async () => {
+    // Regression: the attempt was only written by "Next question", so leaving
+    // the block from the explanation saved nothing at all.
+    setStore();
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const onClose = vi.fn();
+    render(<ExamRunner mode="tutor" retakeIds={[question.id]} onClose={onClose} />);
+
+    await user.click(screen.getByRole("button", { name: "A. Alpha" }));
+    await user.click(screen.getByRole("button", { name: "Check answer" }));
+
+    expect(mocked.recordQuestionAttempt).toHaveBeenCalledTimes(1);
+    expect(mocked.recordQuestionAttempt).toHaveBeenCalledWith(question.id, expect.objectContaining({
+      answerKey: "A", status: "incorrect", mode: "tutor", quizSessionId: expect.any(String),
+    }));
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(confirm).toHaveBeenCalledWith("Leave this block? Answered questions are saved. Unanswered ones are not scored.");
+    expect(onClose).toHaveBeenCalledTimes(1);
+    // The block is kept as a session that ended early, under the same run id.
+    const runId = mocked.recordQuestionAttempt.mock.calls[0][1].quizSessionId;
+    expect(mocked.commitQuizRun).toHaveBeenCalledWith({
+      attempts: [],
+      session: expect.objectContaining({ id: runId, mode: "tutor", endedEarly: true, questionIds: [question.id] }),
+    });
+    confirm.mockRestore();
+  });
+
+  it("writes the error type and confidence against the same run instead of a second attempt", async () => {
+    setStore();
+    const user = userEvent.setup();
+    render(<ExamRunner mode="tutor" retakeIds={[question.id]} onClose={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "A. Alpha" }));
+    await user.click(screen.getByRole("button", { name: "Check answer" }));
+    await user.selectOptions(screen.getByLabelText("Why did this go wrong?"), "missed-clue");
+    await user.click(screen.getByRole("button", { name: "Confidence 2 of 5" }));
+
+    const runIds = new Set(mocked.recordQuestionAttempt.mock.calls.map(([, attempt]) => attempt.quizSessionId));
+    expect(runIds.size).toBe(1);
+    expect(mocked.recordQuestionAttempt.mock.calls.at(-1)?.[1]).toEqual(expect.objectContaining({
+      status: "incorrect", errorType: "missed-clue", confidence: 2,
+    }));
+  });
+
+  it("records how sure the learner was only when they said so before checking", async () => {
+    setStore();
+    const user = userEvent.setup();
+    render(<ExamRunner mode="tutor" retakeIds={[question.id]} onClose={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "A. Alpha" }));
+    await user.click(screen.getByRole("button", { name: "Sure" }));
+    await user.click(screen.getByRole("button", { name: "Check answer" }));
+
+    expect(mocked.recordQuestionAttempt.mock.calls[0][1]).toEqual(expect.objectContaining({ certainty: "sure" }));
+    // Once the answer is showing, the question can no longer be asked honestly.
+    expect(screen.queryByRole("group", { name: "How sure are you?" })).toBeNull();
+  });
+
+  it("leaves certainty out of the attempt when the learner skips it", async () => {
+    setStore();
+    const user = userEvent.setup();
+    render(<ExamRunner mode="tutor" retakeIds={[question.id]} onClose={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "B. Beta" }));
+    await user.click(screen.getByRole("button", { name: "Check answer" }));
+
+    expect(mocked.recordQuestionAttempt.mock.calls[0][1]).not.toHaveProperty("certainty");
+  });
+
+  it("keeps the answered questions of an exam block the learner leaves early", async () => {
+    setStore();
+    mocked.store = { ...mocked.store, questions: [question, second] };
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<ExamRunner mode="exam" retakeIds={[question.id, second.id]} onClose={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "B. Beta" }));
+    await user.click(screen.getByRole("button", { name: "Submit & next" }));
+    await user.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(mocked.commitQuizRun).toHaveBeenCalledTimes(1);
+    const run = mocked.commitQuizRun.mock.calls[0][0];
+    expect(run.attempts).toEqual([{
+      questionId: question.id,
+      attempt: expect.objectContaining({ answerKey: "B", status: "correct", mode: "exam", quizSessionId: run.session.id }),
+    }]);
+    expect(run.session).toEqual(expect.objectContaining({
+      endedEarly: true,
+      score: { correct: 1, scored: 1, total: 2, pct: 100 },
+    }));
+    confirm.mockRestore();
+  });
+
+  it("saves nothing when a block is left before any question is answered", async () => {
+    setStore();
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<ExamRunner mode="exam" retakeIds={[question.id]} onClose={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(mocked.commitQuizRun).not.toHaveBeenCalled();
+    expect(mocked.recordQuestionAttempt).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
+  it("saves an exam block's attempts and result as one commit under one run id", async () => {
+    setStore();
+    mocked.store = { ...mocked.store, questions: [question, second] };
+    const user = userEvent.setup();
+    render(<ExamRunner mode="exam" retakeIds={[question.id, second.id]} onClose={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "A. Alpha" }));
+    await user.click(screen.getByRole("button", { name: "Submit & next" }));
+    await user.click(screen.getByRole("button", { name: "B. Beta" }));
+    await user.click(screen.getByRole("button", { name: "Submit & finish" }));
+
+    expect(mocked.recordQuestionAttempt).not.toHaveBeenCalled();
+    expect(mocked.saveQuizSession).not.toHaveBeenCalled();
+    expect(mocked.commitQuizRun).toHaveBeenCalledTimes(1);
+    const run = mocked.commitQuizRun.mock.calls[0][0];
+    expect(run.session.endedEarly).toBeUndefined();
+    expect(run.attempts.map((entry: { attempt: { quizSessionId: string } }) => entry.attempt.quizSessionId))
+      .toEqual([run.session.id, run.session.id]);
+  });
+
+  it("resumes a block in the mode it was started in, whichever button reopened it", () => {
+    setStore();
+    localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify({
+      mode: "exam", runId: "run-restored", poolIds: [question.id], index: 0, answers: [],
+      revealed: false, startedAt: "2026-07-10T01:00:00.000Z", timed: false,
+      filters: { count: 1, status: "all", ordered: true },
+    }));
+    render(<ExamRunner mode="tutor" onClose={() => {}} />);
+
+    expect(screen.getByRole("heading", { name: /Exam · 1 of 1/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Submit & finish" })).toBeTruthy();
+  });
+
+  it("after a refresh, writes only the tutor answers the workspace never received", () => {
+    const savedAlready: QuestionRecord = {
+      ...question,
+      attempts: [{ at: "2026-07-10T01:01:00.000Z", answerKey: "A", status: "incorrect", errorType: "missed-clue", quizSessionId: "run-restored", mode: "tutor" }],
+    };
+    setStore();
+    mocked.store = { ...mocked.store, questions: [savedAlready, second] };
+    localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify({
+      mode: "tutor", runId: "run-restored", poolIds: [savedAlready.id, second.id], index: 1,
+      answers: [
+        { questionId: savedAlready.id, answerKey: "A", correct: false, flagged: false, seconds: 12 },
+        { questionId: second.id, answerKey: "B", correct: true, flagged: false, seconds: 9 },
+      ],
+      picked: "B", revealed: true, startedAt: "2026-07-10T01:00:00.000Z", timed: false,
+      filters: { count: 2, status: "all", ordered: true },
+    }));
+    render(<ExamRunner mode="tutor" onClose={() => {}} />);
+
+    // The first answer is on disk with its error type, so it is left alone.
+    expect(mocked.commitQuizRun).toHaveBeenCalledTimes(1);
+    expect(mocked.commitQuizRun.mock.calls[0][0].attempts).toEqual([{
+      questionId: second.id,
+      attempt: expect.objectContaining({ answerKey: "B", status: "correct", quizSessionId: "run-restored", timeSpentSeconds: 9 }),
+    }]);
+  });
+
+  it("does not re-save anything when resuming a block saved before runs had an id", () => {
+    setStore();
+    localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify({
+      mode: "tutor", poolIds: [question.id], index: 0,
+      answers: [{ questionId: question.id, answerKey: "A", correct: false, flagged: false }],
+      picked: "A", revealed: true, startedAt: "2026-07-10T01:00:00.000Z", timed: false,
+      filters: { count: 1, status: "all", ordered: true },
+    }));
+    render(<ExamRunner mode="tutor" onClose={() => {}} />);
+
+    expect(mocked.commitQuizRun).not.toHaveBeenCalled();
+    expect(mocked.recordQuestionAttempt).not.toHaveBeenCalled();
   });
 });
 
