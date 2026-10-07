@@ -60,7 +60,10 @@ The docs still work without these settings and without Obsidian.
 
 Update canonical notes directly. Add metadata/edges only when they make the right source
 easier to find; prefer an existing domain router over another map. New graph Markdown is
-covered by `npm run repo:check`; archives stay hash-protected. Do not bulk-rewrite old
+covered by `npm run repo:check`, along with category/authority metadata and required
+routers; archives stay hash-protected. The category hubs link existing notes, not
+generated source-file nodes. Active work routes through the
+[maintenance registry](../operations/repository-audit.md#maintenance-registry). Do not bulk-rewrite old
 notes or let Obsidian rename preserved files to tidy the graph.
 
 Automatic doc-link relationships already provide a useful baseline. Import/test/API edge

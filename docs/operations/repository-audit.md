@@ -1,4 +1,118 @@
-# Repository context migration audit
+---
+tags:
+  - axom/operations
+authority: canonical
+---
+# Repository maintenance and context audit
+
+## Maintenance registry
+
+This is the single cleanup register, extending the existing audit. Coordination owns
+live tasks; this table owns deferred cleanup. Search the relevant path/status rather
+than reading the audit history. Paths are repository-relative; some exist only in the
+owner's worktree. The status applies to cleanup, not permission to implement a feature.
+
+- **ACTIVE = ACTIVE_DO_NOT_TOUCH:** no opportunistic cleanup; record opportunities here.
+- **DEFERRED = DEFERRED MAINTENANCE:** blocked on ownership, evidence or review.
+- **READY = READY FOR MAINTENANCE:** safe condition has been verified; eligible for a
+  separate authorized cleanup task. It is not deletion, publication or merge approval.
+- Normal development areas need no row. Check status/ownership anyway; absence is not
+  evidence that files are safe. Live owner evidence takes precedence over a stale row.
+
+At feature handoff, the owner checks related rows. Once work is integrated and the
+relevant checkout is clean, verify every other safe condition, change ACTIVE/DEFERRED
+to READY and date the evidence. Do not auto-clear protection merely because a branch
+was merged, time passed, or a checkout appears clean. Completed rows may be removed
+only with a commit/progress locator preserving the outcome. Every cell is required;
+use UNKNOWN with a reason when ownership is unresolved. No source TODO scatter.
+
+| Area / path | Status | Owner / task | Why protected | Cleanup opportunity | Safe condition | Date / reference |
+| --- | --- | --- | --- | --- | --- | --- |
+| `web/src/lib/course-engine/`, `web/src/lib/learning-intelligence/`, `web/src/components/tracker/`, `web/src/pages/CourseTrackerPage.tsx`, `web/e2e/` | ACTIVE | Claude / canonical integration owner | Course branch 093bb65 integrated at 7c069ea; newer course/calendar/ranking work continues on integration | Review adapters and test placement after integration | Owner handoff, feature integrated, relevant files clean and contracts settled | 2026-10-07: clean Course handoff; integration c8f6ceb; recovery matrix |
+| `web/src/components/questions/`, `web/src/pages/QuestionWorkspacePage.tsx`, `web/src/lib/questions.ts`, `web/src/lib/quiz.ts`, `web/src/lib/questionImport.ts` | ACTIVE | Exam fidelity, Course Engine and Decode owners | Overlapping practice, import and analysis work | Consolidate shared practice/import boundaries when implementations settle | All three owners settle overlap, work integrated and affected files clean | 2026-10-07: BOARD ownership and state brief |
+| `web/src/lib/store.ts`, `web/src/lib/types.ts`, `web/src/lib/backup.ts`, `web/src/lib/localVault.ts`, `web/src/App.tsx` | ACTIVE | Shared workspace contracts / coordinate first | Save-path and scope changes; schema 34 | Domain extraction only when behavior and persistence invariants are proved | Contract owners agree, branches integrated, regression coverage and clean files | 2026-10-07: live Course/Decode status and BOARD shared contracts |
+| `web/src/lib/decode*.ts`, `web/src/lib/decode/`, `web/src/lib/ai/`, `docs/product/`, `docs/feature-development/`, `docs/directions/` | ACTIVE | Integration owner; Codex prototype / question-first draft | Old runtime checkpoint a33a01e is clean but untested; new Decode port active on integration; question-first draft dirty | Compare remaining prototype intent with the canonical Decode contract; preserve verbatim ideas | Owner integrates or explicitly hands off; no historical reasoning discarded | 2026-10-07: a33a01e and c8f6ceb; recovery matrix; safety snapshot retained |
+| `web/src/lib/media/`, `web/src/lib/soundscapes/`, `web/src/pages/SoundscapesPage.tsx`, `web/public/`, `design/` | ACTIVE | Copilot media pipeline; Claude soundscapes; Codex focus/media | Processing, audio lifecycle and immersive work overlap | Shared audio lifecycle, device-store boundary and media-source duplication review | Media owners settle seams, work integrated and licensing established | 2026-10-07: BOARD media integration and ownership sections |
+| `package.json`, `package-lock.json`, `web/package.json`, `web/package-lock.json` | ACTIVE | Media pipeline / dependency recovery | Dependency-only WIP 8dd9391 parked; also present in mixed commit 93badf8 | Review duplicate/unused dependencies in a separate task | Recovery complete, owners release files and dependency changes clean | 2026-10-07: main checkout and BOARD state brief |
+| `AGENTS.md`, `.gitignore`, `CLAUDE.md`, `.github/copilot-instructions.md`, `docs/`, `src-tauri/permissions/` | ACTIVE | JD / original checkout recovery; Codex context-protocol draft | Original mixed checkout and context draft remain dirty; stash is partly recovered and retained; user Bases protected | Maintenance integrated only in recovery staging; canonical owner must incorporate it; review Bases by owner | JD settles branch recovery; do not apply/drop stash or overwrite other worktrees | 2026-10-07: original 93badf8, context-protocol status, BOARD incident entry |
+| `Resource/`, `examsoft/`, `blue-prints/`, `blueprints/`, `NCRS_Master_Deck.html`, `NCRS_Summary_Sheets.html` | DEFERRED | JD / ownership and publication review | REFERENCE and REVIEW_REQUIRED; licences and personal provenance unresolved | Classify retention and any future relocation; largest reference directories dominate tracked size | Owner reviews provenance, publication rights and retention; explicit move/delete authority | 2026-10-07: Git blob inventory; no private content opened |
+| `AXOM_Opening_Cinematic_v1/`, `AGAIN*. .m4a`, `web/public/cinematics/`, `web/public/soundscapes/` | DEFERRED | JD + media owners | Intentional source/runtime duplicates may have stable URLs | Four exact source/output duplicate groups above 500 KB | Media work released; ownership, source preservation and runtime references proved | 2026-10-07: Git blob identity comparison |
+| `Sources/`, `Resources/`, `Package.swift`, `web/src-tauri/`, `axom/`, `scripts/legacy/`, `db/` | DEFERRED | UNKNOWN / legacy ownership review | LEGACY, not deletion-approved; release/scripts and archive citations may depend on paths | Trace callers and mark retirement boundaries | Prove no active callers, preserve historical locators, obtain owner decision | 2026-10-07: existing architecture/archive routes and metadata audit |
+| `artifacts/`, `bugs/`, `scripts/startup-ident/` | DEFERRED | UNKNOWN / historical evidence review | Existing generated evidence and two tracked Python caches are baseline exceptions | DELETE_CANDIDATE for reproducible caches only; archive useful evidence | Verify provenance/reproducibility and obtain removal authority; never regenerate baseline to hide failures | 2026-10-07: existing exact-path hygiene baseline |
+| `web/src/components/shell/AppearanceStudio.tsx`, `web/src/components/shell/CinematicSettings.tsx` | DEFERRED | Settings owner / keyboard helper | Prior audit reported a cycle; not revalidated in this maintenance pass | Extract the keyboard helper only if cycle still exists | Owner releases settings scope; reproduce cycle and prove keyboard behavior | 2026-10-05: source organization findings below |
+
+Current branch/worktree disposition: [recovery matrix](branch-recovery-2026-10-07.md).
+The following maintenance report describes its original dated checkpoint.
+
+## Maintenance pass 2026-10-07
+
+Scope: repository instructions, documentation routes, Obsidian metadata/defaults,
+ignore rules and the existing Node hygiene gate. No runtime source moves, dependency
+edits, installs, private-file reads, deletes, push or deployment. Base `42eeacb` was
+chosen because `93badf8` in the original checkout has committed conflict markers and
+an incomplete context migration. The board leaves branch/stash recovery to JD.
+The existing graph-only additions from `93badf8` were carried onto the intact base;
+no runtime files from that mixed commit were copied.
+
+The original audit classifications below remain useful: KEEP source/config/tests;
+ARCHIVE historical explanations; IGNORE new generated output; REVIEW_REQUIRED unknown
+reference/legacy material; ACTIVE_DO_NOT_TOUCH owner work. MOVE: none in this pass.
+No proposed deletion was executed. Old root reports stay to preserve file:line citations.
+
+Inventory at base: 1,275 tracked blobs, 457,228,394 bytes; 12 files exceed 5 MiB.
+`Resource/` is 183.2 MB and `examsoft/` 127.8 MB, classified as reference material
+requiring provenance/publication review. Cinematic originals remain media-owner scope.
+Four duplicate blob groups exceed 500 KB; duplication is evidence, not deletion authority.
+The original checkout's 1,254 regular Git candidate files were hashed before edits for
+a later unchanged check. Ignored private directories were not traversed or copied.
+
+The policy now makes zero-agent defaults, material skill activation and phase/session
+boundaries explicit. Shared Claude/Copilot bridges remain tiny and unchanged on this
+base. Installed skills/global settings are retained, not duplicated or modified.
+Prior policy/handoff provenance: `git show 42eeacb:AGENTS.md` and
+`git show 42eeacb:docs/AI_STATE.md`; original graph handoff: `93badf8:docs/AI_STATE.md`.
+The earlier immutable archive manifest remains unchanged.
+
+Strategic checkpoint research confirmed the shared-file approach. Current
+[Claude documentation](https://code.claude.com/docs/en/memory#remove-an-earlier-agents-md-workaround)
+says explicit AGENTS imports are deduplicated even with native AGENTS support;
+retain the import bridge for compatibility. [VS Code instructions](https://code.visualstudio.com/docs/agent-customization/custom-instructions)
+remain harness-dependent; repository checks measure the routed set, not guaranteed
+client loading. [Codex discovery](https://developers.openai.com/codex/guides/agents-md)
+does not make arbitrary linked docs a preload. [Obsidian Markdown links](https://help.obsidian.md/links)
+fit the single-vault approach. The relevant saved resource,
+[Playwright CLI skills](https://playwright.dev/agent-cli/skills), supports existing
+browser workflows; no browser adapter is needed for a non-UI maintenance diff.
+Chrome bookmarks were filtered locally; Safari access was unavailable. No private
+bookmark inventory was copied into Git. Local tools: Node 22.23.1, Codex 0.160.1,
+Claude Code 2.1.292. No new MCP, dependency or agent framework was justified.
+
+Validation on Node 22.23.1: 43 focused repository tests and all 62 root tests passed;
+`repo:check` passed with 30 active documents, zero route/registry/conflict/metadata
+errors and all 10 preserved snapshots matching. The graph has 18 curated notes and
+24 map edges; all nine checked heading routes resolve and both portable JSON defaults
+parse. Native Obsidian rendering was not rerun; this is structural graph verification.
+`git diff --check` passed. All 1,254 hashed files in the original checkout are unchanged;
+the maintenance diff contains no runtime, dependency, lockfile, CI or archive-snapshot edits.
+
+The first optional root-test run passed 61/62: the real signature fixture lacked its
+Tauri CLI in the fresh worktree. Reusing the already installed CLI 2.11.5 through an
+ignored local symlink (matching this branch's lockfile) yielded 62/62, without installing
+or changing packages. Full application build/typecheck/lint/E2E and live services were
+not run because no runtime-affecting file changed. No live client-loading claim is made.
+
+Bootstrap at `42eeacb`: 3,489 → 2,351 estimated tokens (33% smaller); Claude
+3,559 → 2,421; Copilot 3,568 → 2,430. AGENTS: 2,226 → 1,589; AI_STATE:
+1,263 → 762. The original damaged checkout measured 3,541 for the pair and its hygiene
+command failed on a missing baseline file. That checkout remains untouched. These are
+character-based repository estimates, not measured model spend or total prompt size.
+
+No maintenance commit changes another worktree or resolves the mixed commit/stash.
+The next integration step depends on JD's recovery decision. This checkpoint remains
+local on `codex/ai-maintenance-2026-10-07`; locate it with
+`git log -1 -- scripts/repository-hygiene.mjs`. Start later feature work in a fresh session.
+
+## Context migration 2026-10-05
 
 Date: 2026-10-05. Base: `9f29327` (`feat/media-pipeline-v1`).
 Implementation: isolated `codex/repository-context-protocol` worktree. This report
@@ -114,8 +228,10 @@ Other deferred work:
 `npm run repo:check` uses Git's tracked plus non-ignored proposed-file inventory.
 It does not crawl ignored private folders or node_modules. It validates small automatic
 context files, relative links in active navigation/docs, unexpected files over 5 MiB,
-generated/cache/log paths and loose root media. Fragment/external-link validation is
-out of scope; old frozen evidence and branch-only historical links are intentionally
+generated/cache/log paths and loose root media. The maintenance section above adds required-route, registry, graph-metadata and
+conflict-marker guards (active docs, .gitignore and package manifests). These guards
+validate structure, not whether an owner has actually released an active area.
+General fragment/external-link validation is out of scope; old frozen evidence and branch-only historical links are intentionally
 outside active link checks.
 
 The baseline records 45 exact existing paths with byte ceilings and rationales. It
@@ -131,7 +247,7 @@ tests. No dependency was added. Build/deploy upload boundaries remain unchanged.
 
 ## Bootstrap measurement and enforcement limits
 
-`repo:check` enforces 12,000 Unicode characters each for AGENTS and AI_STATE, 1,500
+`repo:check` enforces 12,000 Unicode characters each for AGENTS and AI_STATE, 800
 each for Claude/Copilot bridges, and 4,000 estimated tokens per repository bootstrap
 profile. It sums `ceil(characters / 4)` per file, not a model tokenizer. Reports include
 whitespace-delimited words, UTF-8 bytes, per-file budget results, startup-import status,

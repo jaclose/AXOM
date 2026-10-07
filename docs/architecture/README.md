@@ -1,3 +1,8 @@
+---
+tags:
+  - axom/navigation
+authority: navigation
+---
 # Architecture map
 
 | Boundary | Implementation | Focused route |
