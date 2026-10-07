@@ -16,7 +16,7 @@ import { useStore } from "../../lib/store";
 import { createImportMappingLedger, parseQuestionBlocks, type ParsedQuestionDraft } from "../../lib/questionParse";
 import { detectImportFormat, importFromCsv, importFromJson, importFromText } from "../../lib/questionImport";
 import { extractDocxText, extractPdfText, extractPlainText } from "../../lib/extractText";
-import { FIGURE_BASIS_LABEL, extractPdfFigures, locateQuestionPages, placeFigures } from "../../lib/pdfFigures";
+import { attachPdfFigures } from "../../lib/pdfFigures";
 import { documentTitleFromFile, type QuestionSet, type SourceDocument } from "../../lib/library";
 import {
   EXAM_TYPE_LABEL, QUESTION_CATEGORIES,
@@ -96,6 +96,8 @@ export interface ImportSeed {
   pageTexts?: string[];
   checksum?: string;
   warnings?: string[];
+  /** Figures already cut from the file, named as the drafts name them. */
+  images?: File[];
   source?: QuestionSource;
   /** Internal queue identity used to retire one multi-file row after success. */
   batchQueueId?: string;
@@ -249,7 +251,7 @@ export function ImportPanel({
   const finalizingRef = useRef(false);
   const mountedRef = useRef(true);
   // Image files the learner adds for questions that name one ("Attachment: ecg.png").
-  const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [imageFiles, setImageFiles] = useState<File[]>(() => seed?.images ?? []);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -1505,38 +1507,9 @@ function FileTab({ busyFile, setBusyFile, onParsed }: {
         }
         const drafts = parseQuestionBlocks(extracted.text);
         if (isPdf) assignSourcePages(drafts, extracted.pages);
-        const figureNotes: string[] = [];
-        let images: File[] = [];
-        if (figureBytes && drafts.length > 0) {
-          try {
-            const found = await extractPdfFigures(figureBytes, file.name);
-            const located = locateQuestionPages(drafts, extracted.pages ?? []);
-            const placements = placeFigures(
-              found.figures,
-              drafts.map((draft, index) => ({ stem: draft.stem, sourcePage: located[index].page, repeatsOn: located[index].repeatsOn })),
-              found.linesByPage,
-            );
-            let placed = 0;
-            for (const placement of placements) {
-              if (placement.draftIndex === undefined) {
-                // Kept in the image list and named here: never dropped, never guessed onto a question.
-                figureNotes.push(`${placement.name} was not attached. ${placement.reason}`);
-                continue;
-              }
-              const draft = drafts[placement.draftIndex];
-              draft.attachmentNames = [...(draft.attachmentNames ?? []), placement.name];
-              draft.warnings = [...(draft.warnings ?? []), `Image from page ${placement.page}, attached because this is ${FIGURE_BASIS_LABEL[placement.basis!]}.${located[placement.draftIndex].byFirstAppearance ? " The question's page is the first one its opening words appear on." : ""} Check it is the right one.`];
-              placed += 1;
-            }
-            images = found.figures.map((figure) => figure.file);
-            if (found.figures.length > 0) {
-              figureNotes.unshift(`${found.figures.length} image${found.figures.length === 1 ? "" : "s"} found in this PDF, ${placed} attached to a question by its place on the page.`);
-            }
-            figureNotes.push(...found.warnings);
-          } catch {
-            figureNotes.push("AXOM could not read the images in this PDF. The questions were imported without them: add any image by hand below.");
-          }
-        }
+        const { images, notes: figureNotes } = figureBytes
+          ? await attachPdfFigures(figureBytes, file.name, drafts, extracted.pages ?? [])
+          : { images: [], notes: [] };
         onParsed(
           drafts,
           [

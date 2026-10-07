@@ -3,9 +3,12 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { extractPdfText } from "../../lib/extractText";
+import { attachPdfFigures } from "../../lib/pdfFigures";
 import { MassImport, massImportFileStatus } from "./MassImport";
 
 vi.mock("../../lib/checksum", () => ({ sha256Hex: vi.fn(async () => "sha256-test") }));
+// The PDF bytes here are a stand-in, so the figure pass is stubbed like the text pass.
+vi.mock("../../lib/pdfFigures", () => ({ attachPdfFigures: vi.fn(async () => ({ images: [], notes: [] })) }));
 vi.mock("../../lib/extractText", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../lib/extractText")>(),
   extractPdfText: vi.fn(),
@@ -107,6 +110,35 @@ describe("Mass Import trust handoff", () => {
       checksum: "sha256-test",
       warnings: ["PDF extraction warning"],
       source: "pdf",
+    }));
+  });
+
+  it("carries a PDF's figures and why each was attached into the review", async () => {
+    vi.mocked(extractPdfText).mockResolvedValue({
+      text: ["1. Which PDF option is correct?", "A. Alpha", "B. Beta", "C. Gamma", "D. Delta", "Answer: B"].join("\n"),
+      pages: ["1. Which PDF option is correct? A. Alpha B. Beta"],
+      warnings: [],
+      empty: false,
+    });
+    const figure = new File(["png"], "mapped-p1-fig1.png", { type: "image/png" });
+    vi.mocked(attachPdfFigures).mockImplementationOnce(async (_buffer, _name, drafts) => {
+      drafts[0].attachmentNames = [figure.name];
+      return { images: [figure], notes: ["1 image found in this PDF, 1 attached to a question by its place on the page."] };
+    });
+    const user = userEvent.setup();
+    const onInspect = vi.fn();
+    render(<MassImport onInspect={onInspect} />);
+    await user.upload(screen.getByLabelText("Choose multiple question files"), new File(["pdf bytes"], "mapped.pdf", { type: "application/pdf" }));
+    await user.click(screen.getByRole("button", { name: "Import files" }));
+    await screen.findByText("ready to inspect");
+    // The queue says what came with the file before it is opened.
+    expect(screen.getByText(/1 image$/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Inspect mapped.pdf" }));
+
+    expect(onInspect).toHaveBeenCalledWith(expect.objectContaining({
+      images: [figure],
+      warnings: ["1 image found in this PDF, 1 attached to a question by its place on the page."],
+      drafts: [expect.objectContaining({ attachmentNames: ["mapped-p1-fig1.png"] })],
     }));
   });
 

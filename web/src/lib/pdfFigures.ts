@@ -329,3 +329,50 @@ export async function extractPdfFigures(buffer: ArrayBuffer, fileName: string): 
   }
   return result;
 }
+
+/**
+ * The whole figure pass for one question PDF: find the figures, decide where
+ * each belongs, and write that onto the drafts (the image's name, and a note
+ * saying why it was attached). Returns the image files, placed or not, and the
+ * notes to show the learner. A failure here never loses the questions.
+ */
+export async function attachPdfFigures<T extends { stem: string; sourcePage?: number; attachmentNames?: string[]; warnings?: string[] }>(
+  buffer: ArrayBuffer,
+  fileName: string,
+  drafts: T[],
+  pageTexts: readonly string[],
+): Promise<{ images: File[]; notes: string[] }> {
+  if (drafts.length === 0) return { images: [], notes: [] };
+  try {
+    const found = await extractPdfFigures(buffer, fileName);
+    const located = locateQuestionPages(drafts, pageTexts);
+    const placements = placeFigures(
+      found.figures,
+      drafts.map((draft, index) => ({ stem: draft.stem, sourcePage: located[index].page, repeatsOn: located[index].repeatsOn })),
+      found.linesByPage,
+    );
+    const notes: string[] = [];
+    let placed = 0;
+    for (const placement of placements) {
+      if (placement.draftIndex === undefined) {
+        // Kept in the image list and named here: never dropped, never guessed onto a question.
+        notes.push(`${placement.name} was not attached. ${placement.reason}`);
+        continue;
+      }
+      const draft = drafts[placement.draftIndex];
+      draft.attachmentNames = [...(draft.attachmentNames ?? []), placement.name];
+      draft.warnings = [
+        ...(draft.warnings ?? []),
+        `Image from page ${placement.page}, attached because this is ${FIGURE_BASIS_LABEL[placement.basis!]}.${located[placement.draftIndex].byFirstAppearance ? " The question's page is the first one its opening words appear on." : ""} Check it is the right one.`,
+      ];
+      placed += 1;
+    }
+    if (found.figures.length > 0) {
+      notes.unshift(`${found.figures.length} image${found.figures.length === 1 ? "" : "s"} found in this PDF, ${placed} attached to a question by its place on the page.`);
+    }
+    return { images: found.figures.map((figure) => figure.file), notes: [...notes, ...found.warnings] };
+  } catch {
+    return { images: [], notes: ["AXOM could not read the images in this PDF. The questions were imported without them: add any image by hand below."] };
+  }
+}
+

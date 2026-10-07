@@ -16,7 +16,7 @@ do next. The learner reports nothing AXOM can observe.
 | One scope for questions and tracker rows | `lib/course-engine/scope.ts` |
 | The course by week: progress, question progress, absences | `lib/course-engine/weekView.ts`, `components/tracker/WeekOverview.tsx` |
 | Activity kinds beside `TrackerKind` | `lib/course-engine/activity.ts` |
-| Figures in a question PDF: find, cut out, place | `lib/pdfFigures.ts`, called from `components/questions/ImportPanel.tsx` |
+| Figures in a question PDF: find, cut out, place | `lib/pdfFigures.ts` (`attachPdfFigures`), called from `ImportPanel.tsx` and `MassImport.tsx` in `components/questions/` |
 | Answers as events, first and repeat | `lib/learning-intelligence/attempts.ts` |
 | What a question asks, read from wording | `lib/learning-intelligence/questionFeatures.ts` |
 | Structural and empirical difficulty | `lib/learning-intelligence/difficulty.ts` |
@@ -68,7 +68,8 @@ teaching-day groups across the module's weeks and marks them for confirmation; a
 `Week N:` line in a template states them. Figure placement depends on the importer
 finding each question's page: on four real files it placed 5 of 6, 4 of 6 and 6 of 7
 figures in text PDFs, and 2 of 20 in a slide-deck answer key where 15 of about 39
-questions were not parsed at all. Figures are not extracted in `MassImport.tsx` yet. The
+questions were not parsed at all. Mass import shows each file's proposed place and image
+count and hands its figures to the review; it does not yet save several files at once. The
 week view lists only rows filed as `Term/Module/Week N`; older rows stay in the tracker
 tree. A row counts as done at one pass. Question type and difficulty are keyword
 readings of wording, not analysis by a model.

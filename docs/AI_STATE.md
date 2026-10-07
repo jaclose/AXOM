@@ -31,8 +31,10 @@ every addition is an optional field or derived at read time.
   JD is writing the ranking.
 - Slide-deck answer keys: the parser found 24 of about 39 questions in the one sampled, so
   most of its figures had no question to attach to. Parsing those decks is the next gap.
-- Bulk import review should extend the existing `components/questions/MassImport.tsx`
-  (it already queues files) with figure extraction, proposed scope and accept-all-valid.
+- Bulk import: `components/questions/MassImport.tsx` now shows each queued file's proposed
+  module and week and carries a PDF's figures into the review. Still one file per review:
+  saving every valid file in one action needs the finalize logic lifted out of
+  `ImportPanel.tsx`.
 - Not started: "More like this", settings and data page redesign, graph notes.
 - `contrast-sweep` (light) fails intermittently on Settings tab pills at about 1.1:1, a
   different pill each run. It reads as a pill measured mid cross-fade. Cause not confirmed.
@@ -50,7 +52,7 @@ above). New specs: `question-block-save`, `course-engine-slice`, `course-templat
 
 1. JD: write `reviewPriority`.
 2. Parse slide-deck answer keys (question slide then answer slide) so their figures land.
-3. Bulk import review on top of `MassImport.tsx`.
+3. Lift import finalization out of `ImportPanel.tsx` so mass import can accept all valid files.
 4. Only then: repair `feat/exam-fidelity` and move `ExamRunner` onto its shared engine.
 
 ## Context routes

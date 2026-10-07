@@ -7,11 +7,16 @@
 // shared editable review before it can be finalized. This queue never persists
 // questions, sets, or source documents directly.
 // ===========================================================================
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { FileUp, RefreshCw, CheckCircle2, AlertTriangle, Trash2, Eye } from "lucide-react";
 import { associateAnswerSource, parseAnswerSections, parseQuestionBlocks, type ParsedQuestionDraft } from "../../lib/questionParse";
 import { importFromCsv, importFromJson } from "../../lib/questionImport";
 import { extractDocxText, extractPdfText, extractPlainText } from "../../lib/extractText";
+import { attachPdfFigures } from "../../lib/pdfFigures";
+import { useStore } from "../../lib/store";
+import { MAPPING_STATUS_LABEL, describeMapping, inferSourceMapping } from "../../lib/course-engine/sourceMapping";
+import { moduleAliases } from "../../lib/course-engine/templateParse";
+import { vocabularyFromCourses } from "../../lib/course-engine/vocabulary";
 import { documentTitleFromFile } from "../../lib/library";
 import type { QuestionSource } from "../../lib/questions";
 import { GlassCard, GButton, GhostButton, PanelHeader, Tag, EmptyState } from "../ui/primitives";
@@ -39,6 +44,8 @@ interface QueuedFile {
   answerKeyDetected: boolean;
   source: QuestionSource;
   error?: string;
+  /** Figures cut from a PDF, carried into the review with its questions. */
+  images?: File[];
 }
 
 const uid = () => crypto.randomUUID();
@@ -58,6 +65,19 @@ export function MassImport({
 }) {
   const [queue, setQueue] = useState<QueuedFile[]>([]);
   const [processing, setProcessing] = useState(false);
+  const store = useStore();
+  const vocabulary = useMemo(
+    () => vocabularyFromCourses(store.terms ?? [], store.courses ?? [], moduleAliases),
+    [store.courses, store.terms],
+  );
+  /** Where the file's name says it belongs, and how sure that reading is. The review confirms it. */
+  function placeLine(file: QueuedFile): string {
+    const mapping = inferSourceMapping(file.fileName, vocabulary);
+    const figures = file.images?.length ? ` · ${file.images.length} image${file.images.length === 1 ? "" : "s"}` : "";
+    return mapping.module
+      ? `${describeMapping(mapping)} · ${MAPPING_STATUS_LABEL[mapping.status]}${figures}`
+      : `Not filed: no module of yours in the name${figures}`;
+  }
   const fileInput = useRef<HTMLInputElement>(null);
   const ownedFileIds = useRef(new Set<string>());
   const queueRef = useRef(queue);
@@ -159,10 +179,13 @@ export function MassImport({
       let pageTexts: string[] | undefined;
       let checksum: string | undefined;
       let warnings: string[] = [];
+      let figureBytes: ArrayBuffer | undefined;
 
       if (kind === "pdf" || kind === "docx") {
         const buffer = await file.arrayBuffer();
         checksum = await sha256Hex(buffer);
+        // pdf.js takes ownership of the bytes it is given, so the figure pass reads its own copy.
+        figureBytes = kind === "pdf" ? buffer.slice(0) : undefined;
         const extracted = kind === "pdf" ? await extractPdfText(buffer) : await extractDocxText(buffer);
         rawText = extracted.text;
         pageTexts = kind === "pdf" ? extracted.pages : undefined;
@@ -190,6 +213,10 @@ export function MassImport({
       const drafts = result.drafts;
       if (kind === "pdf" && pageTexts) assignSourcePages(drafts, pageTexts);
       warnings = [...warnings, ...result.warnings];
+      const figures = figureBytes && pageTexts
+        ? await attachPdfFigures(figureBytes, file.name, drafts, pageTexts)
+        : { images: [], notes: [] };
+      warnings.push(...figures.notes);
       const answerKeyDetected = drafts.some((d) => d.correctKey);
       const importStatus = massImportFileStatus(drafts);
       patch(id, {
@@ -197,6 +224,7 @@ export function MassImport({
         drafts,
         warnings,
         answerKeyDetected,
+        images: figures.images,
         error: drafts.length === 0 ? "No questions detected" : undefined,
       });
     } catch (err) {
@@ -279,6 +307,9 @@ export function MassImport({
                         : ""}
                       {file.error ? ` · ${file.error}` : ""}
                     </span>
+                    {(file.status === "ready" || file.status === "needs-review") && (
+                      <span className="sub truncate">{placeLine(file)}</span>
+                    )}
                   </div>
                   <StatusTag status={file.status} />
                   {(file.status === "needs-review" || file.status === "ready") && file.drafts.length > 0 && (
@@ -289,7 +320,7 @@ export function MassImport({
                       onClick={() => onInspect({
                         batchQueueId: file.id,
                         title: documentTitleFromFile(file.fileName),
-                        drafts: file.drafts,
+                        drafts: file.drafts, images: file.images,
                         rawText: file.rawText,
                         fileName: file.fileName,
                         fileType: file.fileType,
