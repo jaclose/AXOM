@@ -323,5 +323,5 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = currentClock }: 
 const dayOf = isoDate;
 
 function notifyLockIn(progress: FocusProgressHint) {
-  void notify("AXOM — are you locked in?", progress.sprint ?? progress.target ?? "Quick check-in. Come back when you can.", { tag: "axom-lock-in" });
+  void notify("AXOM — are you locked in?", progress.sprint ?? progress.target ?? "Quick check-in. Come back when you can.", { tag: "axom-lock-in", route: "productivity" });
 }

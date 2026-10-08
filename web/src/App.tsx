@@ -30,6 +30,7 @@ import { FocusCheckIn } from "./components/shell/FocusCheckIn";
 import { AccountSyncWatcher } from "./components/shell/AccountSyncWatcher";
 import { VaultSaveWatcher } from "./components/shell/VaultSaveWatcher";
 import { NAV } from "./components/shell/nav";
+import { NotificationActionBridge } from "./components/shell/NotificationActionBridge";
 import { useStore } from "./lib/store";
 import { useUi } from "./lib/uiStore";
 import { pushToast } from "./lib/toast";
@@ -403,6 +404,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
       <SoundscapeTimerSync />
       <UserMediaBridge />
       <FocusCheckIn />
+      <NotificationActionBridge />
       <AccountSyncWatcher />
       <VaultSaveWatcher />
       <Toaster />

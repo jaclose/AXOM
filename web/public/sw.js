@@ -65,3 +65,26 @@ self.addEventListener("fetch", (event) => {
     return response;
   })());
 });
+
+// Local notifications only. No push subscription or background timer promise:
+// suspended/closed browser tabs cannot schedule reliable alarms by themselves.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const data = event.notification.data || {};
+  const routes = new Set(["productivity", "questions", "step", "soundscapes", "dashboard"]);
+  const route = routes.has(data.route) ? data.route : "productivity";
+  const action = data.action === "rest" ? "rest" : undefined;
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    const client = windows.find((item) => new URL(item.url).origin === self.location.origin);
+    if (client) {
+      await client.focus();
+      client.postMessage({ type: "AXOM_NOTIFICATION_OPEN", route, action });
+      return;
+    }
+    const url = new URL("./", self.registration.scope);
+    url.hash = route;
+    if (action === "rest") url.searchParams.set("axomRest", "1");
+    await self.clients.openWindow(url.href);
+  })());
+});
