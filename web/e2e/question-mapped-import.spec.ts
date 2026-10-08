@@ -79,14 +79,16 @@ test("a mapped paste imports with its tags, attaches the named image, and shows 
   await page.getByRole("button", { name: "Finalize import" }).click();
   await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
 
-  const saved = await page.evaluate(async () => {
+  // The tab above appears when the questions are saved; the image is attached in a later step
+  // of the same save. So read until the attachment is there, instead of once and too early.
+  const readSaved = () => page.evaluate(async () => {
     type Question = { questionNumber?: number; correctKey?: string; tags?: string[]; citation?: string; attachments?: Array<{ fileName: string; role?: string }> };
     const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => { questions?: Question[] } } }> }).__AXOM_DEV__;
     return (dev.useStore.getState().questions ?? [])
       .map((question) => ({ number: question.questionNumber, key: question.correctKey, tags: question.tags, source: question.citation, images: (question.attachments ?? []).map((item) => `${item.fileName}:${item.role}`) }))
       .sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
   });
-  expect(saved).toEqual([
+  await expect.poll(readSaved).toEqual([
     { number: 1, key: "B", tags: expect.arrayContaining(["renal", "diuretics"]), source: "Course Sample Quiz 4", images: [] },
     { number: 2, key: "C", tags: expect.arrayContaining(["cardiology", "ecg"]), source: "Course Sample Quiz 4", images: ["Figure-2.PNG:exhibit"] },
   ]);
