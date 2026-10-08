@@ -282,6 +282,7 @@ const vaultStorage: StateStorage = {
       // the full localStorage fallback so the app stays usable and data-safe.
       let saved: boolean;
       let failure: unknown;
+      const previousFallback = newerFallbackCopy(fallbackStore, name);
       try {
         // Marker first: it is tiny, and one that does not match the copy beside
         // it is ignored, so a copy that failed to land is never read as newer.
@@ -296,7 +297,18 @@ const vaultStorage: StateStorage = {
       if (saved) {
         markVaultWrite("local-fallback");
       } else {
-        try { fallbackStore?.removeItem(fallbackMarkerKey(name)); } catch { /* nothing to unmark */ }
+        // A quota failure leaves the preceding workspace in place. Keep its
+        // valid marker too, or the next start would prefer the older vault.
+        try {
+          if (previousFallback !== null && fallbackStore?.getItem(name) === previousFallback) {
+            const marker = snapshotFingerprint(previousFallback);
+            if (fallbackStore.getItem(fallbackMarkerKey(name)) !== marker) {
+              fallbackStore.setItem(fallbackMarkerKey(name), marker);
+            }
+          } else {
+            fallbackStore?.removeItem(fallbackMarkerKey(name));
+          }
+        } catch { /* the last successful copy remains available for recovery */ }
         vaultWriteFailures.set(
           writeSequence,
           failure instanceof Error ? failure : new Error("AXOM could not persist the local workspace."),

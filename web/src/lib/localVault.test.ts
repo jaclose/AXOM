@@ -181,6 +181,28 @@ describe("a save that could not reach IndexedDB", () => {
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("newer"));
   });
 
+  it.each(["workspace", "all"])("keeps the last successful fallback after %s writes run out of space", async (failure) => {
+    await localVaultStorage.setItem(key, snapshot("older vault"));
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, snapshot("saved fallback"));
+    const checkpoint = getVaultWriteCheckpoint();
+    vi.stubGlobal("localStorage", {
+      ...storage,
+      setItem: (name: string, value: string) => {
+        if (failure === "all" || name === key) throw new Error("QuotaExceededError");
+        storage.setItem(name, value);
+      },
+    });
+
+    await localVaultStorage.setItem(key, snapshot("unsaved change"));
+    expect(() => assertVaultWritesSince(checkpoint)).toThrow(/QuotaExceededError/);
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    vi.stubGlobal("localStorage", storage);
+
+    // A failed later save must not make the last successful save invisible.
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot("saved fallback"));
+  });
+
   it("ignores a marker that does not describe the copy beside it", async () => {
     await localVaultStorage.setItem(key, snapshot("newer"));
     localStorage.setItem(key, snapshot("stale mirror"));

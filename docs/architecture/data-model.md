@@ -32,6 +32,11 @@ behind it. A save that reaches neither store is reported to the learner
 portable workspace data. Cloud revision snapshots do not imply upload of local attachment
 or generated-media binary bytes.
 
+A later failed fallback save preserves the marker for the last successful fallback;
+otherwise a reload could prefer an older vault record. Reviewed imports wait for both
+image bytes and the workspace's image associations before counting an image as attached.
+A failed association is reported without discarding the questions already saved.
+
 Preserve Noctyrium keys/type compatibility. Coordinate schema changes first, migrate
 additively, and test old imports/defaults. Do not infer an atomic cross-store guarantee
 from an action name; follow write/flush/error behavior in the relevant boundary.

@@ -1,9 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { QuestionSet, SourceDocument } from "./library";
 import { parseQuestionBlocks } from "./questionParse";
 import type { QuestionImportPersistence, ReviewedImportPersistencePlan } from "./questionImportFinalization";
 import { blockedDraftIndexes, prepareReviewedImport, saveReviewedImport, type ReviewedDraft, type ReviewedImportRequest } from "./questionImportSave";
 import type { QuestionRecord } from "./questions";
+import * as imageImport from "./questionImportImages";
+import * as vault from "./localVault";
+
+afterEach(() => vi.restoreAllMocks());
 
 // Invented teaching content.
 const TEXT = [
@@ -149,5 +153,32 @@ describe("saveReviewedImport", () => {
     if (!prepared.ok) throw new Error("expected a prepared import");
     expect(prepared.attachmentNames).toEqual([["thorax-p1-fig1.png"], []]);
     expect(await saveReviewedImport(prepared, store, [])).toMatchObject({ ok: true, images: { attached: 0, missing: 1, problems: [] } });
+  });
+
+  it.each([false, true])("waits for image associations and reports a failed vault write (%s)", async (fail) => {
+    const { store } = memoryStore();
+    const prepared = prepareReviewedImport(request({ drafts: drafts().map((draft, i) => ({
+      ...draft, attachmentNames: i === 0 ? ["figure.png"] : [],
+    })) }), empty, make());
+    if (!prepared.ok) throw new Error("expected prepared import");
+    vi.spyOn(imageImport, "attachNamedImages").mockResolvedValue({ attachments: [{
+      id: "figure", blobKey: "figure", fileName: "figure.png", mimeType: "image/png",
+      byteSize: 10, altText: "", createdAt: "2026-10-08", updatedAt: "2026-10-08", role: "exhibit",
+    }], problems: [] });
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const flush = vi.spyOn(vault, "flushLocalVaultWrites").mockReturnValue(pending);
+    vi.spyOn(vault, "assertVaultWritesSince").mockImplementation(() => {
+      if (fail) throw new Error("Storage full");
+    });
+    let finished = false;
+    const saving = saveReviewedImport(prepared, store, [new File(["image"], "figure.png")])
+      .then((result) => { finished = true; return result; });
+    await vi.waitFor(() => expect(flush).toHaveBeenCalled());
+    expect(finished).toBe(false);
+    release();
+    const result = await saving;
+    expect(result).toMatchObject({ ok: true, images: { attached: fail ? 0 : 1, missing: 0 } });
+    if (result.ok) expect(result.images.problems).toHaveLength(fail ? 1 : 0);
   });
 });

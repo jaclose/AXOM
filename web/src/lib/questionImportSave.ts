@@ -29,6 +29,7 @@ import type { ImportLibrary } from "./questionImportHistory";
 import { attachNamedImages, matchNamedImages } from "./questionImportImages";
 import { evaluateImportDrafts, type DraftImportEvaluation } from "./questionImportTrust";
 import { normalizeTags, suggestCategory } from "./taxonomy";
+import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "./localVault";
 
 export type ImportDestination = "set" | "doc" | "both";
 
@@ -342,8 +343,15 @@ export async function saveReviewedImport(
       if (!images.length) continue;
       const result = await attachNamedImages({ names, files: images, questionId });
       if (result.attachments.length) {
-        store.updateQuestion(questionId, { attachments: result.attachments });
-        report.attached += result.attachments.length;
+        try {
+          const checkpoint = getVaultWriteCheckpoint();
+          await store.updateQuestion(questionId, { attachments: result.attachments });
+          await flushLocalVaultWrites();
+          assertVaultWritesSince(checkpoint);
+          report.attached += result.attachments.length;
+        } catch {
+          report.problems.push(`Question ${index + 1}: its images could not be linked on this device. Keep the source files and export a backup before closing AXOM.`);
+        }
       }
       report.problems.push(...result.problems);
     }
