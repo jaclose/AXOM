@@ -59,7 +59,7 @@ export interface SourceMetadata {
   questionNumber?: number;
 }
 
-export const PROVENANCE_METHODS = ["authored", "manual-transcription", "docx-template", "pdf-import", "axom-export"] as const;
+export const PROVENANCE_METHODS = ["authored", "manual-transcription", "docx-template", "docx-import", "pdf-import", "axom-export"] as const;
 export type ProvenanceMethod = (typeof PROVENANCE_METHODS)[number];
 
 export interface ProvenanceMetadata {
@@ -117,6 +117,13 @@ export interface QuestionAsset {
   bounds?: { x: number; y: number; width: number; height: number };
   /** On an answer-reveal asset: the clean asset it is the marked copy of. */
   revealOf?: string;
+  /**
+   * The part of the stored picture the source hides on each side, as a
+   * fraction of its width or height. A document can crop a picture on the
+   * page and still hold all of it, so whatever shows the picture must hide
+   * the same part.
+   */
+  crop?: { left: number; top: number; right: number; bottom: number };
 }
 
 export const QUESTION_FLAG_TYPES = [
@@ -127,6 +134,7 @@ export const QUESTION_FLAG_TYPES = [
   "media_association_uncertain",
   "table_parse_uncertain",
   "missing_required_media",
+  "answer_needs_review",
 ] as const;
 export type QuestionFlagType = (typeof QUESTION_FLAG_TYPES)[number];
 
@@ -182,7 +190,13 @@ export type StructuralIssueCode =
   | "missing_answer_key"
   | "answer_key_not_a_choice"
   | "choices_incomplete"
-  | "asset_reference_broken";
+  | "asset_reference_broken"
+  | "invalid_document"
+  | "unsupported_content"
+  | "possible_answer_marking"
+  | "tracked_changes"
+  | "media_cropped"
+  | "needs_review";
 
 export type IssueCode = QuestionFlagType | StructuralIssueCode;
 

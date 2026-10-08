@@ -5,7 +5,7 @@
 // repairs content quietly. Writing is canonical (fixed key order, absent
 // fields left out), so export, re-import and export again give the same text.
 // ===========================================================================
-import { ASSET_ROLES, inspectRichText, type QuestionBlock, type TableBlock } from "./blocks";
+import { ASSET_ROLES, inspectRichText, type QuestionBlock, type TableBlock, type TableMerge } from "./blocks";
 import {
   ANSWER_EVIDENCE,
   ASSET_DERIVATIONS,
@@ -100,11 +100,27 @@ const BLOCK_KEYS: Record<QuestionBlock["type"], readonly string[]> = {
   text: ["type", "text"],
   rich_text: ["type", "html"],
   image: ["type", "assetId", "role", "alt", "caption"],
-  table: ["type", "caption", "headers", "rowHeaders", "rowKeys", "rows", "sourceImageAssetId"],
+  table: ["type", "caption", "headers", "rowHeaders", "rowKeys", "rich", "merges", "rows", "sourceImageAssetId"],
   equation: ["type", "latex", "plainText"],
   divider: ["type"],
   callout: ["type", "tone", "text"],
 };
+
+function readMerges(value: unknown): TableMerge[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const merges: TableMerge[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry)) return undefined;
+    const row = integer(entry.row);
+    const column = integer(entry.column);
+    const rowSpan = integer(entry.rowSpan);
+    const columnSpan = integer(entry.columnSpan);
+    if (row === undefined || column === undefined || rowSpan === undefined || columnSpan === undefined) return undefined;
+    if (row < 0 || column < 0 || rowSpan < 1 || columnSpan < 1) return undefined;
+    merges.push({ row, column, rowSpan, columnSpan });
+  }
+  return merges;
+}
 
 function readTable(value: Json, path: string, ctx: ReadContext): TableBlock | undefined {
   const reject = (message: string): undefined => {
@@ -125,13 +141,28 @@ function readTable(value: Json, path: string, ctx: ReadContext): TableBlock | un
   if (widths.size > 1) {
     note(ctx, "warning", "table_parse_uncertain", "The rows of this table do not all have the same number of cells.", path);
   }
+  const rich = value.rich === true;
+  let escaped = false;
+  const safe = (cell: string): string => {
+    if (!rich) return cell;
+    const inspected = inspectRichText(cell);
+    escaped = escaped || inspected.escaped;
+    return inspected.html;
+  };
+  const safeHeaders = headers?.map(safe);
+  const safeRows = (rows as string[][]).map((row) => row.map(safe));
+  if (escaped) note(ctx, "warning", "rich_text_escaped", "Markup AXOM does not run was kept as plain text.", path);
+  const merges = value.merges === undefined ? undefined : readMerges(value.merges);
+  if (value.merges !== undefined && !merges) return reject("Each merged cell needs a row, a column, a row span and a column span.");
   return {
     type: "table",
     ...optional("caption", text(value.caption)),
-    ...optional("headers", headers),
+    ...optional("headers", safeHeaders),
     ...optional("rowHeaders", value.rowHeaders === true ? true : undefined),
     ...optional("rowKeys", rowKeys),
-    rows: rows as string[][],
+    ...optional("rich", rich ? true : undefined),
+    ...optional("merges", merges?.length ? merges : undefined),
+    rows: safeRows,
     ...optional("sourceImageAssetId", filled(value.sourceImageAssetId)),
   };
 }
@@ -200,7 +231,9 @@ function writeBlock(block: QuestionBlock): Json {
     case "image": return compact({ type: block.type, assetId: block.assetId, role: block.role, alt: block.alt, caption: block.caption });
     case "table": return compact({
       type: block.type, caption: block.caption, headers: block.headers, rowHeaders: block.rowHeaders,
-      rowKeys: block.rowKeys, rows: block.rows, sourceImageAssetId: block.sourceImageAssetId,
+      rowKeys: block.rowKeys, rich: block.rich,
+      merges: block.merges?.map((merge) => ({ row: merge.row, column: merge.column, rowSpan: merge.rowSpan, columnSpan: merge.columnSpan })),
+      rows: block.rows, sourceImageAssetId: block.sourceImageAssetId,
     });
     case "equation": return compact({ type: block.type, latex: block.latex, plainText: block.plainText });
     case "divider": return { type: block.type };
@@ -280,7 +313,7 @@ const QUESTION_KEYS = [
 ] as const;
 const ASSET_KEYS = [
   "id", "filename", "mimeType", "width", "height", "byteSize", "sourceFile", "sourcePage", "role", "questionId",
-  "checksum", "derivation", "bounds", "revealOf",
+  "checksum", "derivation", "bounds", "revealOf", "crop",
 ] as const;
 
 function readAsset(value: unknown, index: number, ctx: ReadContext): QuestionAsset | undefined {
@@ -299,6 +332,10 @@ function readAsset(value: unknown, index: number, ctx: ReadContext): QuestionAss
   if (!role) return reject(`An asset needs a role, one of: ${ASSET_ROLES.join(", ")}.`);
   if (!questionId) return reject("An asset needs the id of the question it belongs to.");
   warnUnknown(value, ASSET_KEYS, path, ctx);
+  const crop = isRecord(value.crop) ? value.crop : undefined;
+  const cropped = crop && [crop.left, crop.top, crop.right, crop.bottom].every((entry) => finite(entry) !== undefined && (entry as number) >= 0 && (entry as number) < 1)
+    ? { left: crop.left as number, top: crop.top as number, right: crop.right as number, bottom: crop.bottom as number }
+    : undefined;
   const bounds = isRecord(value.bounds) ? value.bounds : undefined;
   const region = bounds && [bounds.x, bounds.y, bounds.width, bounds.height].every((entry) => finite(entry) !== undefined)
     ? { x: bounds.x as number, y: bounds.y as number, width: bounds.width as number, height: bounds.height as number }
@@ -315,6 +352,7 @@ function readAsset(value: unknown, index: number, ctx: ReadContext): QuestionAss
     ...optional("derivation", oneOf(ASSET_DERIVATIONS, value.derivation)),
     ...optional("bounds", region),
     ...optional("revealOf", filled(value.revealOf)),
+    ...optional("crop", cropped),
   };
 }
 
@@ -325,6 +363,7 @@ function writeAsset(asset: QuestionAsset): Json {
     questionId: asset.questionId, checksum: asset.checksum, derivation: asset.derivation,
     bounds: asset.bounds && { x: asset.bounds.x, y: asset.bounds.y, width: asset.bounds.width, height: asset.bounds.height },
     revealOf: asset.revealOf,
+    crop: asset.crop && { left: asset.crop.left, top: asset.crop.top, right: asset.crop.right, bottom: asset.crop.bottom },
   });
 }
 

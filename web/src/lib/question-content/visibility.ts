@@ -40,10 +40,22 @@ export function isAssetVisible(role: AssetRole, mode: ContentViewMode): boolean 
  * source page while the question is open, and all four supporting roles once
  * it has been answered or is under review.
  */
-function supportingAssetVisible(_role: SupportingRole, _mode: ContentViewMode): boolean {
-  // TODO(human): decide when each supporting role is shown. Until then nothing
-  // beyond the question's own images is shown in any mode.
-  return false;
+function supportingAssetVisible(role: SupportingRole, mode: ContentViewMode): boolean {
+  switch (role) {
+    case "explanation":
+    case "answer_reveal":
+      return mode === "answered" || mode === "review";
+    // The label alone never shows an imported image during a question: an
+    // answer sheet filed as a reference would be exposed. Vetted exam
+    // references, such as lab values, are a separate tool and not an asset.
+    case "reference":
+      return mode !== "question";
+    // A whole page can carry the key or the next question.
+    case "source_page":
+      return mode === "review";
+    default:
+      return false;
+  }
 }
 
 export function visibleBlocks(

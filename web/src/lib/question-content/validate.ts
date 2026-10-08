@@ -22,6 +22,7 @@ const FLAG_SEVERITY: Record<QuestionFlagType, IssueSeverity> = {
   media_association_uncertain: "warning",
   table_parse_uncertain: "warning",
   missing_required_media: "error",
+  answer_needs_review: "warning",
 };
 
 /** Assets that are kept for later and so are not expected to sit in a block. */
@@ -61,6 +62,9 @@ function checkQuestion(pkg: ImportPackage, question: PackageQuestion, options: V
     }
     if (asset.revealOf && !assets.has(asset.revealOf)) {
       add("error", "asset_reference_broken", `The answer-reveal image ${asset.filename} points at an image this question does not have.`, path);
+    }
+    if (asset.crop) {
+      add("info", "media_cropped", `${asset.filename} is cropped in the source. Only the part the source shows may be shown.`, path);
     }
     if (asset.role === "answer_reveal") {
       add("info", "answer_reveal_asset", `${asset.filename} shows the answer. It is held back while the question is open.`, path);

@@ -202,6 +202,61 @@ describe("reading a marked document body", () => {
     expect(questions[0].choices.every((choice) => choice.blocks.every((block) => block.type === "text"))).toBe(true);
   });
 
+  it("uses Word's own lettering, and letters numbered or bulleted choices in order and says so", () => {
+    const item = (text: string, listLabel: string, listKind: "ordered" | "bullet" = "ordered"): DocxBodyElement => ({ kind: "paragraph", text, listLabel, listKind });
+    const lettered = parseMarkedBody([p("[STEM]"), p("Stem."), p("[CHOICES]"), item("one", "A."), item("two", "B."), p("(c) three"), p("[END QUESTION]")], defaults);
+    expect(lettered.issues).toEqual([]);
+    expect(lettered.questions[0].choices.map((choice) => [choice.label, choice.blocks])).toEqual([
+      ["A", [{ type: "text", text: "one" }]], ["B", [{ type: "text", text: "two" }]], ["C", [{ type: "text", text: "three" }]],
+    ]);
+    const numbered = parseMarkedBody([p("[STEM]"), p("Stem."), p("[CHOICES]"), item("one", "1."), item("two", "•", "bullet"), p("[END QUESTION]")], defaults);
+    expect(numbered.questions[0].choices.map((choice) => choice.label)).toEqual(["A", "B"]);
+    expect(codes(numbered.issues)).toEqual(["info:needs_review"]);
+  });
+
+  it("never imports formatting that covers one whole choice, and reports it without using it as the key", () => {
+    const choice = (text: string, emphasis?: { bold?: boolean; highlight?: boolean }): DocxBodyElement => ({ kind: "paragraph", text, ...(emphasis ? { emphasis } : {}) });
+    const marked = parseMarkedBody([p("[STEM]"), p("Stem."), p("[CHOICES]"), choice("A. one"), choice("B. two", { bold: true, highlight: true }), choice("C. three"), p("[END QUESTION]")], defaults);
+    expect(marked.questions[0].correctAnswer).toBeUndefined();
+    expect(JSON.stringify(marked.questions[0].choices)).not.toMatch(/bold|highlight|<b>/);
+    expect(marked.issues).toEqual([expect.objectContaining({ severity: "warning", code: "possible_answer_marking", message: expect.stringContaining("Choice B is formatted differently from the other choices (bold, highlighted)") })]);
+    // The same formatting on every choice is a style, not a mark.
+    const styled = parseMarkedBody([p("[STEM]"), p("Stem."), p("[CHOICES]"), choice("A. one", { bold: true }), choice("B. two", { bold: true }), p("[END QUESTION]")], defaults);
+    expect(styled.issues).toEqual([]);
+  });
+
+  it("takes a tick out of a choice so it cannot give the answer away, and says so", () => {
+    const { questions, issues } = parseMarkedBody([p("[STEM]"), p("Stem."), p("[CHOICES]"), p("A. one"), p("B. two ✓"), p("[END QUESTION]")], defaults);
+    expect(questions[0].choices[1].blocks).toEqual([{ type: "text", text: "two" }]);
+    expect(questions[0].correctAnswer).toBeUndefined();
+    expect(codes(issues)).toEqual(["warning:possible_answer_marking"]);
+  });
+
+  it("places an equation, a caption, merged cells and rich cells where the document has them", () => {
+    const { questions, issues, assetTargets } = parseMarkedBody([
+      p("[STEM]"), p("Before."),
+      { kind: "equation", plainText: "x^2", latex: "{x}^{2}" },
+      { kind: "table", rich: true, headerRows: 1, rows: [["Hormone", "Serum", ""], ["TSH", "0.2 <sup>2</sup>", "4.1"]], merges: [{ row: 0, column: 1, rowSpan: 1, columnSpan: 2 }] },
+      { kind: "paragraph", text: "Table 1. Invented values", caption: true },
+      { kind: "image", target: "word/media/image2.png", crop: { left: 0.25, top: 0, right: 0, bottom: 0 } },
+      { kind: "paragraph", text: "Figure 1", caption: true },
+      p("[IMAGE: answer reveal]"), image("marked.png"), { kind: "paragraph", text: "The answer is circled", caption: true },
+      p("After."),
+      p("[CHOICES]"), p("A. a"), p("B. b"), p("[END QUESTION]"),
+    ], defaults);
+    expect(issues).toEqual([]);
+    expect(questions[0].stem).toEqual([
+      { type: "text", text: "Before." },
+      { type: "equation", latex: "{x}^{2}", plainText: "x^2" },
+      { type: "table", headers: ["Hormone", "Serum", ""], rich: true, merges: [{ row: 0, column: 1, rowSpan: 1, columnSpan: 2 }], rows: [["TSH", "0.2 <sup>2</sup>", "4.1"]], caption: "Table 1. Invented values" },
+      { type: "image", assetId: "example-bank-q01-img-1", caption: "Figure 1" },
+      { type: "text", text: "After." },
+    ]);
+    expect(questions[0].assets[0]).toMatchObject({ crop: { left: 0.25, top: 0, right: 0, bottom: 0 } });
+    expect(JSON.stringify(questions[0].stem)).not.toContain("circled");
+    expect([...assetTargets]).toEqual([["example-bank-q01-img-1", "word/media/image2.png"], ["example-bank-q01-img-2", "media/marked.png"]]);
+  });
+
   it("keeps a paragraph with subscripts as rich text, and ignores a bare heading with nothing under it", () => {
     const { questions, issues } = parseMarkedBody([
       p("QUESTION"),

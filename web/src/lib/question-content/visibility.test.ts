@@ -41,5 +41,28 @@ describe("which images a learner may see", () => {
     expect(shown).toEqual([stem[0], stem[1], stem[3], stem[4]]);
   });
 
-  it.todo("supporting roles (explanation, answer reveal after answering, reference, source page) follow the policy JD sets");
+  // JD's policy of 2026-10-08, every role in every mode. A new role must be added here to be shown anywhere.
+  it("shows each role in exactly the modes the policy allows", () => {
+    const allowed: Record<AssetRole, ContentViewMode[]> = {
+      question: ["question", "answered", "review"],
+      stem: ["question", "answered", "review"],
+      choice: ["question", "answered", "review"],
+      explanation: ["answered", "review"],
+      answer_reveal: ["answered", "review"],
+      reference: ["answered", "review"],
+      source_page: ["review"],
+    };
+    expect(Object.keys(allowed).sort()).toEqual([...ASSET_ROLES].sort());
+    for (const role of ASSET_ROLES) {
+      expect(MODES.filter((mode) => isAssetVisible(role, mode)), role).toEqual(allowed[role]);
+    }
+  });
+
+  it("shows nothing that could give the answer away while a question is open", () => {
+    expect(ASSET_ROLES.filter((role) => isAssetVisible(role, "question"))).toEqual(["question", "stem", "choice"]);
+  });
+
+  it("keeps a role it has never heard of hidden in every mode", () => {
+    for (const mode of MODES) expect(isAssetVisible("future_role" as AssetRole, mode)).toBe(false);
+  });
 });

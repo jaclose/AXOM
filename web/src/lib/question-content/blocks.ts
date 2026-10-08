@@ -49,6 +49,21 @@ export interface TableBlock {
   rowHeaders?: boolean;
   /** Only on a shared answer table: row i is the choice with this label. */
   rowKeys?: string[];
+  /** Cells and headers hold rich text (the tags of a rich_text block), so a subscript in a cell survives. */
+  rich?: boolean;
+  /** Cells that span rows or columns. `rows` stays rectangular: a covered cell is "". */
+  merges?: TableMerge[];
+}
+
+/**
+ * One merged cell. Positions are in the table as drawn: when the table has
+ * headers they are row 0, and the first of `rows` is row 1.
+ */
+export interface TableMerge {
+  row: number;
+  column: number;
+  rowSpan: number;
+  columnSpan: number;
 }
 
 export interface EquationBlock {
@@ -117,11 +132,12 @@ function richTextToPlain(html: string): string {
 // --- reading blocks as plain text ---------------------------------------------
 
 function tableToPlain(table: TableBlock): string {
+  const cell = (value: string): string => (table.rich ? richTextToPlain(value) : value);
   const lines: string[] = [];
   if (table.caption) lines.push(table.caption);
-  if (table.headers) lines.push([...(table.rowKeys ? [""] : []), ...table.headers].join(" | "));
+  if (table.headers) lines.push([...(table.rowKeys ? [""] : []), ...table.headers.map(cell)].join(" | "));
   table.rows.forEach((row, index) => {
-    lines.push([...(table.rowKeys ? [table.rowKeys[index] ?? ""] : []), ...row].join(" | "));
+    lines.push([...(table.rowKeys ? [table.rowKeys[index] ?? ""] : []), ...row.map(cell)].join(" | "));
   });
   return lines.join("\n");
 }
