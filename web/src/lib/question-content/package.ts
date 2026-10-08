@@ -59,6 +59,8 @@ export interface SourceMetadata {
   questionNumber?: number;
   /** Which set of the file it is in, counted from 1, when the file holds several sets each numbered from 1. */
   set?: number;
+  /** The heading the source prints above that set, when it prints one. */
+  setTitle?: string;
 }
 
 export const PROVENANCE_METHODS = ["authored", "manual-transcription", "docx-template", "docx-import", "pdf-import", "axom-export"] as const;
@@ -134,6 +136,7 @@ export const QUESTION_FLAG_TYPES = [
   "possible_duplicate",
   "answer_reveal_asset",
   "media_association_uncertain",
+  "media_position_uncertain",
   "table_parse_uncertain",
   "missing_required_media",
   "answer_needs_review",

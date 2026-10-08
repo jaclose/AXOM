@@ -147,7 +147,7 @@ export function pdfDraftsToQuestions(input: PdfConversionInput, defaults: PdfCon
       if (!placed) {
         question.stem.push({ type: "image", assetId: asset.id, ...(figure.alt ? { alt: figure.alt } : {}) });
         (question.flags ??= []).push({
-          type: "media_association_uncertain",
+          type: "media_position_uncertain",
           message: `The picture from page ${figure.page} belongs to this question, but where it sits in the stem could not be worked out. It is placed after the text.`,
         });
       }

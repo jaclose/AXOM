@@ -14,12 +14,13 @@ export interface ValidateOptions {
   assetFiles?: ReadonlySet<string>;
 }
 
-const FLAG_SEVERITY: Record<QuestionFlagType, IssueSeverity> = {
+export const FLAG_SEVERITY: Record<QuestionFlagType, IssueSeverity> = {
   source_inconsistency: "warning",
   missing_explanation: "info",
   possible_duplicate: "warning",
   answer_reveal_asset: "info",
   media_association_uncertain: "warning",
+  media_position_uncertain: "warning",
   table_parse_uncertain: "warning",
   missing_required_media: "error",
   answer_needs_review: "warning",

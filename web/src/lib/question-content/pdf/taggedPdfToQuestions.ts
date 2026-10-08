@@ -38,6 +38,8 @@ export interface TaggedConversion {
   unplaced: UnplacedMedia[];
   /** Plain notes on how the file was read. */
   notes: string[];
+  /** The text of the file as it was read, page by page: what the library keeps as the source document. */
+  sourceText: { rawText: string; pageTexts: string[] };
   /** Counts only, for a report that can be shown without showing a question. */
   report: {
     pages: number;
@@ -94,12 +96,17 @@ export function taggedPdfToQuestions(input: TaggedConversionInput, defaults: Pdf
     return bodyToAnchoredText(page.elements, { paragraphBreak: "\n", into: anchored }).text;
   });
 
+  // The same pages as a person would read them: a table as rows, and no word for a picture.
+  const readable = pages.map((page) => page.elements.flatMap((element) => (
+    element.kind === "paragraph" ? [element.text] : element.kind === "table" ? element.rows.map((row) => row.join("\t")) : []
+  )).join("\n"));
+
   // One parse for each set of questions. Everything after it works on all of them together.
   const parts = splitParts(pageTexts);
   const headings = new Set(pages.flatMap((page) => page.headings));
   const drafts: ParsedQuestionDraft[] = [];
   const ids: string[] = [];
-  const setOf: number[] = [];
+  const setOf: { set: number; title?: string }[] = [];
   const questionPages: QuestionPage[] = [];
   const notes: string[] = [];
   let deckPages: readonly DeckPage[] = [];
@@ -114,7 +121,7 @@ export function taggedPdfToQuestions(input: TaggedConversionInput, defaults: Pdf
       // The set's own heading files its questions, when the tags say the line is a heading.
       if (parts.length > 1 && part.title && headings.has(part.title) && !draft.topic) draft.topic = part.title;
       drafts.push(draft);
-      setOf.push(at + 1);
+      setOf.push({ set: at + 1, ...(part.title ? { title: part.title } : {}) });
       questionPages.push(located[index]);
     });
     notes.push(...parsed.notes.map((note) => `${label}${note}`));
@@ -152,7 +159,22 @@ export function taggedPdfToQuestions(input: TaggedConversionInput, defaults: Pdf
     deckPages,
   );
   const converted = pdfDraftsToQuestions({ drafts, figures, placements, questionPages, linesByPage, deckPages, media: anchored.media, ids }, defaults);
-  if (parts.length > 1) converted.questions.forEach((question, index) => { question.source.set = setOf[index]; });
+  if (parts.length > 1) {
+    converted.questions.forEach((question, index) => {
+      question.source.set = setOf[index].set;
+      if (setOf[index].title) question.source.setTitle = setOf[index].title;
+    });
+  }
+  // A picture or table left over on a page that holds a question may be that question's. Nothing
+  // says so, and nothing says it is not, so each question on the page waits for a person.
+  for (const entry of converted.unplaced) {
+    const at = entry.media.kind === "image" ? figureAt(entry.media.element.target)?.page ?? Number(/-p(\d+)-fig\d+\.png$/.exec(entry.media.element.target)?.[1] ?? Number.NaN) : Number.NaN;
+    if (!Number.isFinite(at)) continue;
+    converted.questions.forEach((question, index) => {
+      if (questionPages[index].page !== at) return;
+      (question.flags ??= []).push({ type: "media_association_uncertain", message: `A picture on page ${at} could not be tied to a question. It may belong to this one. Check the page.` });
+    });
+  }
   const byName = new Map(figures.map((figure) => [figure.name, figure]));
   for (const [assetId, name] of converted.figureOfAsset) {
     const figure = byName.get(name);
@@ -220,6 +242,7 @@ export function taggedPdfToQuestions(input: TaggedConversionInput, defaults: Pdf
     renders,
     unplaced: converted.unplaced,
     notes,
+    sourceText: { rawText: readable.join("\n\n"), pageTexts: readable },
     report: {
       pages: pages.length,
       readByPosition: pages.some((page) => page.order === "position"),

@@ -100,7 +100,7 @@ describe("writing a package", () => {
       id: "ex-q02",
       week: 4,
       subtopic: "Order",
-      source: { filename: "invented.pdf", page: 5, pageEnd: 6, questionNumber: 2, set: 2 },
+      source: { filename: "invented.pdf", page: 5, pageEnd: 6, questionNumber: 2, set: 2, setTitle: "Renal physiology" },
       stem: [
         { type: "text", text: "Before the table." },
         { type: "table", caption: "Panel", headers: ["", "Seen", "Not seen"], rowHeaders: true, rows: [["Exposed", "12", "0.50"], ["Unexposed", "↑↑", "±"]], sourceImageAssetId: "ex-q02-img-2" },

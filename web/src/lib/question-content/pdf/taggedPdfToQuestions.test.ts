@@ -71,6 +71,7 @@ describe("a tagged document with two sets, a table and figures", () => {
   it("reads each set on its own, and tells them apart in the ids and the source", () => {
     expect(result.questions.map((question) => question.id)).toEqual(["invented-bank-s1-q01", "invented-bank-s1-q02", "invented-bank-s1-q03", "invented-bank-s2-q01", "invented-bank-s2-q02"]);
     expect(result.questions.map((question) => [question.source.set, question.source.questionNumber])).toEqual([[1, 1], [1, 2], [1, 3], [2, 1], [2, 2]]);
+    expect(result.questions.map((question) => question.source.setTitle)).toEqual(["Cardiology", "Cardiology", "Cardiology", "Renal physiology", "Renal physiology"]);
     expect(result.report.sets).toBe(2);
     expect(result.notes[0]).toMatch(/2 sets of questions/);
   });
@@ -111,6 +112,14 @@ describe("a tagged document with two sets, a table and figures", () => {
 
   it("leaves the other questions ready", () => {
     expect([relativeRisk, glomerulus, vasopressin].map((question) => questionReadiness(question, result.issues).readiness)).toEqual(["ready", "ready", "ready"]);
+  });
+
+  it("hands back the text of the file as a person would read it: a table as rows, and no stand-in for a picture", () => {
+    expect(result.sourceText.pageTexts).toHaveLength(2);
+    expect(result.sourceText.pageTexts[0]).toContain("Group\tDeaths\tSurvivors\nDrug\t10\t90\nPlacebo\t20\t80");
+    expect(result.sourceText.rawText).toBe(result.sourceText.pageTexts.join("\n\n"));
+    expect(result.sourceText.rawText).not.toMatch(/AXOMANCHOR/);
+    expect(result.sourceText.rawText).toContain("Answers and brief explanations:");
   });
 
   it("does not change the pages it was given", () => {
@@ -155,6 +164,22 @@ describe("a tagged document with one set", () => {
     expect(result.questions.flatMap((question) => question.assets)).toEqual([]);
     expect(result.unplaced.map((entry) => entry.media.kind === "image" && entry.media.element.target)).toEqual(["page:1:figure:0"]);
     expect(result.issues.filter((issue) => issue.code === "media_association_uncertain" && !issue.questionId)).toHaveLength(1);
+  });
+
+  it("holds a question back when a picture on its page could not be tied to any question", () => {
+    const result = taggedPdfToQuestions({ pages: [
+      // A picture above the first question's number: its own exhibit, or a banner. Nothing says which.
+      page(1, [image(1, 0), p("1. Which nerve supplies the diaphragm?"), ...choices("Vagus nerve", "Phrenic nerve", "Intercostal nerve"), p("Answer: B"), p("")], { figures: [{ left: 100, top: 60, width: 300, height: 200 }] }),
+      page(2, [p("2. Which bone forms the forehead?"), ...choices("Frontal", "Parietal", "Occipital"), p("Answer: A"), p("")]),
+    ] }, DEFAULTS);
+    const [first, second] = result.questions;
+    expect(result.unplaced).toHaveLength(1);
+    expect(first.correctAnswer?.labels).toEqual(["B"]);
+    expect(first.flags).toEqual([{ type: "media_association_uncertain", message: expect.stringContaining("A picture on page 1 could not be tied to a question") }]);
+    expect(questionReadiness(first, result.issues).readiness).toBe("needs-review");
+    // The question on the other page is not touched.
+    expect(second.flags).toBeUndefined();
+    expect(questionReadiness(second, result.issues).readiness).toBe("ready");
   });
 
   it("keeps the parser's doubt when a numbered question follows an explanation with nothing between them", () => {
@@ -233,6 +258,8 @@ describe("a tagged slide deck whose answer slides only mark the answer", () => {
     expect(result.report.figureLabels).toBe(4);
     // Placed after a stem whose first line carries the question's number: no doubt to report.
     expect(first.flags?.map((flag) => flag.type)).toEqual(["answer_needs_review"]);
+    // Nothing on a slide without a question holds a question back.
+    expect(result.questions.flatMap((question) => question.flags ?? []).filter((flag) => flag.type === "media_association_uncertain")).toEqual([]);
   });
 
   it("keeps a key the answer slide prints in words", () => {

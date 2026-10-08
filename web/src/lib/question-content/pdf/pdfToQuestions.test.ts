@@ -72,7 +72,7 @@ describe("the existing PDF import, written as package questions", () => {
 
   it("places a figure after the text and flags it when its place in the stem cannot be worked out", () => {
     expect(second.stem.map((block) => block.type)).toEqual(["text", "image"]);
-    expect(second.flags).toEqual([{ type: "media_association_uncertain", message: expect.stringContaining("where it sits in the stem could not be worked out") }]);
+    expect(second.flags).toEqual([{ type: "media_position_uncertain", message: expect.stringContaining("where it sits in the stem could not be worked out") }]);
   });
 
   it("gives a figure below an answer to the explanation, and lists one with no question for placing by hand", () => {

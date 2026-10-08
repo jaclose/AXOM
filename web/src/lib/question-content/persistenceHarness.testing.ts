@@ -7,11 +7,11 @@ import { STORAGE_KEYS } from "../brand";
 import type { QuestionSet, SourceDocument } from "../library";
 import { DB_NAME, flushLocalVaultWrites, localVaultStorage } from "../localVault";
 import { listQuestionAttachmentBlobKeys } from "../questionAttachments";
-import { prepareReviewedImport, saveReviewedImport, type PreparedReviewedImport, type ReviewedImportRefusal, type SavedReviewedImport } from "../questionImportSave";
 import type { QuestionRecord } from "../questions";
 import { useStore } from "../store";
+import { saveBank, type BankSave, type Workspace as ImportWorkspace } from "./bankImport";
 import type { ImportPackage, PackageIssue } from "./package";
-import { packageToReviewedImport, type PackageImportOptions, type PackageReviewedImport } from "./toReviewedImport";
+import type { PackageImportOptions } from "./toReviewedImport";
 
 export interface Workspace {
   questions: QuestionRecord[];
@@ -61,22 +61,20 @@ export async function closeWorkspace(): Promise<void> {
   vi.unstubAllGlobals();
 }
 
-export interface PackageImport {
-  adapted: PackageReviewedImport;
-  prepared: PreparedReviewedImport | ReviewedImportRefusal;
-  /** Absent when there was nothing to save or the import was refused. */
-  saved?: SavedReviewedImport;
-}
+/** The app's own store, as the import screens hand it to the save. */
+export const realWorkspace: ImportWorkspace = {
+  library: () => {
+    const state = useStore.getState();
+    return { questions: state.questions, questionSets: state.questionSets, documents: state.documents };
+  },
+  store: () => useStore.getState(),
+};
 
-/** The same three calls the import screens make: adapt, prepare against the library as it stands, save. */
-export async function importPackage(pkg: ImportPackage, issues: readonly PackageIssue[], files: readonly File[], options: PackageImportOptions = {}): Promise<PackageImport> {
-  const adapted = packageToReviewedImport(pkg, issues, options);
-  const state = useStore.getState();
-  const prepared = prepareReviewedImport(adapted.request, { questions: state.questions, questionSets: state.questionSets, documents: state.documents });
-  if (!prepared.ok) return { adapted, prepared };
-  const saved = await saveReviewedImport(prepared, useStore.getState(), files);
+/** A package through the canonical import into the real store, then flushed to storage. */
+export async function importPackage(pkg: ImportPackage, issues: readonly PackageIssue[], files: readonly File[], options: PackageImportOptions = {}): Promise<BankSave> {
+  const saved = await saveBank(pkg, issues, files, realWorkspace, options);
   await flushLocalVaultWrites();
-  return { adapted, prepared, saved };
+  return saved;
 }
 
 /** What a reload would read: the vault's own copy, not the store in memory. */

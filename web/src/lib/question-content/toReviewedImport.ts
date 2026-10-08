@@ -10,6 +10,10 @@
 // once a person has accepted it, and never without a key. Everything held
 // back is returned with its reasons.
 //
+// A source file that holds several sets of questions, each numbered from 1,
+// stays one source and becomes one saved set for each of its own. Nothing is
+// renumbered: every question keeps the number its source gave it.
+//
 // Until a question record can hold blocks, three things do not make the trip
 // and are listed in the result instead of being dropped silently: a picture
 // that must stay hidden until the answer is given, a table as a table (it is
@@ -24,9 +28,12 @@ import { questionReadiness, type Readiness } from "./readiness";
 import { isAssetVisible } from "./visibility";
 
 export interface PackageImportOptions {
+  /** "both" keeps a record of the source file in the library beside the questions. It needs `sourceText`. */
   destination?: ImportDestination;
   /** The source file's size, for the library's note of where the questions came from. */
   sourceBytes?: number;
+  /** The text of the source as it was read. With it, the library keeps one record of the file, and every set made from it is tied to that record. */
+  sourceText?: { rawText: string; pageTexts?: string[] };
   /** Ids of questions a person has looked at and accepts although they carry a review note. */
   acknowledged?: ReadonlySet<string>;
   /** Notes on how the file was read, kept on the saved set. */
@@ -47,19 +54,27 @@ export interface WithheldAsset {
   reason: string;
 }
 
-export interface PackageReviewedImport {
+/** One set of the source, as one request to the canonical import. */
+export interface SectionImport {
+  /** Which set of the source this is, counted from 1. Absent when the source is one set. */
+  set?: number;
+  /** The heading the source prints above the set, when it prints one. */
+  title?: string;
   /** What to hand to `prepareReviewedImport`. Its drafts are only the questions that may be saved. */
   request: ReviewedImportRequest;
   /** The package question each draft came from, in step with `request.drafts`. */
   questionIds: string[];
   /** The image files `saveReviewedImport` has to be given, by file name. */
   imageNames: string[];
+}
+
+export interface PackageReviewedImport {
+  /** One for each set of the source that has a question to save, in the source's order. Prepare and save them one after another. */
+  imports: SectionImport[];
   held: HeldQuestion[];
   withheldAssets: WithheldAsset[];
-  /** Where the set is filed, and whether the curriculum agrees that the module sits in that term. */
+  /** Where the sets are filed, and whether the curriculum agrees that the module sits in that term. */
   filing: { module: string; week: number; term: number; curriculumTerm?: string; agrees: boolean };
-  /** True when the source's own numbers repeat, so the saved questions are numbered in running order. */
-  renumbered: boolean;
 }
 
 const FILE_TYPE: Record<string, string> = { pdf: "pdf", docx: "docx", doc: "docx", pptx: "pptx", txt: "text", md: "text" };
@@ -76,92 +91,121 @@ export function packageToReviewedImport(pkg: ImportPackage, issues: readonly Pac
   const { manifest } = pkg;
   const held: HeldQuestion[] = [];
   const withheldAssets: WithheldAsset[] = [];
-  const going: { question: PackageQuestion; reasons: string[] }[] = [];
+  const going: { question: PackageQuestion; advisories: string[]; accepted: string[] }[] = [];
+
+  // Within one set a number names one question. Two with the same number cannot both be saved under it.
+  const numbered = new Map<string, number>();
+  for (const question of pkg.questions) {
+    if (question.source.questionNumber === undefined) continue;
+    const key = `${question.source.set ?? 0}:${question.source.questionNumber}`;
+    numbered.set(key, (numbered.get(key) ?? 0) + 1);
+  }
 
   for (const question of pkg.questions) {
     const verdict = questionReadiness(question, issues);
     const fields = legacyQuestionFields(manifest, question);
     const reasons = [...verdict.reasons];
     let readiness = verdict.readiness;
-    if (readiness !== "unresolved" && fields.options.some((option) => !option.text.trim())) {
+    let saveable = Boolean(question.correctAnswer);
+    if (fields.options.some((option) => !option.text.trim())) {
       // A choice that is only a picture has no text for the current question record to show.
-      readiness = "unresolved";
+      saveable = false;
+      if (readiness === "ready") readiness = "needs-review";
       reasons.push("A choice is a picture with no text. It cannot be saved as a question yet.");
     }
-    if (readiness !== "unresolved" && question.correctAnswer && !fields.correctKey) {
-      readiness = "unresolved";
+    if (question.correctAnswer && !fields.correctKey) {
+      saveable = false;
+      if (readiness === "ready") readiness = "needs-review";
       reasons.push("The key names more than one choice. Only single-answer questions can be saved yet.");
     }
-    const accepted = readiness === "needs-review" && Boolean(question.correctAnswer) && options.acknowledged?.has(question.id);
-    if (readiness === "ready" || accepted) going.push({ question, reasons });
+    const number = question.source.questionNumber;
+    if (number !== undefined && (numbered.get(`${question.source.set ?? 0}:${number}`) ?? 0) > 1) {
+      saveable = false;
+      if (readiness === "ready") readiness = "needs-review";
+      reasons.push(`Another question in the same set also has the number ${number}. Which is which cannot be told from the source.`);
+    }
+    const accepted = readiness === "needs-review" && saveable && options.acknowledged?.has(question.id);
+    if (readiness === "ready" || accepted) going.push({ question, advisories: verdict.advisories, accepted: accepted ? reasons : [] });
     else held.push({ questionId: question.id, readiness, reasons });
   }
 
-  // A file with several sets, each numbered from 1, would be refused for its repeated numbers.
-  // The saved questions are then numbered in running order, and each keeps its own number in its source label.
-  const numbers = going.map((entry) => entry.question.source.questionNumber);
-  const renumbered = numbers.some((value) => value === undefined) || new Set(numbers).size !== numbers.length;
-  const source: QuestionSource = going.some((entry) => entry.question.provenance.method === "pdf-import") ? "pdf" : "imported";
+  const checksum = pkg.questions.find((question) => question.provenance.sourceChecksum)?.provenance.sourceChecksum;
+  const extension = manifest.source.filename.split(".").pop()?.toLowerCase() ?? "";
+  const destination = options.destination ?? (options.sourceText ? "both" : "set");
+  const sets = [...new Set(going.map((entry) => entry.question.source.set))];
+  const several = new Set(pkg.questions.map((question) => question.source.set)).size > 1;
 
-  const drafts: ReviewedDraft[] = going.map(({ question, reasons }, index) => {
-    const fields = legacyQuestionFields(manifest, question);
-    const shown = question.assets.filter((asset) => isAssetVisible(asset.role, "question"));
-    for (const asset of question.assets) {
-      if (shown.includes(asset)) continue;
-      withheldAssets.push({
-        questionId: question.id,
-        assetId: asset.id,
-        filename: asset.filename,
-        role: asset.role,
-        reason: "It must not be seen while the question is open, and the current question record shows every picture with the question. It stays in the package.",
-      });
-    }
-    const where = [
-      question.source.filename,
-      ...(question.source.set !== undefined ? [`set ${question.source.set}`] : []),
-      ...(question.source.questionNumber !== undefined ? [`question ${question.source.questionNumber}`] : []),
-    ].join(", ");
+  const imports: SectionImport[] = sets.map((set) => {
+    const members = going.filter((entry) => entry.question.source.set === set);
+    const title = members.find((entry) => entry.question.source.setTitle)?.question.source.setTitle;
+    const place = set === undefined ? "" : `set ${set}${title ? ` (${title})` : ""}`;
+    const drafts: ReviewedDraft[] = members.map(({ question, advisories, accepted }) => {
+      const fields = legacyQuestionFields(manifest, question);
+      const shown = question.assets.filter((asset) => isAssetVisible(asset.role, "question"));
+      for (const asset of question.assets) {
+        if (shown.includes(asset)) continue;
+        withheldAssets.push({
+          questionId: question.id,
+          assetId: asset.id,
+          filename: asset.filename,
+          role: asset.role,
+          reason: "It must not be seen while the question is open, and the current question record shows every picture with the question. It stays in the package.",
+        });
+      }
+      const where = [
+        question.source.filename,
+        ...(place ? [place] : []),
+        ...(question.source.questionNumber !== undefined ? [`question ${question.source.questionNumber}`] : []),
+      ].join(", ");
+      return {
+        stem: fields.stem,
+        options: fields.options,
+        correctKey: fields.correctKey,
+        ...(fields.explanation ? { explanation: fields.explanation } : {}),
+        ...(fields.topic ? { topic: fields.topic } : {}),
+        // The source's own number, as it is. A set never borrows numbers from another set.
+        ...(question.source.questionNumber !== undefined ? { questionNumber: question.source.questionNumber } : {}),
+        ...(fields.sourcePage !== undefined ? { sourcePage: fields.sourcePage, questionSourcePage: fields.sourcePage } : {}),
+        sourceLabel: where,
+        ...(shown.length ? { attachmentNames: shown.map((asset) => asset.filename) } : {}),
+        parserRuleIds: ["import.package", `import.package.${question.provenance.method}`],
+        confidence: "high",
+        // Advisory notes travel with the question. Only a doubt a person accepted marks it as reviewed by hand.
+        warnings: [...accepted, ...advisories],
+        source: question.provenance.method === "pdf-import" ? "pdf" : "imported",
+        ...(accepted.length ? { reviewAcknowledged: true } : {}),
+      };
+    });
+    const source: QuestionSource = members.some((entry) => entry.question.provenance.method === "pdf-import") ? "pdf" : "imported";
     return {
-      stem: fields.stem,
-      options: fields.options,
-      correctKey: fields.correctKey,
-      ...(fields.explanation ? { explanation: fields.explanation } : {}),
-      ...(fields.topic ? { topic: fields.topic } : {}),
-      questionNumber: renumbered ? index + 1 : question.source.questionNumber,
-      ...(fields.sourcePage !== undefined ? { sourcePage: fields.sourcePage, questionSourcePage: fields.sourcePage } : {}),
-      sourceLabel: where,
-      ...(shown.length ? { attachmentNames: shown.map((asset) => asset.filename) } : {}),
-      parserRuleIds: ["import.package", `import.package.${question.provenance.method}`],
-      confidence: "high",
-      warnings: reasons,
-      source: question.provenance.method === "pdf-import" ? "pdf" : "imported",
-      ...(reasons.length ? { reviewAcknowledged: true } : {}),
+      ...(set !== undefined ? { set } : {}),
+      ...(title ? { title } : {}),
+      request: {
+        drafts,
+        destination,
+        document: {
+          title: manifest.bank.title,
+          fileName: manifest.source.filename,
+          fileType: FILE_TYPE[extension] ?? "text",
+          sizeBytes: options.sourceBytes ?? 0,
+          rawText: options.sourceText?.rawText ?? "",
+          ...(options.sourceText?.pageTexts ? { pageTexts: options.sourceText.pageTexts } : {}),
+          ...(checksum ? { checksum } : {}),
+        },
+        sourceType: source,
+        // One source, and one saved set for each of its own sets.
+        setTitle: several && place ? `${manifest.bank.title}: ${place}` : manifest.bank.title,
+        scope: { module: manifest.course.name, week: manifest.course.week },
+        parserWarnings: [...(options.notes ?? [])],
+      },
+      questionIds: members.map((entry) => entry.question.id),
+      imageNames: [...new Set(drafts.flatMap((draft) => draft.attachmentNames ?? []))],
     };
   });
 
-  const checksum = pkg.questions.find((question) => question.provenance.sourceChecksum)?.provenance.sourceChecksum;
-  const extension = manifest.source.filename.split(".").pop()?.toLowerCase() ?? "";
   const curriculumTerm = curriculumTermOf(manifest.course.name);
   return {
-    request: {
-      drafts,
-      destination: options.destination ?? "set",
-      document: {
-        title: manifest.bank.title,
-        fileName: manifest.source.filename,
-        fileType: FILE_TYPE[extension] ?? "text",
-        sizeBytes: options.sourceBytes ?? 0,
-        // The text of the source is not carried: the package is what was read from it.
-        rawText: "",
-        ...(checksum ? { checksum } : {}),
-      },
-      sourceType: source,
-      setTitle: manifest.bank.title,
-      scope: { module: manifest.course.name, week: manifest.course.week },
-      parserWarnings: [...(options.notes ?? [])],
-    },
-    questionIds: going.map((entry) => entry.question.id),
-    imageNames: [...new Set(drafts.flatMap((draft) => draft.attachmentNames ?? []))],
+    imports,
     held,
     withheldAssets,
     filing: {
@@ -171,6 +215,5 @@ export function packageToReviewedImport(pkg: ImportPackage, issues: readonly Pac
       ...(curriculumTerm ? { curriculumTerm } : {}),
       agrees: curriculumTerm === undefined || curriculumTerm === `Term ${manifest.course.term}`,
     },
-    renumbered,
   };
 }

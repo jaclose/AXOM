@@ -39,55 +39,46 @@ describe.skipIf(!process.env.AXOM_QBANK_PERSIST)("real banks through the canonic
       const readiness = countReadiness(pkg.questions, issues);
 
       const first = await importPackage(pkg, issues, files);
-      const { adapted } = first;
       say(`\n=== ${pkg.manifest.bank.id}`);
       say(`  package: ${pkg.questions.length} questions  READY ${readiness.ready}  NEEDS REVIEW ${readiness["needs-review"]}  UNRESOLVED ${readiness.unresolved}`);
-      say(`  filing: ${adapted.filing.module}, week ${adapted.filing.week}, term ${adapted.filing.term}; the curriculum puts ${adapted.filing.module} in ${adapted.filing.curriculumTerm ?? "no term it knows"}: ${adapted.filing.agrees ? "agrees" : "DISAGREES"}`);
-      say(`  offered to the import: ${adapted.questionIds.length}  held back: ${adapted.held.length}  renumbered in running order: ${adapted.renumbered ? "yes" : "no"}`);
-      say(`  pictures offered: ${adapted.imageNames.length}  pictures withheld until a record can hide them: ${adapted.withheldAssets.length}`);
-      expect(adapted.filing.agrees).toBe(true);
-      expect(adapted.questionIds.length).toBe(readiness.ready);
+      say(`  filing: ${first.filing.module}, week ${first.filing.week}, term ${first.filing.term}; the curriculum puts ${first.filing.module} in ${first.filing.curriculumTerm ?? "no term it knows"}: ${first.filing.agrees ? "agrees" : "DISAGREES"}`);
+      say(`  import: ${first.status}  sets ${first.sections.map((section) => `${section.set ?? "-"}:${section.savedIds.length}`).join(" ") || "none"}  held ${first.held.length}  pictures withheld ${first.withheldAssets.length}  errors ${first.errors.length}`);
+      expect(first.filing.agrees).toBe(true);
+      expect(first.errors).toEqual([]);
+      const offered = first.sections.reduce((sum, section) => sum + section.savedIds.length, 0);
+      expect(offered).toBe(readiness.ready);
 
-      if (adapted.questionIds.length === 0) {
-        say(`  nothing ready, so nothing was saved: ${first.prepared.ok ? "UNEXPECTEDLY PREPARED" : first.prepared.reason}`);
-        expect(first.saved).toBeUndefined();
+      if (offered === 0) {
+        expect(first.status).toBe("nothing-ready");
         expect((await workspaceOnDisk()).questions).toHaveLength(0);
         return;
       }
-      expect(first.saved?.ok).toBe(true);
-      if (!first.saved?.ok) return;
-      say(`  saved: ${first.saved.questionIds.length} questions in 1 set  pictures attached ${first.saved.images.attached}, missing ${first.saved.images.missing}, problems ${first.saved.images.problems.length}`);
-
       const disk = await workspaceOnDisk();
-      const set = disk.questionSets[0];
-      const filed = disk.questions.filter((question) => question.module === adapted.filing.module && question.week === adapted.filing.week && question.setId === set.id).length;
-      const keyed = disk.questions.filter((question) => question.correctKey && question.options.some((option) => option.key === question.correctKey)).length;
-      const savedIds = first.saved.questionIds;
-      const sameKey = adapted.questionIds.filter((packageId, index) => {
-        const saved = disk.questions.find((question) => question.id === savedIds[index]);
-        return saved !== undefined && saved.correctKey === pkg.questions.find((question) => question.id === packageId)?.correctAnswer?.labels[0];
-      }).length;
-      say(`  on disk: ${disk.questions.length} questions, ${disk.questionSets.length} set, ${disk.documents.length} documents; set scope ${JSON.stringify(set.scope)}; filed under it ${filed}; with a key that is one of their choices ${keyed}; key equal to the package's ${sameKey}`);
+      const sameKey = first.sections.reduce((sum, section) => sum + section.questionIds.filter((packageId, index) => {
+        const saved = disk.questions.find((question) => question.id === section.savedIds[index]);
+        const from = pkg.questions.find((question) => question.id === packageId)!;
+        return saved !== undefined && saved.correctKey === from.correctAnswer?.labels[0] && saved.questionNumber === from.source.questionNumber;
+      }).length, 0);
+      const filed = disk.questions.filter((question) => question.module === first.filing.module && question.week === first.filing.week).length;
+      say(`  on disk: ${disk.questions.length} questions, ${disk.questionSets.length} sets, ${disk.documents.length} documents; filed under the module and week ${filed}; key and own number equal to the package's ${sameKey}`);
       say(`  pictures: ${disk.questions.reduce((sum, question) => sum + (question.attachments?.length ?? 0), 0)} linked to questions, ${await storedImageCount()} stored`);
-      expect(set.scope).toEqual({ module: adapted.filing.module, week: adapted.filing.week });
-      expect(filed).toBe(adapted.questionIds.length);
-      expect(sameKey).toBe(adapted.questionIds.length);
-      expect(first.saved.images.attached).toBe(adapted.imageNames.length);
+      expect(disk.questionSets).toHaveLength(first.sections.length);
+      expect(filed).toBe(offered);
+      expect(sameKey).toBe(offered);
 
       const reloaded = await reloadWorkspace();
       const same = reloaded.questions.filter((question) => {
         const before = disk.questions.find((other) => other.id === question.id);
         return before && before.stem === question.stem && before.correctKey === question.correctKey && (before.attachments?.length ?? 0) === (question.attachments?.length ?? 0);
       }).length;
-      say(`  after a reload: ${reloaded.questions.length} questions, ${same} unchanged, ${reloaded.questionSets.length} set`);
+      say(`  after a reload: ${reloaded.questions.length} questions, ${same} unchanged, ${reloaded.questionSets.length} sets`);
       expect(same).toBe(disk.questions.length);
 
       const again = await importPackage(pkg, issues, files);
       const after = await workspaceOnDisk();
-      say(`  second import: ${again.saved?.ok ? (again.saved.reused ? "reused the first, wrote nothing" : "WROTE AGAIN") : "refused"}; now ${after.questions.length} questions, ${after.questionSets.length} set, ${await storedImageCount()} pictures stored`);
-      expect(again.saved).toMatchObject({ ok: true, reused: true });
-      expect([after.questions.length, after.questionSets.length]).toEqual([disk.questions.length, 1]);
-      expect(await storedImageCount()).toBe(first.saved.images.attached);
+      say(`  second import: ${again.status}; now ${after.questions.length} questions, ${after.questionSets.length} sets, ${await storedImageCount()} pictures stored`);
+      expect(again.status).toBe("already-saved");
+      expect([after.questions.length, after.questionSets.length]).toEqual([disk.questions.length, disk.questionSets.length]);
     });
   }
 });
