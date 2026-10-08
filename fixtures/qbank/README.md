@@ -42,6 +42,11 @@ From `web/`. Each step prints counts only: no stem, no choice, no answer letter.
 3. Check the built packages: `npx vitest run src/lib/question-content/fixtures.test.ts`
 4. Take each bank through the app's own import and save, in memory, then reload and
    import it again: `AXOM_QBANK_PERSIST=1 npx vitest run src/lib/question-content/pdf/persistBank.local.test.ts`
+5. Do the same in a real browser, from the PDF itself, on the harness page. Start the dev
+   server on a port of its own (`npm run dev -- --host 127.0.0.1 --port 5197 --strictPort`), then:
+   `AXOM_QBANK_SOURCES=/folder/with/the/pdfs AXOM_E2E_BASE_URL=http://127.0.0.1:5197 npx playwright test e2e/goer-pdf-import.local.spec.ts --output=/a/folder/outside/the/repository`
+   Delete that output folder afterwards. The test runs in a browser profile of its own, so
+   it never touches a real workspace.
 
 The pictures of the invented bank and the DOCX template are produced by
 `node scripts/qbank/build-fixtures.mjs`.

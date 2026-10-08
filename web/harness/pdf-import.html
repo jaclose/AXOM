@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AXOM PDF import harness (development only)</title>
+    <style>
+      body { font: 14px/1.5 system-ui, sans-serif; margin: 24px; background: #111; color: #eee; max-width: 980px; }
+      fieldset { border: 1px solid #333; border-radius: 8px; margin: 0 0 16px; padding: 12px 16px; }
+      label { display: inline-flex; flex-direction: column; gap: 4px; margin: 0 12px 8px 0; font-size: 12px; color: #aaa; }
+      input, select, button { font: inherit; padding: 6px 8px; border-radius: 6px; border: 1px solid #444; background: #1b1b1b; color: #eee; }
+      button { cursor: pointer; }
+      pre { white-space: pre-wrap; word-break: break-word; background: #181818; padding: 10px 12px; border-radius: 8px; }
+      article { border: 1px solid #333; border-radius: 8px; padding: 12px 16px; margin: 12px 0; }
+      article[data-readiness="ready"] { border-left: 4px solid #3fb27f; }
+      article[data-readiness="needs-review"] { border-left: 4px solid #d9a441; }
+      article[data-readiness="unresolved"] { border-left: 4px solid #d96a5a; }
+      img { display: block; max-width: 420px; margin: 8px 0; background: #fff; }
+      table { border-collapse: collapse; margin: 8px 0; }
+      th, td { border: 1px solid #555; padding: 4px 10px; text-align: left; }
+      .held { color: #d9a441; }
+    </style>
+  </head>
+  <body>
+    <h1>PDF question import</h1>
+    <p>Development only. It reads a PDF you choose, shows what it found, and saves the ready questions into this browser's AXOM workspace through the app's own import.</p>
+    <fieldset>
+      <legend>Where the questions are filed</legend>
+      <label>Bank id <input data-testid="bank-id" id="bank-id" value="invented-bank" /></label>
+      <label>Bank title <input data-testid="bank-title" id="bank-title" value="Invented bank" /></label>
+      <label>Discipline <input data-testid="discipline" id="discipline" value="Example" /></label>
+      <label>Module <input data-testid="module" id="module" value="EXAMPLE" size="10" /></label>
+      <label>Term <input data-testid="term" id="term" type="number" value="1" style="width: 64px" /></label>
+      <label>Week <input data-testid="week" id="week" type="number" value="1" style="width: 64px" /></label>
+      <label>Or a bank's manifest.json <input data-testid="manifest" id="manifest" type="file" accept="application/json,.json" /></label>
+      <span data-testid="filing" id="filing"></span>
+    </fieldset>
+    <fieldset>
+      <legend>The file</legend>
+      <input data-testid="file" id="file" type="file" accept="application/pdf,.pdf" />
+      <span data-testid="status" id="status" data-state="idle">Choose a PDF.</span>
+    </fieldset>
+    <pre data-testid="summary" id="summary">{}</pre>
+    <label>Show each question as <select data-testid="mode" id="mode"><option value="question">it looks while it is open</option><option value="answered">it looks once answered</option><option value="review">it looks in review</option></select></label>
+    <button data-testid="import" id="import" type="button" disabled>Import the ready questions</button>
+    <pre data-testid="result" id="result">{}</pre>
+    <pre data-testid="errors" id="errors"></pre>
+    <h2>This browser's workspace</h2>
+    <pre data-testid="workspace" id="workspace" data-ready="false">{}</pre>
+    <h2>What was found</h2>
+    <div data-testid="questions" id="questions"></div>
+    <!-- Development only. The production build's one entry is index.html, so this page never ships. -->
+    <script type="module" src="/src/harness/pdfImportHarness.ts"></script>
+  </body>
+</html>
