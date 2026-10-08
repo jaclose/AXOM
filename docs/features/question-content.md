@@ -171,9 +171,11 @@ What it reports and does not import: charts, SmartArt and drawn shapes; linked p
 EMF, WMF, TIFF and BMP pictures; hidden text; comments; a table inside a cell (read as
 lines). It refuses `.doc`, OpenDocument, password-protected and damaged files with a reason.
 
-**Formatting that could give the answer away is never imported.** Bold, highlight or
-colour on one whole choice, and a tick beside a choice, are left out of the question, are
-not used as the key, and are reported as a possible answer marking.
+**Formatting that could give the answer away is never imported.** Formatting on one whole
+choice, and a tick beside a choice, are left out of the question and are never used as the
+key. Bold, underline, highlight, colour and strike-through on one choice and not the
+others are also reported as a possible answer marking (`isPossibleAnswerMark`). Italics
+alone are not reported: organism names and terms are set that way for their own sake.
 
 No library is added: the ZIP is inflated with the platform's `DecompressionStream` and the
 XML is read by a small parser with no DTD and no entity expansion. `jszip` stays a dev
@@ -208,7 +210,7 @@ check prints counts only.
 | Phase | Scope | State |
 | --- | --- | --- |
 | 1 | Model, package, checks, markers, template, fixtures, tests | Built (`c25718d`) |
-| 2 | Read a `.docx` body in document order; convert to the package; adapter from the existing PDF import | Built. One choice is JD's: `isPossibleAnswerMark` in `docx/parseMarkedBody.ts` |
+| 2 | Read a `.docx` body in document order; convert to the package; adapter from the existing PDF import | Built (`96c5cd9`) |
 | 3 | Import preview: counts, issues, rendered questions, media badges, moving a picture to the right place | Open. Codex wires it into `ImportPanel` and `MassImport`; `summarizePackage`, `validatePackage` and `unplaced` are its inputs |
 | 4 | `content` on `QuestionRecord`; one block renderer under every exam interface; wider attachment roles; image enlarge, zoom, pan; deletion, backup and restore of the pictures | Open. Edits `questions.ts`, `questionAttachments.ts`, `ExamRunner.tsx`: Codex's files |
 | 5 | Build the three Term 5 GOER Week 2 banks locally and run them as the real regression set | Open. The sources are PDFs: tables must be rebuilt from page positions first, or the banks typed into the template |

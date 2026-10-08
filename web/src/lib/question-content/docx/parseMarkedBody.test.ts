@@ -4,7 +4,7 @@ import type { ImportPackage, PackageManifest } from "../package";
 import { parsePackage, serializeManifest, serializeQuestionsFile } from "../packageJson";
 import { validatePackage } from "../validate";
 import { looksLikeMarker, readMarker, type DocxBodyElement } from "./markers";
-import { DOCX_MARKER_PARSER, parseMarkedBody } from "./parseMarkedBody";
+import { ANSWER_MARK_KINDS, DOCX_MARKER_PARSER, isPossibleAnswerMark, parseMarkedBody } from "./parseMarkedBody";
 
 const p = (text: string): DocxBodyElement => ({ kind: "paragraph", text });
 const table = (...rows: string[][]): DocxBodyElement => ({ kind: "table", rows });
@@ -223,6 +223,30 @@ describe("reading a marked document body", () => {
     // The same formatting on every choice is a style, not a mark.
     const styled = parseMarkedBody([p("[STEM]"), p("Stem."), p("[CHOICES]"), choice("A. one", { bold: true }), choice("B. two", { bold: true }), p("[END QUESTION]")], defaults);
     expect(styled.issues).toEqual([]);
+  });
+
+  it("counts bold, underline, highlight, colour and strike as possible answer marks, and not italics alone", () => {
+    expect([...ANSWER_MARK_KINDS]).toEqual(["bold", "underline", "highlight", "colour", "strike"]);
+    for (const kind of ANSWER_MARK_KINDS) expect(isPossibleAnswerMark({ [kind]: true }), kind).toBe(true);
+    expect(isPossibleAnswerMark({ italic: true })).toBe(false);
+    expect(isPossibleAnswerMark({})).toBe(false);
+    expect(isPossibleAnswerMark({ bold: false, italic: true })).toBe(false);
+    // Italics beside a kind that counts do not hide it.
+    expect(isPossibleAnswerMark({ italic: true, strike: true })).toBe(true);
+  });
+
+  it("says nothing about a choice set in italics, such as an organism's name, and still imports no formatting", () => {
+    const choice = (text: string, emphasis?: { italic?: boolean; highlight?: boolean }): DocxBodyElement => ({ kind: "paragraph", text, ...(emphasis ? { emphasis } : {}) });
+    const named = parseMarkedBody([p("[STEM]"), p("Which organism?"), p("[CHOICES]"), choice("A. Escherichia coli", { italic: true }), choice("B. A virus"), choice("C. A prion"), p("[END QUESTION]")], defaults);
+    expect(named.issues).toEqual([]);
+    expect(named.questions[0].choices[0].blocks).toEqual([{ type: "text", text: "Escherichia coli" }]);
+    expect(named.questions[0].correctAnswer).toBeUndefined();
+    // Italic and highlighted: reported for the highlight, and the italics are not named as a reason.
+    const both = parseMarkedBody([p("[STEM]"), p("Which organism?"), p("[CHOICES]"), choice("A. Escherichia coli", { italic: true, highlight: true }), choice("B. A virus"), p("[ANSWER]"), p("B"), p("[END QUESTION]")], defaults);
+    expect(both.issues).toEqual([expect.objectContaining({ code: "possible_answer_marking", message: "Choice A is formatted differently from the other choices (highlighted). That may mark the answer. The formatting was not imported and was not used as the key." })]);
+    // The key is what [ANSWER] says, never what the formatting suggests.
+    expect(both.questions[0].correctAnswer).toEqual({ labels: ["B"], evidence: "printed-key" });
+    expect(JSON.stringify(both.questions[0].choices)).not.toMatch(/highlight|italic|<i>|<b>/);
   });
 
   it("takes a tick out of a choice so it cannot give the answer away, and says so", () => {

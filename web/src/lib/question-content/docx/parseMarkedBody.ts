@@ -80,15 +80,19 @@ const EMPHASIS_WORDS: Record<keyof ParagraphEmphasis, string> = {
 };
 
 /**
- * Whether formatting on one whole choice, and not on the others, should be
- * reported as a possible answer marking. The formatting is never imported
- * either way; this only decides whether the import preview says so.
+ * The kinds of formatting that, on one whole choice and not on the others,
+ * are reported as a possible answer marking (JD, 2026-10-08). Italics are
+ * left out: an organism's name or a term is set that way for its own sake.
+ */
+export const ANSWER_MARK_KINDS = ["bold", "underline", "highlight", "colour", "strike"] as const satisfies readonly (keyof ParagraphEmphasis)[];
+
+/**
+ * Whether a choice's formatting is worth a warning in the import preview.
+ * That is all it decides. The formatting is never imported, and a correct
+ * answer is never inferred or saved from it, whatever this returns.
  */
 export function isPossibleAnswerMark(emphasis: ParagraphEmphasis): boolean {
-  // TODO(human): decide which kinds of formatting count. Until then every
-  // kind is reported, which is safe and sometimes noisy (an organism's name
-  // set in italics as a whole choice is reported too).
-  return Object.values(emphasis).some(Boolean);
+  return ANSWER_MARK_KINDS.some((kind) => emphasis[kind] === true);
 }
 
 interface DraftIssue {
@@ -325,7 +329,8 @@ export function parseMarkedBody(elements: readonly DocxBodyElement[], defaults: 
     });
     // Formatting every choice shares is a style. Formatting on some of them may be the answer.
     if (marked.length > 0 && marked.length < done.choices.length) {
-      const kinds = [...new Set(marked.flatMap((entry) => (Object.keys(entry.emphasis) as (keyof ParagraphEmphasis)[]).filter((key) => entry.emphasis[key]).map((key) => EMPHASIS_WORDS[key])))];
+      // Only the kinds that count are named: a bold italic choice is reported as bold.
+      const kinds = ANSWER_MARK_KINDS.filter((kind) => marked.some((entry) => entry.emphasis[kind])).map((kind) => EMPHASIS_WORDS[kind]);
       add(
         "warning", "possible_answer_marking",
         `Choice ${marked.map((entry) => entry.label).join(", ")} ${marked.length === 1 ? "is" : "are"} formatted differently from the other choices (${kinds.join(", ")}). That may mark the answer. The formatting was not imported and was not used as the key.`,
