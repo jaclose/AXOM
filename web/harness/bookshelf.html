@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>AXOM bookshelf harness (development only)</title>
+    <script>
+      // The same first-paint theme rule as the app: a stored choice, else the system's.
+      (() => {
+        let preference = "system";
+        try { const stored = localStorage.getItem("axom.theme"); if (stored === "light" || stored === "dark") preference = stored; } catch { /* storage may be closed */ }
+        const dark = preference === "system" ? (window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? true) : preference === "dark";
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- Development only. The production build's one entry is index.html, so this page never ships. -->
+    <script type="module" src="/src/harness/bookshelfHarness.tsx"></script>
+  </body>
+</html>

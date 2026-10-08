@@ -26,6 +26,9 @@ module and week, findings and review reasons are in
 Optional AI uses the [provider boundary](../architecture/backend.md), with validated,
 reviewed outputs. A specification is not proof all source formats are implemented.
 
+Content made of ordered blocks (tables, images and equations in place), the import
+package and the DOCX template: [question content](question-content.md).
+
 Canonical scope: [import engine specification](../UNIVERSAL-QUESTION-IMPORT-ENGINE.md).
 Known supported formats/limitations must be checked against current import adapters
 and [evaluation harness](../QUESTION-IMPORT-EVALUATION-HARNESS.md).

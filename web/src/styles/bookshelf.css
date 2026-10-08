@@ -1,0 +1,589 @@
+/* ===========================================================================
+   The academic bookshelf. Books are real 3D boxes drawn with CSS transforms:
+   no canvas, no library. Every colour is a theme token or a mix of tokens, so
+   palettes and the light theme carry through. The opening is a sequence of
+   transitions whose lengths match STEP in AcademicBookshelf.tsx.
+   =========================================================================== */
+
+.academic-bookshelf {
+  --shelf-wall-1: color-mix(in srgb, var(--bg-3) 92%, var(--gold) 8%);
+  --shelf-wall-2: var(--bg-1);
+  --shelf-plank-1: color-mix(in srgb, var(--bg-3) 78%, var(--gold) 22%);
+  --shelf-plank-2: color-mix(in srgb, var(--bg-1) 90%, var(--gold) 10%);
+  --page: color-mix(in srgb, var(--bone) 84%, #6d5b3a);
+  --book-depth: 140px;
+  --book-height: 262px;
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
+  position: relative;
+  display: block;
+}
+
+.academic-bookshelf-empty { padding: 40px 0; color: var(--text-60); }
+
+.bookshelf-hint {
+  margin: 0 0 14px;
+  font-size: 12px;
+  color: var(--text-45);
+}
+
+/* Shelves stand side by side where there is room, like the bays of a bookcase. */
+.bookshelf-shelves {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr));
+  gap: 26px;
+  transition: transform .5s var(--ease-out), filter .5s var(--ease-out), opacity .5s var(--ease-out);
+  transform-origin: 50% 30%;
+}
+
+/* The room recedes while a book is out. */
+.academic-bookshelf[data-open="true"] .bookshelf-shelves {
+  transform: scale(.965);
+  filter: brightness(.55) saturate(.8);
+}
+
+.bookshelf-shelf {
+  position: relative;
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-sm);
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(var(--accent-rgb), .07), transparent 60%),
+    linear-gradient(180deg, var(--shelf-wall-1), var(--shelf-wall-2) 78%);
+  box-shadow: inset 0 1px 0 var(--hairline-soft), inset 0 -30px 40px -20px rgba(0, 0, 0, .55), var(--shadow-card);
+  border: 1px solid var(--glass-card-border);
+}
+
+/* The brass plate that names the shelf. */
+.bookshelf-plate {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  z-index: 2;
+  margin: 0;
+  padding: 4px 10px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--gold-line);
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), .2), rgba(var(--accent-rgb), .07));
+  font-family: var(--font-brand);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
+.bookshelf-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 5px;
+  margin: 0;
+  padding: 62px 26px 0;
+  min-height: calc(var(--book-height) + 62px);
+  list-style: none;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+  perspective: 1300px;
+  perspective-origin: 50% 35%;
+}
+
+.bookshelf-slot { flex: none; scroll-snap-align: center; }
+
+.bookshelf-plank {
+  height: 16px;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  background: linear-gradient(180deg, var(--shelf-plank-1), var(--shelf-plank-2));
+  box-shadow: inset 0 1px 0 rgba(var(--accent-rgb), .28), 0 14px 22px -12px rgba(0, 0, 0, .7);
+}
+
+/* --- a book on the shelf ---------------------------------------------------- */
+
+.shelf-book {
+  --hue: var(--blue);
+  --mix: 26%;
+  --cloth: color-mix(in srgb, var(--hue) var(--mix), #121216);
+  --cloth-hi: color-mix(in srgb, var(--hue) calc(var(--mix) + 16%), #23232a);
+  --cloth-lo: color-mix(in srgb, var(--hue) calc(var(--mix) - 12%), #050506);
+  position: relative;
+  display: block;
+  width: var(--spine);
+  height: calc(var(--book-height) * var(--rise));
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.shelf-book[data-tone="1"], .open-book-layer[data-tone="1"] { --hue: var(--teal); }
+.shelf-book[data-tone="2"], .open-book-layer[data-tone="2"] { --hue: var(--purple); }
+.shelf-book[data-tone="3"], .open-book-layer[data-tone="3"] { --hue: var(--orange); }
+.shelf-book[data-tone="4"], .open-book-layer[data-tone="4"] { --hue: var(--green); }
+.shelf-book[data-tone="5"], .open-book-layer[data-tone="5"] { --hue: var(--red); }
+.shelf-book[data-tone="6"], .open-book-layer[data-tone="6"] { --hue: var(--bone-dim); }
+.shelf-book[data-step="1"], .open-book-layer[data-step="1"] { --mix: 32%; }
+.shelf-book[data-step="2"], .open-book-layer[data-step="2"] { --mix: 21%; }
+.shelf-book[data-step="3"], .open-book-layer[data-step="3"] { --mix: 37%; }
+
+.shelf-book:focus { outline: none; }
+
+.shelf-book-body {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  transform-origin: 50% 100%;
+  transition: transform .42s var(--ease-out);
+}
+
+.shelf-book-spine {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0 14px;
+  border-radius: 3px 3px 1px 1px;
+  background:
+    linear-gradient(90deg, rgba(0, 0, 0, .5), transparent 16%, rgba(255, 255, 255, .07) 42%, transparent 62%, rgba(0, 0, 0, .46)),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, .018) 0 1px, transparent 1px 3px),
+    linear-gradient(180deg, var(--cloth-hi), var(--cloth) 30%, var(--cloth-lo));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .05), 0 10px 14px -8px rgba(0, 0, 0, .8);
+  overflow: hidden;
+}
+
+/* Gold bands near the head and the foot of the spine. */
+.shelf-book-spine::before,
+.shelf-book-spine::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 5px;
+  border-block: 1px solid var(--gold-line);
+}
+.shelf-book-spine::before { top: 30px; }
+.shelf-book-spine::after { bottom: 34px; }
+
+/* A slow sheen that crosses the spine when the book is picked out. */
+.shelf-book-body::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 30%, rgba(255, 255, 255, .16) 48%, transparent 66%);
+  background-size: 260% 100%;
+  background-position: 120% 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.spine-crest {
+  font-family: var(--font-brand);
+  font-size: 11px;
+  line-height: 1;
+  color: var(--gold);
+  opacity: .8;
+}
+
+.spine-title {
+  flex: 1;
+  min-height: 0;
+  margin-top: 16px;
+  writing-mode: vertical-rl;
+  font-family: var(--font-brand);
+  font-size: clamp(12px, calc(var(--spine) * .34), 21px);
+  font-weight: 600;
+  letter-spacing: .12em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--gold);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, .6);
+}
+
+/* A bound spine is dark cloth in either theme, so its small print is always light. */
+.spine-id {
+  margin-bottom: 26px;
+  writing-mode: vertical-rl;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  letter-spacing: .1em;
+  white-space: nowrap;
+  color: rgba(243, 240, 232, .62);
+}
+
+/* The front cover, seen edge-on until the book turns. */
+.shelf-book-cover {
+  position: absolute;
+  top: 0;
+  left: 100%;
+  width: var(--book-depth);
+  height: 100%;
+  transform-origin: left center;
+  transform: rotateY(90deg);
+  border-radius: 0 3px 3px 0;
+  background: linear-gradient(90deg, var(--cloth-lo), var(--cloth) 30%, var(--cloth-hi));
+}
+
+.shelf-book-top {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  bottom: 100%;
+  height: var(--book-depth);
+  transform-origin: bottom center;
+  transform: rotateX(90deg);
+  background: repeating-linear-gradient(90deg, var(--page) 0 1px, color-mix(in srgb, var(--page) 78%, #000) 1px 2px);
+}
+
+.shelf-book:hover .shelf-book-body,
+.shelf-book:focus-visible .shelf-book-body {
+  transform: translateY(-14px) translateZ(34px) rotateY(-17deg);
+}
+
+.shelf-book:hover .shelf-book-body::after,
+.shelf-book:focus-visible .shelf-book-body::after {
+  opacity: 1;
+  background-position: -60% 0;
+  transition: background-position .9s var(--ease-out), opacity .2s;
+}
+
+.shelf-book:focus-visible .shelf-book-spine {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .05), 0 0 0 2px rgba(var(--accent-rgb), .9), 0 0 0 6px rgba(var(--accent-rgb), .18);
+}
+
+/* A real module with nothing in it: an unbound book, the colour of the wall
+   behind it, outlined and plainly marked. It reads as a place kept, not as a
+   book with content. */
+.shelf-book[data-state="empty"] .shelf-book-spine {
+  background: color-mix(in srgb, var(--cloth) 16%, var(--shelf-wall-1));
+  border: 1px dashed color-mix(in srgb, var(--gold) 38%, var(--hairline));
+  box-shadow: none;
+}
+.shelf-book[data-state="empty"] .shelf-book-cover { background: color-mix(in srgb, var(--cloth) 22%, var(--shelf-wall-2)); }
+.shelf-book[data-state="empty"] .spine-title,
+.shelf-book[data-state="empty"] .spine-crest,
+.shelf-book[data-state="empty"] .spine-id { color: var(--text-55); text-shadow: none; }
+.shelf-book[data-state="empty"] .shelf-book-spine::before,
+.shelf-book[data-state="empty"] .shelf-book-spine::after { border-color: var(--hairline); }
+.shelf-book[data-state="empty"] .shelf-book-body::after { display: none; }
+
+/* Off the shelf: the gap stays, so nothing beside it moves. */
+.shelf-book[data-out="true"] { visibility: hidden; }
+
+.shelf-book-tip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 22px);
+  z-index: 3;
+  display: grid;
+  gap: 1px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-card-border);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-floating);
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-70);
+  text-align: left;
+  opacity: 0;
+  transform: translate(-50%, 6px);
+  transition: opacity .18s, transform .28s var(--ease-out);
+  pointer-events: none;
+}
+.shelf-book-tip strong { font-family: var(--font-display); font-size: 12px; color: var(--text); }
+.shelf-book:hover .shelf-book-tip,
+.shelf-book:focus-visible .shelf-book-tip { opacity: 1; transform: translate(-50%, 0); }
+
+/* --- the book in the air, and open ------------------------------------------- */
+
+.open-book-layer {
+  --hue: var(--blue);
+  --mix: 26%;
+  --cloth: color-mix(in srgb, var(--hue) var(--mix), #121216);
+  --cloth-hi: color-mix(in srgb, var(--hue) calc(var(--mix) + 16%), #23232a);
+  --cloth-lo: color-mix(in srgb, var(--hue) calc(var(--mix) - 12%), #050506);
+  --page: color-mix(in srgb, var(--bone) 84%, #6d5b3a);
+  /* A leaf of the open book: the same paper the open pages are drawn on. */
+  --leaf: color-mix(in srgb, var(--cloth) 16%, var(--bg-3));
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  perspective: 2200px;
+}
+
+.open-book-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(4, 4, 6, .62);
+  backdrop-filter: blur(3px);
+  opacity: 0;
+  transition: opacity .5s var(--ease-out);
+}
+.open-book-layer:not([data-phase="lifting"]):not([data-phase="returning"]) .open-book-scrim { opacity: 1; }
+
+.book-flight {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--cover-w);
+  height: var(--cover-h);
+  margin: calc(var(--cover-h) / -2) 0 0 calc(var(--cover-w) / -2);
+  transform-style: preserve-3d;
+  /* On the shelf: spine to the reader, at the size and place of the book that was chosen. */
+  transform: translate3d(var(--from-x), var(--from-y), 0) scale(var(--from-scale)) rotateY(90deg);
+  transition: transform .56s var(--ease-out), opacity .3s;
+  pointer-events: none;
+}
+
+.open-book-layer[data-phase="turning"] .book-flight,
+.open-book-layer[data-phase="closing"] .book-flight { transform: translate3d(0, 0, 0) scale(1) rotateY(0deg); }
+.open-book-layer[data-phase="opening"] .book-flight,
+.open-book-layer[data-phase="open"] .book-flight { transform: translate3d(calc(var(--cover-w) * .5), 0, 0) scale(1) rotateY(0deg); transition-duration: .52s; }
+.open-book-layer[data-phase="open"] .book-flight { opacity: 0; }
+.open-book-layer[data-phase="returning"] .book-flight { transition-duration: .48s; }
+
+.book-flight-box { position: absolute; inset: 0; transform-style: preserve-3d; }
+
+.flight-spine {
+  position: absolute;
+  top: 0;
+  left: calc(var(--spine-w) / -2);
+  width: var(--spine-w);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 26px 0;
+  transform: rotateY(-90deg);
+  background:
+    linear-gradient(90deg, rgba(0, 0, 0, .5), transparent 16%, rgba(255, 255, 255, .07) 42%, transparent 62%, rgba(0, 0, 0, .46)),
+    linear-gradient(180deg, var(--cloth-hi), var(--cloth) 30%, var(--cloth-lo));
+}
+.flight-spine .spine-title { margin-top: 30px; font-size: clamp(22px, calc(var(--spine-w) * .34), 46px); }
+.flight-spine .spine-crest { font-size: 24px; }
+
+.flight-pages {
+  position: absolute;
+  inset: 6px 8px 6px 2px;
+  transform: translateZ(calc(var(--spine-w) / -2 + 3px));
+  border-radius: 2px 6px 6px 2px;
+  background:
+    linear-gradient(90deg, rgba(0, 0, 0, .4), transparent 10%),
+    repeating-linear-gradient(180deg, transparent 0 27px, var(--hairline-soft) 27px 28px),
+    var(--leaf);
+  box-shadow: inset 0 0 0 1px var(--hairline-soft);
+  /* The page block exists only while the cover is off it. Closed, a book is cover and spine. */
+  visibility: hidden;
+}
+.open-book-layer[data-phase="opening"] .flight-pages,
+.open-book-layer[data-phase="open"] .flight-pages,
+.open-book-layer[data-phase="closing"] .flight-pages { visibility: visible; }
+
+/* The inside of the spine is never seen: only its outer face is drawn. */
+.flight-spine { backface-visibility: hidden; }
+
+.flight-cover {
+  position: absolute;
+  inset: 0;
+  transform: translateZ(calc(var(--spine-w) / 2));
+  transform-origin: left center;
+  transform-style: preserve-3d;
+  transition: transform .52s cubic-bezier(.4, 0, .2, 1);
+}
+.open-book-layer[data-phase="opening"] .flight-cover,
+.open-book-layer[data-phase="open"] .flight-cover { transform: translateZ(calc(var(--spine-w) / 2)) rotateY(-162deg); }
+.open-book-layer[data-phase="closing"] .flight-cover { transition-duration: .38s; }
+
+.flight-cover-face {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: 12%;
+  border-radius: 3px 8px 8px 3px;
+  background:
+    linear-gradient(90deg, rgba(0, 0, 0, .5), transparent 7%, rgba(255, 255, 255, .05) 12%, transparent 22%),
+    radial-gradient(90% 70% at 30% 20%, rgba(255, 255, 255, .09), transparent 60%),
+    linear-gradient(160deg, var(--cloth-hi), var(--cloth) 45%, var(--cloth-lo));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .06), inset 0 0 0 10px transparent, inset 0 0 0 11px var(--gold-line), 0 40px 80px -30px rgba(0, 0, 0, .9);
+  backface-visibility: hidden;
+  text-align: center;
+}
+/* The inside of the cover, seen once it has swung past the reader: the left leaf of the open book. */
+.flight-cover-inside {
+  position: absolute;
+  inset: 0;
+  transform: rotateY(180deg);
+  backface-visibility: hidden;
+  border-radius: 8px 3px 3px 8px;
+  background: linear-gradient(270deg, rgba(0, 0, 0, .4), transparent 10%), var(--leaf);
+  box-shadow: inset 0 0 0 9px color-mix(in srgb, var(--cloth) 80%, transparent), inset 0 0 0 10px var(--gold-line);
+}
+.cover-crest { font-family: var(--font-brand); font-size: 30px; color: var(--gold); }
+.cover-title { font-family: var(--font-brand); font-size: clamp(30px, calc(var(--cover-w) * .17), 64px); font-weight: 600; letter-spacing: .1em; color: var(--gold); text-shadow: 0 2px 0 rgba(0, 0, 0, .55); }
+.cover-id { font-family: var(--font-mono); font-size: 12px; letter-spacing: .16em; color: var(--text-60); }
+.cover-shelf { margin-top: 18px; font-family: var(--font-brand); font-size: 12px; letter-spacing: .2em; text-transform: uppercase; color: var(--text-50); }
+
+/* The open book: two facing pages on a wide screen, one page on a phone. */
+.open-book {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  width: min(1040px, calc(100vw - 32px));
+  height: min(680px, calc(100dvh - 48px));
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--glass-card-border);
+  background:
+    linear-gradient(90deg, transparent calc(50% - 26px), rgba(0, 0, 0, .28) 50%, transparent calc(50% + 26px)),
+    linear-gradient(180deg, color-mix(in srgb, var(--cloth) 16%, var(--bg-3)), var(--bg-2));
+  box-shadow: var(--shadow-overlay), inset 0 1px 0 var(--hairline-soft), inset 0 0 0 5px color-mix(in srgb, var(--cloth) 55%, transparent);
+  opacity: 0;
+  transform: scale(.972) translateY(8px);
+  transition: opacity .3s var(--ease-out), transform .46s var(--ease-out);
+  pointer-events: none;
+}
+.open-book:focus { outline: none; }
+.open-book-layer[data-phase="opening"] .open-book { opacity: 1; transform: none; transition-delay: .2s; }
+.open-book-layer[data-phase="open"] .open-book { opacity: 1; transform: none; pointer-events: auto; }
+.open-book-layer[data-phase="closing"] .open-book { opacity: 0; transition-duration: .18s; }
+
+.open-book-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 26px 14px;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.open-book-kicker { margin: 0 0 4px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--text-50); }
+.open-book-title { margin: 0; font-family: var(--font-brand); font-size: 30px; font-weight: 600; letter-spacing: .08em; color: var(--gold); }
+.open-book-close {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-card-border);
+  background: var(--surface-1);
+  color: var(--text-80);
+  cursor: pointer;
+}
+.open-book-close:hover { border-color: var(--neutral-border-hover); background: var(--neutral-hover); }
+.open-book-close:focus-visible, .book-page :focus-visible { outline: none; box-shadow: var(--axom-focus-ring); }
+
+.open-book-body { flex: 1; min-height: 0; display: flex; }
+
+.book-pages { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }
+.book-page { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px 26px 24px; }
+.book-page + .book-page { padding-left: 34px; }
+.book-page h3 { margin: 0 0 10px; font-family: var(--font-display); font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-60); }
+.book-page p { margin: 0 0 12px; font-size: 13.5px; line-height: 1.55; color: var(--text-80); }
+
+.book-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0 0 18px; padding: 0; }
+.book-fact { padding: 10px 12px; border-radius: var(--radius-md); border: 1px solid var(--hairline-soft); background: var(--surface-1); }
+.book-fact dt { font-size: 11px; color: var(--text-50); }
+.book-fact dd { margin: 2px 0 0; font-family: var(--font-display); font-size: 19px; font-weight: 600; color: var(--text); }
+
+.book-note { padding: 10px 12px; border-radius: var(--radius-md); border: 1px solid var(--gold-line); background: var(--gold-soft); font-size: 12.5px; line-height: 1.5; color: var(--text-85); }
+.book-note[data-tone="plain"] { border-color: var(--hairline); background: var(--surface-1); color: var(--text-70); }
+.book-note[data-tone="bad"] { border-color: color-mix(in srgb, var(--red) 55%, transparent); background: color-mix(in srgb, var(--red) 14%, transparent); }
+.book-note[data-tone="good"] { border-color: color-mix(in srgb, var(--green) 55%, transparent); background: color-mix(in srgb, var(--green) 13%, transparent); }
+
+.book-list { display: grid; gap: 8px; margin: 0 0 16px; padding: 0; list-style: none; }
+.book-row { border-radius: var(--radius-md); border: 1px solid var(--hairline-soft); background: var(--surface-1); }
+.book-row-main { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 8px 12px; }
+.book-row-main input[type="checkbox"] { width: 18px; height: 18px; flex: none; accent-color: rgb(var(--accent-rgb)); }
+.book-row-text { flex: 1; min-width: 0; }
+.book-row-title { display: block; font-size: 13.5px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+.book-row-meta { display: block; margin-top: 1px; font-size: 12px; color: var(--text-55); overflow-wrap: anywhere; }
+.book-row details { border-top: 1px solid var(--hairline-soft); padding: 0 12px; }
+.book-row summary { min-height: 44px; display: flex; align-items: center; font-size: 12px; color: var(--text-60); cursor: pointer; }
+.book-row details ul { margin: 0 0 10px; padding-left: 18px; font-size: 12.5px; line-height: 1.6; color: var(--text-75); }
+
+.book-status { flex: none; padding: 3px 9px; border-radius: var(--radius-pill); border: 1px solid var(--hairline); font-size: 11px; white-space: nowrap; color: var(--text-70); }
+.book-status[data-status="imported"] { border-color: color-mix(in srgb, var(--green) 50%, transparent); color: var(--green); }
+.book-status[data-status="awaiting-review"], .book-status[data-status="available"] { border-color: var(--gold-line); color: var(--gold); }
+.book-status[data-status="source-missing"], .book-status[data-status="unsupported"] { border-color: color-mix(in srgb, var(--red) 50%, transparent); color: var(--red); }
+
+.book-segments { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+.book-segment { min-height: 44px; padding: 0 14px; border-radius: var(--radius-pill); border: 1px solid var(--hairline); background: transparent; font: inherit; font-size: 12.5px; color: var(--text-70); cursor: pointer; }
+.book-segment[aria-pressed="true"] { border-color: var(--gold-line); background: var(--gold-soft); color: var(--text); }
+
+.book-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 6px; }
+.book-count { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-70); }
+.book-count input { width: 76px; min-height: 44px; padding: 0 10px; border-radius: var(--radius-sm); border: 1px solid var(--hairline); background: var(--surface-1); font: inherit; color: var(--text); }
+
+/* --- the library frame: browse, recover, import, create ----------------------- */
+
+.academic-library { display: grid; gap: 18px; }
+.academic-library-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.academic-library-title { margin: 0; font-family: var(--font-display); font-size: 22px; font-weight: 600; color: var(--text); }
+.academic-library-sub { margin: 4px 0 0; font-size: 13px; color: var(--text-60); }
+.academic-library-tabs { display: flex; gap: 4px; padding: 4px; border-radius: var(--radius-pill); border: 1px solid var(--hairline-soft); background: var(--surface-1); }
+.academic-library-tab { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px; border-radius: var(--radius-pill); border: 0; background: transparent; font: inherit; font-size: 13px; color: var(--text-60); cursor: pointer; }
+.academic-library-tab[aria-selected="true"] { background: var(--gold-soft); color: var(--text); box-shadow: inset 0 0 0 1px var(--gold-line); }
+.academic-library-tab:focus-visible { outline: none; box-shadow: var(--axom-focus-ring); }
+.academic-library-panel { min-height: 120px; }
+.academic-library-plain { max-width: 62ch; display: grid; gap: 12px; padding: 22px; border-radius: var(--radius-lg); border: 1px solid var(--glass-card-border); background: var(--glass-card-fill); }
+.academic-library-plain h3 { margin: 0; font-family: var(--font-display); font-size: 16px; color: var(--text); }
+.academic-library-plain p { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--text-75); }
+
+/* --- light theme --------------------------------------------------------------- */
+
+:root[data-theme="light"] .academic-bookshelf {
+  --shelf-wall-1: #f4eee3;
+  --shelf-wall-2: #e6dccb;
+  --shelf-plank-1: #cbb892;
+  --shelf-plank-2: #a8946b;
+}
+:root[data-theme="light"] .bookshelf-shelf { box-shadow: inset 0 1px 0 #fffdf9, inset 0 -30px 40px -24px rgba(var(--ink-rgb), .28), var(--shadow-card); border-color: rgba(var(--ink-rgb), .16); }
+:root[data-theme="light"] .academic-bookshelf[data-open="true"] .bookshelf-shelves { filter: brightness(.8) saturate(.8); }
+:root[data-theme="light"] .open-book { background: linear-gradient(90deg, transparent calc(50% - 26px), rgba(var(--ink-rgb), .1) 50%, transparent calc(50% + 26px)), linear-gradient(180deg, #fffdf9, #f4eee3); }
+:root[data-theme="light"] .open-book-scrim { background: rgba(60, 52, 38, .42); }
+:root[data-theme="light"] .open-book-layer { --leaf: #fbf7ef; }
+
+/* --- phone ------------------------------------------------------------------- */
+
+@media (max-width: 720px) {
+  .academic-bookshelf { --book-height: 204px; --book-depth: 104px; }
+  .bookshelf-row { padding: 58px 16px 0; gap: 4px; }
+  /* A thumb needs more than a 34 pixel spine. */
+  .shelf-book { width: max(var(--spine), 44px); }
+  .open-book { width: calc(100vw - 20px); height: calc(100dvh - 28px); border-radius: var(--radius-lg); background: linear-gradient(180deg, color-mix(in srgb, var(--cloth) 16%, var(--bg-3)), var(--bg-2)); }
+  .open-book-head { padding: 16px 16px 12px; }
+  .open-book-title { font-size: 24px; }
+  .open-book-body { overflow-y: auto; overscroll-behavior: contain; }
+  .book-pages { display: block; }
+  .book-page { overflow: visible; padding: 16px; }
+  .book-page + .book-page { padding-left: 16px; border-top: 1px solid var(--hairline-soft); }
+  .open-book-layer[data-phase="opening"] .book-flight,
+  .open-book-layer[data-phase="open"] .book-flight { transform: translate3d(0, 0, 0) scale(1) rotateY(0deg); }
+  .academic-library-tabs { width: 100%; overflow-x: auto; }
+}
+
+@media (hover: none) {
+  .shelf-book:hover .shelf-book-body { transform: none; }
+  .shelf-book:hover .shelf-book-tip { opacity: 0; }
+}
+
+/* --- less motion: the same steps, with nothing travelling ---------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .bookshelf-shelves, .shelf-book-body, .shelf-book-tip, .book-flight, .flight-cover, .open-book, .open-book-scrim { transition-duration: .01ms !important; transition-delay: 0s !important; }
+  .shelf-book:hover .shelf-book-body, .shelf-book:focus-visible .shelf-book-body { transform: translateY(-6px); }
+  .book-flight { display: none; }
+  .academic-bookshelf[data-open="true"] .bookshelf-shelves { transform: none; }
+}
+:root[data-motion="reduce"] .book-flight { display: none; }
+:root[data-motion="reduce"] .shelf-book:hover .shelf-book-body,
+:root[data-motion="reduce"] .shelf-book:focus-visible .shelf-book-body { transform: translateY(-6px); }

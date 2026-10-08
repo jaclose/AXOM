@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "course": {
+    "name": "EXAMPLE",
+    "term": 1,
+    "week": 1
+  },
+  "bank": {
+    "id": "synthetic-multimodal-shapes",
+    "title": "Invented multimodal shapes",
+    "discipline": "Example"
+  },
+  "source": {
+    "filename": "invented.pdf",
+    "sourceWeekDeclared": false,
+    "axomAssignedWeek": 1
+  },
+  "questionsFile": "questions.json",
+  "assetsDirectory": "assets/"
+}

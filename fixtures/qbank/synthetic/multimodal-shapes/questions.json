@@ -1,0 +1,811 @@
+{
+  "schemaVersion": 1,
+  "bankId": "synthetic-multimodal-shapes",
+  "questions": [
+    {
+      "id": "syn-q01",
+      "source": {
+        "filename": "invented.pdf",
+        "page": 1,
+        "questionNumber": 1
+      },
+      "stem": [
+        {
+          "type": "text",
+          "text": "A study follows 400 people who drink well water and 600 who drink mains water for five years. Which measure compares how often a new illness arises in the two groups?"
+        }
+      ],
+      "choices": [
+        {
+          "id": "syn-q01-a",
+          "label": "A",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Prevalence ratio"
+            }
+          ]
+        },
+        {
+          "id": "syn-q01-b",
+          "label": "B",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Relative risk"
+            }
+          ]
+        },
+        {
+          "id": "syn-q01-c",
+          "label": "C",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Odds of exposure"
+            }
+          ]
+        },
+        {
+          "id": "syn-q01-d",
+          "label": "D",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Case fatality"
+            }
+          ]
+        },
+        {
+          "id": "syn-q01-e",
+          "label": "E",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Specificity"
+            }
+          ]
+        }
+      ],
+      "correctAnswer": {
+        "labels": ["B"],
+        "evidence": "printed-key"
+      },
+      "explanation": [
+        {
+          "type": "text",
+          "text": "Both groups are followed forward from the exposure, so the two incidences can be measured and divided."
+        }
+      ],
+      "assets": [],
+      "provenance": {
+        "method": "authored",
+        "notes": "Invented for tests. Not course material."
+      }
+    },
+    {
+      "id": "syn-q02",
+      "source": {
+        "filename": "invented.pdf",
+        "page": 1,
+        "questionNumber": 2
+      },
+      "stem": [
+        {
+          "type": "text",
+          "text": "Investigators compare 200 gardeners who use a compost additive with 300 who do not, and record who develops a rash within a year."
+        },
+        {
+          "type": "table",
+          "headers": ["", "Rash", "No rash", "Total"],
+          "rowHeaders": true,
+          "rows": [
+            ["Additive", "40", "160", "200"],
+            ["No additive", "30", "270", "300"],
+            ["Total", "70", "430", "500"]
+          ]
+        },
+        {
+          "type": "text",
+          "text": "What is the relative risk of a rash in gardeners who use the additive?"
+        }
+      ],
+      "choices": [
+        {
+          "id": "syn-q02-a",
+          "label": "A",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "0.5"
+            }
+          ]
+        },
+        {
+          "id": "syn-q02-b",
+          "label": "B",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "1.0"
+            }
+          ]
+        },
+        {
+          "id": "syn-q02-c",
+          "label": "C",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "2.0"
+            }
+          ]
+        },
+        {
+          "id": "syn-q02-d",
+          "label": "D",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "2.5"
+            }
+          ]
+        },
+        {
+          "id": "syn-q02-e",
+          "label": "E",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "4.0"
+            }
+          ]
+        }
+      ],
+      "correctAnswer": {
+        "labels": ["C"],
+        "evidence": "printed-key"
+      },
+      "explanation": [
+        {
+          "type": "text",
+          "text": "Divide the risk in the exposed group by the risk in the unexposed group."
+        },
+        {
+          "type": "equation",
+          "latex": "RR = \\frac{40 / 200}{30 / 300} = 2.0",
+          "plainText": "RR = (40 / 200) / (30 / 300) = 2.0"
+        }
+      ],
+      "assets": [],
+      "provenance": {
+        "method": "authored",
+        "notes": "Invented for tests. Not course material."
+      }
+    },
+    {
+      "id": "syn-q03",
+      "source": {
+        "filename": "invented.pdf",
+        "page": 2,
+        "pageEnd": 3,
+        "questionNumber": 3
+      },
+      "stem": [
+        {
+          "type": "text",
+          "text": "The graph shows the plasma level of two invented compounds, X (blue) and Y (red), after one dose."
+        },
+        {
+          "type": "image",
+          "assetId": "syn-q03-img-1",
+          "alt": "Two curves of plasma level against time. The blue curve falls and the red curve rises to a plateau."
+        },
+        {
+          "type": "text",
+          "text": "Which statement about compound Y is supported by the graph?"
+        }
+      ],
+      "choices": [
+        {
+          "id": "syn-q03-a",
+          "label": "A",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Its level falls by half every hour"
+            }
+          ]
+        },
+        {
+          "id": "syn-q03-b",
+          "label": "B",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Its level rises to a plateau"
+            }
+          ]
+        },
+        {
+          "id": "syn-q03-c",
+          "label": "C",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "It is never detected"
+            }
+          ]
+        },
+        {
+          "id": "syn-q03-d",
+          "label": "D",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Its level is always lower than that of X"
+            }
+          ]
+        },
+        {
+          "id": "syn-q03-e",
+          "label": "E",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Its level rises and falls in a regular cycle"
+            }
+          ]
+        }
+      ],
+      "correctAnswer": {
+        "labels": ["B"],
+        "evidence": "answer-reveal-slide"
+      },
+      "explanation": [
+        {
+          "type": "text",
+          "text": "The red curve climbs quickly, then flattens and stays level."
+        }
+      ],
+      "assets": [
+        {
+          "id": "syn-q03-img-1",
+          "filename": "syn-q03-curves.png",
+          "mimeType": "image/png",
+          "width": 480,
+          "height": 320,
+          "byteSize": 2009,
+          "sourceFile": "invented.pdf",
+          "sourcePage": 2,
+          "role": "stem",
+          "questionId": "syn-q03",
+          "checksum": "sha256:60cd6d30cbaef26e653e2ae863ea345e804f69e6fe9cde60c85cbfce11a0e073",
+          "derivation": "authored"
+        },
+        {
+          "id": "syn-q03-img-2",
+          "filename": "syn-q03-curves-answer.png",
+          "mimeType": "image/png",
+          "width": 480,
+          "height": 320,
+          "byteSize": 2089,
+          "sourceFile": "invented.pdf",
+          "sourcePage": 3,
+          "role": "answer_reveal",
+          "questionId": "syn-q03",
+          "checksum": "sha256:18a9a2bc9f53b6883f68a8aa9c37335a6b6d6b6b836d843400d1a6f1b14c605c",
+          "derivation": "authored",
+          "revealOf": "syn-q03-img-1"
+        }
+      ],
+      "provenance": {
+        "method": "authored",
+        "notes": "Invented for tests. Not course material."
+      }
+    },
+    {
+      "id": "syn-q04",
+      "source": {
+        "filename": "invented.pdf",
+        "page": 4,
+        "questionNumber": 4
+      },
+      "stem": [
+        {
+          "type": "text",
+          "text": "A volunteer in a teaching exercise has the invented panel below."
+        },
+        {
+          "type": "table",
+          "headers": ["Test", "Result", "Reference range"],
+          "rows": [
+            ["Marker A", "12.0 mg/dL", "8.5–10.5 mg/dL"],
+            ["Marker B", "0.2 μU/mL", "0.5–5.0 μU/mL"],
+            ["Marker C", "310 mOsm/kg", "275–295 mOsm/kg"]
+          ]
+        },
+        {
+          "type": "text",
+          "text": "A tissue sample is prepared and viewed under the microscope."
+        },
+        {
+          "type": "image",
+          "assetId": "syn-q04-img-1",
+          "alt": "Invented micrograph: pale cells with dark centres on a pink ground."
+        },
+        {
+          "type": "text",
+          "text": "Which marker in the panel is below its reference range?"
+        }
+      ],
+      "choices": [
+        {
+          "id": "syn-q04-a",
+          "label": "A",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Marker A"
+            }
+          ]
+        },
+        {
+          "id": "syn-q04-b",
+          "label": "B",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Marker B"
+            }
+          ]
+        },
+        {
+          "id": "syn-q04-c",
+          "label": "C",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Marker C"
+            }
+          ]
+        },
+        {
+          "id": "syn-q04-d",
+          "label": "D",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "All three"
+            }
+          ]
+        },
+        {
+          "id": "syn-q04-e",
+          "label": "E",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "None of them"
+            }
+          ]
+        }
+      ],
+      "correctAnswer": {
+        "labels": ["B"],
+        "evidence": "printed-key"
+      },
+      "explanation": [
+        {
+          "type": "text",
+          "text": "Only Marker B, at 0.2 μU/mL, is under the lower limit of its range."
+        }
+      ],
+      "assets": [
+        {
+          "id": "syn-q04-img-1",
+          "filename": "syn-q04-micrograph.png",
+          "mimeType": "image/png",
+          "width": 400,
+          "height": 300,
+          "byteSize": 6012,
+          "sourceFile": "invented.pdf",
+          "sourcePage": 4,
+          "role": "stem",
+          "questionId": "syn-q04",
+          "checksum": "sha256:fc00ff03dad71cdcdc4268e0604055dbff39af21f51ca713a714e16b9319e245",
+          "derivation": "authored"
+        }
+      ],
+      "provenance": {
+        "method": "authored",
+        "notes": "Invented for tests. Not course material."
+      }
+    },
+    {
+      "id": "syn-q05",
+      "source": {
+        "filename": "invented.pdf",
+        "page": 5,
+        "questionNumber": 5
+      },
+      "stem": [
+        {
+          "type": "text",
+          "text": "A gland stops responding to the signal from the pituitary. Which row shows the pattern that follows?"
+        }
+      ],
+      "choices": [
+        {
+          "id": "syn-q05-a",
+          "label": "A",
+          "blocks": []
+        },
+        {
+          "id": "syn-q05-b",
+          "label": "B",
+          "blocks": []
+        },
+        {
+          "id": "syn-q05-c",
+          "label": "C",
+          "blocks": []
+        },
+        {
+          "id": "syn-q05-d",
+          "label": "D",
+          "blocks": []
+        },
+        {
+          "id": "syn-q05-e",
+          "label": "E",
+          "blocks": []
+        }
+      ],
+      "choiceTable": {
+        "type": "table",
+        "headers": ["Pituitary signal", "Gland hormone", "Target tissue effect"],
+        "rowKeys": ["A", "B", "C", "D", "E"],
+        "rows": [
+          ["↑", "↑", "↑"],
+          ["↑", "↓", "↓"],
+          ["↓", "↑", "↑"],
+          ["↓", "↓", "↓"],
+          ["↔", "↔", "↔"]
+        ]
+      },
+      "correctAnswer": {
+        "labels": ["B"],
+        "evidence": "printed-key"
+      },
+      "explanation": [
+        {
+          "type": "text",
+          "text": "The gland makes less hormone, so the tissue effect falls and the pituitary signal rises."
+        }
+      ],
+      "assets": [],
+      "provenance": {
+        "method": "authored",
+        "notes": "Invented for tests. Not course material."
+      }
+    },
+    {
+      "id": "syn-q06",
+      "source": {
+        "filename": "invented.pdf",
+        "page": 6,
+        "questionNumber": 6
+      },
+      "stem": [
+        {
+          "type": "rich_text",
+          "html": "Each option gives the Na<sup>+</sup> and HCO<sub>3</sub><sup>−</sup> of an invented sample. Which option has both values inside the ranges 135–145 mEq/L and 22–28 mEq/L?"
+        }
+      ],
+      "choices": [
+        {
+          "id": "syn-q06-a",
+          "label": "A",
+          "blocks": [
+            {
+              "type": "table",
+              "headers": ["Na⁺ (mEq/L)", "HCO₃⁻ (mEq/L)"],
+              "rows": [
+                ["128", "24"]
+              ]
+            }
+          ]
+        },
+        {
+          "id": "syn-q06-b",
+          "label": "B",
+          "blocks": [
+            {
+              "type": "table",
+              "headers": ["Na⁺ (mEq/L)", "HCO₃⁻ (mEq/L)"],
+              "rows": [
+                ["140", "16"]
+              ]
+            }
+          ]
+        },
+        {
+          "id": "syn-q06-c",
+          "label": "C",
+          "blocks": [
+            {
+              "type": "table",
+              "headers": ["Na⁺ (mEq/L)", "HCO₃⁻ (mEq/L)"],
+              "rows": [
+                ["140", "25"]
+              ]
+            }
+          ]
+        },
+        {
+          "id": "syn-q06-d",
+          "label": "D",
+          "blocks": [
+            {
+              "type": "table",
+              "headers": ["Na⁺ (mEq/L)", "HCO₃⁻ (mEq/L)"],
+              "rows": [
+                ["152", "25"]
+              ]
+            }
+          ]
+        },
+        {
+          "id": "syn-q06-e",
+          "label": "E",
+          "blocks": [
+            {
+              "type": "table",
+              "headers": ["Na⁺ (mEq/L)", "HCO₃⁻ (mEq/L)"],
+              "rows": [
+                ["152", "34"]
+              ]
+            }
+          ]
+        }
+      ],
+      "correctAnswer": {
+        "labels": ["C"],
+        "evidence": "printed-key"
+      },
+      "explanation": [
+        {
+          "type": "text",
+          "text": "Only 140 and 25 mEq/L both sit inside their ranges."
+        }
+      ],
+      "assets": [],
+      "provenance": {
+        "method": "authored",
+        "notes": "Invented for tests. Not course material."
+      }
+    },
+    {
+      "id": "syn-q07",
+      "source": {
+        "filename": "invented.pdf",
+        "page": 7,
+        "questionNumber": 7
+      },
+      "stem": [
+        {
+          "type": "text",
+          "text": "The two diagrams show what an invented test recorded for the left eye and for the right eye. The shaded part was not seen."
+        },
+        {
+          "type": "image",
+          "assetId": "syn-q07-img-1",
+          "alt": "Left eye: a circle with its left half shaded.",
+          "caption": "Left eye"
+        },
+        {
+          "type": "image",
+          "assetId": "syn-q07-img-2",
+          "alt": "Right eye: a circle with its right half shaded.",
+          "caption": "Right eye"
+        },
+        {
+          "type": "text",
+          "text": "Which description matches the diagrams?"
+        }
+      ],
+      "choices": [
+        {
+          "id": "syn-q07-a",
+          "label": "A",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "The left half is lost in both eyes"
+            }
+          ]
+        },
+        {
+          "id": "syn-q07-b",
+          "label": "B",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "The right half is lost in both eyes"
+            }
+          ]
+        },
+        {
+          "id": "syn-q07-c",
+          "label": "C",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "The outer half is lost in each eye"
+            }
+          ]
+        },
+        {
+          "id": "syn-q07-d",
+          "label": "D",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "The inner half is lost in each eye"
+            }
+          ]
+        },
+        {
+          "id": "syn-q07-e",
+          "label": "E",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Nothing is lost"
+            }
+          ]
+        }
+      ],
+      "correctAnswer": {
+        "labels": ["C"],
+        "evidence": "printed-key"
+      },
+      "assets": [
+        {
+          "id": "syn-q07-img-1",
+          "filename": "syn-q07-field-left.png",
+          "mimeType": "image/png",
+          "width": 240,
+          "height": 240,
+          "byteSize": 1460,
+          "sourceFile": "invented.pdf",
+          "sourcePage": 7,
+          "role": "stem",
+          "questionId": "syn-q07",
+          "checksum": "sha256:cb1daf567f21156e802d511111ee7531412c0db1ab7b82d66322f1ad3d5b01ee",
+          "derivation": "authored"
+        },
+        {
+          "id": "syn-q07-img-2",
+          "filename": "syn-q07-field-right.png",
+          "mimeType": "image/png",
+          "width": 240,
+          "height": 240,
+          "byteSize": 1457,
+          "sourceFile": "invented.pdf",
+          "sourcePage": 7,
+          "role": "stem",
+          "questionId": "syn-q07",
+          "checksum": "sha256:a3933ec0728482cc2ae12ad7218ab9838688fdc827be988e2a24d70cecb22097",
+          "derivation": "authored"
+        }
+      ],
+      "provenance": {
+        "method": "authored",
+        "notes": "Invented for tests. Not course material."
+      }
+    },
+    {
+      "id": "syn-q08",
+      "source": {
+        "filename": "invented.pdf",
+        "page": 8,
+        "questionNumber": 8
+      },
+      "stem": [
+        {
+          "type": "text",
+          "text": "An infusion of an invented compound is stopped and its plasma level is measured."
+        },
+        {
+          "type": "table",
+          "headers": ["Time after infusion (h)", "Plasma level (μg/mL)"],
+          "rows": [
+            ["0", "16"],
+            ["2", "8"],
+            ["4", "4"],
+            ["6", "2"]
+          ]
+        },
+        {
+          "type": "text",
+          "text": "What is the half-life of the compound?"
+        }
+      ],
+      "choices": [
+        {
+          "id": "syn-q08-a",
+          "label": "A",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "1 h"
+            }
+          ]
+        },
+        {
+          "id": "syn-q08-b",
+          "label": "B",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "2 h"
+            }
+          ]
+        },
+        {
+          "id": "syn-q08-c",
+          "label": "C",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "4 h"
+            }
+          ]
+        },
+        {
+          "id": "syn-q08-d",
+          "label": "D",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "6 h"
+            }
+          ]
+        },
+        {
+          "id": "syn-q08-e",
+          "label": "E",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "8 h"
+            }
+          ]
+        }
+      ],
+      "correctAnswer": {
+        "labels": ["B"],
+        "evidence": "printed-key"
+      },
+      "explanation": [
+        {
+          "type": "rich_text",
+          "html": "The level halves every 2 h (16, 8, 4, 2 μg/mL), so t<sub>½</sub> = 2 h."
+        }
+      ],
+      "assets": [],
+      "flags": [
+        {
+          "type": "source_inconsistency",
+          "message": "Invented example of a flag: the stem says the infusion is stopped, the table heading says after infusion. Left as written."
+        }
+      ],
+      "provenance": {
+        "method": "authored",
+        "notes": "Invented for tests. Not course material."
+      }
+    }
+  ]
+}

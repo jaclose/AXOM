@@ -1,6 +1,6 @@
 # Ideas bank: index (read this first)
 
-Every idea JD has given, as one tracked item. The verbatim notes sit beside this file (IDEAS-1.md to IDEAS-6.md) and are never edited; this index is where status changes. When JD sends new notes: save them verbatim as the next IDEAS-N.md, then add each actionable idea below with the next ID.
+Every idea JD has given, as one tracked item. The verbatim notes sit beside this file (IDEAS-1.md to IDEAS-8.md) and are never edited; this index is where status changes. When JD sends new notes: save them verbatim as the next IDEAS-N.md, then add each actionable idea below with the next ID.
 
 **Status:** `NEW` not yet planned · `PLANNED` in a branch plan · `IN PROGRESS` being built · `PARTIAL` part shipped · `SHIPPED` on main · `VERIFIED` on main and exercised in a real browser · `CODEX` Codex's lane (status as Codex reports it) · `NEEDS JD` waiting on a decision, licence or credential · `FUTURE` parked, see ../05-FUTURE.md · `ANSWERED` a question, not a feature.
 
@@ -115,6 +115,13 @@ The [doctrine](../../product/AXOM-LEARNING-INTELLIGENCE-DOCTRINE.md) governs [Id
 | I4-04 | Schedule import in the setup style (the standard for every fill-in box) | PLANNED | feat/wave2-study-ai, on shared setup primitives |
 | I4-05 | Download your cohort's schedule as .ics; AXOM knows exams, small groups, iMCQs, eSOFTs, OSCE/OSPE | PLANNED | feat/wave2-study-ai |
 | I4-06 | Skip tracker: allowances for lectures, small groups, eSOFTs, iMCQs | PLANNED | feat/wave2-study-ai |
+| I8-01 | A reusable academic bookshelf: real books on shelves, one book for each module (ER, DM, GOER ...) read from the course data, one shelf for each term | IN PROGRESS | `feat/qbank-multimodal-import-v1`: components, styles and a development harness built and exercised in a browser at 1440 and 390, dark and light ([contract](../../features/bookshelf.md)); Codex wires it into Course Tracker and the Question Bank |
+| I8-02 | A book is as thick as what it holds: activities for a course, questions for a bank, on a scale that grows slowly, never from file size | IN PROGRESS | `feat/qbank-multimodal-import-v1`: derived from canonical counts each time the shelf is drawn, never stored |
+| I8-03 | Hover and focus lift the book; choosing it takes it off the shelf, turns it and opens it; closing puts it back and returns focus; less motion keeps every function | IN PROGRESS | `feat/qbank-multimodal-import-v1`: CSS 3D transforms, no library; keyboard, screen reader names and reduced motion tested |
+| I8-04 | Inside a course book: modules, weeks, activities, and a Load Course step that only adds and changes no progress | IN PROGRESS | `feat/qbank-multimodal-import-v1`: the Course Engine's own week view; loading adds a missing term, course or module and is safe to repeat; loading a template file's activities stays the existing template loader's job |
+| I8-05 | Inside a question bank book: weeks, sets by source, real counts, choose sets and a number, start practice | IN PROGRESS | `feat/qbank-multimodal-import-v1`: read from sets and questions; Term 5 GOER Week 2 shows its three banks as not on this device, with no question claimed |
+| I8-06 | Browse, Recover, Import and Create kept apart and named honestly; a file picker is never called recovery | IN PROGRESS | `feat/qbank-multimodal-import-v1`: the library frame shows only the modes its host can really do |
+| I8-07 | Saved on this device, backed up and synced are three different claims | IN PROGRESS | `feat/qbank-multimodal-import-v1`: the load reports "saved on this device" only after the write finishes; backup and sync status are the host screen's to add |
 
 ## 5. Questions, exams, flashcards, AI
 
@@ -146,6 +153,14 @@ The [doctrine](../../product/AXOM-LEARNING-INTELLIGENCE-DOCTRINE.md) governs [Id
 | I5-23 | A clear review screen before import that shows source conflicts instead of smoothing them away | PARTIAL | Wave 1.3 (77b0335) shows each draft's key warning; a conflict summary for the whole import is open |
 | I5-24 | Images: map from `Attachment:` deterministically, preview during import review, keep the aspect ratio, enlarge cleanly, never break the layout on a phone or a desktop, stay with the question through edits | PARTIAL | Wave 1.3 (1267f2d, f4db063): attach, show under the stem, enlarged view; preview in review and the edit path are open |
 | I5-25 | Cross-device images belong to a later storage / media layer: design that boundary now, and keep binaries out of the revision payload | PLANNED | design note, import hardening branch |
+| I7-01 | Questions made of ordered blocks (text, table, image, equation) in stems, choices and explanations; source wording kept, problems flagged and never fixed | IN PROGRESS | `feat/qbank-multimodal-import-v1`: the model, its checks and the plain-text reading are built (Phase 1, [contract](../../features/question-content.md)); the field on the question record and the renderer are Phase 4 |
+| I7-02 | Import package: manifest, questions file, assets folder, `schemaVersion` from 1 | IN PROGRESS | `feat/qbank-multimodal-import-v1`, Phase 1: reads, checks and writes canonically, with a version gate |
+| I7-03 | An answer-marked copy of a slide is never shown while a question is open | IN PROGRESS | `feat/qbank-multimodal-import-v1`: one rule in `question-content/visibility.ts`; JD set the policy for supporting images on 2026-10-08 and every role is tested in every mode; the players use it in Phase 4 |
+| I7-04 | A Word template people can fill in, with fixed markers, read in the order of the document body | IN PROGRESS | `feat/qbank-multimodal-import-v1`: template, marker reader and the reader for real `.docx` files built (Phases 1 and 2), checked on files written by Word and pandoc; an unmarked document goes through the existing text parser with its tables and pictures in place; wiring into the import screens is Codex's |
+| I7-05 | Import preview: counts, issues, each question rendered, media badges, and "where does this image belong?" | PLANNED | `feat/qbank-multimodal-import-v1`, Phase 3 (lands in `ImportPanel` and `MassImport`, which stream 1 holds) |
+| I7-06 | One block renderer under every exam interface; tables that scroll on a phone and never cut a value; images that enlarge, zoom, pan and reset | PLANNED | `feat/qbank-multimodal-import-v1`, Phase 4 |
+| I7-07 | Term 5, GOER, Week 2 as three separate banks (biostatistics and epidemiology; pharmacodynamics and pharmacokinetics; endocrine pathophysiology), the first real regression set | IN PROGRESS | `feat/qbank-multimodal-import-v1`: three manifests committed (Phase 1); the banks are built on JD's machine in Phase 5 and stay out of the public repository |
+| I7-08 | Pictures follow their question through deletion, bank deletion, account sync, backup and restore | PLANNED | `feat/qbank-multimodal-import-v1`, Phase 4; picture bytes across devices wait on I5-25 |
 | I2-06 | Extending a highlight over a highlight | CODEX (VERIFIED by Codex) | 691c23a (Wave 1.1) |
 | I1-33 | Simulations tab (WIP) | FUTURE | |
 | I1-02 | Daily medical fact from a local, sourced library | FUTURE | |
