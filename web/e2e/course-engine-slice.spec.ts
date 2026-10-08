@@ -62,10 +62,9 @@ test("a source file becomes a filed set, recorded answers, a finding and a revie
 
   // --- question bank: filed by module, then week ------------------------------
   await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
-  const group = page.locator("details.qset-group").filter({ hasText: "FTM 1" });
-  await expect(group).toHaveAttribute("open", "");
+  const group = page.getByRole("region", { name: "Course question bank" });
   await expect(group.getByRole("heading", { name: "Week 2", exact: true })).toBeVisible();
-  await group.locator("article.qset-card").filter({ hasText: "Week 2 practice" }).getByRole("button", { name: "Start" }).click();
+  await group.getByRole("button", { name: "Practice Week 2 practice", exact: true }).click();
   await page.getByRole("button", { name: "Start tutor block" }).click();
 
   // --- answer both: one sure and wrong, one right but unsure -----------------
@@ -125,7 +124,7 @@ test("a source file becomes a filed set, recorded answers, a finding and a revie
   expect(saved.questions).toHaveLength(2);
 
   await page.getByRole("tab", { name: /Question Sets \(2\)/ }).click();
-  await expect(page.locator("details.qset-group").filter({ hasText: "FTM 1" }).locator("summary")).toContainText("2 sets");
+  await expect(group.locator(".cb-set-row")).toHaveCount(2);
   expect(errors).toEqual([]);
 });
 

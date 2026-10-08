@@ -174,8 +174,8 @@ describe("Mass import: accept", () => {
     await waitFor(() => expect(screen.getByText("Accepted 1")).toBeTruthy());
     const state = useStore.getState();
     expect(state.questionSets).toHaveLength(1);
-    expect(state.questionSets[0].scope).toEqual({ module: "FTM 1", week: 3 });
-    expect(state.questions[0]).toMatchObject({ module: "FTM 1", week: 3 });
+    expect(state.questionSets[0].scope).toEqual({ module: "FTM 1", week: 3, courseId: "course-1" });
+    expect(state.questions[0]).toMatchObject({ module: "FTM 1", week: 3, courseId: "course-1" });
   });
 });
 

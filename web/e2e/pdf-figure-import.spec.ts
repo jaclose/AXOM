@@ -78,7 +78,7 @@ test("a figure in a question PDF is cut out, attached to its question and shown 
   ]);
 
   await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
-  await page.locator("article.qset-card").filter({ hasText: "PDF with a figure" }).getByRole("button", { name: "Start" }).click();
+  await page.getByRole("button", { name: "Practice PDF with a figure", exact: true }).click();
   await page.getByRole("button", { name: "Start tutor block" }).click();
   const exhibit = page.locator(".question-exhibit img");
   await expect(exhibit).toBeVisible();

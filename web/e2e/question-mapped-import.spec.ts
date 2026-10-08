@@ -97,7 +97,7 @@ test("a mapped paste imports with its tags, attaches the named image, and shows 
   // and is still there after a reload (its bytes live in the device vault).
   await reloadAfterSave(page);
   await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
-  await page.locator("article.qset-card").filter({ hasText: "Mapped sample" }).getByRole("button", { name: "Start" }).click();
+  await page.getByRole("button", { name: "Practice Mapped sample", exact: true }).click();
   await page.getByRole("button", { name: "Start tutor block" }).click();
   for (let item = 0; item < 2; item += 1) {
     const stem = (await page.locator(".question-stem").innerText()).trim();

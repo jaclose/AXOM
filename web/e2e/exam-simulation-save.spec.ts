@@ -9,6 +9,7 @@ import { STORAGE_KEYS } from "../src/lib/brand";
 test("a submitted Examplify block is saved as one run and survives a reload", async ({ page }) => {
   const errors = collectPageErrors(page);
   await openSeededSet(page, 3);
+  await page.getByText("Advanced: order, category & exam interface", { exact: true }).click();
   await page.getByRole("radio", { name: /ExamSoft \(Examplify\)/ }).click();
   await page.getByRole("button", { name: "Exam (feedback at the end)" }).click();
   await page.getByRole("button", { name: /Start exam block/ }).click();
@@ -98,7 +99,7 @@ async function openSeededSet(page: Page, count: number): Promise<void> {
   }, count);
   await page.evaluate(() => { window.location.hash = "questions"; });
   await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
-  await page.locator("article.qset-card").filter({ hasText: "Simulation save set" }).getByRole("button", { name: "Start" }).click();
+  await page.getByRole("button", { name: "Practice Simulation save set", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Set up a tutor block" })).toBeVisible();
 }
 

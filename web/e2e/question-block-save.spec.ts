@@ -131,7 +131,7 @@ async function openSeededSet(page: Page, count: number): Promise<void> {
   }, count);
   await page.evaluate(() => { window.location.hash = "questions"; });
   await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
-  await page.locator("article.qset-card").filter({ hasText: "Block save set" }).getByRole("button", { name: "Start" }).click();
+  await page.getByRole("button", { name: "Practice Block save set", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Set up a tutor block" })).toBeVisible();
 }
 

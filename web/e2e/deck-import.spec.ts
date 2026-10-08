@@ -123,7 +123,7 @@ test("a review deck comes in as one question per slide, with only the question s
 
   // Before answering, the learner sees the question's picture and nothing from the answer slide.
   await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
-  await page.locator("article.qset-card").filter({ hasText: "Deck with answer slides" }).getByRole("button", { name: "Start" }).click();
+  await page.getByRole("button", { name: "Practice Deck with answer slides", exact: true }).click();
   await page.getByRole("button", { name: "Start tutor block" }).click();
   await expect(page.locator(".question-exhibit img")).toHaveCount(1);
   await expect(page.getByText("Inferior changes usually come from the right coronary artery.")).toHaveCount(0);

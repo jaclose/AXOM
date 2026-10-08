@@ -72,7 +72,8 @@ test("what a deck's own slides teach is offered after an answer, kept, and trace
   await page.getByLabel("Set title").fill("Cardiology review");
   await page.getByRole("button", { name: "Finalize import" }).click();
   await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
-  await page.locator("article.qset-card").filter({ hasText: "Cardiology review" }).getByRole("button", { name: "Start" }).click();
+  await page.getByRole("button", { name: "Practice Cardiology review", exact: true }).click();
+  await page.getByText("Advanced: order, category & exam interface", { exact: true }).click();
   await page.getByText("Keep document order (instead of shuffling)").click();
   await page.getByRole("button", { name: "Start tutor block" }).click();
 

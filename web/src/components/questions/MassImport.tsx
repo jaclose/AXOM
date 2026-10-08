@@ -15,6 +15,7 @@ import { FileUp, RefreshCw, CheckCircle2, AlertTriangle, Trash2, Pencil, Check, 
 import { associateAnswerSource, parseAnswerSections, parseQuestionBlocks, type ParsedQuestionDraft } from "../../lib/questionParse";
 import { importFromCsv, importFromJson } from "../../lib/questionImport";
 import { extractDocxText, extractPdfText, extractPlainText } from "../../lib/extractText";
+import { proposePdfMarkedAnswers } from "../../lib/pdfMarkedAnswers";
 import { attachPdfFigures } from "../../lib/pdfFigures";
 import { parsePdfQuestions } from "../../lib/pdfQuestionImport";
 import { courseForScope } from "../../lib/course-engine/questionBank";
@@ -252,6 +253,7 @@ export function MassImport({
         : kind === "csv" ? importFromCsv(rawText) : kind === "json" ? importFromJson(rawText) : { drafts: parseQuestionBlocks(rawText), warnings: [] };
       const drafts = result.drafts;
       warnings = [...warnings, ...result.warnings];
+      if (figureBytes) warnings.push(...await proposePdfMarkedAnswers(figureBytes.slice(0), drafts, read?.deckPages));
       const figures = figureBytes && pageTexts
         ? await attachPdfFigures(figureBytes, file.name, drafts, pageTexts, read?.deckPages)
         : { images: [], notes: [] };

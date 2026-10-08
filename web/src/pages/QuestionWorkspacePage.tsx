@@ -290,7 +290,7 @@ export function QuestionWorkspacePage() {
     <>
       <div
         ref={entryRef}
-        className={`qb-hero tx-marble ${isFirstUse ? "qb-first-use" : "qb-returning-hero"} ${tab === "sets" ? "qb-course-header" : ""}`}
+        className={`qb-hero ${tab === "sets" ? "qb-course-header" : "tx-marble"} ${isFirstUse ? "qb-first-use" : "qb-returning-hero"}`}
         data-tour="question-bank-entry"
       >
         <div className="qb-hero-inner">

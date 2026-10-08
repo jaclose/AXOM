@@ -71,9 +71,12 @@ do next. The learner reports nothing AXOM can observe.
   slide reading is kept only when the parser returns exactly one question per question
   slide; otherwise the file is read as running text. A numbered document with one question
   to a page keeps its running-text reading and only gains pages.
-- **Answers come from text, never from formatting or images.** A written answer line, an
+- **Answers require source evidence.** A written answer line, an
   answer key and a tick, asterisk or "(correct)" on an answer slide are read. A deck that
-  marks the answer only in colour or bold stays unanswered and says so. A key is matched
+  marks the answer only in colour or bold stays unanswered and says so. A strict native
+  vector-check reader (`pdfMarkedAnswers.ts`) can propose a key only on a paired answer
+  slide, with one check beside one option. Every proposal stays review-gated, keeps its
+  evidence page, and clears conflicting keys. Green highlights/arrows are not answers. A key is matched
   by the slides' own numbers, or in slide order only when it lists exactly one answer each.
 - **An image never reaches a question from where the answer is.** Not from an answer or
   explanation slide, and not from under an answer or rationale line on a shared page. Such
@@ -140,3 +143,21 @@ Tests: `lib/pdfFigures.test.ts`, `lib/deckPages.test.ts`, `lib/pdfQuestionImport
 `lib/learning-intelligence/learningIntelligence.test.ts`, `lib/quizRunCommit.test.ts`;
 E2E `web/e2e/deck-import.spec.ts`, `mass-import-accept.spec.ts`, `pdf-figure-import.spec.ts`,
 `course-engine-slice.spec.ts`, `course-template-load.spec.ts`, `question-block-save.spec.ts`.
+
+
+## Course bank navigation (2026-10-08)
+
+`course-engine/questionBank.ts` indexes canonical sets/questions by term, course,
+module and week. Explicit course IDs win; ambiguous legacy module names stay unassigned.
+`CourseBankBrowser` shows one week's rows, up to 12 at once, with search and source
+filters. Set details replace the list. The same navigator selects sources across
+weeks/modules in `ExamRunner`; setup starts focused on the selected sources, with
+advanced controls collapsed. Saved blocks retain canonical set references.
+
+Browser coverage: `course-qbank-v2.spec.ts` exercises 60 sets, cross-week selection,
+a reusable unused-only block, two answers and reload at 1440px and 390px. Existing
+import/media/review/persistence journeys use the new navigator. Real-source inspection
+(kept private): 30 of 33 drafts across two IMCQ decks gain review-required native-check
+proposals; three stay unresolved. This is extraction evidence, not verified answer keys.
+SKILLS_USED: design-production-router, redesign-existing-projects (UI only); pdf:pdf
+(native source inspection). No additional dependency or storage schema.

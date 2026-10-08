@@ -16,6 +16,7 @@ import { useStore } from "../../lib/store";
 import { createImportMappingLedger, parseQuestionBlocks, type ParsedQuestionDraft } from "../../lib/questionParse";
 import { detectImportFormat, importFromCsv, importFromJson, importFromText } from "../../lib/questionImport";
 import { extractDocxText, extractPdfText, extractPlainText } from "../../lib/extractText";
+import { proposePdfMarkedAnswers } from "../../lib/pdfMarkedAnswers";
 import { attachPdfFigures } from "../../lib/pdfFigures";
 import { parsePdfQuestions } from "../../lib/pdfQuestionImport";
 import { documentTitleFromFile, type SourceDocument } from "../../lib/library";
@@ -1362,6 +1363,7 @@ function FileTab({ busyFile, setBusyFile, onParsed }: {
         }
         const read = isPdf ? parsePdfQuestions(extracted.text, extracted.pages) : { drafts: parseQuestionBlocks(extracted.text), notes: [], deckPages: undefined };
         const drafts = read.drafts;
+        const markNotes = figureBytes ? await proposePdfMarkedAnswers(figureBytes.slice(0), drafts, read.deckPages) : [];
         const { images, notes: figureNotes } = figureBytes
           ? await attachPdfFigures(figureBytes, file.name, drafts, extracted.pages ?? [], read.deckPages)
           : { images: [], notes: [] };
@@ -1371,6 +1373,7 @@ function FileTab({ busyFile, setBusyFile, onParsed }: {
             ...extracted.warnings,
             ...read.notes,
             ...figureNotes,
+            ...markNotes,
             ...(drafts.length === 0 ? ["Text was extracted but no question pattern was found — review the file, or keep it as a library document."] : []),
           ],
           isPdf ? "pdf" : "imported",
