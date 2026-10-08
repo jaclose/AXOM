@@ -32,6 +32,7 @@ end of this note.
 | Bridge from the existing text parser (anchors) | `fromDrafts.ts` |
 | The existing PDF import as package questions | `pdf/pdfToQuestions.ts` |
 | A tagged PDF: pages from pdf.js, the tagged reader, sets of questions, the converter | `pdf/loadTaggedPdf.ts`, `pdf/taggedPdf.ts`, `pdf/parts.ts`, `pdf/taggedPdfToQuestions.ts` |
+| A tagged PDF file in the browser: questions and their picture files | `pdf/taggedPdfInBrowser.ts`, `pdf/renderPlan.ts` |
 | Ready, needs review or unresolved, with reasons | `readiness.ts` |
 | A package into the canonical import and save | `toReviewedImport.ts` |
 | Building and saving a real bank on this machine, counts only | `pdf/buildBank.local.test.ts`, `pdf/persistBank.local.test.ts` |
@@ -245,6 +246,16 @@ left out. No table is guessed from positions.
 PDF for each picture (`renders`: a page, and a box for a region), what could not be tied
 to a question (`unplaced`), plain notes and a counts-only report.
 
+In the browser, `taggedPdfFileToQuestions(buffer, defaults)` does the whole trip: it
+reads the file, converts it, draws each page that has a picture once on a canvas (up to
+three times the page's size, longest edge 1,600 pixels) and cuts the pictures out, then
+gives every asset the size, weight and checksum of its drawn picture. It returns the
+conversion plus `files`, one PNG for each asset under the asset's file name, ready for
+`saveReviewedImport`. For a PDF with no tags it returns `{ tagged: false }` and the
+caller falls back to `pdfToQuestions`. A development-only page, `/harness/tagged-pdf.html`,
+runs it on an invented PDF built in the page, and `e2e/tagged-pdf-harness.spec.ts` checks
+it in a real browser.
+
 ## Ready, needs review, unresolved
 
 `questionReadiness(question, issues)` gives one verdict with its reasons.
@@ -303,7 +314,7 @@ check prints counts only.
 | 2 | Read a `.docx` body in document order; convert to the package; adapter from the existing PDF import | Built (`96c5cd9`) |
 | 3 | Import preview: counts, issues, rendered questions, media badges, moving a picture to the right place | Open. Codex wires it into `ImportPanel` and `MassImport`; `summarizePackage`, `validatePackage` and `unplaced` are its inputs |
 | 4 | `content` on `QuestionRecord`; one block renderer under every exam interface; wider attachment roles; image enlarge, zoom, pan; deletion, backup and restore of the pictures | Open. Edits `questions.ts`, `questionAttachments.ts`, `ExamRunner.tsx`: Codex's files |
-| 5 | Build the three Term 5 GOER Week 2 banks locally and run them as the real regression set | In part (`feat/goer-pdf-bank-import-v1`). All three PDFs are tagged and are built locally: 47 questions, 11 tables, 7 figures. 32 are ready (two banks, every key agreed by a second PDF reader) and were saved, reloaded and re-imported without a duplicate through the canonical import, in memory. 15 need review (the slide deck: its answers are drawn marks, 14 of 15 slides). Not done: reading those marks (Codex), a browser renderer for the regions, the import screen |
+| 5 | Build the three Term 5 GOER Week 2 banks locally and run them as the real regression set | In part (`feat/goer-pdf-bank-import-v1`). All three PDFs are tagged and are built locally: 47 questions, 11 tables, 7 figures. 32 are ready (two banks, every key agreed by a second PDF reader) and were saved, reloaded and re-imported without a duplicate through the canonical import, in memory. 15 need review (the slide deck: its answers are drawn marks, 14 of 15 slides). The browser import is built and checked in a real browser on an invented PDF; it has not been run in a browser on the three real files. Not done: reading those marks (Codex), the import screen (Codex) |
 
 Known limits to carry forward: a rendered question must apply an asset's `crop`; annotations store positions in the plain stem, so
 highlights on block text need a mapping in Phase 4. Picture bytes are stored on the
