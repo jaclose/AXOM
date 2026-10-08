@@ -12,8 +12,11 @@ travels as an import package and can be written by hand in a Word template.
 
 **Status (2026-10-08):** Phases 1 and 2 of five are built on `feat/qbank-multimodal-import-v1`:
 the model, the package and its checks, the template, a reader for real `.docx` files, and
-an adapter from the existing PDF import. Nothing in the app calls them yet: wiring is
-Codex's (decision 4 below). Phases are at the end of this note.
+an adapter from the existing PDF import. On `feat/goer-pdf-bank-import-v1` a reader for
+tagged PDFs, a readiness verdict and an adapter into the canonical import are added, and
+the three GOER Week 2 banks are built locally from their PDFs (Phase 5, in part). Nothing
+in the app calls any of it yet: wiring is Codex's (decision 4 below). Phases are at the
+end of this note.
 
 | Responsibility | Files |
 | --- | --- |
@@ -28,6 +31,10 @@ Codex's (decision 4 below). Phases are at the end of this note.
 | `.docx` in, questions and picture files out | `docx/docxToQuestions.ts` |
 | Bridge from the existing text parser (anchors) | `fromDrafts.ts` |
 | The existing PDF import as package questions | `pdf/pdfToQuestions.ts` |
+| A tagged PDF: pages from pdf.js, the tagged reader, sets of questions, the converter | `pdf/loadTaggedPdf.ts`, `pdf/taggedPdf.ts`, `pdf/parts.ts`, `pdf/taggedPdfToQuestions.ts` |
+| Ready, needs review or unresolved, with reasons | `readiness.ts` |
+| A package into the canonical import and save | `toReviewedImport.ts` |
+| Building and saving a real bank on this machine, counts only | `pdf/buildBank.local.test.ts`, `pdf/persistBank.local.test.ts` |
 | Picture kind, size, checksum | `assets.ts` |
 | Counts-only harness for local files | `docx/inspect.local.test.ts` |
 | Fixtures and what may be committed | [`fixtures/qbank/`](../../fixtures/qbank/README.md) |
@@ -195,7 +202,90 @@ the lines it sits between; when that cannot be worked out it goes after the text
 flag. A figure the placer held back on an answer page becomes an `answer_reveal` asset
 tied to its clean copy; one below an answer goes to the explanation; one with no question
 is listed for placing by hand. `pdfToQuestions` runs the existing passes in the browser.
-Tables in a PDF still arrive as text: rebuilding them from positions is not done.
+In a PDF with no structure tags, tables still arrive as text: rebuilding them from
+positions is not done.
+
+## A tagged PDF as package questions
+
+Word and PowerPoint write a structure tree into the PDFs they export. pdf.js returns it
+(`page.getStructTree()`, and `getTextContent({ includeMarkedContent: true })` for the
+text of each tagged piece). `loadTaggedPdf` collects both for every page, and
+`readTaggedPage` turns a page into the same body elements the Word reader produces:
+paragraphs, list items with their printed labels, tables with heading rows and row names,
+and figures with their boxes and alternative text. Page furniture outside the tags is
+left out. No table is guessed from positions.
+
+- **A document** is read in the order of its tags. A figure large enough to be one is in
+  the text where the tags put it, so it lands between the lines it sits between. One
+  printed straight after the last choice is moved to the question and flagged for a
+  person to check.
+- **A slide** is read by position, because text boxes are tagged in the order they were
+  made. Text at the same height is one line. A graph drawn as many shapes is one region.
+  Its axis numbers, axis titles and curve letters are text of the slide: they are taken
+  out of the running text, the region grows to cover them, and they are kept as the
+  picture's description. A line shaped like a choice or a numbered question is never
+  taken. A bare number at the foot of several pages is removed as a page number.
+- **Sets.** A file can hold several sets of questions, each numbered from 1. `splitParts`
+  splits the text where the numbering goes back to 1 and each set is parsed on its own.
+  Question ids then carry the set (`<bank>-s2-q03`) and `source.set` records it. The set's
+  heading becomes the topic only when the tags call that line a heading.
+- **Answer sections.** A separate section of numbered answers goes to the one set that has
+  exactly those question numbers and no answers of its own. If it fits none, or more than
+  one, it is applied to none. A key in any other shape printed after the last set is cut
+  out when an earlier set has no answers, because nothing says whose it is. The parser
+  reads a section only under a heading it knows; when it cannot read one as printed, the
+  heading is reworded to "Answers and Explanations:" and the entries are left untouched.
+- **An answer key set out as a table** (question number, then letter) goes to the parser as
+  key lines. It never becomes a table of a question.
+- **An answer slide** is kept whole as an `answer_reveal` picture of the page. Which choice
+  a drawn mark points at is not read here: that is Codex's `pdfMarkedAnswers.ts`. A
+  question whose only key is a mark has no key and says why.
+
+`taggedPdfToQuestions` returns the questions, the issues, what has to be drawn from the
+PDF for each picture (`renders`: a page, and a box for a region), what could not be tied
+to a question (`unplaced`), plain notes and a counts-only report.
+
+## Ready, needs review, unresolved
+
+`questionReadiness(question, issues)` gives one verdict with its reasons.
+
+| Verdict | When |
+| --- | --- |
+| Ready | A printed key, no flag, no warning or error of its own |
+| Needs review | A printed key and a flag or warning. Or no key, and the source shows the answer in a form kept for a person to read (`answer_needs_review`) |
+| Unresolved | An error stops it being run. Or no answer could be read and nothing was kept to settle it |
+
+A package-level warning (two logos on a title slide) does not hold any question back.
+
+## Saving a package through the canonical import
+
+There is one way to save reviewed questions: `prepareReviewedImport` and
+`saveReviewedImport` in `lib/questionImportSave.ts`. `packageToReviewedImport(pkg, issues,
+options)` builds the request they take, so a package is checked, de-duplicated and written
+by the same code as any other import. This is the typed contract for the import screens:
+
+```ts
+const adapted = packageToReviewedImport(pkg, issues, { acknowledged, sourceBytes, notes });
+const prepared = prepareReviewedImport(adapted.request, library);
+if (prepared.ok) await saveReviewedImport(prepared, store, imageFiles); // files named in adapted.imageNames
+```
+
+- Only a ready question is offered. One that needs review is offered once its id is in
+  `acknowledged`, and never without a key. Everything else is in `held` with its reasons.
+- The set is filed by the manifest: `scope: { module, week }`. `filing.agrees` says whether
+  the curriculum puts that module in the manifest's term.
+- Only a picture that may be seen while the question is open is offered, by file name. An
+  answer-reveal or explanation picture is listed in `withheldAssets` and stays in the
+  package, because the current question record shows every picture with the question.
+- The existing save refuses a batch whose question numbers repeat. When they do (two sets
+  numbered from 1), the saved questions are numbered in running order and each keeps its
+  own place in its source label: "file, set 2, question 3".
+- A second import of the same package is recognised and reuses the first. Nothing is
+  written twice.
+
+Until `content` is on `QuestionRecord` (Phase 4), a saved question is the plain-text
+reading of its blocks: a table is saved as text, and a picture is an exhibit shown with
+the stem, not at its place inside it.
 
 ## What is private
 
@@ -213,7 +303,7 @@ check prints counts only.
 | 2 | Read a `.docx` body in document order; convert to the package; adapter from the existing PDF import | Built (`96c5cd9`) |
 | 3 | Import preview: counts, issues, rendered questions, media badges, moving a picture to the right place | Open. Codex wires it into `ImportPanel` and `MassImport`; `summarizePackage`, `validatePackage` and `unplaced` are its inputs |
 | 4 | `content` on `QuestionRecord`; one block renderer under every exam interface; wider attachment roles; image enlarge, zoom, pan; deletion, backup and restore of the pictures | Open. Edits `questions.ts`, `questionAttachments.ts`, `ExamRunner.tsx`: Codex's files |
-| 5 | Build the three Term 5 GOER Week 2 banks locally and run them as the real regression set | Open. The sources are PDFs: tables must be rebuilt from page positions first, or the banks typed into the template |
+| 5 | Build the three Term 5 GOER Week 2 banks locally and run them as the real regression set | In part (`feat/goer-pdf-bank-import-v1`). All three PDFs are tagged and are built locally: 47 questions, 11 tables, 7 figures. 32 are ready (two banks, every key agreed by a second PDF reader) and were saved, reloaded and re-imported without a duplicate through the canonical import, in memory. 15 need review (the slide deck: its answers are drawn marks, 14 of 15 slides). Not done: reading those marks (Codex), a browser renderer for the regions, the import screen |
 
 Known limits to carry forward: a rendered question must apply an asset's `crop`; annotations store positions in the plain stem, so
 highlights on block text need a mapping in Phase 4. Picture bytes are stored on the
@@ -226,3 +316,9 @@ Tests: `web/src/lib/question-content/**/*.test.ts`. Run
 `npx vitest run src/lib/question-content` from `web/`. To see what the reader finds in a
 folder of your own `.docx` files, counts only:
 `AXOM_DOCX=/path npx vitest run src/lib/question-content/docx/inspect.local.test.ts`.
+To build the real banks from their PDFs (needs poppler's `pdftocairo` for the pictures),
+and then to take them through the canonical import in memory, counts only:
+`AXOM_QBANK_SOURCES=/folder/with/the/pdfs npx vitest run src/lib/question-content/pdf/buildBank.local.test.ts`
+and `AXOM_QBANK_PERSIST=1 npx vitest run src/lib/question-content/pdf/persistBank.local.test.ts`.
+The committed proof of save, reload and no duplicates runs on the invented bank:
+`toReviewedImport.persistence.test.ts`.

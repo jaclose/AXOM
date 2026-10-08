@@ -57,6 +57,8 @@ export interface SourceMetadata {
   pageEnd?: number;
   /** The source's own number for the question. */
   questionNumber?: number;
+  /** Which set of the file it is in, counted from 1, when the file holds several sets each numbered from 1. */
+  set?: number;
 }
 
 export const PROVENANCE_METHODS = ["authored", "manual-transcription", "docx-template", "docx-import", "pdf-import", "axom-export"] as const;

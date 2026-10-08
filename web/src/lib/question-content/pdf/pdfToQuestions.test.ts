@@ -21,6 +21,11 @@ describe("where a figure sits in a stem", () => {
     expect([stem.slice(0, at), stem.slice(at)]).toEqual(["The graph shows two invented compounds after one dose.", " Which statement about the red one is supported?"]);
   });
 
+  it("is the end of the stem when the whole stem is one line that opens with the question's number", () => {
+    const whole = lines([60, `12. ${stem}`], [300, "A. one"]);
+    expect(splitPointAbove(stem, whole, 200)).toBe(stem.length);
+  });
+
   it("is unknown when no line of the stem is above the figure", () => {
     expect(splitPointAbove(stem, page, 50)).toBeUndefined();
     expect(splitPointAbove(stem, lines([10, "Fall term"], [20, "p. 3"]), 150)).toBeUndefined();

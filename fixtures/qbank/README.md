@@ -31,9 +31,17 @@ if the rules are removed.
 
 ## Building a real bank locally
 
-1. Put the source PDF in the bank's `source/` folder.
-2. Build `questions.json` and `assets/` (Phase 5 of the plan in the feature doc).
-3. Run `npx vitest run src/lib/question-content/fixtures.test.ts` from `web/`.
+From `web/`. Each step prints counts only: no stem, no choice, no answer letter.
+
+1. Put the source PDF in the bank's `source/` folder, or keep the PDFs together in a
+   folder of your own outside the repository. The file name must be the one the
+   manifest gives. The PDF must be a tagged export (Word or PowerPoint: "Save as PDF").
+2. Build `questions.json` and `assets/` beside each manifest. The pictures are cut from
+   the pages with poppler's `pdftocairo`:
+   `AXOM_QBANK_SOURCES=/folder/with/the/pdfs npx vitest run src/lib/question-content/pdf/buildBank.local.test.ts`
+3. Check the built packages: `npx vitest run src/lib/question-content/fixtures.test.ts`
+4. Take each bank through the app's own import and save, in memory, then reload and
+   import it again: `AXOM_QBANK_PERSIST=1 npx vitest run src/lib/question-content/pdf/persistBank.local.test.ts`
 
 The pictures of the invented bank and the DOCX template are produced by
 `node scripts/qbank/build-fixtures.mjs`.
