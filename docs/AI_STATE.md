@@ -26,12 +26,14 @@ Wave 2 home, AnkiConnect/push, [Course Engine and learning intelligence](feature
 the shared exam engine with both exam interfaces and the AXOM player on it, and
 [Decode](features/decode.md).
 
-Added 2026-10-08 by fast-forward to `b5065ed` (stream 5), as independent modules that no
-screen imports yet: [question content](features/question-content.md) (ordered blocks, a
-versioned import package, a `.docx` reader, an adapter from the PDF import, one rule for
-which image may be shown when) and the [academic bookshelf](features/bookshelf.md) (course
-and question bank libraries). Wiring both into Course Tracker, the Question Bank and the
-import screens is stream 1's.
+Added 2026-10-08 by fast-forward (stream 5 at `b5065ed`, stream 6 at `a14df11`), as
+independent modules that no screen imports yet: [question content](features/question-content.md)
+(ordered blocks, a versioned import package, a `.docx` reader, an adapter from the PDF
+import, one rule for which image may be shown when; from stream 6 a reader for tagged PDFs
+that keeps tables, figures and answer slides, a readiness verdict for each question, and
+`extractPdfBank` with `saveBank`, which take a PDF through the reviewed import) and the
+[academic bookshelf](features/bookshelf.md) (course and question bank libraries). Wiring
+all of it into Course Tracker, the Question Bank and the import screens is stream 1's.
 
 Each layer owns one thing. Course Engine owns term/module/week/question scope and attempt
 persistence. Decode owns what a source teaches about a question: analyses are an optional
@@ -73,7 +75,9 @@ only relevant current entries.
 `reviewPriority` in `lib/learning-intelligence/review.ts` still has `TODO(human)`.
 The optional `content?` field on `QuestionRecord` is approved and not added: until it is,
 a block question is saved as its plain-text reading. The three Term 5 GOER Week 2 banks
-are manifests only; building them from their PDFs is stream 6.
+build locally from JD's PDFs and stay out of git: 47 questions, 32 ready, and the 15 of the
+pharmacology deck wait for a person's answer. No app screen imports them yet; only the
+development page `/harness/pdf-import.html` does.
 The AXOM player lacks I5-18's question navigator. Most source decks still need review:
 colour-coded answers are not read; unresolved slide cases are in the Course Engine contract.
 Decode's concept groups have no screen, and teaching is shown only in the tutor's feedback.
@@ -88,9 +92,11 @@ Each step on this line is gated on Node 22.23.1 (typecheck, lint, unit tests, bu
 repository tests, hygiene, the browser suite on its own port) and recorded with exact
 counts in the ledger. `npm run repo:check` prints current bootstrap size.
 
-Gate at `b5065ed`: 2,698 unit tests, the browser suite 50 passed and 1 skipped, build,
+Gate at `a14df11`: 2,815 unit tests, the browser suite 54 passed and 1 skipped, build,
 update and offline verifiers, repository tests and hygiene.
 
-Next: stream 1 merges this line into its branch and wires the bookshelf and the import
-into the real screens. New feature work starts from this line in a fresh session, not
-from a retired branch, a recovery snapshot or the original mixed checkout.
+Next: stream 1 finishes and commits its bookshelf wiring (22 uncommitted files on
+2026-10-08, copied to `refs/safety/2026-10-08/wt-course-qbank-intelligence-v2`), merges
+this line, and gives the import screens `extractPdfBank` and `saveBank`. New feature work
+starts from this line in a fresh session, not from a retired branch, a recovery snapshot
+or the original mixed checkout.
