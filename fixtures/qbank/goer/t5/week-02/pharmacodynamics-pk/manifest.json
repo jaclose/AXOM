@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "course": {
+    "name": "GOER",
+    "term": 5,
+    "week": 2
+  },
+  "bank": {
+    "id": "goer-t5-w2-pharmacodynamics-pk",
+    "title": "Pharmacodynamics, Pharmacokinetics & Clinical Pharmacokinetics",
+    "discipline": "Pharmacology"
+  },
+  "source": {
+    "filename": "Pharmacodynamics%2C+Pharmacokinetics+and+Clinical+Pharmacokinetics+PQ.pdf",
+    "institution": "St. George's University",
+    "declaredTitle": "PCM2 GOER Module Pharmacology",
+    "declaredTerm": "Fall Term 2026",
+    "sourceWeekDeclared": false,
+    "axomAssignedWeek": 2
+  },
+  "questionsFile": "questions.json",
+  "assetsDirectory": "assets/"
+}

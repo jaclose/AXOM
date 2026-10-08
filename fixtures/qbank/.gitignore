@@ -1,0 +1,15 @@
+# This repository is public. Real course material is never committed:
+# source files, the pictures taken from them, and the questions and answer
+# keys themselves stay on the machine that built them.
+#
+# A pattern with a slash in it is tied to this folder, so the two folder rules
+# need the leading **/ to reach a bank several levels down.
+**/source/*
+**/assets/*
+questions.json
+questions.docx
+!.gitkeep
+
+# The invented bank is the one exception: every word and picture in it was
+# made up for the tests.
+!/synthetic/**

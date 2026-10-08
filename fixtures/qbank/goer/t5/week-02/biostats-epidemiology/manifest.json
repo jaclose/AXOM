@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "course": {
+    "name": "GOER",
+    "term": 5,
+    "week": 2
+  },
+  "bank": {
+    "id": "goer-t5-w2-biostats-epidemiology",
+    "title": "Biostatistics & Epidemiology",
+    "discipline": "Biostatistics / Epidemiology"
+  },
+  "source": {
+    "filename": "Biostats+and+Epidemiology+PQ.pdf",
+    "institution": "St. George's University",
+    "sourceWeekDeclared": false,
+    "axomAssignedWeek": 2
+  },
+  "questionsFile": "questions.json",
+  "assetsDirectory": "assets/"
+}

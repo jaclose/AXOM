@@ -10,6 +10,7 @@ Choose one row. Existing feature contracts remain canonical at their established
 | Task | Orientation | Source entry |
 | --- | --- | --- |
 | Question import, bank, exams | [Questions](questions.md) | `pages/QuestionWorkspacePage.tsx`, `components/questions/` |
+| Questions with tables, images and equations in order; the import package; the DOCX template | [Question content](question-content.md) | `lib/question-content/`, `fixtures/qbank/` from repository root |
 | Targets, timers, study accounting | [Productivity](productivity.md) | `pages/ProductivityPage.tsx`, `lib/pomodoro.ts` |
 | Soundscapes, focus media, media pipeline | [Soundscapes](soundscapes.md) | `pages/SoundscapesPage.tsx`, `lib/soundscapes/`, `lib/media/` |
 | Dashboard widgets/next action | [Widget contract](../DASHBOARD-WIDGET-ARCHITECTURE.md), [brief evidence](../COMMAND-BRIEF-EVIDENCE.md) | `pages/DashboardPage.tsx`, `lib/dashboardWidgets.ts`, `lib/commandBrief.ts` |
