@@ -23,6 +23,7 @@ import { explainSimply, explainWhyWrong, memoryHook, resolveActiveProvider } fro
 import { Modal, SelectField } from "../ui/Modal";
 import { GButton, GhostButton, Tag } from "../ui/primitives";
 import { pushToast } from "../../lib/toast";
+import { CourseBankBrowser } from "./CourseBankBrowser";
 import { QuizFeedback } from "./QuizFeedback";
 import { SourceTeaching } from "./SourceTeaching";
 import { accuracyTone } from "../../lib/library";
@@ -131,6 +132,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const [status, setStatus] = useState<QuizFilters["status"]>(presetFilters?.status ?? "all");
   const [category, setCategory] = useState(presetFilters?.categories?.[0] ?? "");
   const [examType, setExamType] = useState<QuestionExamType | "">(presetFilters?.examTypes?.[0] ?? "");
+  const [choosingSources, setChoosingSources] = useState(false);
+  const [wholeBank, setWholeBank] = useState(!presetFilters?.setIds?.length);
   const [setIds, setSetIds] = useState<string[]>(presetFilters?.setIds ?? []);
   const [ordered, setOrdered] = useState(presetFilters?.ordered ?? false);
   const [timed, setTimed] = useState(restored?.timed ?? (simulate || presetTimed));
@@ -801,14 +804,13 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   // ------------------------------------------------------------------ render
 
   if (stage === "setup") {
-    return (
-      <Modal title={mode === "exam" ? "Set up an exam block" : "Set up a tutor block"} onClose={onClose}
-        footer={
-          <>
-            <GhostButton onClick={saveAsBlock}>Save as block</GhostButton>
-            <GButton variant="primary" onClick={begin}><Play size={ICON_SIZE.body} /> Start {mode} block</GButton>
-          </>
-        }>
+    const available = buildQuizPool(questions, { ...currentFilters(), count: questions.length, ordered: true }, questionSets).length;
+    const selectedSets = questionSets.filter((set) => setIds.includes(set.id));
+    const sourceTitle = wholeBank ? "Whole question bank" : selectedSets.length === 1 ? selectedSets[0].title : `${selectedSets.length} selected sets`;
+    const canStart = count <= 1000 && available > 0 && (wholeBank || selectedSets.length > 0) && Number.isInteger(count) && count > 0;
+    return <Modal title={mode === "exam" ? "Set up an exam block" : "Set up a tutor block"} onClose={onClose}
+      footer={<><GhostButton disabled={!canStart} onClick={saveAsBlock}>Save as block</GhostButton>
+        <GButton variant="primary" disabled={!canStart} onClick={begin}><Play size={ICON_SIZE.body} /> Start {mode} block</GButton></>}>
         {suspended && (
           <div className="sim-suspended-banner" role="status">
             <div>
@@ -825,6 +827,33 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             </div>
           </div>
         )}
+      <div className="block-setup">
+        <section className="block-source-summary" aria-label="Practice source">
+          <span className="field-label">Your practice</span><h3>{sourceTitle}</h3>
+          <p>{canStart ? `${Math.min(count, available)} questions in this block · ${available} match your filters` : "Choose a source with ready questions to continue."}</p>
+          <GhostButton onClick={() => setChoosingSources((value) => !value)} aria-expanded={choosingSources}>{choosingSources ? "Done choosing" : "Change sources"}</GhostButton>
+        </section>
+        {choosingSources && <div className="stack gap12">
+          <label className="row gap8"><input type="checkbox" checked={wholeBank} onChange={(event) => { setWholeBank(event.target.checked); setSetIds([]); }} />Use the whole bank</label>
+          <CourseBankBrowser selectedIds={setIds} onSelectionChange={(ids) => { setWholeBank(false); setSetIds(ids); }} />
+        </div>}
+        <div className="stack gap6"><span className="field-label">How do you want to practice?</span>
+          <div className="row wrap gap8" role="group" aria-label="Block mode">
+            {(["tutor", "exam"] as QuizMode[]).map((value) => <button type="button" key={value} className={`filter-pill ${mode === value ? "on" : ""}`} aria-pressed={mode === value} onClick={() => setMode(value)}>
+              {value === "tutor" ? "Tutor (feedback per question)" : "Exam (feedback at the end)"}
+            </button>)}
+          </div>
+        </div>
+        <div className="stack gap6"><span className="field-label">How many questions?</span>
+          <div className="block-count-row" role="group" aria-label="Question count">
+            {[10, 20, 40].map((value) => <button type="button" key={value} className={`filter-pill ${count === value ? "on" : ""}`} aria-pressed={count === value} onClick={() => setCount(value)}>{value}</button>)}
+            <label className="row gap6"><span className="sub">Custom</span><input className="field" aria-label="Custom question count" type="number" min="1" max="1000" value={count} onChange={(event) => setCount(Number(event.target.value))} /></label>
+          </div>
+        </div>
+        <SelectField label="Question pool" value={status} onChange={(event) => setStatus(event.target.value as QuizFilters["status"])}>
+          <option value="all">All questions</option><option value="unused">Unused only</option><option value="incorrect">Incorrect only</option><option value="marked">Marked only</option>
+        </SelectField>
+        <details className="block-advanced"><summary>Advanced: order, category & exam interface</summary><div className="stack gap12">
         <div className="stack gap6">
           <span className="field-label">Interface</span>
           <div className="sim-interface-grid" role="radiogroup" aria-label="Exam interface">
@@ -847,46 +876,6 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             <span className="sub">{BLOCK_PRESETS.find((preset) => preset.id === presetId)?.note}</span>
           </div>
         )}
-        <div className="row" style={{ gap: 6 }} role="group" aria-label="Block mode">
-          {(["tutor", "exam"] as QuizMode[]).map((m) => (
-            <button type="button" key={m} className={`filter-pill ${mode === m ? "on" : ""}`}
-              aria-pressed={mode === m} onClick={() => setMode(m)}>
-              {m === "tutor" ? "Tutor (feedback per question)" : "Exam (feedback at the end)"}
-            </button>
-          ))}
-        </div>
-        {questionSets.length > 0 && (
-          <div className="stack gap6">
-            <span className="field-label">Question sets (none selected = whole bank)</span>
-            <div className="row" style={{ flexWrap: "wrap", gap: 6 }} role="group" aria-label="Question sets">
-              {questionSets.map((qset) => (
-                <button type="button" key={qset.id} className={`filter-pill ${setIds.includes(qset.id) ? "on" : ""}`}
-                  aria-pressed={setIds.includes(qset.id)}
-                  onClick={() => setSetIds((prev) => prev.includes(qset.id) ? prev.filter((x) => x !== qset.id) : [...prev, qset.id])}>
-                  {qset.title} ({qset.questionIds.length})
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        <div className="stack gap6">
-          <span className="field-label">How many questions</span>
-          <div className="row" style={{ flexWrap: "wrap" }} role="group" aria-label="Question count">
-            {[5, 10, 20, 40, 50].map((n) => (
-              <button type="button" key={n} className={`filter-pill ${count === n ? "on" : ""}`}
-                aria-pressed={count === n} onClick={() => setCount(n)}>{n}</button>
-            ))}
-          </div>
-        </div>
-        <div className="stack gap6">
-          <span className="field-label">Pool</span>
-          <div className="row" style={{ flexWrap: "wrap" }} role="group" aria-label="Question pool">
-            {([["all", "All"], ["unused", "Unused only"], ["incorrect", "Incorrect only"], ["marked", "Marked only"]] as Array<[QuizFilters["status"], string]>).map(([v, label]) => (
-              <button type="button" key={v} className={`filter-pill ${status === v ? "on" : ""}`}
-                aria-pressed={status === v} onClick={() => setStatus(v)}>{label}</button>
-            ))}
-          </div>
-        </div>
         <div className="grid grid-2">
           <SelectField label="Category" value={category} onChange={(e) => setCategory(e.target.value)}>
             <option value="">Any</option>
@@ -907,8 +896,9 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             <span>Timed · {minutesPerQ} min per question{examInterface !== "axom" && timed ? ` (${Math.round(count * minutesPerQ)} min block)` : ""}</span>
           </label>
         )}
-      </Modal>
-    );
+        </div></details>
+      </div>
+    </Modal>;
   }
 
   if (stage === "sim" && simRun) {

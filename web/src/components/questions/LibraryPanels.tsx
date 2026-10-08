@@ -19,6 +19,7 @@ import { moduleKey } from "../../lib/course-engine/vocabulary";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { createQuestionSetShare } from "../../lib/sharing/questionSetShare";
 import { publishShare } from "../../lib/sharing/supabaseSharing";
+import { CourseBankBrowser } from "./CourseBankBrowser";
 import { sortByNaturalTitle } from "../../lib/naturalSort";
 
 const NO_QUESTIONS: QuestionRecord[] = [];
@@ -114,6 +115,7 @@ export function SourceLibrary({
 
 export function QuestionSetList({
   onRunSet,
+  onRunSets,
   onReviewIssues,
   onReviewMisses,
   onOpenInsights,
@@ -124,6 +126,7 @@ export function QuestionSetList({
   sub,
 }: {
   onRunSet: (set: QuestionSet) => void;
+  onRunSets?: (sets: QuestionSet[]) => void;
   onReviewIssues?: (ids: string[]) => void;
   onReviewMisses?: (ids: string[]) => void;
   onOpenInsights?: () => void;
@@ -190,16 +193,6 @@ export function QuestionSetList({
     () => [...new Set((s.courses ?? []).flatMap((course) => course.modules.map((module) => module.name)))],
     [s.courses],
   );
-  // Once any set has a place in the course, the list is laid out by module and
-  // week. Recent and compact lists stay flat: they answer "what was I doing".
-  const groups = useMemo(() => groupSetsByScope(filteredSets), [filteredSets]);
-  const grouped = !recent && !compact && filteredSets.some((set) => set.scope?.module);
-  const [openGroups, setOpenGroups] = useState<Set<string>>(() => {
-    // Open the module worked on most recently; the rest are one click away.
-    const newest = [...sets].filter((set) => set.scope?.module).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-    return new Set(newest?.scope?.module ? [moduleKey(newest.scope.module)] : [UNFILED_GROUP]);
-  });
-
   function fileUnder(set: QuestionSet) {
     const current = set.scope?.module ? `${set.scope.module}${set.scope.week ? `, week ${set.scope.week}` : ""}` : "";
     const answer = prompt(`File "${set.title}" under which module and week? For example: ${courseModules[0]}, week 2. Leave empty to unfile it.`, current);
@@ -213,7 +206,6 @@ export function QuestionSetList({
     }
     const week = parseWeek(rest.join(","));
     s.updateQuestionSet(set.id, { scope: { module, ...(week ? { week } : {}) } });
-    setOpenGroups((existing) => new Set(existing).add(moduleKey(module)));
   }
 
   function renderCard(set: QuestionSet) {
@@ -270,6 +262,11 @@ export function QuestionSetList({
     );
   }
 
+  if (!recent && !compact) return <CourseBankBrowser
+    onPractice={(chosen) => chosen.length === 1 ? onRunSet(chosen[0]) : onRunSets?.(chosen)}
+    renderSet={renderCard}
+  />;
+
   return (
     <GlassCard>
       <PanelHeader
@@ -293,77 +290,12 @@ export function QuestionSetList({
           hint="Import questions in the Import Center and save them as a question set — they'll appear here with mastery tracking."
         />
       ) : (
-        grouped ? (
-          <div className="qset-groups">
-            {groups.map((group) => (
-              <details key={group.key} className="qset-group" open={openGroups.has(group.key)}
-                onToggle={(event) => {
-                  const isOpen = (event.currentTarget as HTMLDetailsElement).open;
-                  setOpenGroups((current) => {
-                    const next = new Set(current);
-                    if (isOpen) next.add(group.key); else next.delete(group.key);
-                    return next;
-                  });
-                }}>
-                <summary>
-                  <b>{group.label}</b>
-                  <span className="sub">
-                    {group.sets.length} set{group.sets.length === 1 ? "" : "s"} · {group.questionCount} question{group.questionCount === 1 ? "" : "s"}
-                  </span>
-                </summary>
-                {group.weeks.map((week) => (
-                  <section key={week.label} className="qset-week" aria-label={`${group.label}, ${week.label}`}>
-                    {group.module && <h3 className="field-label">{week.label}</h3>}
-                    <div className="qset-grid">{week.sets.map(renderCard)}</div>
-                  </section>
-                ))}
-              </details>
-            ))}
-            {filteredSets.length === 0 && <EmptyState title="No question sets match" hint="Try a different set title or tag." />}
-          </div>
-        ) : (
           <div className={`qset-grid ${compact ? "compact" : ""}`}>
             {filteredSets.map(renderCard)}
             {filteredSets.length === 0 && <EmptyState title="No question sets match" hint="Try a different set title or tag." />}
           </div>
-        )
       )}
     </GlassCard>
   );
 }
 
-const UNFILED_GROUP = "unfiled";
-
-interface SetGroup {
-  key: string;
-  module?: string;
-  label: string;
-  questionCount: number;
-  sets: QuestionSet[];
-  weeks: Array<{ label: string; sets: QuestionSet[] }>;
-}
-
-/** Sets by module, then week, in course order. Sets with no place come last. */
-function groupSetsByScope(sets: readonly QuestionSet[]): SetGroup[] {
-  const byModule = new Map<string, SetGroup>();
-  for (const set of sets) {
-    const module = set.scope?.module;
-    const key = module ? moduleKey(module) : UNFILED_GROUP;
-    const group = byModule.get(key) ?? { key, module, label: module ?? "Not filed under a module", questionCount: 0, sets: [], weeks: [] };
-    group.sets.push(set);
-    group.questionCount += set.questionIds.length;
-    byModule.set(key, group);
-  }
-  for (const group of byModule.values()) {
-    const weeks = new Map<number, QuestionSet[]>();
-    for (const set of group.sets) weeks.set(set.scope?.week ?? 0, [...(weeks.get(set.scope?.week ?? 0) ?? []), set]);
-    group.weeks = [...weeks.entries()]
-      .sort(([left], [right]) => (left || Infinity) - (right || Infinity))
-      .map(([week, items]) => ({ label: week ? `Week ${week}` : "No week set", sets: items }));
-  }
-  return [...byModule.values()].sort((left, right) => {
-    if (left.key === UNFILED_GROUP) return 1;
-    if (right.key === UNFILED_GROUP) return -1;
-    return left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: "base" });
-  });
-}

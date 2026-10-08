@@ -145,7 +145,7 @@ interface AnswerSignal {
   ambiguousLeadingLetter?: boolean;
 }
 
-const ANSWER_PREFIX_RE = /^\s*(?:(?:the\s+)?(?:correct\s+|right\s+)?answer|(?:correct|right)\s+(?:option|choice)|(?:correct\s+)?ans|correct|key|solution)\s*(?:is)?\s*[:\-–]?\s*(.+?)\s*$/i;
+const ANSWER_PREFIX_RE = /^\s*(?:(?:the\s+)?(?:correct\s+|right\s+)?answer(?:\s+key)?|(?:correct|right)\s+(?:option|choice)|(?:correct\s+)?ans|correct|key|solution)\s*(?:is)?\s*[:\-–]?\s*(.+?)\s*$/i;
 
 function isRationaleTail(value: string): boolean {
   return /^(?:because|since|as\b|due\s+to\b|the\s+(?:mechanism|reason|finding|clue|pathway)\b|this\b|these\b|it\b)/i.test(value.trim());

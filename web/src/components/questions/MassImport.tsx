@@ -17,6 +17,7 @@ import { importFromCsv, importFromJson } from "../../lib/questionImport";
 import { extractDocxText, extractPdfText, extractPlainText } from "../../lib/extractText";
 import { attachPdfFigures } from "../../lib/pdfFigures";
 import { parsePdfQuestions } from "../../lib/pdfQuestionImport";
+import { courseForScope } from "../../lib/course-engine/questionBank";
 import { useStore } from "../../lib/store";
 import { MAPPING_STATUS_LABEL, describeMapping, inferSourceMapping } from "../../lib/course-engine/sourceMapping";
 import { moduleAliases } from "../../lib/course-engine/templateParse";
@@ -302,7 +303,7 @@ export function MassImport({
       document: { title, fileName: file.fileName, fileType: file.fileType, sizeBytes: file.sizeBytes, rawText: file.rawText, pageTexts: file.pageTexts, checksum: file.checksum },
       sourceType: file.source,
       setTitle: title,
-      scope: evaluation.scope,
+      scope: evaluation.scope ? { ...evaluation.scope, courseId: courseForScope(evaluation.scope, current.courses)?.id } : undefined,
       parserWarnings: file.warnings,
     }, library);
     if (!prepared.ok) return false;

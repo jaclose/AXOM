@@ -62,7 +62,7 @@ export interface ReviewedImportRequest {
   sourceType: QuestionSource;
   setTitle: string;
   /** Where the set sits in the course. */
-  scope?: { module: string; week?: number };
+  scope?: { module: string; week?: number; courseId?: string };
   /** A category for every question that has none of its own. */
   category?: string;
   examType?: QuestionExamType;
@@ -160,6 +160,7 @@ export function prepareReviewedImport(
     // place in the course when it is later drawn into another set.
     module: scope?.module,
     week: scope?.week,
+    courseId: scope?.courseId,
     setId,
     sourceDocumentId: documentId,
     sourceFile: document ? {

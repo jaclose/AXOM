@@ -77,7 +77,7 @@ export function QuestionWorkspacePage() {
   const questions = s.questions ?? NO_QUESTIONS;
   const questionSets = s.questionSets ?? NO_SETS;
   const documents = s.documents ?? NO_DOCUMENTS;
-  const [tab, setTab] = useState<BankTab>("overview");
+  const [tab, setTab] = useState<BankTab>(() => questionSets.length ? "sets" : "overview");
   const [open, setOpen] = useState<QuestionRecord | null>(null);
   const [showStyle, setShowStyle] = useState(false);
   const [runner, setRunner] = useState<RunnerLaunch | null>(() => {
@@ -290,7 +290,7 @@ export function QuestionWorkspacePage() {
     <>
       <div
         ref={entryRef}
-        className={`qb-hero tx-marble ${isFirstUse ? "qb-first-use" : "qb-returning-hero"}`}
+        className={`qb-hero tx-marble ${isFirstUse ? "qb-first-use" : "qb-returning-hero"} ${tab === "sets" ? "qb-course-header" : ""}`}
         data-tour="question-bank-entry"
       >
         <div className="qb-hero-inner">
@@ -389,6 +389,7 @@ export function QuestionWorkspacePage() {
               compact
               limit={3}
               onRunSet={runSet}
+          onRunSets={(sets) => setRunner({ mode: "tutor", presetFilters: { setIds: sets.map((set) => set.id), count: 20 } })}
               onReviewIssues={openMappingReview}
             />
           )}
@@ -502,6 +503,7 @@ export function QuestionWorkspacePage() {
       {tab === "sets" && (
         <QuestionSetList
           onRunSet={runSet}
+          onRunSets={(sets) => setRunner({ mode: "tutor", presetFilters: { setIds: sets.map((set) => set.id), count: 20 } })}
           onReviewIssues={openMappingReview}
           onReviewMisses={(ids) => ids.length && setRunner({ mode: "tutor", retakeIds: ids })}
           onOpenInsights={() => setTab("insights")}

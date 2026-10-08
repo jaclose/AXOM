@@ -41,6 +41,7 @@ import { ALREADY_IMPORTED_RULE, applyPriorImport } from "../../lib/questionImpor
 import { hasReviewedImportInFlight } from "../../lib/questionImportFinalization";
 import { prepareReviewedImport, saveReviewedImport, type ImportSourceFile } from "../../lib/questionImportSave";
 import { scopeFromMapping } from "../../lib/massImportCandidate";
+import { courseForScope } from "../../lib/course-engine/questionBank";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { MassImport } from "./MassImport";
 import { flagImportDuplicates } from "../../lib/questionDuplicates";
@@ -342,7 +343,8 @@ export function ImportPanel({
       sourceType,
       setTitle,
       scope: scopeModule
-        ? { module: scopeModule, ...(Number.isInteger(week) && week > 0 && week < 100 ? { week } : {}) }
+        ? { module: scopeModule, courseId: courseForScope({ module: scopeModule }, s.courses)?.id,
+            ...(Number.isInteger(week) && week > 0 && week < 100 ? { week } : {}) }
         : undefined,
       category: category || undefined,
       examType: examType || undefined,

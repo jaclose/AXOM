@@ -14,6 +14,11 @@ function fiveQuestions(answerSection: string): string {
 }
 
 describe("real-source answer mapping hardening", () => {
+  it("reads an inline Answer Key label without treating Key as answer text", () => {
+    const [draft] = parseQuestionBlocks("1. Which sample?\nA. Alpha\nB. Beta\nC. Gamma\nAnswer Key: B\nRationale: Beta is the supplied answer.");
+    expect(draft.correctKey).toBe("B");
+    expect(draft.parserRuleIds).not.toContain("answer.unrecognized-key");
+  });
   it("maps a PDF table whose question numbers and answer letters occupy aligned rows", () => {
     const drafts = parseQuestionBlocks(fiveQuestions([
       "Answer Key", "1   2   3   4   5", "B   D   A   C   E",
