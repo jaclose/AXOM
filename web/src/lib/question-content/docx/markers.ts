@@ -87,6 +87,8 @@ export type DocxBodyElement =
       rich?: boolean;
       /** Leading rows the document marks as headings. */
       headerRows?: number;
+      /** The first cell of each row below the headings is marked as that row's name. */
+      rowHeaders?: boolean;
       /** Positions in `rows` as given, row 0 first. */
       merges?: TableMerge[];
     }

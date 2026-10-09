@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseQuestionBlocks, type ParsedQuestionDraft } from "../questionParse";
 import { blockShape } from "./blocks";
 import type { DocxBodyElement } from "./docx/markers";
-import { anchorToken, bodyToAnchoredText, draftsToQuestions } from "./fromDrafts";
+import { anchorToken, answerKeyLines, bodyToAnchoredText, draftsToQuestions, type AnchoredText } from "./fromDrafts";
 
 const p = (text: string, more: Partial<Extract<DocxBodyElement, { kind: "paragraph" }>> = {}): DocxBodyElement => ({ kind: "paragraph", text, ...more });
 const defaults = { bankId: "example-bank", sourceFilename: "invented.docx", method: "docx-import" as const };
@@ -84,5 +84,73 @@ describe("answers the parser is unsure of", () => {
     expect(questions[0].source).toEqual({ filename: "invented.docx", page: 7, questionNumber: 4 });
     // Two questions with the same number still get two ids.
     expect(questions.map((question) => question.id)).toEqual(["example-bank-q04", "example-bank-q04-2"]);
+  });
+});
+
+describe("an answer key set out as a table", () => {
+  it("is read as key lines when it runs question number then choice letter", () => {
+    expect(answerKeyLines([["Question", "Answer"], ["1", "B"], ["2", "D"], ["3", "A"]])).toEqual(["1. B", "2. D", "3. A"]);
+    expect(answerKeyLines([["Q1", "(C)", "The third choice is the largest."], ["Q2", "(A)", ""], ["Q3", "(B)", "Only this one falls."]], 0))
+      .toEqual(["1. (C) The third choice is the largest.", "2. (A)", "3. (B) Only this one falls."]);
+  });
+
+  it("is left a table when the numbers skip, the rows are few, or the second column is not letters", () => {
+    expect(answerKeyLines([["Question", "Answer"], ["1", "B"], ["3", "D"], ["4", "A"]])).toBeUndefined();
+    expect(answerKeyLines([["Question", "Answer"], ["1", "B"], ["2", "D"]])).toBeUndefined();
+    expect(answerKeyLines([["Dose", "Level"], ["1", "12 mg/L"], ["2", "24 mg/L"], ["3", "36 mg/L"]])).toBeUndefined();
+    expect(answerKeyLines([["Group", "Deaths", "Survivors"], ["Drug", "10", "90"], ["Placebo", "20", "80"], ["None", "30", "70"]])).toBeUndefined();
+  });
+
+  it("goes to the parser as its answer section, and never becomes a table of a question", () => {
+    const anchored = bodyToAnchoredText([
+      p("Which marker is low?", { listLabel: "1.", listKind: "ordered" }), p("Marker A", { listLabel: "A.", listKind: "ordered" }), p("Marker B", { listLabel: "B.", listKind: "ordered" }),
+      p(""),
+      p("Which marker is high?", { listLabel: "2.", listKind: "ordered" }), p("Marker A", { listLabel: "A.", listKind: "ordered" }), p("Marker B", { listLabel: "B.", listKind: "ordered" }),
+      p(""),
+      p("Which marker is normal?", { listLabel: "3.", listKind: "ordered" }), p("Marker A", { listLabel: "A.", listKind: "ordered" }), p("Marker C", { listLabel: "B.", listKind: "ordered" }),
+      p(""),
+      p("Answer Key"),
+      { kind: "table", rows: [["Question", "Answer"], ["1", "B"], ["2", "A"], ["3", "B"]], headerRows: 1 },
+    ]);
+    expect(anchored.media).toEqual([]);
+    const converted = draftsToQuestions(parseQuestionBlocks(anchored.text), anchored, defaults);
+    expect(converted.questions.map((question) => question.correctAnswer?.labels[0])).toEqual(["B", "A", "B"]);
+  });
+});
+
+describe("anchors across the pages of one file", () => {
+  it("gives the same table printed on two pages one anchor, and a different table its own", () => {
+    const table = (rows: string[][]): DocxBodyElement => ({ kind: "table", rows });
+    const into: AnchoredText = { text: "", media: [], flattened: false };
+    const first = bodyToAnchoredText([p("Question slide"), table([["Dose", "Level"], ["1", "12"]])], { paragraphBreak: "\n", into }).text;
+    const second = bodyToAnchoredText([p("Answer slide"), table([["Dose", "Level"], ["1", "12"]]), table([["Dose", "Level"], ["2", "24"]])], { paragraphBreak: "\n", into }).text;
+    expect(first).toBe(`Question slide\n${anchorToken(0)}`);
+    expect(second).toBe(`Answer slide\n${anchorToken(0)}\n${anchorToken(1)}`);
+    expect(into.media).toHaveLength(2);
+  });
+});
+
+describe("what the caller knows better than the parser", () => {
+  const text = ["1. Which marker is low?", "A. Marker A", "B. Marker B", "Answer: B", "", "1. Which marker is high?", "A. Marker A", "B. Marker B", "Answer: A"].join("\n");
+
+  it("takes an id for each question when it is given one, and still never repeats an id", () => {
+    const drafts = parseQuestionBlocks(text);
+    expect(draftsToQuestions(drafts, { media: [] }, defaults).questions.map((question) => question.id)).toEqual(["example-bank-q01", "example-bank-q01-2"]);
+    expect(draftsToQuestions(drafts, { media: [] }, { ...defaults, ids: ["example-bank-s1-q01", "example-bank-s2-q01"] }).questions.map((question) => question.id))
+      .toEqual(["example-bank-s1-q01", "example-bank-s2-q01"]);
+    expect(draftsToQuestions(drafts, { media: [] }, { ...defaults, ids: ["same", "same"] }).questions.map((question) => question.id)).toEqual(["same", "same-2"]);
+  });
+
+  it("moves a table printed after the last choice out of that choice and into the question, with a flag", () => {
+    const anchored = bodyToAnchoredText([
+      p("Which group has the higher risk?", { listLabel: "1.", listKind: "ordered" }),
+      p("The exposed group", { listLabel: "A.", listKind: "ordered" }),
+      p("The unexposed group", { listLabel: "B.", listKind: "ordered" }),
+      { kind: "table", rows: [["Group", "Cases"], ["Exposed", "30"], ["Unexposed", "10"]] },
+    ]);
+    const [question] = draftsToQuestions(parseQuestionBlocks(anchored.text), anchored, defaults).questions;
+    expect(question.choices.map((choice) => blockShape(choice.blocks))).toEqual([["text"], ["text"]]);
+    expect(blockShape(question.stem)).toEqual(["text", "table"]);
+    expect(question.flags).toEqual([{ type: "media_association_uncertain", message: expect.stringContaining("printed after the answer choices") }]);
   });
 });

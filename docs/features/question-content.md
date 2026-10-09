@@ -12,8 +12,12 @@ travels as an import package and can be written by hand in a Word template.
 
 **Status (2026-10-08):** Phases 1 and 2 of five are built on `feat/qbank-multimodal-import-v1`:
 the model, the package and its checks, the template, a reader for real `.docx` files, and
-an adapter from the existing PDF import. Nothing in the app calls them yet: wiring is
-Codex's (decision 4 below). Phases are at the end of this note.
+an adapter from the existing PDF import. On `feat/goer-pdf-bank-import-v1` a reader for
+tagged PDFs, a readiness verdict and an adapter into the canonical import are added, and
+the three GOER Week 2 banks are read from their PDFs in a real browser, previewed,
+classified, saved through the canonical import, and checked after a reload, on a
+development-only harness page (Phase 5). No screen of the app calls any of it yet: wiring
+is Codex's (decision 4 below). Phases are at the end of this note.
 
 | Responsibility | Files |
 | --- | --- |
@@ -28,6 +32,14 @@ Codex's (decision 4 below). Phases are at the end of this note.
 | `.docx` in, questions and picture files out | `docx/docxToQuestions.ts` |
 | Bridge from the existing text parser (anchors) | `fromDrafts.ts` |
 | The existing PDF import as package questions | `pdf/pdfToQuestions.ts` |
+| A tagged PDF: pages from pdf.js, the tagged reader, sets of questions, the converter | `pdf/loadTaggedPdf.ts`, `pdf/taggedPdf.ts`, `pdf/parts.ts`, `pdf/taggedPdfToQuestions.ts` |
+| A tagged PDF file in the browser: questions and their picture files | `pdf/taggedPdfInBrowser.ts`, `pdf/renderPlan.ts` |
+| A chosen PDF into a package with a verdict for every question | `pdf/extractPdfBank.ts` |
+| Saving a package, each set of the source in turn, with a plain account of the outcome | `bankImport.ts` |
+| The whole import in a browser, development only | `web/harness/pdf-import.html`, `web/src/harness/pdfImportHarness.ts`, `web/e2e/pdf-import-harness.spec.ts` |
+| Ready, needs review or unresolved, with reasons | `readiness.ts` |
+| A package into the canonical import and save | `toReviewedImport.ts` |
+| Building and saving a real bank on this machine, counts only | `pdf/buildBank.local.test.ts`, `pdf/persistBank.local.test.ts` |
 | Picture kind, size, checksum | `assets.ts` |
 | Counts-only harness for local files | `docx/inspect.local.test.ts` |
 | Fixtures and what may be committed | [`fixtures/qbank/`](../../fixtures/qbank/README.md) |
@@ -52,6 +64,15 @@ Storage and schema: [data model](../architecture/data-model.md).
    `pdfMarkedAnswers.ts`. Nothing here detects it.
 6. An answer that is ambiguous stays unresolved and asks for review. It is never
    saved as the key.
+7. Only a doubt that bears on answering or marking a question keeps it out of scored
+   practice: an answer that is not verified, essential content that is missing, doubt over
+   which question or set something belongs to, a picture the question needs that could not
+   be tied to it, anything that could give the answer away. A formatting difference, a
+   filing note that can be put right, or an oddity of type is advisory. An inferred answer
+   is never verified.
+8. A source file stays one source. It may hold several sets of questions, and each set
+   keeps its own numbering and provenance. Sets are never flattened into one run of numbers
+   to get round a repeated number.
 
 **Image visibility** (`visibility.ts`, every role tested in every mode):
 
@@ -195,7 +216,150 @@ the lines it sits between; when that cannot be worked out it goes after the text
 flag. A figure the placer held back on an answer page becomes an `answer_reveal` asset
 tied to its clean copy; one below an answer goes to the explanation; one with no question
 is listed for placing by hand. `pdfToQuestions` runs the existing passes in the browser.
-Tables in a PDF still arrive as text: rebuilding them from positions is not done.
+In a PDF with no structure tags, tables still arrive as text: rebuilding them from
+positions is not done.
+
+## A tagged PDF as package questions
+
+Word and PowerPoint write a structure tree into the PDFs they export. pdf.js returns it
+(`page.getStructTree()`, and `getTextContent({ includeMarkedContent: true })` for the
+text of each tagged piece). `loadTaggedPdf` collects both for every page, and
+`readTaggedPage` turns a page into the same body elements the Word reader produces:
+paragraphs, list items with their printed labels, tables with heading rows and row names,
+and figures with their boxes and alternative text. Page furniture outside the tags is
+left out. No table is guessed from positions.
+
+- **A document** is read in the order of its tags. A figure large enough to be one is in
+  the text where the tags put it, so it lands between the lines it sits between. One
+  printed straight after the last choice is moved to the question and flagged for a
+  person to check.
+- **A slide** is read by position, because text boxes are tagged in the order they were
+  made. Text at the same height is one line. A graph drawn as many shapes is one region.
+  Its axis numbers, axis titles and curve letters are text of the slide: they are taken
+  out of the running text, the region grows to cover them, and they are kept as the
+  picture's description. A line shaped like a choice or a numbered question is never
+  taken. A bare number at the foot of several pages is removed as a page number.
+- **Sets.** A file can hold several sets of questions, each numbered from 1. `splitParts`
+  splits the text where the numbering goes back to 1 and each set is parsed on its own.
+  Question ids then carry the set (`<bank>-s2-q03`), `source.set` records it and
+  `source.setTitle` keeps the line printed above it. The set's heading becomes the topic
+  only when the tags call that line a heading.
+- **A picture that belongs to no question.** It is listed in `unplaced`. If it sits on a
+  page that holds a question, that question is flagged `media_association_uncertain`,
+  since the picture may be its own. A picture on a page with no question (a logo on a title
+  slide) holds nothing back.
+- **Answer sections.** A separate section of numbered answers goes to the one set that has
+  exactly those question numbers and no answers of its own. If it fits none, or more than
+  one, it is applied to none. A key in any other shape printed after the last set is cut
+  out when an earlier set has no answers, because nothing says whose it is. The parser
+  reads a section only under a heading it knows; when it cannot read one as printed, the
+  heading is reworded to "Answers and Explanations:" and the entries are left untouched.
+- **An answer key set out as a table** (question number, then letter) goes to the parser as
+  key lines. It never becomes a table of a question.
+- **An answer slide** is kept whole as an `answer_reveal` picture of the page. Which choice
+  a drawn mark points at is not read here: that is Codex's `pdfMarkedAnswers.ts`. A
+  question whose only key is a mark has no key and says why.
+
+`taggedPdfToQuestions` returns the questions, the issues, what has to be drawn from the
+PDF for each picture (`renders`: a page, and a box for a region), what could not be tied
+to a question (`unplaced`), plain notes and a counts-only report.
+
+In the browser, `taggedPdfFileToQuestions(buffer, defaults)` does the whole trip: it
+reads the file, converts it, draws each page that has a picture once on a canvas (up to
+three times the page's size, longest edge 1,600 pixels) and cuts the pictures out, then
+gives every asset the size, weight and checksum of its drawn picture. It returns the
+conversion plus `files`, one PNG for each asset under the asset's file name, ready for
+`saveReviewedImport`. For a PDF with no tags it returns `{ tagged: false }` and the
+caller falls back to `pdfToQuestions`. A development-only page, `/harness/tagged-pdf.html`,
+runs it on an invented PDF built in the page, and `e2e/tagged-pdf-harness.spec.ts` checks
+it in a real browser.
+
+## Ready, needs review, unresolved
+
+`questionReadiness(question, issues)` gives one verdict: `readiness`, the `reasons` that
+hold the question back, and `advisories` that do not. It follows decision 7.
+
+| Verdict | When |
+| --- | --- |
+| Ready | A verified key and nothing blocking. Advisories may be present |
+| Needs review | A key that is not verified, or a blocking doubt. Or no key, with the answer kept in a form a person can read (`answer_needs_review`) |
+| Unresolved | An error stops it being run. Or no answer could be read and nothing was kept to settle it |
+
+- **A verified key** has evidence `printed-key` or `reviewer`. A key read from a slide that
+  marks the answer, worked out from the wording of an explanation, or given with no source
+  at all is not verified.
+- **Blocking** is the default. A warning holds a question back unless its code is on the
+  advisory list in `readiness.ts`, so a code added later blocks until someone classifies
+  it. Blocking today: `source_inconsistency`, `media_association_uncertain`,
+  `table_parse_uncertain`, `needs_review` (the parser's own doubt about a boundary),
+  `possible_answer_marking`, `choices_incomplete`, `unsupported_content`, and a picture
+  that shows the answer placed where the question would show it.
+- **Advisory:** `media_position_uncertain` (the picture is the question's; only its place
+  among the lines is unsure), `possible_duplicate`, `scope_mismatch`, `media_cropped`,
+  `rich_text_escaped`, `tracked_changes`, `unknown_field`, `unknown_flag`,
+  `asset_reference_broken` (not needed to answer). Plain information, such as a missing
+  explanation, is neither.
+- A package-level warning (two logos on a title slide) does not hold any question back.
+- **A person sets an answer** with `withReviewedAnswer(question, label)`. The key is
+  recorded with evidence `reviewer` and the request for review is cleared. Only a person's
+  action calls it. A proposal from a program, such as a mark read off a slide, goes to the
+  person first. Run `assessBank` again afterwards.
+
+## Saving a package through the canonical import
+
+There is one way to save reviewed questions: `prepareReviewedImport` and
+`saveReviewedImport` in `lib/questionImportSave.ts`. A package is saved by that code and
+by no second path. This is the typed contract for the import screens:
+
+```ts
+const bank = await extractPdfBank(file, manifest);            // browser: read, convert, draw, assess
+if (!bank.tagged) { /* fall back to pdfToQuestions */ }
+// preview: bank.pkg, bank.verdicts, bank.counts, bank.files, bank.unplaced, bank.notes
+const saved = await saveBank(bank.pkg, bank.issues, bank.files, { library, store }, {
+  acknowledged, sourceText: bank.sourceText, sourceBytes: bank.sourceBytes, notes: bank.notes,
+});
+// saved.status: "saved" | "already-saved" | "nothing-ready" | "failed"
+```
+
+- `packageToReviewedImport` builds one request **for each set of the source** (decision 8).
+  Each set becomes its own saved set, titled "Bank: set 2 (its heading)", and every
+  question keeps the number its source gave it. `saveBank` prepares and saves them in turn.
+- With `sourceText`, the library keeps one record of the source file, found again by its
+  checksum, and every set made from the file is tied to that record. Without it only the
+  questions are saved.
+- Only a ready question is offered. One that needs review is offered once its id is in
+  `acknowledged`, and never without a key. Two questions of one set that share a number are
+  both held. Everything held is in `held` with its reasons.
+- The sets are filed by the manifest: `scope: { module, week }`. `filing.agrees` says
+  whether the curriculum puts that module in the manifest's term.
+- Only a picture that may be seen while the question is open is offered, by file name. An
+  answer-reveal or explanation picture is listed in `withheldAssets` and stays in the
+  package, because the current question record shows every picture with the question.
+- Advisory notes travel with the question as its warnings.
+- A second import of the same file is recognised and reuses the first. Nothing is written
+  twice. The comparison includes the set's title and the questions' topic, so the same file
+  filed under a different bank is a different import.
+- A refusal by the canonical checks, or a write that fails, gives `status: "failed"` and
+  the reason in `errors`. It is never reported as a save.
+
+Until `content` is on `QuestionRecord` (Phase 4), a saved question is the plain-text
+reading of its blocks: a table is saved as text, and a picture is an exhibit shown with
+the stem, not at its place inside it. The package question's own id is not on the saved
+record; `saveBank` returns the two lists of ids in step.
+
+### The harness page
+
+`/harness/pdf-import.html` on the dev server runs the whole import on the app's real
+store, in whatever browser profile opens it: choose a PDF (and, to file it, a bank's
+`manifest.json` or the fields), read the preview, switch between how a question looks
+while open, once answered and in review, set an answer by hand where the source only
+marks it, import, reload, and read the check of what was saved. Its summary, result and
+workspace panels hold counts only. It is not in the production build.
+
+pdf.js is used as the app already configures it: no `wasmUrl`, `standardFontDataUrl` or
+`cMapUrl`. A PDF whose pictures are JPEG 2000 or whose fonts are not embedded could draw
+blank or in a stand-in font. The harness counts blank pictures; the three GOER files drew
+none and raised no browser warning.
 
 ## What is private
 
@@ -213,7 +377,7 @@ check prints counts only.
 | 2 | Read a `.docx` body in document order; convert to the package; adapter from the existing PDF import | Built (`96c5cd9`) |
 | 3 | Import preview: counts, issues, rendered questions, media badges, moving a picture to the right place | Open. Codex wires it into `ImportPanel` and `MassImport`; `summarizePackage`, `validatePackage` and `unplaced` are its inputs |
 | 4 | `content` on `QuestionRecord`; one block renderer under every exam interface; wider attachment roles; image enlarge, zoom, pan; deletion, backup and restore of the pictures | Open. Edits `questions.ts`, `questionAttachments.ts`, `ExamRunner.tsx`: Codex's files |
-| 5 | Build the three Term 5 GOER Week 2 banks locally and run them as the real regression set | Open. The sources are PDFs: tables must be rebuilt from page positions first, or the banks typed into the template |
+| 5 | Build the three Term 5 GOER Week 2 banks locally and run them as the real regression set | In part (`feat/goer-pdf-bank-import-v1`). All three PDFs are tagged and are built locally: 47 questions, 11 tables, 7 figures. 32 are ready (two banks, every key agreed by a second PDF reader) and were saved, reloaded and re-imported without a duplicate through the canonical import, in memory. 15 need review (the slide deck: its answers are drawn marks, 14 of 15 slides). In a real browser, on the harness page, each of the three files was chosen, read, previewed, classified, imported, reloaded and checked. The 32 ready questions were saved as three sets from two source files (the biostatistics file keeps its two sets), every stem, key, number, page and picture unchanged after the reload, every table cell found, no answer slide on the page while a question is open, nothing written by a second import. Not done: reading the deck's marks (Codex), the import screen (Codex) |
 
 Known limits to carry forward: a rendered question must apply an asset's `crop`; annotations store positions in the plain stem, so
 highlights on block text need a mapping in Phase 4. Picture bytes are stored on the
@@ -226,3 +390,12 @@ Tests: `web/src/lib/question-content/**/*.test.ts`. Run
 `npx vitest run src/lib/question-content` from `web/`. To see what the reader finds in a
 folder of your own `.docx` files, counts only:
 `AXOM_DOCX=/path npx vitest run src/lib/question-content/docx/inspect.local.test.ts`.
+To build the real banks from their PDFs (needs poppler's `pdftocairo` for the pictures),
+and then to take them through the canonical import in memory, counts only:
+`AXOM_QBANK_SOURCES=/folder/with/the/pdfs npx vitest run src/lib/question-content/pdf/buildBank.local.test.ts`
+and `AXOM_QBANK_PERSIST=1 npx vitest run src/lib/question-content/pdf/persistBank.local.test.ts`.
+The committed proof of save, reload and no duplicates runs on the invented bank:
+`toReviewedImport.persistence.test.ts`. The browser path is `e2e/pdf-import-harness.spec.ts`
+on invented PDFs, and `e2e/goer-pdf-import.local.spec.ts` on the real ones (give it
+`--output` outside the repository and delete that folder: a failed test writes a snapshot
+of the page).

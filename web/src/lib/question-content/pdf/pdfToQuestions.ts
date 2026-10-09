@@ -14,10 +14,10 @@ import type { FigurePlacement, PageLine, PdfFigure, QuestionPage } from "../../p
 import type { ParsedQuestionDraft } from "../../questionParse";
 import { describeAssets } from "../assets";
 import type { ConvertedQuestions } from "../docx/docxToQuestions";
-import { draftsToQuestions, type UnplacedMedia } from "../fromDrafts";
+import { draftsToQuestions, type AnchoredMedia, type UnplacedMedia } from "../fromDrafts";
 import type { PackageIssue, PackageQuestion, QuestionAsset } from "../package";
 
-export type PdfFigureBox = Pick<PdfFigure, "name" | "page" | "left" | "top" | "width" | "height">;
+export type PdfFigureBox = Pick<PdfFigure, "name" | "page" | "left" | "top" | "width" | "height"> & { alt?: string };
 
 export interface PdfConversionInput {
   drafts: readonly ParsedQuestionDraft[];
@@ -27,6 +27,10 @@ export interface PdfConversionInput {
   questionPages?: readonly QuestionPage[];
   linesByPage?: ReadonlyMap<number, readonly PageLine[]>;
   deckPages?: readonly DeckPage[];
+  /** Tables carried through the parser as anchors, to be put back where it kept them. */
+  media?: AnchoredMedia[];
+  /** An id for each draft, in step with `drafts`. */
+  ids?: readonly string[];
 }
 
 export interface PdfConversionDefaults {
@@ -40,6 +44,8 @@ export interface PdfDraftConversion {
   issues: PackageIssue[];
   /** For each image asset id, the name of the figure it came from. */
   figureOfAsset: Map<string, string>;
+  /** For each image asset that came through the parser as an anchor, the target it named. */
+  assetTargets: Map<string, string>;
   unplaced: UnplacedMedia[];
 }
 
@@ -63,9 +69,14 @@ export function splitPointAbove(stem: string, lines: readonly PageLine[], figure
   const haystack = squashedStem.join("");
   const above = lines.filter((line) => line.top < figureTop).sort((a, b) => b.top - a.top);
   for (const line of above) {
-    const needle = squash(line.text);
+    let needle = squash(line.text);
     if (needle.length < 6) continue;
-    const at = haystack.lastIndexOf(needle);
+    let at = haystack.lastIndexOf(needle);
+    if (at < 0) {
+      // The line that opens the question starts with its number, which the stem does not keep.
+      needle = needle.replace(/^\d{1,3}/, "");
+      at = needle.length >= 6 ? haystack.lastIndexOf(needle) : -1;
+    }
     if (at < 0) continue;
     // Take the full stop or bracket that closes the line with it.
     let end = origin[at + needle.length - 1] + 1;
@@ -76,10 +87,13 @@ export function splitPointAbove(stem: string, lines: readonly PageLine[], figure
 }
 
 export function pdfDraftsToQuestions(input: PdfConversionInput, defaults: PdfConversionDefaults): PdfDraftConversion {
-  const converted = draftsToQuestions(input.drafts, { media: [] }, { ...defaults, method: "pdf-import" });
+  const converted = draftsToQuestions(input.drafts, { media: input.media ?? [] }, { ...defaults, method: "pdf-import", ...(input.ids ? { ids: input.ids } : {}) });
   const { questions, issues } = converted;
   const figureOfAsset = new Map<string, string>();
-  const unplaced: UnplacedMedia[] = [];
+  // Tables the parser left outside every question are listed with the figures that were.
+  const unplaced: UnplacedMedia[] = [...converted.unplaced];
+  const unplacedIssue = issues.findIndex((issue) => issue.code === "media_association_uncertain" && !issue.questionId);
+  if (unplacedIssue >= 0) issues.splice(unplacedIssue, 1);
   const figures = new Map((input.figures ?? []).map((figure) => [figure.name, figure]));
 
   const assetFor = (question: PackageQuestion, figure: PdfFigureBox, role: QuestionAsset["role"]): QuestionAsset => {
@@ -117,18 +131,23 @@ export function pdfDraftsToQuestions(input: PdfConversionInput, defaults: PdfCon
       const question = questions[placement.draftIndex];
       if (!question) continue;
       const asset = assetFor(question, figure, "stem");
-      const first = question.stem[0];
-      const split = first?.type === "text" && question.stem.length === 1
-        ? splitPointAbove(first.text, input.linesByPage?.get(figure.page) ?? [], figure.top)
-        : undefined;
-      if (first?.type === "text" && split !== undefined) {
-        const before = first.text.slice(0, split).replace(/\s+$/, "");
-        const after = first.text.slice(split).replace(/^\s+/, "");
-        question.stem = [...(before ? [{ type: "text" as const, text: before }] : []), { type: "image", assetId: asset.id }, ...(after ? [{ type: "text" as const, text: after }] : [])];
-      } else {
-        question.stem.push({ type: "image", assetId: asset.id });
+      // The figure goes after the last stretch of stem text that is printed above it on its page.
+      const lines = input.linesByPage?.get(figure.page) ?? [];
+      let placed = false;
+      for (let index = question.stem.length - 1; index >= 0 && !placed; index -= 1) {
+        const block = question.stem[index];
+        if (block.type !== "text") continue;
+        const split = splitPointAbove(block.text, lines, figure.top);
+        if (split === undefined) continue;
+        const before = block.text.slice(0, split).replace(/\s+$/, "");
+        const after = block.text.slice(split).replace(/^\s+/, "");
+        question.stem.splice(index, 1, ...(before ? [{ type: "text" as const, text: before }] : []), { type: "image" as const, assetId: asset.id, ...(figure.alt ? { alt: figure.alt } : {}) }, ...(after ? [{ type: "text" as const, text: after }] : []));
+        placed = true;
+      }
+      if (!placed) {
+        question.stem.push({ type: "image", assetId: asset.id, ...(figure.alt ? { alt: figure.alt } : {}) });
         (question.flags ??= []).push({
-          type: "media_association_uncertain",
+          type: "media_position_uncertain",
           message: `The picture from page ${figure.page} belongs to this question, but where it sits in the stem could not be worked out. It is placed after the text.`,
         });
       }
@@ -156,7 +175,7 @@ export function pdfDraftsToQuestions(input: PdfConversionInput, defaults: PdfCon
       message: `${unplaced.length} ${unplaced.length === 1 ? "picture" : "pictures"} in the PDF could not be tied to a question. Each one is listed so it can be placed by hand.`,
     });
   }
-  return { questions, issues, figureOfAsset, unplaced };
+  return { questions, issues, figureOfAsset, assetTargets: converted.assetTargets, unplaced };
 }
 
 /**

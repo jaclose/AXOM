@@ -421,6 +421,8 @@ function readQuestion(value: unknown, index: number, issues: PackageIssue[]): Pa
     ...optional("page", integer(sourceRaw.page)),
     ...optional("pageEnd", integer(sourceRaw.pageEnd)),
     ...optional("questionNumber", integer(sourceRaw.questionNumber)),
+    ...optional("set", integer(sourceRaw.set)),
+    ...optional("setTitle", filled(sourceRaw.setTitle)),
   };
 
   const provenanceRaw = isRecord(value.provenance) ? value.provenance : {};
@@ -488,6 +490,7 @@ function writeQuestion(question: PackageQuestion): Json {
     source: compact({
       filename: question.source.filename, page: question.source.page, pageEnd: question.source.pageEnd,
       questionNumber: question.source.questionNumber,
+      set: question.source.set, setTitle: question.source.setTitle,
     }),
     stem: question.stem.map(writeBlock),
     choices: question.choices.map((choice) => ({ id: choice.id, label: choice.label, blocks: choice.blocks.map(writeBlock) })),
