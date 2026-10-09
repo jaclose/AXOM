@@ -1,3 +1,4 @@
+import { QuestionContent, QuestionSupportingContent } from "./QuestionContent";
 // ===========================================================================
 // Question block runner (pre-beta §7): Tutor mode (immediate feedback, AI
 // actions, repair cards) and Exam mode (deferred feedback, optional timer,
@@ -1158,7 +1159,9 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       </div>
 
       <div className="quiz-reading" style={{ "--quiz-reading-scale": readingScale } as CSSProperties}>
-        <AnnotatedQuestionText
+        <div aria-label={question.content ? "Question stem" : undefined} tabIndex={question.content ? -1 : undefined} ref={question.content ? stemRef : undefined}>
+        <QuestionContent question={question} part="stem" fallback={
+          <AnnotatedQuestionText
           text={question.stem}
           annotations={stemAnnotations}
           className="question-stem"
@@ -1167,9 +1170,10 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           eraseMode={annotationTool?.kind === "eraser"}
           focusRef={stemRef}
           onSelection={(range) => handleAnnotationSelection("stem", range)}
-        />
-
-        <QuestionExhibits attachments={exhibits} />
+        />} />
+        </div>
+        <QuestionSupportingContent question={question} mode="question" />
+        {!question.content && <QuestionExhibits attachments={exhibits} />}
 
         <div className="tutor-answer-options">
           {question.options.map((opt) => {
@@ -1186,7 +1190,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
                   disabled={revealed}
                   onClick={() => act({ type: "pick", key: opt.key })}>
                   <span className="mono option-key">{opt.key}</span>
-                  <span className="option-text">{opt.text}</span>
+                  <span className="option-text"><QuestionContent question={question} part="choice" choice={opt.key} fallback={opt.text} /></span>
                 </button>
                 {/* Once revealed: a tick on the right answer, a cross on a wrong pick. Never a tick on the pick itself. */}
                 {showCorrect ? <span className="option-result ok" role="img" aria-label="Correct answer"><Check size={ICON_SIZE.emphasis} /></span>
@@ -1231,7 +1235,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             onMarkExplanationWrong={() => flagExtractionIssue("explanation")}
             onMarkAnswerWrong={() => flagExtractionIssue("answer")}
             onEditMapping={() => setEditingMapping((value) => !value)}
-            explanationContent={question.explanation ? (
+            explanationContent={question.explanation ? (<QuestionContent question={question} part="explanation" mode="answered" fallback={
               <AnnotatedQuestionText
                 text={question.explanation.trim()}
                 annotations={explanationAnnotations}
@@ -1242,8 +1246,9 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
                 inline
                 onSelection={(range) => handleAnnotationSelection("explanation", range)}
               />
-            ) : undefined}
+            } />) : undefined}
           />
+          <QuestionSupportingContent question={question} mode="answered" />
           {editingMapping && (
             <SelectField label="Repair correct-answer mapping" value={question.correctKey ?? ""}
               onChange={(event) => {
@@ -1344,10 +1349,10 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           )}
           <QuestionAttachmentsPanel
             questionId={question.id}
-            attachments={(question.attachments ?? []).filter((attachment) => attachment.role !== "exhibit")}
+            attachments={(question.attachments ?? []).filter((attachment) => !attachment.role)}
             onChange={(noteImages) => {
               // The question's own exhibits stay with the stem; this panel manages note images only.
-              const next = [...exhibits, ...noteImages];
+              const next = [...(question.attachments ?? []).filter((attachment) => attachment.role), ...noteImages];
               const value = next.length ? next : undefined;
               setPool((current) => current.map((item) => item.id === question.id ? { ...item, attachments: value } : item));
               s.updateQuestion(question.id, { attachments: value });

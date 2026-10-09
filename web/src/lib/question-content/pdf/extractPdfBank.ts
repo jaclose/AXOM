@@ -8,16 +8,10 @@
 // ===========================================================================
 import { sha256 } from "../assets";
 import type { ImportPackage, PackageIssue, PackageManifest } from "../package";
-import { questionReadiness, type Readiness, type ReadinessVerdict } from "../readiness";
-import { validatePackage } from "../validate";
+import { assessBank, type BankAssessment } from "../assessBank";
+export { assessBank, type BankAssessment } from "../assessBank";
 import { taggedPdfFileToQuestions } from "./taggedPdfInBrowser";
 import type { TaggedConversion } from "./taggedPdfToQuestions";
-
-export interface BankAssessment {
-  issues: PackageIssue[];
-  verdicts: Map<string, ReadinessVerdict>;
-  counts: Record<Readiness, number>;
-}
 
 export type PdfBankExtraction =
   | { tagged: false; creator?: string }
@@ -38,15 +32,6 @@ export type PdfBankExtraction =
       sourceText: TaggedConversion["sourceText"];
       sourceBytes: number;
     });
-
-/** The package checks and each question's verdict. Run it again after a question changes. */
-export function assessBank(pkg: ImportPackage, conversionIssues: readonly PackageIssue[], files: readonly { name: string }[]): BankAssessment {
-  const issues = [...conversionIssues, ...validatePackage(pkg, { assetFiles: new Set(files.map((file) => file.name)) })];
-  const verdicts = new Map(pkg.questions.map((question) => [question.id, questionReadiness(question, issues)]));
-  const counts: Record<Readiness, number> = { ready: 0, "needs-review": 0, unresolved: 0 };
-  for (const verdict of verdicts.values()) counts[verdict.readiness] += 1;
-  return { issues, verdicts, counts };
-}
 
 export async function extractPdfBank(file: { arrayBuffer(): Promise<ArrayBuffer> }, manifest: PackageManifest): Promise<PdfBankExtraction> {
   const buffer = await file.arrayBuffer();

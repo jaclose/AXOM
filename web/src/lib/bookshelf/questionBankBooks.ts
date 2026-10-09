@@ -209,9 +209,10 @@ export function buildQuestionBankBooks(input: QuestionBankInput): QuestionBankBo
 
   // Packages AXOM knows about and has not imported. A bank already in the workspace is not listed twice.
   const importedTitles = new Set([...input.sets.map((set) => set.title), ...input.questions.flatMap((question) => (question.bank ? [question.bank] : []))]);
+  const importedBanks = new Set(input.questions.flatMap((question) => question.content?.bankId ? [question.content.bankId] : []));
   for (const known of input.packages ?? []) {
     const { manifest } = known;
-    if (importedTitles.has(manifest.bank.title)) continue;
+    if (importedTitles.has(manifest.bank.title) || importedBanks.has(manifest.bank.id)) continue;
     const draft = draftFor(manifest.course.name);
     const status: CollectionStatus = known.readable === false ? "unsupported" : known.summary && known.summary.questions > 0 ? "available" : known.hasSource ? "not-built" : "source-missing";
     weekFor(draft, manifest.course.week).collections.push({

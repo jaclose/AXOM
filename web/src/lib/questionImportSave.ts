@@ -25,8 +25,9 @@ import {
   type ReviewedImportPersistencePlan,
   type ReviewedQuestionInput,
 } from "./questionImportFinalization";
+import { getQuestionAttachmentBlob, type QuestionImageAttachment } from "./questionAttachments";
 import type { ImportLibrary } from "./questionImportHistory";
-import { attachNamedImages, matchNamedImages } from "./questionImportImages";
+import { attachNamedImages, imageNameKey, matchNamedImages } from "./questionImportImages";
 import { evaluateImportDrafts, type DraftImportEvaluation } from "./questionImportTrust";
 import { normalizeTags, suggestCategory } from "./taxonomy";
 import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "./localVault";
@@ -83,7 +84,7 @@ export interface PreparedReviewedImport {
   fingerprint: string;
   plan: ReviewedImportPersistencePlan;
   /** A set that already holds exactly these reviewed questions. Saving reuses it. */
-  equivalent?: { setId: string; questionIds: string[] };
+  equivalent?: { setId: string; questionIds: string[]; attachments?: QuestionImageAttachment[][] };
   wantsSet: boolean;
   wantsDoc: boolean;
   setTitle: string;
@@ -144,6 +145,7 @@ export function prepareReviewedImport(
     id: make.id(),
     source: draft.source,
     stem: draft.stem,
+    content: draft.content,
     options: draft.options,
     correctKey: draft.correctKey,
     // Always derive this from the current edited option list at the boundary.
@@ -282,7 +284,7 @@ export function prepareReviewedImport(
     ok: true,
     fingerprint,
     plan: { questions: wantsSet ? questions : [], questionSet, documentWrite },
-    equivalent: equivalent ? { setId: equivalent.set.id, questionIds: equivalent.questionIds } : undefined,
+    equivalent: equivalent ? { setId: equivalent.set.id, questionIds: equivalent.questionIds, attachments: equivalent.questionIds.map(id => library.questions.find(q => q.id === id)?.attachments ?? []) } : undefined,
     wantsSet,
     wantsDoc,
     setTitle,
@@ -299,7 +301,7 @@ export type SavedReviewedImport =
   | { ok: false; message: string; rollbackFailures: string[] }
   | {
       ok: true;
-      /** An identical earlier import was found and reused: nothing was written. */
+      /** An identical earlier import was reused; missing image bytes may have been repaired. */
       reused: boolean;
       /** Another caller was already writing this same import, and this one waited for it. */
       joined: boolean;
@@ -317,18 +319,9 @@ export async function saveReviewedImport(
   images: readonly File[] = [],
 ): Promise<SavedReviewedImport> {
   const noImages = { attached: 0, missing: 0, problems: [] as string[] };
-  if (prepared.equivalent) {
-    return {
-      ok: true, reused: true, joined: false,
-      setId: prepared.equivalent.setId,
-      documentId: prepared.wantsDoc ? prepared.existingDocumentId : undefined,
-      questionIds: prepared.equivalent.questionIds,
-      reusedDocument: Boolean(prepared.existingDocumentId),
-      images: noImages,
-    };
-  }
-
-  const coordinated = await persistReviewedImportOnce(prepared.fingerprint, store, prepared.plan);
+  const coordinated = prepared.equivalent
+    ? { joined: false, result: { ok: true as const, questionSetId: prepared.equivalent.setId, questionIds: prepared.equivalent.questionIds, documentId: prepared.wantsDoc ? prepared.existingDocumentId : undefined } }
+    : await persistReviewedImportOnce(prepared.fingerprint, store, prepared.plan);
   const persisted = coordinated.result;
   if (!persisted.ok) return persisted;
 
@@ -340,13 +333,26 @@ export async function saveReviewedImport(
       // Saved ids come back in the order the questions were given.
       const questionId = persisted.questionIds[index];
       if (!names.length || !questionId) continue;
-      report.missing += matchNamedImages(names, images).filter((match) => !match.file).length;
+      const existing = prepared.equivalent?.attachments?.[index] ?? [];
+      const usable = new Set<string>();
+      for (const attachment of existing) {
+        if (await getQuestionAttachmentBlob(attachment.blobKey)) usable.add(imageNameKey(attachment.fileName));
+      }
+      const needed = names.filter(name => !usable.has(imageNameKey(name)));
+      if (!needed.length) continue;
+      report.missing += matchNamedImages(needed, images).filter((match) => !match.file).length;
       if (!images.length) continue;
-      const result = await attachNamedImages({ names, files: images, questionId });
+      const result = await attachNamedImages({ names: needed, files: images, questionId });
+      const content = prepared.plan.questions[index]?.content;
+      if (content) result.attachments = result.attachments.map((attachment) => {
+        const asset = content.assets.find((item) => imageNameKey(item.filename) === imageNameKey(attachment.fileName));
+        return asset ? { ...attachment, assetId: asset.id, role: asset.role } : { ...attachment, role: "source_page" };
+      });
       if (result.attachments.length) {
         try {
           const checkpoint = getVaultWriteCheckpoint();
-          await store.updateQuestion(questionId, { attachments: result.attachments });
+          const replaced = new Set(result.attachments.map(attachment => imageNameKey(attachment.fileName)));
+          await store.updateQuestion(questionId, { attachments: [...existing.filter(attachment => !replaced.has(imageNameKey(attachment.fileName))), ...result.attachments] });
           await flushLocalVaultWrites();
           assertVaultWritesSince(checkpoint);
           report.attached += result.attachments.length;
@@ -358,7 +364,7 @@ export async function saveReviewedImport(
     }
   }
   return {
-    ok: true, reused: false, joined: coordinated.joined,
+    ok: true, reused: Boolean(prepared.equivalent), joined: coordinated.joined,
     setId: persisted.questionSetId,
     documentId: persisted.documentId,
     questionIds: persisted.questionIds,

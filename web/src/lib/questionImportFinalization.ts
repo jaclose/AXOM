@@ -1,3 +1,4 @@
+import { readWorkspaceContent } from "./question-content/workspaceContent";
 import type { QuestionSet, SourceDocument } from "./library";
 import { assertVaultWritesSince, getVaultWriteCheckpoint } from "./localVault";
 import type { QuestionRecord } from "./questions";
@@ -21,6 +22,7 @@ export interface QuestionImportPersistence {
 }
 
 export interface ReviewedQuestionInput extends Record<string, unknown> {
+  content?: QuestionRecord["content"];
   id: string;
   source?: QuestionRecord["source"];
   stem: string;
@@ -172,9 +174,16 @@ export async function persistReviewedImport(
   }
 }
 
+const comparableContent = (content: QuestionRecord["content"]) => {
+  if (!content) return undefined;
+  const normalized = readWorkspaceContent(content).content;
+  return normalized && { ...normalized, provenance: { ...normalized.provenance, createdAt: undefined } };
+};
+
 const comparableQuestion = (question: ReviewedQuestionInput | QuestionRecord) => ({
   source: question.source,
   stem: question.stem.trim(),
+  content: comparableContent(question.content),
   options: question.options.map((option) => ({ key: option.key.trim().toUpperCase(), text: option.text.trim() })),
   correctKey: question.correctKey?.trim().toUpperCase(),
   explanation: question.explanation?.trim() || undefined,

@@ -20,6 +20,7 @@ import {
 import { hasLabelledRecords, normalizeLabelledRecords } from "./questionLabelledRecords";
 
 export interface ParsedQuestionDraft {
+  content?: import("./question-content/package").PackageQuestion;
   stem: string;
   options: QuestionOption[];
   correctKey?: string;

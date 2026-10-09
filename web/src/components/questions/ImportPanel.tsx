@@ -1,3 +1,5 @@
+import { BankImportReview, type TaggedBank } from "./BankImportReview";
+import { manifestForFile } from "../../lib/question-content/knownBanks";
 // ===========================================================================
 // Import Center (question-bank rehaul, layers 1–2). Upload PDF/DOCX/TXT/MD/
 // CSV/JSON or paste text → extract → parse (stems, choices, answer keys,
@@ -831,7 +833,7 @@ export function ImportPanel({
             />
           )}
           {tab === "file" && (
-            <FileTab busyFile={busyFile} setBusyFile={setBusyFile} onParsed={loadDrafts} />
+            <FileTab busyFile={busyFile} setBusyFile={setBusyFile} onParsed={loadDrafts} onBankSaved={finishSuccessfulImport} />
           )}
           {tab === "ai" && (
             <AiGenerateTab seedReference={seed?.reference} onParsed={(parsed, warnings) => loadDrafts(parsed, warnings, "ai-generated", null, true)} />
@@ -1329,12 +1331,14 @@ function PasteTab({ raw, label, onRawChange, parseSource, onParsed }: {
 
 // --- file tab ----------------------------------------------------------------
 
-function FileTab({ busyFile, setBusyFile, onParsed }: {
+function FileTab({ busyFile, setBusyFile, onParsed, onBankSaved }: {
+  onBankSaved: (result: ImportFinalizationResult) => void;
   busyFile: string | null;
   setBusyFile: (name: string | null) => void;
   onParsed: (drafts: ParsedQuestionDraft[], warnings: string[], source: QuestionSource, doc: PendingDocument | null, ai?: boolean, images?: File[]) => void;
 }) {
   const fileInput = useRef<HTMLInputElement>(null);
+  const [bank, setBank] = useState<TaggedBank>();
 
   async function handleFile(file: File) {
     const name = file.name.toLowerCase();
@@ -1342,6 +1346,12 @@ function FileTab({ busyFile, setBusyFile, onParsed }: {
     const isDocx = name.endsWith(".docx") || file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
     setBusyFile(file.name);
     try {
+      if (isPdf) {
+        const { extractPdfBank } = await import("../../lib/question-content/pdf/extractPdfBank");
+        const state = useStore.getState();
+        const extractedBank = await extractPdfBank(file, manifestForFile(file.name, state.terms, state.courses));
+        if (extractedBank.tagged) { setBank(extractedBank); return; }
+      }
       if (isPdf || isDocx) {
         const buffer = await file.arrayBuffer();
         const checksum = await sha256Hex(buffer);
@@ -1424,6 +1434,8 @@ function FileTab({ busyFile, setBusyFile, onParsed }: {
       setBusyFile(null);
     }
   }
+
+  if (bank) return <BankImportReview bank={bank} onBack={() => setBank(undefined)} onSaved={onBankSaved} />;
 
   return (
     <div className="stack" style={{ gap: 10 }}>

@@ -130,7 +130,7 @@ describe("saveReviewedImport", () => {
 
     const again = prepareReviewedImport(request(), state);
     if (!again.ok) throw new Error("expected a prepared import");
-    expect(again.equivalent).toEqual({ setId: first.plan.questionSet!.id, questionIds: first.plan.questions.map((question) => question.id) });
+    expect(again.equivalent).toMatchObject({ setId: first.plan.questionSet!.id, questionIds: first.plan.questions.map((question) => question.id) });
     const saved = await saveReviewedImport(again, store);
     expect(saved).toMatchObject({ ok: true, reused: true, setId: first.plan.questionSet!.id, reusedDocument: true });
     expect(commits).toHaveLength(1);

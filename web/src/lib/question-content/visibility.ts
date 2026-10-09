@@ -22,7 +22,12 @@ const PART_OF_THE_QUESTION: ReadonlySet<AssetRole> = new Set<AssetRole>(["questi
  * marking on either one wins, so a mislabelled block cannot expose the slide.
  */
 export function effectiveRole(blockRole: AssetRole | undefined, assetRole: AssetRole | undefined, sectionRole: AssetRole): AssetRole {
-  if (blockRole === "answer_reveal" || assetRole === "answer_reveal") return "answer_reveal";
+  const roles = [blockRole, assetRole, sectionRole];
+  // A placement cannot weaken an asset's restrictions. Whole source pages
+  // remain review-only even when somebody places one in a stem.
+  for (const restricted of ["source_page", "answer_reveal", "explanation", "reference"] as const) {
+    if (roles.includes(restricted)) return restricted;
+  }
   return blockRole ?? assetRole ?? sectionRole;
 }
 

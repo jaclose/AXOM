@@ -1,0 +1,105 @@
+import { test, expect, seedOnboarded, reloadAfterSave } from "./fixtures";
+import { inventedDeckPdf, inventedTwoSetPdf } from "../src/lib/question-content/pdf/buildTaggedPdf.testing";
+
+for (const width of [1440, 390]) test(`PDF bank import, table and figure practice, results and reload at ${width}px`, async ({ page }) => {
+  await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
+  await seedOnboarded(page);
+  await page.goto("/#questions");
+  await page.getByRole("tablist", { name: "Question Bank sections" }).getByRole("tab", { name: "Import", exact: true }).click();
+  const choose = () => page.getByLabel("Choose a question file to import").setInputFiles({ name: "FTM1 Week 2 PQ.pdf", mimeType: "application/pdf", buffer: Buffer.from(inventedTwoSetPdf()) });
+  await choose();
+  const preview = page.getByRole("region", { name: "PDF bank preview" });
+  await expect(preview).toContainText("4 questions · 3 ready", { timeout: 30000 });
+  await preview.getByLabel("Bank module").fill("FTM 1");
+  await preview.getByLabel("Bank term").fill("1");
+  await preview.getByLabel("Bank week").fill("2");
+  await expect(preview.locator("table")).toHaveCount(1);
+  await expect(preview).not.toContainText("Answer: B");
+  await preview.getByRole("button", { name: "Next question" }).click();
+  await expect(preview.locator("img")).toBeVisible();
+  await expect.poll(() => preview.locator("img").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(300);
+  await preview.getByRole("button", { name: "Import 3 verified questions" }).click();
+  await expect(preview).toContainText("3 questions saved on this device.");
+  await expect(preview).toContainText("1 question still needs review");
+  await preview.getByRole("button", { name: "Open imported bank" }).click();
+  await page.getByRole("tab", { name: /Question Sets/ }).click();
+  await page.getByRole("button", { name: "Bookshelf", exact: true }).click();
+  const shelf = page.getByRole("region", { name: "Question bank library", exact: true });
+  await shelf.getByRole("button", { name: /^FTM 1,/ }).click();
+  const book = page.getByRole("dialog", { name: /FTM 1/ });
+  await expect(book.getByRole("button", { name: "Week 2 · 3", exact: true })).toBeVisible();
+  await book.getByRole("button", { name: "Start practice", exact: true }).click();
+  await page.getByRole("button", { name: "Start tutor block", exact: true }).click();
+  let tableSeen = false, imageSeen = false;
+  for (let i = 0; i < 3; i++) {
+    const stem = page.getByLabel("Question stem", { exact: true });
+    await expect(stem).toBeVisible();
+    await expect(stem.getByText("Loading figure…", { exact: true })).toHaveCount(0);
+    if (await stem.locator("table").count()) { tableSeen = true; await expect(stem.locator("table")).toContainText("10"); }
+    if (await stem.locator("img").count()) {
+      imageSeen = true;
+      await expect(stem.locator("img")).toBeVisible();
+      await stem.getByRole("button", { name: /^Enlarge/ }).click();
+      await expect(page.getByRole("dialog", { name: "An invented pressure tracing", exact: true }).locator("img")).toBeVisible();
+      await page.keyboard.press("Escape");
+    }
+    await stem.focus();
+    await page.keyboard.press("A");
+    await page.keyboard.press("Enter");
+    await page.getByRole("button", { name: i === 2 ? "Finish block" : "Next question", exact: true }).click();
+  }
+  expect(tableSeen && imageSeen).toBe(true);
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  await reloadAfterSave(page);
+  await page.getByRole("button", { name: "Bookshelf", exact: true }).click();
+  await shelf.getByRole("button", { name: /^FTM 1,/ }).click();
+  await expect(book.locator(".book-fact").filter({ hasText: "Answered" })).toContainText("3");
+  await page.keyboard.press("Escape");
+  await page.getByRole("tablist", { name: "Question Bank sections" }).getByRole("tab", { name: "Import", exact: true }).click();
+  await choose();
+  await expect(preview).toContainText("4 questions · 3 ready", { timeout: 30000 });
+  await preview.getByLabel("Bank module").fill("FTM 1");
+  await preview.getByLabel("Bank term").fill("1");
+  await preview.getByLabel("Bank week").fill("2");
+  await preview.getByRole("button", { name: "Import 3 verified questions" }).click();
+  await expect(preview).toContainText("Already imported. No duplicate questions were added.");
+  await page.screenshot({ path: `/tmp/axom-pdf-product-${width}.png` });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test("answer-marked slides are review-gated and stay hidden until a tutor answer is checked", async ({ page }) => {
+  await seedOnboarded(page);
+  await page.goto("/#questions");
+  await page.getByRole("tablist", { name: "Question Bank sections" }).getByRole("tab", { name: "Import", exact: true }).click();
+  await page.getByLabel("Choose a question file to import").setInputFiles({ name: "FTM1 Week 2 eSoft.pdf", mimeType: "application/pdf", buffer: Buffer.from(inventedDeckPdf()) });
+  const preview = page.getByRole("region", { name: "PDF bank preview" });
+  await expect(preview).toContainText("3 questions · 0 ready · 3 need review", { timeout: 30000 });
+  await preview.getByLabel("Bank module").fill("FTM 1");
+  await preview.getByLabel("Bank term").fill("1");
+  await preview.getByLabel("Bank week").fill("2");
+  await expect(preview.getByRole("button", { name: "Import 0 verified questions" })).toBeDisabled();
+  await expect(page.locator('[data-asset-role="answer_reveal"]')).toHaveCount(0);
+  await preview.getByLabel("Preview mode").selectOption("review");
+  await expect(preview.locator('[data-asset-role="answer_reveal"] img')).toBeVisible();
+  await preview.getByLabel("Verified answer").selectOption("B");
+  await preview.getByRole("button", { name: "Confirm answer from source" }).click();
+  await preview.getByRole("button", { name: "Import 1 verified questions" }).click();
+  await expect(preview).toContainText("1 question saved on this device.");
+  await preview.getByRole("button", { name: "Open imported bank" }).click();
+  await reloadAfterSave(page);
+  await page.getByRole("tab", { name: /Question Sets/ }).click();
+  await page.getByRole("button", { name: "Bookshelf", exact: true }).click();
+  await page.getByRole("region", { name: "Question bank library", exact: true }).getByRole("button", { name: /^FTM 1,/ }).click();
+  await page.getByRole("dialog", { name: /FTM 1/ }).getByRole("button", { name: "Start practice", exact: true }).click();
+  await page.getByRole("button", { name: "Start tutor block", exact: true }).click();
+  await expect(page.locator('[data-asset-role="answer_reveal"]')).toHaveCount(0);
+  await page.getByLabel("Question stem", { exact: true }).focus();
+  await page.keyboard.press("B");
+  await page.keyboard.press("Enter");
+  await expect(page.locator('[data-asset-role="answer_reveal"] img')).toBeVisible();
+});

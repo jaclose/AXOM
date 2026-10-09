@@ -98,7 +98,7 @@ export interface ExamBlockApi {
   /** Keys every interface shares (move, flag, choose, strike, tutor submit). True when the key was used. */
   handleKey: (event: KeyboardEvent) => boolean;
   rootRef: RefObject<HTMLDivElement>;
-  stemRef: RefObject<HTMLDivElement | null>;
+  stemRef: RefObject<HTMLDivElement>;
 }
 
 export function useExamBlock({ skin, mode, pool, timeLimitSeconds, resume, review, onFinish, onSuspend }: ExamBlockOptions): ExamBlockApi {

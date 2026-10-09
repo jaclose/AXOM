@@ -7,13 +7,10 @@ import { buildQuestionBankBooks, type PracticeSelection, type QuestionBankBook, 
 import { AcademicBookshelf } from "../bookshelf/AcademicBookshelf";
 import { AcademicLibrary } from "../bookshelf/AcademicLibrary";
 import { QuestionBankBookContent } from "../bookshelf/BookContents";
-import biostats from "../../../../fixtures/qbank/goer/t5/week-02/biostats-epidemiology/manifest.json";
-import endocrine from "../../../../fixtures/qbank/goer/t5/week-02/endocrine-pathophysiology/manifest.json";
-import pharma from "../../../../fixtures/qbank/goer/t5/week-02/pharmacodynamics-pk/manifest.json";
+import { knownBankManifests } from "../../lib/question-content/knownBanks";
 
-// These public manifests contain metadata only. A browser cannot infer that the
-// source file on another checkout is available in this device's workspace.
-const packages: KnownPackage[] = [biostats, endocrine, pharma].map((manifest) => ({ manifest, hasSource: false }));
+// Metadata is known; source bytes become available only after an import.
+const packages: KnownPackage[] = knownBankManifests.map((manifest) => ({ manifest, hasSource: false }));
 
 export function QuestionBankLibrary({ onPractice, onOpenBank, onImport, onCreate }: {
   onPractice: (selection: PracticeSelection) => void;

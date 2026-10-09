@@ -1,3 +1,4 @@
+import { ASSET_ROLES, type AssetRole } from "./question-content/blocks";
 // ===========================================================================
 // Question-note image attachments (Q2b-2). Metadata is an additive, tiny
 // array on QuestionRecord (schema v32 untouched); image BYTES live in the
@@ -32,7 +33,9 @@ export interface QuestionImageAttachment {
    * with the stem before answering. Absent: an image the learner added to
    * their own notes, shown with the review.
    */
-  role?: "exhibit";
+  role?: "exhibit" | AssetRole;
+  /** Canonical content asset associated with these locally stored bytes. */
+  assetId?: string;
 }
 
 export interface QuestionAttachmentBlobRecord {
@@ -70,7 +73,8 @@ export function normalizeQuestionAttachments(value: unknown): QuestionImageAttac
       createdAt,
       updatedAt,
       blobKey: typeof item.blobKey === "string" && item.blobKey.trim() ? item.blobKey.trim() : id,
-      ...(item.role === "exhibit" ? { role: "exhibit" as const } : {}),
+      ...((item.role === "exhibit" || ASSET_ROLES.includes(item.role as AssetRole)) ? { role: item.role as "exhibit" | AssetRole } : {}),
+      ...(typeof item.assetId === "string" ? { assetId: item.assetId } : {}),
     };
     const existing = byId.get(id);
     if (!existing || attachment.updatedAt >= existing.updatedAt) byId.set(id, attachment);

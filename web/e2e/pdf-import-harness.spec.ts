@@ -109,13 +109,13 @@ test("a deck whose answers are drawn marks: nothing is scored until a person set
   expect(await read(page, "summary")).toMatchObject({ ready: 1, needsReview: 2 });
   await page.getByTestId("import").click();
   await expect(state(page)).toHaveAttribute("data-state", "saved");
-  expect(await read(page, "result")).toMatchObject({ status: "saved", held: 2, picturesWithheld: 1, sections: [{ saved: 1, picturesAttached: 1 }] });
+  expect(await read(page, "result")).toMatchObject({ status: "saved", held: 2, picturesWithheld: 0, sections: [{ saved: 1, picturesAttached: 2 }] });
 
-  // After a reload: the question, its key and its graph are there. Its answer slide was never stored.
+  // After a reload: the question, its key and its graph are there. Its answer slide is stored for post-answer review.
   await page.reload();
   await expect(page.getByTestId("workspace")).toHaveAttribute("data-ready", "true");
   expect(await read(page, "workspace")).toMatchObject({
-    questions: 1, picturesLinked: 1, picturesDecoded: 1,
+    questions: 1, picturesLinked: 2, picturesDecoded: 2,
     check: { expected: 1, found: 1, sameStem: 1, sameKey: 1, samePage: 1, samePictures: 1, withheldPicturesStored: 0 },
   });
 });

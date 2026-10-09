@@ -10,18 +10,20 @@ explanation is an ordered list of blocks (text, table, image, equation), so a la
 sits between the vignette and the prompt, where the source put it. The same content
 travels as an import package and can be written by hand in a Word template.
 
-**Status (2026-10-08):** Phases 1 and 2 of five are built on `feat/qbank-multimodal-import-v1`:
-the model, the package and its checks, the template, a reader for real `.docx` files, and
-an adapter from the existing PDF import. On `feat/goer-pdf-bank-import-v1` a reader for
-tagged PDFs, a readiness verdict and an adapter into the canonical import are added, and
-the three GOER Week 2 banks are read from their PDFs in a real browser, previewed,
-classified, saved through the canonical import, and checked after a reload, on a
-development-only harness page (Phase 5). No screen of the app calls any of it yet: wiring
-is Codex's (decision 4 below). Phases are at the end of this note.
+**Status (2026-10-08):** The actual QBank calls `extractPdfBank` and `saveBank`.
+Tagged PDFs open a paged review with course/week filing and an explicit answer-verification
+step. Only ready questions enter practice. `QuestionRecord.content` retains ordered blocks;
+attachment asset IDs and roles retain every image, including restricted answer slides.
+Tutor, exam layouts and question detail use the shared renderer and visibility rules.
+The three private GOER PDFs were exercised in the actual app: 32 verified questions,
+three sets, nine stem tables and three figures survived reload; 15 keys remained held.
+Source files and browser artifacts stay outside Git. DOCX and batch UI wiring remain next.
 
 | Responsibility | Files |
 | --- | --- |
 | Blocks, rich text rule, plain-text reading | `web/src/lib/question-content/blocks.ts` |
+| Actual import review and shared rendering | `components/questions/BankImportReview.tsx`, `QuestionContent.tsx` |
+| Workspace validation and portable restore | `workspaceContent.ts`, `questions.ts`, `backup.ts` |
 | Which image may be shown when | `web/src/lib/question-content/visibility.ts` |
 | Package types, flags, issues, filing | `web/src/lib/question-content/package.ts` |
 | Reading, version gate, canonical writing | `web/src/lib/question-content/packageJson.ts` |
@@ -332,9 +334,11 @@ const saved = await saveBank(bank.pkg, bank.issues, bank.files, { library, store
   both held. Everything held is in `held` with its reasons.
 - The sets are filed by the manifest: `scope: { module, week }`. `filing.agrees` says
   whether the curriculum puts that module in the manifest's term.
-- Only a picture that may be seen while the question is open is offered, by file name. An
-  answer-reveal or explanation picture is listed in `withheldAssets` and stays in the
-  package, because the current question record shows every picture with the question.
+- All image bytes are saved in the existing attachment vault. Stable asset IDs join them
+  to blocks. Restricted roles are enforced by the shared renderer: answer-reveal and
+  explanation images appear after answering, whole source pages only in review.
+- Reimport repairs missing bytes without duplicating questions. A later answer review
+  adds only newly accepted questions in a continuation set; prior attempts stay attached.
 - Advisory notes travel with the question as its warnings.
 - A second import of the same file is recognised and reuses the first. Nothing is written
   twice. The comparison includes the set's title and the questions' topic, so the same file
@@ -342,10 +346,11 @@ const saved = await saveBank(bank.pkg, bank.issues, bank.files, { library, store
 - A refusal by the canonical checks, or a write that fails, gives `status: "failed"` and
   the reason in `errors`. It is never reported as a save.
 
-Until `content` is on `QuestionRecord` (Phase 4), a saved question is the plain-text
-reading of its blocks: a table is saved as text, and a picture is an exhibit shown with
-the stem, not at its place inside it. The package question's own id is not on the saved
-record; `saveBank` returns the two lists of ids in step.
+`QuestionRecord.content` holds the package question, including provenance. Legacy strings
+remain searchable and editable; deliberate text edits take precedence over source blocks.
+The optional field stays on schema 34. Portable restore rejects malformed content instead
+of silently stripping it. Held questions are not saved as scored questions: keep the source
+file and reopen it for later verification. Persisting an unfinished review remains follow-up.
 
 ### The harness page
 
@@ -399,3 +404,13 @@ The committed proof of save, reload and no duplicates runs on the invented bank:
 on invented PDFs, and `e2e/goer-pdf-import.local.spec.ts` on the real ones (give it
 `--output` outside the repository and delete that folder: a failed test writes a snapshot
 of the page).
+
+### Product verification checkpoint
+
+`web/e2e/qbank-pdf-product.spec.ts` covers actual import, one-at-a-time preview, tables,
+figures and enlargement, practice, attempt reload, duplicate import, and answer-slide gating
+at 390/1440px. `qbank-real-pdf.local.spec.ts` is opt-in with `AXOM_QBANK_SOURCES` and must
+write its output outside Git. Persistence regressions cover ordered content, portable
+restore, missing media repair and incremental answer review. Browser checks use a separate
+profile, not the learner workspace. PDF.js native structure and operator APIs remain the
+parser authority; no new parser, storage system or dependency was introduced.

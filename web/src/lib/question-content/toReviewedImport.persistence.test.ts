@@ -5,7 +5,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getQuestionAttachmentBlob } from "../questionAttachments";
+import { deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob } from "../questionAttachments";
 import type { ReviewedImportStore } from "../questionImportSave";
 import { saveBank } from "./bankImport";
 import { parsePackage } from "./packageJson";
@@ -13,6 +13,7 @@ import { closeWorkspace, importPackage, openEmptyWorkspace, realWorkspace, reloa
 import type { ImportPackage, PackageIssue } from "./package";
 import { packageToReviewedImport } from "./toReviewedImport";
 import { validatePackage } from "./validate";
+import { isAssetVisible } from "./visibility";
 
 const folder = join(process.cwd(), "..", "fixtures", "qbank", "synthetic", "multimodal-shapes");
 const SOURCE_TEXT = { rawText: "The invented source, as it was read.", pageTexts: ["The invented source,", "as it was read."] };
@@ -58,7 +59,7 @@ describe("what a package offers to the canonical import", () => {
     expect(adapted.imports[0].request).toMatchObject({ scope: { module: "EXAMPLE", week: 1 }, destination: "set", setTitle: "Invented multimodal shapes" });
   });
 
-  it("takes a question that needs review only once a person has accepted it, and never offers the picture that gives its answer away", () => {
+  it("takes a question that needs review only once a person has accepted it, and retains restricted pictures for post-answer review", () => {
     const { pkg, issues } = invented();
     const adapted = packageToReviewedImport(pkg, issues, { acknowledged: new Set(["syn-q03"]) });
     const [section] = adapted.imports;
@@ -66,9 +67,10 @@ describe("what a package offers to the canonical import", () => {
     const draft = section.request.drafts[section.questionIds.indexOf("syn-q03")];
     expect(draft.reviewAcknowledged).toBe(true);
     expect(draft.warnings).toEqual([expect.stringContaining("slide that marks the answer")]);
-    expect(draft.attachmentNames).toEqual(["syn-q03-curves.png"]);
-    expect(section.imageNames).toEqual(["syn-q03-curves.png", "syn-q04-micrograph.png", "syn-q07-field-left.png", "syn-q07-field-right.png"]);
-    expect(adapted.withheldAssets.map((asset) => [asset.questionId, asset.filename, asset.role])).toEqual([["syn-q03", "syn-q03-curves-answer.png", "answer_reveal"]]);
+    expect(draft.attachmentNames).toEqual(["syn-q03-curves.png", "syn-q03-curves-answer.png"]);
+    expect(section.imageNames).toEqual(["syn-q03-curves.png", "syn-q03-curves-answer.png", "syn-q04-micrograph.png", "syn-q07-field-left.png", "syn-q07-field-right.png"]);
+    expect(adapted.withheldAssets).toEqual([]);
+    expect(draft.content?.assets.find((asset) => asset.role === "answer_reveal")).toBeDefined();
   });
 
   it("never takes a question with no key, accepted or not", () => {
@@ -160,11 +162,12 @@ describe("a package through the canonical import", () => {
 
     // Each saved question is the package question in the same place.
     const savedOf = (packageId: string) => disk.questions.find((question) => question.id === section.savedIds[section.questionIds.indexOf(packageId)])!;
-    expect(savedOf("syn-q04").attachments?.map((attachment) => [attachment.fileName, attachment.role])).toEqual([["syn-q04-micrograph.png", "exhibit"]]);
+    expect(savedOf("syn-q04").attachments?.map((attachment) => [attachment.fileName, attachment.role])).toEqual([["syn-q04-micrograph.png", "stem"]]);
     expect(savedOf("syn-q07").attachments?.map((attachment) => attachment.fileName)).toEqual(["syn-q07-field-left.png", "syn-q07-field-right.png"]);
     expect(savedOf("syn-q01").attachments ?? []).toEqual([]);
     for (const packageId of section.questionIds) {
       const from = pkg.questions.find((question) => question.id === packageId)!;
+      expect(savedOf(packageId).content).toEqual(from);
       expect(savedOf(packageId)).toMatchObject({ correctKey: from.correctAnswer!.labels[0], questionNumber: from.source.questionNumber, ...(from.source.page !== undefined ? { sourcePage: from.source.page } : {}) });
     }
 
@@ -174,16 +177,22 @@ describe("a package through the canonical import", () => {
     expect(blob?.byteSize).toBe(files.find((file) => file.name === "syn-q04-micrograph.png")!.size);
   });
 
-  it("never stores the picture that gives an answer away, even for a question a person accepted", async () => {
+  it("stores answer pictures with stable roles, hidden until the answer is checked", async () => {
     const { pkg, issues, files } = invented();
     const saved = await importPackage(pkg, issues, files, { acknowledged: new Set(["syn-q03"]) });
     expect(saved.status).toBe("saved");
-    expect(saved.withheldAssets.map((asset) => asset.filename)).toEqual(["syn-q03-curves-answer.png"]);
+    expect(saved.withheldAssets).toEqual([]);
     const disk = await workspaceOnDisk();
     expect(disk.questions).toHaveLength(7);
     expect(disk.questions.flatMap((question) => question.attachments ?? []).map((attachment) => attachment.fileName).sort())
-      .toEqual(["syn-q03-curves.png", "syn-q04-micrograph.png", "syn-q07-field-left.png", "syn-q07-field-right.png"]);
-    expect(await storedImageCount()).toBe(4);
+      .toEqual(["syn-q03-curves-answer.png", "syn-q03-curves.png", "syn-q04-micrograph.png", "syn-q07-field-left.png", "syn-q07-field-right.png"]);
+    expect(await storedImageCount()).toBe(5);
+    const after = await reloadWorkspace();
+    const reveal = after.questions.flatMap((question) => question.attachments ?? []).find((asset) => asset.role === "answer_reveal")!;
+    expect(reveal.assetId).toBeTruthy();
+    expect(isAssetVisible("answer_reveal", "question")).toBe(false);
+    expect(isAssetVisible("answer_reveal", "answered")).toBe(true);
+    expect((await getQuestionAttachmentBlob(reveal.blobKey))?.byteSize).toBe(reveal.byteSize);
   });
 
   it("is all there after a reload", async () => {
@@ -195,7 +204,7 @@ describe("a package through the canonical import", () => {
     expect(after.questions.map((question) => question.id).sort()).toEqual([...section.savedIds].sort());
     expect(after.questionSets.map((set) => [set.id, set.scope, set.questionIds, set.sourceDocumentIds])).toEqual([[section.setId, { module: "EXAMPLE", week: 1 }, section.savedIds, [section.documentId]]]);
     expect(after.documents.map((document) => [document.id, document.checksum, document.linkedQuestionSetIds])).toEqual([[section.documentId, "sha256:invented", [section.setId]]]);
-    const shape = (question: (typeof after.questions)[number]) => [question.id, question.stem, question.correctKey, question.questionNumber, question.sourcePage, question.attachments?.map((attachment) => attachment.blobKey) ?? []];
+    const shape = (question: (typeof after.questions)[number]) => [question.id, question.stem, question.correctKey, question.questionNumber, question.sourcePage, question.content, question.attachments?.map((attachment) => attachment.blobKey) ?? []];
     expect(after.questions.map(shape).sort()).toEqual(before.questions.map(shape).sort());
     for (const attachment of after.questions.flatMap((question) => question.attachments ?? [])) expect((await getQuestionAttachmentBlob(attachment.blobKey))?.byteSize).toBe(attachment.byteSize);
   });
@@ -203,7 +212,8 @@ describe("a package through the canonical import", () => {
   it("writes nothing the second time, before or after a reload", async () => {
     const { pkg, issues, files } = invented();
     const first = await importPackage(pkg, issues, files);
-    const again = await importPackage(pkg, issues, files);
+    const reread = { ...pkg, questions: pkg.questions.map(q => ({ ...q, provenance: { ...q.provenance, createdAt: "2026-10-09T12:00:00Z" } })) };
+    const again = await importPackage(reread, issues, files);
     expect(again.status).toBe("already-saved");
     expect(again.sections[0]).toMatchObject({ reused: true, setId: first.sections[0].setId, savedIds: first.sections[0].savedIds });
     const disk = await workspaceOnDisk();
@@ -212,6 +222,31 @@ describe("a package through the canonical import", () => {
     await reloadWorkspace();
     expect((await importPackage(pkg, issues, files)).status).toBe("already-saved");
     expect((await workspaceOnDisk()).questions).toHaveLength(6);
+  });
+
+  it("repairs missing image bytes on reimport without duplicating questions", async () => {
+    const { pkg, issues, files } = invented();
+    await importPackage(pkg, issues, files);
+    const before = await workspaceOnDisk();
+    const image = before.questions.flatMap(q => q.attachments ?? [])[0];
+    await deleteQuestionAttachmentBlobs([image.blobKey]);
+    const repaired = await importPackage(pkg, issues, files);
+    expect(repaired.status).toBe("already-saved");
+    expect(repaired.sections[0].images.attached).toBe(1);
+    expect((await workspaceOnDisk()).questions).toHaveLength(6);
+    expect(await storedImageCount()).toBe(3);
+  });
+
+  it("adds newly reviewed questions without duplicating an earlier ready subset", async () => {
+    const { pkg, issues, files } = invented();
+    await importPackage(pkg, issues, files);
+    await importPackage(pkg, issues, files, { acknowledged: new Set(["syn-q03"]) });
+    const disk = await workspaceOnDisk();
+    expect(disk.questions).toHaveLength(7);
+    expect(new Set(disk.questions.map(q => q.content?.id)).size).toBe(7);
+    const again = await importPackage(pkg, issues, files, { acknowledged: new Set(["syn-q03"]) });
+    expect(again.status).toBe("already-saved");
+    expect((await workspaceOnDisk()).questions).toHaveLength(7);
   });
 
   it("says nothing is ready when every question is held, and writes nothing", async () => {

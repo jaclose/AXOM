@@ -65,7 +65,7 @@ export function QuizFeedback({
       {explanation && (
         <div className="feedback-explanation">
           <span className="field-label">Explanation</span>
-          <p>{explanationContent ?? explanation}</p>
+          {question.content ? <div>{explanationContent ?? explanation}</div> : <p>{explanationContent ?? explanation}</p>}
         </div>
       )}
 

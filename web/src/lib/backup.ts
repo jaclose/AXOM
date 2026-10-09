@@ -1,3 +1,4 @@
+import { readWorkspaceContent } from "./question-content/workspaceContent";
 // ===========================================================================
 // JSON export / import. The portable backup story for the browser-stored data.
 // ===========================================================================
@@ -452,6 +453,11 @@ export function parseImport(text: string): NoctyriumState {
 function migrateImportedQuestion(value: unknown, fromVersion: number): unknown {
   if (!isRecord(value)) return value;
   const question = { ...value };
+  if (question.content !== undefined) {
+    const parsed = readWorkspaceContent(question.content);
+    if (parsed.errors.length || !parsed.content) throw new Error(`Question content could not be restored: ${parsed.errors.join(" ")}`);
+    question.content = parsed.content;
+  }
   question.annotations = normalizeQuestionAnnotations(question.annotations);
   question.attachments = normalizeQuestionAttachments(question.attachments);
   question.analyses = normalizeQuestionAnalyses(question.analyses);

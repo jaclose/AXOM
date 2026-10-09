@@ -1,3 +1,4 @@
+import { QuestionContent, QuestionSupportingContent } from "../questions/QuestionContent";
 // Pieces every exam interface shares: the lab reference table, a question's
 // exhibit images, and the explanation shown once an answer is revealed. Each
 // interface styles them its own way; what they contain is the same.
@@ -110,7 +111,8 @@ export function ExplanationBody({ question, picked, correctKey, result, seconds 
         {correctKey && <span>Correct answer: {correctKey}</span>}
         <span>Time spent: {formatQuestionTime(seconds)}</span>
       </div>
-      {question.explanation && <div className="sim-explanation-text">{question.explanation.trim()}</div>}
+      {question.explanation && <div className="sim-explanation-text"><QuestionContent question={question} part="explanation" mode="answered" fallback={question.explanation.trim()} /></div>}
+      <QuestionSupportingContent question={question} mode="answered" />
       {Object.keys(rationales).length > 0 && (
         <dl className="sim-rationales">
           {question.options.filter((option) => rationales[option.key]).map((option) => (

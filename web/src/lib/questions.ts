@@ -1,3 +1,5 @@
+import type { PackageQuestion } from "./question-content/package";
+import { readWorkspaceContent } from "./question-content/workspaceContent";
 // ===========================================================================
 // Question Workspace domain model (directive Phase 4). Typed practice-question
 // records with provenance, an error taxonomy that surfaces recurring patterns
@@ -166,6 +168,8 @@ export interface QuestionImportDiagnostics {
 }
 
 export interface QuestionRecord {
+  /** Ordered source content; legacy strings remain the searchable reading. */
+  content?: PackageQuestion;
   id: ID;
   source: QuestionSource;
   /** Original upload metadata — the file itself is not stored, its identity is. */
@@ -262,6 +266,8 @@ export interface QuestionMappingSummary {
  */
 export function questionMappingStatus(question: QuestionRecord): QuestionMappingStatus {
   if (!question.correctKey || question.needsReview === true) return "unresolved";
+  if (question.content?.assets.some((asset) => ["question", "stem", "choice"].includes(asset.role)
+    && !question.attachments?.some((attachment) => attachment.assetId === asset.id))) return "unresolved";
   if (question.extraction && question.extraction.reviewed !== true) return "review-suggested";
   return "ready";
 }
@@ -423,6 +429,8 @@ export function validateQuestionRecord(input: unknown, now: Date = new Date()): 
   const errors: string[] = [];
   if (!isRecord(input)) return { ok: false, errors: ["Question must be an object."] };
 
+  const { content, errors: contentErrors } = readWorkspaceContent(input.content);
+  errors.push(...contentErrors);
   const stem = typeof input.stem === "string" ? input.stem.trim() : "";
   if (!stem) errors.push("Question stem is required.");
   if (stem.length > 8000) errors.push("Question stem is unreasonably long (>8000 chars).");
@@ -468,6 +476,7 @@ export function validateQuestionRecord(input: unknown, now: Date = new Date()): 
           }
         : undefined,
       stem,
+      content,
       options,
       correctKey,
       correctAnswerText: correctKey ? options.find((option) => option.key === correctKey)?.text : undefined,

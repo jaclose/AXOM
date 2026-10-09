@@ -1,3 +1,5 @@
+import { QuestionContent, QuestionSupportingContent } from "./QuestionContent";
+import { isAssetVisible } from "../../lib/question-content/visibility";
 // ===========================================================================
 // Exam simulator — practice inside the interface you will actually sit:
 // UWorld, USMLE/NBME (2026 Prometric software) or ExamSoft Examplify. One
@@ -189,7 +191,7 @@ function ClassicExam({ exam, skin, mode, onClose }: {
         <section className="exam-sim-item" data-exam-scroll aria-labelledby="sim-item-heading">
           <h2 id="sim-item-heading" className="sr-only">Item {index + 1} of {pool.length}</h2>
           <div className={`sim-stem ${tool === "highlight" ? "tool-highlight" : ""} ${tool === "erase" ? "tool-erase" : ""}`}>
-            <AnnotatedQuestionText
+            <div aria-label={question.content ? "Question stem" : undefined} tabIndex={question.content ? -1 : undefined} ref={question.content ? exam.stemRef : undefined}><QuestionContent question={question} part="stem" fallback={<AnnotatedQuestionText
               text={question.stem}
               annotations={exam.annotations}
               className="sim-stem-text"
@@ -198,10 +200,11 @@ function ClassicExam({ exam, skin, mode, onClose }: {
               eraseMode={tool === "erase"}
               onDelete={exam.onDeleteAnnotation}
               onSelection={exam.onSelection}
-            />
+            />} /></div>
           </div>
-          {(question.attachments?.length ?? 0) > 0 && <SimExhibits question={question} />}
+          {!question.content && (question.attachments?.length ?? 0) > 0 && <SimExhibits question={question} />}
 
+          <QuestionSupportingContent question={question} mode="question" />
           <fieldset className="sim-choices" aria-label="Answer choices">
             {question.options.map((option) => {
               const selected = item.answerKey === option.key;
@@ -214,7 +217,7 @@ function ClassicExam({ exam, skin, mode, onClose }: {
                   <label>
                     <input type="radio" name={`sim-${question.id}`} checked={selected} disabled={revealed} onChange={() => exam.pick(option.key)} aria-label={`${option.key}. ${option.text}`} />
                     <span className="sim-choice-key">{option.key}.</span>
-                    <span className="sim-choice-text">{option.text}</span>
+                    <span className="sim-choice-text"><QuestionContent question={question} part="choice" choice={option.key} fallback={option.text} /></span>
                   </label>
                   {isCorrect && <Check size={18} className="sim-choice-mark ok" aria-label="Correct answer" />}
                   {isWrong && <X size={18} className="sim-choice-mark bad" aria-label="Your answer (incorrect)" />}
@@ -429,7 +432,7 @@ function SimSettings({ prefs, onChange }: { prefs: ExamSimPrefs; onChange: (patc
 
 /** Exhibits with per-image contrast and invert (USMLE 2026 image controls). */
 function SimExhibits({ question }: { question: QuestionRecord }) {
-  const attachments = question.attachments ?? [];
+  const attachments = (question.attachments ?? []).filter((asset) => asset.role === "exhibit" || asset.role && isAssetVisible(asset.role, "question"));
   const urls = useExhibitUrls(attachments);
   const [adjust, setAdjust] = useState<Record<string, { contrast: number; invert: boolean }>>({});
   const [zoomed, setZoomed] = useState<string | null>(null);

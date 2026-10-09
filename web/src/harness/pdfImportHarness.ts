@@ -297,7 +297,7 @@ async function save(): Promise<void> {
         ...(fields.correctKey ? { key: fields.correctKey } : {}),
         ...(question.source.questionNumber !== undefined ? { number: question.source.questionNumber } : {}),
         ...(fields.sourcePage !== undefined ? { page: fields.sourcePage } : {}),
-        pictures: question.assets.filter((asset) => isAssetVisible(asset.role, "question")).length,
+        pictures: question.assets.length,
         cells: question.stem.flatMap((block) => (block.type === "table" ? [...(block.headers ?? []), ...block.rows.flat()].filter(Boolean) : [])),
       });
     }

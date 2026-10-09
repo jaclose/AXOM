@@ -5,13 +5,19 @@ authority: current-state
 ---
 # AXOM current AI state
 
-Snapshot: 2026-10-08. Canonical development line: the rolling line
-`integration/axom-next-2026-10-07`, worktree `AXOM-next-integration`. The promotion
-candidate `integration/axom-convergence-2026-10-07` stays frozen at `3d981f7`; nobody
-commits to it. Only the integration steward writes here; every stream keeps its own
-worktree and starts from this line. Recheck branch, HEAD and status. Local integration
-is not production; `main` remains `5fbe8a4`. No push, deployment, merge to `main` or
-branch/worktree removal is authorized.
+Snapshot: 2026-10-08. Rolling development line:
+`integration/axom-next-2026-10-07` (last merged here: `6f7e422e`). This feature checkout
+is `feat/course-qbank-intelligence-v2`, worktree `AXOM-course-qbank-intelligence-v2`.
+Bookshelf product integration was pushed at `31ef1b68`; PDF product integration follows.
+JD appointed Codex primary developer and authorized normal development-feature pushes
+and guarded local rolling integration. Production `main` and the frozen convergence
+line remain protected: no main merge/push/deploy, force push, history rewrite or deletion.
+
+Current product evidence: actual QBank import -> structured preview -> verified questions
+-> practice -> answers -> reload works at 390/1440px. Private GOER test: 32 ready questions
+in three sets; 15 uncertain keys excluded. Ordered content, role-safe images, portable
+restore, media retry and incremental review use canonical storage. No private sources
+were committed. Next slice: persistent course-template library, then Anki Lab.
 
 ## Implemented boundaries
 
@@ -27,13 +33,13 @@ the shared exam engine with both exam interfaces and the AXOM player on it, and
 [Decode](features/decode.md).
 
 Added 2026-10-08 by fast-forward (stream 5 at `b5065ed`, stream 6 at `a14df11`), as
-independent modules that no screen imports yet: [question content](features/question-content.md)
+foundations now wired into this feature checkout: [question content](features/question-content.md)
 (ordered blocks, a versioned import package, a `.docx` reader, an adapter from the PDF
 import, one rule for which image may be shown when; from stream 6 a reader for tagged PDFs
 that keeps tables, figures and answer slides, a readiness verdict for each question, and
 `extractPdfBank` with `saveBank`, which take a PDF through the reviewed import) and the
 [academic bookshelf](features/bookshelf.md) (course and question bank libraries). Wiring
-all of it into Course Tracker, the Question Bank and the import screens is stream 1's.
+into Course Tracker, the QBank, tagged-PDF import and question players is implemented here; DOCX/batch screen wiring remains.
 
 Each layer owns one thing. Course Engine owns term/module/week/question scope and attempt
 persistence. Decode owns what a source teaches about a question: analyses are an optional
@@ -95,8 +101,6 @@ counts in the ledger. `npm run repo:check` prints current bootstrap size.
 Gate at `a14df11`: 2,815 unit tests, the browser suite 54 passed and 1 skipped, build,
 update and offline verifiers, repository tests and hygiene.
 
-Next: stream 1 finishes and commits its bookshelf wiring (22 uncommitted files on
-2026-10-08, copied to `refs/safety/2026-10-08/wt-course-qbank-intelligence-v2`), merges
-this line, and gives the import screens `extractPdfBank` and `saveBank`. New feature work
-starts from this line in a fresh session, not from a retired branch, a recovery snapshot
-or the original mixed checkout.
+Next: persist compatible templates in the existing local document vault, browse them
+from the bookshelf, select weeks/activities, and verify a real course load. Continue this
+feature worktree; the preservation ref is a backup, never a replacement for newer work.

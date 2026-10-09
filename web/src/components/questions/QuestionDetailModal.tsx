@@ -1,3 +1,4 @@
+import { QuestionContent, QuestionSupportingContent } from "./QuestionContent";
 // ===========================================================================
 // Answer + review flow for a single question. Answer → reveal → capture WHY
 // (confidence, guessed?, error type on a miss, note) → optionally turn the
@@ -252,14 +253,15 @@ export function QuestionDetailModal({ question, onClose }: { question: QuestionR
         statusMessage={annotationStatus}
       />
 
-      <AnnotatedQuestionText
+      <QuestionContent question={question} part="stem" fallback={<AnnotatedQuestionText
         text={question.stem}
         annotations={annotations.filter((annotation) => annotation.target === "stem")}
         className="question-stem"
         label="Question stem"
         onDelete={deleteAnnotation}
         onSelection={(range) => setAnnotationSelection(range ? { target: "stem", range } : null)}
-      />
+      />} />
+      <QuestionSupportingContent question={question} mode="question" />
 
       <QuestionProvenance
         question={question}
@@ -345,7 +347,7 @@ export function QuestionDetailModal({ question, onClose }: { question: QuestionR
                 disabled={revealed}
               >
                 <span className="mono option-key">{opt.key}</span>
-                <span>{opt.text}</span>
+                <span><QuestionContent question={question} part="choice" choice={opt.key} fallback={opt.text} /></span>
               </button>
             );
           })}
@@ -362,7 +364,7 @@ export function QuestionDetailModal({ question, onClose }: { question: QuestionR
             onMarkExplanationWrong={() => s.updateQuestion(question.id, { needsReview: true, status: "needs-review" })}
             onMarkAnswerWrong={() => s.updateQuestion(question.id, { needsReview: true, status: "needs-review" })}
             showProvenance={false}
-            explanationContent={question.explanation ? (
+            explanationContent={question.explanation ? (<QuestionContent question={question} part="explanation" mode="answered" fallback={
               <AnnotatedQuestionText
                 text={question.explanation.trim()}
                 annotations={annotations.filter((annotation) => annotation.target === "explanation")}
@@ -372,8 +374,9 @@ export function QuestionDetailModal({ question, onClose }: { question: QuestionR
                 inline
                 onSelection={(range) => setAnnotationSelection(range ? { target: "explanation", range } : null)}
               />
-            ) : undefined}
+            } />) : undefined}
           />
+          <QuestionSupportingContent question={question} mode="answered" />
           <div className="stack gap6">
             <span className="field-label">Confidence</span>
             <div className="row">
@@ -408,10 +411,11 @@ export function QuestionDetailModal({ question, onClose }: { question: QuestionR
           />
           <QuestionAttachmentsPanel
             questionId={question.id}
-            attachments={attachmentsList}
+            attachments={attachmentsList.filter(attachment => !attachment.role)}
             onChange={(next) => {
-              const value = next.length ? next : undefined;
-              setAttachmentsList(next);
+              const combined = [...attachmentsList.filter(attachment => attachment.role), ...next];
+              const value = combined.length ? combined : undefined;
+              setAttachmentsList(combined);
               s.updateQuestion(question.id, { attachments: value });
             }}
           />

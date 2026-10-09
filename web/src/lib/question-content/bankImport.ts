@@ -19,7 +19,7 @@ export interface SavedSection {
   /** The package question ids, and the ids they were saved under, in step. */
   questionIds: string[];
   savedIds: string[];
-  /** An identical earlier import was found and reused: nothing was written. */
+  /** An earlier question set was reused; missing image bytes may have been repaired. */
   reused: boolean;
   images: { attached: number; missing: number; problems: string[] };
 }
@@ -27,7 +27,7 @@ export interface SavedSection {
 export interface BankSave {
   /**
    * "saved": at least one set was written. "already-saved": every set was found from an
-   * earlier import and nothing was written. "nothing-ready": no question may be saved yet.
+   * earlier import (missing image bytes may still have been repaired). "nothing-ready": no question may be saved yet.
    * "failed": something was refused or could not be written; see `errors`.
    */
   status: "saved" | "already-saved" | "nothing-ready" | "failed";
@@ -53,7 +53,26 @@ const REFUSAL: Record<string, string> = {
 export async function saveBank(pkg: ImportPackage, issues: readonly PackageIssue[], files: readonly File[], workspace: Workspace, options: PackageImportOptions = {}): Promise<BankSave> {
   const adapted = packageToReviewedImport(pkg, issues, options);
   const result: BankSave = { status: "nothing-ready", sections: [], held: adapted.held, withheldAssets: adapted.withheldAssets, filing: adapted.filing, errors: [] };
-  for (const section of adapted.imports) {
+  // A later review can release more questions from the same source. Reuse
+  // earlier subsets instead of importing their canonical questions again.
+  const imports = adapted.imports.flatMap(section => {
+    const groups = new Map<string, number[]>();
+    const existing = workspace.library().questions;
+    section.request.drafts.forEach((draft, index) => {
+      const content = draft.content;
+      const previous = content?.provenance.sourceChecksum && existing.find(question =>
+        question.content?.id === content.id && question.content.bankId === content.bankId &&
+        question.content.provenance.sourceChecksum === content.provenance.sourceChecksum &&
+        question.correctKey === draft.correctKey && question.setId);
+      const key = previous ? previous.setId! : "new";
+      groups.set(key, [...(groups.get(key) ?? []), index]);
+    });
+    return [...groups.values()].map(indices => ({ ...section,
+      questionIds: indices.map(index => section.questionIds[index]),
+      request: { ...section.request, drafts: indices.map(index => section.request.drafts[index]) },
+    }));
+  });
+  for (const section of imports) {
     const name = section.request.setTitle;
     try {
       const prepared = prepareReviewedImport(section.request, workspace.library());
@@ -67,6 +86,7 @@ export async function saveBank(pkg: ImportPackage, issues: readonly PackageIssue
         result.errors.push(`${name}: ${saved.message}${saved.rollbackFailures.length ? ` ${saved.rollbackFailures.join(" ")}` : ""}`);
         continue;
       }
+      if (saved.images.missing || saved.images.problems.length) result.errors.push(`${name}: some media could not be saved. ${saved.images.problems.join(" ")}`);
       result.sections.push({
         ...(section.set !== undefined ? { set: section.set } : {}),
         ...(section.title ? { title: section.title } : {}),

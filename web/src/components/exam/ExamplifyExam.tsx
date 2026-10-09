@@ -1,3 +1,5 @@
+import { QuestionContent, QuestionSupportingContent } from "../questions/QuestionContent";
+import { isAssetVisible } from "../../lib/question-content/visibility";
 // ===========================================================================
 // The Examplify (ExamSoft) interface, as a renderer over the shared exam
 // block (useExamBlock). Layout, proportions, colours and behaviour follow
@@ -271,7 +273,7 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
 
           {!collapsed && (
             <div className={`xfy-stem ${tool === "highlight" ? "tool-highlight" : ""} ${tool === "erase" ? "tool-erase" : ""}`}>
-              <AnnotatedQuestionText
+              <div aria-label={question.content ? "Question stem" : undefined} tabIndex={question.content ? -1 : undefined} ref={question.content ? exam.stemRef : undefined}><QuestionContent question={question} part="stem" fallback={<AnnotatedQuestionText
                 text={question.stem}
                 annotations={exam.annotations}
                 className="xfy-stem-text"
@@ -280,11 +282,12 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
                 eraseMode={tool === "erase"}
                 onDelete={exam.onDeleteAnnotation}
                 onSelection={exam.onSelection}
-              />
+              />} /></div>
             </div>
           )}
-          {(question.attachments?.length ?? 0) > 0 && <Exhibits question={question} opened={attachment} onOpen={setAttachment} />}
+          {!question.content && (question.attachments?.length ?? 0) > 0 && <Exhibits question={question} opened={attachment} onOpen={setAttachment} />}
 
+          <QuestionSupportingContent question={question} mode="question" />
           <p className="xfy-selected">
             <b>{revealed ? "Your Answer" : "Currently Selected"} : {selectedWords}</b>
             {revealed && correctKey && <b className="xfy-correct-line">Correct Answer : {correctKey}</b>}
@@ -301,7 +304,7 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
                   <button type="button" className="xfy-choice-main" role="radio" aria-checked={selected} disabled={revealed}
                     aria-label={`${option.key}. ${option.text}${struck ? " (struck out)" : ""}`} onClick={() => exam.pick(option.key)}>
                     <b>{option.key}</b>
-                    <span>{option.text}</span>
+                    <span><QuestionContent question={question} part="choice" choice={option.key} fallback={option.text} /></span>
                   </button>
                   {isCorrect ? <span className="xfy-choice-side ok" role="img" aria-label="Correct answer"><Check size={18} /></span>
                     : isWrong ? <span className="xfy-choice-side bad" role="img" aria-label="Your answer (incorrect)"><X size={18} /></span>
@@ -445,7 +448,7 @@ function ColourDots({ value, onChange }: { value: QuestionAnnotationTone; onChan
 
 /** A question's images, in the question, at their own shape. Opening one shows it beside the question, as the exam does. */
 function Exhibits({ question, opened, onOpen }: { question: QuestionRecord; opened: string | null; onOpen: (id: string | null) => void }) {
-  const attachments = question.attachments ?? [];
+  const attachments = (question.attachments ?? []).filter((asset) => asset.role === "exhibit" || asset.role && isAssetVisible(asset.role, "question"));
   const urls = useExhibitUrls(attachments);
   return (
     <div className="xfy-exhibits">
@@ -465,7 +468,7 @@ function Exhibits({ question, opened, onOpen }: { question: QuestionRecord; open
 
 /** The exam's attachment viewer: the image beside the question, with zoom, and a bar to drag the split. */
 function AttachmentPane({ question, attachmentId, number, onClose }: { question: QuestionRecord; attachmentId: string; number: number; onClose: () => void }) {
-  const attachments = question.attachments ?? [];
+  const attachments = (question.attachments ?? []).filter((asset) => asset.role === "exhibit" || asset.role && isAssetVisible(asset.role, "question"));
   const urls = useExhibitUrls(attachments);
   const entry = attachments.find((candidate) => candidate.id === attachmentId);
   const [zoom, setZoom] = useState(1);

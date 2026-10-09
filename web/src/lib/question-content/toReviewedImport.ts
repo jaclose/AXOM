@@ -14,10 +14,7 @@
 // stays one source and becomes one saved set for each of its own. Nothing is
 // renumbered: every question keeps the number its source gave it.
 //
-// Until a question record can hold blocks, three things do not make the trip
-// and are listed in the result instead of being dropped silently: a picture
-// that must stay hidden until the answer is given, a table as a table (it is
-// saved as text), and where in the stem a picture sits.
+// Ordered blocks and role-aware media travel through that same save path.
 // ===========================================================================
 import { CURRICULA } from "../curricula";
 import type { ImportDestination, ReviewedDraft, ReviewedImportRequest } from "../questionImportSave";
@@ -25,11 +22,11 @@ import type { QuestionSource } from "../questions";
 import { legacyQuestionFields } from "./legacyFields";
 import type { ImportPackage, PackageIssue, PackageQuestion, QuestionAsset } from "./package";
 import { questionReadiness, type Readiness } from "./readiness";
-import { isAssetVisible } from "./visibility";
 
 export interface PackageImportOptions {
   /** "both" keeps a record of the source file in the library beside the questions. It needs `sourceText`. */
   destination?: ImportDestination;
+  courseId?: string;
   /** The source file's size, for the library's note of where the questions came from. */
   sourceBytes?: number;
   /** The text of the source as it was read. With it, the library keeps one record of the file, and every set made from it is tied to that record. */
@@ -141,17 +138,7 @@ export function packageToReviewedImport(pkg: ImportPackage, issues: readonly Pac
     const place = set === undefined ? "" : `set ${set}${title ? ` (${title})` : ""}`;
     const drafts: ReviewedDraft[] = members.map(({ question, advisories, accepted }) => {
       const fields = legacyQuestionFields(manifest, question);
-      const shown = question.assets.filter((asset) => isAssetVisible(asset.role, "question"));
-      for (const asset of question.assets) {
-        if (shown.includes(asset)) continue;
-        withheldAssets.push({
-          questionId: question.id,
-          assetId: asset.id,
-          filename: asset.filename,
-          role: asset.role,
-          reason: "It must not be seen while the question is open, and the current question record shows every picture with the question. It stays in the package.",
-        });
-      }
+      const shown = question.assets;
       const where = [
         question.source.filename,
         ...(place ? [place] : []),
@@ -159,6 +146,7 @@ export function packageToReviewedImport(pkg: ImportPackage, issues: readonly Pac
       ].join(", ");
       return {
         stem: fields.stem,
+        content: question,
         options: fields.options,
         correctKey: fields.correctKey,
         ...(fields.explanation ? { explanation: fields.explanation } : {}),
@@ -195,7 +183,7 @@ export function packageToReviewedImport(pkg: ImportPackage, issues: readonly Pac
         sourceType: source,
         // One source, and one saved set for each of its own sets.
         setTitle: several && place ? `${manifest.bank.title}: ${place}` : manifest.bank.title,
-        scope: { module: manifest.course.name, week: manifest.course.week },
+        scope: { module: manifest.course.name, week: manifest.course.week, ...(options.courseId ? { courseId: options.courseId } : {}) },
         parserWarnings: [...(options.notes ?? [])],
       },
       questionIds: members.map((entry) => entry.question.id),
