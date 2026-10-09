@@ -39,6 +39,8 @@ test("a course template fills the tracker week by week and is safe to load twice
   await page.goto("/#tracker");
 
   await page.getByRole("button", { name: "Load course template" }).click();
+  await page.getByRole("dialog", { name: "Course library", exact: true }).getByRole("tab", { name: "Import", exact: true }).click();
+  await page.getByRole("button", { name: "Choose a file", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Load a course template" });
   await dialog.getByLabel("Choose course template files").setInputFiles(FILES);
 
@@ -109,6 +111,8 @@ test("a course template fills the tracker week by week and is safe to load twice
 
   // Loading the same files again finds everything already there.
   await page.getByRole("button", { name: "Load course template" }).click();
+  await page.getByRole("dialog", { name: "Course library", exact: true }).getByRole("tab", { name: "Import", exact: true }).click();
+  await page.getByRole("button", { name: "Choose a file", exact: true }).click();
   await dialog.getByLabel("Choose course template files").setInputFiles(FILES);
   await preview.getByLabel("FTM 1 starts in week").fill("3");
   // The moved lecture is not pulled back to the week AXOM first gave it.

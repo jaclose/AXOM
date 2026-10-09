@@ -26,6 +26,8 @@ import { AnalysisPanel } from "../components/questions/AnalysisPanel";
 import { QuestionDetailModal } from "../components/questions/QuestionDetailModal";
 import { SourceLibrary, QuestionSetList } from "../components/questions/LibraryPanels";
 import { BlockBuilder } from "../components/questions/BlockBuilder";
+import { QuestionBankLibrary } from "../components/questions/QuestionBankLibrary";
+import type { BankLocation } from "../components/questions/CourseBankBrowser";
 import { BankBrowser } from "../components/questions/BankBrowser";
 import { AxomBrandLockup } from "../components/ui/BrandMark";
 import { coachWeakness, resolveActiveProvider } from "../lib/ai";
@@ -78,6 +80,8 @@ export function QuestionWorkspacePage() {
   const questionSets = s.questionSets ?? NO_SETS;
   const documents = s.documents ?? NO_DOCUMENTS;
   const [tab, setTab] = useState<BankTab>(() => questionSets.length ? "sets" : "overview");
+  const [bankView, setBankView] = useState<"books" | "weeks">("books");
+  const [bankLocation, setBankLocation] = useState<BankLocation>();
   const [open, setOpen] = useState<QuestionRecord | null>(null);
   const [showStyle, setShowStyle] = useState(false);
   const [runner, setRunner] = useState<RunnerLaunch | null>(() => {
@@ -500,15 +504,22 @@ export function QuestionWorkspacePage() {
           }}
         />
       )}
-      {tab === "sets" && (
-        <QuestionSetList
+      {tab === "sets" && <>
+        <div className="cb-view-switch" role="group" aria-label="Question bank view">
+          <button aria-pressed={bankView === "books"} onClick={() => setBankView("books")}>Bookshelf</button>
+          <button aria-pressed={bankView === "weeks"} onClick={() => setBankView("weeks")}>Browse weeks</button>
+        </div>
+        {bankView === "books" ? <QuestionBankLibrary onImport={() => setTab("import")} onCreate={() => setRunner({ mode: "tutor" })}
+          onOpenBank={(book, week) => { setBankLocation({ module: book.module, courseId: book.courseId, week }); setBankView("weeks"); }}
+          onPractice={(selection) => { setBankView("weeks"); setBankLocation(selection); setRunner({ mode: "tutor", presetFilters: { setIds: selection.setIds, count: selection.count } }); }} /> :
+        <QuestionSetList key={JSON.stringify(bankLocation)} initialScope={bankLocation}
           onRunSet={runSet}
           onRunSets={(sets) => setRunner({ mode: "tutor", presetFilters: { setIds: sets.map((set) => set.id), count: 20 } })}
           onReviewIssues={openMappingReview}
           onReviewMisses={(ids) => ids.length && setRunner({ mode: "tutor", retakeIds: ids })}
           onOpenInsights={() => setTab("insights")}
         />
-      )}
+      }</>}
       {tab === "library" && <SourceLibrary onParseFrom={parseFrom} onGenerateFrom={generateFrom} />}
       {tab === "blocks" && <BlockBuilder onRunBlock={runBlock} onNewBlock={() => setRunner({ mode: "tutor" })} />}
 

@@ -62,6 +62,7 @@ test("a source file becomes a filed set, recorded answers, a finding and a revie
 
   // --- question bank: filed by module, then week ------------------------------
   await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
+  await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
   const group = page.getByRole("region", { name: "Course question bank" });
   await expect(group.getByRole("heading", { name: "Week 2", exact: true })).toBeVisible();
   await group.getByRole("button", { name: "Practice Week 2 practice", exact: true }).click();
@@ -124,6 +125,7 @@ test("a source file becomes a filed set, recorded answers, a finding and a revie
   expect(saved.questions).toHaveLength(2);
 
   await page.getByRole("tab", { name: /Question Sets \(2\)/ }).click();
+  await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
   await expect(group.locator(".cb-set-row")).toHaveCount(2);
   expect(errors).toEqual([]);
 });

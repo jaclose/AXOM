@@ -72,12 +72,14 @@ export type SaveOutcome =
  * has not.
  */
 export async function commitCourseLoad(book: CourseBook): Promise<SaveOutcome> {
-  const [{ useStore }, { flushLocalVaultWrites }] = await Promise.all([import("../store"), import("../localVault")]);
+  const [{ useStore }, { flushLocalVaultWrites, assertVaultWritesSince, getVaultWriteCheckpoint }] = await Promise.all([import("../store"), import("../localVault")]);
   const state = useStore.getState();
   if (planCourseLoad(state, book).alreadyPresent) return { status: "nothing-to-save" };
   try {
+    const checkpoint = getVaultWriteCheckpoint();
     useStore.setState(applyCourseLoad(state, book));
     await flushLocalVaultWrites();
+    assertVaultWritesSince(checkpoint);
     return { status: "saved-on-device" };
   } catch (error) {
     return { status: "failed", message: error instanceof Error ? error.message : "The change could not be saved on this device." };

@@ -34,6 +34,8 @@ import { cardSystemFor, type CardSystem } from "../lib/cardSystem";
 import { TrackerFirstRun } from "../components/tracker/TrackerFirstRun";
 import { ICON_SIZE } from "../lib/iconSize";
 import { parseCourseSchedule, reconcileScheduleDuplicates, scheduleCandidatesToTracker, type ScheduleCandidate } from "../lib/courseScheduleImport";
+import { CourseLibrary } from "../components/tracker/CourseLibrary";
+import type { CourseBook } from "../lib/bookshelf/courseBooks";
 import { CourseTemplateLoader } from "../components/tracker/CourseTemplateLoader";
 import { WeekOverview } from "../components/tracker/WeekOverview";
 import { activePrimaryPaths, activePrimaryScopes, isPrimaryPath, itemsInPrimary, setPrimaryUntil, togglePrimaryScope, type PrimaryTrackerScope } from "../lib/trackerFocus";
@@ -113,6 +115,8 @@ export function CourseTrackerPage() {
   const [moduleOpen, setModuleOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [templateBook, setTemplateBook] = useState<CourseBook>();
   const [templateOpen, setTemplateOpen] = useState(false);
   const [moduleHelpOpen, setModuleHelpOpen] = useState(false);
   const [moduleTourOpen, setModuleTourOpen] = useState(false);
@@ -252,7 +256,7 @@ export function CourseTrackerPage() {
                 <BookOpen size={ICON_SIZE.body} /> Add course or module
               </GButton>
               <GButton size="sm" onClick={() => setScheduleOpen(true)}><Upload size={ICON_SIZE.body}/> Import schedule</GButton>
-              <GButton size="sm" onClick={() => setTemplateOpen(true)}><Upload size={ICON_SIZE.body}/> Load course template</GButton>
+              <GButton size="sm" onClick={() => setLibraryOpen(true)}><Upload size={ICON_SIZE.body}/> Load course template</GButton>
             </div>
           </GlassCard>
 
@@ -378,7 +382,11 @@ export function CourseTrackerPage() {
       {moduleOpen && <ModuleEditor onDone={(nextScope) => { setModuleOpen(false); if (nextScope) setScope(nextScope); }} />}
       {bulkOpen && <BulkImportModal defaultPath={scope} onClose={() => setBulkOpen(false)} />}
       {scheduleOpen && <ScheduleImportModal defaultPath={scope} onClose={() => setScheduleOpen(false)} />}
-      {templateOpen && <CourseTemplateLoader onClose={() => setTemplateOpen(false)} />}
+      {libraryOpen && <CourseLibrary onClose={() => setLibraryOpen(false)}
+        onTemplate={(book) => { setTemplateBook(book); setLibraryOpen(false); setTemplateOpen(true); }}
+        onCreate={() => { setLibraryOpen(false); setModuleOpen(true); }}
+        onOpen={(book) => { setScope(`${book.term}/${book.module}`); setLibraryOpen(false); }} />}
+      {templateOpen && <CourseTemplateLoader defaultTermId={s.terms.find((term) => term.name === templateBook?.term)?.id} onClose={() => setTemplateOpen(false)} />}
       {deleteScope && <DeleteScopeModal scope={deleteScope} onSelect={setScope} onClose={() => setDeleteScope(null)} />}
       {moduleTourOpen && <ModuleTour name="Course Tracker" route="tracker" steps={COURSE_TRACKER_TOUR_STEPS} onExit={() => setModuleTourOpen(false)} />}
     </div>

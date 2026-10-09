@@ -7,7 +7,10 @@ import { GButton, GhostButton } from "../ui/primitives";
 import { ICON_SIZE } from "../../lib/iconSize";
 import "../../styles/course-bank.css";
 
+export interface BankLocation { module: string; week?: number; courseId?: string }
+
 interface Props {
+  initialScope?: BankLocation;
   selectedIds?: string[];
   onSelectionChange?: (ids: string[]) => void;
   onPractice?: (sets: QuestionSet[]) => void;
@@ -15,7 +18,7 @@ interface Props {
 }
 
 /** The same bounded source navigator serves the library and the block picker. */
-export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPractice, renderSet }: Props) {
+export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPractice, renderSet, initialScope }: Props) {
   const { questionSets = [], questions = [], courses, terms } = useStore();
   const branches = useMemo(() => buildCourseQuestionBank(questionSets, questions, courses, terms), [questionSets, questions, courses, terms]);
   const [chosen, setChosen] = useState<string>();
@@ -23,7 +26,8 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
   const [source, setSource] = useState("");
   const [limit, setLimit] = useState(12);
   const [openedSet, setOpenedSet] = useState<string>();
-  const initial = branches.flatMap((branch) => branch.weeks).find((week) => week.sets.some((set) => selectedIds.includes(set.id)))
+  const scoped = branches.find((branch) => branch.module === initialScope?.module && (!initialScope.courseId || branch.courseId === initialScope.courseId));
+  const initial = scoped?.weeks.find((week) => week.week === initialScope?.week) ?? scoped?.weeks[0] ?? branches.flatMap((branch) => branch.weeks).find((week) => week.sets.some((set) => selectedIds.includes(set.id)))
     ?? branches[0]?.weeks[0];
   const active = branches.flatMap((branch) => branch.weeks).find((week) => week.key === chosen) ?? initial;
   const branch = branches.find((item) => item.weeks.some((week) => week.key === active?.key));

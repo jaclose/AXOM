@@ -195,9 +195,23 @@ describe("question bank books", () => {
     const er = book("ER");
     const week = er.weeks[0];
     const all = week.collections.map((collection) => collection.id);
-    expect(practiceSelection(er, week, all, 20)).toEqual({ module: "ER", week: 1, setIds: ["s1", "s2", "s4"], count: 20 });
-    expect(practiceSelection(er, week, ["set:s2"], 500)).toEqual({ module: "ER", week: 1, setIds: ["s2"], count: 39 });
+    expect(practiceSelection(er, week, all, 20)).toEqual({ courseId: er.courseId, module: "ER", week: 1, setIds: ["s1", "s2", "s4"], count: 20 });
+    expect(practiceSelection(er, week, ["set:s2"], 500)).toEqual({ courseId: er.courseId, module: "ER", week: 1, setIds: ["s2"], count: 39 });
+    expect(week.questions).toBe(105);
+    expect(practiceSelection(er, week, all, 500).count).toBe(99);
     const goer = book("GOER");
     expect(practiceSelection(goer, goer.weeks[0], goer.weeks[0].collections.map((collection) => collection.id), 20)).toEqual({ module: "GOER", week: 2, setIds: [], count: 0 });
   });
+});
+
+
+it("keeps identically named modules in separate courses", () => {
+  const terms: Term[] = [{ id: "term-a", name: "Term A" }, { id: "term-b", name: "Term B" }];
+  const courses: Course[] = terms.map((term, index) => ({ id: `course-${index}`, termId: term.id, code: `Course ${index}`, name: "Sample course", files: 0, modules: [{ id: `module-${index}`, name: "Shared module" }] }));
+  const questions = courses.map((course, index) => question(`q-${index}`, "Shared module", 1, `s-${index}`, { courseId: course.id }));
+  const sets = courses.map((course, index) => ({ ...set(`s-${index}`, `Set ${index}`, "Shared module", 1, [`q-${index}`]), scope: { module: "Shared module", week: 1, courseId: course.id } }));
+  const books = buildQuestionBankBooks({ terms, courses, sets, questions });
+  expect(books).toHaveLength(2);
+  expect(books.map((book) => [book.courseId, book.count])).toEqual([["course-0", 1], ["course-1", 1]]);
+  expect(new Set(books.map((book) => book.id)).size).toBe(2);
 });

@@ -9,6 +9,7 @@
 // questions that are really on this device.
 // ===========================================================================
 import { questionScope } from "../course-engine/scope";
+import { courseForScope } from "../course-engine/questionBank";
 import { moduleKey } from "../course-engine/vocabulary";
 import type { CurriculumTemplate } from "../curricula";
 import type { QuestionSet } from "../library";
@@ -51,6 +52,8 @@ export interface BankCollection {
   questions: number;
   /** Of those, how many can be practised now. */
   ready: number;
+  questionIds?: string[];
+  readyQuestionIds?: string[];
   attempted: number;
   awaitingReview: number;
   status: CollectionStatus;
@@ -130,7 +133,8 @@ export function buildQuestionBankBooks(input: QuestionBankInput): QuestionBankBo
   const questionsById = new Map(input.questions.map((question) => [question.id, question]));
   const drafts = new Map<string, Draft>();
   const draftFor = (module: string, courseId?: string): Draft => {
-    const key = moduleKey(module);
+    courseId = courseForScope({ module, courseId }, input.courses)?.id;
+    const key = `${courseId ?? "unassigned"}|${moduleKey(module)}`;
     const draft: Draft = drafts.get(key) ?? { module, weeks: new Map(), questionIds: new Set() };
     if (courseId && !draft.courseId) draft.courseId = courseId;
     drafts.set(key, draft);
@@ -158,6 +162,8 @@ export function buildQuestionBankBooks(input: QuestionBankInput): QuestionBankBo
       source: sourceOf(set),
       ...(week !== undefined ? { week } : {}),
       questions: members.length,
+      questionIds: members.map((question) => question.id),
+      readyQuestionIds: members.filter((question) => questionMappingStatus(question) === "ready" && question.options.length >= 2).map((question) => question.id),
       ready: members.filter((question) => questionMappingStatus(question) === "ready" && question.options.length >= 2).length,
       attempted: members.filter((question) => question.attempts.length > 0).length,
       awaitingReview: awaiting,
@@ -172,18 +178,18 @@ export function buildQuestionBankBooks(input: QuestionBankInput): QuestionBankBo
   }
 
   // Questions that belong to a module but to no set.
-  const looseByScope = new Map<string, { module: string; week?: number; questions: QuestionRecord[] }>();
+  const looseByScope = new Map<string, { module: string; week?: number; courseId?: string; questions: QuestionRecord[] }>();
   for (const question of input.questions) {
     if (inSet.has(question.id)) continue;
     const scope = questionScope(question, setsById);
     if (!scope.module) continue;
-    const key = `${moduleKey(scope.module)}|${scope.week ?? ""}`;
-    const entry = looseByScope.get(key) ?? { module: scope.module, ...(scope.week !== undefined ? { week: scope.week } : {}), questions: [] };
+    const key = `${scope.courseId ?? ""}|${moduleKey(scope.module)}|${scope.week ?? ""}`;
+    const entry = looseByScope.get(key) ?? { module: scope.module, courseId: scope.courseId, ...(scope.week !== undefined ? { week: scope.week } : {}), questions: [] };
     entry.questions.push(question);
     looseByScope.set(key, entry);
   }
   for (const [key, entry] of looseByScope) {
-    const draft = draftFor(entry.module);
+    const draft = draftFor(entry.module, entry.courseId);
     const awaiting = entry.questions.filter((question) => questionMappingStatus(question) !== "ready").length;
     weekFor(draft, entry.week).collections.push({
       id: `loose:${key}`,
@@ -191,6 +197,8 @@ export function buildQuestionBankBooks(input: QuestionBankInput): QuestionBankBo
       source: "Imported",
       ...(entry.week !== undefined ? { week: entry.week } : {}),
       questions: entry.questions.length,
+      questionIds: entry.questions.map((question) => question.id),
+      readyQuestionIds: entry.questions.filter((question) => questionMappingStatus(question) === "ready" && question.options.length >= 2).map((question) => question.id),
       ready: entry.questions.filter((question) => questionMappingStatus(question) === "ready" && question.options.length >= 2).length,
       attempted: entry.questions.filter((question) => question.attempts.length > 0).length,
       awaitingReview: awaiting,
@@ -242,8 +250,8 @@ export function buildQuestionBankBooks(input: QuestionBankInput): QuestionBankBo
     const weeks = [...draft.weeks.values()].sort((a, b) => (a.week ?? Infinity) - (b.week ?? Infinity));
     for (const week of weeks) {
       week.collections.sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }));
-      week.questions = week.collections.reduce((sum, collection) => sum + collection.questions, 0);
-      week.ready = week.collections.reduce((sum, collection) => sum + collection.ready, 0);
+      week.questions = new Set(week.collections.flatMap((collection) => collection.questionIds ?? [])).size;
+      week.ready = new Set(week.collections.flatMap((collection) => collection.readyQuestionIds ?? [])).size;
     }
     const members = [...draft.questionIds].map((id) => questionsById.get(id)!);
     const count = members.length;
@@ -254,7 +262,7 @@ export function buildQuestionBankBooks(input: QuestionBankInput): QuestionBankBo
       moduleIndex: course ? course.modules.findIndex((module) => moduleKey(module.name) === moduleKey(draft.module)) : 0,
       book: {
         kind: "question-bank",
-        id: `bank:${moduleKey(draft.module)}`,
+        id: `bank:${draft.courseId ?? "unassigned"}:${moduleKey(draft.module)}`,
         title: course?.modules.find((module) => moduleKey(module.name) === moduleKey(draft.module))?.name ?? draft.module,
         ...(course ? { identifier: course.code } : place ? { identifier: place.code } : {}),
         shelf: term,
@@ -275,6 +283,7 @@ export function buildQuestionBankBooks(input: QuestionBankInput): QuestionBankBo
 }
 
 export interface PracticeSelection {
+  courseId?: string;
   module: string;
   week?: number;
   /** The sets to draw from. Sets only: a package that is not imported has nothing to practise. */
@@ -286,9 +295,10 @@ export interface PracticeSelection {
 /** What can be practised from a week's chosen collections, never more than is ready. */
 export function practiceSelection(book: QuestionBankBook, week: BankWeek, collectionIds: readonly string[], wanted: number): PracticeSelection {
   const chosen = week.collections.filter((collection) => collectionIds.includes(collection.id) && collection.setId && collection.ready > 0);
-  const ready = chosen.reduce((sum, collection) => sum + collection.ready, 0);
+  const ready = new Set(chosen.flatMap((collection) => collection.readyQuestionIds ?? [])).size;
   return {
     module: book.module,
+    ...(book.courseId ? { courseId: book.courseId } : {}),
     ...(week.week !== undefined ? { week: week.week } : {}),
     setIds: chosen.map((collection) => collection.setId!),
     count: Math.max(0, Math.min(Math.floor(wanted) || 0, ready)),

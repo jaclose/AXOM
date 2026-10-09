@@ -19,7 +19,7 @@ import { moduleKey } from "../../lib/course-engine/vocabulary";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { createQuestionSetShare } from "../../lib/sharing/questionSetShare";
 import { publishShare } from "../../lib/sharing/supabaseSharing";
-import { CourseBankBrowser } from "./CourseBankBrowser";
+import { CourseBankBrowser, type BankLocation } from "./CourseBankBrowser";
 import { sortByNaturalTitle } from "../../lib/naturalSort";
 
 const NO_QUESTIONS: QuestionRecord[] = [];
@@ -114,6 +114,7 @@ export function SourceLibrary({
 }
 
 export function QuestionSetList({
+  initialScope,
   onRunSet,
   onRunSets,
   onReviewIssues,
@@ -125,6 +126,7 @@ export function QuestionSetList({
   title,
   sub,
 }: {
+  initialScope?: BankLocation;
   onRunSet: (set: QuestionSet) => void;
   onRunSets?: (sets: QuestionSet[]) => void;
   onReviewIssues?: (ids: string[]) => void;
@@ -262,7 +264,7 @@ export function QuestionSetList({
     );
   }
 
-  if (!recent && !compact) return <CourseBankBrowser
+  if (!recent && !compact) return <CourseBankBrowser initialScope={initialScope}
     onPractice={(chosen) => chosen.length === 1 ? onRunSet(chosen[0]) : onRunSets?.(chosen)}
     renderSet={renderCard}
   />;

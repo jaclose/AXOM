@@ -64,6 +64,7 @@ test("a figure in a question PDF is cut out, attached to its question and shown 
   await page.getByLabel("Set title").fill("PDF with a figure");
   await page.getByRole("button", { name: "Finalize import" }).click();
   await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
+  await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
 
   await reloadAfterSave(page);
   const saved = await page.evaluate(async () => {
@@ -78,6 +79,7 @@ test("a figure in a question PDF is cut out, attached to its question and shown 
   ]);
 
   await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
+  await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
   await page.getByRole("button", { name: "Practice PDF with a figure", exact: true }).click();
   await page.getByRole("button", { name: "Start tutor block" }).click();
   const exhibit = page.locator(".question-exhibit img");

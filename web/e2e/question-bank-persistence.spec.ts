@@ -64,6 +64,7 @@ test("onboarding → import → block → repair → reload retains the full que
   await page.getByLabel("Set title").fill("AXOM persisted journey");
   await page.getByRole("button", { name: "Finalize import" }).click();
   await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
+  await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
   await page.getByRole("button", { name: "AXOM persisted journey", exact: true }).click();
   const setCard = page.locator("article.qset-card").filter({ hasText: "AXOM persisted journey" });
   await expect(setCard).toBeVisible();
@@ -151,6 +152,7 @@ test("onboarding → import → block → repair → reload retains the full que
   await expect.poll(async () => (await readPersistedWorkspace(page)).questions?.[0]?.attempts?.length ?? 0).toBe(1);
   await page.reload({ waitUntil: "networkidle" });
   await page.getByRole("tab", { name: /Question Sets/ }).click();
+  await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
   await page.getByRole("button", { name: "AXOM persisted journey", exact: true }).click();
   const reloadedCard = page.locator("article.qset-card").filter({ hasText: "AXOM persisted journey" });
   await expect(reloadedCard).toBeVisible();

@@ -22,6 +22,7 @@ for (const width of [1440, 390]) test(`course bank stays focused, builds across 
     await flushVault();
   });
   await page.goto("/#questions");
+  await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
   const bank = page.getByRole("region", { name: "Course question bank" });
   await expect(bank.getByRole("heading", { name: "Week 1", exact: true })).toBeVisible();
   await expect(bank.locator(".cb-set-row")).toHaveCount(12);
@@ -62,6 +63,7 @@ for (const width of [1440, 390]) test(`course bank stays focused, builds across 
   expect(result.answered).toHaveLength(2);
   expect(result.answered.every((week) => week === 2 || week === 3)).toBe(true);
   expect(result.block?.filters.setIds).toHaveLength(24);
+  await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
   await bank.getByLabel("Search question sets").fill("IMCQ practice 60");
   await expect(bank.locator(".cb-set-row")).toHaveCount(1);
   await bank.getByLabel("Search question sets").fill("");

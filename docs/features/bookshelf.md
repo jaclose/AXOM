@@ -11,9 +11,10 @@ or focus lifts it; choosing it takes it off the shelf, turns it and opens it ont
 of what is really inside. Two libraries use the one shelf: course templates and question
 banks.
 
-**Status (2026-10-08):** built as independent components on `feat/qbank-multimodal-import-v1`
-and exercised in a browser on a development harness. Not yet in Course Tracker or the
-Question Bank: that wiring is Codex's. Nothing in the app imports these files yet.
+**Status (2026-10-08):** connected to Course Tracker's Load course template and
+Question Bank's Bookshelf view. Course books open the existing template loader with
+the chosen term. Bank books open a scoped week or a focused practice block. The
+week navigator remains available through Browse weeks; no parallel workspace store.
 
 | Responsibility | Files under `web/src/` |
 | --- | --- |
@@ -87,9 +88,17 @@ book is a modal dialog that keeps Tab inside it.
 
 ## Not done
 
-- Not wired into Course Tracker or the Question Bank.
+- Imported templates are not yet a persistent catalog; select the source file to load again.
 - "Load course" adds the module's place in the course. The lectures and other activities
   of a template file still come in through the existing template loader, which
   `onChooseTemplate` is there to open.
 - Recover has a slot and honest copy, and no search behind it yet.
 - Selecting single weeks of a course to load is not built.
+
+
+Product integration: `components/tracker/CourseLibrary.tsx` and
+`components/questions/QuestionBankLibrary.tsx`; `e2e/bookshelf-product.spec.ts` checks
+the actual app at desktop and phone sizes. Weekly and selected practice counts use
+unique canonical question IDs, so a review set cannot inflate the pool. Course IDs
+separate otherwise identical module names. Saves assert the vault outcome before
+reporting success. Recover remains hidden until it has a real recovery source.

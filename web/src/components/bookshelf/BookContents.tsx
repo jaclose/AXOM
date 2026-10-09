@@ -136,7 +136,7 @@ export function QuestionBankBookContent({ book, onPractice, onOpenBank }: Questi
   const practisable = useMemo(() => (week?.collections ?? []).filter((collection) => collection.setId && collection.ready > 0), [week]);
   const [chosen, setChosen] = useState<readonly string[] | undefined>(undefined);
   const chosenIds = chosen ?? practisable.map((collection) => collection.id);
-  const readyChosen = practisable.filter((collection) => chosenIds.includes(collection.id)).reduce((sum, collection) => sum + collection.ready, 0);
+  const readyChosen = new Set(practisable.filter((collection) => chosenIds.includes(collection.id)).flatMap((collection) => collection.readyQuestionIds ?? [])).size;
   const [wanted, setWanted] = useState(20);
   const selection = week ? practiceSelection(book, week, chosenIds, wanted) : undefined;
   const waiting = book.weeks.flatMap((entry) => entry.collections).filter((collection) => collection.questions === 0);

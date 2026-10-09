@@ -7,6 +7,7 @@
 // ===========================================================================
 import { useMemo, useState } from "react";
 import { Upload } from "lucide-react";
+import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "../../lib/localVault";
 import { useStore } from "../../lib/store";
 import { countActivity, type CourseActivity } from "../../lib/course-engine/activity";
 import {
@@ -33,7 +34,7 @@ interface ModulePreview {
 
 const EXAMPLE = "FTM 1 - Lectures + DLAs:\n\nFTM Lecture 01 Histology of the Cell [Lecture]\nDLA 01 Membrane Structure [DLA]";
 
-export function CourseTemplateLoader({ onClose }: { onClose: () => void }) {
+export function CourseTemplateLoader({ onClose, defaultTermId }: { onClose: () => void; defaultTermId?: string }) {
   const s = useStore();
   const [sections, setSections] = useState<CourseTemplateSection[]>([]);
   const [pasted, setPasted] = useState("");
@@ -72,7 +73,7 @@ export function CourseTemplateLoader({ onClose }: { onClose: () => void }) {
   /** The term a module's course already sits in, so the usual case needs no choice. */
   function knownTerm(module: string): string {
     const course = s.courses.find((item) => item.modules.some((entry) => moduleKey(entry.name) === moduleKey(module)));
-    return course?.termId ?? "";
+    return defaultTermId ?? course?.termId ?? "";
   }
 
   const previews = useMemo<ModulePreview[]>(() => {
@@ -88,7 +89,7 @@ export function CourseTemplateLoader({ onClose }: { onClose: () => void }) {
     });
     // knownTerm reads s.courses; listing it keeps the memo honest.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sections, setup, s.courses, s.terms, s.tracker]);
+  }, [sections, setup, s.courses, s.terms, s.tracker, defaultTermId]);
 
   const adding = previews.reduce((total, preview) => total + preview.changes.create.length, 0);
   const updating = previews.reduce((total, preview) => total + preview.changes.update.length, 0);
@@ -103,28 +104,36 @@ export function CourseTemplateLoader({ onClose }: { onClose: () => void }) {
     });
   }
 
-  function apply() {
-    const rows = previews.flatMap((preview) => preview.changes.create.map((item) => ({
-      path: item.path,
-      label: item.label,
-      kind: item.kind,
-      passes: 0,
-      ankiPasses: 0,
-      yield: "none" as const,
-      activity: item.activity,
-      templateKey: item.templateKey,
-      weekSource: item.weekSource,
-    })));
-    if (rows.length) s.bulkAddTrackerItems(rows);
-    for (const preview of previews) {
-      for (const change of preview.changes.update) s.updateTrackerItem(change.id, { path: change.path, label: change.label, weekSource: change.weekSource });
-    }
-    pushToast({
-      title: "Course template loaded",
-      body: `${rows.length} item${rows.length === 1 ? "" : "s"} added${updating ? `, ${updating} brought up to date` : ""}. Progress on existing items is unchanged.`,
-      tone: "success",
-    });
-    onClose();
+  async function apply() {
+    setBusy(true);
+    const checkpoint = getVaultWriteCheckpoint();
+    try {
+      const rows = previews.flatMap((preview) => preview.changes.create.map((item) => ({
+        path: item.path,
+        label: item.label,
+        kind: item.kind,
+        passes: 0,
+        ankiPasses: 0,
+        yield: "none" as const,
+        activity: item.activity,
+        templateKey: item.templateKey,
+        weekSource: item.weekSource,
+      })));
+      if (rows.length) s.bulkAddTrackerItems(rows);
+      for (const preview of previews) {
+        for (const change of preview.changes.update) s.updateTrackerItem(change.id, { path: change.path, label: change.label, weekSource: change.weekSource });
+      }
+      await flushLocalVaultWrites();
+      assertVaultWritesSince(checkpoint);
+      pushToast({
+        title: "Course template loaded",
+        body: `${rows.length} item${rows.length === 1 ? "" : "s"} added${updating ? `, ${updating} brought up to date` : ""}. Progress on existing items is unchanged.`,
+        tone: "success",
+      });
+      onClose();
+    } catch (error) {
+      pushToast({ title: "Template could not be saved", body: error instanceof Error ? error.message : "Keep AXOM open and try again.", tone: "warn" });
+    } finally { setBusy(false); }
   }
 
   return (
@@ -133,7 +142,7 @@ export function CourseTemplateLoader({ onClose }: { onClose: () => void }) {
       onClose={onClose}
       footer={<>
         <GButton onClick={onClose}>Cancel</GButton>
-        <GButton variant="primary" disabled={adding + updating === 0} onClick={apply}>
+        <GButton variant="primary" disabled={busy || adding + updating === 0} onClick={() => void apply()}>
           {adding + updating === 0 ? "Nothing to add" : `Add ${adding} item${adding === 1 ? "" : "s"}${updating ? ` and update ${updating}` : ""}`}
         </GButton>
       </>}

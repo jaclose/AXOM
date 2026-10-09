@@ -70,3 +70,12 @@
  .cb-set-row .gbtn span { display:none; }
 }
 @media (prefers-reduced-motion:reduce) { .cb-module svg { transition:none; } }
+
+.course-library-modal { width: min(1120px, 96vw); max-width: none; }
+.cb-view-switch { display: flex; gap: 20px; margin: 0 0 22px; border-bottom: 1px solid var(--hairline); }
+.cb-view-switch button { background: none; color: var(--text60); border: 0; border-bottom: 2px solid transparent; padding: 10px 0; cursor: pointer; }
+.cb-view-switch button[aria-pressed="true"] { border-color: var(--gold); color: var(--text); }
+@media (max-width: 600px) {
+  .qb-hero.qb-course-header .qb-hero-actions { display: flex; flex-direction: row; flex-wrap: wrap; }
+  .qb-hero.qb-course-header .qb-hero-actions > * { width: auto; flex: 1; }
+}

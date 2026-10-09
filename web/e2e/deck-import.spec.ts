@@ -95,6 +95,7 @@ test("a review deck comes in as one question per slide, with only the question s
   await page.getByLabel("Set title").fill("Deck with answer slides");
   await page.getByRole("button", { name: "Finalize import" }).click();
   await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
+  await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
 
   await reloadAfterSave(page);
   const saved = await page.evaluate(async () => {
@@ -123,6 +124,7 @@ test("a review deck comes in as one question per slide, with only the question s
 
   // Before answering, the learner sees the question's picture and nothing from the answer slide.
   await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
+  await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
   await page.getByRole("button", { name: "Practice Deck with answer slides", exact: true }).click();
   await page.getByRole("button", { name: "Start tutor block" }).click();
   await expect(page.locator(".question-exhibit img")).toHaveCount(1);
