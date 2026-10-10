@@ -301,7 +301,7 @@ describe("QuestionWorkspacePage returning state", () => {
     render(<QuestionWorkspacePage />);
 
     await user.click(screen.getByRole("button", { name: "Browse weeks" }));
-    await user.click(screen.getByRole("button", { name: snapshot.title, exact: true }));
+    await user.click(screen.getByRole("button", { name: snapshot.title }));
     const card = screen.getByRole("heading", { name: snapshot.title }).closest("article");
     expect(card).not.toBeNull();
     await user.click(within(card as HTMLElement).getByRole("button", { name: "Start" }));
