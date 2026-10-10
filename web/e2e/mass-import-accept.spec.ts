@@ -25,7 +25,7 @@ const FILES = [
 
 async function openQueue(page: Page) {
   await page.goto("/#questions");
-  await page.getByRole("tab", { name: "Import" }).click();
+  await page.getByRole("tablist", { name: "Question Bank sections" }).getByRole("tab", { name: "Import", exact: true }).click();
   await page.getByRole("button", { name: "Import several files" }).click();
 }
 
@@ -81,8 +81,8 @@ test("valid files are accepted together, and adding the same folder again adds n
   const saved = await library(page);
   expect(saved.questions).toBe(3);
   expect(saved.sets).toEqual([
-    { title: "FTM 1 Week 2 Quiz 1", scope: { module: "FTM 1", week: 2 }, size: 2 },
-    { title: "FTM 1 Week 3 Quiz 2", scope: { module: "FTM 1", week: 3 }, size: 1 },
+    { title: "FTM 1 Week 2 Quiz 1", scope: { courseId: expect.any(String), module: "FTM 1", week: 2 }, size: 2 },
+    { title: "FTM 1 Week 3 Quiz 2", scope: { courseId: expect.any(String), module: "FTM 1", week: 3 }, size: 1 },
   ]);
   expect(saved.documents).toEqual(["FTM 1 Week 2 Quiz 1.txt", "FTM 1 Week 3 Quiz 2.txt"]);
 
