@@ -130,7 +130,8 @@ describe("QuestionWorkspacePage first use", () => {
       correctAnswerText: "Beta",
       explanation: "Beta follows from the source.",
     });
-    expect(screen.getByRole("heading", { name: state.questionSets[0].title })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Browse weeks" }));
+    expect(screen.getByRole("button", { name: state.questionSets[0].title })).toBeTruthy();
   });
 
   it("opens a same-route, missing-target-safe Question Bank tour", async () => {
@@ -252,6 +253,7 @@ describe("QuestionWorkspacePage returning state", () => {
     seedReturningState();
     const user = userEvent.setup();
     const { container } = render(<QuestionWorkspacePage />);
+    await user.click(screen.getByRole("tab", { name: "Command Center" }));
 
     expect(screen.getByRole("button", { name: "Continue last session" })).toBeTruthy();
     expect(screen.getByText(/Starts a new tutor block with the same filters/)).toBeTruthy();
@@ -298,6 +300,8 @@ describe("QuestionWorkspacePage returning state", () => {
     const user = userEvent.setup();
     render(<QuestionWorkspacePage />);
 
+    await user.click(screen.getByRole("button", { name: "Browse weeks" }));
+    await user.click(screen.getByRole("button", { name: snapshot.title, exact: true }));
     const card = screen.getByRole("heading", { name: snapshot.title }).closest("article");
     expect(card).not.toBeNull();
     await user.click(within(card as HTMLElement).getByRole("button", { name: "Start" }));
@@ -305,9 +309,11 @@ describe("QuestionWorkspacePage returning state", () => {
     expect(screen.getByText("Stored order D")).toBeTruthy();
   });
 
-  it("removes the mapping alert after every issue is resolved", () => {
+  it("removes the mapping alert after every issue is resolved", async () => {
     seedReturningState();
+    const user = userEvent.setup();
     render(<QuestionWorkspacePage />);
+    await user.click(screen.getByRole("tab", { name: "Command Center" }));
     expect(screen.getByRole("region", { name: "2 questions need review" })).toBeTruthy();
 
     act(() => {
