@@ -5,102 +5,94 @@ authority: current-state
 ---
 # AXOM current AI state
 
-Snapshot: 2026-10-08. Rolling development line:
-`integration/axom-next-2026-10-07` (last merged here: `6f7e422e`). This feature checkout
-is `feat/course-qbank-intelligence-v2`, worktree `AXOM-course-qbank-intelligence-v2`.
-Bookshelf product integration was pushed at `31ef1b68`; PDF product integration follows.
-JD appointed Codex primary developer and authorized normal development-feature pushes
-and guarded local rolling integration. Production `main` and the frozen convergence
-line remain protected: no main merge/push/deploy, force push, history rewrite or deletion.
+Snapshot: 2026-10-10. Rolling development line `integration/axom-next-2026-10-07`
+in `/Users/jd/Developer/AXOM-next-integration`, product tip `f40a8ebc`.
+Source branch: `feat/course-qbank-intelligence-v2` in the matching course-qbank worktree.
+JD confirmed this Codex session owns integration; no competing integration owner.
+The current on-demand contract is `AXOM_QBank_First_Main_Execution_Brief_v2.md`
+in the source worktree. QBank/Decode/Tutor and private content delivery take priority.
 
-Current product evidence: actual QBank import -> structured preview -> verified questions
--> practice -> answers -> reload works at 390/1440px. Private GOER test: 32 ready questions
-in three sets; 15 uncertain keys excluded. Ordered content, role-safe images, portable
-restore, media retry and incremental review use canonical storage. No private sources
-were committed. Next slice: persistent course-template library, then Anki Lab.
+JD authorizes normal development pushes and validated local main convergence. Remote main
+requires inspecting actual production/publication triggers and approval if it deploys.
+Main is still `5fbe8a4f`; the frozen candidate remains `3d981f7c`. Neither was changed.
+No production deployment, private-content publication, destructive cleanup or force push.
 
-## Implemented boundaries
+## Working product slices
 
-React/TypeScript: `web/`; canonical native shell: root `src-tauri/`.
-Local Vault and JSON backup are primary, optional Supabase revisions are additive.
-Schema stays 34; preserve Noctyrium storage identifiers. Legacy Swift, `web/src-tauri/`
-and retired name/PIN account handlers are not current architecture.
+- PDF import, ordered text/tables/images, review gates, hierarchical banks, practice and
+  saved results are integrated. Prior private GOER evidence: 32 ready questions across
+  three sets; 15 uncertain keys excluded. This is not complete corpus delivery.
+- `16fd072f`: compact source-grounded Tutor feedback, optional deeper reasoning and source
+  trace; persisted block review with all/missed/flagged filters and explicit repeat practice.
+  Reviewing history neither adds attempts nor rescores the historical answer.
+- `f40a8ebc`: persistent course-template versions in the existing document vault. Browse,
+  choose weeks/activity types, preview additions/updates, load, reload and export/restore.
+  Same-content imports deduplicate. Term-prefixed headers keep their module; reconciliation
+  cannot move another term's activity/progress. Real browser acceptance loaded and reloaded
+  all 28 supplied TXT templates: 14 modules, 672 activities, no unreadable lines.
+  This was a test workspace, not delivery into the user's normal library.
+- The private inventory accounts for 13 source roots: 651 files, 628 unique, 23 exact
+  duplicates. Manifest remains ignored under `artifacts/source-inventory/`. Dependency and
+  build trees are excluded. Corpus readiness, accepted generation quotas and portable
+  private-bundle delivery are not complete. Updated FTM1-MSK PDFs still need reconciliation.
 
-This line contains the media foundation, context/graph infrastructure and Codex's
-maintenance checkpoint (merged at `8b3a4d2`), Ideas 6/doctrine, journal/study plans,
-Wave 2 home, AnkiConnect/push, [Course Engine and learning intelligence](features/course-engine.md),
-the shared exam engine with both exam interfaces and the AXOM player on it, and
-[Decode](features/decode.md).
+Durable behavior: [Course Engine](features/course-engine.md), [Decode](features/decode.md),
+[question content](features/question-content.md), [bookshelf](features/bookshelf.md).
+The one requirements/delivery ledger is external `AXOM-coordination/state/CONVERGENCE.md`.
 
-Added 2026-10-08 by fast-forward (stream 5 at `b5065ed`, stream 6 at `a14df11`), as
-foundations now wired into this feature checkout: [question content](features/question-content.md)
-(ordered blocks, a versioned import package, a `.docx` reader, an adapter from the PDF
-import, one rule for which image may be shown when; from stream 6 a reader for tagged PDFs
-that keeps tables, figures and answer slides, a readiness verdict for each question, and
-`extractPdfBank` with `saveBank`, which take a PDF through the reviewed import) and the
-[academic bookshelf](features/bookshelf.md) (course and question bank libraries). Wiring
-into Course Tracker, the QBank, tagged-PDF import and question players is implemented here; DOCX/batch screen wiring remains.
+## Contracts and protected work
 
-Each layer owns one thing. Course Engine owns term/module/week/question scope and attempt
-persistence. Decode owns what a source teaches about a question: analyses are an optional
-field on the question, and Decode has no scope and no store. Learning intelligence is
-derived from attempts; `reviewCandidates` hands a replaceable ranker `ReviewSignals`.
-Decode and learning intelligence do not import each other (`lib/decode/boundary.test.ts`).
+Canonical app: React/TypeScript `web/`, native shell root `src-tauri/`.
+Local Vault and portable backups are primary; optional Supabase revisions are additive.
+Schema stays 34. Preserve Noctyrium storage identifiers. Legacy Swift and `web/src-tauri/`
+are not the current shell. Models go through `AIProvider`; no additional AI endpoint.
 
-Reviewed question saves use `prepareReviewedImport` and `saveReviewedImport` in
-`lib/questionImportSave.ts`. Tutor answers save when checked; finished exam runs use
-`commitQuizRun`; leaving a block retains answered work. Blank answers count as wrong in
-exam simulation but stay unscored in the AXOM player. Resume storage shape is unchanged.
-Models are reached only through `AIProvider` (the signed-in `ai-proxy`, or a local model).
-Calendar files are read by `lib/icsCalendar.ts`. `npm run accounts:doctor` checks the live
-account stack read-only; account emails come from `lib/api/emailTemplates.ts`.
+Course Engine owns course scope and attempt persistence. Decode owns source teaching;
+analyses stay on canonical questions. Learning intelligence derives from attempts. Decode
+and learning intelligence do not import each other. Reviewed question saves use
+`prepareReviewedImport` / `saveReviewedImport`; checked Tutor answers save immediately,
+finished blocks use the shared commit path, and unfinished blocks resume.
 
-## Protected and deferred
+Read current ownership in `/Users/jd/Developer/AXOM-coordination/BOARD.md` before writing.
+Other dirty worktrees, recovery refs/stashes and the frozen integration line stay protected.
+The [recovery matrix](operations/branch-recovery-2026-10-07.md) and external ledger retain
+historical branch decisions; they are not proof of current ownership or completion.
+The [maintenance registry](operations/repository-audit.md#maintenance-registry) keeps affected
+areas ACTIVE: authorized feature work only, no incidental cleanup.
 
-[Recovery matrix](operations/branch-recovery-2026-10-07.md) records every meaningful
-branch group, dirty worktrees, recovery artifacts and next actions as of `ac67549`. The
-[maintenance registry](operations/repository-audit.md#maintenance-registry) owns cleanup
-conditions. External coordination remains `/Users/jd/Developer/AXOM-coordination/BOARD.md`
-and `state/CONVERGENCE.md` (ledger, Decode and Ideas 2 tables, retirement matrix); read
-only relevant current entries.
+## Remaining acceptance work
 
-- The old Decode code at `a33a01e` was ported by intent; the ledger accounts for every
-  module. Nothing more is to be taken from it.
-- Ideas 2 (`0478959`, plus 12 uncommitted files under a safety ref) is mined by capability,
-  never merged. The ledger says what is on this line and what waits for its owner.
-- Original checkout remains at mixed commit `93badf8`; do not revert there while
-  occupied. Its safe exam parent is integrated. Stash `ccaff8d` and safety refs remain
-  intact. The standalone OpenAI endpoint and dependency commit `8dd9391` stay out.
-- Context-protocol/question-first dirty drafts and the unfinished release-repair merge
-  remain preserved. Never reset, abort, clean or remove these as incidental maintenance.
-- Remote AI proxy tasks and the Guide need separate review: the first changes a deployed
-  function, the second adds an assistant to the top bar.
-
-## Open product work
-
-`reviewPriority` in `lib/learning-intelligence/review.ts` still has `TODO(human)`.
-The optional `content?` field on `QuestionRecord` is approved and not added: until it is,
-a block question is saved as its plain-text reading. The three Term 5 GOER Week 2 banks
-build locally from JD's PDFs and stay out of git: 47 questions, 32 ready, and the 15 of the
-pharmacology deck wait for a person's answer. No app screen imports them yet; only the
-development page `/harness/pdf-import.html` does.
-The AXOM player lacks I5-18's question navigator. Most source decks still need review:
-colour-coded answers are not read; unresolved slide cases are in the Course Engine contract.
-Decode's concept groups have no screen, and teaching is shown only in the tutor's feedback.
-An attempt cannot yet say unanswered, omitted or submitted apart from right or wrong.
-Skipped imports stay in device localStorage. Welcome-back restore has unit coverage only.
-Feature priority is routed through the [doctrine](product/AXOM-LEARNING-INTELLIGENCE-DOCTRINE.md),
-not preloaded.
+- Deliver every supplied source through resumable, duplicate-safe, image-aware imports and
+  account for ready/review/duplicate/reference/unsupported/missing/failed states. Inventory
+  alone is not ingestion. Structured PDF/DOCX batch wiring and durable queue resume remain.
+- Interactive Slide regions, shared visibility/attempt/annotation behavior, full exam-tool
+  fidelity, ten accepted generated questions per eligible document and the actual secure
+  Anki runtime remediation workflow still need acceptance. No generation batch ran here.
+- Keep school/generated evidence and assisted/repeated/variant attempts distinct in analysis.
+  `reviewPriority` still has the user's `TODO(human)`; do not silently replace its owner logic.
+- Templates still need updated schedule authority, title-edit conflicts and cohort contexts
+  within the same term. Selecting a version does not certify its academic currency.
+- Original source PDFs for drawn-page previews remain device-local and excluded from workspace
+  backups; imported question media has its separate portable attachment path.
+- Main convergence, native/package validation, hosting-trigger inspection and release candidate
+  assembly are pending. Do not claim the entire Ideas roadmap or corpus is complete.
 
 ## Validation and next action
 
-Each step on this line is gated on Node 22.23.1 (typecheck, lint, unit tests, build,
-repository tests, hygiene, the browser suite on its own port) and recorded with exact
-counts in the ledger. `npm run repo:check` prints current bootstrap size.
+Node 22.23.1, installed Chrome, reduced-motion desktop/mobile journeys. Saved-review slice:
+113 affected unit tests, 8 browser journeys plus 2 console-strict checks. Integrated baseline:
+2,843 unit tests passed, 5 skipped; typecheck/lint/build and update/offline checks passed.
+Full Chrome run: 59 passed, 2 skipped, 3 failed. Stale mass-import assertions were repaired
+in `df50465a`; that journey and both intermittent source-page attachment failures passed
+on the actual integrated recheck. Keep that initial failure evidence, not an all-green claim.
+Live-account and private-path suites are opt-in; mocks do not establish live integration.
 
-Gate at `a14df11`: 2,815 unit tests, the browser suite 54 passed and 1 skipped, build,
-update and offline verifiers, repository tests and hygiene.
+Templates: 42 affected unit tests, 4 Chrome journeys including all real TXT templates,
+typecheck/lint/build, 43 repository tests and hygiene passed on the feature tip. Existing
+large-chunk and ineffective dynamic-import build warnings remain. Exact logs and final
+integrated checks are recorded in the external ledger. No native or production validation.
 
-Next: persist compatible templates in the existing local document vault, browse them
-from the bookshelf, select weeks/activities, and verify a real course load. Continue this
-feature worktree; the preservation ref is a backup, never a replacement for newer work.
+Next: continue the smallest QBank-first private corpus workflow using the existing import
+and storage contracts. Reuse these completed slices; do not rebuild the importer or library.
+Complete release-critical acceptance before main/package promotion. Preserve all private
+sources and existing worktrees; no cleanup project.
