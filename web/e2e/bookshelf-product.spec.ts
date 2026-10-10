@@ -7,11 +7,12 @@ for (const width of [1440, 390]) test(`the product bookshelf loads activities an
   page.on("pageerror", (error) => errors.push(error.message));
   await seedOnboarded(page);
   await page.goto("/#tracker");
-  await page.getByRole("button", { name: "Load course template", exact: true }).click();
+  await page.getByRole("button", { name: "Course Library / Load Course", exact: true }).click();
+  await page.getByRole("region", { name: "Course library", exact: true }).getByLabel("Available content").uncheck();
   await page.getByRole("region", { name: "Course library", exact: true }).getByRole("button", { name: /^FTM 1,/ }).click();
   const book = page.getByRole("dialog", { name: /FTM 1/ });
   await expect(book.getByText("Weeks", { exact: true }).first()).toBeVisible();
-  await book.getByRole("button", { name: "Choose a template file" }).click();
+  await book.getByRole("button", { name: "Import custom material" }).click();
   const loader = page.getByRole("dialog", { name: "Load a course template" });
   const files = process.env.AXOM_TEMPLATE_FILES?.split("|") ?? [{ name: "FTM1.txt", mimeType: "text/plain",
     buffer: Buffer.from("FTM 1 - Activities:\nWeek 2:\nSample lecture [Lecture]\nSample small group [Small Group]\nSample IMCQ [IMCQ]\n") }];
@@ -24,7 +25,7 @@ for (const width of [1440, 390]) test(`the product bookshelf loads activities an
 
   // Use canonical import actions: no parallel bank or attempt store.
   await page.goto("/#questions");
-  await page.getByRole("tab", { name: "Import", exact: true }).click();
+  await page.getByRole("button", { name: "Add your own material", exact: true }).click();
   await page.getByLabel("Import source type", { exact: true }).getByRole("button", { name: "Paste text", exact: true }).click();
   await page.getByLabel("Structured question text").fill("Question 1: Which sample label is Beta?\nA. Alpha\nB. Beta\nC. Gamma\nAnswer: B\nExplanation: Beta is the requested label.");
   await page.getByRole("button", { name: "Parse and review", exact: true }).click();
@@ -46,7 +47,7 @@ for (const width of [1440, 390]) test(`the product bookshelf loads activities an
   await page.keyboard.press("Enter");
   const bank = page.getByRole("dialog", { name: /FTM 1/ });
   await expect(bank.getByRole("button", { name: "Week 2 · 1", exact: true })).toBeVisible();
-  await bank.getByRole("button", { name: "Start practice", exact: true }).click();
+  await bank.getByRole("button", { name: "Create Quiz", exact: true }).click();
   await page.getByRole("button", { name: "Start tutor block", exact: true }).click();
   await page.getByLabel("Question stem").focus();
   await page.keyboard.press("B");
@@ -59,9 +60,10 @@ for (const width of [1440, 390]) test(`the product bookshelf loads activities an
   await expect(bank.locator(".book-fact").filter({ hasText: "Answered" })).toContainText("1");
   await page.keyboard.press("Escape");
   await expect(shelf.getByRole("button", { name: /^FTM 1,/ })).toBeFocused();
+  await shelf.getByLabel("Available content").uncheck();
   await shelf.getByRole("button", { name: /^GOER,/ }).click();
   const pending = page.getByRole("dialog", { name: /GOER/ });
-  await expect(pending.getByRole("button", { name: "Start practice", exact: true })).toBeDisabled();
+  await expect(pending.getByRole("button", { name: "Create Quiz", exact: true })).toBeDisabled();
   await expect(pending.getByText("Source file missing", { exact: true })).toHaveCount(3);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect(errors).toEqual([]);

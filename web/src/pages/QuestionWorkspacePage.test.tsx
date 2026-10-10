@@ -83,16 +83,15 @@ describe("QuestionWorkspacePage first use", () => {
     const { container } = render(<QuestionWorkspacePage />);
 
     expect(screen.getByRole("heading", { level: 1, name: "Question Bank" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Import Questions" })).toBeTruthy();
-    expect(screen.getByText("PDF, DOCX, TXT, Markdown, CSV, JSON, or pasted text.")).toBeTruthy();
-    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+    expect(screen.getByRole("button", { name: "Create Quiz" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("region", { name: "Question bank library" })).toBeTruthy();
     expect(screen.queryByText("Current mastery")).toBeNull();
     expect(screen.queryByText("Attempt accuracy")).toBeNull();
     expect(screen.queryByRole("tab", { name: /Insights/ })).toBeNull();
-    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Overview", "Import"]);
+    expect(within(screen.getByRole("tablist", { name: "Question Bank sections" })).getAllByRole("tab").map(tab => tab.textContent)).toEqual(["Browse Courses / Question Sets", "Overview", "Import custom material"]);
     expect(container.querySelector('[data-tour="question-bank-entry"]')).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Import Questions" }));
+    await user.click(screen.getByRole("button", { name: "Add your own material" }));
     expect(screen.getByLabelText("Choose a question file to import")).toBeTruthy();
   });
 
@@ -100,7 +99,8 @@ describe("QuestionWorkspacePage first use", () => {
     const user = userEvent.setup();
     render(<QuestionWorkspacePage />);
 
-    await user.click(screen.getByRole("button", { name: "Paste text" }));
+    await user.click(screen.getByRole("button", { name: "Add your own material" }));
+    await user.click(within(screen.getByLabelText("Import source type")).getByRole("button", { name: "Paste text" }));
     expect(screen.getByRole("heading", { name: "Import questions" })).toBeTruthy();
     expect(screen.getByLabelText("Structured question text")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Parse and review" }) as HTMLButtonElement).disabled).toBe(true);
@@ -110,7 +110,8 @@ describe("QuestionWorkspacePage first use", () => {
     const user = userEvent.setup();
     render(<QuestionWorkspacePage />);
 
-    await user.click(screen.getByRole("button", { name: "Paste text" }));
+    await user.click(screen.getByRole("button", { name: "Add your own material" }));
+    await user.click(within(screen.getByLabelText("Import source type")).getByRole("button", { name: "Paste text" }));
     await user.type(screen.getByLabelText("Structured question text"), [
       "1. Which option is correct?",
       "A. Alpha",
@@ -150,37 +151,26 @@ describe("QuestionWorkspacePage first use", () => {
   it("uses a labelled roving tab pattern with arrow-key navigation", async () => {
     const user = userEvent.setup();
     render(<QuestionWorkspacePage />);
-    const overview = screen.getByRole("tab", { name: "Overview" });
-    const importTab = screen.getByRole("tab", { name: "Import" });
+    const tabs = within(screen.getByRole("tablist", { name: "Question Bank sections" }));
+    const browse = tabs.getByRole("tab", { name: "Browse Courses / Question Sets" });
+    const overview = tabs.getByRole("tab", { name: "Overview" });
+    const importTab = tabs.getByRole("tab", { name: "Import custom material" });
+    expect(browse.getAttribute("aria-selected")).toBe("true");
+    expect(browse.getAttribute("tabindex")).toBe("0");
+    expect(overview.getAttribute("tabindex")).toBe("-1");
+    browse.focus();
+    for (const [key, target, id] of [
+      ["{ArrowRight}", overview, "overview"], ["{ArrowRight}", importTab, "import"],
+      ["{Home}", browse, "sets"], ["{End}", importTab, "import"],
+    ] as const) {
+      await user.keyboard(key);
+      expect(document.activeElement).toBe(target);
+      expect(target.getAttribute("aria-selected")).toBe("true");
+      expect(target.getAttribute("aria-controls")).toBe(`question-bank-panel-${id}`);
+      expect(document.getElementById(`question-bank-panel-${id}`)?.getAttribute("aria-labelledby")).toBe(target.id);
+      expectRenderedTabControlsToResolve();
+    }
 
-    expect(overview.getAttribute("aria-controls")).toBe("question-bank-panel-overview");
-    expect(document.getElementById(overview.getAttribute("aria-controls")!)).toBe(screen.getByRole("tabpanel"));
-    expect(overview.getAttribute("tabindex")).toBe("0");
-    expect(importTab.hasAttribute("aria-controls")).toBe(false);
-    expect(importTab.getAttribute("tabindex")).toBe("-1");
-    expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe("question-bank-tab-overview");
-    expectRenderedTabControlsToResolve();
-
-    overview.focus();
-    await user.keyboard("{ArrowRight}");
-    expect(document.activeElement).toBe(importTab);
-    expect(importTab.getAttribute("aria-selected")).toBe("true");
-    expect(importTab.getAttribute("aria-controls")).toBe("question-bank-panel-import");
-    expect(document.getElementById("question-bank-panel-import")).toBe(screen.getByRole("tabpanel"));
-    expect(overview.hasAttribute("aria-controls")).toBe(false);
-    expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe("question-bank-tab-import");
-    expectRenderedTabControlsToResolve();
-
-    await user.keyboard("{Home}");
-    expect(document.activeElement).toBe(overview);
-    expect(overview.getAttribute("aria-controls")).toBe("question-bank-panel-overview");
-    expect(importTab.hasAttribute("aria-controls")).toBe(false);
-
-    await user.keyboard("{End}");
-    expect(document.activeElement).toBe(importTab);
-    expect(importTab.getAttribute("aria-controls")).toBe("question-bank-panel-import");
-    expect(overview.hasAttribute("aria-controls")).toBe(false);
-    expectRenderedTabControlsToResolve();
   });
 
   it("keeps a saved Source Library reachable in the reduced first-use tab list", async () => {
@@ -202,7 +192,7 @@ describe("QuestionWorkspacePage first use", () => {
     render(<QuestionWorkspacePage />);
 
     const sourceTab = screen.getByRole("tab", { name: "Source Library (1)" });
-    expect(screen.getAllByRole("tab").map((item) => item.textContent)).toEqual(["Overview", "Import", "Source Library (1)"]);
+    expect(within(screen.getByRole("tablist", { name: "Question Bank sections" })).getAllByRole("tab").map(item => item.textContent)).toEqual(["Browse Courses / Question Sets", "Overview", "Import custom material", "Source Library (1)"]);
     expect(sourceTab.hasAttribute("aria-controls")).toBe(false);
     await user.click(sourceTab);
     expect(sourceTab.getAttribute("aria-controls")).toBe("question-bank-panel-library");
@@ -249,14 +239,14 @@ describe("QuestionWorkspacePage returning state", () => {
     });
   }
 
-  it("prioritizes continuation, recent sets, mapping review, and explicit metrics", async () => {
+  it("offers a new quiz for a finished session, recent sets, mapping review, and explicit metrics", async () => {
     seedReturningState();
     const user = userEvent.setup();
     const { container } = render(<QuestionWorkspacePage />);
     await user.click(screen.getByRole("tab", { name: "Command Center" }));
 
-    expect(screen.getByRole("button", { name: "Continue last session" })).toBeTruthy();
-    expect(screen.getByText(/Starts a new tutor block with the same filters/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Create Quiz" })).toHaveProperty("disabled", false);
+    expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
     const titles = [...container.querySelectorAll(".qset-grid.compact .qset-title-wrap h3")].map((node) => node.textContent);
     expect(screen.getByRole("heading", { name: "Recent sets" })).toBeTruthy();
     expect(titles).toEqual(["Newest set", "Older set", "Stable fallback set"]);
@@ -343,12 +333,13 @@ describe("QuestionWorkspacePage returning state", () => {
     });
     render(<QuestionWorkspacePage />);
 
+    await user.click(screen.getByRole("tab", { name: "Command Center" }));
     expect(screen.getByRole("heading", { name: "Import another clean set" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: /Review .* due questions/ })).toBeNull();
     expect(screen.queryByRole("heading", { name: /Retry .* misses/ })).toBeNull();
     expect(screen.getByRole("button", { name: /Review due/ })).toHaveProperty("disabled", true);
     expect(screen.getByRole("button", { name: /Retry incorrects/ })).toHaveProperty("disabled", true);
-    expect(screen.getByRole("button", { name: "Import questions" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Import questions/ })).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: /Begin/ }));
     expect(screen.getByRole("heading", { name: "Import questions" })).toBeTruthy();

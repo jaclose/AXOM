@@ -11,9 +11,11 @@ import { Field, SelectField } from "../ui/Modal";
 import { GButton, GhostButton } from "../ui/primitives";
 import { QuestionBlocks } from "./QuestionContent";
 import type { ImportFinalizationResult } from "./ImportPanel";
+import type { ImportPackage } from "../../lib/question-content/package";
 
 export type TaggedBank = Extract<PdfBankExtraction, { tagged: true }>;
-export function BankImportReview({ bank, onBack, onSaved }: { bank: TaggedBank; onBack: () => void; onSaved?: (result: ImportFinalizationResult) => void }) {
+type ReviewBank = Pick<TaggedBank, "pkg" | "conversionIssues" | "files" | "sourceText" | "sourceBytes" | "notes" | "warnings" | "unplaced">;
+export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: ReviewBank; onBack: () => void; onSaved?: (result: ImportFinalizationResult) => void; onReviewed?: (pkg: ImportPackage, result: BankSave) => Promise<void> }) {
   const [pkg, setPackage] = useState(bank.pkg);
   const [index, setIndex] = useState(0);
   const [mode, setMode] = useState<ContentViewMode>("question");
@@ -40,6 +42,7 @@ export function BankImportReview({ bank, onBack, onSaved }: { bank: TaggedBank; 
       }, { sourceText: bank.sourceText, sourceBytes: bank.sourceBytes, notes: bank.notes,
         courseId: courseForScope({ module: pkg.manifest.course.name }, useStore.getState().courses)?.id });
       setResult(saved);
+      if (saved.status !== "failed") await onReviewed?.(pkg, saved);
     } catch (failure) { setError(failure instanceof Error ? failure.message : "The import could not be saved. Keep this source file and try again."); }
     finally { setBusy(false); }
   }

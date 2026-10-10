@@ -5,94 +5,100 @@ authority: current-state
 ---
 # AXOM current AI state
 
-Snapshot: 2026-10-10. Rolling development line `integration/axom-next-2026-10-07`
-in `/Users/jd/Developer/AXOM-next-integration`, product tip `f40a8ebc`.
-Source branch: `feat/course-qbank-intelligence-v2` in the matching course-qbank worktree.
-JD confirmed this Codex session owns integration; no competing integration owner.
-The current on-demand contract is `AXOM_QBank_First_Main_Execution_Brief_v2.md`
-in the source worktree. QBank/Decode/Tutor and private content delivery take priority.
+Snapshot: 2026-10-10. Source checkout `feat/course-qbank-intelligence-v2`, based on
+`c46ae207`; this checkpoint contains the validated private-library delivery correction.
+Rolling line `/Users/jd/Developer/AXOM-next-integration` is clean at `c46ae207`.
+JD authorizes this session to own integration, normal development pushes and validated
+local main convergence. Main is `5fbe8a4f`; frozen convergence stays `3d981f7c`.
+The current on-demand contract is `AXOM_QBank_First_Main_Execution_Brief_v2.md`.
+Immediate priority: JD's supplied private library in the app they actually use.
 
-JD authorizes normal development pushes and validated local main convergence. Remote main
-requires inspecting actual production/publication triggers and approval if it deploys.
-Main is still `5fbe8a4f`; the frozen candidate remains `3d981f7c`. Neither was changed.
-No production deployment, private-content publication, destructive cleanup or force push.
+## Actual delivery target
 
-## Working product slices
+JD explicitly selected the regular Chrome `https://axom.info` workspace. Its supported
+Settings export is preserved in Downloads (2026-10-10): 1,088 questions, 67 sets and
+618 attempts. Two pre-existing image blobs were missing. One exact filename/size match
+was recovered into a separate private backup copy; neither copy has been merged into
+the live workspace. No reset or content installation occurred. Local validation is `127.0.0.1:5188`.
+Authenticated Vercel inspection found axom.info serving promoted feature commit
+`c25718d93123ad26e31a72f528710b5c814e002e`, not the integrated product tip.
+Project axom uses GitHub `jaclose/AXOM`, production branch main, with automatic domain
+assignment. Remote main therefore crosses the production-deployment boundary: prepare
+and validate the exact commit/RC, then request one specific deployment approval.
+No production deployment or private-content publication is authorized implicitly.
 
-- PDF import, ordered text/tables/images, review gates, hierarchical banks, practice and
-  saved results are integrated. Prior private GOER evidence: 32 ready questions across
-  three sets; 15 uncertain keys excluded. This is not complete corpus delivery.
-- `16fd072f`: compact source-grounded Tutor feedback, optional deeper reasoning and source
-  trace; persisted block review with all/missed/flagged filters and explicit repeat practice.
-  Reviewing history neither adds attempts nor rescores the historical answer.
-- `f40a8ebc`: persistent course-template versions in the existing document vault. Browse,
-  choose weeks/activity types, preview additions/updates, load, reload and export/restore.
-  Same-content imports deduplicate. Term-prefixed headers keep their module; reconciliation
-  cannot move another term's activity/progress. Real browser acceptance loaded and reloaded
-  all 28 supplied TXT templates: 14 modules, 672 activities, no unreadable lines.
-  This was a test workspace, not delivery into the user's normal library.
-- The private inventory accounts for 13 source roots: 651 files, 628 unique, 23 exact
-  duplicates. Manifest remains ignored under `artifacts/source-inventory/`. Dependency and
-  build trees are excluded. Corpus readiness, accepted generation quotas and portable
-  private-bundle delivery are not complete. Updated FTM1-MSK PDFs still need reconciliation.
+## Working local delivery slice
 
-Durable behavior: [Course Engine](features/course-engine.md), [Decode](features/decode.md),
-[question content](features/question-content.md), [bookshelf](features/bookshelf.md).
-The one requirements/delivery ledger is external `AXOM-coordination/state/CONVERGENCE.md`.
+- One responsive academic collection, module search and term filter, readable covers,
+  visible Load Course and Create Quiz actions. Prepared courses remain discoverable
+  without enrolling every activity. Loading and updates preserve existing progress.
+- Resumable private folder/ZIP installation uses existing template, question, media and
+  original-source stores. Canonical source identity prevents repeat imports from cloning
+  questions after learner tag/title/wording edits. Uncertain keys/images stay review-gated.
+- Clean Chrome first run through setup and the actual folder chooser passed: 28 templates,
+  362 ready questions, 43 sets, 36 questions with images; FTM 1 loaded 55 activities.
+  Single/mixed quizzes saved 14 attempts. Reload and repeat installation preserved counts.
+  No injected database records. Existing-workspace replay also passed.
+- JD's actual exported workspace was restored through Settings in an isolated profile.
+  Installation preserved all 1,088 questions, notes, 183 tracker activities and 618 attempts.
+  Combined library: 1,450 questions / 110 sets. Single/mixed practice, images, reload and
+  repeated installation passed; 633 attempts include test-only answers in that copy.
+- Workspace backup exported 3,071 images in a 708,843,876-byte ZIP. Archive integrity and
+  actual Settings merge/reload passed: 362 questions, 43 sets, 14 attempts, 28 templates;
+  no browser errors. Large media uses binary ZIP; existing JSON backups remain supported.
+  Original document bytes travel in the separate private collection, not workspace backups.
+- Prior integrated slices remain: PDF text/tables/images, compact source-grounded Tutor,
+  saved-block Decode/review, persistent template versions and selective course loading.
+
+Private collection is outside Git under the user's Application Support/AXOM/private-library.
+Content version `c4ac1a69d35fc597`, preparer v3. Existing 13-root inventory: 651 entries,
+628 unique files, 23 exact duplicates. Prepared catalog: 40 prepared, 472 review-required,
+90 reference/template-only, 20 unsupported, 23 duplicate-linked, six missing LFS originals,
+zero failed. 11,599 held extraction candidates are NOT verified scored question counts.
+All 28 current TXT files parse: 14 module labels, 672 activities, zero unreadable lines.
+Latest FTM1–MSK PDF authority and same-term cohort reconciliation remain unfinished.
+Accepted supplementary generation: zero; ten-per-eligible-document quota remains open.
+
+Durable behavior: [question content](features/question-content.md),
+[bookshelf](features/bookshelf.md), [Course Engine](features/course-engine.md),
+[Decode](features/decode.md). One coverage ledger: external
+`AXOM-coordination/state/CONVERGENCE.md`. Do not create a second roadmap.
 
 ## Contracts and protected work
 
-Canonical app: React/TypeScript `web/`, native shell root `src-tauri/`.
-Local Vault and portable backups are primary; optional Supabase revisions are additive.
-Schema stays 34. Preserve Noctyrium storage identifiers. Legacy Swift and `web/src-tauri/`
-are not the current shell. Models go through `AIProvider`; no additional AI endpoint.
+React/TypeScript web, root src-tauri native shell, schema 34. Preserve Noctyrium storage
+identifiers and learner data. Reviewed imports use prepareReviewedImport/saveReviewedImport;
+question attempts, assets, annotations, results and course logging remain canonical.
+No added question engine, provider endpoint or scheduler. Optional account sync is additive.
 
-Course Engine owns course scope and attempt persistence. Decode owns source teaching;
-analyses stay on canonical questions. Learning intelligence derives from attempts. Decode
-and learning intelligence do not import each other. Reviewed question saves use
-`prepareReviewedImport` / `saveReviewedImport`; checked Tutor answers save immediately,
-finished blocks use the shared commit path, and unfinished blocks resume.
+Read current BOARD ownership before writes. Communications/Pulse has a separate active
+worktree and owns new communication features plus its App/Settings entries; preserve it.
+This slice owns Settings backup/media changes. Other worktrees, drafts, recovery refs,
+stashes and frozen convergence remain protected. A clean worktree does not imply ownership.
+The maintenance registry keeps product areas ACTIVE; no opportunistic cleanup.
 
-Read current ownership in `/Users/jd/Developer/AXOM-coordination/BOARD.md` before writing.
-Other dirty worktrees, recovery refs/stashes and the frozen integration line stay protected.
-The [recovery matrix](operations/branch-recovery-2026-10-07.md) and external ledger retain
-historical branch decisions; they are not proof of current ownership or completion.
-The [maintenance registry](operations/repository-audit.md#maintenance-registry) keeps affected
-areas ACTIVE: authorized feature work only, no incidental cleanup.
+## Remaining gates and limitations
 
-## Remaining acceptance work
+Web gate components pass: typecheck, lint, 2,858 unit tests (five skips), build, update
+consent/persistence verification, offline games, and all 65 enabled browser journeys.
+The initial browser run found stale navigation assertions; all 22 affected journeys passed
+after correction. Four opt-in journeys were skipped there; full private-content acceptance
+ran separately against clean and real-workspace copies. Source preparation now retries
+restored missing files; a missing -> restored template CLI check passed. Repository tests:
+43 pass; hygiene and guard pass. Existing build chunk notices remain.
+Desktop/phone screenshots and real interaction evidence are in /tmp/axom-private-*.
+Synthetic acceptance profiles were removed after validation to regain disk headroom;
+originals, private prepared package and JD's actual browser profile were preserved.
 
-- Deliver every supplied source through resumable, duplicate-safe, image-aware imports and
-  account for ready/review/duplicate/reference/unsupported/missing/failed states. Inventory
-  alone is not ingestion. Structured PDF/DOCX batch wiring and durable queue resume remain.
-- Interactive Slide regions, shared visibility/attempt/annotation behavior, full exam-tool
-  fidelity, ten accepted generated questions per eligible document and the actual secure
-  Anki runtime remediation workflow still need acceptance. No generation batch ran here.
-- Keep school/generated evidence and assisted/repeated/variant attempts distinct in analysis.
-  `reviewPriority` still has the user's `TODO(human)`; do not silently replace its owner logic.
-- Templates still need updated schedule authority, title-edit conflicts and cohort contexts
-  within the same term. Selecting a version does not certify its academic currency.
-- Original source PDFs for drawn-page previews remain device-local and excluded from workspace
-  backups; imported question media has its separate portable attachment path.
-- Main convergence, native/package validation, hosting-trigger inspection and release candidate
-  assembly are pending. Do not claim the entire Ideas roadmap or corpus is complete.
+Full private collection exceeds the existing 14 MB account snapshot limit. The library
+shows that limit explicitly. Local persistence and portable ZIP backup are verified;
+full-corpus cloud sync is NOT supported/verified.
+Do not silently omit private documents or raise server limits as a shortcut.
+Slide mode, full exam-tool fidelity, Anki remediation, generated content and school-pattern
+analysis still need acceptance. Existing reviewPriority TODO(human) remains owner-controlled.
 
-## Validation and next action
-
-Node 22.23.1, installed Chrome, reduced-motion desktop/mobile journeys. Saved-review slice:
-113 affected unit tests, 8 browser journeys plus 2 console-strict checks. Integrated baseline:
-2,843 unit tests passed, 5 skipped; typecheck/lint/build and update/offline checks passed.
-Full Chrome run: 59 passed, 2 skipped, 3 failed. Stale mass-import assertions were repaired
-in `df50465a`; that journey and both intermittent source-page attachment failures passed
-on the actual integrated recheck. Keep that initial failure evidence, not an all-green claim.
-Live-account and private-path suites are opt-in; mocks do not establish live integration.
-
-Templates: 42 affected unit tests, 4 Chrome journeys including all real TXT templates,
-typecheck/lint/build, 43 repository tests and hygiene passed on the feature tip. Existing
-large-chunk and ineffective dynamic-import build warnings remain. Exact logs and final
-integrated checks are recorded in the external ledger. No native or production validation.
-
-Next: continue the smallest QBank-first private corpus workflow using the existing import
-and storage contracts. Reuse these completed slices; do not rebuild the importer or library.
-Complete release-critical acceptance before main/package promotion. Preserve all private
-sources and existing worktrees; no cleanup project.
+Next: commit/push the reviewed development slice,
+fast-forward the verified rolling/local main line under ownership, package/smoke-test the web
+RC. Then obtain deployment approval, retain JD's exported workspace safety copy, install
+the private prepared folder through the supported one-time transfer, and verify that exact
+origin. Until then, this is locally validated, NOT delivered to JD's production workspace.

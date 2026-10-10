@@ -48,10 +48,11 @@ export function AcademicLibrary({ title, subtitle, browse, recover, onChooseFile
             {offered.map(({ id: entry, label, icon: Icon }) => (
               <button
                 key={entry} type="button" role="tab" id={`${id}-${entry}-tab`} className="academic-library-tab"
-                aria-selected={mode === entry} aria-controls={`${id}-${entry}`} tabIndex={mode === entry ? 0 : -1}
+                aria-selected={mode === entry} aria-controls={mode === entry ? `${id}-${entry}` : undefined} tabIndex={mode === entry ? 0 : -1}
                 onClick={() => setMode(entry)}
                 onKeyDown={(event) => {
                   if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+                  event.preventDefault();
                   const at = offered.findIndex((item) => item.id === mode);
                   const next = offered[(at + (event.key === "ArrowRight" ? 1 : offered.length - 1)) % offered.length];
                   setMode(next.id);

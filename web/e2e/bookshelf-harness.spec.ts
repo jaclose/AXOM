@@ -10,6 +10,7 @@ const shots = process.env.AXOM_BOOKSHELF_SHOTS;
 async function openHarness(page: Page) {
   await page.goto(HARNESS);
   await expect(page.getByRole("region", { name: "Course library" })).toBeVisible();
+  await page.getByLabel("Available content").uncheck();
 }
 
 // AXOM is dark first. One test below looks at the light theme.
@@ -25,7 +26,7 @@ const spine = (page: Page, name: RegExp) => page.getByRole("button", { name });
 const width = async (page: Page, name: RegExp) => (await spine(page, name).boundingBox())!.width;
 
 test.describe("academic bookshelf", () => {
-  test("shows a real book for each module, thicker where there is more in it", async ({ page }) => {
+  test("shows readable, consistently sized books with actual activity counts", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await openHarness(page);
     // ER, DM and GOER are modules in the course map the app carries. Nothing is invented for the shelf.
@@ -39,12 +40,11 @@ test.describe("academic bookshelf", () => {
     await expect(spine(page, /^ER, BPM 501, Term 2\. 72 activities\./)).toBeVisible();
     await expect(spine(page, /^DM, BPM 501, Term 2\. 17 activities\./)).toBeVisible();
     const [er, dm, nb1, nb2] = [await width(page, /^ER, BPM 501/), await width(page, /^DM, BPM 501/), await width(page, /^NB1, BPM 501/), await width(page, /^NB2, BPM 501/)];
-    expect(er).toBeGreaterThan(dm);
-    expect(dm).toBeGreaterThan(nb1);
-    expect(nb1).toBeGreaterThan(nb2);
+    expect(er).toBeCloseTo(dm, 0);
+    expect(dm).toBeCloseTo(nb1, 0);
+    expect(nb1).toBeCloseTo(nb2, 0);
     expect(nb2).toBe(empty);
-    // Seventy-two activities is not thirty-six times a two-activity book: the scale is logarithmic.
-    expect(er).toBeLessThan(nb1 * 3);
+    expect(er).toBeGreaterThanOrEqual(140);
     if (shots) await page.screenshot({ path: `${shots}/shelf-1440.png` });
   });
 
@@ -69,7 +69,7 @@ test.describe("academic bookshelf", () => {
     await expect(dialog).toHaveCount(0);
     await expect(page.locator(".shelf-book:focus")).toHaveAttribute("aria-label", label!);
     await page.keyboard.press("ArrowDown");
-    await expect(page.locator(".shelf-book:focus")).toHaveAttribute("aria-label", /Term 2\./);
+    await expect(page.locator(".shelf-book:focus")).not.toHaveAttribute("aria-label", label!);
   });
 
   test("loads a course into Course Tracker and still has it after a reload", async ({ page }) => {
@@ -84,6 +84,7 @@ test.describe("academic bookshelf", () => {
     await expect(spine(page, /^GOER, PPM 501, Term 5\. 0 activities\. In your Course Tracker, with no activities yet\./)).toBeVisible();
 
     await page.reload();
+    await page.getByLabel("Available content").uncheck();
     await expect(spine(page, /^GOER, PPM 501, Term 5\. 0 activities\. In your Course Tracker, with no activities yet\./)).toBeVisible();
     // Loading again adds nothing: the book says so and offers no second load.
     await spine(page, /^GOER, PPM 501, Term 5\./).click();
@@ -101,9 +102,10 @@ test.describe("academic bookshelf", () => {
     await page.getByTestId("add-sample").click();
     await expect(page.getByTestId("harness-log")).toContainText("saved on this device");
     await page.getByRole("button", { name: "Question banks", exact: true }).click();
+    await page.getByLabel("Available content").uncheck();
     await expect(spine(page, /^ER, BPM 501, Term 2\. 185 questions\./)).toBeVisible();
     await expect(spine(page, /^DM, BPM 501, Term 2\. 12 questions\./)).toBeVisible();
-    expect(await width(page, /^ER, BPM 501/)).toBeGreaterThan(await width(page, /^DM, BPM 501/));
+    expect(await width(page, /^ER, BPM 501/)).toBeCloseTo(await width(page, /^DM, BPM 501/), 0);
 
     // GOER has three known banks and no question on this device: an honest, empty book.
     await spine(page, /^GOER, PPM 501, Term 5\. 0 questions\. 3 banks known, none on this device yet\./).click();
@@ -145,6 +147,24 @@ test.describe("academic bookshelf", () => {
     await expect(dialog.getByText("Week 6", { exact: true })).toBeVisible();
     if (shots) await page.screenshot({ path: `${shots}/open-course-390.png` });
     expect(await page.evaluate(() => document.scrollingElement!.scrollWidth <= window.innerWidth)).toBe(true);
+  });
+
+  test("keeps actions reachable in a short window and a 200 percent effective viewport", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 500 });
+    await openHarness(page);
+    await spine(page, /^GOER, PPM 501, Term 5\./).click();
+    const dialog = page.getByRole("dialog", { name: "GOER" });
+    await dialog.getByTestId("load-course").scrollIntoViewIfNeeded();
+    await expect(dialog.getByTestId("load-course")).toBeInViewport();
+    await page.keyboard.press("Escape");
+    // Browser zoom halves the CSS viewport; CSS zoom on the root does not.
+    await page.setViewportSize({ width: 720, height: 250 });
+    await spine(page, /^GOER, PPM 501, Term 5\./).click();
+    await dialog.getByTestId("load-course").scrollIntoViewIfNeeded();
+    await expect(dialog.getByTestId("load-course")).toBeInViewport();
+    expect(await page.evaluate(() => document.scrollingElement!.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(spine(page, /^GOER, PPM 501, Term 5\./)).toBeFocused();
   });
 });
 

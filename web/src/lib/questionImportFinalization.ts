@@ -2,6 +2,7 @@ import { readWorkspaceContent } from "./question-content/workspaceContent";
 import type { QuestionSet, SourceDocument } from "./library";
 import { assertVaultWritesSince, getVaultWriteCheckpoint } from "./localVault";
 import type { QuestionRecord } from "./questions";
+import { normalizeTagList } from "./questionTags";
 
 type Awaitable<T> = T | Promise<T>;
 
@@ -202,7 +203,7 @@ const comparableQuestion = (question: ReviewedQuestionInput | QuestionRecord) =>
   examType: question.examType,
   difficulty: question.difficulty,
   citation: question.citation?.trim() || undefined,
-  tags: [...(question.tags ?? [])],
+  tags: normalizeTagList(question.tags),
 });
 
 const inFlightReviewedImports = new Map<string, Promise<ReviewedImportPersistenceResult>>();

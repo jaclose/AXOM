@@ -81,6 +81,7 @@ import {
 import type { QuestionOrdering } from "./questionOrdering";
 import { reconcileQuestionAnnotationSources } from "./questionAnnotations";
 import { deleteQuestionAttachmentBlobs, listQuestionAttachmentBlobKeys, runQuestionAttachmentMaintenance } from "./questionAttachments";
+import { privateReviewMedia } from "./privateLibrary/media";
 import type { QuizBlock, QuizSession } from "./quiz";
 import { buildQuestionSetFromFilter, type QuestionSet, type SourceDocument } from "./library";
 import { repairOrphans } from "./orphanRepair";
@@ -1660,7 +1661,7 @@ export const useStore = create<Store>()(
           storeHydration.finish(error);
           // Only sweep after rehydration, when questions are authoritative.
           if (state && Array.isArray(state.questions)) {
-            void runQuestionAttachmentMaintenance(state.questions).catch(() => {});
+            void runQuestionAttachmentMaintenance([...state.questions, ...privateReviewMedia(state.documents)]).catch(() => {});
           }
         };
       },

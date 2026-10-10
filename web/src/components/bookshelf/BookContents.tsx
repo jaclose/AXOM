@@ -37,6 +37,7 @@ const SAVE_TEXT: Record<SaveOutcome["status"], string> = {
 
 export interface CourseBookContentProps {
   book: CourseBook;
+  questionBank?: QuestionBankBook;
   /** The workspace as it is now, to say exactly what loading would add. */
   workspace: { terms: readonly Term[]; courses: readonly Course[] };
   /** Writes the book's module into Course Tracker. Resolves once it is on the device, or says why not. */
@@ -47,7 +48,7 @@ export interface CourseBookContentProps {
   onChooseTemplate?: (book: CourseBook) => void;
 }
 
-export function CourseBookContent({ book, workspace, onLoad, onOpen, onChooseTemplate }: CourseBookContentProps) {
+export function CourseBookContent({ book, questionBank, workspace, onLoad, onOpen, onChooseTemplate }: CourseBookContentProps) {
   const plan = useMemo(() => planCourseLoad(workspace, book), [workspace, book]);
   const [outcome, setOutcome] = useState<SaveOutcome | undefined>(undefined);
   const [saving, setSaving] = useState(false);
@@ -67,22 +68,28 @@ export function CourseBookContent({ book, workspace, onLoad, onOpen, onChooseTem
             <Fact label="Term" value={book.term} />
             <Fact label="Weeks" value={book.weeks.length} />
             <Fact label="Activities" value={total} />
+            {questionBank && <Fact label="Ready questions" value={questionBank.ready} />}
+            {book.templateVersion && <Fact label="Template version" value={<code className="book-version">{book.templateVersion}</code>} />}
+            {book.loadedActivities !== undefined && <Fact label="Already loaded" value={`${book.loadedActivities} of ${total} activities`} />}
           </dl>
           {book.courseCode && <p>{book.courseCode}{book.courseName ? `: ${book.courseName}` : ""}</p>}
           {total > 0
             ? <p>{book.done} of {total} done so far. Opening this book changes nothing.</p>
             : <p className="book-note" data-tone="plain">{book.origin === "curriculum" ? "This module is in the school's course map. Nothing is loaded for it yet, so the book is empty." : "This module is in your Course Tracker with no activities yet."}</p>}
-          <p className="book-note" data-tone={plan.alreadyPresent ? "plain" : undefined}>{plan.summary}</p>
+          <p className="book-note" data-tone={plan.alreadyPresent ? "plain" : undefined}>{book.templateIds?.length
+            ? book.term === "Term unconfirmed" ? "This template needs a confirmed term. Choose Customize Weeks & Activities before loading."
+              : `Loads ${Math.max(0, total - (book.loadedActivities ?? 0))} new activities. Your progress, notes and personal edits are preserved.`
+            : plan.summary}</p>
           <div className="book-actions">
-            {!plan.alreadyPresent && (
-              <GButton variant="primary" onClick={load} disabled={saving} data-testid="load-course">
+            {(!plan.alreadyPresent || book.templateIds?.length) && (
+              <GButton variant="primary" onClick={load} disabled={saving || book.term === "Term unconfirmed"} data-testid="load-course">
                 <FolderInput size={ICON_SIZE.emphasis} aria-hidden="true" /> {saving ? "Saving" : "Load course"}
               </GButton>
             )}
             {plan.alreadyPresent && onOpen && (
-              <GButton variant="primary" onClick={() => onOpen(book)}><BookOpen size={ICON_SIZE.emphasis} aria-hidden="true" /> Open in Course Tracker</GButton>
+              <GButton onClick={() => onOpen(book)}><BookOpen size={ICON_SIZE.emphasis} aria-hidden="true" /> Open in Course Tracker</GButton>
             )}
-            {onChooseTemplate && <GButton onClick={() => onChooseTemplate(book)}>Choose a template file</GButton>}
+            {onChooseTemplate && <GButton onClick={() => onChooseTemplate(book)}>{book.templateIds?.length ? "Customize Weeks & Activities" : "Import custom material"}</GButton>}
           </div>
           <p role="status" aria-live="polite" className={outcome ? "book-note" : undefined} data-tone={outcome?.status === "failed" ? "bad" : outcome ? "good" : undefined} style={{ marginTop: 12 }}>
             {outcome?.status === "failed" ? `Not saved. ${outcome.message}` : outcome ? SAVE_TEXT[outcome.status] : ""}
@@ -116,6 +123,13 @@ export function CourseBookContent({ book, workspace, onLoad, onOpen, onChooseTem
             ))}
           </ul>
           {book.unfiled > 0 && <p className="book-note" data-tone="plain">{book.unfiled} more {book.unfiled === 1 ? "row is" : "rows are"} filed under this module but under no week.</p>}
+          {questionBank && questionBank.ready > 0 && <>
+            <h3>Available question sets</h3>
+            <ul className="book-list">{questionBank.weeks.flatMap(week => week.collections).filter(set => set.ready > 0).map(set => <li key={set.id} className="book-row">
+              <span className="book-row-title">{set.title}</span><span className="book-row-meta">{set.ready} ready questions</span>
+            </li>)}</ul>
+            <p className="sub">Open Question Bank and choose {book.module} to create a quiz from these sets.</p>
+          </>}
         </>
       }
     />
@@ -206,7 +220,7 @@ export function QuestionBankBookContent({ book, onPractice, onOpenBank }: Questi
               </label>
               {onPractice && (
                 <GButton variant="primary" disabled={!selection || selection.count === 0} onClick={() => selection && onPractice(selection)} data-testid="start-practice">
-                  <Play size={ICON_SIZE.emphasis} aria-hidden="true" /> Start practice
+                  <Play size={ICON_SIZE.emphasis} aria-hidden="true" /> Create Quiz
                 </GButton>
               )}
               {onOpenBank && <GButton onClick={() => onOpenBank(book, week.week)}>Open bank</GButton>}

@@ -414,3 +414,43 @@ write its output outside Git. Persistence regressions cover ordered content, por
 restore, missing media repair and incremental answer review. Browser checks use a separate
 profile, not the learner workspace. PDF.js native structure and operator APIs remain the
 parser authority; no new parser, storage system or dependency was introduced.
+
+## Private library delivery
+
+`web/scripts/prepare-private-library.mjs` consumes the existing local source inventory and
+writes a resumable catalog, templates, validated question packages, images and original
+files to a private directory. It reuses the tagged and fallback PDF, DOCX and text readers.
+Identical files link to one source; known banks retain their existing canonical identities.
+LFS pointers are missing source bytes, not damaged PDFs. Unsupported sources, unreadable
+rows, uncertain keys and missing images remain explicit gaps or review items.
+
+`PreparedLibrary` installs this collection through one browser-authorized folder selection
+or a bounded ZIP bundle. A configured local development server can expose the same reader
+on a loopback-only, same-origin route; that route is absent from production builds.
+No browser reads arbitrary Mac paths. No private content ships in Git or public assets.
+Large collections use the folder reader so each file is read independently of the archive.
+
+`lib/privateLibrary/install.ts` backs up the current workspace, validates source/template
+hashes and image bytes, and uses the existing template vault and `saveBank`. Ready banks
+are flushed immediately; held-only documents checkpoint in bounded batches. Templates remain discoverable without enrollment;
+only verified stored questions enter quizzes. Reinstallation preserves reviewed answers,
+learner progress and existing course edits. Installation failures remain visible and retryable.
+
+Held packages use the existing document vault and question attachment store. Their image
+references participate in workspace backup/restore and post-reload maintenance. Backups
+with more than 128 MiB of images use a binary ZIP alongside workspace JSON, avoiding
+browser string limits; restore accepts both this archive and existing JSON backups. Original
+source bytes use Decode's existing local original-file store; keep the private collection
+for transferring/restoring those originals. School and generated questions remain distinct;
+source ingestion does not fulfill supplementary generation quotas.
+
+Acceptance: `e2e/private-library.local.spec.ts` is opt-in with `AXOM_PRIVATE_LIBRARY_DIR` or
+`AXOM_PRIVATE_BUNDLE`. It uses first-run setup and the actual file chooser, without seeded
+course/question records. It checks loading, scopes, practice, images, results, reload and
+repeat installation. A persistent clean Chrome profile is used for large-collection storage;
+incognito's separate quota is not representative of the user's normal workspace.
+`AXOM_PRIVATE_WORKSPACE_BACKUP` additionally restores an exported workspace through Settings
+inside that isolated profile, then checks that installation preserves its questions, notes,
+attempts and tracker records. It never writes the learner's browser profile directly.
+Collections exceeding the existing account snapshot limit are identified as device-local
+in the library; a portable backup and the separate private collection remain necessary.

@@ -6,7 +6,7 @@
 // ===========================================================================
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import {
-  AlertTriangle, BarChart3, BookOpen, FileInput, Files, ListFilter,
+  AlertTriangle, BarChart3, BookOpen, FileInput, ListFilter,
   Microscope, Play, RotateCcw, Sparkles, HelpCircle, MonitorPlay } from "lucide-react";
 import { useStore } from "../lib/store";
 import {
@@ -78,8 +78,8 @@ export function QuestionWorkspacePage() {
   const s = useStore();
   const questions = s.questions ?? NO_QUESTIONS;
   const questionSets = s.questionSets ?? NO_SETS;
-  const documents = s.documents ?? NO_DOCUMENTS;
-  const [tab, setTab] = useState<BankTab>(() => questionSets.length ? "sets" : "overview");
+  const documents = useMemo(() => (s.documents ?? NO_DOCUMENTS).filter(doc => !["axom-private-library-catalog", "axom-private-bank-review"].includes(doc.fileType)), [s.documents]);
+  const [tab, setTab] = useState<BankTab>("sets");
   const [bankView, setBankView] = useState<"books" | "weeks">("books");
   const [bankLocation, setBankLocation] = useState<BankLocation>();
   const [open, setOpen] = useState<QuestionRecord | null>(null);
@@ -154,8 +154,9 @@ export function QuestionWorkspacePage() {
   const visibleTabs = useMemo(() => {
     if (!isFirstUse) return ALL_TABS.map(([id, label]) => [id, tabLabel(id, label, questionSets.length, documents.length, questions.length, s.quizBlocks?.length ?? 0)] as [BankTab, string]);
     const tabs: Array<[BankTab, string]> = [
+      ["sets", "Browse Courses / Question Sets"],
       ["overview", "Overview"],
-      ["import", "Import"],
+      ["import", "Import custom material"],
     ];
     if (documents.length > 0) tabs.push(["library", `Source Library (${documents.length})`]);
     return tabs;
@@ -304,41 +305,26 @@ export function QuestionWorkspacePage() {
               <h1 className="qb-page-title">Question Bank</h1>
               <p className="qb-lede">
                 {isFirstUse
-                  ? "Turn lecture files and question documents into reliable practice sets."
+                  ? "Choose your course, open a question set, and start learning."
                   : "Continue the right set, resolve uncertain mappings, and understand what your attempts are showing."}
               </p>
             </div>
             <div className="qb-hero-actions" data-module-tour="qb-import">
-              {isFirstUse ? (
-                <>
-                  <button className="qb-cta primary" onClick={() => openImport("file")}>
-                    <FileInput size={ICON_SIZE.emphasis} /> Import Questions
-                  </button>
-                  <button className="qb-cta ghost" onClick={() => openImport("paste")}>
-                    <Files size={ICON_SIZE.body} /> Paste text
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button className="qb-cta primary" onClick={launchRecommended}>
-                    <Play size={ICON_SIZE.emphasis} /> {lastSession ? "Continue last session" : runnable ? "Start practice" : "Import questions"}
-                  </button>
-                  <button className="qb-cta ghost" onClick={() => openImport("file")}>
-                    <FileInput size={ICON_SIZE.body} /> Import
-                  </button>
-                </>
-              )}
+              {suspendedSim && <button className="qb-cta primary" onClick={() => setRunner({ mode: suspendedSim.mode, simulate: true })}><Play size={ICON_SIZE.emphasis} /> Continue</button>}
+              <button className="qb-cta primary" disabled={!runnable} onClick={() => setRunner({ mode: "tutor" })}><Play size={ICON_SIZE.emphasis} /> Create Quiz</button>
+              <button className="qb-cta ghost" onClick={() => { setTab("sets"); setBankView("books"); }}><BookOpen size={ICON_SIZE.body} /> Browse Courses / Question Sets</button>
+              <button className="qb-cta ghost" onClick={() => openImport("file")}><FileInput size={ICON_SIZE.body} /> Add your own material</button>
               <button className="qb-cta ghost" onClick={() => setModuleTourOpen(true)} aria-label="Open Question Bank help tour">
                 <HelpCircle size={ICON_SIZE.body} /> Help
               </button>
             </div>
           </div>
           {isFirstUse ? (
-            <p className="qb-format-note">PDF, DOCX, TXT, Markdown, CSV, JSON, or pasted text.</p>
+            <p className="qb-format-note">Prepared courses and banks live in your library. Custom imports are optional.</p>
           ) : (
             <p className="qb-session-note">
               {lastSession
-                ? `Starts a new ${lastSession.mode} block with the same filters as your last session.${mapping.issueCount > 0 ? ` ${mapping.issueCount} mapping issue${mapping.issueCount === 1 ? "" : "s"} also need review.` : ""}`
+                ? `Your last ${lastSession.mode} session is saved in results.${mapping.issueCount > 0 ? ` ${mapping.issueCount} mapping issue${mapping.issueCount === 1 ? "" : "s"} also need review.` : ""}`
                 : mapping.issueCount > 0
                   ? `${mapping.issueCount} mapping issue${mapping.issueCount === 1 ? "" : "s"} should be checked before the next block.`
                   : "Your most useful next action is ready below."}

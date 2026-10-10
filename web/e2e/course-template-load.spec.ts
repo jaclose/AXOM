@@ -38,7 +38,7 @@ test("a course template fills the tracker week by week and is safe to load twice
   await seedOnboarded(page);
   await page.goto("/#tracker");
 
-  await page.getByRole("button", { name: "Load course template" }).click();
+  await page.getByRole("button", { name: "Course Library / Load Course" }).click();
   await page.getByRole("dialog", { name: "Course library", exact: true }).getByRole("tab", { name: "Import", exact: true }).click();
   await page.getByRole("button", { name: "Choose a file", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Load a course template" });
@@ -110,7 +110,7 @@ test("a course template fills the tracker week by week and is safe to load twice
   await expect(ftmAgain.locator("li.week-row").first()).toContainText("1 of 7 done");
 
   // Loading the same files again finds everything already there.
-  await page.getByRole("button", { name: "Load course template" }).click();
+  await page.getByRole("button", { name: "Course Library / Load Course" }).click();
   await page.getByRole("dialog", { name: "Course library", exact: true }).getByRole("tab", { name: "Import", exact: true }).click();
   await page.getByRole("button", { name: "Choose a file", exact: true }).click();
   await dialog.getByLabel("Choose course template files").setInputFiles(FILES);

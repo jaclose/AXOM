@@ -25,7 +25,7 @@ const FILES = [
 
 async function openQueue(page: Page) {
   await page.goto("/#questions");
-  await page.getByRole("tablist", { name: "Question Bank sections" }).getByRole("tab", { name: "Import", exact: true }).click();
+  await page.getByRole("button", { name: "Add your own material", exact: true }).click();
   await page.getByRole("button", { name: "Import several files" }).click();
 }
 

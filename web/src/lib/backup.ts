@@ -1,4 +1,6 @@
 import { readWorkspaceContent } from "./question-content/workspaceContent";
+import { privateReviewMedia } from "./privateLibrary/media";
+import { createMediaBackupArchive, LARGE_MEDIA_BACKUP_BYTES, mediaBackupBytes } from "./backupArchive";
 // ===========================================================================
 // JSON export / import. The portable backup story for the browser-stored data.
 // ===========================================================================
@@ -75,16 +77,22 @@ export async function exportStateWithAttachments(
     _exported: new Date().toISOString(),
     ...toPortableState(state),
   };
+  const references = [...(state.questions ?? []), ...privateReviewMedia(state.documents)];
+  if (mediaBackupBytes(references) > LARGE_MEDIA_BACKUP_BYTES) {
+    const result = await createMediaBackupArchive(payload, references);
+    downloadBackupBlob(result.blob, "zip");
+    return { attachmentCount: result.attachmentCount, missingBlobKeys: result.missingBlobKeys };
+  }
   let attachmentCount = 0;
   let missingBlobKeys: string[];
   try {
-    const collected = await collectQuestionAttachmentPayloads(state.questions ?? []);
+    const collected = await collectQuestionAttachmentPayloads(references);
     if (collected.payloads.length) payload[ATTACHMENT_EXPORT_KEY] = collected.payloads;
     attachmentCount = collected.payloads.length;
     missingBlobKeys = collected.missingBlobKeys;
   } catch {
     // Blob store unavailable (private mode): export metadata-only, reported.
-    missingBlobKeys = (state.questions ?? []).flatMap((question) =>
+    missingBlobKeys = [...(state.questions ?? []), ...privateReviewMedia(state.documents)].flatMap((question) =>
       (question.attachments ?? []).map((attachment) => attachment.blobKey));
   }
   downloadBackupPayload(payload);
@@ -93,13 +101,17 @@ export async function exportStateWithAttachments(
 
 function downloadBackupPayload(payload: Record<string, unknown>) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  downloadBackupBlob(blob, "json");
+}
+
+function downloadBackupBlob(blob: Blob, extension: "json" | "zip") {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   const stamp = new Date().toISOString().slice(0, 10);
   a.href = url;
-  a.download = `${BRAND.productName.toLowerCase()}-backup-${stamp}.json`;
+  a.download = `${BRAND.productName.toLowerCase()}-backup-${stamp}.${extension}`;
   a.click();
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
   markBackupDone();
 }
 

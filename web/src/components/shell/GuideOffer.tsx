@@ -42,7 +42,10 @@ export function GuideOffer({ active, onStart }: { active: boolean; onStart: () =
 
   useEffect(() => {
     if (!visible) return;
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") later(); };
+    const onKey = (event: KeyboardEvent) => {
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      if (event.key === "Escape") later();
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });

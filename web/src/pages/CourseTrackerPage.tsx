@@ -222,7 +222,8 @@ export function CourseTrackerPage() {
   return (
     <div className="tracker-page-shell">
       <div className="tracker-page-toolbar">
-        <div><b>Course Tracker</b><span>Import structure, log passes, and keep the next useful move visible.</span></div>
+        <div><b>Course Tracker</b><span>Your courses, weekly activities, and observed study progress.</span></div>
+        <GButton variant="primary" onClick={() => setLibraryOpen(true)}><BookOpen size={ICON_SIZE.body}/> Course Library / Load Course</GButton>
         <GButton size="sm" onClick={() => setModuleHelpOpen((open) => !open)} aria-expanded={moduleHelpOpen} aria-controls={moduleHelpOpen ? "course-tracker-help" : undefined}>
           <HelpCircle size={ICON_SIZE.body} /> Help
         </GButton>
@@ -231,7 +232,7 @@ export function CourseTrackerPage() {
       <div className="tracker-grid">
         <aside className="tracker-utility-column" aria-label="Course Tracker utilities">
           <GlassCard pad data-tour="import" data-module-tour="tracker-structure">
-            <PanelHeader title="Mastery tree" sub="Choose a course or module"
+            <PanelHeader title="My Courses" sub="Choose a loaded course or module"
               action={<GhostButton title="Add one item" onClick={() => setAdding(true)}><Plus size={ICON_SIZE.emphasis} /></GhostButton>} />
             {primaries.length > 0 && (
               <PrimaryFocusList primaries={primaries} tracker={s.tracker} active={scope} onSelect={setScope} onToggle={togglePrimary} />
@@ -256,7 +257,6 @@ export function CourseTrackerPage() {
                 <BookOpen size={ICON_SIZE.body} /> Add course or module
               </GButton>
               <GButton size="sm" onClick={() => setScheduleOpen(true)}><Upload size={ICON_SIZE.body}/> Import schedule</GButton>
-              <GButton size="sm" onClick={() => setLibraryOpen(true)}><Upload size={ICON_SIZE.body}/> Load course template</GButton>
             </div>
           </GlassCard>
 
@@ -386,7 +386,7 @@ export function CourseTrackerPage() {
         onTemplate={(book) => { setTemplateBook(book); setLibraryOpen(false); setTemplateOpen(true); }}
         onCreate={() => { setLibraryOpen(false); setModuleOpen(true); }}
         onOpen={(book) => { setScope(`${book.term}/${book.module}`); setLibraryOpen(false); }} />}
-      {templateOpen && <CourseTemplateLoader defaultTermId={s.terms.find((term) => term.name === templateBook?.term)?.id} onClose={() => setTemplateOpen(false)} />}
+      {templateOpen && <CourseTemplateLoader templateIds={templateBook?.templateIds} defaultTermId={s.terms.find((term) => term.name === templateBook?.term)?.id} onClose={() => setTemplateOpen(false)} />}
       {deleteScope && <DeleteScopeModal scope={deleteScope} onSelect={setScope} onClose={() => setDeleteScope(null)} />}
       {moduleTourOpen && <ModuleTour name="Course Tracker" route="tracker" steps={COURSE_TRACKER_TOUR_STEPS} onExit={() => setModuleTourOpen(false)} />}
     </div>

@@ -46,6 +46,9 @@ export interface CourseBook extends ShelfBook {
   /** Rows filed under the module but under no week. */
   unfiled: number;
   done: number;
+  templateIds?: string[];
+  templateVersion?: string;
+  loadedActivities?: number;
 }
 
 export interface CourseBookInput {

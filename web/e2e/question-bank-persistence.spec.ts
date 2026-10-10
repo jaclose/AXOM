@@ -26,9 +26,10 @@ test("onboarding → import → block → repair → reload retains the full que
   await page.evaluate(() => { window.location.hash = "questions"; });
   await expect(page.getByRole("tab", { name: "Overview" })).toBeVisible();
   await expect(page.getByRole("heading", { level: 1, name: "Question Bank" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Import Questions" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create Quiz", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Add your own material", exact: true })).toBeVisible();
 
-  await page.getByRole("tab", { name: "Import" }).click();
+  await page.getByRole("button", { name: "Add your own material", exact: true }).click();
   await page.getByLabel("Choose a question file to import").setInputFiles({
     name: "ppd-regression.txt",
     mimeType: "text/plain",

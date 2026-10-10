@@ -9,11 +9,12 @@ import { ICON_SIZE } from "../../lib/iconSize";
 import { Modal, Field } from "../ui/Modal";
 import { GButton, Tag } from "../ui/primitives";
 import { useStore } from "../../lib/store";
+import { privateReviewMedia } from "../../lib/privateLibrary/media";
 import { compactAvatarDataUrl } from "../../lib/avatarImage";
 import { exportStateWithAttachments, mergeStates, parseImport } from "../../lib/backup";
+import { readPortableBackup } from "../../lib/backupArchive";
+import { flushLocalVaultWrites, assertVaultWritesSince, getVaultWriteCheckpoint } from "../../lib/localVault";
 import {
-  extractQuestionAttachmentPayloads,
-  restoreQuestionAttachmentPayloads,
   runQuestionAttachmentMaintenance,
 } from "../../lib/questionAttachments";
 import { AiSettingsPanel } from "./AiSettingsPanel";
@@ -94,6 +95,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
   const mergeRef = useRef<HTMLInputElement>(null);
   const avatarRef = useRef<HTMLInputElement>(null);
   const [msg, setMsg] = useState<string>("");
+  const [backupBusy, setBackupBusy] = useState(false);
   const [tab, setTab] = useState<SettingsSection>(() => normalizeSettingsTab(initialTab));
   const [personalTab, setPersonalTab] = useState<PersonalizationSubsection>(() => initialSubsection(initialTab));
   const tabsId = useId();
@@ -142,65 +144,47 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
     tabRefs.current[nextSection]?.focus();
   }
 
-  function doImport(file: File, mode: "replace" | "merge") {
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const rawText = String(reader.result);
-        const next = parseImport(rawText);
-        // Q2b-2: image bytes ride inside the exported file only; extract them
-        // here and restore into the blob store after the state lands.
-        let attachmentPayloads: ReturnType<typeof extractQuestionAttachmentPayloads> = [];
-        try {
-          attachmentPayloads = extractQuestionAttachmentPayloads(JSON.parse(rawText));
-        } catch {
-          attachmentPayloads = [];
-        }
-        const finishAttachments = (questions: typeof next.questions) => {
-          void restoreQuestionAttachmentPayloads(attachmentPayloads, questions ?? [])
-            .then(async ({ restored }) => {
-              await runQuestionAttachmentMaintenance(questions ?? []).catch(() => undefined);
-              if (restored) setMsg((current) => `${current} Restored ${restored} image attachment${restored === 1 ? "" : "s"}.`);
-            })
-            .catch(() => setMsg((current) => `${current} Some image attachments could not be restored.`));
-        };
-        if (mode === "replace") {
-          if (!confirm("Restore this backup? It REPLACES the current data on this device. Download a backup first if you want to keep both.")) {
-            setMsg("Restore cancelled. No data changed.");
-            return;
-          }
-          store.replaceAll(next);
-          recordRestoreEvent({ kind: "portable-restore", detail: file.name });
-          setMsg(`Restored from ${file.name}. Your data is back.`);
-          finishAttachments(next.questions);
-        } else {
-          const merged = mergeStates(store, next);
-          if (!confirm("Merge this backup into the current data? Records are combined by id (newer wins); your profile and current day stay as they are. Nothing is deleted.")) {
-            setMsg("Merge cancelled. No data changed.");
-            return;
-          }
-          store.replaceAll(merged);
-          recordRestoreEvent({ kind: "portable-merge", detail: file.name });
-          setMsg(`Merged ${file.name} into this device's data.`);
-          finishAttachments(merged.questions);
-        }
-      } catch (e) {
-        setMsg((e as Error).message);
-      }
+  async function doImport(file: File, mode: "replace" | "merge") {
+    if (backupBusy) return;
+    setBackupBusy(true); setMsg("Reading your backup…");
+    try {
+      const { rawText, restoreMedia } = await readPortableBackup(file);
+      const next = parseImport(rawText);
+      const message = mode === "replace"
+        ? "Restore this backup? It REPLACES the current data on this device. Download a backup first if you want to keep both."
+        : "Merge this backup into the current data? Records are combined by id (newer wins); your profile and current day stay as they are. Nothing is deleted.";
+      if (!confirm(message)) { setMsg("Restore cancelled. No data changed."); return; }
+      const current = useStore.getState();
+      const restoredState = mode === "merge" ? mergeStates(current, next) : next;
+      const checkpoint = getVaultWriteCheckpoint();
+      current.replaceAll(restoredState);
+      setMsg("Saving your workspace and restoring images…");
+      await flushLocalVaultWrites(); assertVaultWritesSince(checkpoint);
+      const references = [...(restoredState.questions ?? []), ...privateReviewMedia(restoredState.documents)];
+      const { restored } = await restoreMedia(references);
+      await runQuestionAttachmentMaintenance(references);
+      recordRestoreEvent({ kind: mode === "merge" ? "portable-merge" : "portable-restore", detail: file.name });
+      setMsg(`${mode === "merge" ? "Merged" : "Restored"} ${file.name}. Saved on this device.${restored ? ` Restored ${restored} image attachments.` : ""}`);
+    } catch (e) {
+      setMsg(`Recovery did not finish. ${e instanceof Error ? e.message : "Keep your backup and try again."}`);
+    } finally {
+      setBackupBusy(false);
       if (fileRef.current) fileRef.current.value = "";
       if (mergeRef.current) mergeRef.current.value = "";
-    };
-    reader.readAsText(file);
+    }
   }
 
-  function exportBackup() {
-    void exportStateWithAttachments(store).then(({ attachmentCount, missingBlobKeys }) => {
+  async function exportBackup() {
+    if (backupBusy) return;
+    setBackupBusy(true); setMsg("Preparing your workspace and images…");
+    try {
+      const { attachmentCount, missingBlobKeys } = await exportStateWithAttachments(useStore.getState());
       const missing = missingBlobKeys.length
-        ? ` ${missingBlobKeys.length} image attachment${missingBlobKeys.length === 1 ? "" : "s"} could not be read and were exported as metadata only.`
-        : "";
-      const included = attachmentCount ? ` Includes ${attachmentCount} image attachment${attachmentCount === 1 ? "" : "s"}.` : "";
-      setMsg(`Downloaded your backup file.${included}${missing}`);
-    });
+        ? ` ${missingBlobKeys.length} image attachments could not be read and were exported as metadata only.` : "";
+      setMsg(`Downloaded your backup file.${attachmentCount ? ` Includes ${attachmentCount} image attachments.` : ""}${missing}`);
+    } catch (error) {
+      setMsg(`Backup was not exported. ${error instanceof Error ? error.message : "Try again after checking storage."}`);
+    } finally { setBackupBusy(false); }
   }
 
   function setAvatar(file: File) {
@@ -287,7 +271,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
       {tab === "backup" && (
         <section role="tabpanel" id={`${tabsId}-panel-backup`} aria-labelledby={`${tabsId}-tab-backup`} className="backup-center">
           <div className="sub" style={{ marginBottom: 4 }}>
-            Signed-in accounts can retain protected server versions. Manual JSON backup remains an emergency portable safety valve.
+            Signed-in accounts can retain protected server versions. Manual backup remains an emergency portable safety valve.
           </div>
 
           <RecoveryStatusCard
@@ -309,21 +293,21 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
           <div className="backup-actions-panel">
             <div>
               <div className="sync-title">Portable emergency copy</div>
-              <div className="sub">Automatic local saving is primary. Export a portable copy you control, or restore or merge a saved AXOM JSON file when recovery is needed.</div>
+              <div className="sub">Automatic local saving is primary. Export a portable copy you control, or restore or merge a saved AXOM JSON or ZIP backup when recovery is needed. Large image libraries export as ZIP.</div>
             </div>
             <div className="row wrap gap8">
-              <GButton size="sm" variant="primary" onClick={exportBackup}>
+              <GButton size="sm" variant="primary" disabled={backupBusy} onClick={exportBackup}>
                 <Download size={ICON_SIZE.body} /> Export backup
               </GButton>
-              <GButton size="sm" onClick={() => fileRef.current?.click()}>
+              <GButton size="sm" disabled={backupBusy} onClick={() => fileRef.current?.click()}>
                 <Upload size={ICON_SIZE.body} /> Import / restore
               </GButton>
-              <GButton size="sm" onClick={() => mergeRef.current?.click()}>
+              <GButton size="sm" disabled={backupBusy} onClick={() => mergeRef.current?.click()}>
                 <Upload size={ICON_SIZE.body} /> Merge backup
               </GButton>
-              <input ref={fileRef} type="file" accept="application/json,.json" hidden
+              <input ref={fileRef} type="file" accept="application/json,application/zip,.json,.zip" hidden
                 onChange={(e) => e.target.files?.[0] && doImport(e.target.files[0], "replace")} />
-              <input ref={mergeRef} type="file" accept="application/json,.json" hidden
+              <input ref={mergeRef} type="file" accept="application/json,application/zip,.json,.zip" hidden
                 onChange={(e) => e.target.files?.[0] && doImport(e.target.files[0], "merge")} />
             </div>
             <div className="backup-note">

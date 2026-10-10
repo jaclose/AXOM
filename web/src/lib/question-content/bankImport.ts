@@ -7,6 +7,7 @@
 // ===========================================================================
 import type { ImportLibrary } from "../questionImportHistory";
 import { prepareReviewedImport, saveReviewedImport, type ReviewedImportStore } from "../questionImportSave";
+import { hasReviewedImportInFlight } from "../questionImportFinalization";
 import type { ImportPackage, PackageIssue } from "./package";
 import { packageToReviewedImport, type HeldQuestion, type PackageImportOptions, type WithheldAsset } from "./toReviewedImport";
 
@@ -67,7 +68,8 @@ export async function saveBank(pkg: ImportPackage, issues: readonly PackageIssue
       const key = previous ? previous.setId! : "new";
       groups.set(key, [...(groups.get(key) ?? []), index]);
     });
-    return [...groups.values()].map(indices => ({ ...section,
+    return [...groups.entries()].map(([existingSetId, indices]) => ({ ...section,
+      existingSetId: existingSetId === "new" ? undefined : existingSetId,
       questionIds: indices.map(index => section.questionIds[index]),
       request: { ...section.request, drafts: indices.map(index => section.request.drafts[index]) },
     }));
@@ -80,6 +82,19 @@ export async function saveBank(pkg: ImportPackage, issues: readonly PackageIssue
         const detail = prepared.reason === "invalid-question" ? ` ${prepared.errors.join(" ")}` : "";
         result.errors.push(`${name}: ${REFUSAL[prepared.reason] ?? "The import was refused."}${detail}`);
         continue;
+      }
+      // Canonical source identities survive learner edits to tags, titles and
+      // wording. An unchanged source must repair media without cloning those
+      // questions or discarding their attempts. Never adopt tentative writes.
+      if (section.existingSetId && !hasReviewedImportInFlight()) {
+        const library = workspace.library();
+        const set = library.questionSets.find(s => s.id === section.existingSetId);
+        const previous = section.request.drafts.map(draft => library.questions.find(q =>
+          set?.questionIds.includes(q.id) && q.content?.id === draft.content?.id &&
+          q.content?.bankId === draft.content?.bankId && q.content?.provenance.sourceChecksum === draft.content?.provenance.sourceChecksum));
+        if (set && previous.every(q => q !== undefined)) prepared.equivalent = {
+          setId: set.id, questionIds: previous.map(q => q!.id), attachments: previous.map(q => q!.attachments ?? []),
+        };
       }
       const saved = await saveReviewedImport(prepared, workspace.store(), files);
       if (!saved.ok) {

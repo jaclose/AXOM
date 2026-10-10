@@ -15,7 +15,7 @@ import {
   type CourseTemplatePlan, type CourseTemplateSection, type TemplateReconciliation,
 } from "../../lib/course-engine/templateParse";
 import { moduleKey } from "../../lib/course-engine/vocabulary";
-import { courseTemplateFamily, prepareCourseTemplate } from "../../lib/course-engine/templateLibrary";
+import { courseTemplateFamily, prepareCourseTemplate, savedCourseTemplates } from "../../lib/course-engine/templateLibrary";
 import { SavedCourseTemplates } from "./SavedCourseTemplates";
 import { pushToast } from "../../lib/toast";
 import { ICON_SIZE } from "../../lib/iconSize";
@@ -40,14 +40,14 @@ interface ModulePreview {
 
 const EXAMPLE = "FTM 1 - Lectures + DLAs:\n\nFTM Lecture 01 Histology of the Cell [Lecture]\nDLA 01 Membrane Structure [DLA]";
 
-export function CourseTemplateLoader({ onClose, defaultTermId }: { onClose: () => void; defaultTermId?: string }) {
+export function CourseTemplateLoader({ onClose, defaultTermId, templateIds }: { onClose: () => void; defaultTermId?: string; templateIds?: string[] }) {
   const s = useStore();
-  const [sections, setSections] = useState<CourseTemplateSection[]>([]);
+  const [sections, setSections] = useState<CourseTemplateSection[]>(() => savedCourseTemplates(s.documents).filter(t => templateIds?.includes(t.document.id)).map(t => t.section));
   const [pasted, setPasted] = useState("");
   const [setup, setSetup] = useState<Record<string, ModuleSetup>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [libraryOpen, setLibraryOpen] = useState(true);
+  const [libraryOpen, setLibraryOpen] = useState(!templateIds?.length);
 
   function add(next: CourseTemplateSection[]) {
     const readable = next.filter((section) => section.module && section.items.length > 0);

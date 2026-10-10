@@ -16,7 +16,7 @@ for (const width of [1440, 390]) {
     const dialog = page.getByRole("dialog", { name: "Load a course template" });
     const preview = dialog.getByRole("region", { name: "Template for FTM 1" });
     const open = async () => {
-      await page.getByRole("button", { name: "Load course template" }).click();
+      await page.getByRole("button", { name: "Course Library / Load Course" }).click();
       await page.getByRole("button", { name: /Saved templates \(/ }).click();
       await expect(dialog).toBeVisible();
     };

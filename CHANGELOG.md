@@ -1,6 +1,10 @@
 # AXOM Changelog
 
-## 0.0.2-prebeta — 2026-09-26 (Accounts, soundscapes, focus dock and safe updates)
+## 0.0.2-prebeta — 2026-10-10 (Academic library, Tutor, accounts and safe updates)
+
+- **Prepared academic library**: connect a private collection once, browse available course templates and question banks, and choose what to load. The shared bookshelf has readable covers, search and term filters; course loading preserves progress and personal edits.
+- **Question practice**: create focused or mixed quizzes from real sets, study ordered text, tables and images, and return to saved answers and Decode feedback. Uncertain source items remain in a separate review queue. Reinstalling the same source preserves canonical questions and attempts.
+- **Portable media**: private library installation resumes safely and reports missing sources. Workspace backups include scored and held-review images, with binary ZIP export for large collections. Original documents travel in the separate private content package; school content is not included in the public application.
 
 - **Focus dock**: a pill at the bottom of every page shows the running Pomodoro or study session with pause, skip, quick log, focus mode and finish. When a soundscape plays, the pill splits in two; hover the sound half to open its live visual and controls.
 - **Soundscapes**: 40 Hz, 20 Hz, 10 Hz and 2 Hz binaural tones (matched to the recordings you already use), brown noise and soft rain, all generated on your device with palette-aware visuals. Headphones or speakers mode, a sleep-friendly stop timer, media keys, and "follow my Pomodoro" (10 Hz on breaks). Each preset states its evidence honestly, and "Is it working for you?" compares your question accuracy and Anki "again" rate with and without sound.

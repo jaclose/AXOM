@@ -5,16 +5,16 @@ authority: canonical
 ---
 # The academic bookshelf
 
-**Purpose:** One way to browse what AXOM holds: real books on shelves. A book is a module
-of a course (ER, DM, GOER), a shelf is a term. A book is as thick as what it holds. Hover
-or focus lifts it; choosing it takes it off the shelf, turns it and opens it onto a preview
-of what is really inside. Two libraries use the one shelf: course templates and question
-banks.
+**Purpose:** One academic collection, with a book per module and quiet term labels.
+Readable covers wrap into responsive rows; filters narrow the collection without empty
+term shelves. Choosing a book opens its real contents and primary action.
 
-**Status (2026-10-08):** connected to Course Tracker's Load course template and
-Question Bank's Bookshelf view. Course books open the existing template loader with
-the chosen term. Bank books open a scoped week or a focused practice block. The
-week navigator remains available through Browse weeks; no parallel workspace store.
+**Status (2026-10-10):** Course Tracker exposes My Courses and Course Library / Load Course.
+Prepared templates are available before activation. Load Course adds their missing activities;
+Customize Weeks & Activities uses the existing versioned template loader. QBank opens on
+course sets and exposes Create Quiz. Bank selection retains its module/week/set scope.
+The private-library transfer path is described in [question content](question-content.md#private-library-delivery).
+Implementation and local acceptance are not proof of delivery to axom.info.
 
 | Responsibility | Files under `web/src/` |
 | --- | --- |
@@ -37,13 +37,13 @@ Depends on: [course engine](course-engine.md) (`buildModuleWeeks`, `questionScop
 1. **A book is derived, never stored.** Books, counts and thickness are computed from the
    workspace each time the shelf is drawn. There is no bookshelf state to go stale and no
    second course or question model.
-2. **Thickness is content.** `spineThickness(count)` grows with the logarithm of the count
-   of activities or of questions, between a width that can still be read and tapped and a
-   maximum. Never file size.
+2. **Readable books first.** Cover widths follow the responsive grid; physical dimensions
+   never make titles or hit targets too small. Persistent captions show actual content counts.
 3. **Nothing is invented.** A spine shows the module's name as the data has it. A module
    with nothing in it is an unbound, outlined book that says so.
 4. **Opening a book changes nothing.** Only "Load course" writes, and it only adds: a term,
-   a course or a module that is missing. Loading twice adds nothing the second time. A
+   a course, a module or prepared activities that are missing. Existing progress, notes and
+   personal titles remain intact. Loading twice adds nothing the second time. A
    book keeps its identity (`courseBookId`) before and after loading, so it stays open
    while the workspace changes under it.
 5. **A question the device does not have is not counted.** A known package that is not
@@ -73,8 +73,8 @@ sets, questions, packages, curricula, sourceOf })` and `QuestionBankBookContent`
 `sourceOf` names a set's source; pass stream 1's `bankSource` there. `AcademicLibrary`
 shows a Recover, Import or Create tab only when its host gives it something real to do.
 
-Keyboard: one Tab stop for the shelf; arrows move along and between shelves, Home and End
-within one; Enter or Space opens; Escape closes and focus returns to the spine. The open
+Keyboard: one Tab stop for the shelf; arrows follow the responsive rows and columns, Home and End
+reach the ends of the collection; Enter or Space opens; Escape closes and focus returns to the spine. The open
 book is a modal dialog that keeps Tab inside it.
 
 ## Checks
@@ -82,18 +82,17 @@ book is a modal dialog that keeps Tab inside it.
 - `npx vitest run src/lib/bookshelf` (thickness, course books, loading, bank books, the
   three Term 5 GOER Week 2 manifests).
 - `AXOM_E2E_BASE_URL=http://127.0.0.1:5197 npx playwright test e2e/bookshelf-harness.spec.ts`
-  against a dev server: the shelf as drawn, thickness order, keyboard and focus, a load
+  against a dev server: the collection as drawn, readable covers, keyboard and focus, a load
   that survives a reload, bank counts, a phone-sized screen, the opening with motion, the
   light theme.
 
-## Not done
+## Remaining boundaries
 
-- Imported templates are not yet a persistent catalog; select the source file to load again.
-- "Load course" adds the module's place in the course. The lectures and other activities
-  of a template file still come in through the existing template loader, which
-  `onChooseTemplate` is there to open.
-- Recover has a slot and honest copy, and no search behind it yet.
-- Selecting single weeks of a course to load is not built.
+- The updated schedule PDFs still require cohort and authority reconciliation; a saved
+  template version does not certify its academic currency.
+- Recover stays hidden until it has a real recovery source.
+- Available content defaults on; clear it to inspect the underlying course map. An empty
+  mapped course never claims prepared activities or ready questions.
 
 
 Product integration: `components/tracker/CourseLibrary.tsx` and

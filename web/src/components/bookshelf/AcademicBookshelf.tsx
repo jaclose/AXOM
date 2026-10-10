@@ -1,6 +1,6 @@
-// The academic bookshelf: real books on shelves, one shelf to a term. A book
+// The academic bookshelf: one responsive collection with quiet term filters. A book
 // lifts on hover and focus, comes off the shelf and opens when chosen, and
-// goes back where it stood when closed. The books and their thickness come
+// goes back where it stood when closed. The books and their content counts come
 // in as data (lib/bookshelf); this file only draws and moves them.
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -59,8 +59,13 @@ function flightStyle(flight: Flight): CSSProperties {
   } as CSSProperties;
 }
 
-export function AcademicBookshelf<T extends ShelfBook>({ label, shelves, renderBook, empty }: AcademicBookshelfProps<T>) {
-  const books = useMemo(() => shelves.flatMap((shelf) => shelf.books), [shelves]);
+export function AcademicBookshelf<T extends ShelfBook>({ label, shelves: inputShelves, renderBook, empty }: AcademicBookshelfProps<T>) {
+  const [term, setTerm] = useState("");
+  const [query, setQuery] = useState("");
+  const [availableOnly, setAvailableOnly] = useState(true);
+  const allBooks = useMemo(() => inputShelves.flatMap(shelf => shelf.books), [inputShelves]);
+  const books = useMemo(() => allBooks.filter(book => (!availableOnly || book.count > 0) && (!term || book.shelf === term) && `${book.title} ${book.identifier ?? ""}`.toLowerCase().includes(query.toLowerCase())), [allBooks, term, query, availableOnly]);
+  const shelves = useMemo(() => [{ id: "academic-collection", label: "Academic collection", books }], [books]);
   const [focusId, setFocusId] = useState<string | undefined>(undefined);
   const [openId, setOpenId] = useState<string | undefined>(undefined);
   const [phase, setPhase] = useState<Phase>("closed");
@@ -164,25 +169,38 @@ export function AcademicBookshelf<T extends ShelfBook>({ label, shelves, renderB
       setFocusId(target.id);
       spines.current.get(target.id)?.focus();
     };
-    const onShelf = (index: number, at: number) => shelves[index]?.books[Math.min(at, (shelves[index]?.books.length ?? 1) - 1)];
+    const vertical = (direction: number) => {
+      const current = event.currentTarget.getBoundingClientRect();
+      // Follow the rendered grid, including wrapping and browser zoom.
+      return shelf.books.map(book => ({ book, rect: spines.current.get(book.id)?.getBoundingClientRect() }))
+        .filter((item): item is { book: T; rect: DOMRect } => Boolean(item.rect && (item.rect.top - current.top) * direction > 2))
+        .sort((a, b) => Math.abs(a.rect.top - current.top) - Math.abs(b.rect.top - current.top)
+          || Math.abs(a.rect.left - current.left) - Math.abs(b.rect.left - current.left))[0]?.book;
+    };
     if (event.key === "ArrowRight") go(shelf.books[bookIndex + 1] ?? shelves[shelfIndex + 1]?.books[0]);
     else if (event.key === "ArrowLeft") go(shelf.books[bookIndex - 1] ?? shelves[shelfIndex - 1]?.books[shelves[shelfIndex - 1].books.length - 1]);
-    else if (event.key === "ArrowDown") go(onShelf(shelfIndex + 1, bookIndex));
-    else if (event.key === "ArrowUp") go(onShelf(shelfIndex - 1, bookIndex));
+    else if (event.key === "ArrowDown") go(vertical(1));
+    else if (event.key === "ArrowUp") go(vertical(-1));
     else if (event.key === "Home") go(shelf.books[0]);
     else if (event.key === "End") go(shelf.books[shelf.books.length - 1]);
   };
 
-  if (!books.length) return <div className="academic-bookshelf academic-bookshelf-empty">{empty}</div>;
+  if (!allBooks.length) return <div className="academic-bookshelf academic-bookshelf-empty">{empty}</div>;
 
   const openTone = openBook ? toneOf(shelves, openBook.id) : undefined;
   return (
-    <div className="academic-bookshelf" data-open={phase !== "closed" ? "true" : undefined} role="region" aria-label={label}>
-      <p className="bookshelf-hint" id={`${titleId}-hint`}>Arrow keys move along the shelves. Enter opens a book.</p>
+    <div className="academic-bookshelf academic-collection" data-open={phase !== "closed" ? "true" : undefined} role="region" aria-label={label}>
+      <div className="collection-filters">
+        <label>Find a module<input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search your collection" /></label>
+        <label>Term<select value={term} onChange={event => setTerm(event.target.value)}><option value="">All terms</option>{[...new Set(allBooks.map(b => b.shelf))].map(name => <option key={name}>{name}</option>)}</select></label>
+        <span>{books.length} modules</span>
+        <label className="collection-availability"><input type="checkbox" checked={availableOnly} onChange={event => setAvailableOnly(event.target.checked)} />Available content</label>
+      </div>
+      {!books.length && <p>{availableOnly ? "No prepared content matches yet. Install your prepared library above, or clear Available content to browse the course map." : "No courses match these filters."}</p>}
+      <p className="bookshelf-hint" id={`${titleId}-hint`}>Arrow keys move between books. Enter opens a book.</p>
       <div className="bookshelf-shelves" aria-hidden={phase === "open" ? "true" : undefined}>
         {shelves.map((shelf, shelfIndex) => (
           <section key={shelf.id} className="bookshelf-shelf" aria-label={shelf.label}>
-            <h3 className="bookshelf-plate">{shelf.label}</h3>
             <ul className="bookshelf-row" role="list">
               {shelf.books.map((book, bookIndex) => {
                 const tone = spineTone(shelfIndex, bookIndex);
@@ -219,7 +237,7 @@ export function AcademicBookshelf<T extends ShelfBook>({ label, shelves, renderB
                       </span>
                       <span className="shelf-book-tip" aria-hidden="true">
                         <strong>{book.title}</strong>
-                        <span>{book.state === "empty" ? book.stateNote ?? "Empty" : book.countLabel}</span>
+                        <span>{book.shelf} · {book.countLabel}</span>
                       </span>
                     </button>
                   </li>

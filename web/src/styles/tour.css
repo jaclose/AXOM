@@ -207,6 +207,8 @@
   .guide-offer-actions { grid-column: 1 / -1; justify-content: flex-end; }
 }
 @media (prefers-reduced-motion: reduce) { .guide-offer { animation: none; } }
+/* A nonmodal suggestion must never cover a study dialog's primary controls. */
+body:has([role="dialog"][aria-modal="true"]) .guide-offer { display: none; }
 
 /* Light theme: the tour tip used a fixed dark surface with the theme's dark
    ink, so its title nearly vanished. Cream glass, as the guide offer uses. */

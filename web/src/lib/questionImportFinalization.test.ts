@@ -155,13 +155,14 @@ describe("reviewed import retry identity", () => {
       source: "imported",
       status: "unseen",
       attempts: [],
-      tags: [],
+      tags: ["x-linked"],
       createdAt: "2026-07-22T00:00:00.000Z",
       updatedAt: "2026-07-22T00:00:00.000Z",
     };
     const existingSet = { ...set, id: "set-existing", questionIds: [stored.id] };
     const candidate = {
       ...question("q-new", "Same reviewed question?"),
+      tags: ["X-linked"],
       sourceFile: { ...question("q-new").sourceFile!, addedAt: "later" },
     };
 

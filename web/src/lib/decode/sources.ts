@@ -60,7 +60,7 @@ export async function saveSourceOriginal(document: Pick<SourceDocument, "id" | "
   if (!document.checksum) {
     throw new SourceOriginalError("no-fingerprint", "This source was saved without a fingerprint, so a file cannot be matched to it. Import the file again to attach it.");
   }
-  if (await sha256Hex(await file.arrayBuffer()) !== document.checksum) {
+  if (await sha256Hex(await file.arrayBuffer()) !== document.checksum.replace(/^sha256:/, "")) {
     throw new SourceOriginalError("different-file", "This is a different version of the file. Choose the exact file that was imported, so page numbers still point at the right pages.");
   }
   await withStore("readwrite", (store) => store.put(file, document.id), "The original file could not be saved. Check this device's storage and try again.");

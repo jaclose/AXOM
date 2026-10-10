@@ -34,7 +34,7 @@ export function SourceLibrary({
   onGenerateFrom: (doc: SourceDocument) => void;
 }) {
   const s = useStore();
-  const documents = s.documents ?? NO_DOCUMENTS;
+  const documents = useMemo(() => (s.documents ?? NO_DOCUMENTS).filter(doc => !["axom-private-library-catalog", "axom-private-bank-review"].includes(doc.fileType)), [s.documents]);
   const [preview, setPreview] = useState<SourceDocument | null>(null);
   const [query, setQuery] = useState("");
   const provider = useMemo(() => resolveActiveProvider(), []);

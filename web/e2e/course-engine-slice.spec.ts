@@ -47,7 +47,7 @@ test("a source file becomes a filed set, recorded answers, a finding and a revie
   await page.goto("/#questions");
 
   // --- import: the name proposes where the set belongs -----------------------
-  await page.getByRole("tab", { name: "Import" }).click();
+  await page.getByRole("button", { name: "Add your own material", exact: true }).click();
   await page.getByLabel("Choose a question file to import").setInputFiles({
     name: "FTM 1 Week 2 Practice Questions.txt", mimeType: "text/plain", buffer: Buffer.from(SOURCE),
   });

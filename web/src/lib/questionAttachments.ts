@@ -286,7 +286,9 @@ export async function runQuestionAttachmentMaintenance(
     for (const attachment of question.attachments ?? []) referenced.add(attachment.blobKey);
   }
   const stored = await listQuestionAttachmentBlobKeys();
-  const orphans = stored.filter((key) => !referenced.has(key));
+  // Private review documents have their own references. Preserve their bytes if
+  // an older app/backup cannot read a document; recovery must remain possible.
+  const orphans = stored.filter((key) => !referenced.has(key) && !key.startsWith("private-library:"));
   await deleteQuestionAttachmentBlobs(orphans);
   const storedSet = new Set(stored);
   const missing = [...referenced].filter((key) => !storedSet.has(key));
