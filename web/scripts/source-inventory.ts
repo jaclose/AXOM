@@ -71,6 +71,7 @@ const extraModules: ModuleVocabulary[] = (option("modules") ?? "")
 function walk(dir: string, found: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (entry.name === ".DS_Store" || entry.name.startsWith("._")) continue;
+    if (["node_modules", ".git", ".cache", ".vite", "dist", "build", "target", "coverage", "test-results", "playwright-report"].includes(entry.name)) continue;
     const full = join(dir, entry.name);
     if (entry.isDirectory()) walk(full, found);
     else if (entry.isFile()) found.push(full);

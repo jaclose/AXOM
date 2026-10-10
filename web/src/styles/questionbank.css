@@ -1019,6 +1019,21 @@
 .template-module b { font-family: var(--font-display); color: var(--text); }
 .template-note { margin: 0; padding-left: 10px; border-left: 2px solid var(--gold-line); }
 ul.template-note { padding-left: 26px; }
+.modal.course-template-modal { width: min(820px, calc(100vw - 24px)); max-width: 820px; display: flex; flex-direction: column; overflow: hidden; }
+.course-template-modal > .spread, .course-template-modal > .modal-actions { flex-shrink: 0; }
+.course-template-modal > .modal-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
+.course-template-modal .grid-2 { grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); }
+.course-template-modal .grid-2 > *, .course-template-modal .field { min-width: 0; }
+.course-template-modal .modal-actions { flex-wrap: wrap; }
+.course-template-modal .modal-actions button { min-height: 40px; }
+.saved-course-templates { display: grid; gap: 12px; padding: 16px 0; }
+.saved-course-templates p { margin: 4px 0 0; }
+.saved-template-list { display: grid; gap: 12px; }
+.saved-template-row { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--hairline); border-radius: var(--radius-md); min-width: 0; overflow-wrap: anywhere; }
+.template-selection { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 10px 0; margin: 0; border: 0; }
+.template-selection legend { font-weight: 600; font-size: 13px; }
+.template-selection label { display: flex; align-items: center; gap: 6px; min-height: 36px; cursor: pointer; font-size: 13px; }
+.template-selection input { accent-color: var(--gold); width: 16px; height: 16px; }
 
 /* ---- Weeks (Course Tracker) --------------------------------------------------- */
 .week-overview { display: flex; flex-direction: column; gap: 12px; }

@@ -105,6 +105,22 @@ do next. The learner reports nothing AXOM can observe.
 
 ## Known limits
 
+Course templates imported through `CourseTemplateLoader` persist as content-addressed
+`axom-course-template` source documents in the existing workspace vault. The Course library's
+Saved templates entry groups versions by module and section. Import time labels the latest
+import, not academic authority. Identical text does not create another version; revised text
+keeps both versions. Individual versions export as TXT and all versions travel through the
+normal JSON workspace export/restore. No additional database or schema version is required.
+
+The loading preview filters weeks and activity types after the complete template is planned,
+so selection cannot alter inferred weeks or stable activity identities. It previews additions
+and updates, preserves attempt/pass counts and learner-placed weeks, and checks durable vault
+writes before reporting success. Loading a subset does not remove existing tracker rows.
+Term-prefixed headings such as `T5 - MODULE - Lectures` retain the term and module separately.
+Reconciliation scopes activity keys to term/module so another term's progress is not moved.
+Updated schedule authority, title-edit conflict handling and cohorts within the same term remain
+separate acceptance work; importing a version is not confirmation that its schedule is current.
+
 Lecture weeks are not stated in the learner's current templates, so the planner spreads
 teaching-day groups across the module's weeks and marks them for confirmation; a
 `Week N:` line in a template states them.

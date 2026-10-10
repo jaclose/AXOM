@@ -30,6 +30,8 @@ export interface CourseTemplateItem {
 }
 
 export interface CourseTemplateSection {
+  /** Optional explicit term prefix, such as "T5 - MI - Lectures". */
+  term?: string;
   /** Module name from the heading: "FTM 1". */
   module: string;
   /** What the section lists: "Lectures + DLAs". */
@@ -69,6 +71,7 @@ export function parseCourseTemplate(text: string, sourceName?: string): CourseTe
   const problems: string[] = [];
   const items: CourseTemplateItem[] = [];
   let module = "";
+  let term: string | undefined;
   let title = "";
   let group = 0;
   let inGroup = false;
@@ -84,7 +87,9 @@ export function parseCourseTemplate(text: string, sourceName?: string): CourseTe
     if (module && weekHeading) { headedWeek = Number(weekHeading[1]); inGroup = false; return; }
 
     if (!module && !/\[[^\]]+\]\s*$/.test(line)) {
-      const heading = line.replace(/:\s*$/, "");
+      let heading = line.replace(/:\s*$/, "");
+      const termPrefix = heading.match(/^(?:T|Term)\s*(\d{1,2})\s+[-–]\s+(.+)$/i);
+      if (termPrefix) { term = `Term ${Number(termPrefix[1])}`; heading = termPrefix[2]; }
       const dash = heading.search(/\s[-–]\s/);
       module = (dash > 0 ? heading.slice(0, dash) : heading).trim();
       title = dash > 0 ? heading.slice(dash).replace(/^\s[-–]\s/, "").trim() : "";
@@ -112,7 +117,7 @@ export function parseCourseTemplate(text: string, sourceName?: string): CourseTe
   });
 
   if (!module) problems.unshift("The first line should name the module, for example \"FTM 1 - Lectures + DLAs:\".");
-  return { module, title, items, groupCount: group, problems, sourceName };
+  return { module, ...(term ? { term } : {}), title, items, groupCount: group, problems, sourceName };
 }
 
 export type WeekBasis = "stated" | "group-order" | "spread" | "unknown";
@@ -165,6 +170,7 @@ export function planCourseTemplate(
 ): CourseTemplatePlan {
   const offset = Math.max(1, options.firstWeek ?? 1) - 1;
   const module = sections[0]?.module ?? "";
+  const term = options.term ?? sections[0]?.term;
   const problems = sections.flatMap((section) => section.problems);
   for (const section of sections) {
     if (moduleKey(section.module) !== moduleKey(module)) {
@@ -200,7 +206,7 @@ export function planCourseTemplate(
         weekBasis = "spread";
       }
       items.push({
-        path: [options.term, module, week ? `Week ${week}` : "Unscheduled"].filter(Boolean).join("/"),
+        path: [term, module, week ? `Week ${week}` : "Unscheduled"].filter(Boolean).join("/"),
         label: item.label,
         kind: TRACKER_KIND_FOR_ACTIVITY[item.activity],
         activity: item.activity,
@@ -214,7 +220,7 @@ export function planCourseTemplate(
 
   return {
     module,
-    term: options.term,
+    term,
     weekCount,
     items,
     needsConfirmation: items.some((item) => item.weekBasis !== "stated" && item.weekBasis !== "group-order"),
@@ -239,7 +245,14 @@ export function reconcileCourseTemplate(
   plan: CourseTemplatePlan,
   existing: ReadonlyArray<{ id: string; path: string; label: string; templateKey?: string; weekSource?: "template" | "inferred" | "learner" }>,
 ): TemplateReconciliation {
-  const byKey = new Map(existing.flatMap((item) => (item.templateKey ? [[item.templateKey, item] as const] : [])));
+  // The same module can be studied in more than one term. Its stable activity
+  // key must never pull a row (and its progress) out of another course context.
+  const inScope = existing.filter((item) => {
+    const parts = item.path.split("/");
+    return moduleKey(parts.at(-2) ?? "") === moduleKey(plan.module)
+      && parts.slice(0, -2).join("/").toLowerCase() === (plan.term ?? "").toLowerCase();
+  });
+  const byKey = new Map(inScope.flatMap((item) => (item.templateKey ? [[item.templateKey, item] as const] : [])));
   const byPlace = new Set(existing.map((item) => `${item.path}|${item.label}`.toLowerCase()));
   const result: TemplateReconciliation = { create: [], update: [], unchanged: 0 };
   for (const item of plan.items) {
