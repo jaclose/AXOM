@@ -32,3 +32,18 @@ web/tsconfig.tsbuildinfo
 !/supabase/functions/
 !/supabase/functions/ai-proxy/
 !/supabase/functions/ai-proxy/core.ts
+
+# AXOM GOER manifest allowlist
+!/fixtures/
+/fixtures/*
+!/fixtures/qbank/
+/fixtures/qbank/*
+!/fixtures/qbank/goer/
+/fixtures/qbank/goer/*
+!/fixtures/qbank/goer/t5/
+/fixtures/qbank/goer/t5/*
+!/fixtures/qbank/goer/t5/week-02/
+/fixtures/qbank/goer/t5/week-02/*
+!/fixtures/qbank/goer/t5/week-02/*/
+/fixtures/qbank/goer/t5/week-02/*/*
+!/fixtures/qbank/goer/t5/week-02/*/manifest.json
