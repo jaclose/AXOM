@@ -13,6 +13,7 @@ import { GlassCard, GhostButton, PanelHeader, Tag, EmptyState } from "../ui/prim
 import { pushToast } from "../../lib/toast";
 import { accuracyTone } from "../../lib/library";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { SessionReviewModal } from "./SessionReviewModal";
 
 const NO_QUESTIONS: QuestionRecord[] = [];
 
@@ -30,6 +31,8 @@ export function PerformancePanel({ onRetakeMissed }: { onRetakeMissed: (ids: str
   const sessions = useStore((s) => s.quizSessions ?? []);
   const [coach, setCoach] = useState<{ diagnosis: string; suggestedBlock: string } | null>(null);
   const [coaching, setCoaching] = useState(false);
+  const [reviewId, setReviewId] = useState<string>();
+  const reviewSession = sessions.find((session) => session.id === reviewId);
   const provider = useMemo(() => resolveActiveProvider(), []);
 
   const recent = sessions.slice(0, 5);
@@ -58,7 +61,7 @@ export function PerformancePanel({ onRetakeMissed }: { onRetakeMissed: (ids: str
   }
 
   return (
-    <GlassCard>
+    <><GlassCard>
       <PanelHeader
         title="Performance"
         sub="Session history, weakest categories, error behavior, and what's due for another shot."
@@ -73,7 +76,7 @@ export function PerformancePanel({ onRetakeMissed }: { onRetakeMissed: (ids: str
           <div className="stack gap6">
             <span className="field-label">Recent blocks</span>
             {recent.map((session) => (
-              <div key={session.id} className="row" style={{ fontSize: 13 }}>
+              <div key={session.id} className="row wrap gap6" style={{ fontSize: 13 }}>
                 <Tag tone={accuracyTone(session.score?.pct ?? null)}>
                   {session.score?.pct ?? 0}%
                 </Tag>
@@ -82,6 +85,7 @@ export function PerformancePanel({ onRetakeMissed }: { onRetakeMissed: (ids: str
                   {session.timed ? ` · ${Math.round(sessionElapsedSeconds(session) / 60)}m` : ""}
                 </span>
                 <span className="dim">{session.startedAt.slice(0, 10)}</span>
+                {session.endedAt && <GhostButton aria-label={`Review ${session.mode} block from ${session.startedAt.slice(0, 10)}`} onClick={() => setReviewId(session.id)}>Review answers</GhostButton>}
               </div>
             ))}
           </div>
@@ -118,5 +122,8 @@ export function PerformancePanel({ onRetakeMissed }: { onRetakeMissed: (ids: str
         </div>
       )}
     </GlassCard>
+    {reviewSession && <SessionReviewModal session={reviewSession} onClose={() => setReviewId(undefined)}
+      onPractice={(ids) => { setReviewId(undefined); onRetakeMissed(ids); }} />}
+    </>
   );
 }

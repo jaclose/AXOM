@@ -1,4 +1,5 @@
 import { expect, reloadAfterSave, seedOnboarded, test } from "./fixtures";
+import { STORAGE_KEYS } from "../src/lib/brand";
 
 // A deck that explains its questions in headed sections ("Why it's right",
 // "Why not the others", "High-yield"). After the learner checks an answer,
@@ -59,16 +60,20 @@ function deckPdf(pages: string[][]): Buffer {
   return Buffer.concat(parts);
 }
 
-test("what a deck's own slides teach is offered after an answer, kept, and traced to its page", async ({ page }) => {
+for (const width of [1440, 390]) {
+test(`source teaching and saved block review survive reload at ${width}px`, async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => { if (message.type() === "error" || message.type() === "warning") errors.push(message.text()); });
   const pdf = { name: "Cardiology review.pdf", mimeType: "application/pdf", buffer: deckPdf(PAGES) };
 
   await seedOnboarded(page);
   await page.goto("/#questions");
   await page.getByRole("tab", { name: "Import" }).click();
   await page.getByLabel("Choose a question file to import").setInputFiles(pdf);
-  await expect(page.getByText("Review 3 parsed questions", { exact: false })).toBeVisible();
+  await expect(page.getByText("Review 3 parsed questions", { exact: false })).toBeVisible({ timeout: 60_000 });
   await page.getByLabel("Set title").fill("Cardiology review");
   await page.getByRole("button", { name: "Finalize import" }).click();
   await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
@@ -88,6 +93,8 @@ test("what a deck's own slides teach is offered after an answer, kept, and trace
   await expect(offered).toContainText("Inferior wall infarction");
   await expect(offered).toContainText("Match the leads to the wall, then the wall to the artery.");
   await expect(offered).toContainText("Why A is not the answer");
+  await offered.getByText("Why? Clues, mechanism and alternatives").click();
+  await expect(offered.getByText("Why A is not the answer")).toBeVisible();
   await offered.getByRole("button", { name: "Keep" }).click();
   const kept = page.getByRole("region", { name: "From the source", exact: true });
   await expect(kept).toContainText("Match the leads to the wall, then the wall to the artery.");
@@ -116,5 +123,61 @@ test("what a deck's own slides teach is offered after an answer, kept, and trace
   expect(size.width).toBeGreaterThan(900);
   expect(size.height / size.width).toBeCloseTo(792 / 612, 1);
   expect(size.shown).toBeGreaterThan(200);
+  await kept.getByRole("button", { name: "Hide the source page" }).click();
+  for (let index = 0; index < 2; index += 1) {
+    await page.getByRole("button", { name: "Next question", exact: true }).click();
+    await page.getByLabel("Question stem").focus();
+    await page.keyboard.press("A");
+    await page.keyboard.press("Enter");
+  }
+  await page.getByRole("button", { name: "Finish block", exact: true }).click();
+  await page.getByRole("button", { name: "Review answers and Decode", exact: true }).click();
+  const review = page.getByRole("dialog", { name: "Review saved block", exact: true });
+  await expect(review).toContainText("Missed when submitted");
+  await expect(review).toContainText("Match the leads to the wall, then the wall to the artery.");
+  await review.getByRole("button", { name: "Flagged", exact: true }).click();
+  await expect(review.getByRole("status")).toContainText("No flagged questions");
+  await review.getByRole("button", { name: "All answers", exact: true }).click();
+  await review.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(review).toContainText("Your answer: A");
+  await review.getByRole("button", { name: "Previous", exact: true }).click();
+  await page.screenshot({ path: `/tmp/axom-saved-review-${width}.png` });
+  await review.getByText("Source explanation", { exact: true }).click();
+  await expect(review.getByText("Inferior wall infarction WHY IT'S RIGHT", { exact: false })).toBeVisible();
+  await review.getByText("Source explanation", { exact: true }).click();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await review.getByRole("button", { name: "Close", exact: true }).click();
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+
+  await reloadAfterSave(page);
+  await page.evaluate(() => { window.location.hash = "questions"; });
+  await page.getByRole("tab", { name: "Insights", exact: true }).click();
+  await page.getByText("Session history and breakdowns", { exact: true }).click();
+  await page.getByRole("button", { name: /Review tutor block from/ }).click();
+  await expect(review).toContainText("Match the leads to the wall, then the wall to the artery.");
+  const counts = await page.evaluate(async () => {
+    type State = { questions: Array<{ attempts: unknown[] }>; quizSessions: unknown[] };
+    const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => State } }> }).__AXOM_DEV__;
+    const state = dev.useStore.getState();
+    return { attempts: state.questions.map((question) => question.attempts.length), sessions: state.quizSessions.length };
+  });
+  expect(counts).toEqual({ attempts: [1, 1, 1], sessions: 1 });
+  await page.evaluate((key) => localStorage.setItem(key, "dark"), STORAGE_KEYS.themePreference);
+  await reloadAfterSave(page);
+  await page.evaluate(() => { window.location.hash = "questions"; });
+  await page.getByRole("tab", { name: "Insights", exact: true }).click();
+  await page.getByText("Session history and breakdowns", { exact: true }).click();
+  await page.getByRole("button", { name: /Review tutor block from/ }).click();
+  await review.getByRole("region", { name: "From the source", exact: true }).scrollIntoViewIfNeeded();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.screenshot({ path: `/tmp/axom-saved-review-dark-${width}.png` });
+  await review.getByRole("button", { name: "Practice 2 missed" }).click();
+  await expect(page.getByRole("heading", { name: "Tutor · 1 of 2", exact: true })).toBeVisible();
+  await page.getByLabel("Question stem").focus();
+  await page.keyboard.press("C");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("region", { name: "From the source", exact: true })).toBeVisible();
+
   expect(errors).toEqual([]);
 });
+}

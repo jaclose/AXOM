@@ -19,13 +19,15 @@ const same = (a: string | undefined, b: string | undefined) => (a ?? "").replace
  * as teaching. A reading of the source's slides, or a model's, is shown as a
  * proposal to keep or discard. Nothing is stored until the learner decides.
  */
-export function SourceTeaching({ question, document: source, siblings, provider, onChange }: {
+export function SourceTeaching({ question, document: source, siblings, provider, compact = false, onChange }: {
   question: QuestionRecord;
   /** The question's source document, when it is in the library. */
   document?: SourceDocument;
   /** Every question imported from the same source, so a page that holds two is not guessed at. */
   siblings?: readonly QuestionRecord[];
   provider?: AIProvider | null;
+  /** Lead with the rule; leave mechanism and distractor detail one step away. */
+  compact?: boolean;
   onChange: (analyses: QuestionAnalysis[] | undefined) => void;
 }) {
   const headingId = useId();
@@ -49,12 +51,13 @@ export function SourceTeaching({ question, document: source, siblings, provider,
   }, [kept, question, siblings, source]);
   const shown = kept ?? proposal;
 
-  const canAsk = Boolean(provider) && !shown && view.answer !== undefined;
+  const hasSourceText = questionSourcePages(question).some((number) => source?.pageTexts?.[number - 1]?.trim());
+  const canAsk = Boolean(provider) && hasSourceText && !shown && view.answer !== undefined;
   const pages = shown ? analysisPages(shown) : questionSourcePages(question);
   const page = pagePicked && pages.includes(pagePicked) ? pagePicked : pages[0];
   const taken = undo?.questionId === question.id ? undo : undefined;
   // With nothing to teach and no way to ask, the feedback above already says all there is.
-  if (!shown && !canAsk && !taken) return null;
+  if (!shown && !canAsk && !taken && !(compact && source && pages.length)) return null;
 
   const notes = (shown?.distractors ?? []).filter((note) => !same(note.whyWrong, question.choiceRationales?.[note.key]));
   const ownExplanation = shown?.explanation && !same(shown.explanation, question.explanation) ? shown.explanation : undefined;
@@ -82,6 +85,8 @@ export function SourceTeaching({ question, document: source, siblings, provider,
       const analysis = batch.analyses[0];
       if (analysis) onChange(withAnalysis(question.analyses, analysis));
       else setProblem(batch.errors[0]?.message ?? "No analysis came back. Try again.");
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : "The source could not be read. Try again.");
     } finally {
       setBusy(false);
     }
@@ -120,6 +125,9 @@ export function SourceTeaching({ question, document: source, siblings, provider,
           <p>{shown.rule}</p>
         </div>
       )}
+      {shown?.task && <p className="sub"><b>What this tests:</b> {shown.task}</p>}
+      {shown && <details className="source-teaching-depth" open={!compact}>
+      <summary>Why? Clues, mechanism and alternatives</summary>
       {shown && shown.decisiveClues.length > 0 && (
         <div className="feedback-explanation">
           <span className="field-label">What decides it</span>
@@ -144,6 +152,7 @@ export function SourceTeaching({ question, document: source, siblings, provider,
           ))}
         </div>
       )}
+      </details>}
 
       {source && page && (
         <div className="source-teaching-trace">

@@ -339,11 +339,28 @@
 /* Source teaching (lib/decode): the same card as provenance, holding the
    feedback blocks that already exist. Only the list, the page and the
    problem line are new. */
-.source-teaching { display: grid; gap: 10px; margin-block: 4px; padding: 13px; border: 1px solid rgba(230,226,214,.08); border-radius: var(--radius-md); background: rgba(230,226,214,.025); }
+.source-teaching { display: grid; gap: 10px; margin-block: 4px; padding: 13px; border: 1px solid var(--hairline); border-radius: var(--radius-md); background: var(--surface-1); }
 .source-teaching-title { display: inline-flex; align-items: center; gap: 6px; }
 .source-teaching-list { margin: 7px 0 0; padding-left: 18px; display: grid; gap: 4px; color: var(--text-80); font-size: var(--fs-base); line-height: var(--leading-relaxed); max-width: 68ch; }
 .source-teaching .rationale-lead p + p { margin-top: 4px; }
 .source-teaching-trace { display: grid; gap: 10px; }
+.source-teaching-depth > summary, .session-review-why > summary { cursor: pointer; min-height: 44px; align-content: center; color: var(--text-80); font-weight: var(--fw-semibold); }
+.source-teaching-depth[open] > summary { margin-bottom: 8px; }
+.modal.session-review-modal { max-width: 900px; display: flex; flex-direction: column; overflow: hidden; }
+.session-review-modal > .spread, .session-review-modal > .modal-actions { flex-shrink: 0; }
+.session-review-modal > .modal-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
+.session-review-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--hairline); }
+.session-review-heading p { margin: 6px 0; font-family: var(--font-display); font-size: var(--fs-lg); text-wrap: balance; }
+.session-review-filters { display: flex; flex-wrap: wrap; gap: 8px; padding-block: 12px; }
+.session-review-filters button { min-height: 44px; }
+.session-review-question { display: grid; gap: 16px; min-width: 0; }
+.session-review-question p { max-width: 68ch; overflow-wrap: anywhere; }
+.session-review-options { list-style: none; display: grid; gap: 8px; padding: 0; margin: 0; }
+.session-review-options > li { display: grid; grid-template-columns: 1.5em minmax(0, 1fr); align-items: baseline; gap: 8px; padding: 12px; border: 1px solid var(--hairline); border-radius: var(--radius-sm); }
+.session-review-options > li > .sub { grid-column: 2; }
+.session-review-options .is-correct { border-color: var(--gold-line); background: var(--gold-soft); }
+.session-review-explanation { padding-block: 16px; border-block: 1px solid var(--hairline); }
+.session-review-citation { margin: 0; }
 .source-page-preview { display: grid; gap: 8px; margin: 0; min-width: 0; }
 .source-page-preview canvas { display: block; width: 100%; height: auto; border-radius: var(--radius-sm); border: 1px solid var(--hairline); background: #fff; }
 .source-page-preview canvas[hidden] { display: none; }

@@ -104,13 +104,27 @@ Tests: `lib/decode/decode.test.ts`, `lib/decode/sources.test.ts`, `lib/decode/te
 is imported, an answer checked, the teaching kept, the page reloaded and the source page drawn
 from the attached original).
 
+## Saved block review
+
+Completed blocks can be reopened from results or Insights > Session history. The saved
+answer and its original result remain unchanged while the current canonical question,
+ordered figures/tables, source explanation and reviewed Decode teaching are inspected.
+All/missed/flagged filters and next/previous navigation do not record new attempts.
+Practice missed explicitly starts a new Tutor run. Removed questions retain their saved
+result; uncertain current keys are labeled and excluded from practice. Tutor and saved
+review lead with the rule, with mechanism/distractor detail under an optional “Why?”.
+Model analysis is offered only when the question's source pages contain text.
+Acceptance: `SessionReviewModal.test.tsx`, `SourceTeaching.test.tsx`, and
+`e2e/source-teaching.spec.ts` cover desktop/mobile, save/reload, source trace and unchanged
+attempt counts. This is a saved-block review, not the future pre-exam synthesis.
+
 ## Known limits
 
 No lecture line was read in the two real decks; why was not looked into. A drawn page is
 small on a phone and cannot be enlarged yet; its text is offered beside it. The original
 file is not kept at import: the learner attaches it the first time a page is opened.
-Concept groups and "questions without teaching" have no screen. Teaching is not shown on
-the block results screen or in the Question Bank's question view.
+Concept groups and "questions without teaching" have no screen. The standalone Question
+Bank question view does not yet show Decode teaching.
 
 Measured on the learner's own files on 2026-10-07 (counts only): of 471 readable PDFs, 118
 are decks holding 1,860 questions. Two decks lay their teaching out in headed sections, and

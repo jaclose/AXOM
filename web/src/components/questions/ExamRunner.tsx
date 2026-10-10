@@ -27,6 +27,7 @@ import { pushToast } from "../../lib/toast";
 import { CourseBankBrowser } from "./CourseBankBrowser";
 import { QuizFeedback } from "./QuizFeedback";
 import { SourceTeaching } from "./SourceTeaching";
+import { SessionReviewModal } from "./SessionReviewModal";
 import { accuracyTone } from "../../lib/library";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { formatSeconds, pacingInsight, summarizePacing } from "../../lib/quizPacing";
@@ -218,6 +219,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const localAnnotationsRef = useRef(localAnnotations);
   const [annotationStatus, setAnnotationStatus] = useState<string>();
   const [session, setSession] = useState<QuizSession | null>(null);
+  const [reviewingAnswers, setReviewingAnswers] = useState(false);
   const [reviewSetCreated, setReviewSetCreated] = useState(false);
   /** Also put answers that were right but unsure or slow into the review set. */
   const [includeShaky, setIncludeShaky] = useState(false);
@@ -931,6 +933,22 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   }
 
   if (stage === "results" && session) {
+    if (reviewingAnswers) return <SessionReviewModal session={session} onClose={() => setReviewingAnswers(false)} onPractice={(ids) => {
+      const retry = buildQuizPool(questions.filter((entry) => ids.includes(entry.id)), { count: ids.length, status: "all", ordered: true });
+      if (!retry.length) return;
+      setPool(retry);
+      setMode("tutor");
+      openBlock(startBlock({ ids: retry.map((entry) => entry.id), mode: "tutor", now: Date.now() }));
+      setCertainties({});
+      setChecked({});
+      setErrorType("");
+      setConfidence(undefined);
+      setSession(null);
+      setRunId(crypto.randomUUID());
+      setStartedAt(new Date().toISOString());
+      setReviewingAnswers(false);
+      setStage("running");
+    }} />;
     const missed = missedQuestionIds(session);
     const byId = new Map(questions.map((q) => [q.id, q]));
     const retakePool = buildQuizPool(
@@ -947,6 +965,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       <Modal title="Block results" onClose={onClose}
         footer={
           <>
+            <GhostButton onClick={() => setReviewingAnswers(true)}>Review answers and Decode</GhostButton>
             {retakePool.length > 0 && (
               <GhostButton onClick={() => {
                 setPool(retakePool);
@@ -1269,6 +1288,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             </SelectField>
           )}
           <SourceTeaching
+            key={question.id}
+            compact
             question={question}
             document={sourceDocument}
             siblings={sourceSiblings}

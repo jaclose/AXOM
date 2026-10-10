@@ -56,6 +56,17 @@ const provider = (answer: () => unknown): AIProvider => ({
 });
 
 describe("what the source teaches, after an answer", () => {
+  it("keeps mechanism detail optional in compact mode and requires source text before asking a model", async () => {
+    const user = userEvent.setup();
+    const view = render(<SourceTeaching compact question={first} document={source} siblings={siblings} onChange={() => {}} />);
+    const details = screen.getByText("Why? Clues, mechanism and alternatives").closest("details")!;
+    expect(details.open).toBe(false);
+    await user.click(screen.getByText("Why? Clues, mechanism and alternatives"));
+    expect(details.open).toBe(true);
+    view.rerender(<SourceTeaching compact question={siblings[1]} provider={provider(() => ({}))} onChange={() => {}} />);
+    expect(screen.queryByRole("button", { name: /Ask for an analysis/ })).toBeNull();
+  });
+
   it("offers what the source's own slides say as a proposal, and stores nothing until the learner decides", async () => {
     const onChange = vi.fn();
     const user = userEvent.setup();

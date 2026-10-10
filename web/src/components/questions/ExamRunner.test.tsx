@@ -137,9 +137,9 @@ describe("ExamRunner saved blocks and selection semantics", () => {
 
     expect(screen.getByRole("checkbox", { name: /Timed/i })).toHaveProperty("checked", true);
     expect(screen.getByRole("button", { name: /Exam \(feedback at the end\)/i }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: "Saved set (1)" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("region", { name: "Practice source" }).textContent).toContain("Saved set");
     expect(screen.getByRole("button", { name: "10" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: "All" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByLabelText("Question pool")).toHaveProperty("value", "all");
     expect(mocked.saveQuizBlock).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: /Start exam block/i }));
