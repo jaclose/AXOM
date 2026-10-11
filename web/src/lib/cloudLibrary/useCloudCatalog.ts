@@ -26,6 +26,9 @@ export function useCloudCatalog() {
         const client = await loadSupabase();
         if (!client || !present()) return;
         const session = await client.auth.getSession();
+        // The view may have closed while auth held its lock. Do not subscribe
+        // after cleanup or allow a stale refresh to replace the current view.
+        if (!present()) return;
         if (session.error) throw new Error("Sign-in could not be checked. Retry the library without changing your saved work.");
         identity = session.data.session?.user.id ?? "anonymous";
         setState({ status: "loading", identity });
