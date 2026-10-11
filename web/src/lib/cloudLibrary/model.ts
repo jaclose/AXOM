@@ -25,7 +25,8 @@ function count(value: unknown, max = 10000): number {
 }
 export function safeCatalogPath(value: unknown): string {
   const path = string(value);
-  if (path.startsWith("/") || /[\\\x00-\x1f\x7f%?#]/.test(path) || path.split("/").some(p => !p || p === "." || p === "..")) throw new Error("Unsafe catalog path.");
+  const hasControl = [...path].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127);
+  if (path.startsWith("/") || /[\\%?#]/.test(path) || hasControl || path.split("/").some(p => !p || p === "." || p === "..")) throw new Error("Unsafe catalog path.");
   return path;
 }
 export function parseRelease(value: unknown): CatalogRelease {

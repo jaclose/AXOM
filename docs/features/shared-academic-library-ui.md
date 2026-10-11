@@ -1,6 +1,6 @@
 ---
 tags:
-  - axom/features
+  - axom/feature
 authority: canonical
 ---
 # Shared academic library interface
