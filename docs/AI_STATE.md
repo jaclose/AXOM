@@ -5,74 +5,78 @@ authority: current-state
 ---
 # AXOM current AI state
 
-Snapshot: 2026-10-10. This is the isolated `feat/shared-academic-catalog` development
-branch, PR 20 against `integration/axom-next-2026-10-07`, based on `c23e8c26`.
-It is not main or production. Verify live refs before continuing.
+Snapshot: 2026-10-10. Isolated `feat/shared-academic-catalog`, draft PR 20 against
+`integration/axom-next-2026-10-07`, based on `c23e8c26`. Not main or production.
+Verify current refs and actual CI before continuing; other worktrees are untouched.
 
-## Active delivery correction
+## Active product correction
 
 JD requires a SITE-WIDE CLOUD Course Template Library and QBank, not a personal
-folder installer. Shared content is published once for its permitted audience;
-learner course activation, attempts, notes and review remain private. Local-first
-storage is the selected-content cache, not the only distribution mechanism.
+folder installer. Shared content is published once for its permitted audience.
+Course activation, progress, attempts and notes remain private. The local vault
+caches selected content; it is no longer the only proposed distribution mechanism.
 
-Implemented on this branch: versioned cloud releases, catalog entries, exact asset
-manifests, audience grants, private Storage policy boundaries, automatic account-aware
-metadata discovery, Load Course/Create Quiz through canonical stores, and operator
-preparation/publication tools. Details and source routes:
+Implemented: versioned releases, catalog entries, checksum file manifests, audience
+grants, private Storage policies, account-aware discovery, Load Course/Create Quiz
+through existing stores, and operator preparation/publication tools. Canonical guide:
 [Shared academic catalog](features/shared-academic-catalog.md).
 
-The client never contains a publisher credential. The publisher requires the exact
-reviewed release ID, project identity, rights reference and audience. It filters held
-answers/assets, preserves source originals and uploads only approved prepared content.
-No source bytes or personal data are added to public Git.
+The publisher requires exact release approval, project identity, rights reference and
+audience. Uncertain source keys/assets remain held. No private content, user records,
+server credentials or personal collection data were added to Git. Preparation refuses
+overlapping source/output paths and does not publish unused assets from failed banks.
 
-## Verification and release boundaries
+## Verified checkpoint and next CI
 
-GitHub Actions is the execution environment because JD's Desktop Commander is offline.
-Remote production inspection confirmed AXOM project `jofkmfwkidubxcutkwzf` is healthy;
-no academic_catalog tables existed at inspection. No production migration was applied.
+At `92af4e73`, GitHub Actions run 38103986818 passed BOTH web and native jobs:
+repository hygiene, 72 root tests, TypeScript, lint, full unit suite, production build,
+two catalog browser journeys (1440px and 390px), update-consent/persistence checks,
+offline reopening, and native Rust fmt/check/tests. The high-severity production
+dependency gate passed; three existing moderate mammoth/argparse/sprintf advisories
+remain. No package manifests or lockfiles were changed.
 
-At `4f06d9e7` native CI passed web compilation/build, Rust formatting/check/tests.
-Web CI stopped at a singular/plural graph-tag error, now corrected. Expanded contract,
-filesystem, canonical-load, policy and browser tests are awaiting the next full run.
-Do not inherit old all-green counts as evidence for this new catalog.
+Browser journeys exercised automatic catalog discovery, course loading, signed image
+fetch, canonical practice, Decode review and persisted reload using synthetic HTTP
+fixtures. Local PGlite tests covered anonymous/two-account access, exact object policies,
+immutable publication, and the entire existing migration chain. These are NOT hosted
+Supabase Storage or real school-content acceptance.
 
-Unit/UI tests use synthetic/mocked inputs. SQL tests execute both migrations in isolated
-PGlite with anonymous and separate account roles. Browser contract tests route synthetic
-HTTP through the real SDK, UI, question engine and persistence. None proves live hosted
-publication, two-account Storage behavior, or availability of JD's actual corpus.
+This follow-up threads account-validity guards through async course activation and adds
+two race regressions. The final CI must pass at its exact commit, not inherit 92af4e73's
+result. PR checks and comments carry the latest outcome without another roadmap.
 
-Main and production remain unchanged. Development pushes are authorized. Do not merge
-or deploy this draft until checks pass and the required hosted verification/approval
-is complete. Vercel main updates trigger production. No force push, data reset, stash
-or worktree removal, or publication beyond the approved content audience.
+## Actual environment and blockers
 
-## Prepared material and remaining work
+Desktop Commander on JD's Mac is offline. Its prepared collection is not accessible.
+Historical location: Application Support/AXOM/private-library. Previous local report:
+28 templates; 362 ready questions in 43 sets; 36 image-bearing questions. The 651-entry
+source inventory includes review-held/unsupported/missing content, not all-ready banks.
 
-The last locally prepared collection is outside Git at Application Support/AXOM/private-library
-on JD's Mac. Historical count: 28 templates, 362 ready questions/43 sets,36 image-bearing
-questions. The 651-entry inventory is not all-ready content. Original source access is
-blocked by the offline Mac connector; do not claim upload or corpus delivery.
+Read-only inspection confirmed production project `jofkmfwkidubxcutkwzf` healthy and no
+academic_catalog tables yet. NO production migration, content publication or deployment
+was performed. No staging project/paid branch was created. Obtain an authorized hosted
+environment and publication audience before network writes. Apply both catalog migrations
+there, publish one reviewed course/image-rich bank, verify independent accounts and denied
+access, then use the same resumable publisher for the remaining authorized collection.
 
-Next: finish CI/browser validation, then obtain access to the existing prepared files
-and approval for an appropriate hosted environment/migration and content audience.
-Publish one authorized course and image-rich bank, verify actual separate accounts,
-then continue the remaining prepared collection through the same publisher.
+Main remains untouched. Dev pushes are authorized; main/production deployment and private
+source publication retain explicit approval boundaries. Never force push, erase workspaces,
+drop stashes, delete worktrees, expose credentials or publish beyond the authorized audience.
 
-Full original source-page/Slide assets, supplementary question generation, complete
-Anki remediation, deeper analysis, full-corpus learner sync and remaining Ideas still
-need acceptance. The existing learner snapshot limit is unchanged. The new shared
-catalog must not be described as fixing every account-sync or offline-revocation case.
+## Remaining scope and protection
 
-## Existing contracts and protection
+Original PDF/source-page and interactive Slide delivery, supplementary generation, complete
+Anki remediation, deeper analysis and remaining Ideas still need acceptance. The learner
+snapshot limit is unchanged: very large downloaded local libraries may still exceed it.
+Catalog distribution is not a claim of full-corpus learner synchronization or offline DRM.
 
-React/TypeScript web, root src-tauri shell, local schema 34, Noctyrium storage IDs
-unchanged. Reuse reviewed import/saveBank, templates, media, attempts, Decode and
-course logging. No parallel question engine, AI provider, scheduler or learner store.
+React/TypeScript web, root src-tauri shell, local schema 34 and Noctyrium identifiers
+remain. Reuse saveBank/reviewed imports, templates, attachments, attempts, Decode and
+course logging; no parallel question engine, AI endpoint, scheduler or learner store.
+The small optional guard on course activation protects against identity changes while
+waiting for persistence; ordinary local loading retains its existing default behavior.
 
-Read current coordination BOARD ownership before any local writes or integration.
-Its absence is not a clean ownership handoff. Other active worktrees and the separate
-Communications/Pulse owner remain protected. This branch changes only catalog entry
-points and its new modules; no incidental source cleanup or dependency upgrades.
-Prior private-library delivery evidence remains at `5355e5e7:docs/AI_STATE.md`.
+Before local writes or integration, recheck current BOARD ownership. Its absence is not
+permission to overwrite another session. Communications/Pulse, other active worktrees,
+drafts, recovery refs and frozen branches remain protected. No incidental cleanup.
+Prior private-folder implementation evidence: `5355e5e7:docs/AI_STATE.md`.

@@ -37,7 +37,8 @@ jobs:
           set +e
           npm --prefix web run quality > "$RUNNER_TEMP/axom-web-quality.log" 2>&1
           result=$?
-          tail -n 180 "$RUNNER_TEMP/axom-web-quality.log"
+          grep -E 'Test Files|Tests |FAIL|Error:|error TS' "$RUNNER_TEMP/axom-web-quality.log" | tail -n 20
+          tail -n 80 "$RUNNER_TEMP/axom-web-quality.log"
           exit "$result"
       - name: Install browser for production update checks
         run: npm --prefix web exec -- playwright install --with-deps chromium

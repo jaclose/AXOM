@@ -63,7 +63,7 @@ export function loadCloudCourse(course:CatalogCourse,signal:AbortSignal):Promise
       const ids=new Set(documents.map(d=>d.id));
       const matches=books.filter(b=>moduleKey(b.term)===moduleKey(course.term) && moduleKey(b.module)===moduleKey(course.module) && b.templateIds?.some(id=>ids.has(id)));
       if(matches.length!==1)throw new Error("The published course scope needs review. Its template is saved; use Customize Weeks & Activities rather than guessing a term.");
-      await guard.verify();const result=await loadPreparedCourse(matches[0]);guard.assert();
+      await guard.verify();const result=await loadPreparedCourse(matches[0],guard.assert);guard.assert();
       if(result.status==="failed")throw new Error(result.message||"The course could not be saved.");
       return result.status==="nothing-to-save" ? "This course is already in your tracker. Progress was preserved." : "Course loaded. Your progress is saved on this device.";
     } finally {guard.close();}
