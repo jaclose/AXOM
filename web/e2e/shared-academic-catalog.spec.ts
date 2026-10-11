@@ -2,18 +2,19 @@ import { createHash } from "node:crypto";
 import type { Page } from "@playwright/test";
 import { test, expect, seedOnboarded, reloadAfterSave } from "./fixtures";
 import type { PreparedBank } from "../src/lib/privateLibrary/types";
-type CatalogTestWindow = Window & {
-  __AXOM_E2E_ACCOUNT__: { url: string; key: string };
-  __AXOM_DEV__: Promise<{ flushVault: () => Promise<void>; useStore: { getState: () => {
-    documents: { fileType: string }[]; tracker: { templateKey?: string }[];
-    questions: { attempts: unknown[] }[];
-  } } }>;
-};
+interface DevHarness {
+  flushVault: () => Promise<void>;
+  useStore: { getState: () => {
+    documents: Array<{ fileType?: string }>;
+    tracker: Array<{ templateKey?: string }>;
+    questions: Array<{ attempts: unknown[] }>;
+  } };
+}
 const origin = "https://catalog-test.supabase.co";
 const release = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const hash = (bytes: Uint8Array | string) => createHash("sha256").update(bytes).digest("hex");
 async function catalogBackend(page: Page) {
-  // This is an SDK/browser contract fixture, not hosted Supabase acceptance.
+  // SDK/browser contract fixture, not hosted Supabase acceptance.
   const template = Buffer.from("T5 - GOER - Lectures:\nWeek 2:\nLecture 01 Synthetic catalog example [Lecture]\n");
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
   const bank: PreparedBank = { pkg: { manifest: { schemaVersion: 1, course: { name: "GOER", term: 5, week: 2 },
@@ -37,7 +38,9 @@ async function catalogBackend(page: Page) {
     { ...common, id: "bank", kind: "bank", title: "Synthetic published set", question_count: 1, image_question_count: 1, activity_count: 0, payload_path: "banks/test/bank.json" },
   ];
   const requests: string[] = [];
-  await page.addInitScript(url => { (window as unknown as CatalogTestWindow).__AXOM_E2E_ACCOUNT__ = { url, key: "synthetic-public-test-key" }; }, origin);
+  await page.addInitScript(url => {
+    (window as Window & { __AXOM_E2E_ACCOUNT__?: { url: string; key: string } }).__AXOM_E2E_ACCOUNT__ = { url, key: "synthetic-public-test-key" };
+  }, origin);
   await page.route(`${origin}/**`, async route => {
     const request = route.request(), url = new URL(request.url());
     const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*", "Access-Control-Allow-Methods": "GET,POST,OPTIONS" };
@@ -91,7 +94,8 @@ for (const width of [1440, 390]) test(`shared catalog loads course and image qui
   await page.getByRole("button", { name: "Done", exact: true }).click();
   await reloadAfterSave(page);
   const state = await page.evaluate(async () => {
-    const dev = await (window as unknown as CatalogTestWindow).__AXOM_DEV__; await dev.flushVault(); const s = dev.useStore.getState();
+    const dev = await (window as unknown as { __AXOM_DEV__: Promise<DevHarness> }).__AXOM_DEV__;
+    await dev.flushVault(); const s = dev.useStore.getState();
     return { templates: s.documents.filter(d => d.fileType === "axom-course-template").length,
       activities: s.tracker.filter(t => t.templateKey).length,
       questions: s.questions.length, attempts: s.questions.reduce((n, q) => n + q.attempts.length, 0) };
