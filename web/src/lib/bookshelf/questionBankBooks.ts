@@ -151,8 +151,9 @@ export function buildQuestionBankBooks(input: QuestionBankInput): QuestionBankBo
   for (const set of input.sets) {
     const members = set.questionIds.flatMap((id) => (questionsById.has(id) ? [questionsById.get(id)!] : []));
     const scopes = members.map((question) => questionScope(question, setsById));
-    const module = set.scope?.module ?? same(scopes.map((scope) => scope.module));
-    if (!module) continue;
+    // Older imports and mixed sets have no single module. Keep them visible
+    // under the same unfiled branch used by the week browser.
+    const module = (set.scope?.module ?? same(scopes.map((scope) => scope.module))) || "Unfiled & mixed";
     const draft = draftFor(module, set.scope?.courseId ?? same(scopes.map((scope) => scope.courseId)));
     const week = set.scope?.week ?? same(scopes.map((scope) => scope.week));
     const awaiting = members.filter((question) => questionMappingStatus(question) !== "ready").length;
@@ -177,14 +178,14 @@ export function buildQuestionBankBooks(input: QuestionBankInput): QuestionBankBo
     }
   }
 
-  // Questions that belong to a module but to no set.
+  // Questions in no set, including older imports with no course assignment.
   const looseByScope = new Map<string, { module: string; week?: number; courseId?: string; questions: QuestionRecord[] }>();
   for (const question of input.questions) {
     if (inSet.has(question.id)) continue;
     const scope = questionScope(question, setsById);
-    if (!scope.module) continue;
-    const key = `${scope.courseId ?? ""}|${moduleKey(scope.module)}|${scope.week ?? ""}`;
-    const entry = looseByScope.get(key) ?? { module: scope.module, courseId: scope.courseId, ...(scope.week !== undefined ? { week: scope.week } : {}), questions: [] };
+    const module = scope.module || "Unfiled & mixed";
+    const key = `${scope.courseId ?? ""}|${moduleKey(module)}|${scope.week ?? ""}`;
+    const entry = looseByScope.get(key) ?? { module, courseId: scope.courseId, ...(scope.week !== undefined ? { week: scope.week } : {}), questions: [] };
     entry.questions.push(question);
     looseByScope.set(key, entry);
   }

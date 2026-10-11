@@ -81,6 +81,14 @@ export function fillNoise(kind: "brown" | "pink" | "white", channel: Float32Arra
     const t = i / fade;
     channel[i] = samples[i] * t + samples[channel.length + i] * (1 - t);
   }
+  // Filtered random runs can exceed full scale. Attenuate the whole loop only
+  // when needed, preserving its waveform and crossfade instead of clipping peaks.
+  let peak = 0;
+  for (const sample of channel) peak = Math.max(peak, Math.abs(sample));
+  if (peak >= 1) {
+    const gain = 0.99 / peak;
+    for (let i = 0; i < channel.length; i += 1) channel[i] *= gain;
+  }
 }
 
 /** A diffuse stereo room: decaying noise, slightly different per ear. */
