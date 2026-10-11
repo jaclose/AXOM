@@ -22,6 +22,17 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm --prefix web ci --no-audit --no-fund
+      - name: Isolated validation inputs
+        run: |
+          git archive --format=tar HEAD web/src web/scripts web/e2e web/package.json web/package-lock.json web/tsconfig.json web/tsconfig.app.json web/tsconfig.node.json web/eslint.config.js web/vite.config.ts web/playwright.config.ts scripts supabase/migrations docs AGENTS.md CLAUDE.md .github .gitattributes .gitignore package.json > /tmp/axom-catalog-source.tar
+          tar -czf /tmp/axom-catalog-dependencies.tgz web/node_modules
+      - uses: actions/upload-artifact@v4
+        with:
+          name: catalog-validation-inputs
+          path: |
+            /tmp/axom-catalog-source.tar
+            /tmp/axom-catalog-dependencies.tgz
+          retention-days: 1
       - name: Typecheck
         run: npm --prefix web run typecheck
       - name: Catalog, publisher and integration regressions
