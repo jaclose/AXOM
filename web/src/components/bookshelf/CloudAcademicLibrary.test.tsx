@@ -1,13 +1,14 @@
+// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { CloudAcademicLibrary } from "./CloudAcademicLibrary";
 const mocks = vi.hoisted(() => ({ refresh: vi.fn(), load: vi.fn(), quiz: vi.fn(), state: {} as any }));
 vi.mock("../../lib/cloudLibrary/useCloudCatalog", () => ({ useCloudCatalog: () => ({ state: mocks.state, refresh: mocks.refresh }) }));
 vi.mock("../../lib/cloudLibrary/load", () => ({ loadCloudCourse: (...args: unknown[]) => mocks.load(...args), prepareCloudQuiz: (...args: unknown[]) => mocks.quiz(...args) }));
-// Exercise content/actions independently of the existing animated bookshelf's tests.
+// Action tests are separate from the animated bookshelf's browser tests.
 vi.mock("./AcademicBookshelf", () => ({ AcademicBookshelf: ({ shelves, renderBook }: any) => <div>{shelves.flatMap((s: any) => s.books).map((b: any) => <div key={b.id}>{renderBook(b, () => {})}</div>)}</div> }));
 const release = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-const bank = { release_id: release, id: "bank", kind: "bank", title: "School set", module: "TEST", term: "Term 1", week: 1, question_count: 2, image_question_count: 1, activity_count: 0, payload_path: "bank.json", source_label: "test.txt" };
+const bank = { release_id: release, id: "bank", kind: "bank", title: "School set", module: "TEST", term: "Term 1", week: 1, question_count: 2, image_question_count: 1, activity_count: 0, payload_path: "banks/test/bank.json", source_label: "test.txt" };
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.state = { status: "ready", identity: "account-a", signedIn: true, catalog: { releases: [], entries: [bank] } };

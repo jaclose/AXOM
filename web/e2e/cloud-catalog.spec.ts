@@ -1,6 +1,5 @@
-// Browser integration against synthetic HTTP responses, NOT hosted-account acceptance.
-// No course/question rows are injected into the workspace. All writes use the
-// catalog client and the existing course/question persistence paths.
+// Synthetic HTTP transport with real frontend import/save paths. This is not
+// hosted-account, live RLS, or real-corpus publication acceptance.
 import { test, expect, type Page } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { completeSetup } from "../scripts/setup-flow.mjs";
@@ -62,11 +61,14 @@ async function open(page: Page) {
   const promise = page.getByRole("dialog", { name: "A promise to yourself" });
   if (await promise.isVisible()) await promise.getByRole("button", { name: "Review later", exact: true }).click();
 }
-const readState = (page: Page) => page.evaluate(async () => {
-  const { useStore, flushVault } = await (window as unknown as { __AXOM_DEV__: Promise<{ flushVault: () => Promise<void>; useStore: { getState: () => { tracker: { templateKey?: string }[]; questions: { attempts: unknown[]; attachments?: unknown[] }[] } } }> }).__AXOM_DEV__;
-  await flushVault(); const s = useStore.getState();
-  return { activities: s.tracker.filter(t => t.templateKey).length, questions: s.questions.length, images: s.questions.filter(q => q.attachments?.length).length, attempts: s.questions.reduce((n,q) => n + q.attempts.length, 0) };
-});
+async function readState(page: Page) {
+  await expect(page.locator(".shell")).toBeAttached();
+  return page.evaluate(async () => {
+    const { useStore, flushVault } = await (window as unknown as { __AXOM_DEV__: Promise<{ flushVault: () => Promise<void>; useStore: { getState: () => { tracker: { templateKey?: string }[]; questions: { attempts: unknown[]; attachments?: unknown[] }[] } } }> }).__AXOM_DEV__;
+    await flushVault(); const s = useStore.getState();
+    return { activities: s.tracker.filter(t => t.templateKey).length, questions: s.questions.length, images: s.questions.filter(q => q.attachments?.length).length, attempts: s.questions.reduce((n,q) => n + q.attempts.length, 0) };
+  });
+}
 test("published course and image-rich set work without folder import", async ({ page }, info) => {
   test.setTimeout(120_000);
   const errors: string[] = []; page.on("pageerror", e => errors.push(e.message));
@@ -97,8 +99,9 @@ test("published course and image-rich set work without folder import", async ({ 
   await book.getByRole("checkbox").check();
   await book.getByRole("spinbutton").fill("1");
   await book.getByRole("button", { name: "Create Quiz", exact: true }).click();
-  const setup = page.getByRole("dialog", { name: "Tutor setup", exact: true });
+  const setup = page.getByRole("dialog", { name: "Set up a tutor block", exact: true });
   await expect(setup).toBeVisible({ timeout: 20_000 });
+  await expect(setup.getByRole("region", { name: "Practice source" })).not.toContainText("Whole question bank");
   await setup.getByRole("button", { name: "Start tutor block", exact: true }).click();
   const question = page.getByLabel("Question stem", { exact: true });
   await expect(question).toBeVisible();
