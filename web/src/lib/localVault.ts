@@ -217,12 +217,16 @@ function writeVault(name: string, value: string, userId: string): Promise<unknow
 // tiny active-profile pointer and device preferences; remove the mirrored
 // state, and the marker that called it newer, after a confirmed vault write.
 function clearFallbackCopy(fallbackStore: Storage | null, name: string, userId: string): void {
-  fallbackStore?.removeItem(name);
-  fallbackStore?.removeItem(fallbackMarkerKey(name));
-  if (userId) {
-    fallbackStore?.setItem(activeUserKey(name), userId);
-    fallbackStore?.removeItem(scopedStateKey(name, userId));
-  }
+  // These optional mirrors must not turn a confirmed IndexedDB write into a
+  // failed save when localStorage is full or unavailable.
+  try {
+    fallbackStore?.removeItem(name);
+    fallbackStore?.removeItem(fallbackMarkerKey(name));
+    if (userId) {
+      fallbackStore?.setItem(activeUserKey(name), userId);
+      fallbackStore?.removeItem(scopedStateKey(name, userId));
+    }
+  } catch { /* IndexedDB already holds the durable workspace. */ }
 }
 
 const vaultStorage: StateStorage = {

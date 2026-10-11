@@ -37,6 +37,8 @@ export class SyncCoordinator {
   private timer: number | undefined;
   private running = false;
   private disposed = false;
+  private changeVersion = 0;
+  private readonly accountUserId = read().accountUserId;
   private status: ProtectionStatus = "saved-locally";
   private listeners = new Set<(status: ProtectionStatus) => void>();
 
@@ -62,6 +64,8 @@ export class SyncCoordinator {
 
   /** Mark the workspace dirty and schedule a debounced upload. */
   queue(): void {
+    if (this.disposed) return;
+    this.changeVersion += 1;
     const meta = read();
     if (!meta.pending || !meta.pendingIdempotencyKey) {
       write({ ...meta, pending: true, pendingIdempotencyKey: meta.pendingIdempotencyKey ?? crypto.randomUUID() });
@@ -191,26 +195,33 @@ export class SyncCoordinator {
     try {
       // A second pass only follows a replayed retry that stored older content (see below).
       for (let pass = 0; pass < 2; pass += 1) {
+        if (this.disposed || read().accountUserId !== this.accountUserId) return;
+        const changeVersion = this.changeVersion;
         const meta = read();
-        const envelope = await snapshotWorkspace(this.state(), {
+        let envelope = await snapshotWorkspace(this.state(), {
+          accountUserId: meta.accountUserId,
           deviceId: deviceId(),
           baseRevision: meta.baseRevision,
           idempotencyKey: meta.pendingIdempotencyKey,
           reason,
         });
+        if (this.disposed || read().accountUserId !== this.accountUserId) return;
         // Nothing changed since the last protected version. Only safe when this
         // key was never sent: a sent upload may have landed without its answer.
-        if (automatic && envelope.contentHash === meta.lastHash && meta.lastProtectedAt && meta.sentIdempotencyKey !== envelope.idempotencyKey) {
+        if (automatic && changeVersion === this.changeVersion && envelope.contentHash === meta.lastHash && meta.lastProtectedAt && meta.sentIdempotencyKey !== envelope.idempotencyKey) {
           write({ ...read(), pending: false, pendingIdempotencyKey: undefined, attempt: 0, lastError: undefined, nextAttemptAt: undefined });
           this.set("protected");
           return;
         }
+        if (this.transport.prepare) envelope = await this.transport.prepare(envelope);
+        if (this.disposed || read().accountUserId !== this.accountUserId) return;
         write({ ...read(), lastAttemptAt: this.iso(0), lastPayloadBytes: envelope.payloadBytes });
         if (envelope.payloadBytes > MAX_SNAPSHOT_BYTES) {
           throw new SyncPushError({ kind: "rejected", rejection: "too-large", status: 0 }, "The workspace is larger than an account can store.");
         }
         write({ ...read(), sentIdempotencyKey: envelope.idempotencyKey });
         const result = await this.transport.push(envelope);
+        if (this.disposed || read().accountUserId !== this.accountUserId) return;
         if (result.status === "conflict") {
           write({
             ...read(),
@@ -227,13 +238,14 @@ export class SyncCoordinator {
         // A replayed retry answers with the revision the first try stored. If the
         // workspace changed in between, that revision is older than what is on
         // this device now: record it as the base and upload again under a new key.
-        const stale = result.idempotent && result.contentHash !== undefined && result.contentHash !== envelope.contentHash;
+        const replayed = result.idempotent && result.contentHash !== undefined && result.contentHash !== envelope.contentHash;
+        const stale = replayed || changeVersion !== this.changeVersion;
         write({
           ...read(),
           baseRevision: result.revision,
           pending: stale,
           pendingIdempotencyKey: stale ? crypto.randomUUID() : undefined,
-          lastHash: stale ? result.contentHash : envelope.contentHash,
+          lastHash: replayed ? result.contentHash : envelope.contentHash,
           lastProtectedAt: this.iso(0),
           attempt: 0,
           conflictServerRevision: undefined,
@@ -248,7 +260,7 @@ export class SyncCoordinator {
       this.rest(read());
       this.schedule(this.delay);
     } catch (error) {
-      this.fail(failureOf(error));
+      if (!this.disposed && read().accountUserId === this.accountUserId) this.fail(failureOf(error));
     }
   }
 

@@ -3,7 +3,7 @@
 // driver, record counts, schema/migration state, last backup age, and the
 // pre-migration snapshot recovery path. No silent states.
 // ===========================================================================
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Database, HardDrive, ShieldCheck, Wrench } from "lucide-react";
 import { useStore } from "../../lib/store";
 import { findOrphans } from "../../lib/orphanRepair";
@@ -11,6 +11,10 @@ import { STORAGE_KEYS } from "../../lib/brand";
 import { GhostButton, Tag } from "../ui/primitives";
 import { pushToast } from "../../lib/toast";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { subscribeVault, useLastVaultWrite } from "./SettingsSections";
+import { readVaultWriteFailure } from "../../lib/vaultActivity";
+import { localVaultStorage, flushLocalVaultWrites } from "../../lib/localVault";
+import { toPortableState } from "../../lib/backup";
 import { TechnicalDetails } from "./TechnicalDetails";
 
 async function probeIndexedDb(): Promise<boolean> {
@@ -28,6 +32,23 @@ async function probeIndexedDb(): Promise<boolean> {
 
 export function DataHealthPanel() {
   const s = useStore();
+  const failure = useSyncExternalStore(subscribeVault, readVaultWriteFailure, () => null);
+  const lastWrite = useLastVaultWrite();
+  const [saving, setSaving] = useState(false);
+  async function retrySave() {
+    setSaving(true);
+    try {
+      await flushLocalVaultWrites();
+      const state = useStore.getState();
+      const options = useStore.persist.getOptions();
+      const value = JSON.stringify({ state: options.partialize ? options.partialize(state) : state, version: options.version });
+      await localVaultStorage.setItem(STORAGE_KEYS.persistedState, value);
+      if (await localVaultStorage.getItem(STORAGE_KEYS.persistedState) !== value) throw new Error("Saving is still unavailable. Export a backup while this window is open.");
+      pushToast({ title: "Workspace saved", tone: "success" });
+    } catch (error) {
+      pushToast({ title: "Keep this window open", body: error instanceof Error ? error.message : "Export a backup before reloading.", tone: "warn" });
+    } finally { setSaving(false); }
+  }
   const [idbOk, setIdbOk] = useState<boolean | null>(null);
   const [storageUsed, setStorageUsed] = useState<string>("Checking…");
 
@@ -70,10 +91,11 @@ export function DataHealthPanel() {
 
   return (
     <div className="stack" style={{ gap: 12 }}>
-      {idbOk === false && (
+      {failure && <div className="data-health-warning" role="status"><b>Your latest changes need saving</b><span>Keep this window open. Try saving again or export a backup in Emergency recovery.</span><GhostButton disabled={saving} onClick={retrySave}>{saving ? "Saving…" : "Try saving again"}</GhostButton></div>}
+      {!failure && idbOk === false && (
         <div className="data-health-warning" role="status">
           <b>This browser is using its backup storage</b>
-          <span>Everything works, but browser cleanup can clear it more easily. Export a copy in Emergency recovery to be safe.</span>
+          <span>The browser could not open the main vault. Export a copy in Emergency recovery to be safe.</span>
         </div>
       )}
 
@@ -101,17 +123,17 @@ export function DataHealthPanel() {
 
       <TechnicalDetails>
         <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
-          <Tag tone={idbOk === false ? "orange" : "green"}>
-            <Database size={ICON_SIZE.microInline} /> {idbOk === null ? "Checking storage…" : idbOk ? "IndexedDB vault active" : "localStorage fallback"}
+          <Tag tone={failure || idbOk === false ? "orange" : idbOk === null ? "neutral" : "green"}>
+            <Database size={ICON_SIZE.microInline} /> {idbOk === null ? "Checking storage…" : idbOk ? "IndexedDB available" : "localStorage fallback"}
           </Tag>
-          <Tag tone="neutral"><HardDrive size={ICON_SIZE.microInline} /> Approx. storage used: {storageUsed}</Tag>
-          <Tag tone="green"><ShieldCheck size={ICON_SIZE.microInline} /> Autosave active</Tag>
+          <Tag tone="neutral"><HardDrive size={ICON_SIZE.microInline} /> Whole browser storage: {storageUsed}</Tag>
+          <Tag tone={failure ? "orange" : lastWrite ? "green" : "neutral"}><ShieldCheck size={ICON_SIZE.microInline} /> {failure ? "Autosave needs attention" : lastWrite ? "Last save confirmed" : "Save not yet confirmed"}</Tag>
           <Tag tone={duplicateSources ? "orange" : "green"}>
             <FileFingerprintIcon /> {duplicateSources ? `${duplicateSources} duplicate source${duplicateSources === 1 ? "" : "s"}` : "Source checksums healthy"}
           </Tag>
         </div>
         <p>{orphans.totalIssues === 0 ? "Question-bank links are healthy: no orphaned questions, sets, or documents." : `${orphans.totalIssues} dangling link${orphans.totalIssues === 1 ? "" : "s"} across questions, sets, and documents.`}</p>
-        <p>Storage health and record counts describe this device only.</p>
+        <p>Workspace records: {formatBytes(new TextEncoder().encode(JSON.stringify(toPortableState(s))).length)} before compression. Browser storage also includes images, safety snapshots and cached app files. It is not your account size.</p>
       </TechnicalDetails>
     </div>
   );

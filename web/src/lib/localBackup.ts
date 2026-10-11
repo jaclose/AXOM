@@ -1,3 +1,4 @@
+import { compressText, decompressText } from "./compressedText";
 import { BUILD_INFO, type BuildInfo } from "./buildInfo";
 import { STORAGE_KEYS } from "./brand";
 import {
@@ -255,11 +256,13 @@ function openExistingVault(): Promise<IDBDatabase> {
 }
 
 async function writeBackupRecord(key: string, value: string): Promise<void> {
-  await withBackupStore("readwrite", (store) => store.put(value, key));
+  const packed = await compressText(value);
+  await withBackupStore("readwrite", (store) => store.put(packed, key));
 }
 
 async function readBackupRecord(key: string): Promise<string | undefined> {
-  return withBackupStore("readonly", (store) => store.get(key));
+  const stored = await withBackupStore<string | undefined>("readonly", (store) => store.get(key));
+  return stored === undefined ? undefined : decompressText(stored);
 }
 
 async function listBackupRecordKeys(): Promise<string[]> {

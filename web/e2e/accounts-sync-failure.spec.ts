@@ -34,7 +34,7 @@ async function standInAccount(page: Page, push: { answer: Answer; bodies: Array<
     const request = route.request();
     const path = new URL(request.url()).pathname;
     if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers: CORS });
-    if (path === "/rest/v1/rpc/push_workspace_revision") {
+    if (path === "/rest/v1/rpc/push_workspace_revision_v2") {
       push.bodies.push(request.postDataJSON() as Record<string, unknown>);
       return push.answer(route);
     }

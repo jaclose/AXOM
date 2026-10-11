@@ -269,7 +269,7 @@ function ClassicExam({ exam, skin, mode, onClose }: {
           {reviewing
             ? <button type="button" className="sim-bottom-btn end" onClick={onClose}><X size={14} /> Close review</button>
             : <>
-              <button type="button" className="sim-bottom-btn" onClick={exam.suspend}><PauseCircle size={16} /> Suspend</button>
+              <button type="button" className="sim-bottom-btn" onClick={exam.suspend}><PauseCircle size={16} /> Save & exit</button>
               <button type="button" className="sim-bottom-btn end" onClick={exam.requestEnd}><Square size={14} /> End Block</button>
             </>}
         </div>

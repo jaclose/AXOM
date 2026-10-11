@@ -142,7 +142,9 @@ export function writeSuspendedBlock(block: SuspendedBlock | null): void {
   try {
     if (block) localStorage.setItem(EXAM_SIM_SUSPENDED_KEY, JSON.stringify(block));
     else localStorage.removeItem(EXAM_SIM_SUSPENDED_KEY);
-  } catch { /* device-only convenience */ }
+  } catch {
+    if (block) throw new Error("Your exam could not be saved. Keep this window open and try again, or finish the block to save your answers.");
+  }
 }
 
 export interface ExamSimPrefs {

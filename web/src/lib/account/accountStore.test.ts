@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { indexedDB, IDBKeyRange } from "fake-indexeddb";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const rpc = vi.fn();
@@ -35,6 +36,17 @@ const auth = {
 let storedSession: unknown = null;
 let loadFails = false;
 vi.mock("./supabase", () => ({
+  accountOperationClient: async () => ({
+    userId: session.user.id,
+    assertCurrent: async () => undefined,
+    client: {
+      auth, rpc, from: (table: string) => chain(table),
+      storage: { from: () => ({
+        upload: async () => ({ error: null }),
+        list: async () => ({ data: [], error: null }),
+      }) },
+    },
+  }),
   cloudConfigured: () => true,
   getSupabase: () => ({ auth, rpc, from: (table: string) => chain(table) }),
   loadSupabase: async () => {
@@ -50,7 +62,11 @@ const { useStore } = await import("../store");
 const { makeSeed } = await import("../seed");
 
 beforeEach(() => {
+  vi.stubGlobal("indexedDB", indexedDB);
+  vi.stubGlobal("IDBKeyRange", IDBKeyRange);
   localStorage.clear();
+  for (const key of Object.keys(tables)) tables[key] = [];
+  useAccount.setState({ busy: false, applyingRemote: false });
   storedSession = null;
   loadFails = false;
   resetAccountInitForTests();
@@ -86,7 +102,7 @@ describe("account lifecycle", () => {
   it("links a device against base 0 so existing account work surfaces as a conflict, then resolves by keeping this device", async () => {
     await useAccount.getState().signIn("learner@example.com", "password123");
     rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
-      if (name === "push_workspace_revision") {
+      if (name === "push_workspace_revision_v2") {
         return args.p_base_revision === 0
           ? { data: { status: "conflict", server_revision: 7, preserved_revision_id: "c1" }, error: null }
           : { data: { status: "accepted", revision: 8, revision_id: "r8", idempotent: false }, error: null };
@@ -95,11 +111,11 @@ describe("account lifecycle", () => {
     });
     await useAccount.getState().linkThisDevice();
     expect(useAccount.getState()).toMatchObject({ link: "linked", protection: "conflict", conflictServerRevision: 7 });
-    const firstPush = rpc.mock.calls.find(([name]) => name === "push_workspace_revision")!;
+    const firstPush = rpc.mock.calls.find(([name]) => name === "push_workspace_revision_v2")!;
     expect(firstPush[1]).toMatchObject({ p_base_revision: 0, p_reason: "foundation" });
 
     await useAccount.getState().keepThisDevice();
-    const pushes = rpc.mock.calls.filter(([name]) => name === "push_workspace_revision");
+    const pushes = rpc.mock.calls.filter(([name]) => name === "push_workspace_revision_v2");
     expect(pushes.at(-1)![1]).toMatchObject({ p_base_revision: 7, p_reason: "manual" });
     expect(pushes.at(-1)![1].p_idempotency_key).not.toBe(firstPush[1].p_idempotency_key);
     expect(useAccount.getState()).toMatchObject({ protection: "protected", conflictServerRevision: undefined });
@@ -113,7 +129,7 @@ describe("account lifecycle", () => {
     tables.workspace_revisions = [{ id: "r7", revision: 7, schema_version: server.schemaVersion, content_hash: "a".repeat(64), snapshot_payload: toPortableState(server), reason: "automatic", created_at: "2026-09-25T10:00:00Z" }];
     useStore.setState({ tasks: [...useStore.getState().tasks, { id: "device-only-task", title: "From the phone", done: false, created: "2026-09-21T10:00:00Z" }] });
     rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
-      if (name === "push_workspace_revision") {
+      if (name === "push_workspace_revision_v2") {
         return args.p_base_revision === 0
           ? { data: { status: "conflict", server_revision: 7, preserved_revision_id: "c1" }, error: null }
           : { data: { status: "accepted", revision: 8, revision_id: "r8", idempotent: false }, error: null };
@@ -126,7 +142,7 @@ describe("account lifecycle", () => {
     await useAccount.getState().mergeWithAccount();
     const ids = useStore.getState().tasks.map((task) => task.id);
     expect(ids).toEqual(expect.arrayContaining(["server-only-task", "device-only-task"]));
-    const lastPush = rpc.mock.calls.filter(([name]) => name === "push_workspace_revision").at(-1)!;
+    const lastPush = rpc.mock.calls.filter(([name]) => name === "push_workspace_revision_v2").at(-1)!;
     expect(lastPush[1]).toMatchObject({ p_base_revision: 7, p_reason: "manual" });
     expect(useAccount.getState()).toMatchObject({ protection: "protected", conflictServerRevision: undefined });
     tables.workspace_revisions = [];
@@ -266,13 +282,13 @@ describe("account session consistency (Ideas 4: Profile and Account agree; sign-
 describe("a refused upload (the production failure of 2026-09-30)", () => {
   /** What an account before migration 20261001090000 answers once its history is full. */
   const historyFull = { data: null, error: { code: "54000", message: "workspace snapshot storage limit reached; reduce the snapshot size before syncing", details: null, hint: null }, status: 500 };
-  const pushes = () => rpc.mock.calls.filter(([name]) => name === "push_workspace_revision");
+  const pushes = () => rpc.mock.calls.filter(([name]) => name === "push_workspace_revision_v2");
 
   it("says what happened, stops repeating it, and recovers when the account accepts again", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     await useAccount.getState().signIn("learner@example.com", "password123");
     let answer: unknown = historyFull;
-    rpc.mockImplementation(async (name: string) => (name === "push_workspace_revision" ? answer : { data: null, error: null }));
+    rpc.mockImplementation(async (name: string) => (name === "push_workspace_revision_v2" ? answer : { data: null, error: null }));
 
     await useAccount.getState().linkThisDevice();
     expect(useAccount.getState()).toMatchObject({ link: "linked", protection: "blocked", syncFailure: { kind: "rejected", rejection: "storage-limit", status: 500, code: "54000" } });
@@ -301,7 +317,7 @@ describe("a refused upload (the production failure of 2026-09-30)", () => {
     expect(protectionDetail({ protection: "saved-locally" })).toBeNull();
     expect(protectionDetail({ protection: "conflict" })).toBeNull();
     const tooLarge = protectionDetail({ protection: "blocked", syncFailure: { kind: "rejected", rejection: "too-large", status: 0, at } });
-    expect(tooLarge).toMatch(/larger than an account copy can be \(15 MB\)/);
+    expect(tooLarge).toMatch(/compressed account record exceeds its 15 MB limit/);
     expect(tooLarge).toMatch(/Emergency recovery/);
     expect(protectionDetail({ protection: "blocked", syncFailure: { kind: "rejected", rejection: "refused", status: 400, at }, nextAttemptAt: soon })).toMatch(/refused this upload.*tries again by itself around/);
     expect(protectionDetail({ protection: "paused", syncFailure: { kind: "server", status: 500, at }, nextAttemptAt: soon })).toMatch(/after several tries.*checks less often.*tries again by itself around/);
@@ -327,7 +343,7 @@ describe("signing in brings your AXOM back (Priority 4), never over your own wor
     server.tasks = [...server.tasks, { id: "laptop-task", title: "From the laptop", done: false, created: "2026-09-20T10:00:00Z" }];
     tables.workspace_revisions = [{ id: "r5", revision: 5, schema_version: server.schemaVersion, content_hash: "b".repeat(64), snapshot_payload: toPortableState(server), reason: "automatic", created_at: "2026-09-28T18:00:00Z" }];
   }
-  const accepting = async (name: string) => (name === "push_workspace_revision"
+  const accepting = async (name: string) => (name === "push_workspace_revision_v2"
     ? { data: { status: "accepted", revision: 6, revision_id: "r6", idempotent: false }, error: null }
     : { data: null, error: null });
 
@@ -362,7 +378,7 @@ describe("signing in brings your AXOM back (Priority 4), never over your own wor
     await useAccount.getState().signIn("learner@example.com", "password123");
     expect(useAccount.getState().restoreOffer).toBeDefined();
     rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
-      if (name === "push_workspace_revision") {
+      if (name === "push_workspace_revision_v2") {
         return args.p_base_revision === 0
           ? { data: { status: "conflict", server_revision: 5, preserved_revision_id: "c2" }, error: null }
           : { data: { status: "accepted", revision: 6, revision_id: "r6", idempotent: false }, error: null };
@@ -374,5 +390,56 @@ describe("signing in brings your AXOM back (Priority 4), never over your own wor
     expect(useStore.getState().tasks.map((task) => task.id)).not.toContain("laptop-task");
     expect(useAccount.getState()).toMatchObject({ link: "linked", protection: "protected", restoreOffer: undefined });
     tables.workspace_revisions = [];
+  });
+});
+
+
+describe("background account downloads", () => {
+  async function linked() {
+    await useAccount.getState().signIn("learner@example.com", "password123");
+    const { snapshotWorkspace } = await import("../sync/workspaceSnapshot");
+    const { read, write } = await import("../sync/syncMetadata");
+    const snapshot = await snapshotWorkspace(useStore.getState(), { deviceId: "device", baseRevision: 1, reason: "automatic" });
+    write({ ...read(), accountUserId: "user-1", baseRevision: 1, lastHash: snapshot.contentHash, pending: false });
+    useAccount.setState({ link: "linked" });
+    const server = makeSeed();
+    server.tasks = [{ id: "from-second-device", title: "Saved on laptop", created: "2026-10-11T00:00:00Z", done: false }];
+    const remote = await snapshotWorkspace(server, { deviceId: "other-device", baseRevision: 1, reason: "automatic" });
+    tables.workspace_revisions = [{ id: "r2", revision: 2, schema_version: server.schemaVersion, content_hash: remote.contentHash, snapshot_payload: remote.payload, reason: "automatic", created_at: "2026-10-11T00:00:00Z" }];
+    return { read, write };
+  }
+  it("downloads a newer account version only onto an unchanged protected workspace", async () => {
+    const { read } = await linked();
+    await useAccount.getState().pullLatest();
+    expect(useStore.getState().tasks.some((task) => task.id === "from-second-device")).toBe(true);
+    expect(read()).toMatchObject({ baseRevision: 2, pending: false });
+    expect(useAccount.getState().error).toBe("");
+  });
+  it("never replaces unsynced local edits with the account version", async () => {
+    const { read, write } = await linked();
+    write({ ...read(), pending: true });
+    await useAccount.getState().pullLatest();
+    expect(useStore.getState().tasks.some((task) => task.id === "from-second-device")).toBe(false);
+    expect(read().baseRevision).toBe(1);
+    write({ ...read(), pending: false });
+    useStore.setState({ tasks: [{ id: "local-edit", title: "Keep me", created: "2026-10-11T00:00:00Z", done: false }] });
+    await useAccount.getState().pullLatest();
+    expect(useStore.getState().tasks[0].id).toBe("local-edit");
+    expect(read().baseRevision).toBe(1);
+  });
+  it("keeps edits made while a remote version is downloading", async () => {
+    const { read } = await linked();
+    const { SupabaseSyncTransport } = await import("../sync/supabaseTransport");
+    const original = SupabaseSyncTransport.prototype.revision;
+    const spy = vi.spyOn(SupabaseSyncTransport.prototype, "revision").mockImplementation(async function (this: InstanceType<typeof SupabaseSyncTransport>, id) {
+      const result = await original.call(this, id);
+      useStore.setState({ tasks: [{ id: "during-download", title: "Keep this too", created: "2026-10-11T00:00:00Z", done: false }] });
+      return result;
+    });
+    try {
+      await useAccount.getState().pullLatest();
+      expect(useStore.getState().tasks[0].id).toBe("during-download");
+      expect(read().baseRevision).toBe(1);
+    } finally { spy.mockRestore(); }
   });
 });

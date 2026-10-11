@@ -75,8 +75,7 @@ export function AccountSyncPanel() {
           <p>This build has no cloud credentials configured, so sign-in and cloud copies are switched off. Local autosave and manual JSON recovery are unchanged.</p>
         )}
         <p>
-          Portable JSON export, restore, and merge work with or without an account. Question attachment images stay on this device
-          unless you include them in a portable backup; account protection covers workspace data, not binary attachment sync.
+          Portable backups work with or without an account. New protected versions keep source content and question images in private account storage. Images download as you open them and remain available offline after downloading. Older protected versions may require a portable media backup.
         </p>
         {account.syncFailure && <p>{failureSummary(account)}</p>}
       </TechnicalDetails>

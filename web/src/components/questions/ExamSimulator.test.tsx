@@ -149,7 +149,7 @@ describe("ExamSimulator", () => {
     fireEvent.keyDown(window, { key: "m" });
     fireEvent.click(screen.getByRole("button", { name: "Notes" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Block notes" }), { target: { value: "Check renal later" } });
-    fireEvent.click(screen.getByRole("button", { name: /Suspend/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Save & exit/ }));
     const block = onSuspend.mock.calls[0][0];
     expect(block).toMatchObject({ skin: "uworld", mode: "exam", index: 0, notes: "Check renal later", timeLimitSeconds: 270 });
     expect(block.items.q1).toMatchObject({ answerKey: "A", marked: true, visited: true });
@@ -171,4 +171,14 @@ describe("ExamSimulator", () => {
     fireEvent.change(screen.getByRole("searchbox", { name: "Search lab values" }), { target: { value: "tsh" } });
     expect(screen.getByText("0.4–4.0 μU/mL")).toBeTruthy();
   });
+  it("leaves the block editable when saving an exit fails, then permits a retry", () => {
+    const onSuspend = vi.fn().mockImplementationOnce(() => { throw new Error("device full"); });
+    render(<ExamSimulator skin="nbme" mode="exam" pool={pool} onFinish={vi.fn()} onSuspend={onSuspend} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save & exit" }));
+    fireEvent.click(screen.getByRole("radio", { name: "B. Beta" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save & exit" }));
+    expect(onSuspend).toHaveBeenCalledTimes(2);
+    expect(onSuspend.mock.calls[1][0].items.q1.answerKey).toBe("B");
+  });
+
 });

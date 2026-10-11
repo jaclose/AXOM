@@ -29,6 +29,12 @@ async function supabaseLikeDatabase({ rlsAutoEnable }: { rlsAutoEnable: boolean 
     alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
     alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
     alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
+    create schema storage;
+    create table storage.buckets (id text primary key, name text, public boolean, file_size_limit bigint, allowed_mime_types text[]);
+    create table storage.objects (id uuid default gen_random_uuid(), bucket_id text references storage.buckets, name text, metadata jsonb, unique(bucket_id,name));
+    alter table storage.objects enable row level security;
+    grant usage on schema storage to anon, authenticated, service_role;
+    grant select,insert,update,delete on storage.objects to authenticated, service_role;
     create schema auth;
     create table auth.users (id uuid primary key default gen_random_uuid(), email text, raw_user_meta_data jsonb default '{}'::jsonb);
     create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
@@ -56,6 +62,7 @@ async function canExecute(db: PGlite, role: string, signature: string) {
 }
 
 const PRIVILEGED = [
+  "public.push_workspace_revision_v2(bigint,integer,text,jsonb,uuid,uuid,text)",
   "public.push_workspace_revision(bigint,integer,text,jsonb,uuid,uuid,text)",
   "public.create_question_set_share(text,jsonb)",
   "public.touch_account_device(uuid,text,text,bigint)",
@@ -311,4 +318,34 @@ describe("Supabase migrations on real Postgres", () => {
     expect(Number((await db.query<{ n: number }>("select count(*)::int as n from public.workspace_revisions where user_id=$1", [A])).rows[0].n)).toBe(2);
     await db.close();
   }, 60_000);
+  it("protects v2 files by owner, refuses incomplete revisions, and preserves atomic retries", async () => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
+    try {
+      await db.query("insert into auth.users(id,email) values ($1,'a@x.com'),($2,'b@x.com')", [A, B]);
+      const path = `${A}/${HASH}`;
+      const put = (user: string, name: string) => as(db, "authenticated", user,
+        "insert into storage.objects(bucket_id,name,metadata) values ('workspace-media',$1,'{\"size\":7}')", [name]);
+      await put(A, path);
+      await expect(put(B, `${A}/${"b".repeat(64)}`)).rejects.toMatchObject({ code: "42501" });
+      expect((await as(db, "authenticated", B, "select * from storage.objects")).rows).toHaveLength(0);
+      expect((await as(db, "authenticated", B, "delete from storage.objects returning name")).rows).toHaveLength(0);
+      expect((await as(db, "authenticated", A, "update storage.objects set metadata='{}' returning name")).rows).toHaveLength(0);
+      const snapshot = { _axomCloudFormat: 2, content: "{}", expandedBytes: 2, sources: [], media: [
+        { blobKey: "figure", hash: HASH, byteSize: 7, updatedAt: "2026-10-11T00:00:00Z" },
+      ] };
+      const call = (user: string, base: number, key: string, payload = snapshot) => as(db, "authenticated", user,
+        "select public.push_workspace_revision_v2($1,34,$2,$3::jsonb,'33333333-3333-4333-8333-333333333333'::uuid,$4::uuid,'automatic') as r",
+        [base, HASH, JSON.stringify(payload), key]);
+      await expect(call(B, 0, "44444444-4444-4444-8444-444444444444")).rejects.toMatchObject({ code: "PT409" });
+      await expect(call(A, 0, "44444444-4444-4444-8444-444444444444", { ...snapshot, media: [...snapshot.media, ...snapshot.media] })).rejects.toMatchObject({ code: "PT400" });
+      await expect(call(A, 0, "44444444-4444-4444-8444-444444444444", { ...snapshot, media: [{ ...snapshot.media[0], byteSize: 8 }] })).rejects.toMatchObject({ code: "PT409" });
+      expect((await call(A, 0, "44444444-4444-4444-8444-444444444444")).rows[0].r).toMatchObject({ status: "accepted", revision: 1 });
+      expect((await call(A, 0, "44444444-4444-4444-8444-444444444444")).rows[0].r).toMatchObject({ status: "accepted", revision: 1, idempotent: true });
+      expect((await call(A, 0, "55555555-5555-4555-8555-555555555555")).rows[0].r).toMatchObject({ status: "conflict", preserved: true });
+      await expect(as(db, "authenticated", A, "select public.push_workspace_revision(1,34,$1,'{}','33333333-3333-4333-8333-333333333333','66666666-6666-4666-8666-666666666666')", [HASH]))
+        .rejects.toMatchObject({ code: "PT409", message: expect.stringMatching(/Update AXOM/) });
+      expect((await db.query<{ public: boolean }>("select public from storage.buckets")).rows.every((bucket) => !bucket.public)).toBe(true);
+    } finally { await db.close(); }
+  }, 60_000);
+
 });

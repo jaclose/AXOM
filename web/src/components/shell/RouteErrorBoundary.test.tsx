@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RouteErrorBoundary, isChunkLoadError } from "./RouteErrorBoundary";
+
+vi.mock("../../lib/updateCheckpoint", () => ({ createUpdateCheckpoint: vi.fn() }));
+vi.mock("../../lib/webUpdates", () => ({ activateWaitingWebUpdate: vi.fn() }));
+import { createUpdateCheckpoint } from "../../lib/updateCheckpoint";
+import { activateWaitingWebUpdate } from "../../lib/webUpdates";
 
 function Boom({ error }: { error: Error }): never { throw error; }
 
@@ -35,4 +40,14 @@ describe("RouteErrorBoundary", () => {
     fireEvent.click(screen.getByRole("button", { name: /Try again/ }));
     expect(screen.getByText("screen ok")).toBeTruthy();
   });
+  it("does not activate an update or reload when the recovery checkpoint fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(createUpdateCheckpoint).mockRejectedValueOnce(new Error("Device storage is full."));
+    render(<RouteErrorBoundary onHome={() => {}}><Boom error={new TypeError("Failed to fetch dynamically imported module: x.js")} /></RouteErrorBoundary>);
+    fireEvent.click(screen.getByRole("button", { name: "Reload AXOM" }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("This window has been kept open"));
+    expect(activateWaitingWebUpdate).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Reload AXOM" }).hasAttribute("disabled")).toBe(false);
+  });
+
 });

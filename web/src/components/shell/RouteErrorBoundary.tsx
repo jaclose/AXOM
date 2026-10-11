@@ -2,12 +2,14 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 import { LayoutDashboard, RefreshCw, RotateCcw } from "lucide-react";
 import { GButton } from "../ui/primitives";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { createUpdateCheckpoint } from "../../lib/updateCheckpoint";
+import { activateWaitingWebUpdate } from "../../lib/webUpdates";
 import { isChunkLoadError } from "../../lib/chunkErrors";
 
 export { isChunkLoadError };
 
 type Props = { children: ReactNode; onHome: () => void };
-type State = { error: Error | null };
+type State = { error: Error | null; saving?: boolean; recoveryError?: string };
 
 /**
  * Keeps a failed screen inside the shell. The sidebar, focus dock and a
@@ -20,6 +22,16 @@ export class RouteErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("[AXOM] A screen failed to render; the shell stayed open", error, info.componentStack);
   }
+  reloadSafely = async () => {
+    this.setState({ saving: true, recoveryError: undefined });
+    try {
+      await createUpdateCheckpoint(false);
+      await activateWaitingWebUpdate();
+      window.location.reload();
+    } catch (error) {
+      this.setState({ saving: false, recoveryError: error instanceof Error ? error.message : "Could not save your workspace. Export a backup before reloading." });
+    }
+  };
   render() {
     const { error } = this.state;
     if (!error) return this.props.children;
@@ -30,13 +42,13 @@ export class RouteErrorBoundary extends Component<Props, State> {
           <h2 id="route-error-title">{stale ? "This screen needs the latest AXOM" : "This screen hit a snag"}</h2>
           <p>
             {stale
-              ? "AXOM was updated while this window was open, so this screen's code moved. Reload to open the newest version. Your saved work stays put."
+              ? "This screen could not load. A connection problem or an app update may be responsible. AXOM will verify your saved work before reloading."
               : "Nothing you saved was lost. Try the screen again, or head back to the dashboard."}
           </p>
           <div className="route-error-actions">
             {stale ? (
-              <GButton variant="primary" onClick={() => window.location.reload()}>
-                <RefreshCw size={ICON_SIZE.body} /> Reload AXOM
+              <GButton variant="primary" disabled={this.state.saving} onClick={this.reloadSafely}>
+                <RefreshCw size={ICON_SIZE.body} /> {this.state.saving ? "Saving before reload…" : "Reload AXOM"}
               </GButton>
             ) : (
               <GButton variant="primary" onClick={() => this.setState({ error: null })}>
@@ -47,6 +59,7 @@ export class RouteErrorBoundary extends Component<Props, State> {
               <LayoutDashboard size={ICON_SIZE.body} /> Dashboard
             </GButton>
           </div>
+          {this.state.recoveryError && <p role="status">{this.state.recoveryError} This window has been kept open.</p>}
           <details className="route-error-details">
             <summary>Technical details</summary>
             <pre>{String(error.message).slice(0, 1200)}</pre>
