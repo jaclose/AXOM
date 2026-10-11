@@ -1,6 +1,6 @@
 ---
 tags:
-  - axom/features
+  - axom/feature
 authority: canonical
 ---
 # Shared academic catalog
@@ -8,48 +8,44 @@ authority: canonical
 ## Product boundary
 
 Published templates and verified question banks are shared content, not JD's workspace.
-The Course Library and QBank discover permitted releases using the configured account
-backend. Loading a course or creating a quiz fetches only the selected content and uses
-the existing [Course Engine](course-engine.md), [question importer](question-content.md),
-[bookshelf](bookshelf.md), and local vault. Learner attempts and notes are never published.
+Course Library and QBank discover permitted releases through the configured account
+backend. Selecting a course or quiz downloads its content into the existing
+[Course Engine](course-engine.md), [question engine](question-content.md), and
+[bookshelf](bookshelf.md). Learner attempts and notes are never published.
 
-Status: development PR 20 on `feat/shared-academic-catalog`. Database migration,
-publication of actual source material, hosted acceptance, and production deployment
-have NOT occurred. A code deployment by itself does not create a content catalog.
-The empty/configuration/error states deliberately distinguish those failures.
+Development: PR 20, `feat/shared-academic-catalog`. The production database migration,
+actual content publication, hosted multi-user acceptance, and production deployment
+have NOT occurred. Deploying code alone does not create a populated catalog.
 
-## Implementation
+## Implementation and limits
 
-- Client contracts and bounded downloads: `web/src/lib/cloudLibrary/`.
-- Shared entry points: `web/src/components/bookshelf/CloudAcademicLibrary.tsx`.
-- Operator tools: `web/scripts/shared-library/`, invoked by `web/scripts/shared-library.mjs`.
-- Database: `supabase/migrations/20261010233000_shared_academic_catalog.sql` and
-  `20261010234000_catalog_storage_policy_boundary.sql`.
+- `web/src/lib/cloudLibrary/`: metadata, bounded asset reads, canonical cache adapters.
+- `web/src/components/bookshelf/CloudAcademicLibrary.tsx`: course/quiz entry points.
+- `web/scripts/shared-library/`: operator-only prepare and publish tools.
+- Migrations: `20261010233000_shared_academic_catalog.sql` and
+  `20261010234000_catalog_storage_policy_boundary.sql` under `supabase/migrations/`.
 
-A release owns immutable catalog entries and a checksum manifest of private storage
-objects. Its audience is explicitly public, authenticated, or individually granted.
-Public here means available to anonymous clients through the authorized catalog API;
-the bucket itself remains private. The service-role-only publisher stages records,
-verifies uploaded bytes, and publishes atomically only when every expected file exists.
-Restrictive storage policies prevent older permissive policies opening the new bucket.
-No browser role may publish content or grant itself access.
+A release owns immutable entries and a checksum manifest of private Storage objects.
+Its audience is explicitly public, authenticated, or individually granted. Public
+means anonymously readable through the authorized API, not a public Storage bucket.
+Only the server-side publisher can stage content, grant access, and publish after all
+expected files exist. Restrictive Storage policies prevent older permissive policies
+from opening the new bucket or allowing browser writes.
 
-The app reads catalog metadata first and downloads selected bank payloads and media
-through short-lived URLs, checking origin, size, SHA-256, question readiness and course
-scope. Each download is bounded to 16 MiB; images to 8 MiB; quiz preparation to 128 MiB
-and 50 sets. These explicit limits fail visibly instead of silently omitting material.
+The app fetches metadata first. Selected content uses short-lived signed URLs with
+host, size, SHA-256, course-scope and readiness checks. Limits: 16 MiB per file, 8 MiB
+per image, 128 MiB and 50 collections per quiz preparation. Exceeding a limit produces
+an explicit error rather than silently dropping material.
 
-A ready bank is a reusable canonical import package, not a new quiz engine. Existing
-question identities preserve prior attempts on repeated download. Learner edits and
-activation remain local/learner-owned. Original source documents are not published by
-this first adapter: it exports verified question excerpts and associated figures only.
-Full source-page/interactive Slide delivery is still a separate acceptance requirement.
+Banks reuse canonical import identities and existing private attempt records. Course
+loading preserves progress and personal edits. Full source-document bytes are NOT in
+this first publication adapter: verified question excerpts and their figures are.
+Complete original-page/interactive Slide delivery remains a separate acceptance gate.
 
-## Publisher workflow
+## Publication workflow
 
-Review source rights and audience before preparing a release. Use a private output
-folder outside every Git checkout and outside the original prepared collection.
-Example command, run from `web/` with the installed project dependencies:
+Prepare from an existing private collection into a separate private directory outside
+Git and outside the input directory. Original files are never modified. From `web/`:
 
 ```sh
 node scripts/shared-library.mjs prepare \
@@ -60,43 +56,42 @@ node scripts/shared-library.mjs prepare \
   --title 'Academic Library' \
   --audience 'restricted' \
   --grant-users 'AUTHORIZED-USER-UUID' \
-  --rights-reference 'Reference to the actual publication approval'
+  --rights-reference 'Actual publication approval reference'
 ```
 
-This is offline preparation, not upload. Review `publication-plan.json` and the complete
-`publication-coverage.json`. Uncertain keys, unavailable images, unreadable templates,
-unsupported inputs and missing originals stay held. Duplicate source files do not create
-extra banks. No supplementary questions are generated by this tool.
+This is offline preparation, not upload. Review `publication-plan.json` and
+`publication-coverage.json`. Uncertain keys, missing images, unreadable templates and
+unsupported sources remain held. Exact source duplicates do not create extra banks.
+This tool does not generate supplementary questions.
 
-A dry run requires no backend credential:
+Dry run, without backend credentials:
 
 ```sh
 node scripts/shared-library.mjs publish --plan '/absolute/publication-plan.json'
 ```
 
-After the intended staging project has both migrations, use its server-side credential
-in `AXOM_CATALOG_SERVICE_KEY` and its HTTPS URL in `AXOM_CATALOG_PROJECT_URL`. Never put
-this credential in VITE variables, source files, command arguments, browser code or logs.
-Actual publishing additionally requires `--project-ref` and `--approve-release` matching
-the exact reviewed release ID. It uploads immutable object names, verifies hashes after
-upload, and resumes the same staging release on retry. A changed plan needs a new version.
-Withdraw a published release instead of changing its records in place.
+After BOTH migrations are applied to the intended staging project, use its server-side
+credential in `AXOM_CATALOG_SERVICE_KEY` and HTTPS URL in `AXOM_CATALOG_PROJECT_URL`.
+Never put the credential in VITE variables, command arguments, source files or logs.
+An actual publish also requires `--project-ref` and `--approve-release` matching the
+reviewed plan. Uploads use immutable names, then are read back and hash-verified.
+Retries resume the same staging release. Changed content needs a new reviewed version.
+Withdraw published releases rather than editing their records in place.
 
-## Validation and remaining boundary
+## Verification boundaries
 
-Unit/UI tests exercise actions with mocks; publisher tests use synthetic source data;
-policy tests replay SQL in isolated PGlite with separate anonymous/A/B roles. None proves
-live Supabase Storage, cross-device account progress, or actual school-content delivery.
-Complete those checks in an authorized hosted staging environment before release.
+Contract/UI tests use synthetic data and mocks. SQL tests replay both migrations in
+isolated PGlite with anonymous/A/B roles and an intentionally broad legacy policy.
+Browser contract tests route synthetic HTTP responses through the real SDK, stores and
+screens. They do not establish live Supabase Storage or actual school-content delivery.
 
-The existing learner cloud snapshot limit is not increased. Selected content currently
-uses the established local question cache and learner snapshot rules. A very large set
-of downloaded banks can still exceed that snapshot limit; source catalog distribution
-works independently and must not be described as fixing all learner sync limitations.
-Revocation prevents future downloads; it cannot erase copies legitimately downloaded
-for offline study. Previously issued URLs expire after at most 120 seconds.
+The existing learner snapshot limit is unchanged. Downloaded practice uses the current
+local store and learner snapshot rules; sufficiently large selected collections can
+still exceed that snapshot limit. Shared content distribution and full learner sync
+must not be described as the same feature. Revoking access stops future downloads, not
+legitimate offline copies; already issued URLs can remain valid for up to 120 seconds.
 
-Next acceptance: publish one approved image-rich bank and course template in staging;
-verify two independent account/browser profiles see shared content but not each other's
-private progress; test denied grants, reload, image failure, and version updates. Then
-publish the remaining authorized prepared collection without reopening the parser project.
+Next release gate: authorize a hosted staging environment and publish one reviewed
+course plus image-rich bank; verify separate accounts, denied access, save/reload,
+image failure, and updates. Then publish all remaining authorized prepared collections.
+No main promotion or production deployment before those gates and explicit approval.

@@ -33,9 +33,16 @@ jobs:
       - name: Release tool regression tests
         run: node --test scripts/*.test.mjs
       - name: Typecheck, lint, test, and production build
-        run: npm --prefix web run quality
+        run: |
+          set +e
+          npm --prefix web run quality > "$RUNNER_TEMP/axom-web-quality.log" 2>&1
+          result=$?
+          tail -n 180 "$RUNNER_TEMP/axom-web-quality.log"
+          exit "$result"
       - name: Install browser for production update checks
         run: npm --prefix web exec -- playwright install --with-deps chromium
+      - name: Shared catalog browser contract (synthetic HTTP fixtures)
+        run: npm --prefix web run test:e2e -- e2e/shared-academic-catalog.spec.ts
       - name: Verify consent, recovery snapshot and offline update behavior
         run: npm --prefix web run verify:app-updates
       - run: npm --prefix web run verify:daily-games-offline
