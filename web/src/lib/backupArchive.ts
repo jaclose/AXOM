@@ -1,3 +1,6 @@
+// Keep ZIP in the static dependency graph. Recovery must not fetch a new
+// lazy chunk on the first export or restore after a deployment or network loss.
+import JSZip from "jszip";
 import {
   ATTACHMENT_EXPORT_KEY, MAX_QUESTION_ATTACHMENT_BYTES, blobToBase64,
   extractQuestionAttachmentPayloads, getQuestionAttachmentBlob, restoreQuestionAttachmentPayloads,
@@ -18,7 +21,6 @@ export function mediaBackupBytes(references: References): number {
 
 /** Binary images avoid the single-string limit of large base64 JSON backups. */
 export async function createMediaBackupArchive(payload: Record<string, unknown>, references: References) {
-  const { default: JSZip } = await import("jszip");
   const zip = new JSZip();
   const media: MediaEntry[] = [];
   const missingBlobKeys: string[] = [];
@@ -49,7 +51,6 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
     return { rawText, restoreMedia: refs => restoreQuestionAttachmentPayloads(payloads, refs) };
   }
   if (file.size > 2 * 1024 * 1024 * 1024) throw new Error("This backup exceeds the 2 GB archive limit.");
-  const { default: JSZip } = await import("jszip");
   const zip = await JSZip.loadAsync(new Uint8Array(await file.arrayBuffer()));
   if (Object.keys(zip.files).length > 30000) throw new Error("Too many files in this backup.");
   let expanded = 0;
