@@ -1,0 +1,39 @@
+.cloud-academic-library { padding-block: 12px 24px; border-bottom: 1px solid var(--hairline); margin-bottom: 20px; min-width: 0; }
+.cloud-library-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.cloud-library-heading h2 { margin: 6px 0; font-family: var(--font-display); font-size: clamp(19px, 2.3vw, 26px); font-weight: 600; color: var(--text); }
+.cloud-library-heading p, .cloud-course-content p { color: var(--text-80); line-height: 1.65; margin: 8px 0 16px; }
+.cloud-library-eyebrow { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--gold); }
+.cloud-library-notice { padding: 16px 18px; border: 1px solid var(--hairline); border-radius: var(--radius-lg); background: var(--surface-2); color: var(--text-80); line-height: 1.6; }
+.cloud-course-content { padding: 18px; display: grid; align-content: start; gap: 10px; min-width: 0; }
+.cloud-course-intro > span { color: var(--text-80); font-size: 12px; }
+.cloud-course-intro h3 { font-family: var(--font-display); font-size: 24px; margin: 8px 0; }
+.cloud-template-sections { padding: 0; list-style: none; display: grid; gap: 12px; }
+.cloud-template-sections li { display: flex; align-items: start; gap: 10px; line-height: 1.5; border-bottom: 1px solid var(--hairline-soft); padding-bottom: 12px; }
+.cloud-template-sections li span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.cloud-template-sections small { color: var(--text-80); }
+.cloud-set-selection { max-height: min(40vh, 380px); overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding-inline-end: 8px; }
+.cloud-set-selection fieldset { border: 0; border-bottom: 1px solid var(--hairline); padding: 12px 0; margin: 0; min-width: 0; }
+.cloud-set-selection legend { font-weight: 600; color: var(--text); padding: 0 0 4px; }
+.cloud-set-selection label { display: flex; align-items: start; gap: 12px; padding: 12px 2px; min-height: 44px; cursor: pointer; }
+.cloud-set-selection input { flex: 0 0 auto; width: 18px; height: 18px; margin-top: 3px; accent-color: var(--gold); }
+.cloud-set-selection label span { display: grid; gap: 5px; line-height: 1.5; overflow-wrap: anywhere; }
+.cloud-set-selection small, .cloud-library-detail { font-size: 12px; color: var(--text-80); }
+.cloud-quiz-actions { display: flex; flex-wrap: wrap; align-items: end; gap: 14px; padding-top: 12px; }
+.cloud-quiz-actions label { display: grid; gap: 6px; font-size: 13px; }
+.cloud-quiz-actions input { width: 110px; padding: 12px; border: 1px solid var(--hairline); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text); }
+.cloud-library-message { display: flex; align-items: center; gap: 8px; }
+.cloud-library-error { color: var(--text); border-inline-start: 3px solid var(--gold); padding-inline-start: 12px; }
+.cloud-course-content input:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+.cloud-local-material { padding-block: 10px; }
+.cloud-local-material > summary { cursor: pointer; font-weight: 600; color: var(--text-80); min-height: 44px; padding-block: 12px; }
+@media (max-width: 560px) { .cloud-course-content { padding: 12px; } .cloud-library-heading { align-items: start; } .cloud-template-sections li { flex-wrap: wrap; } .cloud-set-selection { max-height: 35vh; } }
+
+/* Quiet bulk set controls: primary quiz action stays visually dominant. */
+.cloud-select-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin: 4px 0; }
+.cloud-select-toolbar > span { font-size: 12px; color: var(--text-80); }
+.cloud-select-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.cloud-select-actions button, .cloud-week-toggle { border: 0; background: transparent; color: var(--gold); font: inherit; font-size: 12px; padding: 9px 10px; border-radius: var(--radius-sm); cursor: pointer; }
+.cloud-select-actions button:hover, .cloud-week-toggle:hover { background: var(--surface-2); }
+.cloud-select-actions button:focus-visible, .cloud-week-toggle:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.cloud-select-actions button:disabled, .cloud-week-toggle:disabled { opacity: .4; cursor: default; }
+.cloud-week-toggle { display: block; margin-left: -10px; }

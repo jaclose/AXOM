@@ -40,21 +40,24 @@ export function withPreparedCourses(books: CourseBook[], documents: readonly Sou
       unfiled: plan.items.filter(i => !i.week).length };
   });
 }
-export async function loadPreparedCourse(book: CourseBook): Promise<SaveOutcome> {
+export async function loadPreparedCourse(book: CourseBook, assertCanWrite: () => void = () => {}): Promise<SaveOutcome> {
   if (book.term === "Term unconfirmed") return { status: "failed", message: "Choose the term in Customize Weeks & Activities before loading this template." };
-  const [{ useStore }, vault] = await Promise.all([import("../store"), import("../localVault")]);
-  const structure = await commitCourseLoad(book);
-  if (structure.status === "failed") return structure;
-  const s = useStore.getState();
-  const sections = templatesForBook(s.documents, book).map(t => t.section);
-  if (!sections.length) return structure;
   try {
+    const [{ useStore }, vault] = await Promise.all([import("../store"), import("../localVault")]);
+    assertCanWrite();
+    const structure = await commitCourseLoad(book, assertCanWrite);
+    if (structure.status === "failed") return structure;
+    assertCanWrite();
+    const s = useStore.getState();
+    const sections = templatesForBook(s.documents, book).map(t => t.section);
+    if (!sections.length) return structure;
     const checkpoint = vault.getVaultWriteCheckpoint();
     const changes = reconcileCourseTemplate(planCourseTemplate(sections, { term: book.term }), s.tracker);
+    assertCanWrite();
     if (changes.create.length) s.bulkAddTrackerItems(changes.create.map(item => ({ path: item.path, label: item.label, kind: item.kind,
       passes: 0, ankiPasses: 0, yield: "none", activity: item.activity, templateKey: item.templateKey, weekSource: item.weekSource })));
     // Existing labels, notes and progress are learner-owned. Version customization is explicit.
-    await vault.flushLocalVaultWrites(); vault.assertVaultWritesSince(checkpoint);
+    await vault.flushLocalVaultWrites(); vault.assertVaultWritesSince(checkpoint); assertCanWrite();
     return { status: changes.create.length ? "saved-on-device" : "nothing-to-save" };
   } catch (error) { return { status: "failed", message: error instanceof Error ? error.message : "Course could not be saved." }; }
 }

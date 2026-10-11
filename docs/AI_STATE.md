@@ -5,100 +5,78 @@ authority: current-state
 ---
 # AXOM current AI state
 
-Snapshot: 2026-10-10. Source checkout `feat/course-qbank-intelligence-v2`, based on
-`c46ae207`; this checkpoint contains the validated private-library delivery correction.
-Rolling line `/Users/jd/Developer/AXOM-next-integration` is clean at `c46ae207`.
-JD authorizes this session to own integration, normal development pushes and validated
-local main convergence. Main is `5fbe8a4f`; frozen convergence stays `3d981f7c`.
-The current on-demand contract is `AXOM_QBank_First_Main_Execution_Brief_v2.md`.
-Immediate priority: JD's supplied private library in the app they actually use.
+Snapshot: 2026-10-10. Isolated `feat/shared-academic-catalog`, draft PR 20 against
+`integration/axom-next-2026-10-07`, based on `c23e8c26`. Not main or production.
+Verify current refs and actual CI before continuing; other worktrees are untouched.
 
-## Actual delivery target
+## Active product correction
 
-JD explicitly selected the regular Chrome `https://axom.info` workspace. Its supported
-Settings export is preserved in Downloads (2026-10-10): 1,088 questions, 67 sets and
-618 attempts. Two pre-existing image blobs were missing. One exact filename/size match
-was recovered into a separate private backup copy; neither copy has been merged into
-the live workspace. No reset or content installation occurred. Local validation is `127.0.0.1:5188`.
-Authenticated Vercel inspection found axom.info serving promoted feature commit
-`c25718d93123ad26e31a72f528710b5c814e002e`, not the integrated product tip.
-Project axom uses GitHub `jaclose/AXOM`, production branch main, with automatic domain
-assignment. Remote main therefore crosses the production-deployment boundary: prepare
-and validate the exact commit/RC, then request one specific deployment approval.
-No production deployment or private-content publication is authorized implicitly.
+JD requires a SITE-WIDE CLOUD Course Template Library and QBank, not a personal
+folder installer. Shared content is published once for its permitted audience.
+Course activation, progress, attempts and notes remain private. The local vault
+caches selected content; it is no longer the only proposed distribution mechanism.
 
-## Working local delivery slice
+Implemented: versioned releases, catalog entries, checksum file manifests, audience
+grants, private Storage policies, account-aware discovery, Load Course/Create Quiz
+through existing stores, and operator preparation/publication tools. Canonical guide:
+[Shared academic catalog](features/shared-academic-catalog.md).
 
-- One responsive academic collection, module search and term filter, readable covers,
-  visible Load Course and Create Quiz actions. Prepared courses remain discoverable
-  without enrolling every activity. Loading and updates preserve existing progress.
-- Resumable private folder/ZIP installation uses existing template, question, media and
-  original-source stores. Canonical source identity prevents repeat imports from cloning
-  questions after learner tag/title/wording edits. Uncertain keys/images stay review-gated.
-- Clean Chrome first run through setup and the actual folder chooser passed: 28 templates,
-  362 ready questions, 43 sets, 36 questions with images; FTM 1 loaded 55 activities.
-  Single/mixed quizzes saved 14 attempts. Reload and repeat installation preserved counts.
-  No injected database records. Existing-workspace replay also passed.
-- JD's actual exported workspace was restored through Settings in an isolated profile.
-  Installation preserved all 1,088 questions, notes, 183 tracker activities and 618 attempts.
-  Combined library: 1,450 questions / 110 sets. Single/mixed practice, images, reload and
-  repeated installation passed; 633 attempts include test-only answers in that copy.
-- Workspace backup exported 3,071 images in a 708,843,876-byte ZIP. Archive integrity and
-  actual Settings merge/reload passed: 362 questions, 43 sets, 14 attempts, 28 templates;
-  no browser errors. Large media uses binary ZIP; existing JSON backups remain supported.
-  Original document bytes travel in the separate private collection, not workspace backups.
-- Prior integrated slices remain: PDF text/tables/images, compact source-grounded Tutor,
-  saved-block Decode/review, persistent template versions and selective course loading.
+The publisher requires exact release approval, project identity, rights reference and
+audience. Uncertain source keys/assets remain held. No private content, user records,
+server credentials or personal collection data were added to Git. Preparation refuses
+overlapping source/output paths and does not publish unused assets from failed banks.
 
-Private collection is outside Git under the user's Application Support/AXOM/private-library.
-Content version `c4ac1a69d35fc597`, preparer v3. Existing 13-root inventory: 651 entries,
-628 unique files, 23 exact duplicates. Prepared catalog: 40 prepared, 472 review-required,
-90 reference/template-only, 20 unsupported, 23 duplicate-linked, six missing LFS originals,
-zero failed. 11,599 held extraction candidates are NOT verified scored question counts.
-All 28 current TXT files parse: 14 module labels, 672 activities, zero unreadable lines.
-Latest FTM1–MSK PDF authority and same-term cohort reconciliation remain unfinished.
-Accepted supplementary generation: zero; ten-per-eligible-document quota remains open.
+## Verified checkpoint and next CI
 
-Durable behavior: [question content](features/question-content.md),
-[bookshelf](features/bookshelf.md), [Course Engine](features/course-engine.md),
-[Decode](features/decode.md). One coverage ledger: external
-`AXOM-coordination/state/CONVERGENCE.md`. Do not create a second roadmap.
+At `92af4e73`, GitHub Actions run 38103986818 passed BOTH web and native jobs:
+repository hygiene, 72 root tests, TypeScript, lint, full unit suite, production build,
+two catalog browser journeys (1440px and 390px), update-consent/persistence checks,
+offline reopening, and native Rust fmt/check/tests. The high-severity production
+dependency gate passed; three existing moderate mammoth/argparse/sprintf advisories
+remain. No package manifests or lockfiles were changed.
 
-## Contracts and protected work
+Browser journeys exercised automatic catalog discovery, course loading, signed image
+fetch, canonical practice, Decode review and persisted reload using synthetic HTTP
+fixtures. Local PGlite tests covered anonymous/two-account access, exact object policies,
+immutable publication, and the entire existing migration chain. These are NOT hosted
+Supabase Storage or real school-content acceptance.
 
-React/TypeScript web, root src-tauri native shell, schema 34. Preserve Noctyrium storage
-identifiers and learner data. Reviewed imports use prepareReviewedImport/saveReviewedImport;
-question attempts, assets, annotations, results and course logging remain canonical.
-No added question engine, provider endpoint or scheduler. Optional account sync is additive.
+This follow-up threads account-validity guards through async course activation and adds
+two race regressions. The final CI must pass at its exact commit, not inherit 92af4e73's
+result. PR checks and comments carry the latest outcome without another roadmap.
 
-Read current BOARD ownership before writes. Communications/Pulse has a separate active
-worktree and owns new communication features plus its App/Settings entries; preserve it.
-This slice owns Settings backup/media changes. Other worktrees, drafts, recovery refs,
-stashes and frozen convergence remain protected. A clean worktree does not imply ownership.
-The maintenance registry keeps product areas ACTIVE; no opportunistic cleanup.
+## Actual environment and blockers
 
-## Remaining gates and limitations
+Desktop Commander on JD's Mac is offline. Its prepared collection is not accessible.
+Historical location: Application Support/AXOM/private-library. Previous local report:
+28 templates; 362 ready questions in 43 sets; 36 image-bearing questions. The 651-entry
+source inventory includes review-held/unsupported/missing content, not all-ready banks.
 
-Web gate components pass: typecheck, lint, 2,858 unit tests (five skips), build, update
-consent/persistence verification, offline games, and all 65 enabled browser journeys.
-The initial browser run found stale navigation assertions; all 22 affected journeys passed
-after correction. Four opt-in journeys were skipped there; full private-content acceptance
-ran separately against clean and real-workspace copies. Source preparation now retries
-restored missing files; a missing -> restored template CLI check passed. Repository tests:
-43 pass; hygiene and guard pass. Existing build chunk notices remain.
-Desktop/phone screenshots and real interaction evidence are in /tmp/axom-private-*.
-Synthetic acceptance profiles were removed after validation to regain disk headroom;
-originals, private prepared package and JD's actual browser profile were preserved.
+Read-only inspection confirmed production project `jofkmfwkidubxcutkwzf` healthy and no
+academic_catalog tables yet. NO production migration, content publication or deployment
+was performed. No staging project/paid branch was created. Obtain an authorized hosted
+environment and publication audience before network writes. Apply both catalog migrations
+there, publish one reviewed course/image-rich bank, verify independent accounts and denied
+access, then use the same resumable publisher for the remaining authorized collection.
 
-Full private collection exceeds the existing 14 MB account snapshot limit. The library
-shows that limit explicitly. Local persistence and portable ZIP backup are verified;
-full-corpus cloud sync is NOT supported/verified.
-Do not silently omit private documents or raise server limits as a shortcut.
-Slide mode, full exam-tool fidelity, Anki remediation, generated content and school-pattern
-analysis still need acceptance. Existing reviewPriority TODO(human) remains owner-controlled.
+Main remains untouched. Dev pushes are authorized; main/production deployment and private
+source publication retain explicit approval boundaries. Never force push, erase workspaces,
+drop stashes, delete worktrees, expose credentials or publish beyond the authorized audience.
 
-Next: commit/push the reviewed development slice,
-fast-forward the verified rolling/local main line under ownership, package/smoke-test the web
-RC. Then obtain deployment approval, retain JD's exported workspace safety copy, install
-the private prepared folder through the supported one-time transfer, and verify that exact
-origin. Until then, this is locally validated, NOT delivered to JD's production workspace.
+## Remaining scope and protection
+
+Original PDF/source-page and interactive Slide delivery, supplementary generation, complete
+Anki remediation, deeper analysis and remaining Ideas still need acceptance. The learner
+snapshot limit is unchanged: very large downloaded local libraries may still exceed it.
+Catalog distribution is not a claim of full-corpus learner synchronization or offline DRM.
+
+React/TypeScript web, root src-tauri shell, local schema 34 and Noctyrium identifiers
+remain. Reuse saveBank/reviewed imports, templates, attachments, attempts, Decode and
+course logging; no parallel question engine, AI endpoint, scheduler or learner store.
+The small optional guard on course activation protects against identity changes while
+waiting for persistence; ordinary local loading retains its existing default behavior.
+
+Before local writes or integration, recheck current BOARD ownership. Its absence is not
+permission to overwrite another session. Communications/Pulse, other active worktrees,
+drafts, recovery refs and frozen branches remain protected. No incidental cleanup.
+Prior private-folder implementation evidence: `5355e5e7:docs/AI_STATE.md`.

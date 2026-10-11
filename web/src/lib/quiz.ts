@@ -26,6 +26,8 @@ export interface QuizFilters {
   /** Restrict to specific question sets / source documents (Block Builder). */
   setIds?: string[];
   documentIds?: string[];
+  /** Exact selected question identities. When present, intersect with sets; empty means none. */
+  questionIds?: string[];
   /** Keep document order instead of shuffling. */
   ordered?: boolean;
 }
@@ -110,6 +112,12 @@ export function buildQuizPool(
     } else {
       pool = pool.filter((question) => question.setId && legacySetIds.has(question.setId));
     }
+  }
+  // A reused canonical set may contain more than the publisher-selected bank.
+  // Never broaden a cloud block or a saved exact selection to those extra rows.
+  if (filters.questionIds !== undefined) {
+    const allowedIds = new Set(filters.questionIds);
+    pool = pool.filter((question) => allowedIds.has(question.id));
   }
   if (filters.status === "unused") pool = pool.filter((q) => q.attempts.length === 0);
   else if (filters.status === "incorrect") pool = pool.filter((q) => q.status === "incorrect" || q.status === "guessed");

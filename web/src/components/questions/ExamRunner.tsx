@@ -137,6 +137,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const [choosingSources, setChoosingSources] = useState(false);
   const [wholeBank, setWholeBank] = useState(!presetFilters?.setIds?.length);
   const [setIds, setSetIds] = useState<string[]>(presetFilters?.setIds ?? []);
+  const [questionIds, setQuestionIds] = useState<string[] | undefined>(() => presetFilters?.questionIds ?? restored?.filters.questionIds);
   const [ordered, setOrdered] = useState(presetFilters?.ordered ?? false);
   const [timed, setTimed] = useState(restored?.timed ?? (simulate || presetTimed));
   const [runBlockId, setRunBlockId] = useState(blockId);
@@ -278,14 +279,14 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
 
   useEffect(() => {
     if (stage !== "running" || pool.length === 0) return;
-    const filters: QuizFilters = { count, status, categories: category ? [category] : undefined, examTypes: examType ? [examType] : undefined, setIds: setIds.length ? setIds : undefined, ordered: ordered || undefined };
+    const filters: QuizFilters = { count, status, categories: category ? [category] : undefined, examTypes: examType ? [examType] : undefined, setIds: setIds.length ? setIds : undefined, questionIds, ordered: ordered || undefined };
     // The snapshot keeps the shape it had before the engine: answered or flagged questions, and the pick on screen.
     const at = Date.now();
     const answers = pool.map((item) => answerIn(block, item.id, at)).filter((answer) => answer.answerKey || answer.flagged);
     const snapshot: ActiveQuizSnapshot = { mode, poolIds: pool.map((item) => item.id), index, answers, picked, revealed, startedAt, timed, filters, runId, certainty };
     try { localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify(snapshot)); } catch { /* Local Vault remains authoritative for saved work. */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [block, category, certainties, checked, count, examType, mode, ordered, pool, runId, setIds, stage, startedAt, status, timed]);
+  }, [block, category, certainties, checked, count, examType, mode, ordered, pool, runId, setIds, questionIds, stage, startedAt, status, timed]);
 
   function clearActiveQuiz() {
     try { localStorage.removeItem(STORAGE_KEYS.quizActiveSession); } catch { /* non-fatal */ }
@@ -418,6 +419,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       categories: category ? [category] : undefined,
       examTypes: examType ? [examType] : undefined,
       setIds: setIds.length ? setIds : undefined,
+      questionIds,
       ordered: ordered || undefined,
     };
   }
@@ -837,8 +839,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           <GhostButton onClick={() => setChoosingSources((value) => !value)} aria-expanded={choosingSources}>{choosingSources ? "Done choosing" : "Change sources"}</GhostButton>
         </section>
         {choosingSources && <div className="stack gap12">
-          <label className="row gap8"><input type="checkbox" checked={wholeBank} onChange={(event) => { setWholeBank(event.target.checked); setSetIds([]); }} />Use the whole bank</label>
-          <CourseBankBrowser selectedIds={setIds} onSelectionChange={(ids) => { setWholeBank(false); setSetIds(ids); }} />
+          <label className="row gap8"><input type="checkbox" checked={wholeBank} onChange={(event) => { setWholeBank(event.target.checked); setSetIds([]); setQuestionIds(undefined); }} />Use the whole bank</label>
+          <CourseBankBrowser selectedIds={setIds} onSelectionChange={(ids) => { setWholeBank(false); setSetIds(ids); setQuestionIds(undefined); }} />
         </div>}
         <div className="stack gap6"><span className="field-label">How do you want to practice?</span>
           <div className="row wrap gap8" role="group" aria-label="Block mode">

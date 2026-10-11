@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: quality-${{ github.workflow }}-${{ github.ref }}
+  group: quality-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -33,11 +33,35 @@ jobs:
       - name: Release tool regression tests
         run: node --test scripts/*.test.mjs
       - name: Typecheck, lint, test, and production build
-        run: npm --prefix web run quality
+        run: |
+          result=0
+          npm --prefix web run quality > "$RUNNER_TEMP/axom-quality.log" 2>&1 || result=$?
+          tail -n 140 "$RUNNER_TEMP/axom-quality.log"
+          exit "$result"
       - name: Install browser for production update checks
         run: npm --prefix web exec -- playwright install --with-deps chromium
+      - name: Shared catalog browser contracts (synthetic HTTP fixtures)
+        run: npm --prefix web run test:e2e -- e2e/shared-academic-catalog.spec.ts e2e/cloud-catalog.spec.ts --workers=1
       - name: Native ZIP question package browser acceptance (no catalog file)
         run: npm --prefix web run test:e2e -- e2e/native-package-zip.spec.ts
+      - name: Shared library browser evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: shared-library-browser-${{ github.run_id }}
+          path: |
+            web/test-results/cloud-catalog-*/
+            web/test-results/shared-academic-catalog-*/
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Quality diagnostic log
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: quality-log-${{ github.run_id }}
+          path: ${{ runner.temp }}/axom-quality.log
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Verify consent, recovery snapshot and offline update behavior
         run: npm --prefix web run verify:app-updates
       - run: npm --prefix web run verify:daily-games-offline
