@@ -10,6 +10,8 @@ import { GhostButton, Tag } from "../ui/primitives";
 import { QuestionContent, QuestionSupportingContent } from "./QuestionContent";
 import { QuestionExhibits } from "./QuestionExhibits";
 import { SourceTeaching } from "./SourceTeaching";
+import { QuestionReviewSlides } from "./QuestionReviewSlides";
+import { QuestionViewControls, QuestionViewFrame, useQuestionView } from "./QuestionView";
 
 /** Reopens a completed run without submitting, rescoring, or creating attempts. */
 export function SessionReviewModal({ session, onClose, onPractice }: {
@@ -18,6 +20,7 @@ export function SessionReviewModal({ session, onClose, onPractice }: {
   onPractice: (ids: string[]) => void;
 }) {
   const s = useStore();
+  const presentation = useQuestionView();
   const [filter, setFilter] = useState<"all" | "missed" | "flagged">("all");
   const [selected, setSelected] = useState(session.questionIds[0]);
   const questionRef = useRef<HTMLElement>(null);
@@ -58,6 +61,7 @@ export function SessionReviewModal({ session, onClose, onPractice }: {
         {([ ["all", "All answers"], ["missed", "Missed"], ["flagged", "Flagged"] ] as const).map(([value, label]) =>
           <button type="button" key={value} className={`filter-pill ${filter === value ? "on" : ""}`} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>)}
       </div>
+      <QuestionViewControls view={presentation.view} onChange={presentation.choose} notice={presentation.notice} mode={session.mode} />
       {!ids.length ? <p role="status">No {filter === "all" ? "saved" : filter} questions in this block. Choose another filter.</p>
         : !question ? <p role="status">This question is no longer in your library. Its saved result is retained. Restore the question from your backup to review its source.</p>
         : <article ref={questionRef} className="session-review-question" key={question.id} aria-label="Saved question review">
@@ -68,6 +72,8 @@ export function SessionReviewModal({ session, onClose, onPractice }: {
             <span className="sub">Your answer: {answer?.answerKey ?? "Not answered"}</span>
             {answer?.flagged && <span className="sub">Flagged in this block</span>}
           </div>
+          <QuestionViewFrame view={presentation.view}>
+          {presentation.view === "slides" && <QuestionReviewSlides question={question} source={source} />}
           <QuestionContent question={question} part="stem" mode="review" fallback={<p className="question-stem">{question.stem}</p>} />
           <QuestionSupportingContent question={question} mode="question" />
           {!question.content && <QuestionExhibits attachments={(question.attachments ?? []).filter((entry) => entry.role === "exhibit")} />}
@@ -78,6 +84,7 @@ export function SessionReviewModal({ session, onClose, onPractice }: {
               <span className="sub">{[ready && option.key === question.correctKey && "Current key", answer?.answerKey === option.key && "Your answer"].filter(Boolean).join(" · ")}</span>
             </li>)}
           </ol>
+          </QuestionViewFrame>
           {!ready && <p role="status">The current answer key needs review. The saved result is historical, not a verified answer for this revision.</p>}
           <SourceTeaching key={question.id} question={question} document={source}
             siblings={s.questions?.filter((entry) => entry.sourceDocumentId === source?.id)} provider={provider}

@@ -80,6 +80,8 @@ test("native multi-bank ZIP installs without catalog.json and persists practice"
   await seedOnboarded(page);
   const buffer = await nativeZip();
   async function chooseBundle(button: string) {
+    const library = page.getByRole("region", { name: "Prepared library" });
+    if (!await library.isVisible()) await page.getByText("Local collection transfer and source review", { exact: true }).click();
     const chooser = page.waitForEvent("filechooser");
     await page.getByRole("button", { name: button, exact: true }).click();
     await (await chooser).setFiles({ name: "native-question-banks.zip", mimeType: "application/zip", buffer });
@@ -142,8 +144,9 @@ test("native multi-bank ZIP installs without catalog.json and persists practice"
     // The reading surface includes both in-order media and source exhibits.
     // A placed figure may live next to the accessible stem rather than inside it.
     const figure = page.locator(".quiz-reading img");
-    if (await figure.count()) {
+    if ((await stem.innerText()).includes("Synthetic item 1:")) {
       sawImage = true;
+      await expect(figure.first()).toBeVisible();
       await expect.poll(() => figure.first().evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
     }
     await stem.focus(); await page.keyboard.press("A"); await page.keyboard.press("Enter");
