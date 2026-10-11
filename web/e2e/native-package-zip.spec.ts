@@ -139,9 +139,12 @@ test("native multi-bank ZIP installs without catalog.json and persists practice"
   for (let index = 0; index < 2; index++) {
     const stem = page.getByLabel("Question stem", { exact: true });
     await expect(stem).toBeVisible();
-    if (await stem.locator("img").count()) {
+    // The reading surface includes both in-order media and source exhibits.
+    // A placed figure may live next to the accessible stem rather than inside it.
+    const figure = page.locator(".quiz-reading img");
+    if (await figure.count()) {
       sawImage = true;
-      await expect.poll(() => stem.locator("img").first().evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+      await expect.poll(() => figure.first().evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
     }
     await stem.focus(); await page.keyboard.press("A"); await page.keyboard.press("Enter");
     await page.getByRole("button", { name: index === 1 ? "Finish block" : "Next question", exact: true }).click();
