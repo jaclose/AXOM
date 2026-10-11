@@ -3,7 +3,7 @@ name: AXOM Quality
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, feat/shared-academic-catalog-ui]
   workflow_dispatch:
   workflow_call:
 
@@ -11,8 +11,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: quality-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: quality-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/feat/shared-academic-catalog-ui' }}
 
 jobs:
   web:
@@ -40,14 +40,16 @@ jobs:
           exit "$result"
       - name: Install browser for production update checks
         run: npm --prefix web exec -- playwright install --with-deps chromium
-      - name: Shared library browser regression (synthetic transport)
-        run: npm --prefix web run test:e2e -- e2e/cloud-catalog.spec.ts --workers=1
+      - name: Shared catalog browser contracts (synthetic HTTP fixtures)
+        run: npm --prefix web run test:e2e -- e2e/shared-academic-catalog.spec.ts e2e/cloud-catalog.spec.ts --workers=1
       - name: Shared library browser evidence
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: shared-library-browser-${{ github.run_id }}
-          path: web/test-results/cloud-catalog-*/
+          path: |
+            web/test-results/cloud-catalog-*/
+            web/test-results/shared-academic-catalog-*/
           if-no-files-found: ignore
           retention-days: 7
       - name: Quality diagnostic log
