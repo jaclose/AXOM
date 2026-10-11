@@ -43,7 +43,7 @@ export async function readCloudFile(releaseId: string, path: string, signal: Abo
   const client = await catalogClient();
   const { data, error } = await client.from("academic_catalog_files")
     .select("release_id,path,storage_path,sha256,byte_size,mime_type")
-    .eq("release_id", releaseId).eq("path", safeCatalogPath(path)).single().abortSignal(signal);
+    .eq("release_id", releaseId).eq("path", safeCatalogPath(path)).abortSignal(signal).single();
   if (error) throw backendError(error);
   const file = parseCatalogFile(data);
   if (file.release_id !== releaseId || file.path !== path) throw new Error("The catalog returned a different asset.");
