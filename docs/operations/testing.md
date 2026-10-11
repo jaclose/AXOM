@@ -120,3 +120,88 @@ for this root/Node baseline. GitHub reports main/integration unprotected and no 
 rulesets. To enforce merging only after checks, the owner must require `deployment-inputs`,
 `web` and `native` through branch protection/rulesets; configure Vercel deployment checks
 separately if production must wait for CI. No remote setting was changed by this task.
+
+### Dependency warning inventory (2026-10-11)
+
+Inspected independently of deployment filtering. No existing dependency was upgraded,
+overridden, removed or silenced. The only added package is the deployment harness's
+small, exact Vercel-compatible ignore parser.
+
+Commands: `npm explain whatwg-encoding inflight glob --json` in each package root;
+`npm view <parent>@latest version dependencies engines deprecated --json` and the npm
+registry's version metadata for the latest compatible parent releases.
+
+| Package root | Exact installed version | Parent chain |
+| --- | --- | --- |
+| Root | whatwg-encoding 3.1.1 | @wdio/cli 9.32.0 → webdriverio 9.32.0 → cheerio 1.2.0 → encoding-sniffer 0.2.1 → whatwg-encoding 3.1.1 |
+| Root | inflight 1.0.6 | @wdio/mocha-framework 9.32.0 → mocha 10.8.2 → glob 8.1.0 → inflight 1.0.6 |
+| Root | glob 8.1.0 | @wdio/mocha-framework 9.32.0 → mocha 10.8.2 → glob 8.1.0 (nested under mocha) |
+| Root | glob 10.5.0 | @wdio/config 9.32.0 → glob 10.5.0 (root node_modules) |
+| Web | None of the three | npm explain exits 1 with “No dependencies found matching”; the web lock contains none of them |
+
+The shared @wdio/config 9.32.0 is reached through @wdio/cli 9.32.0,
+webdriverio 9.32.0, webdriver 9.32.0 and the runner 9.32.0 beneath
+@wdio/local-runner 9.32.0. The webdriverio chain is also reachable through peer links
+from @wdio/globals 9.29.1 / nested 9.31.3 and expect-webdriverio 5.7.0 / nested 6.1.0.
+These are alternate paths to the same versions, not additional warning-package versions.
+Both local package roots were reinstalled successfully with npm ci on Node 22.23.1 /
+npm 10.9.8, then the explain commands were repeated in this isolated worktree. An earlier
+web install hit ENOSPC; only its incomplete generated node_modules was removed before
+the successful fresh installation after disk headroom recovered.
+
+Available remediation, deliberately separate from this deployment-input change:
+
+- **whatwg-encoding:** 3.1.1 is its latest and is deprecated. encoding-sniffer 1.0.2
+  uses @exodus/bytes, but cheerio's latest 1.2.0 still requires ^0.2.1. Even webdriverio
+  10.0.2 retains cheerio. Wait for or contribute the parent update, or separately test
+  a supported parent migration. A transitive major override is not a demonstrated fix.
+- **inflight / glob 8:** latest compatible @wdio/mocha-framework 9.32.0 still requires
+  mocha ^10.8.2. Framework 10.0.1 requires mocha ^12.0.2; mocha 12.0.3 uses glob ^13.0.0
+  without inflight. A coordinated WebdriverIO 10 migration can remove this chain, but
+  needs its own API/peer and live browser-audit validation.
+- **glob 10:** 10.5.0 is the latest 10.x. Even @wdio/config 10.0.1 still requests
+  glob ^10.2.2. Glob 13.0.6 is available but outside the parent's range. A WebdriverIO
+  major upgrade alone does not remove this warning; a compatible upstream change is
+  still needed. Do not force glob 13 into an untested caller.
+
+Deprecation is not itself a vulnerability finding. The current root audit reports
+20 high findings across development tooling; the deployment harness introduces none.
+Web's full audit reports source-map-js high (development tooling) and three moderate
+mammoth/argparse/sprintf-js findings; the latter remain in the production dependency
+audit. These findings remain unresolved and require a separate scoped dependency
+maintenance change. Production dependency audits and existing quality gates remain enabled.
+
+### Validated checkpoint
+
+Code tested: `af21e9b29580d8530a436ececd9b134fec928cbe`, on
+`fix/deployment-input-reliability`, based on integration `baf340bd`.
+[Linux CI run 38141538198](https://github.com/jaclose/AXOM/actions/runs/38141538198)
+passed all three jobs: deployment-inputs, web and native. Later documentation-only
+commits record this evidence; they do not imply a different code revision was tested.
+
+| Exact command | Result / environment |
+| --- | --- |
+| `npm ci` and `npm --prefix web ci` | Both pass, macOS and Ubuntu 24.04; Node 22.23.1 / npm 10.9.8 |
+| `npm run test:deployment` | Seven regressions pass on macOS and Linux |
+| `npm run verify:deployment -- --without-goer-allowlist --expect-build-failure` | Linux: 1,050 filtered files; actual web build fails with all three required GOER TS2307 errors; harness confirms expected failure |
+| `npm run verify:deployment` | Linux: 1,053 filtered files; both fresh installs, exact-case guard, TypeScript, Vite and bundle verification pass |
+| `npm run verify:deployment -- --ignore-ref c23e8c2^ --expect-build-failure` | macOS at e2ebc8aa: exact historical ignore file, 1,089 files (older rules admitted more scripts); same three real TS2307 errors reproduced |
+| `npm run test:release` | 79 root tests pass, including 43 repository tests and seven deployment regressions |
+| `npm run typecheck:api` and `npm run repo:check` | Pass locally and in Linux CI |
+| `npm --prefix web run quality` | Linux: typecheck, lint, 2,910 tests (five existing skips) and build pass |
+| `npm --prefix web run test:e2e -- e2e/native-package-zip.spec.ts` | Linux Chromium: actual ZIP import, required decoded image, quiz, answers, saved result and reload pass; local installed Chrome also passes |
+| `npm --prefix web run verify:app-updates` and `npm --prefix web run verify:daily-games-offline` | Linux production-browser checks pass |
+| `cargo fmt --manifest-path src-tauri/Cargo.toml --check` | Linux: pass |
+| `cargo check --manifest-path src-tauri/Cargo.toml --locked` | Linux: pass |
+| `cargo test --manifest-path src-tauri/Cargo.toml --lib --locked` | Linux: 16 pass |
+| `npm --prefix web audit --omit=dev --audit-level=high` | Passes threshold with three existing moderate findings; root `npm audit --omit=dev` reports zero |
+
+The first CI run at e2ebc8aa exposed an existing instant `img.count()` race in the ZIP
+browser test. The corrected test explicitly waits for the fixture's required image and
+checks decoded pixels; no assertion was removed, relaxed or skipped. The negative
+deployment test deliberately prints TS2307 (including three GitHub error annotations);
+it fails if those real errors are absent or if dependency installation itself fails.
+
+Not verified: hosted Vercel preview, axom.info browser behavior, Windows/macOS signed
+release packaging or native app launch. No production deployment, remote settings
+mutation, dependency maintenance upgrade, main update or integration merge occurred.
