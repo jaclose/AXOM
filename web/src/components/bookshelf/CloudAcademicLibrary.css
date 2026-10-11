@@ -4,7 +4,7 @@
 .cloud-library-heading p, .cloud-course-content p { color: var(--text-80); line-height: 1.65; margin: 8px 0 16px; }
 .cloud-library-eyebrow { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--gold); }
 .cloud-library-notice { padding: 16px 18px; border: 1px solid var(--hairline); border-radius: var(--radius-lg); background: var(--surface-2); color: var(--text-80); line-height: 1.6; }
-.cloud-course-content { padding: 18px; display: grid; gap: 10px; min-width: 0; }
+.cloud-course-content { padding: 18px; display: grid; align-content: start; gap: 10px; min-width: 0; }
 .cloud-course-intro > span { color: var(--text-80); font-size: 12px; }
 .cloud-course-intro h3 { font-family: var(--font-display); font-size: 24px; margin: 8px 0; }
 .cloud-template-sections { padding: 0; list-style: none; display: grid; gap: 12px; }
