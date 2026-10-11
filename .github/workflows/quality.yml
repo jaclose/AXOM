@@ -3,7 +3,8 @@ name: AXOM Quality
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, 'integration/**']
+  merge_group:
   workflow_dispatch:
   workflow_call:
 
@@ -15,6 +16,28 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  deployment-inputs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+      - run: node scripts/toolchain.mjs
+      - run: npm ci
+      - run: npm run test:deployment
+      - name: Prove original GOER exclusion breaks the actual build
+        run: npm run verify:deployment -- --without-goer-allowlist --expect-build-failure
+      - name: Build clean Vercel-filtered source with the targeted allowlist
+        run: npm run verify:deployment
+
   web:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -24,14 +47,20 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '24'
+          node-version-file: .nvmrc
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
       - name: Repository context and hygiene
         run: node scripts/repository-hygiene.mjs
+      - name: Verify supported Node and npm
+        run: node scripts/toolchain.mjs
+      - run: npm ci
       - run: npm --prefix web ci
       - name: Release tool regression tests
         run: node --test scripts/*.test.mjs
+      - run: npm run typecheck:api
       - name: Typecheck, lint, test, and production build
         run: npm --prefix web run quality
       - name: Install browser for production update checks
@@ -52,9 +81,11 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '24'
+          node-version-file: .nvmrc
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
       - name: Install Linux build libraries
         run: |
           sudo apt-get update
@@ -65,6 +96,9 @@ jobs:
       - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
           workspaces: src-tauri -> target
+      - name: Verify supported Node and npm
+        run: node scripts/toolchain.mjs
+      - run: npm ci
       - run: npm --prefix web ci
       - run: npm --prefix web run build
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check

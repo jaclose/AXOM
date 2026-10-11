@@ -32,6 +32,9 @@ jobs:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
           persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
       - name: Validate exact tag and updater configuration
         id: metadata
         env:
@@ -81,11 +84,18 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '24'
+          node-version-file: .nvmrc
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+      - name: Verify supported Node and npm
+        run: node scripts/toolchain.mjs
+      - run: npm ci
       - run: npm --prefix web ci
       - run: node --test scripts/*.test.mjs
+      - run: npm run verify:deployment
+      - run: npm run typecheck:api
       - run: npm --prefix web run quality
       - run: npm --prefix web audit --omit=dev --audit-level=high
       - run: npm --prefix web exec -- playwright install --with-deps chromium
@@ -105,9 +115,14 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '24'
+          node-version-file: .nvmrc
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+      - name: Verify supported Node and npm
+        run: node scripts/toolchain.mjs
+      - run: npm ci
       - run: npm --prefix web ci
       - run: node scripts/release.mjs --web-only
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -153,9 +168,11 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '24'
+          node-version-file: .nvmrc
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
       - name: Install Linux build libraries
         if: runner.os == 'Linux'
         run: |
@@ -168,6 +185,9 @@ jobs:
         with:
           workspaces: src-tauri -> target
           key: ${{ matrix.target }}
+      - name: Verify supported Node and npm
+        run: node scripts/toolchain.mjs
+      - run: npm ci
       - run: npm --prefix web ci
       - name: Build installers and signed updater bundles
         env:
@@ -213,7 +233,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '24'
+          node-version-file: .nvmrc
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: release-*

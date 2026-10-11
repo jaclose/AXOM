@@ -5,10 +5,11 @@
   "type": "module",
   "description": "Optional Vercel serverless backend for AXOM cloud sync and AI scaffolding.",
   "engines": {
-    "node": "22.x"
+    "node": ">=22.23.1 <23",
+    "npm": "10.9.8"
   },
   "scripts": {
-    "build": "npm --prefix web run build",
+    "build": "node scripts/deployment-inputs.mjs && npm --prefix web run build",
     "dev": "npx vercel dev",
     "web:dev": "npm --prefix web run dev",
     "tauri:dev": "node scripts/tauri.mjs dev",
@@ -43,7 +44,10 @@
     "soundscapes:import": "node scripts/import-soundscapes.mjs",
     "directions:check": "node scripts/directions-check.mjs",
     "repo:check": "node scripts/repository-hygiene.mjs",
-    "test:repo": "node --test scripts/repository-hygiene.test.mjs"
+    "test:repo": "node --test scripts/repository-hygiene.test.mjs",
+    "check:toolchain": "node scripts/toolchain.mjs",
+    "test:deployment": "node --test scripts/deployment-inputs.test.mjs",
+    "verify:deployment": "node scripts/verify-deployment.mjs"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2"
@@ -57,7 +61,9 @@
     "@wdio/mocha-framework": "^9.29.1",
     "@wdio/spec-reporter": "^9.29.1",
     "expect-webdriverio": "^5.7.0",
+    "ignore": "4.0.6",
     "supabase": "^2.118.0",
     "typescript": "^5.6.3"
-  }
+  },
+  "packageManager": "npm@10.9.8"
 }
