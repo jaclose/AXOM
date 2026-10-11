@@ -113,6 +113,17 @@ python crawler.py export --output ./data/exports
 
 The school handoff uses existing AXOM schema v2 and stable school IDs. Capture is not labeled official merely because it was scraped or reviewed. Unreviewed passages never become eligibility rules. Conflicting reviewed summaries remain marked.
 
+After every operator export, inspect `data/exports/publication-delta.json` before
+applying reviewed facts elsewhere. It compares the preceding on-disk review export with
+the current approval/policy state, identifies added, changed and **withdrawn** fact IDs,
+and marks whether a prior baseline was available. Withdrawal covers changed excerpts,
+revoked publication permission and outdated evidence that no longer qualifies.
+The delta is an operator review artifact: `publicationApplied` is always false.
+It never makes changes in the AXOM application or a hosted database. Keep versioned
+exports externally as audit evidence; reusing one output folder overwrites its prior
+snapshot after generating the delta. Do not treat the delta as a transactional
+cloud synchronization or proof that an earlier export was actually published.
+
 **Publication lifecycle limitation:** this exporter is an initial/incremental handoff, not a complete cloud synchronization protocol. Before repeated production publication, implement stable source-field IDs and explicit invalidation of previously published facts that change or lose permission. Do not blindly append exports to production. Local approvals already reopen on source change; cloud invalidation remains to be connected.
 
 From the AXOM repository root:

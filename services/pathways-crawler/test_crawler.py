@@ -14,6 +14,70 @@ class FakeFetcher:
     def __init__(self, body=HTML, code=200): self.body,self.code,self.calls=body,code,[]
     def fetch(self,url,conditional=None): self.calls.append((url,conditional)); return self.code,{'content-type':'text/html','etag':'v1'},self.body
 
+
+class PublicationLifecycleTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = c.Store(Path(self.tmp.name)/"crawler.sqlite")
+        self.store.bootstrap_file = None
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+    def test_unknown_baseline_is_explicit_and_not_applied(self):
+        current = {"schemaVersion": 1, "generatedAt": "2026-10-11T00:00:00Z",
+                   "records": [{"id": "S1", "module": "medical-schools", "reviewedFacts": [
+                       {"id": "crawler.gpa.abc", "value": "reviewed", "url": "https://school.edu/"}
+                   ]}]}
+        delta = c.reviewed_fact_delta(None, current)
+        self.assertFalse(delta["baselineKnown"])
+        self.assertFalse(delta["publicationApplied"])
+        self.assertEqual(len(delta["added"]), 1)
+        self.assertEqual(delta["withdrawn"], [])
+    def test_new_review_replaces_old_source_fact_instead_of_stacking(self):
+        old = {"schemaVersion": 1, "generatedAt": "earlier", "records": [
+            {"id": "S1", "module": "medical-schools", "reviewedFacts": [
+                {"id": "crawler.gpa.old-source-id", "value": "Old reviewed statement", "url": "https://school.edu/old"}
+            ]}]}
+        new = {"schemaVersion": 1, "generatedAt": "later", "records": [
+            {"id": "S1", "module": "medical-schools", "reviewedFacts": [
+                {"id": "crawler.gpa.new-source-id", "value": "New verified statement", "url": "https://school.edu/new"}
+            ]}]}
+        delta = c.reviewed_fact_delta(old, new)
+        self.assertEqual([r["factId"] for r in delta["withdrawn"]], ["crawler.gpa.old-source-id"])
+        self.assertEqual([r["factId"] for r in delta["added"]], ["crawler.gpa.new-source-id"])
+        self.assertEqual(delta["changed"], [])
+        self.assertFalse(delta["publicationApplied"])
+    def test_policy_revocation_produces_withdrawal(self):
+        value = {"schemaVersion": 1, "generatedAt": "previous", "records": [{
+            "id": "S1", "module": "medical-schools", "reviewedFacts": [
+                {"id": "crawler.tuition.source", "value": "Previously reviewed", "url": "https://school.edu/"}
+            ]}]}
+        after = {"schemaVersion": 1, "generatedAt": "now", "records": [{
+            "id": "S1", "module": "medical-schools", "reviewedFacts": []
+        }]}
+        delta = c.reviewed_fact_delta(value, after)
+        self.assertEqual(len(delta["withdrawn"]), 1)
+        self.assertTrue(delta["requiresReview"])
+    def test_same_identity_changed_summary_needs_review(self):
+        fact = {"id": "crawler.contact.source", "value": "First", "url": "https://school.edu/"}
+        a = {"schemaVersion": 1, "records": [{"module": "medical-schools", "id": "S1", "reviewedFacts": [fact]}]}
+        b = {"schemaVersion": 1, "records": [{"module": "medical-schools", "id": "S1", "reviewedFacts": [{**fact, "value": "Second"}]}]}
+        self.assertEqual(len(c.reviewed_fact_delta(a, b)["changed"]), 1)
+    def test_unmodified_reviews_require_no_changes(self):
+        fact = {"id": "crawler.curriculum.a", "value": "Reviewed", "url": "https://school.edu/"}
+        base = {"schemaVersion": 1, "records": [{"module": "medical-schools", "id": "S1", "reviewedFacts": [fact]}]}
+        diff = c.reviewed_fact_delta(base, base)
+        self.assertEqual((diff["added"], diff["changed"], diff["withdrawn"]), ([], [], []))
+        self.assertFalse(diff["requiresReview"])
+    def test_bad_baseline_and_duplicate_fact_ids_are_rejected(self):
+        valid = {"schemaVersion": 1, "records": []}
+        with self.assertRaises(ValueError): c.reviewed_fact_delta({"schemaVersion": 7, "records": []}, valid)
+        duplicate = {"schemaVersion": 1, "records": [{"module": "medical-schools", "id": "S1",
+            "reviewedFacts": [{"id": "crawler.same", "value": "a", "url": "https://school.edu/"},
+                              {"id": "crawler.same", "value": "b", "url": "https://school.edu/"}]}]}
+        with self.assertRaises(ValueError): c.reviewed_fact_delta(valid, duplicate)
+
+
 class URLTests(unittest.TestCase):
     def test_tracking_and_fragments(self): self.assertEqual(c.canonical('https://School.edu/a?utm_source=x&b=2#top'),'https://school.edu/a?b=2')
     def test_credentials(self):

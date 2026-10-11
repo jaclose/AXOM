@@ -359,6 +359,49 @@ class Store:
         return {"schools": school_export, "pathways": {"schemaVersion": 1, "generatedAt": iso(), "records": records}}
 
 
+def reviewed_fact_delta(previous: dict | None, current: dict) -> dict:
+    """A review-only export diff. A withdrawal is not a public API write.
+
+    IDs may change when a source excerpt changes, so remove the old ID and
+    introduce the newly approved one rather than merging both indefinitely.
+    """
+    def index(document: dict | None) -> dict:
+        if document is None:
+            return {}
+        if not isinstance(document, dict) or document.get("schemaVersion") != 1 or not isinstance(document.get("records"), list):
+            raise ValueError("The previous reviewed export is invalid. Do not publish over an unknown baseline.")
+        result = {}
+        for entity in document["records"]:
+            if not isinstance(entity, dict) or not isinstance(entity.get("id"), str) or not isinstance(entity.get("module"), str):
+                raise ValueError("A reviewed export contains an invalid institution identity.")
+            facts = entity.get("reviewedFacts")
+            if not isinstance(facts, list):
+                raise ValueError("A reviewed export contains an invalid fact collection.")
+            for fact in facts:
+                if not isinstance(fact, dict) or not isinstance(fact.get("id"), str) or not fact["id"].startswith("crawler.") or not isinstance(fact.get("value"), str) or not isinstance(fact.get("url"), str):
+                    raise ValueError("A reviewed export contains an invalid fact identity.")
+                key = (entity["module"], entity["id"], fact["id"])
+                if key in result:
+                    raise ValueError("Two facts share a publication identity. Resolve the duplicate before exporting.")
+                result[key] = fact
+        return result
+
+    old, new = index(previous), index(current)
+    def describe(key: tuple[str, str, str]) -> dict:
+        return {"module": key[0], "entityId": key[1], "factId": key[2]}
+    removed = [describe(key) for key in sorted(old.keys() - new.keys())]
+    added = [describe(key) for key in sorted(new.keys() - old.keys())]
+    changed = [describe(key) for key in sorted(new.keys() & old.keys())
+               if (new[key]["value"], new[key]["url"]) != (old[key]["value"], old[key]["url"])]
+    return {"schemaVersion": 1, "sourcePipelineVersion": VERSION,
+            "generatedAt": current.get("generatedAt"), "previousGeneratedAt": previous.get("generatedAt") if previous else None,
+            "baselineKnown": previous is not None, "added": added, "changed": changed,
+            "withdrawn": removed, "requiresReview": bool(added or changed or removed or previous is None),
+            "publicationApplied": False}
+
+
+
+
 class Fetcher:
     def __init__(self, store: Store): self.store, self.robots = store, {}
     def request(self, url: str, allowed: set[str], conditional: dict | None = None):
@@ -544,7 +587,22 @@ def main():
             store.db.execute("INSERT INTO policies VALUES(?,?,?,?) ON CONFLICT(host) DO UPDATE SET fetch=excluded.fetch,publication=excluded.publication,note=excluded.note", (host,args.fetch,args.publication,args.note)); store.db.commit()
         elif args.command == "review": store.review(args.id,args.value,args.reviewer,args.reject)
         elif args.command == "export":
-            exports=store.export(); write_json(args.output/"application-schools.incremental.json",exports["schools"]); write_json(args.output/"pathways.reviewed.json",exports["pathways"]); write_json(args.output/"status.json",store.status()); print(str(args.output))
+            # Read the previous candidate export before replacing it. The delta
+            # does not grant publication rights or merge anything into AXOM.
+            previous_path = args.output/"pathways.reviewed.json"
+            if previous_path.exists():
+                if previous_path.stat().st_size > 32*1024*1024:
+                    raise ValueError("The previous reviewed export exceeds the safe comparison limit.")
+                previous = json.loads(previous_path.read_text())
+            else:
+                previous = None
+            exports = store.export()
+            delta = reviewed_fact_delta(previous, exports["pathways"])
+            write_json(args.output/"application-schools.incremental.json", exports["schools"])
+            write_json(previous_path, exports["pathways"])
+            write_json(args.output/"status.json", store.status())
+            write_json(args.output/"publication-delta.json", delta)
+            print(str(args.output))
         else:
             with open(str(store.path)+".lock", "w") as lock:
                 try: fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
