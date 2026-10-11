@@ -3,7 +3,7 @@ name: AXOM Quality
 on:
   pull_request:
   push:
-    branches: [main, feat/shared-academic-catalog-ui]
+    branches: [main]
   workflow_dispatch:
   workflow_call:
 
@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: quality-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/feat/shared-academic-catalog-ui' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   web:
@@ -42,6 +42,8 @@ jobs:
         run: npm --prefix web exec -- playwright install --with-deps chromium
       - name: Shared catalog browser contracts (synthetic HTTP fixtures)
         run: npm --prefix web run test:e2e -- e2e/shared-academic-catalog.spec.ts e2e/cloud-catalog.spec.ts --workers=1
+      - name: Native ZIP question package browser acceptance (no catalog file)
+        run: npm --prefix web run test:e2e -- e2e/native-package-zip.spec.ts
       - name: Shared library browser evidence
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
