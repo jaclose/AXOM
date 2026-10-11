@@ -1,0 +1,54 @@
+name: Pathways crawler tests and bounded smoke crawl
+on:
+  pull_request:
+    paths:
+      - 'services/pathways-crawler/**'
+      - '.github/workflows/pathways-crawler.yml'
+  push:
+    branches: ['feat/pathways-crawler-v1']
+    paths:
+      - 'services/pathways-crawler/**'
+      - '.github/workflows/pathways-crawler.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: pathways-crawler-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            services/pathways-crawler
+            web/public/application-schools.json
+          sparse-checkout-cone-mode: false
+          lfs: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile and run deterministic regression suite
+        working-directory: services/pathways-crawler
+        run: |
+          python -m py_compile crawler.py pdf_worker.py browser_worker.py
+          python -m unittest -v
+      - name: Bounded live collection check against existing roster
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        working-directory: services/pathways-crawler
+        run: |
+          python crawler.py bootstrap ../../web/public/application-schools.json --allow-private-capture
+          python crawler.py once --max-pages 8
+          python crawler.py status > status.json
+      - uses: actions/upload-artifact@v4
+        if: always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        with:
+          name: pathways-crawler-status
+          path: services/pathways-crawler/status.json
+          retention-days: 7
+          if-no-files-found: warn
+# This is a bounded test, NOT the persistent crawler host.
+# No raw snapshots, candidate text, credentials, or database files are uploaded.
+# A supervised host (launchd or Docker) is required for continuous operation.
