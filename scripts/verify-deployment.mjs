@@ -60,7 +60,10 @@ export async function verifyDeployment(root, { ref = 'HEAD', ignoreRef, withoutG
     if (expectBuildFailure) {
       // Exercise the real TypeScript/Vite build without the early diagnostic guard.
       // An install error or our guard alone is not evidence of the original failure.
-      const result = spawnSync('npm', ['--prefix', 'web', 'run', 'build'], { cwd: target, env, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+      const result = spawnSync('npm', ['--prefix', 'web', 'run', 'build'], {
+        cwd: target, env, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
+        shell: process.platform === 'win32',
+      });
       process.stdout.write(result.stdout || '');
       process.stderr.write(result.stderr || '');
       if (result.error) throw result.error;

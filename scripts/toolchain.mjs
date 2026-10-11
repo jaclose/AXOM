@@ -12,7 +12,9 @@ export function checkToolchain(root = process.cwd()) {
     (version[1] === Number(minimum[2]) && version[2] < Number(minimum[3]))) {
     throw new Error(`Use Node ${config.engines.node}; found ${process.version}`);
   }
-  const npm = execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['--version'], { encoding: 'utf8' }).trim();
+  const npm = execFileSync('npm', ['--version'], {
+    encoding: 'utf8', shell: process.platform === 'win32',
+  }).trim();
   if (`npm@${npm}` !== config.packageManager) {
     throw new Error(`Use ${config.packageManager}; found npm@${npm}`);
   }
