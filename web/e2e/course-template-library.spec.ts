@@ -13,11 +13,12 @@ for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await seedOnboarded(page);
     await page.goto("/#tracker");
-    const dialog = page.getByRole("dialog", { name: "Load a course template" });
+    const dialog = page.getByRole("region", { name: "Load a course template", exact: true });
     const preview = dialog.getByRole("region", { name: "Template for FTM 1" });
     const open = async () => {
-      await page.getByRole("button", { name: "Course Library / Load Course" }).click();
-      await page.getByRole("button", { name: /Saved templates \(/ }).click();
+      if (!new URL(page.url()).searchParams.has("course-library")) await page.getByRole("button", { name: "Course Library / Load Course" }).click();
+      await page.getByText("Manage sources and custom courses", { exact: true }).click();
+      await page.getByRole("button", { name: "Saved templates and imports", exact: true }).click();
       await expect(dialog).toBeVisible();
     };
     await open();
@@ -32,8 +33,9 @@ for (const width of [1440, 390]) {
     await preview.getByRole("checkbox", { name: "1 DLA" }).focus();
     await page.keyboard.press("Space");
     await expect(preview).toContainText("1 of 3 activities selected");
+    await dialog.getByRole("button", { name: "Add 1 item", exact: true }).scrollIntoViewIfNeeded();
     await expect(dialog.getByRole("button", { name: "Add 1 item", exact: true })).toBeInViewport();
-    expect(await dialog.locator(".modal-body").evaluate((body) => body.scrollWidth <= body.clientWidth)).toBe(true);
+    expect(await dialog.evaluate((body) => body.scrollWidth <= body.clientWidth)).toBe(true);
     await page.screenshot({ path: `/tmp/axom-template-selection-${width}.png` });
     await dialog.getByRole("button", { name: "Add 1 item", exact: true }).click();
     await reloadAfterSave(page);

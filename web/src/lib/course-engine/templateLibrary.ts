@@ -31,7 +31,7 @@ export function savedCourseTemplates(documents: readonly SourceDocument[]): Save
 }
 
 export function courseTemplateFamily(section: CourseTemplateSection): string {
-  return `${section.term ?? ""}|${moduleKey(section.module)}|${section.title.trim().toLocaleLowerCase("en")}`;
+  return `${section.term ?? ""}|${moduleKey(section.module)}|${section.title.trim().toLocaleLowerCase("en")}${section.context ? `|${section.context.academicTerm ?? ""}|${section.context.cohort ?? ""}` : ""}`;
 }
 
 export function courseTemplateVersions(templates: readonly SavedCourseTemplate[]): SavedCourseTemplate[][] {
@@ -40,5 +40,7 @@ export function courseTemplateVersions(templates: readonly SavedCourseTemplate[]
     const key = courseTemplateFamily(template.section);
     groups.set(key, [...(groups.get(key) ?? []), template]);
   }
-  return [...groups.values()].sort((a, b) => a[0].document.title.localeCompare(b[0].document.title));
+  return [...groups.values()].map(versions => versions.sort((a, b) =>
+    (b.section.context?.sourceRevision ?? "").localeCompare(a.section.context?.sourceRevision ?? "") || b.document.uploadedAt.localeCompare(a.document.uploadedAt)))
+    .sort((a, b) => a[0].document.title.localeCompare(b[0].document.title));
 }

@@ -56,15 +56,22 @@ export async function bankFiles(bank: PreparedBank, read?: LibraryReader, bankFi
   return files;
 }
 
-let installing: Promise<void> | undefined;
+export interface LibraryInstallation {
+  templateIds: string[];
+  documentIds: string[];
+  questionIds: string[];
+  setIds: string[];
+}
+let installing: Promise<LibraryInstallation> | undefined;
 /** Same canonical import as file review. Each completed source is durable; retry repairs missing media. */
-export function installPrivateLibrary(read: LibraryReader, progress: (message: string) => void = () => {}): Promise<void> {
+export function installPrivateLibrary(read: LibraryReader, progress: (message: string) => void = () => {}): Promise<LibraryInstallation> {
   if (installing) return installing;
   installing = install(read, progress).finally(() => { installing = undefined; });
   return installing;
 }
 async function install(read: LibraryReader, progress: (message: string) => void) {
   const catalog = readCatalog(JSON.parse(text(await read("catalog.json"))));
+  const installedIds: LibraryInstallation = { templateIds: [], documentIds: [], questionIds: [], setIds: [] };
   progress("Protecting your current workspace…");
   await flushLocalVaultWrites();
   await createLocalBackup(BUILD_INFO.schemaVersion, listLocalBackups().length + 2);
@@ -73,6 +80,8 @@ async function install(read: LibraryReader, progress: (message: string) => void)
     const bytes = await read(entry.file);
     if (await sha256(bytes) !== `sha256:${entry.checksum}`) throw new Error(`Template integrity check failed: ${entry.name}`);
     const doc = await prepareCourseTemplate(text(bytes), entry.name);
+    installedIds.templateIds.push(doc.id);
+    installedIds.documentIds.push(doc.id);
     const s = useStore.getState();
     if (!s.documents.some(d => d.id === doc.id)) s.addDocument(doc);
   }
@@ -98,6 +107,7 @@ async function install(read: LibraryReader, progress: (message: string) => void)
         const doc = existing ?? { id: `private-source-${source.checksum}`, title: source.name.replace(/\.[^.]+$/, ""), fileName: source.name,
           fileType: source.originalFile.split(".").pop() ?? "file", uploadedAt: new Date().toISOString(), rawText: "", sizeBytes: 0,
           checksum: `sha256:${source.checksum}`, tags: [source.module ?? "Unfiled"], linkedQuestionSetIds: [], libraryOnly: true };
+        installedIds.documentIds.push(doc.id);
         if (!await readSourceOriginal(doc.id)) {
           const bytes = await read(source.originalFile);
           await saveSourceOriginal(doc, new Blob([bytes as BlobPart]));
@@ -117,6 +127,11 @@ async function install(read: LibraryReader, progress: (message: string) => void)
         library: () => useStore.getState(), store: () => useStore.getState(),
       }, { sourceText: bank.sourceText, sourceBytes: bank.sourceBytes, notes: bank.notes });
       if (result.status === "failed") throw new Error(result.errors.join(" "));
+      for (const section of result.sections) {
+        installedIds.questionIds.push(...section.savedIds);
+        if (section.setId) installedIds.setIds.push(section.setId);
+        if (section.documentId) installedIds.documentIds.push(section.documentId);
+      }
       source.ready = result.sections.reduce((n, section) => n + section.savedIds.length, 0);
       source.review = result.held.length + (bank.unreadableQuestions ?? 0);
       if (bank.unreadableQuestions) source.reason = `${bank.unreadableQuestions} extracted rows could not be read. Open the original to review them; they are excluded from scored practice.`;
@@ -124,6 +139,7 @@ async function install(read: LibraryReader, progress: (message: string) => void)
       const state = useStore.getState();
       // Preserve an existing reviewer's decisions when refreshing the same source version.
       const id = `private-review-${source.checksum}`;
+      if (source.review) installedIds.documentIds.push(id);
       if (source.review && !state.documents.some(d => d.id === id)) pendingDocuments.set(id, { id, title: bank.pkg.manifest.bank.title, fileName: source.name,
         fileType: PRIVATE_REVIEW_DOCUMENT, rawText, uploadedAt: new Date().toISOString(), sizeBytes: rawText.length, tags: [source.module ?? "Unfiled"], libraryOnly: true, linkedQuestionSetIds: result.sections.flatMap(s => s.setId ? [s.setId] : []) });
       }
@@ -132,11 +148,13 @@ async function install(read: LibraryReader, progress: (message: string) => void)
   }
   await flushDocuments();
   const rawText = JSON.stringify({ ...catalog, sources: installed });
+  installedIds.documentIds.push(`private-library-${catalog.id}`);
   useStore.getState().addDocument({ id: `private-library-${catalog.id}`, title: "Prepared academic library", fileName: "catalog.json", fileType: PRIVATE_LIBRARY_DOCUMENT,
     uploadedAt: new Date().toISOString(), rawText, sizeBytes: rawText.length, tags: [catalog.version], libraryOnly: true, linkedQuestionSetIds: [] });
   await flushLocalVaultWrites(); assertVaultWritesSince(checkpoint);
   if (failures.length) throw new Error(`${failures.length} banks need another installation attempt. Your saved courses, questions and progress are intact. See source coverage.`);
   progress("Library installed. Choose a course or create a quiz.");
+  return { templateIds: [...new Set(installedIds.templateIds)], documentIds: [...new Set(installedIds.documentIds)], questionIds: [...new Set(installedIds.questionIds)], setIds: [...new Set(installedIds.setIds)] };
 }
 
 // Shared intake understands wrapper folders and native packages without a user-authored index.

@@ -11,6 +11,7 @@ import type { CurriculumTemplate } from "../curricula";
 import type { QuestionSet } from "../library";
 import type { QuestionRecord } from "../questions";
 import type { Course, Term, TrackerItem } from "../types";
+import type { CourseTemplateContext } from "../course-engine/templateParse";
 import { countWords, type ShelfBook } from "./model";
 
 export interface CourseBookActivity {
@@ -49,6 +50,7 @@ export interface CourseBook extends ShelfBook {
   templateIds?: string[];
   templateVersion?: string;
   loadedActivities?: number;
+  academicContext?: CourseTemplateContext;
 }
 
 export interface CourseBookInput {

@@ -1,3 +1,4 @@
+import { clearCourseQuizLaunch, readCourseQuizLaunch } from "../lib/course-engine/quizLaunch";
 // ===========================================================================
 // Question Bank — the flagship study engine. Import Center → Source Library →
 // Question Sets → Block Builder → Results, in one tabbed surface. Uploaded
@@ -76,6 +77,8 @@ interface RunnerLaunch {
 
 export function QuestionWorkspacePage() {
   const s = useStore();
+  const [courseLaunch] = useState(() => readCourseQuizLaunch(s.questions ?? []));
+  useEffect(() => { clearCourseQuizLaunch(); }, []);
   const questions = s.questions ?? NO_QUESTIONS;
   const questionSets = s.questionSets ?? NO_SETS;
   const documents = useMemo(() => (s.documents ?? NO_DOCUMENTS).filter(doc => !["axom-private-library-catalog", "axom-private-bank-review"].includes(doc.fileType)), [s.documents]);
@@ -85,6 +88,7 @@ export function QuestionWorkspacePage() {
   const [open, setOpen] = useState<QuestionRecord | null>(null);
   const [showStyle, setShowStyle] = useState(false);
   const [runner, setRunner] = useState<RunnerLaunch | null>(() => {
+    if (courseLaunch) return { mode: "tutor", retakeIds: courseLaunch.questionIds, presetFilters: { setIds: courseLaunch.setIds } };
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession) ?? "null") as { mode?: QuizMode; poolIds?: string[] } | null;
       return saved?.mode && saved.poolIds?.length ? { mode: saved.mode } : null;

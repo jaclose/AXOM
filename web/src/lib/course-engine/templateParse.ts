@@ -41,6 +41,18 @@ export interface CourseTemplateSection {
   /** Lines that could not be read. */
   problems: string[];
   sourceName?: string;
+  context?: CourseTemplateContext;
+}
+
+/** Explicit source metadata, independent of import time and the learner's term. */
+export interface CourseTemplateContext {
+  academicTerm?: string;
+  cohort?: string;
+  sourceRevision?: string;
+  authority?: "reviewed";
+  weekPolicy?: "explicit";
+  sources: string[];
+  weekDates: Record<number, string>;
 }
 
 /** The words a template may put in brackets, lower-cased. */
@@ -76,15 +88,38 @@ export function parseCourseTemplate(text: string, sourceName?: string): CourseTe
   let group = 0;
   let inGroup = false;
   let headedWeek: number | undefined;
+  const context: CourseTemplateContext = { sources: [], weekDates: {} };
 
   lines.forEach((raw, index) => {
     const line = raw.trim();
     const lineNumber = index + 1;
     if (!line) { inGroup = false; return; }
 
+    if (line.startsWith("@")) {
+      const metadata = line.match(/^@(academic-term|cohort|source-revision|authority|week-policy|source|week\s+\d+):\s*(.+)$/i);
+      if (!metadata) { problems.push(`Line ${lineNumber} has unrecognized source metadata.`); return; }
+      const [, name, value] = metadata;
+      const key = name.toLowerCase();
+      if (key === "academic-term") context.academicTerm = value;
+      else if (key === "cohort") context.cohort = value;
+      else if (key === "source-revision") {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(value)) context.sourceRevision = value;
+        else problems.push(`Line ${lineNumber}: source revision must be YYYY-MM-DD.`);
+      } else if (key === "authority") {
+        if (value === "reviewed") context.authority = "reviewed";
+        else problems.push(`Line ${lineNumber}: source authority is not reviewed.`);
+      } else if (key === "week-policy") {
+        if (value === "explicit") context.weekPolicy = "explicit";
+        else problems.push(`Line ${lineNumber}: week policy must be explicit.`);
+      } else if (key === "source") context.sources.push(value);
+      else context.weekDates[Number(key.slice(5))] = value;
+      return;
+    }
+
     // "Week 3:" on its own line dates every group below it, until the next one.
     const weekHeading = line.match(/^(?:week|wk)\s*0*(\d{1,2})\s*:?$/i);
     if (module && weekHeading) { headedWeek = Number(weekHeading[1]); inGroup = false; return; }
+    if (module && /^Unscheduled\s*:\s*$/i.test(line)) { headedWeek = undefined; inGroup = false; return; }
 
     if (!module && !/\[[^\]]+\]\s*$/.test(line)) {
       let heading = line.replace(/:\s*$/, "");
@@ -117,7 +152,8 @@ export function parseCourseTemplate(text: string, sourceName?: string): CourseTe
   });
 
   if (!module) problems.unshift("The first line should name the module, for example \"FTM 1 - Lectures + DLAs:\".");
-  return { module, ...(term ? { term } : {}), title, items, groupCount: group, problems, sourceName };
+  return { module, ...(term ? { term } : {}), title, items, groupCount: group, problems, sourceName,
+    ...(context.academicTerm || context.sourceRevision || context.sources.length || context.weekPolicy ? { context } : {}) };
 }
 
 export type WeekBasis = "stated" | "group-order" | "spread" | "unknown";
@@ -185,7 +221,7 @@ export function planCourseTemplate(
     section.items.find((item) => item.group === group && item.statedWeek)?.statedWeek ?? offset + group
   );
   const moduleWeeks = [...new Set(weekly.flatMap((section) => (
-    Array.from({ length: section.groupCount }, (_, index) => groupWeek(section, index + 1))
+    section.context?.weekPolicy === "explicit" ? section.items.flatMap(item => item.statedWeek ? [item.statedWeek] : []) : Array.from({ length: section.groupCount }, (_, index) => groupWeek(section, index + 1))
   )))].sort((a, b) => a - b);
   const weekCount = moduleWeeks.length || undefined;
 
@@ -200,8 +236,8 @@ export function planCourseTemplate(
       let week: number | undefined;
       let weekBasis: WeekBasis = "unknown";
       if (stated) { week = stated; weekBasis = "stated"; }
-      else if (isWeekly) { week = offset + item.group; weekBasis = "group-order"; }
-      else if (weekCount) {
+      else if (isWeekly && section.context?.weekPolicy !== "explicit") { week = offset + item.group; weekBasis = "group-order"; }
+      else if (weekCount && section.context?.weekPolicy !== "explicit") {
         week = moduleWeeks[Math.ceil((item.group * weekCount) / section.groupCount) - 1];
         weekBasis = "spread";
       }
@@ -210,7 +246,7 @@ export function planCourseTemplate(
         label: item.label,
         kind: TRACKER_KIND_FOR_ACTIVITY[item.activity],
         activity: item.activity,
-        templateKey: templateKey(module, item),
+        templateKey: [section.context?.academicTerm, section.context?.cohort, templateKey(module, item)].filter(Boolean).join("|"),
         week,
         weekBasis,
         weekSource: weekBasis === "stated" || weekBasis === "group-order" ? "template" : week ? "inferred" : undefined,

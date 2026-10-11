@@ -8,12 +8,12 @@ for (const width of [1440, 390]) test(`the product bookshelf loads activities an
   await seedOnboarded(page);
   await page.goto("/#tracker");
   await page.getByRole("button", { name: "Course Library / Load Course", exact: true }).click();
-  await page.getByRole("region", { name: "Course library", exact: true }).getByLabel("Available content").uncheck();
-  await page.getByRole("region", { name: "Course library", exact: true }).getByRole("button", { name: /^FTM 1,/ }).click();
-  const book = page.getByRole("dialog", { name: /FTM 1/ });
-  await expect(book.getByText("Weeks", { exact: true }).first()).toBeVisible();
-  await book.getByRole("button", { name: "Import custom material" }).click();
-  const loader = page.getByRole("dialog", { name: "Load a course template" });
+  await page.getByRole("button", { name: "Course map", exact: true }).click();
+  await page.getByRole("button", { name: "Preview FTM 1, Term 1", exact: true }).click();
+  const book = page.getByRole("region", { name: "FTM 1 course plan", exact: true });
+  await expect(book.getByRole("heading", { name: "Weekly plan" })).toBeVisible();
+  await book.getByRole("button", { name: "Customize Weeks & Activities" }).click();
+  const loader = page.getByRole("region", { name: "Load a course template", exact: true });
   const files = process.env.AXOM_TEMPLATE_FILES?.split("|") ?? [{ name: "FTM1.txt", mimeType: "text/plain",
     buffer: Buffer.from("FTM 1 - Activities:\nWeek 2:\nSample lecture [Lecture]\nSample small group [Small Group]\nSample IMCQ [IMCQ]\n") }];
   await loader.getByLabel("Choose course template files").setInputFiles(files);

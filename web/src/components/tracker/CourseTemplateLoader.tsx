@@ -5,7 +5,7 @@
 // tracker does not already have. Rows the learner has studied keep their
 // progress: a re-load updates titles and places, never passes.
 // ===========================================================================
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Upload } from "lucide-react";
 import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "../../lib/localVault";
 import { useStore } from "../../lib/store";
@@ -40,7 +40,12 @@ interface ModulePreview {
 
 const EXAMPLE = "FTM 1 - Lectures + DLAs:\n\nFTM Lecture 01 Histology of the Cell [Lecture]\nDLA 01 Membrane Structure [DLA]";
 
-export function CourseTemplateLoader({ onClose, defaultTermId, templateIds }: { onClose: () => void; defaultTermId?: string; templateIds?: string[] }) {
+function TemplatePage({ title, onClose, footer, children }: { title: string; onClose: () => void; footer: ReactNode; children: ReactNode; className?: string }) {
+  return <section className="course-library-page" aria-label={title}><header className="course-library-heading"><h1>{title}</h1><GButton onClick={onClose}>Back to course</GButton></header>{children}<div className="row wrap gap8" style={{ marginTop: 24 }}>{footer}</div></section>;
+}
+
+export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templateIds, embedded = false }: { onClose: () => void; onApplied?: () => void; defaultTermId?: string; templateIds?: string[]; embedded?: boolean }) {
+  const Frame = embedded ? TemplatePage : Modal;
   const s = useStore();
   const [sections, setSections] = useState<CourseTemplateSection[]>(() => savedCourseTemplates(s.documents).filter(t => templateIds?.includes(t.document.id)).map(t => t.section));
   const [pasted, setPasted] = useState("");
@@ -170,7 +175,7 @@ export function CourseTemplateLoader({ onClose, defaultTermId, templateIds }: { 
         body: `${rows.length} item${rows.length === 1 ? "" : "s"} added${updating ? `, ${updating} brought up to date` : ""}. Progress on existing items is unchanged.`,
         tone: "success",
       });
-      onClose();
+      (onApplied ?? onClose)();
     } catch (error) {
       setError(error instanceof Error ? error.message : "Keep AXOM open and try again.");
       pushToast({ title: "Template could not be saved", body: error instanceof Error ? error.message : "Keep AXOM open and try again.", tone: "warn" });
@@ -178,7 +183,7 @@ export function CourseTemplateLoader({ onClose, defaultTermId, templateIds }: { 
   }
 
   return (
-    <Modal
+    <Frame
       title="Load a course template"
       className="course-template-modal"
       onClose={onClose}
@@ -287,6 +292,6 @@ export function CourseTemplateLoader({ onClose, defaultTermId, templateIds }: { 
           );
         })}
       </div>
-    </Modal>
+    </Frame>
   );
 }

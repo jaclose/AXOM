@@ -12,8 +12,9 @@ test("every supplied text template persists with its stated module and term", as
   await seedOnboarded(page);
   await page.goto("/#tracker");
   await page.getByRole("button", { name: "Course Library / Load Course" }).click();
-  await page.getByRole("button", { name: /Saved templates \(/ }).click();
-  const dialog = page.getByRole("dialog", { name: "Load a course template" });
+  await page.getByText("Manage sources and custom courses", { exact: true }).click();
+      await page.getByRole("button", { name: "Saved templates and imports", exact: true }).click();
+  const dialog = page.getByRole("region", { name: "Load a course template", exact: true });
   await dialog.getByLabel("Choose course template files").setInputFiles(files);
   await expect(dialog.getByLabel("Choose course template files")).toBeEnabled();
   await expect(dialog.getByRole("region", { name: /^Template for / }).first()).toBeVisible();
@@ -31,7 +32,8 @@ test("every supplied text template persists with its stated module and term", as
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   await reloadAfterSave(page);
   await page.getByRole("button", { name: "Course Library / Load Course" }).click();
-  await page.getByRole("button", { name: `Saved templates (${files.length})` }).click();
+  await page.getByText("Manage sources and custom courses", { exact: true }).click();
+  await page.getByRole("button", { name: "Saved templates and imports", exact: true }).click();
   await expect(dialog.getByRole("button", { name: /^Use saved / })).toHaveCount(files.length);
   console.log(JSON.stringify({ privateTemplateAcceptance: expected }));
 });

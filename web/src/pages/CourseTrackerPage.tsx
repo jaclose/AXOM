@@ -115,7 +115,13 @@ export function CourseTrackerPage() {
   const [moduleOpen, setModuleOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
-  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(() => typeof window !== "undefined" && new URL(window.location.href).searchParams.has("course-library"));
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (libraryOpen) url.searchParams.set("course-library", "1");
+    else { url.searchParams.delete("course-library"); url.searchParams.delete("course"); }
+    window.history.replaceState(null, "", url);
+  }, [libraryOpen]);
   const [templateBook, setTemplateBook] = useState<CourseBook>();
   const [templateOpen, setTemplateOpen] = useState(false);
   const [moduleHelpOpen, setModuleHelpOpen] = useState(false);
@@ -218,6 +224,16 @@ export function CourseTrackerPage() {
     if (!scope) return;
     setDeleteScope(scope);
   }
+
+  if (templateOpen) return <CourseTemplateLoader embedded templateIds={templateBook?.templateIds}
+    onApplied={() => { setTemplateOpen(false); setLibraryOpen(false); }}
+    defaultTermId={s.terms.find(term => term.name === templateBook?.term)?.id}
+    onClose={() => { setTemplateOpen(false); setLibraryOpen(true); }} />;
+
+  if (libraryOpen) return <CourseLibrary onClose={() => setLibraryOpen(false)}
+    onTemplate={(book) => { setTemplateBook(book); setLibraryOpen(false); setTemplateOpen(true); }}
+    onCreate={() => { setLibraryOpen(false); setModuleOpen(true); }}
+    onOpen={(book) => { setScope(`${book.term}/${book.module}`); setLibraryOpen(false); }} />;
 
   return (
     <div className="tracker-page-shell">
@@ -382,11 +398,8 @@ export function CourseTrackerPage() {
       {moduleOpen && <ModuleEditor onDone={(nextScope) => { setModuleOpen(false); if (nextScope) setScope(nextScope); }} />}
       {bulkOpen && <BulkImportModal defaultPath={scope} onClose={() => setBulkOpen(false)} />}
       {scheduleOpen && <ScheduleImportModal defaultPath={scope} onClose={() => setScheduleOpen(false)} />}
-      {libraryOpen && <CourseLibrary onClose={() => setLibraryOpen(false)}
-        onTemplate={(book) => { setTemplateBook(book); setLibraryOpen(false); setTemplateOpen(true); }}
-        onCreate={() => { setLibraryOpen(false); setModuleOpen(true); }}
-        onOpen={(book) => { setScope(`${book.term}/${book.module}`); setLibraryOpen(false); }} />}
-      {templateOpen && <CourseTemplateLoader templateIds={templateBook?.templateIds} defaultTermId={s.terms.find((term) => term.name === templateBook?.term)?.id} onClose={() => setTemplateOpen(false)} />}
+
+
       {deleteScope && <DeleteScopeModal scope={deleteScope} onSelect={setScope} onClose={() => setDeleteScope(null)} />}
       {moduleTourOpen && <ModuleTour name="Course Tracker" route="tracker" steps={COURSE_TRACKER_TOUR_STEPS} onExit={() => setModuleTourOpen(false)} />}
     </div>
