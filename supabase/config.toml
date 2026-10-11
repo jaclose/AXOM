@@ -434,3 +434,8 @@ enabled = true
 # Callers must present a signed-in user's JWT; the function re-checks it and
 # meters a per-user daily quota before calling Claude.
 verify_jwt = true
+
+[functions.communications]
+# The handler verifies user JWTs with getUser, cron bearer, or Resend signatures.
+# Public unsubscribe capability links and provider webhooks have no Supabase JWT.
+verify_jwt = false

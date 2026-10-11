@@ -78,7 +78,18 @@ const LazyActivityHistoryPage = lazy(() => import("./pages/ActivityHistoryPage")
 const LazyStudyMethodsPage = lazy(() => import("./pages/StudyMethodsPage").then((module) => ({ default: module.StudyMethodsPage })));
 const LazySoundscapesPage = lazy(() => import("./pages/SoundscapesPage").then((module) => ({ default: module.SoundscapesPage })));
 
+const LazyCommunicationsPage = lazy(() => import("./pages/CommunicationsPage").then(m => ({ default: m.CommunicationsPage })));
+const LazyPrivacyPage = lazy(() => import("./pages/PrivacyPage").then(m => ({ default: m.PrivacyPage })));
+const LazyPulsePage = lazy(() => import("./pages/PulsePage").then(m => ({ default: m.PulsePage })));
+const LazyCommunicationsAdminPage = lazy(() => import("./pages/CommunicationsAdminPage").then(m => ({ default: m.CommunicationsAdminPage })));
+const LazyEssayPage = lazy(() => import("./pages/EssayPage").then(m => ({ default: m.EssayPage })));
+
 const PAGES: Record<string, () => JSX.Element> = {
+  communications: () => <LazyCommunicationsPage />,
+  privacy: () => <LazyPrivacyPage />,
+  pulse: () => <LazyPulsePage />,
+  "communications-admin": () => <LazyCommunicationsAdminPage />,
+  essay: () => <LazyEssayPage />,
   dashboard: DashboardPage,
   courses: () => <LazyCoursesPage />,
   tracker: () => <LazyCourseTrackerPage />,
@@ -300,8 +311,16 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
   }
 
   const routeKey = route.split("?")[0];
-  const nav = NAV.find((n) => n.id === routeKey) ?? NAV[0];
+  const communicationNav: Record<string, { label: string; subtitle: string }> = { communications: { label: "Communications", subtitle: "Your inbox, on your terms" }, privacy: { label: "Privacy & Data", subtitle: "Keep, download and remove" }, "communications-admin": { label: "Communications studio", subtitle: "Considered writing and delivery" } };
+  const nav = NAV.find((n) => n.id === routeKey) ?? communicationNav[routeKey] ?? NAV[0];
   const Page: ComponentType = PAGES[routeKey] ?? DashboardPage;
+
+  if (routeKey === "pulse") {
+    return <Suspense fallback={<div role="status">Opening your Pulse…</div>}><LazyPulsePage /><AccountSyncWatcher /><PresentationReady /></Suspense>;
+  }
+  if (routeKey === "essay") {
+    return <Suspense fallback={<div role="status">Opening essay…</div>}><LazyEssayPage /><PresentationReady /></Suspense>;
+  }
 
   if (!onboarded || setupMode) {
     return (
