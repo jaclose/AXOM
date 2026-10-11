@@ -1,0 +1,8 @@
+.landing-account { height: 100dvh; overflow: auto; background: var(--bg-1); color: var(--text); padding: 28px max(24px, calc((100vw - 1080px) / 2)); }
+.landing-account header { display: flex; justify-content: space-between; align-items: center; gap: 24px; }
+.landing-account header a:last-child, .landing-account-back { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; color: var(--text-80); }
+.landing-account section { max-width: 800px; margin: 48px auto; }
+.landing-account h1 { font: 500 clamp(28px, 4vw, 40px)/1.2 var(--font-display); margin: 24px 0 12px; }
+.landing-account section > p { color: var(--text-80); margin-bottom: 28px; }
+.landing-account :focus-visible { outline: 2px solid var(--text); outline-offset: 4px; }
+@media (max-width: 560px) { .landing-account { padding: 20px; } .landing-account section { margin-top: 28px; } .landing-account header a:last-child { font-size: 12px; } }
