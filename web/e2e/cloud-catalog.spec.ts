@@ -7,7 +7,7 @@ const host = "https://catalog-fixture.supabase.test";
 const release = "11111111-1111-4111-8111-111111111111";
 const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 const template = Buffer.from("T5 - GOER - Course activities:\nWeek 2:\nSynthetic lecture [Lecture]\nSynthetic practice [PQ]\n");
-const image = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jGZkAAAAASUVORK5CYII=", "base64");
+const image = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=", "base64");
 const stem = "This is a synthetic software test question, not medical teaching material. A learner is shown the small reference image below. The fixture defines option A as the expected answer so that the application can verify its question, image, answer, and persistence pipeline. Which option is specified as the expected answer in this fixture?";
 const bank = Buffer.from(JSON.stringify({ pkg: {
   manifest: { schemaVersion: 1, course: { name: "GOER", term: 5, week: 2 }, bank: { id: "cloud-goer-synthetic", title: "Shared sample set", discipline: "General" }, source: { filename: "synthetic-fixture.txt", sourceWeekDeclared: true }, questionsFile: "questions.json", assetsDirectory: "assets/" },
