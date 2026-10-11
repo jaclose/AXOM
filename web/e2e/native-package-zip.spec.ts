@@ -142,7 +142,10 @@ test("native multi-bank ZIP installs without catalog.json and persists practice"
     // The reading surface includes both in-order media and source exhibits.
     // A placed figure may live next to the accessible stem rather than inside it.
     const figure = page.locator(".quiz-reading img");
-    if (await figure.count()) {
+    // The first fixture requires an image. IndexedDB resolves after the stem renders;
+    // probing count() once can skip the assertion entirely on a fast CI runner.
+    if ((await stem.innerText()).includes("Synthetic item 1:")) {
+      await expect(figure).toHaveCount(1);
       sawImage = true;
       await expect.poll(() => figure.first().evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
     }
