@@ -10,7 +10,8 @@ export const INPUT_MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;
 /** Filenames may contain spaces and #. This is a local path, never a URL. */
 export function safeInputPath(value: string): string {
   if (typeof value !== "string" || !value || value.length > 1_024 || value.startsWith("/")
-      || /^[a-z]:/i.test(value) || /[\\\u0000-\u001f\u007f]/.test(value)
+      || /^[a-z]:/i.test(value) || value.includes("\\")
+      || Array.from(value).some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)
       || value.split("/").some(part => !part || part === "." || part === "..")) {
     throw new Error("Unsafe input: this collection contains an unsafe file path. Choose an unmodified export.");
   }
