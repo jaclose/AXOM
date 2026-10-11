@@ -139,43 +139,5 @@ async function install(read: LibraryReader, progress: (message: string) => void)
   progress("Library installed. Choose a course or create a quiz.");
 }
 
-export async function zipLibraryReader(file: File): Promise<LibraryReader> {
-  if (file.size > 1024 * 1024 * 1024) throw new Error("For a collection larger than 1 GB, extract the bundle and choose Install prepared folder. Files are read one at a time.");
-  const { default: JSZip } = await import("jszip");
-  const zip = await JSZip.loadAsync(await file.arrayBuffer());
-  if (Object.keys(zip.files).length > 30000) throw new Error("Too many files in the bundle.");
-  // JSZip records the expanded size before decoding. Check it before allocating bytes.
-  let total = 0;
-  for (const item of Object.values(zip.files)) {
-    const size = (item as unknown as { _data?: { uncompressedSize?: number } })._data?.uncompressedSize ?? 0;
-    if (size > 128 * 1024 * 1024 || size < 0) throw new Error("A library file exceeds the safety limit.");
-    total += size;
-  }
-  if (total > 2 * 1024 * 1024 * 1024) throw new Error("The expanded library exceeds the safety limit.");
-  let readBytes = 0;
-  return async path => {
-    const item = zip.file(safeLibraryPath(path));
-    if (!item) throw new Error(`Missing library file: ${path}`);
-    const bytes = await item.async("uint8array");
-    readBytes += bytes.length;
-    if (bytes.length > 128 * 1024 * 1024 || readBytes > 2 * 1024 * 1024 * 1024) throw new Error("The expanded library exceeds the safety limit.");
-    return bytes;
-  };
-}
-
-/** A single browser-authorized folder selection avoids loading a large ZIP into memory. */
-export function folderLibraryReader(files: readonly File[]): LibraryReader {
-  const byPath = new Map<string, File>();
-  for (const file of files) {
-    const path = safeLibraryPath(file.webkitRelativePath.split("/").slice(1).join("/"));
-    if (byPath.has(path)) throw new Error("The prepared folder contains duplicate paths.");
-    byPath.set(path, file);
-  }
-  if (!byPath.has("catalog.json")) throw new Error("Choose the prepared library folder that contains catalog.json.");
-  return async path => {
-    const file = byPath.get(safeLibraryPath(path));
-    if (!file) throw new Error(`Missing library file: ${path}`);
-    if (file.size > 128 * 1024 * 1024) throw new Error("A library file exceeds the safety limit.");
-    return new Uint8Array(await file.arrayBuffer());
-  };
-}
+// Shared intake understands wrapper folders and native packages without a user-authored index.
+export { zipLibraryReader, folderLibraryReader } from "./fileInput";
