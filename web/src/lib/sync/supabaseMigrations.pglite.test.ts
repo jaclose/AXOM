@@ -109,6 +109,11 @@ describe("Supabase migrations on real Postgres", () => {
     expect(functions.length).toBeGreaterThan(0);
     for (const { signature, proconfig } of functions) {
       expect(proconfig, `${signature} search_path`).toContain("search_path=pg_catalog, public, pg_temp");
+      if (signature.startsWith("push_workspace_revision(")) {
+        expect(proconfig).toContain("statement_timeout=60s");
+      } else {
+        expect(proconfig?.some((setting) => setting.startsWith("statement_timeout="))).toBe(false);
+      }
     }
     await db.close();
   }, 30_000);
