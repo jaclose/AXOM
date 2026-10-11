@@ -36,6 +36,8 @@ jobs:
         run: npm --prefix web run quality
       - name: Install browser for production update checks
         run: npm --prefix web exec -- playwright install --with-deps chromium
+      - name: Native ZIP question package browser acceptance (no catalog file)
+        run: npm --prefix web run test:e2e -- e2e/native-package-zip.spec.ts
       - name: Verify consent, recovery snapshot and offline update behavior
         run: npm --prefix web run verify:app-updates
       - run: npm --prefix web run verify:daily-games-offline
