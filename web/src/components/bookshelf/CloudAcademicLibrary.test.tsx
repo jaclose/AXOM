@@ -25,6 +25,28 @@ describe("published library entry points", () => {
     await waitFor(() => expect(onPractice).toHaveBeenCalledWith(selection));
     expect(mocks.quiz.mock.calls[0][0]).toHaveLength(1);
   });
+  it("lets a learner cancel a stalled transfer and retry without losing control", async () => {
+    const onPractice = vi.fn();
+    mocks.quiz.mockImplementationOnce((_sets: unknown, _wanted: number, signal: AbortSignal) =>
+      new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(new DOMException("Canceled", "AbortError")), { once: true });
+      }));
+    render(<CloudAcademicLibrary mode="questions" onPractice={onPractice} />);
+    fireEvent.click(screen.getByRole("button", { name: "Create Quiz" }));
+    const cancel = screen.getByRole("button", { name: "Cancel preparation" });
+    expect(cancel).toBeTruthy();
+    fireEvent.click(cancel);
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toContain("Preparation stopped");
+      expect(screen.getByRole("button", { name: "Create Quiz" })).toHaveProperty("disabled", false);
+    });
+    expect(onPractice).not.toHaveBeenCalled();
+    const selection = { module: "TEST", setIds: ["saved-set"], questionIds: ["saved-question"], count: 1 };
+    mocks.quiz.mockResolvedValueOnce(selection);
+    fireEvent.click(screen.getByRole("button", { name: "Create Quiz" }));
+    await waitFor(() => expect(onPractice).toHaveBeenCalledWith(selection));
+  });
+
   it("does not interpret an empty selection as every question", () => {
     render(<CloudAcademicLibrary mode="questions" />);
     fireEvent.click(screen.getByRole("checkbox"));

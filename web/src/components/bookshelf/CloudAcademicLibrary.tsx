@@ -50,7 +50,11 @@ function CloudCourseContent({ course, mode, onPractice }: {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const controller = useRef<AbortController>();
-  useEffect(() => () => controller.current?.abort(), []);
+  useEffect(() => () => {
+    const active = controller.current;
+    controller.current = undefined;
+    active?.abort();
+  }, []);
   const selected = banks.filter(e => selection.includes(`${e.release_id}:${e.id}`));
   const available = selected.reduce((n,e) => n + e.question_count, 0);
   const weeks = [...new Set(banks.map(e => e.week))].sort((a,b) => (a ?? Infinity) - (b ?? Infinity));
@@ -58,20 +62,29 @@ function CloudCourseContent({ course, mode, onPractice }: {
   async function run(kind: "course" | "quiz") {
     if (busy) return;
     const request = new AbortController(); controller.current = request;
+    const timeout = window.setTimeout(() => request.abort(), 120_000);
     setBusy(true); setError(""); setMessage(kind === "course" ? "Loading your course…" : "Preparing your selected questions and images…");
     try {
       if (kind === "course") {
         const result = await loadCloudCourse(course, request.signal);
-        if (!request.signal.aborted) setMessage(result);
+        if (!request.signal.aborted && controller.current === request) setMessage(result);
       } else {
         const result = await prepareCloudQuiz(selectedBanks(course, selection), Number(wanted), request.signal);
-        if (!request.signal.aborted) { setMessage(""); onPractice(result); }
+        if (!request.signal.aborted && controller.current === request) { setMessage(""); onPractice(result); }
       }
     } catch (cause) {
-      if (!request.signal.aborted) { setMessage(""); setError(cause instanceof Error ? cause.message : "This action could not finish. Your saved work is intact."); }
-    } finally { if (!request.signal.aborted) setBusy(false); }
+      if (controller.current === request) {
+        setMessage("");
+        setError(request.signal.aborted
+          ? "Preparation stopped. Your saved study data is intact; retry when ready."
+          : cause instanceof Error ? cause.message : "This action could not finish. Your saved work is intact.");
+      }
+    } finally {
+      window.clearTimeout(timeout);
+      if (controller.current === request) { controller.current = undefined; setBusy(false); }
+    }
   }
-  return <div className="cloud-course-content">
+  return <div className="cloud-course-content" aria-busy={busy}>
     <div className="cloud-course-intro"><span>{course.term}</span><h3>{course.module}</h3><p>{totalActivities} activities · {banks.reduce((n,e)=>n+e.question_count,0)} ready questions</p></div>
     {mode === "courses" ? <>
       <p>Load this course into your tracker. Already loaded activities, personal edits, and completed work are preserved.</p>
@@ -91,6 +104,7 @@ function CloudCourseContent({ course, mode, onPractice }: {
           onClick={()=>void run("quiz")}>Create Quiz</GButton></div>
       <p className="cloud-library-detail">{available} questions in selected collections. The next screen lets you choose Tutor or Exam. Any overlap is removed before practice starts.</p>
     </>}
+    {busy && <GhostButton onClick={() => { controller.current?.abort(); setMessage("Stopping preparation…"); }}>Cancel preparation</GhostButton>}
     {message && <p role="status" className="cloud-library-message">{!busy && <Check size={ICON_SIZE.body} />} {message}</p>}
     {error && <p role="alert" className="cloud-library-error">{error}</p>}
   </div>;
