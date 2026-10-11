@@ -24,9 +24,9 @@ jobs:
       - run: npm --prefix web ci --no-audit --no-fund
       - name: Isolated validation inputs
         run: |
-          git archive --format=tar HEAD web/src web/scripts web/e2e web/package.json web/package-lock.json web/tsconfig.json web/tsconfig.app.json web/tsconfig.node.json web/eslint.config.js web/vite.config.ts web/playwright.config.ts scripts supabase/migrations docs AGENTS.md CLAUDE.md .github .gitattributes .gitignore package.json > /tmp/axom-catalog-source.tar
+          git archive --format=tar HEAD web/src web/scripts web/e2e web/package.json web/package-lock.json web/tsconfig.json web/eslint.config.js web/vite.config.ts web/playwright.config.ts scripts supabase/migrations docs AGENTS.md CLAUDE.md .github .gitattributes .gitignore package.json > /tmp/axom-catalog-source.tar
           tar -czf /tmp/axom-catalog-dependencies.tgz web/node_modules
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: catalog-validation-inputs
           path: |
