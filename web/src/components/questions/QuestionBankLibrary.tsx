@@ -9,10 +9,9 @@ import { AcademicLibrary } from "../bookshelf/AcademicLibrary";
 import { QuestionBankBookContent } from "../bookshelf/BookContents";
 import { knownBankManifests } from "../../lib/question-content/knownBanks";
 import { PreparedLibrary } from "../bookshelf/PreparedLibrary";
+import { CloudAcademicLibrary } from "../bookshelf/CloudAcademicLibrary";
 
-// Metadata is known; source bytes become available only after an import.
-const packages: KnownPackage[] = knownBankManifests.map((manifest) => ({ manifest, hasSource: false }));
-
+const packages: KnownPackage[] = knownBankManifests.map(manifest => ({ manifest, hasSource: false }));
 export function QuestionBankLibrary({ onPractice, onOpenBank, onImport, onCreate }: {
   onPractice: (selection: PracticeSelection) => void;
   onOpenBank: (book: QuestionBankBook, week?: number) => void;
@@ -23,8 +22,13 @@ export function QuestionBankLibrary({ onPractice, onOpenBank, onImport, onCreate
   const shelves = useMemo(() => buildShelves(buildQuestionBankBooks({ terms: s.terms, courses: s.courses,
     sets: s.questionSets ?? [], questions: s.questions ?? [], packages, curricula: CURRICULA, sourceOf: bankSource })),
   [s.terms, s.courses, s.questionSets, s.questions]);
-  return <><PreparedLibrary /><AcademicLibrary title="Course question banks" subtitle="Choose a course and its question sets. Create a focused quiz or combine sets."
-    onChooseFile={onImport} onCreate={onCreate} createHint="Build a reusable practice block from your saved questions."
-    browse={<AcademicBookshelf label="Question bank library" shelves={shelves}
-      renderBook={(book) => <QuestionBankBookContent book={book} onPractice={onPractice} onOpenBank={onOpenBank} />} />} /></>;
+  return <><CloudAcademicLibrary onPractice={onPractice} />
+    <details className="personal-library-section" open={Boolean(s.questionSets?.length)}>
+      <summary>My saved sets and custom material</summary><div>
+        <AcademicLibrary title="My question sets" subtitle="Continue saved practice, mix sets, or add your own material."
+          onChooseFile={onImport} onCreate={onCreate} createHint="Build a reusable practice block from your saved questions."
+          browse={<AcademicBookshelf label="Question bank library" shelves={shelves}
+            renderBook={book => <QuestionBankBookContent book={book} onPractice={onPractice} onOpenBank={onOpenBank} />} />} />
+        <details><summary>Transfer a personal library</summary><PreparedLibrary /></details>
+      </div></details></>;
 }
