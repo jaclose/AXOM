@@ -37,12 +37,13 @@ describe("cloud content into canonical learner stores", () => {
   it("creates usable scoped practice, survives reload, and reuses edited questions", async () => {
     const first = await prepareCloudQuiz([entry], 20, new AbortController().signal);
     expect(first.count).toBe(1); expect(first.setIds).toHaveLength(1);
+    expect(first.questionIds).toEqual(useStore.getState().questions.map(q => q.id));
     await reloadWorkspace();
     const question = useStore.getState().questions[0];
     useStore.getState().updateQuestion(question.id, { notes: "My own note", stem: "My clarified wording?" });
     const again = await prepareCloudQuiz([entry, entry], 20, new AbortController().signal);
     await reloadWorkspace();
-    expect(again.setIds).toEqual(first.setIds); expect(useStore.getState().questions).toHaveLength(1);
+    expect(again.setIds).toEqual(first.setIds); expect(again.questionIds).toEqual(first.questionIds); expect(useStore.getState().questions).toHaveLength(1);
     expect(useStore.getState().questions[0]).toMatchObject({ id: question.id, notes: "My own note", stem: "My clarified wording?" });
   });
   it("activates the published course only on request and preserves tracker progress", async () => {

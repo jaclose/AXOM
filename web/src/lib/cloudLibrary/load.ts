@@ -115,7 +115,7 @@ export function prepareCloudQuiz(input:readonly CatalogEntry[],wanted:number,sig
       await guard.verify();await flushLocalVaultWrites();assertVaultWritesSince(checkpoint);
       if(!setIds.size||!questionIds.size)throw new Error("No verified questions are available from this selection.");
       const week=entries.every(e=>e.week===entries[0].week)?entries[0].week:null;
-      return{module,...(week!=null?{week}:{}),setIds:[...setIds],count:Math.min(wanted,questionIds.size)};
+      return{module,...(week!=null?{week}:{}),setIds:[...setIds],questionIds:[...questionIds],count:Math.min(wanted,questionIds.size)};
     } finally {guard.close();}
   });
 }

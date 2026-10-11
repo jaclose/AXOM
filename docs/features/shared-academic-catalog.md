@@ -37,6 +37,11 @@ host, size, SHA-256, course-scope and readiness checks. Limits: 16 MiB per file,
 per image, 128 MiB and 50 collections per quiz preparation. Exceeding a limit produces
 an explicit error rather than silently dropping material.
 
+Each prepared quiz also carries the exact verified question IDs that were selected. The
+runner intersects these IDs with any reused local sets, so unrelated questions from a
+larger preexisting set cannot enter a narrow cloud practice block. Choosing different
+sources explicitly clears that boundary before building a new block.
+
 Banks reuse canonical import identities and existing private attempt records. Course
 loading preserves progress and personal edits. Full source-document bytes are NOT in
 this first publication adapter: verified question excerpts and their figures are.
