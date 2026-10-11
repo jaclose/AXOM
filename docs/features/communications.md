@@ -38,46 +38,78 @@ node scripts/build-communications.mjs
 node scripts/render-communications-auth.mjs
 node scripts/preview-communications.mjs
 node scripts/verify-communications-artifacts.mjs
+node scripts/verify-communications-previews.mjs
 ```
 
 Open `artifacts/communications/index.html`. It contains 20 real-renderer templates,
-two appearances, four accents, desktop/mobile controls and plain-text alternatives.
+four visual treatments, two appearances, four accents, desktop/mobile controls and
+plain-text alternatives. The gallery also includes a capture of the real Pulse sheen.
 The browser test generates real app screenshots and share-card PNGs in that folder.
+To refresh the optional motion capture, install Playwright’s video runtime with
+`web/node_modules/.bin/playwright install ffmpeg`, ensure `ffmpeg` is on PATH, then run
+`node scripts/capture-communications-motion.mjs` with the communications dev server up.
+The recorder uses a fresh synthetic profile and two encoding threads.
+
 Its fictional Alex Morgan fixtures are explicitly illustrative; no fixture is imported
 into production source. Screenshots and preview files are ignored artifacts. Their
 generators and verification journeys are committed.
 
 ## Visual walkthrough
 
-1. **Communications:** an editorial headline inside AXOM's existing shell. Study,
-   Editorial and AXOM groups have quiet divider rows and ten independent switches.
+1. **Communications:** an Orb-led optical-glass header inside AXOM's existing shell. Study,
+   Editorial and AXOM groups have illuminated inset panels and ten independent switches.
    Enabled schedules expose local time, weekday where relevant, and one timezone.
    A live adjacent email preview makes the choices tangible. Save/error/unsaved states,
    an all-optional unsubscribe action and recent delivery history complete the flow.
-2. **Email:** warm charcoal or warm paper, current Orb, compact AXOM wordmark,
-   monospaced category label, large restrained headline, evidence-led metric rows,
-   one direct action and a thin personal-accent closing rule. Tables and inline styles
-   do the structural work. Arial and Courier fallbacks avoid remote font dependence.
-3. **Pulse:** a large personal headline and the current Orb inside fine orbital rings.
-   The single signature moment is the Orb's entrance and the progression into the record.
+2. **Email:** four treatments share the same safe renderer: **Orb / Pulse** has an
+   oversized annual Orb; **Glass / Reports** has inset metric panels; **Letter / Editorial**
+   uses literary Georgia headlines; **Frost / Account** keeps essential messages compact.
+   All use the canonical Orb, rounded double borders, personal accent and a restrained
+   highlight. Tables, inline solid backgrounds and live text form a complete static
+   layout. Arial/Courier/Georgia avoid remote font dependence. The masthead sheen is
+   progressive enhancement, enabled only under `prefers-reduced-motion: no-preference`.
+3. **Pulse:** a glass headline panel faces the authentic Orb inside an optical lens and
+   fine orbital rings. A reflection crosses the panel and lens for roughly 2.4 seconds
+   per 12-second cycle, with staggered metric-panel reflections. Only transforms and
+   opacity animate. A visible Pause/Resume motion control complements OS and AXOM
+   reduced motion; visibility observers pause decoration offscreen and in hidden tabs.
    Scrolling reveals recorded effort, accuracy trajectory, system strengths/improvement,
    courses, recall/play and milestones. Reduced motion reveals everything immediately.
-4. **Share card:** actual 1080 × 1350 PNG rendering, neutral dark background, Orb,
-   four available headline statistics and period/denominator context. Name inclusion
-   starts off. Download, clipboard and platform sharing are user-triggered. JSON export
-   retains the underlying record. Nothing publishes automatically.
+4. **Share card:** actual 1080 × 1350 PNG rendering, layered graphite glass, a fixed
+   reflection, canonical Orb, four available statistics and period/denominator context.
+   Name inclusion starts off. Download, clipboard and platform sharing are user-triggered.
+   JSON retains the underlying record. Nothing publishes automatically.
 5. **Studio:** an administrator-only composer with subject/preheader variables,
    full canonical essay text, excerpt, reading time, optional illustration, CTA and
    bounded audience selection. Desktop/mobile and light/dark previews are alongside.
    Draft → audience review → allowlisted test → typed scheduling confirmation.
    A separate section publishes the article and exports Resend Broadcast files.
-6. **Privacy & Data:** numbered sections for local backup, private account export,
+6. **Privacy & Data:** quiet, numbered glass sections for local backup, private account export,
    communications and account removal. Deletion offers a backup first, requires a
    recent sign-in and typed confirmation, shows its deadline and supports cancellation.
 
 Desktop and 390px layouts are designed separately. Controls use native input semantics,
 visible keyboard focus, status announcements and touch-sized action areas. No generated
 image was needed: the authentic Orb and actual interface carry the design.
+
+### Optical glass implementation
+
+The reference was JD's actual **Anki Future Glass / Basic CSS**: translucent gradient
+layers, an illuminated rim, and the ten-second `lusterSweep`. This is an adaptation to
+AXOM's palette and reading density; the Anki source/decks were not edited or copied into
+this public repository. Light mode uses porcelain glass and darker accent text.
+
+`CommunicationsBrand` standardizes the existing Orb. Scoped optical tokens live in
+`communications.css`; `useOpticalMotion` manages observer/visibility lifetime. No new
+application dependency, persistence contract, provider logic or migration was added.
+A named `axom-auth-code` slot replaces the old spacer-dependent OTP insertion; generation
+asserts every code and the correct presence/absence of secure links before writing.
+
+Email animation and blur support vary by client. The design does not require either:
+[animation support tests](https://www.caniemail.com/features/css-animation/) and
+[backdrop-filter support tests](https://www.caniemail.com/features/css-backdrop-filter/)
+justify the static-first delivery boundary. Browser previews are not proof of Gmail,
+Apple Mail or Outlook rendering. No tracking pixel or script is introduced.
 
 ## Discovery and reuse
 

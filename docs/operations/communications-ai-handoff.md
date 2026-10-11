@@ -67,8 +67,54 @@ source prompts while keeping the remaining staged whitespace check strict.
 
 ## Verification ledger
 
+### Optical glass revision, 2026-10-11
+
+Continues baseline commit `f936f7a8` on the same branch. JD requested more AXOM glass,
+Orb identity and the occasional travelling sheen from the real Anki CSS. Four email
+families, five product surfaces, share PNG and visual gallery are refreshed. Delivery,
+consent, account data and migration contracts are unchanged. Read HEAD for the revision
+commit; no external activation occurred.
+
+| Current revision check | Result |
+| --- | --- |
+| `npm --prefix web run typecheck` | PASS |
+| Targeted ESLint for communications modules/components, five pages and E2E | PASS; no warnings |
+| `npm --prefix web run build` | PASS; includes TypeScript and Daily Games isolation |
+| Focused four-file command below | 83 passed, 0 failed |
+| Communications Playwright command below | 6 passed, 0 failed |
+| `node scripts/verify-communications-previews.mjs` | 320 email viewports + 16 stylesheet-stripped fallbacks pass; zero console issues |
+| Build / auth / preview generators and artifact integrity | PASS; 28 source inputs, 7 auth/security templates, 160 previews |
+| `npm run test:repo` | 43 passed, 0 failed |
+| `npm run repo:check` and `git diff --check` | PASS |
+
+Browser acceptance covers moving sheen, visible pause/resume, offscreen pause, OS and
+AXOM reduced motion, desktop/mobile, light/dark, classic and amethyst product accents,
+and all four email accents. The new email-browser verifier is repeatable from source.
+Visual review corrected a clipped Orb caption, weak light-mode accent text and missing
+local motion controls. Artifact integrity caught spacer-coupled OTP insertion; the
+named auth slot now guards that interface. `pulse-optical-motion.webm` shows the actual
+Pulse interface with synthetic fixtures, with playback controls in the gallery.
+
+Final browser rerun:
+
+```sh
+AXOM_E2E_CHANNEL=chrome AXOM_E2E_BASE_URL=http://127.0.0.1:5196 npm --prefix web run test:e2e -- e2e/communications-pulse.spec.ts --global-timeout=240000
+```
+
+One earlier expanded run timed out before any case ran during recorded host contention.
+The bounded final rerun completed all six cases. Other tasks' build ownership was preserved.
+Motion capture is repeatable via `scripts/capture-communications-motion.mjs`; its separate
+Playwright video runtime and `ffmpeg` requirement affect artifact generation only.
+
+The full 2,922-test quality suite below is the baseline evidence; it was not rerun for
+this visual revision. Native and actual email-client/provider checks remain unrun.
+Existing production-build notices about `webUpdates` mixed imports and large chunks
+remain. No new application dependency or remote service configuration was added.
+
+### Baseline implementation, f936f7a8
+
 Finalization date: **2026-10-11**, Node **22.23.1**, isolated feature worktree above.
-The commands below ran against this implementation. All provider/network/account
+The commands below ran against the baseline implementation. All provider/network/account
 boundaries in application E2E are synthetic. No real provider send is claimed.
 
 | Command / check | Actual local result |

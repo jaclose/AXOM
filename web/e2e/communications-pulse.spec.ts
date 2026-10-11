@@ -56,6 +56,22 @@ async function setup(page: Page) {
     dev.useAccount.setState({ phase: "signed-in", user: { id: "11111111-1111-4111-8111-111111111111", email: "alex@example.invalid", displayName: "Alex Morgan" }, link: "unlinked" });
   });
 }
+async function captureLightAccent(page: Page, name: string) {
+  await page.evaluate(async () => {
+    document.documentElement.dataset.theme = "light";
+    const modulePath = "/src/lib/palette.ts";
+    const { applyPalettePreference } = await import(/* @vite-ignore */ modulePath);
+    applyPalettePreference({ id: "amethyst" });
+  });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: `${out}/${name}-light-amethyst.png`, fullPage: true });
+  await page.evaluate(async () => {
+    document.documentElement.dataset.theme = "dark";
+    const modulePath = "/src/lib/palette.ts";
+    const { applyPalettePreference } = await import(/* @vite-ignore */ modulePath);
+    applyPalettePreference({ id: "classic" });
+  });
+}
 for (const width of [1440, 390]) test(`communications, privacy and Pulse at ${width}px`, async ({ page }) => {
   await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
   const errors: string[] = []; page.on("pageerror", e => errors.push(e.message)); page.on("console", msg => { if (["error", "warning"].includes(msg.type())) errors.push(msg.text()); });
@@ -71,6 +87,7 @@ for (const width of [1440, 390]) test(`communications, privacy and Pulse at ${wi
   await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; document.querySelector(".surface-scroll")?.scrollTo(0, 0); });
   await page.getByRole("heading", { name: "An inbox with intention." }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: `${out}/communications-${width}-dark.png`, fullPage: true });
+  await captureLightAccent(page, `communications-${width}`);
   await page.getByRole("combobox", { name: "Template", exact: true }).selectOption("pulse"); await expect(page.frameLocator('iframe[title="AXOM email preview"]').getByRole("heading", { level: 1 })).toContainText("this was your year");
   const download = page.waitForEvent("download"); await page.getByRole("button", { name: "Download this email preview" }).click(); expect((await download).suggestedFilename()).toBe("axom-pulse.html");
   await page.getByRole("combobox", { name: "Appearance", exact: true }).selectOption("light");
@@ -85,6 +102,7 @@ for (const width of [1440, 390]) test(`communications, privacy and Pulse at ${wi
   await page.getByRole("button", { name: "Schedule deletion in 7 days" }).click(); await page.getByRole("button", { name: "Cancel deletion" }).click(); await expect(page.getByText("Deletion cancelled.", { exact: true })).toBeVisible();
   await page.getByRole("heading", { name: "Your data stays yours." }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: `${out}/privacy-${width}.png`, fullPage: true });
+  await captureLightAccent(page, `privacy-${width}`);
   await page.getByRole("link", { name: "Email preferences", exact: true }).click(); await page.getByRole("link", { name: /AXOM Pulse/ }).click();
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Alex, this");
   await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; window.scrollTo(0, 0); });
@@ -126,6 +144,7 @@ test("studio previews, validates an audience and schedules only after explicit r
   await page.getByRole("button", { name: "Queue a test" }).click(); await expect(page.getByText("Test queued for your allowlisted account.", { exact: true })).toBeVisible();
   await page.getByRole("heading", { name: "Something worth sending." }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: `${out}/studio-desktop.png`, fullPage: true });
+  await captureLightAccent(page, "studio-1440");
   await page.getByRole("combobox", { name: "Width", exact: true }).selectOption("mobile"); await page.getByRole("combobox", { name: "Appearance", exact: true }).selectOption("light");
   await page.getByLabel("Send at (your local time)").fill("2027-01-02T08:00"); await page.getByLabel("Type SCHEDULE EMAIL").fill("SCHEDULE EMAIL");
   await page.getByRole("button", { name: "Schedule email", exact: true }).click(); await expect(page.getByText("Campaign scheduled.", { exact: false })).toBeVisible();
@@ -134,12 +153,29 @@ test("studio previews, validates an audience and schedules only after explicit r
   await page.getByRole("heading", { name: "Something worth sending." }).scrollIntoViewIfNeeded();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: `${out}/studio-mobile.png` });
+  await captureLightAccent(page, "studio-390");
 });
 
 test("Pulse remains readable with motion enabled and without history", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "no-preference" }); await seedOnboarded(page, { name: "New learner" });
   await page.evaluate(async () => { const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { setState: (p: object) => void } }> }).__AXOM_DEV__; dev.useStore.setState({ questions: [], logs: [], cardReviews: [], dailyWordPuzzles: [] }); location.hash = "pulse?year=2026"; });
-  await expect(page.getByRole("heading", { name: "Your record is beginning." })).toBeAttached(); await page.getByRole("button", { name: "Read your record" }).click(); await expect(page.getByRole("heading", { name: "Your record is beginning." })).toBeVisible();
+  const hero = page.locator(".pulse-hero-copy");
+  await expect(hero).toHaveAttribute("data-optical-active", "true");
+  expect(await hero.evaluate(el => getComputedStyle(el, "::after").animationPlayState)).toBe("running");
+  await page.getByRole("button", { name: "Pause motion", exact: true }).click();
+  expect(await hero.evaluate(el => getComputedStyle(el, "::after").animationPlayState)).toBe("paused");
+  await page.getByRole("button", { name: "Resume motion", exact: true }).click();
+  const before = await hero.evaluate(el => getComputedStyle(el, "::after").transform);
+  await expect.poll(() => hero.evaluate(el => getComputedStyle(el, "::after").transform)).not.toBe(before);
+  await page.evaluate(() => { document.documentElement.dataset.motion = "reduce"; });
+  expect(await hero.evaluate(el => getComputedStyle(el, "::after").animationName)).toBe("none");
+  await page.evaluate(() => { delete document.documentElement.dataset.motion; });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  expect(await hero.evaluate(el => getComputedStyle(el, "::after").display)).toBe("none");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await expect(page.getByRole("heading", { name: "Your record is beginning." })).toBeAttached(); await page.getByRole("button", { name: "Read your record" }).click();
+  await expect(hero).toHaveAttribute("data-optical-active", "false");
+  expect(await hero.evaluate(el => getComputedStyle(el, "::after").animationPlayState)).toBe("paused"); await expect(page.getByRole("heading", { name: "Your record is beginning." })).toBeVisible();
   expect(await page.locator(".pulse-page").evaluate(e => e.querySelectorAll(".pulse-number").length)).toBe(0);
 });
 
@@ -162,9 +198,11 @@ test("public essay uses the published canonical record and recovers from an unav
   await page.route("https://communications-test.supabase.co/**", route => route.fulfill({ contentType: "application/json", body: JSON.stringify(route.request().url().includes("published-fixture") ? { title: "The work between the answers", excerpt: "A synthetic canonical article fixture.", body: "Progress takes shape in the return.\n\nThis is a browser acceptance fixture, not a published essay.", reading_minutes: 6 } : null) }));
   await page.goto("/#essay?id=published-fixture"); await expect(page.getByRole("heading", { level: 1 })).toHaveText("The work between the answers");
   await page.screenshot({ path: `${out}/essay-desktop.png`, fullPage: true });
+  await captureLightAccent(page, "essay-1440");
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.reload(); await expect(page.getByRole("heading", { level: 1 })).toHaveText("The work between the answers");
   await page.screenshot({ path: `${out}/essay-mobile.png`, fullPage: true });
+  await captureLightAccent(page, "essay-390");
   await page.evaluate(() => { location.hash = "essay?id=missing-fixture"; }); await expect(page.getByRole("alert")).toContainText("not published yet"); await expect(page.getByRole("heading", { level: 1 })).toHaveCount(0);
 });

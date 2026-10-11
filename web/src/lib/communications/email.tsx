@@ -19,14 +19,14 @@ export function templateReady(input: EmailInput): boolean {
   });
 }
 export function MetricRow({ value, label, color, border }: { value: string; label: string; color: string; border: string }) {
-  return <tr><td style={{ padding: "22px 0", borderBottom: `1px solid ${border}`, fontSize: 38, lineHeight: "44px", letterSpacing: "-1.5px", color }}>{value}</td><td align="right" style={{ padding: "22px 0", borderBottom: `1px solid ${border}`, fontFamily: mono, fontSize: 11, letterSpacing: "1px" }}>{label.toUpperCase()}</td></tr>;
+  return <tr><td style={{ padding: "22px 14px", borderBottom: `1px solid ${border}`, fontSize: 36, lineHeight: "44px", letterSpacing: "-1.5px", color }}>{value}</td><td align="right" style={{ padding: "22px 14px", borderBottom: `1px solid ${border}`, fontFamily: mono, fontSize: 11, letterSpacing: "1px" }}>{label.toUpperCase()}</td></tr>;
 }
 export function CTAButton({ href, children, background, foreground }: { href: string; children: ReactNode; background: string; foreground: string }) {
-  return <table role="presentation" cellPadding={0} cellSpacing={0} style={{ margin: "32px 0" }}><tbody><tr><td style={{ borderRadius: 5, msoPaddingAlt: "16px 24px" } as CSSProperties}><a href={safeUrl(href)} style={{ display: "inline-block", padding: "17px 24px", color: foreground, background, border: `1px solid ${background}`, borderRadius: 5, fontFamily: font, fontWeight: 700, fontSize: 13, textDecoration: "none" }}>{children} &nbsp; ↗</a></td></tr></tbody></table>;
+  return <table className="email-cta" role="presentation" cellPadding={0} cellSpacing={0} style={{ margin: "32px 0" }}><tbody><tr><td style={{ borderRadius: 28, msoPaddingAlt: "16px 24px" } as CSSProperties}><a href={safeUrl(href)} style={{ display: "inline-block", padding: "17px 24px", color: foreground, background, boxShadow: "inset 0 1px 0 rgba(255,255,255,.28)", border: `1px solid ${background}`, borderRadius: 28, fontFamily: font, fontWeight: 700, fontSize: 13, textDecoration: "none" }}>{children} &nbsp; ↗</a></td></tr></tbody></table>;
 }
 export function AxomOrb({ src, large = false }: { src: string; large?: boolean }) {
-  const size = large ? 150 : 42;
-  return <img src={safeUrl(src)} width={size} height={size} alt="AXOM Orb" style={{ display: "block", border: 0, margin: large ? "12px auto 36px" : 0 }} />;
+  const size = large ? 184 : 48;
+  return <img src={safeUrl(src)} width={size} height={size} alt="AXOM Orb" style={{ display: "block", border: 0, margin: large ? "24px auto 30px" : 0 }} />;
 }
 export function emailContent(input: EmailInput) {
   const { type, context: c, baseUrl } = input; const name = firstName(c.displayName); const snap = c.snapshot;
@@ -78,19 +78,31 @@ export function renderAxomEmail(input: EmailInput): RenderedEmail {
   const metrics = snapshot?.metrics.filter(m => ["questions", "accuracy", "minutes", "days", "reviews"].includes(m.id)) ?? [];
   const improved = snapshot?.systems.filter(s => (s.delta ?? 0) > 0).sort((a, b) => (b.delta ?? 0) - (a.delta ?? 0))[0];
   const showReport = ["weekly_report", "monthly_report", "pulse"].includes(type);
+  const editorial = ["essay", "product_update", "research", "marketing"].includes(type);
+  const family = pulse ? "pulse" : showReport ? "report" : editorial ? "editorial" : "account";
+  const glass = dark ? "#1b1e24" : "#ffffff";
+  const rim = dark ? "#55565a" : "#ffffff";
   const label = pulse ? `PULSE // ${snapshot?.periodStart.slice(0, 4) ?? "YEAR"}` : optional(category) ? CATEGORIES[category].label.toUpperCase() : "YOUR AXOM ACCOUNT";
   const plainMetrics = metrics.map(m => `${m.value.toLocaleString("en")} ${m.unit} ${m.label}`);
-  const html = "<!doctype html>" + renderToStaticMarkup(<html lang="en"><head><meta charSet="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><meta name="color-scheme" content="light dark" /><title>{content.subject}</title><style>{`@media(max-width:600px){.email-pad{padding:28px 22px!important}.email-title{font-size:34px!important;line-height:39px!important}}`}</style></head>
-    <body style={{ margin: 0, padding: 0, backgroundColor: bg, color: ink, fontFamily: font }}>
+  const html = "<!doctype html>" + renderToStaticMarkup(<html lang="en"><head><meta charSet="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><meta name="color-scheme" content="light dark" /><title>{content.subject}</title><style>{`
+.email-masthead{position:relative;overflow:hidden}
+@media(prefers-reduced-motion:no-preference){.email-masthead:after{content:"";position:absolute;pointer-events:none;inset:-50% auto -50% -55%;width:40%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.16),transparent);opacity:0;animation:email-luster 12s cubic-bezier(.22,1,.36,1) 1s infinite}@keyframes email-luster{0%{transform:translateX(-100%) rotate(17deg);opacity:0}3%{opacity:.8}20%,100%{transform:translateX(460%) rotate(17deg);opacity:0}}}
+@media(max-width:600px){.email-pad{padding:28px 22px!important}.email-title{font-size:34px!important;line-height:39px!important}.email-masthead{padding:22px!important}.email-shell{border-radius:24px!important}}
+`}</style></head>
+    <body className={`email-family-${family}`} style={{ margin: 0, padding: 0, backgroundColor: bg, color: ink, fontFamily: font }}>
       <div style={{ display: "none", maxHeight: 0, overflow: "hidden", opacity: 0 }}>{input.editorial?.preview || content.body}</div>
       <table role="presentation" width="100%" cellPadding={0} cellSpacing={0} bgcolor={bg}><tbody><tr><td align="center" style={{ padding: "28px 12px" }}>
-        <table role="presentation" width="600" cellPadding={0} cellSpacing={0} style={{ width: "100%", maxWidth: 600, backgroundColor: panel, border: `1px solid ${line}` }}><tbody><tr><td className="email-pad" style={{ padding: "40px 48px" }}>
-          <table role="presentation" width="100%"><tbody><tr><td><AxomOrb src={c.orbUrl} /></td><td align="right" style={{ fontSize: 12, letterSpacing: "4px", fontWeight: 700 }}>AXOM</td></tr></tbody></table>
-          <div style={{ height: 40 }} />{pulse && <AxomOrb src={c.orbUrl} large />}
-          <p style={{ color: muted, font: `11px ${mono}`, letterSpacing: "2px", margin: "0 0 22px" }}>{label}</p>
-          <h1 className="email-title" style={{ fontSize: pulse ? 46 : 38, fontWeight: 400, letterSpacing: "-1.7px", lineHeight: pulse ? "50px" : "44px", margin: "0 0 24px", color: ink }}>{content.title}</h1>
-          <p style={{ color: muted, fontSize: 15, lineHeight: "25px", margin: "0 0 28px" }}>{content.body}</p>
-          {showReport && <><p style={{ font: `11px ${mono}`, color: muted }}>{snapshot?.periodStart} · {snapshot?.periodEnd}</p><table role="presentation" width="100%" cellPadding={0} cellSpacing={0}><tbody>{metrics.map(m => <MetricRow key={m.id} color={ink} border={line} label={m.label} value={m.id === "minutes" ? `${Math.round(m.value / 60 * 10) / 10}h` : `${m.value.toLocaleString("en")}${m.unit}`} />)}</tbody></table>{!metrics.length && <p style={{ color: muted, fontSize: 15, lineHeight: "24px" }}>Your record is beginning. There is not enough recorded activity for a report yet.</p>}
+        <table className="email-shell" role="presentation" width="600" cellPadding={0} cellSpacing={0} style={{ width: "100%", maxWidth: 600, backgroundColor: panel, backgroundImage: `linear-gradient(145deg,${glass},${panel} 48%)`, border: `1px solid ${line}`, borderTopColor: rim, borderRadius: 32, boxShadow: `inset 0 1px 0 ${rim}, 0 24px 70px rgba(0,0,0,.12)` }}><tbody><tr><td className="email-pad" style={{ padding: "12px 12px 0" }}>
+          <div className="email-masthead" style={{ padding: "28px 32px", backgroundColor: glass, backgroundImage: `linear-gradient(125deg,${accent}24,${glass} 48%,${accent}0a)`, border: `1px solid ${line}`, borderTopColor: rim, borderRadius: 22, boxShadow: `inset 0 1px 0 ${rim}` }}>
+            <table role="presentation" width="100%" cellPadding={0} cellSpacing={0}><tbody><tr><td width="64"><AxomOrb src={c.orbUrl} /></td><td style={{ fontSize: 13, letterSpacing: "4px", fontWeight: 700, color: ink }}>AXOM<br /><span style={{ font: `9px ${mono}`, letterSpacing: "1px", color: muted }}>{editorial ? "ESSAYS & IDEAS" : pulse ? "YOUR PRIVATE RECORD" : showReport ? "THE WORK, RECORDED" : "A SPACE OF YOUR OWN"}</span></td><td align="right" style={{ color: muted, font: `10px ${mono}` }}>{pulse ? snapshot?.periodStart.slice(0, 4) ?? "PULSE" : "//"}</td></tr></tbody></table>
+            {pulse && <AxomOrb src={c.orbUrl} large />}
+          </div>
+        </td></tr><tr><td className="email-pad" style={{ padding: "36px 44px 40px" }}>
+          <p style={{ color: muted, font: `11px ${mono}`, letterSpacing: "2px", margin: "0 0 22px", borderLeft: `2px solid ${accent}`, paddingLeft: 12 }}>{label}</p>
+          <h1 className="email-title" style={{ fontFamily: editorial ? "Georgia, Times, serif" : font, fontSize: pulse ? 46 : editorial ? 42 : 38, fontWeight: 400, letterSpacing: editorial ? "-1.2px" : "-1.7px", lineHeight: pulse ? "50px" : "46px", margin: "0 0 24px", color: ink }}>{content.title}</h1>
+          <p style={{ color: muted, fontSize: editorial ? 16 : 15, lineHeight: "27px", margin: "0 0 28px" }}>{content.body}</p>
+          {type === "auth" && <div id="axom-auth-code" />}
+          {showReport && <><p style={{ font: `11px ${mono}`, color: muted }}>{snapshot?.periodStart} · {snapshot?.periodEnd}</p><table role="presentation" width="100%" cellPadding={0} cellSpacing={0} style={{ backgroundColor: glass, border: `1px solid ${line}`, borderRadius: 16, boxShadow: `inset 0 1px 0 ${rim}` }}><tbody>{metrics.map(m => <MetricRow key={m.id} color={ink} border={line} label={m.label} value={m.id === "minutes" ? `${Math.round(m.value / 60 * 10) / 10}h` : `${m.value.toLocaleString("en")}${m.unit}`} />)}</tbody></table>{!metrics.length && <p style={{ color: muted, fontSize: 15, lineHeight: "24px" }}>Your record is beginning. There is not enough recorded activity for a report yet.</p>}
             {snapshot?.comparison?.accuracyDelta !== undefined && <p style={{ fontSize: 13, lineHeight: "22px", color: muted }}>Recorded accuracy {snapshot.comparison.accuracyDelta >= 0 ? "increased" : "decreased"} {Math.abs(snapshot.comparison.accuracyDelta)} percentage points versus the previous equal-length period.</p>}
             {snapshot && snapshot.systems.length > 1 && <p style={{ fontSize: 13, lineHeight: "22px", color: muted }}>Strongest recorded system: {snapshot.systems[0].name}. A direction for review: {snapshot.systems.at(-1)?.name}.</p>}
             {improved && <div style={{ borderLeft: `3px solid ${accent}`, padding: "4px 0 4px 18px", marginTop: 28 }}><p style={{ color: muted, font: `10px ${mono}`, letterSpacing: "1px" }}>MOST IMPROVED SYSTEM</p><h2 style={{ fontSize: 24, fontWeight: 400 }}>{improved.name} +{improved.delta} points</h2><p style={{ color: muted, fontSize: 13, lineHeight: "22px" }}>First-answer accuracy improved between the two halves of this period.</p></div>}
@@ -101,7 +113,7 @@ export function renderAxomEmail(input: EmailInput): RenderedEmail {
           {input.editorial?.readingMinutes && <p style={{ font: `11px ${mono}`, color: muted }}>{input.editorial.readingMinutes} MIN READ · JAFAR FROM AXOM</p>}
           {type !== "deletion_completed" && <CTAButton href={content.href} background={ink} foreground={panel}>{content.cta}</CTAButton>}
           {showReport && <p style={{ fontSize: 11, lineHeight: "18px", color: muted }}>{snapshot?.source === "protected-copy" ? `Protected copy: ${snapshot.sourceUpdatedAt ?? "date unavailable"}. Device-only changes are not included. ` : ""}Statistics describe recorded activity, including repeat answers. Open the report for sources and denominators.</p>}
-          <div style={{ borderTop: `1px solid ${accent}`, marginTop: 40, paddingTop: 22 }}><p style={{ color: muted, fontSize: 11, lineHeight: "19px" }}>{optional(category) ? `You chose ${CATEGORIES[category].label}.` : "An essential AXOM account communication."}</p><p style={{ color: muted, fontSize: 11, lineHeight: "22px" }}>{optional(category) && <><a href={safeUrl(`${input.baseUrl}/#communications`)} style={{ color: muted }}>Manage preferences</a>{" · "}<a href={safeUrl(input.unsubscribeUrl ?? `${input.baseUrl}/#communications`)} style={{ color: muted }}>Unsubscribe</a>{" · "}</>}<a href={safeUrl(`${input.baseUrl}/#privacy`)} style={{ color: muted }}>Privacy & Data</a></p></div>
+          <div style={{ borderTop: `1px solid ${line}`, marginTop: 40, paddingTop: 22 }}><p style={{ color: muted, fontSize: 11, lineHeight: "19px" }}>{optional(category) ? `You chose ${CATEGORIES[category].label}.` : "An essential AXOM account communication."}</p><p style={{ color: muted, fontSize: 11, lineHeight: "22px" }}>{optional(category) && <><a href={safeUrl(`${input.baseUrl}/#communications`)} style={{ color: muted }}>Manage preferences</a>{" · "}<a href={safeUrl(input.unsubscribeUrl ?? `${input.baseUrl}/#communications`)} style={{ color: muted }}>Unsubscribe</a>{" · "}</>}<a href={safeUrl(`${input.baseUrl}/#privacy`)} style={{ color: muted }}>Privacy & Data</a></p></div>
         </td></tr></tbody></table>
       </td></tr></tbody></table>
     </body></html>);
