@@ -149,9 +149,9 @@ describe("Supabase migrations on real Postgres", () => {
     const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
     try {
       const release = "33333333-3333-4333-8333-333333333333";
-      await as(db, "anon", null, `create temporary table academic_catalog_releases (id uuid, status text, audience text);
-        insert into pg_temp.academic_catalog_releases values ('${release}', 'published', 'public');
-        create temporary table academic_catalog_grants (release_id uuid, user_id uuid);`);
+      await as(db, "anon", null, "create temporary table academic_catalog_releases (id uuid, status text, audience text)");
+      await as(db, "anon", null, "insert into pg_temp.academic_catalog_releases values ($1, 'published', 'public')", [release]);
+      await as(db, "anon", null, "create temporary table academic_catalog_grants (release_id uuid, user_id uuid)");
       const response = await as(db, "anon", null, "select public.can_read_academic_release($1::uuid) as allowed", [release]);
       expect(response.rows).toEqual([{ allowed: false }]);
     } finally { await db.close(); }
