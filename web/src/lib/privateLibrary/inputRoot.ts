@@ -12,7 +12,7 @@ export function safeInputPath(value: string): string {
   if (typeof value !== "string" || !value || value.length > 1_024 || value.startsWith("/")
       || /^[a-z]:/i.test(value) || /[\\\u0000-\u001f\u007f]/.test(value)
       || value.split("/").some(part => !part || part === "." || part === "..")) {
-    throw new Error("This collection contains an unsafe file path. Choose an unmodified export.");
+    throw new Error("Unsafe input: this collection contains an unsafe file path. Choose an unmodified export.");
   }
   return value.normalize("NFC");
 }

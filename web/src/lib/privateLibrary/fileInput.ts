@@ -4,6 +4,17 @@ import { resolveLibraryReader } from "./nativeInput";
 import { indexLibraryZip } from "./zipIndex";
 
 type Reader = (path: string) => Promise<Uint8Array>;
+/** JSZip exposes this documented API at runtime, but omits it from JSZipObject. */
+interface ByteStream {
+  on(event: "data", callback: (chunk: Uint8Array) => void): ByteStream;
+  on(event: "error", callback: (error: unknown) => void): ByteStream;
+  on(event: "end", callback: () => void): ByteStream;
+  pause(): void;
+  resume(): void;
+}
+type StreamingZipObject = JSZipObject & {
+  internalStream?: (type: "uint8array") => ByteStream;
+};
 const crcTable = Uint32Array.from({ length: 256 }, (_, value) => {
   let next = value;
   for (let bit = 0; bit < 8; bit++) next = next & 1 ? 0xedb88320 ^ (next >>> 1) : next >>> 1;
@@ -13,7 +24,12 @@ const crcTable = Uint32Array.from({ length: 256 }, (_, value) => {
 /** Bound actual expansion, not just the archive's untrusted size claim. */
 function readZipEntry(item: JSZipObject, expected: number, crc: number, consume: (length: number) => void): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
-    const stream = item.internalStream("uint8array"), chunks: Uint8Array[] = [];
+    const streaming = item as StreamingZipObject;
+    if (typeof streaming.internalStream !== "function") {
+      reject(new Error("This ZIP reader cannot stream safely. Extract the collection and choose its folder."));
+      return;
+    }
+    const stream = streaming.internalStream("uint8array"), chunks: Uint8Array[] = [];
     let length = 0, checksum = 0xffffffff, settled = false;
     const fail = (error: unknown) => {
       if (settled) return;

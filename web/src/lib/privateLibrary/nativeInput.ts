@@ -31,7 +31,7 @@ export async function resolveLibraryReader(entries: readonly LibraryInputEntry[]
   const byPath = new Map(entries.map(entry => [safeInputPath(entry.path), entry]));
   const readSelected: Reader = async path => {
     const key = safeInputPath(path), entry = byPath.get(key);
-    if (!entry) throw new Error(`This collection is missing ${leaf(key)}. Keep its questions and image folders together.`);
+    if (!entry) throw new Error(`Missing collection file: ${leaf(key)}. Keep its questions and image folders together.`);
     const bytes = await read(entry.path);
     if (bytes.length !== entry.byteSize) throw new Error(`The size of ${leaf(key)} changed while importing. Select the collection again.`);
     return bytes;
