@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useStore } from "../../lib/store";
 import { CURRICULA } from "../../lib/curricula";
 import { buildCourseBooks, type CourseBook } from "../../lib/bookshelf/courseBooks";
@@ -22,29 +22,28 @@ export function CourseLibrary({ onClose, onTemplate, onOpen, onCreate }: {
   onCreate: () => void;
 }) {
   const s = useStore();
-  const templates = savedCourseTemplates(s.documents);
+  const [error, setError] = useState("");
   const shelves = useMemo(() => buildShelves(withPreparedCourses(buildCourseBooks({ terms: s.terms, courses: s.courses,
     tracker: s.tracker, questions: s.questions, sets: s.questionSets, curricula: CURRICULA }), s.documents, s.tracker)),
   [s.terms, s.courses, s.tracker, s.questions, s.questionSets, s.documents]);
   const banks = useMemo(() => buildQuestionBankBooks({ terms: s.terms, courses: s.courses,
     questions: s.questions, sets: s.questionSets, curricula: CURRICULA }), [s.terms, s.courses, s.questions, s.questionSets]);
+  async function chooseTemplate(book: CourseBook) { setError(""); onTemplate(book); }
   return <Modal title="Course library" onClose={onClose} className="course-library-modal">
-    <CloudAcademicLibrary />
-    <details className="personal-library-section" open={templates.length > 0}>
-      <summary>My saved courses and custom templates</summary><div>
-        <div className="row wrap gap8" style={{ marginBottom: 14 }}>
-          <GButton onClick={() => onTemplate()}>Saved templates ({templates.length})</GButton>
-          <span className="sub">Customize versions, weeks and activities.</span>
-        </div>
-        <AcademicLibrary title="My academic bookshelf" subtitle="Your activated courses and personal templates. Progress stays separate from the shared library."
-          onChooseFile={() => onTemplate()} onCreate={onCreate}
-          createHint="Add your own course or module, then fill it with activities."
-          importHint="Add a custom template when your course is not in the shared library."
-          browse={<AcademicBookshelf label="Course library" shelves={shelves}
-            renderBook={book => <CourseBookContent book={book} workspace={s} onLoad={loadPreparedCourse}
-              questionBank={banks.find(bank => moduleKey(bank.module) === moduleKey(book.module) && bank.term === book.term)}
-              onOpen={onOpen} onChooseTemplate={() => onTemplate(book)} />} />} />
-        <details><summary>Transfer a personal library</summary><PreparedLibrary /></details>
-      </div></details>
+    {error && <p role="alert">{error}</p>}
+    <CloudAcademicLibrary mode="courses" />
+    <div className="row wrap gap8" style={{ marginBottom: 14 }}>
+      <GButton onClick={() => onTemplate()}>Saved templates ({savedCourseTemplates(s.documents).length})</GButton>
+      <span className="sub">Choose versions, weeks and activities.</span>
+    </div>
+    <AcademicLibrary title="Your saved courses" subtitle="Customize downloaded templates or continue courses already in your tracker."
+      onChooseFile={() => onTemplate()} onCreate={onCreate}
+      createHint="Add your own course or module, then fill it with activities."
+      importHint="Choose your lecture and activity templates. Review the weekly plan before saving."
+      browse={<AcademicBookshelf label="Course library" shelves={shelves}
+        renderBook={(book) => <CourseBookContent book={book} workspace={s} onLoad={loadPreparedCourse}
+          questionBank={banks.find(bank => moduleKey(bank.module) === moduleKey(book.module) && bank.term === book.term)}
+          onOpen={onOpen} onChooseTemplate={() => void chooseTemplate(book)} />} />} />
+    <details className="cloud-local-material"><summary>Local collection transfer and source review</summary><PreparedLibrary /></details>
   </Modal>;
 }

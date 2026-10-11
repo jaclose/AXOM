@@ -1,6 +1,5 @@
 import { loadSupabase } from "../account/supabase";
 import { CATALOG_BUCKET, MAX_CATALOG_FILE_BYTES, currentReleases, parseRelease, parseEntry, parseCatalogFile, safeCatalogPath, verifyCatalogBytes, type CatalogEntry, type CatalogRelease } from "./model";
-
 export interface CloudCatalog { releases: CatalogRelease[]; entries: CatalogEntry[]; }
 export async function catalogClient() {
   const client = await loadSupabase();
@@ -11,7 +10,7 @@ function backendError(error: { code?: string; message?: string }): Error {
   if (["42P01", "PGRST205", "PGRST202"].includes(error.code ?? "")) return new Error("The shared library database has not been enabled yet. This is a setup issue, not an empty question bank.");
   return new Error("The shared library could not be reached. Check your connection and retry; your progress is unchanged.");
 }
-/** Paginate metadata only. No question text or images are downloaded at app startup. */
+/** Only metadata at startup. All pages are read, or an explicit capacity error is returned. */
 export async function listCloudCatalog(signal: AbortSignal): Promise<CloudCatalog> {
   const client = await catalogClient();
   const releases: CatalogRelease[] = [];
@@ -31,15 +30,17 @@ export async function listCloudCatalog(signal: AbortSignal): Promise<CloudCatalo
         .select("release_id,id,kind,title,module,term,week,question_count,image_question_count,activity_count,payload_path,source_label")
         .eq("release_id", release.id).order("id").range(page * 200, page * 200 + 199).abortSignal(signal);
       if (error) throw backendError(error);
-      entries.push(...(data ?? []).map(parseEntry));
+      const parsed = (data ?? []).map(parseEntry);
+      if (parsed.some(e => e.release_id !== release.id)) throw new Error("Catalog release identity mismatch.");
+      entries.push(...parsed);
       if ((data?.length ?? 0) < 200) break;
       if (page === 49) throw new Error("This release exceeds the supported catalog size. Nothing was silently omitted.");
     }
   }
   return { releases: current, entries };
 }
-
 export async function readCloudFile(releaseId: string, path: string, signal: AbortSignal): Promise<Uint8Array> {
+  signal.throwIfAborted();
   const client = await catalogClient();
   const { data, error } = await client.from("academic_catalog_files")
     .select("release_id,path,storage_path,sha256,byte_size,mime_type")
@@ -48,6 +49,7 @@ export async function readCloudFile(releaseId: string, path: string, signal: Abo
   const file = parseCatalogFile(data);
   if (file.release_id !== releaseId || file.path !== path) throw new Error("The catalog returned a different asset.");
   const signed = await client.storage.from(CATALOG_BUCKET).createSignedUrl(file.storage_path, 120);
+  signal.throwIfAborted();
   if (signed.error || !signed.data?.signedUrl) throw new Error("This content is not available to this account or its access expired. Refresh the library.");
   const url = new URL(signed.data.signedUrl);
   const standIn = import.meta.env.DEV && typeof window !== "undefined"
@@ -60,8 +62,7 @@ export async function readCloudFile(releaseId: string, path: string, signal: Abo
   let length = 0;
   try {
     while (true) {
-      const part = await reader.read();
-      if (part.done) break;
+      const part = await reader.read(); if (part.done) break;
       length += part.value.byteLength;
       if (length > file.byte_size || length > MAX_CATALOG_FILE_BYTES) throw new Error("The content exceeds its declared size.");
       chunks.push(part.value);
@@ -70,6 +71,6 @@ export async function readCloudFile(releaseId: string, path: string, signal: Abo
   finally { reader.releaseLock(); }
   const bytes = new Uint8Array(length); let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  await verifyCatalogBytes(file, bytes);
+  await verifyCatalogBytes(file, bytes); signal.throwIfAborted();
   return bytes;
 }

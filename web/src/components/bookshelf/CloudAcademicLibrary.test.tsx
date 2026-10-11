@@ -1,40 +1,55 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { CloudAcademicLibrary } from "./CloudAcademicLibrary";
-const mocks = vi.hoisted(() => ({ list: vi.fn(), load: vi.fn(), quiz: vi.fn() }));
-vi.mock("../../lib/cloudLibrary/client", () => ({ listCloudCatalog: mocks.list }));
-vi.mock("../../lib/cloudLibrary/load", () => ({ loadCloudCourse: mocks.load, prepareCloudQuiz: mocks.quiz }));
-vi.mock("../../lib/account/supabase", () => ({ loadSupabase: async () => null }));
-const release = "11111111-1111-4111-8111-111111111111";
-const bank = { release_id: release, id: "bank-a", kind: "bank", title: "Example bank", module: "TEST", term: "Term 1", week: 1, question_count: 2, image_question_count: 1, activity_count: 0, payload_path: "banks/a/bank.json", source_label: "Synthetic fixture" };
-const template = { ...bank, id: "template-a", kind: "template", title: "Example course", question_count: 0, image_question_count: 0, activity_count: 3, payload_path: "templates/a.txt" };
-beforeEach(() => { vi.clearAllMocks(); mocks.list.mockResolvedValue({ releases: [], entries: [bank, template] }); mocks.load.mockResolvedValue("Course loaded."); mocks.quiz.mockResolvedValue({ module: "TEST", setIds: ["saved-exact-set"], count: 2 }); });
+const mocks = vi.hoisted(() => ({ refresh: vi.fn(), load: vi.fn(), quiz: vi.fn(), state: {} as any }));
+vi.mock("../../lib/cloudLibrary/useCloudCatalog", () => ({ useCloudCatalog: () => ({ state: mocks.state, refresh: mocks.refresh }) }));
+vi.mock("../../lib/cloudLibrary/load", () => ({ loadCloudCourse: (...args: unknown[]) => mocks.load(...args), prepareCloudQuiz: (...args: unknown[]) => mocks.quiz(...args) }));
+// Exercise content/actions independently of the existing animated bookshelf's tests.
+vi.mock("./AcademicBookshelf", () => ({ AcademicBookshelf: ({ shelves, renderBook }: any) => <div>{shelves.flatMap((s: any) => s.books).map((b: any) => <div key={b.id}>{renderBook(b, () => {})}</div>)}</div> }));
+const release = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const bank = { release_id: release, id: "bank", kind: "bank", title: "School set", module: "TEST", term: "Term 1", week: 1, question_count: 2, image_question_count: 1, activity_count: 0, payload_path: "bank.json", source_label: "test.txt" };
+beforeEach(() => {
+  vi.resetAllMocks();
+  mocks.state = { status: "ready", identity: "account-a", signedIn: true, catalog: { releases: [], entries: [bank] } };
+});
 afterEach(cleanup);
-describe("published library user workflow", () => {
-  it("discovers courses without requiring a local import", async () => {
-    render(<CloudAcademicLibrary />);
-    expect(await screen.findByRole("button", { name: "Open TEST, Term 1" })).toBeTruthy();
-    expect(screen.queryByText(/Install prepared folder/)).toBeNull();
+describe("published library entry points", () => {
+  it("offers a real quiz without a file-import action", async () => {
+    const onPractice = vi.fn(), selection = { module: "TEST", setIds: ["saved-set"], count: 2 };
+    mocks.quiz.mockResolvedValue(selection);
+    render(<CloudAcademicLibrary mode="questions" onPractice={onPractice} />);
+    expect(screen.getByText("School set")).toBeTruthy();
+    expect(screen.queryByText("Install prepared folder")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Create Quiz" }));
+    await waitFor(() => expect(onPractice).toHaveBeenCalledWith(selection));
+    expect(mocks.quiz.mock.calls[0][0]).toHaveLength(1);
   });
-  it("loads a selected published course through the real integration boundary", async () => {
-    const user = userEvent.setup(); render(<CloudAcademicLibrary />);
-    await user.click(await screen.findByRole("button", { name: "Open TEST, Term 1" }));
-    await user.click(screen.getByRole("button", { name: "Load Course" }));
-    expect(await screen.findByText("Course loaded.")).toBeTruthy(); expect(mocks.load).toHaveBeenCalledTimes(1);
-  });
-  it("requires an explicit set selection and passes the result to the existing player", async () => {
-    const user = userEvent.setup(), play = vi.fn(); render(<CloudAcademicLibrary onPractice={play} />);
-    await user.click(await screen.findByRole("button", { name: "Open TEST, Term 1" }));
+  it("does not interpret an empty selection as every question", () => {
+    render(<CloudAcademicLibrary mode="questions" />);
+    fireEvent.click(screen.getByRole("checkbox"));
     expect(screen.getByRole("button", { name: "Create Quiz" })).toHaveProperty("disabled", true);
-    await user.click(screen.getByRole("checkbox"));
-    await user.click(screen.getByRole("button", { name: "Create Quiz" }));
-    await screen.findByText("Questions are ready. Choose your study mode.");
-    expect(mocks.quiz.mock.calls[0][0]).toEqual([bank]); expect(play).toHaveBeenCalledWith({ module: "TEST", setIds: ["saved-exact-set"], count: 2 });
+    expect(mocks.quiz).not.toHaveBeenCalled();
   });
-  it("shows a backend failure instead of claiming the bank has zero content", async () => {
-    mocks.list.mockRejectedValue(new Error("Catalog database unavailable")); render(<CloudAcademicLibrary />);
-    expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Catalog database unavailable");
-    expect(screen.queryByText(/No courses have been published/)).toBeNull();
+  it("shows backend failure instead of claiming an empty catalog", () => {
+    mocks.state = { status: "error", identity: "a", message: "Catalog connection failed" };
+    render(<CloudAcademicLibrary mode="questions" />);
+    expect(screen.getByRole("alert").textContent).toContain("Catalog connection failed");
+    fireEvent.click(screen.getByRole("button", { name: "Retry library" }));
+    expect(mocks.refresh).toHaveBeenCalledOnce();
+  });
+  it("loads a course only after the learner chooses it", async () => {
+    mocks.state.catalog.entries = [{ ...bank, id: "template", kind: "template", question_count: 0, image_question_count: 0, activity_count: 3 }];
+    mocks.load.mockResolvedValue("Course loaded. Your progress is saved on this device.");
+    render(<CloudAcademicLibrary mode="courses" />);
+    expect(mocks.load).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /Load Course/ }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Course loaded"));
+  });
+  it("reports failed downloads without starting an empty practice block", async () => {
+    mocks.quiz.mockRejectedValue(new Error("Published image validation failed."));
+    const onPractice = vi.fn(); render(<CloudAcademicLibrary mode="questions" onPractice={onPractice} />);
+    fireEvent.click(screen.getByRole("button", { name: "Create Quiz" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("image validation"));
+    expect(onPractice).not.toHaveBeenCalled();
   });
 });

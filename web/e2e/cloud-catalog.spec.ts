@@ -1,6 +1,6 @@
 // Browser integration against synthetic HTTP responses, NOT hosted-account acceptance.
-// No course/question rows are injected into the workspace. All writes go through
-// the catalog client and the existing course/question persistence paths.
+// No course/question rows are injected into the workspace. All writes use the
+// catalog client and the existing course/question persistence paths.
 import { test, expect, type Page } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { completeSetup } from "../scripts/setup-flow.mjs";
@@ -72,22 +72,31 @@ test("published course and image-rich set work without folder import", async ({ 
   const errors: string[] = []; page.on("pageerror", e => errors.push(e.message));
   await page.setViewportSize({ width: 1440, height: 900 });
   await open(page);
-  const shared = page.getByRole("region", { name: "Published academic library" });
-  await shared.getByRole("button", { name: "Open GOER, Term 5" }).click();
-  await expect(shared.getByRole("button", { name: "Create Quiz" })).toBeDisabled();
-  await shared.getByRole("button", { name: "Load Course", exact: true }).click();
-  await expect(shared.getByRole("status")).toContainText("Course loaded", { timeout: 20_000 });
+  await page.goto("/#tracker", { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "Course Library / Load Course", exact: true }).click();
+  const courseCatalog = page.getByRole("region", { name: "Published course catalog" });
+  await courseCatalog.getByRole("button", { name: /^GOER,/ }).click();
+  const book = page.getByRole("dialog", { name: "GOER", exact: true });
+  await book.getByRole("button", { name: "Load Course", exact: true }).click();
+  await expect(book.getByRole("status")).toContainText("Course loaded", { timeout: 20_000 });
   const loaded = await readState(page); expect(loaded.activities).toBe(2);
-  await shared.getByRole("button", { name: "Load Course", exact: true }).click();
-  await expect(shared.getByRole("status")).toContainText("already in your tracker");
+  await book.getByRole("button", { name: "Load Course", exact: true }).click();
+  await expect(book.getByRole("status")).toContainText("already in your tracker");
   expect((await readState(page)).activities).toBe(loaded.activities);
+  await page.screenshot({ path: info.outputPath("course-desktop.png"), fullPage: true });
+  await page.goto("/#questions", { waitUntil: "networkidle" });
+  const shared = page.getByRole("region", { name: "Published question catalog" });
+  await expect(shared.getByRole("button", { name: /^GOER,/ })).toBeVisible();
   await page.screenshot({ path: info.outputPath("catalog-desktop.png"), fullPage: true });
+  await shared.getByRole("button", { name: /^GOER,/ }).click();
+  await book.getByRole("checkbox").uncheck();
+  await expect(book.getByRole("button", { name: "Create Quiz" })).toBeDisabled();
   await page.setViewportSize({ width: 390, height: 844 });
-  expect(await shared.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  expect(await book.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
   await page.screenshot({ path: info.outputPath("catalog-mobile.png"), fullPage: true });
-  await shared.getByRole("checkbox").check();
-  await shared.getByRole("spinbutton").fill("1");
-  await shared.getByRole("button", { name: "Create Quiz", exact: true }).click();
+  await book.getByRole("checkbox").check();
+  await book.getByRole("spinbutton").fill("1");
+  await book.getByRole("button", { name: "Create Quiz", exact: true }).click();
   const setup = page.getByRole("dialog", { name: "Tutor setup", exact: true });
   await expect(setup).toBeVisible({ timeout: 20_000 });
   await setup.getByRole("button", { name: "Start tutor block", exact: true }).click();
@@ -98,7 +107,7 @@ test("published course and image-rich set work without folder import", async ({ 
   await page.getByRole("button", { name: "Finish block", exact: true }).click();
   const answered = await readState(page); expect(answered.attempts).toBe(1); expect(answered.images).toBe(1);
   await page.reload({ waitUntil: "networkidle" });
-  await expect(shared.getByRole("button", { name: "Open GOER, Term 5" })).toBeVisible();
+  await expect(shared.getByRole("button", { name: /^GOER,/ })).toBeVisible();
   expect(await readState(page)).toEqual(answered);
   expect(errors).toEqual([]);
 });
