@@ -47,6 +47,24 @@ describe("published library entry points", () => {
     await waitFor(() => expect(onPractice).toHaveBeenCalledWith(selection));
   });
 
+  it("defaults to one set and allows selecting a full week deliberately", async () => {
+    const another = { ...bank, id: "second", title: "Second set", week: 2 };
+    mocks.state.catalog.entries = [bank, another];
+    const onPractice = vi.fn();
+    mocks.quiz.mockResolvedValue({ setIds: ["first"], questionIds: ["a"], count: 1 });
+    render(<CloudAcademicLibrary mode="questions" onPractice={onPractice} />);
+    expect(screen.getByText("1 of 2 sets selected")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Create Quiz" }));
+    await waitFor(() => expect(onPractice).toHaveBeenCalledOnce());
+    expect(mocks.quiz.mock.calls[0][0]).toEqual([bank]);
+    cleanup();
+
+    render(<CloudAcademicLibrary mode="questions" />);
+    fireEvent.click(screen.getByRole("button", { name: "Select Week 2" }));
+    expect(screen.getByText("2 of 2 sets selected")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
+    expect(screen.getByRole("button", { name: "Create Quiz" })).toHaveProperty("disabled", true);
+  });
   it("does not interpret an empty selection as every question", () => {
     render(<CloudAcademicLibrary mode="questions" />);
     fireEvent.click(screen.getByRole("checkbox"));

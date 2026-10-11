@@ -44,7 +44,8 @@ function CloudCourseContent({ course, mode, onPractice }: {
   course: CatalogCourse; mode: "courses" | "questions"; onPractice: (selection: PracticeSelection) => void;
 }) {
   const banks = course.entries.filter(e => e.kind === "bank");
-  const [selection, setSelection] = useState(() => banks.map(e => `${e.release_id}:${e.id}`));
+  // Start with one source, not every multi-gigabyte course bank at once.
+  const [selection, setSelection] = useState(() => banks.slice(0, 1).map(e => `${e.release_id}:${e.id}`));
   const [wanted, setWanted] = useState("20");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -58,6 +59,13 @@ function CloudCourseContent({ course, mode, onPractice }: {
   const selected = banks.filter(e => selection.includes(`${e.release_id}:${e.id}`));
   const available = selected.reduce((n,e) => n + e.question_count, 0);
   const weeks = [...new Set(banks.map(e => e.week))].sort((a,b) => (a ?? Infinity) - (b ?? Infinity));
+  const keyOf = (entry: CatalogCourse["entries"][number]) => `${entry.release_id}:${entry.id}`;
+  function toggleWeek(week: number | null) {
+    const keys = banks.filter(entry => entry.week === week).map(keyOf);
+    setSelection(current => keys.every(key => current.includes(key))
+      ? current.filter(key => !keys.includes(key))
+      : [...new Set([...current, ...keys])]);
+  }
   const totalActivities = course.entries.reduce((n,e) => n + e.activity_count, 0);
   async function run(kind: "course" | "quiz") {
     if (busy) return;
@@ -91,9 +99,19 @@ function CloudCourseContent({ course, mode, onPractice }: {
       <ul className="cloud-template-sections">{course.entries.filter(e=>e.kind === "template").map(e => <li key={`${e.release_id}:${e.id}`}><BookOpen size={ICON_SIZE.body} /><span>{e.title}</span><small>{e.activity_count} activities</small></li>)}</ul>
       <GButton variant="primary" disabled={busy || !totalActivities} onClick={() => void run("course")}><BookOpen size={ICON_SIZE.emphasis} /> Load Course</GButton>
     </> : <>
-      <p>Select the sets you want. Images and questions are downloaded securely when you create your quiz.</p>
+      <p>Start with one published set, or choose more for a mixed block. Images download only when you create a quiz.</p>
+      <div className="cloud-select-toolbar">
+        <span>{selected.length} of {banks.length} sets selected</span>
+        <div className="cloud-select-actions">
+          <button type="button" disabled={busy || selection.length === banks.length} onClick={() => setSelection(banks.map(keyOf))}>Select all sets</button>
+          <button type="button" disabled={busy || !selection.length} onClick={() => setSelection([])}>Clear selection</button>
+        </div>
+      </div>
       <div className="cloud-set-selection">{weeks.map(week => <fieldset key={week ?? "unscheduled"} disabled={busy}>
         <legend>{week == null ? "Course practice" : `Week ${week}`}</legend>
+        <button type="button" className="cloud-week-toggle" disabled={busy}
+          onClick={() => toggleWeek(week)}>{banks.filter(e => e.week === week).every(e => selection.includes(keyOf(e)))
+            ? "Clear" : "Select"} {week == null ? "course practice" : `Week ${week}`}</button>
         {banks.filter(e=>e.week === week).map(e => {
           const key = `${e.release_id}:${e.id}`;
           return <label key={key}><input type="checkbox" checked={selection.includes(key)} onChange={event => setSelection(current => event.target.checked ? [...current,key] : current.filter(id=>id!==key))} />
