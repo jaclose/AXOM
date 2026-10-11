@@ -1,0 +1,35 @@
+name: Shared academic catalog
+on:
+  push:
+    branches: [feat/shared-catalog-delivery]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: shared-catalog-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm --prefix web ci --no-audit --no-fund
+      - name: Typecheck
+        run: npm --prefix web run typecheck
+      - name: Catalog, publisher and integration regressions
+        working-directory: web
+        run: npx vitest run src/lib/cloudLibrary scripts/academic-catalog src/lib/privateLibrary/install.test.ts src/lib/bookshelf src/lib/course-engine/templateLibrary.test.ts
+      - name: Lint
+        run: npm --prefix web run lint
+      - name: Production build
+        run: npm --prefix web run build
+      - name: Repository hygiene
+        run: node scripts/repository-hygiene.mjs

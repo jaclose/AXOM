@@ -1,0 +1,27 @@
+.shared-academic-library { margin-block: 8px 28px; min-width: 0; }
+.shared-catalog-heading { display: flex; align-items: start; justify-content: space-between; gap: 18px; padding-block: 8px 22px; }
+.shared-catalog-heading h2, .shared-catalog-book h2 { font-family: var(--font-display); font-size: clamp(21px, 2.3vw, 29px); line-height: 1.25; margin: 9px 0; color: var(--text); }
+.shared-catalog-heading p, .shared-catalog-book p { max-width: 64ch; color: var(--text-80); line-height: 1.65; margin: 8px 0; }
+.shared-catalog-eyebrow { display: flex; align-items: center; gap: 7px; color: var(--text-80); font-size: 11px; font-weight: 600; letter-spacing: .1em; }
+.shared-catalog-notice { padding: 18px; border: 1px solid var(--hairline); border-radius: var(--radius-lg); background: var(--surface-1); line-height: 1.65; }
+.shared-catalog-notice p { margin: 6px 0; max-width: 70ch; }
+.shared-catalog-book { display: grid; gap: 14px; padding: 8px 0; min-width: 0; }
+.shared-catalog-book [role=alert] { padding: 12px; border: 1px solid var(--hairline); border-radius: var(--radius-sm); color: var(--text); background: var(--surface-2); }
+.shared-catalog-sections { margin: 0; padding: 0; list-style: none; }
+.shared-catalog-sections li { display: flex; justify-content: space-between; gap: 12px; padding: 13px 0; border-bottom: 1px solid var(--hairline-soft); overflow-wrap: anywhere; }
+.shared-catalog-sections small { flex-shrink: 0; color: var(--text-80); }
+.shared-catalog-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.shared-catalog-set-list { min-width: 0; max-height: 42vh; overflow-y: auto; overscroll-behavior: contain; }
+.shared-catalog-set-list details { border-bottom: 1px solid var(--hairline); padding: 8px 0; }
+.shared-catalog-set-list summary { cursor: pointer; padding: 10px 0; font-weight: 600; }
+.shared-catalog-set-list summary small { margin-left: 8px; color: var(--text-80); font-weight: 400; }
+.shared-catalog-set-list label { display: flex; align-items: start; gap: 10px; padding: 12px 2px; cursor: pointer; line-height: 1.5; overflow-wrap: anywhere; }
+.shared-catalog-set-list input { width: 18px; height: 18px; margin-top: 3px; flex-shrink: 0; accent-color: rgb(var(--accent-rgb)); }
+.shared-catalog-set-list small { display: block; color: var(--text-80); margin-top: 4px; }
+.shared-catalog-quiz-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 14px; }
+.shared-catalog-quiz-controls label { display: grid; gap: 6px; }
+.shared-catalog-quiz-controls input { width: 96px; padding: 10px; color: var(--text); background: var(--surface-2); border: 1px solid var(--hairline); border-radius: var(--radius-sm); }
+.shared-catalog-quiz-controls span { flex: 1; min-width: 160px; font-size: 12px; line-height: 1.55; color: var(--text-80); }
+.personal-academic-library > summary { cursor: pointer; padding: 16px 0; border-top: 1px solid var(--hairline); font-weight: 600; }
+.personal-academic-library[open] > summary { margin-bottom: 14px; }
+@media (max-width: 560px) { .shared-catalog-heading { flex-wrap: wrap; gap: 10px; } .shared-catalog-sections li { flex-direction: column; gap: 4px; } }
