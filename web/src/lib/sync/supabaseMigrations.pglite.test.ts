@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
 import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
 import { describe, expect, it } from "vitest";
+import { installStorageMigrationFixture } from "./storageMigrationFixture.testing";
 
 /**
  * Replays every supabase/migrations file against real Postgres (PGlite, WASM)
@@ -36,6 +37,7 @@ async function supabaseLikeDatabase({ rlsAutoEnable }: { rlsAutoEnable: boolean 
     grant execute on function auth.uid() to anon, authenticated;
     set search_path = "$user", public, extensions;
   `);
+  await installStorageMigrationFixture(db);
   if (rlsAutoEnable) await db.exec("create function public.rls_auto_enable() returns void language sql as $$ select $$;");
   for (const file of files) await db.exec(`begin;${readFileSync(migrationsDir + file, "utf8")}commit;`);
   return db;
@@ -89,7 +91,12 @@ describe("Supabase migrations on real Postgres", () => {
     for (const role of ["anon", "authenticated"]) {
       expect(await canExecute(db, role, "public.handle_new_account()")).toBe(false);
       if (rlsAutoEnable) expect(await canExecute(db, role, "public.rls_auto_enable()")).toBe(false);
+      expect(await canExecute(db, role, "public.publish_academic_release(uuid,integer,integer)")).toBe(false);
+      expect(await canExecute(db, role, "public.guard_academic_catalog_mutation()")).toBe(false);
+      expect(await canExecute(db, role, "public.guard_academic_release_mutation()")).toBe(false);
+      expect(await canExecute(db, role, "public.can_read_academic_release(uuid)")).toBe(true);
     }
+    expect(await canExecute(db, "service_role", "public.publish_academic_release(uuid,integer,integer)")).toBe(true);
     await db.close();
   }, 30_000);
 
@@ -108,7 +115,11 @@ describe("Supabase migrations on real Postgres", () => {
     );
     expect(functions.length).toBeGreaterThan(0);
     for (const { signature, proconfig } of functions) {
-      expect(proconfig, `${signature} search_path`).toContain("search_path=pg_catalog, public, pg_temp");
+      // The catalog predicate schema-qualifies every relation and deliberately
+      // uses an empty path. Keep the original assertion for every older RPC.
+      const expected = /^(?:public\.)?can_read_academic_release\(uuid\)$/.test(signature)
+        ? 'search_path=""' : "search_path=pg_catalog, public, pg_temp";
+      expect(proconfig, `${signature} search_path`).toContain(expected);
     }
     await db.close();
   }, 30_000);
@@ -132,6 +143,18 @@ describe("Supabase migrations on real Postgres", () => {
     expect(real.rows).toEqual([{ title: "real share" }]);
     expect(fake.rows).toEqual([]);
     await db.close();
+  }, 30_000);
+
+  it("does not grant catalog access through caller-controlled temporary tables", async () => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
+    try {
+      const release = "33333333-3333-4333-8333-333333333333";
+      await as(db, "anon", null, "create temporary table academic_catalog_releases (id uuid, status text, audience text)");
+      await as(db, "anon", null, "insert into pg_temp.academic_catalog_releases values ($1, 'published', 'public')", [release]);
+      await as(db, "anon", null, "create temporary table academic_catalog_grants (release_id uuid, user_id uuid)");
+      const response = await as(db, "anon", null, "select public.can_read_academic_release($1::uuid) as allowed", [release]);
+      expect(response.rows).toEqual([{ allowed: false }]);
+    } finally { await db.close(); }
   }, 30_000);
 
   it("keeps revisions, devices and shares private and deletion scoped to the caller", async () => {
