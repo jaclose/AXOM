@@ -36,6 +36,8 @@ jobs:
         run: npm --prefix web run quality
       - name: Install browser for production update checks
         run: npm --prefix web exec -- playwright install --with-deps chromium
+      - name: Shared library browser regression (synthetic transport)
+        run: npm --prefix web run test:e2e -- e2e/cloud-catalog.spec.ts --workers=1
       - name: Verify consent, recovery snapshot and offline update behavior
         run: npm --prefix web run verify:app-updates
       - run: npm --prefix web run verify:daily-games-offline
