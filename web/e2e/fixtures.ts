@@ -43,6 +43,11 @@ export async function openMedicalSchools(page: import("@playwright/test").Page) 
   await expect(tab).toHaveAttribute("aria-selected", "true");
 }
 
+/** The public entry loads the workspace asynchronously, after document load. */
+export async function waitForWorkspace(page: import("@playwright/test").Page) {
+  await page.waitForFunction(() => Boolean((window as unknown as { __AXOM_DEV__?: unknown }).__AXOM_DEV__));
+}
+
 /**
  * Reload only after the workspace save has reached IndexedDB. Saves are
  * coalesced and asynchronous, so an immediate reload can race the last write.

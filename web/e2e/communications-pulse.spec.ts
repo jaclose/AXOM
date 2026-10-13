@@ -75,9 +75,10 @@ async function captureLightAccent(page: Page, name: string) {
 for (const width of [1440, 390]) test(`communications, privacy and Pulse at ${width}px`, async ({ page }) => {
   await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
   const errors: string[] = []; page.on("pageerror", e => errors.push(e.message)); page.on("console", msg => { if (["error", "warning"].includes(msg.type())) errors.push(msg.text()); });
-  await setup(page); await page.goto("/#communications");
-  // A full navigation reinitializes account state; reconnect the test stand-in through the live store.
-  await page.evaluate(async () => { const d = await (window as unknown as { __AXOM_DEV__: Promise<{ useAccount: { setState: (p: object) => void } }> }).__AXOM_DEV__; d.useAccount.setState({ phase: "signed-in", user: { id: "11111111-1111-4111-8111-111111111111", displayName: "Alex Morgan", email: "alex@example.invalid" }, link: "unlinked" }); });
+  await setup(page);
+  // Follow the app's client-side navigation. This UI fixture uses a stand-in
+  // account; a new document deliberately reinitializes real Auth and hydration.
+  await page.evaluate(() => { location.hash = "communications"; });
   await expect(page.getByRole("heading", { name: "An inbox with intention." })).toBeVisible();
   await expect(page.getByRole("button", { name: "Save preferences", exact: true })).toBeEnabled();
   await page.getByRole("switch", { name: /Essays & Notes/ }).check();
@@ -195,7 +196,7 @@ test("failed deletion stays reviewable and privacy controls remain keyboard reac
 test("privacy warns about omitted backup media and clears the warning after a complete retry", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await setup(page);
-  await page.goto("/#privacy");
+  await page.evaluate(() => { location.hash = "privacy"; });
   await page.evaluate(async () => {
     const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => { questions: Array<{ id: string } & Record<string, unknown>> }; setState: (patch: object) => void }; useAccount: { setState: (patch: object) => void }; flushVault: () => Promise<void> }> }).__AXOM_DEV__;
     dev.useAccount.setState({ phase: "signed-in", user: { id: "11111111-1111-4111-8111-111111111111", email: "alex@example.invalid", displayName: "Alex Morgan" }, link: "unlinked" });

@@ -15,7 +15,7 @@ export function CloudAcademicLibrary({ mode, onPractice }: {
   onPractice?: (selection: PracticeSelection) => void;
 }) {
   const { state, refresh } = useCloudCatalog();
-  const entries = state.status === "ready" ? state.catalog.entries : [];
+  const entries = useMemo(() => state.status === "ready" ? state.catalog.entries : [], [state]);
   const books = useMemo<CloudBook[]>(() => catalogCourses(entries).flatMap(course => {
     const relevant = course.entries.filter(e => e.kind === (mode === "courses" ? "template" : "bank"));
     if (!relevant.length) return [];

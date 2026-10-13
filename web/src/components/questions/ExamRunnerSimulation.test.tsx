@@ -49,7 +49,7 @@ describe("ExamRunner simulation", () => {
     fireEvent.click(screen.getByRole("radio", { name: /USMLE \/ NBME/ }));
     fireEvent.click(screen.getByRole("button", { name: /Start exam block/ }));
     fireEvent.click(screen.getAllByRole("radio", { name: "A. Alpha" })[0]);
-    fireEvent.click(screen.getByRole("button", { name: /Suspend/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Save & exit" }));
     expect(onClose).toHaveBeenCalled();
     expect(readSuspendedBlock()).toMatchObject({ skin: "nbme" });
     unmount();
