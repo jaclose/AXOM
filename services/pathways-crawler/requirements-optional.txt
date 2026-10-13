@@ -1,0 +1,3 @@
+# Optional, tested versions. Review upgrades before unattended deployment.
+pypdf==5.9.0
+playwright==1.57.0
