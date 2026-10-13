@@ -94,6 +94,28 @@ and `AXOM_ACADEMIC_PILOT` pointing to the authorized pilot ZIP. The opt-in
 `backend.local.test.ts` and `academic-backend.local.spec.ts` refuse hosted URLs.
 Credentials and source files remain outside Git; tests never delete existing users.
 
+The local feature migrations applied for this acceptance are
+`20261011173750_private_workspace_media.sql`,
+`20261011175017_allow_bounded_snapshot_retention_cleanup.sql`,
+`20261011190000_academic_library.sql`,
+`20261013180000_incremental_workspace_transport.sql`,
+`20261013200000_daily_academic_challenges.sql`,
+`20261013210000_academic_course_lookup.sql`, and
+`20261013220000_content_storage_boundaries.sql`, on the existing local account
+baseline. This is not a claim that hosted migrations or communications activation
+have occurred. The preserved migration chain also passes role/grant/RLS replay tests.
+
+The opt-in `backup-restore.local.spec.ts` exercises an authorized existing ZIP through
+Settings in a fresh persistent Chrome profile, with hosted requests blocked. On
+2026-10-13 the 516,431,732-byte archive restored 343 questions, one existing attempt,
+43 tracker activities and 848 documents. Question notes, attempt fields, tracker
+progress and source/set identities matched before and after reload. All 2,151 images
+(467,866,781 bytes) matched the archive by SHA-256 after reopening. The measured
+read/restore/reload/integrity phase took 28,178 ms; the complete browser case including
+profile teardown took 47.1 seconds on this Mac with Node 22.23.1. This is a single
+local recovery observation, not a cloud latency claim. Reproduce with
+`AXOM_RESTORE_BACKUP` pointing to an authorized ZIP; no original file is modified.
+
 **Still incomplete:** downloaded academic records remain in the legacy workspace
 snapshot. Revision-bound per-answer changes are implemented, but new-device recovery
 still hydrates private source objects. Shared-content exclusion, cross-device learner
