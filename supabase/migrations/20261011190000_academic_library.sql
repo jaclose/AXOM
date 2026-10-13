@@ -105,9 +105,9 @@ create policy academic_enrollment_self on public.academic_enrollments for select
 insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types)
 values ('academic-content','academic-content',false,52428800,array['application/json','text/plain','application/pdf','image/png','image/jpeg','image/webp','application/vnd.openxmlformats-officedocument.wordprocessingml.document'])
 on conflict(id) do nothing;
-create policy academic_object_read on storage.objects for select to authenticated using(
+create policy academic_content_object_read on storage.objects for select to authenticated using(
   bucket_id='academic-content' and exists(select 1 from public.academic_files f where f.object_path=name));
-create policy academic_object_insert on storage.objects for insert to authenticated with check(
+create policy academic_content_object_insert on storage.objects for insert to authenticated with check(
   bucket_id='academic-content' and exists(select 1 from public.academic_files f join public.academic_revisions r on r.id=f.revision_id
     where f.object_path=name and public.academic_is_owner(r.collection_id) and r.status='uploading'));
 -- No client update/delete policies: published content bytes are immutable.
