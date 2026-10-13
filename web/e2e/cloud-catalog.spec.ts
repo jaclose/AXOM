@@ -5,7 +5,7 @@ test("QBank discovers the course catalog without downloading content and retains
   const backend = await academicCatalogFixture(page);
   const region = page.getByRole("region", { name: "Available question banks" });
   const course = region.locator(`[data-course-id="${collection}"]`);
-  await expect(course).toContainText("1 ready questions");
+  await expect(course).toContainText("1 ready question");
   expect(backend.paths).toEqual([]);
   backend.fail(); await region.getByRole("button", { name: "Refresh banks" }).click();
   await expect(region.getByRole("alert")).toContainText("could not be loaded");
