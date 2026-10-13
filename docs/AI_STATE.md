@@ -9,9 +9,15 @@ Snapshot: 2026-10-13, isolated `feat/academic-library-v1` in
 `AXOM-academic-library-v1`. Combined code checkpoint `eca6ac3b` integrates reviewed
 consolidation `6aa2126a`: academic/account recovery, daily challenges, Questions/Slides,
 Communications/Pulse, Cinematic entry, Ideas2 and audited library/audio/sync safeguards.
-The later consolidation merge `e3f0d046` has the same code tree. Preserve all active
-other-owner drafts. JD authorized commits, development pushes and tested local-main
+Concurrent local main `7059a6cf` has the same runtime code and is merged here.
+Preserve all active other-owner drafts. JD authorized commits, development pushes and tested local-main
 convergence. Remote main still deploys production and has not been updated here.
+
+Superseded Ideas3, backup recovery, owner-feedback, untested Decode, exam bootstrap
+and parked dependency checkpoints are preserved as ancestry without replacing their
+newer implementations. The private-media branch
+`backup/pre-large-file-cleanup-2026-09-28` remains excluded: its 288 MB audio file and
+another local audio asset have no publication clearance. Do not merge or publish it.
 
 ## Working and verified
 
@@ -49,8 +55,10 @@ The actual supplied 516,431,732-byte backup now passes Settings restore and relo
 an isolated persistent browser profile with hosted traffic blocked. Notes/progress,
 343 questions, 848 documents and all 2,151 image hashes match. Detailed timings and
 local migrations are in the feature contract. Native packaging, hosted staging and
-production acceptance remain outstanding. Final clean deployment-input build and
-local-main promotion are recorded with exact SHAs on the coordination board/ledger.
+production acceptance remain outstanding. The clean Vercel-filtered install/build passes for `0c38e23e`; its 270-file web
+distribution is 53,981,760 bytes (uncompressed, before this documentation-only merge).
+Exact final deployment-input validation and local-main promotion are recorded on the
+coordination board/ledger.
 
 ## Remaining delivery boundary
 
