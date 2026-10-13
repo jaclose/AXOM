@@ -6,6 +6,14 @@ import { TEMPLATE_CATEGORY } from '../supabase/functions/communications/service.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const sha = value => createHash('sha256').update(value).digest('hex');
 const manifest = JSON.parse(await readFile(root + 'supabase/functions/communications/source-manifest.json', 'utf8'));
+const previewsManifest = JSON.parse(await readFile(root + 'artifacts/communications/preview-manifest.json', 'utf8'));
+assert.equal(previewsManifest.version, 1);
+for (const [path, expected] of Object.entries(previewsManifest.sources)) {
+  assert.equal(sha(await readFile(root + path)), expected, `${path} changed: regenerate the visual gallery.`);
+}
+for (const [path, expected] of Object.entries(previewsManifest.generated)) {
+  assert.equal(sha(await readFile(root + 'artifacts/communications/' + path)), expected, `${path}: generated preview drift.`);
+}
 assert.equal(manifest.version, 1);
 assert.ok(Object.keys(manifest.sources).length > 10, 'Build must track transitive canonical source inputs.');
 for (const [path, expected] of Object.entries({ ...manifest.sources, ...manifest.authTemplates, [manifest.bundle.path]: manifest.bundle.sha256 })) {

@@ -84,11 +84,13 @@ export function renderAxomEmail(input: EmailInput): RenderedEmail {
   const rim = dark ? "#55565a" : "#ffffff";
   const label = pulse ? `PULSE // ${snapshot?.periodStart.slice(0, 4) ?? "YEAR"}` : optional(category) ? CATEGORIES[category].label.toUpperCase() : "YOUR AXOM ACCOUNT";
   const plainMetrics = metrics.map(m => `${m.value.toLocaleString("en")} ${m.unit} ${m.label}`);
-  const html = "<!doctype html>" + renderToStaticMarkup(<html lang="en"><head><meta charSet="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><meta name="color-scheme" content="light dark" /><title>{content.subject}</title><style>{`
+  // Inbox readers cannot pause CSS: one short sweep, then the complete static design.
+  // This static CSS has no user input. Raw style text preserves pseudo-element quotes in SSR.
+  const html = "<!doctype html>" + renderToStaticMarkup(<html lang="en"><head><meta charSet="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><meta name="color-scheme" content="light dark" /><title>{content.subject}</title><style dangerouslySetInnerHTML={{ __html: `
 .email-masthead{position:relative;overflow:hidden}
-@media(prefers-reduced-motion:no-preference){.email-masthead:after{content:"";position:absolute;pointer-events:none;inset:-50% auto -50% -55%;width:40%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.16),transparent);opacity:0;animation:email-luster 12s cubic-bezier(.22,1,.36,1) 1s infinite}@keyframes email-luster{0%{transform:translateX(-100%) rotate(17deg);opacity:0}3%{opacity:.8}20%,100%{transform:translateX(460%) rotate(17deg);opacity:0}}}
+@media(prefers-reduced-motion:no-preference){.email-masthead:after{content:"";position:absolute;pointer-events:none;inset:-50% auto -50% -55%;width:40%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.16),transparent);opacity:0;animation:email-luster 2.4s cubic-bezier(.22,1,.36,1) .6s 1}@keyframes email-luster{0%{transform:translateX(-100%) rotate(17deg);opacity:0}15%{opacity:.8}100%{transform:translateX(460%) rotate(17deg);opacity:0}}}
 @media(max-width:600px){.email-pad{padding:28px 22px!important}.email-title{font-size:34px!important;line-height:39px!important}.email-masthead{padding:22px!important}.email-shell{border-radius:24px!important}}
-`}</style></head>
+` }} /></head>
     <body className={`email-family-${family}`} style={{ margin: 0, padding: 0, backgroundColor: bg, color: ink, fontFamily: font }}>
       <div style={{ display: "none", maxHeight: 0, overflow: "hidden", opacity: 0 }}>{input.editorial?.preview || content.body}</div>
       <table role="presentation" width="100%" cellPadding={0} cellSpacing={0} bgcolor={bg}><tbody><tr><td align="center" style={{ padding: "28px 12px" }}>

@@ -67,6 +67,73 @@ source prompts while keeping the remaining staged whitespace check strict.
 
 ## Verification ledger
 
+### Strategic checkpoint, 2026-10-13
+
+Continues committed optical revision `3ac16528`; the branch was clean on recovery.
+No feature was restarted. The config audit again confirms `supabase/config.toml`
+contains only five added lines relative to `c46ae207`, with no removed configuration.
+This checkpoint does not alter App, Settings, Vercel, migrations or provider logic.
+
+The deeper browser check found that React SSR escaped the CSS pseudo-element content
+quotes, preventing the email sheen from appearing. The renderer now emits only its
+static authored CSS as raw style text; personalized/author content remains escaped.
+Inboxes get one 2.4-second sweep after a 0.6-second delay, then settle. Pulse retains
+its recurring reflection and pause controls. This follows
+[W3C pause/stop guidance](https://www.w3.org/WAI/WCAG22/Understanding/pause-stop-hide.html).
+Saved Resend, Playwright and Motion resources were revisited; current
+[Resend idempotency documentation](https://resend.com/docs/dashboard/emails/idempotency-keys)
+still supports the existing frozen-payload/23-hour retry boundary. No new dependency
+or provider integration was justified.
+
+The gallery previously linked outside its served directory. It now includes the five
+linked canonical documents, with source/output hashes and recursive HTTP link checks.
+The new packager uses the already-installed JSZip, requires committed source and fresh
+browser evidence, writes a commit-qualified archive, and preserves previous deliveries.
+It includes the complete feature patch from `c46ae207`; the next AI should continue the
+existing branch, not reapply that patch or restart the original prompt.
+
+| Current checkpoint check | Actual result |
+| --- | --- |
+| `npm --prefix web run typecheck` | PASS |
+| Targeted ESLint command below | PASS; zero warnings |
+| `npm --prefix web run build` | PASS; TypeScript and Daily Games isolation included |
+| Focused four-file command below with `--maxWorkers=1` | 83 passed, 0 failed; four files |
+| Communications Playwright command below | 6 passed, 0 failed; 1.5 minutes |
+| `node scripts/verify-communications-previews.mjs` | 320 layouts/reduced-motion checks, 16 static fallbacks, 16 actual bounded-motion checks; zero console issues |
+| `node scripts/verify-communications-gallery.mjs` | 23 local links, 64 control selections, 2 video checks; zero console issues |
+| Build/Auth/preview generators and artifact integrity | PASS; 28 source inputs, 7 Auth/security files, 160 HTML variants |
+| `npm run test:repo` | 43 passed, 0 failed |
+| `npm run repo:check` and `git diff --check` | PASS |
+| Negative integrity/packaging checks | Correctly reject stale copied documentation and uncommitted source |
+
+```sh
+web/node_modules/.bin/eslint web/src/lib/communications web/src/components/communications web/src/pages/CommunicationsPage.tsx web/src/pages/CommunicationsAdminPage.tsx web/src/pages/PrivacyPage.tsx web/src/pages/PulsePage.tsx web/src/pages/EssayPage.tsx web/e2e/communications-pulse.spec.ts --max-warnings=0
+npm --prefix web test -- src/lib/communications/communications.test.ts src/lib/communications/server.test.ts src/lib/communications/database.test.ts src/lib/sync/supabaseMigrations.pglite.test.ts --maxWorkers=1
+AXOM_E2E_CHANNEL=chrome AXOM_E2E_BASE_URL=http://127.0.0.1:5196 npm --prefix web run test:e2e -- e2e/communications-pulse.spec.ts --global-timeout=300000
+```
+
+Node 22.23.1 and installed Chrome were used. Desktop/mobile, light/dark, reduced motion,
+settings, privacy, studio, essay and Pulse journeys were rerun against this tree.
+Manual Playwright CLI review exercised gallery treatment/appearance/accent controls,
+1440/390 layouts and console; regenerated Pulse dark and editorial light emails and
+Pulse screenshots were visually inspected. All fixtures remain synthetic.
+Two initial motion-verifier runs exposed the escaped-CSS defect; the repaired output
+passes. The verifier pauses CSS before enabling motion, then seeks actual browser
+animation states so host contention cannot exhaust the short effect before inspection.
+An artifact refresh later hit a local-navigation timeout under host load above 300.
+The final email/gallery commands use the test-only prefix
+`AXOM_E2E_SOFTWARE_GRAPHICS=1` to reduce GPU contention; their JSON reports record this.
+Navigation is bounded at 60 seconds, and every layout/motion assertion is retained.
+This is Chrome layout/behavior evidence, not a hardware frame-rate measurement.
+The six product journeys ran with the normal installed-Chrome configuration.
+
+Active private/academic-library validators were respected; their completed process
+reservation was released only after repeated live process/cwd checks. The final heavy
+lane was released after the successful build and six journeys. Existing large-chunk
+and mixed-import notices remain; no new browser console warning was introduced.
+The older full-unit baseline below was not rerun. Real inbox/provider/native tests,
+remote migration, live deletion and deployment remain outside this local checkpoint.
+
 ### Optical glass revision, 2026-10-11
 
 Continues baseline commit `f936f7a8` on the same branch. JD requested more AXOM glass,

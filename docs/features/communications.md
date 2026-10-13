@@ -39,6 +39,7 @@ node scripts/render-communications-auth.mjs
 node scripts/preview-communications.mjs
 node scripts/verify-communications-artifacts.mjs
 node scripts/verify-communications-previews.mjs
+node scripts/verify-communications-gallery.mjs
 ```
 
 Open `artifacts/communications/index.html`. It contains 20 real-renderer templates,
@@ -52,7 +53,17 @@ The recorder uses a fresh synthetic profile and two encoding threads.
 
 Its fictional Alex Morgan fixtures are explicitly illustrative; no fixture is imported
 into production source. Screenshots and preview files are ignored artifacts. Their
-generators and verification journeys are committed.
+generators and verification journeys are committed. The gallery includes local copies
+of its five linked documents, so it works both from disk and when served as the HTTP
+root. `preview-manifest.json` binds these outputs to their current renderer, generator,
+Orb and canonical documentation; the integrity check rejects stale or edited outputs.
+
+After committing the verified source, run `node scripts/package-communications-handoff.mjs`.
+It requires a clean worktree and browser reports matching the current preview manifest.
+The commit-named ZIP contains only the gallery's declared files, linked screenshots and
+motion capture, checksums, browser evidence and the feature patch from `c46ae207`.
+It is a review/AI handoff, not an application checkout. Continue the existing branch;
+do not reapply the patch there. Older delivered ZIPs are preserved.
 
 ## Visual walkthrough
 
@@ -68,6 +79,10 @@ generators and verification journeys are committed.
    highlight. Tables, inline solid backgrounds and live text form a complete static
    layout. Arial/Courier/Georgia avoid remote font dependence. The masthead sheen is
    progressive enhancement, enabled only under `prefers-reduced-motion: no-preference`.
+   One 2.4-second sweep starts after 0.6 seconds, then remains static. Inboxes lack the
+   app's pause control, so they do not loop the decoration. The raw style block contains
+   only static, authored CSS; preserving its quotes is necessary for pseudo-elements
+   to render correctly in React server output. User content is still escaped.
 3. **Pulse:** a glass headline panel faces the authentic Orb inside an optical lens and
    fine orbital rings. A reflection crosses the panel and lens for roughly 2.4 seconds
    per 12-second cycle, with staggered metric-panel reflections. Only transforms and
@@ -110,6 +125,11 @@ Email animation and blur support vary by client. The design does not require eit
 [backdrop-filter support tests](https://www.caniemail.com/features/css-backdrop-filter/)
 justify the static-first delivery boundary. Browser previews are not proof of Gmail,
 Apple Mail or Outlook rendering. No tracking pixel or script is introduced.
+The finite inbox sweep follows [W3C pause/stop guidance](https://www.w3.org/WAI/WCAG22/Understanding/pause-stop-hide.html).
+The browser verifier checks actual pseudo-element animation, its visible and settled
+states, all 320 reduced-motion viewports and 16 stylesheet-stripped fallbacks. The
+separate gallery verifier exercises its controls, video and local document link closure
+through HTTP at desktop/mobile sizes. These remain local-browser checks, not inbox proof.
 
 ## Discovery and reuse
 

@@ -5,7 +5,7 @@ authority: current-state
 ---
 # AXOM current AI state
 
-Snapshot: 2026-10-11. This checkout is `feat/axom-communications-pulse` in
+Snapshot: 2026-10-13. This checkout is `feat/axom-communications-pulse` in
 `/Users/jd/Developer/AXOM-communications-pulse`, based on `c46ae207`.
 It is an isolated feature branch, not a statement about main or production.
 
@@ -17,6 +17,9 @@ No send, push, merge, paid action or deployment is authorized by this task.
 The two prompts are preserved in Ideas 9/10; Pulse is the chosen product name.
 JD then requested stronger optical glass, standard Orb identity and Anki-style sheen.
 This visual revision continues the committed baseline `f936f7a8` on the same branch.
+The strategic checkpoint continues the committed optical revision `3ac16528`.
+It repairs escaped email pseudo-element CSS, limits inbox sheen to one short sweep,
+and makes the visual/AI handoff portable with source hashes and repeatable packaging.
 
 Canonical explanation: [Communications and Pulse](features/communications.md).
 Activation: [Resend runbook](operations/communications-resend.md).
@@ -38,15 +41,19 @@ Preserve its store/backup/Settings edits. This branch owns only account-tab link
 Settings and App route/title wiring as shared seams. Check the live external board
 before integration or heavy validation; dated ownership here is not authority elsewhere.
 
-Optical revision checks: typecheck/targeted lint/build pass; 83 focused tests and six
-Chrome journeys pass. Email matrix: 320 viewports plus 16 static fallbacks, zero console
-issues. Repo tests: 43 pass; repo:check/artifact integrity/diff check pass. Motion and
-light/dark/mobile visuals are covered in the [handoff](operations/communications-ai-handoff.md).
+Checkpoint checks: typecheck/targeted lint/build pass; 83 focused tests and six Chrome
+journeys pass. Email matrix: 320 layouts/reduced-motion checks, 16 static fallbacks and
+16 bounded-motion checks. Gallery: 23 local links, 64 selections, two video checks.
+Browser consoles are clean. Repo tests: 43 pass; repo:check/integrity/diff check pass.
+Motion and light/dark/mobile evidence and host-contention caveats are in the
+[handoff](operations/communications-ai-handoff.md).
 Baseline full quality evidence (2,922 tests, five existing skips) remains explicitly dated
 in that handoff. No full unit-suite rerun was needed for this visual revision. Native,
 actual SMTP/Resend, email-client rendering and live deletion remain unverified.
 
 ## Next action
 
-Review the optical revision commit and updated visual/motion gallery, then use the activation runbook with
-actual operator configuration. Do not reopen unrelated cleanup or private corpus work.
+Review the latest local commit and self-contained visual gallery, then use the activation
+runbook with actual operator configuration. Generate its commit-named ZIP with
+`node scripts/package-communications-handoff.mjs` after the gallery checks. This run
+does not authorize integration or activation. Preserve unrelated owner work.
