@@ -66,3 +66,10 @@
 .course-plan-heading > div:last-child { min-width: 0; }
 .course-plan-heading h1 { overflow-wrap: anywhere; }
 .course-plan-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); font-size: 12px; line-height: 1.5; }
+.course-sharing { margin-block: 0 1.25rem; padding: 1rem; border: 1px solid var(--hairline); border-radius: var(--radius-sm); }
+.course-sharing summary { cursor: pointer; font-weight: 600; }
+.course-sharing p { max-width: 70ch; color: var(--text-70); font-size: .875rem; }
+.course-sharing-fields { display: flex; align-items: end; flex-wrap: wrap; gap: .8rem; }
+.course-sharing-fields label { display: grid; gap: .4rem; flex: 1 1 220px; min-width: 0; }
+.course-sharing-fields select { width: 100%; max-width: 100%; min-height: 44px; padding: 8px 12px; font: inherit; color: var(--text); background: var(--surface-1); border: 1px solid var(--hairline); border-radius: var(--radius-sm); }
+.course-sharing :is(summary,select):focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }

@@ -40,3 +40,21 @@ it("rejects stale pagination after filtering and prevents duplicate page request
   await act(() => next.resolve([course("old-page")]));
   expect(result.current.courses.map(c => c.id)).toEqual(["filtered"]);
 });
+
+
+it("keeps the open course mounted during same-account refresh, but clears it for another query", async () => {
+  vi.useFakeTimers();
+  const refreshed = deferred<AcademicCourse[]>();
+  vi.mocked(listAcademicCourses).mockResolvedValueOnce([course("owned")]).mockReturnValueOnce(refreshed.promise)
+    .mockResolvedValueOnce([]);
+  const { result, rerender } = renderHook(({ query }) => useAcademicCatalog("a", query, ""), { initialProps: { query: "" } });
+  await act(() => vi.advanceTimersByTimeAsync(200));
+  act(() => result.current.retry());
+  expect(result.current.courses.map(c => c.id)).toEqual(["owned"]);
+  expect(result.current.loading).toBe(true);
+  await act(() => vi.advanceTimersByTimeAsync(200));
+  await act(() => refreshed.resolve([{ ...course("owned"), visibility: "shared" }]));
+  expect(result.current.courses[0].visibility).toBe("shared");
+  rerender({ query: "different" });
+  expect(result.current.courses).toEqual([]);
+});

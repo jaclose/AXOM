@@ -38,7 +38,10 @@ The current upload control accepts one prepared course with one plan, at most 1,
 files / 512 MiB total and **6 MiB per file**. Larger original files require a later
 resumable-file transport. Unreferenced ZIP entries and learner backup fields are not
 uploaded. Local paths in catalog entries are replaced by source filenames. Sharing
-controls and the administrative review interface are not yet delivered.
+controls now live under the owned course preview. Private, shared and membership-backed
+group choices call the existing permissioned RPC. Same-scope refresh preserves the open
+plan; account/query changes still discard prior metadata immediately. The administrative
+review interface is not yet delivered.
 
 Account requests reuse the recovery owner's `accountOperationClient`: requests retain
 the starting token and reject a changed account. Catalog results are scoped by account
@@ -59,7 +62,11 @@ passes a two-synthetic-account Auth/REST/Storage test: private isolation, retry 
 review-gated sharing, independent enrollments, immutable images and withdrawal. A
 separate browser test signs in through the real UI, privately uploads the pilot,
 previews the backend plan, downloads Week 2, reloads and launches its exact quiz.
-These are local backend checks, not hosted staging or production acceptance.
+A two-account browser sharing journey also verifies pending review stays private,
+reviewed discovery, group membership restrictions, owner-only controls, and return to
+private visibility. It covers 1440px/390px/short windows, both themes, keyboard, reduced
+motion and 200% CSS zoom with no captured browser errors/warnings. These are local
+backend checks, not hosted staging or production acceptance.
 
 Reproduce with `AXOM_LOCAL_SUPABASE_STATUS` pointing to the CLI's private status JSON
 and `AXOM_ACADEMIC_PILOT` pointing to the authorized pilot ZIP. The opt-in
@@ -67,9 +74,10 @@ and `AXOM_ACADEMIC_PILOT` pointing to the authorized pilot ZIP. The opt-in
 Credentials and source files remain outside Git; tests never delete existing users.
 
 **Still incomplete:** downloaded academic records remain in the legacy workspace
-snapshot. Catalog-first loading is implemented, but lightweight per-answer sync,
-cross-device learner overlays, migration of existing libraries, bounded offline cache,
-sharing UI, real leaderboards, remaining supplied courses and release/package acceptance
-are not delivered. The private-recovery handoff is a supporting layer, not a substitute
+snapshot. Revision-bound per-answer changes are implemented, but new-device recovery
+still hydrates private source objects. Shared-content exclusion, cross-device learner
+overlays, migration of existing libraries, bounded offline cache, real leaderboards,
+remaining supplied courses and release/package acceptance are not delivered. The
+private-recovery handoff is a supporting layer, not a substitute
 for this missing account/content separation. Never report this checkpoint as completion
 of canonical 1.1 or as a production deployment.

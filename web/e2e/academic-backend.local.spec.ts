@@ -46,7 +46,7 @@ test("real sign-in, private course, scoped study and cross-device recovery", asy
   await (await chooser).setFiles(pilot!);
   await page.getByRole("button", { name: "Save private course", exact: true }).click();
   await expect(page.getByText("Private course saved. Open it from Available courses.", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Preview FTM 1, Fall 2026", exact: true }).click();
+  await page.locator(".course-card").filter({ hasText: "Your upload" }).click();
   await expect(page.getByRole("region", { name: "FTM 1 course plan" })).toBeVisible();
   await expect(page.getByText("75", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Clear selection", exact: true }).click();
@@ -86,7 +86,7 @@ test("real sign-in, private course, scoped study and cross-device recovery", asy
   const progress = (target: Page) => target.evaluate(async () => {
     const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => NoctyriumState }; useAccount: { getState: () => { protection: string } }; flushVault: () => Promise<void> }> }).__AXOM_DEV__;
     await dev.flushVault(); const state = dev.useStore.getState();
-    return { questions: state.questions.length, attempts: state.questions.flatMap(q => q.attempts.map(attempt => attempt.id)).sort(), protection: dev.useAccount.getState().protection };
+    return { questions: state.questions.length, attempts: state.questions.flatMap(q => q.attempts.map(attempt => ({ questionId: q.id, ...attempt }))).sort((a,b) => a.questionId.localeCompare(b.questionId)), protection: dev.useAccount.getState().protection };
   });
   await expect.poll(async () => (await progress(page)).attempts.length).toBe(11);
   await expect.poll(() => writes.filter(write => write.endpoint.endsWith("push_workspace_delta_v2")).length, { timeout: 30_000 }).toBeGreaterThan(0);
@@ -94,6 +94,8 @@ test("real sign-in, private course, scoped study and cross-device recovery", asy
   const saved = await progress(page);
   console.info("Academic acceptance: saved progress", JSON.stringify({ questions: saved.questions, attempts: saved.attempts.length, protection: saved.protection }));
   expect(saved.attempts).toHaveLength(11);
+  expect(saved.attempts.every(attempt => Boolean(attempt.quizSessionId && attempt.answerKey && attempt.at))).toBe(true);
+  expect(new Set(saved.attempts.map(attempt => attempt.questionId)).size).toBe(11);
   console.info("Academic acceptance: incremental answer checkpoint acknowledged");
   await page.reload();
   await expect.poll(async () => (await progress(page)).questions).toBe(25);
@@ -118,7 +120,7 @@ test("real sign-in, private course, scoped study and cross-device recovery", asy
     await device.getByRole("dialog").getByRole("button", { name: "Done", exact: true }).click();
     await device.goto(`${new URL(page.url()).origin}/#tracker`);
     await device.getByRole("button", { name: "Course Library / Load Course", exact: true }).click();
-    await device.getByRole("button", { name: "Preview FTM 1, Fall 2026", exact: true }).click();
+    await device.locator(".course-card").filter({ hasText: "Your upload" }).click();
     await device.getByRole("button", { name: "Quiz week 2", exact: true }).click();
     await expect(device.getByText("Question 1 of 11", { exact: false }).first()).toBeVisible();
     // Existing quiz engine owns answer/review state; no second progress engine.

@@ -12,6 +12,7 @@ import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint 
 import { CoursePlan } from "./CoursePlan";
 import { GButton } from "../ui/primitives";
 import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
+import { AcademicSharing } from "./AcademicSharing";
 
 const REFERENCE_TYPE = "axom-academic-reference";
 interface DownloadReference extends LibraryInstallation {
@@ -42,8 +43,8 @@ async function saveReference(value: DownloadReference, assertCurrent: () => void
   await flushLocalVaultWrites(); assertVaultWritesSince(checkpoint);
 }
 
-export function ConnectedCoursePlan({ course, onBack, onOpen, onCustomize }: {
-  course: AcademicCourse; onBack: () => void; onOpen: (book: CourseBook) => void; onCustomize: (book: CourseBook) => void;
+export function ConnectedCoursePlan({ course, onBack, onOpen, onCustomize, onSharingSaved }: {
+  course: AcademicCourse; onBack: () => void; onOpen: (book: CourseBook) => void; onCustomize: (book: CourseBook) => void; onSharingSaved: () => void;
 }) {
   const state = useStore();
   const accountId = useAccount(account => account.user?.id);
@@ -105,6 +106,7 @@ export function ConnectedCoursePlan({ course, onBack, onOpen, onCustomize }: {
     {!book && <><GButton onClick={onBack}>All courses</GButton><p role="status">{error ? "Preview unavailable" : "Opening the weekly plan…"}</p></>}
     {error && <div role="alert"><p>{error}</p><GButton onClick={() => setRetry(value => value + 1)}>Retry preview</GButton></div>}
     {book && <><p className="course-connection-status" role="status">{message || (downloaded ? "Downloaded on this device" : `${course.ready_questions} reviewed questions available. Load Course downloads this revision for study.`)}</p>
+      <AcademicSharing course={course} onSaved={onSharingSaved} />
       {downloaded?.pendingWeeks && <p role="status">Enrollment is saved on this device and needs an account retry. Load Course again when connected.</p>}
       <CoursePlan book={book} bank={bank} availableQuestions={course.ready_questions} onBack={onBack} onOpen={onOpen} onCustomize={onCustomize} onLoad={load} />
     </>}

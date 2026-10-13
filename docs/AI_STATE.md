@@ -26,7 +26,8 @@ A real browser signs in, uploads privately, previews the backend plan, downloads
 Week 2, reloads and starts its exact 11-question quiz. Source-rich local study also
 passes through answering, Decode review and reload with 11 attempts. The real
 backend journey now also restores those same attempts in a clean second browser
-context. Private recovery integration `1942a77f` and ZIP fix `a039e872` are pushed.
+context, comparing the full canonical attempt records (question/run identity, answers
+and timestamps). Private recovery integration `1942a77f` and ZIP fix `a039e872` are pushed.
 
 ## Validation and protected work
 
@@ -44,7 +45,8 @@ real local two-account source/image integrity and isolation, four account/exam C
 journeys, typecheck, full lint, build and 43 repository tests. The SQL security check
 now recognizes both qualified empty paths and the existing safe ordered path.
 Private recovery stays with that owner. Academic content exclusion, learner event
-sync, sharing UI and leaderboard remain this stream's responsibility. Other QBank,
+sync and leaderboard remain this stream's responsibility. Owner sharing controls now
+pass real two-account browser checks for review, groups and return to private access. Other QBank,
 communications, cinematic and integration work remains protected by the live board.
 
 ## Next boundary

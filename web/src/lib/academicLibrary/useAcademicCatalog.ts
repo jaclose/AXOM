@@ -21,13 +21,14 @@ export function useAcademicCatalog(accountId: string | undefined, query: string,
   useEffect(() => {
     const request = ++generation.current;
     paging.current = false;
-    setPage(empty(scope, Boolean(accountId)));
+    setPage(current => current.scope === scope && accountId
+      ? { ...current, loading: true, error: "" } : empty(scope, Boolean(accountId)));
     if (!accountId) return;
     const timer = window.setTimeout(() => {
       void listAcademicCourses(query, term).then(courses => {
         if (generation.current === request) setPage({ scope, courses, loading: false, more: courses.length === 24, error: "" });
       }).catch(cause => {
-        if (generation.current === request) setPage({ ...empty(scope), error: cause instanceof Error ? cause.message : "The collection could not be loaded." });
+        if (generation.current === request) setPage(current => ({ ...(current.scope === scope ? current : empty(scope)), loading: false, error: cause instanceof Error ? cause.message : "The collection could not be loaded." }));
       });
     }, 200);
     return () => { generation.current = request + 1; window.clearTimeout(timer); };
