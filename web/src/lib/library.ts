@@ -46,6 +46,8 @@ export interface QuestionSetDigest {
 export interface QuestionSet {
   id: ID;
   title: string;
+  /** Course Tracker module destination; completion stays derived from attempts. */
+  trackerPath?: string;
   sourceDocumentIds: ID[];
   createdAt: string;
   /** IMMUTABLE membership snapshot. Later tag/filter changes never mutate this. */

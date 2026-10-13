@@ -42,20 +42,60 @@ export interface SpotifyIframeAPI { createController: (element: HTMLElement, opt
 declare global { interface Window { onSpotifyIframeApiReady?: (api: SpotifyIframeAPI) => void } }
 
 let apiPromise: Promise<SpotifyIframeAPI> | undefined;
+let apiAttempt: Promise<SpotifyIframeAPI> | undefined;
 /** Official loader only. Never read iframe DOM or rely on undocumented postMessage payloads. */
 export function loadSpotifyAPI(): Promise<SpotifyIframeAPI> {
-  if (apiPromise) return apiPromise;
-  apiPromise = new Promise((resolve, reject) => {
+  if (apiAttempt) return apiAttempt;
+  // Spotify's bootstrap is a page singleton and loads another script itself.
+  // A caller timing out must not reinsert it or discard a late API callback.
+  apiPromise ??= new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    const timeout = window.setTimeout(() => { script.remove(); apiPromise = undefined; reject(new Error("Spotify didn’t respond. Check your connection or open it directly.")); }, 20_000);
-    window.onSpotifyIframeApiReady = (api) => { clearTimeout(timeout); resolve(api); };
+    const previousReady = window.onSpotifyIframeApiReady;
+    let settled = false;
+    const cleanup = () => {
+      settled = true;
+      script.onerror = null;
+      if (window.onSpotifyIframeApiReady === ready) {
+        if (previousReady) window.onSpotifyIframeApiReady = previousReady;
+        else delete window.onSpotifyIframeApiReady;
+      }
+    };
+    const fail = (message: string) => {
+      if (settled) return;
+      cleanup();
+      script.remove();
+      apiPromise = undefined;
+      reject(new Error(message));
+    };
+    const ready = (api: SpotifyIframeAPI) => {
+      if (settled) return;
+      cleanup();
+      resolve(api);
+    };
+    window.onSpotifyIframeApiReady = ready;
     script.src = "https://open.spotify.com/embed/iframe-api/v1";
     script.async = true;
     script.dataset.axomSpotifyApi = "true";
-    script.onerror = () => { clearTimeout(timeout); script.remove(); apiPromise = undefined; reject(new Error("Spotify is unavailable here. Open it directly or try again.")); };
+    script.onerror = () => fail("Spotify is unavailable here. Open it directly or try again.");
     document.head.append(script);
   });
-  return apiPromise;
+  const initialization = apiPromise;
+  const attempt = new Promise<SpotifyIframeAPI>((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      if (apiAttempt === attempt) apiAttempt = undefined;
+      reject(new Error("Spotify didn’t respond. Check your connection or open it directly."));
+    }, 20_000);
+    void initialization.then((api) => {
+      clearTimeout(timeout);
+      resolve(api);
+    }, (cause: unknown) => {
+      clearTimeout(timeout);
+      if (apiAttempt === attempt) apiAttempt = undefined;
+      reject(cause);
+    });
+  });
+  apiAttempt = attempt;
+  return attempt;
 }
 
 interface SpotifyState extends SpotifyPrefs {

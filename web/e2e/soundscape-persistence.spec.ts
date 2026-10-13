@@ -11,9 +11,14 @@ async function openSoundscapes(page: Page) {
   await expect(page.getByRole("heading", { name: "Find your sound" })).toBeVisible();
 }
 
-async function spotifyFixture(page: Page, delayReady = false) {
+async function spotifyFixture(page: Page, { delayReady = false, failFirst = false, bootstrapGate }: { delayReady?: boolean; failFirst?: boolean; bootstrapGate?: Promise<void> } = {}) {
   // Exercise only the documented controller contract; live Spotify is checked separately.
-  await page.route("https://open.spotify.com/embed/iframe-api/v1", (route) => route.fulfill({ contentType: "text/javascript", body: `
+  let attempts = 0;
+  await page.route("https://open.spotify.com/embed/iframe-api/v1", async (route) => {
+    attempts += 1;
+    if (failFirst && attempts === 1) return route.abort("failed");
+    await bootstrapGate;
+    return route.fulfill({ contentType: "text/javascript", body: `
     window.onSpotifyIframeApiReady({ createController(element, options, callback) {
       const frame = document.createElement('iframe'); frame.title = 'Spotify persistence fixture';
       frame.dataset.instance = crypto.randomUUID(); frame.dataset.uri = options.uri; element.replaceWith(frame);
@@ -31,7 +36,9 @@ async function spotifyFixture(page: Page, delayReady = false) {
       window.addEventListener('qa:spotify-play', play); window.addEventListener('qa:spotify-ready', ready);
       callback(controller);
     }});
-  ` }));
+  ` });
+  });
+  return { attempts: () => attempts };
 }
 
 test("personalization and sound settings survive reload; audio and its dock survive navigation", async ({ page }) => {
@@ -112,7 +119,7 @@ test("Spotify keeps one player across routes and restores the saved selection wi
 });
 
 test("playlist changes during Spotify initialization reach the persistent controller", async ({ page }) => {
-  await spotifyFixture(page, true);
+  await spotifyFixture(page, { delayReady: true });
   await openSoundscapes(page);
   await page.getByRole("button", { name: "Open player", exact: true }).first().click();
   const frame = page.getByTitle("Spotify persistence fixture", { exact: true });
@@ -123,4 +130,48 @@ test("playlist changes during Spotify initialization reach the persistent contro
   await page.evaluate(() => window.dispatchEvent(new Event("qa:spotify-ready")));
   await expect(frame).toHaveAttribute("data-uri", `spotify:playlist:${jazz}`);
   await expect(page.getByText("Connecting to Spotify…", { exact: true })).toHaveCount(0);
+});
+
+test("a failed Spotify connection can retry without losing its saved playlist", async ({ page }) => {
+  await spotifyFixture(page, { failFirst: true });
+  await openSoundscapes(page);
+  const jazzCard = page.locator("article").filter({ has: page.getByRole("heading", { name: "Jazz for Study", exact: true }) });
+  await jazzCard.getByRole("button", { name: "Open player", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Spotify is unavailable");
+  await page.getByRole("button", { name: "Try again", exact: true }).click();
+  await expect(page.getByTitle("Spotify persistence fixture", { exact: true })).toHaveAttribute("data-uri", `spotify:playlist:${jazz}`);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByText("Connecting to Spotify…", { exact: true })).toHaveCount(0);
+  await page.evaluate(() => window.dispatchEvent(new Event("qa:spotify-play")));
+  await expect(page.getByRole("button", { name: "Pause Spotify", exact: true })).toBeVisible();
+});
+
+test("a late Spotify API recovers after timeout using one script and the latest playlist", async ({ page }) => {
+  let releaseAPI!: () => void;
+  const bootstrapGate = new Promise<void>((resolve) => { releaseAPI = resolve; });
+  const fixture = await spotifyFixture(page, { bootstrapGate });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => { if (["error", "warning"].includes(message.type())) errors.push(message.text()); });
+  await page.clock.install();
+  await openSoundscapes(page);
+  await page.getByRole("button", { name: "Open player", exact: true }).first().click();
+  await expect(page.getByText("Connecting to Spotify…", { exact: true })).toBeVisible();
+  await page.clock.fastForward(20_001);
+  await expect(page.getByRole("alert")).toContainText("Spotify didn’t respond");
+  await expect(page.getByText("Retry will keep your current playlist selection.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Hide Spotify player" }).click();
+  await page.locator("article").filter({ has: page.getByRole("heading", { name: "Jazz for Study", exact: true }) }).getByRole("button", { name: "Open player", exact: true }).click();
+  await page.getByRole("button", { name: "Try again", exact: true }).click();
+  releaseAPI();
+  const frame = page.getByTitle("Spotify persistence fixture", { exact: true });
+  await expect(frame).toHaveAttribute("data-uri", `spotify:playlist:${jazz}`);
+  await expect(frame).toHaveCount(1);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByText("Connecting to Spotify…", { exact: true })).toHaveCount(0);
+  await expect(page.locator("script[data-axom-spotify-api]")).toHaveCount(1);
+  expect(fixture.attempts()).toBe(1);
+  await page.evaluate(() => window.dispatchEvent(new Event("qa:spotify-play")));
+  await expect(page.getByRole("button", { name: "Pause Spotify", exact: true })).toBeVisible();
+  expect(errors).toEqual([]);
 });

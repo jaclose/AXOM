@@ -72,6 +72,9 @@ export interface TrackerItem {
   assessmentDate?: string; // yyyy-MM-dd; explicit learner/course evidence only
   explicitPriority?: 1 | 2 | 3 | 4 | 5;
   recommendationSnoozedUntil?: string; // ISO timestamp; defers, never deletes
+  reviewTask?: { source: "question-results" | "digest"; sourceId?: string };
+  archivedAt?: string;
+  passEvents?: Array<{ id: string; method: "study" | "anki" | "questions"; at: string }>;
 }
 
 export interface Task {

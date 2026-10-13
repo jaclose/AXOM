@@ -26,7 +26,7 @@ async function navigate(page: Page, route: string) {
 test("exam edits, completion, removal and Step 1 dates persist through reload", async ({ page }) => {
   await openWorkspace(page);
   await page.getByRole("button", { name: "Set Step 1 date" }).click();
-  await page.getByLabel("Step 1 date", { exact: true }).fill("2027-03-31");
+  await page.getByRole("textbox", { name: "Step 1 date", exact: true }).fill("2027-03-31");
   await page.getByLabel("Date status").selectOption("booked");
   await page.getByRole("button", { name: "Save date" }).click();
   await page.getByRole("button", { name: "Add exam", exact: true }).click();
@@ -141,7 +141,9 @@ test("focus spaces retain the timer, support local video and recover the saved s
   await expect.poll(() => localVideo.evaluate((video: HTMLVideoElement) => video.readyState)).toBeGreaterThan(0);
   await page.getByRole("button", { name: "Close focus space" }).click();
   await page.reload();
-  await expect(page.getByLabel("Environment", { exact: true })).toHaveValue("local");
+  const environment = page.locator(".focus-spaces select");
+  await environment.scrollIntoViewIfNeeded();
+  await expect(environment).toHaveValue("local");
   await page.getByRole("button", { name: "Open space", exact: true }).click();
   await expect(localVideo).toHaveAttribute("src", /^blob:/);
   await page.keyboard.press("Escape");

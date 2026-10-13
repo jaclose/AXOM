@@ -17,6 +17,9 @@ const mocked = vi.hoisted(() => ({
   removeQuestionSet: vi.fn(),
   updateDocument: vi.fn(),
   documents: [] as SourceDocument[],
+  terms: [] as Array<{ id: string; name: string }>,
+  courses: [] as Array<{ id: string; termId: string; code: string; name: string; files: number; modules: Array<{ id: string; name: string }> }>,
+  tracker: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("../../lib/store", () => ({ useStore: () => mocked }));
@@ -43,6 +46,9 @@ const draft: ParsedQuestionDraft = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocked.documents.splice(0);
+  mocked.terms.splice(0);
+  mocked.courses.splice(0);
+  mocked.tracker.splice(0);
   mocked.addQuestion.mockReturnValue({ ok: true, errors: [], id: "question-1" });
 });
 afterEach(cleanup);
@@ -307,6 +313,20 @@ describe("source-document-first import", () => {
 
     expect(mocked.addQuestion).toHaveBeenCalledTimes(1);
     expect(mocked.addQuestionSet).toHaveBeenCalledWith(expect.objectContaining({ questionIds: ["question-1"] }));
+  });
+
+  it("links a finalized question set to an existing course module", async () => {
+    mocked.terms.push({ id: "term-4", name: "Term 4" });
+    mocked.courses.push({ id: "ncrs", termId: "term-4", code: "NCRS", name: "Neuroscience", files: 0, modules: [{ id: "neuro", name: "Neuro" }] });
+    const user = userEvent.setup();
+    render(<ImportPanel seed={{
+      drafts: [draft], rawText: "Question source", title: "Neuro bank", fileName: "neuro.txt", fileType: "text",
+    }} />);
+
+    await user.selectOptions(screen.getByLabelText("Course module (optional)"), "Term 4/NCRS/Neuro");
+    await user.click(screen.getByRole("button", { name: "Finalize import" }));
+
+    expect(mocked.addQuestionSet).toHaveBeenCalledWith(expect.objectContaining({ trackerPath: "Term 4/NCRS/Neuro" }));
   });
 
   it("returns to the full source text without losing it and reparses an edit", async () => {

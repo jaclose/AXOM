@@ -48,6 +48,7 @@ import {
 import { ICON_SIZE } from "../../lib/iconSize";
 import { MassImport } from "./MassImport";
 import { flagImportDuplicates } from "../../lib/questionDuplicates";
+import { courseModulePaths } from "../../lib/courseWork";
 
 export type ImportTab = "paste" | "file" | "batch" | "ai";
 type SaveMode = "set" | "doc" | "both";
@@ -229,6 +230,7 @@ export function ImportPanel({
     seed?.drafts ? (seed.drafts.length > 0 ? "both" : "doc") : "both");
   const [aiEnhance, setAiEnhance] = useState(false);
   const [setTitle, setSetTitle] = useState(seed?.title ?? "");
+  const [trackerPath, setTrackerPath] = useState("");
   const [category, setCategory] = useState("");
   const [examType, setExamType] = useState<QuestionExamType | "">("");
   const [difficulty, setDifficulty] = useState<QuestionDifficulty | "">("");
@@ -246,6 +248,7 @@ export function ImportPanel({
 
   const provider = useMemo(() => resolveActiveProvider(), []);
   const reviewing = step === "review" || step === "finalize";
+  const modulePaths = useMemo(() => courseModulePaths(s.terms ?? [], s.courses ?? [], s.tracker ?? []), [s.courses, s.terms, s.tracker]);
 
   // Auto-categorize only when the user hasn't set a batch category and the
   // draft has none: high-confidence heuristic assigns, otherwise left blank.
@@ -269,6 +272,7 @@ export function ImportPanel({
     setActiveBatchQueueId(undefined);
     setSetTitle("");
     setSaveMode("both");
+    setTrackerPath("");
     setAiEnhance(false);
     setStep("source");
     if (!preserveFinalizedGuard) finalizingRef.current = false;
@@ -445,6 +449,9 @@ export function ImportPanel({
       : undefined;
     if (equivalent) {
       finalizingRef.current = true;
+      if (trackerPath && equivalent.set.trackerPath !== trackerPath) {
+        s.updateQuestionSet(equivalent.set.id, { trackerPath });
+      }
       pushToast({
         title: "Import already finalized",
         body: "AXOM found the same reviewed questions and reused the existing set instead of creating duplicates.",
@@ -461,6 +468,7 @@ export function ImportPanel({
     const questionSet: QuestionSet | undefined = wantsSet ? {
       id: setId!,
       title: normalizedSetTitle,
+      trackerPath: trackerPath || undefined,
       sourceDocumentIds: documentId ? [documentId] : [],
       createdAt: reviewedAt,
       questionIds: questionInputs.map((question) => question.id),
@@ -1051,6 +1059,10 @@ export function ImportPanel({
           {saveMode !== "doc" && (
             <div className="grid grid-2">
               <Field label="Set title" value={setTitle} onChange={(event) => setSetTitle(event.target.value)} />
+              <SelectField label="Course module (optional)" value={trackerPath} onChange={(event) => setTrackerPath(event.target.value)}>
+                <option value="">Keep in Question Bank only</option>
+                {modulePaths.map((path) => <option key={path} value={path}>{path}</option>)}
+              </SelectField>
               <SelectField label="Category (applies to all)" value={category} onChange={(event) => setCategory(event.target.value)}>
                 <option value="">None</option>
                 {QUESTION_CATEGORIES.map((item) => <option key={item} value={item}>{item}</option>)}

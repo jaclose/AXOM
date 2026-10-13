@@ -1,5 +1,6 @@
 // Opt-in live audit. No credentials, no source rewriting, no CSP bypass.
 // node scripts/verify-experiences.mjs [output-directory]
+/* global URL, process, document, console */
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { chromium } from "playwright";

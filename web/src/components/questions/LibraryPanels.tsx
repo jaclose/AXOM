@@ -17,6 +17,7 @@ import { QuestionSetCard } from "./QuestionSetCard";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { createQuestionSetShare } from "../../lib/sharing/questionSetShare";
 import { publishShare } from "../../lib/sharing/supabaseSharing";
+import { reviewTaskInputs } from "../../lib/courseWork";
 
 const NO_QUESTIONS: QuestionRecord[] = [];
 const NO_DOCUMENTS: SourceDocument[] = [];
@@ -183,6 +184,17 @@ export function QuestionSetList({
     }
   }
 
+  function addDigestReview(set: QuestionSet) {
+    const suggestions = set.digest?.suggestedReview ?? [];
+    const items = reviewTaskInputs(suggestions, set.trackerPath ?? "Question Bank/Review", { source: "digest", sourceId: set.id }, s.tracker);
+    if (!items.length) {
+      pushToast({ title: "Review work already tracked", body: "Nothing new was added.", tone: "info" });
+      return;
+    }
+    s.bulkAddTrackerItems(items);
+    pushToast({ title: "Review work added", body: `${items.length} digest suggestion${items.length === 1 ? "" : "s"} added to Course Tracker.`, tone: "success" });
+  }
+
   return (
     <GlassCard>
       <PanelHeader
@@ -246,6 +258,11 @@ export function QuestionSetList({
                       <Sparkles size={ICON_SIZE.body} /> {enhancing === set.id ? "Analyzing…" : "Build digest"}
                     </GhostButton>
                   )}
+                  {set.digest?.suggestedReview.length ? (
+                    <GhostButton onClick={() => addDigestReview(set)}>
+                      <ListPlus size={ICON_SIZE.body} /> Add review to Tracker
+                    </GhostButton>
+                  ) : null}
                   <GhostButton aria-label={`Delete ${set.title}`} onClick={() => {
                     if (confirm(`Remove the set "${set.title}"? Its questions stay in the bank, unlinked.`)) s.removeQuestionSet(set.id);
                   }}>

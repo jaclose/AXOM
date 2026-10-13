@@ -81,6 +81,7 @@ import { reconcileQuestionAnnotationSources } from "./questionAnnotations";
 import { deleteQuestionAttachmentBlobs, listQuestionAttachmentBlobKeys, runQuestionAttachmentMaintenance } from "./questionAttachments";
 import type { QuizBlock, QuizSession } from "./quiz";
 import { buildQuestionSetFromFilter, type QuestionSet, type SourceDocument } from "./library";
+import { confirmCoursePass, withCourseProgress, type CourseStudyMethod } from "./courseWork";
 import { repairOrphans } from "./orphanRepair";
 import type {
   ReviewedImportPersistencePlan,
@@ -116,6 +117,7 @@ interface Actions {
 
   // tracker
   addTrackerItem: (item: Omit<TrackerItem, "id" | "updated">) => void;
+  recordCoursePass: (id: string, method: CourseStudyMethod, eventId: string) => void;
   bulkAddTrackerItems: (items: Omit<TrackerItem, "id" | "updated">[]) => void;
   updateTrackerItem: (id: string, patch: Partial<TrackerItem>) => void;
   renameTrackerScope: (oldPath: string, newPath: string) => void;
@@ -386,8 +388,11 @@ export const useStore = create<Store>()(
         })),
       updateTrackerItem: (id, patch) =>
         set((s) => ({
-          tracker: s.tracker.map((t) => (t.id === id ? { ...t, ...patch, updated: now() } : t)),
+          tracker: s.tracker.map((t) => (t.id === id ? withCourseProgress(t, patch, now()) : t)),
         })),
+      recordCoursePass: (id, method, eventId) => set((s) => ({
+        tracker: s.tracker.map((item) => item.id === id ? confirmCoursePass(item, method, eventId, now()) : item),
+      })),
       renameTrackerScope: (oldPath, newPath) =>
         set((s) => {
           const from = normalizeTrackerPath(oldPath);
@@ -396,6 +401,12 @@ export const useStore = create<Store>()(
           const toKey = trackerPathKey(to);
           if (!from || !to || fromKey === toKey) return {};
           return {
+            questionSets: (s.questionSets ?? []).map((item) => {
+              const path = normalizeTrackerPath(item.trackerPath ?? "");
+              const key = trackerPathKey(path);
+              return key === fromKey || key.startsWith(`${fromKey}/`)
+                ? { ...item, trackerPath: `${to}${path.slice(from.length)}` } : item;
+            }),
             tracker: s.tracker.map((t) => {
               const cleanPath = normalizeTrackerPath(t.path);
               const key = trackerPathKey(cleanPath);
@@ -429,18 +440,18 @@ export const useStore = create<Store>()(
       bumpPasses: (id, delta) =>
         set((s) => ({
           tracker: s.tracker.map((t) =>
-            t.id === id ? { ...t, passes: Math.max(0, t.passes + delta), updated: now() } : t),
+            t.id === id ? withCourseProgress(t, { passes: Math.max(0, t.passes + delta) }, now()) : t),
         })),
       setPasses: (id, n) =>
         set((s) => ({
           tracker: s.tracker.map((t) =>
             // click the dot you're already at to clear it back one
-            t.id === id ? { ...t, passes: t.passes === n ? n - 1 : n, updated: now() } : t),
+            t.id === id ? withCourseProgress(t, { passes: Math.max(0, t.passes === n ? n - 1 : n) }, now()) : t),
         })),
       cycleAnki: (id) =>
         set((s) => ({
           tracker: s.tracker.map((t) =>
-            t.id === id ? { ...t, ankiPasses: (t.ankiPasses + 1) % 4, updated: now() } : t),
+            t.id === id ? withCourseProgress(t, { ankiPasses: (t.ankiPasses + 1) % 4 }, now()) : t),
         })),
       cycleYield: (id) =>
         set((s) => {

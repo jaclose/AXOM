@@ -1,4 +1,4 @@
-.persistent-spotify { position: fixed; z-index: 85; right: 24px; bottom: 84px; width: min(366px, calc(100vw - 28px)); padding: 12px; color: var(--text); background: var(--bg); border: 1px solid var(--hairline); border-radius: 18px; box-shadow: 0 12px 36px rgb(0 0 0 / 18%); }
+.persistent-spotify { position: fixed; z-index: 85; right: 24px; bottom: 84px; width: min(366px, calc(100vw - 28px)); max-height: calc(100dvh - 112px); overflow-y: auto; overscroll-behavior: contain; padding: 12px; color: var(--text); background: var(--surface-elevated); border: 1px solid var(--hairline); border-radius: 18px; box-shadow: 0 12px 36px rgb(0 0 0 / 18%); }
 .persistent-spotify[hidden] { display: none; }
 .persistent-spotify-head, .persistent-spotify-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .persistent-spotify-head { margin-bottom: 10px; }
@@ -10,6 +10,8 @@
 .persistent-spotify-foot a { color: var(--text); }
 .persistent-spotify > small { display: block; color: var(--text-60); font-size: var(--fs-xs); }
 .persistent-spotify p { font-size: var(--fs-sm); }
+.persistent-spotify [role="alert"] { line-height: 1.6; }
+.persistent-spotify [role="alert"] button { display: block; min-height: 44px; margin-top: 8px; padding: 8px 14px; border: 1px solid var(--hairline); border-radius: var(--btn-radius); background: var(--surface-2); }
 .media-library-search { display: flex; align-items: center; gap: 9px; color: var(--text-60); border-bottom: 1px solid var(--hairline); min-width: 210px; }
 .media-library-search input { width: 100%; color: var(--text); border: 0; background: transparent; padding: 12px 0; font: inherit; }
 .media-library-filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 20px; }
@@ -42,9 +44,12 @@
 .focus-space-external { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font-size: var(--fs-sm); padding: 8px 0; }
 .focus-space-host { position: fixed; z-index: 55; inset: 70px 24px 88px; overflow: hidden; border-radius: 20px; background: var(--bg); color: var(--text); box-shadow: 0 24px 80px rgb(0 0 0 / .3); animation: space-open 300ms cubic-bezier(.2,.8,.2,1); }
 .focus-space-host.immersive { inset: 0; border-radius: 0; }
+.focus-space-host:not(.experience-host) { pointer-events: none; }
+.focus-space-host:not(.experience-host) .focus-space-hud,
+.focus-space-host:not(.experience-host) video { pointer-events: auto; }
 .focus-space-visual { position: absolute; inset: 0; }
 .focus-space-visual > canvas, .focus-space-visual video { width: 100%; height: 100%; object-fit: cover; }
-.focus-space-hud { position: absolute; inset: 18px 18px auto; display: flex; justify-content: space-between; align-items: start; gap: 12px; }
+.focus-space-hud { position: absolute; z-index: 2; inset: 18px 18px auto; display: flex; justify-content: space-between; align-items: start; gap: 12px; }
 .focus-space-hud > div { border: 1px solid var(--hairline); border-radius: 12px; background: var(--bg); padding: 10px 14px; }
 .focus-space-hud > div:last-child { display: flex; padding: 4px; }
 .focus-space-hud small { font-size: 10px; letter-spacing: .14em; color: var(--text-60); }
@@ -58,4 +63,4 @@
 @media (prefers-reduced-motion: reduce) { .focus-space-host { animation: none; } }
 :root[data-motion="reduce"] .focus-space-host { animation: none; }
 @media (max-width: 600px) { .focus-spaces { grid-template-columns: 1fr; gap: 16px; } .focus-space-host { inset: 12px 12px 140px; } .focus-space-hud { inset: max(12px, env(safe-area-inset-top)) 12px auto; } .focus-space-hud > div { padding: 8px; } .focus-space-hud h2 { font-size: 14px; } .focus-space-hud button { width: 38px; height: 42px; } }
-@media (max-width: 600px) { .persistent-spotify { right: 14px; bottom: 124px; } .sound-library .soundscape-section-head { flex-direction: column; align-items: stretch; } .dock-media { max-width: 220px; } .dock-media .dock-sound-name b { max-width: 108px; } }
+@media (max-width: 600px) { .persistent-spotify { right: 14px; bottom: 124px; max-height: calc(100dvh - 152px); } .sound-library .soundscape-section-head { flex-direction: column; align-items: stretch; } .dock-media { max-width: 220px; } .dock-media .dock-sound-name b { max-width: 108px; } }

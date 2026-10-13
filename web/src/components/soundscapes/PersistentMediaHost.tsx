@@ -19,6 +19,7 @@ export function PersistentMediaHost() {
     if (!enabled || !hostRef.current) return;
     let disposed = false;
     let ownedController: SpotifyController | undefined;
+    let timeout: number | undefined;
     const host = hostRef.current;
     const mount = document.createElement("div");
     host.replaceChildren(mount);
@@ -34,12 +35,12 @@ export function PersistentMediaHost() {
       dispose();
       useSpotify.setState({ status: "error", error: cause instanceof Error ? cause.message : "Spotify could not load." });
     };
-    // Loading the API script does not mean its embedded player became ready.
-    const timeout = window.setTimeout(() => {
-      if (useSpotify.getState().status !== "ready") fail(new Error("Spotify didn’t finish connecting. Try again or open it directly."));
-    }, 20_000);
     void loadSpotifyAPI().then((api) => {
       if (disposed) return;
+      // The loader bounds the script request; give the embed its own readiness window.
+      timeout = window.setTimeout(() => {
+        if (useSpotify.getState().status !== "ready") fail(new Error("Spotify didn’t finish connecting. Try again or open it directly."));
+      }, 20_000);
       const loadedPlaylistId = useSpotify.getState().playlistId;
       api.createController(mount, { uri: `spotify:playlist:${loadedPlaylistId}`, width: "100%", height: 352 }, (controller) => {
         if (disposed) { controller.destroy(); return; }
@@ -67,6 +68,6 @@ export function PersistentMediaHost() {
     {status === "loading" && <p role="status">Connecting to Spotify…</p>}
     {status === "error" && <p role="alert">{error} <button type="button" onClick={() => setRetry((value) => value + 1)}>Try again</button></p>}
     <div className="persistent-spotify-foot"><a href={playlist.url} target="_blank" rel="noopener noreferrer">Open in Spotify <ExternalLink size={13} /></a><button type="button" onClick={() => useSpotify.getState().disconnect()}>Disconnect</button></div>
-    <small>Playback continues as you move through AXOM.</small>
+    <small>{status === "error" ? "Retry will keep your current playlist selection." : "Playback continues as you move through AXOM."}</small>
   </aside>;
 }

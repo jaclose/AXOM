@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { PersistentMediaHost } from "./PersistentMediaHost";
 import { detachSpotifyController, loadSpotifyAPI, PIANO_PLAYLIST, SPOTIFY_CATALOG, useSpotify, type SpotifyController, type SpotifyIframeAPI } from "../../lib/soundscapes/spotify";
@@ -76,4 +77,42 @@ it("destroys a controller that arrives after disconnection without restoring pla
   expect(controller.destroy).toHaveBeenCalledOnce();
   expect(useSpotify.getState()).toMatchObject({ enabled: false, status: "idle" });
   expect(useMediaSession.getState().sessions.spotify).toBeUndefined();
+});
+
+it("gives the embed its own readiness window after a slow API connection", async () => {
+  let resolveAPI!: (api: SpotifyIframeAPI) => void;
+  vi.mocked(loadSpotifyAPI).mockReturnValue(new Promise((resolve) => { resolveAPI = resolve; }));
+  render(<PersistentMediaHost />);
+  await act(async () => { await vi.advanceTimersByTimeAsync(19_000); });
+  await act(async () => { resolveAPI({ createController }); });
+  act(() => connect(controller));
+  await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+  expect(useSpotify.getState().status).toBe("loading");
+  act(() => listeners.get("ready")!({}));
+  await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+  expect(useSpotify.getState().status).toBe("ready");
+  expect(controller.destroy).not.toHaveBeenCalled();
+});
+
+it("creates one player under Strict Mode and releases it on unmount", async () => {
+  const view = render(<StrictMode><PersistentMediaHost /></StrictMode>);
+  await act(async () => {});
+  expect(createController).toHaveBeenCalledOnce();
+  act(() => { connect(controller); listeners.get("ready")!({}); });
+  view.unmount();
+  expect(controller.destroy).toHaveBeenCalledOnce();
+});
+
+it("keeps a retry alive when the first connection callback arrives late", async () => {
+  await mountPlayer();
+  const lateConnect = connect;
+  await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await act(async () => {});
+  act(() => { connect(controller); listeners.get("ready")!({}); });
+  const oldController = { ...controller, destroy: vi.fn() };
+  act(() => lateConnect(oldController));
+  expect(oldController.destroy).toHaveBeenCalledOnce();
+  expect(controller.destroy).not.toHaveBeenCalled();
+  expect(useSpotify.getState().status).toBe("ready");
 });
