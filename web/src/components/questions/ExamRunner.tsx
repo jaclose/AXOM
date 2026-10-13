@@ -678,11 +678,16 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   }
 
   function suspendSimulation(block: SuspendedBlock) {
-    writeSuspendedBlock(block);
+    try {
+      writeSuspendedBlock(block);
+    } catch (error) {
+      pushToast({ title: "Exam is still open", body: error instanceof Error ? error.message : "Could not save the exam. Try again.", tone: "warn" });
+      throw error;
+    }
     setSuspended(block);
     const counts = blockCounts(block.poolIds, block.items);
     pushToast({
-      title: "Block suspended",
+      title: "Exam saved",
       body: `${counts.answered}/${counts.total} answered${block.timeLimitSeconds ? ` · ${formatClock(block.timeLimitSeconds - block.elapsedMs / 1000)} left` : ""}. Resume it from block setup.`,
       tone: "success",
     });
@@ -1136,6 +1141,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         mode === "tutor"
           ? (
             <>
+              <GhostButton onClick={leaveBlock}><X size={ICON_SIZE.body} /> Exit block</GhostButton>
               <GhostButton disabled={index === 0} onClick={goPrevious}><ChevronLeft size={ICON_SIZE.body} /> Previous</GhostButton>
               <GhostButton onClick={toggleFlag} aria-label="Flag question" aria-pressed={item.marked}>
                 <Flag size={ICON_SIZE.body} /> {item.marked ? "Flagged" : "Mark review"}
@@ -1147,6 +1153,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           )
           : (
             <>
+              <GhostButton onClick={leaveBlock}><X size={ICON_SIZE.body} /> Exit block</GhostButton>
               <GhostButton disabled={index === 0} onClick={goPrevious}><ChevronLeft size={ICON_SIZE.body} /> Previous</GhostButton>
               <GhostButton onClick={finishBlock}>End block</GhostButton>
               <GButton variant="primary" disabled={!picked} onClick={submitExamAndNext}>

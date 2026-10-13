@@ -35,6 +35,7 @@ function ContentImage({ asset, attachment, files, alt, enlarge }: {
 }) {
   const [url, setUrl] = useState<string>();
   const [missing, setMissing] = useState(false);
+  const [retry, setRetry] = useState(0);
   const [open, setOpen] = useState(false);
   const file = files?.find((entry) => entry.name === asset.filename);
   useEffect(() => {
@@ -49,14 +50,14 @@ function ContentImage({ asset, attachment, files, alt, enlarge }: {
       setMissing(false);
     })();
     return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [file, attachment]);
+  }, [file, attachment, retry]);
   const crop = asset.crop;
   const width = Math.max(.01, 1 - (crop?.left ?? 0) - (crop?.right ?? 0));
   const height = Math.max(.01, 1 - (crop?.top ?? 0) - (crop?.bottom ?? 0));
   const picture = url && <span className="qcontent-crop" style={crop ? { aspectRatio: `${(asset.width ?? 1) * width} / ${(asset.height ?? 1) * height}` } : undefined}>
     <img src={url} alt={alt} style={crop ? { width: `${100 / width}%`, maxWidth: "none", position: "absolute", left: `${-100 * crop.left / width}%`, top: `${-100 * crop.top / height}%` } : undefined} />
   </span>;
-  if (missing) return <span className="qcontent-missing" role="status">Image unavailable: {asset.filename}. Restore its media backup before practising.</span>;
+  if (missing) return <span className="qcontent-missing" role="status">This figure is not available on this device yet. Reconnect or restore a media backup. <button type="button" className="gbtn" onClick={() => { setMissing(false); setRetry((value) => value + 1); }}>Try loading figure again</button></span>;
   if (!url) return <span role="status">Loading figure…</span>;
   return <>
     {enlarge ? <button type="button" className="qcontent-image" onClick={() => setOpen(true)} aria-label={`Enlarge ${alt}`}>{picture}</button> : <span className="qcontent-image">{picture}</span>}

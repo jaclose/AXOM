@@ -180,7 +180,7 @@ export function ProfileSection({
 // Emergency recovery: status strip + restore history
 // ---------------------------------------------------------------------------
 
-function subscribeVault(listener: () => void) {
+export function subscribeVault(listener: () => void) {
   window.addEventListener(VAULT_WRITE_EVENT, listener);
   window.addEventListener(VAULT_WRITE_FAILURE_EVENT, listener);
   return () => {
@@ -201,6 +201,15 @@ export function useLastVaultWrite() {
   return { at, target };
 }
 
+export function LocalSaveBadge() {
+  const write = useLastVaultWrite();
+  const failure = useSyncExternalStore(subscribeVault, readVaultWriteFailure, () => null);
+  return <Tag tone={failure ? "orange" : write ? "green" : "neutral"}>
+    {failure ? <ShieldAlert size={ICON_SIZE.microInline} /> : <ShieldCheck size={ICON_SIZE.microInline} />}
+    {failure ? "Changes not saved" : write ? "Saved on this device" : "Waiting for first save"}
+  </Tag>;
+}
+
 export function LastSavedLine() {
   const write = useLastVaultWrite();
   // Null while saves are landing; a successful save clears it.
@@ -218,7 +227,7 @@ export function LastSavedLine() {
       <ShieldCheck size={ICON_SIZE.microInline} aria-hidden="true" />
       {write
         ? <>Saved on this device at <b>{new Date(write.at).toLocaleTimeString()}</b>{write.target === "local-fallback" ? " (browser storage fallback)" : ""}</>
-        : <>Autosave is on — the next change will be saved immediately</>}
+        : <>Waiting for the first confirmed save</>}
     </span>
   );
 }

@@ -36,8 +36,11 @@ native package, hosted staging and production acceptance are still outstanding.
 
 The active backup/account owner supplied a tested 39-file recovery patch against
 `3ebfa15e`, plus an exact manifest. Their `9b828694` checkpoint is incomplete alone.
-Only their account-token-bound helper and its test are reused in this checkpoint;
-the remaining recovery patch awaits scoped integration and browser acceptance.
+The complete handoff is integrated here after ZIP repair `a039e872`; the original
+owner checkout is unchanged. Integrated recovery checks pass: 100 focused tests,
+real local two-account source/image integrity and isolation, four account/exam Chrome
+journeys, typecheck, full lint, build and 43 repository tests. The SQL security check
+now recognizes both qualified empty paths and the existing safe ordered path.
 Private recovery stays with that owner. Academic content exclusion, learner event
 sync, sharing UI and leaderboard remain this stream's responsibility. Other QBank,
 communications, cinematic and integration work remains protected by the live board.
@@ -45,8 +48,7 @@ communications, cinematic and integration work remains protected by the live boa
 ## Next boundary
 
 Downloaded content still enters the legacy workspace snapshot: lightweight per-answer
-sync and cross-device learner overlays are NOT delivered. Integrate the reviewed
-recovery handoff, then implement the academic-reference projection and incremental
+sync and cross-device learner overlays are NOT delivered. Implement the academic-reference projection and incremental
 learner adapter without copying shared content into private recovery objects. Preserve
 legacy backup compatibility and private edits. Complete two-device/offline acceptance,
 remaining source-backed courses, sharing and leaderboard before claiming canonical 1.1.

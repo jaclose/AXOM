@@ -45,6 +45,40 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("SyncCoordinator", () => {
+  it("uploads edits made while an earlier request is in flight", async () => {
+    let state = makeSeed();
+    const push = vi.fn<SyncTransport["push"]>().mockImplementation(async () => {
+      if (push.mock.calls.length === 1) {
+        state = { ...state, profile: { ...state.profile, name: "Changed during upload" } };
+        c.queue();
+      }
+      return accepted(push.mock.calls.length);
+    });
+    const c = coordinator(push, () => state);
+    c.queue();
+    await c.flush();
+    expect(push).toHaveBeenCalledTimes(2);
+    expect(push.mock.calls[1][0].payload.profile.name).toBe("Changed during upload");
+    expect(push.mock.calls[1][0].idempotencyKey).not.toBe(push.mock.calls[0][0].idempotencyKey);
+    expect(meta()).toMatchObject({ pending: false, baseRevision: 2 });
+    c.dispose();
+  });
+
+  it("ignores an acknowledgment after the account is changed or signed out", async () => {
+    let resolve!: (value: PushResult) => void;
+    const push = vi.fn<SyncTransport["push"]>(() => new Promise((done) => { resolve = done; }));
+    const c = coordinator(push);
+    c.queue();
+    const pending = c.flush();
+    await vi.waitFor(() => expect(push).toHaveBeenCalledOnce());
+    c.dispose();
+    const next = { ...meta(), accountUserId: "another-account", baseRevision: 9 };
+    localStorage.setItem(SYNC_METADATA_KEY, JSON.stringify(next));
+    resolve(accepted(1));
+    await pending;
+    expect(meta()).toEqual(next);
+  });
+
   it("persists a retryable pending idempotency key and clears it only after acknowledgment", async () => {
     const push = vi.fn<SyncTransport["push"]>().mockRejectedValueOnce(new Error("down")).mockResolvedValue(accepted(1, { idempotent: true }));
     const c = coordinator(push);

@@ -157,6 +157,9 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
         <span className="xfy-title">{title}{reviewing ? " · Review" : exam.block.mode === "tutor" ? " · Tutor" : ""}</span>
 
         <div className="xfy-top-right">
+          <button type="button" className="xfy-controls xfy-exit" aria-label={reviewing ? "Close review" : "Save & exit"} onClick={reviewing ? onClose : exam.suspend}>
+            <X size={16} aria-hidden="true" /> <span>{reviewing ? "Close review" : "Save & exit"}</span>
+          </button>
           {/* The exam keeps its clock at the top of the screen; an alarm sits over it. */}
           {!reviewing && (
             <div className="xfy-clock-wrap">

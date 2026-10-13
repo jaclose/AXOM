@@ -299,7 +299,9 @@
 @media (max-width: 640px) {
   .xfy .xfy-top { gap: 10px; padding-left: 10px; }
   .xfy .xfy-brand-name, .xfy .xfy-title { display: none; }
-  .xfy .xfy-top-right { flex: 1; justify-content: flex-end; }
+  .xfy .xfy-top-right { flex: 1; min-width: 0; justify-content: flex-end; }
+  .xfy .xfy-exit { min-width: 40px; }
+  .xfy .xfy-exit span { display: none; }
   .xfy .xfy-clock-wrap { padding: 0 8px; margin-right: auto; }
   .xfy .xfy-controls, .xfy .xfy-toolkit-toggle { padding: 0 10px; gap: 6px; letter-spacing: 0.03em; }
   .xfy .xfy-rail { width: 44px; }

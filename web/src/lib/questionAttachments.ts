@@ -185,8 +185,16 @@ export function putQuestionAttachmentBlob(blobKey: string, record: QuestionAttac
   return withAttachmentStore("readwrite", (store) => store.put(record, blobKey));
 }
 
-export function getQuestionAttachmentBlob(blobKey: string): Promise<QuestionAttachmentBlobRecord | undefined> {
-  return withAttachmentStore("readonly", (store) => store.get(blobKey));
+type MissingAttachmentLoader = (blobKey: string) => Promise<QuestionAttachmentBlobRecord | undefined>;
+let missingAttachmentLoader: MissingAttachmentLoader | undefined;
+export function setMissingAttachmentLoader(loader: MissingAttachmentLoader): () => void {
+  missingAttachmentLoader = loader;
+  return () => { if (missingAttachmentLoader === loader) missingAttachmentLoader = undefined; };
+}
+
+export async function getQuestionAttachmentBlob(blobKey: string): Promise<QuestionAttachmentBlobRecord | undefined> {
+  const local = await withAttachmentStore<QuestionAttachmentBlobRecord | undefined>("readonly", (store) => store.get(blobKey));
+  return local ?? await missingAttachmentLoader?.(blobKey);
 }
 
 export async function deleteQuestionAttachmentBlobs(blobKeys: readonly string[]): Promise<void> {

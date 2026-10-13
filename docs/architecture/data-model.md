@@ -29,8 +29,10 @@ copy first and moves it into the vault, so a stale IndexedDB copy never shadows 
 a vault upgrade waits on another tab, later saves go to that fallback instead of queueing
 behind it. A save that reaches neither store is reported to the learner
 (`vaultActivity.ts`, `components/shell/VaultSaveWatcher.tsx`). Account sessions are outside
-portable workspace data. Cloud revision snapshots do not imply upload of local attachment
-or generated-media binary bytes.
+portable workspace data. Legacy cloud snapshots protect attachment metadata only. The
+[private recovery format 2](accounts-sync-v1.md#private-recovery-format-2) adds verified,
+owner-scoped source objects and question/review images without changing schema 34.
+Other generated-media bytes retain their existing local-only behavior.
 
 A later failed fallback save preserves the marker for the last successful fallback;
 otherwise a reload could prefer an older vault record. Reviewed imports wait for both

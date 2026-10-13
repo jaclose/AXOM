@@ -1,3 +1,6 @@
+import type { ContentReference, ContentUpload } from "./cloudContent";
+import type { CloudSnapshot } from "./cloudSnapshot";
+import type { CloudMediaReference } from "./cloudMedia";
 import type { NoctyriumState } from "../types";
 
 export type ProtectionStatus =
@@ -61,9 +64,12 @@ export interface SyncMetadata {
 export type RevisionReason = "foundation" | "automatic" | "manual" | "pre_restore" | "restore";
 
 export interface SnapshotEnvelope {
+  accountUserId?: string;
   schemaVersion: number;
   contentHash: string;
   payload: NoctyriumState;
+  packed?: CloudSnapshot;
+  contentObjects?: ContentUpload[];
   /** Size of the payload as compact JSON, in bytes. */
   payloadBytes: number;
   deviceId: string;
@@ -85,11 +91,13 @@ export interface ProtectedRevision {
   contentHash: string;
   payload: NoctyriumState;
   reason: string;
+  media?: CloudMediaReference[];
+  sources?: ContentReference[];
   createdAt: string;
 }
 
 /** Revision metadata without the (large) payload, for history lists. */
-export type RevisionSummary = Omit<ProtectedRevision, "payload">;
+export type RevisionSummary = Omit<ProtectedRevision, "payload" | "media" | "sources">;
 
 export interface AccountDevice {
   deviceId: string;
@@ -101,6 +109,7 @@ export interface AccountDevice {
 }
 
 export interface SyncTransport {
+  prepare?(envelope: SnapshotEnvelope): Promise<SnapshotEnvelope>;
   push(envelope: SnapshotEnvelope): Promise<PushResult>;
   history(): Promise<ProtectedRevision[]>;
   revision(id: string): Promise<ProtectedRevision>;

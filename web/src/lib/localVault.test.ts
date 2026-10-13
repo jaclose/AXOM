@@ -32,6 +32,17 @@ beforeEach(async () => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("IndexedDB-first local vault", () => {
+  it("keeps a confirmed vault save successful when optional localStorage metadata is full", async () => {
+    const persisted = JSON.stringify({ state: { profile: { userId: "jd" }, value: "durable" } });
+    const marker = vi.spyOn(storage, "setItem").mockImplementation(() => { throw new DOMException("Full", "QuotaExceededError"); });
+    const checkpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(STORAGE_KEYS.persistedState, persisted);
+    expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+    expect(readVaultWriteFailure()).toBeNull();
+    expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBe(persisted);
+    marker.mockRestore();
+  });
+
   it("coalesces a burst of saves: the newest snapshot wins and nothing older lands after it", async () => {
     const snapshot = (n: number) => JSON.stringify({ state: { profile: { userId: "jd" }, n }, version: 32 });
     const put = vi.spyOn(IDBObjectStore.prototype, "put");

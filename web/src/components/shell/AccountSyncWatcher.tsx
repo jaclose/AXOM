@@ -1,3 +1,4 @@
+import { installCloudMediaCache } from "../../lib/sync/cloudMediaCache";
 import { useEffect } from "react";
 import { deviceLabel, platformName, protectionView, useAccount } from "../../lib/account/accountStore";
 import { useCompactAvatar } from "../../lib/avatarImage";
@@ -31,6 +32,7 @@ export function AccountSyncWatcher() {
 
   useEffect(() => {
     if (phase !== "signed-in" || link !== "linked" || !userId) return;
+    const offMedia = installCloudMediaCache(userId, () => useStore.getState());
     const meta = read();
     const transport = new SupabaseSyncTransport();
     const coordinator = new SyncCoordinator(transport, () => useStore.getState(), SYNC_DELAY_MS, restingStatus(meta));
@@ -40,9 +42,15 @@ export function AccountSyncWatcher() {
     const offStore = useStore.subscribe((state) => {
       if (state === previous) return;
       previous = state;
-      coordinator.queue();
+      if (!useAccount.getState().applyingRemote) coordinator.queue();
     });
-    const onOnline = () => coordinator.reconnect();
+    let pulling = false;
+    const pull = async () => {
+      if (pulling || coordinator.currentStatus() === "syncing" || document.hidden) return;
+      pulling = true;
+      try { await useAccount.getState().pullLatest(); coordinator.adopt(); } finally { pulling = false; }
+    };
+    const onOnline = () => { coordinator.reconnect(); void pull(); };
     window.addEventListener("online", onOnline);
     // Another tab uploaded, failed or started waiting: follow the shared state.
     const onStorage = (event: StorageEvent) => {
@@ -50,8 +58,14 @@ export function AccountSyncWatcher() {
     };
     window.addEventListener("storage", onStorage);
     coordinator.resume();
+    const pullTimer = window.setInterval(() => void pull(), 60_000);
+    window.addEventListener("focus", pull);
+    void pull();
     void transport.touchDevice({ deviceId: deviceId(), label: deviceLabel(), platform: platformName(), revision: meta.baseRevision }).catch(() => undefined);
     return () => {
+      window.clearInterval(pullTimer);
+      window.removeEventListener("focus", pull);
+      offMedia();
       offStatus();
       offStore();
       window.removeEventListener("online", onOnline);

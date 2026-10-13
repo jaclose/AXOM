@@ -179,8 +179,11 @@ export function useExamBlock({ skin, mode, pool, timeLimitSeconds, resume, revie
 
   const suspend = useCallback(() => {
     if (finished.current || reviewing) return;
-    finished.current = true;
-    onSuspend(suspendBlock(block, Date.now(), { skin, timeLimitSeconds }));
+    try {
+      onSuspend(suspendBlock(block, Date.now(), { skin, timeLimitSeconds }));
+      finished.current = true;
+      if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+    } catch { /* The parent explains the failed save; the exam remains editable. */ }
   }, [block, onSuspend, reviewing, skin, timeLimitSeconds]);
 
   // Time is up: the block ends, exactly like the real thing.

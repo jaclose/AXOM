@@ -1,3 +1,5 @@
+import { snapshotWorkspace } from "../sync/workspaceSnapshot";
+import { assertVaultWritesSince, getVaultWriteCheckpoint, flushLocalVaultWrites } from "../localVault";
 import { create } from "zustand";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import { authRedirectUrl, cloudConfigured, loadSupabase, readStoredSession } from "./supabase";
@@ -52,6 +54,7 @@ interface AccountState {
   history: RevisionSummary[];
   devices: AccountDevice[];
   busy: boolean;
+  applyingRemote?: boolean;
   message: string;
   error: string;
   /** An email address awaiting a one-time code. */
@@ -73,6 +76,7 @@ interface AccountState {
   linkThisDevice(): Promise<void>;
   syncNow(): Promise<void>;
   refresh(): Promise<void>;
+  pullLatest(): Promise<void>;
   restoreRevision(summary: RevisionSummary): Promise<void>;
   keepThisDevice(): Promise<void>;
   adoptAccountVersion(): Promise<void>;
@@ -485,16 +489,52 @@ export const useAccount = create<AccountState>((set, get) => {
       void get().refresh();
     },
 
+    async pullLatest() {
+      const user = get().user;
+      const meta = read();
+      if (!user || get().link !== "linked" || get().busy || get().applyingRemote || meta.pending || meta.conflictServerRevision !== undefined || !meta.lastHash) return;
+      const before = useStore.getState();
+      try {
+        const current = await snapshotWorkspace(before, { deviceId: deviceId(), baseRevision: meta.baseRevision, reason: "automatic" });
+        if (current.contentHash !== meta.lastHash) return;
+        const [latest] = await transport.summaries(1);
+        if (!latest || latest.revision <= meta.baseRevision) return;
+        const revision = await transport.revision(latest.id);
+        const next = parseImport(JSON.stringify(revision.payload));
+        const unchanged = () => get().user?.id === user.id && useStore.getState() === before && !read().pending && read().baseRevision === meta.baseRevision;
+        if (!unchanged()) return;
+        await createLocalBackup(before.schemaVersion);
+        if (!unchanged()) return;
+        await transport.prepareMediaCache(revision, user.id);
+        if (!unchanged()) return;
+        const checkpoint = getVaultWriteCheckpoint();
+        set({ applyingRemote: true });
+        try { useStore.getState().replaceAll(next); } finally { set({ applyingRemote: false }); }
+        const applied = useStore.getState();
+        write({ ...read(), baseRevision: latest.revision, pending: true, pendingIdempotencyKey: crypto.randomUUID() });
+        await flushLocalVaultWrites();
+        assertVaultWritesSince(checkpoint);
+        if (get().user?.id !== user.id) return;
+        const changed = useStore.getState() !== applied;
+        write({ ...read(), baseRevision: latest.revision, lastHash: revision.contentHash, lastProtectedAt: latest.createdAt,
+          pending: changed, pendingIdempotencyKey: changed ? crypto.randomUUID() : undefined, attempt: 0, lastError: undefined, nextAttemptAt: undefined });
+        set({ ...protectionView(restingStatus(read())), error: "" });
+      } catch (error) {
+        if (get().user?.id === user.id) set({ error: friendlyError(error), applyingRemote: false });
+      }
+    },
+
     async refresh() {
-      if (!get().user) return;
+      const userId = get().user?.id;
+      if (!userId) return;
       try {
         const [history, devices] = await Promise.all([
           transport.summaries(30),
           transport.devices(deviceId()).catch(() => [] as AccountDevice[]),
         ]);
-        set({ history, devices });
+        if (get().user?.id === userId) set({ history, devices });
       } catch (error) {
-        set({ error: friendlyError(error) });
+        if (get().user?.id === userId) set({ error: friendlyError(error) });
       }
     },
 
@@ -502,12 +542,21 @@ export const useAccount = create<AccountState>((set, get) => {
       const user = get().user;
       if (!user) return;
       await guarded("Restoring the protected version…", async () => {
+        const previousState = useStore.getState();
         const revision = await transport.revision(summary.id);
+        if (get().user?.id !== user.id || useStore.getState() !== previousState) throw new Error("Your account or workspace changed while downloading. Try the restore again after finishing your edit.");
         const next = parseImport(JSON.stringify(revision.payload));
         await createLocalBackup(useStore.getState().schemaVersion);
+        await transport.prepareMediaCache(revision, user.id);
+        if (get().user?.id !== user.id || useStore.getState() !== previousState) throw new Error("Your account or workspace changed while downloading. Try the restore again after finishing your edit.");
+        const checkpoint = getVaultWriteCheckpoint();
         useStore.getState().replaceAll(next);
+        await flushLocalVaultWrites();
+        assertVaultWritesSince(checkpoint);
+        if (get().user?.id !== user.id) throw new Error("The signed-in account changed. Restore was stopped.");
         recordRestoreEvent({ kind: "account-restore", detail: `Protected version #${summary.revision} from ${new Date(summary.createdAt).toLocaleString()}` });
         const latest = await transport.latestRevision().catch(() => summary.revision);
+        if (get().user?.id !== user.id) throw new Error("The signed-in account changed. Restore was stopped.");
         write({ ...read(), accountUserId: user.id, baseRevision: latest, conflictServerRevision: undefined, pending: true, pendingIdempotencyKey: crypto.randomUUID() });
         const status = await withCoordinator(async (active) => {
           await active.flush("restore");
@@ -543,12 +592,18 @@ export const useAccount = create<AccountState>((set, get) => {
         const [latest] = await transport.summaries(1);
         if (!latest) throw new Error("No account version is available to merge with yet.");
         const revision = await transport.revision(latest.id);
+        if (get().user?.id !== user.id) throw new Error("The signed-in account changed. Merge was stopped.");
         const server = parseImport(JSON.stringify(revision.payload));
         await createLocalBackup(useStore.getState().schemaVersion);
-        // Records combine by id; the newer copy of any record wins and nothing
-        // is deleted — the same guarantees as merging a portable backup.
+        await transport.prepareMediaCache(revision, user.id);
+        if (get().user?.id !== user.id) throw new Error("The signed-in account changed. Merge was stopped.");
+        // Merge only after all downloads, so edits made while waiting survive.
         const merged = mergeStates(useStore.getState(), server);
+        const checkpoint = getVaultWriteCheckpoint();
         useStore.getState().replaceAll(merged);
+        await flushLocalVaultWrites();
+        assertVaultWritesSince(checkpoint);
+        if (get().user?.id !== user.id) throw new Error("The signed-in account changed. Merge was stopped.");
         set({ restoreOffer: undefined });
         recordRestoreEvent({ kind: "account-merge", detail: `Merged with protected version #${latest.revision}` });
         write({ ...read(), accountUserId: user.id, baseRevision: latest.revision, conflictServerRevision: undefined, pending: true, pendingIdempotencyKey: crypto.randomUUID() });
@@ -639,7 +694,7 @@ export function protectionDetail(view: Pick<AccountState, "protection" | "syncFa
     : "";
   if (protection === "blocked") {
     if (syncFailure?.rejection === "too-large") {
-      return `This workspace is larger than an account copy can be (15 MB), so nothing is uploading. ${saved} Emergency recovery can still export all of it.`;
+      return `The compressed account record exceeds its 15 MB limit, so this version is not uploading. ${saved} Emergency recovery can still export all of it.`;
     }
     if (syncFailure?.rejection === "storage-limit") {
       return `Your account’s version history is full, so it refused this upload and AXOM stopped repeating it. ${saved}${next}`;

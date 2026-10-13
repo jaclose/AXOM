@@ -42,6 +42,7 @@ import {
   BackupStatusCard,
   FocusCheckInSettings,
   LastSavedLine,
+  LocalSaveBadge,
   ProfileSection,
   RestoreHistoryCard,
 } from "./SettingsSections";
@@ -254,7 +255,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
               </div>
               <div style={{ marginTop: 8 }}><LastSavedLine /></div>
             </div>
-            <Tag tone="green"><ShieldCheck size={ICON_SIZE.microInline} /> On this device</Tag>
+            <LocalSaveBadge />
           </div>
           <DataHealthPanel />
         </section>
