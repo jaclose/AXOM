@@ -54,6 +54,9 @@ Depends on: [course engine](course-engine.md) (`buildModuleWeeks`, `questionScop
    backup or about sync.
 7. **Motion is separate from function.** With reduced motion, by system setting or by
    AXOM's own, a book opens and closes at once and everything still works.
+8. **Unfiled questions remain reachable.** Sets without a single module and loose
+   questions without a module appear in the "Unfiled & mixed" book. This display
+   grouping does not change their saved scopes, memberships or practice history.
 
 ## Using it
 

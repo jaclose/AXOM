@@ -86,6 +86,25 @@ describe("soundscape versions", () => {
 });
 
 describe("synthesis helpers", () => {
+  it("keeps a reproducible high-peak brown-noise loop below full scale", () => {
+    let seed = 367;
+    const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
+    const channel = new Float32Array(44_100);
+    fillNoise("brown", channel, random);
+    // This real random sequence previously produced a peak of 1.0225817.
+    const peak = channel.reduce((max, sample) => Math.max(max, Math.abs(sample)), 0);
+    expect(peak).toBeGreaterThan(0.9);
+    expect(peak).toBeLessThan(1);
+    expect(channel.every(Number.isFinite)).toBe(true);
+  });
+
+  it.each(["brown", "pink"] as const)("bounds sustained extreme %s input without clipping the waveform", (kind) => {
+    const channel = new Float32Array(44_100);
+    fillNoise(kind, channel, () => 1);
+    expect(channel.every((sample) => Number.isFinite(sample) && Math.abs(sample) < 1)).toBe(true);
+    expect(new Set(channel).size).toBeGreaterThan(100);
+  });
+
   it("maps volume perceptually and never approaches full scale", () => {
     expect(volumeToGain(0)).toBe(0);
     expect(volumeToGain(50)).toBeLessThan(volumeToGain(51));

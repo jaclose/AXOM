@@ -839,7 +839,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       <div className="block-setup">
         <section className="block-source-summary" aria-label="Practice source">
           <span className="field-label">Your practice</span><h3>{sourceTitle}</h3>
-          <p>{canStart ? `${Math.min(count, available)} questions in this block · ${available} match your filters` : "Choose a source with ready questions to continue."}</p>
+          <p>{canStart ? `${Math.min(count, available)} ${Math.min(count, available) === 1 ? "question" : "questions"} in this block · ${available} ${available === 1 ? "matches" : "match"} your filters` : "Choose a source with ready questions to continue."}</p>
           <GhostButton onClick={() => setChoosingSources((value) => !value)} aria-expanded={choosingSources}>{choosingSources ? "Done choosing" : "Change sources"}</GhostButton>
         </section>
         {choosingSources && <div className="stack gap12">

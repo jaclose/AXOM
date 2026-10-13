@@ -29,6 +29,9 @@ Invariants: preserve originals; report optimization only for a real verified der
 keep long-lived audio lifecycle separate from route mounts. Device media bytes and
 external embed permissions are separate from portable workspace/cloud protection.
 Do not rename playback actions or add AudioContexts without auditing callers.
+Generated noise loops stay below full scale. If a filtered random sequence exceeds
+that bound, attenuate the entire loop after its crossfade so the waveform and seam
+are preserved; ordinary lower-level loops are unchanged.
 
 Known integration questions from the coordination board: truthful optimization status
 in existing user-media imports and adoption of shared audio context/lifecycle boundaries.
