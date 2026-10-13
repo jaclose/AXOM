@@ -38,7 +38,7 @@ export function releaseMetadataPlugin(metadata: ReturnType<typeof buildMetadata>
       // installed with the service worker; heavy document engines load lazily.
       const html = readFileSync(resolve(dist, "index.html"), "utf8");
       const assets = [...html.matchAll(/(?:src|href)="(\.\/assets\/[^"?]+)"/g)].map((match) => match[1]);
-      const manifest = JSON.parse(readFileSync(resolve(dist, ".vite/manifest.json"), "utf8")) as Record<string, { file: string; imports?: string[]; css?: string[] }>;
+      const manifest = JSON.parse(readFileSync(resolve(dist, ".vite/manifest.json"), "utf8")) as Record<string, { file: string; name?: string; imports?: string[]; css?: string[] }>;
       const seen = new Set<string>();
       const collect = (key: string) => {
         if (seen.has(key) || !manifest[key]) return;
@@ -48,11 +48,15 @@ export function releaseMetadataPlugin(metadata: ReturnType<typeof buildMetadata>
         (entry.imports ?? []).forEach(collect);
       };
       collect("index.html");
+      // Public landing now loads the workspace dynamically. Preserve its
+      // bootstrap too, so an installed update can still open offline.
+      collect("src/main.tsx");
       collect("src/App.tsx");
       // Updating must still work after the host removes the previous build's
       // hashed assets. Keep the save/checkpoint path with that build's shell,
       // even though it is lazy-loaded to preserve the pre-hydration guard.
       collect("src/lib/updateCheckpoint.ts");
+      Object.keys(manifest).filter(key => manifest[key].name === "updateCheckpoint").forEach(collect);
       // Settings promises release notes "available offline", and the update
       // panel shows them while an old build is still running.
       collect("src/components/shell/ReleaseNotesHistory.tsx");

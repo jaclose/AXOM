@@ -33,7 +33,9 @@ try {
     const manifest = JSON.parse(await readFile(join(folder, '.vite/manifest.json'), 'utf8'));
     const worker = await readFile(join(folder, 'sw.js'), 'utf8');
     const precache = JSON.parse(worker.match(/^const PRECACHE = (.+);$/m)[1]);
-    assert.ok(precache.includes(`./${manifest['src/lib/updateCheckpoint.ts'].file}`), 'update checkpoint must survive removal of old deployment assets');
+    const checkpoint = manifest['src/lib/updateCheckpoint.ts'] ?? Object.values(manifest).find(entry => entry.name === 'updateCheckpoint');
+    assert.ok(checkpoint && precache.includes(`./${checkpoint.file}`), 'update checkpoint must survive removal of old deployment assets');
+    assert.ok(precache.includes(`./${manifest['src/main.tsx'].file}`), 'the workspace bootstrap must remain available offline after a landing-page update');
     for (const [key, entry] of Object.entries(manifest)) {
       if (/dailyWordWords|DailyWordPage/.test(key)) assert.ok(!precache.includes(`./${entry.file}`), 'optional game code must remain lazy');
     }
@@ -45,7 +47,7 @@ try {
   // the app inert for up to 1.8 s, and fill() into an inert input is a no-op.
   const context = await browser.newContext({ reducedMotion: 'reduce' });
   const page = await context.newPage();
-  await page.goto(origin, { waitUntil: 'networkidle' });
+  await page.goto(`${origin}/?app=1`, { waitUntil: 'networkidle' });
   await completeSetup(page, 'Update persistence check');
   await deferPromisePrompt(page);
   await page.evaluate(async () => { await navigator.serviceWorker.ready; localStorage.setItem('axom.theme', 'light'); });
@@ -53,7 +55,7 @@ try {
   await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
   const oldEntry = await page.locator('script[type="module"][src]').getAttribute('src');
   const peer = await context.newPage();
-  await peer.goto(origin, { waitUntil: 'networkidle' });
+  await peer.goto(`${origin}/?app=1`, { waitUntil: 'networkidle' });
   let peerNavigations = 0;
   peer.on('framenavigated', (frame) => { if (frame === peer.mainFrame()) peerNavigations++; });
   const oldWorker = await page.evaluate(async () => {
