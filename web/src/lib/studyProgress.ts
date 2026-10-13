@@ -1,6 +1,7 @@
 import { resolveStudyPlan, studyPlanCourse, type StudyWorkflowPreferences } from "./studyPreferences";
 import { isCompletionKind, isQuestionKind, targetPassesForItem } from "./tracker";
 import type { Course, TrackerItem } from "./types";
+import { isReviewTask, isArchivedCourseItem } from "./courseWork";
 
 interface StudyProgressOptions {
   preferences?: StudyWorkflowPreferences;
@@ -11,7 +12,7 @@ interface StudyProgressOptions {
 export function trackerStudyProgress(item: TrackerItem, options: StudyProgressOptions = {}) {
   const course = studyPlanCourse(options.courses ?? [], item);
   const plan = resolveStudyPlan(options.preferences, course, item);
-  const target = isQuestionKind(item.kind) || isCompletionKind(item.kind)
+  const target = isReviewTask(item) ? 1 : isQuestionKind(item.kind) || isCompletionKind(item.kind)
     ? targetPassesForItem(item)
     : plan.lecturePasses;
   return { plan, target, fraction: Math.min(item.passes, target) / target, complete: item.passes >= target };
@@ -19,6 +20,7 @@ export function trackerStudyProgress(item: TrackerItem, options: StudyProgressOp
 
 /** Each item contributes equally; extra passes cannot finish another item's work. */
 export function scopeStudyProgress(items: TrackerItem[], options: StudyProgressOptions = {}) {
+  items = items.filter((item) => !isArchivedCourseItem(item));
   let total = 0;
   let complete = 0;
   let inProgress = 0;

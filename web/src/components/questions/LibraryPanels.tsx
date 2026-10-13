@@ -21,6 +21,7 @@ import { createQuestionSetShare } from "../../lib/sharing/questionSetShare";
 import { publishShare } from "../../lib/sharing/supabaseSharing";
 import { CourseBankBrowser, type BankLocation } from "./CourseBankBrowser";
 import { sortByNaturalTitle } from "../../lib/naturalSort";
+import { reviewTaskInputs } from "../../lib/courseWork";
 
 const NO_QUESTIONS: QuestionRecord[] = [];
 const NO_DOCUMENTS: SourceDocument[] = [];
@@ -210,6 +211,22 @@ export function QuestionSetList({
     s.updateQuestionSet(set.id, { scope: { module, ...(week ? { week } : {}) } });
   }
 
+  function addDigestReview(set: QuestionSet) {
+    const suggestions = set.digest?.suggestedReview ?? [];
+    const course = (s.courses ?? []).find((item) => item.id === set.scope?.courseId);
+    const term = (s.terms ?? []).find((item) => item.id === course?.termId);
+    const destination = set.scope?.module
+      ? [term?.name ?? course?.code ?? "Question Bank", set.scope.module, set.scope.week ? `Week ${set.scope.week}` : "Review"].join("/")
+      : "Question Bank/Review";
+    const items = reviewTaskInputs(suggestions, destination, { source: "digest", sourceId: set.id }, s.tracker);
+    if (!items.length) {
+      pushToast({ title: "Review already tracked", body: "Those active digest topics are already in the Course Tracker.", tone: "warn" });
+      return;
+    }
+    s.bulkAddTrackerItems(items);
+    pushToast({ title: "Review work added", body: `${items.length} digest topic${items.length === 1 ? "" : "s"} added to the Course Tracker.`, tone: "success" });
+  }
+
   function renderCard(set: QuestionSet) {
     const metrics = questionSetMetrics(set, questions, s.documents ?? []);
     return (
@@ -249,6 +266,11 @@ export function QuestionSetList({
               <Sparkles size={ICON_SIZE.body} /> {enhancing === set.id ? "Analyzing…" : "Build digest"}
             </GhostButton>
           )}
+          {set.digest?.suggestedReview.length ? (
+            <GhostButton onClick={() => addDigestReview(set)}>
+              <ListPlus size={ICON_SIZE.body} /> Add review to Tracker
+            </GhostButton>
+          ) : null}
           {courseModules.length > 0 && (
             <GhostButton onClick={() => fileUnder(set)}>
               <FolderInput size={ICON_SIZE.body} /> {set.scope?.module ? "Move" : "File under a week"}
