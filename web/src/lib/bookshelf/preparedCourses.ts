@@ -47,12 +47,14 @@ export function withPreparedCourses(books: CourseBook[], documents: readonly Sou
       unfiled: plan.items.filter(i => !i.week).length };
   });
 }
-export async function loadPreparedCourse(book: CourseBook, selectedWeeks?: readonly number[]): Promise<SaveOutcome> {
+export async function loadPreparedCourse(book: CourseBook, selectedWeeks?: readonly number[], assertCurrent: () => void = () => {}): Promise<SaveOutcome> {
   if (selectedWeeks && !selectedWeeks.some(week => book.weeks.some(entry => entry.week === week))) return { status: "nothing-to-save" };
   if (book.term === "Term unconfirmed") return { status: "failed", message: "Choose the term in Customize Weeks & Activities before loading this template." };
   const [{ useStore }, vault] = await Promise.all([import("../store"), import("../localVault")]);
-  const structure = await commitCourseLoad(book);
+  assertCurrent();
+  const structure = await commitCourseLoad(book, assertCurrent);
   if (structure.status === "failed") return structure;
+  assertCurrent();
   const s = useStore.getState();
   const sections = templatesForBook(s.documents, book).map(t => t.section);
   if (!sections.length) return structure;

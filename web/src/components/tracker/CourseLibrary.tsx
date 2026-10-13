@@ -11,9 +11,10 @@ import { moduleKey } from "../../lib/course-engine/vocabulary";
 import { CoursePlan } from "./CoursePlan";
 import { ConnectedCoursePlan } from "./ConnectedCoursePlan";
 import { useAccount } from "../../lib/account/accountStore";
-import { listAcademicCourses, type AcademicCourse } from "../../lib/academicLibrary/client";
+import { useAcademicCatalog } from "../../lib/academicLibrary/useAcademicCatalog";
 import { ICON_SIZE } from "../../lib/iconSize";
 import "../../styles/course-library.css";
+import { AcademicCourseUpload } from "./AcademicCourseUpload";
 
 export function CourseLibrary({ onClose, onTemplate, onOpen, onCreate }: {
   onClose: () => void; onTemplate: (book?: CourseBook) => void;
@@ -24,32 +25,8 @@ export function CourseLibrary({ onClose, onTemplate, onOpen, onCreate }: {
   const [query, setQuery] = useState("");
   const [term, setTerm] = useState("");
   const [view, setView] = useState<"available" | "mine" | "all">("available");
-  const [connected, setConnected] = useState<AcademicCourse[]>([]);
-  const [catalogError, setCatalogError] = useState("");
-  const [catalogLoading, setCatalogLoading] = useState(false);
-  const [catalogRetry, setCatalogRetry] = useState(0);
-  const [moreAvailable, setMoreAvailable] = useState(false);
-  useEffect(() => {
-    if (!accountId) { setConnected([]); return; }
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      setCatalogLoading(true); setCatalogError("");
-      void listAcademicCourses(query, term).then(courses => {
-        if (!cancelled) { setConnected(courses); setMoreAvailable(courses.length === 24); }
-      }).catch(cause => { if (!cancelled) setCatalogError(cause instanceof Error ? cause.message : "The collection is unavailable. Try again."); })
-        .finally(() => { if (!cancelled) setCatalogLoading(false); });
-    }, 200);
-    return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [accountId, query, term, catalogRetry]);
-  async function more() {
-    setCatalogLoading(true);
-    try {
-      const page = await listAcademicCourses(query, term, connected.at(-1)?.id);
-      setConnected(current => [...current, ...page.filter(course => !current.some(entry => entry.id === course.id))]);
-      setMoreAvailable(page.length === 24); setCatalogError("");
-    } catch (cause) { setCatalogError(cause instanceof Error ? cause.message : "More courses could not be loaded."); }
-    finally { setCatalogLoading(false); }
-  }
+  const { courses: connected, loading: catalogLoading, error: catalogError, more: moreAvailable,
+    loadMore: more, retry: retryCatalog } = useAcademicCatalog(accountId, query, term);
   const [selected, setSelected] = useState<string | null>(() => new URL(window.location.href).searchParams.get("course"));
   const heading = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -57,6 +34,7 @@ export function CourseLibrary({ onClose, onTemplate, onOpen, onCreate }: {
     if (selected) url.searchParams.set("course", selected); else url.searchParams.delete("course");
     window.history.replaceState(null, "", url);
     heading.current?.scrollIntoView({ block: "start" });
+    heading.current?.querySelector<HTMLElement>("h1")?.focus({ preventScroll: true });
   }, [selected]);
   const books = useMemo(() => withPreparedCourses(buildCourseBooks({ terms: s.terms, courses: s.courses,
     tracker: s.tracker, questions: s.questions, sets: s.questionSets, curricula: CURRICULA }), s.documents, s.tracker),
@@ -73,8 +51,8 @@ export function CourseLibrary({ onClose, onTemplate, onOpen, onCreate }: {
   const connectedChosen = connected.find(course => `remote:${course.id}` === selected);
   const connectedShown = connected.filter(course => view !== "mine" || s.documents.some(document => document.id === `academic-${course.current_revision_id}`));
   return <div className="course-library-page" ref={heading}>
-    {connectedChosen ? <ConnectedCoursePlan key={connectedChosen.current_revision_id} course={connectedChosen} onBack={() => setSelected(null)} onOpen={onOpen} onCustomize={onTemplate} /> : chosen ? <CoursePlan key={chosen.id} book={chosen} bank={bankFor(chosen)} onBack={() => setSelected(null)} onOpen={onOpen} onCustomize={onTemplate} /> : <>
-      <header className="course-library-heading"><div><p className="course-eyebrow">Academic collection</p><h1>Course Library</h1><p>Find your course. See the weeks ahead. Study what matters now.</p></div><GButton onClick={onClose}><ArrowLeft size={ICON_SIZE.body} /> My Courses</GButton></header>
+    {connectedChosen ? <ConnectedCoursePlan key={`${accountId}:${connectedChosen.current_revision_id}`} course={connectedChosen} onBack={() => setSelected(null)} onOpen={onOpen} onCustomize={onTemplate} /> : chosen ? <CoursePlan key={chosen.id} book={chosen} bank={bankFor(chosen)} onBack={() => setSelected(null)} onOpen={onOpen} onCustomize={onTemplate} /> : <>
+      <header className="course-library-heading"><div><p className="course-eyebrow">Academic collection</p><h1 tabIndex={-1}>Course Library</h1><p>Find your course. See the weeks ahead. Study what matters now.</p></div><GButton onClick={onClose}><ArrowLeft size={ICON_SIZE.body} /> My Courses</GButton></header>
       <div className="course-library-tools">
         <div className="course-view-switch" role="group" aria-label="Course collection">
           <button aria-pressed={view === "available"} onClick={() => setView("available")}>Available courses</button>
@@ -82,10 +60,10 @@ export function CourseLibrary({ onClose, onTemplate, onOpen, onCreate }: {
           <button aria-pressed={view === "all"} onClick={() => setView("all")}>Course map</button>
         </div>
         <label className="course-search"><Search size={ICON_SIZE.emphasis} /><span className="sr-only">Search courses</span><input name="course-search" autoComplete="off" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Course or module" /></label>
-        <label className="course-term-filter"><span className="sr-only">Filter by term</span><select value={term} onChange={event => setTerm(event.target.value)}><option value="">All terms</option>{[...new Set(books.map(book => book.term))].map(value => <option key={value}>{value}</option>)}</select></label>
+        <label className="course-term-filter"><span className="sr-only">Filter by term</span><select value={term} onChange={event => setTerm(event.target.value)}><option value="">All terms</option>{[...new Set([...books.map(book => book.term), ...connected.map(course => course.term)])].map(value => <option key={value}>{value}</option>)}</select></label>
       </div>
       <p className="course-collection-count" role="status">{catalogLoading ? "Loading the collection…" : `${shown.length + connectedShown.length} courses${view === "mine" ? " activated" : accountId ? " available" : " available on this device"}`}</p>
-      {catalogError && <div role="alert"><p>{catalogError}</p><GButton onClick={() => setCatalogRetry(value => value + 1)}>Retry collection</GButton></div>}
+      {catalogError && <div role="alert"><p>{catalogError}</p><GButton onClick={retryCatalog}>Retry collection</GButton></div>}
       {!shown.length && !connectedShown.length && !catalogLoading && <div className="course-empty"><BookOpen size={32} /><h2>{view === "mine" ? "Your courses start here" : "No courses to show"}</h2><p>{query || term ? "Try a different search or term." : "Choose an available course to preview its weekly plan. Your progress stays separate from the collection."}</p>{view !== "available" && <GButton onClick={() => setView("available")}>Browse available courses</GButton>}</div>}
       <div className="course-collection">
         {connectedShown.map(course => <button key={course.id} className="course-card" onClick={() => setSelected(`remote:${course.id}`)} aria-label={`Preview ${course.module}, ${course.academic_term || course.term}`}>
@@ -97,7 +75,7 @@ export function CourseLibrary({ onClose, onTemplate, onOpen, onCreate }: {
         <div className="course-card-copy"><span className="course-card-context">{book.courseCode || book.term}</span><h2>{book.module}</h2><p>{book.courseName || "Academic module"}</p><span className="course-card-facts">{book.weeks.length ? `${book.weeks.length} weeks · ${book.count} activities` : "Weekly plan not available"}</span><span className="course-card-state">{mine(book) ? "In My Courses" : available(book) ? "Ready to preview" : "Not prepared yet"}{bankFor(book)?.ready ? ` · ${bankFor(book)?.ready} questions` : ""}</span></div><ArrowUpRight size={ICON_SIZE.control} aria-hidden="true" />
       </button>)}</div>
       {moreAvailable && <GButton disabled={catalogLoading} onClick={() => void more()}>Load more courses</GButton>}
-      <details className="course-management"><summary>Manage sources and custom courses</summary><p className="sub">Prepared collections and personal imports are kept separate from course activation.</p><div className="row wrap gap8"><GButton onClick={() => onTemplate()}>Saved templates and imports</GButton><GButton onClick={onCreate}>Create a custom course</GButton></div><PreparedLibrary /></details>
+      <details className="course-management"><summary>Manage sources and custom courses</summary><p className="sub">Prepared collections and personal imports are kept separate from course activation.</p><div className="row wrap gap8"><GButton onClick={() => onTemplate()}>Saved templates and imports</GButton><GButton onClick={onCreate}>Create a custom course</GButton></div><AcademicCourseUpload key={accountId} onSaved={retryCatalog} /><PreparedLibrary /></details>
     </>}
   </div>;
 }

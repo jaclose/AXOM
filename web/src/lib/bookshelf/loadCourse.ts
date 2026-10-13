@@ -71,8 +71,9 @@ export type SaveOutcome =
  * It reports "saved" only after the write has finished, and says so when it
  * has not.
  */
-export async function commitCourseLoad(book: CourseBook): Promise<SaveOutcome> {
+export async function commitCourseLoad(book: CourseBook, assertCurrent: () => void = () => {}): Promise<SaveOutcome> {
   const [{ useStore }, { flushLocalVaultWrites, assertVaultWritesSince, getVaultWriteCheckpoint }] = await Promise.all([import("../store"), import("../localVault")]);
+  assertCurrent();
   const state = useStore.getState();
   if (planCourseLoad(state, book).alreadyPresent) return { status: "nothing-to-save" };
   try {

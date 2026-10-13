@@ -318,6 +318,7 @@ export async function saveReviewedImport(
   store: ReviewedImportStore,
   images: readonly File[] = [],
 ): Promise<SavedReviewedImport> {
+  store.assertCurrent?.();
   const noImages = { attached: 0, missing: 0, problems: [] as string[] };
   const coordinated = prepared.equivalent
     ? { joined: false, result: { ok: true as const, questionSetId: prepared.equivalent.setId, questionIds: prepared.equivalent.questionIds, documentId: prepared.wantsDoc ? prepared.existingDocumentId : undefined } }
@@ -339,6 +340,7 @@ export async function saveReviewedImport(
         if (await getQuestionAttachmentBlob(attachment.blobKey)) usable.add(imageNameKey(attachment.fileName));
       }
       const needed = names.filter(name => !usable.has(imageNameKey(name)));
+      store.assertCurrent?.();
       if (!needed.length) continue;
       report.missing += matchNamedImages(needed, images).filter((match) => !match.file).length;
       if (!images.length) continue;
@@ -350,6 +352,7 @@ export async function saveReviewedImport(
       });
       if (result.attachments.length) {
         try {
+          store.assertCurrent?.();
           const checkpoint = getVaultWriteCheckpoint();
           const replaced = new Set(result.attachments.map(attachment => imageNameKey(attachment.fileName)));
           await store.updateQuestion(questionId, { attachments: [...existing.filter(attachment => !replaced.has(imageNameKey(attachment.fileName))), ...result.attachments] });

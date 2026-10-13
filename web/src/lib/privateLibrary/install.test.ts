@@ -26,6 +26,21 @@ async function bundle() {
 beforeEach(async () => { await openEmptyWorkspace(); vi.stubGlobal("Blob", NativeBlob); vi.stubGlobal("File", NativeFile); });
 afterEach(closeWorkspace);
 describe("prepared private library installation", () => {
+  it("does not join a different bundle or adopt delayed files after an account switch", async () => {
+    const b = await bundle();
+    let current = true;
+    let release!: () => void;
+    const waiting = new Promise<void>(resolve => { release = resolve; });
+    const read = async (path: string) => { if (path === "templates/test.txt") await waiting; return b.read(path); };
+    const pending = installPrivateLibrary(read, undefined, { key: "account-a", assertCurrent: () => { if (!current) throw new Error("Account changed"); } });
+    await expect(installPrivateLibrary(b.read, undefined, { key: "account-b", assertCurrent: () => {} })).rejects.toThrow("Another library download");
+    current = false; release();
+    await expect(pending).rejects.toThrow("Account changed");
+    expect(useStore.getState().questions).toHaveLength(0);
+    expect(useStore.getState().documents).toHaveLength(0);
+    await installPrivateLibrary(b.read);
+    expect(useStore.getState().questions).toHaveLength(1);
+  });
   it("installs without enrolling, survives reload, and preserves progress on repeated installation and loading", async () => {
     const b = await bundle();
     const trackerBefore = useStore.getState().tracker.length;

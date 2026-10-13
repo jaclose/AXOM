@@ -5,55 +5,54 @@ authority: current-state
 ---
 # AXOM current AI state
 
-Snapshot: 2026-10-11, isolated `fix/deployment-input-reliability` in
-`AXOM-deployment-reliability`, based on remote integration `baf340bd`.
-Implementation commits `e2ebc8aa` and `af21e9b2` are pushed to the matching development
-branch. Other workers, integration/main checkouts and private content were not edited.
-This snapshot describes this branch, not production or another checkout.
+Snapshot: 2026-10-13, isolated `feat/academic-library-v1` in
+`AXOM-academic-library-v1`. Base includes deployment reliability `71aa2525`.
+User-created `f768f5ca` committed tracked course edits but omitted required new files;
+this checkpoint completes those files without rewriting history. Integration/main
+and production have not been changed by this stream.
 
-## Focused deployment reliability
+## Working slice
 
-The original `c23e8c26` GOER allowlist is preserved. `npm run verify:deployment` creates
-fresh deployment inputs from a committed Git revision, applies verified Vercel ignore
-semantics, installs both package roots and executes vercel.json's build command.
-The negative mode must reproduce real TS2307 missing-manifest errors. Seven regressions
-cover the allowlist, exclusions, missing/case-mismatched files and build-script inclusion.
-The build guard derives required manifests from the canonical bank imports; no content,
-TypeScript checks, tests or application features were removed.
+[Academic library](features/academic-library.md) records the implemented behavior,
+security boundary, reproducible acceptance and unfinished requirements. Full-page
+course discovery, source-aware weekly plans, selective activation and exact scoped
+quiz navigation reuse the existing tracker/import/question engines. The private FTM1
+pilot preserves source provenance and keeps two ambiguous activities unassigned.
 
-Node 22.23.1 / npm 10.9.8 is the pinned local/CI baseline. Both packages support the
-same Node 22 range and npm version. Vercel remains configured for Node 22.x at the
-repository root; its install command pins npm. Quality now covers integration pushes
-and merge groups, keeps existing web/native checks, installs both roots and validates
-API types. An existing browser assertion now waits for required IndexedDB-backed media
-and checks decoded pixels instead of conditionally probing an immediate image count.
+The academic catalog/revision/ACL/enrollment migration was exercised on a separate
+local native Supabase stack (CLI 2.120.0, API `127.0.0.1:55321`). Real synthetic-account
+Auth/REST/Storage isolation, immutable media, reviewer-gated sharing and retries pass.
+A real browser signs in, uploads privately, previews the backend plan, downloads
+Week 2, reloads and starts its exact 11-question quiz. Source-rich local study also
+passes through answering, Decode review and reload with 11 attempts.
 
-## Validation and handoff
+## Validation and protected work
 
-Local macOS: both clean npm ci installations, 79 root tests (including seven deployment
-regressions and 43 repository tests), API typecheck, hygiene and the actual native ZIP
-import/practice/persistence browser journey pass. Original c23e8c2-parent ignore rules
-reproduce all three real missing GOER imports. Disk-full interrupted the first web
-install; the final fresh install passed after headroom recovered. Only session-owned
-scratch/test data was reclaimed; learner data and other workers' files were preserved.
+Node 22.23.1. Affected focused tests, typecheck, targeted lint, production build,
+43 repository tests, seven deployment-input tests and repository hygiene pass.
+Desktop/mobile template regression and the real FTM1 study journey pass, including
+short windows, light/dark, reduced motion and 200% CSS zoom. Full merged-tip gates,
+native package, hosted staging and production acceptance are still outstanding.
 
-Linux CI at `af21e9b29580d8530a436ececd9b134fec928cbe`: filtered negative/positive builds
-pass (1,050 versus 1,053 source files); native format/check plus 16 tests pass. Web
-typecheck/lint/build, 2,910 tests (five skips), the ZIP browser journey, update recovery,
-offline reopening and production audit threshold pass. All three jobs are green in
-[CI run 38141538198](https://github.com/jaclose/AXOM/actions/runs/38141538198).
-Exact evidence, dependency chains and
-required remote settings are in [testing](operations/testing.md#vercel-deployment-inputs).
+The active backup/account owner supplied a tested 39-file recovery patch against
+`3ebfa15e`, plus an exact manifest. Their `9b828694` checkpoint is incomplete alone.
+Only their account-token-bound helper and its test are reused in this checkpoint;
+the remaining recovery patch awaits scoped integration and browser acceptance.
+Private recovery stays with that owner. Academic content exclusion, learner event
+sync, sharing UI and leaderboard remain this stream's responsibility. Other QBank,
+communications, cinematic and integration work remains protected by the live board.
 
-No existing dependency upgrades or forced overrides. Root warning packages are
-whatwg-encoding 3.1.1, inflight 1.0.6, glob 8.1.0/10.5.0; none occur in web. Known
-root development-tooling and web audit findings remain separately recorded. No remote
-protection/ruleset/Vercel settings were changed. No production deployment, main merge,
-private-library installation or hosted preview/browser acceptance is claimed.
+## Next boundary
 
-Prior academic/library requirements remain recorded in the existing domain documents
-and external AXOM-coordination coverage ledger. This focused task does not certify
-that broader product delivery. Other active streams and recovery work remain protected.
-Ready for integration-owner review; no merge was performed. Do not merge across active
-work or infer production authorization. The documentation-only handoff records the
-tested code revision above; it does not claim a new runtime validation or deployment.
+Downloaded content still enters the legacy workspace snapshot: lightweight per-answer
+sync and cross-device learner overlays are NOT delivered. Integrate the reviewed
+recovery handoff, then implement the academic-reference projection and incremental
+learner adapter without copying shared content into private recovery objects. Preserve
+legacy backup compatibility and private edits. Complete two-device/offline acceptance,
+remaining source-backed courses, sharing and leaderboard before claiming canonical 1.1.
+
+Normal `www.axom.info` was reverified read-only as deployment
+`dpl_6fg8rJYXk2tSfJWvNALwL7gN38TF`, source `c23e8c26`. AXOM Production remains
+`jofkmfwkidubxcutkwzf`; no production tests or writes were performed. Any production
+migration/deployment still requires exact release approval. Development commits/pushes
+and validated local convergence are authorized under current ownership coordination.

@@ -291,4 +291,17 @@ describe("reviewed import retry identity", () => {
     expect(isReviewedImportInFlight("distinct:first")).toBe(false);
     expect(isReviewedImportInFlight("distinct:second")).toBe(false);
   });
+  it("rechecks the account after waiting behind another canonical import", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const commitReviewedImport = vi.fn(async () => { await gate; return { ok: true as const, questionIds: ["q-1"] }; });
+    let current = true;
+    const first = persistReviewedImportOnce("guard:first", persistence({ commitReviewedImport }), plan([question("q-1")]));
+    const guarded = persistence({ commitReviewedImport, assertCurrent: () => { if (!current) throw new Error("Account changed"); } });
+    const second = persistReviewedImportOnce("guard:second", guarded, plan([question("q-2")]));
+    const rejected = expect(second).rejects.toThrow("Account changed");
+    current = false; release();
+    await first; await rejected;
+    expect(commitReviewedImport).toHaveBeenCalledTimes(1);
+  });
 });

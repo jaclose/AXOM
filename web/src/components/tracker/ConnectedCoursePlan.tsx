@@ -1,0 +1,112 @@
+import { useEffect, useMemo, useState } from "react";
+import { useStore } from "../../lib/store";
+import { useAccount } from "../../lib/account/accountStore";
+import { academicPreview, downloadAcademicCourse, enrollAcademicCourse, type AcademicCourse } from "../../lib/academicLibrary/client";
+import { prepareCourseTemplate } from "../../lib/course-engine/templateLibrary";
+import { withPreparedCourses, loadPreparedCourse } from "../../lib/bookshelf/preparedCourses";
+import { buildQuestionBankBooks } from "../../lib/bookshelf/questionBankBooks";
+import type { CourseBook } from "../../lib/bookshelf/courseBooks";
+import type { SourceDocument } from "../../lib/library";
+import type { LibraryInstallation } from "../../lib/privateLibrary/install";
+import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "../../lib/localVault";
+import { CoursePlan } from "./CoursePlan";
+import { GButton } from "../ui/primitives";
+import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
+
+const REFERENCE_TYPE = "axom-academic-reference";
+interface DownloadReference extends LibraryInstallation {
+  collectionId: string;
+  revisionId: string;
+  accountId: string;
+  pendingWeeks?: number[];
+}
+function reference(documents: SourceDocument[], course: AcademicCourse, accountId?: string): DownloadReference | undefined {
+  const revision = course.current_revision_id;
+  const doc = documents.find(doc => doc.fileType === REFERENCE_TYPE && doc.id === `academic-${revision}`);
+  if (!doc) return;
+  try {
+    const value = JSON.parse(doc.rawText) as DownloadReference;
+    if (!value || value.accountId !== accountId || value.revisionId !== revision || value.collectionId !== course.id
+      || ![value.templateIds, value.documentIds, value.questionIds, value.setIds].every(ids => Array.isArray(ids) && ids.every(id => typeof id === "string" && id.length > 0))
+      || (value.pendingWeeks && (!Array.isArray(value.pendingWeeks) || value.pendingWeeks.some(week => !Number.isInteger(week) || week < 1 || week > 60)))) return;
+    return value;
+  } catch { return; }
+}
+async function saveReference(value: DownloadReference, assertCurrent: () => void) {
+  assertCurrent();
+  const checkpoint = getVaultWriteCheckpoint();
+  const rawText = JSON.stringify(value);
+  useStore.getState().addDocument({ id: `academic-${value.revisionId}`, fileType: REFERENCE_TYPE, title: "Downloaded course reference",
+    fileName: "course-reference.json", uploadedAt: new Date().toISOString(), rawText, sizeBytes: new TextEncoder().encode(rawText).length,
+    tags: [], linkedQuestionSetIds: value.setIds, libraryOnly: true });
+  await flushLocalVaultWrites(); assertVaultWritesSince(checkpoint);
+}
+
+export function ConnectedCoursePlan({ course, onBack, onOpen, onCustomize }: {
+  course: AcademicCourse; onBack: () => void; onOpen: (book: CourseBook) => void; onCustomize: (book: CourseBook) => void;
+}) {
+  const state = useStore();
+  const accountId = useAccount(account => account.user?.id);
+  const [template, setTemplate] = useState<SourceDocument>();
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [retry, setRetry] = useState(0);
+  const downloaded = useMemo(() => reference(state.documents, course, accountId), [state.documents, course, accountId]);
+  useEffect(() => {
+    let cancelled = false;
+    setTemplate(undefined); setError("");
+    void academicPreview(course.current_revision_id, accountId).then(preview => {
+      if (preview.collection_id !== course.id) throw new Error("This preview does not match the selected course.");
+      return prepareCourseTemplate(preview.template_text, `${course.module} course plan.txt`);
+    })
+      .then(document => { if (!cancelled) { setTemplate(document); setError(""); } })
+      .catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : "The course preview could not be opened."); });
+    return () => { cancelled = true; };
+  }, [course.current_revision_id, course.id, course.module, accountId, retry]);
+  const book = useMemo(() => {
+    if (!template) return;
+    const result = withPreparedCourses([], [template], state.tracker)[0];
+    return result ? { ...result, id: `remote:${course.id}`, term: course.term, courseName: course.title } : undefined;
+  }, [template, state.tracker, course]);
+  const bank = useMemo(() => {
+    if (!downloaded) return;
+    const ids = new Set(downloaded.questionIds);
+    const sets = new Set(downloaded.setIds);
+    return buildQuestionBankBooks({ terms: state.terms, courses: state.courses,
+      questions: state.questions.filter(question => ids.has(question.id)), sets: state.questionSets.filter(set => sets.has(set.id)) })[0];
+  }, [downloaded, state.terms, state.courses, state.questions, state.questionSets]);
+  async function load(weeks: number[]) {
+    if (!book || !weeks.length) return { status: "nothing-to-save" as const };
+    setError("");
+    const scope = academicAccountScope(accountId ?? "");
+    try {
+      scope.assertCurrent();
+      if (!accountId) throw new Error("Sign in again before downloading this course.");
+      let saved = downloaded;
+      if (!saved || !saved.questionIds.every(id => useStore.getState().questions.some(question => question.id === id))) {
+        const ids = await downloadAcademicCourse(course.current_revision_id, setMessage, scope);
+        scope.assertCurrent();
+        saved = { ...ids, collectionId: course.id, revisionId: course.current_revision_id, accountId };
+      }
+      // Persist intent before the network call. A failed acknowledgement leaves
+      // an explicit retry available and never removes the downloaded source.
+      await saveReference({ ...saved, pendingWeeks: weeks }, scope.assertCurrent);
+      const outcome = await loadPreparedCourse(book, weeks, scope.assertCurrent);
+      if (outcome.status === "failed") return outcome;
+      scope.assertCurrent();
+      await enrollAcademicCourse(course, weeks, accountId);
+      await saveReference({ ...saved, pendingWeeks: undefined }, scope.assertCurrent);
+      setMessage("Course downloaded and enrollment saved to your account.");
+      return outcome;
+    } catch (cause) { return { status: "failed" as const, message: cause instanceof Error ? cause.message : "The course could not be loaded. Retry when connected." }; }
+    finally { scope.dispose(); }
+  }
+  return <>
+    {!book && <><GButton onClick={onBack}>All courses</GButton><p role="status">{error ? "Preview unavailable" : "Opening the weekly plan…"}</p></>}
+    {error && <div role="alert"><p>{error}</p><GButton onClick={() => setRetry(value => value + 1)}>Retry preview</GButton></div>}
+    {book && <><p className="course-connection-status" role="status">{message || (downloaded ? "Downloaded on this device" : `${course.ready_questions} reviewed questions available. Load Course downloads this revision for study.`)}</p>
+      {downloaded?.pendingWeeks && <p role="status">Enrollment is saved on this device and needs an account retry. Load Course again when connected.</p>}
+      <CoursePlan book={book} bank={bank} availableQuestions={course.ready_questions} onBack={onBack} onOpen={onOpen} onCustomize={onCustomize} onLoad={load} />
+    </>}
+  </>;
+}

@@ -11,6 +11,7 @@ Choose one row. Existing feature contracts remain canonical at their established
 | --- | --- | --- |
 | Question import, bank, exams | [Questions](questions.md) | `pages/QuestionWorkspacePage.tsx`, `components/questions/` |
 | Questions with tables, images and equations in order; the import package; the DOCX template | [Question content](question-content.md) | `lib/question-content/`, `fixtures/qbank/` from repository root |
+| Backend course discovery, weekly preview and scoped study | [Academic library](academic-library.md) | `components/tracker/CourseLibrary.tsx`, `lib/academicLibrary/` |
 | The academic bookshelf: course library and question bank library | [Bookshelf](bookshelf.md) | `components/bookshelf/`, `lib/bookshelf/`, `styles/bookshelf.css` |
 | Targets, timers, study accounting | [Productivity](productivity.md) | `pages/ProductivityPage.tsx`, `lib/pomodoro.ts` |
 | Soundscapes, focus media, media pipeline | [Soundscapes](soundscapes.md) | `pages/SoundscapesPage.tsx`, `lib/soundscapes/`, `lib/media/` |

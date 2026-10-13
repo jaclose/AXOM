@@ -102,3 +102,26 @@ export function resetSupabaseForTests(next?: SupabaseClient | null): void {
   client = next;
   loading = undefined;
 }
+
+/** Bind every request in one operation to the original account's token. A
+ * sign-out or account switch can never retarget an in-flight workspace upload. */
+export async function accountOperationClient() {
+  const shared = await loadSupabase();
+  if (!shared) throw new Error("Account storage is not configured.");
+  const { data: { session }, error } = await shared.auth.getSession();
+  if (error || !session) throw new Error("Sign in again to protect this workspace.");
+  const userId = session.user.id;
+  const assertCurrent = async () => {
+    const current = await shared.auth.getSession();
+    if (current.error || current.data.session?.user.id !== userId) throw new Error("The signed-in account changed. This operation was stopped.");
+  };
+  const { createClient } = await import("@supabase/supabase-js");
+  const scoped = createClient(projectUrl()!, publicKey()!, {
+    accessToken: async () => { await assertCurrent(); return session.access_token; },
+    global: { fetch: (input, init) => {
+      const timeout = AbortSignal.timeout(120_000);
+      return fetch(input, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout });
+    } },
+  });
+  return { client: scoped, userId, assertCurrent };
+}

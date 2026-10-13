@@ -7,6 +7,8 @@ import { normalizeTagList } from "./questionTags";
 type Awaitable<T> = T | Promise<T>;
 
 export interface QuestionImportPersistence {
+  /** Optional account-bound adapter guard, checked again after queued work. */
+  assertCurrent?(): void;
   /**
    * Preferred production path: validate and persist the complete reviewed
    * import as one workspace snapshot. The individual CRUD methods remain the
@@ -91,6 +93,7 @@ export async function persistReviewedImport(
   persistence: QuestionImportPersistence,
   plan: ReviewedImportPersistencePlan,
 ): Promise<ReviewedImportPersistenceResult> {
+  persistence.assertCurrent?.();
   if (persistence.commitReviewedImport) {
     return persistence.commitReviewedImport(plan);
   }
@@ -103,7 +106,7 @@ export async function persistReviewedImport(
   try {
     for (const question of plan.questions) {
       attemptedQuestionIds.push(question.id);
-      const result = await awaitDurable(() => persistence.addQuestion(question));
+      const result = await awaitDurable(() => { persistence.assertCurrent?.(); return persistence.addQuestion(question); });
       if (!result.ok || !result.id) {
         throw new ImportWriteError(
           result.errors.slice(0, 2).join(" ") || "AXOM could not persist the reviewed questions.",
@@ -115,22 +118,22 @@ export async function persistReviewedImport(
 
     if (plan.questionSet) {
       setAttempted = true;
-      await awaitDurable(() => persistence.addQuestionSet({
+      await awaitDurable(() => { persistence.assertCurrent?.(); return persistence.addQuestionSet({
         ...plan.questionSet!,
         questionIds: [...savedQuestionIds],
-      }));
+      }); });
     }
 
     const documentWrite = plan.documentWrite;
     if (documentWrite?.kind === "create") {
       documentAttempted = true;
-      await awaitDurable(() => persistence.addDocument(documentWrite.document));
+      await awaitDurable(() => { persistence.assertCurrent?.(); return persistence.addDocument(documentWrite.document); });
     } else if (documentWrite?.kind === "update") {
       documentAttempted = true;
-      await awaitDurable(() => persistence.updateDocument(
+      await awaitDurable(() => { persistence.assertCurrent?.(); return persistence.updateDocument(
         documentWrite.id,
         documentWrite.patch,
-      ));
+      ); });
     }
 
     return {
@@ -145,6 +148,7 @@ export async function persistReviewedImport(
     const rollbackFailures: string[] = [];
     const rollback = async (label: string, operation: () => Awaitable<void>) => {
       try {
+        persistence.assertCurrent?.();
         await awaitDurable(operation);
       } catch {
         rollbackFailures.push(label);
