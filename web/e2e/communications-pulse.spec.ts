@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { test, expect, seedOnboarded } from "./fixtures";
 import { preferences } from "../src/lib/communications/model";
@@ -190,6 +190,60 @@ test("failed deletion stays reviewable and privacy controls remain keyboard reac
   await expect(page.getByText("Sign in again to confirm.", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Confirm account deletion" })).toBeVisible();
   await page.getByRole("button", { name: "Cancel", exact: true }).click(); await expect(page.getByRole("button", { name: "Delete account", exact: true })).toBeVisible();
+});
+
+test("privacy warns about omitted backup media and clears the warning after a complete retry", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await setup(page);
+  await page.goto("/#privacy");
+  await page.evaluate(async () => {
+    const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => { questions: Array<{ id: string } & Record<string, unknown>> }; setState: (patch: object) => void }; useAccount: { setState: (patch: object) => void }; flushVault: () => Promise<void> }> }).__AXOM_DEV__;
+    dev.useAccount.setState({ phase: "signed-in", user: { id: "11111111-1111-4111-8111-111111111111", email: "alex@example.invalid", displayName: "Alex Morgan" }, link: "unlinked" });
+    const questions = dev.useStore.getState().questions;
+    dev.useStore.setState({ questions: [{ ...questions[0], attachments: [{ id: "missing-backup-media", blobKey: "missing-backup-media", fileName: "synthetic.png", mimeType: "image/png", byteSize: 68, altText: "Synthetic fixture", createdAt: "2026-10-13T12:00:00Z", updatedAt: "2026-10-13T12:00:00Z" }] }, ...questions.slice(1)] });
+    await dev.flushVault();
+  });
+  const incompleteDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download local backup", exact: true }).click();
+  const incompletePath = await (await incompleteDownload).path();
+  expect(incompletePath).toBeTruthy();
+  const incomplete = JSON.parse(readFileSync(incompletePath!, "utf8"));
+  expect(incomplete.questions[0].attachments[0].blobKey).toBe("missing-backup-media");
+  await expect(page.getByRole("alert")).toContainText("1 image attachment is missing");
+  await expect(page.getByRole("alert")).toContainText("Keep this device and your original files");
+  await page.getByRole("alert").scrollIntoViewIfNeeded();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: `${out}/privacy-incomplete-backup-390.png`, fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+  await page.getByRole("alert").scrollIntoViewIfNeeded();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: `${out}/privacy-incomplete-backup-1440-dark.png`, fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Delete account", exact: true }).click();
+  await expect(page.getByRole("alert")).toHaveCount(1);
+  await expect(page.getByRole("alert")).toBeVisible();
+  await page.getByRole("button", { name: "Continue without backup" }).click();
+  await expect(page.getByRole("alert")).toHaveCount(1);
+  await expect(page.locator("form").getByRole("alert")).toContainText("1 image attachment is missing");
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.evaluate(async () => {
+    const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => { questions: Array<{ id: string }> } } }> }).__AXOM_DEV__;
+    const modulePath = "/src/lib/questionAttachments.ts";
+    const { putQuestionAttachmentBlob } = await import(/* @vite-ignore */ modulePath);
+    const bytes = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXioAAAAASUVORK5CYII="), char => char.charCodeAt(0));
+    const blob = new Blob([bytes], { type: "image/png" });
+    await putQuestionAttachmentBlob("missing-backup-media", { blob, mimeType: "image/png", byteSize: blob.size, questionId: dev.useStore.getState().questions[0].id, updatedAt: "2026-10-13T12:00:00Z" });
+  });
+  const completeDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download local backup", exact: true }).focus();
+  await page.getByRole("button", { name: "Download local backup", exact: true }).press("Enter");
+  const completePath = await (await completeDownload).path();
+  expect(completePath).toBeTruthy();
+  const complete = readFileSync(completePath!, "utf8");
+  expect(complete).toContain("iVBORw0KGgoAAAANSUhEUg");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: "Local backup downloaded." })).toContainText("Includes 1 image attachment.");
 });
 
 test("public essay uses the published canonical record and recovers from an unavailable link", async ({ page }) => {

@@ -67,6 +67,52 @@ source prompts while keeping the remaining staged whitespace check strict.
 
 ## Verification ledger
 
+### Privacy backup feedback continuation, 2026-10-13
+
+Continues `64be987d`. The existing export API returns `missingBlobKeys`; Privacy
+discarded that result and always reported success. Privacy now reports incomplete
+media explicitly, preserves the warning through both deletion confirmation steps,
+and clears it only after a complete retry. Successful feedback includes the image
+count. Local backup no longer waits on a remote account refresh. The canonical
+backup implementation and separately owned private-library/media files are untouched.
+
+Current verification:
+
+- `npm --prefix web test -- src/lib/backup.test.ts src/lib/questionAttachments.test.ts --maxWorkers=1`: **42 passed, 0 failed**, two files.
+- `npm --prefix web run build`: **PASS**, including TypeScript and Daily Games isolation.
+- Targeted ESLint on `web/src/pages/PrivacyPage.tsx` and `web/e2e/communications-pulse.spec.ts` with `--max-warnings=0`: **PASS**.
+- The communications Playwright command below: **7 passed, 0 failed**.
+- The new regression uses actual IndexedDB and downloaded JSON, with synthetic metadata
+  referencing a missing image. It inspects the incomplete file, checks the warning
+  through deletion preflight, restores real PNG bytes, downloads again and verifies
+  both the embedded bytes and cleared warning. No real deletion or email is requested.
+- A focused extension also passes at 390px light and 1440px dark, including an Enter-key
+  retry, zero horizontal overflow and an inspected warning screenshot.
+- Refreshed artifact integrity and email browser verification: **320 layouts**, **16
+  static fallbacks**, **16 bounded-motion checks**, zero console issues.
+- Refreshed gallery browser verification: **24 local links**, **64 control selections**,
+  **2 video checks**, zero console issues. Artifact browser commands use the documented
+  `AXOM_E2E_SOFTWARE_GRAPHICS=1` prefix.
+- `npm run test:repo`: **43 passed, 0 failed**. `npm run repo:check` and `git diff --check`: **PASS**.
+
+The gallery links the incomplete-backup screenshot. Older 83-test/320-email evidence
+below remains dated to the previous checkpoint rather than being relabeled as a fresh
+logic-suite run. Packaging still requires source-matching gallery browser reports.
+
+Read-only integration preparation used `git merge-tree --write-tree`:
+
+| Target snapshot | Text merge result |
+| --- | --- |
+| `main` at `5355e5e7` | Only `docs/AI_STATE.md` conflicts |
+| Rolling integration at `a7a41073` | Only `docs/AI_STATE.md` conflicts |
+| Academic library at `a039e872` | Only `docs/AI_STATE.md` conflicts |
+
+App, Settings and migration changes did not produce text conflicts. The Settings
+preview retained the newer backup/import behavior and communications links. No branch
+was merged, no owner worktree was written, and the combined runtime was not tested.
+An integration owner must update the state note and validate the chosen combined tree;
+these dated previews are not permission to merge or proof of production compatibility.
+
 ### Strategic checkpoint, 2026-10-13
 
 Continues committed optical revision `3ac16528`; the branch was clean on recovery.

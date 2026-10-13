@@ -20,6 +20,9 @@ This visual revision continues the committed baseline `f936f7a8` on the same bra
 The strategic checkpoint continues the committed optical revision `3ac16528`.
 It repairs escaped email pseudo-element CSS, limits inbox sheen to one short sweep,
 and makes the visual/AI handoff portable with source hashes and repeatable packaging.
+The continuation from `64be987d` repairs Privacy's incomplete-backup feedback. It
+preserves the canonical export API and keeps missing-media warnings through deletion
+confirmation. No backup/media ownership or cloud schema is changed.
 
 Canonical explanation: [Communications and Pulse](features/communications.md).
 Activation: [Resend runbook](operations/communications-resend.md).
@@ -41,12 +44,16 @@ Preserve its store/backup/Settings edits. This branch owns only account-tab link
 Settings and App route/title wiring as shared seams. Check the live external board
 before integration or heavy validation; dated ownership here is not authority elsewhere.
 
-Checkpoint checks: typecheck/targeted lint/build pass; 83 focused tests and six Chrome
+Prior checkpoint checks: typecheck/targeted lint/build pass; 83 focused tests and six Chrome
 journeys pass. Email matrix: 320 layouts/reduced-motion checks, 16 static fallbacks and
 16 bounded-motion checks. Gallery: 23 local links, 64 selections, two video checks.
 Browser consoles are clean. Repo tests: 43 pass; repo:check/integrity/diff check pass.
 Motion and light/dark/mobile evidence and host-contention caveats are in the
 [handoff](operations/communications-ai-handoff.md).
+Backup-feedback continuation: 42 backup/media unit checks and seven communications
+journeys pass, including real missing-blob download/retry; build/type/lint pass.
+Read-only merge previews against main, rolling and academic tips found only AI_STATE
+conflicts. These are text-level previews, not merged runtime acceptance or integration.
 Baseline full quality evidence (2,922 tests, five existing skips) remains explicitly dated
 in that handoff. No full unit-suite rerun was needed for this visual revision. Native,
 actual SMTP/Resend, email-client rendering and live deletion remain unverified.

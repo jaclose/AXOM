@@ -312,6 +312,11 @@ Exports: requested → processing → ready or failed. The private JSON contains
 profile metadata, latest protected workspace, consent/presentation, Pulse records,
 communications history and request history. Device-only source/attachment binaries are
 outside that account export; the existing local backup preserves supported local media.
+Privacy reads the portable backup's actual result. If attachment bytes are unavailable,
+it reports the number of missing images next to the download action and carries that
+warning into both deletion confirmation steps. The metadata-only copy is still saved;
+it is never presented as complete. A successful retry clears the warning and reports
+the included image count. Local backup feedback does not depend on an account refresh.
 A restrictive Storage policy protects the export bucket even if another bucket has a
 broad permissive policy. An existing public export bucket makes migration fail closed.
 Objects are capped at 25 MB, retained seven days and accessed using 15-minute signed links.
