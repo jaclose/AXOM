@@ -2,7 +2,12 @@
 
 The rules both agents (Claude, Codex) and any contributor follow when they add or change UI. It describes what the code already does; when the code and this file disagree, fix one of them in the same change. Older notes: `docs/planning/ux-standards/DESIGN_LANGUAGE.md`.
 
-Brand: unframed metal mark, ΛXOM wordmark, quiet tagline ("Private academic OS"). Canonical reference: `AXOM_Opening_Cinematic_v1/`.
+Brand: the current AXOM Orb (`web/public/icons/axom-orb-512.png`) is the standard
+mark for new and refreshed product surfaces, emails and exports. Use the asset itself,
+with meaningful alt text when it identifies AXOM; never redraw it as a CSS sphere.
+Optical highlights may surround it without altering the mark. Keep the ΛXOM wordmark
+and quiet tagline ("Private academic OS") where appropriate. Existing cinematic metal
+mark reference: `AXOM_Opening_Cinematic_v1/`. This revision does not replace shell assets.
 
 ## 1. Voice
 

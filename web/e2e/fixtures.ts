@@ -12,9 +12,16 @@ export const QUIET_NUDGES: Record<string, string> = {
   "axom.coach.v1": JSON.stringify({ seen: ["overwhelmed"], off: true }),
 };
 
-export const test = base.extend<{ quietNudges: boolean }>({
+export const test = base.extend<{ quietNudges: boolean; appEntry: boolean }>({
   quietNudges: [true, { option: true }],
-  page: async ({ page, quietNudges }, use) => {
+  appEntry: [true, { option: true }],
+  page: async ({ page, quietNudges, appEntry }, use) => {
+    // These are workspace journeys. Public-entry specs use base Playwright or
+    // opt out, while legacy root navigations explicitly select the app URL.
+    if (appEntry) await page.addInitScript(() => {
+      if (location.pathname !== "/" || location.hash || location.search) return;
+      history.replaceState(history.state, "", "/?app=1");
+    });
     if (quietNudges) {
       await page.addInitScript((entries) => {
         try {

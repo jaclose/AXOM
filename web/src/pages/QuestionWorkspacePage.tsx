@@ -501,7 +501,7 @@ export function QuestionWorkspacePage() {
         </div>
         {bankView === "books" ? <QuestionBankLibrary onImport={() => setTab("import")} onCreate={() => setRunner({ mode: "tutor" })}
           onOpenBank={(book, week) => { setBankLocation({ module: book.module, courseId: book.courseId, week }); setBankView("weeks"); }}
-          onPractice={(selection) => { setBankView("weeks"); setBankLocation(selection); setRunner({ mode: "tutor", presetFilters: { setIds: selection.setIds, count: selection.count } }); }} /> :
+          onPractice={(selection) => { setBankView("weeks"); setBankLocation(selection); setRunner({ mode: "tutor", presetFilters: { setIds: selection.setIds, questionIds: selection.questionIds, count: selection.count } }); }} /> :
         <QuestionSetList key={JSON.stringify(bankLocation)} initialScope={bankLocation}
           onRunSet={runSet}
           onRunSets={(sets) => setRunner({ mode: "tutor", presetFilters: { setIds: sets.map((set) => set.id), count: 20 } })}

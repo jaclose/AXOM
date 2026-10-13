@@ -247,3 +247,21 @@ The [doctrine](../../product/AXOM-LEARNING-INTELLIGENCE-DOCTRINE.md) governs [Id
 | I3-53..I3-58 | Daily Word hints, how-to, win card, share, back link, countdowns + streak | VERIFIED | 224d44b, 3843a5f, 6fc14d9 |
 | I3-59 | "Did you get the Doctordle?" | VERIFIED | facfbd0 |
 | I3-51 | Friends leaderboard, nicknames, widget | FUTURE | needs backend + privacy model |
+
+## Communications and Pulse (2026-10-10)
+
+[Ideas 9](IDEAS-9.md) and [Ideas 10](IDEAS-10.md) preserve both prompts verbatim.
+The Pulse naming instruction governs this feature; the later source also requires the
+strict division between AXOM product logic and Resend transport. User authorized full
+implementation and a local commit, leaving operator Resend connection for the next pass.
+All current evidence is local; no item below claims main or production shipment.
+
+| ID | Idea | Status | Where |
+| --- | --- | --- | --- |
+| I9-01 | Canonical consent, delivery pipeline, safe personalization, current Orb and email design system | CODEX | feat/axom-communications-pulse; [feature contract](../../features/communications.md) |
+| I9-02 | Welcome, auth/security, daily learning/games, weekly/monthly reports, exam and inactivity templates | CODEX | shared renderer, canonical reports and exam plan; operator SMTP activation pending |
+| I9-03 | Essays, product/research/marketing, canonical article, admin preview/test/schedule and bounded audiences | CODEX | studio and additive article/campaign tables |
+| I9-04 | Private exports and cancellable account deletion with real receipt states | CODEX | privacy module; destructive live activation requires operator retention validation |
+| I9-05 | AXOM Pulse canonical snapshot, email teaser, cinematic web record and opt-in share export | CODEX | Pulse page and snapshot adapter; available canonical metrics only |
+| I9-06 | Security, idempotency, webhooks, suppression, timezone scheduling, tests and detailed visual handoff | CODEX | focused automated checks and visual gallery; real provider/client acceptance pending |
+| I10-01 | Resend delivery infrastructure and Broadcasts coexist with AXOM consent, editorial and product logic | CODEX | separate Broadcast export path and [activation runbook](../../operations/communications-resend.md) |

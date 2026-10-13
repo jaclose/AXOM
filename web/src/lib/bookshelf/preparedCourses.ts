@@ -47,26 +47,35 @@ export function withPreparedCourses(books: CourseBook[], documents: readonly Sou
       unfiled: plan.items.filter(i => !i.week).length };
   });
 }
-export async function loadPreparedCourse(book: CourseBook, selectedWeeks?: readonly number[], assertCurrent: () => void = () => {}): Promise<SaveOutcome> {
+export async function loadPreparedCourse(
+  book: CourseBook,
+  selectedWeeksOrAssert?: readonly number[] | (() => void),
+  currentGuard: () => void = () => {},
+): Promise<SaveOutcome> {
+  const selectedWeeks = typeof selectedWeeksOrAssert === "function" ? undefined : selectedWeeksOrAssert;
+  const assertCurrent = typeof selectedWeeksOrAssert === "function" ? selectedWeeksOrAssert : currentGuard;
   if (selectedWeeks && !selectedWeeks.some(week => book.weeks.some(entry => entry.week === week))) return { status: "nothing-to-save" };
   if (book.term === "Term unconfirmed") return { status: "failed", message: "Choose the term in Customize Weeks & Activities before loading this template." };
-  const [{ useStore }, vault] = await Promise.all([import("../store"), import("../localVault")]);
-  assertCurrent();
-  const structure = await commitCourseLoad(book, assertCurrent);
-  if (structure.status === "failed") return structure;
-  assertCurrent();
-  const s = useStore.getState();
-  const sections = templatesForBook(s.documents, book).map(t => t.section);
-  if (!sections.length) return structure;
   try {
+    const [{ useStore }, vault] = await Promise.all([import("../store"), import("../localVault")]);
+    assertCurrent();
+    const structure = await commitCourseLoad(book, assertCurrent);
+    if (structure.status === "failed") return structure;
+    assertCurrent();
+    const s = useStore.getState();
+    const sections = templatesForBook(s.documents, book).map(t => t.section);
+    if (!sections.length) return structure;
     const checkpoint = vault.getVaultWriteCheckpoint();
     const plan = planCourseTemplate(sections, { term: book.term });
     const items = selectedWeeks === undefined ? plan.items : plan.items.filter(item => item.week !== undefined && selectedWeeks.includes(item.week));
     const changes = reconcileCourseTemplate({ ...plan, items }, s.tracker);
+    assertCurrent();
     if (changes.create.length) s.bulkAddTrackerItems(changes.create.map(item => ({ path: item.path, label: item.label, kind: item.kind,
       passes: 0, ankiPasses: 0, yield: "none", activity: item.activity, templateKey: item.templateKey, weekSource: item.weekSource })));
     // Existing labels, notes and progress are learner-owned. Version customization is explicit.
-    await vault.flushLocalVaultWrites(); vault.assertVaultWritesSince(checkpoint);
+    await vault.flushLocalVaultWrites();
+    vault.assertVaultWritesSince(checkpoint);
+    assertCurrent();
     return { status: changes.create.length ? "saved-on-device" : "nothing-to-save" };
   } catch (error) { return { status: "failed", message: error instanceof Error ? error.message : "Course could not be saved." }; }
 }

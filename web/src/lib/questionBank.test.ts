@@ -20,6 +20,25 @@ function makeQuestion(patch: Partial<QuestionRecord> = {}): QuestionRecord {
   };
 }
 
+describe("exact published question selection", () => {
+  const selected = makeQuestion({ id: "selected", setId: "shared-set" });
+  const unrelated = makeQuestion({ id: "unrelated", setId: "shared-set" });
+  const sets = [{ id: "shared-set", questionIds: ["selected", "unrelated"] }];
+
+  it("does not broaden a published selection when its canonical set has more questions", () => {
+    const result = buildQuizPool([selected, unrelated],
+      { count: 20, status: "all", setIds: ["shared-set"], questionIds: ["selected"] }, sets);
+    expect(result.map(question => question.id)).toEqual(["selected"]);
+  });
+
+  it("distinguishes an empty explicit selection from an unrestricted local set", () => {
+    expect(buildQuizPool([selected, unrelated],
+      { count: 20, status: "all", setIds: ["shared-set"], questionIds: [] }, sets)).toEqual([]);
+    expect(buildQuizPool([selected, unrelated],
+      { count: 20, status: "all", setIds: ["shared-set"] }, sets)).toHaveLength(2);
+  });
+});
+
 describe("multi-question paste parsing", () => {
   it("splits a numbered set into separate drafts and strips the numbers", () => {
     const drafts = parseQuestionBlocks([

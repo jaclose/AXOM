@@ -1,0 +1,40 @@
+import { CommunicationsBrand } from "../components/communications/CommunicationsBrand";
+import { useOpticalMotion } from "../lib/communications/useOpticalMotion";
+import { useState } from "react";
+import { ArrowUpRight, Download, Mail, ShieldCheck, Trash2 } from "lucide-react";
+import { useStore } from "../lib/store";
+import { exportStateWithAttachments } from "../lib/backup";
+import { GButton } from "../components/ui/primitives";
+import { communicationsRequest, useCommunications } from "../lib/communications/client";
+import "../styles/communications.css";
+
+export function PrivacyPage() {
+  const opticalRoot = useOpticalMotion<HTMLElement>();
+  const remote = useCommunications(); const [step, setStep] = useState<"closed" | "backup" | "confirm">("closed"); const [confirmation, setConfirmation] = useState(""); const [busy, setBusy] = useState(false); const [message, setMessage] = useState("");
+  const [backupResult, setBackupResult] = useState<{ message: string; incomplete: boolean } | null>(null);
+  const perform = async (fn: () => Promise<unknown>, success: string) => { setBusy(true); setMessage(""); try { await fn(); setMessage(success); await remote.reload(); return true; } catch (e) { setMessage(e instanceof Error ? e.message : "The request failed. Your data has not been cleared."); return false; } finally { setBusy(false); } };
+  const backup = async () => {
+    setBusy(true); setMessage(""); setBackupResult(null);
+    try {
+      const { attachmentCount, missingBlobKeys } = await exportStateWithAttachments(useStore.getState());
+      const missing = new Set(missingBlobKeys).size;
+      setBackupResult({ incomplete: missing > 0, message: missing
+        ? `Backup downloaded, but ${missing} image attachment${missing === 1 ? " is" : "s are"} missing. Keep this device and your original files. Restore the missing media and download another backup before relying on this copy.`
+        : `Local backup downloaded.${attachmentCount ? ` Includes ${attachmentCount} image attachment${attachmentCount === 1 ? "" : "s"}.` : ""}` });
+    } catch (error) {
+      setBackupResult({ incomplete: true, message: `Backup could not be downloaded. Your data remains on this device. ${error instanceof Error ? error.message : "Please try again."}` });
+    } finally { setBusy(false); }
+  };
+  const backupNotice = backupResult && <p role={backupResult.incomplete ? "alert" : "status"} className={backupResult.incomplete ? "comms-notice" : undefined}>{backupResult.message}</p>;
+  return <main ref={opticalRoot} className="comms-page privacy-page"><header className="comms-heading comms-glass" data-optical=""><div><CommunicationsBrand label="Privacy & Data" /><h1>Your data stays yours.</h1><p>A clear record of what you keep, download and remove.</p></div><ShieldCheck size={40} strokeWidth={1} /></header><nav className="comms-nav" aria-label="Privacy"><a href="#communications">Email preferences</a><a href="#privacy" aria-current="page">Privacy & Data</a></nav>
+    {remote.error && <p className="comms-notice">{remote.error}</p>}{remote.loading && <p role="status">Loading account controls…</p>}
+    <section className="privacy-block comms-glass"><Download size={24} /><div><p className="comms-kicker">01 / YOUR DATA</p><h2>Take a copy with you.</h2><p>A local backup uses AXOM’s existing portable export, including supported question media. An account export contains the latest protected workspace and account-held communications data.</p><div className="comms-actions"><GButton variant="primary" disabled={busy} onClick={() => void backup()}>Download local backup</GButton><GButton disabled={busy || !remote.data} onClick={() => void perform(() => communicationsRequest("request-export"), "Account export requested. It will appear below when ready.")}>Request account export</GButton></div>{step === "closed" && backupNotice}<small>Original source PDFs and other device-only files are not included in the account export. Private account download links expire after 15 minutes.</small></div></section>
+    <section className="privacy-block comms-glass"><Mail size={24} /><div><p className="comms-kicker">02 / COMMUNICATIONS</p><h2>A quieter inbox, on your terms.</h2><p>Choose each category independently. Essential security and account messages remain available.</p><a href="#communications">Manage communications <ArrowUpRight size={14} /></a></div></section>
+    <section className="privacy-block privacy-danger comms-glass"><Trash2 size={24} /><div><p className="comms-kicker">03 / YOUR ACCOUNT</p><h2>Leave deliberately.</h2><p>Account deletion removes your sign-in and eligible account-held data after a 7-day cancellation period. It does not remotely erase this device. Backup and required security retention may follow separate policies.</p>{remote.data && !remote.data.deletionEnabled && <p className="comms-notice">Account deletion is awaiting operator activation. No request can be scheduled until it is enabled.</p>}
+      {step === "closed" && <GButton disabled={busy || !remote.data?.deletionEnabled} onClick={() => setStep("backup")}>Delete account</GButton>}
+      {step === "backup" && <div className="privacy-confirm"><h3>Would you like a copy first?</h3><p>Download a local backup before continuing.</p>{backupNotice}<div className="comms-actions"><GButton disabled={busy} onClick={() => void backup()}>Download my data</GButton><GButton onClick={() => setStep("confirm")}>Continue without backup</GButton><GButton onClick={() => setStep("closed")}>Cancel</GButton></div></div>}
+      {step === "confirm" && <form className="privacy-confirm" onSubmit={e => { e.preventDefault(); void perform(() => communicationsRequest("request-deletion", { confirmation }), "Deletion scheduled. You can cancel below before processing begins.").then(ok => { if (ok) { setStep("closed"); setConfirmation(""); } }); }}><h3>Confirm account deletion</h3><p>You must have signed in within the last 10 minutes. Optional emails stop while deletion is pending.</p>{backupNotice}<label>Type DELETE MY ACCOUNT<input name="delete-confirmation" autoComplete="off" value={confirmation} onChange={e => setConfirmation(e.target.value)} /></label><div className="comms-actions"><GButton type="submit" disabled={busy || confirmation !== "DELETE MY ACCOUNT"}>Schedule deletion in 7 days</GButton><GButton type="button" onClick={() => setStep("closed")}>Cancel</GButton></div></form>}
+    </div></section><p role="status" className="comms-status">{message}</p>
+    <section className="comms-history"><h2>Your requests</h2><GButton size="sm" disabled={busy || remote.loading} onClick={() => void remote.reload()}>Refresh status</GButton>{!remote.data?.privacy.length ? <p>No account data requests yet.</p> : <ul>{remote.data.privacy.map(request => <li key={request.id}><div><strong>{request.kind === "export" ? "Account export" : "Account deletion"}</strong><small>{request.scheduled_for ? new Date(request.scheduled_for).toLocaleString() : ""}</small></div><span className="comms-state">{request.status}</span>{request.kind === "export" && request.status === "ready" && <button disabled={busy} onClick={() => void perform(async () => { const result = await communicationsRequest<{ url: string }>("export-link", { id: request.id }); const link = document.createElement("a"); link.href = result.url; link.rel = "noreferrer"; link.click(); }, "Private download opened.")}>Download</button>}{request.kind === "deletion" && ["scheduled", "failed"].includes(request.status) && <button disabled={busy} onClick={() => void perform(() => communicationsRequest("cancel-deletion", { id: request.id }), "Deletion cancelled.")}>Cancel deletion</button>}</li>)}</ul>}</section>
+  </main>;
+}

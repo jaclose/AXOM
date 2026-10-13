@@ -260,6 +260,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
           <DataHealthPanel />
         </section>
       )}
+      {tab === "account" && <div className="settings-card"><h3>Communications & privacy</h3><p>Choose your email categories or manage your account data.</p><div className="filter-bar"><a className="gbtn" href="#communications" onClick={onClose}>Notifications & Communications</a><a className="gbtn" href="#privacy" onClick={onClose}>Privacy & Data</a></div></div>}
       {tab === "account" && <section role="tabpanel" id={`${tabsId}-panel-account`} aria-labelledby={`${tabsId}-tab-account`}><AccountSyncPanel /></section>}
 
       {tab === "appearance" && (

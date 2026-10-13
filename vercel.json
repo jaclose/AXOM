@@ -10,6 +10,7 @@
     { "source": "/index.html", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
     { "source": "/assets/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }] }
   ],
+  "redirects": [{ "source": "/pulse/:year", "destination": "/#pulse?year=:year", "permanent": false }],
   "rewrites": [
     { "source": "/api/user/register", "destination": "/api/user?action=register" },
     { "source": "/api/user/pin-login", "destination": "/api/user?action=pin-login" },

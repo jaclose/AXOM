@@ -1,4 +1,5 @@
 import { QuestionContent, QuestionSupportingContent } from "./QuestionContent";
+import { QuestionViewControls, QuestionViewFrame, useQuestionView } from "./QuestionView";
 // ===========================================================================
 // Question block runner (pre-beta §7): Tutor mode (immediate feedback, AI
 // actions, repair cards) and Exam mode (deferred feedback, optional timer,
@@ -125,6 +126,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const restored = useMemo(() => readActiveQuiz(), []);
   // A resumed block keeps the mode it was started in, whichever button reopened it.
   const [mode, setMode] = useState<QuizMode>(restored?.mode ?? initialMode);
+  const presentation = useQuestionView();
   const [stage, setStage] = useState<Stage>(restored || retakeIds?.length ? "running" : "setup");
   /** Identifies this run on every attempt it saves, and becomes its session id. */
   const [runId, setRunId] = useState<string>(() => restored?.runId ?? crypto.randomUUID());
@@ -137,6 +139,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const [choosingSources, setChoosingSources] = useState(false);
   const [wholeBank, setWholeBank] = useState(!presetFilters?.setIds?.length);
   const [setIds, setSetIds] = useState<string[]>(presetFilters?.setIds ?? []);
+  const [questionIds, setQuestionIds] = useState<string[] | undefined>(() => presetFilters?.questionIds ?? restored?.filters.questionIds);
   const [ordered, setOrdered] = useState(presetFilters?.ordered ?? false);
   const [timed, setTimed] = useState(restored?.timed ?? (simulate || presetTimed));
   const [runBlockId, setRunBlockId] = useState(blockId);
@@ -278,14 +281,14 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
 
   useEffect(() => {
     if (stage !== "running" || pool.length === 0) return;
-    const filters: QuizFilters = { count, status, categories: category ? [category] : undefined, examTypes: examType ? [examType] : undefined, setIds: setIds.length ? setIds : undefined, ordered: ordered || undefined };
+    const filters: QuizFilters = { count, status, categories: category ? [category] : undefined, examTypes: examType ? [examType] : undefined, setIds: setIds.length ? setIds : undefined, questionIds, ordered: ordered || undefined };
     // The snapshot keeps the shape it had before the engine: answered or flagged questions, and the pick on screen.
     const at = Date.now();
     const answers = pool.map((item) => answerIn(block, item.id, at)).filter((answer) => answer.answerKey || answer.flagged);
     const snapshot: ActiveQuizSnapshot = { mode, poolIds: pool.map((item) => item.id), index, answers, picked, revealed, startedAt, timed, filters, runId, certainty };
     try { localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify(snapshot)); } catch { /* Local Vault remains authoritative for saved work. */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [block, category, certainties, checked, count, examType, mode, ordered, pool, runId, setIds, stage, startedAt, status, timed]);
+  }, [block, category, certainties, checked, count, examType, mode, ordered, pool, runId, setIds, questionIds, stage, startedAt, status, timed]);
 
   function clearActiveQuiz() {
     try { localStorage.removeItem(STORAGE_KEYS.quizActiveSession); } catch { /* non-fatal */ }
@@ -418,6 +421,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       categories: category ? [category] : undefined,
       examTypes: examType ? [examType] : undefined,
       setIds: setIds.length ? setIds : undefined,
+      questionIds,
       ordered: ordered || undefined,
     };
   }
@@ -842,15 +846,11 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           <GhostButton onClick={() => setChoosingSources((value) => !value)} aria-expanded={choosingSources}>{choosingSources ? "Done choosing" : "Change sources"}</GhostButton>
         </section>
         {choosingSources && <div className="stack gap12">
-          <label className="row gap8"><input type="checkbox" checked={wholeBank} onChange={(event) => { setWholeBank(event.target.checked); setSetIds([]); }} />Use the whole bank</label>
-          <CourseBankBrowser selectedIds={setIds} onSelectionChange={(ids) => { setWholeBank(false); setSetIds(ids); }} />
+          <label className="row gap8"><input type="checkbox" checked={wholeBank} onChange={(event) => { setWholeBank(event.target.checked); setSetIds([]); setQuestionIds(undefined); }} />Use the whole bank</label>
+          <CourseBankBrowser selectedIds={setIds} onSelectionChange={(ids) => { setWholeBank(false); setSetIds(ids); setQuestionIds(undefined); }} />
         </div>}
         <div className="stack gap6"><span className="field-label">How do you want to practice?</span>
-          <div className="row wrap gap8" role="group" aria-label="Block mode">
-            {(["tutor", "exam"] as QuizMode[]).map((value) => <button type="button" key={value} className={`filter-pill ${mode === value ? "on" : ""}`} aria-pressed={mode === value} onClick={() => setMode(value)}>
-              {value === "tutor" ? "Tutor (feedback per question)" : "Exam (feedback at the end)"}
-            </button>)}
-          </div>
+          <QuestionViewControls view={presentation.view} onChange={presentation.choose} notice={presentation.notice} mode={mode} onModeChange={setMode} />
         </div>
         <div className="stack gap6"><span className="field-label">How many questions?</span>
           <div className="block-count-row" role="group" aria-label="Question count">
@@ -1166,6 +1166,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       <div className="quiz-progress" aria-hidden="true">
         <span className="quiz-progress-fill" style={{ width: `${Math.round(((index + (revealed ? 1 : 0)) / pool.length) * 100)}%` }} />
       </div>
+      <QuestionViewControls view={presentation.view} onChange={presentation.choose} notice={presentation.notice} mode={mode} />
       <main className={`tutor-workspace-shell ${activePanel ? "panel-open" : ""}`} aria-label="Tutor question workspace">
       <section className="tutor-question-region" aria-labelledby="tutor-question-heading">
       <h2 id="tutor-question-heading" className="sr-only">Question {index + 1} of {pool.length}</h2>
@@ -1185,8 +1186,9 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       </div>
 
       <div className="quiz-reading" style={{ "--quiz-reading-scale": readingScale } as CSSProperties}>
+        <QuestionViewFrame view={presentation.view}>
         <div aria-label={question.content ? "Question stem" : undefined} tabIndex={question.content ? -1 : undefined} ref={question.content ? stemRef : undefined}>
-        <QuestionContent question={question} part="stem" fallback={
+        <QuestionContent question={question} part="stem" mode={revealed ? "answered" : "question"} fallback={
           <AnnotatedQuestionText
           text={question.stem}
           annotations={stemAnnotations}
@@ -1216,7 +1218,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
                   disabled={revealed}
                   onClick={() => act({ type: "pick", key: opt.key })}>
                   <span className="mono option-key">{opt.key}</span>
-                  <span className="option-text"><QuestionContent question={question} part="choice" choice={opt.key} fallback={opt.text} /></span>
+                  <span className="option-text"><QuestionContent question={question} part="choice" choice={opt.key} mode={revealed ? "answered" : "question"} fallback={opt.text} /></span>
                 </button>
                 {/* Once revealed: a tick on the right answer, a cross on a wrong pick. Never a tick on the pick itself. */}
                 {showCorrect ? <span className="option-result ok" role="img" aria-label="Correct answer"><Check size={ICON_SIZE.emphasis} /></span>
@@ -1235,6 +1237,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           })}
         </div>
 
+        </QuestionViewFrame>
         {!(mode === "tutor" && revealed) && (
           <div className="quiz-certainty" role="group" aria-label="How sure are you?">
             <span className="field-label">How sure are you? Optional (press 1–3)</span>

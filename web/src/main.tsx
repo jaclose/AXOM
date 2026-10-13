@@ -14,6 +14,7 @@ import { storeHydration } from "./lib/storeHydration";
 import { startStartupIntro } from "./lib/startupIntro";
 import { endPresentation, revealApp } from "./lib/presentation";
 import { AppErrorBoundary } from "./components/shell/AppErrorBoundary";
+import { shouldOpenAccount } from "./lib/landing/entry";
 import "./styles/global.css";
 import "./styles/components.css";
 import "./styles/shell.css";
@@ -62,7 +63,10 @@ installChunkRecovery();
 
 // Pure decoration: migrations and hydration run in parallel and never await
 // media. The player releases inputs on skip, failure, or its hard deadline.
-const startupIntro = startStartupIntro();
+const accountEntryRequested = shouldOpenAccount(new URL(location.href));
+const startupIntro = accountEntryRequested
+  ? { playing: false, dismiss() {} }
+  : startStartupIntro();
 // Without a film, the workspace still settles in quietly as it first renders.
 if (!startupIntro.playing) revealApp("open");
 
@@ -83,12 +87,13 @@ async function bootstrap() {
   // daily-rollover writers, or tour/Promise initializers against the seed.
   await storeHydration.wait();
   rootElement.removeAttribute("role");
+  const AccountEntry = accountEntryRequested ? (await import("./components/landing/AccountEntry")).default : null;
   const analyticsEnabled = import.meta.env.PROD && (
     location.hostname.endsWith(".vercel.app") || import.meta.env.VITE_ENABLE_ANALYTICS === "true"
   );
   createRoot(rootElement).render(
     <StrictMode>
-      <AppErrorBoundary><App startupStatus={startupStatus} /></AppErrorBoundary>
+      <AppErrorBoundary>{AccountEntry ? <AccountEntry /> : <App startupStatus={startupStatus} />}</AppErrorBoundary>
       {analyticsEnabled && (
         <>
           <Analytics />
