@@ -58,4 +58,31 @@ describe("saved block review", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: "Practice 1 missed" }));
     expect(onPractice).toHaveBeenCalledWith(["q1"]);
   });
+
+  it("keeps embedded original pages out of Questions and shows one copy in Slides", async () => {
+    state.questions = [{
+      ...question,
+      content: {
+        id: "q1",
+        source: { filename: "source.pdf", page: 1, questionNumber: 1 },
+        stem: [
+          { type: "text", text: question.stem },
+          { type: "image", assetId: "page-1", role: "source_page", alt: "Original source slide" },
+        ],
+        choices: question.options.map((option) => ({
+          id: `q1-${option.key.toLowerCase()}`,
+          label: option.key,
+          blocks: [{ type: "text", text: option.text }],
+        })),
+        correctAnswer: { labels: ["B"] },
+        assets: [{ id: "page-1", filename: "page-1.png", mimeType: "image/png", role: "source_page", questionId: "q1" }],
+        provenance: { method: "authored" },
+      },
+    }];
+    const user = userEvent.setup();
+    render(<SessionReviewModal session={session} onClose={() => {}} onPractice={() => {}} />);
+    expect(document.querySelectorAll('[data-asset-role="source_page"]')).toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: "Slides" }));
+    expect(document.querySelectorAll('[data-asset-role="source_page"]')).toHaveLength(1);
+  });
 });

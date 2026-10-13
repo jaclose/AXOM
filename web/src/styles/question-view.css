@@ -1,0 +1,24 @@
+.question-view-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-block: 8px 20px; }
+.question-view-switch, .question-mode-switch { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid var(--hairline); border-radius: var(--radius-sm); background: var(--surface-1); }
+.question-view-controls button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 40px; padding: 8px 13px; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text-70); font: inherit; cursor: pointer; transition: color .18s ease-out, background .18s ease-out; }
+.question-view-controls button[aria-pressed="true"] { background: var(--surface-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--hairline); }
+.question-view-controls button:not(:disabled):hover { color: var(--text); background: var(--surface-2); }
+.question-view-controls button:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: 3px; }
+.question-mode-switch button:disabled { cursor: default; opacity: 1; }
+.question-mode-switch button[aria-pressed="true"] { color: var(--gold); }
+.question-mode-note { color: var(--text-60); font-size: var(--fs-small, 12px); }
+.quiz-player-body > .question-view-controls { position: sticky; top: 0; z-index: 5; padding-block: 8px; background: var(--surface-1); border-bottom: 1px solid var(--hairline); }
+.question-view-frame { min-width: 0; }
+.question-view-slide { padding: clamp(16px, 3vw, 36px); border: 1px solid var(--hairline); border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--shadow-card); }
+.question-slide-label { margin: 0 0 18px; font: 11px var(--font-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--text-60); }
+.question-view-slide .question-stem, .question-view-slide > div > .qcontent-blocks { font-size: clamp(17px, 1.5vw, 22px); line-height: 1.65; }
+.question-view-slide .qcontent-image { margin-inline: auto; }
+.question-view-slide .tutor-answer-options { margin-top: 24px; }
+.question-view-slide .source-page-preview canvas { width: 100%; height: auto; }
+@media (max-width: 560px) {
+  .question-view-controls { gap: 8px; }
+  .question-view-controls button { min-height: 44px; padding-inline: 10px; }
+  .question-mode-note { flex-basis: 100%; }
+  .question-view-slide { padding: 14px; }
+}
+@media (prefers-reduced-motion: reduce) { .question-view-controls button { transition: none; } }

@@ -74,13 +74,13 @@ export function SessionReviewModal({ session, onClose, onPractice }: {
           </div>
           <QuestionViewFrame view={presentation.view}>
           {presentation.view === "slides" && <QuestionReviewSlides question={question} source={source} />}
-          <QuestionContent question={question} part="stem" mode="review" fallback={<p className="question-stem">{question.stem}</p>} />
+          <QuestionContent question={question} part="stem" mode="question" fallback={<p className="question-stem">{question.stem}</p>} />
           <QuestionSupportingContent question={question} mode="question" />
           {!question.content && <QuestionExhibits attachments={(question.attachments ?? []).filter((entry) => entry.role === "exhibit")} />}
           <ol className="session-review-options" aria-label="Answer choices">
             {question.options.map((option) => <li key={option.key} className={ready && option.key === question.correctKey ? "is-correct" : ""}>
               <b>{option.key}</b>
-              <QuestionContent question={question} part="choice" choice={option.key} mode="review" fallback={<span>{option.text}</span>} />
+              <QuestionContent question={question} part="choice" choice={option.key} mode="question" fallback={<span>{option.text}</span>} />
               <span className="sub">{[ready && option.key === question.correctKey && "Current key", answer?.answerKey === option.key && "Your answer"].filter(Boolean).join(" · ")}</span>
             </li>)}
           </ol>
