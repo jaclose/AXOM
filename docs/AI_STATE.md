@@ -66,7 +66,16 @@ the wire adapter alone does not deliver the lightweight academic architecture.
 Preserve learner overlays and stable IDs through the existing importer. No second
 question/progress/recovery engine. Preserve
 legacy backup compatibility and private edits. Complete two-device/offline acceptance,
-remaining source-backed courses, sharing and leaderboard before claiming canonical 1.1.
+remaining source-backed courses and hosted activation before claiming canonical 1.1.
+
+Daily challenges now pass two-account local acceptance: fixed reviewed 25-question
+pool through ExamRunner, server-scored first attempts, ties, repeat prevention and
+opt-out. Each learner retains 25 independent attempts. Scoring requests measured
+223 JSON bytes each. The migration is local only; interrupted daily-score submission
+and automatic daily publication remain limitations described in the feature contract.
+JD requested ready branches merge to main. The concurrent consolidation owner has
+integrated prior academic/QBank/Communications/Cinematic checkpoints locally; this
+stream will hand off its final daily commit without racing that owner.
 
 Normal `www.axom.info` was reverified read-only as deployment
 `dpl_6fg8rJYXk2tSfJWvNALwL7gN38TF`, source `c23e8c26`. AXOM Production remains

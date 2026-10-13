@@ -76,8 +76,51 @@ Credentials and source files remain outside Git; tests never delete existing use
 **Still incomplete:** downloaded academic records remain in the legacy workspace
 snapshot. Revision-bound per-answer changes are implemented, but new-device recovery
 still hydrates private source objects. Shared-content exclusion, cross-device learner
-overlays, migration of existing libraries, bounded offline cache, real leaderboards,
+overlays, migration of existing libraries, bounded offline cache, hosted daily challenges,
 remaining supplied courses and release/package acceptance are not delivered. The
 private-recovery handoff is a supporting layer, not a substitute
 for this missing account/content separation. Never report this checkpoint as completion
 of canonical 1.1 or as a production deployment.
+
+
+## Verified daily challenges
+
+The additive `20261013200000_daily_academic_challenges.sql` migration adds a fixed,
+reviewed collection revision per UTC day. The administrative `publishDailyChallenge`
+adapter reads hash-verified backend files through the existing package parser and
+readiness gate. It excludes generated/uncertain questions and incomplete images.
+Only the service role can publish; normal clients cannot submit pools or score totals.
+No scheduled publisher or production pool has been activated yet.
+
+Learners explicitly choose an alias and opt in for that day's module. The existing
+ExamRunner supplies the exact versioned pool. Completed canonical quiz sessions are
+saved locally before sending individual answer events. The server checks collection
+access, participation, day, pool membership and answer key. One correct unassisted
+first challenge answer earns one point; a canonical bank/question identity can earn
+points only once across challenges. Assisted or incorrect first answers consume that
+opportunity. Equal points share a rank. This is not a claim of first-ever practice or
+exam proctoring: ordinary/offline practice is outside the competitive event stream.
+
+Standings expose only aliases and aggregate scores, limited to 100 rows plus the
+learner's own rank. Answer tables and answer-key pools have no client grants. Course
+withdrawal/private visibility revokes standings access, and opt-out remains available
+without deleting personal work. The UI refreshes each minute and after verification.
+
+The first release requires an online challenge completion. Unconfirmed or offline
+answers remain personal; they are not promoted automatically into verified standings.
+Leaving/reloading during submission can leave a partial daily score. Persistent
+challenge resumption and an explicit retry queue remain outstanding. Replaying an
+acknowledged event is idempotent; changing an event's contents is rejected.
+
+Local acceptance on 2026-10-13: two synthetic accounts each completed the same real
+25-question FTM1 image-rich pool, independently saved 25 canonical attempts, received
+four points and rank one, and exercised retries, repeat prevention, opt-out and reload.
+Chrome desktop, 390px, short windows, both themes, reduced motion, keyboard and 200%
+CSS zoom passed without captured browser errors/warnings. Individual scoring request
+JSON bodies were exactly 223 bytes (25 requests, 5,575 bytes for the first learner),
+excluding protocol headers. These are local-loopback measurements, not cloud latency.
+
+Reproduce the fixture with `challengeFixture.local.test.ts` using the local backend
+and pilot variables above plus `AXOM_CHALLENGE_FIXTURE` pointing outside the repo.
+Then run `daily-challenge.local.spec.ts` with that fixture and `AXOM_E2E_BASE_URL`.
+The fixture holds test credentials and is written with mode 0600. Never commit it.

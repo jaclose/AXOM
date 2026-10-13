@@ -1,0 +1,17 @@
+.daily-board { border-top: 2px solid var(--gold); }
+.daily-board-controls { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; margin-block: 16px; }
+.daily-board-controls label { display: grid; gap: 6px; flex: 1 1 220px; max-width: 420px; min-width: 0; }
+.daily-board-controls :is(select,input) { min-height: 44px; width: 100%; padding: 8px 12px; color: var(--text); font: inherit; background: var(--surface-1); border: 1px solid var(--hairline); border-radius: var(--radius-sm); }
+.daily-board :is(select,input):focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+.daily-board-standings { margin-top: 24px; overflow-x: auto; }
+.daily-board-standings h3 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.daily-board-standings h3 span { margin-left: auto; color: var(--text-70); font-size: 12px; font-weight: 400; }
+.daily-board table { width: 100%; border-collapse: collapse; text-align: left; font-variant-numeric: tabular-nums; }
+.daily-board :is(th,td) { padding: 12px 8px; border-bottom: 1px solid var(--hairline); overflow-wrap: anywhere; }
+.daily-board td { font-family: var(--font-mono); }
+.daily-board-you { background: var(--gold-soft); }
+.daily-board .gbtn { min-height: 44px; }
+@media(max-width:560px) { .daily-board :is(th,td) { padding: 10px 5px; font-size: 12px; } }
+
+.daily-board :is(.sub,.panel-sub) { color: var(--text-70); max-width: 70ch; }
+.daily-board > .panel-head .panel-title { font-size: clamp(18px, 2vw, 24px); }
