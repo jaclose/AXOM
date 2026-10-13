@@ -1,16 +1,25 @@
 // @vitest-environment node
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { indexedDB, IDBKeyRange } from "fake-indexeddb";
 import { createClient } from "@supabase/supabase-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeSeed } from "../seed";
-import { canonicalJson, sha256 } from "../compressedText";
+import { workspaceDigest } from "./workspaceDigest";
+import { canonicalJson, compressText, sha256 } from "../compressedText";
 import { putQuestionAttachmentBlob } from "../questionAttachments";
 import { snapshotWorkspace } from "./workspaceSnapshot";
 import { prepareCloudSnapshot, decodeCloudSnapshot } from "./cloudSnapshot";
 import { clearCloudContentCache, hydrateCloudContent, uploadCloudContent } from "./cloudContent";
 import { uploadCloudMedia, validateWorkspaceMedia } from "./cloudMedia";
+import { SupabaseSyncTransport } from "./supabaseTransport";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+const operation = vi.hoisted(() => ({ client: null as SupabaseClient | null, userId: "" }));
+// Only the app's session lookup is supplied by the harness. Every data request
+// still reaches real local Auth/REST/Storage under that account's actual JWT.
+vi.mock("../account/supabase", () => ({ loadSupabase: async () => operation.client,
+  accountOperationClient: async () => ({ ...operation, assertCurrent: async () => {} }) }));
 
 const statusFile = process.env.AXOM_LOCAL_SUPABASE_STATUS;
 afterEach(() => vi.unstubAllGlobals());
@@ -44,7 +53,9 @@ describe.skipIf(!statusFile)("recovery against local Supabase Auth, REST and Sto
     await uploadCloudContent(a.client, a.id, envelope.contentObjects!, [], guard);
     const media = await uploadCloudMedia(a.client, a.id, state, guard);
     const payload = { ...envelope.packed!, media };
-    const args = { p_base_revision: 0, p_schema_version: state.schemaVersion, p_content_hash: envelope.contentHash, p_snapshot_payload: payload, p_device_id: envelope.deviceId, p_idempotency_key: envelope.idempotencyKey, p_reason: "manual" };
+    const legacyHash = await sha256(new TextEncoder().encode(canonicalJson(state)));
+    const legacy = { ...payload, _axomHashFormat: undefined, _axomDeltaFormat: undefined, content: await compressText(payload.content) };
+    const args = { p_base_revision: 0, p_schema_version: state.schemaVersion, p_content_hash: legacyHash, p_snapshot_payload: legacy, p_device_id: envelope.deviceId, p_idempotency_key: envelope.idempotencyKey, p_reason: "manual" };
     expect((await b.client.rpc("push_workspace_revision_v2", args)).error).not.toBeNull();
     const accepted = await a.client.rpc("push_workspace_revision_v2", args);
     expect(accepted.error).toBeNull(); expect(accepted.data).toMatchObject({ status: "accepted", revision: 1 });
@@ -60,7 +71,7 @@ describe.skipIf(!statusFile)("recovery against local Supabase Auth, REST and Sto
     expect(saved.error).toBeNull(); clearCloudContentCache();
     const decoded = await decodeCloudSnapshot(saved.data!.snapshot_payload);
     const restored = await hydrateCloudContent(a.client, a.id, decoded.payload, decoded.sources, guard);
-    expect(await sha256(new TextEncoder().encode(canonicalJson(restored)))).toBe(envelope.contentHash);
+    expect((await workspaceDigest(restored)).hash).toBe(envelope.contentHash);
     expect(restored.questions[0].notes).toBe("Personal note"); validateWorkspaceMedia(restored, decoded.media);
     const restoredImage = await a.client.storage.from("workspace-media").download(`${a.id}/${media[0].hash}`);
     expect(restoredImage.error).toBeNull(); expect(await restoredImage.data!.arrayBuffer()).toEqual(await image.arrayBuffer());
@@ -70,5 +81,26 @@ describe.skipIf(!statusFile)("recovery against local Supabase Auth, REST and Sto
     expect(await uploadCloudMedia(a.client, a.id, state, guard, media)).toEqual(media);
     console.info(JSON.stringify({ environment: url.origin, checkpointBytes: new TextEncoder().encode(JSON.stringify(payload)).length,
       sourceBytes: envelope.contentObjects!.reduce((sum, object) => sum + object.reference.byteSize, 0), mediaBytes: image.size }));
+    operation.client = a.client; operation.userId = a.id;
+    const transport = new SupabaseSyncTransport();
+    expect((await transport.revision(accepted.data.revision_id)).payload).toEqual(state);
+    const first = await transport.push({ ...envelope, baseRevision: 1, idempotencyKey: randomUUID() });
+    expect(first.status).toBe("accepted");
+    if (first.status !== "accepted") throw new Error("Expected initial protected version.");
+    const answered = { ...state, questions: [{ ...state.questions[0], userAnswerKey: "A", notes: "Updated personal note" }] };
+    const answer = await snapshotWorkspace(answered, { accountUserId: a.id, deviceId: envelope.deviceId, baseRevision: first.revision, reason: "automatic" });
+    const synced = await transport.push(answer);
+    expect(synced.status).toBe("accepted"); expect(synced.transferBytes).toBeLessThan(900);
+    if (synced.status !== "accepted") throw new Error("Expected saved answer.");
+    expect(await transport.push(answer)).toMatchObject({ status: "accepted", revision: synced.revision, idempotent: true });
+    const downloaded = await transport.revision(synced.revisionId);
+    expect(downloaded.payload.questions[0].notes).toBe("Updated personal note");
+    expect(downloaded.payload.documents[0].rawText).toBe(state.documents[0].rawText);
+    expect(downloaded.contentHash).toBe(answer.contentHash);
+    console.info(JSON.stringify({ environment: url.origin, initialSaveBytes: first.transferBytes, oneAnswerSaveBytes: synced.transferBytes }));
+    if (process.env.AXOM_SYNC_EVIDENCE) writeFileSync(process.env.AXOM_SYNC_EVIDENCE, JSON.stringify({ environment: url.origin,
+      initialSaveBytes: first.transferBytes, oneAnswerSaveBytes: synced.transferBytes,
+      sourceBytes: envelope.contentObjects!.reduce((sum, object) => sum + object.reference.byteSize, 0), imageBytes: image.size,
+      result: "real legacy compressed restore, incremental transfer, tenant denial, retry and exact recovery passed" }, null, 2));
   }, 120_000);
 });

@@ -24,7 +24,9 @@ local native Supabase stack (CLI 2.120.0, API `127.0.0.1:55321`). Real synthetic
 Auth/REST/Storage isolation, immutable media, reviewer-gated sharing and retries pass.
 A real browser signs in, uploads privately, previews the backend plan, downloads
 Week 2, reloads and starts its exact 11-question quiz. Source-rich local study also
-passes through answering, Decode review and reload with 11 attempts.
+passes through answering, Decode review and reload with 11 attempts. The real
+backend journey now also restores those same attempts in a clean second browser
+context. Private recovery integration `1942a77f` and ZIP fix `a039e872` are pushed.
 
 ## Validation and protected work
 
@@ -47,9 +49,20 @@ communications, cinematic and integration work remains protected by the live boa
 
 ## Next boundary
 
-Downloaded content still enters the legacy workspace snapshot: lightweight per-answer
-sync and cross-device learner overlays are NOT delivered. Implement the academic-reference projection and incremental
-learner adapter without copying shared content into private recovery objects. Preserve
+The incremental wire adapter uses exact acknowledged bases and the existing atomic
+revision writer; immutable record digests avoid reserializing source text on each
+answer. Local service acceptance measured 22,405 bytes for the initial checkpoint
+and 525 bytes for one answer. The real FTM1 browser measured 66,420 bytes initially
+and 10,857 bytes for its completed 11-answer quiz. SQL boundary and retry tests pass.
+Read-only local export measurement: 48,326,029 JSON bytes, 2,841,685-byte compact
+reference checkpoint; initial digest 1,201.77 ms, one-note edit 0.573 ms / 88-byte
+delta, exact round trip. Single-run Node 22 observations; no private export upload.
+
+Downloaded academic sources still enter private recovery and sign-in recovery still
+hydrates that source graph. Complete shared-content exclusion and on-demand restore;
+the wire adapter alone does not deliver the lightweight academic architecture.
+Preserve learner overlays and stable IDs through the existing importer. No second
+question/progress/recovery engine. Preserve
 legacy backup compatibility and private edits. Complete two-device/offline acceptance,
 remaining source-backed courses, sharing and leaderboard before claiming canonical 1.1.
 

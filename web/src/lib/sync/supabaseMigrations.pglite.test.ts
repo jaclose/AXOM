@@ -62,6 +62,7 @@ async function canExecute(db: PGlite, role: string, signature: string) {
 }
 
 const PRIVILEGED = [
+  "public.push_workspace_delta_v2(bigint,text,integer,text,jsonb,uuid,uuid,text)",
   "public.push_workspace_revision_v2(bigint,integer,text,jsonb,uuid,uuid,text)",
   "public.push_workspace_revision(bigint,integer,text,jsonb,uuid,uuid,text)",
   "public.create_question_set_share(text,jsonb)",
@@ -321,6 +322,39 @@ describe("Supabase migrations on real Postgres", () => {
     expect(Number((await db.query<{ n: number }>("select count(*)::int as n from public.workspace_revisions where user_id=$1", [A])).rows[0].n)).toBe(2);
     await db.close();
   }, 60_000);
+  it("applies bounded changes only to the exact owner base, retaining retries and conflicts", async () => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
+    try {
+      await db.query("insert into auth.users(id,email) values ($1,'a@x.com'),($2,'b@x.com')", [A, B]);
+      const content = JSON.stringify({ questions: [{ id: "q1", attempts: [], notes: "" }, { id: "q2", attempts: [] }], profile: { name: "A" } });
+      const snapshot = { _axomCloudFormat: 2, _axomDeltaFormat: 1, content, expandedBytes: new TextEncoder().encode(content).length, media: [], sources: [] };
+      await as(db, "authenticated", A, "select public.push_workspace_revision_v2(0,34,$1,$2,'33333333-3333-4333-8333-333333333333','44444444-4444-4444-8444-444444444444')", [HASH, snapshot]);
+      const call = (user: string, key: string, changes: unknown[], baseHash = HASH) => as(db, "authenticated", user,
+        "select public.push_workspace_delta_v2(1,$1,34,$2,$3,'33333333-3333-4333-8333-333333333333',$4,'automatic') as r", [baseHash, "b".repeat(64), changes, key]);
+      const key = "55555555-5555-4555-8555-555555555555";
+      const changes = [{ op: "append", path: ["workspace", "questions", "0", "attempts"], value: [{ id: "attempt-1", key: "A" }] },
+        { op: "set", path: ["workspace", "questions", "0", "notes"], value: "Private note" },
+        { op: "remove", path: ["workspace", "questions", "1"] }];
+      await expect(call(B, key, changes)).rejects.toMatchObject({ code: "PT428" });
+      await expect(call(A, key, changes, "c".repeat(64))).rejects.toMatchObject({ code: "PT428" });
+      for (const change of [
+        { op: "set", path: [], value: {} }, { op: "set", path: ["unknown"], value: {} },
+        { op: "set", path: ["workspace", "questions", "99"], value: {} },
+        { op: "set", path: ["workspace", "missing", "nested"], value: {} },
+        { op: "append", path: ["workspace", "profile"], value: [] },
+        { op: "remove", path: ["workspace"] },
+      ]) await expect(call(A, key, [change])).rejects.toMatchObject({ code: "PT400" });
+      await expect(call(A, key, Array.from({ length: 1001 }, () => changes[1]))).rejects.toMatchObject({ code: "PT413" });
+      expect((await call(A, key, changes)).rows[0].r).toMatchObject({ status: "accepted", revision: 2 });
+      expect((await call(A, key, changes)).rows[0].r).toMatchObject({ status: "accepted", revision: 2, idempotent: true, content_hash: "b".repeat(64) });
+      const saved = (await as(db, "authenticated", A, "select snapshot_payload from public.workspace_revisions where revision=2")).rows[0].snapshot_payload as { content: string; expandedBytes: number };
+      expect(JSON.parse(saved.content)).toEqual({ questions: [{ id: "q1", attempts: [{ id: "attempt-1", key: "A" }], notes: "Private note" }], profile: { name: "A" } });
+      expect(saved.expandedBytes).toBe(new TextEncoder().encode(saved.content).length);
+      expect((await call(A, "66666666-6666-4666-8666-666666666666", changes)).rows[0].r).toMatchObject({ status: "conflict", server_revision: 2 });
+      expect((await call(A, "66666666-6666-4666-8666-666666666666", changes)).rows[0].r).toMatchObject({ status: "conflict", server_revision: 2 });
+    } finally { await db.close(); }
+  }, 60_000);
+
   it("protects v2 files by owner, refuses incomplete revisions, and preserves atomic retries", async () => {
     const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
     try {

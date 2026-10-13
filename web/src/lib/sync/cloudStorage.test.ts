@@ -2,7 +2,8 @@
 import { indexedDB, IDBKeyRange } from "fake-indexeddb";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { canonicalJson, compressText, decompressText, sha256 } from "../compressedText";
+import { compressText, decompressText } from "../compressedText";
+import { workspaceDigest } from "./workspaceDigest";
 import { makeSeed } from "../seed";
 import { getQuestionAttachmentBlob, putQuestionAttachmentBlob } from "../questionAttachments";
 import { snapshotWorkspace } from "./workspaceSnapshot";
@@ -55,7 +56,7 @@ describe("private cloud content and media", () => {
     expect(decoded.payload.documents[0].rawText).toBeUndefined();
     const restored = await hydrateCloudContent(client, "account-a", decoded.payload, decoded.sources, guard);
     expect(restored).toEqual(state);
-    expect(await sha256(new TextEncoder().encode(canonicalJson(restored)))).toBe(envelope.contentHash);
+    expect((await workspaceDigest(restored)).hash).toBe(envelope.contentHash);
     const count = upload.mock.calls.length;
     const changed = { ...state, questions: [{ ...state.questions[0], userAnswerKey: "A", notes: "A new private note" }] };
     const split = await splitCloudContent(changed);

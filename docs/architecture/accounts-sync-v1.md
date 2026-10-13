@@ -93,3 +93,40 @@ Auth/REST/Storage, denies cross-account access and overwrite, and proves idempot
 revision acknowledgement. It never resets users or storage. Keep status files and
 credentials outside Git. This recovery test does not establish incremental academic
 sync or production readiness.
+
+## Incremental transfer adapter
+
+After a full acknowledged version, `push_workspace_delta_v2` sends bounded field
+changes against that exact revision and content hash. It reconstructs the candidate
+inside Postgres and calls the existing v2 writer, preserving its object authorization,
+atomic revision lock, idempotency, conflict copies and retention. Arrays are indexed
+only against an immutable base. Stale bases remain conflicts; unavailable bases or
+an older backend use the same-key full transfer. Empty server responses are failures.
+
+The acknowledged compact baseline is an optional per-account IndexedDB cache with
+an integrity checksum; pending work remains in the existing durable workspace and
+sync metadata. Losing the cache causes a full transfer, never loss of unsynced edits.
+Unchanged source/media references no longer require a full manifest download for
+each answer. New checkpoints use plain compact JSON tagged `_axomDeltaFormat: 1`;
+legacy compressed checkpoints remain readable. Server storage still retains bounded
+whole compact revisions; this adapter alone does not deliver paged attempt history.
+
+`_axomHashFormat: 1` selects a deterministic tree digest and exact canonical JSON byte
+count. Immutable Zustand records reuse cached hashes, so answering one question does
+not stringify all source text. Legacy checkpoint hashes retain their original SHA-256
+verification. Full portable backups are unchanged. Older clients cannot verify the
+new tree hash and need the compatible client for restoring these new checkpoints.
+
+The design uses the existing [Supabase database function boundary](https://supabase.com/docs/guides/database/functions).
+PowerSync's SQLite sync integration was considered during the research checkpoint;
+introducing another local database would require replacing AXOM's established vault,
+import queue and recovery semantics. The adapter keeps those contracts in place.
+
+This is an intermediate boundary: academic sources still enter private recovery,
+and new-device recovery still hydrates that private graph. Academic references,
+on-demand content restore, paged learner history and fully independent shared banks
+remain required before lightweight account delivery is complete.
+
+Explicit protection/retry attempts reach the endpoint even if the OS reports offline;
+automatic attempts retain offline queuing. The [browser connectivity signal](https://developer.mozilla.org/en-US/docs/Web/API/Navigator/onLine)
+is a hint, not proof that a configured endpoint is unreachable.

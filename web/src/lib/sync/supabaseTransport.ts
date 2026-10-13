@@ -1,4 +1,7 @@
 import { saveCloudMediaIndex } from "./cloudMediaCache";
+import { readSyncBaseline, saveSyncBaseline } from "./syncBaseline";
+import { workspaceDelta } from "./workspaceDelta";
+import { workspaceDigest } from "./workspaceDigest";
 import { uploadCloudContent, hydrateCloudContent, readContentReferences } from "./cloudContent";
 import { canonicalJson, sha256 } from "../compressedText";
 import { prepareCloudSnapshot, decodeCloudSnapshot } from "./cloudSnapshot";
@@ -36,30 +39,57 @@ export class SupabaseSyncTransport implements SyncTransport {
     const { client, userId, assertCurrent } = await accountOperationClient();
     if (!envelope.accountUserId || userId !== envelope.accountUserId) throw new Error("The workspace is linked to a different account. Upload was stopped.");
     if (!envelope.packed) envelope = await this.prepare(envelope);
-    const { data: previous, error: previousError } = await client.from("workspace_revisions")
-      .select("media:snapshot_payload->media,sources:snapshot_payload->sources").neq("reason", "conflict").order("revision", { ascending: false }).limit(1).maybeSingle();
-    if (previousError) throw previousError;
+    const baseline = await readSyncBaseline(userId, envelope.baseRevision);
+    let previous: { media?: unknown; sources?: unknown } | null | undefined = baseline?.packed;
+    if (!previous) {
+      const result = await client.from("workspace_revisions")
+        .select("media:snapshot_payload->media,sources:snapshot_payload->sources").neq("reason", "conflict").order("revision", { ascending: false }).limit(1).maybeSingle();
+      if (result.error) throw result.error;
+      previous = result.data;
+    }
     await uploadCloudContent(client, userId, envelope.contentObjects ?? [], previous?.sources ? readContentReferences(previous.sources) : [], assertCurrent);
     const media = await uploadCloudMedia(client, userId, envelope.payload, assertCurrent, previous?.media ? readMediaManifest(previous.media) : []);
     const payload = { ...envelope.packed!, media };
     if (new TextEncoder().encode(JSON.stringify(payload)).length > MAX_SNAPSHOT_BYTES) throw new SyncPushError({ kind: "rejected", rejection: "too-large", status: 0 }, "This compressed workspace exceeds the account limit.");
     await assertCurrent();
-    const request = client.rpc("push_workspace_revision_v2", {
+    const changes = baseline && baseline.packed._axomHashFormat === payload._axomHashFormat ? workspaceDelta(baseline.packed, payload) : undefined;
+    const deltaBytes = changes ? new TextEncoder().encode(JSON.stringify(changes)).length : Infinity;
+    const useDelta = changes && changes.length <= 1000 && deltaBytes < Math.min(1_000_000, envelope.payloadBytes);
+    const common = {
       p_base_revision: envelope.baseRevision,
       p_schema_version: envelope.schemaVersion,
       p_content_hash: envelope.contentHash,
-      p_snapshot_payload: payload,
       p_device_id: envelope.deviceId,
       p_idempotency_key: envelope.idempotencyKey,
       p_reason: envelope.reason,
-    });
-    const signal = timeoutSignal(pushTimeout(envelope.payloadBytes));
-    const { data, error, status } = await (signal && typeof request.abortSignal === "function" ? request.abortSignal(signal) : request);
+    };
+    let requestBytes = 0;
+    const send = async (delta: boolean) => {
+      const args = delta ? { ...common, p_base_hash: baseline!.contentHash, p_changes: changes! } : { ...common, p_snapshot_payload: payload };
+      requestBytes += new TextEncoder().encode(JSON.stringify(args)).length;
+      const request = client.rpc(delta ? "push_workspace_delta_v2" : "push_workspace_revision_v2", args);
+      const signal = timeoutSignal(pushTimeout(requestBytes));
+      return signal && typeof request.abortSignal === "function" ? request.abortSignal(signal) : request;
+    };
+    let response = await send(Boolean(useDelta));
+    if (useDelta && ["PT428", "PGRST202"].includes(response.error?.code ?? "")) {
+      // An evicted/corrupt cache or an older backend cannot invalidate local
+      // work. The same key takes the existing, fully validated snapshot path.
+      await assertCurrent();
+      response = await send(false);
+    }
+    const { data, error, status } = response;
     if (error) throw new SyncPushError(classifyPushFailure(error, status ?? 0), error.message);
     await assertCurrent();
     const result = readPushResult(data, status ?? 200);
-    if (result.status === "accepted") await saveCloudMediaIndex(userId, media);
-    return result;
+    if (result.status === "accepted") {
+      await saveCloudMediaIndex(userId, media);
+      if (!result.idempotent || result.contentHash === envelope.contentHash) {
+        await assertCurrent();
+        await saveSyncBaseline(userId, { revision: result.revision, contentHash: envelope.contentHash, packed: payload });
+      }
+    }
+    return { ...result, transferBytes: requestBytes };
   }
 
   /** Full revisions (with payload). Prefer summaries() for lists. */
@@ -105,7 +135,9 @@ export class SupabaseSyncTransport implements SyncTransport {
     const revision = await mapRevision(data);
     if (revision.sources) {
       revision.payload = await hydrateCloudContent(client, userId, revision.payload, revision.sources, assertCurrent);
-      if (await sha256(new TextEncoder().encode(canonicalJson(revision.payload))) !== revision.contentHash) {
+      const hash = revision.hashFormat === 1 ? (await workspaceDigest(revision.payload)).hash
+        : await sha256(new TextEncoder().encode(canonicalJson(revision.payload)));
+      if (hash !== revision.contentHash) {
         throw new Error("The reconstructed account workspace failed its integrity check.");
       }
     }
@@ -224,6 +256,7 @@ async function mapRevision(row: Record<string, unknown>): Promise<ProtectedRevis
     payload: decoded.payload,
     media: decoded.media,
     sources: decoded.sources,
+    hashFormat: decoded.hashFormat,
     reason: String(row.reason),
     createdAt: String(row.created_at),
   };

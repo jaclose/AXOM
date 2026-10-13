@@ -45,6 +45,16 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("SyncCoordinator", () => {
+  it("lets an explicit retry reach the backend despite an offline OS hint", async () => {
+    Object.defineProperty(navigator, "onLine", { value: false, configurable: true });
+    const push = vi.fn<SyncTransport["push"]>().mockResolvedValue(accepted(1));
+    const c = new SyncCoordinator({ push, history: async () => [], revision: vi.fn() }, makeSeed, 0);
+    c.queue(); await c.flush();
+    expect(push).not.toHaveBeenCalled(); expect(c.currentStatus()).toBe("offline");
+    await c.flush("manual");
+    expect(push).toHaveBeenCalledTimes(1); expect(c.currentStatus()).toBe("protected"); c.dispose();
+  });
+
   it("uploads edits made while an earlier request is in flight", async () => {
     let state = makeSeed();
     const push = vi.fn<SyncTransport["push"]>().mockImplementation(async () => {

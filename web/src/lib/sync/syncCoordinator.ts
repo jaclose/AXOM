@@ -93,7 +93,9 @@ export class SyncCoordinator {
         return;
       }
     }
-    if (!navigator.onLine) {
+    // The OS connectivity hint can be false while the account endpoint is
+    // reachable (VPN/LAN/local backend). An explicit retry must actually try.
+    if (!navigator.onLine && automatic) {
       this.set("offline");
       return;
     }
@@ -222,6 +224,7 @@ export class SyncCoordinator {
         write({ ...read(), sentIdempotencyKey: envelope.idempotencyKey });
         const result = await this.transport.push(envelope);
         if (this.disposed || read().accountUserId !== this.accountUserId) return;
+        if (result.transferBytes !== undefined) write({ ...read(), lastTransferBytes: result.transferBytes });
         if (result.status === "conflict") {
           write({
             ...read(),

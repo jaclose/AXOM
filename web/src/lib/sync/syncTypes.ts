@@ -57,6 +57,8 @@ export interface SyncMetadata {
   /** When the last upload started (ISO), and how large its snapshot was. */
   lastAttemptAt?: string;
   lastPayloadBytes?: number;
+  /** Actual JSON request bytes for the latest acknowledged save (not blobs). */
+  lastTransferBytes?: number;
   /** The idempotency key of the last upload that was actually sent. */
   sentIdempotencyKey?: string;
 }
@@ -78,11 +80,11 @@ export interface SnapshotEnvelope {
   reason: RevisionReason;
 }
 
-export type PushResult =
+export type PushResult = { transferBytes?: number } & (
   /** `contentHash` is what the account stored; on a replayed retry it can differ from what was just sent. */
   | { status: "accepted"; revision: number; revisionId: string; idempotent: boolean; contentHash?: string }
   /** `preservedRevisionId` is absent when the account already holds its limit of conflict copies. */
-  | { status: "conflict"; serverRevision: number; preservedRevisionId?: string };
+  | { status: "conflict"; serverRevision: number; preservedRevisionId?: string });
 
 export interface ProtectedRevision {
   id: string;
@@ -93,11 +95,12 @@ export interface ProtectedRevision {
   reason: string;
   media?: CloudMediaReference[];
   sources?: ContentReference[];
+  hashFormat?: 1;
   createdAt: string;
 }
 
 /** Revision metadata without the (large) payload, for history lists. */
-export type RevisionSummary = Omit<ProtectedRevision, "payload" | "media" | "sources">;
+export type RevisionSummary = Omit<ProtectedRevision, "payload" | "media" | "sources" | "hashFormat">;
 
 export interface AccountDevice {
   deviceId: string;
