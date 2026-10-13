@@ -46,3 +46,9 @@ Analysis uses the integrated Course Engine, and source analysis follows the
 [Decode contract](decode.md). The older a33a01e prototype remains preserved and has been
 ported by intent; nothing more is taken from it.
 Check the registry and do not create parallel question-attempt or assignment stores.
+
+## Communications and Pulse
+
+[Communications](communications.md) owns email consent, shared templates, queues,
+editorial publishing, privacy requests and the canonical Pulse snapshot/web experience.
+Provider activation is routed to the [Resend runbook](../operations/communications-resend.md).

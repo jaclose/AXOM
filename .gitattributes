@@ -10,3 +10,7 @@
 
 # Preserve the original trailing space in this hash-protected historical snapshot.
 docs/archive/2026-10-05-context-migration/docs/architecture/LIFECYCLE.md whitespace=-blank-at-eol
+
+# Keep Markdown hard-break spaces in the two verbatim user source prompts.
+docs/directions/01-ideas/IDEAS-9.md whitespace=-blank-at-eol
+docs/directions/01-ideas/IDEAS-10.md whitespace=-blank-at-eol
