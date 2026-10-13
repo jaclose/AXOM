@@ -160,6 +160,7 @@ test("personal standings use real logs, separate partial weeks and survive reloa
   await page.getByRole("button", { name: "Logged cards", exact: true }).click();
   await expect(standings.getByRole("listitem")).toHaveCount(2);
   await expect(standings.locator(".lb-rank")).toHaveText(["1", "1"]);
-  await expect(page.getByText("Study with friends", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Daily challenge", exact: true })).toBeVisible();
+  await expect(page.getByText("Sign in to see approved challenges and shared daily standings.", { exact: true })).toBeVisible();
   expect(errors).toEqual([]);
 });

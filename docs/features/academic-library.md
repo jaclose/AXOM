@@ -11,6 +11,13 @@ tracker reconciliation and preserves completed work, notes, personal labels and 
 Quiz navigation passes an exact set of canonical local question IDs to the existing
 question workspace. An empty scope cannot expand into all questions.
 
+QBank discovery uses this same paginated account catalog and opens this same weekly
+plan. The permission-checked `academic_course` lookup resolves an exact deep link
+independently of the first 24 catalog rows. A refresh failure preserves visible
+same-account metadata; failed or unauthorized lookups never replace local content.
+The earlier `cloudLibrary` publisher/reader remains preserved compatibility code,
+with no active product entry point. Do not activate two competing academic stores.
+
 Templates distinguish academic term, cohort, source revision and calendar dates.
 Explicit week policy leaves unresolved activities unassigned. Reviewed complete plans
 take precedence over inferred legacy lists; older source versions remain available.
@@ -28,6 +35,20 @@ group/shared visibility; another account can read only approved revisions. Revie
 membership and group membership require administrative authorization. Withdrawal
 revokes metadata and media access together. Previously approved revisions remain
 readable during review of a replacement while the collection remains shared.
+
+The additive `20261013220000_content_storage_boundaries.sql` migration also uses
+restrictive Storage policies. PostgreSQL combines ordinary policies with OR, so an
+unrelated broad object policy must not open academic or private recovery files.
+Academic reads still require a visible file manifest; uploads require an owned,
+registered revision in progress. Academic objects are immutable to learners.
+`workspace-content` and `workspace-media` remain restricted to the authenticated
+owner's UUID/hash path, with updates forbidden. The regression suite deliberately
+adds a permissive all-object policy and verifies that these boundaries still hold,
+including anonymous access and another account's reads and writes.
+
+The legacy catalog's Storage policy names are distinct from the academic-content
+policies, so both preserved migration histories replay without collisions. Legacy
+catalog data is not copied into, or silently adopted by, the active collection.
 
 Upload identities are stable per account and prepared collection. A retry verifies
 existing object bytes before accepting a lost response, and requires server

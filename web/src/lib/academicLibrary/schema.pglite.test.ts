@@ -24,9 +24,12 @@ beforeAll(async () => {
     create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text,name text,metadata jsonb,unique(bucket_id,name));
     alter table storage.objects enable row level security;
     grant usage on schema storage to anon,authenticated,service_role;
-    grant all on storage.objects to authenticated,service_role;
+    grant all on storage.objects to anon,authenticated,service_role;
+    create policy fixture_broad_access on storage.objects for all to anon,authenticated using(true) with check(true);
   `);
   await db.exec(readFileSync(new URL("../../../../supabase/migrations/20261011190000_academic_library.sql", import.meta.url), "utf8"));
+  await db.exec(readFileSync(new URL("../../../../supabase/migrations/20261013210000_academic_course_lookup.sql", import.meta.url), "utf8"));
+  await db.exec(readFileSync(new URL("../../../../supabase/migrations/20261013220000_content_storage_boundaries.sql", import.meta.url), "utf8"));
 }, 30_000);
 afterAll(async () => db?.close());
 async function as<T>(user: string, sql: string, params: unknown[] = []) {
@@ -47,6 +50,7 @@ describe("academic catalog authorization and publication", () => {
   it("requires explicit grants as well as row policies, including object access", async () => {
     const c = await create();
     expect(await as(B, "select id from public.academic_collections")).toEqual([]);
+    expect(await as(B, "select public.academic_course($1) value", [c.collection_id])).toEqual([{ value: null }]);
     expect(await as(B, "select * from public.academic_revisions")).toEqual([]);
     expect(await as(B, "select * from public.academic_files")).toEqual([]);
     await expect(as(B, "insert into storage.objects(bucket_id,name) values('academic-content',$1)", [`${c.collection_id}/${H}`])).rejects.toThrow(/row-level security/);
@@ -77,6 +81,7 @@ describe("academic catalog authorization and publication", () => {
     const [page] = await as<{ value: Array<Record<string, unknown>> }>(B, "select public.academic_catalog() value");
     expect(page.value.find(row => row.id === c.collection_id)).toMatchObject({ module: "SAMPLE", owned: false });
     expect(JSON.stringify(page)).not.toContain("owner_id");
+    expect(await as(B, "select public.academic_course($1) value", [c.collection_id])).toEqual([{ value: page.value.find(row => row.id === c.collection_id) }]);
     expect(await as(B, "select name from storage.objects where name=$1", [`${c.collection_id}/${H}`])).toHaveLength(1);
     await as(A, "select public.academic_enroll($1,$2,array[2,1,1])", [c.collection_id,c.revision_id]);
     await as(B, "select public.academic_enroll($1,$2,array[1])", [c.collection_id,c.revision_id]);
@@ -106,4 +111,21 @@ describe("academic catalog authorization and publication", () => {
     await as(A, "select public.academic_finish_revision($1)", [c.revision_id]);
     expect(await as(A, "select current_revision_id from public.academic_collections where id=$1", [c.collection_id])).toEqual([{ current_revision_id: next.value.revision_id }]);
   });
+});
+
+
+it("keeps account recovery private and immutable despite an unrelated broad Storage policy", async () => {
+  await db.exec("insert into storage.buckets(id,name) values('workspace-content','workspace-content'),('unrelated-public','unrelated-public')");
+  await as(A, "insert into storage.objects(bucket_id,name) values('workspace-content',$1)", [`${A}/${H}`]);
+  expect(await as(B,"select name from storage.objects where bucket_id='workspace-content'")).toEqual([]);
+  await expect(as(B,"insert into storage.objects(bucket_id,name) values('workspace-content',$1)", [`${A}/${"b".repeat(64)}`])).rejects.toThrow(/row-level security/);
+  expect(await as(A,"update storage.objects set metadata='{}' where bucket_id='workspace-content' returning name")).toEqual([]);
+  expect(await as(B,"delete from storage.objects where bucket_id='workspace-content' returning name")).toEqual([]);
+  await db.exec("select set_config('request.jwt.claim.sub','',false); set role anon;");
+  try {
+    expect((await db.query("select name from storage.objects where bucket_id in ('workspace-content','academic-content')")).rows).toEqual([]);
+    await db.exec("insert into storage.objects(bucket_id,name) values('unrelated-public','public-example')");
+    expect((await db.query("select name from storage.objects where bucket_id='unrelated-public'")).rows).toEqual([{ name:"public-example" }]);
+  } finally { await db.exec("reset role;"); }
+  expect(await as(A,"delete from storage.objects where bucket_id='workspace-content' returning name")).toEqual([{ name:`${A}/${H}` }]);
 });

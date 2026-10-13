@@ -45,6 +45,16 @@ export async function listAcademicCourses(search = "", term = "", afterId?: stri
   const client = await academicClient();
   const { data, error } = await client.rpc("academic_catalog", { search, term_filter: term, after_id: afterId ?? null });
   if (error) throw new Error("The academic collection could not be loaded. Your downloaded courses are unchanged.");
+  return readAcademicCourses(data);
+}
+export async function getAcademicCourse(collection: string, accountId: string): Promise<AcademicCourse> {
+  const { data, error } = await (await academicClient(accountId)).rpc("academic_course", { collection });
+  if (error || !data) throw new Error("This course is unavailable to this account. Your saved material is unchanged.");
+  const course = readAcademicCourses([data])[0];
+  if (course.id !== collection) throw new Error("The course identity did not match this link.");
+  return course;
+}
+function readAcademicCourses(data: unknown): AcademicCourse[] {
   if (!Array.isArray(data) || data.length > 24 || data.some(row => !row || !uuid(row.id) || !uuid(row.current_revision_id)
     || ![row.title, row.module, row.term].every(value => typeof value === "string" && value.length > 0 && value.length <= 180)
     || typeof row.owned !== "boolean" || !counts(row) || !["private", "group", "shared"].includes(row.visibility)

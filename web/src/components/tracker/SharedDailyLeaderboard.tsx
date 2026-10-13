@@ -6,13 +6,14 @@ import { STORAGE_KEYS } from "../../lib/brand";
 import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
 import { challengeStandings, joinChallenge, listDailyChallenges, matchChallengeQuestions, type DailyChallenge, type DailyStandings } from "../../lib/academicLibrary/challenges";
 import { observeChallengeRun } from "../../lib/academicLibrary/challengeRun";
+import { openAcademicCourse } from "../../lib/academicLibrary/navigation";
 import { ExamRunner } from "../questions/ExamRunner";
 import { GButton, GlassCard, PanelHeader } from "../ui/primitives";
 import "../../styles/daily-leaderboard.css";
 
 export function SharedDailyLeaderboard() {
   const accountId = useAccount(state => state.user?.id);
-  return accountId ? <DailyBoard key={accountId} accountId={accountId} /> : <GlassCard pad><PanelHeader title="Daily challenge" sub="Sign in to see approved challenges and shared daily standings." /></GlassCard>;
+  return accountId ? <DailyBoard key={accountId} accountId={accountId} /> : <GlassCard pad><PanelHeader headingLevel={2} title="Daily challenge" sub="Sign in to see approved challenges and shared daily standings." /></GlassCard>;
 }
 interface Run { challenge: DailyChallenge; questionIds: string[]; keys: Array<[string,string]>; startedAt: string }
 function DailyBoard({ accountId }: { accountId: string }) {
@@ -79,12 +80,10 @@ function DailyBoard({ accountId }: { accountId: string }) {
   }
   function openCourse() {
     if (!challenge) return;
-    const url=new URL(location.href); url.searchParams.set("course-library","1"); url.searchParams.set("course",`remote:${challenge.collectionId}`); url.hash="tracker";
-    url.hash=location.hash;
-    history.replaceState(null,"",url); location.hash="tracker";
+    openAcademicCourse(challenge.collectionId);
   }
   return <GlassCard pad className="daily-board">
-    <PanelHeader title="Daily challenge" sub="The same reviewed questions. Independent answers. Real shared standings."
+    <PanelHeader headingLevel={2} title="Daily challenge" sub="The same reviewed questions. Independent answers. Real shared standings."
       action={<GButton onClick={() => setRefresh(value => value+1)} disabled={loading || busy}><RefreshCw size={16} /> Refresh</GButton>} />
     {loading && !challenges.length && <p role="status">Loading today’s challenges…</p>}
     {!loading && !challenges.length && !error && <p>No approved challenge is scheduled for your courses today. Your personal practice remains available below.</p>}

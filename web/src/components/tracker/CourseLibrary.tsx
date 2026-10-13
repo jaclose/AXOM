@@ -15,6 +15,7 @@ import { useAcademicCatalog } from "../../lib/academicLibrary/useAcademicCatalog
 import { ICON_SIZE } from "../../lib/iconSize";
 import "../../styles/course-library.css";
 import { AcademicCourseUpload } from "./AcademicCourseUpload";
+import { getAcademicCourse, type AcademicCourse } from "../../lib/academicLibrary/client";
 
 export function CourseLibrary({ onClose, onTemplate, onOpen, onCreate }: {
   onClose: () => void; onTemplate: (book?: CourseBook) => void;
@@ -28,6 +29,20 @@ export function CourseLibrary({ onClose, onTemplate, onOpen, onCreate }: {
   const { courses: connected, loading: catalogLoading, error: catalogError, more: moreAvailable,
     loadMore: more, retry: retryCatalog } = useAcademicCatalog(accountId, query, term);
   const [selected, setSelected] = useState<string | null>(() => new URL(window.location.href).searchParams.get("course"));
+  const [linkedCourse, setLinkedCourse] = useState<{ accountId: string; course: AcademicCourse }>();
+  const [linkedError, setLinkedError] = useState("");
+  const remoteId = selected?.startsWith("remote:") ? selected.slice(7) : undefined;
+  const listedCourse = connected.find(course => course.id === remoteId);
+  useEffect(() => {
+    let cancelled = false;
+    setLinkedCourse(undefined); setLinkedError("");
+    if (accountId && remoteId && !listedCourse) {
+      void getAcademicCourse(remoteId, accountId).then(course => {
+        if (!cancelled) setLinkedCourse({ accountId, course });
+      }).catch(cause => { if (!cancelled) setLinkedError(cause instanceof Error ? cause.message : "This course could not be opened."); });
+    }
+    return () => { cancelled = true; };
+  }, [accountId, remoteId, listedCourse]);
   const heading = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -48,9 +63,10 @@ export function CourseLibrary({ onClose, onTemplate, onOpen, onCreate }: {
     && (!term || book.term === term) && (view === "all" || (view === "mine" ? mine(book) : available(book)))
     && `${book.title} ${book.courseName ?? ""} ${book.courseCode ?? ""}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   const chosen = books.find(book => book.id === selected);
-  const connectedChosen = connected.find(course => `remote:${course.id}` === selected);
+  const connectedChosen = listedCourse ?? (linkedCourse && linkedCourse.accountId === accountId && linkedCourse.course.id === remoteId ? linkedCourse.course : undefined);
   const connectedShown = connected.filter(course => view !== "mine" || s.documents.some(document => document.id === `academic-${course.current_revision_id}`));
   return <div className="course-library-page" ref={heading}>
+    {remoteId && !connectedChosen && <div><GButton onClick={() => setSelected(null)}>All courses</GButton><p role={linkedError ? "alert" : "status"}>{linkedError || (accountId ? "Opening your course…" : "Sign in to open this course.")}</p></div>}
     {connectedChosen ? <ConnectedCoursePlan key={`${accountId}:${connectedChosen.current_revision_id}`} course={connectedChosen} onBack={() => setSelected(null)} onOpen={onOpen} onCustomize={onTemplate} onSharingSaved={retryCatalog} /> : chosen ? <CoursePlan key={chosen.id} book={chosen} bank={bankFor(chosen)} onBack={() => setSelected(null)} onOpen={onOpen} onCustomize={onTemplate} /> : <>
       <header className="course-library-heading"><div><p className="course-eyebrow">Academic collection</p><h1 tabIndex={-1}>Course Library</h1><p>Find your course. See the weeks ahead. Study what matters now.</p></div><GButton onClick={onClose}><ArrowLeft size={ICON_SIZE.body} /> My Courses</GButton></header>
       <div className="course-library-tools">

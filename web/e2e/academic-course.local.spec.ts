@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures";
+import { test, expect, waitForWorkspace } from "./fixtures";
 import { completeSetup } from "../scripts/setup-flow.mjs";
 import type { NoctyriumState } from "../src/lib/types";
 
@@ -13,11 +13,14 @@ test("reviewed FTM1 plan loads selected weeks and opens its image-rich quiz", as
   page.on("console", message => { if (["error", "warning"].includes(message.type())) errors.push(message.text()); });
   await page.goto("/#questions");
   await completeSetup(page, "Course acceptance");
-  const read = () => page.evaluate(async () => {
+  const read = async () => {
+    await waitForWorkspace(page);
+    return page.evaluate(async () => {
     const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => NoctyriumState }; flushVault: () => Promise<void> }> }).__AXOM_DEV__;
     await dev.flushVault(); const s = dev.useStore.getState();
     return { questions: s.questions, tracker: s.tracker, sets: s.questionSets };
-  });
+    });
+  };
   await read();
   await page.goto("/#questions");
   const promise = page.getByRole("dialog", { name: "A promise to yourself" });
@@ -26,6 +29,7 @@ test("reviewed FTM1 plan loads selected weeks and opens its image-rich quiz", as
   if (await done.isVisible()) await done.click();
   const later = page.getByRole("button", { name: "Later", exact: true });
   if (await later.isVisible()) await later.click();
+  await page.getByText("Local collection transfer and source review", { exact: true }).click();
   const chooser = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "Install prepared library", exact: true }).click();
   await (await chooser).setFiles(bundle!);

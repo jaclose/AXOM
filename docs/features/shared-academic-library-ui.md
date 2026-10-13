@@ -5,6 +5,13 @@ authority: canonical
 ---
 # Shared academic library interface
 
+**Compatibility history, 2026-10-13:** this earlier catalog implementation is
+preserved for review and existing adapter tests. Active QBank and Course Library
+entry points now use the single [academic collection](academic-library.md), including
+its review, upload, group access and enrollment contracts. Do not independently
+activate this older publisher as a second product library. The implementation and
+validation notes below describe its earlier branch checkpoint.
+
 The product catalog is shared cloud content, not a learner's workspace backup.
 Course Library and Question Bank both mount `components/bookshelf/CloudAcademicLibrary`.
 The account-aware hook discovers permitted published release metadata; selected

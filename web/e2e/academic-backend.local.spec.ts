@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
-import { completeSetup, deferPromisePrompt, expect, test } from "./fixtures";
+import { completeSetup, deferPromisePrompt, expect, test, waitForWorkspace } from "./fixtures";
 import type { NoctyriumState } from "../src/lib/types";
 import type { Page } from "@playwright/test";
 
@@ -46,7 +46,9 @@ test("real sign-in, private course, scoped study and cross-device recovery", asy
   await (await chooser).setFiles(pilot!);
   await page.getByRole("button", { name: "Save private course", exact: true }).click();
   await expect(page.getByText("Private course saved. Open it from Available courses.", { exact: true })).toBeVisible();
-  await page.locator(".course-card").filter({ hasText: "Your upload" }).click();
+  const collection = await page.locator(".course-card").filter({ hasText: "Your upload" }).getAttribute("data-course-id");
+  await page.goto("/#questions");
+  await page.getByRole("region", { name: "Available question banks" }).locator(`[data-course-id="${collection}"]`).click();
   await expect(page.getByRole("region", { name: "FTM 1 course plan" })).toBeVisible();
   await expect(page.getByText("75", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Clear selection", exact: true }).click();
@@ -83,11 +85,14 @@ test("real sign-in, private course, scoped study and cross-device recovery", asy
   await page.getByRole("button", { name: "Finish block", exact: true }).click();
   await page.getByRole("button", { name: "Review answers and Decode", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Review saved block", exact: true })).toBeVisible();
-  const progress = (target: Page) => target.evaluate(async () => {
+  const progress = async (target: Page) => {
+    await waitForWorkspace(target);
+    return target.evaluate(async () => {
     const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => NoctyriumState }; useAccount: { getState: () => { protection: string } }; flushVault: () => Promise<void> }> }).__AXOM_DEV__;
     await dev.flushVault(); const state = dev.useStore.getState();
     return { questions: state.questions.length, attempts: state.questions.flatMap(q => q.attempts.map(attempt => ({ questionId: q.id, ...attempt }))).sort((a,b) => a.questionId.localeCompare(b.questionId)), protection: dev.useAccount.getState().protection };
-  });
+    });
+  };
   await expect.poll(async () => (await progress(page)).attempts.length).toBe(11);
   await expect.poll(() => writes.filter(write => write.endpoint.endsWith("push_workspace_delta_v2")).length, { timeout: 30_000 }).toBeGreaterThan(0);
   await expect.poll(async () => (await progress(page)).protection, { timeout: 30_000 }).toBe("protected");

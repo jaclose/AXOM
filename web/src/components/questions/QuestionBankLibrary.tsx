@@ -9,7 +9,7 @@ import { AcademicLibrary } from "../bookshelf/AcademicLibrary";
 import { QuestionBankBookContent } from "../bookshelf/BookContents";
 import { knownBankManifests } from "../../lib/question-content/knownBanks";
 import { PreparedLibrary } from "../bookshelf/PreparedLibrary";
-import { CloudAcademicLibrary } from "../bookshelf/CloudAcademicLibrary";
+import { AcademicBankDiscovery } from "../bookshelf/AcademicBankDiscovery";
 
 const packages: KnownPackage[] = knownBankManifests.map((manifest) => ({ manifest, hasSource: false }));
 export function QuestionBankLibrary({ onPractice, onOpenBank, onImport, onCreate }: {
@@ -23,7 +23,7 @@ export function QuestionBankLibrary({ onPractice, onOpenBank, onImport, onCreate
     sets: s.questionSets ?? [], questions: s.questions ?? [], packages, curricula: CURRICULA, sourceOf: bankSource })),
   [s.terms, s.courses, s.questionSets, s.questions]);
   return <>
-    <CloudAcademicLibrary mode="questions" onPractice={onPractice} />
+    <AcademicBankDiscovery />
     <AcademicLibrary title="Your saved and custom sets" subtitle="Continue downloaded practice, mix saved sets, or add your own material."
       onChooseFile={onImport} onCreate={onCreate} createHint="Build a reusable practice block from your saved questions."
       browse={<AcademicBookshelf label="Question bank library" shelves={shelves}
