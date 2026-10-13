@@ -55,8 +55,9 @@ The actual supplied 516,431,732-byte backup now passes Settings restore and relo
 an isolated persistent browser profile with hosted traffic blocked. Notes/progress,
 343 questions, 848 documents and all 2,151 image hashes match. Detailed timings and
 local migrations are in the feature contract. Native packaging, hosted staging and
-production acceptance remain outstanding. The clean Vercel-filtered install/build passes for `0c38e23e`; its 270-file web
-distribution is 53,981,760 bytes (uncompressed, before this documentation-only merge).
+production acceptance remain outstanding. The clean Vercel-filtered install/build passes for `0c38e23e`. The inspected source
+build at `eca6ac3b` contains 270 distribution files totaling 53,981,760 uncompressed
+bytes; this measures the web output, not a signed native installer.
 Exact final deployment-input validation and local-main promotion are recorded on the
 coordination board/ledger.
 
