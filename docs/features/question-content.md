@@ -454,3 +454,44 @@ inside that isolated profile, then checks that installation preserves its questi
 attempts and tracker records. It never writes the learner's browser profile directly.
 Collections exceeding the existing account snapshot limit are identified as device-local
 in the library; a portable backup and the separate private collection remain necessary.
+
+## Questions and Slides presentation
+
+The standard QBank player exposes Questions | Slides beside Tutor | Exam in setup
+and throughout a run. Mode is fixed once the run starts; presentation can change
+without replacing the question DOM, engine, question IDs, picks, strikeouts, flags,
+annotations or attempts. The device remembers presentation separately from learner
+data. A blocked preference write keeps the current view usable and reports that it
+could not be remembered.
+
+Slides is a reading layout for canonical question text, tables and figures, labelled
+"Study slide". It does not fabricate an original slide. Existing role checks still
+hide answer/explanation imagery before reveal, and hold whole source-page assets
+until review. A finished block's saved review offers the same switch and draws the
+original PDF page through SourcePagePreview when its source record/page is known.
+Missing originals have the existing attach-original recovery; revisiting either view
+never scores again. Other exam simulation skins retain their existing renderers.
+
+## Read-only private corpus audit
+
+From `web/`, run `node scripts/audit-private-library.mjs <collection> <inventory.json>
+<new-private-report.json>`. The report destination must be outside this repository,
+public assets and the source collection. It is created with private permissions and
+never overwritten. This uses the original inventory, SHA-256 checks of original and
+portable bytes, package readers, assessBank and media hashes. It never changes the
+collection, approves keys, imports learner data or publishes content.
+
+The audit separates reported and revalidated readiness, exact duplicates, missing/LFS
+originals, package errors, literal term/module/week evidence and prepared assignments.
+Quiz numbers are never weeks. Ranges and conflicting evidence remain unassigned;
+week basis remains unconfirmed because the old inventory does not encode it.
+Private source paths exist only in the local report. Aggregate counts are not proof
+of complete T1–T5 mapping, content rights or hosted publication.
+
+Local audit 2026-10-11: 651 source entries, 28 templates, 645 matching originals, six
+missing/LFS originals, zero changed originals; 362 ready questions and 11,599 held
+extraction candidates; 23 duplicate links. No audited package/image integrity errors.
+560 entries require mapping review. 39 prepared week assignments differ from literal
+inventory evidence, including explicit known-bank assignments that require separate
+interpretation. No source or learner data was changed. The full private report stays
+outside Git. Complete source-authoritative T1–T5 coverage is still unverified.

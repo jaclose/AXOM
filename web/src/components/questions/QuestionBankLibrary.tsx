@@ -9,10 +9,9 @@ import { AcademicLibrary } from "../bookshelf/AcademicLibrary";
 import { QuestionBankBookContent } from "../bookshelf/BookContents";
 import { knownBankManifests } from "../../lib/question-content/knownBanks";
 import { PreparedLibrary } from "../bookshelf/PreparedLibrary";
+import { CloudAcademicLibrary } from "../bookshelf/CloudAcademicLibrary";
 
-// Metadata is known; source bytes become available only after an import.
 const packages: KnownPackage[] = knownBankManifests.map((manifest) => ({ manifest, hasSource: false }));
-
 export function QuestionBankLibrary({ onPractice, onOpenBank, onImport, onCreate }: {
   onPractice: (selection: PracticeSelection) => void;
   onOpenBank: (book: QuestionBankBook, week?: number) => void;
@@ -23,8 +22,12 @@ export function QuestionBankLibrary({ onPractice, onOpenBank, onImport, onCreate
   const shelves = useMemo(() => buildShelves(buildQuestionBankBooks({ terms: s.terms, courses: s.courses,
     sets: s.questionSets ?? [], questions: s.questions ?? [], packages, curricula: CURRICULA, sourceOf: bankSource })),
   [s.terms, s.courses, s.questionSets, s.questions]);
-  return <><PreparedLibrary /><AcademicLibrary title="Course question banks" subtitle="Choose a course and its question sets. Create a focused quiz or combine sets."
-    onChooseFile={onImport} onCreate={onCreate} createHint="Build a reusable practice block from your saved questions."
-    browse={<AcademicBookshelf label="Question bank library" shelves={shelves}
-      renderBook={(book) => <QuestionBankBookContent book={book} onPractice={onPractice} onOpenBank={onOpenBank} />} />} /></>;
+  return <>
+    <CloudAcademicLibrary mode="questions" onPractice={onPractice} />
+    <AcademicLibrary title="Your saved and custom sets" subtitle="Continue downloaded practice, mix saved sets, or add your own material."
+      onChooseFile={onImport} onCreate={onCreate} createHint="Build a reusable practice block from your saved questions."
+      browse={<AcademicBookshelf label="Question bank library" shelves={shelves}
+        renderBook={(book) => <QuestionBankBookContent book={book} onPractice={onPractice} onOpenBank={onOpenBank} />} />} />
+    <details className="cloud-local-material"><summary>Local collection transfer and source review</summary><PreparedLibrary /></details>
+  </>;
 }

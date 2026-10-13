@@ -289,6 +289,8 @@ export interface PracticeSelection {
   week?: number;
   /** The sets to draw from. Sets only: a package that is not imported has nothing to practise. */
   setIds: string[];
+  /** Optional exact membership for a published subset of a reused local set. */
+  questionIds?: string[];
   /** Capped at what is ready in those sets. */
   count: number;
 }

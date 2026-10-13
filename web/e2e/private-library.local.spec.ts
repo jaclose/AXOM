@@ -12,6 +12,7 @@ const test = base.extend({ context: async ({ playwright }, use) => {
   console.log("Acceptance profile", profile);
   const context = await playwright.chromium.launchPersistentContext(profile, {
     channel: process.env.AXOM_E2E_CHANNEL, headless: true, reducedMotion: "reduce",
+    ...(process.env.AXOM_E2E_SOFTWARE_GRAPHICS === "1" ? { args: ["--disable-gpu"] } : {}),
     baseURL: process.env.AXOM_E2E_BASE_URL ?? "http://127.0.0.1:5187",
   });
   try { await use(context); } finally { await context.close(); }
@@ -57,6 +58,7 @@ test("prepared private collection installs through first run and remains usable 
     await page.getByRole("button", { name: "Done", exact: true }).click();
   }
   const original = await progress();
+  await page.getByText("Local collection transfer and source review", { exact: true }).click();
   const chooser = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: folder ? "Install prepared folder" : "Install prepared library", exact: true }).click();
   await (await chooser).setFiles(bundle!);
@@ -176,6 +178,7 @@ test("prepared private collection installs through first run and remains usable 
   expect((await counts()).attempts).toBe(studied.attempts);
   expect(studied.attempts).toBe(before.attempts + selection.count + 1);
   const repeat = page.waitForEvent("filechooser");
+  if (!await library.isVisible()) await page.getByText("Local collection transfer and source review", { exact: true }).click();
   await page.getByRole("button", { name: folder ? "Install prepared folder" : "Update library", exact: true }).click();
   await (await repeat).setFiles(bundle!);
   await expect(library.getByRole("status")).toContainText("Library installed.", { timeout: 300_000 });
