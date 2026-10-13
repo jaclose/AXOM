@@ -5,13 +5,13 @@ authority: current-state
 ---
 # AXOM current AI state
 
-Snapshot: 2026-10-13, isolated `feat/academic-library-v1` in
+Snapshot: 2026-10-13, validated local integration on `feat/academic-library-v1` in
 `AXOM-academic-library-v1`. Combined code checkpoint `eca6ac3b` integrates reviewed
 consolidation `6aa2126a`: academic/account recovery, daily challenges, Questions/Slides,
 Communications/Pulse, Cinematic entry, Ideas2 and audited library/audio/sync safeguards.
-Concurrent local main `7059a6cf` has the same runtime code and is merged here.
-Preserve all active other-owner drafts. JD authorized commits, development pushes and tested local-main
-convergence. Remote main still deploys production and has not been updated here.
+Local `main` and this branch are converged through the final validation lineage; preserve
+all active other-owner drafts. JD authorized commits, development pushes and tested
+local-main convergence. Remote main still deploys production and has not been updated here.
 
 Superseded Ideas3, backup recovery, owner-feedback, untested Decode, exam bootstrap
 and parked dependency checkpoints are preserved as ancestry without replacing their
@@ -44,12 +44,17 @@ backup checkout is untouched. No private course sources or test credentials ente
 ## Validation
 
 Node 22.23.1, macOS, installed Chrome. Combined code: 3,122 unit/SQL checks pass
-(five existing skips), full typecheck/lint/build pass, 79 release/repository checks
-pass. Real two-build update, recovery checkpoint, unchanged peer tab, offline reopening
-and lazy Daily Games checks pass. The full 96-case browser run had 91 passes, four
-opt-in skips and one stale singular/plural assertion; that assertion is corrected and
-its focused rerun passes. Course, sharing, leaderboard, image rendering, saved review,
-Questions/Slides, communications and responsive checks all pass on the combined code.
+(five existing skips), full typecheck/lint/build pass with zero lint errors or warnings,
+and 79 release/repository checks pass. Real two-build update, recovery checkpoint,
+unchanged peer tab, offline reopening and lazy Daily Games checks pass. The updater
+verifier now waits for the restored workspace rather than global network idleness after
+refresh, removing a listener race without weakening its persistence assertions.
+
+All runnable paths in the 96-case browser matrix pass, with opt-in local/live cases
+skipped as declared. Under severe unrelated host CPU pressure, one full run produced
+ten reload/render timeouts; all ten passed in fresh focused Chrome runs, including the
+desktop source-canvas case. Course, sharing, leaderboard, image rendering, saved review,
+Questions/Slides, communications and responsive checks pass on the combined code.
 
 The actual supplied 516,431,732-byte backup now passes Settings restore and reload in
 an isolated persistent browser profile with hosted traffic blocked. Notes/progress,

@@ -47,6 +47,8 @@ try {
   // the app inert for up to 1.8 s, and fill() into an inert input is a no-op.
   const context = await browser.newContext({ reducedMotion: 'reduce' });
   const page = await context.newPage();
+  page.setDefaultTimeout(120_000);
+  page.setDefaultNavigationTimeout(120_000);
   await page.goto(`${origin}/?app=1`, { waitUntil: 'networkidle' });
   await completeSetup(page, 'Update persistence check');
   await deferPromisePrompt(page);
@@ -74,12 +76,13 @@ try {
   assert.equal(navigations, 0, 'update check forced navigation');
   page.once('dialog', (dialog) => dialog.accept());
   try {
-    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle' }), panel.getByRole('button', { name: 'Save and refresh', exact: true }).click()]);
+    await Promise.all([page.waitForNavigation({ waitUntil: 'domcontentloaded' }), panel.getByRole('button', { name: 'Save and refresh', exact: true }).click()]);
   } catch (error) {
     throw new Error(`Update did not navigate. Panel: ${await panel.innerText().catch(() => 'closed')}`, { cause: error });
   }
   const newEntry = await page.locator('script[type="module"][src]').getAttribute('src');
   assert.notEqual(newEntry, oldEntry, 'refresh must run the new build, not the old cached shell');
+  await page.waitForFunction(() => document.querySelector('#root')?.textContent?.includes('Update persistence check'));
   assert.equal(peerNavigations, 0, 'updating one tab must not navigate another open workspace');
   assert.equal(await peer.locator('script[type="module"][src]').getAttribute('src'), oldEntry);
   await page.evaluate(() => window.dispatchEvent(new Event('axom:check-for-updates')));
