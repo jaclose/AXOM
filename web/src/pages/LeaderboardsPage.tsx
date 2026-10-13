@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Award, CalendarDays, Crown, Flame, Lock, Medal, TrendingUp, Trophy, Users, Zap } from "lucide-react";
+import { Award, CalendarDays, Crown, Flame, Medal, TrendingUp, Trophy, Zap } from "lucide-react";
 import { GlassCard, PanelHeader, Tag } from "../components/ui/primitives";
 import { useStore } from "../lib/store";
 import {
@@ -13,7 +13,7 @@ import {
 } from "../lib/leaderboards";
 import { isoDate } from "../lib/scoring";
 import { ICON_SIZE } from "../lib/iconSize";
-import { useAccount } from "../lib/account/accountStore";
+import { SharedDailyLeaderboard } from "../components/tracker/SharedDailyLeaderboard";
 
 const BOARDS: Array<{ id: PersonalBoardMetric; label: string }> = [
   { id: "activeDays", label: "Study days" }, { id: "cards", label: "Logged cards" }, { id: "minutes", label: "Study time" },
@@ -82,7 +82,6 @@ function BeatYourBest({ pace }: { pace: WeekPace }) {
 
 export function LeaderboardsPage() {
   const logs = useStore((s) => s.logs);
-  const accountPhase = useAccount((s) => s.phase);
   const [metric, setMetric] = useState<PersonalBoardMetric>("activeDays");
   const today = isoDate(new Date());
   const now = useMemo(() => new Date(`${today}T12:00:00`), [today]);
@@ -98,6 +97,7 @@ export function LeaderboardsPage() {
 
   return (
     <div className="lb-page">
+      <SharedDailyLeaderboard />
       <GlassCard pad className="lb-hero">
         <div className="lb-hero-head">
           <span className="lb-hero-icon"><Trophy size={ICON_SIZE.control} aria-hidden="true" /></span>
@@ -169,22 +169,7 @@ export function LeaderboardsPage() {
         <p className="sub">Based only on academic activity recorded in AXOM. Logged cards are not a verified connection to the Anki Leaderboard add-on.</p>
       </GlassCard>
 
-      <GlassCard pad className="lb-friends">
-        <PanelHeader title="Study with friends" sub="Planned · not connected" action={<Tag tone="neutral"><Lock size={ICON_SIZE.microInline} /> Private by design</Tag>} />
-        <div className="lb-friends-body">
-          <Users size={ICON_SIZE.display} aria-hidden="true" />
-          <div>
-            <p>
-              Small private groups will compare <b>this week’s pace</b> the same way you race your past self above — “on track for a better week”,
-              “needs a stronger push” — never raw rankings of strangers. Groups will require an account, an explicit invite, opt-in per measure,
-              and the ability to leave and delete your shared numbers at any time.
-            </p>
-            <p className="sub">
-              {accountPhase === "signed-in" ? "You’re signed in, so you’ll be ready when groups open." : "Nothing from this page leaves your device today. No participants are invented."}
-            </p>
-          </div>
-        </div>
-      </GlassCard>
+
     </div>
   );
 }
