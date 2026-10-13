@@ -108,6 +108,11 @@ describe("Supabase migrations on real Postgres", () => {
       // functions explicitly put pg_temp last so caller tables cannot shadow.
       expect(["search_path=pg_catalog, public, pg_temp", 'search_path=""'], `${signature} search_path`)
         .toContain(proconfig?.find(value => value.startsWith("search_path=")));
+      if (signature.startsWith("push_workspace_revision(")) {
+        expect(proconfig).toContain("statement_timeout=60s");
+      } else {
+        expect(proconfig?.some((setting) => setting.startsWith("statement_timeout="))).toBe(false);
+      }
     }
     await db.close();
   }, 30_000);

@@ -31,6 +31,7 @@ Supabase was selected over the existing custom Neon API, Firebase, and Clerk plu
 - The server transaction locks the workspace row and accepts a write only when `base_revision` equals the current revision.
 - A stale writer is retained as a conflict revision; it never overwrites the canonical revision.
 - Server history keeps the newest canonical revisions that fit in 50 MB of stored size per account, at most 60 and never fewer than the newest three. Older revisions are pruned when a new one is accepted; a new revision is never refused because history is full. Historical rows are immutable from the client.
+- The snapshot RPC has a bounded 60-second statement timeout so the first upload can prune large legacy histories atomically. Other RPC timeouts and authorization rules remain unchanged. The migration reloads PostgREST's schema cache; deployed recovery must still be verified with a successful acknowledged upload. Function-level timeouts follow [Supabase's API guidance](https://supabase.com/docs/guides/database/postgres/timeouts#function-level).
 - Restore validates the portable Workspace shape, creates a local safety snapshot, confirms replacement, persists locally, and submits the result as a new revision.
 
 ## Upload policy and failure behaviour

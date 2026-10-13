@@ -33,10 +33,11 @@ type Phase =
   | { kind: "prompt"; seed: number; preview: boolean }
   | { kind: "reply"; response: FocusCheckInResponse; line: string; preview: boolean };
 
-function restorePrompt(): Phase {
+function restorePrompt(day: string): Phase {
   try {
     const value = JSON.parse(localStorage.getItem(STORAGE_KEYS.focusCheckInPending) ?? "null");
-    if (value?.kind === "prompt" && Number.isSafeInteger(value.seed)) return { kind: "prompt", seed: value.seed, preview: false };
+    if (value?.kind === "prompt" && value.day === day && Number.isSafeInteger(value.seed)) return { kind: "prompt", seed: value.seed, preview: false };
+    localStorage.removeItem(STORAGE_KEYS.focusCheckInPending);
   } catch { /* A blocked device store must not prevent a check-in. */ }
   return { kind: "hidden" };
 }
@@ -89,7 +90,7 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = currentClock }: 
   const quietHours = useStore((state) => state.profile.dailyLoopReminders);
   const sessions = useStore((state) => state.sessions);
   const pomodoroRunning = usePomodoro((state) => state.running && state.phase === "focus");
-  const [phase, setPhase] = useState<Phase>(restorePrompt);
+  const [phase, setPhase] = useState<Phase>(() => restorePrompt(dayOf(clock())));
   const [exiting, setExiting] = useState(false);
   const overlayRef = useRef<HTMLDivElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
@@ -168,9 +169,9 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = currentClock }: 
   useEffect(() => {
     try {
       if (phase.kind !== "prompt" || phase.preview || exiting) localStorage.removeItem(STORAGE_KEYS.focusCheckInPending);
-      else localStorage.setItem(STORAGE_KEYS.focusCheckInPending, JSON.stringify(phase));
+      else localStorage.setItem(STORAGE_KEYS.focusCheckInPending, JSON.stringify({ ...phase, day: dayOf(clock()) }));
     } catch { /* In-memory interaction still works when storage is unavailable. */ }
-  }, [phase, exiting]);
+  }, [clock, phase, exiting]);
 
   // Only an answered prompt times out. An unanswered check-in has no deadline.
   useEffect(() => {
@@ -281,6 +282,8 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = currentClock }: 
             </button>
           </div>
           <div className="focus-checkin-foot">
+            <button type="button" onClick={() => snoozeFor(preferences.intervalMinutes)}>Just got here</button>
+            <span aria-hidden="true">·</span>
             <button type="button" onClick={() => snoozeFor(15)}>Snooze 15 min</button>
             <span aria-hidden="true">·</span>
             <button type="button" onClick={() => {

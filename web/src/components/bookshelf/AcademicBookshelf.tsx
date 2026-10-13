@@ -193,7 +193,7 @@ export function AcademicBookshelf<T extends ShelfBook>({ label, shelves: inputSh
       <div className="collection-filters">
         <label>Find a module<input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search your collection" /></label>
         <label>Term<select value={term} onChange={event => setTerm(event.target.value)}><option value="">All terms</option>{[...new Set(allBooks.map(b => b.shelf))].map(name => <option key={name}>{name}</option>)}</select></label>
-        <span>{books.length} modules</span>
+        <span>{books.length} {books.length === 1 ? "module" : "modules"}</span>
         <label className="collection-availability"><input type="checkbox" checked={availableOnly} onChange={event => setAvailableOnly(event.target.checked)} />Available content</label>
       </div>
       {!books.length && <p>{availableOnly ? "No prepared content matches yet. Install your prepared library above, or clear Available content to browse the course map." : "No courses match these filters."}</p>}

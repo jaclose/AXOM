@@ -8,6 +8,7 @@ import { notify } from "../../lib/notify";
 import { usePomodoro, ensurePomodoroClock, reconcilePomodoro } from "../../lib/pomodoro";
 import { pushToast } from "../../lib/toast";
 import { TimerEdgeGlow } from "../shell/TimerEdgeGlow";
+import { useStore } from "../../lib/store";
 
 export function PomodoroFx() {
   const completedAt = usePomodoro((s) => s.completedAt);
@@ -33,13 +34,29 @@ export function PomodoroFx() {
   useEffect(() => {
     if (!completedAt) return;
     const minutes = completedMinutes;
+    const pomodoro = usePomodoro.getState();
+    const trackerTarget = pomodoro.targetKind === "tracker" && pomodoro.targetId
+      ? useStore.getState().tracker.find((item) => item.id === pomodoro.targetId)
+      : undefined;
+    const eventId = `pomodoro-course:${completedAt}`;
     pushToast({
       title: "Focus sprint complete",
-      body: minutes ? `${minutes}m logged to today — take your break.` : "Nice work — take your break.",
+      body: trackerTarget
+        ? `${minutes ? `${minutes}m logged. ` : ""}What kind of pass did you finish for ${trackerTarget.label}?`
+        : minutes ? `${minutes}m logged to today — take your break.` : "Nice work — take your break.",
       tone: "success",
-      href: "#productivity",
-      actionLabel: "Productivity",
-      duration: 7000,
+      ...(trackerTarget ? {
+        actions: [
+          { label: "Study pass", onAction: () => useStore.getState().recordCoursePass(trackerTarget.id, "study", eventId) },
+          { label: "Anki round", onAction: () => useStore.getState().recordCoursePass(trackerTarget.id, "anki", eventId) },
+          { label: "Question round", onAction: () => useStore.getState().recordCoursePass(trackerTarget.id, "questions", eventId) },
+        ],
+        duration: 0,
+      } : {
+        href: "#productivity",
+        actionLabel: "Productivity",
+        duration: 7000,
+      }),
       dedupe: `pomodoro-complete-${completedAt}`,
     });
     if (typeof document !== "undefined" && (document.visibilityState === "hidden" || !document.hasFocus())) {

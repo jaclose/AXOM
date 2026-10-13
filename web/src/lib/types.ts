@@ -89,6 +89,9 @@ export interface TrackerItem {
    * the learner moved it. A learner's placement is never undone by a re-import.
    */
   weekSource?: "template" | "inferred" | "learner";
+  reviewTask?: { source: "question-results" | "digest"; sourceId?: string };
+  archivedAt?: string;
+  passEvents?: Array<{ id: string; method: "study" | "anki" | "questions"; at: string }>;
 }
 
 export interface Task {

@@ -56,6 +56,23 @@ describe("FocusCheckIn", () => {
     view.unmount();
   });
 
+  it("discards yesterday's pending prompt and lets a new arrival defer without recording a response", () => {
+    localStorage.setItem(STORAGE_KEYS.focusCheckInPending, JSON.stringify({
+      kind: "prompt", seed: 7, day: "2026-09-25",
+    }));
+    const view = render(<FocusCheckIn clock={clock} pollIntervalMs={0} />);
+    expect(screen.queryByText("Are you locked in?")).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.focusCheckInPending)).toBeNull();
+    view.unmount();
+
+    render(<FocusCheckIn clock={clock} pollIntervalMs={0} />);
+    act(() => window.dispatchEvent(new CustomEvent(FOCUS_CHECKIN_TEST_EVENT)));
+    fireEvent.click(screen.getByRole("button", { name: "Just got here" }));
+    const ledger = JSON.parse(localStorage.getItem(STORAGE_KEYS.focusCheckIns) ?? "{}");
+    expect(ledger).not.toHaveProperty("lastResponseAt");
+    expect(ledger).toMatchObject({ lockedIn: 0, drifted: 0, breaks: 0 });
+  });
+
   it("distinguishes focus time, today's study goal, and no study goal", () => {
     const state = makeSeed();
     state.profile.dailySuccess = normalizeDailySuccessConfig({ version: 1, configuredAt: state.activeDayKey, requirements: [makeDailyRequirement({ id: "study", label: "Study", source: { kind: "study-minutes" }, target: 42, unit: "minutes", trackingStartsAt: state.activeDayKey })] });

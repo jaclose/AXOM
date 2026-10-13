@@ -140,6 +140,23 @@ describe("loading a course book", () => {
 });
 
 describe("question bank books", () => {
+  it("keeps unfiled, mixed-module and loose imported questions discoverable", () => {
+    const unfiled = question("old", "", 1, "legacy", { module: undefined, week: undefined });
+    const mixed = [question("er", "ER", 1, undefined), question("dm", "DM", 2, undefined)];
+    const loose = question("loose", "", 1, undefined, { module: undefined, week: undefined });
+    const legacy = { ...set("legacy", "Legacy import", "", 1, ["old"]), scope: undefined };
+    const custom = { ...set("mix", "Mixed review", "", 1, ["er", "dm"], "custom"), scope: undefined };
+    const input = { terms: [], courses: [], sets: [legacy, custom], questions: [unfiled, ...mixed, loose] };
+    const before = structuredClone(input);
+    const books = buildQuestionBankBooks(input);
+    expect(books).toHaveLength(1);
+    expect(books[0]).toMatchObject({ title: "Unfiled & mixed", count: 4, ready: 4, state: "available" });
+    const week = books[0].weeks[0];
+    expect(week.collections.map((collection) => collection.title)).toEqual(["Legacy import", "Mixed review", "Questions in no set"]);
+    expect(practiceSelection(books[0], week, ["set:legacy", "set:mix"], 10)).toMatchObject({ setIds: ["legacy", "mix"], count: 3 });
+    expect(input).toEqual(before);
+  });
+
   const { terms, courses } = workspace();
   const ids = (prefix: string, count: number) => Array.from({ length: count }, (_, index) => `${prefix}-${index + 1}`);
   const questions = [

@@ -31,6 +31,7 @@ import { SourceTeaching } from "./SourceTeaching";
 import { SessionReviewModal } from "./SessionReviewModal";
 import { accuracyTone } from "../../lib/library";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { reviewTaskInputs } from "../../lib/courseWork";
 import { formatSeconds, pacingInsight, summarizePacing } from "../../lib/quizPacing";
 import { createTextAnnotationWithIntegrity, removeTextAnnotationById, type QuestionAnnotationTarget, type QuestionAnnotationTone } from "../../lib/questionAnnotations";
 import { AnnotatedQuestionText, type QuestionTextSelection } from "./AnnotatedQuestionText";
@@ -757,11 +758,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       const item = questions.find((candidate) => candidate.id === id);
       return item ? [item.topic, item.category].filter((value): value is string => Boolean(value?.trim())) : [];
     }))];
-    const existing = new Set(s.tracker.map((item) => `${item.path}|${item.label}`.toLowerCase()));
-    const items = topics.flatMap((topic) => {
-      const item = { path: "Question Bank/Review", label: `Review ${topic}`, kind: "Review Loop" as const, passes: 0, ankiPasses: 0, yield: "review" as const, note: "Created from missed Question Bank results." };
-      return existing.has(`${item.path}|${item.label}`.toLowerCase()) ? [] : [item];
-    });
+    const items = reviewTaskInputs(topics, "Question Bank/Review", { source: "question-results", sourceId: session?.id }, s.tracker);
     if (!items.length) {
       pushToast({ title: topics.length ? "Review topics already tracked" : "No topic labels available", body: topics.length ? "Nothing new was added." : "Add a topic or category to these questions before creating Tracker review work.", tone: "warn" });
       return;
@@ -842,7 +839,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       <div className="block-setup">
         <section className="block-source-summary" aria-label="Practice source">
           <span className="field-label">Your practice</span><h3>{sourceTitle}</h3>
-          <p>{canStart ? `${Math.min(count, available)} questions in this block · ${available} match your filters` : "Choose a source with ready questions to continue."}</p>
+          <p>{canStart ? `${Math.min(count, available)} ${Math.min(count, available) === 1 ? "question" : "questions"} in this block · ${available} ${available === 1 ? "matches" : "match"} your filters` : "Choose a source with ready questions to continue."}</p>
           <GhostButton onClick={() => setChoosingSources((value) => !value)} aria-expanded={choosingSources}>{choosingSources ? "Done choosing" : "Change sources"}</GhostButton>
         </section>
         {choosingSources && <div className="stack gap12">
