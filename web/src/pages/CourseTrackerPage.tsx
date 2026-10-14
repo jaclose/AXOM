@@ -174,7 +174,9 @@ export function CourseTrackerPage() {
       ? { title: "Removed from primary focus", body: path, tone: "info", duration: 2600 }
       : { title: "Primary focus set", body: `${path} now leads suggestions here, in Up next and on the Dashboard.`, tone: "success" });
   }
-  const coverage = useMemo(() => buildCurriculumCoverage(SGU_CURRICULUM, s.documents, s.tracker), [s.documents, s.tracker]);
+  const coverage = useMemo(() => buildCurriculumCoverage(SGU_CURRICULUM, s.documents, s.tracker, {
+    terms: s.terms, courses: s.courses, sets: s.questionSets ?? [], questions: s.questions ?? [],
+  }), [s.documents, s.tracker, s.terms, s.courses, s.questionSets, s.questions]);
   const courseScopes = useMemo(() => collectCourseScopes(s.terms, s.courses), [s.terms, s.courses]);
   const tree = useMemo(() => buildTree(s.tracker, courseScopes), [s.tracker, courseScopes]);
   const scopeOptions = useMemo(() => mergeScopes(collectScopes(s.tracker), courseScopes), [s.tracker, courseScopes]);
@@ -426,16 +428,17 @@ function CurriculumCoverageCard({ coverage }: { coverage: CurriculumCoverage }) 
         <p className="sub">Coverage counts only templates saved in this workspace and tracker rows actually present. The SGU course outline names modules, not a complete official activity schedule. An unavailable template means expected activities are <b>unknown</b>, not zero.</p>
         {coverage.terms.map((term) => (
           <details key={term.term} className="tracker-coverage-term">
-            <summary><b>{term.term} coverage</b><span className="sub">{term.modulesWithTemplates}/{term.modules.length} modules with templates · {term.installedTemplateItems}/{term.sourceItems} known source rows represented · {term.inferredWeeks} inferred week assignments</span></summary>
+            <summary><b>{term.term} coverage</b><span className="sub">{term.modulesWithTemplates}/{term.modules.length} modules with templates · {term.installedTemplateItems}/{term.sourceItems} known source rows represented · {term.questionCollections} local QBank collections · {term.readyQuestions} ready questions</span></summary>
             <div className="tracker-coverage-scroll">
               <table className="tracker-coverage-table">
-                <thead><tr><th scope="col">Course / module</th><th scope="col">Saved source rows</th><th scope="col">Installed</th><th scope="col">Week evidence</th><th scope="col">Gaps</th></tr></thead>
+                <thead><tr><th scope="col">Course / module</th><th scope="col">Saved template rows</th><th scope="col">In tracker</th><th scope="col">Week evidence</th><th scope="col">Question Bank on device</th><th scope="col">Gaps</th></tr></thead>
                 <tbody>{term.modules.map((module) => (
                   <tr key={`${module.courseCode}/${module.module}`}>
                     <th scope="row">{module.courseCode} · {module.module}</th>
                     <td>{module.templateFiles ? module.availableTemplateItems : "No source template"}</td>
                     <td>{module.installedRows}{module.templateFiles ? ` (${module.installedTemplateItems} source-matched)` : ""}</td>
                     <td>{module.statedWeeks.length} stated · {module.inferredWeeks.length} inferred · {module.unscheduledItems} unscheduled</td>
+                    <td>{module.questionCollections} collections · {module.readyQuestions}/{module.storedQuestions} locally ready · {module.reviewQuestions} review{module.missingQuestionReferences ? ` · ${module.missingQuestionReferences} referenced questions not on device` : ""}{module.indexedQuestionWeeks.length ? ` · Source-indexed weeks ${module.indexedQuestionWeeks.join(", ")} (not official dates)` : ""}</td>
                     <td>{module.mapping === "ambiguous" ? "Mapping review" : !module.templateFiles ? "Expected activities unknown" : module.notInstalled ? `${module.notInstalled} saved-template rows not represented` : module.sourceProblems.length ? "Source review" : module.duplicateRows ? `${module.duplicateRows} duplicates` : "Saved template represented; official completeness unverified"}</td>
                   </tr>
                 ))}</tbody>
@@ -444,7 +447,8 @@ function CurriculumCoverageCard({ coverage }: { coverage: CurriculumCoverage }) 
           </details>
         ))}
         {coverage.unmappedTemplateModules.length > 0 && <p className="sub">Templates without a unique outline match: {coverage.unmappedTemplateModules.join(", ")}. Confirm course ownership before installing.</p>}
-        <p className="sub">Week numbers inferred from blank-line groups or even spacing require schedule verification; they are not confirmed school dates.</p>
+        <p className="sub">Week numbers inferred from blank-line groups or even spacing require schedule verification; they are not confirmed school dates. Question collections and ready counts are calculated from locally stored records, not remote uploads, original-file availability, or official activity completeness.</p>
+        {(coverage.unassignedQuestionCollections > 0 || coverage.unassignedQuestions > 0) && <p className="sub" role="note">{coverage.unassignedQuestionCollections} collections and {coverage.unassignedQuestions} question records cannot be uniquely assigned to this SGU term/module outline. They remain in the Question Bank for review, not silently attached to a course.</p>}
       </details>
     </GlassCard>
   );

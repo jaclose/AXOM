@@ -717,6 +717,12 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
 
   function finishSimulation(answerList: QuizAnswer[], meta: { startedAt: string; elapsedSeconds: number }) {
     if (!simRun) return;
+    const originalById = new Map(simRun.pool.map((question) => [question.id, question]));
+    // A changed/missing key must not be scored from a stale simulation snapshot.
+    const validatedAnswers = answerList.map((answer) => {
+      const key = trustedSessionKey(originalById.get(answer.questionId), questionsById.get(answer.questionId));
+      return { ...answer, correct: answer.answerKey && key ? answer.answerKey === key : undefined };
+    });
     const result: QuizSession = {
       id: crypto.randomUUID(),
       mode,
@@ -726,12 +732,12 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       timeLimitSeconds: simRun.timeLimitSeconds,
       filters: currentFilters(),
       questionIds: simRun.pool.map((q) => q.id),
-      answers: answerList,
-      score: scoreSession(answerList),
+      answers: validatedAnswers,
+      score: scoreSession(validatedAnswers),
       simulation: { skin: simRun.skin, preset: simRun.resume ? undefined : presetId, elapsedSeconds: meta.elapsedSeconds },
     };
     s.commitQuizRun({
-      attempts: answerList
+      attempts: validatedAnswers
         .filter((a) => a.answerKey || a.flagged)
         .map((a) => ({ questionId: a.questionId, attempt: attemptFor(a, {}, "simulation", result.id) })),
       session: result,
@@ -769,7 +775,11 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   }
 
   function makeRepairCard(q: QuestionRecord) {
-    const correctKey = trustedCorrectKey(q);
+    const correctKey = trustedSessionKey(poolById.get(q.id) ?? q, questionsById.get(q.id));
+    if (!correctKey) {
+      pushToast({ title: "Review answer before creating a card", body: "This answer changed or needs evidence review. No repair card was created.", tone: "warn" });
+      return;
+    }
     const correct = q.options.find((o) => o.key === correctKey);
     const result = s.addAnkiCards([{
       type: "error-repair",
@@ -832,11 +842,15 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
 
   async function runAi(kind: "simple" | "why-wrong" | "hook") {
     if (!provider || !question) return;
+    const reliableKey = trustedSessionKey(question, questionsById.get(question.id));
+    if (!reliableKey) {
+      pushToast({ title: "Answer review required", body: "The saved answer changed or is unresolved. Reconfirm it before generating an explanation.", tone: "warn" });
+      return;
+    }
     setAiBusy(true);
     setAiText(null);
     try {
-      const correctKey = trustedCorrectKey(question);
-      const correct = question.options.find((o) => o.key === correctKey)?.text;
+      const correct = question.options.find((o) => o.key === reliableKey)?.text;
       const text = kind === "simple"
         ? await explainSimply(provider, { stem: question.stem, correct, explanation: question.explanation })
         : kind === "why-wrong"
@@ -1063,7 +1077,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             ? <Tag tone="neutral">{formatClock(session.simulation.elapsedSeconds).replace(/^00:/, "")}{session.timeLimitSeconds ? ` of ${Math.round(session.timeLimitSeconds / 60)} min` : ""}</Tag>
             : session.timed && <Tag tone="neutral">{Math.round((Date.parse(session.endedAt!) - Date.parse(session.startedAt)) / 60000)} min</Tag>}
           {session.score && session.score.total > session.score.scored && (
-            <span className="sub">{session.score.total - session.score.scored} unscored (no correct answer set)</span>
+            <span className="sub">{session.score.total - session.score.scored} unscored (answer mapping unavailable or changed during the block)</span>
           )}
         </div>
         <PacingPanel session={session} />
