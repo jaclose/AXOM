@@ -153,6 +153,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
 }) {
   const s = useStore();
   const questions = s.questions ?? EMPTY_QUESTIONS;
+  const questionsById = useMemo(() => new Map(questions.map((question) => [question.id, question])), [questions]);
   const readyQuestions = useMemo(() => questions.filter((question) => questionPracticeReadiness(question) === "ready"), [questions]);
   const questionSets = s.questionSets ?? [];
   const restored = useMemo(() => readActiveQuiz(), []);
@@ -195,6 +196,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           { count: Math.max(1, retakeIds.length), status: "all", ordered: true },
         )
       : []);
+  const poolById = useMemo(() => new Map(pool.map((question) => [question.id, question])), [pool]);
   /**
    * The block on screen, held by the engine every exam interface uses
    * (lib/exam/engine): the position, each question's pick, flag, strike-outs
@@ -550,8 +552,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
 
   /** One question's record as this player counts it (lib/exam/playerBlock), read from a block. */
   function answerIn(source: ExamBlock, id: string, at: number): QuizAnswer {
-    const record = pool.find((item) => item.id === id);
-    return playerAnswer(source, id, at, record ? trustedCorrectKey(record) : undefined, { certainty: certainties[id], checked: checked[id] });
+    const key = trustedSessionKey(poolById.get(id), questionsById.get(id));
+    return playerAnswer(source, id, at, key, { certainty: certainties[id], checked: checked[id] });
   }
 
   /**
