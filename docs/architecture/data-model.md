@@ -45,6 +45,9 @@ Original source binaries remain outside the workspace schema. Decode's existing
 `["version", documentId, checksum]` entries with a current-edition pointer. Portable
 ZIP format 2 carries verified originals separately; JSON and format-1 ZIP remain
 readable. See [original recovery](../features/academic-library.md#original-files-and-portable-recovery).
+Saved-work exports keep deferred source metadata outside the scoring engine and read
+only local binary caches. Restoring such a copy reuses exact source-digest retention;
+the imported personal overlay wins without fetching or discarding matching local bytes.
 
 Daily challenge delivery keeps only a versioned, account/challenge-scoped launch
 reference in the existing Local Vault. Its session ID resolves canonical `quizSessions`;

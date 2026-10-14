@@ -7,7 +7,7 @@ import type { SourceDocument } from "./library";
 import {
   ATTACHMENT_EXPORT_KEY, MAX_QUESTION_ATTACHMENT_BYTES, blobToBase64,
   extractQuestionAttachmentPayloads, getQuestionAttachmentBlob, restoreQuestionAttachmentPayloads,
-  type QuestionImageAttachment, type QuestionAttachmentExportPayload,
+  type QuestionImageAttachment, type QuestionAttachmentExportPayload, type AttachmentReadOptions,
 } from "./questionAttachments";
 
 type References = ReadonlyArray<{ id: string; attachments?: readonly QuestionImageAttachment[] }>;
@@ -15,7 +15,7 @@ type MediaEntry = { file: string; metadata: Omit<QuestionAttachmentExportPayload
 type OriginalEntry = { file: string; documentId: string; sha256: string; byteSize: number; mimeType: string };
 const MAX_ORIGINAL_BYTES = 128 * 1024 * 1024;
 export function backupOriginalDocuments(documents: readonly SourceDocument[]): SourceDocument[] {
-  return documents.filter(doc => /^[a-f0-9]{64}$/.test(doc.checksum?.replace(/^sha256:/, "") ?? "") && !doc.fileType.startsWith("axom-"));
+  return documents.filter(doc => /^[a-f0-9]{64}$/.test(doc.checksum?.replace(/^sha256:/, "") ?? "") && typeof doc.fileType === "string" && !doc.fileType.startsWith("axom-"));
 }
 const FORMAT = "axom-media-backup";
 export const LARGE_MEDIA_BACKUP_BYTES = 128 * 1024 * 1024;
@@ -28,13 +28,13 @@ export function mediaBackupBytes(references: References): number {
 }
 
 /** Binary images avoid the single-string limit of large base64 JSON backups. */
-export async function createMediaBackupArchive(payload: Record<string, unknown>, references: References, documents: readonly SourceDocument[] = []) {
+export async function createMediaBackupArchive(payload: Record<string, unknown>, references: References, documents: readonly SourceDocument[] = [], options: AttachmentReadOptions = {}) {
   const zip = new JSZip();
   const media: MediaEntry[] = [];
   const missingBlobKeys: string[] = [];
   for (const metadata of mediaReferences(references)) {
     try {
-      const record = await getQuestionAttachmentBlob(metadata.blobKey);
+      const record = await getQuestionAttachmentBlob(metadata.blobKey, options);
       if (!record) throw new Error("Missing image");
       const bytes = new Uint8Array(await record.blob.arrayBuffer());
       const file = `media/${media.length}`;
@@ -85,7 +85,7 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
   const workspace = zip.file("workspace.json");
   if (!workspace) throw new Error("This ZIP is not an AXOM workspace backup. Prepared libraries are installed from the Course Library or QBank.");
   const rawText = await workspace.async("string");
-  const manifest = JSON.parse(rawText) as { _backupFormat?: string; _backupVersion?: number; media?: MediaEntry[]; originals?: OriginalEntry[]; documents?: SourceDocument[] };
+  const manifest = JSON.parse(rawText) as { _backupFormat?: string; _backupVersion?: number; media?: MediaEntry[]; originals?: OriginalEntry[]; documents?: SourceDocument[]; deferredContent?: { documents?: SourceDocument[] } };
   if (manifest._backupFormat !== FORMAT || ![1, 2].includes(manifest._backupVersion ?? 0) || !Array.isArray(manifest.media)) throw new Error("Unsupported workspace backup format.");
   const media = manifest.media;
   for (const item of media) {
@@ -94,7 +94,10 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
   const originals = manifest._backupVersion === 2 ? manifest.originals : [];
   if (!Array.isArray(originals)) throw new Error("The backup has no original-file manifest.");
   const ids = new Set<string>(), files = new Set<string>();
-  const documents = new Map((Array.isArray(manifest.documents) ? manifest.documents : []).map(doc => [doc?.id, doc]));
+  const documents = new Map([
+    ...(Array.isArray(manifest.documents) ? manifest.documents : []),
+    ...(Array.isArray(manifest.deferredContent?.documents) ? manifest.deferredContent.documents : []),
+  ].map(doc => [doc?.id, doc]));
   // Check integrity before the caller offers to adopt any workspace records.
   for (const item of originals) {
     if (!item || typeof item.documentId !== "string" || ids.has(item.documentId) || files.has(item.file)

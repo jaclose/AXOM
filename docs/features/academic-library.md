@@ -171,6 +171,29 @@ production build. Six affected browser cases pass, including the supplied 516,43
 byte legacy backup and all 2,151 image hashes (49,244 ms read/restore/reload/integrity).
 These results are local-only; this extension needs no hosted migration.
 
+### Saved-work copies when content is unavailable
+
+Settings → Emergency recovery → Export saved work never downloads source or image
+objects. It exports learner records, all deferred references and files already on the
+device, using the existing JSON/ZIP recovery formats. `_backupScope: "saved-work"`
+and the `axom-saved-work-` filename distinguish it from a full portable export. Counts
+identify unfetched sources and missing binaries; it does not advance the full-backup
+timestamp. Full export still reports a failed download rather than silently degrading.
+
+Restore warns when the copy needs the original account/content access. Exact immutable
+source matches already on the device are retained through the account adapter, while
+the imported learner overlay wins. Mismatched editions are never substituted. Deferred
+image references participate in restore/retention, and original manifests accept source
+metadata without treating it as a study-ready question. Concurrent workspace changes
+stop adoption before replacement. No new storage engine, table or migration is needed.
+
+Focused recovery tests exercise JSON and ZIP, unavailable account/content, exact source
+retention, missing images, intact originals and note recovery. The local FTM1 browser
+flow exports while offline on a reference-only device, restores 11 attempts to a fresh
+profile offline, and checks them after reload. No source GET occurs during sign-in or
+saved-work export. Full course download and image-rich offline study remain separate
+explicit operations.
+
 
 
 ## Verified daily challenges

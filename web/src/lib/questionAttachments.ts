@@ -192,9 +192,11 @@ export function setMissingAttachmentLoader(loader: MissingAttachmentLoader): () 
   return () => { if (missingAttachmentLoader === loader) missingAttachmentLoader = undefined; };
 }
 
-export async function getQuestionAttachmentBlob(blobKey: string): Promise<QuestionAttachmentBlobRecord | undefined> {
+export interface AttachmentReadOptions { localOnly?: boolean }
+
+export async function getQuestionAttachmentBlob(blobKey: string, options: AttachmentReadOptions = {}): Promise<QuestionAttachmentBlobRecord | undefined> {
   const local = await withAttachmentStore<QuestionAttachmentBlobRecord | undefined>("readonly", (store) => store.get(blobKey));
-  return local ?? await missingAttachmentLoader?.(blobKey);
+  return local ?? (options.localOnly ? undefined : await missingAttachmentLoader?.(blobKey));
 }
 
 export async function deleteQuestionAttachmentBlobs(blobKeys: readonly string[]): Promise<void> {
@@ -315,6 +317,7 @@ export const ATTACHMENT_EXPORT_KEY = "questionAttachmentPayloads";
 
 export async function collectQuestionAttachmentPayloads(
   questions: ReadonlyArray<{ id: string; attachments?: readonly QuestionImageAttachment[] }>,
+  options: AttachmentReadOptions = {},
 ): Promise<{ payloads: QuestionAttachmentExportPayload[]; missingBlobKeys: string[] }> {
   const payloads: QuestionAttachmentExportPayload[] = [];
   const missing: string[] = [];
@@ -325,7 +328,7 @@ export async function collectQuestionAttachmentPayloads(
       // strip every image down to metadata-only.
       let base64: string | undefined;
       try {
-        const record = await getQuestionAttachmentBlob(attachment.blobKey);
+        const record = await getQuestionAttachmentBlob(attachment.blobKey, options);
         if (record) base64 = await blobToBase64(record.blob);
       } catch {
         base64 = undefined;

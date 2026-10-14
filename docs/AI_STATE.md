@@ -7,8 +7,8 @@ authority: current-state
 
 Snapshot: 2026-10-14 UTC, `feat/academic-library-v1` in `AXOM-academic-library-v1`.
 JD authorized commits, development pushes and tested local-main convergence.
-Original-file recovery `2d083ebd` is committed, pushed and on local main. This checkout
-adds durable daily challenge references, resumption and explicit verification retry.
+Original-file recovery `2d083ebd` and daily resumption `4bf2b3fe` are committed, pushed
+and on local main. This checkout adds offline saved-work export and safe partial restore.
 Remote main remains `5355e5e7`; it deploys production and has not been advanced here.
 
 ## Ownership and protected work
@@ -59,7 +59,16 @@ Node 22.23.1, macOS, installed Chrome, local native Supabase API
 `20261013230000_shared_account_content_references.sql` are applied only locally.
 Original-file and daily-resume extensions need no additional backend migration.
 
-The final daily-resume quality gate passes 3,134 unit/SQL tests with seven declared
+The saved-work quality gate passes 3,136 unit/SQL tests with seven declared opt-in skips,
+typecheck, full lint and production build. Seventy-four focused recovery checks pass.
+Real FTM1 Chrome acceptance exports while offline from a device with no source bodies,
+restores 11 attempts to a fresh profile, and retains 25 downloaded questions and two
+originals when applying the same reference-only copy to a complete device. Reload and
+offline image-rich study pass. Desktop/mobile/short windows, light/dark, keyboard,
+reduced motion and 200% CSS zoom are exercised; screenshots inspected. Final run 46.5 s,
+22.5 s test body. Account JSON remains 101,550 / 10,892 bytes with zero bootstrap GETs.
+
+The preceding daily-resume quality gate passes 3,134 unit/SQL tests with seven declared
 opt-in skips, typecheck, full lint, production build and bundle isolation. Forty-six
 focused fixture/adapter/exam checks pass. Real two-account FTM1 acceptance reloads after
 three answers, loses the fifth actual server acknowledgement, then explicitly retries
@@ -83,14 +92,14 @@ boundary; rerun affected repository gates before this next commit.
 Pending: general private-upload original-binary cloud sync, larger/resumable uploads,
 paged attempt history, persistent offline cache usage/removal, administrative review,
 remaining supplied courses, daily scheduling, configured release and hosted acceptance.
-A backup with unavailable deferred sources currently refuses full export; a clearly
-labeled local/metadata recovery fallback is still to be implemented. Never discard
-personal overlays or references, or label an incomplete copy a complete offline bank.
+Full export still requires downloadable sources. The explicit saved-work fallback
+keeps references, progress and available files without fetching; it never claims a
+complete offline library or advances the full-backup timestamp.
 
 The exact `2d083ebd` web ZIP is 46,867,506 bytes with a verified manifest hash, but
 accountsConfigured=false. It is an unconfigured local package, not the connected
 release. Native compilation/signing remain unverified. Disk headroom recently fell to
-5.7 GiB due to other active work; preserve all services/files and do not prune. External
+7.4 GiB on the latest check; preserve all services/files and do not prune. External
 build storage needs explicit path verification before using it for large native output.
 
 Normal `www.axom.info` was last reverified read-only as deployment

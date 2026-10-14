@@ -11,7 +11,9 @@ import { GButton, Tag } from "../ui/primitives";
 import { useStore } from "../../lib/store";
 import { privateReviewMedia } from "../../lib/privateLibrary/media";
 import { compactAvatarDataUrl } from "../../lib/avatarImage";
-import { exportStateWithAttachments, mergeStates, parseImport } from "../../lib/backup";
+import { exportStateWithAttachments, mergeStates, parseImport, type BackupScope } from "../../lib/backup";
+import { contentMetadata } from "../../lib/sync/deferredContent";
+import { retainDownloadedContent } from "../../lib/sync/contentDownloads";
 import { readPortableBackup } from "../../lib/backupArchive";
 import { flushLocalVaultWrites, assertVaultWritesSince, getVaultWriteCheckpoint } from "../../lib/localVault";
 import {
@@ -151,22 +153,25 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
     try {
       const { rawText, restoreMedia, restoreOriginals } = await readPortableBackup(file);
       const next = parseImport(rawText);
-      const message = mode === "replace"
+      const message = (mode === "replace"
         ? "Restore this backup? It REPLACES the current data on this device. Download a backup first if you want to keep both."
-        : "Merge this backup into the current data? Records are combined by id (newer wins); your profile and current day stay as they are. Nothing is deleted.";
+        : "Merge this backup into the current data? Records are combined by id (newer wins); your profile and current day stay as they are. Nothing is deleted.")
+        + (next.deferredContent ? " This copy contains download references. Uncached course files require the original account and access to that content. Matching files already on this device will be kept." : "");
       if (!confirm(message)) { setMsg("Restore cancelled. No data changed."); return; }
       const current = useStore.getState();
-      const restoredState = mode === "merge" ? mergeStates(current, next) : next;
+      const restoredState = mode === "merge" ? mergeStates(current, next) : await retainDownloadedContent(next, current);
+      if (useStore.getState() !== current) throw new Error("Your workspace changed while preparing recovery. No data was replaced; retry when saving finishes.");
       const checkpoint = getVaultWriteCheckpoint();
       current.replaceAll(restoredState);
       setMsg("Saving your workspace, images and original files…");
       await flushLocalVaultWrites(); assertVaultWritesSince(checkpoint);
-      const references = [...(restoredState.questions ?? []), ...privateReviewMedia(restoredState.documents)];
+      const metadata = contentMetadata(restoredState);
+      const references = [...(metadata.questions ?? []), ...privateReviewMedia(metadata.documents)];
       const { restored } = await restoreMedia(references);
-      const originals = await restoreOriginals(restoredState.documents ?? []);
+      const originals = await restoreOriginals(metadata.documents ?? []);
       await runQuestionAttachmentMaintenance(references);
       recordRestoreEvent({ kind: mode === "merge" ? "portable-merge" : "portable-restore", detail: file.name });
-      setMsg(`${mode === "merge" ? "Merged" : "Restored"} ${file.name}. Saved on this device.${restored ? ` Restored ${restored} image attachments.` : ""}${originals.restored ? ` Restored ${originals.restored} original files.` : ""}`);
+      setMsg(`${mode === "merge" ? "Merged" : "Restored"} ${file.name}. Saved on this device.${restored ? ` Restored ${restored} image attachments.` : ""}${originals.restored ? ` Restored ${originals.restored} original files.` : ""}${restoredState.deferredContent ? " Some course files still need downloading from the original account." : ""}`);
     } catch (e) {
       setMsg(`Recovery did not finish. ${e instanceof Error ? e.message : "Keep your backup and try again."}`);
     } finally {
@@ -177,15 +182,19 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
   }
 
   async function exportBackup() {
+    return exportCopy("complete");
+  }
+
+  async function exportCopy(scope: BackupScope) {
     if (backupBusy) return;
-    setBackupBusy(true); setMsg("Preparing your workspace, images and original files…");
+    setBackupBusy(true); setMsg(scope === "saved-work" ? "Preparing your saved work and files on this device…" : "Preparing your workspace, images and original files…");
     try {
-      const { attachmentCount, missingBlobKeys, originalCount, missingOriginalIds } = await exportStateWithAttachments(useStore.getState());
+      const { attachmentCount, missingBlobKeys, originalCount, missingOriginalIds, deferredSourceCount } = await exportStateWithAttachments(useStore.getState(), scope);
       const missing = missingBlobKeys.length
         ? ` ${missingBlobKeys.length} image attachments could not be read and were exported as metadata only.` : "";
-      setMsg(`Downloaded your backup file.${attachmentCount ? ` Includes ${attachmentCount} image attachments.` : ""}${originalCount ? ` Includes ${originalCount} original files.` : ""}${missing}${missingOriginalIds.length ? ` ${missingOriginalIds.length} original files were unavailable or exceeded the portable file limit. Their saved text and source details are included.` : ""}`);
+      setMsg(`${scope === "saved-work" ? "Downloaded your saved-work copy. Only files already on this device are included." : "Downloaded your backup file."}${deferredSourceCount ? ` ${deferredSourceCount} sources remain as download references and need the original account and content access.` : ""}${attachmentCount ? ` Includes ${attachmentCount} image attachments.` : ""}${originalCount ? ` Includes ${originalCount} original files.` : ""}${missing}${missingOriginalIds.length ? ` ${missingOriginalIds.length} original files were unavailable or exceeded the portable file limit. Their source references are included.` : ""}`);
     } catch (error) {
-      setMsg(`Backup was not exported. ${error instanceof Error ? error.message : "Try again after checking storage."}`);
+      setMsg(`Backup was not exported. ${error instanceof Error ? error.message : "Try again after checking storage."}${scope === "complete" ? " Export saved work to keep a copy without downloading course files." : ""}`);
     } finally { setBackupBusy(false); }
   }
 
@@ -312,6 +321,12 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
                 onChange={(e) => e.target.files?.[0] && doImport(e.target.files[0], "replace")} />
               <input ref={mergeRef} type="file" accept="application/json,application/zip,.json,.zip" hidden
                 onChange={(e) => e.target.files?.[0] && doImport(e.target.files[0], "merge")} />
+            </div>
+            <div className="row wrap gap8">
+              <GButton size="sm" disabled={backupBusy} aria-describedby="saved-work-description" onClick={() => exportCopy("saved-work")}>
+                <Download size={ICON_SIZE.body} /> Export saved work
+              </GButton>
+              <span className="sub" id="saved-work-description">Works offline. Keeps progress and available files; uncached course content stays as download references.</span>
             </div>
             <div className="backup-note">
               <ShieldCheck size={ICON_SIZE.body} />

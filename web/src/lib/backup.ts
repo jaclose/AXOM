@@ -1,4 +1,4 @@
-import { readDeferredContent } from "./sync/deferredContent";
+import { contentMetadata, readDeferredContent } from "./sync/deferredContent";
 import { readWorkspaceContent } from "./question-content/workspaceContent";
 import { privateReviewMedia } from "./privateLibrary/media";
 import { backupOriginalDocuments, createMediaBackupArchive, LARGE_MEDIA_BACKUP_BYTES, mediaBackupBytes } from "./backupArchive";
@@ -67,57 +67,66 @@ export function exportState(state: NoctyriumState) {
   });
 }
 
+export type BackupScope = "complete" | "saved-work";
+
 /** Intentional portable recovery resolves deferred content and includes verified
  * images and original files. Missing binaries are reported, never silently omitted.
+ * Saved-work recovery explicitly stays local and keeps unfetched references.
  * Ordinary account checkpoints do not use this export path. */
 export async function exportStateWithAttachments(
   state: NoctyriumState,
-): Promise<{ attachmentCount: number; missingBlobKeys: string[]; originalCount: number; missingOriginalIds: string[] }> {
-  if (state.deferredContent) {
+  scope: BackupScope = "complete",
+): Promise<{ attachmentCount: number; missingBlobKeys: string[]; originalCount: number; missingOriginalIds: string[]; deferredSourceCount: number }> {
+  if (state.deferredContent && scope === "complete") {
     const { materializeState } = await import("./sync/contentDownloads");
     state = await materializeState(state);
   }
   const payload: Record<string, unknown> = {
     _app: BRAND.productName,
     _exported: new Date().toISOString(),
+    _backupScope: scope,
     ...toPortableState(state),
   };
-  const references = [...(state.questions ?? []), ...privateReviewMedia(state.documents)];
-  if (backupOriginalDocuments(state.documents).length || mediaBackupBytes(references) > LARGE_MEDIA_BACKUP_BYTES) {
-    const result = await createMediaBackupArchive(payload, references, state.documents);
-    downloadBackupBlob(result.blob, "zip");
-    return { attachmentCount: result.attachmentCount, missingBlobKeys: result.missingBlobKeys, originalCount: result.originalCount, missingOriginalIds: result.missingOriginalIds };
+  const metadata = contentMetadata(state);
+  const deferredSourceCount = state.deferredContent?.sources.length ?? 0;
+  const options = { localOnly: scope === "saved-work" };
+  const references = [...(metadata.questions ?? []), ...privateReviewMedia(metadata.documents)];
+  if (backupOriginalDocuments(metadata.documents).length || mediaBackupBytes(references) > LARGE_MEDIA_BACKUP_BYTES) {
+    const result = await createMediaBackupArchive(payload, references, metadata.documents, options);
+    downloadBackupBlob(result.blob, "zip", scope);
+    return { attachmentCount: result.attachmentCount, missingBlobKeys: result.missingBlobKeys, originalCount: result.originalCount, missingOriginalIds: result.missingOriginalIds, deferredSourceCount };
   }
   let attachmentCount = 0;
   let missingBlobKeys: string[];
   try {
-    const collected = await collectQuestionAttachmentPayloads(references);
+    const collected = await collectQuestionAttachmentPayloads(references, options);
     if (collected.payloads.length) payload[ATTACHMENT_EXPORT_KEY] = collected.payloads;
     attachmentCount = collected.payloads.length;
     missingBlobKeys = collected.missingBlobKeys;
   } catch {
     // Blob store unavailable (private mode): export metadata-only, reported.
-    missingBlobKeys = [...(state.questions ?? []), ...privateReviewMedia(state.documents)].flatMap((question) =>
+    missingBlobKeys = references.flatMap((question) =>
       (question.attachments ?? []).map((attachment) => attachment.blobKey));
   }
-  downloadBackupPayload(payload);
-  return { attachmentCount, missingBlobKeys, originalCount: 0, missingOriginalIds: [] };
+  downloadBackupPayload(payload, scope);
+  return { attachmentCount, missingBlobKeys, originalCount: 0, missingOriginalIds: [], deferredSourceCount };
 }
 
-function downloadBackupPayload(payload: Record<string, unknown>) {
+function downloadBackupPayload(payload: Record<string, unknown>, scope: BackupScope = "complete") {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-  downloadBackupBlob(blob, "json");
+  downloadBackupBlob(blob, "json", scope);
 }
 
-function downloadBackupBlob(blob: Blob, extension: "json" | "zip") {
+function downloadBackupBlob(blob: Blob, extension: "json" | "zip", scope: BackupScope = "complete") {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   const stamp = new Date().toISOString().slice(0, 10);
   a.href = url;
-  a.download = `${BRAND.productName.toLowerCase()}-backup-${stamp}.${extension}`;
+  a.download = `${BRAND.productName.toLowerCase()}-${scope === "saved-work" ? "saved-work" : "backup"}-${stamp}.${extension}`;
   a.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
-  markBackupDone();
+  // A references-only recovery copy must not imply the whole library is backed up.
+  if (scope === "complete") markBackupDone();
 }
 
 /** Record when the user last exported, for the data-health panel. */

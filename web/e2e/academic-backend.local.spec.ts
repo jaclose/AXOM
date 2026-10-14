@@ -107,7 +107,7 @@ test("real sign-in, private course, scoped study and cross-device recovery", asy
     return target.evaluate(async () => {
     const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => NoctyriumState }; useAccount: { getState: () => { protection: string } }; flushVault: () => Promise<void> }> }).__AXOM_DEV__;
     await dev.flushVault(); const state = dev.useStore.getState();
-    return { questions: state.questions.length, attempts: state.questions.flatMap(q => q.attempts.map(attempt => ({ questionId: q.id, ...attempt }))).sort((a,b) => a.questionId.localeCompare(b.questionId)), protection: dev.useAccount.getState().protection };
+    return { questions: state.questions.length, attempts: [...state.questions, ...(state.deferredContent?.questions ?? [])].flatMap(q => (q.attempts ?? []).map(attempt => ({ questionId: q.id, ...attempt }))).sort((a,b) => a.questionId.localeCompare(b.questionId)), protection: dev.useAccount.getState().protection };
     });
   };
   await expect.poll(async () => (await progress(page)).attempts.length).toBe(11);
@@ -160,6 +160,55 @@ test("real sign-in, private course, scoped study and cross-device recovery", asy
     });
     expect(pending).toBe(25);
     await device.getByRole("dialog").getByRole("button", { name: "Done", exact: true }).click();
+    // A reference-only device must be able to protect personal progress offline.
+    await device.getByTitle("Settings", { exact: true }).click();
+    await device.getByRole("tab", { name: "Emergency recovery", exact: true }).click();
+    for (const [width, height, theme] of [[1440, 900, "light"], [390, 844, "dark"], [1024, 540, "light"]] as const) {
+      await device.setViewportSize({ width, height });
+      await device.locator("html").evaluate((element, value) => element.setAttribute("data-theme", value), theme);
+      const button = device.getByRole("button", { name: "Export saved work", exact: true });
+      await button.scrollIntoViewIfNeeded(); await expect(button).toBeVisible();
+      expect(await button.evaluate(element => element.scrollHeight <= element.clientHeight + 1)).toBe(true);
+      await device.screenshot({ path: `/tmp/axom-saved-work-${width}.png` });
+    }
+    await device.locator("html").evaluate(element => { element.style.zoom = "2"; });
+    await device.getByRole("button", { name: "Export saved work", exact: true }).scrollIntoViewIfNeeded();
+    await expect(device.getByRole("button", { name: "Export saved work", exact: true })).toBeVisible();
+    expect(await device.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await device.locator("html").evaluate(element => { element.style.zoom = ""; });
+    await other.setOffline(true);
+    const savedWorkDownload = device.waitForEvent("download");
+    await device.getByRole("button", { name: "Export saved work", exact: true }).focus(); await device.keyboard.press("Enter");
+    const savedWork = await savedWorkDownload;
+    expect(savedWork.suggestedFilename()).toMatch(/^axom-saved-work-.*\.zip$/);
+    await expect(device.getByRole("status")).toContainText("sources remain as download references");
+    expect(bootstrapSources).toEqual([]);
+    const savedWorkPath = await savedWork.path();
+    if (!savedWorkPath) throw new Error("Saved-work export was not written.");
+    await other.setOffline(false);
+    await device.getByRole("dialog").getByRole("button", { name: "Done", exact: true }).click();
+
+    const offlineRecovery = await browser.newContext();
+    try {
+      const recovered = await offlineRecovery.newPage();
+      recovered.on("pageerror", error => errors.push(error.message));
+      await recovered.goto(`${new URL(page.url()).origin}/#dashboard`);
+      await completeSetup(recovered, "Saved work recovery"); await deferPromisePrompt(recovered);
+      await recovered.getByTitle("Settings", { exact: true }).click();
+      await recovered.getByRole("tab", { name: "Emergency recovery", exact: true }).click();
+      await offlineRecovery.setOffline(true);
+      const chooser = recovered.waitForEvent("filechooser");
+      await recovered.getByRole("button", { name: "Import / restore", exact: true }).click();
+      recovered.once("dialog", dialog => { expect(dialog.message()).toContain("download references"); void dialog.accept(); });
+      await (await chooser).setFiles({ name: savedWork.suggestedFilename(), mimeType: "application/zip", buffer: readFileSync(savedWorkPath) });
+      await expect(recovered.getByRole("status")).toContainText("Some course files still need downloading");
+      expect((await progress(recovered)).attempts).toEqual(saved.attempts);
+      expect((await progress(recovered)).questions).toBe(0);
+      await offlineRecovery.setOffline(false);
+      await recovered.reload(); await waitForWorkspace(recovered);
+      expect((await progress(recovered)).attempts).toEqual(saved.attempts);
+      expect((await progress(recovered)).questions).toBe(0);
+    } finally { await offlineRecovery.close(); }
     await device.goto(`${new URL(page.url()).origin}/#questions`);
     const downloads = device.getByRole("region", { name: "Saved account content" });
     await expect(downloads).toBeVisible();
@@ -186,6 +235,18 @@ test("real sign-in, private course, scoped study and cross-device recovery", asy
     expect((await progress(device)).attempts).toEqual(saved.attempts);
     const originalFiles = await verifyOriginals(device);
     expect(originalFiles).toBeGreaterThan(0);
+    // Restoring the earlier reference-only copy keeps verified local source bytes.
+    await device.getByTitle("Settings", { exact: true }).click();
+    await device.getByRole("tab", { name: "Emergency recovery", exact: true }).click();
+    const restoreSaved = device.waitForEvent("filechooser");
+    await device.getByRole("button", { name: "Import / restore", exact: true }).click();
+    device.once("dialog", dialog => dialog.accept());
+    await (await restoreSaved).setFiles({ name: savedWork.suggestedFilename(), mimeType: "application/zip", buffer: readFileSync(savedWorkPath) });
+    await expect(device.getByRole("dialog").getByRole("status")).toContainText("Saved on this device.");
+    expect((await progress(device)).questions).toBe(25);
+    expect((await progress(device)).attempts).toEqual(saved.attempts);
+    expect(await verifyOriginals(device)).toBe(originalFiles);
+    await device.getByRole("dialog").getByRole("button", { name: "Done", exact: true }).click();
     await other.setOffline(true);
     await device.getByRole("button", { name: "Quiz week 2", exact: true }).click();
     await expect(device.getByText("Question 1 of 11", { exact: false }).first()).toBeVisible();
