@@ -10,6 +10,7 @@ import { courseForScope } from "../../lib/course-engine/questionBank";
 import { Field, SelectField, TextAreaField } from "../ui/Modal";
 import { GButton, GhostButton } from "../ui/primitives";
 import { QuestionBlocks } from "./QuestionContent";
+import { BankImportSourcePage } from "./BankImportSourcePage";
 import type { ImportFinalizationResult } from "./ImportPanel";
 import type { ImportPackage } from "../../lib/question-content/package";
 import type { QuestionBlock, TableBlock } from "../../lib/question-content/blocks";
@@ -115,6 +116,7 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
         </SelectField>
       </div>
       <p className="sub">{verdict?.readiness === "ready" ? "READY" : "NEEDS REVIEW"} · Source page {question.source.page ?? "not stated"}{question.source.set ? ` · Set ${question.source.set}` : ""} · Original question {question.source.questionNumber ?? index + 1}</p>
+      {mode === "review" && <BankImportSourcePage originalFile={bank.originalFile} sourceName={pkg.manifest.source.filename} sourcePage={question.source.page} />}
       <QuestionBlocks blocks={question.stem} content={question} files={bank.files} mode={mode} />
       {question.choiceTable && <QuestionBlocks blocks={[question.choiceTable]} content={question} files={bank.files} mode={mode} section="choice" />}
       <ol className="bank-import-choices">{question.choices.map((choice) => <li key={choice.id}><b>{choice.label}.</b><QuestionBlocks blocks={choice.blocks} content={question} files={bank.files} mode={mode} section="choice" /></li>)}</ol>

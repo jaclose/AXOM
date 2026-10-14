@@ -1611,7 +1611,13 @@ function FileTab({ busyFile, setBusyFile, onParsed, onBankSaved, stagedSources, 
   }
 
   if (bank) return <BankImportReview bank={bank} onBack={() => { setBank(undefined); setBankStagedId(undefined); onInspectStaged(undefined); }}
-    onSaved={onBankSaved} onReviewed={async (_reviewed, saved) => {
+    onSaved={(result) => {
+      // A successful bank save must return to the remaining staged sources,
+      // not leave a completed BankImportReview mounted over the queue.
+      setBank(undefined);
+      setBankStagedId(undefined);
+      onBankSaved(result);
+    }} onReviewed={async (_reviewed, saved) => {
       if (!bankStagedId || (saved.status !== "saved" && saved.status !== "already-saved")) return;
       const savedIds = saved.sections.flatMap((section) => section.savedIds);
       onStagedSaved(bankStagedId, savedIds.length);
