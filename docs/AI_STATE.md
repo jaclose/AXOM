@@ -5,105 +5,96 @@ authority: current-state
 ---
 # AXOM current AI state
 
-Snapshot: 2026-10-13, `feat/academic-library-v1` in `AXOM-academic-library-v1`.
-Account/content checkpoint `07cd665d` is merged with local consolidation `bb8e31fc`
-through `8f6d0eec`. This checkout adds original-file course downloads and portable recovery. JD authorized
-commits, development pushes and tested local-main convergence. Preserve other-owner
-drafts. Remote main still deploys production and has not been updated here.
+Snapshot: 2026-10-14 UTC, `feat/academic-library-v1` in `AXOM-academic-library-v1`.
+JD authorized commits, development pushes and tested local-main convergence.
+Original-file recovery `2d083ebd` is committed, pushed and on local main. This checkout
+adds durable daily challenge references, resumption and explicit verification retry.
+Remote main remains `5355e5e7`; it deploys production and has not been advanced here.
 
-Superseded Ideas3, backup recovery, owner-feedback, untested Decode, exam bootstrap
-and parked dependency checkpoints are preserved as ancestry without replacing their
-newer implementations. The private-media branch
-`backup/pre-large-file-cleanup-2026-09-28` remains excluded: its 288 MB audio file and
-another local audio asset have no publication clearance. Do not merge or publish it.
+## Ownership and protected work
 
-The reviewed Pathways crawler is now integrated as a separate, local research service.
-It has durable SQLite queues, bounded collection, explicit source/reuse policy, review-
-gated exports and no production publisher. Older remote 3D-ident, Guide/AI/Anki,
-updater, shared-catalog and catalog-replay tips are preserved as superseded ancestry;
-their newer canonical replacements remain in the tree. Stale analytics and dependency
-bot tips are also ancestry-only: analytics already mounts centrally, while the old
-lockfile proposals include unreviewed React, TypeScript, Vitest and CI-action majors.
-No dependency versions changed; regenerate future upgrades from current lockfiles.
+Read the current coordination board and its single CONVERGENCE ledger before another
+integration. Preserve other owners' original checkouts and untracked files. Recovery
+handoff `1942a77f` is integrated. On 2026-10-14 UTC the recovery owner confirmed no
+renewed conflict or pending schema work; further original-file sync and shared-schema
+work belong to the academic owner. Its original `9b828694` checkout remains untouched.
 
-## Working and verified
+All fetched local/remote feature tips are represented in integration history except
+`backup/pre-large-file-cleanup-2026-09-28`. Its 288 MB audio file and another private
+asset have no publication clearance. Do not merge or publish that branch. Superseded
+Ideas3, recovery, Decode, exam-bootstrap, updater, shared-catalog and dependency tips
+are ancestry-only where newer canonical implementations replaced them. No old lockfile
+or major dependency upgrade was adopted. Pathways is a separate local research service
+with review-gated exports; it has no production publisher and passes 62 regressions.
 
-[Academic library](features/academic-library.md) is the canonical behavior and
-acceptance contract. QBank now discovers the same paginated backend catalog as Course
-Library and opens the same source-backed weekly plan. Selective loading and exact
-image-rich quizzes use the existing tracker/import/question engines. Deep links do
-not depend on the first catalog page. Earlier catalog adapters remain compatibility
-history, with no competing product entry point.
+## Working behavior
 
-An isolated native Supabase stack (CLI 2.120.0, API `http://127.0.0.1:55321`) supports
-real synthetic-account Auth/REST/Storage acceptance. Private uploads, reviewed sharing,
-group restrictions, withdrawal, independent enrollment and clean second-device attempt
-recovery pass. The reviewed FTM1 slice contains 75 activities across three weeks, two
-explicitly unresolved activities and an exact 11-question image-rich Week 2 quiz.
-Daily challenges use a fixed reviewed pool, explicit alias/participation, server scoring,
-idempotent events, ties and opt-out. Two learners retain independent attempts.
+[Academic library](features/academic-library.md) owns the implementation and acceptance
+contract. Course Library and QBank share a paginated backend catalog and source-backed
+weekly plan. Explicit selection loads through the existing tracker/import/question
+engines; empty quiz scope never expands. The FTM1 slice contains 75 reviewed activities,
+three weeks, two unresolved activities and an exact 11-question image-rich Week 2 quiz.
+Private uploads, reviewed shared/group visibility, withdrawal and independent learner
+state pass real local Auth/REST/Storage checks. No competing content or attempt engine.
 
-Integration repairs `04ef62fe` add restrictive private-bucket policies and resolve
-migration collisions. `0c6d5861` retains the split workspace bootstrap offline.
-The exact recovery-owner handoff remains integrated at `1942a77f`; the original
-backup checkout is untouched. No private course sources or test credentials enter Git.
+[Account/content separation](architecture/accounts-sync-v1.md) uses the existing atomic
+revision writer, compact metadata checkpoints and explicit content downloads. Source
+text and images reference canonical shared objects when exact; private edits retain
+private recovery. Typed deferred records stay outside scoring. Original source files
+now download through protected manifests into Decode's checksum-specific cache.
+Portable ZIP format 2 includes verified originals; JSON/v1 ZIP imports remain supported.
+No private source files or test credentials enter Git or application release assets.
 
-## Validation
+Daily challenges use a fixed reviewed source revision, alias/participation, server
+scoring, stable event IDs, ties and opt-out. The new device-local launch reference holds
+only canonical quiz identity/mapping. Continue resumes the same ExamRunner session;
+Retry verification reads the durable saved quiz. Refresh/sign-in never silently promote
+unverified answers. Web Locks protect pending references across tabs. New points still
+require the same UTC day and participation. No scheduling or hosted activation yet.
 
-Node 22.23.1, macOS, installed Chrome: `npm --prefix web run verify:all` passes on
-`07cd665d` runtime. 3,128 unit/SQL checks pass, five declared skips; typecheck/full lint
-and production build pass. Two-build update, protected recovery checkpoint, unchanged
-peer tab, offline reopening and lazy Daily Games gates pass. The full Chrome matrix
-passes 93 cases, with four declared source/live opt-in skips. This run includes actual
-local Supabase, private FTM1, two-account sharing/daily scoring and original ZIP restore.
-All 79 repository/release checks pass. Mobile saved-set buttons now grow with long titles;
-desktop, 390px dark and short-window screenshots were inspected and keyboard download passes.
+## Current validation
 
-The Pathways crawler compiles and passes all 62 synthetic Python regressions without
-network access. Repository tests and hygiene pass after the remote-tip consolidation.
+Node 22.23.1, macOS, installed Chrome, local native Supabase API
+`http://127.0.0.1:55321` (CLI 2.120.0). Feature migrations through
+`20261013230000_shared_account_content_references.sql` are applied only locally.
+Original-file and daily-resume extensions need no additional backend migration.
 
-The actual supplied 516,431,732-byte backup now passes Settings restore and reload in
-an isolated persistent browser profile with hosted traffic blocked. Notes/progress,
-343 questions, 848 documents and all 2,151 image hashes match. Detailed timings and
-local migrations are in the feature contract. Native packaging, hosted staging and
-production acceptance remain outstanding. The original ZIP restore recheck took
-74,052 ms for read/restore/reload/integrity under current host load; all 2,151 images
-match. The current release doctor confirms Rust is available and updater credentials
-are absent. Exact package/deployment-input results belong to their source commit;
-previous build measurements do not describe this new checkpoint.
+The final daily-resume quality gate passes 3,134 unit/SQL tests with seven declared
+opt-in skips, typecheck, full lint, production build and bundle isolation. Forty-six
+focused fixture/adapter/exam checks pass. Real two-account FTM1 acceptance reloads after
+three answers, loses the fifth actual server acknowledgement, then explicitly retries
+the same event IDs. Each learner retains 25 attempts, four points and rank one. Thirty
+first-user requests total 6,690 JSON bytes. Desktop/mobile/short windows, both themes,
+keyboard, reduced motion and 200% CSS zoom pass; final screenshots were inspected.
 
-Original-file recovery now uses checksum-specific editions in Decode's existing store.
-Explicit course downloads restore protected original PDF/DOCX/text files; portable ZIP
-format 2 includes verified binaries, reports omissions, and keeps JSON/v1 compatibility.
-New quality gate: 3,131 unit/SQL passes, six declared skips, type/full lint/build pass;
-75 focused recovery checks and 79 release checks pass. Seven affected browser cases
-pass: real FTM1 export/third-profile restore recovers two originals and 11 attempts from
-909,774 bytes; legacy ZIP recovery verifies all 2,151 images. Current local account JSON:
-101,550-byte checkpoint / 10,892-byte 11-answer delta, zero source GETs at sign-in.
-No hosted changes or additional backend migration. Exact details live in the feature doc.
+At `2d083ebd`, seven affected browser cases and the two-build update/consent/recovery/
+peer-tab/offline gate pass. A 909,774-byte FTM1 portable backup restores two verified
+originals plus 11 attempts in a third profile. Local account JSON is 101,550 bytes for
+initial checkpoint / 10,892 bytes for the 11-answer delta; clean sign-in performs zero
+source GETs and creates no private course-image copies. The supplied 516,431,732-byte
+backup restores 343 questions, 848 documents, 43 activities and all 2,151 image hashes.
+The full 97-case browser matrix last passed on predecessor `07cd665d` runtime (93 passes,
+four opt-in skips). Do not describe that full matrix as a run of this new source tree.
+Repository hygiene/43 repository tests and 79 release checks passed at the recovery
+boundary; rerun affected repository gates before this next commit.
 
 ## Remaining delivery boundary
 
-Incremental account requests reuse the atomic revision writer. Hash-format 2 verifies
-compact metadata and immutable references without source downloads. Typed deferred
-records stay outside scored practice. QBank saved-set downloads and saved course
-downloads preserve IDs, notes and attempts and include question figures and study code.
-Verified sources/images reference canonical academic objects; private edits retain
-private recovery. Legacy snapshots remain readable. Migration 20261013230000 was applied
-only to the real local stack at http://127.0.0.1:55321.
+Pending: general private-upload original-binary cloud sync, larger/resumable uploads,
+paged attempt history, persistent offline cache usage/removal, administrative review,
+remaining supplied courses, daily scheduling, configured release and hosted acceptance.
+A backup with unavailable deferred sources currently refuses full export; a clearly
+labeled local/metadata recovery fallback is still to be implemented. Never discard
+personal overlays or references, or label an incomplete copy a complete offline bank.
 
-Actual local FTM1 JSON: 100,780-byte checkpoint / 10,899-byte completed 11-answer delta;
-clean second-device sign-in makes zero source Storage GETs. All 25 question references
-are shared and no private course-image copies are uploaded. Offline image-rich study
-and reconnect retain saved attempts. These are request sizes, excluding headers, not
-hosted latency or live account-size measurements. Paged attempt history, persistent
-cache usage/removal controls and general private-upload binary cloud sync remain unfinished.
+The exact `2d083ebd` web ZIP is 46,867,506 bytes with a verified manifest hash, but
+accountsConfigured=false. It is an unconfigured local package, not the connected
+release. Native compilation/signing remain unverified. Disk headroom recently fell to
+5.7 GiB due to other active work; preserve all services/files and do not prune. External
+build storage needs explicit path verification before using it for large native output.
 
-Also pending: remaining source-backed courses, larger/resumable user uploads and review,
-automatic daily publication, durable interrupted challenge submission, hosted activation
-and native release. Never call this checkpoint full canonical 1.1 delivery.
-Every fetched local and remote feature tip is now represented in the integration history;
-only the publication-blocked private-media backup remains deliberately outside `main`.
 Normal `www.axom.info` was last reverified read-only as deployment
 `dpl_6fg8rJYXk2tSfJWvNALwL7gN38TF`, source `c23e8c26`; AXOM Production is
-`jofkmfwkidubxcutkwzf`. No production tests, migrations, publication or deployment here.
+`jofkmfwkidubxcutkwzf`. No production tests, migrations, source publication or deployment.
+Prepare the exact connected release/migration result before requesting production
+approval. This is not complete canonical 1.1 delivery.

@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { completeSetup, deferPromisePrompt, expect, test } from "./fixtures";
 import type { Page } from "@playwright/test";
 import type { NoctyriumState } from "../src/lib/types";
+import { STORAGE_KEYS } from "../src/lib/brand";
 const file=process.env.AXOM_CHALLENGE_FIXTURE;
 test.skip(!file,"Prepare the isolated local challenge fixture first.");
 test.use({trace:"off",screenshot:"off",video:"off"});
@@ -13,6 +14,8 @@ test("two learners complete the same real daily pool and receive independent ver
   if(url.protocol!=="http:" || !["localhost","127.0.0.1"].includes(url.hostname)) throw new Error("This acceptance refuses hosted services.");
   const errors:string[]=[];
   const submits:Array<Record<string,unknown>>=[];
+  let injectLostAcknowledgement = false;
+  let intercepted = 0;
   page.on("request",request=>{ if(new URL(request.url()).pathname.endsWith("/rpc/academic_submit_challenge")) submits.push(request.postDataJSON()); });
   const other=await browser.newContext({reducedMotion:"reduce",viewport:{width:1440,height:900}});
   const second=await other.newPage(); second.setDefaultTimeout(20_000);
@@ -23,7 +26,7 @@ test("two learners complete the same real daily pool and receive independent ver
   });
   async function prepare(target:Page,user:{email:string;password:string;alias:string}){
     target.on("pageerror",e=>errors.push(e.message));
-    target.on("console",m=>{if(["warning","error"].includes(m.type())) errors.push(m.text());});
+    target.on("console",m=>{if(["warning","error"].includes(m.type()) && !(injectLostAcknowledgement && m.text().includes("503") && m.location().url.includes("academic_submit_challenge"))) errors.push(m.text());});
     await target.addInitScript(({url,key})=>{Object.assign(window,{__AXOM_E2E_ACCOUNT__:{url,key}});},{url:url.href,key:fixture.anonKey});
     await target.goto(`${baseURL}/#dashboard`);
     await completeSetup(target,user.alias); await deferPromisePrompt(target);
@@ -44,7 +47,7 @@ test("two learners complete the same real daily pool and receive independent ver
     await target.getByRole("button",{name:/^(Participate today|Save alias)$/}).click();
     await expect(target.getByRole("button",{name:"Start daily challenge",exact:true})).toBeEnabled();
   }
-  async function complete(target:Page){
+  async function complete(target:Page, exerciseRecovery = false){
     await target.getByRole("button",{name:"Start daily challenge",exact:true}).click();
     let images=0;
     for(let i=0;i<fixture.questionCount;i++){
@@ -55,15 +58,56 @@ test("two learners complete the same real daily pool and receive independent ver
       }
       await target.getByLabel("Question stem",{exact:true}).focus();await target.keyboard.press("A");
       await target.getByRole("button",{name:i+1===fixture.questionCount?"Submit & finish":"Submit & next",exact:true}).click();
+      if (exerciseRecovery && i === 2) {
+        await expect.poll(() => target.evaluate(key => JSON.parse(localStorage.getItem(key) ?? "null")?.index, STORAGE_KEYS.quizActiveSession)).toBe(3);
+        await target.reload();
+        await target.getByRole("combobox", { name: "Module", exact: true }).selectOption(fixture.challenge);
+        await expect(target.getByRole("button", { name: "Continue daily challenge", exact: true })).toBeEnabled();
+        await target.getByRole("button", { name: "Continue daily challenge", exact: true }).click();
+      }
     }
     expect(images).toBeGreaterThan(0);
     await target.getByRole("dialog",{name:"Block results",exact:true}).getByRole("button",{name:"Done",exact:true}).click();
+
+    if (exerciseRecovery) {
+      await expect(target.getByRole("status").filter({ hasText: "Daily verification is incomplete" })).toBeVisible();
+      expect(intercepted).toBe(5);
+      await target.unroute("**/rpc/academic_submit_challenge");
+      injectLostAcknowledgement = false;
+      const initialRequests = submits.length;
+      await target.reload();
+      await target.getByRole("combobox", { name: "Module", exact: true }).selectOption(fixture.challenge);
+      const retry = target.getByRole("button", { name: "Retry verification", exact: true });
+      await expect(retry).toBeEnabled();
+      const refreshed = target.waitForResponse(response => new URL(response.url()).pathname.endsWith("/rpc/academic_daily_challenges"));
+      await target.locator(".daily-board").getByRole("button", { name: "Refresh", exact: true }).click();
+      await refreshed; await expect(retry).toBeEnabled();
+      expect(submits.length).toBe(initialRequests);
+      for (const [width, height] of [[1440, 900], [390, 844]]) {
+        await target.setViewportSize({ width, height });
+        await target.getByRole("region", { name: "Saved daily challenge" }).scrollIntoViewIfNeeded();
+        expect(await target.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        await target.screenshot({ path: `/tmp/axom-daily-pending-${width}.png` });
+      }
+      await target.setViewportSize({ width: 1440, height: 900 });
+      await retry.focus(); await target.keyboard.press("Enter");
+    }
     await expect(target.getByRole("status").filter({hasText:`${fixture.questionCount} answers checked by the server.`})).toBeVisible();
     expect((await progress(target)).attempts).toBe(fixture.questionCount);
   }
   try{
     await prepare(page,fixture.users[0]);await prepare(second,fixture.users[1]);
-    await complete(page);
+    injectLostAcknowledgement = true;
+    await page.route("**/rpc/academic_submit_challenge", async route => {
+      // The real server accepts this event first. Only its acknowledgement is
+      // replaced, reproducing an interrupted connection without mocking scoring.
+      const response = await route.fetch();
+      intercepted++;
+      if (intercepted === 5) await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ message: "Synthetic lost acknowledgement" }) });
+      else await route.fulfill({ response });
+    });
+    await complete(page, true);
+    expect(submits.slice(0, 5)).toEqual(submits.slice(5, 10));
     expect((await progress(second)).attempts).toBe(0);
     const own=page.locator(".daily-board-you");await expect(own).toContainText("Daily Alpha");
     await expect.poll(async()=>Number(await own.locator("td").nth(1).innerText())).toBeGreaterThan(0);
@@ -103,6 +147,6 @@ test("two learners complete the same real daily pool and receive independent ver
     await expect(page.locator(".daily-board-you")).toContainText("Daily Alpha");
     expect((await progress(page)).attempts).toBe(fixture.questionCount);
     expect(errors).toEqual([]);
-    if(process.env.AXOM_CHALLENGE_EVIDENCE){const bytes=submits.map(body=>Buffer.byteLength(JSON.stringify(body)));writeFileSync(process.env.AXOM_CHALLENGE_EVIDENCE,JSON.stringify({environment:"loopback",apiUrl:url.href,questions:fixture.questionCount,participants:2,tiedPoints:firstPoints,attemptRequests:bytes.length,attemptPayloadBytes:{minimum:Math.min(...bytes),maximum:Math.max(...bytes),total:bytes.reduce((a,b)=>a+b,0)}},null,2));}
+    if(process.env.AXOM_CHALLENGE_EVIDENCE){const bytes=submits.map(body=>Buffer.byteLength(JSON.stringify(body)));writeFileSync(process.env.AXOM_CHALLENGE_EVIDENCE,JSON.stringify({environment:"loopback",resumedSameQuiz:true,lostAcknowledgementRetried:true,apiUrl:url.href,questions:fixture.questionCount,participants:2,tiedPoints:firstPoints,attemptRequests:bytes.length,attemptPayloadBytes:{minimum:Math.min(...bytes),maximum:Math.max(...bytes),total:bytes.reduce((a,b)=>a+b,0)}},null,2));}
   }finally{await other.close();}
 });

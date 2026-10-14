@@ -196,11 +196,27 @@ learner's own rank. Answer tables and answer-key pools have no client grants. Co
 withdrawal/private visibility revokes standings access, and opt-out remains available
 without deleting personal work. The UI refreshes each minute and after verification.
 
-The first release requires an online challenge completion. Unconfirmed or offline
-answers remain personal; they are not promoted automatically into verified standings.
-Leaving/reloading during submission can leave a partial daily score. Persistent
-challenge resumption and an explicit retry queue remain outstanding. Replaying an
-acknowledged event is idempotent; changing an event's contents is rejected.
+Starting a daily challenge first saves an account/challenge-bound reference in the
+existing Local Vault. It contains the canonical quiz session ID and exact question
+mapping, not another copy of answers or a client score. The existing ExamRunner accepts
+that stable launch identity and retains its usual resume, mode and reveal rules.
+Continue resumes the same saved quiz after reload. Verification reads the durable
+canonical quiz session, checks account identity, and sends the same server event IDs.
+
+Unconfirmed or offline answers remain personal. Reload, sign-in, catalog refresh and
+reconnect never promote them automatically, including when account recovery adds a
+completed session after the board mounts. A run started or explicitly continued in the
+current view may submit on completion. Otherwise the learner chooses Retry verification.
+A lost acknowledgement replays safely; repeats cannot farm points. The reference is
+retired only after every answered event is acknowledged or excluded by the server.
+New points still require participation, access and the same UTC challenge day.
+
+Launch and retirement use the browser's [Web Locks API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Locks_API)
+to prevent concurrent tabs from overwriting or clearing another pending run. A browser
+without this secure-context API cannot start a shared daily run; personal practice
+remains available. The small pending reference is device-local bookkeeping, outside
+account snapshots and portable backups; canonical answers remain in the existing quiz
+history. Hosted scheduling and native acceptance are still outstanding.
 
 Local acceptance on 2026-10-13: two synthetic accounts each completed the same real
 25-question FTM1 image-rich pool, independently saved 25 canonical attempts, received
@@ -214,3 +230,14 @@ Reproduce the fixture with `challengeFixture.local.test.ts` using the local back
 and pilot variables above plus `AXOM_CHALLENGE_FIXTURE` pointing outside the repo.
 Then run `daily-challenge.local.spec.ts` with that fixture and `AXOM_E2E_BASE_URL`.
 The fixture holds test credentials and is written with mode 0600. Never commit it.
+
+Daily resumption acceptance, 2026-10-14 UTC: two synthetic learners use the real local
+25-question FTM1 pool. The first reloads after three answers and resumes the same quiz.
+The backend then accepts five scoring events before the fifth acknowledgement is
+replaced with an intentional 503. Reload and Refresh send no scoring events. Explicit
+retry repeats the exact event IDs and finishes all 25 canonical attempts; both learners
+still receive four points and rank one. The first learner sends 30 requests of exactly
+223 JSON bytes each (6,690 bytes total), including five safe replays. Tests also cover
+opt-out, independent progress, keyboard, reduced motion, 390px/1440px/short windows,
+both themes and 200% CSS zoom. Pending actions were inspected in actual screenshots.
+The injected acknowledgement failure is deliberate; scoring remains the real backend.

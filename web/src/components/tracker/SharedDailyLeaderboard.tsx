@@ -5,7 +5,7 @@ import { useStore } from "../../lib/store";
 import { STORAGE_KEYS } from "../../lib/brand";
 import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
 import { challengeStandings, joinChallenge, listDailyChallenges, matchChallengeQuestions, type DailyChallenge, type DailyStandings } from "../../lib/academicLibrary/challenges";
-import { observeChallengeRun } from "../../lib/academicLibrary/challengeRun";
+import { observeChallengeRun, prepareChallengeRun, readChallengeRun, verifyChallengeRun, type ChallengeRunIntent } from "../../lib/academicLibrary/challengeRun";
 import { openAcademicCourse } from "../../lib/academicLibrary/navigation";
 import { ExamRunner } from "../questions/ExamRunner";
 import { GButton, GlassCard, PanelHeader } from "../ui/primitives";
@@ -15,7 +15,6 @@ export function SharedDailyLeaderboard() {
   const accountId = useAccount(state => state.user?.id);
   return accountId ? <DailyBoard key={accountId} accountId={accountId} /> : <GlassCard pad><PanelHeader headingLevel={2} title="Daily challenge" sub="Sign in to see approved challenges and shared daily standings." /></GlassCard>;
 }
-interface Run { challenge: DailyChallenge; questionIds: string[]; keys: Array<[string,string]>; startedAt: string }
 function DailyBoard({ accountId }: { accountId: string }) {
   const [challenges,setChallenges] = useState<DailyChallenge[]>([]);
   const [selected,setSelected] = useState("");
@@ -26,7 +25,10 @@ function DailyBoard({ accountId }: { accountId: string }) {
   const [error,setError] = useState("");
   const [message,setMessage] = useState("");
   const [refresh,setRefresh] = useState(0);
-  const [run,setRun] = useState<Run>();
+  const [run,setRun] = useState<ChallengeRunIntent>();
+  const [runner,setRunner] = useState<ChallengeRunIntent>();
+  const [automaticRunId,setAutomaticRunId] = useState<string>();
+  const [runLoading,setRunLoading] = useState(true);
   const [showRunner,setShowRunner] = useState(false);
   const challenge = challenges.find(item => item.id===selected) ?? challenges[0];
   useEffect(() => {
@@ -47,13 +49,44 @@ function DailyBoard({ accountId }: { accountId: string }) {
   },[accountId,challenge,refresh]);
   useEffect(() => { setAlias(challenge?.participation?.alias ?? ""); },[challenge?.id,challenge?.participation?.alias]);
   useEffect(() => {
-    const timer=window.setInterval(() => { if (!document.hidden && !showRunner) setRefresh(value => value+1); },60_000);
+    const timer=window.setInterval(() => { if (!document.hidden && !showRunner && !busy) setRefresh(value => value+1); },60_000);
     return () => window.clearInterval(timer);
-  },[showRunner]);
+  },[showRunner,busy]);
+  const challengeId = challenge?.id;
   useEffect(() => {
-    if (!run) return;
-    return observeChallengeRun(accountId,run.challenge,new Map(run.keys),run.startedAt,setMessage,() => setRefresh(value => value+1));
-  },[accountId,run]);
+    let cancelled = false;
+    setRun(undefined); setRunLoading(true);
+    if (!challengeId) { setRunLoading(false); return; }
+    void readChallengeRun(accountId, challengeId).then(value => { if (!cancelled) setRun(value); })
+      .catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : "Saved challenge unavailable."); })
+      .finally(() => { if (!cancelled) setRunLoading(false); });
+    return () => { cancelled = true; };
+  }, [accountId, challengeId, refresh]);
+  useEffect(() => {
+    if (!run || automaticRunId !== run.sessionId) return;
+    return observeChallengeRun(run,setMessage,() => setRefresh(value => value+1),() => { setRun(undefined); setAutomaticRunId(undefined); },setBusy);
+  },[run,automaticRunId]);
+  const completedRun = useStore(state => run ? state.quizSessions.some(session => session.id === run.sessionId) : false);
+  async function retryVerification() {
+    if (!run || busy) return;
+    setBusy(true); setError(""); setMessage("Checking saved answers with the server…");
+    try {
+      const checked = await verifyChallengeRun(run);
+      setMessage(`${checked} answers checked by the server. Repeated questions earn no additional points.`);
+      setRun(undefined); setRefresh(value => value+1);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Verification remains pending."); }
+    finally { setBusy(false); }
+  }
+  function resume() {
+    if (!run || !challenge) return;
+    try {
+      const active = JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession) ?? "null") as { runId?: string } | null;
+      if (active?.runId && active.runId !== run.sessionId) throw new Error("Resume or finish your other quiz in Question Bank first.");
+      if (run.revisionId !== challenge.revisionId) throw new Error("This challenge revision changed. Your personal results remain saved.");
+      matchChallengeQuestions(challenge,useStore.getState().questions);
+      setRunner(run); setAutomaticRunId(run.sessionId); setShowRunner(true); setError("");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "This challenge cannot resume yet."); }
+  }
   async function participate(visible: boolean) {
     if (!challenge || busy) return;
     const scope=academicAccountScope(accountId);
@@ -73,7 +106,9 @@ function DailyBoard({ accountId }: { accountId: string }) {
       // Recheck participation online at the start; the server also checks it
       // when answers arrive. No local score is ever submitted.
       await joinChallenge(accountId,challenge.id,alias,true); scope.assertCurrent();
-      setRun({ challenge,questionIds:[...mapping.keys()],keys:[...mapping],startedAt:new Date().toISOString() });
+      const prepared = await prepareChallengeRun(accountId, challenge, mapping);
+      scope.assertCurrent();
+      setRun(prepared); setRunner(prepared); setAutomaticRunId(prepared.sessionId);
       setShowRunner(true); setMessage("");
     } catch(cause) { setError(cause instanceof Error ? cause.message : "The daily challenge could not start."); }
     finally { scope.dispose(); setBusy(false); }
@@ -85,11 +120,15 @@ function DailyBoard({ accountId }: { accountId: string }) {
   return <GlassCard pad className="daily-board">
     <PanelHeader headingLevel={2} title="Daily challenge" sub="The same reviewed questions. Independent answers. Real shared standings."
       action={<GButton onClick={() => setRefresh(value => value+1)} disabled={loading || busy}><RefreshCw size={16} /> Refresh</GButton>} />
+    {run && run.challengeId === challenge?.id && !showRunner && <div className="daily-board-pending" role="region" aria-label="Saved daily challenge">
+      <p>{completedRun ? "Your saved daily answers are waiting for verification. Retrying cannot add duplicate points." : "Your daily challenge is saved on this device. Continue with the same questions."}</p>
+      <GButton variant="primary" disabled={busy || runLoading} onClick={completedRun ? () => void retryVerification() : resume}>{completedRun ? "Retry verification" : "Continue daily challenge"}</GButton>
+    </div>}
     {loading && !challenges.length && <p role="status">Loading today’s challenges…</p>}
     {!loading && !challenges.length && !error && <p>No approved challenge is scheduled for your courses today. Your personal practice remains available below.</p>}
     {challenge && <>
       <div className="daily-board-controls">
-        <label>Module<select value={challenge.id} disabled={busy || showRunner} onChange={event => { setSelected(event.target.value); setError(""); setMessage(""); }}>
+        <label>Module<select value={challenge.id} disabled={busy || showRunner} onChange={event => { setSelected(event.target.value); setAutomaticRunId(undefined); setError(""); setMessage(""); }}>
           {challenges.map(item => <option key={item.id} value={item.id}>{item.module} · {item.questionCount} questions</option>)}
         </select></label>
         <p>{challenge.day} · 00:00–24:00 UTC<br />{challenge.questionCount} questions in a fixed source revision</p>
@@ -101,17 +140,17 @@ function DailyBoard({ accountId }: { accountId: string }) {
         </tbody></table> : <p>No participants yet. Choose an alias to join.</p>}
         {standings.yourRank && <p>Your rank: {standings.yourRank}. Standings refresh each minute and after verified answers.</p>}
       </div>}
-      <p className="sub">One point per correct, unassisted first challenge answer. A canonical question earns points only once across challenges. Ties share a rank. Ordinary practice and offline answers do not enter verified standings.</p>
+      <p className="sub">One point per correct, unassisted first challenge answer. A canonical question earns points only once across challenges. Ties share a rank. Ordinary practice stays personal. Offline or interrupted submissions remain unverified until you explicitly retry and the server accepts them.</p>
       <div className="daily-board-controls">
         <label>Display alias<input value={alias} minLength={2} maxLength={32} disabled={busy || showRunner} onChange={event => setAlias(event.target.value)} autoComplete="off" /></label>
         <GButton disabled={busy || showRunner || alias.trim().length<2} onClick={() => void participate(true)}>{challenge.participation?.visible ? "Save alias" : "Participate today"}</GButton>
         {challenge.participation?.visible && <GButton disabled={busy || showRunner} onClick={() => void participate(false)}>Hide my participation</GButton>}
       </div>
       <p className="sub">Only your alias and aggregate score are shared. Your answers and notes stay private. Participation applies to this module’s challenge today.</p>
-      <div className="row wrap gap8"><GButton disabled={busy || !challenge.participation?.visible || showRunner} onClick={() => void start()}>Start daily challenge</GButton><GButton onClick={openCourse} disabled={showRunner}>Open course</GButton></div>
+      <div className="row wrap gap8">{!run && <GButton disabled={busy || runLoading || !challenge.participation?.visible || showRunner} onClick={() => void start()}>Start daily challenge</GButton>}<GButton onClick={openCourse} disabled={showRunner}>Open course</GButton></div>
 
     </>}
     {message && <p role="status">{message}</p>}{error && <p role="alert">{error}</p>}
-    {showRunner && run && <ExamRunner mode="exam" retakeIds={run.questionIds} onClose={() => setShowRunner(false)} />}
+    {showRunner && runner && <ExamRunner mode="exam" sessionId={runner.sessionId} retakeIds={runner.keys.map(([id]) => id)} onClose={() => setShowRunner(false)} />}
   </GlassCard>;
 }

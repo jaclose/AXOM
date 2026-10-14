@@ -68,7 +68,7 @@ export const NAV = [
   { id: "anki", label: "Anki Lab", subtitle: "Turn lectures, DLAs & slides into Anki cards", icon: Wand2 },
   { id: "prompts", label: "Prompt Library", subtitle: "Reusable AI prompts for study workflows", icon: Library },
   { id: "integrations", label: "Integrations", subtitle: "Connect Anki, calendar, drives, and more", icon: Share2 },
-  { id: "leaderboards", label: "Leaderboards", subtitle: "Personal weekly standings; friend groups planned", icon: Trophy },
+  { id: "leaderboards", label: "Leaderboards", subtitle: "Daily challenges and personal study history", icon: Trophy },
   { id: "activity", label: "Activity History", subtitle: "Full local study ledger with filters and export", icon: Calendar },
   // After Tools
   { id: "about", label: "About", subtitle: "What AXOM is, where it is headed, and the live project preview", icon: Info },

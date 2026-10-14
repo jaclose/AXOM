@@ -46,6 +46,14 @@ Original source binaries remain outside the workspace schema. Decode's existing
 ZIP format 2 carries verified originals separately; JSON and format-1 ZIP remain
 readable. See [original recovery](../features/academic-library.md#original-files-and-portable-recovery).
 
+Daily challenge delivery keeps only a versioned, account/challenge-scoped launch
+reference in the existing Local Vault. Its session ID resolves canonical `quizSessions`;
+no parallel answer or progress engine exists. Web Locks serialize creation/retirement.
+A resumed view requires explicit verification of already-saved answers; server event
+identities survive a lost acknowledgement. The reference itself is device-only, while
+canonical quiz history keeps its existing backup and account behavior. See
+[daily challenges](../features/academic-library.md#verified-daily-challenges).
+
 A later failed fallback save preserves the marker for the last successful fallback;
 otherwise a reload could prefer an older vault record. Reviewed imports wait for both
 image bytes and the workspace's image associations before counting an image as attached.

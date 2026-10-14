@@ -107,8 +107,10 @@ function readReadingScale(): number {
   } catch { return 1; }
 }
 
-export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, presetTimed = false, blockId, simulate = false, onClose }: {
+export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, presetTimed = false, blockId, simulate = false, sessionId, onClose }: {
   mode: QuizMode;
+  /** Optional stable identity for a persisted external quiz launch. */
+  sessionId?: string;
   /** When set, skips setup and runs exactly these questions (retake missed). */
   retakeIds?: string[];
   /** Pre-fill the setup (run-from-set, saved blocks). */
@@ -130,7 +132,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const presentation = useQuestionView();
   const [stage, setStage] = useState<Stage>(restored || retakeIds?.length ? "running" : "setup");
   /** Identifies this run on every attempt it saves, and becomes its session id. */
-  const [runId, setRunId] = useState<string>(() => restored?.runId ?? crypto.randomUUID());
+  const [runId, setRunId] = useState<string>(() => restored?.runId ?? sessionId ?? crypto.randomUUID());
 
   // --- setup state
   const [count, setCount] = useState(presetFilters?.count ?? (simulate ? 20 : 10));

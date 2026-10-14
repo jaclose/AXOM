@@ -15,3 +15,7 @@
 
 .daily-board :is(.sub,.panel-sub) { color: var(--text-70); max-width: 70ch; }
 .daily-board > .panel-head .panel-title { font-size: clamp(18px, 2vw, 24px); }
+
+.daily-board-pending { margin-block: 20px; padding: 16px; border: 1px solid var(--hairline); border-radius: var(--radius-sm); background: var(--surface-1); }
+.daily-board-pending p { max-width: 70ch; margin: 0 0 12px; }
+.daily-board-pending .gbtn { height: auto; white-space: normal; text-align: left; }
