@@ -942,3 +942,147 @@ describe("ExamRunner atomic session recovery", () => {
     expect(screen.getByRole("button", { name: "B. Beta" }).getAttribute("aria-pressed")).toBe("true");
   });
 });
+
+describe("ExamRunner live answer-evidence changes", () => {
+  it.each([
+    ["correct answer rekeyed", { correctKey: "A" }],
+    ["choice text changed", { options: [{ key: "A", text: "Alpha edited" }, { key: "B", text: "Beta" }] }],
+    ["source mapping becomes provisional", { extraction: { confidence: "low" as const, reviewed: false } }],
+  ])("leaves an open exam question unscored when its %s", async (_label, change) => {
+    setStore();
+    const user = userEvent.setup();
+    const { rerender } = render(<ExamRunner mode="exam" retakeIds={[question.id]} onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "B. Beta" }));
+    mocked.store = { ...mocked.store, questions: [{ ...question, ...change }] };
+    rerender(<ExamRunner mode="exam" retakeIds={[question.id]} onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Submit & finish" }));
+    const saved = mocked.commitQuizRun.mock.calls.at(-1)?.[0];
+    expect(saved.session.score).toMatchObject({ correct: 0, scored: 0, total: 1 });
+    expect(saved.attempts).toEqual([
+      expect.objectContaining({ questionId: question.id, attempt: expect.objectContaining({ status: "needs-review", answerKey: "B" }) }),
+    ]);
+    expect(screen.getByText(/1 unscored \(answer mapping unavailable or changed during the block\)/)).toBeTruthy();
+  });
+
+  it("continues scoring when only a learner note changes, not the answer content", async () => {
+    setStore();
+    const user = userEvent.setup();
+    const { rerender } = render(<ExamRunner mode="exam" retakeIds={[question.id]} onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "B. Beta" }));
+    mocked.store = { ...mocked.store, questions: [{ ...question, notes: "Review later" }] };
+    rerender(<ExamRunner mode="exam" retakeIds={[question.id]} onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Submit & finish" }));
+    expect(mocked.commitQuizRun.mock.calls.at(-1)?.[0].session.score).toMatchObject({ correct: 1, scored: 1, total: 1 });
+  });
+});
+
+describe("Late tutor recovery and extended option shortcuts", () => {
+  it("replays already-checked tutor answers exactly once after full delayed hydration", async () => {
+    setStore();
+    const second: QuestionRecord = { ...question, id: "late-second", stem: "Hydrated second stem" };
+    const snapshot = {
+      mode: "tutor", runId: "late-tutor-answered",
+      poolIds: [question.id, second.id], index: 1,
+      answers: [{ questionId: question.id, answerKey: "B", correct: true, flagged: false, seconds: 14 }],
+      picked: undefined, revealed: false, startedAt: new Date().toISOString(), timed: false,
+      filters: { count: 2, status: "all", ordered: true },
+    };
+    localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify(snapshot));
+    mocked.store = { ...mocked.store, questions: [] };
+    const { rerender } = render(<ExamRunner mode="tutor" onClose={vi.fn()} />);
+    expect(screen.getByRole("dialog", { name: "Recover your saved question block" })).toBeTruthy();
+    expect(mocked.commitQuizRun).not.toHaveBeenCalled();
+
+    mocked.store = { ...mocked.store, questions: [question] };
+    rerender(<ExamRunner mode="tutor" onClose={vi.fn()} />);
+    expect(mocked.commitQuizRun).not.toHaveBeenCalled();
+
+    mocked.store = { ...mocked.store, questions: [question, second] };
+    rerender(<ExamRunner mode="tutor" onClose={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Tutor · 2 of 2" })).toBeTruthy());
+    await waitFor(() => expect(mocked.commitQuizRun).toHaveBeenCalledTimes(1));
+    expect(mocked.commitQuizRun.mock.calls[0][0].attempts).toEqual([{
+      questionId: question.id,
+      attempt: expect.objectContaining({ answerKey: "B", status: "correct", quizSessionId: "late-tutor-answered" }),
+    }]);
+    mocked.store = { ...mocked.store, questions: [question, second].map((entry) => ({ ...entry, notes: "late sync" })) };
+    rerender(<ExamRunner mode="tutor" onClose={vi.fn()} />);
+    expect(mocked.commitQuizRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses F as a real sixth answer and M to mark, preserving F-as-flag on older five-choice questions", () => {
+    setStore();
+    const expanded: QuestionRecord = {
+      ...question, stem: "Six options, choose Foxtrot",
+      correctKey: "F",
+      options: ["A", "B", "C", "D", "E", "F"].map((key) => ({ key, text: key === "F" ? "Foxtrot" : `Option ${key}` })),
+    };
+    mocked.store = { ...mocked.store, questions: [expanded] };
+    render(<ExamRunner mode="exam" retakeIds={[expanded.id]} onClose={vi.fn()} />);
+    fireEvent.keyDown(window, { key: "f" });
+    expect(screen.getByRole("button", { name: "F. Foxtrot" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Flag question" }).getAttribute("aria-pressed")).toBe("false");
+    fireEvent.keyDown(window, { key: "m" });
+    expect(screen.getByRole("button", { name: "Flag question" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.keyDown(window, { key: "F", shiftKey: true });
+    expect(screen.getByRole("button", { name: "F. Foxtrot" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: "Flag question" }).getAttribute("aria-pressed")).toBe("true");
+  });
+});
+
+describe("Exact retake recovery", () => {
+  it("waits for the entire requested set and preserves its requested order during late hydration", async () => {
+    setStore();
+    const second: QuestionRecord = { ...question, id: "requested-first", stem: "Retake question loaded later" };
+    mocked.store = { ...mocked.store, questions: [question] };
+    const { rerender } = render(<ExamRunner mode="tutor" retakeIds={[second.id, question.id]} onClose={vi.fn()} />);
+    expect(screen.getByRole("dialog", { name: "Prepare your requested questions" })).toBeTruthy();
+    expect(screen.getByText("1 of 2 questions are ready on this device")).toBeTruthy();
+    expect(localStorage.getItem(STORAGE_KEYS.quizActiveSession)).toBeNull();
+    expect(mocked.commitQuizRun).not.toHaveBeenCalled();
+
+    mocked.store = { ...mocked.store, questions: [question, { ...second, needsReview: true }] };
+    rerender(<ExamRunner mode="tutor" retakeIds={[second.id, question.id]} onClose={vi.fn()} />);
+    expect(screen.getByText(/needs answer or source review/)).toBeTruthy();
+    expect(localStorage.getItem(STORAGE_KEYS.quizActiveSession)).toBeNull();
+
+    mocked.store = { ...mocked.store, questions: [question, second] };
+    rerender(<ExamRunner mode="tutor" retakeIds={[second.id, question.id]} onClose={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Tutor · 1 of 2" })).toBeTruthy());
+    expect(screen.getByText(second.stem)).toBeTruthy();
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession) ?? "null")?.poolIds).toEqual([second.id, question.id]));
+    expect(mocked.commitQuizRun).not.toHaveBeenCalled();
+    expect(mocked.saveQuizSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("Sparse snapshot safety on large QBank blocks", () => {
+  it("keeps an unsubmitted tutor selection only in picked, never in checked answers", () => {
+    setStore();
+    render(<ExamRunner mode="tutor" retakeIds={[question.id]} onClose={vi.fn()} />);
+    fireEvent.keyDown(window, { key: "A" });
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession)!);
+    expect(saved.picked).toBe("A");
+    expect(saved.answers).toEqual([]);
+    expect(mocked.recordQuestionAttempt).not.toHaveBeenCalled();
+  });
+
+  it("retains all pool IDs but snapshots only answered items in a 240-question block", () => {
+    setStore();
+    const many: QuestionRecord[] = Array.from({ length: 240 }, (_, i) => ({
+      ...question, id: `stress-${i}`, stem: `Stem for question ${i + 1}`, setId: undefined,
+      questionNumber: i + 1,
+    }));
+    mocked.store = { ...mocked.store, questions: many };
+    render(<ExamRunner mode="exam" presetFilters={{ count: many.length, status: "all", ordered: true }} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Start exam block" }));
+    expect(screen.getByRole("heading", { name: "Exam · 1 of 240" })).toBeTruthy();
+    fireEvent.keyDown(window, { key: "B" });
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession)!);
+    expect(saved.poolIds).toHaveLength(240);
+    expect(saved.answers).toEqual([
+      expect.objectContaining({ questionId: "stress-0", answerKey: "B" }),
+    ]);
+    expect(mocked.commitQuizRun).not.toHaveBeenCalled();
+  });
+});

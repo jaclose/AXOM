@@ -423,7 +423,7 @@ function SimSettings({ prefs, onChange }: { prefs: ExamSimPrefs; onChange: (patc
       <label className="sim-settings-check"><input type="checkbox" checked={prefs.showTimer} onChange={(event) => onChange({ showTimer: event.target.checked })} /> Show timer</label>
       <label className="sim-settings-check"><input type="checkbox" checked={prefs.fiveMinuteAlert} onChange={(event) => onChange({ fiveMinuteAlert: event.target.checked })} /> Alert at 5 minutes remaining</label>
       <p className="sim-settings-help">
-        Keys: <kbd>A</kbd>–<kbd>E</kbd> choose · <kbd>Shift</kbd>+letter strikes out · <kbd>M</kbd> mark · <kbd>←</kbd>/<kbd>→</kbd> or <kbd>Alt</kbd>+<kbd>P</kbd>/<kbd>N</kbd> move · <kbd>Alt</kbd>+<kbd>L</kbd> labs · <kbd>Alt</kbd>+<kbd>C</kbd> calculator.
+        Keys: <kbd>A</kbd>–<kbd>J</kbd> choose available answers · <kbd>Shift</kbd>+letter strikes out · <kbd>M</kbd> mark · <kbd>←</kbd>/<kbd>→</kbd> or <kbd>Alt</kbd>+<kbd>P</kbd>/<kbd>N</kbd> move · <kbd>Alt</kbd>+<kbd>L</kbd> labs · <kbd>Alt</kbd>+<kbd>C</kbd> calculator.
         {" "}Select text to highlight; right-click a choice to strike it out.
       </p>
     </div>

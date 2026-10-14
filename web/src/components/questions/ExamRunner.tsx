@@ -88,26 +88,53 @@ function readActiveQuiz(): ActiveQuizSnapshot | undefined {
   } catch { return undefined; }
 }
 
-/** Never restore only part of an active exam. The original pool order, answer
- * identities and snapshot index are indivisible even during account hydration. */
-function completeRestoredPool(snapshot: ActiveQuizSnapshot, questions: readonly QuestionRecord[]): QuestionRecord[] | undefined {
+/** Keep an explicit study request intact: a partially downloaded set must
+ * never silently become a smaller (and misleading) exam or review session. */
+function completeRequestedPool(ids: readonly string[], questions: readonly QuestionRecord[]): QuestionRecord[] | undefined {
+  if (!ids.length || new Set(ids).size !== ids.length) return undefined;
   const available = new Map(questions.map((question) => [question.id, question]));
-  const ordered = snapshot.poolIds.map((id) => available.get(id));
+  const ordered = ids.map((id) => available.get(id));
   return ordered.every((question) => question && questionPracticeReadiness(question) === "ready")
     ? ordered as QuestionRecord[] : undefined;
+}
+
+function completeRestoredPool(snapshot: ActiveQuizSnapshot, questions: readonly QuestionRecord[]): QuestionRecord[] | undefined {
+  return completeRequestedPool(snapshot.poolIds, questions);
 }
 
 function trustedCorrectKey(question: QuestionRecord): string | undefined {
   return questionPracticeReadiness(question) === "ready" ? question.correctKey : undefined;
 }
 
-/** The displayed question is an immutable session snapshot. If its answer or
- * stem/choices changed in the live vault, score neither version until reviewed. */
+/** Read only the source content the learner answered. Note-only attachments and
+ * learner edits do not affect correctness, but a replaced ECG, clinical table or
+ * source answer-evidence revision invalidates the original session's key. */
+function sessionSourceContent(question: QuestionRecord): string {
+  const content = question.content;
+  const sourceAssets = (question.attachments ?? [])
+    .filter((attachment) => Boolean(attachment.role))
+    .map((attachment) => [attachment.role, attachment.assetId, attachment.blobKey, attachment.byteSize, attachment.updatedAt])
+    .sort((a, b) => String(a[1] ?? a[2]).localeCompare(String(b[1] ?? b[2])));
+  return JSON.stringify({
+    ...(content ? {
+      stem: content.stem, choices: content.choices, choiceTable: content.choiceTable,
+      answer: content.correctAnswer, assets: content.assets, source: content.source,
+    } : {}),
+    sourceAssets,
+    answerEvidence: question.extraction?.answerEvidence,
+    answerEvidenceSnippet: question.extraction?.answerEvidenceSnippet,
+  });
+}
+
+/** The displayed question is an immutable session snapshot. If its answer,
+ * source image or stem/choices changed in the live vault, do not score it. */
 function trustedSessionKey(original: QuestionRecord | undefined, current: QuestionRecord | undefined): string | undefined {
   if (!original || !current || trustedCorrectKey(original) !== trustedCorrectKey(current)) return undefined;
   if (original.stem !== current.stem || original.options.length !== current.options.length
     || original.sourceDocumentId !== current.sourceDocumentId
-    || original.options.some((option, index) => option.key !== current.options[index]?.key || option.text !== current.options[index]?.text)) return undefined;
+    || original.options.some((option, index) => option.key !== current.options[index]?.key || option.text !== current.options[index]?.text)
+    || (original.content !== current.content || original.attachments !== current.attachments || original.extraction !== current.extraction)
+      && sessionSourceContent(original) !== sessionSourceContent(current)) return undefined;
   return trustedCorrectKey(current);
 }
 
@@ -157,11 +184,14 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const readyQuestions = useMemo(() => questions.filter((question) => questionPracticeReadiness(question) === "ready"), [questions]);
   const questionSets = s.questionSets ?? [];
   const restored = useMemo(() => readActiveQuiz(), []);
+  const requestedRetakeIds = useMemo(() => [...new Set((retakeIds ?? []).filter((id) => typeof id === "string" && id))], [retakeIds]);
   // A resumed block keeps the mode it was started in, whichever button reopened it.
   const [mode, setMode] = useState<QuizMode>(restored?.mode ?? initialMode);
   const presentation = useQuestionView();
   const [stage, setStage] = useState<Stage>(restored || retakeIds?.length ? "running" : "setup");
   const [restorePending, setRestorePending] = useState(() => Boolean(restored && !completeRestoredPool(restored, questions)));
+  const [retakePending, setRetakePending] = useState(() => Boolean(!restored && requestedRetakeIds.length
+    && !completeRequestedPool(requestedRetakeIds, questions)));
   /** Identifies this run on every attempt it saves, and becomes its session id. */
   const [runId, setRunId] = useState<string>(() => restored?.runId ?? sessionId ?? crypto.randomUUID());
 
@@ -190,11 +220,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   // --- run state
   const [pool, setPool] = useState<QuestionRecord[]>(() => restored
     ? completeRestoredPool(restored, questions) ?? []
-    : retakeIds?.length
-      ? buildQuizPool(
-          readyQuestions.filter((question) => retakeIds.includes(question.id)),
-          { count: Math.max(1, retakeIds.length), status: "all", ordered: true },
-        )
+    : requestedRetakeIds.length
+      ? completeRequestedPool(requestedRetakeIds, questions) ?? []
       : []);
   const poolById = useMemo(() => new Map(pool.map((question) => [question.id, question])), [pool]);
   /**
@@ -211,6 +238,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       : startBlock({ ids, mode: initialMode, now: Date.now() });
   });
   const blockRef = useRef(block);
+  const restoredTutorReplayRef = useRef(false);
   /** Run one engine action and return the block it made, so a handler can save from it at once. */
   const act = useCallback((action: ExamAction): ExamBlock => {
     const next = examReducer(blockRef.current, action);
@@ -340,16 +368,43 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     setRestorePending(false);
   }, [restored, restorePending, readyQuestions, questions, runId]);
 
+  // An explicit retake is a fixed list too. Wait for all of its questions
+  // rather than starting a shortened review because the vault hydrated late.
   useEffect(() => {
-    if (stage !== "running" || pool.length === 0 || restorePending) return;
+    if (restored || !retakePending) return;
+    const ready = completeRequestedPool(requestedRetakeIds, readyQuestions);
+    if (!ready) return;
+    const now = Date.now();
+    const started = new Date(now).toISOString();
+    setPool(ready);
+    openBlock(startBlock({ ids: ready.map((question) => question.id), mode: initialMode, now, startedAt: started }));
+    setStartedAt(started);
+    setNowTick(now);
+    setCertainties({});
+    setChecked({});
+    const annotations = ready[0]?.annotations ?? [];
+    setLocalAnnotations(annotations);
+    localAnnotationsRef.current = annotations;
+    setRetakePending(false);
+  }, [initialMode, readyQuestions, requestedRetakeIds, restored, retakePending]);
+
+  useEffect(() => {
+    if (stage !== "running" || pool.length === 0 || restorePending || retakePending) return;
     const filters: QuizFilters = { count, status, categories: category ? [category] : undefined, examTypes: examType ? [examType] : undefined, setIds: setIds.length ? setIds : undefined, questionIds, ordered: ordered || undefined };
     // The snapshot keeps the shape it had before the engine: answered or flagged questions, and the pick on screen.
     const at = Date.now();
-    const answers = pool.map((item) => answerIn(block, item.id, at)).filter((answer) => answer.answerKey || answer.flagged);
+    // Unvisited/unanswered questions are not in the sparse resume payload.
+    // Do not repeatedly score large clinical stems/asset records on each pick.
+    const answers = pool.flatMap((item) => {
+      const current = itemState(block, item.id);
+      if (!current.answerKey && !current.marked) return [];
+      const saved = answerIn(block, item.id, at);
+      return saved.answerKey || saved.flagged ? [saved] : [];
+    });
     const snapshot: ActiveQuizSnapshot = { mode, poolIds: pool.map((item) => item.id), index, answers, picked, revealed, startedAt, timed, filters, runId, certainty };
     try { localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify(snapshot)); } catch { /* Local Vault remains authoritative for saved work. */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [block, category, certainties, checked, count, examType, mode, ordered, pool, restorePending, runId, setIds, questionIds, stage, startedAt, status, timed]);
+  }, [block, category, certainties, checked, count, examType, mode, ordered, pool, restorePending, retakePending, runId, setIds, questionIds, stage, startedAt, status, timed]);
 
   function clearActiveQuiz() {
     try { localStorage.removeItem(STORAGE_KEYS.quizActiveSession); } catch { /* non-fatal */ }
@@ -360,15 +415,17 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   // answer the workspace never received. Write only what is missing, so a
   // classification saved for an earlier question is never replaced.
   useEffect(() => {
-    if (!restored?.runId || restored.mode !== "tutor" || restorePending) return;
+    if (!restored?.runId || restored.mode !== "tutor" || restorePending || restoredTutorReplayRef.current) return;
+    restoredTutorReplayRef.current = true;
     const missing = restored.answers.filter((answer) => (
       answer.answerKey && !savedRunAttempt(questions, answer.questionId, restored.runId!)
     ));
     if (missing.length) {
       s.commitQuizRun({ attempts: missing.map((answer) => ({ questionId: answer.questionId, attempt: attemptFor(answer) })) });
     }
+    // Replay only after complete hydration; never rerun on subsequent store updates.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [restorePending]);
 
   // A question's time only runs while it can be seen: AXOM going behind another
   // tab or app stops it, and coming back starts it again.
@@ -389,21 +446,24 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const elapsedSeconds = Math.floor((nowTick - Date.parse(startedAt)) / 1000);
   const timeLeft = timeLimitSeconds !== undefined ? Math.max(0, timeLimitSeconds - elapsedSeconds) : undefined;
   useEffect(() => {
-    if (stage === "running" && !restorePending && pool.length > 0 && timeLeft === 0 && timed) finishBlock();
+    if (stage === "running" && !restorePending && !retakePending && pool.length > 0 && timeLeft === 0 && timed) finishBlock();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeLeft, stage, timed, restorePending, pool.length]);
+  }, [timeLeft, stage, timed, restorePending, retakePending, pool.length]);
 
-  // Keyboard shortcuts: A–E pick an option, Enter submits / advances, F flags.
+  // Answer shortcuts match the actual A–J options. M flags; F also flags only
+  // when this question does not contain an F answer choice (legacy shortcut).
   useEffect(() => {
     if (stage !== "running" || !question) return;
     function onKey(e: KeyboardEvent) {
       const target = e.target instanceof HTMLElement ? e.target : null;
       if (target?.closest('input, textarea, select, button, a, [contenteditable="true"], [role="button"]')) return;
       const letter = e.key.toUpperCase();
-      if (letter === "F") {
-        toggleFlag();
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const optionExists = question!.options.some((o) => o.key === letter);
+      if (letter === "M" || (letter === "F" && !optionExists)) {
+        if (!e.repeat) toggleFlag();
         e.preventDefault();
-      } else if (/^[A-E]$/.test(letter) && question!.options.some((o) => o.key === letter)) {
+      } else if (/^[A-J]$/.test(letter) && optionExists) {
         // Shift+letter eliminates/restores a choice; plain letter picks it.
         if (e.shiftKey) act({ type: "strike", key: letter });
         else act({ type: "pick", key: letter });
@@ -1131,25 +1191,32 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     );
   }
 
-  if (stage === "running" && restorePending && restored) {
+  if (stage === "running" && ((restorePending && restored) || (retakePending && requestedRetakeIds.length))) {
+    const pendingIds = restorePending && restored ? restored.poolIds : requestedRetakeIds;
     const byId = new Map(questions.map((entry) => [entry.id, entry]));
-    const missing = restored.poolIds.filter((id) => !byId.has(id)).length;
-    const needsReview = restored.poolIds.filter((id) => {
+    const missing = pendingIds.filter((id) => !byId.has(id)).length;
+    const needsReview = pendingIds.filter((id) => {
       const candidate = byId.get(id);
       return candidate && questionPracticeReadiness(candidate) !== "ready";
     }).length;
-    const available = restored.poolIds.length - missing - needsReview;
+    const available = pendingIds.length - missing - needsReview;
+    const savedSession = Boolean(restorePending && restored);
     return (
-      <Modal title="Recover your saved question block" onClose={onClose}
+      <Modal title={savedSession ? "Recover your saved question block" : "Prepare your requested questions"} onClose={onClose}
         footer={<GButton variant="primary" onClick={onClose}>Return to Question Bank</GButton>}>
         <div className="stack gap12" role="status" aria-live="polite">
-          <b>{available} of {restored.poolIds.length} questions are ready on this device</b>
+          <b>{available} of {pendingIds.length} questions are ready on this device</b>
           <p>
             {missing > 0 ? `${missing} question record${missing === 1 ? " is" : "s are"} not available locally. ` : ""}
             {needsReview > 0 ? `${needsReview} question${needsReview === 1 ? " needs" : "s need"} answer or source review. ` : ""}
-            Restore missing collections or resolve uncertain mappings to resume this exact session.
+            Restore missing collections or resolve uncertain mappings to practice this exact selection.
           </p>
-          <p className="sub">The original question order, selected answers, flags and session snapshot have not been changed or scored. AXOM resumes automatically once every question is ready.</p>
+          <p className="sub">
+            {savedSession
+              ? "Your original question order, selected answers, flags and session snapshot have not been changed or scored."
+              : "AXOM will not omit requested questions or start a partial retake. No answers have been scored."}
+            {" "}Practice will resume automatically once every question is ready.
+          </p>
         </div>
       </Modal>
     );
@@ -1254,6 +1321,9 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             <>
               <GhostButton onClick={leaveBlock}><X size={ICON_SIZE.body} /> Exit block</GhostButton>
               <GhostButton disabled={index === 0} onClick={goPrevious}><ChevronLeft size={ICON_SIZE.body} /> Previous</GhostButton>
+              <GhostButton onClick={toggleFlag} aria-label="Flag question" aria-pressed={item.marked}>
+                <Flag size={ICON_SIZE.body} /> {item.marked ? "Flagged" : "Mark review"}
+              </GhostButton>
               <GhostButton onClick={finishBlock}>End block</GhostButton>
               <GButton variant="primary" disabled={!picked} onClick={submitExamAndNext}>
                 {index + 1 >= pool.length ? "Submit & finish" : "Submit & next"}

@@ -1071,3 +1071,62 @@ ul.template-note { padding-left: 26px; }
 .qb-collection-warning { color: var(--text-80); line-height: 1.4; }
 @media (max-width: 850px) { .qb-academic-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 480px) { .qb-academic-filters { grid-template-columns: minmax(0, 1fr); } }
+
+/* Direct recovery actions for a saved bank with unresolved or missing records. */
+.qb-collection-recovery { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.qb-collection-recovery .ghost-btn { font-size: 12px; line-height: 1.35; white-space: normal; text-align: center; }
+@media (max-width: 650px) { .cb-set-row .qb-collection-recovery { flex-basis: 100%; justify-content: flex-start; } }
+
+/* QBank exam controls: protected actions must remain legible against the
+   opaque bottom bar in both themes, including when a sixth-choice flag exists. */
+.quiz-player-modal .modal-actions .ghost-btn:not(:disabled) { color: var(--text-80); }
+.quiz-player-modal .modal-actions .ghost-btn:disabled { color: var(--text-45); }
+
+@media (max-width: 620px) {
+  /* Reading, not persistent chrome, owns the small screen. Stacked sticky
+     controls otherwise paint across clinical stems when the dialog scrolls. */
+  .quiz-player-modal .quiz-player-body > .question-view-controls {
+    position: relative;
+    top: auto;
+    z-index: 1;
+    margin-block: 6px 16px;
+    padding: 8px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-2);
+  }
+  .quiz-player-modal .tutor-utility-dock {
+    position: relative;
+    top: auto;
+    bottom: auto;
+    z-index: 1;
+    margin-top: 12px;
+  }
+  /* The expanded exam footer may occupy three rows at phone width.
+     Keep the first-use help dismissal above the footer hitbox. */
+  .quiz-player-modal .tutor-first-tip { bottom: clamp(215px, 28dvh, 270px); }
+  .quiz-player-modal .tutor-question-region { padding-bottom: 24px; }
+}
+
+/* Verified Course Tracker handoff: missing records never become a shorter quiz. */
+.qb-course-handoff {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 18px;
+  padding: 18px 20px; margin: 16px 0;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+.qb-course-handoff-copy { min-width: 0; max-width: 73ch; }
+.qb-course-handoff h2 { font-size: var(--fs-lg); line-height: 1.35; margin: 0 0 8px; }
+.qb-course-handoff p { margin: 4px 0; line-height: 1.5; overflow-wrap: anywhere; }
+.qb-course-handoff-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.qb-course-handoff-actions button {
+  border: 1px solid var(--hairline); background: var(--surface-2);
+  border-radius: var(--radius-sm); color: var(--text);
+  padding: 9px 12px; min-height: 42px; font: inherit; cursor: pointer;
+}
+.qb-course-handoff-actions button:hover,
+.qb-course-handoff-actions button:focus-visible { outline: 2px solid var(--gold-line); outline-offset: 2px; }
+@media (max-width: 700px) {
+  .qb-course-handoff { flex-direction: column; padding: 16px; }
+  .qb-course-handoff-actions { justify-content: flex-start; }
+}

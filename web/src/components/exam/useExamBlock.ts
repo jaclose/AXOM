@@ -248,13 +248,19 @@ export function useExamBlock({ skin, mode, pool, timeLimitSeconds, resume, revie
     if (matchesAnyChord(event, profile.keys.next)) { next(); return true; }
     if (matchesAnyChord(event, profile.keys.previous)) { previous(); return true; }
     if (event.metaKey || event.ctrlKey || event.altKey) return false;
-    if (matchesAnyChord(event, profile.keys.flag)) { mark(); return true; }
+    const letter = event.key.toUpperCase();
+    const choiceExists = question?.options.some((option) => option.key === letter) ?? false;
+    // Examplify's legacy F-to-flag shortcut must not intercept an actual F
+    // answer. M remains available to flag questions with any option count.
+    if (matchesAnyChord(event, profile.keys.flag) && !(letter === "F" && choiceExists)) {
+      if (!event.repeat) mark();
+      return true;
+    }
     if (event.key === "Enter" && mode === "tutor" && !reviewing) {
       if (revealed) next(); else reveal();
       return true;
     }
-    const letter = event.key.toUpperCase();
-    if (/^[A-J]$/.test(letter) && question?.options.some((option) => option.key === letter)) {
+    if (/^[A-J]$/.test(letter) && choiceExists) {
       if (event.shiftKey) strike(letter); else pick(letter);
       return true;
     }

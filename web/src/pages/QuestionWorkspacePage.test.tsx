@@ -8,6 +8,7 @@ import type { QuestionRecord } from "../lib/questions";
 import type { QuizSession } from "../lib/quiz";
 import { useStore } from "../lib/store";
 import { QuestionWorkspacePage } from "./QuestionWorkspacePage";
+import { STORAGE_KEYS } from "../lib/brand";
 
 const localValues = new Map<string, string>();
 const localStorageStub: Storage = {
@@ -382,5 +383,118 @@ describe("QuestionWorkspacePage Course Tracker handoff", () => {
     expect(window.location.hash).toBe("#tracker");
     expect(screen.queryByText("Verified course question")).toBeNull();
     sessionStorage.clear();
+  });
+});
+
+describe("QuestionWorkspacePage collection recovery routing", () => {
+  it("opens the canonical mapping-review bank from a course collection", async () => {
+    useStore.setState({
+      questions: [question({ id: "uncertain", stem: "Needs source review", needsReview: true })],
+      questionSets: [set("scope-review", "School IMCQ needing review", "uncertain", "2026-10-14T12:00:00Z")],
+    });
+    const user = userEvent.setup();
+    render(<QuestionWorkspacePage />);
+    await user.click(screen.getByRole("button", { name: "Browse weeks" }));
+    await user.click(screen.getByRole("button", { name: "Review answer evidence for School IMCQ needing review" }));
+    expect(screen.getByRole("tab", { name: "Bank (1)" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("button", { name: "Needs source review" })).toBeTruthy();
+  });
+
+  it("sends missing local question records to the existing Import flow, not an empty quiz", async () => {
+    useStore.setState({
+      questions: [],
+      questionSets: [set("missing-set", "Absent source PQ", "lost-question", "2026-10-14T12:00:00Z")],
+    });
+    const user = userEvent.setup();
+    render(<QuestionWorkspacePage />);
+    await user.click(screen.getByRole("button", { name: "Browse weeks" }));
+    expect(screen.getByRole("button", { name: "Practice Absent source PQ" }).hasAttribute("disabled")).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Import missing source for Absent source PQ" }));
+    expect(screen.getByRole("tab", { name: "Import" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("heading", { name: "Import questions" })).toBeTruthy();
+  });
+});
+
+describe("QuestionWorkspacePage complete week block defaults", () => {
+  it("prefills the actual unique ready question count across overlapping sets", async () => {
+    const questions = [
+      question({ id: "week-a", stem: "Question A" }),
+      question({ id: "week-b", stem: "Question B" }),
+      question({ id: "week-c", stem: "Question C" }),
+      question({ id: "week-provisional", stem: "Unverified answer", needsReview: true }),
+    ];
+    const scope = { module: "Neuro", week: 2 };
+    useStore.setState({
+      questions,
+      questionSets: [
+        { ...set("week-set-one", "IMCQ 2", "week-a", "2026-10-14T12:00:00Z"),
+          questionIds: ["week-a", "week-b", "week-provisional"], scope },
+        { ...set("week-set-two", "Week 2 PQ", "week-b", "2026-10-14T12:00:00Z"),
+          questionIds: ["week-b", "week-c"], scope },
+      ],
+    });
+    const user = userEvent.setup();
+    render(<QuestionWorkspacePage />);
+    await user.click(screen.getByRole("button", { name: "Browse weeks" }));
+    await user.click(screen.getByRole("button", { name: "Practice week" }));
+    const dialog = screen.getByRole("dialog", { name: "Set up a tutor block" });
+    expect(within(dialog).getByRole("spinbutton", { name: "Custom question count" })).toHaveProperty("value", "3");
+    expect(within(dialog).getByRole("region", { name: "Practice source" }).textContent).toContain("3 questions in this block");
+    await user.click(within(dialog).getByRole("button", { name: "Start tutor block" }));
+    expect(screen.getByRole("heading", { name: /Tutor · 1 of 3/ })).toBeTruthy();
+    expect(screen.queryByText("Unverified answer")).toBeNull();
+  });
+});
+
+describe("QuestionWorkspacePage exact, fail-closed Course Tracker handoff", () => {
+  beforeEach(() => sessionStorage.clear());
+  afterEach(() => sessionStorage.clear());
+  it("never starts a shortened course quiz while the second question is missing or awaiting review", async () => {
+    const key = "axom.courseQuizLaunch.v1";
+    sessionStorage.setItem(key, JSON.stringify({
+      term: "Term 4", module: "NCRS", week: 2, questionIds: ["tracker-a", "tracker-b"],
+      setIds: ["course-week-2"],
+    }));
+    useStore.setState({ questions: [question({ id: "tracker-a", stem: "Ready first" })] });
+    const user = userEvent.setup();
+    render(<QuestionWorkspacePage />);
+    expect(screen.getByRole("heading", { name: /Course practice is waiting/ })).toBeTruthy();
+    expect(screen.getByText(/1 of 2 questions ready on this device/)).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: /Tutor/ })).toBeNull();
+    expect(JSON.parse(sessionStorage.getItem(key)!).questionIds).toEqual(["tracker-a", "tracker-b"]);
+
+    await act(async () => { await useStore.setState({ questions: [
+      question({ id: "tracker-a", stem: "Ready first" }),
+      question({ id: "tracker-b", stem: "Review second", needsReview: true }),
+    ] }); });
+    expect(screen.getByRole("status", { name: /Course practice is waiting/ }).textContent).toContain("1 require answer/source review");
+    await user.click(screen.getByRole("button", { name: "Review 1 question" }));
+    expect(screen.getByRole("button", { name: "Review second" })).toBeTruthy();
+    expect(sessionStorage.getItem(key)).not.toBeNull();
+
+    await act(async () => { await useStore.setState({ questions: [
+      question({ id: "tracker-a", stem: "Ready first" }),
+      question({ id: "tracker-b", stem: "Verified second", needsReview: false }),
+    ] }); });
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Tutor · 1 of 2" })).toBeTruthy());
+    await waitFor(() => expect(sessionStorage.getItem(key)).toBeNull());
+    expect(screen.getByText("Ready first")).toBeTruthy();
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession) ?? "null")?.poolIds).toEqual(["tracker-a", "tracker-b"]));
+    sessionStorage.clear();
+  });
+
+  it("does not consume malformed handoffs and allows explicit cancellation", async () => {
+    const key = "axom.courseQuizLaunch.v1";
+    sessionStorage.setItem(key, JSON.stringify({
+      term: "Term 4", module: "NCRS", questionIds: ["duplicate", "duplicate"], setIds: [],
+    }));
+    const user = userEvent.setup();
+    render(<QuestionWorkspacePage />);
+    expect(screen.getByRole("heading", { name: "Course practice needs a valid selection" })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: /Tutor/ })).toBeNull();
+    expect(sessionStorage.getItem(key)).not.toBeNull();
+    await user.click(screen.getByRole("button", { name: "Cancel course request" }));
+    expect(sessionStorage.getItem(key)).toBeNull();
+    expect(screen.queryByRole("heading", { name: /Course practice/ })).toBeNull();
   });
 });

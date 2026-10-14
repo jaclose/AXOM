@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { ArrowLeft, ArrowUpRight, BookOpen, ChevronRight, Play, Search } from "lucide-react";
 import { useStore } from "../../lib/store";
 import { bankSource, buildCourseQuestionBank } from "../../lib/course-engine/questionBank";
+import { canonicalModuleKey } from "../../lib/course-engine/vocabulary";
 import type { QuestionRecord } from "../../lib/questions";
 import { questionPracticeReadiness } from "../../lib/questionFilters";
 import type { QuestionSet } from "../../lib/library";
@@ -16,6 +17,8 @@ interface Props {
   selectedIds?: string[];
   onSelectionChange?: (ids: string[]) => void;
   onPractice?: (sets: QuestionSet[]) => void;
+  onReviewQuestionIds?: (ids: string[]) => void;
+  onRestoreMissing?: () => void;
   renderSet?: (set: QuestionSet) => ReactNode;
 }
 
@@ -52,7 +55,7 @@ function matchesReadiness(metric: CollectionReadiness, filter: ReadinessFilter):
 }
 
 /** A read-only projection of the canonical question sets, never a second collection store. */
-export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPractice, renderSet, initialScope }: Props) {
+export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPractice, onReviewQuestionIds, onRestoreMissing, renderSet, initialScope }: Props) {
   const { questionSets = [], questions = [], courses, terms } = useStore();
   const branches = useMemo(() => buildCourseQuestionBank(questionSets, questions, courses, terms),
     [questionSets, questions, courses, terms]);
@@ -76,7 +79,7 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
     ? termBranches.filter((branch) => courseIdentity(branch) === courseFilter)
     : termBranches;
 
-  const scopedCandidates = initialScope ? visibleBranches.filter((branch) => branch.module === initialScope.module
+  const scopedCandidates = initialScope ? visibleBranches.filter((branch) => canonicalModuleKey(branch.module) === canonicalModuleKey(initialScope.module)
     && (!initialScope.courseId || branch.courseId === initialScope.courseId)) : [];
   // Module names repeat across terms. Never silently assign an unqualified
   // Tracker handoff to the first course with the same module name.
@@ -183,6 +186,19 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
                 </small>}
               </div>
               {onPractice && <GhostButton aria-label={`Practice ${set.title}`} disabled={!state.ready} onClick={() => onPractice([set])}><Play size={ICON_SIZE.body} /><span>Practice</span></GhostButton>}
+              {!onSelectionChange && (state.review > 0 || state.missing > 0) && (
+                <div className="qb-collection-recovery" aria-label={`Resolve ${set.title}`}>
+                  {state.review > 0 && onReviewQuestionIds && <GhostButton
+                    aria-label={`Review answer evidence for ${set.title}`}
+                    onClick={() => onReviewQuestionIds([...new Set(set.questionIds.filter((id) => {
+                      const candidate = questionsById.get(id);
+                      return candidate && questionPracticeReadiness(candidate) !== "ready";
+                    }))])}>Review {state.review}</GhostButton>}
+                  {state.missing > 0 && onRestoreMissing && <GhostButton
+                    aria-label={`Import missing source for ${set.title}`}
+                    onClick={onRestoreMissing}>Import missing source</GhostButton>}
+                </div>
+              )}
             </article>;
           })}
           {!matches.length && <p className="cb-empty" role="status">{ambiguousScope && !chosen ? "Choose the correct course in the outline or filters to resolve the ambiguous module." : "No collections match this week or the active filters. Try another type, readiness, or search."}</p>}

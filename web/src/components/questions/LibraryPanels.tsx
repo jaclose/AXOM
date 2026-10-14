@@ -9,13 +9,12 @@ import { BookOpen, FileText, FolderInput, ListPlus, Search, Sparkles, Trash2 } f
 import { useStore } from "../../lib/store";
 import { questionSetMetrics, sortQuestionSetsByRecency, type QuestionSet, type SourceDocument } from "../../lib/library";
 import { enhanceQuestionSet, resolveActiveProvider } from "../../lib/ai";
-import { GlassCard, GhostButton, PanelHeader, Tag, EmptyState } from "../ui/primitives";
+import { GlassCard, GButton, GhostButton, PanelHeader, Tag, EmptyState } from "../ui/primitives";
 import { Modal } from "../ui/Modal";
 import { pushToast } from "../../lib/toast";
 import type { QuestionRecord } from "../../lib/questions";
 import { QuestionSetCard } from "./QuestionSetCard";
-import { parseWeek } from "../../lib/course-engine/scope";
-import { moduleKey } from "../../lib/course-engine/vocabulary";
+import type { Course, Term } from "../../lib/types";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { createQuestionSetShare } from "../../lib/sharing/questionSetShare";
 import { publishShare } from "../../lib/sharing/supabaseSharing";
@@ -26,6 +25,7 @@ import { reviewTaskInputs } from "../../lib/courseWork";
 const NO_QUESTIONS: QuestionRecord[] = [];
 const NO_DOCUMENTS: SourceDocument[] = [];
 const NO_SETS: QuestionSet[] = [];
+const SOURCE_PAGE_SIZE = 40;
 
 export function SourceLibrary({
   onParseFrom,
@@ -38,6 +38,7 @@ export function SourceLibrary({
   const documents = useMemo(() => (s.documents ?? NO_DOCUMENTS).filter(doc => !["axom-private-library-catalog", "axom-private-bank-review"].includes(doc.fileType)), [s.documents]);
   const [preview, setPreview] = useState<SourceDocument | null>(null);
   const [query, setQuery] = useState("");
+  const [sourceLimit, setSourceLimit] = useState(SOURCE_PAGE_SIZE);
   const provider = useMemo(() => resolveActiveProvider(), []);
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -57,7 +58,7 @@ export function SourceLibrary({
       {documents.length > 0 && (
         <div className="row" style={{ gap: 7, marginBottom: 12 }}>
           <Search size={ICON_SIZE.body} className="dim" />
-          <input className="field grow" value={query} onChange={(event) => setQuery(event.target.value)}
+          <input className="field grow" value={query} onChange={(event) => { setQuery(event.target.value); setSourceLimit(SOURCE_PAGE_SIZE); }}
             aria-label="Search source documents" placeholder="Search source documents…" />
         </div>
       )}
@@ -69,7 +70,7 @@ export function SourceLibrary({
         />
       ) : (
         <div className="stack gap6">
-          {filtered.map((doc) => (
+          {filtered.slice(0, sourceLimit).map((doc) => (
             <div key={doc.id} className="import-draft">
               <div className="row" style={{ gap: 8 }}>
                 <button className="grow stack card-row-main" onClick={() => setPreview(doc)}>
@@ -100,6 +101,12 @@ export function SourceLibrary({
             </div>
           ))}
           {filtered.length === 0 && <EmptyState title="No source documents match" hint="Try a different title, filename, or tag." />}
+          {filtered.length > 0 && <div className="row wrap gap8" role="status">
+            <span className="sub">Showing {Math.min(sourceLimit, filtered.length).toLocaleString()} of {filtered.length.toLocaleString()} source documents</span>
+            {filtered.length > sourceLimit && <GhostButton onClick={() => setSourceLimit((value) => value + SOURCE_PAGE_SIZE)}>
+              Show {Math.min(SOURCE_PAGE_SIZE, filtered.length - sourceLimit)} more sources
+            </GhostButton>}
+          </div>}
         </div>
       )}
       {preview && (
@@ -119,6 +126,7 @@ export function QuestionSetList({
   onRunSet,
   onRunSets,
   onReviewIssues,
+  onImportMissing,
   onReviewMisses,
   onOpenInsights,
   recent = false,
@@ -131,6 +139,7 @@ export function QuestionSetList({
   onRunSet: (set: QuestionSet) => void;
   onRunSets?: (sets: QuestionSet[]) => void;
   onReviewIssues?: (ids: string[]) => void;
+  onImportMissing?: () => void;
   onReviewMisses?: (ids: string[]) => void;
   onOpenInsights?: () => void;
   recent?: boolean;
@@ -145,6 +154,7 @@ export function QuestionSetList({
   const provider = useMemo(() => resolveActiveProvider(), []);
   const [enhancing, setEnhancing] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [filingSet, setFilingSet] = useState<QuestionSet | null>(null);
   const orderedSets = useMemo(
     // Uploads land newest-first in the store; the library reads in lecture order (I3-26).
     () => (recent ? sortQuestionSetsByRecency(sets, questions) : sortByNaturalTitle(sets)),
@@ -192,24 +202,8 @@ export function QuestionSetList({
     }
   }
 
-  const courseModules = useMemo(
-    () => [...new Set((s.courses ?? []).flatMap((course) => course.modules.map((module) => module.name)))],
-    [s.courses],
-  );
-  function fileUnder(set: QuestionSet) {
-    const current = set.scope?.module ? `${set.scope.module}${set.scope.week ? `, week ${set.scope.week}` : ""}` : "";
-    const answer = prompt(`File "${set.title}" under which module and week? For example: ${courseModules[0]}, week 2. Leave empty to unfile it.`, current);
-    if (answer === null) return;
-    if (!answer.trim()) { s.updateQuestionSet(set.id, { scope: undefined }); return; }
-    const [modulePart, ...rest] = answer.split(",");
-    const module = courseModules.find((name) => moduleKey(name) === moduleKey(modulePart));
-    if (!module) {
-      pushToast({ title: "No module by that name", body: `Your courses have: ${courseModules.join(", ")}.`, tone: "warn" });
-      return;
-    }
-    const week = parseWeek(rest.join(","));
-    s.updateQuestionSet(set.id, { scope: { module, ...(week ? { week } : {}) } });
-  }
+  // Filing must include the selected course ID. Free-text module names alone can
+  // silently associate a bank with the wrong term when module names repeat.
 
   function addDigestReview(set: QuestionSet) {
     const suggestions = set.digest?.suggestedReview ?? [];
@@ -271,8 +265,8 @@ export function QuestionSetList({
               <ListPlus size={ICON_SIZE.body} /> Add review to Tracker
             </GhostButton>
           ) : null}
-          {courseModules.length > 0 && (
-            <GhostButton onClick={() => fileUnder(set)}>
+          {(s.courses ?? []).length > 0 && (
+            <GhostButton onClick={() => setFilingSet(set)}>
               <FolderInput size={ICON_SIZE.body} /> {set.scope?.module ? "Move" : "File under a week"}
             </GhostButton>
           )}
@@ -286,12 +280,24 @@ export function QuestionSetList({
     );
   }
 
-  if (!recent && !compact) return <CourseBankBrowser initialScope={initialScope}
-    onPractice={(chosen) => chosen.length === 1 ? onRunSet(chosen[0]) : onRunSets?.(chosen)}
-    renderSet={renderCard}
-  />;
+  const filingDialog = filingSet && (
+    <QuestionSetFilingDialog key={filingSet.id} set={filingSet} courses={s.courses ?? []} terms={s.terms ?? []}
+      onClose={() => setFilingSet(null)}
+      onSave={(scope) => { s.updateQuestionSet(filingSet.id, { scope }); setFilingSet(null); }} />
+  );
+
+  if (!recent && !compact) return <>
+    <CourseBankBrowser initialScope={initialScope}
+      onPractice={(chosen) => chosen.length === 1 ? onRunSet(chosen[0]) : onRunSets?.(chosen)}
+      onReviewQuestionIds={onReviewIssues}
+      onRestoreMissing={onImportMissing}
+      renderSet={renderCard}
+    />
+    {filingDialog}
+  </>;
 
   return (
+    <>
     <GlassCard>
       <PanelHeader
         title={title ?? (recent ? "Recent sets" : "Question Sets")}
@@ -320,6 +326,67 @@ export function QuestionSetList({
           </div>
       )}
     </GlassCard>
+    {filingDialog}
+    </>
   );
 }
 
+
+/** Filing is always keyed to an actual course, never a fuzzy module name.
+ * Duplicate module names across terms must not silently move question sets. */
+function QuestionSetFilingDialog({ set, courses, terms, onSave, onClose }: {
+  set: QuestionSet;
+  courses: readonly Course[];
+  terms: readonly Term[];
+  onSave: (scope: QuestionSet["scope"] | undefined) => void;
+  onClose: () => void;
+}) {
+  const [courseId, setCourseId] = useState(set.scope?.courseId ?? "");
+  const [moduleName, setModuleName] = useState(set.scope?.courseId ? set.scope.module ?? "" : "");
+  const [weekInput, setWeekInput] = useState(set.scope?.week === undefined ? "" : String(set.scope.week));
+  const selectedCourse = courses.find((course) => course.id === courseId);
+  const validModule = Boolean(selectedCourse?.modules.some((module) => module.name === moduleName));
+  const weekText = weekInput.trim();
+  const week = weekText === "" ? undefined : Number(weekText);
+  const validWeek = week === undefined || (Number.isSafeInteger(week) && week > 0);
+
+  return <Modal title={`File ${set.title} in a course`} onClose={onClose}>
+    <div className="stack gap12">
+      <p className="sub">Choose the actual course, module and (if established) week. A shared module name alone does not establish a term assignment.</p>
+      <label className="stack gap6">
+        <span className="field-label">Destination course</span>
+        <select className="field" aria-label="Destination course" value={courseId}
+          onChange={(event) => { setCourseId(event.target.value); setModuleName(""); }}>
+          <option value="">Select a course</option>
+          {courses.map((course) => {
+            const term = terms.find((item) => item.id === course.termId)?.name;
+            return <option key={course.id} value={course.id}>
+              {[term, course.code ?? course.name, course.name].filter((part, index, all) => part && all.indexOf(part) === index).join(" · ")}
+            </option>;
+          })}
+        </select>
+      </label>
+      <label className="stack gap6">
+        <span className="field-label">Module</span>
+        <select className="field" aria-label="Destination module" value={validModule ? moduleName : ""}
+          onChange={(event) => setModuleName(event.target.value)} disabled={!selectedCourse}>
+          <option value="">Select a module</option>
+          {selectedCourse?.modules.map((module) => <option key={module.id} value={module.name}>{module.name}</option>)}
+        </select>
+      </label>
+      <label className="stack gap6">
+        <span className="field-label">Week (optional; only enter a confirmed placement)</span>
+        <input className="field" type="number" min="1" step="1" aria-label="Destination week" value={weekInput}
+          onChange={(event) => setWeekInput(event.target.value)} />
+      </label>
+      {!validWeek && <p className="sub" role="alert">Week must be a positive whole number or left blank.</p>}
+      <div className="row wrap gap6">
+        <GhostButton onClick={() => onSave(undefined)}>Remove course filing</GhostButton>
+        <GButton variant="primary" disabled={!selectedCourse || !validModule || !validWeek}
+          onClick={() => onSave({ courseId: selectedCourse!.id, module: moduleName, ...(week === undefined ? {} : { week }) })}>
+          Save course location
+        </GButton>
+      </div>
+    </div>
+  </Modal>;
+}

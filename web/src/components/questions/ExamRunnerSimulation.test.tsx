@@ -88,3 +88,51 @@ describe("Suspended exam source recovery", () => {
     expect(screen.getByRole("dialog", { name: /USMLE \/ NBME.*simulation/ })).toBeTruthy();
   });
 });
+
+describe("Simulation uses current source evidence at submission", () => {
+  it("does not score stale correct answers after the source key changes mid-exam", async () => {
+    render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("radio", { name: /UWorld-style/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Start exam block/ }));
+    const sim = screen.getByRole("dialog", { name: "UWorld-style exam simulation" });
+    fireEvent.click(within(sim).getAllByRole("radio", { name: "B. Beta" })[0]);
+
+    await act(async () => {
+      await useStore.setState({
+        questions: [q("q1"), q("q2")].map((item) => ({ ...item, correctKey: "A", correctAnswerText: "Alpha" })),
+      });
+    });
+    fireEvent.click(within(sim).getByRole("button", { name: /End Block/ }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "End Block" }));
+
+    const session = useStore.getState().quizSessions[0];
+    expect(session?.score).toMatchObject({ correct: 0, scored: 0, total: 2 });
+    expect(session.answers.some((answer) => answer.answerKey)).toBe(true);
+    expect(session.answers.filter((answer) => answer.answerKey).every((answer) => answer.correct === undefined)).toBe(true);
+    expect(screen.getByText(/answer mapping unavailable or changed during the block/)).toBeTruthy();
+  });
+});
+
+describe("Six-choice simulation keyboard", () => {
+  it("keeps an F answer selectable in ExamSoft and reserves M for marking", async () => {
+    const six: QuestionRecord = {
+      ...q("six-choice"),
+      stem: "Choose the sixth option",
+      correctKey: "F", correctAnswerText: "Foxtrot",
+      options: ["A", "B", "C", "D", "E", "F"].map((key) => ({ key, text: key === "F" ? "Foxtrot" : `Choice ${key}` })),
+    };
+    await act(async () => { await useStore.setState({ questions: [six] }); });
+    render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("radio", { name: /ExamSoft/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Start exam block/ }));
+    const sim = screen.getByRole("dialog", { name: /ExamSoft.*simulation/ });
+    fireEvent.keyDown(window, { key: "f", code: "KeyF" });
+    expect(within(sim).getByRole("radio", { name: "F. Foxtrot" }).getAttribute("aria-checked")).toBe("true");
+    const mark = within(sim).getByRole("button", { name: "Flag question" });
+    expect(mark.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.keyDown(window, { key: "m", code: "KeyM" });
+    expect(mark.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.keyDown(window, { key: "F", code: "KeyF", shiftKey: true });
+    expect(within(sim).getByRole("radio", { name: "F. Foxtrot (struck out)" }).getAttribute("aria-checked")).toBe("false");
+  });
+});

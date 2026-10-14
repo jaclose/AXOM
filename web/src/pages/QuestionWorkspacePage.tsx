@@ -1,4 +1,5 @@
-import { clearCourseQuizLaunch, readCourseQuizLaunch } from "../lib/course-engine/quizLaunch";
+import { clearCourseQuizLaunch } from "../lib/course-engine/quizLaunch";
+import { inspectCourseLaunch } from "../lib/exam/courseLaunchGuard";
 // ===========================================================================
 // Question Bank — the flagship study engine. Import Center → Source Library →
 // Question Sets → Block Builder → Results, in one tabbed surface. Uploaded
@@ -80,11 +81,25 @@ interface RunnerLaunch {
 
 export function QuestionWorkspacePage() {
   const s = useStore();
-  const [courseLaunch, setCourseLaunch] = useState(() => readCourseQuizLaunch((s.questions ?? []).filter((item) => questionPracticeReadiness(item) === "ready")));
-  // The store may hydrate after the route first mounts. Consume the Tracker
-  // handoff only when its exact ready question IDs are available locally.
-  useEffect(() => { if (courseLaunch) clearCourseQuizLaunch(); }, [courseLaunch]);
   const questions = s.questions ?? NO_QUESTIONS;
+  // sessionStorage has no React subscription; the setter requests a fresh read.
+  const [, setHandoffVersion] = useState(0);
+  // Some app shells retain mounted pages across route switches. Refresh the
+  // handoff when Course Tracker navigates back without changing question data.
+  useEffect(() => {
+    const refresh = () => { if (location.hash === "#questions") setHandoffVersion((version) => version + 1); };
+    window.addEventListener("hashchange", refresh);
+    return () => window.removeEventListener("hashchange", refresh);
+  }, []);
+  const courseHandoff = inspectCourseLaunch(questions);
+  const [courseLaunch, setCourseLaunch] = useState(() => courseHandoff.state === "ready" ? courseHandoff.launch : null);
+  // Only clear a verified *complete* request, never the partial subset that
+  // happened to hydrate first. The prior handoff is kept until then.
+  useEffect(() => {
+    if (!courseLaunch) return;
+    clearCourseQuizLaunch();
+    setHandoffVersion((version) => version + 1);
+  }, [courseLaunch]);
   const questionSets = s.questionSets ?? NO_SETS;
   const documents = useMemo(() => (s.documents ?? NO_DOCUMENTS).filter(doc => !["axom-private-library-catalog", "axom-private-bank-review"].includes(doc.fileType)), [s.documents]);
   const [tab, setTab] = useState<BankTab>("sets");
@@ -110,12 +125,16 @@ export function QuestionWorkspacePage() {
   const provider = useMemo(() => resolveActiveProvider(), []);
 
   useEffect(() => {
-    if (courseLaunch || runner) return;
-    const verified = readCourseQuizLaunch(questions.filter((item) => questionPracticeReadiness(item) === "ready"));
-    if (!verified) return;
+    if (courseLaunch || runner || courseHandoff.state !== "ready") return;
+    const verified = courseHandoff.launch;
     setCourseLaunch(verified);
     setRunner({ mode: "tutor", retakeIds: verified.questionIds, presetFilters: { setIds: verified.setIds }, fromCourse: true });
-  }, [courseLaunch, runner, questions]);
+  }, [courseLaunch, runner, courseHandoff]);
+
+  function cancelPendingCourseLaunch() {
+    clearCourseQuizLaunch();
+    setHandoffVersion((version) => version + 1);
+  }
 
   function returnToCourseTracker() {
     setRunner(null);
@@ -196,7 +215,9 @@ export function QuestionWorkspacePage() {
   }, [tab, visibleTabs]);
 
   function runSet(set: QuestionSet) {
-    setRunner({ mode: "tutor", presetFilters: { setIds: [set.id], count: Math.min(set.questionIds.length, 20) } });
+    const ids = new Set(set.questionIds);
+    const ready = runnableQuestions.filter((question) => ids.has(question.id)).length;
+    setRunner({ mode: "tutor", presetFilters: { setIds: [set.id], count: Math.min(ready, 20) } });
   }
   function runBlock(block: QuizBlock) {
     setRunner({ mode: block.mode, presetFilters: block.filters, presetTimed: block.timed, blockId: block.id });
@@ -356,6 +377,32 @@ export function QuestionWorkspacePage() {
           )}
         </div>
       </div>
+
+      {!courseLaunch && (courseHandoff.state === "pending" || courseHandoff.state === "invalid") && (
+        <section className="qb-course-handoff" aria-labelledby="qb-course-handoff-title" role="status" aria-live="polite">
+          <div className="qb-course-handoff-copy">
+            <h2 id="qb-course-handoff-title">{courseHandoff.state === "pending"
+              ? "Course practice is waiting for its complete question selection"
+              : "Course practice needs a valid selection"}</h2>
+            {courseHandoff.state === "pending" ? <>
+              <p><b>{courseHandoff.term} / {courseHandoff.module}{courseHandoff.week ? ` / Week ${courseHandoff.week}` : ""}</b></p>
+              <p>{courseHandoff.ready} of {courseHandoff.total} questions ready on this device
+                {courseHandoff.missing ? ` · ${courseHandoff.missing} not downloaded or locally available` : ""}
+                {courseHandoff.review ? ` · ${courseHandoff.review} require answer/source review` : ""}.</p>
+              <p className="sub">AXOM will not silently shorten this practice block. The original request remains intact and starts only when every question is ready.</p>
+            </> : <p>{courseHandoff.reason} AXOM did not start or overwrite a quiz.</p>}
+          </div>
+          <div className="qb-course-handoff-actions">
+            {courseHandoff.state === "pending" && courseHandoff.review > 0 && (
+              <button type="button" onClick={() => openMappingReview(courseHandoff.reviewIds)}>Review {courseHandoff.review} question{courseHandoff.review === 1 ? "" : "s"}</button>
+            )}
+            {courseHandoff.state === "pending" && courseHandoff.missing > 0 && (
+              <button type="button" onClick={() => openImport("file")}>Import missing source</button>
+            )}
+            <button type="button" onClick={cancelPendingCourseLaunch}>Cancel course request</button>
+          </div>
+        </section>
+      )}
 
       <div className="qb-segment" role="tablist" aria-label="Question Bank sections">
         {visibleTabs.map(([id, label], index) => (
@@ -524,8 +571,13 @@ export function QuestionWorkspacePage() {
           onPractice={(selection) => { setBankView("weeks"); setBankLocation(selection); setRunner({ mode: "tutor", presetFilters: { setIds: selection.setIds, questionIds: selection.questionIds, count: selection.count } }); }} /> :
         <QuestionSetList key={JSON.stringify(bankLocation)} initialScope={bankLocation}
           onRunSet={runSet}
-          onRunSets={(sets) => setRunner({ mode: "tutor", presetFilters: { setIds: sets.map((set) => set.id), count: 20 } })}
+          onRunSets={(sets) => {
+            const ids = new Set(sets.flatMap((set) => set.questionIds));
+            const readyIds = runnableQuestions.filter((question) => ids.has(question.id)).map((question) => question.id);
+            setRunner({ mode: "tutor", presetFilters: { setIds: sets.map((set) => set.id), questionIds: readyIds, count: Math.min(readyIds.length, 1000) } });
+          }}
           onReviewIssues={openMappingReview}
+          onImportMissing={() => openImport("file")}
           onReviewMisses={(ids) => ids.length && setRunner({ mode: "tutor", retakeIds: ids })}
           onOpenInsights={() => setTab("insights")}
         />
