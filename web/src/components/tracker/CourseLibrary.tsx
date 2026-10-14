@@ -7,7 +7,7 @@ import { withPreparedCourses } from "../../lib/bookshelf/preparedCourses";
 import { PreparedLibrary } from "../bookshelf/PreparedLibrary";
 import { GButton } from "../ui/primitives";
 import { buildQuestionBankBooks } from "../../lib/bookshelf/questionBankBooks";
-import { moduleKey } from "../../lib/course-engine/vocabulary";
+import { bankForCourseBook } from "./courseLibraryMatching";
 import { CoursePlan } from "./CoursePlan";
 import { ConnectedCoursePlan } from "./ConnectedCoursePlan";
 import { useAccount } from "../../lib/account/accountStore";
@@ -56,11 +56,12 @@ export function CourseLibrary({ onClose, onTemplate, onOpen, onCreate }: {
   [s.terms, s.courses, s.tracker, s.questions, s.questionSets, s.documents]);
   const banks = useMemo(() => buildQuestionBankBooks({ terms: s.terms, courses: s.courses,
     questions: s.questions, sets: s.questionSets, curricula: CURRICULA }), [s.terms, s.courses, s.questions, s.questionSets]);
-  const bankFor = (book: CourseBook) => banks.find(bank => moduleKey(bank.module) === moduleKey(book.module) && bank.term === book.term);
+  const bankFor = (book: CourseBook) => bankForCourseBook(book, banks, books);
   const mine = (book: CourseBook) => book.templateIds?.length ? (book.loadedActivities ?? 0) > 0 : book.origin === "workspace" && book.count > 0;
   const available = (book: CourseBook) => Boolean(book.templateIds?.length || book.count || bankFor(book)?.ready);
-  const shown = books.filter(book => !connected.some(course => moduleKey(course.module) === moduleKey(book.module) && course.term === book.term)
-    && (!term || book.term === term) && (view === "all" || (view === "mine" ? mine(book) : available(book)))
+  // A remote catalog record does not prove it is the same as a local course.
+  // Keep both accessible; never hide another course by matching its module title.
+  const shown = books.filter(book => (!term || book.term === term) && (view === "all" || (view === "mine" ? mine(book) : available(book)))
     && `${book.title} ${book.courseName ?? ""} ${book.courseCode ?? ""}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   const chosen = books.find(book => book.id === selected);
   const connectedChosen = listedCourse ?? (linkedCourse && linkedCourse.accountId === accountId && linkedCourse.course.id === remoteId ? linkedCourse.course : undefined);
