@@ -5,13 +5,11 @@ authority: current-state
 ---
 # AXOM current AI state
 
-Snapshot: 2026-10-13, validated local integration on `feat/academic-library-v1` in
-`AXOM-academic-library-v1`. Combined code checkpoint `eca6ac3b` integrates reviewed
-consolidation `6aa2126a`: academic/account recovery, daily challenges, Questions/Slides,
-Communications/Pulse, Cinematic entry, Ideas2 and audited library/audio/sync safeguards.
-Local `main` and this branch are converged through the final validation lineage; preserve
-all active other-owner drafts. JD authorized commits, development pushes and tested
-local-main convergence. Remote main still deploys production and has not been updated here.
+Snapshot: 2026-10-13, `feat/academic-library-v1` in `AXOM-academic-library-v1`.
+Account/content checkpoint `07cd665d` is merged with local consolidation `bb8e31fc`.
+The merged runtime exactly matches the fully verified checkpoint. JD authorized
+commits, development pushes and tested local-main convergence. Preserve other-owner
+drafts. Remote main still deploys production and has not been updated here.
 
 Superseded Ideas3, backup recovery, owner-feedback, untested Decode, exam bootstrap
 and parked dependency checkpoints are preserved as ancestry without replacing their
@@ -52,18 +50,15 @@ backup checkout is untouched. No private course sources or test credentials ente
 
 ## Validation
 
-Node 22.23.1, macOS, installed Chrome. Combined code: 3,122 unit/SQL checks pass
-(five existing skips), full typecheck/lint/build pass with zero lint errors or warnings,
-and 79 release/repository checks pass. Real two-build update, recovery checkpoint,
-unchanged peer tab, offline reopening and lazy Daily Games checks pass. The updater
-verifier now waits for the restored workspace rather than global network idleness after
-refresh, removing a listener race without weakening its persistence assertions.
+Node 22.23.1, macOS, installed Chrome: `npm --prefix web run verify:all` passes on
+`07cd665d` runtime. 3,128 unit/SQL checks pass, five declared skips; typecheck/full lint
+and production build pass. Two-build update, protected recovery checkpoint, unchanged
+peer tab, offline reopening and lazy Daily Games gates pass. The full Chrome matrix
+passes 93 cases, with four declared source/live opt-in skips. This run includes actual
+local Supabase, private FTM1, two-account sharing/daily scoring and original ZIP restore.
+All 79 repository/release checks pass. Mobile saved-set buttons now grow with long titles;
+desktop, 390px dark and short-window screenshots were inspected and keyboard download passes.
 
-All runnable paths in the 96-case browser matrix pass, with opt-in local/live cases
-skipped as declared. Under severe unrelated host CPU pressure, one full run produced
-ten reload/render timeouts; all ten passed in fresh focused Chrome runs, including the
-desktop source-canvas case. Course, sharing, leaderboard, image rendering, saved review,
-Questions/Slides, communications and responsive checks pass on the combined code.
 The Pathways crawler compiles and passes all 62 synthetic Python regressions without
 network access. Repository tests and hygiene pass after the remote-tip consolidation.
 
@@ -71,22 +66,28 @@ The actual supplied 516,431,732-byte backup now passes Settings restore and relo
 an isolated persistent browser profile with hosted traffic blocked. Notes/progress,
 343 questions, 848 documents and all 2,151 image hashes match. Detailed timings and
 local migrations are in the feature contract. Native packaging, hosted staging and
-production acceptance remain outstanding. The clean Vercel-filtered install/build passes for `0c38e23e`. The inspected source
-build at `eca6ac3b` contains 270 distribution files totaling 53,981,760 uncompressed
-bytes; this measures the web output, not a signed native installer.
-Exact final deployment-input validation and local-main promotion are recorded on the
-coordination board/ledger.
+production acceptance remain outstanding. The original ZIP restore recheck took
+74,052 ms for read/restore/reload/integrity under current host load; all 2,151 images
+match. The current release doctor confirms Rust is available and updater credentials
+are absent. Exact package/deployment-input results belong to their source commit;
+previous build measurements do not describe this new checkpoint.
 
 ## Remaining delivery boundary
 
-Incremental account requests reuse the atomic revision writer. Local service measures:
-22,405-byte initial checkpoint / 525-byte answer; real FTM1 66,420-byte initial checkpoint /
-10,857-byte completed 11-answer delta. Daily scoring requests are 223 JSON bytes each.
-These exclude protocol headers and are local observations. Downloaded academic content
-still enters private recovery, and new-device sign-in hydrates the source graph.
-Shared-content exclusion, on-demand restore, learner overlays/history pagination and
-bounded offline downloads remain unfinished. Preserve original copies and stable IDs;
-do not replace the canonical question/progress/recovery engines.
+Incremental account requests reuse the atomic revision writer. Hash-format 2 verifies
+compact metadata and immutable references without source downloads. Typed deferred
+records stay outside scored practice. QBank saved-set downloads and saved course
+downloads preserve IDs, notes and attempts and include question figures and study code.
+Verified sources/images reference canonical academic objects; private edits retain
+private recovery. Legacy snapshots remain readable. Migration 20261013230000 was applied
+only to the real local stack at http://127.0.0.1:55321.
+
+Actual local FTM1 JSON: 100,780-byte checkpoint / 10,899-byte completed 11-answer delta;
+clean second-device sign-in makes zero source Storage GETs. All 25 question references
+are shared and no private course-image copies are uploaded. Offline image-rich study
+and reconnect retain saved attempts. These are request sizes, excluding headers, not
+hosted latency or live account-size measurements. Paged attempt history, persistent
+cache usage/removal controls and complete original-binary recovery remain unfinished.
 
 Also pending: remaining source-backed courses, larger/resumable user uploads and review,
 automatic daily publication, durable interrupted challenge submission, hosted activation
