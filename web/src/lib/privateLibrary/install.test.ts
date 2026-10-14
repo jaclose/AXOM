@@ -153,3 +153,39 @@ describe("prepared private library installation", () => {
     await expect(read("banks/missing.json")).rejects.toThrow("Missing");
   });
 });
+
+describe("shared image identity in prepared libraries", () => {
+  it("materializes a reused source-page image once even when question-local asset IDs differ", async () => {
+    const b = await bundle();
+    const bank = JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)) as PreparedBank;
+    const png = new Uint8Array([
+      137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,
+    ]);
+    const checksum = await sha256(png);
+    const asset = {
+      id: "source-page-first", filename: "shared-source-page.png", mimeType: "image/png",
+      role: "source_page" as const, questionId: "sample-1", checksum,
+    };
+    const question = bank.pkg.questions[0];
+    bank.pkg.questions = [
+      { ...question, assets: [{ ...asset }] },
+      { ...question, id: "sample-2", assets: [{ ...asset, id: "source-page-second", questionId: "sample-2" }] },
+    ];
+    let assetReads = 0;
+    const read = async (path: string) => {
+      expect(path).toBe("banks/test/assets/shared-source-page.png");
+      assetReads += 1;
+      return png;
+    };
+    const files = await bankFiles(bank, read, "banks/test/prepared-bank.json");
+    expect(files.map(file => file.name)).toEqual(["shared-source-page.png"]);
+    expect(assetReads).toBe(1);
+    // A second question may attach the SAME source bytes using its own ID.
+    const { matchNamedImages } = await import("../questionImportImages");
+    expect(matchNamedImages(["shared-source-page.png"], files)[0].file).toBe(files[0]);
+    const conflicting = structuredClone(bank);
+    conflicting.pkg.questions[1].assets[0].checksum = "sha256:" + "f".repeat(64);
+    await expect(bankFiles(conflicting, read, "banks/test/prepared-bank.json"))
+      .rejects.toThrow(/two different images are named/i);
+  });
+});

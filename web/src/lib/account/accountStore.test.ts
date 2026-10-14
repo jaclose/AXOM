@@ -5,6 +5,27 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const rpc = vi.fn();
 const tables: Record<string, unknown[]> = { workspace_revisions: [], account_devices: [], account_profiles: [], workspaces: [] };
 
+/** Real Supabase RPC acceptance persists a revision before its owner-scoped
+ * SELECT can verify it. Mock both sides of that atomic contract, rather than
+ * returning a fake success response and an empty revision table. */
+function acceptedRevision(args: Record<string, unknown>, revision: number, id: string) {
+  const hash = args.p_content_hash;
+  if (typeof hash !== "string" || !/^[a-f0-9]{64}$/.test(hash)) {
+    throw new Error("This accepted-revision fixture needs a real upload hash.");
+  }
+  const row = {
+    id, revision, content_hash: hash,
+    schema_version: args.p_schema_version,
+    snapshot_payload: args.p_snapshot_payload,
+    reason: typeof args.p_reason === "string" ? args.p_reason : "automatic",
+    created_at: new Date().toISOString(),
+  };
+  tables.workspace_revisions = [row, ...tables.workspace_revisions.filter(
+    (existing) => typeof existing !== "object" || existing === null || !("id" in existing) || existing.id !== id,
+  )];
+  return { data: { status: "accepted" as const, revision, revision_id: id, idempotent: false }, error: null };
+}
+
 function chain(table: string) {
   const result = () => ({ data: tables[table] ?? [], error: null });
   const builder: Record<string, unknown> = {};
@@ -105,7 +126,7 @@ describe("account lifecycle", () => {
       if (name === "push_workspace_revision_v2") {
         return args.p_base_revision === 0
           ? { data: { status: "conflict", server_revision: 7, preserved_revision_id: "c1" }, error: null }
-          : { data: { status: "accepted", revision: 8, revision_id: "r8", idempotent: false }, error: null };
+          : acceptedRevision(args, 8, "r8");
       }
       return { data: null, error: null };
     });
@@ -132,7 +153,7 @@ describe("account lifecycle", () => {
       if (name === "push_workspace_revision_v2") {
         return args.p_base_revision === 0
           ? { data: { status: "conflict", server_revision: 7, preserved_revision_id: "c1" }, error: null }
-          : { data: { status: "accepted", revision: 8, revision_id: "r8", idempotent: false }, error: null };
+          : acceptedRevision(args, 8, "r8");
       }
       return { data: null, error: null };
     });
@@ -288,7 +309,14 @@ describe("a refused upload (the production failure of 2026-09-30)", () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     await useAccount.getState().signIn("learner@example.com", "password123");
     let answer: unknown = historyFull;
-    rpc.mockImplementation(async (name: string) => (name === "push_workspace_revision_v2" ? answer : { data: null, error: null }));
+    rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+      if (name !== "push_workspace_revision_v2") return { data: null, error: null };
+      const accepted = (answer as { data?: { status?: string; revision?: number; revision_id?: string } }).data;
+      if (accepted?.status === "accepted" && accepted.revision && accepted.revision_id) {
+        return { ...acceptedRevision(args, accepted.revision, accepted.revision_id), status: 200 };
+      }
+      return answer;
+    });
 
     await useAccount.getState().linkThisDevice();
     expect(useAccount.getState()).toMatchObject({ link: "linked", protection: "blocked", syncFailure: { kind: "rejected", rejection: "storage-limit", status: 500, code: "54000" } });
@@ -343,8 +371,8 @@ describe("signing in brings your AXOM back (Priority 4), never over your own wor
     server.tasks = [...server.tasks, { id: "laptop-task", title: "From the laptop", done: false, created: "2026-09-20T10:00:00Z" }];
     tables.workspace_revisions = [{ id: "r5", revision: 5, schema_version: server.schemaVersion, content_hash: "b".repeat(64), snapshot_payload: toPortableState(server), reason: "automatic", created_at: "2026-09-28T18:00:00Z" }];
   }
-  const accepting = async (name: string) => (name === "push_workspace_revision_v2"
-    ? { data: { status: "accepted", revision: 6, revision_id: "r6", idempotent: false }, error: null }
+  const accepting = async (name: string, args: Record<string, unknown>) => (name === "push_workspace_revision_v2"
+    ? acceptedRevision(args, 6, "r6")
     : { data: null, error: null });
 
   it("restores the account's latest version on a device with no work of its own", async () => {
@@ -381,7 +409,7 @@ describe("signing in brings your AXOM back (Priority 4), never over your own wor
       if (name === "push_workspace_revision_v2") {
         return args.p_base_revision === 0
           ? { data: { status: "conflict", server_revision: 5, preserved_revision_id: "c2" }, error: null }
-          : { data: { status: "accepted", revision: 6, revision_id: "r6", idempotent: false }, error: null };
+          : acceptedRevision(args, 6, "r6");
       }
       return { data: null, error: null };
     });

@@ -37,10 +37,24 @@ export function readPreparedBank(value: unknown): PreparedBank {
 const reviewBlobKey = (checksum: string) => `private-library:${checksum}`;
 export async function bankFiles(bank: PreparedBank, read?: LibraryReader, bankFile?: string, assertCurrent: () => void = () => {}): Promise<File[]> {
   const files: File[] = [];
-  for (const asset of new Map(bank.pkg.questions.flatMap(q => q.assets).map(a => [a.id, a])).values()) {
+  // Several question assets can refer to the *same* source-page file while
+  // having distinct question-local asset IDs. The image matcher intentionally
+  // refuses ambiguous duplicate filenames. Supply each verified file once,
+  // and refuse collisions where identical names claim different bytes.
+  const byFileName = new Map<string, (typeof bank.pkg.questions)[number]["assets"][number]>();
+  for (const asset of bank.pkg.questions.flatMap(question => question.assets)) {
+    if (!asset.checksum) continue;
+    const key = asset.filename.trim().split(/[\\/]/).pop()!.normalize("NFC").toLowerCase();
+    const previous = byFileName.get(key);
+    if (previous && previous.checksum !== asset.checksum) {
+      throw new Error(`Two different images are named ${asset.filename}. Rename and review their references before importing.`);
+    }
+    if (!previous) byFileName.set(key, asset);
+  }
+  for (const asset of byFileName.values()) {
+    if (!asset.checksum) continue;
     // The assessor holds questions whose essential images are absent. One
     // incomplete extraction must not prevent verified siblings from loading.
-    if (!asset.checksum) continue;
     const key = reviewBlobKey(asset.checksum);
     let record = await getQuestionAttachmentBlob(key);
     if (!record && read && bankFile) {
@@ -111,7 +125,8 @@ async function install(read: LibraryReader, progress: (message: string) => void,
   const installed = catalog.sources.map(s => ({ ...s }));
   for (const [index, source] of installed.entries()) {
     if (!source.bankFile && !source.originalFile) continue;
-    progress(`Preparing your library · ${index + 1} of ${installed.length} sources`);
+    const report = (phase: string) => progress(`Preparing your library · ${index + 1} of ${installed.length} sources · ${phase}`);
+    report("checking original");
     try {
       if (source.originalFile) {
         const s = currentStore();
@@ -129,18 +144,26 @@ async function install(read: LibraryReader, progress: (message: string) => void,
         } else if (!existing) pendingDocuments.set(doc.id, doc);
       }
       if (source.bankFile) {
+      report("opening question package");
       const storedReview = currentStore().documents.find(d => d.id === `private-review-${source.checksum}`);
       const bank = readPreparedBank(JSON.parse(storedReview?.rawText ?? text(await read(source.bankFile))));
+      report("verifying figure assets");
       const files = await bankFiles(bank, read, source.bankFile, assertCurrent);
+      report("reviewing answer evidence");
       const assessed = assessBank(bank.pkg, bank.issues, files);
       if (assessed.issues.some(i => i.severity === "error" && !i.questionId)) throw new Error("Bank validation failed.");
       // Canonical question import must see its source document. Held-only
       // documents can share one snapshot instead of rewriting tens of MB each.
-      if (assessed.counts.ready) await flushDocuments();
+      if (assessed.counts.ready) {
+        report("saving source documents");
+        await flushDocuments();
+      }
+      report("saving reviewed questions");
       const result = await saveBank(bank.pkg, assessed.issues, files, {
         library: currentStore, store: currentStore,
       }, { sourceText: bank.sourceText, sourceBytes: bank.sourceBytes, notes: bank.notes });
       if (result.status === "failed") throw new Error(result.errors.join(" "));
+      report("recording review queue");
       for (const section of result.sections) {
         installedIds.questionIds.push(...section.savedIds);
         if (section.setId) installedIds.setIds.push(section.setId);
@@ -157,9 +180,22 @@ async function install(read: LibraryReader, progress: (message: string) => void,
       if (source.review && !state.documents.some(d => d.id === id)) pendingDocuments.set(id, { id, title: bank.pkg.manifest.bank.title, fileName: source.name,
         fileType: PRIVATE_REVIEW_DOCUMENT, rawText, uploadedAt: new Date().toISOString(), sizeBytes: rawText.length, tags: [source.module ?? "Unfiled"], libraryOnly: true, linkedQuestionSetIds: result.sections.flatMap(s => s.setId ? [s.setId] : []) });
       }
-    } catch (cause) { assertCurrent(); source.status = "failed"; source.ready = 0; source.reason = cause instanceof Error ? cause.message : "Installation failed."; failures.push(source.name); }
-    if (pendingDocuments.size >= 20 || source.ready) await flushDocuments();
+    } catch (cause) {
+      assertCurrent();
+      source.status = "failed";
+      source.ready = 0;
+      source.reason = cause instanceof Error ? cause.message : "Installation failed.";
+      // Preserve the underlying error, not only a generic file count: otherwise
+      // a failed bank can look like a silent stall at the last progress label.
+      failures.push(`${source.name}: ${source.reason}`);
+      report("source needs attention; continuing with other files");
+    }
+    if (pendingDocuments.size >= 20 || source.ready) {
+      report("synchronizing local vault");
+      await flushDocuments();
+    }
   }
+  progress("Finalizing local library catalog…");
   await flushDocuments();
   const rawText = JSON.stringify({ ...catalog, sources: installed });
   installedIds.documentIds.push(`private-library-${catalog.id}`);
@@ -167,7 +203,7 @@ async function install(read: LibraryReader, progress: (message: string) => void,
     uploadedAt: new Date().toISOString(), rawText, sizeBytes: rawText.length, tags: [catalog.version], libraryOnly: true, linkedQuestionSetIds: [] });
   await flushLocalVaultWrites(); assertVaultWritesSince(checkpoint);
   assertCurrent();
-  if (failures.length) throw new Error(`${failures.length} banks need another installation attempt. Your saved courses, questions and progress are intact. See source coverage.`);
+  if (failures.length) throw new Error(`${failures.length} banks need another installation attempt. ${failures.slice(0, 3).join(" · ")}${failures.length > 3 ? ` · ${failures.length - 3} more failures` : ""}. Saved study progress is intact; review the source coverage and retry.`);
   progress("Library installed. Choose a course or create a quiz.");
   return { templateIds: [...new Set(installedIds.templateIds)], documentIds: [...new Set(installedIds.documentIds)], questionIds: [...new Set(installedIds.questionIds)], setIds: [...new Set(installedIds.setIds)] };
 }

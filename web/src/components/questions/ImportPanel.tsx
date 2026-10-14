@@ -1451,8 +1451,11 @@ function FileTab({ busyFile, setBusyFile, onParsed, onBankSaved, stagedSources, 
           fileName: file.name,
           fileType: isPdf ? "pdf" : "docx",
           sizeBytes: file.size,
-          rawText: "previewText" in extracted ? extracted.previewText : extracted.text,
-          pageTexts: isPdf && "previewPages" in extracted ? extracted.previewPages : undefined,
+          rawText: "previewText" in extracted && typeof extracted.previewText === "string"
+            ? extracted.previewText : extracted.text,
+          pageTexts: isPdf && "previewPages" in extracted && Array.isArray(extracted.previewPages)
+            && extracted.previewPages.every((page): page is string => typeof page === "string")
+            ? extracted.previewPages : undefined,
           checksum,
         };
         if (extracted.empty) {
