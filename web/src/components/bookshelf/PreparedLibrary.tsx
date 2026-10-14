@@ -59,7 +59,7 @@ export function PreparedLibrary() {
     setError("");
     try {
       const doc = documents.find(d => d.checksum?.replace(/^sha256:/, "") === checksum);
-      const blob = doc && await readSourceOriginal(doc.id);
+      const blob = doc && await readSourceOriginal(doc.id, doc.checksum);
       if (!blob) throw new Error("The original is not on this device. Reinstall the prepared bundle to restore it.");
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a"); link.href = url; link.download = name; link.click();

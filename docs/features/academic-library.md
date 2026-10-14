@@ -134,10 +134,43 @@ and their figures referenced academic objects, with zero private course-image co
 These are single-run local observations, not hosted latency or total account-size claims.
 
 **Still incomplete:** paged learner history, persistent offline cache usage/removal
-controls, full original-binary recovery, larger/resumable uploads and administrative
+controls, general private-upload original-binary sync, larger/resumable uploads and administrative
 review, remaining supplied courses, hosted daily challenges and release/package
 acceptance. Legacy checkpoints still use the compatible full-source restore path.
 Never report this checkpoint as completion of canonical 1.1 or a production deployment.
+
+## Original files and portable recovery
+
+Academic bindings identify original PDF, DOCX and text files only when the prepared
+catalog explicitly declares their paths and their checksums match the installed source.
+A course-template JSON is never treated as an original document. Explicit saved-course
+and saved-set downloads verify protected original files through the existing backend
+file/RLS boundary, then store them in Decode's existing checksum-verified cache.
+
+Intentional portable exports include available original binaries in ZIP format 2,
+separate from workspace JSON and question images. The manifest records source ID,
+SHA-256, byte count and media type. Import validates every original's identity, bounds,
+size and hash before offering workspace adoption; restore reuses the existing source
+cache. Repeated restore skips verified copies, merge skips mismatched newer documents,
+and older cached editions remain readable. JSON and version-1 ZIP imports still work.
+
+The archive limits remain 2 GiB total, 30,000 entries and 128 MiB workspace JSON;
+originals have a 128 MiB per-file limit and images retain their 8 MiB limit. Export
+reports unavailable or oversized originals while retaining their saved text and
+metadata. It never removes the only local copy. Older clients cannot open format-2
+original-file ZIPs; update before restoring them. No database migration is required.
+General private-upload original-file cloud sync and cache-removal controls remain open.
+
+Local Chrome acceptance additionally exports the real FTM1 pilot through Settings and
+restores it into a third empty profile. The 909,774-byte ZIP restores both original
+files with verified hashes after reload, plus all 11 independent saved attempts.
+The same run measures a 101,550-byte account checkpoint and 10,892-byte 11-answer delta,
+with zero source GETs at clean sign-in and zero private course-image copies. The full
+quality gate passes 3,131 unit/SQL tests (six declared skips), typecheck, full lint and
+production build. Six affected browser cases pass, including the supplied 516,431,732-
+byte legacy backup and all 2,151 image hashes (49,244 ms read/restore/reload/integrity).
+These results are local-only; this extension needs no hosted migration.
+
 
 
 ## Verified daily challenges

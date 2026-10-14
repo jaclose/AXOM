@@ -1,7 +1,7 @@
 import { readDeferredContent } from "./sync/deferredContent";
 import { readWorkspaceContent } from "./question-content/workspaceContent";
 import { privateReviewMedia } from "./privateLibrary/media";
-import { createMediaBackupArchive, LARGE_MEDIA_BACKUP_BYTES, mediaBackupBytes } from "./backupArchive";
+import { backupOriginalDocuments, createMediaBackupArchive, LARGE_MEDIA_BACKUP_BYTES, mediaBackupBytes } from "./backupArchive";
 // ===========================================================================
 // JSON export / import. The portable backup story for the browser-stored data.
 // ===========================================================================
@@ -67,13 +67,12 @@ export function exportState(state: NoctyriumState) {
   });
 }
 
-/** Complete portable backup: workspace JSON plus question-note image bytes as
- * base64 payloads that exist only inside the exported file (Q2b-2). Reports
- * any attachment whose bytes were unavailable so the export is never silently
- * incomplete. */
+/** Intentional portable recovery resolves deferred content and includes verified
+ * images and original files. Missing binaries are reported, never silently omitted.
+ * Ordinary account checkpoints do not use this export path. */
 export async function exportStateWithAttachments(
   state: NoctyriumState,
-): Promise<{ attachmentCount: number; missingBlobKeys: string[] }> {
+): Promise<{ attachmentCount: number; missingBlobKeys: string[]; originalCount: number; missingOriginalIds: string[] }> {
   if (state.deferredContent) {
     const { materializeState } = await import("./sync/contentDownloads");
     state = await materializeState(state);
@@ -84,10 +83,10 @@ export async function exportStateWithAttachments(
     ...toPortableState(state),
   };
   const references = [...(state.questions ?? []), ...privateReviewMedia(state.documents)];
-  if (mediaBackupBytes(references) > LARGE_MEDIA_BACKUP_BYTES) {
-    const result = await createMediaBackupArchive(payload, references);
+  if (backupOriginalDocuments(state.documents).length || mediaBackupBytes(references) > LARGE_MEDIA_BACKUP_BYTES) {
+    const result = await createMediaBackupArchive(payload, references, state.documents);
     downloadBackupBlob(result.blob, "zip");
-    return { attachmentCount: result.attachmentCount, missingBlobKeys: result.missingBlobKeys };
+    return { attachmentCount: result.attachmentCount, missingBlobKeys: result.missingBlobKeys, originalCount: result.originalCount, missingOriginalIds: result.missingOriginalIds };
   }
   let attachmentCount = 0;
   let missingBlobKeys: string[];
@@ -102,7 +101,7 @@ export async function exportStateWithAttachments(
       (question.attachments ?? []).map((attachment) => attachment.blobKey));
   }
   downloadBackupPayload(payload);
-  return { attachmentCount, missingBlobKeys };
+  return { attachmentCount, missingBlobKeys, originalCount: 0, missingOriginalIds: [] };
 }
 
 function downloadBackupPayload(payload: Record<string, unknown>) {

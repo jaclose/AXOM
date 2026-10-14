@@ -1,12 +1,13 @@
 // ===========================================================================
-// The original file of a source document, kept on this device only.
+// Verified original files cached on this device.
 //
 // In the workspace a source document is its text and its identity (a
 // checksum of the file's bytes). Showing a page as it was drawn needs the
 // file itself, which is far too large for a workspace snapshot or for sync.
-// So it lives here, in its own IndexedDB database, keyed by the document's
-// id. It is never exported, never uploaded, and is not on another device
-// until the learner attaches the same file there.
+// Copies live in this IndexedDB database, keyed by the document's id.
+// An explicit academic download can restore a copy from the protected
+// immutable backend file; attaching the exact local original also works.
+// Workspace snapshots carry identity and text, not these binary bytes.
 //
 // A file is only accepted when its bytes match the document's checksum: a
 // different version of the file would put other pages behind the page
@@ -55,25 +56,44 @@ async function withStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStor
   }
 }
 
-/** Keep the original of a source on this device, once its bytes are shown to be that source's. */
+const versionKey = (id: string, checksum: string) => ["version", id, checksum];
+const fingerprint = (checksum: string) => checksum.replace(/^sha256:/, "");
+
+/** Immutable versions share one blob per document/hash. The current id is only
+ * a pointer; legacy Blob values remain readable and are preserved on upgrade. */
 export async function saveSourceOriginal(document: Pick<SourceDocument, "id" | "checksum">, file: Blob): Promise<void> {
   if (!document.checksum) {
     throw new SourceOriginalError("no-fingerprint", "This source was saved without a fingerprint, so a file cannot be matched to it. Import the file again to attach it.");
   }
-  if (await sha256Hex(await file.arrayBuffer()) !== document.checksum.replace(/^sha256:/, "")) {
+  const checksum = fingerprint(document.checksum);
+  if (await sha256Hex(await file.arrayBuffer()) !== checksum) {
     throw new SourceOriginalError("different-file", "This is a different version of the file. Choose the exact file that was imported, so page numbers still point at the right pages.");
   }
-  await withStore("readwrite", (store) => store.put(file, document.id), "The original file could not be saved. Check this device's storage and try again.");
+  const previous = await readSourceOriginal(document.id);
+  const previousHash = previous && await sha256Hex(await previous.arrayBuffer());
+  await withStore("readwrite", store => {
+    if (previous && previousHash && previousHash !== checksum) store.put(previous, versionKey(document.id, previousHash));
+    store.put(file, versionKey(document.id, checksum));
+    return store.put({ checksum }, document.id);
+  }, "The original file could not be saved. Check this device's storage and try again.");
 }
 
-export async function readSourceOriginal(documentId: string): Promise<Blob | undefined> {
-  const found = await withStore<unknown>("readonly", (store) => store.get(documentId), "AXOM could not read the original file.");
-  return found instanceof Blob ? found : undefined;
+export async function readSourceOriginal(documentId: string, checksum?: string): Promise<Blob | undefined> {
+  const found = await withStore<unknown>("readonly", store => store.get(documentId), "AXOM could not read the original file.");
+  const expected = checksum ? fingerprint(checksum) : undefined;
+  if (found instanceof Blob && (!expected || await sha256Hex(await found.arrayBuffer()) === expected)) return found;
+  const hash = expected ?? (found && typeof found === "object" && "checksum" in found ? found.checksum : undefined);
+  if (typeof hash !== "string") return undefined;
+  const version = await withStore<unknown>("readonly", store => store.get(versionKey(documentId, hash)), "AXOM could not read this version of the original file.");
+  return version instanceof Blob && await sha256Hex(await version.arrayBuffer()) === hash ? version : undefined;
 }
 
-/** A source that leaves the workspace takes its original with it. */
+/** Explicit removal deletes this document's copies, never another source's. */
 export async function deleteSourceOriginal(documentId: string): Promise<void> {
-  await withStore("readwrite", (store) => store.delete(documentId), "The original file could not be removed.");
+  await withStore("readwrite", store => {
+    store.delete(IDBKeyRange.bound(["version", documentId], ["version", documentId, []]));
+    return store.delete(documentId);
+  }, "The original file could not be removed.");
 }
 
 /** Fewer characters than this on a page usually means a figure or a scan. It is not a verdict that the page is unreadable. */

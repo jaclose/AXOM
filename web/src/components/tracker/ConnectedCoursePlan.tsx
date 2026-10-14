@@ -95,7 +95,7 @@ export function ConnectedCoursePlan({ course, onBack, onOpen, onCustomize, onSha
         await downloadAccountContent({ questionIds: saved.questionIds, documentIds: saved.documentIds });
         scope.assertCurrent();
       }
-      if (!saved?.bindings || !saved.questionIds.every(id => useStore.getState().questions.some(question => question.id === id))) {
+      if (!saved?.bindings?.originals || !saved.questionIds.every(id => useStore.getState().questions.some(question => question.id === id))) {
         const ids = await downloadAcademicCourse(course.current_revision_id, setMessage, scope);
         scope.assertCurrent();
         saved = { ...ids, collectionId: course.id, revisionId: course.current_revision_id, accountId };

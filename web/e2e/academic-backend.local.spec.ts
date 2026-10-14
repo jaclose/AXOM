@@ -13,6 +13,21 @@ test.use({ trace: "off", screenshot: "off", video: "off" });
 
 test("real sign-in, private course, scoped study and cross-device recovery", async ({ page, browser }) => {
   test.setTimeout(180_000);
+  const verifyOriginals = async (target: Page) => target.evaluate(async () => {
+      const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => NoctyriumState } }> }).__AXOM_DEV__;
+      const { readSourceOriginal } = await import("/src/lib/decode/sources.ts" /* @vite-ignore */);
+      const { sha256Hex } = await import("/src/lib/checksum.ts" /* @vite-ignore */);
+      const state = dev.useStore.getState();
+      const references = state.documents.filter(document => document.fileType === "axom-academic-reference")
+        .flatMap(document => JSON.parse(document.rawText).bindings?.originals ?? []) as Array<{ documentId: string; asset: { sha256: string } }>;
+      let verified = 0;
+      for (const reference of references) {
+        const blob = await readSourceOriginal(reference.documentId, reference.asset.sha256);
+        if (!blob || await sha256Hex(await blob.arrayBuffer()) !== reference.asset.sha256) throw new Error("The saved course original is missing or damaged.");
+        verified++;
+      }
+      return verified;
+    });
   const { env } = JSON.parse(readFileSync(statusFile!, "utf8"));
   const url = new URL(env.API_URL);
   if (url.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(url.hostname)) throw new Error("Local acceptance refuses a hosted backend.");
@@ -169,6 +184,8 @@ test("real sign-in, private course, scoped study and cross-device recovery", asy
     await device.getByRole("button", { name: "Download course to this device", exact: true }).click();
     await expect.poll(async () => (await progress(device)).questions).toBe(25);
     expect((await progress(device)).attempts).toEqual(saved.attempts);
+    const originalFiles = await verifyOriginals(device);
+    expect(originalFiles).toBeGreaterThan(0);
     await other.setOffline(true);
     await device.getByRole("button", { name: "Quiz week 2", exact: true }).click();
     await expect(device.getByText("Question 1 of 11", { exact: false }).first()).toBeVisible();
@@ -199,7 +216,40 @@ test("real sign-in, private course, scoped study and cross-device recovery", asy
     // Existing quiz engine owns answer/review state; no second progress engine.
     expect((await progress(device)).attempts).toEqual(expect.arrayContaining(saved.attempts));
   } finally { await other.close(); }
+  // Export and restore through the supported controls in a third, empty profile.
+  // The original source bytes remain private in the Playwright temp download.
+  await page.goto("/#dashboard");
+  await page.getByTitle("Settings", { exact: true }).click();
+  await page.getByRole("tab", { name: "Emergency recovery", exact: true }).click();
+  const downloaded = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export backup", exact: true }).click();
+  const backup = await downloaded;
+  expect(backup.suggestedFilename()).toMatch(/\.zip$/);
+  const backupPath = await backup.path();
+  if (!backupPath) throw new Error("Portable export was not written.");
+  await expect(page.getByRole("status")).toContainText("original files");
+  const recovery = await browser.newContext();
+  let recoveredOriginals: number;
+  try {
+    const restored = await recovery.newPage();
+    restored.on("pageerror", error => errors.push(error.message));
+    await restored.route("**/*.supabase.co/**", route => route.abort());
+    await restored.goto(`${new URL(page.url()).origin}/#dashboard`);
+    await completeSetup(restored, "Portable recovery acceptance"); await deferPromisePrompt(restored);
+    await restored.getByTitle("Settings", { exact: true }).click();
+    await restored.getByRole("tab", { name: "Emergency recovery", exact: true }).click();
+    const chooser = restored.waitForEvent("filechooser");
+    await restored.getByRole("button", { name: "Import / restore", exact: true }).click();
+    restored.once("dialog", dialog => dialog.accept());
+    await (await chooser).setFiles({ name: backup.suggestedFilename(), mimeType: "application/zip", buffer: readFileSync(backupPath) });
+    await expect(restored.getByRole("status")).toContainText("Saved on this device.");
+    await expect(restored.getByRole("status")).toContainText("original files");
+    await restored.reload(); await waitForWorkspace(restored);
+    expect((await progress(restored)).attempts).toEqual(saved.attempts);
+    recoveredOriginals = await verifyOriginals(restored);
+    expect(recoveredOriginals).toBeGreaterThan(0);
+  } finally { await recovery.close(); }
   expect(errors).toEqual([]);
-  if (process.env.AXOM_ACADEMIC_EVIDENCE) writeFileSync(process.env.AXOM_ACADEMIC_EVIDENCE, JSON.stringify({ apiUrl: url.href, result: "passed", writes, bootstrapSourceDownloads: 0, sharedQuestionReferences: 25, privateCourseImageCopies: 0,
+  if (process.env.AXOM_ACADEMIC_EVIDENCE) writeFileSync(process.env.AXOM_ACADEMIC_EVIDENCE, JSON.stringify({ apiUrl: url.href, result: "passed", recoveredOriginals, portableBackupBytes: readFileSync(backupPath).byteLength, writes, bootstrapSourceDownloads: 0, sharedQuestionReferences: 25, privateCourseImageCopies: 0,
     workflow: "real sign-in, private upload, Week 2 activation, image-rich 11-question quiz, Decode, incremental save, reload, clean second-device recovery" }, null, 2));
 });

@@ -149,7 +149,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
     if (backupBusy) return;
     setBackupBusy(true); setMsg("Reading your backup…");
     try {
-      const { rawText, restoreMedia } = await readPortableBackup(file);
+      const { rawText, restoreMedia, restoreOriginals } = await readPortableBackup(file);
       const next = parseImport(rawText);
       const message = mode === "replace"
         ? "Restore this backup? It REPLACES the current data on this device. Download a backup first if you want to keep both."
@@ -159,13 +159,14 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
       const restoredState = mode === "merge" ? mergeStates(current, next) : next;
       const checkpoint = getVaultWriteCheckpoint();
       current.replaceAll(restoredState);
-      setMsg("Saving your workspace and restoring images…");
+      setMsg("Saving your workspace, images and original files…");
       await flushLocalVaultWrites(); assertVaultWritesSince(checkpoint);
       const references = [...(restoredState.questions ?? []), ...privateReviewMedia(restoredState.documents)];
       const { restored } = await restoreMedia(references);
+      const originals = await restoreOriginals(restoredState.documents ?? []);
       await runQuestionAttachmentMaintenance(references);
       recordRestoreEvent({ kind: mode === "merge" ? "portable-merge" : "portable-restore", detail: file.name });
-      setMsg(`${mode === "merge" ? "Merged" : "Restored"} ${file.name}. Saved on this device.${restored ? ` Restored ${restored} image attachments.` : ""}`);
+      setMsg(`${mode === "merge" ? "Merged" : "Restored"} ${file.name}. Saved on this device.${restored ? ` Restored ${restored} image attachments.` : ""}${originals.restored ? ` Restored ${originals.restored} original files.` : ""}`);
     } catch (e) {
       setMsg(`Recovery did not finish. ${e instanceof Error ? e.message : "Keep your backup and try again."}`);
     } finally {
@@ -177,12 +178,12 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
 
   async function exportBackup() {
     if (backupBusy) return;
-    setBackupBusy(true); setMsg("Preparing your workspace and images…");
+    setBackupBusy(true); setMsg("Preparing your workspace, images and original files…");
     try {
-      const { attachmentCount, missingBlobKeys } = await exportStateWithAttachments(useStore.getState());
+      const { attachmentCount, missingBlobKeys, originalCount, missingOriginalIds } = await exportStateWithAttachments(useStore.getState());
       const missing = missingBlobKeys.length
         ? ` ${missingBlobKeys.length} image attachments could not be read and were exported as metadata only.` : "";
-      setMsg(`Downloaded your backup file.${attachmentCount ? ` Includes ${attachmentCount} image attachments.` : ""}${missing}`);
+      setMsg(`Downloaded your backup file.${attachmentCount ? ` Includes ${attachmentCount} image attachments.` : ""}${originalCount ? ` Includes ${originalCount} original files.` : ""}${missing}${missingOriginalIds.length ? ` ${missingOriginalIds.length} original files were unavailable or exceeded the portable file limit. Their saved text and source details are included.` : ""}`);
     } catch (error) {
       setMsg(`Backup was not exported. ${error instanceof Error ? error.message : "Try again after checking storage."}`);
     } finally { setBackupBusy(false); }
@@ -295,7 +296,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
           <div className="backup-actions-panel">
             <div>
               <div className="sync-title">Portable emergency copy</div>
-              <div className="sub">Automatic local saving is primary. Export a portable copy you control, or restore or merge a saved AXOM JSON or ZIP backup when recovery is needed. Large image libraries export as ZIP.</div>
+              <div className="sub">Automatic local saving is primary. Export a portable copy you control, or restore or merge a saved AXOM JSON or ZIP backup when recovery is needed. Original files and large image libraries export as ZIP.</div>
             </div>
             <div className="row wrap gap8">
               <GButton size="sm" variant="primary" disabled={backupBusy} onClick={exportBackup}>

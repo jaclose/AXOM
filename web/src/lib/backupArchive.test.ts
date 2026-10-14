@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Blob as NativeBlob, File as NativeFile } from "node:buffer";
+import { sha256Hex } from "./checksum";
+import { readSourceOriginal, saveSourceOriginal, deleteSourceOriginal, SOURCE_ORIGINALS_DB } from "./decode/sources";
+import type { SourceDocument } from "./library";
 import { closeWorkspace, openEmptyWorkspace } from "./question-content/persistenceHarness.testing";
 import { createMediaBackupArchive, mediaBackupBytes, readPortableBackup } from "./backupArchive";
 import { ATTACHMENT_EXPORT_KEY, deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, putQuestionAttachmentBlob, type QuestionImageAttachment } from "./questionAttachments";
@@ -8,7 +11,10 @@ import { ATTACHMENT_EXPORT_KEY, deleteQuestionAttachmentBlobs, getQuestionAttach
 const attachment: QuestionImageAttachment = { id: "figure", blobKey: "private-library:figure", fileName: "figure.png", mimeType: "image/png", byteSize: 4, altText: "Test figure", createdAt: "2026-10-10T00:00:00Z", updatedAt: "2026-10-10T00:00:00Z", role: "question" };
 const refs = [{ id: "held-question", attachments: [attachment] }];
 beforeEach(async () => { await openEmptyWorkspace(); vi.stubGlobal("Blob", NativeBlob); vi.stubGlobal("File", NativeFile); });
-afterEach(closeWorkspace);
+afterEach(async () => {
+  await new Promise<void>(resolve => { const request = indexedDB.deleteDatabase(SOURCE_ORIGINALS_DB); request.onsuccess = () => resolve(); });
+  await closeWorkspace();
+});
 
 describe("portable binary media backup", () => {
   it("round-trips held images once without embedding base64 in workspace JSON", async () => {
@@ -31,6 +37,35 @@ describe("portable binary media backup", () => {
     const payload = { _app: "AXOM", [ATTACHMENT_EXPORT_KEY]: [{ ...attachment, questionId: "held-question", base64: "QVhPTQ==" }] };
     const backup = await readPortableBackup(new File([JSON.stringify(payload)], "older.json"));
     expect(await backup.restoreMedia(refs)).toEqual({ restored: 1, skipped: 0 });
+  });
+
+  it("round-trips verified originals, retries safely and preserves a newer local edition", async () => {
+    const original = new Blob(["original source"], { type: "text/plain" });
+    const document: SourceDocument = { id: "source", title: "Source", fileName: "source.txt", fileType: "text/plain", uploadedAt: "2026-10-13", rawText: "original source", sizeBytes: original.size, checksum: await sha256Hex(await original.arrayBuffer()), tags: [], linkedQuestionSetIds: [], libraryOnly: true };
+    await saveSourceOriginal(document, original);
+    const exported = await createMediaBackupArchive({ documents: [document] }, [], [document]);
+    expect(exported).toMatchObject({ originalCount: 1, missingOriginalIds: [] });
+    const backup = await readPortableBackup(new File([exported.blob], "originals.zip"));
+    expect(backup.rawText).not.toContain("base64");
+    await deleteSourceOriginal(document.id);
+    const newer = { ...document, checksum: await sha256Hex("newer source") };
+    await saveSourceOriginal(newer, new Blob(["newer source"]));
+    expect(await backup.restoreOriginals([newer])).toEqual({ restored: 0, skipped: 1 });
+    expect(await backup.restoreOriginals([document])).toEqual({ restored: 1, skipped: 0 });
+    expect(await backup.restoreOriginals([document])).toEqual({ restored: 0, skipped: 1 });
+    expect(await (await readSourceOriginal(document.id, document.checksum))?.text()).toBe("original source");
+    expect(await (await readSourceOriginal(document.id, newer.checksum))?.text()).toBe("newer source");
+    const { default: JSZip } = await import("jszip");
+    const corrupted = await JSZip.loadAsync(new Uint8Array(await exported.blob.arrayBuffer()));
+    corrupted.file("originals/0", "corrupted bytes");
+    await expect(readPortableBackup(new File([await corrupted.generateAsync({ type: "arraybuffer" })], "corrupt.zip"))).rejects.toThrow("integrity check");
+    const forged = await JSZip.loadAsync(new Uint8Array(await exported.blob.arrayBuffer()));
+    const manifest = JSON.parse(await forged.file("workspace.json")!.async("string"));
+    manifest.originals.push(manifest.originals[0]);
+    forged.file("workspace.json", JSON.stringify(manifest));
+    await expect(readPortableBackup(new File([await forged.generateAsync({ type: "arraybuffer" })], "duplicate.zip"))).rejects.toThrow("invalid or missing original-file");
+    await deleteSourceOriginal(document.id);
+    expect(await createMediaBackupArchive({ documents: [document] }, [], [document])).toMatchObject({ originalCount: 0, missingOriginalIds: [document.id] });
   });
 
   it("rejects unrelated ZIPs and missing media before allowing a workspace restore", async () => {

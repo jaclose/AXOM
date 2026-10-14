@@ -6,6 +6,8 @@ import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint 
 import type { NoctyriumState } from "../types";
 import { hydrateCloudContent, splitCloudContent, mergeSourceFields } from "./cloudContent";
 import { readDeferredContent } from "./deferredContent";
+import { downloadAcademicAsset, storedAcademicBindings } from "../academicLibrary/contentReferences";
+import { readSourceOriginal, saveSourceOriginal } from "../decode/sources";
 
 export interface ContentSelection { questionIds?: string[]; documentIds?: string[] }
 
@@ -23,6 +25,19 @@ export async function materializeState(state: NoctyriumState, selection?: Conten
   const sources = deferred.sources.filter(ref => (ref.collection === "questions" ? qids : dids).has(ref.id));
   const partial = { ...state, questions, documents, deferredContent: undefined } as NoctyriumState;
   const restored = await hydrateCloudContent(client, userId, partial, sources, assertCurrent);
+  // Original PDF/DOCX files belong to the same protected course revision.
+  // Keep only verified copies in Decode's existing original-file cache.
+  const originals = storedAcademicBindings(state).originals ?? [];
+  for (const document of restored.documents) {
+    const original = originals.find(item => item.documentId === document.id);
+    if (!original) continue;
+    if (original.asset.sha256 !== document.checksum?.replace(/^sha256:/, "")) throw new Error("The original document does not match its saved source identity.");
+    await assertCurrent();
+    if (await readSourceOriginal(document.id, document.checksum)) continue;
+    const blob = await downloadAcademicAsset(client, original.asset);
+    await assertCurrent();
+    await saveSourceOriginal(document, blob);
+  }
   // Explicit downloads include their original figures so the resulting bank
   // is actually usable offline. Source metadata alone is never called downloaded.
   const media = new Map(deferred.media.map(entry => [entry.blobKey, entry]));

@@ -120,7 +120,7 @@ async function install(read: LibraryReader, progress: (message: string) => void,
           fileType: source.originalFile.split(".").pop() ?? "file", uploadedAt: new Date().toISOString(), rawText: "", sizeBytes: 0,
           checksum: `sha256:${source.checksum}`, tags: [source.module ?? "Unfiled"], linkedQuestionSetIds: [], libraryOnly: true };
         installedIds.documentIds.push(doc.id);
-        if (!await readSourceOriginal(doc.id)) {
+        if (!await readSourceOriginal(doc.id, doc.checksum)) {
           const bytes = await read(source.originalFile);
           assertCurrent();
           await saveSourceOriginal(doc, new Blob([bytes as BlobPart]));

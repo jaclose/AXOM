@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PreparedBank } from "../privateLibrary/types";
 import type { NoctyriumState } from "../types";
 import { sha256 } from "../compressedText";
-import { readPreparedBank, safeLibraryPath, type LibraryInstallation } from "../privateLibrary/install";
+import { readCatalog, readPreparedBank, safeLibraryPath, type LibraryInstallation } from "../privateLibrary/install";
 import { packageToReviewedImport } from "../question-content/toReviewedImport";
 import { prepareReviewedImport } from "../questionImportSave";
 import { validateQuestionRecord } from "../questions";
@@ -19,6 +19,7 @@ export interface AcademicRecordReference extends AcademicAssetReference {
 export interface AcademicBindings {
   sources: ContentReference[];
   assets: AcademicAssetReference[];
+  originals?: Array<{ documentId: string; asset: AcademicAssetReference }>;
 }
 export function validAcademicAsset(value: unknown): value is AcademicAssetReference {
   const item = value as AcademicAssetReference;
@@ -97,11 +98,19 @@ export async function academicBindings(state: NoctyriumState, installation: Libr
       }
     }
   }
-  return { sources, assets: files.filter(file => file.mime_type.startsWith("image/")).map(file => ({ revisionId, path: file.path, sha256: file.sha256 })) };
+  const catalogBytes = captured.get("catalog.json");
+  const originalPaths = new Set(catalogBytes ? readCatalog(JSON.parse(new TextDecoder().decode(catalogBytes))).sources.flatMap(source => source.originalFile ? [source.originalFile] : []) : []);
+  const originals = state.documents.filter(document => installation.documentIds.includes(document.id) && document.checksum && document.fileType !== "axom-course-template")
+    .flatMap(document => {
+      const file = files.find(item => originalPaths.has(item.path) && item.sha256 === document.checksum!.replace(/^sha256:/, "")
+        && ["application/pdf", "text/plain", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"].includes(item.mime_type));
+      return file ? [{ documentId: document.id, asset: { revisionId, path: file.path, sha256: file.sha256 } }] : [];
+    });
+  return { sources, originals, assets: files.filter(file => file.mime_type.startsWith("image/")).map(file => ({ revisionId, path: file.path, sha256: file.sha256 })) };
 }
 
 export function storedAcademicBindings(state: NoctyriumState): AcademicBindings {
-  const result: AcademicBindings = { sources: [], assets: [] };
+  const result: AcademicBindings = { sources: [], assets: [], originals: [] };
   for (const doc of state.documents) {
     if (doc.fileType !== "axom-academic-reference") continue;
     try {
@@ -109,6 +118,7 @@ export function storedAcademicBindings(state: NoctyriumState): AcademicBindings 
       if (!value || !Array.isArray(value.sources) || !Array.isArray(value.assets)) continue;
       result.sources.push(...value.sources.filter(ref => validAcademicAsset(ref.academic)));
       result.assets.push(...value.assets.filter(validAcademicAsset));
+      if (Array.isArray(value.originals)) result.originals!.push(...value.originals.filter(item => typeof item?.documentId === "string" && validAcademicAsset(item.asset)));
     } catch { /* Legacy references have no shared-source mapping. Preserve their private recovery. */ }
   }
   return result;

@@ -75,10 +75,15 @@ Each layer owns one thing and reads the layer before it by id.
 - **A group never claims more than the sources show.** Questions are grouped only when
   their reviewed rules match word for word, a question printed in two decks counts once,
   and one question is called an instance, not a pattern. No screen uses the groups yet.
-- **The original file stays on the device.** A source in the workspace is its text and a
-  checksum. The file itself is kept in its own IndexedDB database, never exported or
-  synced, and goes when its source is removed. A file is accepted only when its bytes
-  match the source's checksum, so page numbers keep pointing at the same pages.
+- **Original files keep their exact editions.** A source in the workspace holds text
+  and a checksum. Original bytes live in the existing Decode IndexedDB cache, keyed by
+  document and checksum, with a current-edition pointer. Legacy Blob entries remain
+  readable and are preserved when adopting the new representation. Page previews read
+  the requested checksum, so a newer edition cannot silently replace cited pages.
+  Explicit academic downloads fetch the protected immutable course original; portable
+  ZIP backups include verified cached originals. Ordinary account saves do not carry
+  these bytes. Explicit source removal clears only that document's cached editions.
+  See [portable original recovery](academic-library.md#original-files-and-portable-recovery).
 - **Bounded.** A few analyses per question and capped text (`ANALYSIS_LIMITS`), so
   teaching cannot swell a workspace past what sync carries.
 

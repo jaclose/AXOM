@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { indexedDB as fakeIndexedDb } from "fake-indexeddb";
+import { indexedDB as fakeIndexedDb, IDBKeyRange } from "fake-indexeddb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256Hex } from "../checksum";
 import {
@@ -8,6 +8,7 @@ import {
 
 beforeEach(() => {
   vi.stubGlobal("indexedDB", fakeIndexedDb);
+  vi.stubGlobal("IDBKeyRange", IDBKeyRange);
 });
 afterEach(async () => {
   await new Promise<void>((resolve) => {
@@ -30,6 +31,40 @@ describe("the original file of a source, on this device", () => {
     const kept = await readSourceOriginal("doc-1");
     expect(await kept?.text()).toBe("%PDF the imported file");
     expect(await readSourceOriginal("doc-2")).toBeUndefined();
+  });
+
+  it("keeps the legacy Blob copy when upgrading to versioned storage", async () => {
+    const legacy = bytes("legacy original");
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open(SOURCE_ORIGINALS_DB, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore("originals");
+      request.onsuccess = () => {
+        const db = request.result, transaction = db.transaction("originals", "readwrite");
+        transaction.objectStore("originals").put(legacy, "doc-1");
+        transaction.oncomplete = () => { db.close(); resolve(); };
+        transaction.onerror = () => reject(transaction.error);
+      };
+    });
+    const oldHash = await sha256Hex(await legacy.arrayBuffer());
+    expect(await (await readSourceOriginal("doc-1", oldHash))?.text()).toBe("legacy original");
+    await saveSourceOriginal({ id: "doc-1", checksum: await sha256Hex("new edition") }, bytes("new edition"));
+    expect(await (await readSourceOriginal("doc-1", oldHash))?.text()).toBe("legacy original");
+  });
+
+  it("preserves revisions across replacement, concurrent saves and retry", async () => {
+    const first = bytes("original edition"), second = bytes("corrected edition");
+    const one = await sha256Hex(await first.arrayBuffer()), two = await sha256Hex(await second.arrayBuffer());
+    await Promise.all([
+      saveSourceOriginal({ id: "doc-1", checksum: one }, first),
+      saveSourceOriginal({ id: "doc-1", checksum: two }, second),
+    ]);
+    await saveSourceOriginal({ id: "doc-1", checksum: two }, second);
+    expect(await (await readSourceOriginal("doc-1", one))?.text()).toBe("original edition");
+    expect(await (await readSourceOriginal("doc-1", `sha256:${two}`))?.text()).toBe("corrected edition");
+    expect(await (await readSourceOriginal("doc-1"))?.text()).toBe("corrected edition");
+    expect(await readSourceOriginal("doc-1", "0".repeat(64))).toBeUndefined();
+    await deleteSourceOriginal("doc-1");
+    expect(await readSourceOriginal("doc-1", one)).toBeUndefined();
   });
 
   it("refuses another version of the file, so page numbers cannot point at other pages", async () => {

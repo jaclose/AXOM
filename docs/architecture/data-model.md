@@ -40,6 +40,12 @@ It is persisted and preserved in safety snapshots, cleared by deliberate replace
 and resolved for full portable export. It never supplies partial questions to scoring.
 See [metadata checkpoints](accounts-sync-v1.md#metadata-checkpoints-and-explicit-content-downloads).
 
+Original source binaries remain outside the workspace schema. Decode's existing
+`axom-decode-originals-v1` database accepts legacy Blob values and immutable
+`["version", documentId, checksum]` entries with a current-edition pointer. Portable
+ZIP format 2 carries verified originals separately; JSON and format-1 ZIP remain
+readable. See [original recovery](../features/academic-library.md#original-files-and-portable-recovery).
+
 A later failed fallback save preserves the marker for the last successful fallback;
 otherwise a reload could prefer an older vault record. Reviewed imports wait for both
 image bytes and the workspace's image associations before counting an image as attached.

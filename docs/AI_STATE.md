@@ -6,8 +6,8 @@ authority: current-state
 # AXOM current AI state
 
 Snapshot: 2026-10-13, `feat/academic-library-v1` in `AXOM-academic-library-v1`.
-Account/content checkpoint `07cd665d` is merged with local consolidation `bb8e31fc`.
-The merged runtime exactly matches the fully verified checkpoint. JD authorized
+Account/content checkpoint `07cd665d` is merged with local consolidation `bb8e31fc`
+through `8f6d0eec`. This checkout adds original-file course downloads and portable recovery. JD authorized
 commits, development pushes and tested local-main convergence. Preserve other-owner
 drafts. Remote main still deploys production and has not been updated here.
 
@@ -72,6 +72,16 @@ match. The current release doctor confirms Rust is available and updater credent
 are absent. Exact package/deployment-input results belong to their source commit;
 previous build measurements do not describe this new checkpoint.
 
+Original-file recovery now uses checksum-specific editions in Decode's existing store.
+Explicit course downloads restore protected original PDF/DOCX/text files; portable ZIP
+format 2 includes verified binaries, reports omissions, and keeps JSON/v1 compatibility.
+New quality gate: 3,131 unit/SQL passes, six declared skips, type/full lint/build pass;
+75 focused recovery checks and 79 release checks pass. Seven affected browser cases
+pass: real FTM1 export/third-profile restore recovers two originals and 11 attempts from
+909,774 bytes; legacy ZIP recovery verifies all 2,151 images. Current local account JSON:
+101,550-byte checkpoint / 10,892-byte 11-answer delta, zero source GETs at sign-in.
+No hosted changes or additional backend migration. Exact details live in the feature doc.
+
 ## Remaining delivery boundary
 
 Incremental account requests reuse the atomic revision writer. Hash-format 2 verifies
@@ -87,7 +97,7 @@ clean second-device sign-in makes zero source Storage GETs. All 25 question refe
 are shared and no private course-image copies are uploaded. Offline image-rich study
 and reconnect retain saved attempts. These are request sizes, excluding headers, not
 hosted latency or live account-size measurements. Paged attempt history, persistent
-cache usage/removal controls and complete original-binary recovery remain unfinished.
+cache usage/removal controls and general private-upload binary cloud sync remain unfinished.
 
 Also pending: remaining source-backed courses, larger/resumable user uploads and review,
 automatic daily publication, durable interrupted challenge submission, hosted activation

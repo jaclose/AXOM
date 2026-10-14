@@ -27,6 +27,18 @@ async function bundle() {
 beforeEach(async () => { await openEmptyWorkspace(); vi.stubGlobal("Blob", NativeBlob); vi.stubGlobal("File", NativeFile); });
 afterEach(closeWorkspace);
 describe("prepared private library installation", () => {
+  it("binds original documents by their verified file checksum, never a filename match", async () => {
+    const b = await bundle();
+    const original = encode("Verified original document bytes.");
+    const hash = (await sha256(original)).slice(7);
+    b.catalog.sources = [{ ...b.catalog.sources[0], checksum: hash, bankFile: undefined, originalFile: "sources/original.txt", ready: 0 }];
+    b.files.set("catalog.json", encode(b.catalog)); b.files.set("sources/original.txt", original);
+    const installation = await installPrivateLibrary(b.read);
+    const files = [{ path: "sources/original.txt", sha256: hash, mime_type: "text/plain" }];
+    const bound = await academicBindings(useStore.getState(), installation, "11111111-1111-4111-8111-111111111111", files, b.files);
+    expect(bound.originals).toEqual([{ documentId: `private-source-${hash}`, asset: { revisionId: "11111111-1111-4111-8111-111111111111", path: "sources/original.txt", sha256: hash } }]);
+    expect((await academicBindings(useStore.getState(), installation, "11111111-1111-4111-8111-111111111111", [{ ...files[0], sha256: "f".repeat(64) }], b.files)).originals).toEqual([]);
+  });
   it("binds canonical installed questions to immutable shared package content", async () => {
     const b = await bundle();
     const installation = await installPrivateLibrary(b.read);

@@ -30,7 +30,7 @@ export function SourcePagePreview({ document: source, page }: {
     setState("opening");
     setProblem("");
     void (async () => {
-      const original = await readSourceOriginal(source.id);
+      const original = await readSourceOriginal(source.id, source.checksum);
       if (cancelled) return;
       if (!original) { setState("no-original"); return; }
       const pdfjs = await import("pdfjs-dist");
@@ -60,7 +60,7 @@ export function SourcePagePreview({ document: source, page }: {
       cancelled = true;
       void release?.();
     };
-  }, [source.id, page, attached]);
+  }, [source.id, source.checksum, page, attached]);
 
   async function attach(file: File | undefined) {
     if (!file) return;
