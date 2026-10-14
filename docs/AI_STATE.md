@@ -19,6 +19,15 @@ newer implementations. The private-media branch
 `backup/pre-large-file-cleanup-2026-09-28` remains excluded: its 288 MB audio file and
 another local audio asset have no publication clearance. Do not merge or publish it.
 
+The reviewed Pathways crawler is now integrated as a separate, local research service.
+It has durable SQLite queues, bounded collection, explicit source/reuse policy, review-
+gated exports and no production publisher. Older remote 3D-ident, Guide/AI/Anki,
+updater, shared-catalog and catalog-replay tips are preserved as superseded ancestry;
+their newer canonical replacements remain in the tree. Stale analytics and dependency
+bot tips are also ancestry-only: analytics already mounts centrally, while the old
+lockfile proposals include unreviewed React, TypeScript, Vitest and CI-action majors.
+No dependency versions changed; regenerate future upgrades from current lockfiles.
+
 ## Working and verified
 
 [Academic library](features/academic-library.md) is the canonical behavior and
@@ -55,6 +64,8 @@ skipped as declared. Under severe unrelated host CPU pressure, one full run prod
 ten reload/render timeouts; all ten passed in fresh focused Chrome runs, including the
 desktop source-canvas case. Course, sharing, leaderboard, image rendering, saved review,
 Questions/Slides, communications and responsive checks pass on the combined code.
+The Pathways crawler compiles and passes all 62 synthetic Python regressions without
+network access. Repository tests and hygiene pass after the remote-tip consolidation.
 
 The actual supplied 516,431,732-byte backup now passes Settings restore and reload in
 an isolated persistent browser profile with hosted traffic blocked. Notes/progress,
@@ -80,6 +91,8 @@ do not replace the canonical question/progress/recovery engines.
 Also pending: remaining source-backed courses, larger/resumable user uploads and review,
 automatic daily publication, durable interrupted challenge submission, hosted activation
 and native release. Never call this checkpoint full canonical 1.1 delivery.
+Every fetched local and remote feature tip is now represented in the integration history;
+only the publication-blocked private-media backup remains deliberately outside `main`.
 Normal `www.axom.info` was last reverified read-only as deployment
 `dpl_6fg8rJYXk2tSfJWvNALwL7gN38TF`, source `c23e8c26`; AXOM Production is
 `jofkmfwkidubxcutkwzf`. No production tests, migrations, publication or deployment here.
