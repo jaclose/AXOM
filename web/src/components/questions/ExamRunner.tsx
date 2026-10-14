@@ -101,6 +101,16 @@ function trustedCorrectKey(question: QuestionRecord): string | undefined {
   return questionPracticeReadiness(question) === "ready" ? question.correctKey : undefined;
 }
 
+/** The displayed question is an immutable session snapshot. If its answer or
+ * stem/choices changed in the live vault, score neither version until reviewed. */
+function trustedSessionKey(original: QuestionRecord | undefined, current: QuestionRecord | undefined): string | undefined {
+  if (!original || !current || trustedCorrectKey(original) !== trustedCorrectKey(current)) return undefined;
+  if (original.stem !== current.stem || original.options.length !== current.options.length
+    || original.sourceDocumentId !== current.sourceDocumentId
+    || original.options.some((option, index) => option.key !== current.options[index]?.key || option.text !== current.options[index]?.text)) return undefined;
+  return trustedCorrectKey(current);
+}
+
 /** The attempt a run has already saved for a question, read from the live workspace. */
 function savedRunAttempt(
   questions: readonly QuestionRecord[],

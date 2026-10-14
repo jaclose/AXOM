@@ -118,14 +118,14 @@ export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templa
   /** The term a module's course already sits in, so the usual case needs no choice. */
   function knownTerm(module: string, stated?: string): string {
     if (stated) return s.terms.find((item) => item.name.toLowerCase() === stated.toLowerCase())?.id ?? `source-term:${stated}`;
-    const course = s.courses.find((item) => item.modules.some((entry) => moduleKey(entry.name) === moduleKey(module)));
+    const course = s.courses.find((item) => item.modules.some((entry) => canonicalModuleKey(entry.name) === canonicalModuleKey(module)));
     return defaultTermId ?? course?.termId ?? "";
   }
 
   const previews = useMemo<ModulePreview[]>(() => {
     const byModule = new Map<string, CourseTemplateSection[]>();
     for (const section of sections) {
-      const key = `${section.term ?? ""}|${moduleKey(section.module)}`;
+      const key = `${section.term ?? ""}|${canonicalModuleKey(section.module)}`;
       byModule.set(key, [...(byModule.get(key) ?? []), section]);
     }
     return [...byModule.entries()].map(([key, group]) => {
