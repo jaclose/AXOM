@@ -1,3 +1,5 @@
+import type { AcademicBindings } from "../../lib/academicLibrary/contentReferences";
+import { downloadAccountContent } from "../../lib/sync/contentDownloads";
 import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../../lib/store";
 import { useAccount } from "../../lib/account/accountStore";
@@ -20,6 +22,7 @@ interface DownloadReference extends LibraryInstallation {
   revisionId: string;
   accountId: string;
   pendingWeeks?: number[];
+  bindings?: AcademicBindings;
 }
 function reference(documents: SourceDocument[], course: AcademicCourse, accountId?: string): DownloadReference | undefined {
   const revision = course.current_revision_id;
@@ -52,8 +55,11 @@ export function ConnectedCoursePlan({ course, onBack, onOpen, onCustomize, onSha
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [retry, setRetry] = useState(0);
+  const [downloading, setDownloading] = useState(false);
   const downloaded = useMemo(() => reference(state.documents, course, accountId), [state.documents, course, accountId]);
+  const cachedTemplate = state.documents.find(document => downloaded?.templateIds.includes(document.id));
   useEffect(() => {
+    if (cachedTemplate) { setTemplate(cachedTemplate); setError(""); return; }
     let cancelled = false;
     setTemplate(undefined); setError("");
     void academicPreview(course.current_revision_id, accountId).then(preview => {
@@ -63,7 +69,7 @@ export function ConnectedCoursePlan({ course, onBack, onOpen, onCustomize, onSha
       .then(document => { if (!cancelled) { setTemplate(document); setError(""); } })
       .catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : "The course preview could not be opened."); });
     return () => { cancelled = true; };
-  }, [course.current_revision_id, course.id, course.module, accountId, retry]);
+  }, [course.current_revision_id, course.id, course.module, accountId, retry, cachedTemplate]);
   const book = useMemo(() => {
     if (!template) return;
     const result = withPreparedCourses([], [template], state.tracker)[0];
@@ -84,7 +90,12 @@ export function ConnectedCoursePlan({ course, onBack, onOpen, onCustomize, onSha
       scope.assertCurrent();
       if (!accountId) throw new Error("Sign in again before downloading this course.");
       let saved = downloaded;
-      if (!saved || !saved.questionIds.every(id => useStore.getState().questions.some(question => question.id === id))) {
+      if (saved && useStore.getState().deferredContent) {
+        setMessage("Downloading this course and your saved progress…");
+        await downloadAccountContent({ questionIds: saved.questionIds, documentIds: saved.documentIds });
+        scope.assertCurrent();
+      }
+      if (!saved?.bindings || !saved.questionIds.every(id => useStore.getState().questions.some(question => question.id === id))) {
         const ids = await downloadAcademicCourse(course.current_revision_id, setMessage, scope);
         scope.assertCurrent();
         saved = { ...ids, collectionId: course.id, revisionId: course.current_revision_id, accountId };
@@ -105,7 +116,8 @@ export function ConnectedCoursePlan({ course, onBack, onOpen, onCustomize, onSha
   return <>
     {!book && <><GButton onClick={onBack}>All courses</GButton><p role="status">{error ? "Preview unavailable" : "Opening the weekly plan…"}</p></>}
     {error && <div role="alert"><p>{error}</p><GButton onClick={() => setRetry(value => value + 1)}>Retry preview</GButton></div>}
-    {book && <><p className="course-connection-status" role="status">{message || (downloaded ? "Downloaded on this device" : `${course.ready_questions} reviewed questions available. Load Course downloads this revision for study.`)}</p>
+    {book && <><p className="course-connection-status" role="status">{message || (downloaded ? (downloaded.questionIds.every(id => state.questions.some(question => question.id === id)) ? "Downloaded on this device" : "Saved in your account. Download this course to continue on this device.") : `${course.ready_questions} reviewed questions available. Load Course downloads this revision for study.`)}</p>
+      {downloaded && !downloaded.questionIds.every(id => state.questions.some(question => question.id === id)) && <GButton disabled={downloading} onClick={() => { setError(""); setDownloading(true); void downloadAccountContent({ questionIds: downloaded.questionIds, documentIds: downloaded.documentIds }).catch(cause => setError(cause instanceof Error ? cause.message : "Download unavailable. Retry when connected.")).finally(() => setDownloading(false)); }}>Download course to this device</GButton>}
       <AcademicSharing course={course} onSaved={onSharingSaved} />
       {downloaded?.pendingWeeks && <p role="status">Enrollment is saved on this device and needs an account retry. Load Course again when connected.</p>}
       <CoursePlan book={book} bank={bank} availableQuestions={course.ready_questions} onBack={onBack} onOpen={onOpen} onCustomize={onCustomize} onLoad={load} />

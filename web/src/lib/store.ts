@@ -1624,6 +1624,7 @@ export const useStore = create<Store>()(
 
       replaceAll: (state) => set(() => ({
         ...state,
+        deferredContent: state.deferredContent,
         profile: normalizeProfile(state.profile),
         dailyWordPuzzles: normalizeDailyWordPuzzles(state.dailyWordPuzzles),
       })),
@@ -1631,11 +1632,12 @@ export const useStore = create<Store>()(
         // Wiping all questions orphans every stored image — purge the blob
         // store so a "reset" leaves no screenshot bytes behind on disk.
         void listQuestionAttachmentBlobKeys().then((keys) => keys.length ? deleteQuestionAttachmentBlobs(keys) : undefined).catch(() => {});
-        set(() => ({ ...makeSeed() }));
+        set(() => ({ ...makeSeed(), deferredContent: undefined }));
       },
       startFresh: () => {
         void listQuestionAttachmentBlobKeys().then((keys) => keys.length ? deleteQuestionAttachmentBlobs(keys) : undefined).catch(() => {});
         set((s) => ({
+          deferredContent: undefined,
           terms: [], courses: [], tracker: [], productivityTrackers: defaultProductivityTrackers(), tasks: [],
           // keep the curated shared drives even on a fresh start
           resources: SGU_DRIVES.map((d) => ({ id: uid(), created: now(), ...driveResourceFields(d) })),
@@ -1676,13 +1678,13 @@ export const useStore = create<Store>()(
           profile, terms, courses, tracker, productivityTrackers, resources, tasks, journal, premedExperiences, prompts,
           folders, logs, integrations, boardPrep, dayPlans, blueprintInstalls, activeDayKey,
           lastActiveLocalDate, lastTimezoneOffset, dailyArchives, dailyRolloverEvents, energyFactors,
-          habits, habitEntries, sessions, closeouts, recoveryPlans, questions, quizSessions, documents, questionSets, savedQuestionFilters, quizBlocks, ankiCards, cardReviews, dailyWordPuzzles, schemaVersion,
+          habits, habitEntries, sessions, closeouts, recoveryPlans, questions, quizSessions, documents, questionSets, savedQuestionFilters, quizBlocks, ankiCards, cardReviews, dailyWordPuzzles, schemaVersion, deferredContent,
         } = s;
         return {
           profile, terms, courses, tracker, productivityTrackers, resources, tasks, journal, premedExperiences, prompts,
           folders, logs, integrations, boardPrep, dayPlans, blueprintInstalls, activeDayKey,
           lastActiveLocalDate, lastTimezoneOffset, dailyArchives, dailyRolloverEvents, energyFactors,
-          habits, habitEntries, sessions, closeouts, recoveryPlans, questions, quizSessions, documents, questionSets, savedQuestionFilters, quizBlocks, ankiCards, cardReviews, dailyWordPuzzles, schemaVersion,
+          habits, habitEntries, sessions, closeouts, recoveryPlans, questions, quizSessions, documents, questionSets, savedQuestionFilters, quizBlocks, ankiCards, cardReviews, dailyWordPuzzles, schemaVersion, deferredContent,
         } as NoctyriumState;
       },
     },

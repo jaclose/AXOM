@@ -1,3 +1,4 @@
+import { materializeState } from "./contentDownloads";
 // @vitest-environment node
 import { readFileSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -71,7 +72,7 @@ describe.skipIf(!statusFile)("recovery against local Supabase Auth, REST and Sto
     expect(saved.error).toBeNull(); clearCloudContentCache();
     const decoded = await decodeCloudSnapshot(saved.data!.snapshot_payload);
     const restored = await hydrateCloudContent(a.client, a.id, decoded.payload, decoded.sources, guard);
-    expect((await workspaceDigest(restored)).hash).toBe(envelope.contentHash);
+    expect((await workspaceDigest(restored)).hash).toBe((await workspaceDigest(state)).hash);
     expect(restored.questions[0].notes).toBe("Personal note"); validateWorkspaceMedia(restored, decoded.media);
     const restoredImage = await a.client.storage.from("workspace-media").download(`${a.id}/${media[0].hash}`);
     expect(restoredImage.error).toBeNull(); expect(await restoredImage.data!.arrayBuffer()).toEqual(await image.arrayBuffer());
@@ -94,9 +95,11 @@ describe.skipIf(!statusFile)("recovery against local Supabase Auth, REST and Sto
     if (synced.status !== "accepted") throw new Error("Expected saved answer.");
     expect(await transport.push(answer)).toMatchObject({ status: "accepted", revision: synced.revision, idempotent: true });
     const downloaded = await transport.revision(synced.revisionId);
-    expect(downloaded.payload.questions[0].notes).toBe("Updated personal note");
-    expect(downloaded.payload.documents[0].rawText).toBe(state.documents[0].rawText);
-    expect(downloaded.contentHash).toBe(answer.contentHash);
+    expect(downloaded.payload.questions).toEqual([]);
+    const materialized = await materializeState(downloaded.payload);
+    expect(materialized.questions[0].notes).toBe("Updated personal note");
+    expect(materialized.documents[0].rawText).toBe(state.documents[0].rawText);
+    expect(downloaded.contentHash).toBe((await prepareCloudSnapshot(answer)).contentHash);
     console.info(JSON.stringify({ environment: url.origin, initialSaveBytes: first.transferBytes, oneAnswerSaveBytes: synced.transferBytes }));
     if (process.env.AXOM_SYNC_EVIDENCE) writeFileSync(process.env.AXOM_SYNC_EVIDENCE, JSON.stringify({ environment: url.origin,
       initialSaveBytes: first.transferBytes, oneAnswerSaveBytes: synced.transferBytes,

@@ -100,8 +100,9 @@ The local feature migrations applied for this acceptance are
 `20261011190000_academic_library.sql`,
 `20261013180000_incremental_workspace_transport.sql`,
 `20261013200000_daily_academic_challenges.sql`,
-`20261013210000_academic_course_lookup.sql`, and
-`20261013220000_content_storage_boundaries.sql`, on the existing local account
+`20261013210000_academic_course_lookup.sql`,
+`20261013220000_content_storage_boundaries.sql`, and
+`20261013230000_shared_account_content_references.sql`, on the existing local account
 baseline. This is not a claim that hosted migrations or communications activation
 have occurred. The preserved migration chain also passes role/grant/RLS replay tests.
 
@@ -116,14 +117,27 @@ profile teardown took 47.1 seconds on this Mac with Node 22.23.1. This is a sing
 local recovery observation, not a cloud latency claim. Reproduce with
 `AXOM_RESTORE_BACKUP` pointing to an authorized ZIP; no original file is modified.
 
-**Still incomplete:** downloaded academic records remain in the legacy workspace
-snapshot. Revision-bound per-answer changes are implemented, but new-device recovery
-still hydrates private source objects. Shared-content exclusion, cross-device learner
-overlays, migration of existing libraries, bounded offline cache, hosted daily challenges,
-remaining supplied courses and release/package acceptance are not delivered. The
-private-recovery handoff is a supporting layer, not a substitute
-for this missing account/content separation. Never report this checkpoint as completion
-of canonical 1.1 or as a production deployment.
+Metadata checkpoints now restore personal progress and immutable references without
+downloading source files. QBank offers individual saved-set downloads; saved course
+previews offer a course download. Sources and figures are verified before the canonical
+question records enter practice. Exact existing local content remains available while
+remote learner notes and attempts are applied. Shared academic questions and images
+reference their revision files directly; personal source edits retain private recovery.
+See the [account boundary](../architecture/accounts-sync-v1.md#metadata-checkpoints-and-explicit-content-downloads).
+
+The real local FTM1 browser acceptance measured a 100,780-byte checkpoint and a
+10,899-byte completed 11-answer update (request JSON, excluding headers). Clean
+second-device sign-in made zero Storage downloads and retained 25 deferred question
+references. Explicit set/course downloads restored all 25 canonical IDs and 11 attempts;
+offline image-rich study and reconnect preserved those attempts. All 25 question sources
+and their figures referenced academic objects, with zero private course-image copies.
+These are single-run local observations, not hosted latency or total account-size claims.
+
+**Still incomplete:** paged learner history, persistent offline cache usage/removal
+controls, full original-binary recovery, larger/resumable uploads and administrative
+review, remaining supplied courses, hosted daily challenges and release/package
+acceptance. Legacy checkpoints still use the compatible full-source restore path.
+Never report this checkpoint as completion of canonical 1.1 or a production deployment.
 
 
 ## Verified daily challenges

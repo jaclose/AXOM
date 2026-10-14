@@ -75,3 +75,10 @@
 .course-sharing-fields label { display: grid; gap: .4rem; flex: 1 1 220px; min-width: 0; }
 .course-sharing-fields select { width: 100%; max-width: 100%; min-height: 44px; padding: 8px 12px; font: inherit; color: var(--text); background: var(--surface-1); border: 1px solid var(--hairline); border-radius: var(--radius-sm); }
 .course-sharing :is(summary,select):focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+
+.account-content-downloads { margin-block: 1.5rem; }
+.account-content-downloads .row { display: flex; flex-wrap: wrap; gap: .75rem; }
+.account-content-downloads button { height: auto; min-height: 44px; padding-block: .65rem; white-space: normal; text-align: left; max-width: 100%; overflow-wrap: anywhere; }
+.account-content-downloads button svg { flex-shrink: 0; }
+.account-content-downloads details { margin-top: 1rem; }
+.account-content-downloads details button { display: block; margin-top: .5rem; }

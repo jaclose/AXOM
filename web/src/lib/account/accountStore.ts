@@ -1,3 +1,4 @@
+import { retainDownloadedContent } from "../sync/contentDownloads";
 import { snapshotWorkspace } from "../sync/workspaceSnapshot";
 import { assertVaultWritesSince, getVaultWriteCheckpoint, flushLocalVaultWrites } from "../localVault";
 import { create } from "zustand";
@@ -262,7 +263,7 @@ export const useAccount = create<AccountState>((set, get) => {
     }
     if (!latest) return;
     const state = useStore.getState();
-    if (deviceHasOwnWork({ ...state, userSounds: 0 })) {
+    if (state.deferredContent?.sources.length || deviceHasOwnWork({ ...state, userSounds: 0 })) {
       set({ restoreOffer: latest, message: "" });
       return;
     }
@@ -496,11 +497,11 @@ export const useAccount = create<AccountState>((set, get) => {
       const before = useStore.getState();
       try {
         const current = await snapshotWorkspace(before, { deviceId: deviceId(), baseRevision: meta.baseRevision, reason: "automatic" });
-        if (current.contentHash !== meta.lastHash) return;
+        if (current.contentHash !== meta.lastHash && (await transport.prepare(current)).contentHash !== meta.lastHash) return;
         const [latest] = await transport.summaries(1);
         if (!latest || latest.revision <= meta.baseRevision) return;
         const revision = await transport.revision(latest.id);
-        const next = parseImport(JSON.stringify(revision.payload));
+        const next = parseImport(JSON.stringify(await retainDownloadedContent(revision.payload, before)));
         const unchanged = () => get().user?.id === user.id && useStore.getState() === before && !read().pending && read().baseRevision === meta.baseRevision;
         if (!unchanged()) return;
         await createLocalBackup(before.schemaVersion);
@@ -545,7 +546,7 @@ export const useAccount = create<AccountState>((set, get) => {
         const previousState = useStore.getState();
         const revision = await transport.revision(summary.id);
         if (get().user?.id !== user.id || useStore.getState() !== previousState) throw new Error("Your account or workspace changed while downloading. Try the restore again after finishing your edit.");
-        const next = parseImport(JSON.stringify(revision.payload));
+        const next = parseImport(JSON.stringify(await retainDownloadedContent(revision.payload, previousState)));
         await createLocalBackup(useStore.getState().schemaVersion);
         await transport.prepareMediaCache(revision, user.id);
         if (get().user?.id !== user.id || useStore.getState() !== previousState) throw new Error("Your account or workspace changed while downloading. Try the restore again after finishing your edit.");

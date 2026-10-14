@@ -60,10 +60,10 @@ it("validates first eligible answers, retries, repeats, assistance, ties and opt
   await expect(answer(B,"bank:three","C")).rejects.toThrow(/Opt in/);
 });
 it("keeps published pools immutable and denies closed or inaccessible challenges", async () => {
-  const same=await db.query<{ id: string }>("select public.academic_publish_challenge($1,current_date,$2) id",[R,JSON.stringify(pool)]);
+  const same=await db.query<{ id: string }>("select public.academic_publish_challenge($1,(now() at time zone 'UTC')::date,$2) id",[R,JSON.stringify(pool)]);
   expect(same.rows[0].id).toBe(challenge);
-  await expect(db.query("select public.academic_publish_challenge($1,current_date,$2)",[R,JSON.stringify(pool.slice(0,1))])).rejects.toThrow(/immutable/);
-  await db.query("update public.academic_challenges set day=current_date-1 where id=$1",[challenge]);
+  await expect(db.query("select public.academic_publish_challenge($1,(now() at time zone 'UTC')::date,$2)",[R,JSON.stringify(pool.slice(0,1))])).rejects.toThrow(/immutable/);
+  await db.query("update public.academic_challenges set day=(now() at time zone 'UTC')::date-1 where id=$1",[challenge]);
   await expect(answer(A,"bank:three","C")).rejects.toThrow(/closed/);
   await db.query("update public.academic_collections set visibility='private' where id=$1",[C]);
   await expect(as(B,"select public.academic_challenge_standings($1)",[challenge])).rejects.toThrow(/unavailable/);

@@ -10,6 +10,7 @@ import { privateReviewMedia } from "./media";
 import { collectQuestionAttachmentPayloads, deleteQuestionAttachmentBlobs, restoreQuestionAttachmentPayloads, runQuestionAttachmentMaintenance } from "../questionAttachments";
 import { buildCourseBooks } from "../bookshelf/courseBooks";
 import { withPreparedCourses, loadPreparedCourse } from "../bookshelf/preparedCourses";
+import { academicBindings, academicRecord } from "../academicLibrary/contentReferences";
 
 const encode = (value: unknown) => new TextEncoder().encode(typeof value === "string" ? value : JSON.stringify(value));
 async function bundle() {
@@ -26,6 +27,23 @@ async function bundle() {
 beforeEach(async () => { await openEmptyWorkspace(); vi.stubGlobal("Blob", NativeBlob); vi.stubGlobal("File", NativeFile); });
 afterEach(closeWorkspace);
 describe("prepared private library installation", () => {
+  it("binds canonical installed questions to immutable shared package content", async () => {
+    const b = await bundle();
+    const installation = await installPrivateLibrary(b.read);
+    const files = await Promise.all([...b.files].map(async ([path, bytes]) => ({ path, sha256: (await sha256(bytes)).slice(7), mime_type: "application/json" })));
+    const bound = await academicBindings(useStore.getState(), installation, "11111111-1111-4111-8111-111111111111", files, b.files);
+    const question = useStore.getState().questions[0];
+    const bank = readPreparedBank(JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json"))));
+    const canonical = academicRecord(bank, { adapterVersion: 1, kind: "question", questionId: question.content!.id, reviewedAt: question.extraction!.reviewedAt, revisionId: "11111111-1111-4111-8111-111111111111", path: "banks/test/bank.json", sha256: "a".repeat(64) }) as Record<string, unknown>;
+    const mismatch = ["content", "stem", "options", "correctKey", "correctAnswerText", "explanation", "choiceRationales", "analyses", "extraction", "citation"].filter(key => JSON.stringify((question as unknown as Record<string, unknown>)[key]) !== JSON.stringify(canonical[key]));
+    expect(mismatch).toEqual([]);
+    expect(bound.sources.filter(ref => ref.collection === "questions")).toHaveLength(1);
+    const state = useStore.getState();
+    const personal = { ...state, questions: [{ ...question, notes: "Private learner note", attempts: [] }] };
+    expect((await academicBindings(personal, installation, "11111111-1111-4111-8111-111111111111", files, b.files)).sources.filter(ref => ref.collection === "questions")).toHaveLength(1);
+    const edited = { ...personal, questions: [{ ...personal.questions[0], stem: "My corrected source wording" }] };
+    expect((await academicBindings(edited, installation, "11111111-1111-4111-8111-111111111111", files, b.files)).sources.filter(ref => ref.collection === "questions")).toHaveLength(0);
+  });
   it("does not join a different bundle or adopt delayed files after an account switch", async () => {
     const b = await bundle();
     let current = true;

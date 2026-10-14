@@ -208,6 +208,7 @@ export class SyncCoordinator {
           reason,
         });
         if (this.disposed || read().accountUserId !== this.accountUserId) return;
+        if (this.transport.prepare) envelope = await this.transport.prepare(envelope);
         // Nothing changed since the last protected version. Only safe when this
         // key was never sent: a sent upload may have landed without its answer.
         if (automatic && changeVersion === this.changeVersion && envelope.contentHash === meta.lastHash && meta.lastProtectedAt && meta.sentIdempotencyKey !== envelope.idempotencyKey) {
@@ -215,7 +216,6 @@ export class SyncCoordinator {
           this.set("protected");
           return;
         }
-        if (this.transport.prepare) envelope = await this.transport.prepare(envelope);
         if (this.disposed || read().accountUserId !== this.accountUserId) return;
         write({ ...read(), lastAttemptAt: this.iso(0), lastPayloadBytes: envelope.payloadBytes });
         if (envelope.payloadBytes > MAX_SNAPSHOT_BYTES) {

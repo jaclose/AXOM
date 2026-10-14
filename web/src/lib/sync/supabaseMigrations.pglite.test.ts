@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
@@ -72,6 +72,36 @@ const PRIVATE_TABLES = [
   "academic_catalog_releases", "academic_catalog_entries", "academic_catalog_files", "academic_catalog_grants",
 ];
 describe("Supabase migrations on real Postgres", () => {
+  it("references one academic object for two learners while enforcing review, withdrawal and acknowledged personal history", async () => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
+    const collection = "33333333-3333-4333-8333-333333333333";
+    const revision = "44444444-4444-4444-8444-444444444444";
+    try {
+      await db.query("insert into auth.users(id,email) values ($1,'a@x.com'),($2,'b@x.com')", [A, B]);
+      await db.query("insert into public.academic_collections(id,owner_id,title,module,term) values($1,$2,'Test course','TEST','Term 1')", [collection, A]);
+      await db.query("insert into public.academic_revisions(id,collection_id,content_hash,template_text,status) values($1,$2,$3,'Week 1','ready')", [revision, collection, HASH]);
+      await db.query("insert into public.academic_files(revision_id,path,object_path,sha256,byte_size,mime_type) values($1,'bank.json',$2,$3,7,'application/json')", [revision, `${collection}/${HASH}`, HASH]);
+      await db.query("insert into storage.objects(bucket_id,name,metadata) values('academic-content',$1,'{\"size\":7}')", [`${collection}/${HASH}`]);
+      const source = { collection: "questions", id: "q1", hash: HASH, byteSize: 10, expandedBytes: 20,
+        academic: { revisionId: revision, path: "bank.json", sha256: HASH, adapterVersion: 1, kind: "question", questionId: "original-q1", reviewedAt: "2026-10-13T00:00:00Z" } };
+      const payload = { _axomCloudFormat: 2, _axomHashFormat: 2, content: "{}", expandedBytes: 2, media: [], sources: [source] };
+      const save = (user: string, base: number, value = payload, key = randomUUID()) => as(db, "authenticated", user,
+        "select public.push_workspace_revision_v2($1,34,$2,$3,gen_random_uuid(),$4) as r", [base, HASH, value, key]);
+      expect((await save(A, 0)).rows[0].r).toMatchObject({ status: "accepted" });
+      await expect(save(B, 0)).rejects.toMatchObject({ code: "PT409" });
+      await db.query("update public.academic_collections set visibility='shared',review_status='approved' where id=$1", [collection]);
+      await db.query("update public.academic_revisions set approved_at=now() where id=$1", [revision]);
+      const retryKey = randomUUID();
+      expect((await save(B, 0, payload, retryKey)).rows[0].r).toMatchObject({ status: "accepted" });
+      expect((await db.query("select * from storage.objects where bucket_id='workspace-content'")).rows).toEqual([]);
+      await db.query("update public.academic_collections set withdrawn=true where id=$1", [collection]);
+      expect((await save(B, 0, payload, retryKey)).rows[0].r).toMatchObject({ status: "accepted", revision: 1, idempotent: true });
+      expect((await save(B, 1)).rows[0].r).toMatchObject({ status: "accepted" });
+      await expect(save(B, 2, { ...payload, sources: [{ ...source, id: "unacknowledged" }] })).rejects.toMatchObject({ code: "PT409" });
+      expect((await as(db, "authenticated", B, "select * from storage.objects where bucket_id='academic-content'")).rows).toEqual([]);
+    } finally { await db.close(); }
+  }, 60_000);
+
   it.each([false, true])("apply cleanly and lock function ACLs (rls_auto_enable present: %s)", async (rlsAutoEnable) => {
     const db = await supabaseLikeDatabase({ rlsAutoEnable });
     for (const signature of PRIVILEGED) {

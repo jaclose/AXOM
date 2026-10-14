@@ -12,6 +12,9 @@ import { CONTENT_BUCKET, clearCloudContentCache, hydrateCloudContent, splitCloud
 import { MEDIA_BUCKET, uploadCloudMedia, validateWorkspaceMedia } from "./cloudMedia";
 import { installCloudMediaCache, saveCloudMediaIndex } from "./cloudMediaCache";
 import type { NoctyriumState } from "../types";
+import { deferContent } from "./deferredContent";
+import { materializeState, retainDownloadedContent } from "./contentDownloads";
+import { parseImport } from "../backup";
 
 const operation = vi.hoisted(() => ({ current: null as unknown }));
 vi.mock("../account/supabase", () => ({ accountOperationClient: async () => operation.current }));
@@ -42,6 +45,73 @@ beforeEach(() => {
 afterEach(() => { dispose?.(); dispose = undefined; vi.unstubAllGlobals(); });
 
 describe("private cloud content and media", () => {
+  it("opens a verified metadata checkpoint without source I/O, then downloads one selected question with its learner state", async () => {
+    const original = fixture();
+    const envelope = await prepareCloudSnapshot(await snapshotWorkspace(original, { accountUserId: "account-a", deviceId: "d", baseRevision: 0, reason: "manual" }));
+    await uploadCloudContent(client, "account-a", envelope.contentObjects!, [], guard);
+    clearCloudContentCache(); download.mockClear();
+    const decoded = await decodeCloudSnapshot(envelope.packed);
+    const deferred = deferContent(decoded.payload, "account-a", decoded.sources!, []);
+    expect(deferred.questions).toEqual([]);
+    expect(deferred.documents).toEqual([]);
+    expect(download).not.toHaveBeenCalled();
+    const reopened = parseImport(JSON.stringify(deferred));
+    expect(reopened.deferredContent).toEqual(deferred.deferredContent);
+    const unchanged = await prepareCloudSnapshot(await snapshotWorkspace(deferred, { accountUserId: "account-a", deviceId: "d", baseRevision: 1, reason: "automatic" }));
+    expect(unchanged.contentHash).toBe(envelope.contentHash);
+    expect(unchanged.contentObjects).toEqual([]);
+    const selected = await materializeState(deferred, { questionIds: ["q1"] });
+    expect(download).toHaveBeenCalledTimes(1);
+    expect(selected.questions).toEqual(original.questions);
+    expect(selected.documents).toEqual([]);
+    expect(selected.deferredContent?.documents).toHaveLength(1);
+    const next = await prepareCloudSnapshot(await snapshotWorkspace(selected, { accountUserId: "account-a", deviceId: "d", baseRevision: 1, reason: "automatic" }));
+    expect(next.contentHash).toBe(envelope.contentHash);
+    const complete = await materializeState(selected);
+    expect(complete.questions).toEqual(original.questions);
+    expect(complete.documents).toEqual(original.documents);
+    expect(complete.deferredContent).toBeUndefined();
+  });
+
+  it("keeps references through failure, denies another account, and keeps private source caches account-bound", async () => {
+    const original = fixture();
+    const split = await splitCloudContent(original);
+    await uploadCloudContent(client, "account-a", split.objects, [], guard);
+    clearCloudContentCache();
+    const deferred = deferContent(split.workspace, "account-a", split.references, []);
+    operation.current = { client, userId: "account-b", assertCurrent: guard };
+    await expect(materializeState(deferred)).rejects.toThrow(/Sign in to the account/);
+    operation.current = { client, userId: "account-a", assertCurrent: guard };
+    await materializeState(deferred);
+    operation.current = { client, userId: "account-b", assertCurrent: guard };
+    const other = deferContent(split.workspace, "account-b", split.references, []);
+    await expect(materializeState(other)).rejects.toThrow(/downloaded or verified/);
+    expect(deferred.deferredContent?.sources).toEqual(split.references);
+  });
+
+  it("retains local source bytes when remote notes change, without fetching or overriding the remote learner overlay", async () => {
+    const original = fixture();
+    const edited = { ...original, questions: [{ ...original.questions[0], notes: "Saved on phone" }] };
+    const split = await splitCloudContent(edited);
+    const remote = deferContent(split.workspace, "account-a", split.references, []);
+    download.mockClear();
+    const retained = await retainDownloadedContent(remote, original);
+    expect(retained.questions).toEqual(edited.questions);
+    expect(retained.documents).toEqual(edited.documents);
+    expect(retained.deferredContent).toBeUndefined();
+    expect(download).not.toHaveBeenCalled();
+  });
+
+  it("keeps bootstrap bytes bounded when source text grows a hundredfold", async () => {
+    const state = fixture();
+    async function size(value: NoctyriumState) {
+      const prepared = await prepareCloudSnapshot(await snapshotWorkspace(value, { deviceId: "d", baseRevision: 0, reason: "manual" }));
+      return prepared.payloadBytes;
+    }
+    const before = await size(state);
+    const after = await size({ ...state, documents: [{ ...state.documents[0], rawText: state.documents[0].rawText.repeat(100) }] });
+    expect(Math.abs(after - before)).toBeLessThan(20);
+  });
   it("round-trips a source graph, keeps learner notes private, and never reuploads unchanged source content on an answer", async () => {
     const state = fixture();
     const envelope = await snapshotWorkspace(state, { deviceId: "device", baseRevision: 0, reason: "manual" });

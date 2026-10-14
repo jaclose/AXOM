@@ -95,7 +95,7 @@ export interface ProtectedRevision {
   reason: string;
   media?: CloudMediaReference[];
   sources?: ContentReference[];
-  hashFormat?: 1;
+  hashFormat?: 1 | 2;
   createdAt: string;
 }
 

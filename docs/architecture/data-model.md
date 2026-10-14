@@ -34,6 +34,12 @@ portable workspace data. Legacy cloud snapshots protect attachment metadata only
 owner-scoped source objects and question/review images without changing schema 34.
 Other generated-media bytes retain their existing local-only behavior.
 
+The optional `deferredContent` field keeps account-bound source metadata and immutable
+references outside canonical questions/documents until an explicit verified download.
+It is persisted and preserved in safety snapshots, cleared by deliberate replacement,
+and resolved for full portable export. It never supplies partial questions to scoring.
+See [metadata checkpoints](accounts-sync-v1.md#metadata-checkpoints-and-explicit-content-downloads).
+
 A later failed fallback save preserves the marker for the last successful fallback;
 otherwise a reload could prefer an older vault record. Reviewed imports wait for both
 image bytes and the workspace's image associations before counting an image as attached.

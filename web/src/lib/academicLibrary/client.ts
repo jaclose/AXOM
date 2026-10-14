@@ -1,3 +1,5 @@
+import { useStore } from "../store";
+import { academicBindings, type AcademicBindings } from "./contentReferences";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { accountOperationClient } from "../account/supabase";
 import { sha256 } from "../question-content/assets";
@@ -72,7 +74,7 @@ export async function academicPreview(revision: string, accountId?: string): Pro
 
 /** Adapt the backend to the existing reviewed package installer. Hash checks
  * precede every adoption, including media and original source documents. */
-export async function academicLibraryReader(client: SupabaseClient, revision: string): Promise<LibraryReader> {
+export async function academicLibraryReader(client: SupabaseClient, revision: string): Promise<LibraryReader & { files: AcademicFile[] }> {
   const manifest: AcademicFile[] = [];
   // Supabase's row cap also applies to file metadata; never mistake a truncated
   // index for a complete course when a revision contains more than 1,000 files.
@@ -91,7 +93,7 @@ export async function academicLibraryReader(client: SupabaseClient, revision: st
     bytes += file.byte_size;
   }
   if (bytes > 512 * 1024 * 1024) throw new Error("This course exceeds the supported download size.");
-  return async path => {
+  const read: LibraryReader = async path => {
     const file = files.get(safeLibraryPath(path));
     if (!file) throw new Error("A required course file is missing from this revision.");
     const result = await client.storage.from("academic-content").download(file.object_path);
@@ -100,13 +102,24 @@ export async function academicLibraryReader(client: SupabaseClient, revision: st
     if (buffer.length !== file.byte_size || await sha256(buffer) !== `sha256:${file.sha256}`) throw new Error("A course file failed its integrity check. Your local work is unchanged.");
     return buffer;
   };
+  return Object.assign(read, { files: manifest });
 }
 
-export async function downloadAcademicCourse(revision: string, progress: (message: string) => void, scope: LibraryInstallScope): Promise<LibraryInstallation> {
+export async function downloadAcademicCourse(revision: string, progress: (message: string) => void, scope: LibraryInstallScope): Promise<LibraryInstallation & { bindings: AcademicBindings }> {
   const client = await academicClient(scope.key);
   const read = await academicLibraryReader(client, revision);
   scope.assertCurrent();
-  return installPrivateLibrary(async path => { scope.assertCurrent(); const bytes = await read(path); scope.assertCurrent(); return bytes; }, progress, scope);
+  const captured = new Map<string, Uint8Array>();
+  const installation = await installPrivateLibrary(async path => {
+    scope.assertCurrent(); const bytes = await read(path); scope.assertCurrent();
+    if (path.endsWith(".json")) captured.set(path, bytes);
+    return bytes;
+  }, progress, scope);
+  const bindings = await academicBindings(useStore.getState(), installation, revision, read.files, captured);
+  scope.assertCurrent();
+  if (typeof window !== "undefined") await import("../../pages/QuestionWorkspacePage");
+  scope.assertCurrent();
+  return { ...installation, bindings };
 }
 export async function enrollAcademicCourse(course: AcademicCourse, weeks: number[], accountId: string): Promise<void> {
   const client = await academicClient(accountId);

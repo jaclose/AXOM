@@ -848,6 +848,8 @@ import type { SavedQuestionFilter } from "./questionFilters";
 import type { AnkiCard, CardReviewLog } from "./ankiCards";
 
 export interface NoctyriumState {
+  /** Account-owned metadata waiting for an explicit content download. */
+  deferredContent?: import("./sync/deferredContent").DeferredContent;
   profile: Profile;
   terms: Term[];
   courses: Course[];

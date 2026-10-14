@@ -1,10 +1,11 @@
+import { deferContent } from "./deferredContent";
 import { saveCloudMediaIndex } from "./cloudMediaCache";
 import { readSyncBaseline, saveSyncBaseline } from "./syncBaseline";
 import { workspaceDelta } from "./workspaceDelta";
 import { workspaceDigest } from "./workspaceDigest";
 import { uploadCloudContent, hydrateCloudContent, readContentReferences } from "./cloudContent";
 import { canonicalJson, sha256 } from "../compressedText";
-import { prepareCloudSnapshot, decodeCloudSnapshot } from "./cloudSnapshot";
+import { prepareCloudSnapshot, decodeCloudSnapshot, contentCheckpointHash } from "./cloudSnapshot";
 import { uploadCloudMedia, readMediaManifest, validateWorkspaceMedia } from "./cloudMedia";
 import { MAX_SNAPSHOT_BYTES } from "./syncPolicy";
 import { accountOperationClient, loadSupabase } from "../account/supabase";
@@ -38,6 +39,7 @@ export class SupabaseSyncTransport implements SyncTransport {
   async push(envelope: SnapshotEnvelope): Promise<PushResult> {
     const { client, userId, assertCurrent } = await accountOperationClient();
     if (!envelope.accountUserId || userId !== envelope.accountUserId) throw new Error("The workspace is linked to a different account. Upload was stopped.");
+    if (envelope.payload.deferredContent && envelope.payload.deferredContent.accountId !== userId) throw new Error("Download your saved content in its original account before transferring this workspace.");
     if (!envelope.packed) envelope = await this.prepare(envelope);
     const baseline = await readSyncBaseline(userId, envelope.baseRevision);
     let previous: { media?: unknown; sources?: unknown } | null | undefined = baseline?.packed;
@@ -133,7 +135,10 @@ export class SupabaseSyncTransport implements SyncTransport {
     if (error) throw new Error(error.message);
     await assertCurrent();
     const revision = await mapRevision(data);
-    if (revision.sources) {
+    if (revision.sources && revision.hashFormat === 2) {
+      if (await contentCheckpointHash(revision.payload, revision.sources) !== revision.contentHash) throw new Error("The account checkpoint failed its integrity check. Your workspace is unchanged.");
+      revision.payload = deferContent(revision.payload, userId, revision.sources, revision.media ?? []);
+    } else if (revision.sources) {
       revision.payload = await hydrateCloudContent(client, userId, revision.payload, revision.sources, assertCurrent);
       const hash = revision.hashFormat === 1 ? (await workspaceDigest(revision.payload)).hash
         : await sha256(new TextEncoder().encode(canonicalJson(revision.payload)));
@@ -141,7 +146,7 @@ export class SupabaseSyncTransport implements SyncTransport {
         throw new Error("The reconstructed account workspace failed its integrity check.");
       }
     }
-    if (revision.media !== undefined) validateWorkspaceMedia(revision.payload, revision.media);
+    if (revision.media !== undefined && !revision.payload.deferredContent) validateWorkspaceMedia(revision.payload, revision.media);
     return revision;
   }
 

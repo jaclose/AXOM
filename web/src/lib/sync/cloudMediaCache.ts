@@ -1,8 +1,7 @@
 import { DB_NAME, DB_VERSION, STORE_NAME, ensureVaultStores } from "../localVault";
 import { accountOperationClient } from "../account/supabase";
 import { setMissingAttachmentLoader } from "../questionAttachments";
-import { sha256 } from "../compressedText";
-import { MEDIA_BUCKET, readMediaManifest, workspaceMedia, type CloudMediaReference } from "./cloudMedia";
+import { downloadCloudMediaAsset, readMediaManifest, workspaceMedia, type CloudMediaReference } from "./cloudMedia";
 import { putQuestionAttachmentBlob } from "../questionAttachments";
 import type { NoctyriumState } from "../types";
 
@@ -50,9 +49,7 @@ export function installCloudMediaCache(userId: string, state: () => NoctyriumSta
       if (!entry || entry.updatedAt !== reference.attachment.updatedAt || entry.byteSize !== reference.attachment.byteSize) return undefined;
       const operation = await accountOperationClient();
       if (operation.userId !== userId || disposed) return undefined;
-      const { data, error } = await operation.client.storage.from(MEDIA_BUCKET).download(`${userId}/${entry.hash}`);
-      if (error || !data) throw new Error("This question image is not available offline yet. Reconnect to download it.");
-      if (data.size !== entry.byteSize || await sha256(new Uint8Array(await data.arrayBuffer())) !== entry.hash) throw new Error("The downloaded question image failed its integrity check.");
+      const data = await downloadCloudMediaAsset(operation.client, userId, entry);
       await operation.assertCurrent();
       const current = workspaceMedia(state()).get(blobKey)?.attachment;
       if (disposed || !current || current.updatedAt !== reference.attachment.updatedAt || current.byteSize !== reference.attachment.byteSize) return undefined;

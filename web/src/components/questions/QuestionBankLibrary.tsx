@@ -1,3 +1,4 @@
+import { AccountContentDownloads } from "../bookshelf/AccountContentDownloads";
 import { useMemo } from "react";
 import { useStore } from "../../lib/store";
 import { CURRICULA } from "../../lib/curricula";
@@ -24,6 +25,7 @@ export function QuestionBankLibrary({ onPractice, onOpenBank, onImport, onCreate
   [s.terms, s.courses, s.questionSets, s.questions]);
   return <>
     <AcademicBankDiscovery />
+    <AccountContentDownloads />
     <AcademicLibrary title="Your saved and custom sets" subtitle="Continue downloaded practice, mix saved sets, or add your own material."
       onChooseFile={onImport} onCreate={onCreate} createHint="Build a reusable practice block from your saved questions."
       browse={<AcademicBookshelf label="Question bank library" shelves={shelves}

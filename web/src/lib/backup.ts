@@ -1,3 +1,4 @@
+import { readDeferredContent } from "./sync/deferredContent";
 import { readWorkspaceContent } from "./question-content/workspaceContent";
 import { privateReviewMedia } from "./privateLibrary/media";
 import { createMediaBackupArchive, LARGE_MEDIA_BACKUP_BYTES, mediaBackupBytes } from "./backupArchive";
@@ -39,6 +40,7 @@ import { normalizeApplicationProfile } from "./applicationProfile";
 import { normalizeStudyWorkflow } from "./studyPreferences";
 
 const DATA_KEYS = [
+  "deferredContent",
   "profile", "terms", "courses", "tracker", "productivityTrackers", "resources", "tasks", "journal",
   "premedExperiences", "prompts", "folders", "logs", "integrations", "boardPrep", "blueprintInstalls", "dayPlans", "activeDayKey", "schemaVersion",
   "lastActiveLocalDate", "lastTimezoneOffset", "dailyArchives", "dailyRolloverEvents", "energyFactors", "habits", "habitEntries",
@@ -72,6 +74,10 @@ export function exportState(state: NoctyriumState) {
 export async function exportStateWithAttachments(
   state: NoctyriumState,
 ): Promise<{ attachmentCount: number; missingBlobKeys: string[] }> {
+  if (state.deferredContent) {
+    const { materializeState } = await import("./sync/contentDownloads");
+    state = await materializeState(state);
+  }
   const payload: Record<string, unknown> = {
     _app: BRAND.productName,
     _exported: new Date().toISOString(),
@@ -138,6 +144,7 @@ export function lastBackupAt(): string | null {
  * or what day it is. Use replace (with explicit confirmation) for full restore.
  */
 export function mergeStates(current: NoctyriumState, imported: NoctyriumState): NoctyriumState {
+  if (current.deferredContent || imported.deferredContent) throw new Error("Download saved account content before merging workspaces. Your existing work is unchanged.");
   const listKeys = [
     "terms", "courses", "tracker", "productivityTrackers", "resources", "tasks", "journal",
     "premedExperiences", "prompts", "folders", "logs", "boardPrep" /* handled below */, "blueprintInstalls",
@@ -448,6 +455,7 @@ export function parseImport(text: string): NoctyriumState {
     sessions: Array.isArray(data.sessions) ? data.sessions : [],
     closeouts: Array.isArray(data.closeouts) ? data.closeouts : [],
     recoveryPlans: Array.isArray(data.recoveryPlans) ? data.recoveryPlans : [],
+    deferredContent: readDeferredContent(data.deferredContent),
     questions: Array.isArray(data.questions)
       ? data.questions.map((question: unknown) => migrateImportedQuestion(question, importedSchemaVersion))
       : [],
