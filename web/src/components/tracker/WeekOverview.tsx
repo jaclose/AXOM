@@ -9,6 +9,7 @@ import { useStore } from "../../lib/store";
 import { countActivity, COURSE_ACTIVITY_LABEL, type CourseActivity } from "../../lib/course-engine/activity";
 import { absenceStanding, buildModuleWeeks, isAttended, type ModuleWeeks, type WeekSummary } from "../../lib/course-engine/weekView";
 import { GlassCard, PanelHeader, Tag } from "../ui/primitives";
+import { questionsWithUnambiguousCourse } from "./legacyCourseQuestionScope";
 
 const ALLOWANCE_FIELDS: CourseActivity[] = ["lecture", "small-group", "imcq", "esoft", "lab"];
 
@@ -22,9 +23,15 @@ function questionLine(week: WeekSummary): string | null {
 export function WeekOverview() {
   const s = useStore();
   const setsById = useMemo(() => new Map((s.questionSets ?? []).map((set) => [set.id, set])), [s.questionSets]);
+  const scopedQuestions = useMemo(
+    () => questionsWithUnambiguousCourse(s.questions ?? [], s.courses, setsById),
+    [s.questions, s.courses, setsById],
+  );
   const modules = useMemo(
-    () => buildModuleWeeks(s.tracker, s.questions ?? [], setsById),
-    [s.tracker, s.questions, setsById],
+    () => buildModuleWeeks(s.tracker, scopedQuestions, setsById, {
+      terms: s.terms, courses: s.courses,
+    }),
+    [s.tracker, scopedQuestions, setsById, s.terms, s.courses],
   );
   // Open on the module in progress; the rest are one click away. Until the
   // learner picks one, the choice follows the data, so a template loaded a
@@ -96,7 +103,7 @@ function ModuleBlock({ module, open, onToggle, openWeek, onToggleWeek }: {
         {/* The tracker tree below has its own toggle named after the module:
             this prefix tells the two apart for anyone not looking at the page. */}
         <span className="sr-only">Weeks: </span>
-        <b>{module.module}</b>
+        <b>{module.course ? `${module.course} · ` : ""}{module.module}</b>
         <span className="sub">
           {module.term ? `${module.term} · ` : ""}{module.weeks.length} week{module.weeks.length === 1 ? "" : "s"} · {module.done} of {module.total} done
         </span>

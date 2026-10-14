@@ -90,5 +90,5 @@ test("official NB Block 2 template resolves the pre-existing NB2 course without 
     return dev.useStore.getState().tracker.filter((row) => row.templateKey);
   });
   expect(saved).toHaveLength(1);
-  expect(saved[0].path).toMatch(/^Term 2\/NB Block 2\/Week 1$/);
+  expect(saved[0].path).toMatch(/^Term 2\/BPM 501\/NB2\/Week 1$/);
 });

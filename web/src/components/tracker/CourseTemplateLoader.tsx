@@ -24,6 +24,7 @@ import { GButton, GhostButton, Tag } from "../ui/primitives";
 
 interface ModuleSetup {
   termId: string;
+  courseId?: string;
   firstWeek: string;
   excludedWeeks?: string[];
   excludedActivities?: CourseActivity[];
@@ -115,11 +116,25 @@ export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templa
     } finally { setBusy(false); }
   }
 
-  /** The term a module's course already sits in, so the usual case needs no choice. */
+  /** A repeated module name across terms cannot be silently placed in the first term. */
+  function matchingTermIds(module: string): string[] {
+    const key = canonicalModuleKey(module);
+    return [...new Set(s.courses.filter((course) =>
+      course.modules.some((entry) => canonicalModuleKey(entry.name) === key)
+    ).map((course) => course.termId))];
+  }
+
+  function matchingCourses(module: string, termId: string) {
+    const key = canonicalModuleKey(module);
+    return s.courses.filter((course) => course.termId === termId
+      && course.modules.some((entry) => canonicalModuleKey(entry.name) === key));
+  }
+
   function knownTerm(module: string, stated?: string): string {
     if (stated) return s.terms.find((item) => item.name.toLowerCase() === stated.toLowerCase())?.id ?? `source-term:${stated}`;
-    const course = s.courses.find((item) => item.modules.some((entry) => canonicalModuleKey(entry.name) === canonicalModuleKey(module)));
-    return defaultTermId ?? course?.termId ?? "";
+    if (defaultTermId) return defaultTermId;
+    const candidates = matchingTermIds(module);
+    return candidates.length === 1 ? candidates[0] : "";
   }
 
   const previews = useMemo<ModulePreview[]>(() => {
@@ -131,7 +146,17 @@ export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templa
     return [...byModule.entries()].map(([key, group]) => {
       const chosen = setup[key] ?? { termId: knownTerm(group[0].module, group[0].term), firstWeek: "1" };
       const term = chosen.termId.startsWith("source-term:") ? chosen.termId.slice(12) : s.terms.find((item) => item.id === chosen.termId)?.name ?? "";
-      const plan = planCourseTemplate(group, { term, firstWeek: Number(chosen.firstWeek) || 1 });
+      const candidates = matchingCourses(group[0].module, chosen.termId);
+      // A term can have multiple courses containing the same module code. Never
+      // silently attach the import to the first course returned by the store.
+      const owningCourse = candidates.length === 1 ? candidates[0]
+        : candidates.find((candidate) => candidate.id === chosen.courseId);
+      const owningModule = owningCourse?.modules.find((entry) =>
+        canonicalModuleKey(entry.name) === canonicalModuleKey(group[0].module));
+      const plan = planCourseTemplate(group, {
+        term, course: owningCourse?.code, moduleName: owningModule?.name,
+        firstWeek: Number(chosen.firstWeek) || 1,
+      });
       const counts = new Map<CourseActivity, number>();
       const weeks = new Map<string, number>();
       for (const item of plan.items) {
@@ -170,6 +195,15 @@ export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templa
   const adding = previews.reduce((total, preview) => total + preview.changes.create.length, 0) + manualCreates.length;
   const updating = previews.reduce((total, preview) => total + preview.changes.update.length, 0) + manualUpdates.length;
   const unresolved = previews.reduce((total, preview) => total + (preview.changes.review?.length ?? 0), 0) - manual.length;
+  const ambiguousTerms = previews.filter((preview) => {
+    const chosen = setup[preview.key] ?? { termId: knownTerm(preview.plan.module, preview.plan.term) };
+    return !chosen.termId && matchingTermIds(preview.plan.module).length > 1;
+  }).length;
+  const ambiguousCourses = previews.filter((preview) => {
+    const chosen = setup[preview.key] ?? { termId: knownTerm(preview.plan.module, preview.plan.term) };
+    const candidates = matchingCourses(preview.plan.module, chosen.termId);
+    return candidates.length > 1 && !candidates.some((entry) => entry.id === chosen.courseId);
+  }).length;
 
   function patchSetup(preview: ModulePreview, patch: Partial<ModuleSetup>) {
     setConflictResolutions({});
@@ -238,7 +272,7 @@ export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templa
       onClose={onClose}
       footer={<>
         <GButton onClick={onClose}>Cancel</GButton>
-        <GButton variant="primary" disabled={busy || adding + updating === 0} onClick={() => void apply()}>
+        <GButton variant="primary" disabled={busy || adding + updating === 0 || ambiguousTerms > 0 || ambiguousCourses > 0} onClick={() => void apply()}>
           {adding + updating === 0 ? "Nothing to add" : `Add ${adding} item${adding === 1 ? "" : "s"}${updating ? ` and update ${updating}` : ""}`}
         </GButton>
       </>}
@@ -292,9 +326,14 @@ export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templa
               <div className="row wrap gap6">
                 {preview.counts.map(([activity, count]) => <Tag key={activity} tone="neutral">{countActivity(activity, count)}</Tag>)}
               </div>
+              {!chosen.termId && matchingTermIds(preview.plan.module).length > 1 && (
+                <p role="alert" className="sub template-note">
+                  This module exists in more than one term. Choose its term before loading; AXOM will not guess.
+                </p>
+              )}
               <div className="grid grid-2">
                 <SelectField label={`Term for ${preview.plan.module}`} value={chosen.termId}
-                  onChange={(event) => patchSetup(preview, { termId: event.target.value })}>
+                  onChange={(event) => patchSetup(preview, { termId: event.target.value, courseId: "" })}>
                   <option value="">No term</option>
                   {chosen.termId.startsWith("source-term:") && <option value={chosen.termId}>{chosen.termId.slice(12)} (from template)</option>}
                   {s.terms.map((term) => <option key={term.id} value={term.id}>{term.name}</option>)}
@@ -302,6 +341,21 @@ export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templa
                 <Field label={`${preview.plan.module} starts in week`} type="number" inputMode="numeric" min={1} max={60}
                   value={chosen.firstWeek} onChange={(event) => patchSetup(preview, { firstWeek: event.target.value, excludedWeeks: [] })} />
               </div>
+              {matchingCourses(preview.plan.module, chosen.termId).length > 1 && (
+                <section className="stack gap6">
+                  {!matchingCourses(preview.plan.module, chosen.termId).some((course) => course.id === chosen.courseId) && (
+                    <p role="alert" className="sub template-note">
+                      This module belongs to more than one course in the selected term. Choose the correct course before loading.
+                    </p>
+                  )}
+                  <SelectField label={`Course for ${preview.plan.module}`} value={chosen.courseId ?? ""}
+                    onChange={(event) => patchSetup(preview, { courseId: event.target.value })}>
+                    <option value="">Choose course</option>
+                    {matchingCourses(preview.plan.module, chosen.termId).map((course) =>
+                      <option key={course.id} value={course.id}>{course.code} · {course.name}</option>)}
+                  </SelectField>
+                </section>
+              )}
               <fieldset className="template-selection">
                 <legend>Weeks to load</legend>
                 {preview.weeks.map(([week, count]) => <label key={week}>

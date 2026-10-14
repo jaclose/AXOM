@@ -67,10 +67,10 @@ test("a course template fills the tracker week by week and is safe to load twice
   expect(rows).toHaveLength(10);
   // Weekly activities take their group's week, counted from where the module starts.
   expect(rows.filter((row) => row.activity === "esoft").map((row) => row.path)).toEqual([
-    "Term 1/FTM 1/Week 3", "Term 1/FTM 1/Week 4",
+    "Term 1/BPM 500/FTM 1/Week 3", "Term 1/BPM 500/FTM 1/Week 4",
   ]);
-  expect(rows.find((row) => row.label === "FTM SG 01 Sample group")).toMatchObject({ kind: "Requirement", activity: "small-group", path: "Term 1/FTM 1/Week 3" });
-  expect(rows.find((row) => row.label.startsWith("FTM Lecture 04"))).toMatchObject({ kind: "Lecture", path: "Term 1/FTM 1/Week 4", passes: 0 });
+  expect(rows.find((row) => row.label === "FTM SG 01 Sample group")).toMatchObject({ kind: "Requirement", activity: "small-group", path: "Term 1/BPM 500/FTM 1/Week 3" });
+  expect(rows.find((row) => row.label.startsWith("FTM Lecture 04"))).toMatchObject({ kind: "Lecture", path: "Term 1/BPM 500/FTM 1/Week 4", passes: 0 });
   expect(rows.find((row) => row.label.startsWith("FTM Lecture 02"))).toMatchObject({ activity: "flipped-lecture", templateKey: "ftm1|lecture|2" });
 
   // --- the week view reads those rows, attempts and absences ------------------

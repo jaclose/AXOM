@@ -5,7 +5,7 @@
 // ===========================================================================
 import { COURSE_ACTIVITY_LABEL, countActivity, type CourseActivity } from "../course-engine/activity";
 import { trackerPathScope } from "../course-engine/scope";
-import { moduleKey } from "../course-engine/vocabulary";
+import { canonicalModuleKey, moduleKey } from "../course-engine/vocabulary";
 import { buildModuleWeeks } from "../course-engine/weekView";
 import type { CurriculumTemplate } from "../curricula";
 import type { QuestionSet } from "../library";
@@ -66,27 +66,61 @@ export interface CourseBookInput {
 const activityLabel = (activity: CourseActivity | "other", count: number): string =>
   activity === "other" ? countWords.one(count, "other item") : countActivity(activity, count);
 
+/** T2 / Term 2 are equivalent in learner paths, but book IDs stay backward compatible. */
+const termKey = (name: string): string => {
+  const match = name.trim().match(/^(?:t|term)\s*0*(\d{1,2})$/i);
+  return match ? `term${Number(match[1])}` : moduleKey(name);
+};
+
 /**
  * A book is the same book before and after it is loaded: its id comes from
  * where it stands (term, course, module), not from the record that backs it.
  * An open book therefore stays open while the workspace changes under it.
  */
 export function courseBookId(term: string, courseCode: string, module: string): string {
-  return `course:${moduleKey(term)}:${moduleKey(courseCode)}:${moduleKey(module)}`;
+  return `course:${moduleKey(term)}:${moduleKey(courseCode)}:${canonicalModuleKey(module)}`;
 }
 
 export function buildCourseBooks(input: CourseBookInput): CourseBook[] {
   const setsById = new Map((input.sets ?? []).map((set) => [set.id, set]));
-  const byModule = new Map(buildModuleWeeks(input.tracker, input.questions ?? [], setsById).map((entry) => [entry.key, entry]));
-  // Rows that name the module in their path but sit under no "Week N".
-  const loose = new Map<string, number>();
-  for (const item of input.tracker) {
-    if (trackerPathScope(item.path).week) continue;
-    for (const segment of item.path.split("/")) {
-      const key = moduleKey(segment);
-      if (key) loose.set(key, (loose.get(key) ?? 0) + 1);
+  // The Course Engine is keyed by term / course / canonical module. A flat
+  // module-name map discards both course ownership and every legacy week row.
+  const moduleWeeks = buildModuleWeeks(input.tracker, input.questions ?? [], setsById, {
+    terms: input.terms, courses: input.courses,
+  });
+  const courseModuleCount = new Map<string, number>();
+  for (const course of input.courses) {
+    const term = input.terms.find((entry) => entry.id === course.termId)?.name ?? "";
+    for (const module of course.modules) {
+      const key = `${termKey(term)}|${canonicalModuleKey(module.name)}`;
+      courseModuleCount.set(key, (courseModuleCount.get(key) ?? 0) + 1);
     }
   }
+
+  /** Assign legacy Term/Module paths only if one course owns that module. */
+  const ownsPath = (term: string, courseCode: string, module: string, pathTerm: string,
+    pathCourse?: string, pathModule?: string): boolean => {
+    if (termKey(term) !== termKey(pathTerm)
+        || canonicalModuleKey(module) !== canonicalModuleKey(pathModule ?? "")) return false;
+    if (pathCourse) return moduleKey(pathCourse) === moduleKey(courseCode);
+    return courseModuleCount.get(`${termKey(term)}|${canonicalModuleKey(module)}`) === 1;
+  };
+
+  // Unscheduled / loose rows have no "Week N", so trackerPathScope deliberately
+  // does not claim a module. Inspect the actual term/course path explicitly.
+  const looseRows = input.tracker.filter((item) => !trackerPathScope(item.path).week)
+    .map((item) => {
+      const segments = item.path.split("/").map((entry) => entry.trim()).filter(Boolean);
+      const explicitCourse = input.courses.some((course) =>
+        termKey(input.terms.find((term) => term.id === course.termId)?.name ?? "") === termKey(segments[0] ?? "")
+        && moduleKey(course.code) === moduleKey(segments[1] ?? ""));
+      return {
+        item,
+        term: segments[0] ?? "",
+        course: explicitCourse ? segments[1] : undefined,
+        module: explicitCourse ? segments[2] : segments[1],
+      };
+    });
   const termName = new Map(input.terms.map((term) => [term.id, term.name]));
   const books: CourseBook[] = [];
   const present = new Set<string>();
@@ -101,18 +135,47 @@ export function buildCourseBooks(input: CourseBookInput): CourseBook[] {
   for (const course of input.courses) {
     const term = termName.get(course.termId) ?? "Not in a term";
     for (const module of course.modules) {
-      const key = moduleKey(module.name);
-      present.add(`${moduleKey(term)}|${key}`);
-      const found = byModule.get(key);
-      const weeks: CourseBookWeek[] = (found?.weeks ?? []).map((week) => ({
-        week: week.week,
-        total: week.items.length,
-        done: week.done,
-        activities: week.byActivity.map((entry) => ({ activity: entry.activity, label: activityLabel(entry.activity, entry.total), total: entry.total, done: entry.done })),
-        items: week.items.map((item) => ({ id: item.id, label: item.label, kind: item.activity ? COURSE_ACTIVITY_LABEL[item.activity] : item.kind })),
-      }));
-      const unfiled = loose.get(key) ?? 0;
-      const count = (found?.total ?? 0) + unfiled;
+      present.add(`${termKey(term)}|${moduleKey(course.code)}|${canonicalModuleKey(module.name)}`);
+      const related = moduleWeeks.filter((entry) => ownsPath(
+        term, course.code, module.name, entry.term ?? "", entry.course, entry.module,
+      ));
+      // A learner can have both new Term/Course/Module weeks and legacy
+      // Term/Module weeks. Merge their rows once, without changing saved ids.
+      const byWeek = new Map<number, Map<string, TrackerItem>>();
+      for (const source of related) {
+        for (const week of source.weeks) {
+          const rows = byWeek.get(week.week) ?? new Map<string, TrackerItem>();
+          for (const item of week.items) rows.set(item.id, item);
+          byWeek.set(week.week, rows);
+        }
+      }
+      const weeks: CourseBookWeek[] = [...byWeek.entries()]
+        .sort(([left], [right]) => left - right)
+        .map(([week, rows]) => {
+          const items = [...rows.values()];
+          const activity = new Map<CourseActivity | "other", { total: number; done: number }>();
+          for (const item of items) {
+            const key = item.activity ?? "other";
+            const current = activity.get(key) ?? { total: 0, done: 0 };
+            current.total += 1;
+            if (item.passes >= 1) current.done += 1;
+            activity.set(key, current);
+          }
+          return {
+            week, total: items.length, done: items.filter((item) => item.passes >= 1).length,
+            activities: [...activity.entries()].map(([kind, counts]) => ({
+              activity: kind, label: activityLabel(kind, counts.total), ...counts,
+            })),
+            items: items.map((item) => ({
+              id: item.id, label: item.label,
+              kind: item.activity ? COURSE_ACTIVITY_LABEL[item.activity] : item.kind,
+            })),
+          };
+        });
+      const unfiled = looseRows.filter((entry) => ownsPath(
+        term, course.code, module.name, entry.term, entry.course, entry.module,
+      )).length;
+      const count = weeks.reduce((total, week) => total + week.total, 0) + unfiled;
       books.push({
         kind: "course",
         id: unique(courseBookId(term, course.code, module.name)),
@@ -132,7 +195,7 @@ export function buildCourseBooks(input: CourseBookInput): CourseBook[] {
         origin: "workspace",
         weeks,
         unfiled,
-        done: found?.done ?? 0,
+        done: weeks.reduce((total, week) => total + week.done, 0),
       });
     }
   }
@@ -141,7 +204,7 @@ export function buildCourseBooks(input: CourseBookInput): CourseBook[] {
     for (const term of curriculum.terms) {
       for (const course of term.courses) {
         for (const module of course.modules) {
-          if (present.has(`${moduleKey(term.name)}|${moduleKey(module)}`)) continue;
+          if (present.has(`${termKey(term.name)}|${moduleKey(course.code)}|${canonicalModuleKey(module)}`)) continue;
           books.push({
             kind: "course",
             id: unique(courseBookId(term.name, course.code, module)),
