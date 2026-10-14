@@ -37,6 +37,11 @@ import { parseCourseSchedule, reconcileScheduleDuplicates, scheduleCandidatesToT
 import { CourseLibrary } from "../components/tracker/CourseLibrary";
 import type { CourseBook } from "../lib/bookshelf/courseBooks";
 import { CourseTemplateLoader } from "../components/tracker/CourseTemplateLoader";
+import { SGU_CURRICULUM } from "../lib/curricula";
+import { buildCurriculumCoverage, type CurriculumCoverage } from "../lib/course-engine/curriculumCoverage";
+import { canonicalModuleKey } from "../lib/course-engine/vocabulary";
+import { launchCourseQuiz } from "../lib/course-engine/quizLaunch";
+import { buildQuestionBankBooks, COLLECTION_STATUS_LABEL } from "../lib/bookshelf/questionBankBooks";
 import { WeekOverview } from "../components/tracker/WeekOverview";
 import { activePrimaryPaths, activePrimaryScopes, isPrimaryPath, itemsInPrimary, setPrimaryUntil, togglePrimaryScope, type PrimaryTrackerScope } from "../lib/trackerFocus";
 
@@ -169,6 +174,7 @@ export function CourseTrackerPage() {
       ? { title: "Removed from primary focus", body: path, tone: "info", duration: 2600 }
       : { title: "Primary focus set", body: `${path} now leads suggestions here, in Up next and on the Dashboard.`, tone: "success" });
   }
+  const coverage = useMemo(() => buildCurriculumCoverage(SGU_CURRICULUM, s.documents, s.tracker), [s.documents, s.tracker]);
   const courseScopes = useMemo(() => collectCourseScopes(s.terms, s.courses), [s.terms, s.courses]);
   const tree = useMemo(() => buildTree(s.tracker, courseScopes), [s.tracker, courseScopes]);
   const scopeOptions = useMemo(() => mergeScopes(collectScopes(s.tracker), courseScopes), [s.tracker, courseScopes]);
@@ -277,6 +283,7 @@ export function CourseTrackerPage() {
           </GlassCard>
 
           <WeekOverview />
+          <CurriculumCoverageCard coverage={coverage} />
 
           <GlassCard pad className="tracker-suggestions-card" data-module-tour="tracker-suggestions">
             <PanelHeader title="Suggested next moves" sub={primaries.length ? "Your primary focus is weighted first, then progress, yield, timing and workflow" : "Stable guidance based on progress, yield, timing, and your study workflow"}
@@ -346,6 +353,8 @@ export function CourseTrackerPage() {
           </div>
           </GlassCard>
 
+          {!inBlueprintScope && <TrackerQuestionLinks scope={scope} />}
+
           <GlassCard pad data-tour="tracker-help" data-module-tour="tracker-passes">
           <PanelHeader title="Items" sub={`Log passes toward your saved plan${cardSystem ? ` · ${cardSystem.label} rounds are tracked separately` : ""}`}
             action={
@@ -406,6 +415,96 @@ export function CourseTrackerPage() {
   );
 }
 
+function CurriculumCoverageCard({ coverage }: { coverage: CurriculumCoverage }) {
+  return (
+    <GlassCard pad className="tracker-curriculum-coverage">
+      <details>
+        <summary>
+          <b>SGU Terms 1–5 · curriculum coverage</b>
+          <span className="sub">{coverage.modulesWithTemplates}/{coverage.totalModules} modules have saved templates · {coverage.installedTemplateItems}/{coverage.sourceItems} saved-template activities represented in tracker</span>
+        </summary>
+        <p className="sub">Coverage counts only templates saved in this workspace and tracker rows actually present. The SGU course outline names modules, not a complete official activity schedule. An unavailable template means expected activities are <b>unknown</b>, not zero.</p>
+        {coverage.terms.map((term) => (
+          <details key={term.term} className="tracker-coverage-term">
+            <summary><b>{term.term} coverage</b><span className="sub">{term.modulesWithTemplates}/{term.modules.length} modules with templates · {term.installedTemplateItems}/{term.sourceItems} known source rows represented · {term.inferredWeeks} inferred week assignments</span></summary>
+            <div className="tracker-coverage-scroll">
+              <table className="tracker-coverage-table">
+                <thead><tr><th scope="col">Course / module</th><th scope="col">Saved source rows</th><th scope="col">Installed</th><th scope="col">Week evidence</th><th scope="col">Gaps</th></tr></thead>
+                <tbody>{term.modules.map((module) => (
+                  <tr key={`${module.courseCode}/${module.module}`}>
+                    <th scope="row">{module.courseCode} · {module.module}</th>
+                    <td>{module.templateFiles ? module.availableTemplateItems : "No source template"}</td>
+                    <td>{module.installedRows}{module.templateFiles ? ` (${module.installedTemplateItems} source-matched)` : ""}</td>
+                    <td>{module.statedWeeks.length} stated · {module.inferredWeeks.length} inferred · {module.unscheduledItems} unscheduled</td>
+                    <td>{module.mapping === "ambiguous" ? "Mapping review" : !module.templateFiles ? "Expected activities unknown" : module.notInstalled ? `${module.notInstalled} saved-template rows not represented` : module.sourceProblems.length ? "Source review" : module.duplicateRows ? `${module.duplicateRows} duplicates` : "Saved template represented; official completeness unverified"}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          </details>
+        ))}
+        {coverage.unmappedTemplateModules.length > 0 && <p className="sub">Templates without a unique outline match: {coverage.unmappedTemplateModules.join(", ")}. Confirm course ownership before installing.</p>}
+        <p className="sub">Week numbers inferred from blank-line groups or even spacing require schedule verification; they are not confirmed school dates.</p>
+      </details>
+    </GlassCard>
+  );
+}
+
+function normalizedTerm(value: string): string {
+  const match = value.trim().match(/^(?:t|term)\s*0*(\d{1,2})$/i);
+  return match ? `term-${Number(match[1])}` : value.trim().toLowerCase();
+}
+
+/** Only explicit set scope (course/module/week) links to practice; title similarity cannot imply ownership. */
+function TrackerQuestionLinks({ scope }: { scope: string }) {
+  const s = useStore();
+  const books = useMemo(() => buildQuestionBankBooks({
+    terms: s.terms, courses: s.courses, sets: s.questionSets ?? [],
+    questions: s.questions ?? [], curricula: [SGU_CURRICULUM],
+  }), [s.terms, s.courses, s.questionSets, s.questions]);
+  const parts = scope.split("/").filter(Boolean);
+  const weekIndex = parts.findIndex((part) => /^week\s*\d+$/i.test(part));
+  const module = weekIndex > 0 ? parts[weekIndex - 1] : parts.length >= 2 ? parts.at(-1) : undefined;
+  const week = weekIndex > 0 ? Number(parts[weekIndex].match(/\d+/)?.[0]) : undefined;
+  const term = parts.length >= 2 ? parts[0] : undefined;
+  if (!term || !module || module.toLowerCase() === "unscheduled") return null;
+  const matches = books.filter((book) => canonicalModuleKey(book.module) === canonicalModuleKey(module) && normalizedTerm(book.term) === normalizedTerm(term));
+  const matched = matches.length === 1 ? matches[0] : undefined;
+  const collections = matched?.weeks.filter((entry) => week === undefined || entry.week === week)
+    .flatMap((entry) => entry.collections.map((collection) => ({ collection, week: entry.week }))) ?? [];
+  const ready = new Set(collections.flatMap(({ collection }) => collection.readyQuestionIds ?? [])).size;
+
+  const start = (ids: string[], setId?: string, sourceWeek?: number) => {
+    try {
+      launchCourseQuiz({ module: matched!.module, term: matched!.term, week: sourceWeek,
+        questionIds: ids, setIds: setId ? [setId] : [] });
+    } catch (error) {
+      pushToast({ title: "Practice cannot start", body: error instanceof Error ? error.message : "Review your question collection first.", tone: "warn" });
+    }
+  };
+  return (
+    <GlassCard pad className="tracker-question-links">
+      <PanelHeader title="Related Question Bank" sub="Collections filed to this module and week; not an inferred match to an individual lecture or activity." />
+      {matches.length > 1 ? <p className="sub">More than one course matches this module. Assign the question sets to a unique course before launching practice.</p>
+        : !matched || collections.length === 0 ? <p className="sub">No Question Bank collections are explicitly filed to this selected academic scope. An activity in your tracker does not imply its questions are installed.</p>
+        : <>
+          <div className="tracker-resources-summary"><b>{collections.length} collections</b><span>{ready} reviewed questions ready</span><span>{collections.filter(({ collection }) => collection.awaitingReview > 0).length} collections need review</span></div>
+          <details open={week !== undefined} className="tracker-resource-details">
+            <summary>View linked collections</summary>
+            <ul>{collections.map(({ collection, week: collectionWeek }) => (
+              <li key={collection.id} className="tracker-resource-row">
+                <span><b>{collection.title}</b><small>{collectionWeek ? `Week ${collectionWeek} · ` : "Week unassigned · "}{COLLECTION_STATUS_LABEL[collection.status]} · {collection.ready} ready / {collection.questions} imported{collection.note ? ` · ${collection.note}` : ""}</small></span>
+                <GButton size="tiny" disabled={!collection.readyQuestionIds?.length}
+                  onClick={() => start(collection.readyQuestionIds ?? [], collection.setId, collectionWeek)}>Practice</GButton>
+              </li>
+            ))}</ul>
+          </details>
+          {ready > 0 && <GButton size="sm" onClick={() => start([...new Set(collections.flatMap(({ collection }) => collection.readyQuestionIds ?? []))], undefined, week)}>Practice all ready ({ready})</GButton>}
+        </>}
+    </GlassCard>
+  );
+}
+
 /**
  * I3-27: "Not now" is one tap. The suggestion rests until tomorrow morning and
  * the item stays in the Tracker; Undo lives on the notice, no dialog asks when.
@@ -438,11 +537,11 @@ function ScheduleImportModal({ defaultPath, onClose }: { defaultPath: string; on
   }, { ready: 0, review: 0, existing: 0, invalid: 0 });
 
   function updateRow(index: number, patch: Partial<ScheduleCandidate>) {
-    setReview((current) => reconcileScheduleDuplicates(current.map((candidate, candidateIndex) => candidateIndex === index ? { ...candidate, ...patch } : candidate), store.tracker));
+    setReview((current) => reconcileScheduleDuplicates(current.map((candidate, candidateIndex) => candidateIndex === index ? { ...candidate, ...patch } : candidate), store.tracker, path));
   }
   function extractPaste() {
     setErrors([]);
-    setReview(parseCourseSchedule(text, store.tracker, "Pasted schedule"));
+    setReview(parseCourseSchedule(text, store.tracker, "Pasted schedule", {}, path));
   }
   async function extractFiles(files: FileList | null) {
     if (!files?.length) return;
@@ -455,13 +554,13 @@ function ScheduleImportModal({ defaultPath, onClose }: { defaultPath: string; on
       else if (extension === "docx") extracted = await extractDocxText(await file.arrayBuffer());
       else extracted = extractPlainText(await file.text());
       if (extracted.empty) throw new Error(extracted.warnings[0] ?? "No readable schedule text was found.");
-      const parsed = parseCourseSchedule(extracted.text, store.tracker, file.name);
+      const parsed = parseCourseSchedule(extracted.text, store.tracker, file.name, {}, path);
       if (!parsed.length) throw new Error("No schedule entries were detected. Check the file format or paste the rows for review.");
       return parsed;
     }));
     const candidates = settled.flatMap((result) => result.status === "fulfilled" ? result.value : []);
     setErrors(settled.flatMap((result, index) => result.status === "rejected" ? [`${files[index].name}: ${result.reason instanceof Error ? result.reason.message : "Could not read file."}`] : []));
-    setReview((current) => reconcileScheduleDuplicates([...current, ...candidates], store.tracker));
+    setReview((current) => reconcileScheduleDuplicates([...current, ...candidates], store.tracker, path));
     setBusy(false);
     if (fileRef.current) fileRef.current.value = "";
   }
@@ -475,7 +574,11 @@ function ScheduleImportModal({ defaultPath, onClose }: { defaultPath: string; on
   return (
     <Modal title="Import course schedule" onClose={onClose} footer={<><GButton onClick={onClose}>Cancel</GButton>{review.length ? <GButton variant="primary" disabled={!importable || busy} onClick={commit}>Import selected ({importable})</GButton> : <GButton variant="primary" disabled={!text.trim() || busy} onClick={extractPaste}>Review schedule</GButton>}</>}>
       <p className="sub">Add PDF, DOCX, ICS, CSV, TSV, or TXT files—or paste rows. AXOM extracts candidates first; nothing is created until you review.</p>
-      <Field label="Tracker destination" value={path} onChange={(event) => setPath(event.target.value)} placeholder="Term/Course/Module" />
+      <Field label="Tracker destination" value={path} onChange={(event) => {
+        const next = event.target.value;
+        setPath(next);
+        setReview((current) => reconcileScheduleDuplicates(current, store.tracker, next));
+      }} placeholder="Term/Course/Module" />
       <div className="schedule-source-actions">
         <GButton onClick={() => fileRef.current?.click()} disabled={busy}><Upload size={ICON_SIZE.body} /> {busy ? "Reading files…" : "Add schedule files"}</GButton>
         <input ref={fileRef} hidden type="file" multiple accept=".pdf,.docx,.ics,.csv,.tsv,.txt,text/calendar,text/csv,text/tab-separated-values,text/plain,application/pdf" onChange={(event) => void extractFiles(event.target.files)} />
@@ -558,6 +661,12 @@ function ItemRow({ item, highlight }: { item: TrackerItem; highlight?: boolean }
         <div className="dr-label">{item.label}</div>
         <div className="dr-type">{item.path}</div>
         <div className="dr-note">{progressLabel}</div>
+        {(item.templateKey || item.weekSource) && <div className="row wrap gap6" aria-label="Activity provenance">
+          {item.templateKey && <Tag tone="neutral">Template activity</Tag>}
+          {item.weekSource === "template" && <Tag tone="green">Week stated in template</Tag>}
+          {item.weekSource === "inferred" && <Tag tone="orange">Week inferred · verify</Tag>}
+          {item.weekSource === "learner" && <Tag tone="cyan">Week chosen by you</Tag>}
+        </div>}
         {item.note && <div className="dr-note">{item.note}</div>}
         {planLabels.length > 0 && <div className="row wrap gap6" aria-label="Effective study plan">{planLabels.map((label) => <Tag key={label} tone="neutral">{label}</Tag>)}</div>}
       </div>

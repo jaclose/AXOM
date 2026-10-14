@@ -40,6 +40,16 @@ describe("saved course template versions", () => {
     expect(courseTemplateVersions(savedCourseTemplates(restored.documents))).toHaveLength(1);
   });
 
+  it("rejects partially readable templates instead of silently dropping activities", async () => {
+    const damaged = "CPR 1 - Lectures:\nCPR 01 First [Lecture]\nLecture 02 Missing kind\nCPR 03 Last [Lecture]";
+    await expect(prepareCourseTemplate(damaged, "partially-readable.txt")).rejects.toThrow(/Line 3 has no kind/);
+    const unknown = "CPR 1 - Lectures:\nCPR 01 First [Lecture]\nSeminar 1 [Seminar]";
+    await expect(prepareCourseTemplate(unknown, "unknown-activity.txt")).rejects.toThrow(/uses a kind AXOM does not know/);
+    // The parser itself still exposes the invalid source row so a reviewer can
+    // repair it, but it must not be saved as a completed template version.
+    expect(parseCourseTemplate(unknown).items).toHaveLength(2);
+  });
+
   it("rejects non-templates and excludes ordinary source documents from the library", async () => {
     await expect(prepareCourseTemplate("A schedule without activities", "schedule.txt")).rejects.toThrow("no course activities");
     const doc = await prepareCourseTemplate(TEMPLATE, "template.txt");

@@ -3,13 +3,13 @@ import type { QuestionSet } from "../library";
 import type { QuestionRecord } from "../questions";
 import { questionMappingStatus } from "../questions";
 import { questionScope, type CourseScope } from "./scope";
-import { moduleKey } from "./vocabulary";
+import { canonicalModuleKey } from "./vocabulary";
 
 /** Resolve only a unique course. Repeated module names require an explicit assignment. */
 export function courseForScope(scope: CourseScope, courses: readonly Course[]): Course | undefined {
   if (scope.courseId) return courses.find((course) => course.id === scope.courseId);
   if (!scope.module) return undefined;
-  const matches = courses.filter((course) => course.modules.some((module) => moduleKey(module.name) === moduleKey(scope.module!)));
+  const matches = courses.filter((course) => course.modules.some((module) => canonicalModuleKey(module.name) === canonicalModuleKey(scope.module!)));
   return matches.length === 1 ? matches[0] : undefined;
 }
 
@@ -63,7 +63,7 @@ export function buildCourseQuestionBank(
     };
     const course = courseForScope(scope, courses);
     const term = terms.find((item) => item.id === course?.termId)?.name ?? "Not yet assigned";
-    const key = JSON.stringify([course?.id ?? scope.courseId ?? "unassigned", moduleKey(scope.module ?? "")]);
+    const key = JSON.stringify([course?.id ?? scope.courseId ?? "unassigned", canonicalModuleKey(scope.module ?? "")]);
     const branch = modules.get(key) ?? {
       key, term, course: course?.name || course?.code || "Choose a course when filing",
       courseId: course?.id, module: scope.module ?? "Unfiled & mixed", weeks: [],

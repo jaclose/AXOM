@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { indexedDB, IDBKeyRange } from "fake-indexeddb";
+import { sha256Hex } from "./checksum";
+import { readSourceOriginal, deleteSourceOriginal } from "./decode/sources";
 import type { QuestionSet, SourceDocument } from "./library";
 import { parseQuestionBlocks } from "./questionParse";
 import type { QuestionImportPersistence, ReviewedImportPersistencePlan } from "./questionImportFinalization";
@@ -7,7 +10,7 @@ import type { QuestionRecord } from "./questions";
 import * as imageImport from "./questionImportImages";
 import * as vault from "./localVault";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 // Invented teaching content.
 const TEXT = [
@@ -180,5 +183,79 @@ describe("saveReviewedImport", () => {
     const result = await saving;
     expect(result).toMatchObject({ ok: true, images: { attached: fail ? 0 : 1, missing: 0 } });
     if (result.ok) expect(result.images.problems).toHaveLength(fail ? 1 : 0);
+  });
+
+  it("saves original source bytes before committing questions and records a verified identity", async () => {
+    vi.stubGlobal("indexedDB", indexedDB);
+    vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+    const original = new Blob([TEXT], { type: "text/plain" });
+    const checksum = await sha256Hex(await original.arrayBuffer());
+    if (!checksum) throw new Error("SHA-256 is required for verified originals");
+    const { store, commits } = memoryStore();
+    const prepared = prepareReviewedImport(request({ document: {
+      ...file, checksum, originalFile: original, sizeBytes: original.size, fileType: "text",
+    } }), empty, make());
+    if (!prepared.ok) throw new Error("expected verified original");
+    try {
+      const saved = await saveReviewedImport(prepared, store);
+      expect(saved).toMatchObject({ ok: true, reused: false });
+      expect(commits).toHaveLength(1);
+      const documentWrite = commits[0].documentWrite;
+      expect(documentWrite?.kind).toBe("create");
+      if (documentWrite?.kind !== "create") throw new Error("document was not created");
+      expect(documentWrite.document.originalFile).toEqual({
+        version: 1, sha256: checksum, byteSize: original.size, mimeType: "text/plain",
+      });
+      expect(await (await readSourceOriginal(documentWrite.document.id, checksum))?.text()).toBe(TEXT);
+    } finally {
+      if (prepared.plan.documentWrite?.kind === "create") await deleteSourceOriginal(prepared.plan.documentWrite.document.id);
+    }
+  });
+
+  it("preserves reviewed questions and a verified local source when the cloud original is oversized", async () => {
+    vi.stubGlobal("indexedDB", indexedDB);
+    vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+    // Synthetic size boundary: real bytes remain small to keep local CI safe.
+    // Hashing and actual >128 MiB transfer are separately covered by storage
+    // and resumable-upload tests, not by a giant committed test fixture.
+    const blob = new Blob([TEXT], { type: "text/plain" });
+    Object.defineProperty(blob, "size", { value: 128 * 1024 * 1024 + 1 });
+    const checksum = await sha256Hex(await blob.arrayBuffer());
+    if (!checksum) throw new Error("SHA-256 is required for verified sources");
+    const { store, commits } = memoryStore();
+    const prepared = prepareReviewedImport(request({ document: {
+      ...file, checksum, originalFile: blob, fileType: "text", sizeBytes: blob.size,
+    } }), empty, make());
+    if (!prepared.ok) throw new Error("expected prepared import");
+    try {
+      const saved = await saveReviewedImport(prepared, store);
+      expect(saved).toMatchObject({ ok: true, originalSource: {
+        status: "local-only-oversize", bytes: 128 * 1024 * 1024 + 1,
+        message: expect.stringMatching(/stays on this device/),
+      } });
+      expect(commits).toHaveLength(1);
+      expect(commits[0].questions).toHaveLength(2);
+      const write = commits[0].documentWrite;
+      if (write?.kind !== "create") throw new Error("expected document");
+      expect(write.document.originalFile).toBeUndefined();
+      expect(write.document.checksum).toBe(checksum);
+      expect(await (await readSourceOriginal(write.document.id, checksum))?.text()).toBe(TEXT);
+    } finally {
+      if (prepared.plan.documentWrite?.kind === "create") await deleteSourceOriginal(prepared.plan.documentWrite.document.id);
+    }
+  });
+
+  it("rejects mismatched original bytes before writing any questions or falsely reporting success", async () => {
+    vi.stubGlobal("indexedDB", indexedDB);
+    vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+    const { store, commits } = memoryStore();
+    const prepared = prepareReviewedImport(request({ document: {
+      ...file, checksum: "a".repeat(64), originalFile: new Blob([TEXT], { type: "text/plain" }), fileType: "text",
+    } }), empty, make());
+    if (!prepared.ok) throw new Error("expected prepared");
+    const saved = await saveReviewedImport(prepared, store);
+    expect(saved).toMatchObject({ ok: false });
+    if (!saved.ok) expect(saved.message).toMatch(/different version/);
+    expect(commits).toHaveLength(0);
   });
 });

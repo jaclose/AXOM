@@ -10,7 +10,7 @@ import type { QuestionSet } from "../library";
 import type { QuestionRecord } from "../questions";
 import { ATTENDED_ACTIVITIES, attendanceCategory, type CourseActivity } from "./activity";
 import { scopeProgress, trackerPathScope, type ScopeProgress } from "./scope";
-import { moduleKey } from "./vocabulary";
+import { canonicalModuleKey } from "./vocabulary";
 
 export interface WeekSummary {
   /** Tracker scope: "Term 1/FTM 1/Week 3". */
@@ -22,6 +22,8 @@ export interface WeekSummary {
   byActivity: Array<{ activity: CourseActivity | "other"; total: number; done: number }>;
   /** What was answered of the questions filed under this module and week. */
   questions: ScopeProgress;
+  /** More than one term has this module code; question ownership is unresolved. */
+  questionScopeAmbiguous?: boolean;
   missed: number;
 }
 
@@ -49,10 +51,12 @@ export function buildModuleWeeks(
   for (const item of tracker) {
     const scope = trackerPathScope(item.path);
     if (!scope.module || !scope.week) continue;
-    const key = moduleKey(scope.module);
+    // Separate the same module code when it appears in different terms.
+    const term = item.path.split("/").length >= 3 ? item.path.split("/")[0] : undefined;
+    const key = `${(term ?? "").toLowerCase()}|${canonicalModuleKey(scope.module)}`;
     const segments = item.path.split("/");
     const entry = modules.get(key) ?? {
-      key, module: scope.module, term: segments.length >= 3 ? segments[0] : undefined,
+      key, module: scope.module, term: term ?? (segments.length >= 3 ? segments[0] : undefined),
       weeks: [], done: 0, total: 0, byWeek: new Map(), paths: new Map(),
     };
     entry.byWeek.set(scope.week, [...(entry.byWeek.get(scope.week) ?? []), item]);
@@ -60,7 +64,18 @@ export function buildModuleWeeks(
     modules.set(key, entry);
   }
 
+  const termsByModule = new Map<string, Set<string>>();
+  for (const module of modules.values()) {
+    const key = canonicalModuleKey(module.module);
+    const terms = termsByModule.get(key) ?? new Set<string>();
+    terms.add((module.term ?? "").toLowerCase());
+    termsByModule.set(key, terms);
+  }
+
   return [...modules.values()].map(({ byWeek, paths, ...module }) => {
+    // Without a course/term link on the question, reusing a module name in two
+    // terms cannot truthfully allocate those questions to either week.
+    const ambiguous = (termsByModule.get(canonicalModuleKey(module.module))?.size ?? 0) > 1;
     const weeks = [...byWeek.entries()].sort(([left], [right]) => left - right).map(([week, items]): WeekSummary => {
       const groups = new Map<CourseActivity | "other", { total: number; done: number }>();
       for (const item of items) {
@@ -76,7 +91,10 @@ export function buildModuleWeeks(
         items,
         done: items.filter(isDone).length,
         byActivity: [...groups.entries()].map(([activity, counts]) => ({ activity, ...counts })),
-        questions: scopeProgress(questions, { module: module.module, week }, setsById),
+        questions: ambiguous
+          ? { total: 0, attempted: 0, firstTimeCorrect: 0, missed: 0, questionIds: [] }
+          : scopeProgress(questions, { module: module.module, week }, setsById),
+        ...(ambiguous ? { questionScopeAmbiguous: true } : {}),
         missed: items.filter((item) => item.attendance === "missed").length,
       };
     });

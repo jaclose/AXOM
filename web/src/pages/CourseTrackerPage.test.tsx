@@ -212,6 +212,57 @@ describe("Course Tracker comprehension layout", () => {
     expect(useStore.getState().profile.promisePromptStatus).toBeUndefined();
   });
 
+
+  it("shows explicit week provenance and launches reviewed questions from the selected module/week", () => {
+    const stamp = "2026-10-14T12:00:00.000Z";
+    const tracker: TrackerItem = {
+      id: "ncrs-imcq-3", path: "Term 4/NCRS/Week 3", label: "NCRS IMCQ 3",
+      kind: "Assessment", activity: "imcq", templateKey: "ncrs|imcq|3",
+      weekSource: "inferred", passes: 1, ankiPasses: 0, yield: "none", updated: stamp,
+    };
+    const terms = [{ id: "term-4", name: "Term 4" }];
+    const courses = [{
+      id: "ppm-500", termId: "term-4", code: "PPM 500", name: "Principles and Practice of Medicine I",
+      files: 0, modules: [{ id: "ncrs", name: "NCRS" }],
+    }];
+    const question = {
+      id: "ncrs-q1", source: "imported" as const, stem: "A review question", courseId: "ppm-500",
+      module: "NCRS", week: 3, setId: "ncrs-imcq-3-set", correctKey: "A",
+      options: [{ key: "A", text: "Correct" }, { key: "B", text: "Distractor" }],
+      status: "unseen" as const, tags: [], attempts: [], createdAt: stamp, updatedAt: stamp,
+    };
+    const questionSets = [{
+      id: "ncrs-imcq-3-set", title: "NCRS IMCQ 3 bank", createdAt: stamp, questionIds: ["ncrs-q1"],
+      tags: [], aiEnhanced: false, parserWarnings: [], sourceDocumentIds: [],
+      scope: { courseId: "ppm-500", module: "NCRS", week: 3 },
+    }];
+    sessionStorage.removeItem("axom.courseQuizLaunch.v1");
+    useStore.setState({ tracker: [tracker], terms, courses, questions: [question], questionSets });
+    render(<CourseTrackerPage />);
+    fireEvent.change(screen.getByLabelText("Jump to a subsection"), {
+      target: { value: "Term 4/NCRS/Week 3" },
+    });
+    expect(screen.getByText("Week inferred · verify")).toBeTruthy();
+    const panel = screen.getByText("Related Question Bank").closest<HTMLElement>(".glass-card")!;
+    expect(within(panel).getByText("NCRS IMCQ 3 bank")).toBeTruthy();
+    expect(within(panel).getByText(/1 reviewed questions ready/)).toBeTruthy();
+    fireEvent.click(within(panel).getByRole("button", { name: "Practice" }));
+    expect(JSON.parse(sessionStorage.getItem("axom.courseQuizLaunch.v1") ?? "null")).toMatchObject({
+      module: "NCRS", term: "Term 4", week: 3, questionIds: ["ncrs-q1"],
+    });
+    sessionStorage.removeItem("axom.courseQuizLaunch.v1");
+    window.location.hash = "";
+  });
+
+  it("distinguishes school outline coverage from actually imported source templates", () => {
+    useStore.setState({ documents: [], tracker: [] });
+    render(<CourseTrackerPage />);
+    const coverage = screen.getByText("SGU Terms 1–5 · curriculum coverage").closest<HTMLElement>(".glass-card")!;
+    expect(within(coverage).getByText(/0\/23 modules have saved templates/)).toBeTruthy();
+    expect(coverage.textContent).toContain("expected activities are unknown, not zero");
+    expect(within(coverage).getByText("Term 5 coverage")).toBeTruthy();
+  });
+
   it("uses utility/work-area regions that can stack without changing DOM order at mobile width", () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     render(<CourseTrackerPage />);

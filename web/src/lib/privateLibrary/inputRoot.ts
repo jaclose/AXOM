@@ -21,8 +21,8 @@ export function isPackagingMetadata(path: string): boolean {
   return path.split("/").some(part => part === "__MACOSX" || part === ".DS_Store" || part.startsWith("._"));
 }
 
-/** A single wrapping folder is harmless; multiple catalogs are not guessed. */
-export function resolveLibraryInputRoot(entries: readonly LibraryInputEntry[]): LibraryInputRoot {
+/** Shared bounded path validation for prepared packages and ordinary source folders. */
+export function validateLibraryInputEntries(entries: readonly LibraryInputEntry[]): string[] {
   if (!entries.length) throw new Error("The selected folder is empty. Choose files or a collection to import.");
   if (entries.length > INPUT_MAX_FILES) throw new Error("This collection contains too many files. Split it into smaller collections.");
   const paths: string[] = [], seen = new Set<string>();
@@ -39,6 +39,12 @@ export function resolveLibraryInputRoot(entries: readonly LibraryInputEntry[]): 
     seen.add(portableKey);
     if (!isPackagingMetadata(path)) paths.push(path);
   }
+  return paths;
+}
+
+/** A single wrapping folder is harmless; multiple catalogs are not guessed. */
+export function resolveLibraryInputRoot(entries: readonly LibraryInputEntry[]): LibraryInputRoot {
+  const paths = validateLibraryInputEntries(entries);
   const catalogs = paths.filter(path => path.split("/").pop() === "catalog.json");
   if (catalogs.length > 1) throw new Error("Several prepared libraries were selected. Choose one collection folder or ZIP at a time.");
   if (catalogs.length === 1) {

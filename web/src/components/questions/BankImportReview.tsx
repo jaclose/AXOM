@@ -7,14 +7,16 @@ import { withReviewedAnswer } from "../../lib/question-content/readiness";
 import { isAssetVisible, type ContentViewMode } from "../../lib/question-content/visibility";
 import { summarizePackage } from "../../lib/question-content/validate";
 import { courseForScope } from "../../lib/course-engine/questionBank";
-import { Field, SelectField } from "../ui/Modal";
+import { Field, SelectField, TextAreaField } from "../ui/Modal";
 import { GButton, GhostButton } from "../ui/primitives";
 import { QuestionBlocks } from "./QuestionContent";
 import type { ImportFinalizationResult } from "./ImportPanel";
 import type { ImportPackage } from "../../lib/question-content/package";
+import type { QuestionBlock, TableBlock } from "../../lib/question-content/blocks";
+import { editReviewedBlock, editReviewedTableCell, unresolvedExtractionIssues, type ReviewBlockLocation, type ReviewSection } from "../../lib/question-content/reviewEdits";
 
 export type TaggedBank = Extract<PdfBankExtraction, { tagged: true }>;
-type ReviewBank = Pick<TaggedBank, "pkg" | "conversionIssues" | "files" | "sourceText" | "sourceBytes" | "notes" | "warnings" | "unplaced">;
+export type ReviewBank = Omit<Pick<TaggedBank, "pkg" | "conversionIssues" | "files" | "sourceText" | "sourceBytes" | "originalFile" | "notes" | "warnings" | "unplaced">, "sourceText"> & { sourceText: { rawText: string; pageTexts?: string[] } };
 export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: ReviewBank; onBack: () => void; onSaved?: (result: ImportFinalizationResult) => void; onReviewed?: (pkg: ImportPackage, result: BankSave) => Promise<void> }) {
   const [pkg, setPackage] = useState(bank.pkg);
   const [index, setIndex] = useState(0);
@@ -23,7 +25,8 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
   const [result, setResult] = useState<BankSave>();
   const [error, setError] = useState("");
   const [answer, setAnswer] = useState("");
-  const assessed = useMemo(() => assessBank(pkg, bank.conversionIssues, bank.files), [pkg, bank]);
+  const [confirmedAnswerIds, setConfirmedAnswerIds] = useState<ReadonlySet<string>>(() => new Set());
+  const assessed = useMemo(() => assessBank(pkg, unresolvedExtractionIssues(bank.conversionIssues, confirmedAnswerIds), bank.files), [pkg, bank, confirmedAnswerIds]);
   const summary = useMemo(() => summarizePackage(pkg, assessed.issues), [pkg, assessed.issues]);
   const question = pkg.questions[index];
   const verdict = question && assessed.verdicts.get(question.id);
@@ -33,13 +36,56 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
     setPackage((current) => ({ ...current, manifest: { ...current.manifest, course: { ...current.manifest.course, ...patch } } }));
     setResult(undefined);
   }
+  function edited(patch: ImportPackage) {
+    if (patch === pkg) return;
+    setPackage(patch);
+    if (question) setConfirmedAnswerIds((current) => { const next = new Set(current); next.delete(question.id); return next; });
+    setAnswer("");
+    setResult(undefined);
+  }
+  function confirmSourceAnswer() {
+    if (!question || !answer) return;
+    setPackage((current) => ({ ...current, questions: current.questions.map((entry) =>
+      entry.id === question.id ? withReviewedAnswer(entry, answer) : entry) }));
+    setConfirmedAnswerIds((current) => new Set([...current, question.id]));
+    setAnswer(""); setResult(undefined);
+  }
+  function editBlock(where: ReviewBlockLocation, value: string) {
+    if (question) edited(editReviewedBlock(pkg, question.id, where, value));
+  }
+  function editTable(where: ReviewBlockLocation | "choiceTable", location: { row: number; column: number } | { header: number }, value: string) {
+    if (question) edited(editReviewedTableCell(pkg, question.id, where, location, value));
+  }
+  function tableEditors(table: TableBlock, where: ReviewBlockLocation | "choiceTable", name: string) {
+    return <fieldset key={`${name}-table`} className="stack gap6"><legend>{name} · editable table cells</legend>
+      {table.headers?.map((header, i) => <Field key={`${name}-header-${i}`} label={`${name} header ${i + 1}`}
+        value={header} onChange={(event) => editTable(where, { header: i }, event.target.value)} />)}
+      {table.rows.map((row, r) => <div key={`${name}-row-${r}`} className="row wrap gap6">
+        {row.map((value, c) => <Field key={`${name}-cell-${r}-${c}`} label={`${name}, row ${r + 1}, column ${c + 1}`}
+          value={value} onChange={(event) => editTable(where, { row: r, column: c }, event.target.value)} />)}
+      </div>)}
+    </fieldset>;
+  }
+  function blockEditors(blocks: readonly QuestionBlock[], section: ReviewSection, name: string, choiceId?: string) {
+    return blocks.map((block, position) => {
+      const where: ReviewBlockLocation = { section, index: position, ...(choiceId ? { choiceId } : {}) };
+      const label = `${name} · block ${position + 1}`;
+      if (block.type === "text" || block.type === "rich_text" || block.type === "callout") {
+        return <TextAreaField key={`${name}-${position}`} label={label} rows={2}
+          value={block.type === "rich_text" ? block.html : block.text}
+          onChange={(event) => editBlock(where, event.target.value)} />;
+      }
+      if (block.type === "table") return tableEditors(block, where, label);
+      return <p key={`${name}-${position}`} className="sub">{label}: {block.type} is preserved unchanged. Correct the source document to replace this media.</p>;
+    });
+  }
   async function save() {
     setBusy(true); setError("");
     try {
       const saved = await saveBank(pkg, assessed.issues, bank.files, {
         library: () => { const state = useStore.getState(); return { questions: state.questions ?? [], questionSets: state.questionSets ?? [], documents: state.documents ?? [] }; },
         store: () => useStore.getState(),
-      }, { sourceText: bank.sourceText, sourceBytes: bank.sourceBytes, notes: bank.notes,
+      }, { sourceText: bank.sourceText, sourceBytes: bank.sourceBytes, originalFile: bank.originalFile, notes: bank.notes,
         courseId: courseForScope({ module: pkg.manifest.course.name }, useStore.getState().courses)?.id });
       setResult(saved);
       if (saved.status !== "failed") await onReviewed?.(pkg, saved);
@@ -47,7 +93,7 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
     finally { setBusy(false); }
   }
   const savedIds = result?.sections.flatMap((section) => section.savedIds) ?? [];
-  return <section className="bank-import-review stack" aria-label="PDF bank preview" style={{ gap: 18 }}>
+  return <section className="bank-import-review stack" aria-label="Source question bank preview" style={{ gap: 18 }}>
     <header><p className="sub">Source → Review → Save</p><h2>{pkg.manifest.bank.title}</h2>
       <p role="status">{pkg.questions.length} questions · {assessed.counts.ready} ready · {assessed.counts["needs-review"]} need review · {assessed.counts.unresolved} unresolved</p>
       <p className="sub">{summary.tables} tables · {summary.images} images · {summary.answerReveals} answer-reveal images</p>
@@ -77,10 +123,20 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
         <QuestionBlocks blocks={question.explanation ?? []} content={question} files={bank.files} mode={mode} section="explanation" />
         <QuestionBlocks blocks={question.assets.filter((asset) => ["answer_reveal", "reference", "source_page"].includes(asset.role) && isAssetVisible(asset.role, mode)).map((asset) => ({ type: "image", assetId: asset.id, role: asset.role, alt: "Source answer or reference" }))} content={question} files={bank.files} mode={mode} />
       </>}
+      <details className="stack gap8" aria-label={`Edit question ${index + 1} from source`}>
+        <summary>Correct extracted text, answer choices or tables</summary>
+        <p className="sub">Only this question is edited. Figures, equations, source pages, stable IDs and block order remain intact. Any edit clears the prior verified key until you confirm it again against the original.</p>
+        {blockEditors(question.stem, "stem", `Question ${index + 1} stem`)}
+        {question.choiceTable && tableEditors(question.choiceTable, "choiceTable", "Shared answer table")}
+        {question.choices.map((choice) => <div key={choice.id} className="stack gap6">
+          {blockEditors(choice.blocks, "choice", `Choice ${choice.label}`, choice.id)}
+        </div>)}
+        {question.explanation?.length ? blockEditors(question.explanation, "explanation", "Explanation") : <p className="sub">The source has no extracted explanation. Add it to the original document and reimport if needed.</p>}
+      </details>
       {verdict && [...verdict.reasons, ...verdict.advisories].map((note, n) => <p key={n} className="sub">{note}</p>)}
       {verdict?.readiness !== "ready" && <div className="row wrap gap8">
         <SelectField label="Verified answer" value={answer} onChange={(event) => setAnswer(event.target.value)}><option value="">Choose after checking the source</option>{question.choices.map((choice) => <option key={choice.id}>{choice.label}</option>)}</SelectField>
-        <GButton disabled={!answer || mode === "question"} onClick={() => { setPackage({ ...pkg, questions: pkg.questions.map((entry) => entry.id === question.id ? withReviewedAnswer(entry, answer) : entry) }); setAnswer(""); setResult(undefined); }}>Confirm answer from source</GButton>
+        <GButton disabled={!answer || mode === "question"} onClick={confirmSourceAnswer}>Confirm answer from source</GButton>
       </div>}
     </article>}
     {error && <p role="alert">{error}</p>}

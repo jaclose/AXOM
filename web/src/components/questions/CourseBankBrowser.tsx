@@ -2,6 +2,8 @@ import { useMemo, useState, type ReactNode } from "react";
 import { ArrowLeft, ArrowUpRight, BookOpen, ChevronRight, Play, Search } from "lucide-react";
 import { useStore } from "../../lib/store";
 import { bankSource, buildCourseQuestionBank } from "../../lib/course-engine/questionBank";
+import type { QuestionRecord } from "../../lib/questions";
+import { questionPracticeReadiness } from "../../lib/questionFilters";
 import type { QuestionSet } from "../../lib/library";
 import { GButton, GhostButton } from "../ui/primitives";
 import { ICON_SIZE } from "../../lib/iconSize";
@@ -17,30 +19,93 @@ interface Props {
   renderSet?: (set: QuestionSet) => ReactNode;
 }
 
-/** The same bounded source navigator serves the library and the block picker. */
+interface CollectionReadiness {
+  stored: number;
+  ready: number;
+  review: number;
+  missing: number;
+}
+
+type ReadinessFilter = "all" | "ready" | "review" | "missing";
+
+function measureCollection(set: QuestionSet, byId: ReadonlyMap<string, QuestionRecord>): CollectionReadiness {
+  const ids = new Set(set.questionIds);
+  let stored = 0;
+  let ready = 0;
+  for (const id of ids) {
+    const question = byId.get(id);
+    if (!question) continue;
+    stored += 1;
+    if (questionPracticeReadiness(question) === "ready") ready += 1;
+  }
+  return { stored, ready, review: stored - ready, missing: ids.size - stored };
+}
+
+function courseIdentity(branch: { courseId?: string; course: string }): string {
+  return branch.courseId ?? `unassigned:${branch.course}`;
+}
+
+function matchesReadiness(metric: CollectionReadiness, filter: ReadinessFilter): boolean {
+  return filter === "all" || (filter === "ready" && metric.ready > 0)
+    || (filter === "review" && metric.review > 0)
+    || (filter === "missing" && (metric.missing > 0 || metric.stored === 0));
+}
+
+/** A read-only projection of the canonical question sets, never a second collection store. */
 export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPractice, renderSet, initialScope }: Props) {
   const { questionSets = [], questions = [], courses, terms } = useStore();
-  const branches = useMemo(() => buildCourseQuestionBank(questionSets, questions, courses, terms), [questionSets, questions, courses, terms]);
+  const branches = useMemo(() => buildCourseQuestionBank(questionSets, questions, courses, terms),
+    [questionSets, questions, courses, terms]);
+  const questionsById = useMemo(() => new Map(questions.map((question) => [question.id, question])), [questions]);
+  const readiness = useMemo(() => new Map(questionSets.map((set) => [set.id, measureCollection(set, questionsById)])),
+    [questionsById, questionSets]);
+
   const [chosen, setChosen] = useState<string>();
+  const [termFilter, setTermFilter] = useState("");
+  const [courseFilter, setCourseFilter] = useState("");
   const [query, setQuery] = useState("");
   const [source, setSource] = useState("");
+  const [readinessFilter, setReadinessFilter] = useState<ReadinessFilter>("all");
   const [limit, setLimit] = useState(12);
   const [openedSet, setOpenedSet] = useState<string>();
-  const scoped = branches.find((branch) => branch.module === initialScope?.module && (!initialScope.courseId || branch.courseId === initialScope.courseId));
-  const initial = scoped?.weeks.find((week) => week.week === initialScope?.week) ?? scoped?.weeks[0] ?? branches.flatMap((branch) => branch.weeks).find((week) => week.sets.some((set) => selectedIds.includes(set.id)))
-    ?? branches[0]?.weeks[0];
-  const active = branches.flatMap((branch) => branch.weeks).find((week) => week.key === chosen) ?? initial;
-  const branch = branches.find((item) => item.weeks.some((week) => week.key === active?.key));
+
+  const termsAvailable = [...new Set(branches.map((branch) => branch.term))];
+  const termBranches = termFilter ? branches.filter((branch) => branch.term === termFilter) : branches;
+  const courseOptions = [...new Map(termBranches.map((branch) => [courseIdentity(branch), branch.course])).entries()];
+  const visibleBranches = courseFilter
+    ? termBranches.filter((branch) => courseIdentity(branch) === courseFilter)
+    : termBranches;
+
+  const scopedCandidates = initialScope ? visibleBranches.filter((branch) => branch.module === initialScope.module
+    && (!initialScope.courseId || branch.courseId === initialScope.courseId)) : [];
+  // Module names repeat across terms. Never silently assign an unqualified
+  // Tracker handoff to the first course with the same module name.
+  const ambiguousScope = Boolean(initialScope?.module && scopedCandidates.length > 1);
+  const scoped = scopedCandidates.length === 1 ? scopedCandidates[0] : undefined;
+  const selectedInitial = visibleBranches.flatMap((branch) => branch.weeks)
+    .find((week) => week.sets.some((set) => selectedIds.includes(set.id)));
+  const initial = ambiguousScope ? undefined : scoped?.weeks.find((week) => week.week === initialScope?.week)
+    ?? scoped?.weeks[0] ?? selectedInitial ?? visibleBranches[0]?.weeks[0];
+  const active = visibleBranches.flatMap((branch) => branch.weeks)
+    .find((week) => week.key === chosen) ?? initial;
+  const branch = visibleBranches.find((item) => item.weeks.some((week) => week.key === active?.key));
   const selected = new Set(selectedIds);
   const search = query.trim().toLowerCase();
-  const matches = useMemo(() => {
-    const pool = search ? branches.flatMap((module) => module.weeks.flatMap((week) => week.sets.map((set) => ({ module, week, set }))))
-      : active && branch ? active.sets.map((set) => ({ module: branch, week: active, set })) : [];
-    return pool.filter(({ set, module, week }) => (!source || bankSource(set) === source)
-      && (!search || `${set.title} ${set.tags.join(" ")} ${module.term} ${module.course} ${module.module} ${week.label}`.toLowerCase().includes(search)));
-  }, [search, branches, active, branch, source]);
+  const pool = search
+    ? visibleBranches.flatMap((module) => module.weeks.flatMap((week) => week.sets.map((set) => ({ module, week, set }))))
+    : active && branch ? active.sets.map((set) => ({ module: branch, week: active, set })) : [];
+  const matches = pool.filter(({ set, module, week }) => {
+    const state = readiness.get(set.id) ?? { stored: 0, ready: 0, review: 0, missing: 0 };
+    return (!source || bankSource(set) === source)
+      && matchesReadiness(state, readinessFilter)
+      && (!search || `${set.title} ${set.tags.join(" ")} ${bankSource(set)} ${module.term} ${module.course} ${module.module} ${week.label}`.toLowerCase().includes(search));
+  });
   const detail = questionSets.find((set) => set.id === openedSet);
-  const availableSources = [...new Set((search ? questionSets : active?.sets ?? []).map(bankSource))];
+  const availableSources = [...new Set(visibleBranches.flatMap((module) => module.weeks.flatMap((week) => week.sets.map(bankSource))))];
+  const weekReadyIds = new Set(matches.flatMap(({ set }) => set.questionIds.filter((id) => {
+    const question = questionsById.get(id);
+    return question && questionPracticeReadiness(question) === "ready";
+  })));
 
   function toggle(ids: string[]) {
     const next = new Set(selectedIds);
@@ -60,43 +125,67 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
         onChange={(event) => { setQuery(event.target.value); setLimit(12); }} /></label>
       {onSelectionChange && <span className="cb-selection" role="status">{selectedIds.length} selected</span>}
     </div>
-    {!branches.length ? <div className="cb-empty"><BookOpen size={24} /><h2>Your course questions start here</h2><p>Import a question file. AXOM will suggest its module and week for you to review.</p></div> :
-    <div className="cb-layout">
+    {branches.length > 0 && <div className="qb-academic-filters" role="group" aria-label="Academic question bank filters">
+      <label>Term<select aria-label="Filter by term" value={termFilter} onChange={(event) => { setTermFilter(event.target.value); setCourseFilter(""); setChosen(undefined); setLimit(12); }}>
+        <option value="">All terms</option>{termsAvailable.map((term) => <option key={term} value={term}>{term}</option>)}
+      </select></label>
+      <label>Course<select aria-label="Filter by course" value={courseFilter} onChange={(event) => { setCourseFilter(event.target.value); setChosen(undefined); setLimit(12); }}>
+        <option value="">All courses</option>{courseOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+      </select></label>
+      <label>Collection type<select aria-label="Filter by collection type" value={source} onChange={(event) => { setSource(event.target.value); setLimit(12); }}>
+        <option value="">All types</option>{availableSources.map((name) => <option key={name} value={name}>{name}</option>)}
+      </select></label>
+      <label>Readiness<select aria-label="Filter by readiness" value={readinessFilter} onChange={(event) => { setReadinessFilter(event.target.value as ReadinessFilter); setLimit(12); }}>
+        <option value="all">Any readiness</option><option value="ready">Ready for practice</option>
+        <option value="review">Review required</option><option value="missing">Unavailable / missing records</option>
+      </select></label>
+    </div>}
+    {!branches.length ? <div className="cb-empty"><BookOpen size={24} /><h2>Your course questions start here</h2><p>No saved question sets are installed. Browse available course packages or import a question file, then review its answer mappings.</p></div>
+    : !visibleBranches.length ? <p className="cb-empty" role="status">No modules match the selected term and course. Change a filter to browse your other courses.</p>
+    : <div className="cb-layout">
       <nav className="cb-outline" aria-label="Course outline">
-        {branches.map((item, index) => <div className="cb-branch" key={item.key}>
-          {(index === 0 || branches[index - 1].term !== item.term) && <p className="cb-term">{item.term}</p>}
-          {(index === 0 || branches[index - 1].course !== item.course || branches[index - 1].term !== item.term) && <p className="cb-course">{item.course}</p>}
-          <button className="cb-module" aria-expanded={branch?.key === item.key} onClick={() => { setChosen(item.weeks[0]?.key); setQuery(""); setSource(""); setLimit(12); }}>
-            <ChevronRight size={14} className={branch?.key === item.key ? "cb-rotated" : ""} /><b>{item.module}</b><span>{item.weeks.length}</span>
+        {visibleBranches.map((item, index) => <div className="cb-branch" key={item.key}>
+          {(index === 0 || visibleBranches[index - 1].term !== item.term) && <p className="cb-term">{item.term}</p>}
+          {(index === 0 || visibleBranches[index - 1].course !== item.course || visibleBranches[index - 1].term !== item.term) && <p className="cb-course">{item.course}</p>}
+          <button className="cb-module" aria-expanded={branch?.key === item.key} onClick={() => { setChosen(item.weeks[0]?.key); setQuery(""); setLimit(12); }}>
+            <ChevronRight size={14} className={branch?.key === item.key ? "cb-rotated" : ""} /><b>{item.module}</b><span>{item.weeks.length} weeks</span>
           </button>
           {branch?.key === item.key && <ul>{item.weeks.map((week) => <li key={week.key}><button aria-current={active?.key === week.key ? "true" : undefined}
-            onClick={() => { setChosen(week.key); setQuery(""); setSource(""); setLimit(12); }}><span>{week.label}</span><small>{week.questionIds.length}</small></button></li>)}</ul>}
+            aria-label={`${week.label} ${week.questionIds.length}`} aria-description={`${week.ready} of ${week.questionIds.length} ready for practice`}
+            onClick={() => { setChosen(week.key); setQuery(""); setLimit(12); }}><span>{week.label}</span><small>{week.ready}/{week.questionIds.length} ready</small></button></li>)}</ul>}
         </div>)}
       </nav>
       <div className="cb-content">
+        {ambiguousScope && !chosen && <p className="qb-collection-warning" role="alert">Multiple courses contain {initialScope?.module}. Select the correct course or week before practicing; AXOM has not inferred a course.</p>}
         <header className="cb-week-head">
-          <p className="cb-eyebrow">{search ? "Across your question bank" : `${branch?.term} / ${branch?.module}`}</p>
-          <h2>{search ? "Search results" : active?.label}</h2>
-          <p>{search ? `${matches.length} matching sets` : `${active?.questionIds.length ?? 0} questions · ${active?.attempted ?? 0} answered · ${active?.ready ?? 0} ready to practice`}</p>
+          <p className="cb-eyebrow">{search ? "Within selected academic scope" : `${branch?.term} / ${branch?.course} / ${branch?.module}`}</p>
+          <h2>{search ? "Search results" : active?.label ?? "Select an academic week"}</h2>
+          <p>{search ? `${matches.length} matching collections` : `${active?.questionIds.length ?? 0} stored questions · ${active?.attempted ?? 0} answered · ${active?.ready ?? 0} ready to practice`}</p>
           {!search && active && <div className="cb-week-actions">
-            {onPractice && <GButton variant="primary" disabled={!active.ready || !matches.length} onClick={() => onPractice(matches.map((match) => match.set))}><Play size={14} /> Practice week</GButton>}
+            {onPractice && <GButton variant="primary" aria-label="Practice week" aria-description={`${weekReadyIds.size} unique ready questions`} disabled={!weekReadyIds.size} onClick={() => onPractice(matches.filter(({ set }) => (readiness.get(set.id)?.ready ?? 0) > 0).map(({ set }) => set))}><Play size={14} /> Practice week · {weekReadyIds.size} ready</GButton>}
             {onSelectionChange && <GhostButton onClick={() => toggle(active.sets.map((set) => set.id))}>{active.sets.every((set) => selected.has(set.id)) ? "Remove week" : "Add week"}</GhostButton>}
             {onSelectionChange && branch && branch.weeks.length > 1 && <GhostButton onClick={() => toggle(branch.weeks.flatMap((week) => week.sets.map((set) => set.id)))}>Toggle module</GhostButton>}
           </div>}
         </header>
-        <div className="cb-list-heading"><span>{search ? "Matching sources" : "Sources"}</span><select aria-label="Source type" value={source} onChange={(event) => { setSource(event.target.value); setLimit(12); }}>
-          <option value="">All sources</option>{availableSources.map((name) => <option key={name}>{name}</option>)}
-        </select></div>
+        <div className="cb-list-heading"><span>{search ? "Matching collections" : "Collections"}</span><span>{matches.length} shown in scope</span></div>
         <div className="cb-set-list">
-          {matches.slice(0, limit).map(({ set, module, week }) => <article className="cb-set-row" key={set.id}>
-            {onSelectionChange && <input type="checkbox" aria-label={`Include ${set.title}`} checked={selected.has(set.id)} onChange={() => toggle([set.id])} />}
-            <div className="cb-set-copy"><span className={`cb-source ${set.kind === "generated" ? "cb-generated" : ""}`}>{bankSource(set)}</span>
-              {renderSet ? <button className="cb-set-title" onClick={() => setOpenedSet(set.id)}>{set.title}<ArrowUpRight size={14} /></button> : <b>{set.title}</b>}
-              <small>{search ? `${module.module} / ${week.label} · ` : ""}{set.questionIds.length} {set.questionIds.length === 1 ? "question" : "questions"}</small>
-            </div>
-            {onPractice && <GhostButton aria-label={`Practice ${set.title}`} onClick={() => onPractice([set])}><Play size={ICON_SIZE.body} /><span>Practice</span></GhostButton>}
-          </article>)}
-          {!matches.length && <p className="cb-empty" role="status">No sets match. Try another source or a shorter search.</p>}
+          {matches.slice(0, limit).map(({ set, module, week }) => {
+            const state = readiness.get(set.id) ?? { stored: 0, ready: 0, review: 0, missing: 0 };
+            return <article className="cb-set-row" key={set.id}>
+              {onSelectionChange && <input type="checkbox" aria-label={`Include ${set.title}`} checked={selected.has(set.id)} onChange={() => toggle([set.id])} />}
+              <div className="cb-set-copy"><span className={`cb-source ${set.kind === "generated" ? "cb-generated" : ""}`}>{bankSource(set)}</span>
+                {renderSet ? <button className="cb-set-title" onClick={() => setOpenedSet(set.id)}>{set.title}<ArrowUpRight size={14} /></button> : <b>{set.title}</b>}
+                <small>{search ? `${module.module} / ${week.label} · ` : ""}{state.stored} stored · {state.ready} ready{state.review ? ` · ${state.review} need review` : ""}{state.missing ? ` · ${state.missing} missing` : ""}</small>
+                {state.ready === 0 && <small className="qb-collection-warning" role="status">
+                  {state.review > 0 ? "Review the answer evidence or options before practice."
+                    : state.missing > 0 ? "Question records are unavailable on this device; restore or re-import this source."
+                    : "This collection has no saved questions available for practice."}
+                </small>}
+              </div>
+              {onPractice && <GhostButton aria-label={`Practice ${set.title}`} disabled={!state.ready} onClick={() => onPractice([set])}><Play size={ICON_SIZE.body} /><span>Practice</span></GhostButton>}
+            </article>;
+          })}
+          {!matches.length && <p className="cb-empty" role="status">{ambiguousScope && !chosen ? "Choose the correct course in the outline or filters to resolve the ambiguous module." : "No collections match this week or the active filters. Try another type, readiness, or search."}</p>}
         </div>
         {matches.length > limit && <GhostButton onClick={() => setLimit((value) => value + 12)}>Show 12 more ({matches.length - limit} remaining)</GhostButton>}
       </div>

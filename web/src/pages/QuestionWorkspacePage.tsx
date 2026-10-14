@@ -12,11 +12,12 @@ import {
 import { useStore } from "../lib/store";
 import {
   analyzeQuestionStyle, dueQuestions, errorPatterns, questionCollectionMetrics,
-  questionMappingStatus, summarizeQuestionMappings, weakTopics,
+  summarizeQuestionMappings, weakTopics,
   ERROR_TYPE_LABEL,
   type QuestionRecord,
 } from "../lib/questions";
 import type { QuizBlock, QuizFilters, QuizMode } from "../lib/quiz";
+import { questionPracticeReadiness } from "../lib/questionFilters";
 import type { QuestionSet, SourceDocument } from "../lib/library";
 import { GlassCard, PanelHeader, EmptyState } from "../components/ui/primitives";
 import { ImportPanel, parseStoredDocument, type ImportSeed } from "../components/questions/ImportPanel";
@@ -73,12 +74,16 @@ interface RunnerLaunch {
   presetFilters?: Partial<QuizFilters>;
   presetTimed?: boolean;
   blockId?: string;
+  /** Only genuine Course Tracker launches receive a direct return action. */
+  fromCourse?: boolean;
 }
 
 export function QuestionWorkspacePage() {
   const s = useStore();
-  const [courseLaunch] = useState(() => readCourseQuizLaunch(s.questions ?? []));
-  useEffect(() => { clearCourseQuizLaunch(); }, []);
+  const [courseLaunch, setCourseLaunch] = useState(() => readCourseQuizLaunch((s.questions ?? []).filter((item) => questionPracticeReadiness(item) === "ready")));
+  // The store may hydrate after the route first mounts. Consume the Tracker
+  // handoff only when its exact ready question IDs are available locally.
+  useEffect(() => { if (courseLaunch) clearCourseQuizLaunch(); }, [courseLaunch]);
   const questions = s.questions ?? NO_QUESTIONS;
   const questionSets = s.questionSets ?? NO_SETS;
   const documents = useMemo(() => (s.documents ?? NO_DOCUMENTS).filter(doc => !["axom-private-library-catalog", "axom-private-bank-review"].includes(doc.fileType)), [s.documents]);
@@ -88,7 +93,7 @@ export function QuestionWorkspacePage() {
   const [open, setOpen] = useState<QuestionRecord | null>(null);
   const [showStyle, setShowStyle] = useState(false);
   const [runner, setRunner] = useState<RunnerLaunch | null>(() => {
-    if (courseLaunch) return { mode: "tutor", retakeIds: courseLaunch.questionIds, presetFilters: { setIds: courseLaunch.setIds } };
+    if (courseLaunch) return { mode: "tutor", retakeIds: courseLaunch.questionIds, presetFilters: { setIds: courseLaunch.setIds }, fromCourse: true };
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession) ?? "null") as { mode?: QuizMode; poolIds?: string[] } | null;
       return saved?.mode && saved.poolIds?.length ? { mode: saved.mode } : null;
@@ -104,9 +109,23 @@ export function QuestionWorkspacePage() {
   const entryRef = useRef<HTMLDivElement>(null);
   const provider = useMemo(() => resolveActiveProvider(), []);
 
+  useEffect(() => {
+    if (courseLaunch || runner) return;
+    const verified = readCourseQuizLaunch(questions.filter((item) => questionPracticeReadiness(item) === "ready"));
+    if (!verified) return;
+    setCourseLaunch(verified);
+    setRunner({ mode: "tutor", retakeIds: verified.questionIds, presetFilters: { setIds: verified.setIds }, fromCourse: true });
+  }, [courseLaunch, runner, questions]);
+
+  function returnToCourseTracker() {
+    setRunner(null);
+    setCourseLaunch(null);
+    setSuspendedSim(readSuspendedBlock());
+    location.hash = "tracker";
+  }
+
   const isFirstUse = questionSets.length === 0 && questions.length === 0;
-  const runnableQuestions = useMemo(() => questions.filter((question) =>
-    question.options.length >= 2 && questionMappingStatus(question) === "ready"), [questions]);
+  const runnableQuestions = useMemo(() => questions.filter((question) => questionPracticeReadiness(question) === "ready"), [questions]);
   const due = useMemo(() => dueQuestions(runnableQuestions), [runnableQuestions]);
   const incorrect = runnableQuestions.filter((question) => question.status === "incorrect");
   const weak = useMemo(() => weakTopics(questions, 5), [questions]);
@@ -317,6 +336,7 @@ export function QuestionWorkspacePage() {
               {suspendedSim && <button className="qb-cta primary" onClick={() => setRunner({ mode: suspendedSim.mode, simulate: true })}><Play size={ICON_SIZE.emphasis} /> Continue</button>}
               <button className="qb-cta primary" disabled={!runnable} onClick={() => setRunner({ mode: "tutor" })}><Play size={ICON_SIZE.emphasis} /> Create Quiz</button>
               <button className="qb-cta ghost" onClick={() => { setTab("sets"); setBankView("books"); }}><BookOpen size={ICON_SIZE.body} /> Browse Courses / Question Sets</button>
+              {courseLaunch && <button className="qb-cta ghost" onClick={returnToCourseTracker} aria-label={`Return to Course Tracker from ${courseLaunch.module}`}><BookOpen size={ICON_SIZE.body} /> Return to Course Tracker · {courseLaunch.module}{courseLaunch.week ? ` / Week ${courseLaunch.week}` : ""}</button>}
               <button className="qb-cta ghost" onClick={() => openImport("file")}><FileInput size={ICON_SIZE.body} /> Add your own material</button>
               <button className="qb-cta ghost" onClick={() => setModuleTourOpen(true)} aria-label="Open Question Bank help tour">
                 <HelpCircle size={ICON_SIZE.body} /> Help
@@ -585,6 +605,7 @@ export function QuestionWorkspacePage() {
           presetTimed={runner.presetTimed}
           blockId={runner.blockId}
           simulate={runner.simulate}
+          onReturnToCourse={runner.fromCourse ? returnToCourseTracker : undefined}
           onClose={() => { setRunner(null); setSuspendedSim(readSuspendedBlock()); }}
         />
       )}

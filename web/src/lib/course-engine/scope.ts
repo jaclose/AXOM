@@ -11,7 +11,7 @@
 import type { ID } from "../types";
 import type { QuestionSet } from "../library";
 import type { QuestionRecord } from "../questions";
-import { moduleKey } from "./vocabulary.ts";
+import { canonicalModuleKey } from "./vocabulary.ts";
 
 export interface CourseScope {
   /** Module as the learner writes it: "FTM 1". */
@@ -28,7 +28,7 @@ export const UNASSIGNED_SCOPE_KEY = "unassigned";
 
 /** "ftm1|w2". Two spellings of a module are one scope. */
 export function scopeKey(scope: CourseScope): string {
-  const module = scope.module ? moduleKey(scope.module) : "";
+  const module = scope.module ? canonicalModuleKey(scope.module) : "";
   if (!module) return UNASSIGNED_SCOPE_KEY;
   return scope.week ? `${module}|w${scope.week}` : module;
 }

@@ -92,7 +92,7 @@ describe("QuestionWorkspacePage first use", () => {
     expect(container.querySelector('[data-tour="question-bank-entry"]')).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Add your own material" }));
-    expect(screen.getByLabelText("Choose a question file to import")).toBeTruthy();
+    expect(screen.getByLabelText(/Choose question files or a ZIP to import/)).toBeTruthy();
   });
 
   it("routes Paste text into the real paste mode on the unified Import tab", async () => {
@@ -344,5 +344,43 @@ describe("QuestionWorkspacePage returning state", () => {
     await user.click(screen.getByRole("button", { name: /Begin/ }));
     expect(screen.getByRole("heading", { name: "Import questions" })).toBeTruthy();
     expect(screen.queryByRole("dialog", { name: /Tutor/ })).toBeNull();
+  });
+});
+
+describe("QuestionWorkspacePage Course Tracker handoff", () => {
+  it("waits for hydration before consuming a Tracker selection, runs it, and returns to Tracker", async () => {
+    sessionStorage.clear();
+    window.location.hash = "questions";
+    const key = "axom.courseQuizLaunch.v1";
+    sessionStorage.setItem(key, JSON.stringify({
+      module: "Neuro", term: "Term 4", week: 2,
+      questionIds: ["tracker-ready"], setIds: ["tracker-set"],
+    }));
+    const user = userEvent.setup();
+    render(<QuestionWorkspacePage />);
+    expect(sessionStorage.getItem(key)).not.toBeNull();
+    expect(screen.queryByText("Verified course question")).toBeNull();
+
+    act(() => {
+      useStore.setState({
+        questions: [question({ id: "tracker-ready", stem: "Verified course question", correctKey: "A" })],
+        questionSets: [{
+          ...set("tracker-set", "Course IMCQ", "tracker-ready", "2026-10-14T10:00:00.000Z"),
+          scope: { courseId: "ncrs", module: "Neuro", week: 2 },
+        }],
+      });
+    });
+    await waitFor(() => expect(screen.getByText("Verified course question")).toBeTruthy());
+    expect(sessionStorage.getItem(key)).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "A. Alpha" }));
+    await user.click(screen.getByRole("button", { name: "Check answer" }));
+    await user.click(screen.getByRole("button", { name: "Finish block" }));
+    expect(screen.getByRole("heading", { name: "Block results" })).toBeTruthy();
+    expect(useStore.getState().quizSessions.some((item) => item.questionIds.includes("tracker-ready"))).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Return to Course Tracker" }));
+    expect(window.location.hash).toBe("#tracker");
+    expect(screen.queryByText("Verified course question")).toBeNull();
+    sessionStorage.clear();
   });
 });

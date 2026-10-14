@@ -212,18 +212,18 @@ describe("course templates", () => {
 
   it("adds nothing when a template is applied twice, and renames instead of duplicating", () => {
     const plan = planCourseTemplate([parseCourseTemplate(ACTIVITIES)]);
-    const applied = plan.items.map((item, index) => ({ id: `row-${index}`, path: item.path, label: item.label, templateKey: item.templateKey }));
+    const applied = plan.items.map((item, index) => ({ id: `row-${index}`, path: item.path, label: item.label, templateKey: item.templateKey, weekSource: item.weekSource }));
     expect(reconcileCourseTemplate(plan, applied)).toEqual({ create: [], update: [], unchanged: 6 });
 
     const retitled = planCourseTemplate([parseCourseTemplate(ACTIVITIES.replace("DEMO SG 01 Introduction", "DEMO SG 01 Orientation"))]);
     expect(reconcileCourseTemplate(retitled, applied)).toEqual({
-      create: [], update: [{ id: "row-0", path: "DEMO 1/Week 1", label: "DEMO SG 01 Orientation", weekSource: "template" }], unchanged: 5,
+      create: [], update: [{ id: "row-0", path: "DEMO 1/Week 1", label: "DEMO SG 01 Orientation", weekSource: "inferred" }], unchanged: 5,
     });
   });
 
   it("records who placed each row, and never moves a row the learner placed", () => {
     const plan = planCourseTemplate([parseCourseTemplate(LECTURES), parseCourseTemplate(ACTIVITIES)]);
-    expect(plan.items.find((item) => item.activity === "esoft")?.weekSource).toBe("template");
+    expect(plan.items.find((item) => item.activity === "esoft")?.weekSource).toBe("inferred");
     const lecture = plan.items.find((item) => item.label.startsWith("DEMO Lecture 03"))!;
     expect(lecture).toMatchObject({ week: 2, weekSource: "inferred" });
 
@@ -235,6 +235,145 @@ describe("course templates", () => {
     const retitled = planCourseTemplate([parseCourseTemplate(LECTURES.replace("Third topic", "Third topic, revised")), parseCourseTemplate(ACTIVITIES)]);
     expect(reconcileCourseTemplate(retitled, moved).update).toEqual([
       { id: moved.find((row) => row.weekSource === "learner")!.id, path: "DEMO 1/Week 1", label: "DEMO Lecture 03 Third topic, revised", weekSource: "learner" },
+    ]);
+  });
+
+
+  it("only treats the week's own explicit evidence as confirmed", () => {
+    const source = [
+      "DEMO 1 - Lectures:",
+      "",
+      "DEMO Lecture 01 Week 3 introductions [Lecture]",
+      "DEMO Lecture 02 Derivatives [Lecture]",
+    ].join("\n");
+    const plan = planCourseTemplate([parseCourseTemplate(source)]);
+    expect(plan.items[0]).toMatchObject({ week: 3, weekBasis: "stated", weekSource: "template" });
+    expect(plan.items[1].weekBasis).not.toBe("stated");
+    expect(plan.items[1].weekSource).not.toBe("template");
+    expect(plan.needsConfirmation).toBe(true);
+  });
+
+  it("preserves numbered lecture identities even when official titles change", () => {
+    const original = parseCourseTemplate("CPR 1 - Lectures:\n\nCPR 03 Histology of Circulation [Lecture]\nCPR DLA 02 Before Lecture 06 [DLA]");
+    const revised = parseCourseTemplate("CPR 1 - Lectures:\n\nCPR 03 Cardiac Histology, Updated [Lecture]\nCPR DLA 02 Before Lecture 06 [DLA]");
+    expect(original.items.map((item) => item.number)).toEqual([3, 2]);
+    const first = planCourseTemplate([original], { term: "Term 1" });
+    const second = planCourseTemplate([revised], { term: "Term 1" });
+    expect(first.items[0].templateKey).toBe(second.items[0].templateKey);
+    const current = first.items.map((item, index) => ({ ...item, id: `record-${index}`, passes: 3, attendance: "attended" as const }));
+    const changes = reconcileCourseTemplate(second, current);
+    expect(changes.create).toEqual([]);
+    expect(changes.review).toBeUndefined();
+    expect(changes.update).toMatchObject([{ id: "record-0", label: "CPR 03 Cardiac Histology, Updated" }]);
+  });
+
+  it("keeps identical activities in distinct terms independent", () => {
+    const section = parseCourseTemplate("DEMO 1 - Lectures:\n\nDEMO Lecture 01 Anatomy [Lecture]");
+    const plan = planCourseTemplate([section], { term: "Term 2" });
+    const previousTerm = plan.items.map((item) => ({
+      id: "other-term", path: item.path.replace("Term 2", "Term 1"),
+      label: item.label, templateKey: item.templateKey, weekSource: item.weekSource,
+    }));
+    expect(reconcileCourseTemplate(plan, previousTerm).create).toHaveLength(1);
+  });
+
+  it("reconciles short and long module identities inside the same term without duplicating", () => {
+    const section = parseCourseTemplate("NB Block 2 - Lectures:\n\nNB Lecture 01 Structure [Lecture]");
+    const plan = planCourseTemplate([section], { term: "Term 2" });
+    const shortForm = [{
+      id: "already-done", path: "T2/NB2/Unscheduled", label: "NB Lecture 01 Structure",
+      templateKey: "nb2|lecture|1", weekSource: "learner" as const,
+    }];
+    const reconciliation = reconcileCourseTemplate(plan, shortForm);
+    expect(reconciliation.create).toEqual([]);
+    expect(reconciliation.review).toBeUndefined();
+    expect(reconciliation.unchanged + reconciliation.update.length).toBe(1);
+    // A learner's chosen location survives importing the long-form template.
+    expect(reconciliation.update.every((item) => item.path === "T2/NB2/Unscheduled")).toBe(true);
+  });
+
+  it("holds ambiguous duplicate identities for review rather than inserting either copy", () => {
+    const repeated = parseCourseTemplate("DEMO 1 - Lectures:\n\nDEMO Lecture 01 One [Lecture]\nDEMO Lecture 01 Duplicate [Lecture]");
+    const plan = planCourseTemplate([repeated], { term: "Term 1" });
+    const changes = reconcileCourseTemplate(plan, []);
+    expect(changes.create).toHaveLength(0);
+    expect(changes.review).toHaveLength(2);
+  });
+
+  it("keeps renamed unnumbered source activities for review rather than silently creating a second", () => {
+    const original = planCourseTemplate([parseCourseTemplate("DEMO 1 - Lectures:\n\nTeaching conference [Review]")], { term: "Term 1" });
+    const updated = planCourseTemplate([parseCourseTemplate("DEMO 1 - Lectures:\n\nRevised teaching conference [Review]")], { term: "Term 1" });
+    const rows = [{ id: "tracked", path: original.items[0].path, label: original.items[0].label, templateKey: original.items[0].templateKey }];
+    const changes = reconcileCourseTemplate(updated, rows);
+    expect(changes.create).toHaveLength(0);
+    expect(changes.review).toHaveLength(1);
+    expect(changes.review?.[0].candidateIds).toEqual(["tracked"]);
+  });
+
+
+  it("does not silently duplicate a manually filed unkeyed activity from another week", () => {
+    const plan = planCourseTemplate([
+      parseCourseTemplate("DEMO 1 - Lectures:\n\nDEMO Lecture 01 Study Session [Lecture]"),
+    ], { term: "Term 2", firstWeek: 3 });
+    const old = [{
+      id: "manual-with-progress", path: "Term 2/DEMO 1/Week 2",
+      label: plan.items[0].label, weekSource: "learner" as const,
+    }];
+    const changed = reconcileCourseTemplate(plan, old);
+    expect(changed.create).toHaveLength(0);
+    expect(changed.review).toHaveLength(1);
+    expect(changed.review?.[0].candidateIds).toEqual(["manual-with-progress"]);
+  });
+
+  it("recognizes an existing module-root activity as same-term rather than copying it", () => {
+    const plan = planCourseTemplate([parseCourseTemplate("DEMO 1 - Lectures:\n\nDEMO Lecture 01 Anatomy [Lecture]")], { term: "Term 2" });
+    const old = [{ id: "manual-root", path: "Term 2/DEMO 1", label: plan.items[0].label }];
+    const changed = reconcileCourseTemplate(plan, old);
+    expect(changed.create).toHaveLength(0);
+    expect(changed.review?.[0].candidateIds).toEqual(["manual-root"]);
+  });
+
+
+  it("uses source-stated week anchors before group order and does not invent inconsistent dates", () => {
+    const evidence = [
+      "DEMO 1 - Small Groups:",
+      "SG 01 [Small Group]",
+      "Week 4 ExamSoft Quiz [ESoft]",
+      "",
+      "SG 02 [Small Group]",
+      "Week 5 ExamSoft Quiz [ESoft]",
+      "",
+      "SG 03 [Small Group]",
+    ].join("\n");
+    const plan = planCourseTemplate([parseCourseTemplate(evidence, "weekly.txt")], { term: "Term 3" });
+    expect(plan.items.map((item) => [item.label, item.week, item.weekBasis])).toEqual([
+      ["SG 01", 4, "group-order"], ["Week 4 ExamSoft Quiz", 4, "stated"],
+      ["SG 02", 5, "group-order"], ["Week 5 ExamSoft Quiz", 5, "stated"],
+      ["SG 03", 6, "group-order"],
+    ]);
+    expect(plan.problems).toEqual([]);
+    const inconsistent = evidence.replace("Week 5 ExamSoft Quiz", "Week 9 ExamSoft Quiz");
+    const disputed = planCourseTemplate([parseCourseTemplate(inconsistent, "inconsistent.txt")], { term: "Term 3" });
+    expect(disputed.problems).toContain(
+      "inconsistent.txt: explicit week labels conflict with a single consecutive group timeline. Unstated groups remain unscheduled.",
+    );
+    expect(disputed.items.find((item) => item.label === "SG 03")?.week).toBeUndefined();
+    expect(disputed.items.find((item) => item.label === "SG 03")?.weekBasis).toBe("unknown");
+  });
+
+  it("keeps standalone metadata even when no source revision is specified", () => {
+    const section = parseCourseTemplate(
+      "T4 - NCRS - Lectures:\n@authority: reviewed\n@cohort: D\n@week 4: September 14\nWeek 4:\nLecture 01 Exam [Lecture]",
+    );
+    expect(section.context).toMatchObject({
+      authority: "reviewed", cohort: "D", weekDates: { 4: "September 14" },
+    });
+    const invalid = parseCourseTemplate(
+      "T4 - NCRS - Lectures:\n@week 0: Invalid\n@week 4: First\n@week 4: Different\nLecture 01 Exam [Lecture]",
+    );
+    expect(invalid.problems).toEqual([
+      "Line 2: source week must be 1–60.",
+      "Line 4: source Week 4 has conflicting dates.",
     ]);
   });
 

@@ -7,6 +7,7 @@ import { uploadCloudContent, hydrateCloudContent, readContentReferences } from "
 import { canonicalJson, sha256 } from "../compressedText";
 import { prepareCloudSnapshot, decodeCloudSnapshot, contentCheckpointHash } from "./cloudSnapshot";
 import { uploadCloudMedia, readMediaManifest, validateWorkspaceMedia } from "./cloudMedia";
+import { ORIGINALS_BUCKET, uploadCloudOriginals } from "./cloudOriginals";
 import { MAX_SNAPSHOT_BYTES } from "./syncPolicy";
 import { accountOperationClient, loadSupabase } from "../account/supabase";
 import { SyncPushError, classifyPushFailure } from "./syncFailure";
@@ -37,19 +38,20 @@ export class SupabaseSyncTransport implements SyncTransport {
   prepare = prepareCloudSnapshot;
 
   async push(envelope: SnapshotEnvelope): Promise<PushResult> {
-    const { client, userId, assertCurrent } = await accountOperationClient();
+    const { client, userId, assertCurrent, resumable } = await accountOperationClient();
     if (!envelope.accountUserId || userId !== envelope.accountUserId) throw new Error("The workspace is linked to a different account. Upload was stopped.");
     if (envelope.payload.deferredContent && envelope.payload.deferredContent.accountId !== userId) throw new Error("Download your saved content in its original account before transferring this workspace.");
     if (!envelope.packed) envelope = await this.prepare(envelope);
     const baseline = await readSyncBaseline(userId, envelope.baseRevision);
-    let previous: { media?: unknown; sources?: unknown } | null | undefined = baseline?.packed;
+    let previous: { media?: unknown; sources?: unknown; content?: string } | null | undefined = baseline?.packed;
     if (!previous) {
       const result = await client.from("workspace_revisions")
-        .select("media:snapshot_payload->media,sources:snapshot_payload->sources").neq("reason", "conflict").order("revision", { ascending: false }).limit(1).maybeSingle();
+        .select("media:snapshot_payload->media,sources:snapshot_payload->sources,content:snapshot_payload->>content").neq("reason", "conflict").order("revision", { ascending: false }).limit(1).maybeSingle();
       if (result.error) throw result.error;
       previous = result.data;
     }
     await uploadCloudContent(client, userId, envelope.contentObjects ?? [], previous?.sources ? readContentReferences(previous.sources) : [], assertCurrent);
+    await uploadCloudOriginals(client, userId, envelope.payload, previous?.content, assertCurrent, resumable);
     const media = await uploadCloudMedia(client, userId, envelope.payload, assertCurrent, previous?.media ? readMediaManifest(previous.media) : []);
     const payload = { ...envelope.packed!, media };
     if (new TextEncoder().encode(JSON.stringify(payload)).length > MAX_SNAPSHOT_BYTES) throw new SyncPushError({ kind: "rejected", rejection: "too-large", status: 0 }, "This compressed workspace exceeds the account limit.");
@@ -200,7 +202,7 @@ export class SupabaseSyncTransport implements SyncTransport {
   /** Deletes every server copy for this account. Local data is untouched. */
   async deleteCloudData(): Promise<void> {
     const { client, userId, assertCurrent } = await accountOperationClient();
-    for (const name of ["workspace-media", "workspace-content"]) {
+    for (const name of ["workspace-media", "workspace-content", ORIGINALS_BUCKET]) {
       const bucket = client.storage.from(name);
       for (;;) {
         await assertCurrent();

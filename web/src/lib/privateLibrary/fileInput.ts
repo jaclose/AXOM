@@ -22,7 +22,7 @@ const crcTable = Uint32Array.from({ length: 256 }, (_, value) => {
 });
 
 /** Bound actual expansion, not just the archive's untrusted size claim. */
-function readZipEntry(item: JSZipObject, expected: number, crc: number, consume: (length: number) => void): Promise<Uint8Array> {
+export function readZipEntry(item: JSZipObject, expected: number, crc: number, consume: (length: number) => void): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
     const streaming = item as StreamingZipObject;
     if (typeof streaming.internalStream !== "function") {

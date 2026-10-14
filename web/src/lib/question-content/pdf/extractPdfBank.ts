@@ -31,6 +31,7 @@ export type PdfBankExtraction =
       report: TaggedConversion["report"];
       sourceText: TaggedConversion["sourceText"];
       sourceBytes: number;
+      originalFile?: Blob;
     });
 
 export async function extractPdfBank(file: { arrayBuffer(): Promise<ArrayBuffer> }, manifest: PackageManifest): Promise<PdfBankExtraction> {
@@ -54,6 +55,7 @@ export async function extractPdfBank(file: { arrayBuffer(): Promise<ArrayBuffer>
     report: read.report,
     sourceText: read.sourceText,
     sourceBytes: buffer.byteLength,
+    ...(file instanceof Blob ? { originalFile: file } : {}),
     ...assessBank(pkg, read.issues, read.files),
   };
 }

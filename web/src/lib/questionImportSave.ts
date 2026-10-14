@@ -31,6 +31,8 @@ import { attachNamedImages, imageNameKey, matchNamedImages } from "./questionImp
 import { evaluateImportDrafts, type DraftImportEvaluation } from "./questionImportTrust";
 import { normalizeTags, suggestCategory } from "./taxonomy";
 import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "./localVault";
+import { saveSourceOriginal } from "./decode/sources";
+import { MAX_SOURCE_ORIGINAL_BYTES, originalFileIdentity } from "./sourceOriginal";
 
 export type ImportDestination = "set" | "doc" | "both";
 
@@ -44,6 +46,8 @@ export interface ReviewedDraft extends ParsedQuestionDraft {
 
 /** The file the questions came from, when there is one. */
 export interface ImportSourceFile {
+  /** Transient bytes for the local save boundary; never serialized into workspace JSON. */
+  originalFile?: Blob;
   existingDocumentId?: string;
   title: string;
   fileName: string;
@@ -80,6 +84,7 @@ export type ReviewedImportRefusal =
   | { ok: false; reason: "invalid-question"; errors: string[] };
 
 export interface PreparedReviewedImport {
+  originalFile?: Blob;
   ok: true;
   fingerprint: string;
   plan: ReviewedImportPersistencePlan;
@@ -282,6 +287,7 @@ export function prepareReviewedImport(
 
   return {
     ok: true,
+    originalFile: document?.originalFile,
     fingerprint,
     plan: { questions: wantsSet ? questions : [], questionSet, documentWrite },
     equivalent: equivalent ? { setId: equivalent.set.id, questionIds: equivalent.questionIds, attachments: equivalent.questionIds.map(id => library.questions.find(q => q.id === id)?.attachments ?? []) } : undefined,
@@ -310,6 +316,8 @@ export type SavedReviewedImport =
       questionIds: string[];
       /** The file was already in the library, so its record was linked, not copied. */
       reusedDocument: boolean;
+      /** This is local storage only, not an account/cloud acknowledgement. */
+      originalSource?: { status: "local-pending-sync" | "local-only-oversize"; bytes: number; message?: string };
       images: { attached: number; missing: number; problems: string[] };
     };
 
@@ -320,9 +328,42 @@ export async function saveReviewedImport(
 ): Promise<SavedReviewedImport> {
   store.assertCurrent?.();
   const noImages = { attached: 0, missing: 0, problems: [] as string[] };
+  let plan = prepared.plan;
+  let originalSource: { status: "local-pending-sync" | "local-only-oversize"; bytes: number; message?: string } | undefined;
+  if (prepared.originalFile && plan.documentWrite) {
+    const write = plan.documentWrite;
+    const document = write.kind === "create" ? write.document : write.original;
+    try {
+      // Even a source exceeding the configured cloud file-size ceiling must
+      // never block import of validated, reviewed questions. Preserve its exact
+      // bytes in the existing local originals cache, but do not write a false
+      // cloud restorable reference for a file the backend cannot accept.
+      const oversized = prepared.originalFile.size > MAX_SOURCE_ORIGINAL_BYTES;
+      const originalFile = oversized ? undefined : originalFileIdentity(document, prepared.originalFile);
+      await saveSourceOriginal(document, prepared.originalFile);
+      store.assertCurrent?.();
+      originalSource = oversized
+        ? { status: "local-only-oversize", bytes: prepared.originalFile.size,
+          message: "This original exceeds the 128 MiB account-original limit. Its verified copy stays on this device; keep an offline backup. Questions and source text may still sync separately." }
+        : { status: "local-pending-sync", bytes: prepared.originalFile.size };
+      if (originalFile) {
+        plan = { ...plan, documentWrite: write.kind === "create"
+          ? { ...write, document: { ...write.document, originalFile } }
+          : { ...write, patch: { ...write.patch, originalFile } } };
+        // An exact repeated import also repairs a legacy record's missing original.
+        if (prepared.equivalent) {
+          const checkpoint = getVaultWriteCheckpoint();
+          await store.updateDocument(document.id, { originalFile });
+          await flushLocalVaultWrites(); assertVaultWritesSince(checkpoint);
+        }
+      }
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : "The original file could not be saved. Keep it and retry.", rollbackFailures: [] };
+    }
+  }
   const coordinated = prepared.equivalent
     ? { joined: false, result: { ok: true as const, questionSetId: prepared.equivalent.setId, questionIds: prepared.equivalent.questionIds, documentId: prepared.wantsDoc ? prepared.existingDocumentId : undefined } }
-    : await persistReviewedImportOnce(prepared.fingerprint, store, prepared.plan);
+    : await persistReviewedImportOnce(prepared.fingerprint, store, plan);
   const persisted = coordinated.result;
   if (!persisted.ok) return persisted;
 
@@ -372,6 +413,7 @@ export async function saveReviewedImport(
     documentId: persisted.documentId,
     questionIds: persisted.questionIds,
     reusedDocument: Boolean(prepared.existingDocumentId),
+    ...(originalSource ? { originalSource } : {}),
     images: report,
   };
 }

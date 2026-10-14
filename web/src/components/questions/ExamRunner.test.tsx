@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { QuestionSet } from "../../lib/library";
@@ -858,3 +858,87 @@ function selectText(root: HTMLElement, startOffset: number, endOffset: number) {
   selection?.addRange(range);
   fireEvent.mouseUp(root);
 }
+
+describe("ExamRunner answer-key integrity", () => {
+  it("does not launch an invalid correct key or duplicate answer keys as scorable practice", async () => {
+    setStore();
+    const invalidKey = { ...question, id: "invalid-key", stem: "Invalid answer key", correctKey: "Z", setId: undefined };
+    const ambiguousOptions = { ...question, id: "duplicate-key", stem: "Ambiguous options", correctKey: "A",
+      options: [{ key: "A", text: "First A" }, { key: "A", text: "Second A" }], setId: undefined };
+    mocked.store = { ...mocked.store, questions: [question, invalidKey, ambiguousOptions] };
+    const user = userEvent.setup();
+    render(<ExamRunner mode="tutor" onClose={vi.fn()} />);
+    expect(screen.getByRole("region", { name: "Practice source" }).textContent).toContain("1 matches your filters");
+    await user.click(screen.getByRole("button", { name: "Start tutor block" }));
+    expect(screen.getByText(question.stem)).toBeTruthy();
+    expect(screen.queryByText("Invalid answer key")).toBeNull();
+    expect(screen.queryByText("Ambiguous options")).toBeNull();
+  });
+});
+
+describe("ExamRunner atomic session recovery", () => {
+  const second: QuestionRecord = { ...question, id: "restored-second", stem: "Second restored question" };
+
+  it("preserves a timed exam snapshot until every question arrives, then restores its position and answers", async () => {
+    setStore();
+    const now = new Date().toISOString();
+    const pendingSnapshot = {
+      mode: "exam", runId: "late-hydration-run", poolIds: [question.id, second.id], index: 1,
+      answers: [{ questionId: question.id, answerKey: "B", correct: true, flagged: true, seconds: 18 }],
+      picked: "A", revealed: false, startedAt: now, timed: true,
+      filters: { count: 2, status: "all", ordered: true },
+    };
+    localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify(pendingSnapshot));
+    mocked.store = { ...mocked.store, questions: [] };
+    const onClose = vi.fn();
+    const { rerender } = render(<ExamRunner mode="tutor" onClose={onClose} />);
+
+    expect(screen.getByRole("dialog", { name: "Recover your saved question block" })).toBeTruthy();
+    expect(screen.getByText("0 of 2 questions are ready on this device")).toBeTruthy();
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession)!)).toEqual(pendingSnapshot);
+    expect(mocked.commitQuizRun).not.toHaveBeenCalled();
+    expect(mocked.saveQuizSession).not.toHaveBeenCalled();
+
+    mocked.store = { ...mocked.store, questions: [question] };
+    rerender(<ExamRunner mode="tutor" onClose={onClose} />);
+    expect(screen.getByText("1 of 2 questions are ready on this device")).toBeTruthy();
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession)!)).toEqual(pendingSnapshot);
+
+    mocked.store = { ...mocked.store, questions: [question, second] };
+    rerender(<ExamRunner mode="tutor" onClose={onClose} />);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Exam · 2 of 2" })).toBeTruthy());
+    expect(screen.getByText(second.stem)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "A. Alpha" }).getAttribute("aria-pressed")).toBe("true");
+    const resumed = JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession)!);
+    expect(resumed.poolIds).toEqual([question.id, second.id]);
+    expect(resumed.index).toBe(1);
+    expect(resumed.runId).toBe("late-hydration-run");
+    expect(resumed.answers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ questionId: question.id, answerKey: "B", flagged: true }),
+    ]));
+    expect(mocked.commitQuizRun).not.toHaveBeenCalled();
+    expect(mocked.saveQuizSession).not.toHaveBeenCalled();
+  });
+
+  it("does not silently score a saved block while a stored answer mapping needs review", async () => {
+    setStore();
+    const awaiting = { ...question, needsReview: true };
+    const snapshot = {
+      mode: "tutor", runId: "review-resume", poolIds: [question.id], index: 0,
+      answers: [], picked: "B", revealed: false, startedAt: new Date().toISOString(),
+      timed: false, filters: { count: 1, status: "all", ordered: true },
+    };
+    localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify(snapshot));
+    mocked.store = { ...mocked.store, questions: [awaiting] };
+    const { rerender } = render(<ExamRunner mode="tutor" onClose={vi.fn()} />);
+    expect(screen.getByText("0 of 1 questions are ready on this device")).toBeTruthy();
+    expect(screen.getByText(/needs answer or source review/)).toBeTruthy();
+    expect(mocked.recordQuestionAttempt).not.toHaveBeenCalled();
+    expect(localStorage.getItem(STORAGE_KEYS.quizActiveSession)).toBe(JSON.stringify(snapshot));
+
+    mocked.store = { ...mocked.store, questions: [{ ...awaiting, needsReview: false }] };
+    rerender(<ExamRunner mode="tutor" onClose={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Tutor · 1 of 1" })).toBeTruthy());
+    expect(screen.getByRole("button", { name: "B. Beta" }).getAttribute("aria-pressed")).toBe("true");
+  });
+});

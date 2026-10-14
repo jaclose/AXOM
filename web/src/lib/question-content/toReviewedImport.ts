@@ -24,6 +24,7 @@ import type { ImportPackage, PackageIssue, PackageQuestion, QuestionAsset } from
 import { questionReadiness, type Readiness } from "./readiness";
 
 export interface PackageImportOptions {
+  originalFile?: Blob;
   /** "both" keeps a record of the source file in the library beside the questions. It needs `sourceText`. */
   destination?: ImportDestination;
   courseId?: string;
@@ -172,6 +173,7 @@ export function packageToReviewedImport(pkg: ImportPackage, issues: readonly Pac
         drafts,
         destination,
         document: {
+          originalFile: options.originalFile,
           title: manifest.bank.title,
           fileName: manifest.source.filename,
           fileType: FILE_TYPE[extension] ?? "text",

@@ -13,11 +13,10 @@ import {
 import { useStore } from "../../lib/store";
 import {
   filterForMode, MODE_META, QUESTION_CATEGORIES, QUESTION_MAPPING_STATUS_LABEL,
-  questionMappingStatus,
   type QuestionMode, type QuestionRecord, type QuestionDifficulty, type QuestionSource,
 } from "../../lib/questions";
 import {
-  applyQuestionFilter, countActiveFilters, emptyQuestionFilter, normalizeQuestionFilter,
+  applyQuestionFilter, countActiveFilters, emptyQuestionFilter, normalizeQuestionFilter, questionPracticeReadiness,
   type QuestionFilterCriteria,
 } from "../../lib/questionFilters";
 import { computeTagCounts, parseTagInput } from "../../lib/questionTags";
@@ -358,6 +357,14 @@ export function BankBrowser({
               {presentSources.map((source) => <option key={source} value={source}>{SOURCE_LABEL[source]}</option>)}
             </select>
           )}
+          <select className="field" style={{ width: "auto" }} aria-label="Filter by answer readiness"
+            value={criteria.readiness ?? ""} onChange={(e) => patchCriteria((draft) => { if (e.target.value) draft.readiness = e.target.value as NonNullable<QuestionFilterCriteria["readiness"]>; else delete draft.readiness; })}>
+            <option value="">Any answer readiness</option>
+            <option value="ready">Ready for practice</option>
+            <option value="review">Review required</option>
+            <option value="review-suggested">Suggested evidence review</option>
+            <option value="unresolved">Missing / unresolved evidence</option>
+          </select>
           {presentCourses.length > 0 && (
             <select className="field" style={{ width: "auto" }} aria-label="Filter by course"
               value={criteria.courseId ?? ""} onChange={(e) => patchCriteria((d) => { if (e.target.value) d.courseId = e.target.value; else delete d.courseId; })}>
@@ -457,7 +464,7 @@ export function BankBrowser({
               <button className="grow truncate qrow-open" onClick={() => onOpen(q)}>{q.stem}</button>
               {q.tags.slice(0, 3).map((tag) => <Tag key={tag} tone="neutral">{tag}</Tag>)}
               {(() => {
-                const mappingStatus = questionMappingStatus(q);
+                const mappingStatus = questionPracticeReadiness(q);
                 return mappingStatus === "ready"
                   ? null
                   : <Tag tone={mappingStatus === "unresolved" ? "red" : "orange"}>{QUESTION_MAPPING_STATUS_LABEL[mappingStatus]}</Tag>;

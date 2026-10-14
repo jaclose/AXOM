@@ -5,6 +5,7 @@ import { readDeferredContent } from "./deferredContent";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { canonicalJson, compressText, decompressText, sha256 } from "../compressedText";
 import type { NoctyriumState } from "../types";
+import { readOriginalFile } from "../sourceOriginal";
 
 export const CONTENT_BUCKET = "workspace-content";
 export const MAX_CONTENT_OBJECT_BYTES = 8 * 1024 * 1024;
@@ -59,6 +60,7 @@ export async function splitCloudContent(state: NoctyriumState): Promise<{ worksp
   for (const collection of ["documents", "questions"] as const) {
     const compact: Record<string, unknown>[] = [];
     for (const record of state[collection] ?? []) {
+      if (collection === "documents") readOriginalFile(record as NoctyriumState["documents"][number]);
       const fields = collection === "documents" && "fileType" in record && INLINE_CONTENT_TYPES.has(record.fileType)
         ? [] : collection === "documents" ? DOCUMENT_FIELDS : QUESTION_FIELDS;
       const projected = await projectCloudRecord(record, collection);

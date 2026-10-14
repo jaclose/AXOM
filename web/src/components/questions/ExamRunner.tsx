@@ -16,7 +16,6 @@ import {
 } from "../../lib/quiz";
 import {
   ANSWER_CERTAINTY_LABEL, ERROR_TYPE_LABEL, EXAM_TYPE_LABEL, QUESTION_CATEGORIES,
-  questionMappingStatus,
   type AnswerCertainty, type QuestionAttempt, type QuestionErrorType, type QuestionExamType, type QuestionRecord,
 } from "../../lib/questions";
 import { newSchedule } from "../../lib/ankiCards";
@@ -26,6 +25,7 @@ import { Modal, SelectField } from "../ui/Modal";
 import { GButton, GhostButton, Tag } from "../ui/primitives";
 import { pushToast } from "../../lib/toast";
 import { CourseBankBrowser } from "./CourseBankBrowser";
+import { questionPracticeReadiness } from "../../lib/questionFilters";
 import { QuizFeedback } from "./QuizFeedback";
 import { SourceTeaching } from "./SourceTeaching";
 import { SessionReviewModal } from "./SessionReviewModal";
@@ -54,6 +54,7 @@ import { blockFromPlayerSnapshot, certaintiesFromPlayerSnapshot, checkedFromPlay
 const ERROR_TYPES = Object.keys(ERROR_TYPE_LABEL) as QuestionErrorType[];
 const EXAM_TYPES = Object.keys(EXAM_TYPE_LABEL) as QuestionExamType[];
 const CERTAINTY_LEVELS = Object.keys(ANSWER_CERTAINTY_LABEL) as AnswerCertainty[];
+const EMPTY_QUESTIONS: QuestionRecord[] = [];
 
 /** "sim-review": a finished simulation, read back in the interface it was sat in. */
 type Stage = "setup" | "running" | "results" | "sim" | "sim-review";
@@ -77,12 +78,27 @@ interface ActiveQuizSnapshot {
 function readActiveQuiz(): ActiveQuizSnapshot | undefined {
   try {
     const value = JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession) ?? "null") as ActiveQuizSnapshot | null;
-    return value && Array.isArray(value.poolIds) && value.poolIds.length > 0 ? value : undefined;
+    if (!value || (value.mode !== "tutor" && value.mode !== "exam")
+      || !Array.isArray(value.poolIds) || !value.poolIds.length
+      || value.poolIds.some((id) => typeof id !== "string" || !id)
+      || new Set(value.poolIds).size !== value.poolIds.length
+      || !Array.isArray(value.answers) || !value.filters || typeof value.filters !== "object"
+      || typeof value.startedAt !== "string" || !Number.isFinite(Date.parse(value.startedAt))) return undefined;
+    return value;
   } catch { return undefined; }
 }
 
+/** Never restore only part of an active exam. The original pool order, answer
+ * identities and snapshot index are indivisible even during account hydration. */
+function completeRestoredPool(snapshot: ActiveQuizSnapshot, questions: readonly QuestionRecord[]): QuestionRecord[] | undefined {
+  const available = new Map(questions.map((question) => [question.id, question]));
+  const ordered = snapshot.poolIds.map((id) => available.get(id));
+  return ordered.every((question) => question && questionPracticeReadiness(question) === "ready")
+    ? ordered as QuestionRecord[] : undefined;
+}
+
 function trustedCorrectKey(question: QuestionRecord): string | undefined {
-  return questionMappingStatus(question) === "ready" ? question.correctKey : undefined;
+  return questionPracticeReadiness(question) === "ready" ? question.correctKey : undefined;
 }
 
 /** The attempt a run has already saved for a question, read from the live workspace. */
@@ -107,7 +123,7 @@ function readReadingScale(): number {
   } catch { return 1; }
 }
 
-export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, presetTimed = false, blockId, simulate = false, sessionId, onClose }: {
+export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, presetTimed = false, blockId, simulate = false, sessionId, onClose, onReturnToCourse }: {
   mode: QuizMode;
   /** Optional stable identity for a persisted external quiz launch. */
   sessionId?: string;
@@ -122,15 +138,19 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   /** Open straight into exam-interface simulation (UWorld / NBME / ExamSoft). */
   simulate?: boolean;
   onClose: () => void;
+  /** Set only when the block originated from a verified Course Tracker selection. */
+  onReturnToCourse?: () => void;
 }) {
   const s = useStore();
-  const questions = s.questions ?? [];
+  const questions = s.questions ?? EMPTY_QUESTIONS;
+  const readyQuestions = useMemo(() => questions.filter((question) => questionPracticeReadiness(question) === "ready"), [questions]);
   const questionSets = s.questionSets ?? [];
   const restored = useMemo(() => readActiveQuiz(), []);
   // A resumed block keeps the mode it was started in, whichever button reopened it.
   const [mode, setMode] = useState<QuizMode>(restored?.mode ?? initialMode);
   const presentation = useQuestionView();
   const [stage, setStage] = useState<Stage>(restored || retakeIds?.length ? "running" : "setup");
+  const [restorePending, setRestorePending] = useState(() => Boolean(restored && !completeRestoredPool(restored, questions)));
   /** Identifies this run on every attempt it saves, and becomes its session id. */
   const [runId, setRunId] = useState<string>(() => restored?.runId ?? sessionId ?? crypto.randomUUID());
 
@@ -158,10 +178,10 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
 
   // --- run state
   const [pool, setPool] = useState<QuestionRecord[]>(() => restored
-    ? restored.poolIds.map((id) => questions.find((question) => question.id === id)).filter((question): question is QuestionRecord => Boolean(question))
+    ? completeRestoredPool(restored, questions) ?? []
     : retakeIds?.length
       ? buildQuizPool(
-          questions.filter((question) => retakeIds.includes(question.id)),
+          readyQuestions.filter((question) => retakeIds.includes(question.id)),
           { count: Math.max(1, retakeIds.length), status: "all", ordered: true },
         )
       : []);
@@ -282,8 +302,34 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   );
   const provider = useMemo(() => resolveActiveProvider(), []);
 
+  // An account/device restore can mount the player before the local vault has
+  // loaded every saved question. Reconstruct the original block atomically;
+  // never truncate it to the IDs that happened to arrive first.
   useEffect(() => {
-    if (stage !== "running" || pool.length === 0) return;
+    if (!restored || !restorePending) return;
+    const recovered = completeRestoredPool(restored, readyQuestions);
+    if (!recovered) return;
+    const ids = recovered.map((item) => item.id);
+    const recoveredBlock = blockFromPlayerSnapshot(restored, ids, Date.now());
+    const currentId = ids[recoveredBlock.index];
+    const priorAttempt = itemState(recoveredBlock, currentId).revealed
+      ? savedRunAttempt(questions, currentId, runId) : undefined;
+    setPool(recovered);
+    openBlock(recoveredBlock);
+    setCertainties(certaintiesFromPlayerSnapshot(restored, ids));
+    setChecked(checkedFromPlayerSnapshot(restored));
+    setErrorType(priorAttempt?.errorType ?? "");
+    setConfidence(priorAttempt?.confidence);
+    const annotations = recovered[recoveredBlock.index]?.annotations ?? [];
+    setLocalAnnotations(annotations);
+    localAnnotationsRef.current = annotations;
+    setStartedAt(restored.startedAt);
+    setNowTick(Date.now());
+    setRestorePending(false);
+  }, [restored, restorePending, readyQuestions, questions, runId]);
+
+  useEffect(() => {
+    if (stage !== "running" || pool.length === 0 || restorePending) return;
     const filters: QuizFilters = { count, status, categories: category ? [category] : undefined, examTypes: examType ? [examType] : undefined, setIds: setIds.length ? setIds : undefined, questionIds, ordered: ordered || undefined };
     // The snapshot keeps the shape it had before the engine: answered or flagged questions, and the pick on screen.
     const at = Date.now();
@@ -291,7 +337,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     const snapshot: ActiveQuizSnapshot = { mode, poolIds: pool.map((item) => item.id), index, answers, picked, revealed, startedAt, timed, filters, runId, certainty };
     try { localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify(snapshot)); } catch { /* Local Vault remains authoritative for saved work. */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [block, category, certainties, checked, count, examType, mode, ordered, pool, runId, setIds, questionIds, stage, startedAt, status, timed]);
+  }, [block, category, certainties, checked, count, examType, mode, ordered, pool, restorePending, runId, setIds, questionIds, stage, startedAt, status, timed]);
 
   function clearActiveQuiz() {
     try { localStorage.removeItem(STORAGE_KEYS.quizActiveSession); } catch { /* non-fatal */ }
@@ -302,7 +348,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   // answer the workspace never received. Write only what is missing, so a
   // classification saved for an earlier question is never replaced.
   useEffect(() => {
-    if (!restored?.runId || restored.mode !== "tutor") return;
+    if (!restored?.runId || restored.mode !== "tutor" || restorePending) return;
     const missing = restored.answers.filter((answer) => (
       answer.answerKey && !savedRunAttempt(questions, answer.questionId, restored.runId!)
     ));
@@ -331,9 +377,9 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const elapsedSeconds = Math.floor((nowTick - Date.parse(startedAt)) / 1000);
   const timeLeft = timeLimitSeconds !== undefined ? Math.max(0, timeLimitSeconds - elapsedSeconds) : undefined;
   useEffect(() => {
-    if (stage === "running" && timeLeft === 0 && timed) finishBlock();
+    if (stage === "running" && !restorePending && pool.length > 0 && timeLeft === 0 && timed) finishBlock();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeLeft, stage, timed]);
+  }, [timeLeft, stage, timed, restorePending, pool.length]);
 
   // Keyboard shortcuts: A–E pick an option, Enter submits / advances, F flags.
   useEffect(() => {
@@ -461,7 +507,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
 
   function begin() {
     const filters = currentFilters();
-    const built = buildQuizPool(questions, filters, questionSets);
+    const built = buildQuizPool(readyQuestions, filters, questionSets);
     if (built.length === 0) {
       pushToast({ title: "No questions match", body: "Loosen the filters or import more questions first.", tone: "warn" });
       return;
@@ -635,17 +681,19 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
 
   function resumeSuspended() {
     if (!suspended) return;
-    const resumedPool = suspended.poolIds
-      .map((id) => questions.find((question) => question.id === id))
-      .filter((question): question is QuestionRecord => Boolean(question));
-    if (!resumedPool.length) {
-      pushToast({ title: "Suspended block unavailable", body: "Its questions are no longer in this workspace.", tone: "warn" });
-      writeSuspendedBlock(null);
-      setSuspended(undefined);
+    const available = new Map(readyQuestions.map((question) => [question.id, question]));
+    const resolved = suspended.poolIds.map((id) => available.get(id));
+    const ready = resolved.filter((question): question is QuestionRecord => Boolean(question));
+    if (ready.length !== suspended.poolIds.length || new Set(suspended.poolIds).size !== suspended.poolIds.length) {
+      pushToast({
+        title: "Suspended exam needs its questions",
+        body: `${ready.length} of ${suspended.poolIds.length} questions are ready on this device. Restore or review the missing records before resuming. Your saved answers were not discarded.`,
+        tone: "warn",
+      });
       return;
     }
     setMode(suspended.mode);
-    setSimRun({ skin: suspended.skin, pool: resumedPool, timeLimitSeconds: suspended.timeLimitSeconds, resume: suspended });
+    setSimRun({ skin: suspended.skin, pool: ready, timeLimitSeconds: suspended.timeLimitSeconds, resume: suspended });
     setStage("sim");
   }
 
@@ -815,7 +863,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   // ------------------------------------------------------------------ render
 
   if (stage === "setup") {
-    const available = buildQuizPool(questions, { ...currentFilters(), count: questions.length, ordered: true }, questionSets).length;
+    const available = buildQuizPool(readyQuestions, { ...currentFilters(), count: readyQuestions.length, ordered: true }, questionSets).length;
     const selectedSets = questionSets.filter((set) => setIds.includes(set.id));
     const sourceTitle = wholeBank ? "Whole question bank" : selectedSets.length === 1 ? selectedSets[0].title : `${selectedSets.length} selected sets`;
     const canStart = count <= 1000 && available > 0 && (wholeBank || selectedSets.length > 0) && Number.isInteger(count) && count > 0;
@@ -851,29 +899,20 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         <div className="stack gap6"><span className="field-label">How do you want to practice?</span>
           <QuestionViewControls view={presentation.view} onChange={presentation.choose} notice={presentation.notice} mode={mode} onModeChange={setMode} />
         </div>
-        <div className="stack gap6"><span className="field-label">How many questions?</span>
-          <div className="block-count-row" role="group" aria-label="Question count">
-            {[10, 20, 40].map((value) => <button type="button" key={value} className={`filter-pill ${count === value ? "on" : ""}`} aria-pressed={count === value} onClick={() => setCount(value)}>{value}</button>)}
-            <label className="row gap6"><span className="sub">Custom</span><input className="field" aria-label="Custom question count" type="number" min="1" max="1000" value={count} onChange={(event) => setCount(Number(event.target.value))} /></label>
-          </div>
-        </div>
-        <SelectField label="Question pool" value={status} onChange={(event) => setStatus(event.target.value as QuizFilters["status"])}>
-          <option value="all">All questions</option><option value="unused">Unused only</option><option value="incorrect">Incorrect only</option><option value="marked">Marked only</option>
-        </SelectField>
-        <details className="block-advanced"><summary>Advanced: order, category & exam interface</summary><div className="stack gap12">
         <div className="stack gap6">
-          <span className="field-label">Interface</span>
+          <span className="field-label">Practice interface</span>
           <div className="sim-interface-grid" role="radiogroup" aria-label="Exam interface">
-            {([["axom", "AXOM", "Tutor tools, AI help and repair cards in the AXOM player."], ...Object.entries(EXAM_SKINS).map(([id, meta]) => [id, meta.label, meta.description])] as Array<[ExamInterface, string, string]>).map(([id, label, description]) => (
+            {([["axom", "AXOM native", "Tutor tools, explanations, and study annotations."], ...Object.entries(EXAM_SKINS).map(([id, meta]) => [id, meta.label, meta.description])] as Array<[ExamInterface, string, string]>).map(([id, label, description]) => (
               <button type="button" key={id} role="radio" aria-checked={examInterface === id} className={`sim-interface-option skin-${id} ${examInterface === id ? "on" : ""}`} onClick={() => chooseInterface(id)}>
                 <b>{label}</b><small>{description}</small>
               </button>
             ))}
           </div>
+          <span className="sub">Presentation only — all interfaces use the same verified questions and saved session history.</span>
         </div>
         {examInterface !== "axom" && (
           <div className="stack gap6">
-            <span className="field-label">Block</span>
+            <span className="field-label">Simulation preset</span>
             <div className="row" style={{ flexWrap: "wrap", gap: 6 }} role="group" aria-label="Block preset">
               {BLOCK_PRESETS.map((preset) => (
                 <button type="button" key={preset.id} className={`filter-pill ${presetId === preset.id ? "on" : ""}`} aria-pressed={presetId === preset.id}
@@ -883,6 +922,16 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             <span className="sub">{BLOCK_PRESETS.find((preset) => preset.id === presetId)?.note}</span>
           </div>
         )}
+        <div className="stack gap6"><span className="field-label">How many questions?</span>
+          <div className="block-count-row" role="group" aria-label="Question count">
+            {[10, 20, 40].map((value) => <button type="button" key={value} className={`filter-pill ${count === value ? "on" : ""}`} aria-pressed={count === value} onClick={() => setCount(value)}>{value}</button>)}
+            <label className="row gap6"><span className="sub">Custom</span><input className="field" aria-label="Custom question count" type="number" min="1" max="1000" value={count} onChange={(event) => setCount(Number(event.target.value))} /></label>
+          </div>
+        </div>
+        <SelectField label="Question pool" value={status} onChange={(event) => setStatus(event.target.value as QuizFilters["status"])}>
+          <option value="all">All questions</option><option value="unused">Unused only</option><option value="incorrect">Incorrect only</option><option value="marked">Marked only</option>
+        </SelectField>
+        <details className="block-advanced"><summary>Advanced: order, category and timing</summary><div className="stack gap12">
         <div className="grid grid-2">
           <SelectField label="Category" value={category} onChange={(e) => setCategory(e.target.value)}>
             <option value="">Any</option>
@@ -938,7 +987,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
 
   if (stage === "results" && session) {
     if (reviewingAnswers) return <SessionReviewModal session={session} onClose={() => setReviewingAnswers(false)} onPractice={(ids) => {
-      const retry = buildQuizPool(questions.filter((entry) => ids.includes(entry.id)), { count: ids.length, status: "all", ordered: true });
+      const retry = buildQuizPool(readyQuestions.filter((entry) => ids.includes(entry.id)), { count: ids.length, status: "all", ordered: true });
       if (!retry.length) return;
       setPool(retry);
       setMode("tutor");
@@ -956,7 +1005,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     const missed = missedQuestionIds(session);
     const byId = new Map(questions.map((q) => [q.id, q]));
     const retakePool = buildQuizPool(
-      questions.filter((question) => missed.includes(question.id)),
+      readyQuestions.filter((question) => missed.includes(question.id)),
       { count: Math.max(1, missed.length), status: "all", ordered: true },
     );
     const reasonCounts = new Map<ReviewReason, number>();
@@ -988,6 +1037,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             {session.simulation && session.simulation.skin in EXAM_SKINS && (
               <GhostButton onClick={() => setStage("sim-review")}>Review in the exam interface</GhostButton>
             )}
+            {onReturnToCourse && <GhostButton onClick={onReturnToCourse}>Return to Course Tracker</GhostButton>}
             <GButton variant="primary" onClick={onClose}>Done</GButton>
           </>
         }>
@@ -1051,6 +1101,30 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           </div>
         )}
         {missed.length === 0 && <div className="sub">Nothing missed in this block. The pool filters decide what comes next.</div>}
+      </Modal>
+    );
+  }
+
+  if (stage === "running" && restorePending && restored) {
+    const byId = new Map(questions.map((entry) => [entry.id, entry]));
+    const missing = restored.poolIds.filter((id) => !byId.has(id)).length;
+    const needsReview = restored.poolIds.filter((id) => {
+      const candidate = byId.get(id);
+      return candidate && questionPracticeReadiness(candidate) !== "ready";
+    }).length;
+    const available = restored.poolIds.length - missing - needsReview;
+    return (
+      <Modal title="Recover your saved question block" onClose={onClose}
+        footer={<GButton variant="primary" onClick={onClose}>Return to Question Bank</GButton>}>
+        <div className="stack gap12" role="status" aria-live="polite">
+          <b>{available} of {restored.poolIds.length} questions are ready on this device</b>
+          <p>
+            {missing > 0 ? `${missing} question record${missing === 1 ? " is" : "s are"} not available locally. ` : ""}
+            {needsReview > 0 ? `${needsReview} question${needsReview === 1 ? " needs" : "s need"} answer or source review. ` : ""}
+            Restore missing collections or resolve uncertain mappings to resume this exact session.
+          </p>
+          <p className="sub">The original question order, selected answers, flags and session snapshot have not been changed or scored. AXOM resumes automatically once every question is ready.</p>
+        </div>
       </Modal>
     );
   }

@@ -5,6 +5,7 @@
 // everywhere; persistence in store.ts (schema v30).
 // ===========================================================================
 import type { ID } from "./types";
+import type { SourceOriginalFile } from "./sourceOriginal";
 import {
   questionCollectionMetrics,
   summarizeQuestionMappings,
@@ -29,6 +30,8 @@ export interface SourceDocument {
   sizeBytes: number;
   /** SHA-256 of the original file bytes; used for non-destructive duplicate detection. */
   checksum?: string;
+  /** Verified local original; account protection requires its separate file acknowledgement. */
+  originalFile?: SourceOriginalFile;
   tags: string[];
   linkedQuestionSetIds: ID[];
   /** True when the user chose "library document only" (no question set). */

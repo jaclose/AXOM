@@ -55,6 +55,20 @@ describe("course schedule intake", () => {
     expect(rows[2]).toMatchObject({ duplicate: "exact", selected: false });
   });
 
+
+  it("does not treat the same assessment title in a different course as a duplicate", () => {
+    const completed: TrackerItem = {
+      id: "completed-t2", path: "Term 2/ER/Week 3", label: "IMCQ 2",
+      kind: "Assessment", passes: 1, ankiPasses: 0, yield: "none", updated: "2026-10-14",
+      assessmentDate: "2026-10-14",
+    };
+    const csv = "2026-10-14,IMCQ 2,Assessment";
+    const [otherCourse] = parseCourseSchedule(csv, [completed], "SGU.csv", {}, "Term 4/NCRS/Week 3");
+    const [sameCourse] = parseCourseSchedule(csv, [completed], "SGU.csv", {}, "Term 2/ER/Week 3");
+    expect(otherCourse).toMatchObject({ duplicate: "none", selected: true });
+    expect(sameCourse).toMatchObject({ duplicate: "exact", selected: false });
+  });
+
   it("surfaces malformed calendar events instead of silently discarding them", () => {
     const [row] = parseCourseSchedule("BEGIN:VCALENDAR\nBEGIN:VEVENT\nDTSTART:20260814T080000\nEND:VEVENT\nEND:VCALENDAR", [], "broken.ics");
     expect(row).toMatchObject({ selected: false, sourceName: "broken.ics", problem: "Calendar event 1 has no title." });

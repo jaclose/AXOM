@@ -7,6 +7,7 @@
 // presets and question-set snapshots safe to persist and re-import.
 // ===========================================================================
 import {
+  questionMappingStatus,
   type QuestionDifficulty, type QuestionRecord, type QuestionSource, type QuestionStatus,
 } from "./questions";
 import { normalizeTagList } from "./questionTags";
@@ -20,6 +21,18 @@ const SOURCES: readonly QuestionSource[] = [
   "pasted", "screenshot", "image", "pdf", "imported", "manual", "ai-generated",
 ];
 
+export type QuestionPracticeReadiness = "ready" | "review-suggested" | "unresolved";
+export type ReadinessCriteria = QuestionPracticeReadiness | "review";
+/** Browser/runner safety gate. The canonical mapping status must also enforce
+ * option-key integrity (Agent 0 contract) for every launch path. */
+export function questionPracticeReadiness(question: QuestionRecord): QuestionPracticeReadiness {
+  if (question.options.length < 2) return "unresolved";
+  const keys = question.options.map((option) => option.key);
+  if (keys.some((key) => !key) || new Set(keys).size !== keys.length
+    || !question.correctKey || keys.filter((key) => key === question.correctKey).length !== 1) return "unresolved";
+  return questionMappingStatus(question);
+}
+
 export interface QuestionFilterCriteria {
   /** Free text over stem, options, tags, source, and notes. */
   search?: string;
@@ -29,6 +42,8 @@ export interface QuestionFilterCriteria {
   difficulty?: QuestionDifficulty[];
   status?: QuestionStatus[];
   sources?: QuestionSource[];
+  /** Evidence readiness, independent of the learner's last attempt outcome. */
+  readiness?: ReadinessCriteria;
   courseId?: string;
   /** true → has ≥1 attempt; false → no attempts; undefined → ignore. */
   answered?: boolean;
@@ -111,6 +126,7 @@ export function normalizeQuestionFilter(value: unknown): QuestionFilterCriteria 
   if (status) criteria.status = status;
   const sources = sanitizeEnumList(raw.sources, SOURCES);
   if (sources) criteria.sources = sources;
+  if (["ready", "review", "review-suggested", "unresolved"].includes(String(raw.readiness))) criteria.readiness = raw.readiness as ReadinessCriteria;
   if (typeof raw.courseId === "string" && raw.courseId.trim()) criteria.courseId = raw.courseId.trim();
   // `answered` is tri-state (true/false/absent); the rest are require-only, so a
   // stored `false` is meaningless — drop it (keeps countActiveFilters honest).
@@ -129,6 +145,7 @@ export function countActiveFilters(criteria: QuestionFilterCriteria): number {
   if (criteria.difficulty?.length) n += 1;
   if (criteria.status?.length) n += 1;
   if (criteria.sources?.length) n += 1;
+  if (criteria.readiness) n += 1;
   if (criteria.courseId) n += 1;
   for (const key of ["answered", "bookmarked", "incorrect", "reviewDue", "hasAttachment", "hasNotes"] as const) {
     if (criteria[key] !== undefined) n += 1;
@@ -178,6 +195,10 @@ export function applyQuestionFilter(
     if (difficulty && !(question.difficulty && difficulty.has(question.difficulty))) return false;
     if (status && !status.has(question.status)) return false;
     if (sources && !sources.has(question.source)) return false;
+    if (criteria.readiness) {
+      const readiness = questionPracticeReadiness(question);
+      if (criteria.readiness === "review" ? readiness === "ready" : readiness !== criteria.readiness) return false;
+    }
     if (criteria.courseId && question.courseId !== criteria.courseId) return false;
     if (criteria.answered !== undefined && (question.attempts.length > 0) !== criteria.answered) return false;
     if (criteria.bookmarked && !question.marked) return false;

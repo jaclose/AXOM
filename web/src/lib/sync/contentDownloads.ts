@@ -8,6 +8,7 @@ import { hydrateCloudContent, splitCloudContent, mergeSourceFields } from "./clo
 import { readDeferredContent } from "./deferredContent";
 import { downloadAcademicAsset, storedAcademicBindings } from "../academicLibrary/contentReferences";
 import { readSourceOriginal, saveSourceOriginal } from "../decode/sources";
+import { downloadCloudOriginal } from "./cloudOriginals";
 
 export interface ContentSelection { questionIds?: string[]; documentIds?: string[] }
 
@@ -29,6 +30,7 @@ export async function materializeState(state: NoctyriumState, selection?: Conten
   // Keep only verified copies in Decode's existing original-file cache.
   const originals = storedAcademicBindings(state).originals ?? [];
   for (const document of restored.documents) {
+    await downloadCloudOriginal(client, userId, document, assertCurrent);
     const original = originals.find(item => item.documentId === document.id);
     if (!original) continue;
     if (original.asset.sha256 !== document.checksum?.replace(/^sha256:/, "")) throw new Error("The original document does not match its saved source identity.");

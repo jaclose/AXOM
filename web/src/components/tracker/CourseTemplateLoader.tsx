@@ -14,7 +14,7 @@ import {
   WEEK_BASIS_NOTE, parseCourseTemplate, planCourseTemplate, reconcileCourseTemplate,
   type CourseTemplatePlan, type CourseTemplateSection, type TemplateReconciliation,
 } from "../../lib/course-engine/templateParse";
-import { moduleKey } from "../../lib/course-engine/vocabulary";
+import { canonicalModuleKey } from "../../lib/course-engine/vocabulary";
 import { courseTemplateFamily, prepareCourseTemplate, savedCourseTemplates } from "../../lib/course-engine/templateLibrary";
 import { SavedCourseTemplates } from "./SavedCourseTemplates";
 import { pushToast } from "../../lib/toast";

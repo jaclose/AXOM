@@ -843,3 +843,33 @@ describe("source-document-first import", () => {
     expect(screen.getByText(/Review 1 parsed question/)).toBeTruthy();
   });
 });
+
+
+describe("student-facing raw source selection", () => {
+  it("queues multiple ordinary text files without catalog.json and preserves independent removal", async () => {
+    const user = userEvent.setup();
+    render(<ImportPanel initialTab="file" />);
+    const select = screen.getByLabelText("Choose question files or a ZIP to import");
+    const one = new File(["1. Clinical vignette?\nA. First\nB. Second"], "Week 1 PQ.txt", { type: "text/plain" });
+    const two = new File(["2. Another vignette?\nA. First\nB. Second"], "Week 2 PQ.txt", { type: "text/plain" });
+    fireEvent.change(select, { target: { files: [one, two] } });
+    expect(await screen.findByRole("button", { name: "Review Week 1 PQ.txt" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Review Week 2 PQ.txt" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Remove Week 1 PQ.txt" }));
+    expect(screen.queryByRole("button", { name: "Review Week 1 PQ.txt" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Review Week 2 PQ.txt" })).toBeTruthy();
+    expect(mocked.addQuestion).not.toHaveBeenCalled();
+  });
+
+  it("opens the retained file into question review and returns to the queue", async () => {
+    const user = userEvent.setup();
+    render(<ImportPanel initialTab="file" />);
+    const one = new File(["1. Which ion flows during phase 0 of ventricular depolarization?\nA. Na+\nB. K+\nC. Ca2+\nAnswer: A"], "cardiac.txt", { type: "text/plain" });
+    const two = new File(["1. Which kidney structure filters plasma?\nA. Collecting duct\nB. Glomerulus\nAnswer: B"], "renal.txt", { type: "text/plain" });
+    fireEvent.change(screen.getByLabelText("Choose question files or a ZIP to import"), { target: { files: [one, two] } });
+    await user.click(await screen.findByRole("button", { name: "Review cardiac.txt" }));
+    expect(await screen.findByText(/Review 1 parsed question/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /Back to source|Edit source|Choose another/i }));
+    expect(await screen.findByRole("button", { name: "Review renal.txt" })).toBeTruthy();
+  });
+});

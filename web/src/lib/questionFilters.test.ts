@@ -99,3 +99,26 @@ describe("normalizeSavedQuestionFilters", () => {
     expect(presets[0].ordering).toBeUndefined();
   });
 });
+
+describe("answer-readiness filters", () => {
+  const options = [{ key: "A", text: "Alpha" }, { key: "B", text: "Beta" }];
+  const records = [
+    q({ id: "ready", stem: "Ready", correctKey: "A", options, tags: ["renal"] }),
+    q({ id: "suggested", correctKey: "B", options, extraction: { confidence: "medium", reviewed: false }, tags: ["renal"] }),
+    q({ id: "unresolved", options, needsReview: true, correctKey: "A", tags: ["cardio"] }),
+    q({ id: "malformed", correctKey: "A", tags: ["renal"] }), // Only one answer choice.
+  ];
+  it("does not count a one-choice or unreviewed question as runnable", () => {
+    expect(applyQuestionFilter(records, { readiness: "ready" }).map((r) => r.id)).toEqual(["ready"]);
+    expect(applyQuestionFilter(records, { readiness: "review" }).map((r) => r.id)).toEqual(["suggested", "unresolved", "malformed"]);
+    expect(applyQuestionFilter(records, { readiness: "review-suggested" }).map((r) => r.id)).toEqual(["suggested"]);
+    expect(applyQuestionFilter(records, { readiness: "unresolved" }).map((r) => r.id)).toEqual(["unresolved", "malformed"]);
+  });
+  it("composes review status with a tag and rejects malformed saved criteria", () => {
+    expect(applyQuestionFilter(records, { readiness: "review", tags: ["renal"] }).map((r) => r.id))
+      .toEqual(["suggested", "malformed"]);
+    expect(normalizeQuestionFilter({ readiness: "ignored" }).readiness).toBeUndefined();
+    expect(normalizeQuestionFilter({ readiness: "ready" }).readiness).toBe("ready");
+    expect(countActiveFilters(normalizeQuestionFilter({ readiness: "review", tags: ["renal"] }))).toBe(2);
+  });
+});

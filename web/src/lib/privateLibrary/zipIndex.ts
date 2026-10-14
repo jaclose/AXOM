@@ -1,4 +1,4 @@
-import { INPUT_MAX_FILES, resolveLibraryInputRoot, safeInputPath, type LibraryInputEntry } from "./inputRoot";
+import { INPUT_MAX_FILES, resolveLibraryInputRoot, safeInputPath, validateLibraryInputEntries, type LibraryInputEntry } from "./inputRoot";
 
 export interface IndexedZipEntry extends LibraryInputEntry { archivePath: string; crc32: number; }
 
@@ -6,7 +6,7 @@ export interface IndexedZipEntry extends LibraryInputEntry { archivePath: string
  * ZIP64, split volumes and encrypted archives are deliberately routed to folder
  * import. No source bytes are decompressed during this preflight.
  */
-export function indexLibraryZip(bytes: Uint8Array): IndexedZipEntry[] {
+export function indexLibraryZip(bytes: Uint8Array, options: { allowRaw?: boolean } = {}): IndexedZipEntry[] {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const unsupported = () => new Error("This ZIP uses an unsupported layout. Extract it locally and choose its folder instead.");
   const requireRange = (offset: number, length: number) => {
@@ -56,6 +56,7 @@ export function indexLibraryZip(bytes: Uint8Array): IndexedZipEntry[] {
     position += recordSize;
   }
   if (position !== end) throw unsupported();
-  resolveLibraryInputRoot(entries); // Count, expanded-byte, path and root checks.
+  if (options.allowRaw) validateLibraryInputEntries(entries);
+  else resolveLibraryInputRoot(entries); // Count, expanded-byte, path and root checks.
   return entries;
 }

@@ -357,4 +357,78 @@ describe("Supabase migrations on real Postgres", () => {
     } finally { await db.close(); }
   }, 60_000);
 
+  it("protects source-original objects and never acknowledges a missing or wrong-size original", async () => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
+    try {
+      await db.query("insert into auth.users(id,email) values ($1,'a@x.com'),($2,'b@x.com')", [A, B]);
+      const bucket = (await db.query<{ public: boolean; file_size_limit: string }>(
+        "select public,file_size_limit from storage.buckets where id='workspace-originals'")).rows[0];
+      expect(bucket.public).toBe(false);
+      expect(Number(bucket.file_size_limit)).toBe(134_217_728);
+      const original = {
+        id: "source-1", checksum: `sha256:${HASH}`, sizeBytes: 7,
+        originalFile: { version: 1, sha256: HASH, byteSize: 7, mimeType: "application/pdf" },
+      };
+      const body = JSON.stringify({ documents: [original], questions: [] });
+      const snapshot = { _axomCloudFormat: 2, _axomDeltaFormat: 1, content: body,
+        expandedBytes: new TextEncoder().encode(body).length, media: [], sources: [] };
+      const call = (user: string, base: number, key: string, value: unknown = snapshot) => as(db, "authenticated", user,
+        "select public.push_workspace_revision_v2($1,34,$2,$3::jsonb,gen_random_uuid(),$4::uuid) as r",
+        [base, HASH, JSON.stringify(value), key]);
+      const retryKey = "77777777-7777-4777-8777-777777777777";
+      await expect(call(A, 0, retryKey)).rejects.toMatchObject({ code: "PT409" });
+      await expect(as(db, "authenticated", B,
+        "insert into storage.objects(bucket_id,name,metadata) values('workspace-originals',$1,'{\"size\":7}')",
+        [`${A}/${HASH}`])).rejects.toMatchObject({ code: "42501" });
+      await expect(as(db, "anon", null,
+        "insert into storage.objects(bucket_id,name,metadata) values('workspace-originals',$1,'{\"size\":7}')",
+        [`${A}/${HASH}`])).rejects.toMatchObject({ code: "42501" });
+      await as(db, "authenticated", A,
+        "insert into storage.objects(bucket_id,name,metadata) values('workspace-originals',$1,'{\"size\":6}')",
+        [`${A}/${HASH}`]);
+      await expect(call(A, 0, retryKey)).rejects.toMatchObject({ code: "PT409" });
+      expect((await as(db, "authenticated", B,
+        "select name from storage.objects where bucket_id='workspace-originals'")).rows).toEqual([]);
+      expect((await as(db, "authenticated", A,
+        "update storage.objects set metadata='{\"size\":7}' where bucket_id='workspace-originals' returning name")).rows).toEqual([]);
+      await as(db, "authenticated", A,
+        "delete from storage.objects where bucket_id='workspace-originals' and name=$1", [`${A}/${HASH}`]);
+      await as(db, "authenticated", A,
+        "insert into storage.objects(bucket_id,name,metadata) values('workspace-originals',$1,'{\"size\":7}')",
+        [`${A}/${HASH}`]);
+      await expect(call(A, 0, retryKey, { ...snapshot, content: JSON.stringify({
+        documents: [{ ...original, checksum: "sha256:" + "b".repeat(64) }], questions: [],
+      }) })).rejects.toMatchObject({ code: "PT400" });
+      expect((await call(A, 0, retryKey)).rows[0].r).toMatchObject({ status: "accepted", revision: 1 });
+      expect((await call(A, 0, retryKey)).rows[0].r).toMatchObject({ status: "accepted", revision: 1, idempotent: true });
+      await expect(call(B, 0, "88888888-8888-4888-8888-888888888888")).rejects.toMatchObject({ code: "PT409" });
+      expect(Number((await db.query<{ n: number }>("select count(*)::int as n from public.workspace_revisions where user_id=$1", [A])).rows[0].n)).toBe(1);
+      expect(Number((await db.query<{ n: number }>("select count(*)::int as n from public.workspace_revisions where user_id=$1", [B])).rows[0].n)).toBe(0);
+    } finally { await db.close(); }
+  }, 60_000);
+
+  it("does not reactivate an older academic revision that finishes after a newer one", async () => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
+    const collection = "33333333-3333-4333-8333-333333333333";
+    const older = "44444444-4444-4444-8444-444444444444";
+    const newer = "55555555-5555-4555-8555-555555555555";
+    try {
+      await db.query("insert into auth.users(id,email) values ($1,'a@x.com')", [A]);
+      await db.query("insert into public.academic_collections(id,owner_id,title,module,term) values ($1,$2,'Term 1','Sample','Term 1')", [collection, A]);
+      for (const [id, hash, created] of [[older, HASH, "2026-10-12T00:00:00Z"], [newer, "b".repeat(64), "2026-10-13T00:00:00Z"]]) {
+        await db.query("insert into public.academic_revisions(id,collection_id,content_hash,template_text,created_at) values($1,$2,$3,'Course',$4)", [id, collection, hash, created]);
+        await db.query("insert into public.academic_files(revision_id,path,object_path,sha256,byte_size,mime_type) values($1,'catalog.json',$2,$3,7,'application/json')", [id, `${collection}/${hash}`, hash]);
+        await db.query("insert into storage.objects(bucket_id,name,metadata) values('academic-content',$1,'{\"size\":7}')", [`${collection}/${hash}`]);
+      }
+      await as(db, "authenticated", A, "select public.academic_finish_revision($1)", [newer]);
+      await db.query("update public.academic_collections set review_status='approved' where id=$1", [collection]);
+      await as(db, "authenticated", A, "select public.academic_finish_revision($1)", [older]);
+      const result = (await db.query<{ current_revision_id: string; review_status: string }>(
+        "select current_revision_id, review_status from public.academic_collections where id=$1", [collection])).rows[0];
+      expect(result).toEqual({ current_revision_id: newer, review_status: "approved" });
+      expect((await db.query<{ id: string; status: string }>("select id,status from public.academic_revisions where collection_id=$1 order by created_at", [collection])).rows)
+        .toEqual([{ id: older, status: "ready" }, { id: newer, status: "ready" }]);
+    } finally { await db.close(); }
+  }, 60_000);
+
 });

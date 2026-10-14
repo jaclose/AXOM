@@ -55,6 +55,22 @@ describe("the course by week", () => {
     expect(module.weeks[0].questions).toMatchObject({ total: 2, attempted: 1, firstTimeCorrect: 1 });
   });
 
+
+  it("separates the same module in two terms instead of merging week progress", () => {
+    const tracker = [
+      row({ path: "Term 1/NB Block 2/Week 3", passes: 1 }),
+      row({ path: "Term 2/NB2/Week 3", passes: 0 }),
+    ];
+    const modules = buildModuleWeeks(tracker, [question({ module: "NB2", week: 3 })]);
+    expect(modules).toHaveLength(2);
+    expect(modules.map((module) => [module.term, module.done, module.total])).toEqual([
+      ["Term 1", 1, 1], ["Term 2", 0, 1],
+    ]);
+    // A question without an explicit course cannot be assigned to either term.
+    expect(modules.every((module) =>
+      module.weeks[0].questionScopeAmbiguous === true && module.weeks[0].questions.total === 0)).toBe(true);
+  });
+
   it("counts absences per category against the term's allowance, a flipped lecture as a lecture", () => {
     const tracker = [
       row({ activity: "lecture", attendance: "missed" }),

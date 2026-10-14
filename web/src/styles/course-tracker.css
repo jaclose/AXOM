@@ -111,3 +111,37 @@
   .tfr-action, .tfr-action:hover, .tfr-action:active { transform: none; transition: none; }
 }
 :root[data-motion="reduce"] :is(.tfr-action, .tfr-action:hover, .tfr-action:active) { transform: none; transition: none; }
+
+/* Source-backed curriculum accounting and module-scoped practice links. */
+.tracker-curriculum-coverage summary,
+.tracker-resource-details summary {
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.tracker-curriculum-coverage summary:focus-visible,
+.tracker-resource-details summary:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: 3px; }
+.tracker-curriculum-coverage > details > .sub { margin-block: 10px; }
+.tracker-coverage-term { margin-top: 8px; padding: 8px 0; border-top: 1px solid var(--border-subtle, rgba(255,255,255,.1)); }
+.tracker-coverage-term summary { min-height: 32px; }
+.tracker-coverage-scroll { margin-top: 8px; max-width: 100%; overflow-x: auto; }
+.tracker-coverage-table { width: 100%; border-collapse: collapse; font-size: var(--fs-xs); text-align: left; }
+.tracker-coverage-table th, .tracker-coverage-table td {
+  padding: 8px 10px; border-bottom: 1px solid var(--border-subtle, rgba(255,255,255,.08));
+  vertical-align: top; min-width: 100px;
+}
+.tracker-coverage-table th:first-child { min-width: 145px; }
+.tracker-coverage-table thead th { color: var(--text-60, var(--text-50)); font-weight: var(--fw-semibold); }
+.tracker-coverage-table tbody th { color: var(--text-90, var(--text)); font-weight: var(--fw-medium); }
+.tracker-resources-summary { display: flex; flex-wrap: wrap; gap: 12px; font-size: var(--fs-xs); margin-bottom: 10px; }
+.tracker-resources-summary span { color: var(--text-60, var(--text-50)); }
+.tracker-resource-details ul { list-style: none; margin: 8px 0 12px; padding: 0; max-height: 320px; overflow-y: auto; }
+.tracker-resource-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border-subtle, rgba(255,255,255,.08)); }
+.tracker-resource-row > span { min-width: 0; overflow-wrap: anywhere; }
+.tracker-resource-row b { font-size: var(--fs-sm); }
+.tracker-resource-row small { display: block; color: var(--text-60, var(--text-50)); margin-top: 3px; font-size: var(--fs-xs); }
+.tracker-resource-row button { flex-shrink: 0; }
+@media (max-width: 520px) { .tracker-curriculum-coverage summary { display: block; } .tracker-curriculum-coverage summary span { display: block; margin-top: 4px; } }

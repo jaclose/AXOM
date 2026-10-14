@@ -14,14 +14,16 @@
 // Dependency-free on purpose: scripts/source-inventory.ts imports this.
 // ===========================================================================
 import { TRACKER_KIND_FOR_ACTIVITY, type CourseActivity } from "./activity.ts";
-import { moduleKey, type ModuleVocabulary } from "./vocabulary.ts";
+import { canonicalModuleKey, moduleAliases, moduleKey, type ModuleVocabulary } from "./vocabulary.ts";
 
 export interface CourseTemplateItem {
   /** As written, without the bracketed kind. */
   label: string;
   activity: CourseActivity;
-  /** The item's own number when the label carries one: "Lecture 07" is 7. */
+  /** The item's own number when the label carries exactly one. */
   number?: number;
+  /** A combined source line such as "CPR 19, 20, 21" is one composite activity, not lecture 19 alone. */
+  numbers?: number[];
   /** 1-based position of the blank-line group it sits in. */
   group: number;
   /** A week the line itself names: "Week 1 ExamSoft Quiz". */
@@ -112,7 +114,14 @@ export function parseCourseTemplate(text: string, sourceName?: string): CourseTe
         if (value === "explicit") context.weekPolicy = "explicit";
         else problems.push(`Line ${lineNumber}: week policy must be explicit.`);
       } else if (key === "source") context.sources.push(value);
-      else context.weekDates[Number(key.slice(5))] = value;
+      else {
+        const week = Number(key.match(/\d+/)?.[0]);
+        if (!Number.isInteger(week) || week < 1 || week > 60) {
+          problems.push(`Line ${lineNumber}: source week must be 1–60.`);
+        } else if (context.weekDates[week] && context.weekDates[week] !== value) {
+          problems.push(`Line ${lineNumber}: source Week ${week} has conflicting dates.`);
+        } else context.weekDates[week] = value;
+      }
       return;
     }
 
@@ -141,10 +150,12 @@ export function parseCourseTemplate(text: string, sourceName?: string): CourseTe
     if (!inGroup) { group += 1; inGroup = true; }
     const label = match[1].trim();
     const week = label.match(/(?:^|[^a-z0-9])(?:week|wk)\s*0*(\d{1,2})(?![0-9])/i);
+    const numbers = compositeNumbers(label, activity ?? "other");
     items.push({
       label,
       activity: activity ?? "other",
-      number: itemNumber(label),
+      number: numbers ? undefined : itemNumber(label, activity ?? "other"),
+      ...(numbers ? { numbers } : {}),
       group,
       statedWeek: week ? Number(week[1]) : headedWeek,
       line: lineNumber,
@@ -153,14 +164,14 @@ export function parseCourseTemplate(text: string, sourceName?: string): CourseTe
 
   if (!module) problems.unshift("The first line should name the module, for example \"FTM 1 - Lectures + DLAs:\".");
   return { module, ...(term ? { term } : {}), title, items, groupCount: group, problems, sourceName,
-    ...(context.academicTerm || context.sourceRevision || context.sources.length || context.weekPolicy ? { context } : {}) };
+    ...(context.academicTerm || context.cohort || context.sourceRevision || context.authority || context.sources.length || context.weekPolicy || Object.keys(context.weekDates).length ? { context } : {}) };
 }
 
 export type WeekBasis = "stated" | "group-order" | "spread" | "unknown";
 
 export const WEEK_BASIS_NOTE: Record<WeekBasis, string> = {
   stated: "The template names this week.",
-  "group-order": "Each group in the template is taken as one week, in order.",
+  "group-order": "AXOM tentatively treats each blank-line activity group as one week; the source does not explicitly verify these weeks.",
   spread: "The template does not give weeks for these. AXOM spread the groups across the module's weeks in order, so check where each week starts and ends.",
   unknown: "The template does not say which week these belong to.",
 };
@@ -173,9 +184,13 @@ export interface PlannedCourseItem {
   activity: CourseActivity;
   /** Stable across re-imports, so a changed title updates a row instead of adding one. */
   templateKey: string;
+  /** Exact original source line, not a fabricated lecture/week reference. */
+  sourceLine: number;
+  sourceName?: string;
+  sourceRevision?: string;
   week?: number;
   weekBasis: WeekBasis;
-  /** What to record on the row: only a stated or group-ordered week is the template's own. */
+  /** Source stated the week, AXOM inferred it, or no week is evidenced. */
   weekSource?: "template" | "inferred";
 }
 
@@ -215,28 +230,60 @@ export function planCourseTemplate(
   }
   const sameModule = sections.filter((section) => moduleKey(section.module) === moduleKey(module));
   const weekly = sameModule.filter(setsTheWeeks);
-  // A week the template names is already a week of the term; a group counted
-  // in order is a week of the module, moved to where the module starts.
-  const groupWeek = (section: CourseTemplateSection, group: number): number => (
-    section.items.find((item) => item.group === group && item.statedWeek)?.statedWeek ?? offset + group
-  );
+  // Source labels such as Week 4 ESoft Quiz anchor their *own* group. An
+  // adjacent SG/IMCQ remains inferred, but must never be filed into Week 1
+  // merely because the source text had its first blank-line group there.
+  const groupWeeks = new Map<CourseTemplateSection, Map<number, number>>();
+  for (const section of weekly) {
+    const anchored = new Map<number, Set<number>>();
+    for (const item of section.items) {
+      if (item.statedWeek === undefined) continue;
+      const weeks = anchored.get(item.group) ?? new Set<number>();
+      weeks.add(item.statedWeek);
+      anchored.set(item.group, weeks);
+    }
+    const contradictoryGroup = [...anchored.values()].some((values) => values.size > 1);
+    const shifts = new Set([...anchored.entries()].flatMap(([group, values]) =>
+      values.size === 1 ? [[...values][0] - group] : []));
+    const chronologyConsistent = !contradictoryGroup && shifts.size <= 1;
+    if (!chronologyConsistent && section.context?.weekPolicy !== "explicit") {
+      problems.push(`${section.sourceName ?? section.title}: explicit week labels conflict with a single consecutive group timeline. Unstated groups remain unscheduled.`);
+    }
+    const anchorShift = shifts.size === 1 ? [...shifts][0] : undefined;
+    const byGroup = new Map<number, number>();
+    for (let group = 1; group <= section.groupCount; group += 1) {
+      const stated = anchored.get(group);
+      if (stated?.size === 1) {
+        byGroup.set(group, [...stated][0]);
+      } else if (section.context?.weekPolicy !== "explicit" && chronologyConsistent) {
+        // If there is no anchor, firstWeek is a learner-entered offset; with
+        // anchors, they take precedence over firstWeek.
+        const proposed = (anchorShift ?? offset) + group;
+        if (proposed > 0 && proposed < 100) byGroup.set(group, proposed);
+      }
+    }
+    groupWeeks.set(section, byGroup);
+  }
   const moduleWeeks = [...new Set(weekly.flatMap((section) => (
-    section.context?.weekPolicy === "explicit" ? section.items.flatMap(item => item.statedWeek ? [item.statedWeek] : []) : Array.from({ length: section.groupCount }, (_, index) => groupWeek(section, index + 1))
+    section.context?.weekPolicy === "explicit"
+      ? section.items.flatMap(item => item.statedWeek ? [item.statedWeek] : [])
+      : [...(groupWeeks.get(section)?.values() ?? [])]
   )))].sort((a, b) => a - b);
   const weekCount = moduleWeeks.length || undefined;
 
   const items: PlannedCourseItem[] = [];
   for (const section of sameModule) {
     const isWeekly = weekly.includes(section);
-    const statedByGroup = new Map<number, number>();
-    for (const item of section.items) if (item.statedWeek) statedByGroup.set(item.group, item.statedWeek);
-
     for (const item of section.items) {
-      const stated = statedByGroup.get(item.group);
+      // An explicit week on one activity is not evidence for the whole blank-line group.
+      const stated = item.statedWeek;
       let week: number | undefined;
       let weekBasis: WeekBasis = "unknown";
       if (stated) { week = stated; weekBasis = "stated"; }
-      else if (isWeekly && section.context?.weekPolicy !== "explicit") { week = offset + item.group; weekBasis = "group-order"; }
+      else if (isWeekly && section.context?.weekPolicy !== "explicit") {
+        week = groupWeeks.get(section)?.get(item.group);
+        if (week !== undefined) weekBasis = "group-order";
+      }
       else if (weekCount && section.context?.weekPolicy !== "explicit") {
         week = moduleWeeks[Math.ceil((item.group * weekCount) / section.groupCount) - 1];
         weekBasis = "spread";
@@ -247,9 +294,12 @@ export function planCourseTemplate(
         kind: TRACKER_KIND_FOR_ACTIVITY[item.activity],
         activity: item.activity,
         templateKey: [section.context?.academicTerm, section.context?.cohort, templateKey(module, item)].filter(Boolean).join("|"),
+        sourceLine: item.line,
+        ...(section.sourceName ? { sourceName: section.sourceName } : {}),
+        ...(section.context?.sourceRevision ? { sourceRevision: section.context.sourceRevision } : {}),
         week,
         weekBasis,
-        weekSource: weekBasis === "stated" || weekBasis === "group-order" ? "template" : week ? "inferred" : undefined,
+        weekSource: weekBasis === "stated" ? "template" : week ? "inferred" : undefined,
       });
     }
   }
@@ -259,52 +309,130 @@ export function planCourseTemplate(
     term,
     weekCount,
     items,
-    needsConfirmation: items.some((item) => item.weekBasis !== "stated" && item.weekBasis !== "group-order"),
+    needsConfirmation: items.some((item) => item.weekBasis !== "stated"),
     problems,
   };
 }
 
 export interface TemplateReconciliation {
-  /** Rows the workspace does not have yet. */
+  /** Rows safe to create, after deduplication and identity checks. */
   create: PlannedCourseItem[];
-  /** Rows that exist under the same template identity with a different title or week. */
-  update: Array<{ id: string; path: string; label: string; weekSource?: "template" | "inferred" | "learner" }>;
+  /** Only identity, location and labels are patched; study progress is untouched. */
+  update: Array<{ id: string; path: string; label: string; weekSource?: "template" | "inferred" | "learner"; templateKey?: string }>;
   unchanged: number;
+  /** Conflicts must be reconciled by the learner; they are never silently inserted. */
+  review?: Array<{ item: PlannedCourseItem; reason: string; candidateIds: string[] }>;
+  /** Existing source rows absent from the selected plan: informational, never auto-deleted. */
+  notInSelection?: Array<{ id: string; label: string; path: string }>;
 }
 
-/**
- * Compare a plan with what the tracker already holds. Applying a template twice
- * adds nothing, and a row the learner has already studied keeps its progress:
- * only its title and place are brought up to date.
- */
+/** Plan against the existing workspace, without mutating passes, attendance, or links. */
 export function reconcileCourseTemplate(
   plan: CourseTemplatePlan,
-  existing: ReadonlyArray<{ id: string; path: string; label: string; templateKey?: string; weekSource?: "template" | "inferred" | "learner" }>,
+  existing: ReadonlyArray<{ id: string; path: string; label: string; activity?: CourseActivity; templateKey?: string; weekSource?: "template" | "inferred" | "learner" }>,
 ): TemplateReconciliation {
-  // The same module can be studied in more than one term. Its stable activity
-  // key must never pull a row (and its progress) out of another course context.
-  const inScope = existing.filter((item) => {
-    const parts = item.path.split("/");
-    return moduleKey(parts.at(-2) ?? "") === moduleKey(plan.module)
-      && parts.slice(0, -2).join("/").toLowerCase() === (plan.term ?? "").toLowerCase();
+  // Only rows under this module AND this term can match. An identical activity
+  // title in another term is never a duplicate of this student's work.
+  const inScope = existing.filter((row) => {
+    const segments = row.path.split("/").filter(Boolean);
+    const last = segments.at(-1) ?? "";
+    const hasWeekSuffix = /^week\s*\d+$/i.test(last) || /^unscheduled$/i.test(last);
+    const module = hasWeekSuffix ? segments.at(-2) : segments.at(-1);
+    const term = segments.length > (hasWeekSuffix ? 2 : 1) ? segments[0] : undefined;
+    return canonicalModuleKey(module ?? "") === canonicalModuleKey(plan.module)
+      && termIdentity(term) === termIdentity(plan.term);
   });
-  const byKey = new Map(inScope.flatMap((item) => (item.templateKey ? [[item.templateKey, item] as const] : [])));
-  const byPlace = new Set(existing.map((item) => `${item.path}|${item.label}`.toLowerCase()));
+  const normalizeKey = (key: string) => normalizedTemplateIdentity(key, plan.module);
+  const byKey = new Map<string, typeof inScope>();
+  const byPlace = new Map<string, typeof inScope>();
+  for (const row of inScope) {
+    if (row.templateKey) {
+      const key = normalizeKey(row.templateKey);
+      byKey.set(key, [...(byKey.get(key) ?? []), row]);
+    }
+    const place = `${row.path}|${row.label}`.toLowerCase();
+    byPlace.set(place, [...(byPlace.get(place) ?? []), row]);
+  }
+  const planKeyCounts = new Map<string, number>();
+  for (const row of plan.items) {
+    const key = normalizeKey(row.templateKey);
+    planKeyCounts.set(key, (planKeyCounts.get(key) ?? 0) + 1);
+  }
+  const matched = new Set<string>();
+  const review: NonNullable<TemplateReconciliation["review"]> = [];
   const result: TemplateReconciliation = { create: [], update: [], unchanged: 0 };
   for (const item of plan.items) {
-    const match = byKey.get(item.templateKey);
-    if (match) {
-      // A week the learner chose stands: a re-import may retitle the row, never move it.
-      const path = match.weekSource === "learner" ? match.path : item.path;
-      if (match.path === path && match.label === item.label) result.unchanged += 1;
-      else result.update.push({ id: match.id, path, label: item.label, weekSource: match.weekSource === "learner" ? "learner" : item.weekSource });
-    } else if (byPlace.has(`${item.path}|${item.label}`.toLowerCase())) {
-      result.unchanged += 1;
-    } else {
-      result.create.push(item);
+    const identity = normalizeKey(item.templateKey);
+    const candidates = byKey.get(identity) ?? [];
+    const exactPlace = byPlace.get(`${item.path}|${item.label}`.toLowerCase()) ?? [];
+    if ((planKeyCounts.get(identity) ?? 0) > 1 || candidates.length > 1 || exactPlace.length > 1) {
+      review.push({ item, reason: "Repeated identity or duplicate workspace rows require manual reconciliation.", candidateIds: [...new Set([...candidates, ...exactPlace].map((row) => row.id))] });
+      continue;
     }
+    const match = candidates[0];
+    if (match) {
+      matched.add(match.id);
+      // A learner-assigned week wins on every future revision.
+      const path = match.weekSource === "learner" ? match.path : item.path;
+      const weekSource = match.weekSource === "learner" ? "learner" : item.weekSource;
+      if (match.path === path && match.label === item.label && match.weekSource === weekSource) result.unchanged += 1;
+      else result.update.push({ id: match.id, path, label: item.label, weekSource });
+      continue;
+    }
+    if (exactPlace.length === 1) {
+      const existingRow = exactPlace[0];
+      if (existingRow.templateKey && normalizeKey(existingRow.templateKey) !== identity) {
+        review.push({ item, reason: "This location and title already exist under a different template identity. Confirm before merging progress.", candidateIds: [existingRow.id] });
+        continue;
+      }
+      // A manually entered task is not converted into a template-owned record.
+      matched.add(existingRow.id);
+      result.unchanged += 1;
+      continue;
+    }
+    // A learner may have filed the same unkeyed activity in another week.
+    // Recreating it would make two entries with independent completion state.
+    const unkeyedTitleMatches = inScope.filter((row) => !row.templateKey
+      && row.label.trim().toLowerCase() === item.label.trim().toLowerCase());
+    if (unkeyedTitleMatches.length) {
+      review.push({ item, reason: "An existing unkeyed activity with this title may be the same activity in another week.", candidateIds: unkeyedTitleMatches.map((row) => row.id) });
+      continue;
+    }
+    // A prior import may use an older, title-based key. A renamed unnumbered
+    // item cannot be proved new by title similarity: require explicit review.
+    const kindPrefix = identity.split("|").slice(0, -1).join("|") + "|";
+    const legacyCandidates = inScope.filter((row) => row.templateKey
+      && normalizeKey(row.templateKey).startsWith(kindPrefix)
+      && !planKeyCounts.has(normalizeKey(row.templateKey)) && !matched.has(row.id));
+    if (legacyCandidates.length) {
+      review.push({ item, reason: "Existing unmatched activities of this type may be renamed or renumbered versions.", candidateIds: legacyCandidates.map((row) => row.id) });
+      continue;
+    }
+    result.create.push(item);
   }
+  const notInSelection = inScope.filter((row) => row.templateKey && !planKeyCounts.has(normalizeKey(row.templateKey)) && !matched.has(row.id))
+    .map(({ id, path, label }) => ({ id, path, label }));
+  if (review.length) result.review = review;
+  if (notInSelection.length) result.notInSelection = notInSelection;
   return result;
+}
+
+/** Stable activity identity normalizes equivalent long/short SGU module labels. */
+export function normalizedTemplateIdentity(key: string, plannedModule: string): string {
+  const parts = key.split("|");
+  if (parts.length < 3) return key;
+  const modulePart = parts.length - 3;
+  // Previous template keys have already lost word boundaries. Recognize only
+  // the planner module's documented aliases, never arbitrary module prefixes.
+  const spellings = [plannedModule, ...moduleAliases(plannedModule)].map(moduleKey);
+  if (spellings.includes(parts[modulePart])) parts[modulePart] = canonicalModuleKey(plannedModule);
+  return parts.join("|");
+}
+
+function termIdentity(value?: string): string {
+  const normalized = (value ?? "").trim().toLowerCase();
+  const match = normalized.match(/^(?:term|t)\s*0*(\d{1,2})$/);
+  return match ? `term${Number(match[1])}` : normalized;
 }
 
 /** The module codes a set of templates establishes, for the mapping vocabulary. */
@@ -321,19 +449,8 @@ export function templateModules(
   return [...seen.values()];
 }
 
-/**
- * Other ways a module name is written in file names. "NB Block 3" is filed as
- * "NB3"; "BPM502 Post-Midterm" as "PostMidterm".
- */
-export function moduleAliases(module: string): string[] {
-  const words = module.trim().split(/\s+/);
-  const aliases = new Set<string>();
-  const number = module.match(/(\d+)\s*$/)?.[1];
-  if (words.length > 2 && number) aliases.add(`${words[0]}${number}`);
-  if (words.length >= 2 && /\d/.test(words[0]) && !number) aliases.add(words.slice(1).join(" "));
-  aliases.delete(module);
-  return [...aliases];
-}
+// Preserve the established public import location while sharing one alias rule.
+export { moduleAliases } from "./vocabulary.ts";
 
 function setsTheWeeks(section: CourseTemplateSection): boolean {
   if (section.items.some((item) => item.statedWeek)) return true;
@@ -342,14 +459,44 @@ function setsTheWeeks(section: CourseTemplateSection): boolean {
   return section.items.length > 0 && weeklyActivities.length / section.items.length >= 0.8;
 }
 
-function itemNumber(label: string): number | undefined {
-  const match = label.match(/\b(?:lecture|dla|sg|imcq|quiz|lab|case)\s*0*(\d{1,3})\b/i);
-  return match ? Number(match[1]) : undefined;
+/** Combined numbered lectures are one source row; never attach one row's progress to a later split lecture. */
+function compositeNumbers(label: string, activity: CourseActivity): number[] | undefined {
+  if (activity !== "lecture" && activity !== "flipped-lecture") return undefined;
+  const leading = label.match(/^(?:(?:lecture|lec)|[A-Z][A-Z0-9-]{1,9})\s+(\d{1,3}(?:\s*(?:,|&|and)\s*\d{1,3})+)(?=\s|$)/i);
+  if (!leading) return undefined;
+  const numbers = [...leading[1].matchAll(/\d{1,3}/g)].map(([digits]) => Number(digits));
+  return numbers.length > 1 ? numbers : undefined;
+}
+
+function itemNumber(label: string, activity: CourseActivity): number | undefined {
+  // Prefer this activity's own number, never a reference to another lecture in
+  // its title: "DLA 02 before Lecture 06" identifies DLA 2, not Lecture 6.
+  const byActivity: Partial<Record<CourseActivity, RegExp>> = {
+    lecture: /\b(?:lecture|lec)\s*#?\s*0*(\d{1,3})\b/i,
+    "flipped-lecture": /\b(?:lecture|lec)\s*#?\s*0*(\d{1,3})\b/i,
+    dla: /\bdla\s*#?\s*0*(\d{1,3})\b/i,
+    "small-group": /\b(?:sg|small\s+group)\s*#?\s*0*(\d{1,3})\b/i,
+    imcq: /\bimcq\s*#?\s*0*(\d{1,3})\b/i,
+    esoft: /\b(?:e\s?soft|examsoft)(?:\s+quiz)?\s*#?\s*0*(\d{1,3})\b/i,
+    lab: /\blab\s*#?\s*0*(\d{1,3})\b/i,
+    case: /\bcase\s*#?\s*0*(\d{1,3})\b/i,
+    assessment: /\b(?:quiz|exam)\s*#?\s*0*(\d{1,3})\b/i,
+  };
+  const stated = label.match(byActivity[activity] ?? /a^/);
+  if (stated) return Number(stated[1]);
+  // Some official lists say "CPR 03 Histology" without spelling out Lecture.
+  // This applies to lecture kinds only; do not infer assessment numbers.
+  if (activity === "lecture" || activity === "flipped-lecture") {
+    const leading = label.match(/^[A-Z][A-Z0-9-]{1,9}\s+0*(\d{1,3})(?=\s|[,;:/-]|$)/);
+    if (leading) return Number(leading[1]);
+  }
+  return undefined;
 }
 
 function templateKey(module: string, item: CourseTemplateItem): string {
-  const identity = item.number !== undefined
-    ? String(item.number)
-    : item.label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const identity = item.numbers?.length
+    ? `combined-${item.numbers.join("-")}`
+    : item.number !== undefined ? String(item.number)
+      : item.label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   return `${moduleKey(module)}|${item.activity === "flipped-lecture" ? "lecture" : item.activity}|${identity}`;
 }

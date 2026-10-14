@@ -91,6 +91,23 @@ export function moduleKey(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
+/** Alternate module spellings present in source titles, not asserted course assignments. */
+export function moduleAliases(module: string): string[] {
+  const words = module.trim().split(/\s+/);
+  const aliases = new Set<string>();
+  const number = module.match(/(\d+)\s*$/)?.[1];
+  if (words.length > 2 && number) aliases.add(`${words[0]}${number}`);
+  if (words.length >= 2 && /\d/.test(words[0]) && !number) aliases.add(words.slice(1).join(" "));
+  aliases.delete(module);
+  return [...aliases];
+}
+
+/** The same module survives its long-form course-template and short-form curriculum names. */
+export function canonicalModuleKey(module: string): string {
+  const spellings = [module, ...moduleAliases(module)].map(moduleKey).filter(Boolean);
+  return spellings.sort((left, right) => left.length - right.length || left.localeCompare(right))[0] ?? "";
+}
+
 function dedupeModules(modules: readonly ModuleVocabulary[]): ModuleVocabulary[] {
   const byKey = new Map<string, ModuleVocabulary>();
   for (const module of modules) {

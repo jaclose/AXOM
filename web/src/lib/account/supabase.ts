@@ -114,6 +114,10 @@ export async function accountOperationClient() {
   const assertCurrent = async () => {
     const current = await shared.auth.getSession();
     if (current.error || current.data.session?.user.id !== userId) throw new Error("The signed-in account changed. This operation was stopped.");
+    // The scoped SDK and tus headers are pinned to the initiating credential.
+    // A token refresh/revocation must restart the operation with fresh headers;
+    // silently continuing under a stale token risks a partial upload.
+    if (current.data.session.access_token !== session.access_token) throw new Error("The account session was refreshed. Your local work is safe; retry the upload.");
   };
   const { createClient } = await import("@supabase/supabase-js");
   const scoped = createClient(projectUrl()!, publicKey()!, {
@@ -123,5 +127,8 @@ export async function accountOperationClient() {
       return fetch(input, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout });
     } },
   });
-  return { client: scoped, userId, assertCurrent };
+  const endpoint = new URL("storage/v1/upload/resumable", `${projectUrl()!.replace(/\/$/, "")}/`);
+  if (/^[a-z0-9]+\.supabase\.co$/.test(endpoint.hostname)) endpoint.hostname = endpoint.hostname.replace(".supabase.co", ".storage.supabase.co");
+  return { client: scoped, userId, assertCurrent,
+    resumable: { endpoint: endpoint.href, headers: { authorization: `Bearer ${session.access_token}`, apikey: publicKey()! } } };
 }

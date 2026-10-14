@@ -1,5 +1,6 @@
 import { isIcsCalendar, parseIcsEvents, type IcsParseOptions } from "./icsCalendar";
 import type { TrackerItem, TrackerKind } from "./types";
+import { trackerPathKey } from "./pathUtils";
 
 export interface ScheduleCandidate {
   id: string;
@@ -35,9 +36,10 @@ export function parseCourseSchedule(
   existing: readonly TrackerItem[] = [],
   sourceName?: string,
   options: IcsParseOptions = {},
+  scopePath?: string,
 ): ScheduleCandidate[] {
-  if (isIcsCalendar(text)) return parseIcsSchedule(text, existing, sourceName, options);
-  return parseDelimitedSchedule(text, existing, sourceName);
+  if (isIcsCalendar(text)) return parseIcsSchedule(text, existing, sourceName, options, scopePath);
+  return parseDelimitedSchedule(text, existing, sourceName, scopePath);
 }
 
 export function scheduleCandidatesToTracker(
@@ -61,9 +63,12 @@ export function scheduleCandidatesToTracker(
 export function reconcileScheduleDuplicates(
   candidates: readonly ScheduleCandidate[],
   existing: readonly TrackerItem[],
+  scopePath?: string,
 ): ScheduleCandidate[] {
-  const exact = new Set(existing.map((item) => identity(item.label, item.kind, dateFrom(item.assessmentDate, item.note))));
-  const labels = new Set(existing.map((item) => normalize(item.label)));
+  // An identical "IMCQ 1" in a different course is not a duplicate.
+  const scoped = scopePath === undefined ? existing : existing.filter((item) => trackerPathKey(item.path) === trackerPathKey(scopePath));
+  const exact = new Set(scoped.map((item) => identity(item.label, item.kind, dateFrom(item.assessmentDate, item.note))));
+  const labels = new Set(scoped.map((item) => normalize(item.label)));
   const seenExact = new Set<string>();
   const seenLabels = new Set<string>();
   return candidates.map((candidate) => {
@@ -77,7 +82,7 @@ export function reconcileScheduleDuplicates(
   });
 }
 
-function parseDelimitedSchedule(text: string, existing: readonly TrackerItem[], sourceName?: string): ScheduleCandidate[] {
+function parseDelimitedSchedule(text: string, existing: readonly TrackerItem[], sourceName?: string, scopePath?: string): ScheduleCandidate[] {
   const rows = text.split(/\r?\n/).flatMap((raw, index) => {
     const line = raw.trim();
     if (!line || /^date[,\t]/i.test(line)) return [];
@@ -91,17 +96,17 @@ function parseDelimitedSchedule(text: string, existing: readonly TrackerItem[], 
     const problem = label ? undefined : `Line ${index + 1} has no usable title.`;
     return [candidate(`${index + 1}`, label, kind, date, index + 1, sourceName, problem)];
   });
-  return reconcileScheduleDuplicates(rows, existing);
+  return reconcileScheduleDuplicates(rows, existing, scopePath);
 }
 
-function parseIcsSchedule(text: string, existing: readonly TrackerItem[], sourceName: string | undefined, options: IcsParseOptions): ScheduleCandidate[] {
+function parseIcsSchedule(text: string, existing: readonly TrackerItem[], sourceName: string | undefined, options: IcsParseOptions, scopePath?: string): ScheduleCandidate[] {
   const rows = parseIcsEvents(text, options).map((event) => {
     // A learning platform's feed ends every title with the course in brackets; the title alone is the label.
     const label = event.title;
     const problem = label ? undefined : `Calendar event ${event.index + 1} has no title.`;
     return candidate(`ics-${event.index + 1}`, label, detectKind(`${label} ${event.description ?? ""}`), event.start?.date, event.index + 1, sourceName, problem);
   });
-  return reconcileScheduleDuplicates(rows, existing);
+  return reconcileScheduleDuplicates(rows, existing, scopePath);
 }
 
 function candidate(id: string, label: string, kind: TrackerKind, date: string | undefined, sourceLine: number, sourceName?: string, problem?: string): ScheduleCandidate {

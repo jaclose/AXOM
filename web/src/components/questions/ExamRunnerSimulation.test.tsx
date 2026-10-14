@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { QuestionRecord } from "../../lib/questions";
 import { makeSeed } from "../../lib/seed";
 import { useStore } from "../../lib/store";
-import { readSuspendedBlock } from "../../lib/examSim";
+import { readSuspendedBlock, writeSuspendedBlock } from "../../lib/examSim";
 import { ExamRunner } from "./ExamRunner";
 
 vi.mock("../../lib/ai", () => ({ resolveActiveProvider: () => null, explainSimply: vi.fn(), explainWhyWrong: vi.fn(), memoryHook: vi.fn() }));
@@ -57,5 +57,34 @@ describe("ExamRunner simulation", () => {
     expect(screen.getByText(/Suspended block · USMLE \/ NBME/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Resume/ }));
     expect((screen.getAllByRole("radio", { name: "A. Alpha" })[0] as HTMLInputElement).checked).toBe(true);
+  });
+});
+
+describe("Suspended exam source recovery", () => {
+  it("keeps a suspended block intact until all trusted question records are available", async () => {
+    const now = new Date().toISOString();
+    writeSuspendedBlock({
+      version: 1, skin: "nbme", mode: "exam", poolIds: ["q1", "q2"], index: 1,
+      items: {
+        q1: { answerKey: "B", marked: true, struck: [], seconds: 23, visited: true },
+        q2: { answerKey: "A", marked: false, struck: [], seconds: 12, visited: true },
+      },
+      elapsedMs: 45_000, timeLimitSeconds: 180, notes: "Preserve my notes",
+      startedAt: now, suspendedAt: now,
+    });
+    useStore.setState({ questions: [q("q1")] });
+    const onClose = vi.fn();
+    render(<ExamRunner mode="exam" onClose={onClose} />);
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    expect(screen.getByText(/Suspended block · USMLE \/ NBME/)).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: /NBME .* simulation/ })).toBeNull();
+    expect(readSuspendedBlock()?.poolIds).toEqual(["q1", "q2"]);
+    expect(readSuspendedBlock()?.items.q1).toMatchObject({ answerKey: "B", marked: true });
+    expect(onClose).not.toHaveBeenCalled();
+
+    await act(async () => { await useStore.setState({ questions: [q("q1"), q("q2")] }); });
+    await waitFor(() => expect(screen.getByRole("region", { name: "Practice source" }).textContent).toContain("2 match your filters"));
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    expect(screen.getByRole("dialog", { name: /USMLE \/ NBME.*simulation/ })).toBeTruthy();
   });
 });

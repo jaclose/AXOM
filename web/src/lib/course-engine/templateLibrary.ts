@@ -13,6 +13,12 @@ export interface SavedCourseTemplate {
 export async function prepareCourseTemplate(text: string, fileName: string, now = new Date().toISOString()): Promise<SourceDocument> {
   const section = parseCourseTemplate(text, fileName);
   if (!section.module || !section.items.length) throw new Error(`${fileName}: no course activities could be read. Use a module heading and one activity per line with its kind in brackets.`);
+  // A partially parsed template can silently omit required work. The document
+  // vault must not record it as an installable template until every input line
+  // is either accounted for or explicitly repaired by the student.
+  if (section.problems.length) {
+    throw new Error(`${fileName}: fix ${section.problems.length} template issue${section.problems.length === 1 ? "" : "s"} before saving. ${section.problems.slice(0, 3).join(" ")}`);
+  }
   const checksum = await sha256Hex(text);
   if (!checksum) throw new Error("This browser cannot identify template versions securely. Open AXOM on localhost or HTTPS and try again.");
   return {

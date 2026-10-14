@@ -1062,3 +1062,12 @@ ul.template-note { padding-left: 26px; }
 .week-module-head:focus-visible, .week-row-head:focus-visible, .week-absences > summary:focus-visible { outline: 2px solid rgba(var(--accent-rgb), .7); outline-offset: -2px; border-radius: var(--radius-sm); }
 .week-items > li { flex-wrap: wrap; }
 .week-move { width: auto; min-height: 30px; padding: 4px 26px 4px 10px; font-size: var(--fs-tiny); }
+
+/* Course QBank: composable academic scope and answer-readiness filters. */
+.qb-academic-filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 12px 0 16px; }
+.qb-academic-filters label { min-width: 0; display: flex; flex-direction: column; gap: 5px; font-size: 12px; font-weight: 600; color: var(--text-80); }
+.qb-academic-filters select { min-width: 0; width: 100%; padding: 9px 10px; color: var(--text); font: inherit; font-weight: 500; border: 1px solid var(--hairline); border-radius: var(--radius-sm); background: var(--surface, transparent); }
+.qb-academic-filters select:focus-visible { outline: 2px solid rgba(var(--accent-rgb), .7); outline-offset: 2px; }
+.qb-collection-warning { color: var(--text-80); line-height: 1.4; }
+@media (max-width: 850px) { .qb-academic-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .qb-academic-filters { grid-template-columns: minmax(0, 1fr); } }

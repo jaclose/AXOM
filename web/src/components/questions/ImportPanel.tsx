@@ -1,4 +1,4 @@
-import { BankImportReview, type TaggedBank } from "./BankImportReview";
+import { BankImportReview, type ReviewBank } from "./BankImportReview";
 import { manifestForFile } from "../../lib/question-content/knownBanks";
 // ===========================================================================
 // Import Center (question-bank rehaul, layers 1–2). Upload PDF/DOCX/TXT/MD/
@@ -48,11 +48,13 @@ import { courseForScope } from "../../lib/course-engine/questionBank";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { MassImport } from "./MassImport";
 import { flagImportDuplicates } from "../../lib/questionDuplicates";
-import { imageNameKey, matchNamedImages, namedImages } from "../../lib/questionImportImages";
+import { imageNameKey, imageReferenceKey, matchNamedImages, namedImages } from "../../lib/questionImportImages";
+import type { RawSelection } from "../../lib/privateLibrary/rawAcademicInput";
 
 export type ImportTab = "paste" | "file" | "batch" | "ai";
 type SaveMode = "set" | "doc" | "both";
 type ImportStep = "source" | "review" | "finalize";
+interface StagedSource { id: string; file: File; status: "queued" | "partial" | "saved"; questions?: number; saved?: number; images: File[]; answerKeyId?: string; }
 
 interface ReviewDraft extends ParsedQuestionDraft {
   reviewId: string;
@@ -248,6 +250,9 @@ export function ImportPanel({
   const [finalizing, setFinalizing] = useState(false);
   const [activeBatchQueueId, setActiveBatchQueueId] = useState<string | undefined>(seed?.batchQueueId);
   const [finalizedBatchQueueId, setFinalizedBatchQueueId] = useState<string | undefined>();
+  const [stagedSources, setStagedSources] = useState<StagedSource[]>([]);
+  const [stagedSkipped, setStagedSkipped] = useState<string[]>([]);
+  const [activeStagedId, setActiveStagedId] = useState<string>();
   const finalizingRef = useRef(false);
   const mountedRef = useRef(true);
   // Image files the learner adds for questions that name one ("Attachment: ecg.png").
@@ -300,7 +305,7 @@ export function ImportPanel({
     setFinalizing(false);
     // Figures cut from a PDF arrive with its questions and go through the same
     // path as images the learner adds by hand.
-    if (images.length) setImageFiles(images);
+    setImageFiles(images); // Avoid carrying pictures from a prior source into the next review.
     // A file imported before comes in with what it already brought left unselected.
     const known = applyPriorImport(flagImportDuplicates(parsed, s.questions ?? []), doc, settledLibrary());
     setDrafts(known.drafts.map((d, index) => ({ ...d, reviewId: uid(), include: known.selected[index], aiGenerated: ai, source })));
@@ -316,13 +321,19 @@ export function ImportPanel({
   function finishSuccessfulImport(result: ImportFinalizationResult) {
     if (!mountedRef.current) return;
     const continueBatch = Boolean(activeBatchQueueId);
+    const continueStaged = Boolean(activeStagedId);
+    if (continueStaged) {
+      setStagedSources((rows) => rows.map((row) => row.id === activeStagedId
+        ? { ...row, status: result.questionIds.length > 0 && result.questionIds.length === row.questions ? "saved" : "partial", saved: result.questionIds.length } : row));
+      setActiveStagedId(undefined);
+    }
     if (continueBatch) {
       setFinalizedBatchQueueId(activeBatchQueueId);
       setActiveBatchQueueId(undefined);
     }
     reset(true);
-    if (continueBatch) {
-      setTab("batch");
+    if (continueBatch || continueStaged) {
+      setTab(continueBatch ? "batch" : "file");
       return;
     }
     try {
@@ -616,9 +627,9 @@ export function ImportPanel({
 
   /** Take an image off every question that names it. It stays in the import, unplaced. */
   function detachImage(name: string) {
-    const key = imageNameKey(name);
-    setDrafts((all) => all.map((draft) => ((draft.attachmentNames ?? []).some((entry) => imageNameKey(entry) === key)
-      ? { ...draft, attachmentNames: draft.attachmentNames!.filter((entry) => imageNameKey(entry) !== key) }
+    const key = imageReferenceKey(name);
+    setDrafts((all) => all.map((draft) => ((draft.attachmentNames ?? []).some((entry) => imageReferenceKey(entry) === key)
+      ? { ...draft, attachmentNames: draft.attachmentNames!.filter((entry) => imageReferenceKey(entry) !== key) }
       : draft)));
   }
 
@@ -626,6 +637,10 @@ export function ImportPanel({
     setStep("source");
     if (tab === "batch") {
       focusAfterReviewUpdate(activeBatchQueueId ? `mass-import-inspect-${activeBatchQueueId}` : undefined);
+    } else if (tab === "file" && activeStagedId) {
+      // A reviewed item belongs to the multi-file staging queue; do not
+      // move the user to text paste and hide all other queued source files.
+      focusAfterReviewUpdate(`staged-review-${activeStagedId}`);
     } else {
       setTab("paste");
       focusAfterReviewUpdate("import-source-text");
@@ -726,7 +741,7 @@ export function ImportPanel({
   }, [drafts, evaluations, includedDrafts, includedEvaluations]);
   const includedCount = includedDrafts.length;
   const imageMatches = matchNamedImages(namedImages(includedDrafts), imageFiles);
-  const matchedImageKeys = new Set(imageMatches.filter((match) => match.file).map((match) => imageNameKey(match.name)));
+  const matchedImageKeys = new Set(imageMatches.filter((match) => match.file).map((match) => imageReferenceKey(match.name)));
   const usedImages = new Set(imageMatches.map((match) => match.file).filter(Boolean));
   const unusedImages = imageFiles.filter((file) => !usedImages.has(file));
   const blockedCount = includedDrafts.filter((draft, index) => (
@@ -784,8 +799,8 @@ export function ImportPanel({
           <div className="row wrap gap6" aria-label="Import source type">
             {([
               ["paste", "Paste text"],
-              ["file", "Import one file"],
-              ["batch", "Import several files"],
+              ["file", "Upload files, ZIP or folder"],
+              ["batch", "High-volume batch queue"],
               ["ai", "Generate with AI"],
             ] as Array<[ImportTab, string]>).map(([id, label]) => (
               <button key={id} className={`filter-pill ${tab === id ? "on" : ""}`}
@@ -833,7 +848,19 @@ export function ImportPanel({
             />
           )}
           {tab === "file" && (
-            <FileTab busyFile={busyFile} setBusyFile={setBusyFile} onParsed={loadDrafts} onBankSaved={finishSuccessfulImport} />
+            <FileTab busyFile={busyFile} setBusyFile={setBusyFile} onParsed={loadDrafts} onBankSaved={finishSuccessfulImport}
+              stagedSources={stagedSources} stagedSkipped={stagedSkipped}
+              onStage={(selection) => {
+                setStagedSources((rows) => [...rows, ...selection.sources.map((file) => ({ id: uid(), file, status: "queued" as const, images: selection.images }))]);
+                setStagedSkipped((previous) => [...previous, ...selection.skipped.map((entry) => `${entry.path}: ${entry.reason}`)]);
+              }}
+              onRemoveStaged={(id) => setStagedSources((rows) => rows.filter((row) => row.id !== id).map((row) => row.answerKeyId === id ? { ...row, answerKeyId: undefined } : row))}
+              onInspectStaged={setActiveStagedId}
+              onStagedCandidates={(id, count) => setStagedSources((rows) => rows.map((row) => row.id === id ? { ...row, questions: count } : row))}
+              onStagedSaved={(id, count) => setStagedSources((rows) => rows.map((row) => row.id === id
+                ? { ...row, saved: count, status: count > 0 && count === row.questions ? "saved" : "partial" } : row))}
+              onPairKey={(id, answerKeyId) => setStagedSources((rows) => rows.map((row) => row.id === id ? { ...row, answerKeyId } : row))}
+            />
           )}
           {tab === "ai" && (
             <AiGenerateTab seedReference={seed?.reference} onParsed={(parsed, warnings) => loadDrafts(parsed, warnings, "ai-generated", null, true)} />
@@ -962,7 +989,7 @@ export function ImportPanel({
                   onChange={(event) => {
                     const picked = [...(event.target.files ?? [])];
                     event.target.value = "";
-                    if (picked.length) setImageFiles((current) => [...current.filter((file) => !picked.some((next) => imageNameKey(next.name) === imageNameKey(file.name))), ...picked]);
+                    if (picked.length) setImageFiles((current) => [...current.filter((file) => !picked.some((next) => imageReferenceKey(next.name) === imageReferenceKey(file.name))), ...picked]);
                   }} />
               </div>
               {imageMatches.length > 0 && (
@@ -1089,7 +1116,7 @@ export function ImportPanel({
                         {draft.explanation ? " · explanation present" : " · explanation missing"}
                         {draft.sourcePage ? ` · page ${draft.sourcePage}` : ""}
                         {(draft.attachmentNames?.length ?? 0) > 0 && ` · image ${draft.attachmentNames!.map((name) => (
-                          `${name}${matchedImageKeys.has(imageNameKey(name)) ? "" : " (not added yet)"}`
+                          `${name}${matchedImageKeys.has(imageReferenceKey(name)) ? "" : " (not added yet)"}`
                         )).join(", ")}`}
                       </span>
                     </button>
@@ -1331,57 +1358,122 @@ function PasteTab({ raw, label, onRawChange, parseSource, onParsed }: {
 
 // --- file tab ----------------------------------------------------------------
 
-function FileTab({ busyFile, setBusyFile, onParsed, onBankSaved }: {
+function FileTab({ busyFile, setBusyFile, onParsed, onBankSaved, stagedSources, stagedSkipped, onStage, onRemoveStaged, onInspectStaged, onStagedCandidates, onStagedSaved, onPairKey }: {
   onBankSaved: (result: ImportFinalizationResult) => void;
   busyFile: string | null;
   setBusyFile: (name: string | null) => void;
   onParsed: (drafts: ParsedQuestionDraft[], warnings: string[], source: QuestionSource, doc: PendingDocument | null, ai?: boolean, images?: File[]) => void;
+  stagedSources: readonly StagedSource[];
+  stagedSkipped: readonly string[];
+  onStage: (selection: RawSelection) => void;
+  onRemoveStaged: (id: string) => void;
+  onInspectStaged: (id: string | undefined) => void;
+  onStagedCandidates: (id: string, count: number) => void;
+  onStagedSaved: (id: string, saved: number) => void;
+  onPairKey: (id: string, answerKeyId: string | undefined) => void;
 }) {
   const fileInput = useRef<HTMLInputElement>(null);
-  const [bank, setBank] = useState<TaggedBank>();
+  const folderInput = useRef<HTMLInputElement>(null);
+  const [bank, setBank] = useState<ReviewBank>();
+  const [bankStagedId, setBankStagedId] = useState<string>();
+  const [progress, setProgress] = useState("");
+  const [prepared, setPrepared] = useState<{ name: string; read: (path: string) => Promise<Uint8Array>; sources: number; declaredReady: number; declaredReview: number }>();
+  const [installing, setInstalling] = useState(false);
 
-  async function handleFile(file: File) {
+  async function selectedAnswerKey(stagedId?: string) {
+    const source = stagedSources.find((entry) => entry.id === stagedId);
+    const selected = stagedSources.find((entry) => entry.id === source?.answerKeyId);
+    if (!selected) return undefined;
+    const file = selected.file;
+    if (file.size > 128 * 1024 * 1024) throw new Error("The answer-key file exceeds 128 MB. Split or export a smaller key.");
+    const bytes = await file.arrayBuffer();
+    const suffix = file.name.toLowerCase();
+    const extracted = suffix.endsWith(".pdf") ? await extractPdfText(bytes.slice(0))
+      : suffix.endsWith(".docx") ? await extractDocxText(bytes.slice(0))
+      : { text: new TextDecoder("utf-8", { fatal: true }).decode(bytes), warnings: [] as string[] };
+    return {
+      text: extracted.text,
+      warnings: extracted.warnings,
+      context: { name: file.name, checksum: `sha256:${await sha256Hex(bytes)}` },
+    };
+  }
+  async function withPackageKey(source: ReviewBank, stagedId?: string): Promise<ReviewBank> {
+    const key = await selectedAnswerKey(stagedId);
+    if (!key) return source;
+    const { pairPackageAnswers } = await import("../../lib/question-content/separateAnswerKey");
+    const paired = pairPackageAnswers(source.pkg, source.conversionIssues, key.text, key.context);
+    return { ...source, pkg: paired.value.pkg, conversionIssues: paired.value.issues,
+      notes: [...source.notes, ...paired.warnings], warnings: [...source.warnings, ...key.warnings, ...paired.warnings] };
+  }
+  async function withDraftKey(drafts: ParsedQuestionDraft[], stagedId?: string) {
+    const key = await selectedAnswerKey(stagedId);
+    if (!key) return { drafts, warnings: [] as string[] };
+    const { pairDraftAnswers } = await import("../../lib/question-content/separateAnswerKey");
+    const paired = pairDraftAnswers(drafts, key.text, key.context);
+    return { drafts: paired.value, warnings: [...key.warnings, ...paired.warnings] };
+  }
+
+  async function handleFile(file: File, stagedId?: string) {
+    onInspectStaged(stagedId);
+    const relatedImages = stagedSources.find(row => row.id === stagedId)?.images ?? [];
     const name = file.name.toLowerCase();
     const isPdf = file.type === "application/pdf" || name.endsWith(".pdf");
     const isDocx = name.endsWith(".docx") || file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
     setBusyFile(file.name);
+    setProgress(`Opening ${file.name}…`);
     try {
       if (isPdf) {
         const { extractPdfBank } = await import("../../lib/question-content/pdf/extractPdfBank");
         const state = useStore.getState();
         const extractedBank = await extractPdfBank(file, manifestForFile(file.name, state.terms, state.courses));
-        if (extractedBank.tagged) { setBank(extractedBank); return; }
+        if (extractedBank.tagged) { if (stagedId) onStagedCandidates(stagedId, extractedBank.pkg.questions.length); setBankStagedId(stagedId); setBank(await withPackageKey(extractedBank, stagedId)); return; }
+      }
+      if (isDocx) {
+        // Ordinary Word files have a first-class block converter: retain
+        // embedded figures, tables, formulae and evidence instead of flattening
+        // everything through the legacy text-only parser.
+        const { extractDocxBank } = await import("../../lib/question-content/docx/extractDocxBank");
+        const state = useStore.getState();
+        const converted = await extractDocxBank(file, manifestForFile(file.name, state.terms, state.courses));
+        if (converted.pkg.questions.length) { if (stagedId) onStagedCandidates(stagedId, converted.pkg.questions.length); setBankStagedId(stagedId); setBank(await withPackageKey(converted, stagedId)); return; }
       }
       if (isPdf || isDocx) {
         const buffer = await file.arrayBuffer();
         const checksum = await sha256Hex(buffer);
         // pdf.js takes ownership of the bytes it is given, so the figure pass reads its own copy.
         const figureBytes = isPdf ? buffer.slice(0) : undefined;
-        const extracted = isPdf ? await extractPdfText(buffer) : await extractDocxText(buffer);
+        const extracted = isPdf ? await (await import("../../lib/question-content/pdf/extractCompletePdfSource"))
+          .extractCompletePdfSource(buffer, ({ readPages, totalPages }) => setProgress(`Scanning page ${readPages}/${totalPages} in ${file.name}…`))
+          : await extractDocxText(buffer);
         const doc: PendingDocument = {
+          originalFile: file,
           title: documentTitleFromFile(file.name),
           fileName: file.name,
           fileType: isPdf ? "pdf" : "docx",
           sizeBytes: file.size,
-          rawText: extracted.text,
-          pageTexts: isPdf ? extracted.pages : undefined,
+          rawText: "previewText" in extracted ? extracted.previewText : extracted.text,
+          pageTexts: isPdf && "previewPages" in extracted ? extracted.previewPages : undefined,
           checksum,
         };
         if (extracted.empty) {
+          if (stagedId) onStagedCandidates(stagedId, 0);
           onParsed([], extracted.warnings, isPdf ? "pdf" : "imported", doc);
           return;
         }
         const read = isPdf ? parsePdfQuestions(extracted.text, extracted.pages) : { drafts: parseQuestionBlocks(extracted.text), notes: [], deckPages: undefined };
-        const drafts = read.drafts;
+        const paired = await withDraftKey(read.drafts, stagedId);
+        const drafts = paired.drafts;
         const markNotes = figureBytes ? await proposePdfMarkedAnswers(figureBytes.slice(0), drafts, read.deckPages) : [];
         const { images, notes: figureNotes } = figureBytes
           ? await attachPdfFigures(figureBytes, file.name, drafts, extracted.pages ?? [], read.deckPages)
           : { images: [], notes: [] };
+        if (stagedId) onStagedCandidates(stagedId, drafts.length);
         onParsed(
           drafts,
           [
             ...extracted.warnings,
             ...read.notes,
+            ...paired.warnings,
             ...figureNotes,
             ...markNotes,
             ...(drafts.length === 0 ? ["Text was extracted but no question pattern was found — review the file, or keep it as a library document."] : []),
@@ -1389,7 +1481,7 @@ function FileTab({ busyFile, setBusyFile, onParsed, onBankSaved }: {
           isPdf ? "pdf" : "imported",
           doc,
           false,
-          images,
+          [...images, ...relatedImages],
         );
         return;
       }
@@ -1399,6 +1491,7 @@ function FileTab({ busyFile, setBusyFile, onParsed, onBankSaved }: {
         onParsed([], [
           `Attached ${file.name}. Image imports store provenance only — there is no in-app OCR yet. Paste the question text instead.`,
         ], "image", {
+          originalFile: file,
           title: documentTitleFromFile(file.name),
           fileName: file.name,
           fileType: file.type,
@@ -1420,27 +1513,123 @@ function FileTab({ busyFile, setBusyFile, onParsed, onBankSaved }: {
       ]);
       const plain = extractPlainText(text);
       const result = format === "csv" ? importFromCsv(plain.text) : format === "json" ? importFromJson(plain.text) : importFromText(plain.text);
-      onParsed(result.drafts, [...plain.warnings, ...result.warnings], "imported", {
+      const paired = await withDraftKey(result.drafts, stagedId);
+      if (stagedId) onStagedCandidates(stagedId, paired.drafts.length);
+      onParsed(paired.drafts, [...plain.warnings, ...result.warnings, ...paired.warnings], "imported", {
+        originalFile: file,
         title: documentTitleFromFile(file.name),
         fileName: file.name,
         fileType: format,
         sizeBytes: file.size,
         rawText: plain.text,
         checksum,
-      });
+      }, false, relatedImages);
     } catch (err) {
+      if (stagedId) onInspectStaged(undefined);
       pushToast({ title: "Import failed", body: err instanceof Error ? err.message : "Could not read this file.", tone: "warn" });
     } finally {
       setBusyFile(null);
+      setProgress("");
     }
   }
 
-  if (bank) return <BankImportReview bank={bank} onBack={() => setBank(undefined)} onSaved={onBankSaved} />;
+  async function previewPrepared(name: string, input: File | File[]) {
+    setBusyFile(name);
+    try {
+      const { zipLibraryReader, folderLibraryReader, readCatalog } = await import("../../lib/privateLibrary/install");
+      const read = Array.isArray(input) ? folderLibraryReader(input) : await zipLibraryReader(input);
+      const catalog = readCatalog(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(await read("catalog.json"))));
+      setPrepared({ name, read, sources: catalog.sources.length,
+        declaredReady: catalog.sources.reduce((n, source) => n + source.ready, 0),
+        declaredReview: catalog.sources.reduce((n, source) => n + source.review, 0) });
+      setProgress("");
+    } catch (error) {
+      pushToast({ title: "Prepared package could not be opened", body: error instanceof Error ? error.message : "The package is invalid.", tone: "warn" });
+    } finally { setBusyFile(null); }
+  }
+
+  async function stageInputs(files: File[], folder = false) {
+    if (!files.length) return;
+    if (!folder && files.length === 1 && !files[0].name.toLowerCase().endsWith(".zip")) {
+      await handleFile(files[0]);
+      return;
+    }
+    setBusyFile(files.length === 1 ? files[0].name : `${files.length} selected files`);
+    setProgress("Checking input names and sizes…");
+    try {
+      const { rawAcademicFolder, rawAcademicZip } = await import("../../lib/privateLibrary/rawAcademicInput");
+      const archives = folder ? [] : files.filter((file) => file.name.toLowerCase().endsWith(".zip"));
+      const regular = folder ? files : files.filter((file) => !file.name.toLowerCase().endsWith(".zip"));
+      if (regular.length) {
+        try {
+          onStage(await rawAcademicFolder(regular, (at, total, path) =>
+            setProgress(`Reading source ${at}/${total}: ${path}`)));
+        } catch (error) {
+          if (archives.length || !(error instanceof Error) || !/prepared-package metadata/i.test(error.message)) throw error;
+          await previewPrepared(folder ? "Selected prepared folder" : "Selected prepared files", regular);
+        }
+      }
+      // Batch selections may contain several ZIPs and loose documents.
+      // An invalid archive must not remove other already staged sources.
+      for (const [position, archive] of archives.entries()) {
+        try {
+          onStage(await rawAcademicZip(archive, (at, total, path) =>
+            setProgress(`Archive ${position + 1}/${archives.length}, file ${at}/${total}: ${path}`)));
+        } catch (error) {
+          if (archives.length === 1 && !regular.length && error instanceof Error
+              && /prepared AXOM package/i.test(error.message)) {
+            await previewPrepared(archive.name, archive);
+            break;
+          }
+          const detail = error instanceof Error ? error.message : "The archive could not be read.";
+          onStage({ sources: [], images: [], duplicateCount: 0, skipped: [{ path: archive.name, reason: detail }] });
+          pushToast({ title: `Archive not added: ${archive.name}`, body: detail, tone: "warn" });
+        }
+      }
+      setProgress("");
+    } catch (error) {
+      setProgress("");
+      pushToast({ title: "Selected input needs attention", body: error instanceof Error ? error.message : "The selected files could not be read.", tone: "warn" });
+    } finally { setBusyFile(null); }
+  }
+
+  async function installPrepared() {
+    if (!prepared || installing) return;
+    setInstalling(true);
+    try {
+      const { installPrivateLibrary } = await import("../../lib/privateLibrary/install");
+      const installed = await installPrivateLibrary(prepared.read, setProgress);
+      setPrepared(undefined);
+      pushToast({ title: "Prepared library installed on this device", body: `${installed.questionIds.length} question records confirmed in the local workspace; cloud sync is not yet verified.`, tone: "success" });
+      onBankSaved({ setId: installed.setIds[0], documentId: installed.documentIds[0], questionIds: installed.questionIds });
+    } catch (error) {
+      pushToast({ title: "Package installation incomplete", body: error instanceof Error ? error.message : "Review source coverage and retry the failed sources.", tone: "warn" });
+    } finally { setInstalling(false); }
+  }
+
+  if (bank) return <BankImportReview bank={bank} onBack={() => { setBank(undefined); setBankStagedId(undefined); onInspectStaged(undefined); }}
+    onSaved={onBankSaved} onReviewed={async (_reviewed, saved) => {
+      if (!bankStagedId || (saved.status !== "saved" && saved.status !== "already-saved")) return;
+      const savedIds = saved.sections.flatMap((section) => section.savedIds);
+      onStagedSaved(bankStagedId, savedIds.length);
+    }} />;
+  if (prepared) return <div className="stack gap12" aria-label="Prepared AXOM library preview">
+    <b>Prepared AXOM package: {prepared.name}</b>
+    <p className="sub">Manifest declares {prepared.sources} sources, {prepared.declaredReady} ready questions and {prepared.declaredReview} for review.
+      These are package claims, not installed counts. Images, keys and source identities will be checked while importing.</p>
+    {progress && <p role="status">{progress}</p>}
+    <div className="row wrap gap8">
+      <GButton variant="primary" disabled={installing} onClick={() => void installPrepared()}>
+        {installing ? "Installing verified records…" : "Install prepared collection"}
+      </GButton>
+      <GhostButton disabled={installing} onClick={() => { setPrepared(undefined); setProgress(""); }}>Return to files</GhostButton>
+    </div>
+  </div>;
 
   return (
     <div className="stack" style={{ gap: 10 }}>
       <div className="sub">
-        <b>PDF and DOCX are parsed directly</b> (digital text — scanned PDFs are kept as source records; no OCR yet).
+        <b>PDF and Word questions preserve supported tables and pictures</b> (digital text — scanned PDFs are kept as source records; no OCR yet).
         TXT/Markdown use the question parser; CSV wants headers like
         <span className="mono"> question, a, b, c, d, answer, explanation, topic</span>; JSON takes an array of questions.
         Answer-key sections ("Answer key: 1. C…") are mapped automatically and flagged when ambiguous.
@@ -1448,26 +1637,71 @@ function FileTab({ busyFile, setBusyFile, onParsed, onBankSaved }: {
       <input
         ref={fileInput}
         type="file"
-        accept=".pdf,.docx,.txt,.md,.markdown,.csv,.json,image/*"
-        aria-label="Choose a question file to import"
+        multiple
+        accept=".pdf,.docx,.txt,.md,.markdown,.csv,.json,.zip"
+        aria-label="Choose question files or a ZIP to import"
         className="visually-hidden-input"
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) void handleFile(f);
-          e.target.value = "";
+        onChange={(event) => {
+          const files = Array.from(event.target.files ?? []);
+          if (files.length) void stageInputs(files);
+          event.target.value = "";
+        }}
+      />
+      <input
+        ref={folderInput}
+        type="file"
+        multiple
+        {...{ webkitdirectory: "", directory: "" }}
+        aria-label="Choose a folder of question sources"
+        className="visually-hidden-input"
+        onChange={(event) => {
+          const files = Array.from(event.target.files ?? []);
+          if (files.length) void stageInputs(files, true);
+          event.target.value = "";
         }}
       />
       <div className="import-dropzone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => {
         event.preventDefault();
-        const file = event.dataTransfer.files?.[0];
-        if (file && !busyFile) void handleFile(file);
+        const files = Array.from(event.dataTransfer.files ?? []);
+        if (files.length && !busyFile) void stageInputs(files);
       }}>
         <FileUp size={ICON_SIZE.display} />
-        <div><b>Drop a question file here</b><span>or choose one from this device</span></div>
-        <GButton variant="primary" disabled={busyFile !== null} onClick={() => fileInput.current?.click()}>
-          {busyFile ? <RefreshCw size={ICON_SIZE.body} className="spin" /> : <FileUp size={ICON_SIZE.body} />} {busyFile ? `Extracting ${busyFile}…` : "Choose file"}
-        </GButton>
+        <div><b>Drop PDFs, Word files, text files or a ZIP here</b><span>or select files and folders from this device; no catalog.json needed for ordinary sources</span></div>
+        <div className="row wrap gap8">
+          <GButton variant="primary" disabled={busyFile !== null} onClick={() => fileInput.current?.click()}>
+            {busyFile ? <RefreshCw size={ICON_SIZE.body} className="spin" /> : <FileUp size={ICON_SIZE.body} />} {busyFile ? `Reading ${busyFile}…` : "Choose files or ZIP"}
+          </GButton>
+          <GhostButton disabled={busyFile !== null} onClick={() => folderInput.current?.click()}>Choose folder</GhostButton>
+        </div>
       </div>
+      {progress && <p role="status">{progress}</p>}
+      {(stagedSources.length > 0 || stagedSkipped.length > 0) && <section className="stack gap8" aria-label="Staged academic sources">
+        <b>Staged source files · {stagedSources.filter(row => row.status === "saved").length} fully saved locally, {stagedSources.filter(row => row.status === "partial").length} partial, {stagedSources.filter(row => row.status === "queued").length} awaiting review</b>
+        <p className="sub">Open each file, check uncertain answers, then finalize it. Remaining files stay in the queue; nothing is uploaded to the cloud until synchronization is confirmed.</p>
+        <ul className="stack gap6">
+          {stagedSources.map(row => <li key={row.id} className="spread wrap gap8">
+            <span>{row.file.name} · {row.status === "saved" ? `${row.saved ?? 0} questions saved locally` :
+              row.status === "partial" ? `${row.saved ?? 0} saved locally, other questions need review` :
+              row.questions === undefined ? "Awaiting review" : `${row.questions} question candidates`}</span>
+            {stagedSources.length > 1 && row.status !== "saved" && <SelectField
+              label={`Associated answer-key file for ${row.file.name}`}
+              value={row.answerKeyId ?? ""}
+              onChange={(event) => onPairKey(row.id, event.target.value || undefined)}>
+              <option value="">No separate answer key selected</option>
+              {stagedSources.filter((candidate) => candidate.id !== row.id && /\.(?:txt|md|markdown|pdf|docx)$/i.test(candidate.file.name))
+                .sort((a, b) => Number(/(?:answer|key|solution)/i.test(b.file.name)) - Number(/(?:answer|key|solution)/i.test(a.file.name)))
+                .map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.file.name}</option>)}
+            </SelectField>}
+            <div className="row gap6">
+              {row.status !== "saved" && <GhostButton id={`staged-review-${row.id}`} disabled={busyFile !== null} onClick={() => void handleFile(row.file, row.id)}>Review {row.file.name}</GhostButton>}
+              <GhostButton disabled={busyFile !== null} onClick={() => onRemoveStaged(row.id)}>Remove {row.file.name}</GhostButton>
+            </div>
+          </li>)}
+        </ul>
+        {stagedSkipped.length > 0 && <details><summary>{stagedSkipped.length} excluded or duplicated inputs (details)</summary>
+          <ul>{stagedSkipped.map((reason, index) => <li key={index}>{reason}</li>)}</ul>
+        </details>}
+      </section>}
     </div>
   );
 }

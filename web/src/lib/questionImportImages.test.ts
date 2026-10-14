@@ -16,6 +16,15 @@ describe("images named by an import", () => {
     expect(matchNamedImages(["figure-2.png"], [file("figure-2.jpg"), file("figure-2.png")])[0].file?.name).toBe("figure-2.png");
   });
 
+  it("does not silently select the first anatomy image when ZIP paths collide by basename", () => {
+    const images = [file("FTCM/Week1/images/figure.png"), file("FTCM/Week2/images/figure.png")];
+    expect(matchNamedImages(["figure.png"], images)[0].file).toBeUndefined();
+    expect(matchNamedImages(["Week1/images/figure.png"], images)[0].file?.name).toBe(images[0].name);
+    expect(matchNamedImages(["FTCM/Week2/images/figure.png"], images)[0].file?.name).toBe(images[1].name);
+    expect(namedImages([{ attachmentNames: ["Week1/images/figure.png", "Week2/images/figure.png"] }]))
+      .toEqual(["Week1/images/figure.png", "Week2/images/figure.png"]);
+  });
+
   it("reports a name no file answers", () => {
     expect(matchNamedImages(["missing.png"], [file("other.png")])).toEqual([{ name: "missing.png", file: undefined }]);
   });

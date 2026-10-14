@@ -141,3 +141,24 @@ describe("BankBrowser library", () => {
     expect(control.getAttribute("aria-pressed")).toBe("false");
   });
 });
+
+describe("BankBrowser evidence readiness", () => {
+  it("filters ready questions, review cases and known-bad options without conflating answered status", async () => {
+    const options = [{ key: "A", text: "Alpha" }, { key: "B", text: "Beta" }];
+    store.questions = [
+      makeQuestion({ id: "reviewed", stem: "Verified renal stem", options, correctKey: "A" }),
+      makeQuestion({ id: "unreviewed", stem: "Provisional neuro stem", options, correctKey: "A", extraction: { confidence: "medium", reviewed: false } }),
+      makeQuestion({ id: "invalid", stem: "Incomplete cardiac stem", options: [{ key: "A", text: "Only one" }], correctKey: "A" }),
+    ];
+    const user = userEvent.setup();
+    render(<BankBrowser onOpen={vi.fn()} />);
+    await user.selectOptions(screen.getByRole("combobox", { name: "Filter by answer readiness" }), "ready");
+    expect(screen.getByRole("button", { name: "Verified renal stem" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Provisional neuro stem" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Incomplete cardiac stem" })).toBeNull();
+    await user.selectOptions(screen.getByRole("combobox", { name: "Filter by answer readiness" }), "review");
+    expect(screen.queryByRole("button", { name: "Verified renal stem" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Provisional neuro stem" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Incomplete cardiac stem" })).toBeTruthy();
+  });
+});
