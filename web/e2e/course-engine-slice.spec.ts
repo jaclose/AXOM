@@ -48,7 +48,7 @@ test("a source file becomes a filed set, recorded answers, a finding and a revie
 
   // --- import: the name proposes where the set belongs -----------------------
   await page.getByRole("button", { name: "Add your own material", exact: true }).click();
-  await page.getByLabel("Choose a question file to import").setInputFiles({
+  await page.getByLabel("Choose question files or a ZIP to import").setInputFiles({
     name: "FTM 1 Week 2 Practice Questions.txt", mimeType: "text/plain", buffer: Buffer.from(SOURCE),
   });
   await expect(page.getByText("Review 2 parsed questions", { exact: false })).toBeVisible();

@@ -59,7 +59,7 @@ test("a mapped paste imports with its tags, attaches the named image, and shows 
   await seedOnboarded(page);
   await page.goto("/#questions");
   await page.getByRole("button", { name: "Add your own material", exact: true }).click();
-  await page.getByLabel("Choose a question file to import").setInputFiles({ name: "sample-quiz-4.txt", mimeType: "text/plain", buffer: Buffer.from(MAPPED) });
+  await page.getByLabel("Choose question files or a ZIP to import").setInputFiles({ name: "sample-quiz-4.txt", mimeType: "text/plain", buffer: Buffer.from(MAPPED) });
   await expect(page.getByText("Review 3 parsed questions", { exact: false })).toBeVisible();
 
   const drafts = page.locator(".import-draft");

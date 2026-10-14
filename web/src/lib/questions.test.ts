@@ -209,6 +209,25 @@ describe("mapping readiness", () => {
     expect(questions).toEqual(before);
   });
 
+  it("never calls malformed keyed answer choices ready across the canonical question and set metrics", () => {
+    const malformed = [
+      makeQuestion({ id: "wrong-answer", correctKey: "Z" }),
+      makeQuestion({ id: "repeated-choice", options: [{ key: "A", text: "First" }, { key: "A", text: "Second" }] }),
+      makeQuestion({ id: "blank-key", options: [{ key: "A", text: "First" }, { key: " ", text: "Second" }] }),
+      makeQuestion({ id: "single-choice", options: [{ key: "A", text: "Only" }] }),
+      makeQuestion({ id: "missing-options", options: undefined as unknown as QuestionRecord["options"] }),
+    ];
+    for (const question of malformed) {
+      expect(questionMappingStatus(question), question.id).toBe("unresolved");
+    }
+    expect(summarizeQuestionMappings(malformed)).toMatchObject({
+      ready: 0, reviewSuggested: 0, unresolved: 5, issueCount: 5,
+      unresolvedQuestionIds: malformed.map((question) => question.id),
+    });
+    // A valid manually entered question remains runnable without import metadata.
+    expect(questionMappingStatus(makeQuestion({ id: "valid" }))).toBe("ready");
+  });
+
   it("treats a repaired mapping as ready even when its practice status is stale", () => {
     const repaired = makeQuestion({
       status: "needs-review",

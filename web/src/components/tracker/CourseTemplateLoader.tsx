@@ -29,6 +29,15 @@ interface ModuleSetup {
   excludedActivities?: CourseActivity[];
 }
 
+/** A conflict is held out of the import until the learner chooses its identity. */
+type ConflictResolution = "" | "create" | `existing:${string}`;
+type ResolvedConflict =
+  | { kind: "create"; item: TemplateReconciliation["create"][number] }
+  | { kind: "update"; id: string; item: TemplateReconciliation["create"][number] };
+function conflictKey(moduleKey: string, index: number, templateKey: string): string {
+  return JSON.stringify([moduleKey, index, templateKey]);
+}
+
 interface ModulePreview {
   key: string;
   plan: CourseTemplatePlan;
@@ -50,11 +59,15 @@ export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templa
   const [sections, setSections] = useState<CourseTemplateSection[]>(() => savedCourseTemplates(s.documents).filter(t => templateIds?.includes(t.document.id)).map(t => t.section));
   const [pasted, setPasted] = useState("");
   const [setup, setSetup] = useState<Record<string, ModuleSetup>>({});
+  const [conflictResolutions, setConflictResolutions] = useState<Record<string, ConflictResolution>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [libraryOpen, setLibraryOpen] = useState(!templateIds?.length);
 
   function add(next: CourseTemplateSection[]) {
+    // An incoming revision can rename activities or change candidate identities.
+    // Decisions about a previous revision must never be silently carried forward.
+    setConflictResolutions({});
     const readable = next.filter((section) => section.module && section.items.length > 0);
     const unreadable = next.length - readable.length;
     if (unreadable > 0) {
@@ -135,10 +148,31 @@ export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sections, setup, s.courses, s.terms, s.tracker, defaultTermId]);
 
-  const adding = previews.reduce((total, preview) => total + preview.changes.create.length, 0);
-  const updating = previews.reduce((total, preview) => total + preview.changes.update.length, 0);
+  // Distinguish a duplicate identity (must remain unresolved) from an
+  // unnumbered/renamed activity that the learner can explicitly reconcile.
+  const manual: ResolvedConflict[] = previews.flatMap((preview): ResolvedConflict[] =>
+    (preview.changes.review ?? []).flatMap((issue, index): ResolvedConflict[] => {
+    const decision = conflictResolutions[conflictKey(preview.key, index, issue.item.templateKey)] ?? "";
+    const eligible = !issue.reason.startsWith("Repeated identity");
+    if (!eligible) return [];
+    if (decision === "create") return [{ kind: "create" as const, item: issue.item }];
+    if (decision.startsWith("existing:")) {
+      const id = decision.slice("existing:".length);
+      if (issue.candidateIds.includes(id)) return [{
+        kind: "update" as const,
+        id, item: issue.item,
+      }];
+    }
+    return [];
+  }));
+  const manualCreates = manual.flatMap((entry) => entry.kind === "create" ? [entry.item] : []);
+  const manualUpdates = manual.flatMap((entry) => entry.kind === "update" ? [entry] : []);
+  const adding = previews.reduce((total, preview) => total + preview.changes.create.length, 0) + manualCreates.length;
+  const updating = previews.reduce((total, preview) => total + preview.changes.update.length, 0) + manualUpdates.length;
+  const unresolved = previews.reduce((total, preview) => total + (preview.changes.review?.length ?? 0), 0) - manual.length;
 
   function patchSetup(preview: ModulePreview, patch: Partial<ModuleSetup>) {
+    setConflictResolutions({});
     setSetup((current) => {
       const existing: ModuleSetup | undefined = current[preview.key];
       return {
@@ -153,7 +187,16 @@ export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templa
     setError("");
     const checkpoint = getVaultWriteCheckpoint();
     try {
-      const rows = previews.flatMap((preview) => preview.changes.create.map((item) => ({
+      const automaticUpdates = previews.flatMap((preview) => preview.changes.update);
+      const updateIds = [...automaticUpdates.map((change) => change.id), ...manualUpdates.map((change) => change.id)];
+      if (new Set(updateIds).size !== updateIds.length) {
+        throw new Error("Two template rows would update the same activity. Review these identity matches before loading.");
+      }
+      const selectedRows = [
+        ...previews.flatMap((preview) => preview.changes.create),
+        ...manualCreates,
+      ];
+      const rows = selectedRows.map((item) => ({
         path: item.path,
         label: item.label,
         kind: item.kind,
@@ -163,17 +206,23 @@ export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templa
         activity: item.activity,
         templateKey: item.templateKey,
         weekSource: item.weekSource,
-      })));
+      }));
       if (rows.length) s.bulkAddTrackerItems(rows);
-      for (const preview of previews) {
-        for (const change of preview.changes.update) s.updateTrackerItem(change.id, { path: change.path, label: change.label, weekSource: change.weekSource });
+      for (const change of automaticUpdates) {
+        s.updateTrackerItem(change.id, { path: change.path, label: change.label, weekSource: change.weekSource });
+      }
+      for (const change of manualUpdates) {
+        const { item } = change;
+        s.updateTrackerItem(change.id, {
+          path: item.path, label: item.label, weekSource: item.weekSource, templateKey: item.templateKey,
+        });
       }
       await flushLocalVaultWrites();
       assertVaultWritesSince(checkpoint);
       pushToast({
-        title: "Course template loaded",
-        body: `${rows.length} item${rows.length === 1 ? "" : "s"} added${updating ? `, ${updating} brought up to date` : ""}. Progress on existing items is unchanged.`,
-        tone: "success",
+        title: unresolved ? "Course template partially loaded" : "Course template loaded",
+        body: `${rows.length} item${rows.length === 1 ? "" : "s"} added${updating ? `, ${updating} brought up to date` : ""}. Progress on existing items is unchanged.${unresolved ? ` ${unresolved} identity conflicts were left for manual review.` : ""}`,
+        tone: unresolved ? "warn" : "success",
       });
       (onApplied ?? onClose)();
     } catch (error) {
@@ -211,7 +260,7 @@ export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templa
             <input type="file" accept=".txt,text/plain" multiple hidden disabled={busy} aria-label="Choose course template files"
               onChange={(event) => { void addFiles(event.target.files); event.target.value = ""; }} />
           </label>
-          {sections.length > 0 && <GhostButton disabled={busy} onClick={() => { setSections([]); setSetup({}); }}>Clear</GhostButton>}
+          {sections.length > 0 && <GhostButton disabled={busy} onClick={() => { setSections([]); setSetup({}); setConflictResolutions({}); }}>Clear</GhostButton>}
         </div>
         <details>
           <summary className="sub" style={{ cursor: "pointer" }}>Or paste a template</summary>
@@ -228,8 +277,9 @@ export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templa
 
         {previews.map((preview) => {
           const chosen = setup[preview.key] ?? { termId: knownTerm(preview.plan.module, preview.plan.term), firstWeek: "1" };
-          const worked = preview.plan.items.filter((item) => item.weekBasis === "spread").length;
+          const inferred = preview.plan.items.filter((item) => item.weekBasis === "spread" || item.weekBasis === "group-order").length;
           const unscheduled = preview.plan.items.filter((item) => item.weekBasis === "unknown").length;
+          const confirmedWeeks = preview.plan.items.filter((item) => item.weekBasis === "stated").length;
           return (
             <section key={preview.key} className="template-module" aria-label={`Template for ${preview.plan.module}`}>
               <div className="row wrap" style={{ justifyContent: "space-between", gap: 8 }}>
@@ -281,7 +331,46 @@ export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templa
                   {preview.changes.update.map((item) => <li key={item.id}>Update: {s.tracker.find((row) => row.id === item.id)?.label} → {item.label} · {item.path}. Study progress stays.</li>)}
                 </ul>
               </details>}
-              {worked > 0 && <p className="sub template-note" role="note">{worked} items: {WEEK_BASIS_NOTE.spread} To state them, add a line such as "Week 2:" above each week in the template.</p>}
+              {(preview.changes.review?.length ?? 0) > 0 && <section className="stack gap6" aria-label={`Identity conflicts for ${preview.plan.module}`}>
+                <p className="sub template-note" role="status">
+                  {preview.changes.review?.length} ambiguous template activities need identity review.
+                  They will not be created or overwrite previous progress unless you explicitly resolve them.
+                </p>
+                {preview.changes.review?.map((issue, index) => {
+                  const key = conflictKey(preview.key, index, issue.item.templateKey);
+                  const repeatedIdentity = issue.reason.startsWith("Repeated identity");
+                  return <div key={key} className="stack gap6">
+                    <b>{issue.item.label}</b>
+                    <small className="sub">{issue.reason} Proposed placement: {issue.item.path}</small>
+                    {repeatedIdentity
+                      ? <p className="sub" role="note">Repeated identities cannot safely be matched. Correct the source or Tracker; this row remains unresolved.</p>
+                      : <SelectField label={`Resolve activity ${index + 1} for ${preview.plan.module}`}
+                          value={conflictResolutions[key] ?? ""}
+                          onChange={(event) => setConflictResolutions((previous) => ({
+                            ...previous, [key]: event.target.value as ConflictResolution,
+                          }))}>
+                          <option value="">Keep unresolved (no change)</option>
+                          <option value="create">Confirmed distinct activity — add separately</option>
+                          {issue.candidateIds.map((id) => {
+                            const existing = s.tracker.find((row) => row.id === id);
+                            return <option key={id} value={`existing:${id}`}>
+                              Replace existing {existing?.label ?? id} (preserve progress)
+                            </option>;
+                          })}
+                        </SelectField>}
+                  </div>;
+                })}
+              </section>}
+              {(preview.changes.notInSelection?.length ?? 0) > 0 && <details>
+                <summary>{preview.changes.notInSelection?.length} existing activities not in this selection</summary>
+                <p className="sub" role="note">These rows remain unchanged; they may belong to another revision or an excluded week, not necessarily deleted school activities.</p>
+                <ul className="sub">
+                  {preview.changes.notInSelection?.map((item) =>
+                    <li key={item.id}>{item.label} · {item.path} (kept)</li>)}
+                </ul>
+              </details>}
+              {confirmedWeeks > 0 && <p className="sub template-note" role="note">{confirmedWeeks} items explicitly state a week in this template.</p>}
+              {inferred > 0 && <p className="sub template-note" role="note">{inferred} items have inferred, NOT school-confirmed week placement ({WEEK_BASIS_NOTE.spread}). To confirm a week, add a heading such as "Week 2:" above the relevant activities.</p>}
               {unscheduled > 0 && <p className="sub template-note" role="note">{unscheduled} items: {WEEK_BASIS_NOTE.unknown} They go under "Unscheduled".</p>}
               {preview.plan.problems.length > 0 && (
                 <ul className="sub template-note" aria-label={`Lines AXOM could not read in ${preview.plan.module}`}>

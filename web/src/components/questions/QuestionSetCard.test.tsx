@@ -68,6 +68,24 @@ describe("QuestionSetCard", () => {
     expect(screen.getByRole("button", { name: /review misses/i })).toHaveProperty("disabled", true);
   });
 
+  it("does not launch a missing or malformed set with zero actually runnable questions", async () => {
+    const onStart = vi.fn();
+    const user = userEvent.setup();
+    render(<QuestionSetCard set={set} metrics={{
+      ...metrics,
+      needsReview: 0,
+      mapping: {
+        ready: 0, reviewSuggested: 0, unresolved: 0, issueCount: 0,
+        issueQuestionIds: [], reviewSuggestedQuestionIds: [], unresolvedQuestionIds: [],
+      },
+    }} onStart={onStart} compact />);
+    const unavailable = screen.getByRole("button", { name: "Unavailable" });
+    expect(unavailable).toHaveProperty("disabled", true);
+    expect(screen.getByRole("status").textContent).toMatch(/restore missing source records/i);
+    await user.click(unavailable);
+    expect(onStart).not.toHaveBeenCalled();
+  });
+
   it("offers Continue when some questions have attempts and no mapping issues", () => {
     render(<QuestionSetCard set={set} metrics={{
       ...metrics,

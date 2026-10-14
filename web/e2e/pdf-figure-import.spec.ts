@@ -49,7 +49,7 @@ test("a figure in a question PDF is cut out, attached to its question and shown 
   await seedOnboarded(page);
   await page.goto("/#questions");
   await page.getByRole("button", { name: "Add your own material", exact: true }).click();
-  await page.getByLabel("Choose a question file to import").setInputFiles({
+  await page.getByLabel("Choose question files or a ZIP to import").setInputFiles({
     name: "FTM 1 Week 2 IMCQ 1.pdf", mimeType: "application/pdf", buffer: questionPdfWithFigure(),
   });
   await expect(page.getByText("Review 1 parsed question", { exact: false })).toBeVisible();

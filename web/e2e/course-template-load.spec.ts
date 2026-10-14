@@ -50,8 +50,10 @@ test("a course template fills the tracker week by week and is safe to load twice
   await expect(preview).toContainText("1 IMCQ");
   // The module's course already sits in a term, so that is chosen for the learner.
   await expect(preview.getByLabel("Term for FTM 1")).toHaveValue("term-1");
-  // Lecture weeks are not in the template: AXOM says it worked them out.
-  await expect(preview.getByRole("note")).toContainText("5 items: The template does not give weeks for these.");
+  // Neither the lecture nor the activity group's week was stated in this
+  // fixture. Every inferred assignment must be visibly distinguished from
+  // an official course schedule, not just the lecture subset.
+  await expect(preview.getByRole("note")).toContainText("10 items have inferred, NOT school-confirmed week placement");
   await preview.getByLabel("FTM 1 starts in week").fill("3");
   await dialog.getByRole("button", { name: "Add 10 items" }).click();
   await expect(dialog).toHaveCount(0);

@@ -60,7 +60,7 @@ test("Question Bank first use stays focused, themed, responsive, and route-scrol
   }
 
   await page.getByRole("button", { name: "Add your own material", exact: true }).click();
-  await expect(page.getByLabel("Choose a question file to import")).toBeAttached();
+  await expect(page.getByLabel("Choose question files or a ZIP to import")).toBeAttached();
   const previousScroll = await page.locator(".surface-scroll").evaluate((element) => {
     element.scrollTop = element.scrollHeight;
     return element.scrollTop;

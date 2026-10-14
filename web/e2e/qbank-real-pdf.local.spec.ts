@@ -15,7 +15,7 @@ test("three private PDFs through the actual QBank, with uncertain keys excluded 
     await page.getByRole("button", { name: "Add your own material", exact: true }).click();
     const another = page.getByRole("button", { name: "Choose another file" });
     if (await another.isVisible()) await another.click();
-    await page.getByLabel("Choose a question file to import").setInputFiles(join(sourceFolder!, manifest.source.filename));
+    await page.getByLabel("Choose question files or a ZIP to import").setInputFiles(join(sourceFolder!, manifest.source.filename));
     const preview = page.getByRole("region", { name: "PDF bank preview" });
     await expect(preview).toBeVisible({ timeout: 120000 });
     await expect(preview.getByLabel("Bank module")).toHaveValue("GOER");

@@ -30,7 +30,7 @@ test("onboarding → import → block → repair → reload retains the full que
   await expect(page.getByRole("button", { name: "Add your own material", exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Add your own material", exact: true }).click();
-  await page.getByLabel("Choose a question file to import").setInputFiles({
+  await page.getByLabel("Choose question files or a ZIP to import").setInputFiles({
     name: "ppd-regression.txt",
     mimeType: "text/plain",
     buffer: Buffer.from(PPD_FIXTURE),

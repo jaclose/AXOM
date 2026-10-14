@@ -72,7 +72,7 @@ test(`source teaching and saved block review survive reload at ${width}px`, asyn
   await seedOnboarded(page);
   await page.goto("/#questions");
   await page.getByRole("button", { name: "Add your own material", exact: true }).click();
-  await page.getByLabel("Choose a question file to import").setInputFiles(pdf);
+  await page.getByLabel("Choose question files or a ZIP to import").setInputFiles(pdf);
   await expect(page.getByText("Review 3 parsed questions", { exact: false })).toBeVisible({ timeout: 60_000 });
   await page.getByLabel("Set title").fill("Cardiology review");
   await page.getByRole("button", { name: "Finalize import" }).click();

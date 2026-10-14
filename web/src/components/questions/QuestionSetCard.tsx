@@ -31,13 +31,17 @@ export function QuestionSetCard({
   const attemptAccuracy = metrics.historicalAccuracyPct === null ? "—" : `${metrics.historicalAccuracyPct}%`;
   const confidence = metrics.importConfidence === null ? "Legacy" : `${metrics.importConfidence}%`;
   const mappingIssueCount = metrics.mapping?.issueCount ?? metrics.needsReview;
+  // This is the verified, *present* record count, not saved set membership.
+  // An imported set whose question IDs are absent cannot launch an empty block.
+  const runnable = metrics.mapping?.ready ?? 0;
   const partial = metrics.completed > 0 && metrics.remaining > 0;
   // A source set is the default and needs no label; anything built from other
   // sets says what it is, and generated questions are never left unmarked.
   const kind = questionSetKind(set);
-  const primaryAction = mappingIssueCount > 0 && onReviewIssues
-    ? { label: "Review issues", icon: <AlertTriangle size={ICON_SIZE.body} />, onClick: onReviewIssues }
-    : { label: partial ? "Continue" : "Start", icon: <Play size={ICON_SIZE.body} />, onClick: onStart };
+  const reviewAction = mappingIssueCount > 0 && Boolean(onReviewIssues);
+  const primaryAction = reviewAction
+    ? { label: "Review issues", icon: <AlertTriangle size={ICON_SIZE.body} />, onClick: onReviewIssues!, disabled: false }
+    : { label: runnable ? (partial ? "Continue" : "Start") : "Unavailable", icon: <Play size={ICON_SIZE.body} />, onClick: onStart, disabled: runnable === 0 };
 
   return (
     <article className={`qset-card glass-liquid ${compact ? "compact" : ""}`}>
@@ -82,9 +86,12 @@ export function QuestionSetCard({
       </div>
 
       {!compact && children}
+      {runnable === 0 && !reviewAction && <p className="sub" role="status">
+        No verified questions are available to practice. Review the import or restore missing source records.
+      </p>}
 
       <div className="qset-actions">
-        <GButton size="sm" variant="primary" onClick={primaryAction.onClick}>{primaryAction.icon} {primaryAction.label}</GButton>
+        <GButton size="sm" variant="primary" disabled={primaryAction.disabled} onClick={primaryAction.onClick}>{primaryAction.icon} {primaryAction.label}</GButton>
         {!compact && onReviewMisses && (
           <GhostButton disabled={metrics.missedQuestionIds.length === 0} onClick={onReviewMisses}>
             <RotateCcw size={ICON_SIZE.body} /> Review misses

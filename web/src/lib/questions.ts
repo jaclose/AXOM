@@ -265,7 +265,16 @@ export interface QuestionMappingSummary {
  * outcome and can remain `needs-review` after a user repairs the mapping.
  */
 export function questionMappingStatus(question: QuestionRecord): QuestionMappingStatus {
-  if (!question.correctKey || question.needsReview === true) return "unresolved";
+  // The canonical answer gate must reject malformed imported/legacy choice keys
+  // before *any* consumer may count, score or reveal an answer. UI-only checks
+  // are insufficient: quiz pools and saved-set metrics also call this function.
+  if (!Array.isArray(question.options) || question.options.length < 2) return "unresolved";
+  const optionKeys = question.options.map((option) => option?.key);
+  if (optionKeys.some((key) => typeof key !== "string" || !key.trim())
+    || new Set(optionKeys).size !== optionKeys.length
+    || typeof question.correctKey !== "string"
+    || optionKeys.filter((key) => key === question.correctKey).length !== 1
+    || question.needsReview === true) return "unresolved";
   if (question.content?.assets.some((asset) => ["question", "stem", "choice"].includes(asset.role)
     && !question.attachments?.some((attachment) => attachment.assetId === asset.id))) return "unresolved";
   if (question.extraction && question.extraction.reviewed !== true) return "review-suggested";

@@ -10,7 +10,7 @@ for (const width of [1440, 390]) test(`PDF bank import, table and figure practic
   await seedOnboarded(page);
   await page.goto("/#questions");
   await page.getByRole("button", { name: "Add your own material", exact: true }).click();
-  const choose = () => page.getByLabel("Choose a question file to import").setInputFiles({ name: "FTM1 Week 2 PQ.pdf", mimeType: "application/pdf", buffer: Buffer.from(inventedTwoSetPdf()) });
+  const choose = () => page.getByLabel("Choose question files or a ZIP to import").setInputFiles({ name: "FTM1 Week 2 PQ.pdf", mimeType: "application/pdf", buffer: Buffer.from(inventedTwoSetPdf()) });
   await choose();
   const preview = page.getByRole("region", { name: "PDF bank preview" });
   await expect(preview).toContainText("4 questions · 3 ready", { timeout: 30000 });
@@ -76,7 +76,7 @@ test("answer-marked slides are review-gated and stay hidden until a tutor answer
   await seedOnboarded(page);
   await page.goto("/#questions");
   await page.getByRole("button", { name: "Add your own material", exact: true }).click();
-  await page.getByLabel("Choose a question file to import").setInputFiles({ name: "FTM1 Week 2 eSoft.pdf", mimeType: "application/pdf", buffer: Buffer.from(inventedDeckPdf()) });
+  await page.getByLabel("Choose question files or a ZIP to import").setInputFiles({ name: "FTM1 Week 2 eSoft.pdf", mimeType: "application/pdf", buffer: Buffer.from(inventedDeckPdf()) });
   const preview = page.getByRole("region", { name: "PDF bank preview" });
   await expect(preview).toContainText("3 questions · 0 ready · 3 need review", { timeout: 30000 });
   await preview.getByLabel("Bank module").fill("FTM 1");
