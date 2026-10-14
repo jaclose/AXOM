@@ -71,3 +71,24 @@ test("repeated template identity is held for review and cannot silently create t
     return dev.useStore.getState().tracker.filter(row => row.templateKey).length;
   })).toBe(0);
 });
+
+test("official NB Block 2 template resolves the pre-existing NB2 course without creating another module", async ({ page }) => {
+  await seedOnboarded(page);
+  await page.goto("/#tracker");
+  const dialog = await openLoader(page);
+  await dialog.getByLabel("Choose course template files").setInputFiles(input(
+    "NB Block 2 - Lectures:\nWeek 1:\nNB Lecture 01 Sample cortex [Lecture]"
+  ));
+  const preview = dialog.getByRole("region", { name: "Template for NB Block 2" });
+  await expect(preview.getByLabel("Term for NB Block 2")).toHaveValue("term-2");
+  await expect(preview).toContainText("1 of 1 activities selected");
+  await dialog.getByRole("button", { name: "Add 1 item" }).click();
+  await reloadAfterSave(page);
+  const saved = await page.evaluate(async () => {
+    type Dev = { useStore: { getState: () => { tracker: { path: string; templateKey?: string }[] } } };
+    const dev = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
+    return dev.useStore.getState().tracker.filter((row) => row.templateKey);
+  });
+  expect(saved).toHaveLength(1);
+  expect(saved[0].path).toMatch(/^Term 2\/NB Block 2\/Week 1$/);
+});
