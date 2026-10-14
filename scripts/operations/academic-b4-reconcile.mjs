@@ -9,7 +9,7 @@
  * Usage: node scripts/operations/academic-b4-reconcile.mjs
  */
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -25,8 +25,8 @@ const STATES = new Set([
 ]);
 const validCount = value => Number.isSafeInteger(value) && value >= 0;
 
-export function reconcileB4(jobs, receipts, inspectPackage = () => ({ valid: true })) {
-  const errors = [], byStatus = {}, seen = new Set();
+export function reconcileB4(jobs, receipts, inspectPackage = () => ({ valid: true }), freshSourceProof = new Set()) {
+  const errors = [], byStatus = {}, seen = new Set(), orphanReceipts = [];
   const totals = { detected: 0, canonicalReadable: 0, ready: 0, reviewRequired: 0,
     unresolved: 0, rejected: 0, imageAssets: 0, packagesVerified: 0,
     byteCheckedSources: 0, missingSources: 0, unverifiedByteProofSources: 0 };
@@ -47,7 +47,16 @@ export function reconcileB4(jobs, receipts, inspectPackage = () => ({ valid: tru
   for (const receipt of receipts) {
     const key = receipt?.sourceKey;
     const item = expected.get(key);
-    if (!item) { errors.push("Unexpected B4 receipt identity."); continue; }
+    if (!item) {
+      // A prior queue revision may have prepared an original subsequently
+      // removed from this B4 window. Preserve its receipt and private package
+      // for source-inventory reconciliation rather than deleting it.
+      const source = typeof key === "string" ? createHash("sha256").update(key).digest("hex").slice(0, 12) : "invalid";
+      orphanReceipts.push({ source, status: receipt?.status ?? "unknown",
+        index: validCount(receipt?.queueIndex) ? receipt.queueIndex : null });
+      errors.push(`Orphan B4 source receipt ${source} is absent from the active canonical queue.`);
+      continue;
+    }
     if (seen.has(key)) { errors.push(`Duplicate B4 receipt ${item.displayId}.`); continue; }
     seen.add(key);
     if (receipt.schemaVersion !== 1 || receipt.batch !== "B4"
@@ -66,12 +75,14 @@ export function reconcileB4(jobs, receipts, inspectPackage = () => ({ valid: tru
       errors.push(`Unsafe candidate/answer/cloud counts ${item.displayId}.`);
     // Old (already persisted) review receipts can lack a boolean byte proof.
     // Keep their source disposition visible without certifying file integrity.
-    if (DONE.has(receipt.status) && item.sha && receipt.inventoryChecksumVerified !== true)
+    const hashProven = receipt.inventoryChecksumVerified === true
+      || receipt.sourceIndependentlyVerified === true || freshSourceProof.has(key);
+    if (DONE.has(receipt.status) && item.sha && !hashProven)
       totals.unverifiedByteProofSources++;
     byStatus[receipt.status] = (byStatus[receipt.status] ?? 0) + 1;
     for (const name of ["detected","canonicalReadable","ready","reviewRequired","unresolved","rejected","imageAssets"])
       totals[name] += validCount(receipt[name]) ? receipt[name] : 0;
-    if (receipt.inventoryChecksumVerified === true) totals.byteCheckedSources++;
+    if (hashProven && item.sha) totals.byteCheckedSources++;
     if (receipt.status === "unavailable") totals.missingSources++;
     if (DONE.has(receipt.status)) {
       // Review-partial packages deliberately retain every detected original
@@ -103,13 +114,16 @@ export function reconcileB4(jobs, receipts, inspectPackage = () => ({ valid: tru
     queuedSources: jobs.length,
     receivedSourceDispositions: seen.size,
     missingReceipts: missing.length,
+    orphanReceipts: orphanReceipts.length,
+    orphanPreparedReceipts: orphanReceipts.filter(row => DONE.has(row.status)).length,
+    orphanReceiptSamples: orphanReceipts.slice(0, 12),
     byStatus, totals,
     errors: errors.slice(0, 80),
     caveats: [
       "All B4 questions are STRUCTURAL extraction candidates, NOT source-key-verified or ready for scored practice.",
       "A missing source on the unplugged SSD is not a parser failure and must be retried after remount.",
     `${pathOnlySources} originals are path-only priority exceptions; an old path is not a verified immutable byte identity.`,
-    `${totals.unverifiedByteProofSources} prepared sources lack an explicit fresh byte-SHA check in their persisted receipt; keep them in review until reverified.`,
+    `${totals.unverifiedByteProofSources} prepared sources have no accepted source-hash attestation. Legacy receipt fields and optional fresh rehash are accepted; answers remain review-only.`,
       "No owner-authenticated Supabase cloud data receipt is claimed by this audit.",
     ],
   };
@@ -134,7 +148,48 @@ function readCandidate(receipt) {
   } catch { return { valid: false }; }
 }
 
-export function runB4(root = dataRoot) {
+/**
+ * Optional, bounded current-byte attestation. Streams source originals without
+ * copying them or repeating question extraction. Historic receipts can be
+ * checked against today's actual file bytes even if an older importer used a
+ * different boolean field name. No correct answers or cloud claims result.
+ */
+export async function attestSourceBytes(receipts) {
+  const proven = new Set(), failures = [];
+  let bytesRead = 0, inspected = 0;
+  for (const receipt of receipts) {
+    if (!DONE.has(receipt.status) || !receipt.sourceKey?.startsWith("byte:")) continue;
+    const sha = receipt.sourceKey.slice(5);
+    const sourcePath = receipt.originalPath;
+    if (!SHA.test(sha) || !sourcePath || !existsSync(sourcePath)) {
+      failures.push({ source: sha.slice(0, 12), code: "missing_original" });
+      continue;
+    }
+    try {
+      const path = realpathSync(sourcePath);
+      const before = statSync(path);
+      if (!before.isFile() || before.size < 1 || before.size > 128 * 1024 ** 2
+        || before.size !== receipt.sourceBytes) {
+        failures.push({ source: sha.slice(0, 12), code: "source_size_changed_or_out_of_bounds" });
+        continue;
+      }
+      const hash = createHash("sha256");
+      for await (const chunk of createReadStream(path, { highWaterMark: 256 * 1024 })) hash.update(chunk);
+      const after = statSync(path);
+      inspected++;
+      bytesRead += before.size;
+      if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || hash.digest("hex") !== sha)
+        failures.push({ source: sha.slice(0, 12), code: "source_sha_mismatch_or_changed_during_read" });
+      else proven.add(receipt.sourceKey);
+    } catch (error) {
+      failures.push({ source: sha.slice(0, 12), code: error && typeof error === "object"
+        && "code" in error ? "read_" + String(error.code).slice(0, 24) : "source_read_failed" });
+    }
+  }
+  return { proven, failures, inspected, bytesRead };
+}
+
+export async function runB4(root = dataRoot) {
   const queue = JSON.parse(readFileSync(join(root, "agent-2-priority-batches.json"), "utf8"));
   const sourceJobs = JSON.parse(readFileSync(join(root, "agent-2-import-inputs-deduplicated.json"), "utf8"));
   const selected = queue?.processing_order?.find(item => item.id === "B4");
@@ -147,7 +202,20 @@ export function runB4(root = dataRoot) {
   const resultDir = join(root, "role-2-corpus-v2/results");
   const receipts = readdirSync(resultDir).filter(name => /^[A-Za-z0-9-]+\.json$/.test(name))
     .map(name => JSON.parse(readFileSync(join(resultDir, name), "utf8")));
-  const result = reconcileB4(jobs, receipts, readCandidate);
+  const liveAudit = process.argv.includes("--verify-source-bytes")
+    ? await attestSourceBytes(receipts) : undefined;
+  const result = reconcileB4(jobs, receipts, readCandidate, liveAudit?.proven);
+  if (liveAudit) {
+    result.freshOriginalsHashed = liveAudit.inspected;
+    result.freshBytesRead = liveAudit.bytesRead;
+    result.freshOriginalsConfirmed = liveAudit.proven.size;
+    result.freshSourceFailures = liveAudit.failures;
+    if (liveAudit.failures.length) {
+      result.sourceIdentityCoverageComplete = false;
+      result.errors.push(...liveAudit.failures.slice(0, 12).map(row =>
+        `Fresh original ${row.source} failed SHA-256 inspection (${row.code}).`));
+    }
+  }
   const target = join(root, "lead-b4-acceptance.json");
   mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, JSON.stringify({ generatedAt: new Date().toISOString(), ...result }, null, 2) + "\n");
@@ -155,10 +223,14 @@ export function runB4(root = dataRoot) {
     academicReleaseComplete: result.academicReleaseComplete,
     sourceIdentityCoverageComplete: result.sourceIdentityCoverageComplete,
     pathOnlySourceJobs: result.pathOnlySourceJobs,
+    ...(liveAudit ? { freshOriginalsHashed: liveAudit.inspected,
+      freshBytesRead: liveAudit.bytesRead, freshOriginalsConfirmed: liveAudit.proven.size,
+      freshSourceFailures: liveAudit.failures.length } : {}),
     queuedSources: result.queuedSources, receivedSourceDispositions: result.receivedSourceDispositions,
+    orphanReceipts: result.orphanReceipts, orphanPreparedReceipts: result.orphanPreparedReceipts,
     byStatus: result.byStatus, totals: result.totals, errors: result.errors.length, report: target }, null, 2));
   if (!result.sourceReceiptCoverageComplete) process.exitCode = 1;
   return result;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) runB4();
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await runB4();

@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { reconcileB4 } from "./academic-b4-reconcile.mjs";
+import { attestSourceBytes, reconcileB4 } from "./academic-b4-reconcile.mjs";
+import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const a = "a".repeat(64);
 const b = "b".repeat(64);
@@ -79,4 +83,46 @@ test("review-partial packages preserve all detected rows, even rejected parser c
   assert.equal(okay.sourceReceiptCoverageComplete, true, okay.errors.join(";"));
   const truncated = reconcileB4(jobs, [row], () => ({ valid: true, questions: 9, unreadable: 5 }));
   assert.equal(truncated.sourceReceiptCoverageComplete, false);
+});
+
+test("orphan receipts from an older processing queue remain explicit, including prepared review-only packages", () => {
+  const jobs = [{ canonical_input_key: "byte:" + a }];
+  const original = base(0, "byte:" + a);
+  const old = base(0, "byte:" + b);
+  const r = reconcileB4(jobs, [original, old], packages);
+  assert.equal(r.sourceReceiptCoverageComplete, false);
+  assert.equal(r.orphanReceipts, 1);
+  assert.equal(r.orphanPreparedReceipts, 1);
+  assert.equal(r.receivedSourceDispositions, 1);
+  assert.equal(r.totals.detected, 3);
+  assert.equal(r.verifiedCloudQuestionCount, 0);
+  assert.ok(r.errors.some(message => message.includes("Orphan B4 source receipt")));
+});
+
+test("optional live source SHA recheck streams exact original bytes without altering questions or cloud state", async () => {
+  const root = mkdtempSync(join(tmpdir(), "axom-b4-hash-"));
+  try {
+    const bytes = Buffer.from("%PDF-1.4\nSynthetic placeholder for checksum audit\n");
+    const sourceFile = join(root, "synthetic.pdf");
+    writeFileSync(sourceFile, bytes);
+    const actual = createHash("sha256").update(bytes).digest("hex");
+    const original = base(0, "byte:" + actual, {
+      originalPath: sourceFile, sourceBytes: bytes.length,
+      inventoryChecksumVerified: undefined, sourceIndependentlyVerified: false,
+    });
+    const audit = await attestSourceBytes([original]);
+    assert.equal(audit.failures.length, 0, JSON.stringify(audit.failures));
+    assert.equal(audit.inspected, 1);
+    assert.equal(audit.bytesRead, bytes.length);
+    assert.ok(audit.proven.has("byte:" + actual));
+    const result = reconcileB4([{ canonical_input_key: "byte:" + actual }],
+      [original], packages, audit.proven);
+    assert.equal(result.sourceReceiptCoverageComplete, true);
+    assert.equal(result.totals.unverifiedByteProofSources, 0);
+    assert.equal(result.verifiedScorableQuestionCount, 0);
+    writeFileSync(sourceFile, "%PDF-1.4\nAltered original\n");
+    const invalid = await attestSourceBytes([original]);
+    assert.equal(invalid.proven.size, 0);
+    assert.ok(invalid.failures.length > 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
