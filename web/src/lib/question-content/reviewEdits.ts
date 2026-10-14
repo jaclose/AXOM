@@ -4,7 +4,7 @@ import type { ImportPackage, PackageIssue, PackageQuestion } from "./package";
 export type ReviewSection = "stem" | "choice" | "explanation";
 export interface ReviewBlockLocation { section: ReviewSection; choiceId?: string; index: number; }
 
-const ANSWER_RECHECK_NOTE = "A reviewer edited the extracted content. Confirm the correct answer against the original source before scored practice."; 
+const ANSWER_RECHECK_NOTE = "A reviewer edited the extracted content. Confirm the correct answer against the original source before scored practice.";
 
 /** Any material edit makes a formerly verified answer provisional again. */
 function requireAnswerRecheck(question: PackageQuestion): PackageQuestion {
