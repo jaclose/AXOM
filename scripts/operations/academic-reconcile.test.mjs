@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { reconcileAcademicContent } from "./academic-reconcile.mjs";
+import { reconcileAcademicContent, expandedSourceInventory } from "./academic-reconcile.mjs";
 
 const a = "a".repeat(64), b = "b".repeat(64), c = "c".repeat(64);
 const fixture = () => ({
@@ -106,4 +106,41 @@ test("doubled source/academic identities are detected", () => {
   assert.equal(r.complete, false);
   assert.ok(r.errors.some(s => s.includes("Duplicate source disposition")));
   assert.ok(r.errors.some(s => s.includes("Duplicate tracker activity")));
+});
+
+test("expanded corpus adaptor deduplicates SHA by bytes and retains unhashed priority blockers", () => {
+  const inventory = expandedSourceInventory([
+    { source_sha256: a, original_path: "/private/one.pdf", file_extension: ".pdf" },
+    { source_sha256: a, original_path: "/private/one-copy.pdf", file_extension: ".pdf" },
+    { source_sha256: b, original_path: "/private/template.txt", file_extension: ".txt" },
+    { source_sha256: null, original_path: "/private/too-large.pdf", file_extension: ".pdf" },
+  ], {
+    file_denominators: {
+      eligible_priority_files_with_unresolved_sha: 1,
+      catalogued_document_and_asset_paths: 4,
+    },
+    tracker_denominators: { parsed_activity_rows: 2 },
+  });
+  assert.equal(inventory.summary.files, 3);
+  assert.equal(inventory.summary.uniqueFiles, 2);
+  assert.equal(inventory.summary.duplicateFiles, 1);
+  assert.equal(inventory.entries[1].duplicateOf, "/private/one.pdf");
+  const output = reconcileAcademicContent({ inventory });
+  assert.equal(output.complete, false);
+  assert.equal(output.counts.priorityMissingSha, 1);
+  assert.equal(output.counts.cataloguedPaths, 4);
+  assert.ok(output.blockers.some(x => x.includes("eligible academic sources have no verified SHA-256")));
+});
+
+test("inconsistent expanded source summary cannot certify a rolling inventory", () => {
+  const inv = expandedSourceInventory([
+    { source_sha256: a, original_path: "one.pdf" },
+  ], {
+    tracker_denominators: { parsed_activity_rows: 0 },
+    file_denominators: { sha256_hashed_paths: 2, distinct_byte_sha256: 2 },
+  });
+  const r = reconcileAcademicContent({ inventory: inv });
+  assert.equal(r.complete, false);
+  assert.ok(r.errors.some(x => x.includes("hashed paths but source summary reports")));
+  assert.ok(r.errors.some(x => x.includes("unique hashes but source summary reports")));
 });

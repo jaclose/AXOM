@@ -29,6 +29,35 @@ function indexUnique(list, key, errors, label) {
   return indexed;
 }
 
+/**
+ * Adapt Agent 1's expanded JSONL (which intentionally doesn't hash oversized
+ * unrelated/lecture references) without treating unhashed entries as verified.
+ * Every *eligible priority* missing SHA remains a release blocker.
+ */
+export function expandedSourceInventory(manifestRows, sourceSummary) {
+  const counted = new Map(), entries = [];
+  for (const row of manifestRows) {
+    if (!SHA256.test(row.source_sha256 ?? "")) continue;
+    const path = row.original_path ?? row.relative_path ?? row.source_id ?? "(unnamed)";
+    const original = counted.get(row.source_sha256);
+    entries.push({ path, sha256: row.source_sha256, extension: row.file_extension,
+      ...(original ? { duplicateOf: original } : {}) });
+    if (!original) counted.set(row.source_sha256, path);
+  }
+  return {
+    summary: {
+      files: entries.length, uniqueFiles: counted.size,
+      duplicateFiles: entries.length - counted.size,
+      templates: [{ items: sourceSummary?.tracker_denominators?.parsed_activity_rows ?? 0 }],
+    },
+    priorityMissingSha: sourceSummary?.file_denominators?.eligible_priority_files_with_unresolved_sha ?? 0,
+    cataloguedPaths: sourceSummary?.file_denominators?.catalogued_document_and_asset_paths ?? entries.length,
+    expectedHashedPaths: sourceSummary?.file_denominators?.sha256_hashed_paths,
+    expectedDistinctHashes: sourceSummary?.file_denominators?.distinct_byte_sha256,
+    entries,
+  };
+}
+
 export function reconcileAcademicContent({ inventory, dispositions, receipts, tracker }) {
   const errors = [], blockers = [], warnings = [];
   if (!inventory || !Array.isArray(inventory.entries) || !inventory.summary) {
@@ -42,6 +71,10 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
     else byHash.set(file.sha256, file);
   }
   const unique = [...byHash.values()];
+  if (inventory.expectedHashedPaths !== undefined && inventory.expectedHashedPaths !== inventory.entries.length) errors.push(`Expanded manifest has ${inventory.entries.length} hashed paths but source summary reports ${inventory.expectedHashedPaths}; rerun after inventory completes.`);
+  if (inventory.expectedDistinctHashes !== undefined && inventory.expectedDistinctHashes !== unique.length) errors.push(`Expanded manifest has ${unique.length} unique hashes but source summary reports ${inventory.expectedDistinctHashes}; refresh the paired source inventory.`);
+  if ((inventory.priorityMissingSha ?? 0) > 0) blockers.push(`${inventory.priorityMissingSha} eligible academic sources have no verified SHA-256; source coverage is incomplete.`);
+  if (inventory.cataloguedPaths > inventory.entries.length) warnings.push(`${inventory.cataloguedPaths - inventory.entries.length} catalogued paths were not included in the hashed cohort; the eligibility scan must distinguish excluded references from the remaining priority files.`);
   if (inventory.summary.uniqueFiles !== unique.length) errors.push(`Inventory uniqueFiles ${inventory.summary.uniqueFiles} != ${unique.length} verified unique hashes`);
   if (inventory.summary.files !== inventory.entries.length) errors.push(`Inventory files ${inventory.summary.files} != ${inventory.entries.length} entries`);
   if (inventory.summary.duplicateFiles !== duplicateRecords.length) errors.push(`Inventory duplicateFiles ${inventory.summary.duplicateFiles} != ${duplicateRecords.length} duplicates`);
@@ -109,6 +142,8 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
   if (!Array.isArray(dispositionRows) || !Array.isArray(receiptRows) || !Array.isArray(trackerRows)) warnings.push("This is a discovery baseline, not a release acceptance certificate.");
   const counts = {
     inventoryFiles: inventory.entries.length, uniqueSourceFiles: unique.length, duplicateFiles: duplicateRecords.length,
+    ...(inventory.cataloguedPaths !== undefined ? { cataloguedPaths: inventory.cataloguedPaths } : {}),
+    ...(inventory.priorityMissingSha !== undefined ? { priorityMissingSha: inventory.priorityMissingSha } : {}),
     explicitlyClassified: dmap.size, missingDisposition: missingDisposition.length,
     questionSources: questionSources.length, nonInstalledQuestionSources: pendingSources.length,
     detectedQuestions, readyQuestions, reviewQuestions, verifiedReadyQuestions,
@@ -130,7 +165,7 @@ function parseArgs(args) {
   const options = { strict: false };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--strict") { options.strict = true; continue; }
-    if (!["--inventory", "--dispositions", "--receipts", "--tracker", "--out"].includes(args[i])) throw new Error(`Unknown argument: ${args[i]}`);
+    if (!["--inventory", "--inventory-jsonl", "--source-summary", "--dispositions", "--receipts", "--tracker", "--out"].includes(args[i])) throw new Error(`Unknown argument: ${args[i]}`);
     if (!args[i + 1]) throw new Error(`Missing path after ${args[i]}`);
     options[args[i].slice(2)] = args[++i];
   }
@@ -142,7 +177,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   try {
     const a = parseArgs(process.argv.slice(2));
     const inventoryPath = a.inventory ?? "artifacts/qbank-6way-20261014/manifest.json";
-    const report = reconcileAcademicContent({ inventory: readJsonIfPresent(inventoryPath),
+    if (a["inventory-jsonl"] && !a["source-summary"]) throw new Error("--inventory-jsonl requires --source-summary");
+    const expandedRows = a["inventory-jsonl"]
+      ? readFileSync(resolve(a["inventory-jsonl"]), "utf8").split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line))
+      : undefined;
+    const inventory = expandedRows
+      ? expandedSourceInventory(expandedRows, readJsonIfPresent(a["source-summary"]))
+      : readJsonIfPresent(inventoryPath);
+    const report = reconcileAcademicContent({ inventory,
       dispositions: readJsonIfPresent(a.dispositions), receipts: readJsonIfPresent(a.receipts), tracker: readJsonIfPresent(a.tracker) });
     const destination = resolve(a.out ?? "artifacts/qbank-6way-20261014/reconciliation.json");
     mkdirSync(dirname(destination), { recursive: true });
