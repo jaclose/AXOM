@@ -14,12 +14,12 @@ const fixture = () => ({
 });
 const dispositions = () => ({
   sources: [
-    { sha256: a, kind: "question-source", status: "installed", questionCount: 2, readyCount: 2, reviewCount: 0 },
+    { sha256: a, kind: "question-source", status: "installed", questionCount: 2, readyCount: 2, reviewCount: 0, figureReferences: 0 },
     { sha256: b, kind: "course-template", status: "installed" },
     { sha256: c, kind: "asset", status: "excluded", reason: "Referenced by source A" },
   ],
 });
-const receipts = () => ({ sources: [{ sha256: a, questionCount: 2, readbackVerified: true }] });
+const receipts = () => ({ sources: [{ sha256: a, questionCount: 2, readbackVerified: true, ownerAuthenticated: true }] });
 const tracker = () => ({ activities: [
   { activityId: "FTM1:L1", term: "T1", module: "FTM 1", week: 2, weekBasis: "explicit", installed: true },
   { activityId: "FTM1:IMCQ1", term: "T1", module: "FTM 1", weekBasis: "unassigned", installed: true },
@@ -66,7 +66,7 @@ test("source marked installed with no confirmed backend readback is blocked", ()
 });
 
 test("count mismatch between review and cloud persistence is an error", () => {
-  const r = run({ receipts: { sources: [{ sha256: a, questionCount: 1, readbackVerified: true }] } });
+  const r = run({ receipts: { sources: [{ sha256: a, questionCount: 1, readbackVerified: true, ownerAuthenticated: true }] } });
   assert.equal(r.complete, false);
   assert.equal(r.counts.verifiedReadyQuestions, 0);
   assert.ok(r.errors.some(s => s.includes("Ready/stored mismatch")));
@@ -143,4 +143,106 @@ test("inconsistent expanded source summary cannot certify a rolling inventory", 
   assert.equal(r.complete, false);
   assert.ok(r.errors.some(x => x.includes("hashed paths but source summary reports")));
   assert.ok(r.errors.some(x => x.includes("unique hashes but source summary reports")));
+});
+
+test("public academic source requires verified rights and current review approval", () => {
+  const d = dispositions();
+  d.sources[0].visibility = "public";
+  let r = run({ dispositions: d });
+  assert.equal(r.complete, false);
+  assert.ok(r.blockers.some(x => x.includes("lacks verified license")));
+  Object.assign(d.sources[0], {
+    rightsStatus: "verified", publisherOptIn: true, reviewStatus: "approved",
+    licenseEvidence: "original author explicitly authorized redistribution",
+  });
+  r = run({ dispositions: d });
+  assert.equal(r.complete, true);
+});
+
+test("original question figures must be re-read as authenticated bytes, not inferred from a local asset", () => {
+  const d = dispositions();
+  d.sources[0].figureReferences = 3;
+  let r = run({ dispositions: d });
+  assert.equal(r.complete, false);
+  assert.equal(r.counts.declaredFigureReferences, 3);
+  assert.equal(r.counts.verifiedFigureReferences, 0);
+  assert.ok(r.blockers.some(x => x.includes("lacks authenticated image-byte readback")));
+  r = run({ dispositions: d, receipts: { sources: [{
+    sha256: a, questionCount: 2, readbackVerified: true, ownerAuthenticated: true,
+    figureReadbackVerified: true, figureReferences: 2,
+  }] } });
+  assert.equal(r.complete, false);
+  assert.ok(r.errors.some(x => x.includes("Figure count mismatch")));
+  r = run({ dispositions: d, receipts: { sources: [{
+    sha256: a, questionCount: 2, readbackVerified: true, ownerAuthenticated: true,
+    figureReadbackVerified: true, figureReferences: 3,
+  }] } });
+  assert.equal(r.complete, true, JSON.stringify(r.blockers));
+  assert.equal(r.counts.verifiedFigureReferences, 3);
+});
+
+test("invalid claimed image count is not silently cast into a number", () => {
+  const d = dispositions();
+  d.sources[0].figureReferences = -1;
+  const r = run({ dispositions: d });
+  assert.equal(r.complete, false);
+  assert.ok(r.errors.some(x => x.includes("Invalid figureReferences")));
+});
+
+test("production snapshot contradicting claimed installed content blocks acceptance", () => {
+  const production = { projectId: "jofkmfwkidubxcutkwzf",
+    observedAt: "2026-10-14T18:30:00Z", academicCollections: 0,
+    academicRevisions: 0, academicFiles: 0, storageObjects: 0 };
+  const r = run({ production });
+  assert.equal(r.complete, false);
+  assert.equal(r.counts.productionAcademicCollections, 0);
+  assert.ok(r.errors.some(x => x.includes("zero academic collections")));
+});
+
+test("production snapshot for unrelated project never certifies AXOM", () => {
+  const production = { projectId: "unrelated", observedAt: "2026-10-14T18:30:00Z",
+    academicCollections: 1, academicRevisions: 1, academicFiles: 1, storageObjects: 1 };
+  const r = run({ production });
+  assert.equal(r.complete, false);
+  assert.ok(r.errors.some(x => x.includes("not the verified AXOM Production project")));
+});
+
+test("management or service-role readback is not accepted as an owner session", () => {
+  const r = run({ receipts: { sources: [{ sha256: a, questionCount: 2, readbackVerified: true }] } });
+  assert.equal(r.complete, false);
+  assert.equal(r.counts.verifiedReadyQuestions, 0);
+  assert.ok(r.blockers.some(x => x.includes("no owner-authenticated cloud receipt")));
+});
+
+test("installed source must declare image count even when zero", () => {
+  const d = dispositions();
+  delete d.sources[0].figureReferences;
+  const r = run({ dispositions: d });
+  assert.equal(r.complete, false);
+  assert.ok(r.errors.some(x => x.includes("lacks explicit figureReferences")));
+});
+
+test("installed source reconciles ready, review and rejected counts exactly", () => {
+  const d = dispositions();
+  d.sources[0].questionCount = 4;
+  let r = run({ dispositions: d });
+  assert.equal(r.complete, false);
+  assert.ok(r.errors.some(x => x.includes("does not reconcile ready + review + rejected")));
+  d.sources[0].reviewCount = 1;
+  d.sources[0].rejectedCount = 1;
+  r = run({ dispositions: d });
+  assert.equal(r.complete, true);
+});
+
+test("service-role image access cannot count as user-verified figure persistence", () => {
+  const d = dispositions();
+  d.sources[0].figureReferences = 2;
+  const r = run({ dispositions: d, receipts: { sources: [{
+    sha256: a, questionCount: 2, readbackVerified: true,
+    figureReadbackVerified: true, figureReferences: 2,
+  }] } });
+  assert.equal(r.complete, false);
+  assert.equal(r.counts.verifiedFigureReferences, 0);
+  assert.ok(r.blockers.some(x => x.includes("image-byte readback")));
+  assert.ok(r.blockers.some(x => x.includes("no owner-authenticated cloud receipt")));
 });

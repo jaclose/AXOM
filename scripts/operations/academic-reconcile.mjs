@@ -58,7 +58,7 @@ export function expandedSourceInventory(manifestRows, sourceSummary) {
   };
 }
 
-export function reconcileAcademicContent({ inventory, dispositions, receipts, tracker }) {
+export function reconcileAcademicContent({ inventory, dispositions, receipts, tracker, production }) {
   const errors = [], blockers = [], warnings = [];
   if (!inventory || !Array.isArray(inventory.entries) || !inventory.summary) {
     return { complete: false, errors: ["Source inventory has no entries and summary."], blockers: [], warnings: [], counts: {} };
@@ -92,7 +92,7 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
     if (!byHash.has(hash)) errors.push(`Disposition checksum absent from current inventory: ${hash.slice(0, 12)}`);
     if (!supportedKinds.has(row.kind)) errors.push(`Unknown source kind for ${hash.slice(0, 12)}: ${row.kind}`);
     if (!supportedStates.has(row.status)) errors.push(`Unknown disposition for ${hash.slice(0, 12)}: ${row.status}`);
-    for (const key of ["questionCount", "readyCount", "reviewCount"]) {
+    for (const key of ["questionCount", "readyCount", "reviewCount", "rejectedCount"]) {
       if (row[key] !== undefined && !integer(row[key])) errors.push(`Invalid ${key} for ${hash.slice(0, 12)}`);
     }
     if (integer(row.questionCount) && integer(row.readyCount) && row.readyCount > row.questionCount) {
@@ -100,6 +100,22 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
     }
     if (row.kind === "question-source" && row.status !== "installed" && !row.reason) {
       blockers.push(`Question source ${hash.slice(0, 12)} is ${row.status} without an explicit reason.`);
+    }
+    if (row.kind === "question-source" && row.status === "installed") {
+      const keys = ["questionCount", "readyCount", "reviewCount", "figureReferences"];
+      const missing = keys.filter(key => !integer(row[key]));
+      if (missing.length) errors.push(`Installed question source ${hash.slice(0, 12)} lacks explicit ${missing.join(", ")} counts.`);
+      else if (row.readyCount + row.reviewCount + (row.rejectedCount ?? 0) !== row.questionCount)
+        errors.push(`Installed source ${hash.slice(0, 12)} does not reconcile ready + review + rejected against detected.`);
+    }
+    // Public source publication requires affirmative rights, publisher consent,
+    // and review of the current revision. A local file import is PRIVATE by default.
+    if (row.visibility === "public" && !(row.rightsStatus === "verified" && row.publisherOptIn === true
+      && row.reviewStatus === "approved" && typeof row.licenseEvidence === "string" && row.licenseEvidence.trim())) {
+      blockers.push(`Public source ${hash.slice(0, 12)} lacks verified license, opt-in, and current approval.`);
+    }
+    if (row.figureReferences !== undefined && !integer(row.figureReferences)) {
+      errors.push(`Invalid figureReferences for ${hash.slice(0, 12)}`);
     }
   }
   const questionSources = [...dmap.entries()].filter(([, row]) => row.kind === "question-source");
@@ -117,10 +133,30 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
     if (!integer(row.questionCount)) errors.push(`Invalid stored questionCount for ${hash.slice(0, 12)}`);
   }
   let verifiedReadyQuestions = 0;
+  let declaredFigureReferences = 0;
+  let verifiedFigureReferences = 0;
+  let figureBearingSources = 0;
   for (const [hash, row] of questionSources) {
+    const declaredFigures = row.figureReferences;
+    if (integer(declaredFigures) && declaredFigures > 0) {
+      figureBearingSources++;
+      declaredFigureReferences += declaredFigures;
+      if (row.status === "installed") {
+        const receipt = rmap.get(hash);
+        if (!receipt?.readbackVerified || receipt.ownerAuthenticated !== true || receipt.figureReadbackVerified !== true) {
+          blockers.push(`Figure-bearing source ${hash.slice(0, 12)} lacks authenticated image-byte readback.`);
+        } else if (receipt.figureReferences !== declaredFigures) {
+          errors.push(`Figure count mismatch ${hash.slice(0, 12)}: expected ${declaredFigures}, read ${receipt.figureReferences ?? "unknown"}`);
+        } else verifiedFigureReferences += declaredFigures;
+      }
+    }
     if (row.status !== "installed") continue;
     const receipt = rmap.get(hash);
     if (!receipt?.readbackVerified) { blockers.push(`Installed question source ${hash.slice(0, 12)} lacks verified cloud readback.`); continue; }
+    if (receipt.ownerAuthenticated !== true) {
+      blockers.push(`Installed source ${hash.slice(0, 12)} has no owner-authenticated cloud receipt; admin/service-role access is insufficient.`);
+      continue;
+    }
     if (receipt.questionCount !== row.readyCount) errors.push(`Ready/stored mismatch ${hash.slice(0, 12)}: ${row.readyCount ?? "unknown"} ready, ${receipt.questionCount} stored`);
     else verifiedReadyQuestions += receipt.questionCount;
   }
@@ -139,6 +175,23 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
   if (expectedTracker !== null && tmap.size < expectedTracker) {
     blockers.push(`Tracker ledger has ${tmap.size} unique activities; baseline templates have ${expectedTracker}. Coverage is not verified.`);
   }
+  if (production !== undefined) {
+    if (!production || typeof production !== "object" || typeof production.projectId !== "string"
+      || typeof production.observedAt !== "string" || !Number.isFinite(Date.parse(production.observedAt))) {
+      errors.push("Production snapshot lacks verified project ID or observation timestamp.");
+    } else {
+      for (const key of ["academicCollections", "academicRevisions", "academicFiles", "storageObjects"]) {
+        if (!integer(production[key])) errors.push(`Production snapshot has invalid ${key} count.`);
+      }
+      if (production.academicCollections === 0 && verifiedReadyQuestions > 0) {
+        errors.push("Backend source receipts claim verified academic questions but production has zero academic collections.");
+      }
+      if (production.academicFiles === 0 && verifiedFigureReferences > 0) {
+        errors.push("Media receipts claim verified figures but production has zero academic files.");
+      }
+      if (production.projectId !== "jofkmfwkidubxcutkwzf") errors.push("Production snapshot is not the verified AXOM Production project.");
+    }
+  }
   if (!Array.isArray(dispositionRows) || !Array.isArray(receiptRows) || !Array.isArray(trackerRows)) warnings.push("This is a discovery baseline, not a release acceptance certificate.");
   const counts = {
     inventoryFiles: inventory.entries.length, uniqueSourceFiles: unique.length, duplicateFiles: duplicateRecords.length,
@@ -150,6 +203,10 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
     expectedBaselineTrackerActivities: expectedTracker, reportedTrackerActivities: tmap.size,
     installedTrackerActivities: [...tmap.values()].filter(item => item.installed === true).length,
     cloudReceiptSources: rmap.size,
+    ...(figureBearingSources ? { figureBearingSources, declaredFigureReferences, verifiedFigureReferences } : {}),
+    ...(production ? { productionSnapshotAt: production.observedAt,
+      productionAcademicCollections: production.academicCollections,
+      productionAcademicFiles: production.academicFiles } : {}),
   };
   return {
     format: "axom-academic-reconciliation-v1",
@@ -165,7 +222,7 @@ function parseArgs(args) {
   const options = { strict: false };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--strict") { options.strict = true; continue; }
-    if (!["--inventory", "--inventory-jsonl", "--source-summary", "--dispositions", "--receipts", "--tracker", "--out"].includes(args[i])) throw new Error(`Unknown argument: ${args[i]}`);
+    if (!["--inventory", "--inventory-jsonl", "--source-summary", "--dispositions", "--receipts", "--tracker", "--production-snapshot", "--out"].includes(args[i])) throw new Error(`Unknown argument: ${args[i]}`);
     if (!args[i + 1]) throw new Error(`Missing path after ${args[i]}`);
     options[args[i].slice(2)] = args[++i];
   }
@@ -185,7 +242,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       ? expandedSourceInventory(expandedRows, readJsonIfPresent(a["source-summary"]))
       : readJsonIfPresent(inventoryPath);
     const report = reconcileAcademicContent({ inventory,
-      dispositions: readJsonIfPresent(a.dispositions), receipts: readJsonIfPresent(a.receipts), tracker: readJsonIfPresent(a.tracker) });
+      dispositions: readJsonIfPresent(a.dispositions), receipts: readJsonIfPresent(a.receipts),
+      tracker: readJsonIfPresent(a.tracker), production: readJsonIfPresent(a["production-snapshot"]) });
     const destination = resolve(a.out ?? "artifacts/qbank-6way-20261014/reconciliation.json");
     mkdirSync(dirname(destination), { recursive: true });
     writeFileSync(destination, JSON.stringify({ generatedAt: new Date().toISOString(), ...report }, null, 2));
