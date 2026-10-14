@@ -71,6 +71,36 @@ describe("the course by week", () => {
       module.weeks[0].questionScopeAmbiguous === true && module.weeks[0].questions.total === 0)).toBe(true);
   });
 
+
+  it("separates same-named modules filed under different courses and respects course-specific attempts", () => {
+    const rows = [
+      row({ path: "Term 2/BPM 501/NB2/Week 3", label: "Core" }),
+      row({ path: "Term 2/ELECTIVE/NB Block 2/Week 3", label: "Elective" }),
+    ];
+    const answers = [
+      question({ module: "NB2", week: 3, courseId: "core" }),
+      question({ module: "NB Block 2", week: 3, courseId: "elective" }),
+      question({ module: "NB2", week: 3 }),
+    ];
+    const withoutOwners = buildModuleWeeks(rows, answers);
+    expect(withoutOwners).toHaveLength(2);
+    expect(withoutOwners.every((module) => module.weeks[0].questionScopeAmbiguous && module.weeks[0].questions.total === 0)).toBe(true);
+    const withOwners = buildModuleWeeks(rows, answers, undefined, {
+      terms: [{ id: "t2", name: "Term 2" }],
+      courses: [
+        { id: "core", termId: "t2", code: "BPM 501", name: "Core", files: 0,
+          modules: [{ id: "nb2", name: "NB2" }] },
+        { id: "elective", termId: "t2", code: "ELECTIVE", name: "Elective", files: 0,
+          modules: [{ id: "nb-duplicate", name: "NB Block 2" }] },
+      ],
+    });
+    expect(withOwners.map((module) => [module.course, module.courseId, module.total, module.weeks[0].questions.total])).toEqual([
+      ["BPM 501", "core", 1, 1],
+      ["ELECTIVE", "elective", 1, 1],
+    ]);
+    expect(withOwners.every((module) => !module.weeks[0].questionScopeAmbiguous)).toBe(true);
+  });
+
   it("counts absences per category against the term's allowance, a flipped lecture as a lecture", () => {
     const tracker = [
       row({ activity: "lecture", attendance: "missed" }),

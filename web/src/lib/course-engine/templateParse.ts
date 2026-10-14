@@ -197,6 +197,8 @@ export interface PlannedCourseItem {
 export interface CourseTemplatePlan {
   module: string;
   term?: string;
+  /** Optional explicit course grouping, e.g. "BPM 502". Older templates remain course-unassigned. */
+  course?: string;
   /** Weeks the module runs, when any section establishes them. */
   weekCount?: number;
   items: PlannedCourseItem[];
@@ -217,18 +219,20 @@ export interface CourseTemplatePlan {
  */
 export function planCourseTemplate(
   sections: readonly CourseTemplateSection[],
-  options: { term?: string; firstWeek?: number } = {},
+  options: { term?: string; course?: string; moduleName?: string; firstWeek?: number } = {},
 ): CourseTemplatePlan {
   const offset = Math.max(1, options.firstWeek ?? 1) - 1;
   const module = sections[0]?.module ?? "";
   const term = options.term ?? sections[0]?.term;
+  const course = options.course?.trim() || undefined;
+  const moduleName = options.moduleName?.trim() || module;
   const problems = sections.flatMap((section) => section.problems);
   for (const section of sections) {
-    if (moduleKey(section.module) !== moduleKey(module)) {
+    if (canonicalModuleKey(section.module) !== canonicalModuleKey(module)) {
       problems.push(`"${section.sourceName ?? section.title}" is for ${section.module}, not ${module}.`);
     }
   }
-  const sameModule = sections.filter((section) => moduleKey(section.module) === moduleKey(module));
+  const sameModule = sections.filter((section) => canonicalModuleKey(section.module) === canonicalModuleKey(module));
   const weekly = sameModule.filter(setsTheWeeks);
   // Source labels such as Week 4 ESoft Quiz anchor their *own* group. An
   // adjacent SG/IMCQ remains inferred, but must never be filed into Week 1
@@ -289,7 +293,7 @@ export function planCourseTemplate(
         weekBasis = "spread";
       }
       items.push({
-        path: [term, module, week ? `Week ${week}` : "Unscheduled"].filter(Boolean).join("/"),
+        path: [term, course, moduleName, week ? `Week ${week}` : "Unscheduled"].filter(Boolean).join("/"),
         label: item.label,
         kind: TRACKER_KIND_FOR_ACTIVITY[item.activity],
         activity: item.activity,
@@ -307,6 +311,7 @@ export function planCourseTemplate(
   return {
     module,
     term,
+    ...(course ? { course } : {}),
     weekCount,
     items,
     needsConfirmation: items.some((item) => item.weekBasis !== "stated"),
@@ -337,10 +342,15 @@ export function reconcileCourseTemplate(
     const segments = row.path.split("/").filter(Boolean);
     const last = segments.at(-1) ?? "";
     const hasWeekSuffix = /^week\s*\d+$/i.test(last) || /^unscheduled$/i.test(last);
-    const module = hasWeekSuffix ? segments.at(-2) : segments.at(-1);
-    const term = segments.length > (hasWeekSuffix ? 2 : 1) ? segments[0] : undefined;
+    const moduleIndex = segments.length - (hasWeekSuffix ? 2 : 1);
+    const module = segments[moduleIndex];
+    const term = moduleIndex >= 1 ? segments[0] : undefined;
+    const existingCourse = segments.slice(1, moduleIndex).join("/").trim().toLowerCase();
+    // A course-selected reimport may adopt a legacy module-root row, but it
+    // must never steal a row explicitly filed to another course.
     return canonicalModuleKey(module ?? "") === canonicalModuleKey(plan.module)
-      && termIdentity(term) === termIdentity(plan.term);
+      && termIdentity(term) === termIdentity(plan.term)
+      && (!plan.course || !existingCourse || existingCourse === plan.course.trim().toLowerCase());
   });
   const normalizeKey = (key: string) => normalizedTemplateIdentity(key, plan.module);
   const byKey = new Map<string, typeof inScope>();
@@ -372,8 +382,9 @@ export function reconcileCourseTemplate(
     const match = candidates[0];
     if (match) {
       matched.add(match.id);
-      // A learner-assigned week wins on every future revision.
-      const path = match.weekSource === "learner" ? match.path : item.path;
+      // Retain a learner's exact week, and never drag a course-filed row back
+      // into an old module-root layout when a legacy importer lacks course.
+      const path = reconciledActivityPath(plan, item.path, match.path, match.weekSource);
       const weekSource = match.weekSource === "learner" ? "learner" : item.weekSource;
       if (match.path === path && match.label === item.label && match.weekSource === weekSource) result.unchanged += 1;
       else result.update.push({ id: match.id, path, label: item.label, weekSource });
@@ -415,6 +426,29 @@ export function reconcileCourseTemplate(
   if (review.length) result.review = review;
   if (notInSelection.length) result.notInSelection = notInSelection;
   return result;
+}
+
+/** Preserve explicit course filing and student week decisions during reimports. */
+function reconciledActivityPath(
+  plan: CourseTemplatePlan, proposed: string, existing: string,
+  weekSource?: "template" | "inferred" | "learner",
+): string {
+  const oldParts = existing.split("/").filter(Boolean);
+  const suffix = oldParts.at(-1) ?? "";
+  const hasWeek = /^(?:week\s*\d+|unscheduled)$/i.test(suffix);
+  const moduleIndex = oldParts.length - (hasWeek ? 2 : 1);
+  if (moduleIndex < 0) return proposed;
+  const oldCoursePath = oldParts.slice(1, moduleIndex);
+  const newParts = proposed.split("/").filter(Boolean);
+  const newWeek = newParts.at(-1) ?? "";
+  const selectedWeek = weekSource === "learner" && hasWeek ? suffix : newWeek;
+  if (weekSource === "learner" && (!hasWeek || !plan.course)) return existing;
+  if (!plan.course && oldCoursePath.length > 0) {
+    // The already-filed destination remains canonical when an older loader
+    // cannot identify the course at all.
+    return [...oldParts.slice(0, moduleIndex + 1), selectedWeek].join("/");
+  }
+  return [...newParts.slice(0, -1), selectedWeek].join("/");
 }
 
 /** Stable activity identity normalizes equivalent long/short SGU module labels. */

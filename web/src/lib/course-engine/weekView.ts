@@ -5,7 +5,7 @@
 // progress comes from recorded attempts, and absences from what was marked on
 // the row, so nothing here is a second copy of anyone's progress.
 // ===========================================================================
-import type { ID, Term, TrackerItem } from "../types";
+import type { Course, ID, Term, TrackerItem } from "../types";
 import type { QuestionSet } from "../library";
 import type { QuestionRecord } from "../questions";
 import { ATTENDED_ACTIVITIES, attendanceCategory, type CourseActivity } from "./activity";
@@ -32,6 +32,9 @@ export interface ModuleWeeks {
   module: string;
   /** First path segment, when the module sits under one. */
   term?: string;
+  /** Course segment when rows use Term/Course/Module/Week paths. */
+  course?: string;
+  courseId?: ID;
   weeks: WeekSummary[];
   done: number;
   total: number;
@@ -46,17 +49,24 @@ export function buildModuleWeeks(
   tracker: readonly TrackerItem[],
   questions: readonly QuestionRecord[],
   setsById?: ReadonlyMap<ID, Pick<QuestionSet, "scope">>,
+  context?: { terms: readonly Term[]; courses: readonly Course[] },
 ): ModuleWeeks[] {
   const modules = new Map<string, ModuleWeeks & { byWeek: Map<number, TrackerItem[]>; paths: Map<number, string> }>();
   for (const item of tracker) {
     const scope = trackerPathScope(item.path);
     if (!scope.module || !scope.week) continue;
     // Separate the same module code when it appears in different terms.
-    const term = item.path.split("/").length >= 3 ? item.path.split("/")[0] : undefined;
-    const key = `${(term ?? "").toLowerCase()}|${canonicalModuleKey(scope.module)}`;
     const segments = item.path.split("/");
+    const term = segments.length >= 3 ? segments[0] : undefined;
+    const course = segments.length >= 4 ? segments.at(-3) : undefined;
+    const key = `${(term ?? "").toLowerCase()}|${(course ?? "").toLowerCase()}|${canonicalModuleKey(scope.module)}`;
+    const matchingCourses = context?.courses.filter((candidate) =>
+      context.terms.find((termRecord) => termRecord.id === candidate.termId)?.name.toLowerCase() === term?.toLowerCase()
+      && candidate.code.toLowerCase() === course?.toLowerCase()
+      && candidate.modules.some((module) => canonicalModuleKey(module.name) === canonicalModuleKey(scope.module!))) ?? [];
+    const courseId = matchingCourses.length === 1 ? matchingCourses[0].id : undefined;
     const entry = modules.get(key) ?? {
-      key, module: scope.module, term: term ?? (segments.length >= 3 ? segments[0] : undefined),
+      key, module: scope.module, term, course, courseId,
       weeks: [], done: 0, total: 0, byWeek: new Map(), paths: new Map(),
     };
     entry.byWeek.set(scope.week, [...(entry.byWeek.get(scope.week) ?? []), item]);
@@ -68,14 +78,14 @@ export function buildModuleWeeks(
   for (const module of modules.values()) {
     const key = canonicalModuleKey(module.module);
     const terms = termsByModule.get(key) ?? new Set<string>();
-    terms.add((module.term ?? "").toLowerCase());
+    terms.add(`${(module.term ?? "").toLowerCase()}|${(module.course ?? "").toLowerCase()}`);
     termsByModule.set(key, terms);
   }
 
   return [...modules.values()].map(({ byWeek, paths, ...module }) => {
     // Without a course/term link on the question, reusing a module name in two
     // terms cannot truthfully allocate those questions to either week.
-    const ambiguous = (termsByModule.get(canonicalModuleKey(module.module))?.size ?? 0) > 1;
+    const ambiguous = (termsByModule.get(canonicalModuleKey(module.module))?.size ?? 0) > 1 && !module.courseId;
     const weeks = [...byWeek.entries()].sort(([left], [right]) => left - right).map(([week, items]): WeekSummary => {
       const groups = new Map<CourseActivity | "other", { total: number; done: number }>();
       for (const item of items) {
@@ -93,7 +103,7 @@ export function buildModuleWeeks(
         byActivity: [...groups.entries()].map(([activity, counts]) => ({ activity, ...counts })),
         questions: ambiguous
           ? { total: 0, attempted: 0, firstTimeCorrect: 0, missed: 0, questionIds: [] }
-          : scopeProgress(questions, { module: module.module, week }, setsById),
+          : scopeProgress(questions, { module: module.module, week, courseId: module.courseId }, setsById),
         ...(ambiguous ? { questionScopeAmbiguous: true } : {}),
         missed: items.filter((item) => item.attendance === "missed").length,
       };
@@ -107,6 +117,8 @@ export function buildModuleWeeks(
     };
   }).sort((left, right) => (
     (left.term ?? "").localeCompare(right.term ?? "", undefined, { numeric: true })
+    || canonicalModuleKey(left.module).localeCompare(canonicalModuleKey(right.module), undefined, { numeric: true })
+    || (left.course ?? "").localeCompare(right.course ?? "", undefined, { numeric: true, sensitivity: "base" })
     || left.module.localeCompare(right.module, undefined, { numeric: true, sensitivity: "base" })
   ));
 }

@@ -145,3 +145,51 @@
 .tracker-resource-row small { display: block; color: var(--text-60, var(--text-50)); margin-top: 3px; font-size: var(--fs-xs); }
 .tracker-resource-row button { flex-shrink: 0; }
 @media (max-width: 520px) { .tracker-curriculum-coverage summary { display: block; } .tracker-curriculum-coverage summary span { display: block; margin-top: 4px; } }
+
+/* Safe, opt-in migration of older term/module rows under the matching course. */
+.tracker-course-filing summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  cursor: pointer;
+}
+.tracker-course-filing summary:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: 2px; }
+.tracker-course-filing .sub { font-size: var(--fs-xs); line-height: 1.5; }
+.tracker-filing-list { display: grid; gap: 8px; margin-top: 10px; }
+.tracker-filing-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--border-subtle, rgba(255,255,255,.09));
+  padding: 9px 0 2px;
+}
+.tracker-filing-row > div { min-width: 0; }
+.tracker-filing-row b { font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.tracker-filing-row small { display: block; margin-top: 3px; font-size: var(--fs-xs); color: var(--text-60, var(--text-50)); line-height: 1.45; }
+.tracker-filing-row button { flex-shrink: 0; }
+@media (max-width: 520px) { .tracker-filing-row { flex-wrap: wrap; } }
+
+/* Local-only, rights-gated academic catalog metadata export. */
+.tracker-catalog-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 10px 0 12px;
+}
+.tracker-catalog-action .sub {
+  flex: 1 1 230px;
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+}
+
+/* Keep the six-column evidence table in the wider work area, not the narrow utility rail. */
+.tracker-curriculum-anchor {
+  width: 100%;
+  min-width: 0;
+  scroll-margin-top: 112px;
+}
+.tracker-curriculum-anchor .tracker-coverage-scroll { max-width: 100%; overflow-x: auto; }

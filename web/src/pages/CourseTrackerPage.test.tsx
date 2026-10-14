@@ -11,6 +11,7 @@ import {
   descendantScopes,
   extractTrackerImportFile,
   groupItemsBySection,
+  trackerScopeForCourseBook,
   TRACKER_IMPORT_EXAMPLE,
 } from "./CourseTrackerPage";
 
@@ -151,6 +152,20 @@ describe("Course Tracker comprehension layout", () => {
     expect(useStore.getState().tracker).toEqual(before);
   });
 
+
+  it("opens the full-width curriculum evidence table from the utility rail", () => {
+    render(<CourseTrackerPage />);
+    const workArea = screen.getByRole("region", { name: "Selected Course Tracker scope" });
+    const utilities = screen.getByRole("complementary", { name: "Course Tracker utilities" });
+    expect(within(workArea).getByText("SGU Terms 1–5 · curriculum coverage")).toBeTruthy();
+    expect(within(utilities).queryByText("SGU Terms 1–5 · curriculum coverage")).toBeNull();
+    const anchor = document.getElementById("tracker-curriculum-coverage")!;
+    const scroll = vi.fn();
+    anchor.scrollIntoView = scroll;
+    fireEvent.click(within(utilities).getByRole("button", { name: "View curriculum coverage" }));
+    expect(scroll).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+  });
+
   it("opens import and module workflows immediately", () => {
     render(<CourseTrackerPage />);
     fireEvent.click(screen.getByRole("button", { name: "Import lectures or items" }));
@@ -263,6 +278,121 @@ describe("Course Tracker comprehension layout", () => {
     expect(within(coverage).getByText("Term 5 coverage")).toBeTruthy();
   });
 
+
+  it("reports locally present T5 GOER bank questions without fabricating a course template", () => {
+    const stamp = "2026-10-14T12:00:00.000Z";
+    const terms = [{ id: "t5", name: "Term 5" }];
+    const courses = [{ id: "ppm501", termId: "t5", code: "PPM 501", name: "PPM II",
+      files: 0, modules: [{ id: "goer", name: "GOER" }] }];
+    const question = {
+      id: "goer-local", source: "imported" as const, stem: "Verified question", correctKey: "A",
+      options: [{ key: "A", text: "Correct" }, { key: "B", text: "Other" }],
+      module: "GOER", week: 2, courseId: "ppm501", setId: "goer-bank",
+      status: "unseen" as const, tags: [], attempts: [], createdAt: stamp, updatedAt: stamp,
+    };
+    const set = { id: "goer-bank", title: "GOER Week 2", questionIds: ["goer-local"],
+      scope: { module: "GOER", week: 2, courseId: "ppm501" }, tags: [],
+      sourceDocumentIds: [], parserWarnings: [], aiEnhanced: false, createdAt: stamp };
+    useStore.setState({ tracker: [], documents: [], terms, courses, questions: [question], questionSets: [set] });
+    render(<CourseTrackerPage />);
+    const line = screen.getByText("PPM 501 · GOER").closest<HTMLElement>("tr")!;
+    expect(within(line).getByText("No source template")).toBeTruthy();
+    expect(within(line).getByText(/1 collections · 1\/1 locally ready/)).toBeTruthy();
+    expect(within(line).getByText(/Source-indexed weeks 2 \(not official dates\)/)).toBeTruthy();
+    expect(screen.getByText(/0\/23 modules have saved templates/)).toBeTruthy();
+  });
+
+
+
+  it("uses an explicit course breadcrumb to launch only that course's reviewed QBank collection", () => {
+    const stamp = "2026-10-14T12:00:00.000Z";
+    const tracker = [
+      { id: "core-tracker", path: "Term 2/BPM 501/NB2/Week 3",
+        label: "Core NB2 activity", kind: "Lecture" as const, passes: 0, ankiPasses: 0,
+        yield: "none" as const, updated: stamp },
+      { id: "elective-tracker", path: "Term 2/ELECTIVE/NB Block 2/Week 3",
+        label: "Elective NB2 activity", kind: "Lecture" as const, passes: 0, ankiPasses: 0,
+        yield: "none" as const, updated: stamp },
+    ];
+    const terms = [{ id: "term-2", name: "Term 2" }];
+    const courses = [
+      { id: "core-course", termId: "term-2", code: "BPM 501", name: "Core II",
+        files: 0, modules: [{ id: "nb-core", name: "NB2" }] },
+      { id: "elective-course", termId: "term-2", code: "ELECTIVE", name: "Elective",
+        files: 0, modules: [{ id: "nb-elective", name: "NB Block 2" }] },
+    ];
+    const makeQuestion = (id: string, courseId: string, setId: string) => ({
+      id, module: "NB2", courseId, setId, week: 3, source: "imported" as const,
+      stem: id, options: [{ key: "A", text: "Correct" }, { key: "B", text: "Other" }],
+      correctKey: "A", status: "unseen" as const, tags: [], attempts: [],
+      createdAt: stamp, updatedAt: stamp,
+    });
+    const makeSet = (id: string, courseId: string, title: string, questionId: string) => ({
+      id, title, scope: { module: "NB2", courseId, week: 3 },
+      questionIds: [questionId], tags: [], sourceDocumentIds: [],
+      aiEnhanced: false, parserWarnings: [], createdAt: stamp,
+    });
+    sessionStorage.removeItem("axom.courseQuizLaunch.v1");
+    useStore.setState({
+      tracker, terms, courses,
+      questions: [
+        makeQuestion("core-q", "core-course", "core-set"),
+        makeQuestion("elective-q", "elective-course", "elective-set"),
+      ],
+      questionSets: [
+        makeSet("core-set", "core-course", "Core NB2 IMCQ bank", "core-q"),
+        makeSet("elective-set", "elective-course", "Elective NB2 IMCQ bank", "elective-q"),
+      ],
+    });
+    render(<CourseTrackerPage />);
+    fireEvent.change(screen.getByLabelText("Jump to a subsection"), {
+      target: { value: "Term 2/BPM 501/NB2/Week 3" },
+    });
+    const panel = screen.getByText("Related Question Bank").closest<HTMLElement>(".glass-card")!;
+    expect(within(panel).getByText("Core NB2 IMCQ bank")).toBeTruthy();
+    expect(within(panel).queryByText("Elective NB2 IMCQ bank")).toBeNull();
+    fireEvent.click(within(panel).getByRole("button", { name: "Practice" }));
+    expect(JSON.parse(sessionStorage.getItem("axom.courseQuizLaunch.v1") ?? "null")).toMatchObject({
+      week: 3, questionIds: ["core-q"], setIds: ["core-set"],
+    });
+    sessionStorage.removeItem("axom.courseQuizLaunch.v1");
+    window.location.hash = "";
+  });
+
+  it("surfaces tracker rows outside the attributable SGU course hierarchy without hiding them", () => {
+    const state = useStore.getState();
+    useStore.setState({
+      tracker: [{ ...state.tracker[0], id: "custom-not-fabricated",
+        path: "Term 4/Independent Study/Week 4", label: "My own review activity" }],
+      documents: [],
+    });
+    render(<CourseTrackerPage />);
+    expect(screen.getByText(/1 tracker activity cannot be uniquely attributed/)).toBeTruthy();
+    expect(useStore.getState().tracker[0].label).toBe("My own review activity");
+  });
+
+  it("moves legacy course rows under a unique course without resetting passes, timestamps or learner week", () => {
+    const date = "2026-04-14T08:00:00.000Z";
+    const item: TrackerItem = {
+      id: "nb2-old", path: "Term 2/NB Block 2/Week 3", label: "NB Lecture 01 Anatomy",
+      kind: "Lecture", templateKey: "nbblock2|lecture|1", activity: "lecture",
+      weekSource: "learner", passes: 3, ankiPasses: 2, attendance: "attended",
+      yield: "high", note: "Do not lose me", updated: date,
+      passEvents: [{ id: "p1", method: "study", at: date }],
+    };
+    const original = structuredClone(item);
+    useStore.setState({ tracker: [item], terms: [{ id: "term-2", name: "Term 2" }],
+      courses: [{ id: "bpm501", termId: "term-2", code: "BPM 501", name: "BPM II",
+        files: 0, modules: [{ id: "nb2", name: "NB2" }] }] });
+    render(<CourseTrackerPage />);
+    fireEvent.change(screen.getByLabelText("Jump to a subsection"), { target: { value: "Term 2/NB Block 2" } });
+    fireEvent.click(screen.getByText("File activities under their courses"));
+    fireEvent.click(screen.getByRole("button", { name: "File 1 activities under BPM 501" }));
+    expect(useStore.getState().tracker[0]).toEqual({ ...original, path: "Term 2/BPM 501/NB2/Week 3" });
+    expect(localStorage.getItem("axom.tracker.scope.v1")).toBe("Term 2/BPM 501/NB2");
+    expect(screen.queryByRole("button", { name: "File 1 activities under BPM 501" })).toBeNull();
+  });
+
   it("uses utility/work-area regions that can stack without changing DOM order at mobile width", () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     render(<CourseTrackerPage />);
@@ -293,6 +423,31 @@ describe("Course Tracker file extraction", () => {
       fileName: "modules.md",
       extraction: { text: "Week 1:\n- Cardiac cycle", warnings: [] },
     });
+  });
+});
+
+
+describe("Course Library → Tracker navigation", () => {
+  it("chooses the correct course-scoped module rather than another course's identical module name", () => {
+    const scopes = [
+      "Term 2/NB Block 2", "T2/ELECTIVE/NB2", "T2/BPM 501/NB2",
+    ];
+    expect(trackerScopeForCourseBook({
+      term: "Term 2", courseCode: "BPM 501", module: "NB Block 2",
+    }, scopes)).toBe("T2/BPM 501/NB2");
+    expect(trackerScopeForCourseBook({
+      term: "Term 2", courseCode: "ELECTIVE", module: "NB2",
+    }, scopes)).toBe("T2/ELECTIVE/NB2");
+  });
+
+  it("preserves a unique legacy module path when no course-scoped path exists", () => {
+    const book = { term: "Term 2", courseCode: "BPM 501", module: "NB2" };
+    expect(trackerScopeForCourseBook(book, ["Term 2/NB Block 2"]))
+      .toBe("Term 2/NB Block 2");
+    // A different explicitly filed course makes the legacy path ambiguous.
+    expect(trackerScopeForCourseBook(book, [
+      "Term 2/NB Block 2", "Term 2/ELECTIVE/NB2",
+    ])).toBe("Term 2/BPM 501/NB2");
   });
 });
 

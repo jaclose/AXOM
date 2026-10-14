@@ -40,6 +40,18 @@ describe("saved course template versions", () => {
     expect(courseTemplateVersions(savedCourseTemplates(restored.documents))).toHaveLength(1);
   });
 
+
+  it("recognizes short and long forms as versions of one module instead of duplicate template families", async () => {
+    const old = await prepareCourseTemplate("NB Block 2 - Lectures:\n\nNB Lecture 01 Renal Anatomy [Lecture]", "nb-long.txt");
+    const revised = await prepareCourseTemplate("NB2 - Lectures:\n\nNB Lecture 01 Updated Renal Anatomy [Lecture]", "nb-short.txt");
+    const groups = courseTemplateVersions(savedCourseTemplates([old, revised]));
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toHaveLength(2);
+    const plan = planCourseTemplate(groups[0].map(({ section }) => section), { term: "Term 2" });
+    expect(plan.problems).toEqual([]);
+    expect(plan.items).toHaveLength(2);
+  });
+
   it("rejects partially readable templates instead of silently dropping activities", async () => {
     const damaged = "CPR 1 - Lectures:\nCPR 01 First [Lecture]\nLecture 02 Missing kind\nCPR 03 Last [Lecture]";
     await expect(prepareCourseTemplate(damaged, "partially-readable.txt")).rejects.toThrow(/Line 3 has no kind/);

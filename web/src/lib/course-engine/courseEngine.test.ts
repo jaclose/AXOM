@@ -377,6 +377,50 @@ describe("course templates", () => {
     ]);
   });
 
+
+  it("can file a course template into the real term/course/module/week hierarchy", () => {
+    const section = parseCourseTemplate("NB Block 2 - Lectures:\n\nNB Lecture 01 Anatomy [Lecture]");
+    const plan = planCourseTemplate([section], {
+      term: "Term 2", course: "BPM 501", moduleName: "NB2",
+    });
+    expect(plan).toMatchObject({ module: "NB Block 2", course: "BPM 501", term: "Term 2" });
+    expect(plan.items[0].path).toBe("Term 2/BPM 501/NB2/Unscheduled");
+
+    const old = [{ id: "progress-preserved", path: "Term 2/NB2/Week 9",
+      label: "NB Lecture 01 Anatomy", templateKey: "nb2|lecture|1",
+      weekSource: "learner" as const }];
+    expect(reconcileCourseTemplate(plan, old)).toEqual({
+      create: [], unchanged: 0,
+      update: [{ id: "progress-preserved", path: "Term 2/BPM 501/NB2/Week 9",
+        label: "NB Lecture 01 Anatomy", weekSource: "learner" }],
+    });
+  });
+
+  it("never unfiles a course-associated row if the importer does not supply a course", () => {
+    const section = parseCourseTemplate("NB Block 2 - Lectures:\n\nNB Lecture 01 Anatomy [Lecture]");
+    const plan = planCourseTemplate([section], { term: "Term 2" });
+    const current = [{ id: "course-filed", path: "Term 2/BPM 501/NB2/Week 2",
+      label: "NB Lecture 01 Anatomy", templateKey: "nb2|lecture|1",
+      weekSource: "learner" as const }];
+    expect(reconcileCourseTemplate(plan, current)).toEqual({ create: [], update: [], unchanged: 1 });
+  });
+
+  it("holds same-number activities from different courses for review unless course is selected", () => {
+    const section = parseCourseTemplate("DEMO - Lectures:\n\nLecture 01 Anatomical Overview [Lecture]");
+    const ambiguous = planCourseTemplate([section], { term: "Term 1" });
+    const rows = [
+      { id: "course-a", path: "Term 1/BPM 500/DEMO/Unscheduled",
+        label: "Lecture 01 Anatomical Overview", templateKey: "demo|lecture|1" },
+      { id: "course-b", path: "Term 1/ELECTIVE/DEMO/Unscheduled",
+        label: "Lecture 01 Anatomical Overview", templateKey: "demo|lecture|1" },
+    ];
+    const undecided = reconcileCourseTemplate(ambiguous, rows);
+    expect(undecided.create).toEqual([]);
+    expect(undecided.review?.[0].candidateIds).toEqual(["course-a", "course-b"]);
+    const selected = planCourseTemplate([section], { term: "Term 1", course: "BPM 500" });
+    expect(reconcileCourseTemplate(selected, rows)).toEqual({ create: [], update: [], unchanged: 1 });
+  });
+
   it("maps template kinds onto tracker groupings every build understands", () => {
     expect(TRACKER_KIND_FOR_ACTIVITY["small-group"]).toBe("Requirement");
     expect(TRACKER_KIND_FOR_ACTIVITY.esoft).toBe("Assessment");
@@ -436,6 +480,18 @@ describe("one scope for questions and tracker rows", () => {
     });
     // A module-wide scope counts every week.
     expect(scopeProgress(questions, { module: "FTM 1" }).total).toBe(5);
+  });
+
+
+  it("honors explicit course ownership when counting attempts for the same module and week", () => {
+    const questions = [
+      question({ module: "FTM 1", week: 2, courseId: "course-a" }),
+      question({ module: "FTM 1", week: 2, courseId: "course-b" }),
+      question({ module: "FTM 1", week: 2 }),
+    ];
+    expect(scopeProgress(questions, { module: "FTM 1", week: 2 }).total).toBe(3);
+    expect(scopeProgress(questions, { module: "FTM 1", week: 2, courseId: "course-a" }).total).toBe(1);
+    expect(scopeProgress(questions, { module: "FTM 1", week: 2, courseId: "course-b" }).total).toBe(1);
   });
 
   it("groups a bank by module then week, with unassigned last", () => {

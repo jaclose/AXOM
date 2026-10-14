@@ -5,6 +5,7 @@ import {
   Plus, Trash2, ChevronRight, ChevronDown, ListPlus, RefreshCw, BookOpen, HelpCircle, Eye, Upload, Pencil, Brain, ExternalLink, Copy, X, Star,
 } from "lucide-react";
 import { useStore } from "../lib/store";
+import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "../lib/localVault";
 import { GlassCard, GButton, GhostButton, PanelHeader, Tag, EmptyState } from "../components/ui/primitives";
 import { Modal, Field, SelectField, TextAreaField } from "../components/ui/Modal";
 import {
@@ -39,11 +40,13 @@ import type { CourseBook } from "../lib/bookshelf/courseBooks";
 import { CourseTemplateLoader } from "../components/tracker/CourseTemplateLoader";
 import { SGU_CURRICULUM } from "../lib/curricula";
 import { buildCurriculumCoverage, type CurriculumCoverage } from "../lib/course-engine/curriculumCoverage";
+import { buildAcademicTemplateCatalog } from "../lib/course-engine/academicCatalog";
 import { canonicalModuleKey } from "../lib/course-engine/vocabulary";
 import { launchCourseQuiz } from "../lib/course-engine/quizLaunch";
+import { legacyCourseFilingProposals, moveTrackerCourseFiling, type CourseFilingProposal } from "../lib/course-engine/courseFiling";
 import { buildQuestionBankBooks, COLLECTION_STATUS_LABEL } from "../lib/bookshelf/questionBankBooks";
 import { WeekOverview } from "../components/tracker/WeekOverview";
-import { activePrimaryPaths, activePrimaryScopes, isPrimaryPath, itemsInPrimary, setPrimaryUntil, togglePrimaryScope, type PrimaryTrackerScope } from "../lib/trackerFocus";
+import { activePrimaryPaths, activePrimaryScopes, isPrimaryPath, itemsInPrimary, renamePrimaryScopes, setPrimaryUntil, togglePrimaryScope, type PrimaryTrackerScope } from "../lib/trackerFocus";
 
 const KINDS: TrackerKind[] = ["Lecture", "DLA", "PQ", "Lab", "Reading", "Requirement", "Milestone", "Evidence", "Question Block", "Assessment", "Review Loop"];
 const TABS = ["All", "Lecture", "DLA", "PQ", "Blueprint", "Extra"] as const;
@@ -120,6 +123,7 @@ export function CourseTrackerPage() {
   const [moduleOpen, setModuleOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [courseFilingBusy, setCourseFilingBusy] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(() => typeof window !== "undefined" && new URL(window.location.href).searchParams.has("course-library"));
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -174,6 +178,7 @@ export function CourseTrackerPage() {
       ? { title: "Removed from primary focus", body: path, tone: "info", duration: 2600 }
       : { title: "Primary focus set", body: `${path} now leads suggestions here, in Up next and on the Dashboard.`, tone: "success" });
   }
+  const courseFiling = useMemo(() => legacyCourseFilingProposals(s.tracker, s.terms, s.courses), [s.tracker, s.terms, s.courses]);
   const coverage = useMemo(() => buildCurriculumCoverage(SGU_CURRICULUM, s.documents, s.tracker, {
     terms: s.terms, courses: s.courses, sets: s.questionSets ?? [], questions: s.questions ?? [],
   }), [s.documents, s.tracker, s.terms, s.courses, s.questionSets, s.questions]);
@@ -233,6 +238,39 @@ export function CourseTrackerPage() {
     setDeleteScope(scope);
   }
 
+  async function fileLegacyModule(proposal: CourseFilingProposal) {
+    if (courseFilingBusy) return;
+    setCourseFilingBusy(true);
+    const checkpoint = getVaultWriteCheckpoint();
+    let changed = false;
+    try {
+      // Reconcile against the live workspace, not an older React render.
+      const state = useStore.getState();
+      const current = legacyCourseFilingProposals(state.tracker, state.terms, state.courses)
+        .find((entry) => entry.from === proposal.from && entry.to === proposal.to && !entry.blocked);
+      if (!current) throw new Error("Course assignments have changed. Review the refreshed proposal.");
+      useStore.setState((live) => ({
+        tracker: moveTrackerCourseFiling(live.tracker, current),
+        profile: { ...live.profile, primaryTrackerScopes: renamePrimaryScopes(live.profile.primaryTrackerScopes, current.from, current.to) },
+      }));
+      changed = true;
+      if (scope === current.from || scope.startsWith(current.from + "/")) {
+        setScope(current.to + scope.slice(current.from.length));
+      }
+      await flushLocalVaultWrites();
+      assertVaultWritesSince(checkpoint);
+      pushToast({ title: "Course filing saved locally", body: `${current.itemCount} existing row${current.itemCount === 1 ? "" : "s"} moved. IDs, passes, notes and last study timestamps were preserved.`, tone: "success" });
+    } catch (error) {
+      pushToast({
+        title: changed ? "Course filing not confirmed saved" : "Course filing requires review",
+        body: error instanceof Error ? error.message : "Course assignment could not be reconciled.",
+        tone: "warn",
+      });
+    } finally {
+      setCourseFilingBusy(false);
+    }
+  }
+
   if (templateOpen) return <CourseTemplateLoader embedded templateIds={templateBook?.templateIds}
     onApplied={() => { setTemplateOpen(false); setLibraryOpen(false); }}
     defaultTermId={s.terms.find(term => term.name === templateBook?.term)?.id}
@@ -241,7 +279,7 @@ export function CourseTrackerPage() {
   if (libraryOpen) return <CourseLibrary onClose={() => setLibraryOpen(false)}
     onTemplate={(book) => { setTemplateBook(book); setLibraryOpen(false); setTemplateOpen(true); }}
     onCreate={() => { setLibraryOpen(false); setModuleOpen(true); }}
-    onOpen={(book) => { setScope(`${book.term}/${book.module}`); setLibraryOpen(false); }} />;
+    onOpen={(book) => { setScope(trackerScopeForCourseBook(book, scopeOptions)); setLibraryOpen(false); }} />;
 
   return (
     <div className="tracker-page-shell">
@@ -281,11 +319,12 @@ export function CourseTrackerPage() {
                 <BookOpen size={ICON_SIZE.body} /> Add course or module
               </GButton>
               <GButton size="sm" onClick={() => setScheduleOpen(true)}><Upload size={ICON_SIZE.body}/> Import schedule</GButton>
+              <GButton size="sm" onClick={() => document.getElementById("tracker-curriculum-coverage")?.scrollIntoView({ behavior: "smooth", block: "start" })}>View curriculum coverage</GButton>
             </div>
           </GlassCard>
 
           <WeekOverview />
-          <CurriculumCoverageCard coverage={coverage} />
+          {courseFiling.length > 0 && <CourseFilingCard proposals={courseFiling} busy={courseFilingBusy} onFile={(proposal) => { void fileLegacyModule(proposal); }} />}
 
           <GlassCard pad className="tracker-suggestions-card" data-module-tour="tracker-suggestions">
             <PanelHeader title="Suggested next moves" sub={primaries.length ? "Your primary focus is weighted first, then progress, yield, timing and workflow" : "Stable guidance based on progress, yield, timing, and your study workflow"}
@@ -355,6 +394,7 @@ export function CourseTrackerPage() {
           </div>
           </GlassCard>
 
+          <div id="tracker-curriculum-coverage" className="tracker-curriculum-anchor"><CurriculumCoverageCard coverage={coverage} /></div>
           {!inBlueprintScope && <TrackerQuestionLinks scope={scope} />}
 
           <GlassCard pad data-tour="tracker-help" data-module-tour="tracker-passes">
@@ -417,6 +457,59 @@ export function CourseTrackerPage() {
   );
 }
 
+function CourseFilingCard({ proposals, busy, onFile }: { proposals: readonly CourseFilingProposal[]; busy: boolean; onFile: (proposal: CourseFilingProposal) => void }) {
+  const ready = proposals.filter((proposal) => !proposal.blocked).length;
+  return (
+    <GlassCard pad className="tracker-course-filing">
+      <details>
+        <summary><b>File activities under their courses</b><span className="sub">{ready} safe to move · {proposals.length - ready} require review</span></summary>
+        <p className="sub">Older templates may have been installed as Term / Module / Week instead of Term / Course / Module / Week. Filing is optional and keeps every activity ID, study pass, attendance record and last-study timestamp unchanged.</p>
+        <div className="tracker-filing-list">
+          {proposals.map((proposal) => (
+            <div key={proposal.from} className="tracker-filing-row">
+              <div>
+                <b>{proposal.from}</b>
+                <small>{proposal.itemCount} existing activit{proposal.itemCount === 1 ? "y" : "ies"} · {proposal.blocked === "ambiguous-course"
+                  ? "More than one matching course — choose one manually"
+                  : proposal.blocked === "destination-has-items"
+                    ? "Destination already has activities — reconcile duplicates first"
+                    : `→ ${proposal.to}`}</small>
+              </div>
+              <GButton size="tiny" disabled={busy || Boolean(proposal.blocked)} onClick={() => onFile(proposal)}
+                aria-label={`File ${proposal.itemCount} activities under ${proposal.courseCode || "a course"}`}>File under course</GButton>
+            </div>
+          ))}
+        </div>
+      </details>
+    </GlassCard>
+  );
+}
+
+/** A deliberately local-only export; does not publish or authorize protected sources. */
+function downloadAcademicCatalogMetadata(coverage: CurriculumCoverage) {
+  let url: string | undefined;
+  try {
+    const manifest = buildAcademicTemplateCatalog(SGU_CURRICULUM, coverage);
+    const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: "application/json" });
+    url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "axom-sgu-course-metadata-v1.json";
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    pushToast({ title: "Metadata-only export requested", body: "This excludes source files, school question content, answers and your study history. Sharing still requires license and access review.", tone: "info" });
+  } catch (error) {
+    pushToast({ title: "Metadata export unavailable", body: error instanceof Error ? error.message : "The browser could not prepare a local JSON file.", tone: "warn" });
+  } finally {
+    if (url) {
+      const previous = url;
+      window.setTimeout(() => URL.revokeObjectURL(previous), 1000);
+    }
+  }
+}
+
 function CurriculumCoverageCard({ coverage }: { coverage: CurriculumCoverage }) {
   return (
     <GlassCard pad className="tracker-curriculum-coverage">
@@ -426,9 +519,13 @@ function CurriculumCoverageCard({ coverage }: { coverage: CurriculumCoverage }) 
           <span className="sub">{coverage.modulesWithTemplates}/{coverage.totalModules} modules have saved templates · {coverage.installedTemplateItems}/{coverage.sourceItems} saved-template activities represented in tracker</span>
         </summary>
         <p className="sub">Coverage counts only templates saved in this workspace and tracker rows actually present. The SGU course outline names modules, not a complete official activity schedule. An unavailable template means expected activities are <b>unknown</b>, not zero.</p>
+        <div className="tracker-catalog-action">
+          <GButton size="tiny" onClick={() => downloadAcademicCatalogMetadata(coverage)}>Export metadata-only catalog</GButton>
+          <span className="sub">Local JSON only. Excludes uploaded source documents, questions, answers and personal progress; does not authorize redistribution.</span>
+        </div>
         {coverage.terms.map((term) => (
           <details key={term.term} className="tracker-coverage-term">
-            <summary><b>{term.term} coverage</b><span className="sub">{term.modulesWithTemplates}/{term.modules.length} modules with templates · {term.installedTemplateItems}/{term.sourceItems} known source rows represented · {term.questionCollections} local QBank collections · {term.readyQuestions} ready questions</span></summary>
+            <summary><b>{term.term} coverage</b><span className="sub">{term.modulesWithTemplates}/{term.modules.length} modules with templates · {term.installedTemplateItems}/{term.sourceItems} known source rows represented · {term.questionCollections} local QBank collections · {term.readyQuestions} ready questions{term.unresolvedQuestionWeeks ? ` · ${term.unresolvedQuestionWeeks} questions without a verified week association` : ""}</span></summary>
             <div className="tracker-coverage-scroll">
               <table className="tracker-coverage-table">
                 <thead><tr><th scope="col">Course / module</th><th scope="col">Saved template rows</th><th scope="col">In tracker</th><th scope="col">Week evidence</th><th scope="col">Question Bank on device</th><th scope="col">Gaps</th></tr></thead>
@@ -438,7 +535,7 @@ function CurriculumCoverageCard({ coverage }: { coverage: CurriculumCoverage }) 
                     <td>{module.templateFiles ? module.availableTemplateItems : "No source template"}</td>
                     <td>{module.installedRows}{module.templateFiles ? ` (${module.installedTemplateItems} source-matched)` : ""}</td>
                     <td>{module.statedWeeks.length} stated · {module.inferredWeeks.length} inferred · {module.unscheduledItems} unscheduled</td>
-                    <td>{module.questionCollections} collections · {module.readyQuestions}/{module.storedQuestions} locally ready · {module.reviewQuestions} review{module.missingQuestionReferences ? ` · ${module.missingQuestionReferences} referenced questions not on device` : ""}{module.indexedQuestionWeeks.length ? ` · Source-indexed weeks ${module.indexedQuestionWeeks.join(", ")} (not official dates)` : ""}</td>
+                    <td>{module.questionCollections} collections · {module.readyQuestions}/{module.storedQuestions} locally ready · {module.reviewQuestions} review{module.missingQuestionReferences ? ` · ${module.missingQuestionReferences} referenced questions not on device` : ""}{module.indexedQuestionWeeks.length ? ` · Source-indexed weeks ${module.indexedQuestionWeeks.join(", ")} (not official dates)` : ""}{module.unresolvedQuestionWeeks ? ` · ${module.unresolvedQuestionWeeks} question${module.unresolvedQuestionWeeks === 1 ? "" : "s"} without a unique week` : ""}</td>
                     <td>{module.mapping === "ambiguous" ? "Mapping review" : !module.templateFiles ? "Expected activities unknown" : module.notInstalled ? `${module.notInstalled} saved-template rows not represented` : module.sourceProblems.length ? "Source review" : module.duplicateRows ? `${module.duplicateRows} duplicates` : "Saved template represented; official completeness unverified"}</td>
                   </tr>
                 ))}</tbody>
@@ -446,6 +543,7 @@ function CurriculumCoverageCard({ coverage }: { coverage: CurriculumCoverage }) 
             </div>
           </details>
         ))}
+        {coverage.unmappedTrackerRows > 0 && <p className="sub" role="note">{coverage.unmappedTrackerRows} tracker activit{coverage.unmappedTrackerRows === 1 ? "y" : "ies"} cannot be uniquely attributed to this SGU course outline. These may be personal tasks or ambiguous legacy paths; they remain preserved in the Course Tracker for review.</p>}
         {coverage.unmappedTemplateModules.length > 0 && <p className="sub">Templates without a unique outline match: {coverage.unmappedTemplateModules.join(", ")}. Confirm course ownership before installing.</p>}
         <p className="sub">Week numbers inferred from blank-line groups or even spacing require schedule verification; they are not confirmed school dates. Question collections and ready counts are calculated from locally stored records, not remote uploads, original-file availability, or official activity completeness.</p>
         {(coverage.unassignedQuestionCollections > 0 || coverage.unassignedQuestions > 0) && <p className="sub" role="note">{coverage.unassignedQuestionCollections} collections and {coverage.unassignedQuestions} question records cannot be uniquely assigned to this SGU term/module outline. They remain in the Question Bank for review, not silently attached to a course.</p>}
@@ -468,11 +566,21 @@ function TrackerQuestionLinks({ scope }: { scope: string }) {
   }), [s.terms, s.courses, s.questionSets, s.questions]);
   const parts = scope.split("/").filter(Boolean);
   const weekIndex = parts.findIndex((part) => /^week\s*\d+$/i.test(part));
-  const module = weekIndex > 0 ? parts[weekIndex - 1] : parts.length >= 2 ? parts.at(-1) : undefined;
+  const hasUnscheduledSuffix = parts.at(-1)?.toLowerCase() === "unscheduled";
+  const moduleIndex = weekIndex > 0 ? weekIndex - 1 : hasUnscheduledSuffix ? parts.length - 2 : parts.length - 1;
+  const module = parts[moduleIndex];
+  const courseSegment = moduleIndex > 1 ? parts[1] : undefined;
   const week = weekIndex > 0 ? Number(parts[weekIndex].match(/\d+/)?.[0]) : undefined;
   const term = parts.length >= 2 ? parts[0] : undefined;
-  if (!term || !module || module.toLowerCase() === "unscheduled") return null;
-  const matches = books.filter((book) => canonicalModuleKey(book.module) === canonicalModuleKey(module) && normalizedTerm(book.term) === normalizedTerm(term));
+  if (!term || !module) return null;
+  // An explicit course breadcrumb beats ambiguous term+module similarity.
+  // A bank without this course identity cannot be assumed to belong here.
+  const matches = books.filter((book) =>
+    canonicalModuleKey(book.module) === canonicalModuleKey(module)
+    && normalizedTerm(book.term) === normalizedTerm(term)
+    && (!courseSegment || (book.courseCode
+      && book.courseCode.replace(/[^a-z0-9]+/gi, "").toLowerCase()
+        === courseSegment.replace(/[^a-z0-9]+/gi, "").toLowerCase())));
   const matched = matches.length === 1 ? matches[0] : undefined;
   const collections = matched?.weeks.filter((entry) => week === undefined || entry.week === week)
     .flatMap((entry) => entry.collections.map((collection) => ({ collection, week: entry.week }))) ?? [];
@@ -1274,6 +1382,37 @@ function saveTrackerScope(scope: string) {
     if (scope) localStorage.setItem(TRACKER_SCOPE_KEY, scope);
     else localStorage.removeItem(TRACKER_SCOPE_KEY);
   } catch { /* device convenience only */ }
+}
+
+/** Choose the actual Course Tracker tree path, never a similarly named module in another course. */
+export function trackerScopeForCourseBook(
+  book: Pick<CourseBook, "term" | "module" | "courseCode">,
+  scopeOptions: readonly string[],
+): string {
+  const module = canonicalModuleKey(book.module);
+  const scopes = scopeOptions.filter((scope) => {
+    const segments = scope.split("/").filter(Boolean);
+    return segments.length >= 2
+      && normalizedTerm(segments[0]) === normalizedTerm(book.term)
+      && canonicalModuleKey(segments.at(-1) ?? "") === module;
+  });
+  if (book.courseCode) {
+    const exact = scopes.find((scope) => {
+      const segments = scope.split("/").filter(Boolean);
+      return segments.length === 3
+        && canonicalModuleKey(segments[1]) === canonicalModuleKey(book.courseCode!);
+    });
+    if (exact) return exact;
+    // A legacy Term/Module row can be chosen only when no other course
+    // already explicitly claims that module in the current tree.
+    if (!scopes.some((scope) => scope.split("/").filter(Boolean).length === 3)) {
+      const legacy = scopes.find((scope) => scope.split("/").filter(Boolean).length === 2);
+      if (legacy) return legacy;
+    }
+    return `${book.term}/${book.courseCode}/${book.module}`;
+  }
+  return scopes.find((scope) => scope.split("/").filter(Boolean).length === 2)
+    ?? `${book.term}/${book.module}`;
 }
 
 /** Direct and deeper subsections under a scope, for the subsection picker. */

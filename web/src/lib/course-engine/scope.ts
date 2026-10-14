@@ -91,7 +91,9 @@ export function scopeProgress(
     const own = questionScope(question, setsById);
     // A scope without a week counts every week of the module.
     const matches = scope.week ? scopeKey(own) === key : scopeKey({ module: own.module }) === key;
-    if (!matches) continue;
+    // An explicitly course-owned query must not absorb answers from another
+    // course or from records with unresolved course ownership.
+    if (!matches || (scope.courseId && own.courseId !== scope.courseId)) continue;
     progress.total += 1;
     progress.questionIds.push(question.id);
     const first = question.attempts[0];

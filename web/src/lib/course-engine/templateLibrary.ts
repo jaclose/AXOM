@@ -1,6 +1,6 @@
 import { sha256Hex } from "../checksum";
 import type { SourceDocument } from "../library";
-import { moduleKey } from "./vocabulary";
+import { canonicalModuleKey } from "./vocabulary";
 import { parseCourseTemplate, type CourseTemplateSection } from "./templateParse";
 
 export const COURSE_TEMPLATE_FORMAT = "axom-course-template";
@@ -37,7 +37,7 @@ export function savedCourseTemplates(documents: readonly SourceDocument[]): Save
 }
 
 export function courseTemplateFamily(section: CourseTemplateSection): string {
-  return `${section.term ?? ""}|${moduleKey(section.module)}|${section.title.trim().toLocaleLowerCase("en")}${section.context ? `|${section.context.academicTerm ?? ""}|${section.context.cohort ?? ""}` : ""}`;
+  return `${section.term ?? ""}|${canonicalModuleKey(section.module)}|${section.title.trim().toLocaleLowerCase("en")}${section.context ? `|${section.context.academicTerm ?? ""}|${section.context.cohort ?? ""}` : ""}`;
 }
 
 export function courseTemplateVersions(templates: readonly SavedCourseTemplate[]): SavedCourseTemplate[][] {
