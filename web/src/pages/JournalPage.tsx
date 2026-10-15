@@ -10,6 +10,8 @@ import {
 } from "lucide-react";
 import { useStore } from "../lib/store";
 import { useUi } from "../lib/uiStore";
+import { useAccount } from "../lib/account/accountStore";
+import * as localVault from "../lib/localVault";
 import { GButton, GhostButton, PanelHeader, Tag } from "../components/ui/primitives";
 import { Field, Modal, SelectField } from "../components/ui/Modal";
 import { dayKey, prettyDate } from "../lib/scoring";
@@ -46,10 +48,15 @@ import {
 
 type JournalProfile = Profile & { journalNotebook?: JournalNotebookPreferences };
 type TurnDirection = "previous" | "next" | null;
+export type JournalTransitionGuard = (transition: () => void) => Promise<boolean>;
+export type RegisterJournalTransitionGuard = (guard: JournalTransitionGuard) => () => void;
+type JournalPersistResult = "saved" | "no-change" | "superseded" | "aborted" | "failed";
 
 const outcomeTone = { won: "green", partial: "orange", missed: "red" } as const;
 
-export function JournalPage() {
+export function JournalPage({ registerAppTransitionGuard }: {
+  registerAppTransitionGuard?: RegisterJournalTransitionGuard;
+} = {}) {
   const s = useStore();
   const journalDay = useUi((state) => state.journalDay);
   const clearJournalDay = useUi((state) => state.clearJournalDay);
@@ -59,6 +66,8 @@ export function JournalPage() {
   const [remediationMode, setRemediationMode] = useState(false);
   const [turnDirection, setTurnDirection] = useState<TurnDirection>(null);
   const [customizing, setCustomizing] = useState(false);
+  const transitionGuardRef = useRef<JournalTransitionGuard | null>(null);
+  const requestedJournalDayRef = useRef<string | null>(null);
   const today = s.activeDayKey || dayKey();
   const preferences = normalizeJournalNotebookPreferences((s.profile as JournalProfile).journalNotebook);
   const missed = missedStandupDays({ journal: s.journal, logs: s.logs, dayPlans: s.dayPlans });
@@ -69,13 +78,35 @@ export function JournalPage() {
 
   useEffect(() => { announceJournalEnergyOnce(); }, []);
 
+  const registerTransitionGuard = useCallback<RegisterJournalTransitionGuard>((guard) => {
+    transitionGuardRef.current = guard;
+    const unregisterAppGuard = registerAppTransitionGuard?.(guard);
+    return () => {
+      if (transitionGuardRef.current === guard) transitionGuardRef.current = null;
+      unregisterAppGuard?.();
+    };
+  }, [registerAppTransitionGuard]);
+
+  const requestTransition = useCallback(async (transition: () => void) => {
+    const guard = transitionGuardRef.current;
+    if (guard) return guard(transition);
+    transition();
+    return true;
+  }, []);
+
   useEffect(() => {
-    if (!journalDay) return;
-    setSelectedDay(journalDay);
-    setOpen(true);
-    setRemediationMode(true);
-    clearJournalDay();
-  }, [journalDay, clearJournalDay]);
+    if (!journalDay || requestedJournalDayRef.current === journalDay) return;
+    const requestedDay = journalDay;
+    requestedJournalDayRef.current = requestedDay;
+    void requestTransition(() => {
+      setSelectedDay(requestedDay);
+      setOpen(true);
+      setRemediationMode(true);
+    }).then((completed) => {
+      requestedJournalDayRef.current = null;
+      if (completed && useUi.getState().journalDay === requestedDay) clearJournalDay();
+    });
+  }, [journalDay, clearJournalDay, requestTransition]);
 
   function openDay(key: string, remediation = false) {
     setSelectedDay(key);
@@ -106,7 +137,7 @@ export function JournalPage() {
         </div>
         <div className="journal-header-actions">
           <GButton size="sm" onClick={() => setCustomizing(true)}><Palette size={ICON_SIZE.body} /> Customize</GButton>
-          {open && <GButton size="sm" onClick={closeNotebook}><BookOpen size={ICON_SIZE.body} /> Library</GButton>}
+          {open && <GButton size="sm" onClick={() => { void requestTransition(closeNotebook); }}><BookOpen size={ICON_SIZE.body} /> Library</GButton>}
         </div>
       </header>
 
@@ -128,6 +159,7 @@ export function JournalPage() {
           remediationMode={remediationMode}
           onNavigate={navigate}
           onClose={closeNotebook}
+          registerTransitionGuard={registerTransitionGuard}
         />
       )}
 
@@ -177,12 +209,12 @@ function NotebookLibrary({
           <GButton variant="primary" onClick={() => onOpenDay(today)}>
             <BookOpen size={ICON_SIZE.emphasis} /> Open today’s page
           </GButton>
-          <span>{entries.length ? `${entries.length} local page${entries.length === 1 ? "" : "s"}` : "Your first page is ready"}</span>
+          <span>{entries.length ? `${entries.length} saved page${entries.length === 1 ? "" : "s"}` : "Your first page is ready"}</span>
         </div>
       </section>
 
       <aside className="journal-library-shelf" aria-label="Journal pages">
-        <PanelHeader title="Recent pages" sub="Stored locally in your AXOM workspace" />
+        <PanelHeader title="Recent pages" sub="Saved locally first in your AXOM workspace" />
         {entries.length === 0 ? (
           <div className="journal-calm-empty">
             <BookOpen size={ICON_SIZE.display} />
@@ -246,7 +278,7 @@ interface JournalDraft {
 }
 
 function JournalWritingPage({
-  day, today, preferences, direction, remediationMode, onNavigate, onClose,
+  day, today, preferences, direction, remediationMode, onNavigate, onClose, registerTransitionGuard,
 }: {
   day: string;
   today: string;
@@ -255,6 +287,7 @@ function JournalWritingPage({
   remediationMode: boolean;
   onNavigate: (direction: Exclude<TurnDirection, null>) => void;
   onClose: () => void;
+  registerTransitionGuard: RegisterJournalTransitionGuard;
 }) {
   const s = useStore();
   const entry = s.journal.find((item) => entryDayKey(item) === day) as NotebookJournalEntry | undefined;
@@ -262,13 +295,20 @@ function JournalWritingPage({
   const prompts = useMemo(() => reflectionPrompts(plan), [plan]);
   const reducedMotion = useReducedMotion();
   const [draft, setDraftState] = useState<JournalDraft>(() => draftFromEntry(entry, plan));
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">(entry ? "saved" : "idle");
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "failed">(entry ? "saved" : "idle");
+  const [saveError, setSaveError] = useState("");
   const [attachmentError, setAttachmentError] = useState("");
   const [addingImage, setAddingImage] = useState(false);
   const [editingGlance, setEditingGlance] = useState<JournalGlanceSectionKey | null>(null);
   const entryIdRef = useRef(entry?.id ?? "");
+  const entryDateRef = useRef(entry?.date ?? `${day}T12:00:00`);
   const draftRef = useRef(draft);
   const dirtyRef = useRef(false);
+  const draftVersionRef = useRef(0);
+  const mountedRef = useRef(true);
+  const transitionPendingRef = useRef(false);
+  const lifecyclePersistPendingRef = useRef(false);
+  const persistQueueRef = useRef<Promise<void>>(Promise.resolve());
   const saveTimerRef = useRef<number | null>(null);
   const pageHeadingRef = useRef<HTMLHeadingElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -304,16 +344,18 @@ function JournalWritingPage({
   const liveGlanceRef = useRef(liveGlanceText);
   liveGlanceRef.current = liveGlanceText;
 
-  const persist = useCallback((status?: "draft" | "complete") => {
+  const persistNow = useCallback(async (status?: "draft" | "complete"): Promise<JournalPersistResult> => {
+    if (!mountedRef.current) return "aborted";
     const current = draftRef.current;
-    if (!hasNotebookContent(current) && !entryIdRef.current) return;
+    if (!hasNotebookContent(current) && !entryIdRef.current) return "no-change";
+    const draftVersion = draftVersionRef.current;
     const timestamp = new Date().toISOString();
     // Stamp the entry's `date` with the local day key (noon), never a raw UTC
     // toISOString(): day-keyed lookups use `entry.date.slice(0,10)` against the
     // local day key, so a UTC prefix mismatches near midnight (entry appears on
     // the wrong day / not found). `updatedAt` keeps the precise instant.
     const payload: Omit<JournalEntry, "id"> & JournalNotebookEntryFields = {
-      date: entry?.date ?? `${day}T12:00:00`,
+      date: entryDateRef.current,
       today: current.today.trim(),
       tomorrow: current.tomorrow,
       blockers: current.blockers,
@@ -335,36 +377,143 @@ function JournalWritingPage({
       entryIdRef.current = id;
     }
     const store = useStore.getState();
-    if (store.journal.some((item) => item.id === id)) store.updateJournal(id, payload);
-    else store.addJournal({ ...payload, id });
-    dirtyRef.current = false;
-    setSaveState("saved");
-  }, [day, entry?.date]);
+    const checkpoint = localVault.getVaultWriteCheckpoint();
+    if (mountedRef.current) {
+      setSaveState("saving");
+      setSaveError("");
+    }
+    try {
+      if (store.journal.some((item) => item.id === id)) store.updateJournal(id, payload);
+      else store.addJournal({ ...payload, id });
+      await localVault.flushLocalVaultWrites();
+      localVault.assertVaultWrite(checkpoint + 1);
+      localVault.assertVaultWritesSince(checkpoint);
+      if (draftVersion === draftVersionRef.current) {
+        dirtyRef.current = false;
+        if (mountedRef.current) setSaveState("saved");
+        return "saved";
+      }
+      return "superseded";
+    } catch {
+      if (draftVersion === draftVersionRef.current) {
+        dirtyRef.current = true;
+        if (mountedRef.current) {
+          setSaveState("failed");
+          setSaveError("Your latest changes are still open, but AXOM could not confirm them in local storage. Export a portable backup, then retry Save.");
+        }
+        return "failed";
+      }
+      return "superseded";
+    }
+  }, []);
+
+  const persist = useCallback((status?: "draft" | "complete") => {
+    const queued = persistQueueRef.current.then(
+      () => persistNow(status),
+      () => persistNow(status),
+    );
+    persistQueueRef.current = queued.then(() => undefined, () => undefined);
+    return queued;
+  }, [persistNow]);
+
+  const cancelScheduledSave = useCallback(() => {
+    if (saveTimerRef.current === null) return;
+    window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = null;
+  }, []);
+
+  const requestDurableTransition = useCallback<JournalTransitionGuard>(async (transition) => {
+    if (transitionPendingRef.current) return false;
+    transitionPendingRef.current = true;
+    cancelScheduledSave();
+    try {
+      while (mountedRef.current) {
+        const result = await persist();
+        if (result === "superseded") continue;
+        if (result === "failed" || result === "aborted" || !mountedRef.current) return false;
+        transition();
+        return true;
+      }
+      return false;
+    } finally {
+      transitionPendingRef.current = false;
+    }
+  }, [cancelScheduledSave, persist]);
+
+  const persistBeforePageExit = useCallback(() => {
+    if (!dirtyRef.current || lifecyclePersistPendingRef.current) return;
+    cancelScheduledSave();
+    lifecyclePersistPendingRef.current = true;
+    void persistNow().finally(() => {
+      lifecyclePersistPendingRef.current = false;
+    });
+  }, [cancelScheduledSave, persistNow]);
 
   function setDraft(update: (current: JournalDraft) => JournalDraft) {
     setDraftState((current) => {
       const next = update(current);
       draftRef.current = next;
+      draftVersionRef.current += 1;
       dirtyRef.current = true;
       setSaveState("saving");
-      if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = window.setTimeout(() => persist(), 420);
+      setSaveError("");
+      cancelScheduledSave();
+      if (!transitionPendingRef.current) {
+        saveTimerRef.current = window.setTimeout(() => {
+          saveTimerRef.current = null;
+          void persist();
+        }, 420);
+      }
       return next;
     });
   }
 
   useEffect(() => {
+    mountedRef.current = true;
     pageHeadingRef.current?.focus({ preventScroll: true });
-    return () => {
-      if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
-      if (dirtyRef.current) persist();
+    const unregisterTransitionGuard = registerTransitionGuard(requestDurableTransition);
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!dirtyRef.current) return;
+      event.preventDefault();
+      event.returnValue = "";
     };
-  }, [persist]);
+    const persistOnPageHide = () => { persistBeforePageExit(); };
+    const persistWhenHidden = () => {
+      if (document.visibilityState === "hidden") persistBeforePageExit();
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    window.addEventListener("pagehide", persistOnPageHide);
+    document.addEventListener("visibilitychange", persistWhenHidden);
+    return () => {
+      window.removeEventListener("beforeunload", warnBeforeUnload);
+      window.removeEventListener("pagehide", persistOnPageHide);
+      document.removeEventListener("visibilitychange", persistWhenHidden);
+      cancelScheduledSave();
+      mountedRef.current = false;
+      unregisterTransitionGuard();
+    };
+  }, [cancelScheduledSave, persistBeforePageExit, registerTransitionGuard, requestDurableTransition]);
 
   function turnPage(nextDirection: Exclude<TurnDirection, null>) {
-    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
-    persist();
-    onNavigate(nextDirection);
+    void requestDurableTransition(() => onNavigate(nextDirection));
+  }
+
+  function completeToday() {
+    cancelScheduledSave();
+    const current = draftRef.current;
+    if (!hasNotebookContent(current) && !entryIdRef.current) {
+      setSaveState("idle");
+      setSaveError("Write one line before marking this page done. Nothing has been saved yet.");
+      return;
+    }
+    const next = { ...current, notebookStatus: "complete" as const };
+    draftRef.current = next;
+    draftVersionRef.current += 1;
+    dirtyRef.current = true;
+    setDraftState(next);
+    setSaveState("saving");
+    setSaveError("");
+    void persist("complete");
   }
 
   function handleBookKeyDown(event: KeyboardEvent<HTMLElement>) {
@@ -404,7 +553,7 @@ function JournalWritingPage({
   function exportPage() {
     const raw: NotebookJournalEntry = {
       id: entryIdRef.current || `journal-export-${day}`,
-      date: entry?.date ?? `${day}T12:00:00`,
+      date: entryDateRef.current,
       ...draftRef.current,
     };
     const body = buildJournalMarkdown(raw, prettyDate(`${day}T12:00:00`));
@@ -430,12 +579,14 @@ function JournalWritingPage({
         </GButton>
         <div className="journal-page-position" aria-live="polite">
           <b>{day === today ? "Today" : prettyDate(`${day}T12:00:00`)}</b>
-          <span>{saveState === "saving" ? "Saving locally…" : saveState === "saved" ? "Saved locally" : "Ready to write"}</span>
+          <span>{saveState === "saving" ? "Saving to this workspace…" : saveState === "saved" ? "Saved to this workspace" : saveState === "failed" ? "Not saved on this device" : "Ready to write"}</span>
         </div>
         <GButton size="sm" onClick={() => turnPage("next")} disabled={day >= today} aria-label="Next journal page">
           Next <ArrowRight size={ICON_SIZE.body} />
         </GButton>
       </div>
+
+      {saveError && <div className="journal-save-error" role="alert">{saveError}</div>}
 
       <div className="journal-open-book">
         <article className="journal-paper journal-writing-paper">
@@ -484,7 +635,7 @@ function JournalWritingPage({
           <label className="journal-writing-field journal-free-writing">
             <span>Free writing</span>
             <textarea value={draft.freeWriting} onChange={(event) => setDraft((current) => ({ ...current, freeWriting: event.target.value }))}
-              placeholder="Write without a template. This stays on your device." />
+              placeholder="Write without a template. Saved locally first in your workspace." />
           </label>
 
           {liveGlanceText && (
@@ -496,14 +647,15 @@ function JournalWritingPage({
 
           <section className="journal-attachments" aria-labelledby="journal-attachments-title">
             <div className="journal-section-head">
-              <div><h3 id="journal-attachments-title">Images</h3><span>Optional · stored in this local workspace</span></div>
+              <div><h3 id="journal-attachments-title">Images</h3><span>Optional · saved with this workspace</span></div>
               <GButton size="sm" onClick={() => fileInputRef.current?.click()} disabled={addingImage}>
                 <ImagePlus size={ICON_SIZE.body} /> {addingImage ? "Adding…" : "Add image"}
               </GButton>
               <input ref={fileInputRef} className="journal-file-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif"
                 onChange={addAttachment} aria-label="Choose a journal image" />
             </div>
-            <p className="journal-local-note">Images are saved in IndexedDB with this workspace. Nothing is uploaded. Maximum 3 MB each and 12 MB per page.</p>
+            <p className="journal-local-note">Images are saved locally first in IndexedDB and included in portable exports. If you link account protection, they may be included in owner-private backups when the workspace fits account limits; check Account for actual protection status. Maximum 3 MB each and 12 MB per page.</p>
+            <JournalAccountProtectionWarning />
             {attachmentError && <div className="journal-attachment-error" role="alert">{attachmentError}</div>}
             {draft.attachments.length > 0 && (
               <div className="journal-attachment-grid">
@@ -537,17 +689,14 @@ function JournalWritingPage({
               </select>
             </label>
             <GButton size="sm" onClick={exportPage}><Download size={ICON_SIZE.body} /> Export page</GButton>
-            {remediationMode && <GButton size="sm" onClick={onClose}><X size={ICON_SIZE.body} /> Cancel</GButton>}
-            <GButton size="sm" onClick={() => persist()}><Save size={ICON_SIZE.body} /> Save</GButton>
-            <GButton variant="primary" size="sm" onClick={() => {
-              setDraft((current) => ({ ...current, notebookStatus: "complete" }));
-              window.setTimeout(() => persist("complete"), 0);
-            }}><CheckCircle2 size={ICON_SIZE.body} /> Done for today</GButton>
+            {remediationMode && <GButton size="sm" onClick={() => { void requestDurableTransition(onClose); }}><X size={ICON_SIZE.body} /> Cancel</GButton>}
+            <GButton size="sm" onClick={() => { void persist(); }}><Save size={ICON_SIZE.body} /> Save</GButton>
+            <GButton variant="primary" size="sm" onClick={completeToday}><CheckCircle2 size={ICON_SIZE.body} /> Done for today</GButton>
           </div>
         </article>
 
         <aside className="journal-paper journal-glance-paper" aria-labelledby="journal-glance-title">
-          <div className="journal-paper-running-head"><span>Local summary</span><span>Optional</span></div>
+          <div className="journal-paper-running-head"><span>Workspace summary</span><span>Optional</span></div>
           <h2 id="journal-glance-title">Day at a glance</h2>
           <p>AXOM assembled this from today’s local records. Edit or ignore anything.</p>
           <div className="journal-glance-list">
@@ -588,6 +737,27 @@ function JournalWritingPage({
         </aside>
       </div>
     </section>
+  );
+}
+
+function JournalAccountProtectionWarning() {
+  const blockedBySize = useAccount((state) => (
+    state.link === "linked"
+    && state.protection === "blocked"
+    && state.syncFailure?.rejection === "too-large"
+  ));
+  if (!blockedBySize) return null;
+  return (
+    <div className="journal-account-warning" role="alert">
+      <div>
+        <b>Account protection blocked</b>
+        <span>The prepared workspace exceeds the 14 MB account limit. Your locally confirmed Journal copy remains on this device, but this version is not protected in your account. Remove large images or export a portable backup, then retry in Account.</span>
+      </div>
+      <span className="journal-account-warning-actions">
+        <GButton size="sm" onClick={() => useUi.getState().requestSettings("backup")}>Emergency recovery</GButton>
+        <GButton size="sm" onClick={() => useUi.getState().requestSettings("account")}>Open Account</GButton>
+      </span>
+    </div>
   );
 }
 

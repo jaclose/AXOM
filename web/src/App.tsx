@@ -45,7 +45,11 @@ import { ResourcesPage } from "./pages/ResourcesPage";
 import { StepPage } from "./pages/StepPage";
 import { ProductivityPage } from "./pages/ProductivityPage";
 import { TasksPage } from "./pages/TasksPage";
-import { JournalPage } from "./pages/JournalPage";
+import {
+  JournalPage,
+  type JournalTransitionGuard,
+  type RegisterJournalTransitionGuard,
+} from "./pages/JournalPage";
 
 const DevDesignPreview = import.meta.env.DEV
   ? lazy(() => import("./pages/DesignPreviewPage"))
@@ -131,6 +135,14 @@ const PAGES: Record<string, () => JSX.Element> = {
 export default function App({ startupStatus }: { startupStatus?: StorageMigrationResult }) {
   // route via the URL hash so deep-links + the standalone page work
   const [route, setRoute] = useState<string>(() => location.hash.replace("#", "") || "dashboard");
+  const routeRef = useRef(route);
+  routeRef.current = route;
+  const routeTransitionGuardRef = useRef<JournalTransitionGuard | null>(null);
+  const appTransitionPendingRef = useRef(false);
+  const routeRequestRef = useRef<{
+    target: string;
+    history: "push" | "replace" | "external";
+  } | null>(null);
   const [drawer, setDrawer] = useState(false);
   const [settings, setSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("profile");
@@ -162,6 +174,67 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
     restoreMenuFocusRef.current = true;
     setDrawer(false);
   }, [drawer]);
+
+  const registerRouteTransitionGuard = useCallback<RegisterJournalTransitionGuard>((guard) => {
+    routeTransitionGuardRef.current = guard;
+    return () => {
+      if (routeTransitionGuardRef.current === guard) routeTransitionGuardRef.current = null;
+    };
+  }, []);
+
+  const requestAppTransition = useCallback(async (transition: () => void): Promise<boolean> => {
+    if (appTransitionPendingRef.current) return false;
+    appTransitionPendingRef.current = true;
+    try {
+      const guard = routeTransitionGuardRef.current;
+      if (guard) return await guard(transition);
+      transition();
+      return true;
+    } catch {
+      return false;
+    } finally {
+      appTransitionPendingRef.current = false;
+    }
+  }, []);
+
+  const requestRoute = useCallback((requested: string, history: "push" | "replace" | "external") => {
+    const target = requested || "dashboard";
+    const pending = routeRequestRef.current;
+    if (pending) {
+      // Browser back/hash changes can fire both popstate and hashchange. One
+      // durable write owns that burst; the continuation uses the latest target.
+      pending.target = target;
+      pending.history = history;
+      return;
+    }
+    if (target === routeRef.current) return;
+
+    const request = { target, history };
+    routeRequestRef.current = request;
+    const commit = () => {
+      if (routeRequestRef.current !== request) return;
+      const destination = request.target;
+      routeRef.current = destination;
+      if (request.history !== "external") {
+        try {
+          if (request.history === "push") window.history.pushState(null, "", `#${destination}`);
+          else window.history.replaceState(null, "", `#${destination}`);
+        } catch {
+          location.hash = destination;
+        }
+      }
+      setRoute(destination);
+    };
+    void requestAppTransition(commit).then((completed) => {
+      if (routeRequestRef.current !== request) return;
+      routeRequestRef.current = null;
+      if (completed) return;
+      // External history changes update the URL before the app can ask the
+      // Journal to save. Put the URL back when durability cannot be confirmed.
+      try { window.history.replaceState(null, "", `#${routeRef.current}`); }
+      catch { location.hash = routeRef.current; }
+    });
+  }, [requestAppTransition]);
 
   // Restore focus only after the drawer has become inert. Scheduling from the
   // close handler can race React's render and leave focus stranded inside the
@@ -214,7 +287,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
     if (shouldOfferPromiseAfterGlobalTour(reason, profile)) {
       setPromisePromptOpen(true);
     }
-    location.hash = "dashboard";
+    requestRoute("dashboard", "replace");
   }
 
   function deferPromisePrompt() {
@@ -235,14 +308,14 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
   }
 
   useEffect(() => {
-    const onHash = () => setRoute(location.hash.replace("#", "") || "dashboard");
+    const onHash = () => requestRoute(location.hash.replace("#", "") || "dashboard", "external");
     window.addEventListener("hashchange", onHash);
     window.addEventListener("popstate", onHash);
     return () => {
       window.removeEventListener("hashchange", onHash);
       window.removeEventListener("popstate", onHash);
     };
-  }, []);
+  }, [requestRoute]);
 
   // Pages can request a Settings section; legacy names such as "ai" remain aliases.
   const settingsRequest = useUi((u) => u.settingsRequest);
@@ -256,10 +329,16 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
   const onboardingRequested = useUi((u) => u.onboardingRequested);
   useEffect(() => {
     if (!onboardingRequested) return;
-    setSettings(false);
-    setSetupMode("rerun");
-    useUi.getState().clearOnboardingRequest();
-  }, [onboardingRequested]);
+    void requestAppTransition(() => {
+      setSettings(false);
+      setSetupMode("rerun");
+      useUi.getState().clearOnboardingRequest();
+    }).then((completed) => {
+      // A failed durability gate leaves the Journal and Settings mounted. Clear
+      // the one-shot request so the user can retry Run setup again explicitly.
+      if (!completed) useUi.getState().clearOnboardingRequest();
+    });
+  }, [onboardingRequested, requestAppTransition]);
 
   // First visit to a tab this session: its sections settle in (lib/presentation).
   const pageEnter = usePageEntrance(route.split("?")[0]);
@@ -274,12 +353,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
   }
 
   function go(id: string) {
-    try {
-      window.history.pushState(null, "", `#${id}`);
-    } catch {
-      location.hash = id;
-    }
-    setRoute(id);
+    requestRoute(id, "push");
   }
 
   function completeOnboarding(destination: OnboardingDestination) {
@@ -301,8 +375,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
   // render cycle) and updates the URL with replaceState so it never creates
   // Back-button history traps or depends on the async hashchange event.
   function navigateTour(id: string) {
-    setRoute(id);
-    try { window.history.replaceState(null, "", `#${id}`); } catch { location.hash = id; }
+    requestRoute(id, "replace");
   }
 
   function refresh() {
@@ -381,7 +454,9 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
             <div className={route === "tracker" ? "page page-tracker" : "page"} data-enter={pageEnter ? "" : undefined}>
               <RouteErrorBoundary key={routeKey} onHome={() => go("dashboard")}>
                 <Suspense fallback={<div className="route-loading" role="status" aria-live="polite">Opening your workspace…</div>}>
-                  <Page />
+                  {routeKey === "journal"
+                    ? <JournalPage registerAppTransitionGuard={registerRouteTransitionGuard} />
+                    : <Page />}
                   {/* Commits with the page itself, so the film only hands over to real content. */}
                   <PresentationReady />
                 </Suspense>

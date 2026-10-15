@@ -695,7 +695,7 @@ export function protectionDetail(view: Pick<AccountState, "protection" | "syncFa
     : "";
   if (protection === "blocked") {
     if (syncFailure?.rejection === "too-large") {
-      return `The compressed account record exceeds its 15 MB limit, so this version is not uploading. ${saved} Emergency recovery can still export all of it.`;
+      return `The prepared account record exceeds its 14 MB limit, so this version is not uploading. ${saved} Remove or export large local items, then choose Protect now. Emergency recovery can still export all of it.`;
     }
     if (syncFailure?.rejection === "storage-limit") {
       return `Your account’s version history is full, so it refused this upload and AXOM stopped repeating it. ${saved}${next}`;

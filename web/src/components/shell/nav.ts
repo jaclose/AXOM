@@ -41,7 +41,7 @@ export const NAV = [
   { id: "courses", label: "Courses", subtitle: "Term-based course map with module-level folders", icon: BookOpen },
   { id: "tracker", label: "Course Tracker", subtitle: "Lecture, DLA, and PQ completion map", icon: BadgeCheck },
   { id: "questions", label: "Question Bank", subtitle: "Import Center, source library, question sets, blocks, and results", icon: HelpCircle },
-  { id: "shared-set", label: "Shared Question Set", subtitle: "Preview and safely copy a private shared set", icon: HelpCircle },
+  { id: "shared-set", label: "Shared Question Set", subtitle: "Preview and import an unlisted Question Set link", icon: HelpCircle },
   { id: "methods", label: "Study Methods", subtitle: "Evidence-informed technique templates with honest trade-offs", icon: BookOpenCheck },
   { id: "soundscapes", label: "Soundscapes", subtitle: "Synthesized study sound with live visuals and an honest listening log", icon: AudioWaveform },
   { id: "productivity", label: "Productivity", subtitle: "Study time, Anki cards, lecture blocks, day usefulness", icon: Calendar },

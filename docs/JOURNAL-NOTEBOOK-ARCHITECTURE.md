@@ -12,7 +12,7 @@ Foundation owns the dependable writing experience:
 - today and prior-day pages;
 - structured closeout fields plus unrestricted free writing;
 - a user-editable local Day at a Glance;
-- bounded local image attachments;
+- bounded local-first image attachments;
 - previous/next page navigation and lightweight CSS page transitions;
 - local export, autosave, keyboard navigation, and reduced motion.
 
@@ -56,15 +56,22 @@ by the existing backup compatibility policy.
 
 The writing page keeps an in-memory draft for responsive typing and writes it to
 the existing Zustand/IndexedDB workspace after a short idle interval. It also
-flushes before a page turn and when the page component unmounts. New entries are
-not created until there is meaningful text, an attachment, or an included
-summary. A stable generated entry ID prevents duplicate pages during closely
-spaced saves.
+gates every app-owned page turn, requested-day change, Library exit, and editor
+close on the same vault flush and exact-write assertion. If that durability
+check fails, the transition is canceled, the current in-memory draft remains
+open, and the page offers export and Save retry actions. New entries are not
+created until there is meaningful text, an attachment, or an included summary.
+A stable generated entry ID prevents duplicate pages during closely spaced
+saves.
 
 Page transitions animate the paper container, not the form state. Navigation
 flushes first, then mounts the destination day. Returning to a page reads the
 persisted entry, so animation cannot become a source of text loss. Reduced
 motion removes the open and page-turn animations entirely.
+
+Browser or tab teardown cannot truthfully await asynchronous IndexedDB work, so
+the Journal does not treat `beforeunload` as a durable-save guarantee. Its idle
+autosave and explicit in-app transition gates are the durability boundary.
 
 ## Day at a Glance
 
@@ -88,10 +95,28 @@ Foundation accepts JPEG, PNG, WebP, and GIF images. SVG and arbitrary files are
 rejected. Limits are 3 MB per image and 12 MB per journal page. Data URLs are
 stored with the journal entry in the existing IndexedDB-backed workspace.
 
-There is no upload, remote URL lookup, background sync, or cloud fallback.
+There is no separate attachment uploader or remote URL lookup. Images save to
+IndexedDB first and remain in the journal entry's workspace data. Portable
+exports include that workspace data. If the user explicitly links account
+protection, the normal owner-private workspace snapshot may also contain the
+inline data URL when the complete snapshot fits the account byte limit. Account
+status, not the presence of a local image, is the authority for whether that
+copy is protected remotely. The Journal does not estimate from attachment
+sizes: it mirrors the account engine's exact prepared-snapshot refusal and
+links to Account and Emergency recovery. A 12 MB local page can therefore
+remain readable and exportable while its current workspace is clearly marked
+not protected in the account.
+
 Users can remove an image from the page or export its original local bytes.
 Whole-page Markdown export lists attachment names and sizes but intentionally
-does not embed the base64 payload.
+does not embed the base64 payload. The 12 MB page ceiling is a local hydration
+and compatibility limit, not a promise that every locally valid page fits the
+smaller account snapshot ceiling. Existing over-limit pages must remain
+loadable and exportable rather than being truncated during hydration.
+
+The page says `Saved to this workspace` only after the IndexedDB-first vault
+confirms the write or its durable local fallback. A failed write keeps the open
+in-memory draft and shows an explicit export-and-retry warning.
 
 These limits protect storage; they are not an image-management system. A future
 spatial placement layer should reference the same attachment IDs and must not
@@ -120,6 +145,7 @@ cinematic layer must honor these invariants:
 
 1. Writing and navigation work without animation.
 2. Text is persisted before any cinematic transition.
-3. Attachments remain local unless the user explicitly exports them.
+3. Attachments save locally first; owner-private account copying remains
+   explicit, capacity-bounded, and accurately reported in Account status.
 4. No audio or haptic effect is enabled by default.
 5. The semantic notebook remains usable if advanced rendering fails.

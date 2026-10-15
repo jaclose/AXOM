@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeDailyRequirement } from "../../lib/dailySuccess";
 import type { QuestionRecord } from "../../lib/questions";
@@ -7,20 +7,26 @@ import { makeSeed } from "../../lib/seed";
 import { useStore } from "../../lib/store";
 import type { JournalEntry } from "../../lib/types";
 import { useUi } from "../../lib/uiStore";
+import * as localVault from "../../lib/localVault";
 import { CloseoutModal } from "./CloseoutModal";
 
 const DAY = "2035-04-13";
 
-beforeEach(() => {
+beforeEach(async () => {
+  localStorage.clear();
   setCloseoutState();
   useUi.setState({ journalDay: null });
   window.location.hash = "#dashboard";
+  await localVault.flushLocalVaultWrites();
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 describe("CloseoutModal daily loop", () => {
-  it("shows the canonical Day at a Glance, exact reflection prompts, and saves numeric energy", () => {
+  it("saves the closeout without creating a journal entry when opt-in stays unchecked", async () => {
     const onClose = vi.fn();
     render(<CloseoutModal onClose={onClose} />);
 
@@ -53,10 +59,11 @@ describe("CloseoutModal daily loop", () => {
     fireEvent.click(screen.getByText("Planning details"));
     fireEvent.click(screen.getByRole("button", { name: "Higher" }));
 
-    expect(screen.queryByRole("checkbox")).toBeNull();
+    const journalOption = screen.getByRole("checkbox", { name: /Create today’s journal page from this closeout/i }) as HTMLInputElement;
+    expect(journalOption.checked).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
 
-    expect(onClose).toHaveBeenCalledOnce();
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
     expect(useStore.getState().closeouts).toHaveLength(1);
     expect(useStore.getState().closeouts[0]).toMatchObject({
       dayKey: DAY,
@@ -69,21 +76,33 @@ describe("CloseoutModal daily loop", () => {
       energyVsMorning: "higher",
       tomorrowMode: "auto",
     });
-    // The closeout always becomes today's journal page.
-    expect(useStore.getState().journal).toHaveLength(1);
-    expect(useStore.getState().journal[0]).toMatchObject({
-      date: `${DAY}T20:30:00`,
-      today: "Finished the question block",
-      tomorrow: "Start cardiology",
-      blockers: "A late meeting",
-      energy: "High",
-      rating: "Daily closeout",
-      wins: ["Stayed focused"],
-      losses: ["Finish the summary"],
-    });
+    expect(useStore.getState().journal).toHaveLength(0);
   });
 
-  it("merges into an existing same-day entry without overwriting anything written there", () => {
+  it("leaves an existing journal entry unchanged when opt-in stays unchecked", async () => {
+    const existing: JournalEntry = {
+      id: "existing-journal",
+      date: `${DAY}T09:00:00`,
+      today: "Existing reflection",
+      tomorrow: "Existing plan",
+      blockers: "Existing obstacle",
+      energy: "Medium",
+      rating: "Useful",
+    };
+    useStore.setState({ journal: [existing] });
+    const onClose = vi.fn();
+    render(<CloseoutModal onClose={onClose} />);
+
+    fireEvent.change(screen.getByLabelText("What went well?"), { target: { value: "New closeout reflection" } });
+    fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Kept going" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(useStore.getState().journal).toEqual([existing]);
+    expect(useStore.getState().closeouts[0].completedSummary).toBe("New closeout reflection");
+  });
+
+  it("merges an opted-in closeout into an existing entry without overwriting its prose", async () => {
     const existing: JournalEntry = {
       id: "existing-journal",
       date: `${DAY}T09:00:00`,
@@ -94,14 +113,18 @@ describe("CloseoutModal daily loop", () => {
       rating: "Useful",
     };
     useStore.setState({ journal: [existing] });
-    render(<CloseoutModal onClose={vi.fn()} />);
+    const onClose = vi.fn();
+    render(<CloseoutModal onClose={onClose} />);
 
-    expect(screen.getByText(/your writing there stays as it is/)).toBeTruthy();
+    const journalOption = screen.getByRole("checkbox", { name: /Add this closeout to today’s journal/i });
+    expect(journalOption).toHaveProperty("checked", false);
     fireEvent.change(screen.getByLabelText("What went well?"), { target: { value: "New closeout reflection" } });
     fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Kept going" } });
     fireEvent.change(screen.getByLabelText("What got in the way?"), { target: { value: "Fatigue" } });
+    fireEvent.click(journalOption);
     fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
 
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
     const [page] = useStore.getState().journal;
     expect(useStore.getState().journal).toHaveLength(1);
     expect(page).toMatchObject({
@@ -115,16 +138,23 @@ describe("CloseoutModal daily loop", () => {
     expect(useStore.getState().closeouts[0].completedSummary).toBe("New closeout reflection");
   });
 
-  it("derives the journal energy label from the entered score", () => {
-    render(<CloseoutModal onClose={vi.fn()} />);
+  it("creates a journal entry from the closeout only after explicit opt-in", async () => {
+    const onClose = vi.fn();
+    render(<CloseoutModal onClose={onClose} />);
 
     fireEvent.change(screen.getByLabelText("What went well?"), { target: { value: "Completed the core review" } });
     fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Asked for help early" } });
     fireEvent.change(screen.getByLabelText("What got in the way?"), { target: { value: "Noisy room" } });
     fireEvent.change(screen.getByLabelText("What matters tomorrow?"), { target: { value: "Review weak questions" } });
     fireEvent.change(screen.getByLabelText("Energy now (0–100)"), { target: { value: "35" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /Create today’s journal page from this closeout/i }));
+    let stateChanges = 0;
+    const unsubscribe = useStore.subscribe(() => { stateChanges += 1; });
     fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
 
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    unsubscribe();
+    expect(stateChanges).toBe(1);
     expect(useStore.getState().journal).toHaveLength(1);
     expect(useStore.getState().journal[0]).toMatchObject({
       date: `${DAY}T20:30:00`,
@@ -137,19 +167,56 @@ describe("CloseoutModal daily loop", () => {
     });
   });
 
-  it("saves before expanding into the full notebook and routes to the same day", () => {
+  it("saves before expanding into the full notebook and routes to the same day", async () => {
     const onClose = vi.fn();
     render(<CloseoutModal onClose={onClose} />);
     fireEvent.change(screen.getByLabelText("What matters tomorrow?"), { target: { value: "Start cardiology" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Expand into full notebook" }));
 
-    expect(onClose).toHaveBeenCalledOnce();
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
     expect(useStore.getState().closeouts).toHaveLength(1);
     expect(useStore.getState().closeouts[0].tomorrowFirstTask).toBe("Start cardiology");
-    expect(useStore.getState().journal[0]).toMatchObject({ tomorrow: "Start cardiology" });
+    expect(useStore.getState().journal).toHaveLength(0);
     expect(useUi.getState().journalDay).toBe(DAY);
     expect(window.location.hash).toBe("#journal");
+  });
+
+  it("keeps an opt-out closeout open with its form data when durability cannot be confirmed", async () => {
+    vi.spyOn(localVault, "flushLocalVaultWrites").mockRejectedValueOnce(new Error("Synthetic closeout vault refusal"));
+    const onClose = vi.fn();
+    render(<CloseoutModal onClose={onClose} />);
+    fireEvent.change(screen.getByLabelText("What went well?"), { target: { value: "Keep this reflection visible" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
+
+    expect((await screen.findByRole("alert")).textContent).toMatch(/Not saved on this device.*still open.*Synthetic closeout vault refusal/i);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByDisplayValue("Keep this reflection visible")).toBeTruthy();
+    expect(useStore.getState().journal).toHaveLength(0);
+    expect(window.location.hash).toBe("#dashboard");
+  });
+
+  it("keeps an opted-in closeout and journal form open when their atomic snapshot is not durable", async () => {
+    vi.spyOn(localVault, "flushLocalVaultWrites").mockRejectedValueOnce(new Error("Synthetic combined vault refusal"));
+    const onClose = vi.fn();
+    render(<CloseoutModal onClose={onClose} />);
+    fireEvent.change(screen.getByLabelText("One win"), { target: { value: "Retain this win for retry" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /Create today’s journal page from this closeout/i }));
+    let stateChanges = 0;
+    const unsubscribe = useStore.subscribe(() => { stateChanges += 1; });
+
+    fireEvent.click(screen.getByRole("button", { name: "Close the day" }));
+
+    expect((await screen.findByRole("alert")).textContent).toMatch(/Not saved on this device.*still open.*Synthetic combined vault refusal/i);
+    unsubscribe();
+    expect(stateChanges).toBe(1);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByDisplayValue("Retain this win for retry")).toBeTruthy();
+    expect(useStore.getState().closeouts).toHaveLength(1);
+    expect(useStore.getState().journal).toHaveLength(1);
+    expect(useStore.getState().journal[0]).toMatchObject({ wins: ["Retain this win for retry"] });
+    expect(window.location.hash).toBe("#dashboard");
   });
 });
 

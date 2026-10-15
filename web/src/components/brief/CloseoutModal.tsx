@@ -15,6 +15,12 @@ import { GButton } from "../ui/primitives";
 import { selectDayAtAGlance } from "../../lib/dayAtAGlance";
 import { entryDayKey } from "../../lib/journal";
 import { gotoJournalDay } from "../../lib/uiStore";
+import {
+  assertVaultWrite,
+  assertVaultWritesSince,
+  flushLocalVaultWrites,
+  getVaultWriteCheckpoint,
+} from "../../lib/localVault";
 
 const MODES: Array<"auto" | BriefMode> = ["auto", "maintain", "catch-up", "recovery", "sprint", "exam-week"];
 
@@ -41,12 +47,18 @@ export function CloseoutModal({ onClose }: { onClose: () => void }) {
   const [firstTask, setFirstTask] = useState(existing?.tomorrowFirstTask ?? "");
   const [energy, setEnergy] = useState<EnergyVsMorning | undefined>(existing?.energyVsMorning);
   const [mode, setMode] = useState<"auto" | BriefMode>(existing?.tomorrowMode ?? "auto");
+  const [addToJournal, setAddToJournal] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const glance = useMemo(() => selectDayAtAGlance(s, today, today), [s, today]);
   const existingJournal = s.journal.find((entry) => entryDayKey(entry) === today) as NotebookJournalEntry | undefined;
 
-  function save(openNotebook = false) {
+  async function save(openNotebook = false) {
+    if (saving) return;
+    setSaving(true);
+    setSaveError("");
     const record: Omit<DailyCloseout, "id" | "createdAt" | "updatedAt"> = {
-      dayKey: s.activeDayKey,
+      dayKey: today,
       completedSummary: completed.trim() || "Nothing logged",
       remainingSummary: remaining.trim() || undefined,
       blocker: blocker.trim() || undefined,
@@ -56,28 +68,58 @@ export function CloseoutModal({ onClose }: { onClose: () => void }) {
       energyVsMorning: energy,
       tomorrowMode: mode,
     };
-    s.saveCloseout(record);
-    // The closeout always lands in today's journal page, without replacing
-    // anything already written there.
-    const merged = mergeCloseoutIntoJournal(existingJournal, {
-      completed, oneWin, blocker, remaining, tomorrow: firstTask, energyLabel: energyNow ? numericEnergyLabel(Number(energyNow)) : "",
-    }, today);
-    if (merged.create) s.addJournal(merged.create);
-    else if (merged.patch && existingJournal) s.updateJournal(existingJournal.id, merged.patch);
-    onClose();
-    if (openNotebook) gotoJournalDay(today);
+    const checkpoint = getVaultWriteCheckpoint();
+    try {
+      useStore.setState((state) => {
+        const stamp = new Date().toISOString();
+        const priorCloseout = closeoutForDay(state.closeouts ?? [], today);
+        const nextCloseout: DailyCloseout = {
+          ...record,
+          id: priorCloseout?.id ?? crypto.randomUUID(),
+          createdAt: priorCloseout?.createdAt ?? stamp,
+          updatedAt: stamp,
+        };
+        let journal = state.journal;
+        if (addToJournal) {
+          const liveJournal = state.journal.find((entry) => entryDayKey(entry) === today) as NotebookJournalEntry | undefined;
+          const merged = mergeCloseoutIntoJournal(liveJournal, {
+            completed, oneWin, blocker, remaining, tomorrow: firstTask,
+            energyLabel: energyNow ? numericEnergyLabel(Number(energyNow)) : "",
+          }, today);
+          if (merged.create) journal = [{ ...merged.create, id: crypto.randomUUID() }, ...state.journal];
+          else if (merged.patch && liveJournal) {
+            journal = state.journal.map((entry) => entry.id === liveJournal.id ? { ...entry, ...merged.patch } : entry);
+          }
+        }
+        return {
+          closeouts: [nextCloseout, ...(state.closeouts ?? []).filter((item) => item.dayKey !== today)],
+          ...(journal === state.journal ? {} : { journal }),
+        };
+      });
+      await flushLocalVaultWrites();
+      assertVaultWrite(checkpoint + 1);
+      assertVaultWritesSince(checkpoint);
+      onClose();
+      if (openNotebook) gotoJournalDay(today);
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : "The local vault write failed.";
+      setSaveError(`Not saved on this device. This closeout is still open, and your entries remain here so you can retry. ${detail}`);
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
     <Modal
       title="Daily closeout"
-      onClose={onClose}
+      onClose={() => { if (!saving) onClose(); }}
       footer={<>
-        <GButton onClick={() => save(true)}>Expand into full notebook</GButton>
-        <GButton variant="primary" onClick={() => save(false)}>Close the day</GButton>
+        <GButton disabled={saving} onClick={() => void save(true)}>Expand into full notebook</GButton>
+        <GButton disabled={saving} variant="primary" onClick={() => void save(false)}>{saving ? "Saving…" : "Close the day"}</GButton>
       </>}
     >
       <div className="sub">A short, honest closeout is enough. AXOM assembled the context below from today’s local records.</div>
+      {saveError && <p role="alert">{saveError}</p>}
       <section className="closeout-glance" aria-label="Day at a glance">
         <b>Day at a Glance</b>
         <span>{glance.intention?.text ? `Intention: ${glance.intention.text}` : "No intention was set"}</span>
@@ -117,11 +159,14 @@ export function CloseoutModal({ onClose }: { onClose: () => void }) {
       </div>
       </details>
 
-      <p className="sub closeout-journal-option">
-        {existingJournal
-          ? "Saved into today’s journal page too — your writing there stays as it is; this fills empty parts and adds your win."
-          : "Saved as today’s journal page too, alongside the day’s recorded activity."}
-      </p>
+      <label className="sub closeout-journal-option row gap8">
+        <input type="checkbox" checked={addToJournal} onChange={(event) => setAddToJournal(event.target.checked)} />
+        <span>
+          {existingJournal
+            ? "Add this closeout to today’s journal. Your existing writing stays unchanged; AXOM only fills empty closeout fields and adds new wins or unfinished loops."
+            : "Create today’s journal page from this closeout. Leave this unchecked to save the closeout without creating a journal entry."}
+        </span>
+      </label>
     </Modal>
   );
 }

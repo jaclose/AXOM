@@ -32,21 +32,24 @@ export interface JournalImageAttachment {
   altText?: string;
 }
 
-export type JournalGlanceSectionKey =
-  | "intention"
-  | "focus"
-  | "questions"
-  | "targets"
-  | "habits"
-  | "tasks"
-  | "energy"
-  | "wins"
-  | "unfinished"
-  | "sessions"
-  | "accuracy"
-  | "sound"
-  | "rest"
-  | "checkins";
+export const JOURNAL_GLANCE_SECTION_KEYS = [
+  "intention",
+  "focus",
+  "questions",
+  "targets",
+  "habits",
+  "tasks",
+  "energy",
+  "wins",
+  "unfinished",
+  "sessions",
+  "accuracy",
+  "sound",
+  "rest",
+  "checkins",
+] as const;
+
+export type JournalGlanceSectionKey = (typeof JOURNAL_GLANCE_SECTION_KEYS)[number];
 
 export interface JournalGlancePreferences {
   hiddenSections?: JournalGlanceSectionKey[];
@@ -357,15 +360,13 @@ export function normalizeJournalAttachments(value: unknown): JournalImageAttachm
 
 function normalizeGlancePreferences(value: unknown): JournalGlancePreferences {
   const record = isRecord(value) ? value : {};
-  const allowed = new Set<JournalGlanceSectionKey>([
-    "intention", "focus", "questions", "targets", "habits", "tasks", "energy", "wins", "unfinished",
-  ]);
+  const allowed = new Set<JournalGlanceSectionKey>(JOURNAL_GLANCE_SECTION_KEYS);
   const hiddenSections = Array.isArray(record.hiddenSections)
     ? record.hiddenSections.filter((key): key is JournalGlanceSectionKey => typeof key === "string" && allowed.has(key as JournalGlanceSectionKey))
     : undefined;
   const rawCorrections = isRecord(record.corrections) ? record.corrections : {};
   const corrections: Partial<Record<JournalGlanceSectionKey, string>> = {};
-  for (const key of allowed) {
+  for (const key of JOURNAL_GLANCE_SECTION_KEYS) {
     if (typeof rawCorrections[key] === "string") corrections[key] = rawCorrections[key] as string;
   }
   return {

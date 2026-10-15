@@ -40,6 +40,19 @@ function showTasksWidget() {
 }
 
 describe("Dashboard widget engine", () => {
+  it("describes journal storage as local-first without denying optional owner-private protection", () => {
+    const layout = structuredClone(useStore.getState().profile.dashboardLayout!);
+    layout.hiddenWidgetIds = layout.hiddenWidgetIds.filter((id) => !["journal", "localData"].includes(id));
+    useStore.getState().updateProfile({ dashboardLayout: layout });
+
+    render(<DashboardPage />);
+
+    expect(screen.getByText("A private, local-first record of the day")).toBeTruthy();
+    expect(screen.getByText(/portable exports and owner-private account protection are separate copies/i)).toBeTruthy();
+    expect(screen.getByText(/protected backups are restricted to the signed-in owner/i)).toBeTruthy();
+    expect(screen.queryByText(/device-local record|workspace stays on this device/i)).toBeNull();
+  });
+
   it("renders the focused core grid and a catalog that omits removed recommendation widgets", async () => {
     const user = userEvent.setup();
     render(<DashboardPage />);

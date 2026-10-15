@@ -658,7 +658,7 @@ function widgetDataStatus(id: DashboardWidgetId, s: ReturnType<typeof useStore.g
   if (id === "todayScore") return s.profile.dailySuccess?.requirements.some((item) => item.enabled) ? "Targets configured" : "No targets selected";
   if (id === "examCountdown") return pickFocusExam(s.boardPrep) ? "Exam focus available" : "No exam focus yet";
   if (id === "premedHours") return s.premedExperiences.length ? `${s.premedExperiences.length} experiences` : "No experience entries yet";
-  if (id === "localData") return "Stored on this device";
+  if (id === "localData") return "Local-first workspace";
   if (id === "winDay") return s.dayPlans.some((plan) => plan.dayKey === s.activeDayKey) ? "Checked in today" : "Ready for today";
   if (id === "weekly" || id === "streak") return s.logs.length ? "History available" : "Learning your rhythm";
   if (id === "pomodoro") return "Ready to focus";
@@ -867,7 +867,7 @@ function JournalDashboardWidget({
   const current = entries.find((entry) => entry.date.slice(0, 10) === activeDayKey) ?? entries[0];
   return (
     <GlassCard pad className="dashboard-core-widget journal-widget">
-      <PanelHeader title="Journal" sub="A private, device-local record of the day"
+      <PanelHeader title="Journal" sub="A private, local-first record of the day"
         action={<a className="gbtn sm primary" href="#journal"><BookText size={ICON_SIZE.body} /> Open</a>} />
       {current ? (
         <>
@@ -1066,7 +1066,7 @@ function DetailMetric({ label, value }: { label: string; value: string }) {
 function LocalDataWidget({ state }: { state: ReturnType<typeof useStore.getState> }) {
   return (
     <GlassCard pad className="local-data-card" data-tour="data-safety-settings">
-      <PanelHeader title="Local data & backup" sub="Your workspace stays on this device; exported backups are portable copies"
+      <PanelHeader title="Local data & backup" sub="Your workspace saves locally first; portable exports and owner-private account protection are separate copies"
         action={<GButton size="sm" onClick={() => exportState(state)}><Download size={ICON_SIZE.body} /> Export backup</GButton>} />
       <div className="alpha-notice">
         <span className="alpha-pill">ALPHA</span>
@@ -1084,7 +1084,7 @@ function LocalDataWidget({ state }: { state: ReturnType<typeof useStore.getState
           <ShieldCheck size={ICON_SIZE.emphasis} />
           <div>
             <b>Private by default</b>
-            <span>No account server is required. Data stays on the current browser/device unless exported.</span>
+            <span>No account is required. Linking account protection is opt-in, and protected backups are restricted to the signed-in owner.</span>
           </div>
         </div>
         <div className="local-data-item">
@@ -1098,7 +1098,7 @@ function LocalDataWidget({ state }: { state: ReturnType<typeof useStore.getState
           <ExternalLink size={ICON_SIZE.emphasis} />
           <div>
             <b>Hosted Alpha</b>
-            <span>Open the hosted preview. It uses its own browser-local workspace unless you import a portable backup.</span>
+            <span>Open the hosted preview. It starts with a local-first workspace; importing a portable backup or linking owner-private account protection are separate choices.</span>
           </div>
         </a>
       </div>

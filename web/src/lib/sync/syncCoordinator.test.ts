@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { JOURNAL_ATTACHMENT_MAX_BYTES, JOURNAL_ATTACHMENT_TOTAL_BYTES } from "../journalNotebook";
 import { makeSeed } from "../seed";
 import { SyncCoordinator } from "./syncCoordinator";
+import { prepareCloudSnapshot } from "./cloudSnapshot";
 import { SyncPushError, classifyPushFailure } from "./syncFailure";
 import { SYNC_METADATA_KEY } from "./syncMetadata";
 import { BLOCKED_RECHECK_MS, MAX_SNAPSHOT_BYTES, PAUSED_RECHECK_MS, RECONNECT_DELAY_MS, RETRY_STEPS_MS } from "./syncPolicy";
@@ -292,6 +294,63 @@ describe("SyncCoordinator", () => {
     await c.flush();
     expect(push).toHaveBeenCalledTimes(1);
     expect(c.currentStatus()).toBe("protected");
+    c.dispose();
+  });
+
+  it("keeps a locally valid 12 MiB journal page intact but blocks its oversized prepared account snapshot", async () => {
+    const imageBytes = JOURNAL_ATTACHMENT_MAX_BYTES;
+    const encoded = "A".repeat(Math.ceil(imageBytes / 3) * 4);
+    const seed = makeSeed();
+    const state = {
+      ...seed,
+      journal: [{
+        id: "journal-with-local-images",
+        date: "2026-10-01T12:00:00",
+        today: "Keep the original page on this device.",
+        tomorrow: "Export a portable backup.",
+        blockers: "",
+        energy: "Medium" as const,
+        rating: "Daily review",
+        attachments: Array.from({ length: 4 }, (_, index) => ({
+          id: `journal-image-${index}`,
+          name: `journal-image-${index}.png`,
+          type: "image/png" as const,
+          size: imageBytes,
+          createdAt: "2026-10-01T12:00:00.000Z",
+          dataUrl: `data:image/png;base64,${encoded}`,
+        })),
+      }],
+    } as ReturnType<typeof makeSeed>;
+    const originalUrls = state.journal[0].attachments!.map((attachment) => attachment.dataUrl);
+    expect(state.journal[0].attachments!.reduce((sum, attachment) => sum + attachment.size, 0))
+      .toBe(JOURNAL_ATTACHMENT_TOTAL_BYTES);
+    const push = vi.fn<SyncTransport["push"]>().mockResolvedValue(accepted(1));
+    let preparedBytes = 0;
+    const transport = {
+      prepare: vi.fn(async (envelope: SnapshotEnvelope) => {
+        const prepared = await prepareCloudSnapshot(envelope);
+        preparedBytes = prepared.payloadBytes;
+        return prepared;
+      }),
+      push,
+      history: vi.fn(),
+      revision: vi.fn(),
+    } as unknown as SyncTransport;
+    const c = new SyncCoordinator(transport, () => state, 60_000, "saved-locally", clock);
+
+    c.queue();
+    await c.flush();
+
+    expect(transport.prepare).toHaveBeenCalledTimes(1);
+    expect(preparedBytes).toBeGreaterThan(MAX_SNAPSHOT_BYTES);
+    expect(push).not.toHaveBeenCalled();
+    expect(c.currentStatus()).toBe("blocked");
+    expect(meta()).toMatchObject({
+      pending: true,
+      lastPayloadBytes: preparedBytes,
+      lastError: { kind: "rejected", rejection: "too-large", status: 0 },
+    });
+    expect(state.journal[0].attachments!.map((attachment) => attachment.dataUrl)).toEqual(originalUrls);
     c.dispose();
   });
 

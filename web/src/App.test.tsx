@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { makeSeed } from "./lib/seed";
 import { useStore } from "./lib/store";
+import { useUi } from "./lib/uiStore";
 import { GUIDED_TOUR_STEPS } from "./components/shell/GuidedTour";
+import * as localVault from "./lib/localVault";
+import { dayKey } from "./lib/scoring";
 
 beforeEach(() => {
+  localStorage.clear();
   sessionStorage.clear();
   const seed = makeSeed();
   seed.profile.onboarded = true;
@@ -14,6 +18,7 @@ beforeEach(() => {
   seed.profile.promise = undefined;
   seed.profile.promisePromptStatus = undefined;
   useStore.setState(seed);
+  useUi.setState({ settingsRequest: null, onboardingRequested: false, journalDay: null });
   window.location.hash = "dashboard";
   vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
   vi.stubGlobal("IntersectionObserver", class { observe() {} disconnect() {} unobserve() {} });
@@ -149,5 +154,123 @@ describe("post-global-guide promise flow", () => {
 
     render(<App />);
     expect(screen.getByRole("dialog", { name: "A promise to yourself" })).toBeTruthy();
+  });
+});
+
+describe("Journal route durability", () => {
+  function openJournalShell() {
+    useStore.setState((state) => ({
+      activeDayKey: dayKey(),
+      journal: [],
+      dayPlans: [],
+      logs: [],
+      profile: {
+        ...state.profile,
+        onboarded: true,
+        tourDone: true,
+        promisePromptStatus: {
+          state: "deferred",
+          updatedAt: "2026-10-15T12:00:00.000Z",
+          promptVersion: "promise-prompt-v1",
+        },
+      },
+    }));
+    window.history.replaceState(null, "", "#journal");
+  }
+
+  it("keeps the Journal mounted until a sidebar route change confirms the draft write", async () => {
+    openJournalShell();
+    let confirmDurability!: () => void;
+    const flush = vi.spyOn(localVault, "flushLocalVaultWrites")
+      .mockReturnValue(new Promise<void>((resolve) => { confirmDurability = resolve; }));
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /Open My AXOM Journal/i }));
+    fireEvent.change(screen.getByLabelText("Free writing"), {
+      target: { value: "Persist before leaving the Journal" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open navigation menu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dashboard" }));
+
+    await waitFor(() => expect(flush).toHaveBeenCalledTimes(1));
+    expect(window.location.hash).toBe("#journal");
+    expect(screen.getByDisplayValue("Persist before leaving the Journal")).toBeTruthy();
+
+    await act(async () => { confirmDurability(); await Promise.resolve(); });
+    await waitFor(() => expect(window.location.hash).toBe("#dashboard"));
+    expect(useStore.getState().journal.find(entry => entry.date.startsWith(dayKey())))
+      .toMatchObject({ freeWriting: "Persist before leaving the Journal" });
+  });
+
+  it("restores an external hash route and keeps the draft visible when durability fails", async () => {
+    openJournalShell();
+    vi.spyOn(localVault, "flushLocalVaultWrites").mockRejectedValue(new Error("Forced route write failure"));
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /Open My AXOM Journal/i }));
+    fireEvent.change(screen.getByLabelText("Free writing"), {
+      target: { value: "Do not leave this route" },
+    });
+
+    act(() => {
+      window.location.hash = "tasks";
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+
+    expect(await screen.findByText("Not saved on this device")).toBeTruthy();
+    await waitFor(() => expect(window.location.hash).toBe("#journal"));
+    expect(screen.getByDisplayValue("Do not leave this route")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Tasks" })).toBeNull();
+  });
+
+  it("keeps Journal and Settings mounted until Run setup again confirms durability", async () => {
+    openJournalShell();
+    let confirmDurability!: () => void;
+    const flush = vi.spyOn(localVault, "flushLocalVaultWrites")
+      .mockReturnValue(new Promise<void>((resolve) => { confirmDurability = resolve; }));
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /Open My AXOM Journal/i }));
+    fireEvent.change(screen.getByLabelText("Free writing"), {
+      target: { value: "Persist before setup replaces the shell" },
+    });
+    act(() => useUi.getState().requestSettings("program"));
+    const settings = await screen.findByRole("dialog", { name: "Your AXOM Setup" });
+    fireEvent.click(within(settings).getByRole("button", { name: "Run setup again" }));
+
+    await waitFor(() => expect(flush).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("dialog", { name: "Your AXOM Setup" })).toBeTruthy();
+    expect(screen.getByDisplayValue("Persist before setup replaces the shell")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Who are you studying as?" })).toBeNull();
+
+    await act(async () => { confirmDurability(); await Promise.resolve(); });
+    expect(await screen.findByRole("heading", { name: "Who are you studying as?" })).toBeTruthy();
+    expect(screen.queryByDisplayValue("Persist before setup replaces the shell")).toBeNull();
+    expect(useStore.getState().journal.find(entry => entry.date.startsWith(dayKey())))
+      .toMatchObject({ freeWriting: "Persist before setup replaces the shell" });
+  });
+
+  it("keeps Journal, Settings, and draft intact when Run setup again cannot be saved", async () => {
+    openJournalShell();
+    vi.spyOn(localVault, "flushLocalVaultWrites").mockRejectedValue(new Error("Forced setup transition failure"));
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /Open My AXOM Journal/i }));
+    fireEvent.change(screen.getByLabelText("Free writing"), {
+      target: { value: "Keep this draft if setup cannot begin" },
+    });
+    act(() => useUi.getState().requestSettings("program"));
+    const settings = await screen.findByRole("dialog", { name: "Your AXOM Setup" });
+    fireEvent.click(within(settings).getByRole("button", { name: "Run setup again" }));
+
+    expect(await screen.findByText("Not saved on this device")).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Your AXOM Setup" })).toBeTruthy();
+    expect(screen.getByDisplayValue("Keep this draft if setup cannot begin")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Who are you studying as?" })).toBeNull();
+    expect(useUi.getState().onboardingRequested).toBe(false);
   });
 });

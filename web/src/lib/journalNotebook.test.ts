@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { DayAtAGlance } from "./dayAtAGlance";
 import {
   JOURNAL_ATTACHMENT_MAX_BYTES,
+  JOURNAL_GLANCE_SECTION_KEYS,
   buildJournalGlanceSections,
   buildJournalMarkdown,
   createJournalAttachmentExport,
@@ -109,6 +110,34 @@ describe("journal notebook data projection", () => {
     expect(rendered).toContain("Focused time: 75 min, including a lecture that was logged later");
     expect(rendered).not.toContain("Energy and readiness");
     expect(rendered).toContain("Questions and cards: 12 practice questions · 20 cards");
+  });
+
+  it("preserves every current day-at-a-glance preference through hydration", () => {
+    const corrections = Object.fromEntries(
+      JOURNAL_GLANCE_SECTION_KEYS.map((key) => [key, `Corrected ${key}`]),
+    );
+    const [entry] = normalizeJournalEntries([{
+      id: "all-glance-preferences",
+      date: "2026-07-13T12:00:00.000Z",
+      today: "",
+      tomorrow: "",
+      blockers: "",
+      energy: "",
+      rating: "Daily review",
+      dayAtAGlance: {
+        hiddenSections: [...JOURNAL_GLANCE_SECTION_KEYS, "future-section"],
+        corrections: { ...corrections, "future-section": "Not yet supported" },
+        includedText: "Saved snapshot",
+        includedAt: "2026-07-13T21:00:00.000Z",
+      },
+    }]);
+
+    expect((entry as NotebookJournalEntry).dayAtAGlance).toEqual({
+      hiddenSections: [...JOURNAL_GLANCE_SECTION_KEYS],
+      corrections,
+      includedText: "Saved snapshot",
+      includedAt: "2026-07-13T21:00:00.000Z",
+    });
   });
 
   it("exports a readable page without embedding attachment bytes or implying cloud storage", () => {

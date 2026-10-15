@@ -345,7 +345,8 @@ describe("a refused upload (the production failure of 2026-09-30)", () => {
     expect(protectionDetail({ protection: "saved-locally" })).toBeNull();
     expect(protectionDetail({ protection: "conflict" })).toBeNull();
     const tooLarge = protectionDetail({ protection: "blocked", syncFailure: { kind: "rejected", rejection: "too-large", status: 0, at } });
-    expect(tooLarge).toMatch(/compressed account record exceeds its 15 MB limit/);
+    expect(tooLarge).toMatch(/prepared account record exceeds its 14 MB limit/);
+    expect(tooLarge).toMatch(/Remove or export large local items, then choose Protect now/);
     expect(tooLarge).toMatch(/Emergency recovery/);
     expect(protectionDetail({ protection: "blocked", syncFailure: { kind: "rejected", rejection: "refused", status: 400, at }, nextAttemptAt: soon })).toMatch(/refused this upload.*tries again by itself around/);
     expect(protectionDetail({ protection: "paused", syncFailure: { kind: "server", status: 500, at }, nextAttemptAt: soon })).toMatch(/after several tries.*checks less often.*tries again by itself around/);
