@@ -25,6 +25,16 @@ const STATES = new Set([
 ]);
 const validCount = value => Number.isSafeInteger(value) && value >= 0;
 
+export function partitionReceiptBatches(receipts) {
+  const batches = { B4: [], B5: [] };
+  receipts.forEach((receipt, index) => {
+    if (receipt?.batch !== "B4" && receipt?.batch !== "B5")
+      throw new Error(`Receipt index ${index} has unsupported batch ${JSON.stringify(receipt?.batch)}.`);
+    batches[receipt.batch].push(receipt);
+  });
+  return batches;
+}
+
 export function reconcileB4(jobs, receipts, inspectPackage = () => ({ valid: true }), freshSourceProof = new Set()) {
   const errors = [], byStatus = {}, seen = new Set(), orphanReceipts = [];
   const totals = { detected: 0, canonicalReadable: 0, ready: 0, reviewRequired: 0,
@@ -125,6 +135,106 @@ export function reconcileB4(jobs, receipts, inspectPackage = () => ({ valid: tru
     `${pathOnlySources} originals are path-only priority exceptions; an old path is not a verified immutable byte identity.`,
     `${totals.unverifiedByteProofSources} prepared sources have no accepted source-hash attestation. Legacy receipt fields and optional fresh rehash are accepted; answers remain review-only.`,
       "No owner-authenticated Supabase cloud data receipt is claimed by this audit.",
+    ],
+  };
+}
+
+/**
+ * Independently reconciles the B5 queue found beside B4 receipts. B5 rows are
+ * review/disposition evidence only: they cannot contribute to B4 coverage,
+ * answer readiness or authenticated cloud acceptance.
+ */
+export function reconcileB5(jobs, receipts, inspectPackage = () => ({ valid: true })) {
+  const errors = [], byStatus = {}, seen = new Set(), orphanReceipts = [];
+  const totals = { detected: 0, canonicalReadable: 0, ready: 0, reviewRequired: 0,
+    unresolved: 0, rejected: 0, imageAssets: 0, packagesVerified: 0,
+    byteCheckedSources: 0, missingSources: 0 };
+  const expected = new Map();
+  let pathOnlySources = 0;
+  jobs.forEach((job, index) => {
+    const key = job?.canonical_input_key;
+    const byteSha = typeof key === "string" && /^byte:[a-f0-9]{64}$/.test(key);
+    const sourcePath = typeof key === "string" && key.startsWith("path:/") && key.length <= 2048;
+    if (!(byteSha || sourcePath) || expected.has(key)) {
+      errors.push(`B5 queue index ${index} has no unique, supported canonical source identity.`);
+      return;
+    }
+    if (sourcePath) pathOnlySources++;
+    expected.set(key, { index, sha: byteSha ? key.slice(5) : undefined,
+      displayId: byteSha ? key.slice(5, 17) : createHash("sha256").update(key).digest("hex").slice(0, 12) });
+  });
+  for (const receipt of receipts) {
+    const key = receipt?.sourceKey;
+    const item = expected.get(key);
+    if (!item) {
+      const source = typeof key === "string"
+        ? createHash("sha256").update(key).digest("hex").slice(0, 12) : "invalid";
+      orphanReceipts.push({ source, status: receipt?.status ?? "unknown",
+        index: validCount(receipt?.queueIndex) ? receipt.queueIndex : null });
+      errors.push(`Orphan B5 source receipt ${source} is absent from the active B5 queue.`);
+      continue;
+    }
+    if (seen.has(key)) { errors.push(`Duplicate B5 receipt ${item.displayId}.`); continue; }
+    seen.add(key);
+    if (receipt.schemaVersion !== 1 || receipt.batch !== "B5"
+      || !receipt.adapterVersion?.startsWith("axom-existing-parsers-bulk-")
+      || receipt.queueIndex !== item.index
+      || (item.sha && receipt.sourceSha256 !== item.sha)
+      || (!item.sha && receipt.sourceSha256 !== undefined && !SHA.test(receipt.sourceSha256))
+      || (!item.sha && receipt.inventoryChecksumVerified === true)
+      || !STATES.has(receipt.status) || !Array.isArray(receipt.reasons))
+      errors.push(`Invalid B5 receipt metadata ${item.displayId}.`);
+    if (![
+      "detected", "canonicalReadable", "ready", "reviewRequired", "unresolved", "rejected", "imageAssets",
+    ].every(field => validCount(receipt[field]))
+      || receipt.detected !== receipt.ready + receipt.reviewRequired + receipt.unresolved + receipt.rejected
+      || receipt.canonicalReadable > receipt.detected || receipt.ready !== 0
+      || receipt.accountCloudReadbackVerified !== false || receipt.answerIndependentlyVerified !== false)
+      errors.push(`Unsafe B5 candidate/answer/cloud counts ${item.displayId}.`);
+    const hashProven = item.sha && (receipt.inventoryChecksumVerified === true
+      || receipt.sourceIndependentlyVerified === true);
+    byStatus[receipt.status] = (byStatus[receipt.status] ?? 0) + 1;
+    for (const name of ["detected", "canonicalReadable", "ready", "reviewRequired", "unresolved", "rejected", "imageAssets"])
+      totals[name] += validCount(receipt[name]) ? receipt[name] : 0;
+    if (hashProven) totals.byteCheckedSources++;
+    if (receipt.status === "unavailable") totals.missingSources++;
+    if (DONE.has(receipt.status)) {
+      if (receipt.canonicalReadable + receipt.rejected !== receipt.detected
+        || receipt.ready + receipt.reviewRequired + receipt.unresolved !== receipt.canonicalReadable)
+        errors.push(`Prepared B5 source lost or miscounted candidate rows ${item.displayId}.`);
+      if (!receipt.packagePath || !SHA.test(receipt.packageQuestionsSha256 ?? "")) {
+        errors.push(`Prepared B5 candidate lacks a verifiable private package ${item.displayId}.`);
+      } else {
+        const check = inspectPackage(receipt);
+        if (!check.valid || check.questions !== receipt.detected || check.unreadable !== receipt.rejected)
+          errors.push(`Prepared B5 question package checksum/record mismatch ${item.displayId}.`);
+        else totals.packagesVerified++;
+      }
+    } else if (receipt.detected > 0) errors.push(`Unprepared B5 source claims questions ${item.displayId}.`);
+  }
+  const missing = [...expected.keys()].filter(key => !seen.has(key));
+  if (missing.length) errors.push(`${missing.length} B5 sources have no disposition receipt.`);
+  return {
+    format: "axom-b5-corpus-crosswalk-v1",
+    sourceReceiptCoverageComplete: errors.length === 0 && !missing.length,
+    sourceIdentityCoverageComplete: errors.length === 0 && !missing.length
+      && pathOnlySources === 0 && totals.byteCheckedSources === jobs.length,
+    academicReleaseComplete: false,
+    verifiedCloudQuestionCount: 0,
+    verifiedScorableQuestionCount: 0,
+    queuedSources: jobs.length,
+    receivedSourceDispositions: seen.size,
+    missingReceipts: missing.length,
+    orphanReceipts: orphanReceipts.length,
+    orphanReceiptSamples: orphanReceipts.slice(0, 12),
+    pathOnlySourceJobs: pathOnlySources,
+    byStatus,
+    totals,
+    errors: errors.slice(0, 80),
+    caveats: [
+      "B5 receipts are source dispositions and structural review candidates, never B4 coverage.",
+      "No B5 answer is independently verified or ready for scored practice.",
+      "No owner-authenticated Supabase cloud data receipt is claimed by this crosswalk.",
     ],
   };
 }
@@ -335,26 +445,53 @@ export async function attestSourceBytes(receipts) {
   return { proven, failures, inspected, bytesRead };
 }
 
-export async function runB4(root = dataRoot) {
+function queuedJobsForBatch(queue, sourceJobs, batchId) {
+  const selected = queue?.processing_order?.find(item => item.id === batchId);
+  if (Array.isArray(selected?.job_indices)) {
+    return selected.job_indices.map(index => {
+      if (!Number.isSafeInteger(index) || index < 0 || index >= sourceJobs.length)
+        throw new Error(`${batchId} queue has an out-of-range source index.`);
+      return sourceJobs[index];
+    });
+  }
+  if (Array.isArray(selected?.jobs)) {
+    return selected.jobs.map((job, index) => {
+      if (typeof job?.canonical_input_key !== "string")
+        throw new Error(`${batchId} queue position ${index} has no canonical source identity.`);
+      if (Number.isSafeInteger(job.queue_index)) {
+        if (job.queue_index < 0 || job.queue_index >= sourceJobs.length
+          || sourceJobs[job.queue_index]?.canonical_input_key !== job.canonical_input_key)
+          throw new Error(`${batchId} queue position ${index} disagrees with the canonical source inventory.`);
+        return sourceJobs[job.queue_index];
+      }
+      return job;
+    });
+  }
+  throw new Error(`${batchId} source queue is unavailable.`);
+}
+
+export async function runB4(root = dataRoot, log = console.log) {
   const queue = JSON.parse(readFileSync(join(root, "agent-2-priority-batches.json"), "utf8"));
   const sourceJobs = JSON.parse(readFileSync(join(root, "agent-2-import-inputs-deduplicated.json"), "utf8"));
-  const selected = queue?.processing_order?.find(item => item.id === "B4");
-  if (!Array.isArray(selected?.job_indices)) throw new Error("B4 SHA-indexed queue is unavailable.");
-  const jobs = selected.job_indices.map(index => {
-    if (!Number.isSafeInteger(index) || index < 0 || index >= sourceJobs.length)
-      throw new Error("B4 queue has an out-of-range source index.");
-    return sourceJobs[index];
-  });
+  const jobs = queuedJobsForBatch(queue, sourceJobs, "B4");
+  const b5Jobs = queuedJobsForBatch(queue, sourceJobs, "B5");
   const resultDir = join(root, "role-2-corpus-v2/results");
   const receipts = readdirSync(resultDir).filter(name => /^[A-Za-z0-9-]+\.json$/.test(name))
     .map(name => JSON.parse(readFileSync(join(resultDir, name), "utf8")));
+  const receiptBatches = partitionReceiptBatches(receipts);
   const liveAudit = process.argv.includes("--verify-source-bytes")
-    ? await attestSourceBytes(receipts) : undefined;
-  const result = reconcileB4(jobs, receipts, readCandidate, liveAudit?.proven);
-  result.orphanCrosswalk = crosswalkB4Orphans(receipts, jobs, sourceJobs, queue, readCandidate);
-  const b5Handoff = buildB5ReclassificationHandoff(result.orphanCrosswalk, queue);
-  if (result.orphanCrosswalk.total !== result.orphanReceipts)
-    throw new Error("B4 orphan evidence changed during reconciliation; retry against a stable receipt manifest.");
+    ? await attestSourceBytes(receiptBatches.B4) : undefined;
+  const result = reconcileB4(jobs, receiptBatches.B4, readCandidate, liveAudit?.proven);
+  const b5Crosswalk = reconcileB5(b5Jobs, receiptBatches.B5, readCandidate);
+  result.b5Crosswalk = b5Crosswalk;
+  // Preserve the legacy lead-report field consumed by the scoped B5 verifier,
+  // but derive it exclusively from explicitly labeled B5 receipts. It is
+  // compatibility evidence, never part of B4 coverage or orphan accounting.
+  result.orphanCrosswalk = crosswalkB4Orphans(
+    receiptBatches.B5, jobs, sourceJobs, queue, readCandidate,
+  );
+  if (result.orphanCrosswalk.total !== receiptBatches.B5.length)
+    throw new Error("B5 compatibility crosswalk omitted a labeled B5 receipt.");
   if (liveAudit) {
     result.freshOriginalsHashed = liveAudit.inspected;
     result.freshBytesRead = liveAudit.bytesRead;
@@ -368,14 +505,14 @@ export async function runB4(root = dataRoot) {
   }
   const target = join(root, "lead-b4-acceptance.json");
   mkdirSync(dirname(target), { recursive: true });
-  // This private plan references existing immutable packages; it never copies
-  // an original file, replays a receipt into B5 or changes a cloud account.
+  // This private crosswalk references existing immutable packages; it never
+  // copies an original file or changes a cloud account.
   const handoffPath = join(root, "agent0-b5-reclassification-handoff.json");
   const handoffTmp = handoffPath + ".tmp-agent0";
-  writeFileSync(handoffTmp, JSON.stringify({ createdAt: new Date().toISOString(), ...b5Handoff }, null, 2) + "\n");
+  writeFileSync(handoffTmp, JSON.stringify({ createdAt: new Date().toISOString(), ...b5Crosswalk }, null, 2) + "\n");
   renameSync(handoffTmp, handoffPath);
   writeFileSync(target, JSON.stringify({ generatedAt: new Date().toISOString(), ...result }, null, 2) + "\n");
-  console.log(JSON.stringify({ sourceReceiptCoverageComplete: result.sourceReceiptCoverageComplete,
+  log(JSON.stringify({ sourceReceiptCoverageComplete: result.sourceReceiptCoverageComplete,
     academicReleaseComplete: result.academicReleaseComplete,
     sourceIdentityCoverageComplete: result.sourceIdentityCoverageComplete,
     pathOnlySourceJobs: result.pathOnlySourceJobs,
@@ -384,18 +521,20 @@ export async function runB4(root = dataRoot) {
       freshSourceFailures: liveAudit.failures.length } : {}),
     queuedSources: result.queuedSources, receivedSourceDispositions: result.receivedSourceDispositions,
     orphanReceipts: result.orphanReceipts, orphanPreparedReceipts: result.orphanPreparedReceipts,
-    b5ReclassificationPlan: { total: b5Handoff.totalB5Jobs,
-      matched: b5Handoff.matchedHistoricalReceipts,
-      reusablePrivatePackages: b5Handoff.existingReviewPackagesReusable,
-      unverifiedSourcePaths: b5Handoff.sourcesWithoutByteSha256,
+    b5Crosswalk: { queuedSources: b5Crosswalk.queuedSources,
+      receivedSourceDispositions: b5Crosswalk.receivedSourceDispositions,
+      sourceReceiptCoverageComplete: b5Crosswalk.sourceReceiptCoverageComplete,
+      sourceIdentityCoverageComplete: b5Crosswalk.sourceIdentityCoverageComplete,
+      pathOnlySourceJobs: b5Crosswalk.pathOnlySourceJobs,
+      reviewRequired: b5Crosswalk.totals.reviewRequired,
+      unresolved: b5Crosswalk.totals.unresolved,
+      ready: b5Crosswalk.totals.ready,
+      verifiedCloudQuestionCount: b5Crosswalk.verifiedCloudQuestionCount,
+      errors: b5Crosswalk.errors.length,
       handoff: handoffPath },
-    orphanCrosswalk: { matchedToOtherCurrentBatch: result.orphanCrosswalk.matchedToOtherCurrentBatch,
-      byAssignedBatch: result.orphanCrosswalk.byAssignedBatch,
-      preservedReviewPackages: result.orphanCrosswalk.preservedPreparedReviewPackages,
-      checksumVerifiedReviewPackages: result.orphanCrosswalk.verifiedPreparedReviewPackages,
-      pathOnlySources: result.orphanCrosswalk.pathOnlySources },
     byStatus: result.byStatus, totals: result.totals, errors: result.errors.length, report: target }, null, 2));
-  if (!result.sourceReceiptCoverageComplete) process.exitCode = 1;
+  if (!result.sourceReceiptCoverageComplete || !b5Crosswalk.sourceReceiptCoverageComplete)
+    process.exitCode = 1;
   return result;
 }
 

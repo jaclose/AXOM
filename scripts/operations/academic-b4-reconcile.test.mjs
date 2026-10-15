@@ -1,13 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { attestSourceBytes, reconcileB4, crosswalkB4Orphans, buildB5ReclassificationHandoff } from "./academic-b4-reconcile.mjs";
+import {
+  attestSourceBytes,
+  buildB5ReclassificationHandoff,
+  crosswalkB4Orphans,
+  partitionReceiptBatches,
+  reconcileB4,
+  reconcileB5,
+  runB4,
+} from "./academic-b4-reconcile.mjs";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const a = "a".repeat(64);
 const b = "b".repeat(64);
+const c = "c".repeat(64);
 const base = (i, key, extra = {}) => ({
   schemaVersion: 1, adapterVersion: "axom-existing-parsers-bulk-v2-20261014",
   batch: "B4", queueIndex: i, sourceKey: key, sourceSha256: key.startsWith("byte:") ? key.slice(5) : undefined,
@@ -97,6 +106,130 @@ test("orphan receipts from an older processing queue remain explicit, including 
   assert.equal(r.totals.detected, 3);
   assert.equal(r.verifiedCloudQuestionCount, 0);
   assert.ok(r.errors.some(message => message.includes("Orphan B4 source receipt")));
+});
+
+test("mixed result directories partition valid B4 and B5 receipts without contaminating B4 coverage", () => {
+  const receipts = [
+    base(0, "byte:" + a),
+    base(0, "byte:" + b, { batch: "B5" }),
+  ];
+  const batches = partitionReceiptBatches(receipts);
+  const b4 = reconcileB4([{ canonical_input_key: "byte:" + a }], batches.B4, packages);
+  const b5 = reconcileB5([{ canonical_input_key: "byte:" + b }], batches.B5, packages);
+  assert.equal(batches.B4.length, 1);
+  assert.equal(batches.B5.length, 1);
+  assert.equal(b4.sourceReceiptCoverageComplete, true, b4.errors.join(";"));
+  assert.equal(b4.receivedSourceDispositions, 1);
+  assert.equal(b4.orphanReceipts, 0);
+  assert.equal(b4.totals.detected, 3);
+  assert.equal(b5.sourceReceiptCoverageComplete, true, b5.errors.join(";"));
+  assert.equal(b5.receivedSourceDispositions, 1);
+  assert.equal(b5.totals.detected, 3);
+  assert.equal(b5.totals.ready, 0);
+  assert.equal(b5.verifiedScorableQuestionCount, 0);
+  assert.equal(b5.verifiedCloudQuestionCount, 0);
+});
+
+test("current-scale mixed receipts conserve 2,090 B4 and 41 B5 dispositions independently", () => {
+  const makeKey = label => "byte:" + createHash("sha256").update(label).digest("hex");
+  const makeRows = (batch, count) => Array.from({ length: count }, (_, index) => {
+    const key = makeKey(`${batch}-${index}`);
+    return {
+      job: { canonical_input_key: key },
+      receipt: base(index, key, { batch, status: "no-questions",
+        detected: 0, canonicalReadable: 0, reviewRequired: 0, unresolved: 0, rejected: 0,
+        packagePath: undefined, packageQuestionsSha256: undefined }),
+    };
+  });
+  const b4Rows = makeRows("B4", 2090);
+  const b5Rows = makeRows("B5", 41);
+  const batches = partitionReceiptBatches([
+    ...b4Rows.map(row => row.receipt),
+    ...b5Rows.map(row => row.receipt),
+  ]);
+  const b4 = reconcileB4(b4Rows.map(row => row.job), batches.B4);
+  const b5 = reconcileB5(b5Rows.map(row => row.job), batches.B5);
+  assert.equal(b4.sourceReceiptCoverageComplete, true, b4.errors.join(";"));
+  assert.equal(b4.queuedSources, 2090);
+  assert.equal(b4.receivedSourceDispositions, 2090);
+  assert.equal(b4.totals.byteCheckedSources, 2090);
+  assert.equal(b5.sourceReceiptCoverageComplete, true, b5.errors.join(";"));
+  assert.equal(b5.queuedSources, 41);
+  assert.equal(b5.receivedSourceDispositions, 41);
+  assert.equal(b5.totals.byteCheckedSources, 41);
+  assert.equal(b5.totals.ready, 0);
+  assert.equal(b5.verifiedCloudQuestionCount, 0);
+});
+
+test("runner reconciles colocated synthetic B4 and B5 receipt files against their own queues", async () => {
+  const root = mkdtempSync(join(tmpdir(), "axom-b4-b5-receipts-"));
+  try {
+    mkdirSync(join(root, "role-2-corpus-v2/results"), { recursive: true });
+    const jobs = [{ canonical_input_key: "byte:" + a }, { canonical_input_key: "byte:" + b }];
+    writeFileSync(join(root, "agent-2-import-inputs-deduplicated.json"), JSON.stringify(jobs));
+    writeFileSync(join(root, "agent-2-priority-batches.json"), JSON.stringify({ processing_order: [
+      { id: "B4", job_indices: [0] },
+      { id: "B5", jobs: [{ canonical_input_key: "byte:" + b, queue_index: 1 }] },
+    ] }));
+    const empty = { status: "no-questions", detected: 0, canonicalReadable: 0,
+      reviewRequired: 0, unresolved: 0, rejected: 0,
+      packagePath: undefined, packageQuestionsSha256: undefined };
+    writeFileSync(join(root, "role-2-corpus-v2/results/b4.json"),
+      JSON.stringify(base(0, "byte:" + a, empty)));
+    writeFileSync(join(root, "role-2-corpus-v2/results/b5.json"),
+      JSON.stringify(base(0, "byte:" + b, { ...empty, batch: "B5" })));
+    const result = await runB4(root, () => {});
+    assert.equal(result.sourceReceiptCoverageComplete, true, result.errors.join(";"));
+    assert.equal(result.queuedSources, 1);
+    assert.equal(result.receivedSourceDispositions, 1);
+    assert.equal(result.orphanReceipts, 0);
+    assert.equal(result.b5Crosswalk.sourceReceiptCoverageComplete, true,
+      result.b5Crosswalk.errors.join(";"));
+    assert.equal(result.b5Crosswalk.queuedSources, 1);
+    assert.equal(result.b5Crosswalk.receivedSourceDispositions, 1);
+    const persisted = JSON.parse(readFileSync(join(root, "lead-b4-acceptance.json"), "utf8"));
+    assert.equal(persisted.b5Crosswalk.verifiedScorableQuestionCount, 0);
+    assert.equal(persisted.b5Crosswalk.verifiedCloudQuestionCount, 0);
+    assert.equal(persisted.orphanReceipts, 0);
+    assert.equal(persisted.orphanCrosswalk.total, 1);
+    assert.equal(persisted.orphanCrosswalk.matchedToOtherCurrentBatch, 1);
+    assert.equal(persisted.orphanCrosswalk.byAssignedBatch.B5, 1);
+    assert.equal(persisted.orphanCrosswalk.rows[0].receiptBatch, "B5");
+    assert.equal(persisted.orphanCrosswalk.rows[0].currentBatches[0], "B5");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a genuine unmatched B4 receipt remains a blocker beside a valid B5 receipt", () => {
+  const batches = partitionReceiptBatches([
+    base(0, "byte:" + a),
+    base(1, "byte:" + c),
+    base(0, "byte:" + b, { batch: "B5" }),
+  ]);
+  const b4 = reconcileB4([{ canonical_input_key: "byte:" + a }], batches.B4, packages);
+  const b5 = reconcileB5([{ canonical_input_key: "byte:" + b }], batches.B5, packages);
+  assert.equal(b4.sourceReceiptCoverageComplete, false);
+  assert.equal(b4.orphanReceipts, 1);
+  assert.equal(b4.receivedSourceDispositions, 1);
+  assert.ok(b4.errors.some(message => message.includes("Orphan B4 source receipt")));
+  assert.equal(b5.sourceReceiptCoverageComplete, true, b5.errors.join(";"));
+});
+
+test("B5 crosswalk rejects count inflation, scored readiness, cloud claims and unknown batches", () => {
+  const jobs = [{ canonical_input_key: "byte:" + b }];
+  for (const changed of [
+    { ready: 1 },
+    { accountCloudReadbackVerified: true },
+    { answerIndependentlyVerified: true },
+    { detected: 4 },
+    { rejected: 0 },
+  ]) {
+    const receipt = base(0, "byte:" + b, { batch: "B5", ...changed });
+    const result = reconcileB5(jobs, [receipt], packages);
+    assert.equal(result.sourceReceiptCoverageComplete, false, JSON.stringify(changed));
+  }
+  assert.throws(() => partitionReceiptBatches([
+    base(0, "byte:" + a, { batch: "B6" }),
+  ]), /unsupported batch "B6"/);
 });
 
 test("optional live source SHA recheck streams exact original bytes without altering questions or cloud state", async () => {

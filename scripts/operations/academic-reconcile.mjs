@@ -15,6 +15,7 @@ import { pathToFileURL } from "node:url";
 const SHA256 = /^[0-9a-f]{64}$/;
 const supportedKinds = new Set(["question-source", "answer-key", "course-template", "reference", "asset", "other", "excluded"]);
 const supportedStates = new Set(["installed", "review-required", "prepared", "unsupported", "excluded", "missing-source"]);
+const originalFileStates = new Set(["cloud-verified", "local-only", "not-provided"]);
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const sample = (array, max = 12) => array.slice(0, max);
 
@@ -129,8 +130,14 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
   const rmap = indexUnique(receiptRows ?? [], "sha256", errors, "cloud receipt");
   for (const [hash, row] of rmap) {
     if (!dmap.has(hash)) errors.push(`Cloud receipt references unclassified source ${hash.slice(0, 12)}`);
-    if (row.readbackVerified !== true) blockers.push(`Cloud receipt for ${hash.slice(0, 12)} is not readback-verified.`);
+    if (!originalFileStates.has(row.originalFileStatus)) {
+      errors.push(`Cloud receipt for ${hash.slice(0, 12)} lacks explicit original-file status.`);
+    } else if (row.originalReadbackVerified !== (row.originalFileStatus === "cloud-verified")) {
+      errors.push(`Cloud receipt for ${hash.slice(0, 12)} contradicts its original-file readback status.`);
+    }
     if (!integer(row.questionCount)) errors.push(`Invalid stored questionCount for ${hash.slice(0, 12)}`);
+    if (!integer(row.reviewCount)) errors.push(`Invalid stored reviewCount for ${hash.slice(0, 12)}`);
+    if (!integer(row.figureReferences)) errors.push(`Invalid stored figureReferences for ${hash.slice(0, 12)}`);
   }
   let verifiedReadyQuestions = 0;
   let declaredFigureReferences = 0;
@@ -143,7 +150,7 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
       declaredFigureReferences += declaredFigures;
       if (row.status === "installed") {
         const receipt = rmap.get(hash);
-        if (!receipt?.readbackVerified || receipt.ownerAuthenticated !== true || receipt.figureReadbackVerified !== true) {
+        if (!receipt?.bankReadbackVerified || receipt.ownerAuthenticated !== true || receipt.figureReadbackVerified !== true) {
           blockers.push(`Figure-bearing source ${hash.slice(0, 12)} lacks authenticated image-byte readback.`);
         } else if (receipt.figureReferences !== declaredFigures) {
           errors.push(`Figure count mismatch ${hash.slice(0, 12)}: expected ${declaredFigures}, read ${receipt.figureReferences ?? "unknown"}`);
@@ -152,13 +159,16 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
     }
     if (row.status !== "installed") continue;
     const receipt = rmap.get(hash);
-    if (!receipt?.readbackVerified) { blockers.push(`Installed question source ${hash.slice(0, 12)} lacks verified cloud readback.`); continue; }
+    if (!receipt?.bankReadbackVerified) { blockers.push(`Installed question source ${hash.slice(0, 12)} lacks verified question-bank cloud readback.`); continue; }
     if (receipt.ownerAuthenticated !== true) {
       blockers.push(`Installed source ${hash.slice(0, 12)} has no owner-authenticated cloud receipt; admin/service-role access is insufficient.`);
       continue;
     }
-    if (receipt.questionCount !== row.readyCount) errors.push(`Ready/stored mismatch ${hash.slice(0, 12)}: ${row.readyCount ?? "unknown"} ready, ${receipt.questionCount} stored`);
-    else verifiedReadyQuestions += receipt.questionCount;
+    const readyCountMatches = receipt.questionCount === row.readyCount;
+    const reviewCountMatches = integer(receipt.reviewCount) && receipt.reviewCount === row.reviewCount;
+    if (!readyCountMatches) errors.push(`Ready/stored mismatch ${hash.slice(0, 12)}: ${row.readyCount ?? "unknown"} ready, ${receipt.questionCount} stored`);
+    if (!reviewCountMatches) errors.push(`Review/stored mismatch ${hash.slice(0, 12)}: ${row.reviewCount ?? "unknown"} review, ${receipt.reviewCount ?? "unknown"} stored`);
+    if (readyCountMatches && reviewCountMatches) verifiedReadyQuestions += receipt.questionCount;
   }
   const expectedTracker = Array.isArray(inventory.summary.templates)
     ? inventory.summary.templates.reduce((sum, entry) => sum + (entry.items ?? 0), 0)
