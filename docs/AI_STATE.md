@@ -6,9 +6,10 @@ authority: current-state
 # AXOM current AI state
 
 Snapshot: 2026-10-15 UTC, `feat/academic-library-v1` in
-`AXOM-academic-library-v1`, HEAD `f4c14aff`. The branch is 28 commits ahead of
-`main` / `origin/main` at `d5f9c030` and remains fast-forwardable. The latest
-integration commits are:
+`AXOM-academic-library-v1`. The verified code baseline is `f4c14aff`; subsequent
+commits only refresh this state record. `main` / `origin/main` remain at
+`d5f9c030`, are ancestors of the feature, and can be integrated by exact
+fast-forward. The latest implementation commits are:
 
 - `5141af72` — exact B4/B5 reconciliation and release-accounting tests;
 - `d27ef811` — durable academic/shared imports, ownership, media integrity,
