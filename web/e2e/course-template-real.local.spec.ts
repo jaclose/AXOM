@@ -11,9 +11,19 @@ test("every supplied text template persists with its stated module and term", as
   expect(files.length).toBeGreaterThan(0);
   await seedOnboarded(page);
   await page.goto("/#tracker");
-  await page.getByRole("button", { name: "Course Library / Load Course" }).click();
-  await page.getByText("Manage sources and custom courses", { exact: true }).click();
-      await page.getByRole("button", { name: "Saved templates and imports", exact: true }).click();
+  const openTemplateLibrary = async () => {
+    // The course-library route persists across page reloads; do not expect a
+    // "Load Course" navigation button while already inside its collection.
+    // Do not use launcher.isVisible() before the lazily loaded Tracker has
+    // rendered: it can be false for a valid button that appears a moment later.
+    if (!new URL(page.url()).searchParams.has("course-library")) {
+      await page.getByRole("button", { name: "Course Library / Load Course" }).click();
+    }
+    await expect(page.getByRole("heading", { name: "Course Library", exact: true })).toBeVisible();
+    await page.getByText("Manage sources and custom courses", { exact: true }).click();
+    await page.getByRole("button", { name: "Saved templates and imports", exact: true }).click();
+  };
+  await openTemplateLibrary();
   const dialog = page.getByRole("region", { name: "Load a course template", exact: true });
   await dialog.getByLabel("Choose course template files").setInputFiles(files);
   await expect(dialog.getByLabel("Choose course template files")).toBeEnabled();
@@ -31,9 +41,7 @@ test("every supplied text template persists with its stated module and term", as
   expect(expected.badTermModules).toBe(0);
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   await reloadAfterSave(page);
-  await page.getByRole("button", { name: "Course Library / Load Course" }).click();
-  await page.getByText("Manage sources and custom courses", { exact: true }).click();
-  await page.getByRole("button", { name: "Saved templates and imports", exact: true }).click();
+  await openTemplateLibrary();
   await expect(dialog.getByRole("button", { name: /^Use saved / })).toHaveCount(files.length);
   console.log(JSON.stringify({ privateTemplateAcceptance: expected }));
 });

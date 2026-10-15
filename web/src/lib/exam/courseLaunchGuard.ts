@@ -1,12 +1,11 @@
 // Safeguard at the QBank handoff boundary, not another curriculum/session store.
-// Agent 4 owns the canonical course selection and its stored payload. The
-// existing reader currently returns the subset already present on this device;
-// never consume that subset as if it were the entire explicitly requested quiz.
-import { COURSE_QUIZ_LAUNCH_KEY, readCourseQuizLaunch, type CourseQuizLaunch } from "../course-engine/quizLaunch";
+// The canonical reader now keeps the entire requested pool intact. This
+// diagnostic guard explains missing/review records without consuming the
+// pending request or introducing a second session store.
+import { COURSE_QUIZ_LAUNCH_KEY, MAX_COURSE_QUIZ_QUESTIONS as MAX_SELECTION, readCourseQuizLaunch, type CourseQuizLaunch } from "../course-engine/quizLaunch";
 import { questionPracticeReadiness } from "../questionFilters";
 import type { QuestionRecord } from "../questions";
 
-const MAX_SELECTION = 2000;
 const MAX_PAYLOAD_CHARS = 240_000;
 
 export type CourseLaunchGuard =

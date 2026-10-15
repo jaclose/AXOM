@@ -4,7 +4,7 @@ import { buildQuestionBankBooks } from "../bookshelf/questionBankBooks";
 import { STORAGE_KEYS } from "../brand";
 import type { QuestionRecord } from "../questions";
 import type { QuestionSet } from "../library";
-import { clearCourseQuizLaunch, courseQuizSelection, launchCourseQuiz, readCourseQuizLaunch } from "./quizLaunch";
+import { COURSE_QUIZ_LAUNCH_KEY, MAX_COURSE_QUIZ_QUESTIONS, clearCourseQuizLaunch, courseQuizSelection, launchCourseQuiz, readCourseQuizLaunch } from "./quizLaunch";
 
 const q = (id: string, week: number): QuestionRecord => ({ id, source: "imported", stem: "Synthetic source question", options: [{ key: "A", text: "First" }, { key: "B", text: "Second" }], correctKey: "A", status: "unseen", module: "SAMPLE", week, tags: [], attempts: [], createdAt: "2026-01-01", updatedAt: "2026-01-01" });
 const questions = [q("one", 1), q("two", 2)];
@@ -36,12 +36,42 @@ describe("course to canonical quiz handoff", () => {
     clearCourseQuizLaunch();
     expect(readCourseQuizLaunch(questions)).toBeNull();
   });
+  it("carries an explicitly selected course identity without mixing similarly named modules", () => {
+    launchCourseQuiz({ term: "Term 2", module: "NB2", courseId: "bpm-501", week: 3,
+      questionIds: ["one"], setIds: ["set-one"] });
+    expect(readCourseQuizLaunch(questions)).toMatchObject({
+      term: "Term 2", module: "NB2", courseId: "bpm-501", week: 3,
+      questionIds: ["one"], setIds: ["set-one"],
+    });
+  });
+
+  it("does not accept duplicate, invalid or excessive fixed question IDs", () => {
+    const base = { term: "Term 1", module: "SAMPLE", setIds: [] };
+    expect(() => launchCourseQuiz({ ...base, questionIds: ["one", "one"] }))
+      .toThrow(/selection is invalid/);
+    expect(() => launchCourseQuiz({
+      ...base, questionIds: Array.from({ length: MAX_COURSE_QUIZ_QUESTIONS + 1 }, (_, index) => `question-${index}`),
+    })).toThrow(/question limit/);
+    for (const malformed of [
+      { ...base, questionIds: ["one", "one"] },
+      { ...base, questionIds: ["one"], week: -2 },
+      { ...base, questionIds: ["one", "missing"] },
+    ]) {
+      sessionStorage.setItem(COURSE_QUIZ_LAUNCH_KEY, JSON.stringify(malformed));
+      expect(readCourseQuizLaunch(questions)).toBeNull();
+    }
+    sessionStorage.removeItem(COURSE_QUIZ_LAUNCH_KEY);
+  });
+
   it("does not replace an unfinished quiz or admit removed questions", () => {
     localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify({ poolIds: ["active"] }));
     expect(() => launchCourseQuiz(courseQuizSelection(bank()))).toThrow("Resume or finish");
     localStorage.clear();
     launchCourseQuiz(courseQuizSelection(bank()));
-    expect(readCourseQuizLaunch([questions[1]])?.questionIds).toEqual(["two"]);
+    // Delayed local hydration must never silently truncate the original pool.
+    expect(readCourseQuizLaunch([questions[1]])).toBeNull();
+    expect(JSON.parse(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY)!)).toMatchObject({ questionIds: ["one", "two"] });
     expect(readCourseQuizLaunch([])).toBeNull();
+    expect(readCourseQuizLaunch(questions)?.questionIds).toEqual(["one", "two"]);
   });
 });

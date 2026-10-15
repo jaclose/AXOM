@@ -46,6 +46,18 @@ describe("checking a package", () => {
     expect(isRunnable("q1", validatePackage(pkg))).toBe(false);
   });
 
+  it("does not treat 9+ merged answer choices as one runnable medical MCQ", () => {
+    const options = Array.from({ length: 9 }, (_, i) => ({
+      id: "q1-choice-" + i,
+      label: String.fromCharCode(65 + i),
+      blocks: [{ type: "text" as const, text: "Synthetic choice " + i }],
+    }));
+    const pkg = pack(question({ choices: options }));
+    expect(validatePackage(pkg)).toContainEqual(expect.objectContaining({
+      severity: "error", code: "invalid_question", questionId: "q1",
+    }));
+    expect(isRunnable("q1", validatePackage(pkg))).toBe(false);
+  });
   it("notes a missing answer key and a missing explanation without blocking the question", () => {
     const pkg = pack(question({ correctAnswer: undefined, explanation: undefined }));
     expect(codes(pkg)).toEqual(["warning:missing_answer_key", "info:missing_explanation"]);

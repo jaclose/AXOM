@@ -44,11 +44,14 @@ import {
 } from "./TutorUtilityDock";
 import type { QuizCalculatorValue } from "./QuizCalculator";
 import { ExamSimulator } from "./ExamSimulator";
+import { ExamRunnerMediaNotice } from "./ExamRunnerMediaNotice";
 import {
   BLOCK_PRESETS, EXAM_SKINS, blockCounts, formatClock, readSuspendedBlock, writeSuspendedBlock,
   type BlockPreset, type ExamSkin, type SuspendedBlock,
 } from "../../lib/examSim";
 import { examReducer, itemState, startBlock, type ExamAction, type ExamBlock } from "../../lib/exam/engine";
+import { requiredMediaIdentity } from "../../lib/exam/mediaPreflight";
+import { useMediaGate } from "../../lib/exam/useMediaGate";
 import { blockFromPlayerSnapshot, certaintiesFromPlayerSnapshot, checkedFromPlayerSnapshot, playerAnswer } from "../../lib/exam/playerBlock";
 
 const ERROR_TYPES = Object.keys(ERROR_TYPE_LABEL) as QuestionErrorType[];
@@ -224,6 +227,17 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       ? completeRequestedPool(requestedRetakeIds, questions) ?? []
       : []);
   const poolById = useMemo(() => new Map(pool.map((question) => [question.id, question])), [pool]);
+  const media = useMediaGate();
+  // Clinical figure fingerprints depend on the pool, not on every keystroke
+  // or answer selection. Avoid resurveying 1000 questions on each render.
+  const mediaSignature = useMemo(() => requiredMediaIdentity(pool), [pool]);
+  const mediaReady = media.isReadyIdentity(mediaSignature);
+  const retryMediaStartRef = useRef<(() => void) | null>(null);
+  const cancelMedia = media.cancel;
+  // useMediaGate provides stable methods; destructure before effects so
+  // hydration re-renders never capture a stale aggregate hook object.
+  const verifyMedia = media.verify;
+  const mediaPhase = media.state.phase;
   /**
    * The block on screen, held by the engine every exam interface uses
    * (lib/exam/engine): the position, each question's pick, flag, strike-outs
@@ -303,6 +317,26 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     try { return localStorage.getItem(STORAGE_KEYS.quizTutorTips) !== "dismissed"; } catch { return true; }
   });
   const stemRef = useRef<HTMLDivElement>(null);
+  const setupSignature = JSON.stringify({ mode, examInterface, count, status, category, examType,
+    setIds, questionIds, ordered, timed, presetId, wholeBank });
+  const setupSignatureRef = useRef(setupSignature);
+  setupSignatureRef.current = setupSignature;
+  const lastSetupSignatureRef = useRef(setupSignature);
+
+  useEffect(() => {
+    if (stage !== "setup" || lastSetupSignatureRef.current === setupSignature) return;
+    lastSetupSignatureRef.current = setupSignature;
+    retryMediaStartRef.current = null;
+    cancelMedia();
+  }, [setupSignature, stage, cancelMedia]);
+
+  // Active sessions and restored retakes must validate the actual image bytes
+  // before the question becomes answerable. The pool identity, not learner
+  // annotations or notes, controls whether a new check is necessary.
+  useEffect(() => {
+    if (stage !== "running" || restorePending || retakePending || !pool.length || mediaReady || mediaPhase !== "idle") return;
+    verifyMedia(pool, () => undefined);
+  }, [stage, restorePending, retakePending, pool, mediaReady, mediaPhase, verifyMedia]);
 
   function chooseCertainty(level: AnswerCertainty) {
     const id = pool[index]?.id;
@@ -389,7 +423,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   }, [initialMode, readyQuestions, requestedRetakeIds, restored, retakePending]);
 
   useEffect(() => {
-    if (stage !== "running" || pool.length === 0 || restorePending || retakePending) return;
+    if (stage !== "running" || pool.length === 0 || restorePending || retakePending || !mediaReady) return;
     const filters: QuizFilters = { count, status, categories: category ? [category] : undefined, examTypes: examType ? [examType] : undefined, setIds: setIds.length ? setIds : undefined, questionIds, ordered: ordered || undefined };
     // The snapshot keeps the shape it had before the engine: answered or flagged questions, and the pick on screen.
     const at = Date.now();
@@ -404,7 +438,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     const snapshot: ActiveQuizSnapshot = { mode, poolIds: pool.map((item) => item.id), index, answers, picked, revealed, startedAt, timed, filters, runId, certainty };
     try { localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify(snapshot)); } catch { /* Local Vault remains authoritative for saved work. */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [block, category, certainties, checked, count, examType, mode, ordered, pool, restorePending, retakePending, runId, setIds, questionIds, stage, startedAt, status, timed]);
+  }, [block, category, certainties, checked, count, examType, mode, ordered, pool, restorePending, retakePending, mediaReady, runId, setIds, questionIds, stage, startedAt, status, timed]);
 
   function clearActiveQuiz() {
     try { localStorage.removeItem(STORAGE_KEYS.quizActiveSession); } catch { /* non-fatal */ }
@@ -415,7 +449,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   // answer the workspace never received. Write only what is missing, so a
   // classification saved for an earlier question is never replaced.
   useEffect(() => {
-    if (!restored?.runId || restored.mode !== "tutor" || restorePending || restoredTutorReplayRef.current) return;
+    if (!restored?.runId || restored.mode !== "tutor" || restorePending || !mediaReady || restoredTutorReplayRef.current) return;
     restoredTutorReplayRef.current = true;
     const missing = restored.answers.filter((answer) => (
       answer.answerKey && !savedRunAttempt(questions, answer.questionId, restored.runId!)
@@ -425,35 +459,35 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     }
     // Replay only after complete hydration; never rerun on subsequent store updates.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [restorePending]);
+  }, [restorePending, mediaReady]);
 
   // A question's time only runs while it can be seen: AXOM going behind another
   // tab or app stops it, and coming back starts it again.
   useEffect(() => {
-    if (stage !== "running") return;
+    if (stage !== "running" || !mediaReady) return;
     const onVisibility = () => act({ type: document.hidden ? "hide" : "show", now: Date.now() });
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, [act, stage]);
+  }, [act, stage, mediaReady]);
 
   // Timer display tick (display only — limits derive from timestamps).
   useEffect(() => {
-    if (stage !== "running" || !timed) return;
+    if (stage !== "running" || !timed || !mediaReady) return;
     const t = window.setInterval(() => setNowTick(Date.now()), 1000);
     return () => window.clearInterval(t);
-  }, [stage, timed]);
+  }, [stage, timed, mediaReady]);
 
   const elapsedSeconds = Math.floor((nowTick - Date.parse(startedAt)) / 1000);
   const timeLeft = timeLimitSeconds !== undefined ? Math.max(0, timeLimitSeconds - elapsedSeconds) : undefined;
   useEffect(() => {
-    if (stage === "running" && !restorePending && !retakePending && pool.length > 0 && timeLeft === 0 && timed) finishBlock();
+    if (stage === "running" && mediaReady && !restorePending && !retakePending && pool.length > 0 && timeLeft === 0 && timed) finishBlock();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeLeft, stage, timed, restorePending, retakePending, pool.length]);
+  }, [timeLeft, stage, timed, restorePending, retakePending, mediaReady, pool.length]);
 
   // Answer shortcuts match the actual A–J options. M flags; F also flags only
   // when this question does not contain an F answer choice (legacy shortcut).
   useEffect(() => {
-    if (stage !== "running" || !question) return;
+    if (stage !== "running" || !question || !mediaReady) return;
     function onKey(e: KeyboardEvent) {
       const target = e.target instanceof HTMLElement ? e.target : null;
       if (target?.closest('input, textarea, select, button, a, [contenteditable="true"], [role="button"]')) return;
@@ -492,7 +526,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stage, question?.id, revealed, picked, mode, errorType, confidence, certainty]);
+  }, [stage, question?.id, revealed, picked, mode, errorType, confidence, certainty, mediaReady]);
 
   // Tutor tools consume Escape before the containing modal. The first press
   // closes the utility/mode; a later press retains the established leave-block
@@ -584,6 +618,16 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       pushToast({ title: "No questions match", body: "Loosen the filters or import more questions first.", tone: "warn" });
       return;
     }
+    const selectedConfig = setupSignatureRef.current;
+    // Retry the original pool, never reroll random questions after a missing
+    // medical figure is detected. Changing setup cancels the stale launch.
+    retryMediaStartRef.current = () => media.verify(built, () => {
+      if (setupSignatureRef.current === selectedConfig) startBuiltBlock(built);
+    }, { fresh: true });
+    retryMediaStartRef.current();
+  }
+
+  function startBuiltBlock(built: QuestionRecord[]) {
     if (examInterface !== "axom") {
       if (suspended && !confirm("Starting a new block discards your suspended block. Continue?")) return;
       writeSuspendedBlock(null);
@@ -764,9 +808,14 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       });
       return;
     }
-    setMode(suspended.mode);
-    setSimRun({ skin: suspended.skin, pool: ready, timeLimitSeconds: suspended.timeLimitSeconds, resume: suspended });
-    setStage("sim");
+    const continueSuspended = () => media.verify(ready, () => {
+      if (!readSuspendedBlock()) return;
+      setMode(suspended.mode);
+      setSimRun({ skin: suspended.skin, pool: ready, timeLimitSeconds: suspended.timeLimitSeconds, resume: suspended });
+      setStage("sim");
+    }, { fresh: true });
+    retryMediaStartRef.current = continueSuspended;
+    continueSuspended();
   }
 
   function discardSuspended() {
@@ -955,7 +1004,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     const canStart = count <= 1000 && available > 0 && (wholeBank || selectedSets.length > 0) && Number.isInteger(count) && count > 0;
     return <Modal title={mode === "exam" ? "Set up an exam block" : "Set up a tutor block"} onClose={onClose}
       footer={<><GhostButton disabled={!canStart} onClick={saveAsBlock}>Save as block</GhostButton>
-        <GButton variant="primary" disabled={!canStart} onClick={begin}><Play size={ICON_SIZE.body} /> Start {mode} block</GButton></>}>
+        <GButton variant="primary" disabled={!canStart || media.state.phase !== "idle"} onClick={begin}><Play size={ICON_SIZE.body} /> Start {mode} block</GButton></>}>
+        <ExamRunnerMediaNotice state={media.state} onRetry={retryMediaStartRef.current ?? undefined} />
         {suspended && (
           <div className="sim-suspended-banner" role="status">
             <div>
@@ -967,8 +1017,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
               </span>
             </div>
             <div className="row gap6">
-              <GhostButton onClick={discardSuspended}>Discard</GhostButton>
-              <GButton size="sm" variant="primary" onClick={resumeSuspended}><Play size={ICON_SIZE.body} /> Resume</GButton>
+              <GhostButton disabled={media.state.phase === "checking"} onClick={discardSuspended}>Discard</GhostButton>
+              <GButton size="sm" variant="primary" disabled={media.state.phase !== "idle"} onClick={resumeSuspended}><Play size={ICON_SIZE.body} /> Resume</GButton>
             </div>
           </div>
         )}
@@ -1220,6 +1270,21 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         </div>
       </Modal>
     );
+  }
+
+  // No answer controls are mounted until the original question images have
+  // been decoded/read back. Missing figures cannot silently become a scored
+  // medical question, including after reload or an exact missed-question retake.
+  if (stage === "running" && !mediaReady) {
+    const currentGate = media.state.phase === "idle"
+      ? { phase: "checking" as const, progress: {
+        total: mediaSignature.split("|").length, checked: 0, available: 0, blocked: 0,
+      } }
+      : media.state;
+    return <Modal title="Verify essential clinical figures" className="qb-media-recovery-modal" onClose={onClose}
+      footer={<GhostButton onClick={onClose}>Return to Question Bank</GhostButton>}>
+      <ExamRunnerMediaNotice state={currentGate} onRetry={() => media.verify(pool, () => undefined)} />
+    </Modal>;
   }
 
   if (!question) return null;

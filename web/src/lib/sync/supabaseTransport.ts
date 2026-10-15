@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { deferContent } from "./deferredContent";
 import { saveCloudMediaIndex } from "./cloudMediaCache";
 import { readSyncBaseline, saveSyncBaseline } from "./syncBaseline";
@@ -7,7 +8,7 @@ import { uploadCloudContent, hydrateCloudContent, readContentReferences } from "
 import { canonicalJson, sha256 } from "../compressedText";
 import { prepareCloudSnapshot, decodeCloudSnapshot, contentCheckpointHash } from "./cloudSnapshot";
 import { uploadCloudMedia, readMediaManifest, validateWorkspaceMedia } from "./cloudMedia";
-import { ORIGINALS_BUCKET, uploadCloudOriginals } from "./cloudOriginals";
+import { ORIGINALS_BUCKET, repairMissingCloudOriginals, uploadCloudOriginals } from "./cloudOriginals";
 import { MAX_SNAPSHOT_BYTES } from "./syncPolicy";
 import { accountOperationClient, loadSupabase } from "../account/supabase";
 import { SyncPushError, classifyPushFailure } from "./syncFailure";
@@ -82,18 +83,36 @@ export class SupabaseSyncTransport implements SyncTransport {
       await assertCurrent();
       response = await send(false);
     }
+    if (response.error?.code === "PT409" && /original source upload is incomplete/i.test(response.error.message)) {
+      // An older acknowledged snapshot may reference an original subsequently
+      // removed from Storage. Fast-path uploads skip unchanged source hashes;
+      // only a server-confirmed missing original triggers an owner-scoped
+      // metadata check and replay from a verified local original.
+      await assertCurrent();
+      const repaired = await repairMissingCloudOriginals(client, userId, envelope.payload, assertCurrent, resumable);
+      if (!repaired) throw new Error("An original source upload is incomplete but no recoverable object was found. Keep the local source and inspect account Storage.");
+      await assertCurrent();
+      response = await send(false); // Same idempotency key; the first attempt was refused.
+    }
     const { data, error, status } = response;
     if (error) throw new SyncPushError(classifyPushFailure(error, status ?? 0), error.message);
     await assertCurrent();
     const result = readPushResult(data, status ?? 200);
+    let verified: PushResult = result;
     if (result.status === "accepted") {
+      // RPC acceptance is necessary but not sufficient for a green "cloud
+      // protected" state. The owner's row must be readable with the exact
+      // stored hash and revision before the local retry queue can be cleared.
+      const storedHash = await verifyCloudRevisionReceipt(client, userId, result, envelope.contentHash, assertCurrent);
+      verified = { ...result, contentHash: storedHash };
+      await assertCurrent();
       await saveCloudMediaIndex(userId, media);
-      if (!result.idempotent || result.contentHash === envelope.contentHash) {
+      if (!result.idempotent || storedHash === envelope.contentHash) {
         await assertCurrent();
         await saveSyncBaseline(userId, { revision: result.revision, contentHash: envelope.contentHash, packed: payload });
       }
     }
-    return { ...result, transferBytes: requestBytes };
+    return { ...verified, transferBytes: requestBytes };
   }
 
   /** Full revisions (with payload). Prefer summaries() for lists. */
@@ -222,20 +241,62 @@ export class SupabaseSyncTransport implements SyncTransport {
 }
 
 /**
+ * Cloud-confirmed is a server-verified revision, not an RPC promise or a
+ * Storage callback. The query is scoped to this owner and retrieves only
+ * bounded metadata; source bytes were verified separately during transfer.
+ *
+ * On a replay, the stored hash may be from the FIRST upload for that key.
+ * The coordinator must learn that hash so it can enqueue newer local edits.
+ */
+export async function verifyCloudRevisionReceipt(
+  client: SupabaseClient,
+  userId: string,
+  result: { revision: number; revisionId: string; idempotent: boolean; contentHash?: string },
+  requestedHash: string,
+  assertCurrent: () => Promise<void>,
+): Promise<string> {
+  await assertCurrent();
+  const read = await client.from("workspace_revisions")
+    .select("id,revision,content_hash,reason")
+    .eq("id", result.revisionId)
+    .eq("user_id", userId)
+    .single();
+  await assertCurrent();
+  if (read.error || !read.data) {
+    // An acknowledged write followed by a failed read can still be retried
+    // under its original idempotency key; don't mark it as cloud-protected.
+    const auth = read.status === 401 || read.status === 403;
+    throw new SyncPushError(auth ? { kind: "auth", status: read.status } : { kind: "server", status: read.status || 503 },
+      "The account accepted the upload but its saved revision could not be verified. Your local version is unchanged and will be retried.");
+  }
+  const row = read.data;
+  const hash = typeof row.content_hash === "string" ? row.content_hash : "";
+  if (row.id !== result.revisionId || Number(row.revision) !== result.revision
+    || row.reason === "conflict" || !/^[a-f0-9]{64}$/.test(hash)
+    || (result.contentHash !== undefined && result.contentHash !== hash)
+    || (!result.idempotent && requestedHash !== hash)) {
+    throw new SyncPushError({ kind: "rejected", rejection: "refused", status: 409 },
+      "The account's saved revision does not match the uploaded content. Your local version was not marked protected.");
+  }
+  return hash;
+}
+
+/**
  * Only the two answers this version knows count. Anything else is a failure:
  * an answer AXOM cannot read must never be recorded as "protected".
  */
 export function readPushResult(data: unknown, status = 200): PushResult {
   const row = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
   const text = (value: unknown) => (typeof value === "string" && value ? value : undefined);
-  const revision = (value: unknown) => ((typeof value === "number" || typeof value === "string") && value !== "" && Number.isFinite(Number(value)) ? Number(value) : undefined);
+  const revision = (value: unknown) => ((typeof value === "number" || typeof value === "string") && value !== "" && Number.isSafeInteger(Number(value)) && Number(value) >= 0 ? Number(value) : undefined);
   const serverRevision = revision(row.server_revision);
   if (row.status === "conflict" && serverRevision !== undefined) {
     return { status: "conflict", serverRevision, preservedRevisionId: text(row.preserved_revision_id) };
   }
   const accepted = revision(row.revision);
-  if (row.status === "accepted" && accepted !== undefined) {
-    return { status: "accepted", revision: accepted, revisionId: String(row.revision_id), idempotent: Boolean(row.idempotent), contentHash: text(row.content_hash) };
+  const revisionId = text(row.revision_id);
+  if (row.status === "accepted" && accepted !== undefined && accepted > 0 && revisionId) {
+    return { status: "accepted", revision: accepted, revisionId, idempotent: Boolean(row.idempotent), contentHash: text(row.content_hash) };
   }
   throw new SyncPushError({ kind: "rejected", rejection: "refused", status }, "The account answered in a way this version of AXOM does not understand.");
 }

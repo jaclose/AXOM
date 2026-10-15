@@ -43,13 +43,19 @@ import { buildCurriculumCoverage, type CurriculumCoverage } from "../lib/course-
 import { buildAcademicTemplateCatalog } from "../lib/course-engine/academicCatalog";
 import { canonicalModuleKey } from "../lib/course-engine/vocabulary";
 import { launchCourseQuiz } from "../lib/course-engine/quizLaunch";
+import { verifyCollectionForCourse } from "../lib/course-engine/verifiedPracticeLinks";
 import { legacyCourseFilingProposals, moveTrackerCourseFiling, type CourseFilingProposal } from "../lib/course-engine/courseFiling";
 import { buildQuestionBankBooks, COLLECTION_STATUS_LABEL } from "../lib/bookshelf/questionBankBooks";
 import { WeekOverview } from "../components/tracker/WeekOverview";
+import { AcademicBookmarkImporter, TrackerBookmarkLinks, TrackerItemBookmarkLinks } from "./CourseTrackerPage.bookmarks";
+import { BulkCurriculumTemplateInstall } from "./CourseTrackerPage.bulkTemplates";
+import { OfficialSguClinicalCatalogReview } from "./CourseTrackerPage.officialCatalog";
+import { PrivateAcademicBatchUpload } from "./CourseTrackerPage.cloudBatch";
 import { activePrimaryPaths, activePrimaryScopes, isPrimaryPath, itemsInPrimary, renamePrimaryScopes, setPrimaryUntil, togglePrimaryScope, type PrimaryTrackerScope } from "../lib/trackerFocus";
 
 const KINDS: TrackerKind[] = ["Lecture", "DLA", "PQ", "Lab", "Reading", "Requirement", "Milestone", "Evidence", "Question Block", "Assessment", "Review Loop"];
 const TABS = ["All", "Lecture", "DLA", "PQ", "Blueprint", "Extra"] as const;
+const TRACKER_VISIBLE_ROW_CHUNK = 80;
 type Tab = (typeof TABS)[number];
 const BLUEPRINT_SCOPE_PREFIX = "blueprint:";
 const BLUEPRINT_STATUS_LABEL: Record<BlueprintNodeStatus, string> = {
@@ -137,6 +143,7 @@ export function CourseTrackerPage() {
   const [moduleTourOpen, setModuleTourOpen] = useState(false);
   const [deleteScope, setDeleteScope] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("All");
+  const [visibleRowLimit, setVisibleRowLimit] = useState(TRACKER_VISIBLE_ROW_CHUNK);
   const [salt, setSalt] = useState(0);
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const focusItemId = useUi((u) => u.focusItemId);
@@ -208,6 +215,11 @@ export function CourseTrackerPage() {
     [inBlueprintScope, scope, s.tracker],
   );
   const items = inScope.filter((t) => tabMatch(tab, t.kind));
+  // A full 547+ activity curriculum need not mount thousands of controls at
+  // once. Scope-level progress continues to use ALL saved rows, not this slice.
+  const visibleItems = items.length > visibleRowLimit ? items.slice(0, visibleRowLimit) : items;
+  const withheldRowCount = items.length - visibleItems.length;
+  useEffect(() => setVisibleRowLimit(TRACKER_VISIBLE_ROW_CHUNK), [scope, tab]);
   const scopeProgress = useMemo(() => scopeStudyProgress(inScope, { preferences: s.profile.studyWorkflow, courses: s.courses }), [inScope, s.profile.studyWorkflow, s.courses]);
   const progressPercent = inBlueprintScope ? blueprintMastery : scopeProgress.percent;
   const suggestions = useMemo(() => {
@@ -324,6 +336,7 @@ export function CourseTrackerPage() {
           </GlassCard>
 
           <WeekOverview />
+          <AcademicBookmarkImporter />
           {courseFiling.length > 0 && <CourseFilingCard proposals={courseFiling} busy={courseFilingBusy} onFile={(proposal) => { void fileLegacyModule(proposal); }} />}
 
           <GlassCard pad className="tracker-suggestions-card" data-module-tour="tracker-suggestions">
@@ -395,7 +408,11 @@ export function CourseTrackerPage() {
           </GlassCard>
 
           <div id="tracker-curriculum-coverage" className="tracker-curriculum-anchor"><CurriculumCoverageCard coverage={coverage} /></div>
+          {!inBlueprintScope && <OfficialSguClinicalCatalogReview />}
+          {!inBlueprintScope && <BulkCurriculumTemplateInstall />}
+          {!inBlueprintScope && <PrivateAcademicBatchUpload />}
           {!inBlueprintScope && <TrackerQuestionLinks scope={scope} />}
+          {!inBlueprintScope && <TrackerBookmarkLinks scope={scope} />}
 
           <GlassCard pad data-tour="tracker-help" data-module-tour="tracker-passes">
           <PanelHeader title="Items" sub={`Log passes toward your saved plan${cardSystem ? ` · ${cardSystem.label} rounds are tracked separately` : ""}`}
@@ -437,8 +454,15 @@ export function CourseTrackerPage() {
                     onAction={(action) => action === "list" ? setBulkOpen(true) : action === "course" ? setModuleOpen(true) : setScheduleOpen(true)} />
                 : <EmptyState title="No items here" hint="Pick another scope, switch tabs, or import." />)}
               {groupBySection
-                ? <GroupedTrackerItems scope={scope} items={items} highlightId={highlightId} onFocusSection={setScope} primaryPaths={primaryPaths} onTogglePrimary={togglePrimary} />
-                : items.map((it) => <ItemRow key={it.id} item={it} highlight={it.id === highlightId} />)}
+                ? <GroupedTrackerItems scope={scope} items={visibleItems} highlightId={highlightId} onFocusSection={setScope} primaryPaths={primaryPaths} onTogglePrimary={togglePrimary} />
+                : visibleItems.map((it) => <ItemRow key={it.id} item={it} highlight={it.id === highlightId} />)}
+              {withheldRowCount > 0 && <div className="tracker-pagination-notice" role="note">
+                <span><b>{visibleItems.length} of {items.length}</b> matching activities shown. Study-plan totals include all records; select a course or module for a shorter list.</span>
+                <GButton size="tiny" onClick={() => setVisibleRowLimit((value) => value + TRACKER_VISIBLE_ROW_CHUNK)}>
+                  Show next {Math.min(TRACKER_VISIBLE_ROW_CHUNK, withheldRowCount)}
+                </GButton>
+                <GButton size="tiny" onClick={() => setVisibleRowLimit(items.length)}>Show all matching activities</GButton>
+              </div>}
             </>
           )}
           </GlassCard>
@@ -564,6 +588,10 @@ function TrackerQuestionLinks({ scope }: { scope: string }) {
     terms: s.terms, courses: s.courses, sets: s.questionSets ?? [],
     questions: s.questions ?? [], curricula: [SGU_CURRICULUM],
   }), [s.terms, s.courses, s.questionSets, s.questions]);
+  const questionsById = useMemo(() => new Map((s.questions ?? []).map((question) =>
+    [question.id, question] as const)), [s.questions]);
+  const setsById = useMemo(() => new Map((s.questionSets ?? []).map((set) =>
+    [set.id, set] as const)), [s.questionSets]);
   const parts = scope.split("/").filter(Boolean);
   const weekIndex = parts.findIndex((part) => /^week\s*\d+$/i.test(part));
   const hasUnscheduledSuffix = parts.at(-1)?.toLowerCase() === "unscheduled";
@@ -584,11 +612,35 @@ function TrackerQuestionLinks({ scope }: { scope: string }) {
   const matched = matches.length === 1 ? matches[0] : undefined;
   const collections = matched?.weeks.filter((entry) => week === undefined || entry.week === week)
     .flatMap((entry) => entry.collections.map((collection) => ({ collection, week: entry.week }))) ?? [];
-  const ready = new Set(collections.flatMap(({ collection }) => collection.readyQuestionIds ?? [])).size;
+  const matchingCourseOwners = s.courses.filter((course) =>
+    normalizedTerm(s.terms.find((termRecord) => termRecord.id === course.termId)?.name ?? "") === normalizedTerm(term ?? "")
+    && course.modules.some((entry) => canonicalModuleKey(entry.name) === canonicalModuleKey(module ?? "")));
+  const requireCourseProof = matchingCourseOwners.length > 1;
+  const selectedCourseId = matched?.courseId ?? (courseSegment
+    ? matchingCourseOwners.find((course) =>
+      course.code.replace(/[^a-z0-9]+/gi, "").toLowerCase()
+      === courseSegment.replace(/[^a-z0-9]+/gi, "").toLowerCase())?.id
+    : undefined);
+  const verifiedCollections = collections.map(({ collection, week: collectionWeek }) => {
+    const verification = verifyCollectionForCourse(collection, {
+      module: matched?.module ?? module,
+      week: collectionWeek ?? week,
+      courseId: selectedCourseId,
+    }, questionsById, setsById, requireCourseProof);
+    return {
+      collection,
+      week: collectionWeek,
+      ...verification,
+      sourceReviewRequired: verification.sourceReviewRequired || (requireCourseProof && !selectedCourseId),
+      readyQuestionIds: requireCourseProof && !selectedCourseId ? [] : verification.readyQuestionIds,
+    };
+  });
+  const ready = new Set(verifiedCollections.flatMap((entry) => entry.readyQuestionIds)).size;
 
   const start = (ids: string[], setId?: string, sourceWeek?: number) => {
     try {
       launchCourseQuiz({ module: matched!.module, term: matched!.term, week: sourceWeek,
+        ...(selectedCourseId ? { courseId: selectedCourseId } : {}),
         questionIds: ids, setIds: setId ? [setId] : [] });
     } catch (error) {
       pushToast({ title: "Practice cannot start", body: error instanceof Error ? error.message : "Review your question collection first.", tone: "warn" });
@@ -600,18 +652,18 @@ function TrackerQuestionLinks({ scope }: { scope: string }) {
       {matches.length > 1 ? <p className="sub">More than one course matches this module. Assign the question sets to a unique course before launching practice.</p>
         : !matched || collections.length === 0 ? <p className="sub">No Question Bank collections are explicitly filed to this selected academic scope. An activity in your tracker does not imply its questions are installed.</p>
         : <>
-          <div className="tracker-resources-summary"><b>{collections.length} collections</b><span>{ready} reviewed questions ready</span><span>{collections.filter(({ collection }) => collection.awaitingReview > 0).length} collections need review</span></div>
+          <div className="tracker-resources-summary"><b>{collections.length} collections</b><span>{ready} reviewed questions ready</span><span>{verifiedCollections.filter((entry) => entry.collection.awaitingReview > 0 || entry.sourceReviewRequired).length} collections need review</span></div>
           <details open={week !== undefined} className="tracker-resource-details">
             <summary>View linked collections</summary>
-            <ul>{collections.map(({ collection, week: collectionWeek }) => (
+            <ul>{verifiedCollections.map(({ collection, week: collectionWeek, readyQuestionIds, sourceReviewRequired, unavailableQuestionCount }) => (
               <li key={collection.id} className="tracker-resource-row">
-                <span><b>{collection.title}</b><small>{collectionWeek ? `Week ${collectionWeek} · ` : "Week unassigned · "}{COLLECTION_STATUS_LABEL[collection.status]} · {collection.ready} ready / {collection.questions} imported{collection.note ? ` · ${collection.note}` : ""}</small></span>
-                <GButton size="tiny" disabled={!collection.readyQuestionIds?.length}
-                  onClick={() => start(collection.readyQuestionIds ?? [], collection.setId, collectionWeek)}>Practice</GButton>
+                <span><b>{collection.title}</b><small>{collectionWeek ? `Week ${collectionWeek} · ` : "Week unassigned · "}{COLLECTION_STATUS_LABEL[collection.status]} · {readyQuestionIds.length} linked-ready / {collection.ready} bank-ready · {collection.questions} stored{sourceReviewRequired ? " · Source/course association needs review" : ""}{unavailableQuestionCount ? ` · ${unavailableQuestionCount} referenced records missing locally` : ""}{collection.note ? ` · ${collection.note}` : ""}</small></span>
+                <GButton size="tiny" disabled={!readyQuestionIds.length}
+                  onClick={() => start(readyQuestionIds, collection.setId, collectionWeek)}>Practice</GButton>
               </li>
             ))}</ul>
           </details>
-          {ready > 0 && <GButton size="sm" onClick={() => start([...new Set(collections.flatMap(({ collection }) => collection.readyQuestionIds ?? []))], undefined, week)}>Practice all ready ({ready})</GButton>}
+          {ready > 0 && <GButton size="sm" onClick={() => start([...new Set(verifiedCollections.flatMap((entry) => entry.readyQuestionIds))], undefined, week)}>Practice all ready ({ready})</GButton>}
         </>}
     </GlassCard>
   );
@@ -773,6 +825,7 @@ function ItemRow({ item, highlight }: { item: TrackerItem; highlight?: boolean }
         <div className="dr-label">{item.label}</div>
         <div className="dr-type">{item.path}</div>
         <div className="dr-note">{progressLabel}</div>
+        <TrackerItemBookmarkLinks itemId={item.id} />
         {(item.templateKey || item.weekSource) && <div className="row wrap gap6" aria-label="Activity provenance">
           {item.templateKey && <Tag tone="neutral">Template activity</Tag>}
           {item.weekSource === "template" && <Tag tone="green">Week stated in template</Tag>}

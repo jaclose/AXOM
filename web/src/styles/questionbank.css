@@ -1130,3 +1130,43 @@ ul.template-note { padding-left: 26px; }
   .qb-course-handoff { flex-direction: column; padding: 16px; }
   .qb-course-handoff-actions { justify-content: flex-start; }
 }
+
+/* Practice integrity: required clinical figures are checked before answers. */
+.qb-required-media-status {
+  padding: 14px 16px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  color: var(--text-80);
+  line-height: 1.5;
+}
+.qb-required-media-status strong { display: block; color: var(--text); margin-bottom: 6px; }
+.qb-required-media-status p { margin: 6px 0; }
+.qb-required-media-status ul { padding-left: 20px; margin: 8px 0; }
+.qb-required-media-status button {
+  margin-top: 8px; min-height: 42px; padding: 9px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm); background: var(--surface-2);
+  color: var(--text); font: inherit; cursor: pointer;
+}
+.qb-required-media-status button:focus-visible { outline: 2px solid var(--gold-line); outline-offset: 2px; }
+
+/* A blocked clinical-media session must offer a legible escape route. */
+.qb-media-recovery-modal .modal-actions .ghost-btn {
+  color: var(--text);
+  min-height: 42px;
+  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  padding-inline: 12px;
+}
+/* Mobile onboarding belongs after the clinical question, never over the stem
+   or figure. The dock has already been moved into document flow on phones. */
+@media (max-width: 620px) {
+  .quiz-player-modal .tutor-first-tip {
+    position: relative;
+    inset: auto;
+    width: 100%;
+    margin: 8px 0 12px;
+    z-index: 1;
+  }
+}

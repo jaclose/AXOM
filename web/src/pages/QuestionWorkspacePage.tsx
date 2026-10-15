@@ -23,10 +23,14 @@ import type { QuestionSet, SourceDocument } from "../lib/library";
 import { GlassCard, PanelHeader, EmptyState } from "../components/ui/primitives";
 import { ImportPanel, parseStoredDocument, type ImportSeed } from "../components/questions/ImportPanel";
 import { ExamRunner } from "../components/questions/ExamRunner";
+import { ExamRunnerMediaNotice } from "../components/questions/ExamRunnerMediaNotice";
 import { EXAM_SKINS, blockCounts, readSuspendedBlock } from "../lib/examSim";
 import { PerformancePanel } from "../components/questions/PerformancePanel";
 import { AnalysisPanel } from "../components/questions/AnalysisPanel";
 import { QuestionDetailModal } from "../components/questions/QuestionDetailModal";
+import { Modal } from "../components/ui/Modal";
+import { useMediaGate } from "../lib/exam/useMediaGate";
+import { requiredQuestionMedia } from "../lib/exam/mediaPreflight";
 import { SourceLibrary, QuestionSetList } from "../components/questions/LibraryPanels";
 import { BlockBuilder } from "../components/questions/BlockBuilder";
 import { QuestionBankLibrary } from "../components/questions/QuestionBankLibrary";
@@ -61,6 +65,29 @@ const ALL_TABS: Array<[BankTab, string]> = [
   ["bank", "Bank"],
   ["insights", "Insights"],
 ];
+
+/** Direct question review uses the same image-evidence gate as exam blocks.
+ * No alternate scoring path is permitted when a clinical figure is missing. */
+function TrustedQuestionDetail({ question, onClose }: { question: QuestionRecord; onClose: () => void }) {
+  const gate = useMediaGate();
+  const ready = gate.isReady([question]);
+  const phase = gate.state.phase;
+  const verify = gate.verify;
+
+  useEffect(() => {
+    if (!ready && phase === "idle") verify([question], () => undefined);
+  }, [ready, phase, verify, question]);
+
+  if (ready) return <QuestionDetailModal question={question} onClose={onClose} />;
+  const display = gate.state.phase === "idle"
+    ? { phase: "checking" as const, progress: {
+      total: requiredQuestionMedia(question).length, checked: 0, available: 0, blocked: 0,
+    } } : gate.state;
+  return <Modal title="Verify essential clinical figures" className="qb-media-recovery-modal" onClose={onClose}>
+    <ExamRunnerMediaNotice state={display} onRetry={() => gate.verify([question], () => undefined)} />
+    <p className="sub">This question cannot record an answer until the necessary clinical image has been restored.</p>
+  </Modal>;
+}
 
 function timestamp(value: string | undefined): number | undefined {
   if (!value) return undefined;
@@ -648,7 +675,7 @@ export function QuestionWorkspacePage() {
       )}
       </section>
 
-      {open && <QuestionDetailModal question={open} onClose={() => setOpen(null)} />}
+      {open && <TrustedQuestionDetail key={open.id} question={open} onClose={() => setOpen(null)} />}
       {runner && (
         <ExamRunner
           mode={runner.mode}

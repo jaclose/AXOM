@@ -359,6 +359,50 @@ describe("Course Tracker comprehension layout", () => {
     window.location.hash = "";
   });
 
+
+  it("holds course-linked practice when a set's actual question ownership contradicts its course label", () => {
+    const stamp = "2026-10-14T12:00:00.000Z";
+    const terms = [{ id: "term-2", name: "Term 2" }];
+    const courses = [
+      { id: "core", termId: "term-2", code: "BPM 501", name: "Core", files: 0,
+        modules: [{ id: "nb-core", name: "NB2" }] },
+      { id: "elective", termId: "term-2", code: "ELECTIVE", name: "Elective", files: 0,
+        modules: [{ id: "nb-elective", name: "NB Block 2" }] },
+    ];
+    useStore.setState({
+      terms, courses,
+      tracker: [{
+        id: "core-lecture", path: "Term 2/BPM 501/NB2/Week 3",
+        label: "Core lecture", kind: "Lecture", passes: 0, ankiPasses: 0,
+        yield: "none", updated: stamp,
+      }],
+      questions: [{
+        id: "foreign-question", module: "NB2", week: 3,
+        courseId: "elective", setId: "contradictory-set",
+        source: "imported", stem: "Contradictory membership",
+        options: [{ key: "A", text: "Correct" }, { key: "B", text: "Other" }],
+        correctKey: "A", status: "unseen", attempts: [], tags: [],
+        createdAt: stamp, updatedAt: stamp,
+      }],
+      questionSets: [{
+        id: "contradictory-set", title: "Unverified core source",
+        scope: { courseId: "core", module: "NB2", week: 3 },
+        questionIds: ["foreign-question"], tags: [], aiEnhanced: false,
+        parserWarnings: [], sourceDocumentIds: [], createdAt: stamp,
+      }],
+    });
+    render(<CourseTrackerPage />);
+    fireEvent.change(screen.getByLabelText("Jump to a subsection"), {
+      target: { value: "Term 2/BPM 501/NB2/Week 3" },
+    });
+    const panel = screen.getByText("Related Question Bank").closest<HTMLElement>(".glass-card")!;
+    expect(within(panel).getByText("Unverified core source")).toBeTruthy();
+    expect(within(panel).getByText(/Source\/course association needs review/)).toBeTruthy();
+    expect(within(panel).getByText(/0 linked-ready \/ 1 bank-ready/)).toBeTruthy();
+    expect((within(panel).getByRole("button", { name: "Practice" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(panel).queryByRole("button", { name: /^Practice all ready/ })).toBeNull();
+  });
+
   it("surfaces tracker rows outside the attributable SGU course hierarchy without hiding them", () => {
     const state = useStore.getState();
     useStore.setState({
@@ -391,6 +435,32 @@ describe("Course Tracker comprehension layout", () => {
     expect(useStore.getState().tracker[0]).toEqual({ ...original, path: "Term 2/BPM 501/NB2/Week 3" });
     expect(localStorage.getItem("axom.tracker.scope.v1")).toBe("Term 2/BPM 501/NB2");
     expect(screen.queryByRole("button", { name: "File 1 activities under BPM 501" })).toBeNull();
+  });
+
+
+  it("renders large bulk-installed curricula in bounded row slices without changing total progress", () => {
+    const seed = useStore.getState();
+    const base = seed.tracker[0];
+    const rows: TrackerItem[] = Array.from({ length: 205 }, (_, index) => ({
+      ...base, id: `bulk-row-${index + 1}`, label: `Bulk source lecture ${index + 1}`,
+      kind: "Lecture", activity: "lecture", path: `Term 2/BPM 501/NB2/Week ${index < 150 ? 3 : 4}`,
+      templateKey: `nb2|lecture|${index + 1}`, passes: 0,
+    }));
+    useStore.setState({
+      tracker: rows, profile: { ...seed.profile, primaryTrackerScopes: [] },
+      terms: [{ id: "t2", name: "Term 2" }],
+      courses: [{ id: "course", termId: "t2", code: "BPM 501", name: "BPM II",
+        files: 0, modules: [{ id: "nb2", name: "NB2" }] }],
+    });
+    const { container } = render(<CourseTrackerPage />);
+    expect(container.querySelectorAll(".tracker-item-row")).toHaveLength(80);
+    expect(container.querySelector(".tk-mastery")?.textContent).toContain("205 items");
+    expect(container.querySelector(".tracker-pagination-notice")?.textContent).toContain("80 of 205");
+    fireEvent.click(screen.getByRole("button", { name: "Show next 80" }));
+    expect(container.querySelectorAll(".tracker-item-row")).toHaveLength(160);
+    fireEvent.click(screen.getByRole("button", { name: "Show all matching activities" }));
+    expect(container.querySelectorAll(".tracker-item-row")).toHaveLength(205);
+    expect(useStore.getState().tracker).toEqual(rows);
   });
 
   it("uses utility/work-area regions that can stack without changing DOM order at mobile width", () => {

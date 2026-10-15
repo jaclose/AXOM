@@ -16,7 +16,7 @@ const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
 const HASH = "a".repeat(64);
 
-async function supabaseLikeDatabase({ rlsAutoEnable }: { rlsAutoEnable: boolean }) {
+async function supabaseLikeDatabase({ rlsAutoEnable, stopBefore }: { rlsAutoEnable: boolean; stopBefore?: string }) {
   const db = new PGlite({ extensions: { pgcrypto } });
   await db.exec(`
     create schema if not exists extensions;
@@ -47,7 +47,10 @@ async function supabaseLikeDatabase({ rlsAutoEnable }: { rlsAutoEnable: boolean 
     set search_path = "$user", public, extensions;
   `);
   if (rlsAutoEnable) await db.exec("create function public.rls_auto_enable() returns void language sql as $$ select $$;");
-  for (const file of files) await db.exec(`begin;${readFileSync(migrationsDir + file, "utf8")}commit;`);
+  for (const file of files) {
+    if (stopBefore && file >= stopBefore) break;
+    await db.exec(`begin;${readFileSync(migrationsDir + file, "utf8")}commit;`);
+  }
   return db;
 }
 async function as(db: PGlite, role: "anon" | "authenticated" | "service_role", sub: string | null, sql: string, params: unknown[] = []) {
@@ -72,6 +75,64 @@ const PRIVATE_TABLES = [
   "academic_catalog_releases", "academic_catalog_entries", "academic_catalog_files", "academic_catalog_grants",
 ];
 describe("Supabase migrations on real Postgres", () => {
+  it("revokes group/shared access when the currently selected academic revision is pending or rejected", async () => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
+    const collection = "77777777-7777-4777-8777-777777777777";
+    const oldRevision = "88888888-8888-4888-8888-888888888888";
+    const newRevision = "99999999-9999-4999-8999-999999999999";
+    const oldHash = HASH;
+    const newHash = "b".repeat(64);
+    try {
+      await db.query("insert into auth.users(id,email) values ($1,'a@x.test'),($2,'b@x.test')", [A, B]);
+      await db.query("insert into public.academic_collections(id,owner_id,title,module,term,visibility,review_status) values($1,$2,'Sample approved bank','T1','Term 1','shared','pending')",
+        [collection, A]);
+      await db.query(`insert into public.academic_revisions
+        (id,collection_id,content_hash,template_text,status,created_at,approved_at)
+        values($1,$3,$4,'Week 1','ready','2026-10-12T00:00:00Z',now()),
+              ($2,$3,$5,'Week 2','ready','2026-10-13T00:00:00Z',null)`,
+      [oldRevision, newRevision, collection, oldHash, newHash]);
+      await db.query("insert into public.academic_files(revision_id,path,object_path,sha256,byte_size,mime_type) values($1,'bank.json',$2,$3,7,'application/json')",
+        [oldRevision, `${collection}/${oldHash}`, oldHash]);
+      await db.query("insert into storage.objects(bucket_id,name,metadata) values('academic-content',$1,'{\"size\":7}')",
+        [`${collection}/${oldHash}`]);
+      const visibility = (user: string) => as(db, "authenticated", user,
+        "select public.academic_can_read($1) as allowed", [collection]);
+      const filesFor = (user: string) => as(db, "authenticated", user,
+        "select object_path from public.academic_files where revision_id=$1", [oldRevision]);
+      const visibleObject = (user: string) => as(db, "authenticated", user,
+        "select name from storage.objects where bucket_id='academic-content'");
+
+      // An explicitly approved active version is accessible to authorized viewers.
+      await db.query("update public.academic_collections set current_revision_id=$2,review_status='approved' where id=$1",
+        [collection, oldRevision]);
+      expect((await visibility(B)).rows).toEqual([{ allowed: true }]);
+      expect((await filesFor(B)).rows).toHaveLength(1);
+      expect((await visibleObject(B)).rows).toHaveLength(1);
+
+      // Its older historical approval must not expose files after replacement
+      // by a new, unreviewed revision.
+      await db.query("update public.academic_collections set current_revision_id=$2,review_status='pending' where id=$1",
+        [collection, newRevision]);
+      expect((await visibility(B)).rows).toEqual([{ allowed: false }]);
+      expect((await filesFor(B)).rows).toHaveLength(0);
+      expect((await visibleObject(B)).rows).toHaveLength(0);
+      expect((await visibility(A)).rows).toEqual([{ allowed: true }]);
+      expect((await filesFor(A)).rows).toHaveLength(1);
+      await db.query("update public.academic_collections set review_status='rejected' where id=$1",
+        [collection]);
+      expect((await visibility(B)).rows).toEqual([{ allowed: false }]);
+
+      // Reviewer approval for the *current* revision restores access, but
+      // withdrawing the collection closes it again without deleting history.
+      await db.query("update public.academic_revisions set approved_at=now() where id=$1", [newRevision]);
+      await db.query("update public.academic_collections set review_status='approved' where id=$1", [collection]);
+      expect((await visibility(B)).rows).toEqual([{ allowed: true }]);
+      await db.query("update public.academic_collections set withdrawn=true where id=$1", [collection]);
+      expect((await visibility(B)).rows).toEqual([{ allowed: false }]);
+      expect((await visibility(A)).rows).toEqual([{ allowed: true }]);
+    } finally { await db.close(); }
+  }, 60_000);
+
   it("references one academic object for two learners while enforcing review, withdrawal and acknowledged personal history", async () => {
     const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
     const collection = "33333333-3333-4333-8333-333333333333";
@@ -89,7 +150,7 @@ describe("Supabase migrations on real Postgres", () => {
         "select public.push_workspace_revision_v2($1,34,$2,$3,gen_random_uuid(),$4) as r", [base, HASH, value, key]);
       expect((await save(A, 0)).rows[0].r).toMatchObject({ status: "accepted" });
       await expect(save(B, 0)).rejects.toMatchObject({ code: "PT409" });
-      await db.query("update public.academic_collections set visibility='shared',review_status='approved' where id=$1", [collection]);
+      await db.query("update public.academic_collections set visibility='shared',review_status='approved',current_revision_id=$2 where id=$1", [collection, revision]);
       await db.query("update public.academic_revisions set approved_at=now() where id=$1", [revision]);
       const retryKey = randomUUID();
       expect((await save(B, 0, payload, retryKey)).rows[0].r).toMatchObject({ status: "accepted" });
@@ -357,6 +418,57 @@ describe("Supabase migrations on real Postgres", () => {
     } finally { await db.close(); }
   }, 60_000);
 
+  it.each([
+    "20261010000100", // AXOM Production at start of Round 2, twelve migrations
+    "20261014120000", // AXOM Production at 13:46 AST, twenty-three migrations
+  ])("upgrades an occupied production-shaped database from %s without modifying account history", async (startVersion) => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false, stopBefore: startVersion });
+    const C = "33333333-3333-4333-8333-333333333333";
+    const D = "44444444-4444-4444-8444-444444444444";
+    try {
+      await db.query("insert into auth.users(id,email) values ($1,'a@x.test'),($2,'b@x.test'),($3,'c@x.test'),($4,'d@x.test')", [A, B, C, D]);
+      await db.query("insert into public.workspaces(user_id,current_revision,current_hash) values($1,40,$3),($2,25,$3)", [A, B, HASH]);
+      await db.query(`insert into public.workspace_revisions
+        (workspace_id,user_id,revision,base_revision,schema_version,content_hash,snapshot_payload,device_id,idempotency_key,reason)
+        select w.id,w.user_id,n,n-1,34,$3,jsonb_build_object('legacy',true,'sequence',n),
+          gen_random_uuid(),gen_random_uuid(),'automatic'
+        from public.workspaces w cross join lateral generate_series(1,case when w.user_id=$1 then 40 else 25 end) n
+        where w.user_id in ($1,$2)`, [A, B, HASH]);
+      const baseline = await db.query<{ count: number }>("select count(*)::int as count from public.workspace_revisions");
+      expect(baseline.rows[0].count).toBe(65);
+      for (const file of files.filter(file => file >= startVersion)) {
+        await db.exec(`begin;${readFileSync(migrationsDir + file, "utf8")}commit;`);
+      }
+      const [{ rows: people }, { rows: workspaces }, { rows: revisions }, { rows: objects }, { rows: buckets }] = await Promise.all([
+        db.query<{ count: number }>("select count(*)::int as count from auth.users"),
+        db.query<{ user_id: string; current_revision: number }>("select user_id,current_revision::int as current_revision from public.workspaces order by user_id"),
+        db.query<{ user_id: string; count: number; oldest: number; newest: number }>(
+          "select user_id,count(*)::int as count,min(revision)::int as oldest,max(revision)::int as newest from public.workspace_revisions group by user_id order by user_id"),
+        db.query<{ count: number }>("select count(*)::int as count from storage.objects"),
+        db.query<{ id: string; public: boolean }>("select id, public from storage.buckets"),
+      ]);
+      expect(people[0].count).toBe(4);
+      expect(workspaces).toEqual([{ user_id: A, current_revision: 40 }, { user_id: B, current_revision: 25 }]);
+      expect(revisions).toEqual([
+        { user_id: A, count: 40, oldest: 1, newest: 40 },
+        { user_id: B, count: 25, oldest: 1, newest: 25 },
+      ]);
+      expect(objects[0].count).toBe(0);
+      expect(buckets.length).toBeGreaterThanOrEqual(5);
+      expect(buckets.every(bucket => !bucket.public)).toBe(true);
+      expect(buckets.some(bucket => bucket.id === "workspace-originals")).toBe(true);
+      expect((await as(db, "authenticated", A, "select count(*)::int as n from public.workspace_revisions")).rows)
+        .toEqual([{ n: 40 }]);
+      expect((await as(db, "authenticated", B, "select count(*)::int as n from public.workspace_revisions")).rows)
+        .toEqual([{ n: 25 }]);
+      const result = (await as(db, "authenticated", A, "select public.push_workspace_revision_v2(40,34,$1,$2,gen_random_uuid(),gen_random_uuid(),'automatic') as receipt",
+        [HASH, { _axomCloudFormat: 2, _axomDeltaFormat: 1, content: "{}", expandedBytes: 2, media: [], sources: [] }])).rows[0].receipt;
+      expect(result).toMatchObject({ status: "accepted", revision: 41 });
+      expect((await as(db, "authenticated", B, "select count(*)::int as n from public.workspace_revisions")).rows)
+        .toEqual([{ n: 25 }]);
+    } finally { await db.close(); }
+  }, 120_000);
+
   it("protects source-original objects and never acknowledges a missing or wrong-size original", async () => {
     const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
     try {
@@ -431,4 +543,59 @@ describe("Supabase migrations on real Postgres", () => {
     } finally { await db.close(); }
   }, 60_000);
 
+});
+
+/** Schema-first media rollout: prove an existing private academic revision
+ * survives the additive GIF migration while the original RLS still denies
+ * other accounts access. No production SQL is executed by this test. */
+describe("academic GIF Storage migration", () => {
+  it("preserves existing revisions, admits GIF figures and keeps bucket/RLS private", async () => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false,
+      stopBefore: "20261015133000_academic_gif_media_support.sql" });
+    const collection = "55555555-5555-4555-8555-555555555555";
+    const revision = "66666666-6666-4666-8666-666666666666";
+    const pngHash = "b".repeat(64);
+    const gifHash = "c".repeat(64);
+    try {
+      await db.query("insert into auth.users(id,email) values($1,'owner@test.invalid'),($2,'other@test.invalid')", [A, B]);
+      await db.query("insert into public.academic_collections(id,owner_id,title,module,term) values($1,$2,'Synthetic illustrations','GOER','Term 5')", [collection, A]);
+      await db.query("insert into public.academic_revisions(id,collection_id,content_hash,template_text,status) values($1,$2,$3,'','uploading')", [revision, collection, HASH]);
+      await db.query("insert into public.academic_files(revision_id,path,object_path,sha256,byte_size,mime_type) values($1,'assets/existing.png',$2,$3,64,'image/png')",
+        [revision, `${collection}/${pngHash}`, pngHash]);
+      const previous = (await db.query<{ allowed_mime_types: string[] }>(
+        "select allowed_mime_types from storage.buckets where id='academic-content'")).rows[0];
+      expect(previous.allowed_mime_types).toContain("image/png");
+      expect(previous.allowed_mime_types).not.toContain("image/gif");
+      await expect(db.query("insert into public.academic_files(revision_id,path,object_path,sha256,byte_size,mime_type) values($1,'assets/figure.gif',$2,$3,43,'image/gif')",
+        [revision, `${collection}/${gifHash}`, gifHash])).rejects.toThrow(/check constraint/);
+
+      await db.exec(readFileSync(migrationsDir + "20261015133000_academic_gif_media_support.sql", "utf8"));
+      const bucket = (await db.query<{ public: boolean; file_size_limit: string; allowed_mime_types: string[] }>(
+        "select public,file_size_limit,allowed_mime_types from storage.buckets where id='academic-content'")).rows[0];
+      expect(bucket.public).toBe(false);
+      expect(Number(bucket.file_size_limit)).toBe(52_428_800);
+      expect(bucket.allowed_mime_types).toContain("image/gif");
+      expect(bucket.allowed_mime_types).toContain("image/png");
+
+      expect((await db.query("select path,mime_type from public.academic_files where revision_id=$1", [revision])).rows)
+        .toEqual([{ path: "assets/existing.png", mime_type: "image/png" }]);
+      await db.query("insert into public.academic_files(revision_id,path,object_path,sha256,byte_size,mime_type) values($1,'assets/figure.gif',$2,$3,43,'image/gif')",
+        [revision, `${collection}/${gifHash}`, gifHash]);
+      const ownerWrite = await as(db, "authenticated", A,
+        "insert into storage.objects(bucket_id,name,metadata) values('academic-content',$1,'{\"size\":43}') returning name",
+        [`${collection}/${gifHash}`]);
+      expect(ownerWrite.rows).toEqual([{ name: `${collection}/${gifHash}` }]);
+      expect((await as(db, "authenticated", B,
+        "select name from storage.objects where bucket_id='academic-content'")).rows).toEqual([]);
+
+      // Script is idempotent if reviewed twice, but Agent0 should only apply it
+      // once via migration tracking rather than re-running raw SQL.
+      await db.exec(readFileSync(migrationsDir + "20261015133000_academic_gif_media_support.sql", "utf8"));
+      const again = (await db.query<{ allowed_mime_types: string[] }>(
+        "select allowed_mime_types from storage.buckets where id='academic-content'")).rows[0];
+      expect(again.allowed_mime_types.filter(type => type === "image/gif")).toHaveLength(1);
+      expect((await db.query("select count(*)::integer as n from public.academic_files")).rows)
+        .toEqual([{ n: 2 }]);
+    } finally { await db.close(); }
+  }, 60_000);
 });

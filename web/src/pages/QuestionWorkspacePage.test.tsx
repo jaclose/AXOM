@@ -498,3 +498,38 @@ describe("QuestionWorkspacePage exact, fail-closed Course Tracker handoff", () =
     expect(screen.queryByRole("heading", { name: /Course practice/ })).toBeNull();
   });
 });
+
+describe("QBank single-question medical-media integrity", () => {
+  const baseAttachment = {
+    id: "figure-needs-restoration", fileName: "essential-ecg.png", mimeType: "image/png" as const,
+    byteSize: 20, blobKey: "figure-needs-restoration", assetId: "ecg-1",
+    altText: "Essential ECG", role: "exhibit" as const,
+    createdAt: "2026-10-14", updatedAt: "2026-10-14",
+  };
+  it("does not expose a direct Check answer pathway for a figure-essential question missing its image", async () => {
+    const user = userEvent.setup();
+    useStore.setState({ questions: [question({
+      id: "medical-ecg", stem: "Interpret this ECG before answering.",
+      attachments: [baseAttachment],
+    })] });
+    render(<QuestionWorkspacePage />);
+    await user.click(screen.getByRole("tab", { name: "Bank (1)" }));
+    await user.click(screen.getByRole("button", { name: "Interpret this ECG before answering." }));
+    expect(screen.getByRole("dialog", { name: "Verify essential clinical figures" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Check answer" })).toBeNull();
+    expect(screen.getByText(/cannot record an answer until the necessary clinical image/)).toBeTruthy();
+  });
+  it("does not block a text-only question merely because a personal note image is absent", async () => {
+    const user = userEvent.setup();
+    useStore.setState({ questions: [question({
+      id: "plain-question", stem: "Text-only question with an unrelated study note.",
+      attachments: [{ ...baseAttachment, role: undefined }],
+    })] });
+    render(<QuestionWorkspacePage />);
+    await user.click(screen.getByRole("tab", { name: "Bank (1)" }));
+    await user.click(screen.getByRole("button", { name: "Text-only question with an unrelated study note." }));
+    expect(screen.getByRole("dialog", { name: "Question" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Check answer" })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Verify essential clinical figures" })).toBeNull();
+  });
+});

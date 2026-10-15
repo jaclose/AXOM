@@ -193,3 +193,148 @@
   scroll-margin-top: 112px;
 }
 .tracker-curriculum-anchor .tracker-coverage-scroll { max-width: 100%; overflow-x: auto; }
+
+/* Personal SGU video references: reviewed import, not verified curriculum. */
+.tracker-bookmark-import summary,
+.tracker-bookmark-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tracker-bookmark-import summary { cursor: pointer; }
+.tracker-bookmark-import summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+.tracker-bookmark-import .sub,
+.tracker-bookmark-links .sub { line-height: 1.48; font-size: var(--fs-xs); }
+.tracker-bookmark-import details > p.sub { margin-top: 10px; }
+.tracker-bookmark-review { display: grid; gap: 10px; margin-top: 12px; }
+.tracker-bookmark-preview { display: grid; gap: 8px; max-height: 360px; overflow-y: auto; }
+.tracker-bookmark-choice { display: grid; gap: 5px; border-top: 1px solid var(--glass-border, rgba(255,255,255,.1)); padding: 10px 2px 4px; }
+.tracker-bookmark-choice b { font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.tracker-bookmark-choice small { color: var(--text-50, rgba(180,190,200,.8)); }
+.tracker-bookmark-choice select { width: 100%; max-width: 100%; min-width: 0; }
+.tracker-bookmark-links ul { margin: 10px 0 0; padding-left: 18px; display: grid; gap: 7px; }
+.tracker-bookmark-links li { font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.tracker-bookmark-links a { text-decoration: underline; text-underline-offset: 3px; }
+@media (max-width: 520px) {
+  .tracker-bookmark-review .btn { max-width: 100%; }
+  .tracker-bookmark-links li { font-size: var(--fs-xs); }
+}
+
+.tracker-bookmark-hints { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.tracker-bookmark-hints .sub { flex: 1 1 210px; }
+
+.tracker-item-bookmark-links { display: flex; flex-wrap: wrap; gap: 4px 9px; font-size: var(--fs-xs); max-width: 100%; }
+.tracker-item-bookmark-links a { color: var(--link, var(--cyan)); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.tracker-item-bookmark-links small { color: var(--text-50, rgba(180,190,200,.8)); }
+.tracker-bookmark-links li small { font-size: var(--fs-xs); color: var(--text-50, rgba(180,190,200,.8)); }
+
+/* Explicit, review-first bulk curriculum installation. */
+.tracker-bulk-course-template > details > summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 14px;
+  flex-wrap: wrap;
+  cursor: pointer;
+}
+.tracker-bulk-course-template > details > summary:focus-visible {
+  outline: 2px solid var(--cyan); outline-offset: 3px;
+}
+.tracker-bulk-course-template > details > p.sub,
+.tracker-bulk-course-template .sub { font-size: var(--fs-xs); line-height: 1.48; }
+.tracker-bulk-course-template details > p { margin: 12px 0; }
+.tracker-bulk-template-stats {
+  display: flex; flex-wrap: wrap; gap: 6px 13px;
+  padding: 10px 0; border-top: 1px solid var(--glass-border, rgba(255,255,255,.09));
+  border-bottom: 1px solid var(--glass-border, rgba(255,255,255,.09));
+}
+.tracker-bulk-template-stats > span { font-size: var(--fs-xs); line-height: 1.45; }
+.tracker-bulk-week-options { border: 0; margin: 12px 0; padding: 0; }
+.tracker-bulk-week-options legend { font-size: var(--fs-sm); font-weight: 600; margin-bottom: 7px; }
+.tracker-bulk-week-options label,
+.tracker-bulk-confirm { display: flex; align-items: flex-start; gap: 8px; margin: 9px 0; font-size: var(--fs-sm); line-height: 1.55; }
+.tracker-bulk-week-options input,
+.tracker-bulk-confirm input { flex: 0 0 auto; margin-top: 4px; }
+.tracker-bulk-confirm { padding: 9px 12px; border: 1px solid var(--glass-border, rgba(255,255,255,.09)); border-radius: 9px; }
+.tracker-bulk-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin: 12px 0; }
+.tracker-bulk-module-list { display: grid; gap: 4px; margin: 12px 0; max-height: 360px; overflow-y: auto; }
+.tracker-bulk-module-row { display: grid; gap: 4px; padding: 10px 4px; border-bottom: 1px solid var(--glass-border, rgba(255,255,255,.09)); }
+.tracker-bulk-module-row b { font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.tracker-bulk-module-row small { font-size: var(--fs-xs); line-height: 1.48; }
+.tracker-bulk-issues ul { padding-left: 19px; margin: 5px 0 12px; font-size: var(--fs-xs); line-height: 1.5; }
+@media(max-width:520px) {
+  .tracker-bulk-course-template .tracker-bulk-actions button { max-width: 100%; }
+}
+
+/* Render large course inventories in deliberate, learner-controlled slices. */
+.tracker-pagination-notice {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+  border-top: 1px solid var(--glass-border, rgba(255,255,255,.1));
+  margin: 15px 0 3px; padding-top: 15px;
+}
+.tracker-pagination-notice > span { flex: 1 1 250px; font-size: var(--fs-xs); line-height: 1.5; }
+@media (max-width: 520px) { .tracker-pagination-notice > button { flex: 1 1 auto; } }
+
+.tracker-bulk-outline { display: flex; align-items: flex-start; gap: 8px; border: 1px solid var(--glass-border,rgba(255,255,255,.09)); border-radius: 9px; padding: 10px 12px; margin: 10px 0; font-size: var(--fs-sm); line-height: 1.55; }
+.tracker-bulk-outline input { flex: 0 0 auto; margin-top: 4px; }
+
+/* Auditable SGU 2025+ course overview, not a student timetable. */
+.tracker-official-sgu-evidence > details > summary {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 9px 16px; flex-wrap: wrap; cursor: pointer;
+}
+.tracker-official-sgu-evidence > details > summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+.tracker-official-sgu-evidence .sub { font-size: var(--fs-xs); line-height: 1.5; }
+.tracker-official-sgu-evidence details > p.sub { margin-top: 12px; }
+.tracker-official-course { margin: 14px 0; }
+.tracker-official-course-title { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 15px; }
+.tracker-official-course-title b { font-size: var(--fs-sm); }
+.tracker-official-course-title a { font-size: var(--fs-xs); text-decoration: underline; text-underline-offset: 2px; }
+.tracker-official-table-scroll { max-width: 100%; overflow-x: auto; }
+.tracker-official-table { min-width: 490px; width: 100%; border-collapse: collapse; font-size: var(--fs-xs); text-align: left; }
+.tracker-official-table th, .tracker-official-table td { padding: 8px 9px; border-bottom: 1px solid var(--glass-border, rgba(255,255,255,.1)); vertical-align: top; }
+.tracker-official-table th { font-weight: 650; }
+.tracker-official-table th small { display: block; font-weight: 400; margin-top: 3px; line-height: 1.45; }
+.tracker-official-table td:nth-child(2), .tracker-official-table td:nth-child(3) { white-space: nowrap; }
+
+@media (max-width: 600px) {
+  .tracker-official-table { min-width: 0; display: block; }
+  .tracker-official-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .tracker-official-table tbody { display: block; }
+  .tracker-official-table tr {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+    gap: 4px 10px; padding: 11px 0;
+    border-bottom: 1px solid var(--glass-border, rgba(255,255,255,.1));
+  }
+  .tracker-official-table th[scope="row"] { grid-column: 1 / -1; padding: 1px 0 4px; border: 0; }
+  .tracker-official-table td { border: 0; padding: 2px 0; min-width: 0; white-space: normal !important; }
+  .tracker-official-table td:nth-child(4) { grid-column: 1 / -1; }
+  .tracker-official-table td:nth-child(2)::before { content: "Duration: "; font-weight: 650; }
+  .tracker-official-table td:nth-child(3)::before { content: "Sequence: "; font-weight: 650; }
+  .tracker-official-table td:nth-child(4)::before { content: "AXOM mapping: "; font-weight: 650; }
+}
+
+/* Account-private academic batches: owner verification, not public sharing. */
+.tracker-private-batch details > summary {
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  justify-content: space-between; gap: 8px 15px; cursor: pointer;
+}
+.tracker-private-batch details > summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+.tracker-private-batch .sub { font-size: var(--fs-xs); line-height: 1.5; }
+.tracker-private-batch details > p.sub { margin: 12px 0; }
+.tracker-private-batch-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.tracker-private-batch-review { display: grid; gap: 9px; margin-top: 12px; }
+.tracker-private-batch-review ul { display: grid; gap: 7px; list-style: none; padding: 0; margin: 2px 0; }
+.tracker-private-batch-review li { display: grid; gap: 3px; border-bottom: 1px solid var(--glass-border,rgba(255,255,255,.09)); padding: 7px 0; }
+.tracker-private-batch-review li b { font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.tracker-private-batch-review li small { font-size: var(--fs-xs); color: var(--text-50,rgba(180,190,200,.8)); }
+.tracker-private-batch-consent { display: flex; gap: 9px; align-items: flex-start; border: 1px solid var(--glass-border,rgba(255,255,255,.09)); border-radius: 9px; padding: 10px 12px; font-size: var(--fs-sm); line-height: 1.55; }
+.tracker-private-batch-consent input { flex: 0 0 auto; margin-top: 4px; }
+.tracker-private-batch-outcomes { margin: 12px 0; padding-left: 18px; display: grid; gap: 6px; font-size: var(--fs-xs); }
+.tracker-private-batch-outcomes li { overflow-wrap: anywhere; }
+.tracker-private-batch-outcomes b { display: block; }
+.tracker-private-batch-result { display: grid; justify-items: start; gap: 8px; margin: 12px 0; font-size: var(--fs-xs); }
+.tracker-private-batch-result small { display: block; line-height: 1.5; }
+@media(max-width:520px) { .tracker-private-batch-actions button { max-width: 100%; } }

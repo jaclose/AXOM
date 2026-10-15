@@ -81,6 +81,25 @@ describe("what a package offers to the canonical import", () => {
     expect(adapted.held.find((entry) => entry.questionId === "syn-q02")).toEqual({ questionId: "syn-q02", readiness: "needs-review", reasons: ["The answer is only shown by a mark."] });
   });
 
+  it("blocks a merged 9-choice PDF and a one-choice slide even when review is acknowledged", () => {
+    const { pkg, files } = invented();
+    const nineChoices = Array.from({ length: 9 }, (_, i) => ({
+      id: "synthetic-option-" + i,
+      label: String.fromCharCode(65+i),
+      blocks: [{ type: "text" as const, text: "Synthetic alternative " + i }],
+    }));
+    const malformed = { ...pkg, questions: pkg.questions.map((q) =>
+      q.id === "syn-q01" ? { ...q, choices: nineChoices } :
+      q.id === "syn-q02" ? { ...q, choices: [q.choices[0]] } : q) };
+    const result = packageToReviewedImport(malformed, validatePackage(malformed, {
+      assetFiles: new Set(files.map(file=>file.name)),
+    }), { acknowledged: new Set(["syn-q01","syn-q02"]) });
+    const accepted = result.imports.flatMap(section => section.questionIds);
+    expect(accepted).not.toContain("syn-q01");
+    expect(accepted).not.toContain("syn-q02");
+    expect(result.held.find(q=>q.questionId==="syn-q01")?.reasons.join(" ")).toMatch(/2–8/);
+    expect(result.held.find(q=>q.questionId==="syn-q02")?.reasons.join(" ")).toMatch(/2–8/);
+  });
   it("lets an advisory note travel with a ready question without marking it as reviewed by hand", () => {
     const { pkg, issues } = invented();
     const noted = { ...pkg, questions: pkg.questions.map((question) => (question.id === "syn-q01" ? { ...question, flags: [{ type: "possible_duplicate" as const, message: "It reads like another question in the bank." }] } : question)) };
