@@ -246,3 +246,102 @@ test("service-role image access cannot count as user-verified figure persistence
   assert.ok(r.blockers.some(x => x.includes("image-byte readback")));
   assert.ok(r.blockers.some(x => x.includes("no owner-authenticated cloud receipt")));
 });
+
+test("complete status cannot survive an unmounted previously hashed academic PDF volume", () => {
+  const triage = { schema: "axom-academic-pdf-triage-v1",
+    runAt: new Date().toISOString(), queueDistinctPdfJobs: 1,
+    rows: [{ source_sha256: a, status: "source_volume_unmounted" }] };
+  const blocked = run({ pdfTriage: triage });
+  assert.equal(blocked.complete, false);
+  assert.equal(blocked.counts.pdfVolumeUnmounted, 1);
+  assert.ok(blocked.blockers.some(msg => msg.includes("unmounted academic drive")));
+  triage.rows[0].status = "text_with_question_indicators";
+  const current = run({ pdfTriage: triage });
+  assert.equal(current.complete, true, JSON.stringify(current.blockers));
+  assert.equal(current.counts.pdfJobsRecorded, 1);
+});
+
+test("partial and duplicate PDF sampling cannot be mistaken for corpus coverage", () => {
+  const triage = { schema: "axom-academic-pdf-triage-v1",
+    runAt: new Date().toISOString(), queueDistinctPdfJobs: 2,
+    rows: [{ source_sha256: a, status: "text_with_question_indicators" }] };
+  const partial = run({ pdfTriage: triage });
+  assert.equal(partial.complete, false);
+  assert.ok(partial.blockers.some(msg => msg.includes("covers 1/2")));
+  triage.rows.push({ source_sha256: a, status: "text_with_question_indicators" });
+  const repeated = run({ pdfTriage: triage });
+  assert.equal(repeated.complete, false);
+  assert.ok(repeated.errors.some(msg => msg.includes("repeated source fingerprint")));
+});
+
+test("stale source availability snapshots cannot count as current verified coverage", () => {
+  const triage = { schema: "axom-academic-pdf-triage-v1",
+    runAt: "2024-01-01T00:00:00Z", queueDistinctPdfJobs: 1,
+    rows: [{ source_sha256: a, status: "text_with_question_indicators" }] };
+  const r = run({ pdfTriage: triage });
+  assert.equal(r.complete, false);
+  assert.ok(r.blockers.some(msg => msg.includes("stale or future-dated")));
+});
+
+const canonicalB4Audit = (overrides = {}) => ({
+  format: "axom-b4-corpus-acceptance-v1", generatedAt: new Date().toISOString(),
+  queuedSources: 2, receivedSourceDispositions: 2, missingReceipts: 0,
+  orphanReceipts: 0, pathOnlySourceJobs: 0,
+  sourceReceiptCoverageComplete: true, sourceIdentityCoverageComplete: true,
+  academicReleaseComplete: false, verifiedCloudQuestionCount: 0, verifiedScorableQuestionCount: 0,
+  totals: { detected: 15, canonicalReadable: 14, missingSources: 0, unverifiedByteProofSources: 0 },
+  ...overrides,
+});
+
+test("canonical B4 source audit preserves orphan, path-only and unavailable blockers", () => {
+  const corpusAudit = canonicalB4Audit({
+    orphanReceipts: 2, pathOnlySourceJobs: 1,
+    sourceReceiptCoverageComplete: false, sourceIdentityCoverageComplete: false,
+    totals: { detected: 15, canonicalReadable: 14, missingSources: 1, unverifiedByteProofSources: 1 },
+  });
+  const r = run({ corpusAudit });
+  assert.equal(r.complete, false);
+  assert.equal(r.counts.b4Candidates, 15);
+  assert.equal(r.counts.b4OrphanReceipts, 2);
+  assert.equal(r.counts.b4PathOnlySources, 1);
+  assert.equal(r.counts.b4OriginalsUnavailable, 1);
+  assert.ok(r.blockers.some(x => x.includes("orphan receipts")));
+  assert.ok(r.blockers.some(x => x.includes("path-only originals")));
+});
+
+test("canonical B4 partial queue and forged cloud/scored claims are rejected", () => {
+  const corpusAudit = canonicalB4Audit({
+    receivedSourceDispositions: 1, missingReceipts: 1,
+    verifiedCloudQuestionCount: 8, verifiedScorableQuestionCount: 8,
+  });
+  const r = run({ corpusAudit });
+  assert.equal(r.complete, false);
+  assert.ok(r.errors.some(x => x.includes("offline review")));
+  assert.ok(r.blockers.some(x => x.includes("1/2 current queue entries")));
+});
+
+test("independent ready sources can coexist with valid separate B4 source-only audit", () => {
+  const corpusAudit = canonicalB4Audit();
+  const r = run({ corpusAudit });
+  assert.equal(r.complete, true, JSON.stringify(r.blockers));
+  assert.equal(r.counts.b4JobsAudited, 2);
+  assert.equal(r.counts.verifiedReadyQuestions, 2);
+  assert.equal(r.counts.b4Candidates, 15);
+});
+
+test("stale or noncanonical audit schema never replaces the verified B4 denominator", () => {
+  const corpusAudit = canonicalB4Audit({ format: "axom-b4-source-receipt-audit-v1" });
+  const r = run({ corpusAudit });
+  assert.equal(r.complete, false);
+  assert.ok(r.errors.some(x => x.includes("Canonical B4 acceptance schema")));
+});
+
+test("yesterday's production counts cannot certify a release even if all synthetic receipts appear valid", () => {
+  const production = { projectId: "jofkmfwkidubxcutkwzf", observedAt: "2026-10-14T18:39:58.776Z",
+    academicCollections: 1, academicRevisions: 1, academicFiles: 2, storageObjects: 2 };
+  const r = run({ production });
+  assert.equal(r.complete, false);
+  assert.ok(r.blockers.some(message => message.includes("Production database snapshot is stale")));
+  const current = run({ production: { ...production, observedAt: new Date().toISOString() } });
+  assert.equal(current.complete, true, JSON.stringify(current.blockers));
+});

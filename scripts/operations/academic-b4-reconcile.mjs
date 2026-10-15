@@ -9,7 +9,7 @@
  * Usage: node scripts/operations/academic-b4-reconcile.mjs
  */
 import { createHash } from "node:crypto";
-import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -129,6 +129,152 @@ export function reconcileB4(jobs, receipts, inspectPackage = () => ({ valid: tru
   };
 }
 
+/**
+ * Historical B4 receipts may have been written after a worker switched to
+ * the B5 triage window without changing its receipt prefix. Do not delete
+ * or silently count them in B4. Crosswalk by exact canonical source key to
+ * the *current* full queue and preserve any prepared review-only packages.
+ * This never treats a path-only source or a parser result as answer evidence.
+ */
+export function crosswalkB4Orphans(receipts, activeB4Jobs, canonicalJobs, priority, inspectPackage = () => ({ valid: false })) {
+  const active = new Set(activeB4Jobs.map(job => job?.canonical_input_key));
+  const byKey = new Map(canonicalJobs.map((job, index) => [job.canonical_input_key, { job, index }]));
+  const batchOwnership = new Map();
+  for (const group of priority.processing_order ?? []) {
+    const keys = Array.isArray(group.job_indices)
+      ? group.job_indices.map(index => canonicalJobs[index]?.canonical_input_key)
+      : (group.jobs ?? []).map(job => job.canonical_input_key);
+    for (const key of keys) {
+      if (!key) continue;
+      if (!batchOwnership.has(key)) batchOwnership.set(key, new Set());
+      batchOwnership.get(key).add(group.id);
+    }
+  }
+  const batchPositions = new Map();
+  for (const group of priority.processing_order ?? []) {
+    const keys = Array.isArray(group.job_indices)
+      ? group.job_indices.map(index => canonicalJobs[index]?.canonical_input_key)
+      : (group.jobs ?? []).map(job => job.canonical_input_key);
+    keys.forEach((key,index) => { if(key) batchPositions.set(group.id+"|"+key,index); });
+  }
+  const rows = [];
+  for (const receipt of receipts) {
+    if (!receipt?.sourceKey || active.has(receipt.sourceKey)) continue;
+    const entry = byKey.get(receipt.sourceKey);
+    const owningBatches = [...(batchOwnership.get(receipt.sourceKey) ?? [])].filter(x => x !== "B4");
+    const sha = receipt.sourceKey.startsWith("byte:") ? receipt.sourceKey.slice(5) : null;
+    const checksumMatches = sha !== null && SHA.test(sha) && receipt.sourceSha256 === sha;
+    const hasPreparedPackage = DONE.has(receipt.status) && Boolean(receipt.packagePath);
+    const packaged = hasPreparedPackage ? inspectPackage(receipt) : undefined;
+    rows.push({
+      sourceKey: receipt.sourceKey,
+      sourceSha256: sha && SHA.test(sha) ? sha : null,
+      sourceId: sha?.slice(0, 12) ?? createHash("sha256").update(receipt.sourceKey).digest("hex").slice(0, 12),
+      ...(entry?.job?.source_path ? { originalSourcePath: entry.job.source_path } : {}),
+      ...(owningBatches.length === 1 ? { targetBatchPosition: batchPositions.get(owningBatches[0]+"|"+receipt.sourceKey) ?? null } : {}),
+      receiptBatch: receipt.batch, receiptIndex: receipt.queueIndex,
+      currentJobIndex: entry?.index ?? null,
+      currentBatches: owningBatches,
+      status: receipt.status ?? "unknown",
+      immutableShaSupported: checksumMatches,
+      sourceIdentity: sha ? "byte-sha256" : "path-only",
+      preparedReviewPackagePreserved: hasPreparedPackage,
+      preparedPackageChecksumVerified: packaged?.valid === true,
+      ...(hasPreparedPackage ? { privatePackagePath: receipt.packagePath,
+        packageQuestionsSha256: receipt.packageQuestionsSha256 ?? null } : {}),
+      // A prepared package is a source-review artifact. No implicit evidence
+      // that it is independently answered, licensed or cloud-installed.
+      answerVerified: false,
+      accountCloudReadbackVerified: false,
+      classification: owningBatches.length === 1 && entry
+        ? "currently_queued_other_batch" : entry ? "ambiguous_current_queue_batch"
+          : "absent_from_current_canonical_queue",
+      nextAction: owningBatches.length === 1 && entry
+        ? "Issue a fresh source/review receipt in the actual owning batch after re-verifying original SHA; preserve original B4 receipt and package."
+        : "Agent 1 must reconcile source identity and root before selecting any import batch.",
+    });
+  }
+  return {
+    total: rows.length,
+    byStatus: Object.fromEntries([...new Set(rows.map(x => x.status))].map(k => [k, rows.filter(x => x.status === k).length])),
+    byAssignedBatch: Object.fromEntries([...new Set(rows.flatMap(x => x.currentBatches))].map(k =>
+      [k, rows.filter(x => x.currentBatches.includes(k)).length])),
+    matchedToOtherCurrentBatch: rows.filter(x => x.classification === "currently_queued_other_batch").length,
+    preservedPreparedReviewPackages: rows.filter(x => x.preparedReviewPackagePreserved).length,
+    verifiedPreparedReviewPackages: rows.filter(x => x.preparedPackageChecksumVerified).length,
+    byteShaConfirmedByReceipt: rows.filter(x => x.immutableShaSupported).length,
+    pathOnlySources: rows.filter(x => x.sourceIdentity === "path-only").length,
+    rows,
+    caveat: "A receipt in an incorrect batch is not a validated, installed or cloud-verified collection. No original/source bytes modified.",
+  };
+}
+
+/** A versioned, zero-copy migration PLAN, never a silent receipt rewrite. */
+export function buildB5ReclassificationHandoff(orphanCrosswalk, priority) {
+  const group = priority?.processing_order?.find(g => g.id === "B5");
+  if (!Array.isArray(group?.jobs)) throw new Error("Current B5 source queue is missing.");
+  const canonicalKeys = group.jobs.map(job => job.canonical_input_key);
+  if (canonicalKeys.some(key => typeof key !== "string" || !key.length)
+    || new Set(canonicalKeys).size !== canonicalKeys.length)
+    throw new Error("B5 queue has missing or duplicate canonical source keys.");
+  const queueFingerprint = createHash("sha256").update(JSON.stringify(canonicalKeys)).digest("hex");
+  const matched = new Set(), tasks = [];
+  for (const row of orphanCrosswalk?.rows ?? []) {
+    if (row.classification !== "currently_queued_other_batch"
+      || row.currentBatches.length !== 1 || row.currentBatches[0] !== "B5"
+      || !Number.isSafeInteger(row.targetBatchPosition)
+      || group.jobs[row.targetBatchPosition]?.canonical_input_key !== row.sourceKey)
+      throw new Error("Historical B4 receipt cannot be safely attributed to the current B5 queue.");
+    if (matched.has(row.sourceKey)) throw new Error("Duplicate historical source identity in B5 migration evidence.");
+    matched.add(row.sourceKey);
+    if (row.preparedReviewPackagePreserved && !row.preparedPackageChecksumVerified)
+      throw new Error("Unverified historical package cannot be reused during B5 migration.");
+    tasks.push({
+      targetBatch: "B5",
+      targetQueuePosition: row.targetBatchPosition,
+      originalSourcePath: row.originalSourcePath ?? null,
+      canonicalInputKey: row.sourceKey,
+      sourceSha256: row.sourceSha256,
+      oldReceiptBatch: row.receiptBatch,
+      oldReceiptIndex: row.receiptIndex,
+      oldReceiptStatus: row.status,
+      sourceIdentity: row.sourceIdentity,
+      originalCurrentlyAccessible: typeof row.originalSourcePath === "string"
+        ? existsSync(row.originalSourcePath) : false,
+      ...(row.preparedReviewPackagePreserved ? {
+        existingPrivateReviewPackagePath: row.privatePackagePath,
+        existingQuestionsSha256: row.packageQuestionsSha256,
+        packageChecksumVerified: true,
+      } : {}),
+      validatedCorrectAnswers: 0,
+      authenticatedCloudReadbackVerified: false,
+      status: row.preparedReviewPackagePreserved
+        ? "review_package_reusable_after_source_confirmation" : "needs_original_or_source_review",
+      nextAction: row.sourceIdentity === "path-only"
+        ? "Reconnect academic drive and hash the original; do not use path string as a checksum."
+        : row.preparedReviewPackagePreserved
+          ? "Confirm original SHA and author/reviewer rights, then reissue B5 receipt referencing existing immutable private package without copying it."
+          : "Reopen original in actual B5 batch, retain the historical B4 receipt for provenance.",
+    });
+  }
+  tasks.sort((a,b) => a.targetQueuePosition-b.targetQueuePosition);
+  const unresolvedB5 = canonicalKeys.filter(key => !matched.has(key));
+  return {
+    format: "axom-b5-orphan-reclassification-plan-v1",
+    sourceQueueSha256: queueFingerprint,
+    totalB5Jobs: canonicalKeys.length, matchedHistoricalReceipts: tasks.length,
+    missingFromHistoricalReceipts: unresolvedB5.length,
+    missingCurrentB5Keys: unresolvedB5,
+    sourcesWithoutByteSha256: tasks.filter(t => t.sourceIdentity === "path-only").length,
+    existingReviewPackagesReusable: tasks.filter(t => t.packageChecksumVerified).length,
+    actionsCompleted: 0,
+    permissionedCloudInstallations: 0,
+    noSourceOrPreparedPackageBytesCopied: true,
+    note: "A plan to adopt prior review-only receipt identities; no answers certified, no original or private package modified, no cloud upload.",
+    tasks,
+  };
+}
+
 function readCandidate(receipt) {
   const root = realpathSync(join(privateRoot, "packages"));
   const folder = resolve(receipt.packagePath);
@@ -205,6 +351,10 @@ export async function runB4(root = dataRoot) {
   const liveAudit = process.argv.includes("--verify-source-bytes")
     ? await attestSourceBytes(receipts) : undefined;
   const result = reconcileB4(jobs, receipts, readCandidate, liveAudit?.proven);
+  result.orphanCrosswalk = crosswalkB4Orphans(receipts, jobs, sourceJobs, queue, readCandidate);
+  const b5Handoff = buildB5ReclassificationHandoff(result.orphanCrosswalk, queue);
+  if (result.orphanCrosswalk.total !== result.orphanReceipts)
+    throw new Error("B4 orphan evidence changed during reconciliation; retry against a stable receipt manifest.");
   if (liveAudit) {
     result.freshOriginalsHashed = liveAudit.inspected;
     result.freshBytesRead = liveAudit.bytesRead;
@@ -218,6 +368,12 @@ export async function runB4(root = dataRoot) {
   }
   const target = join(root, "lead-b4-acceptance.json");
   mkdirSync(dirname(target), { recursive: true });
+  // This private plan references existing immutable packages; it never copies
+  // an original file, replays a receipt into B5 or changes a cloud account.
+  const handoffPath = join(root, "agent0-b5-reclassification-handoff.json");
+  const handoffTmp = handoffPath + ".tmp-agent0";
+  writeFileSync(handoffTmp, JSON.stringify({ createdAt: new Date().toISOString(), ...b5Handoff }, null, 2) + "\n");
+  renameSync(handoffTmp, handoffPath);
   writeFileSync(target, JSON.stringify({ generatedAt: new Date().toISOString(), ...result }, null, 2) + "\n");
   console.log(JSON.stringify({ sourceReceiptCoverageComplete: result.sourceReceiptCoverageComplete,
     academicReleaseComplete: result.academicReleaseComplete,
@@ -228,6 +384,16 @@ export async function runB4(root = dataRoot) {
       freshSourceFailures: liveAudit.failures.length } : {}),
     queuedSources: result.queuedSources, receivedSourceDispositions: result.receivedSourceDispositions,
     orphanReceipts: result.orphanReceipts, orphanPreparedReceipts: result.orphanPreparedReceipts,
+    b5ReclassificationPlan: { total: b5Handoff.totalB5Jobs,
+      matched: b5Handoff.matchedHistoricalReceipts,
+      reusablePrivatePackages: b5Handoff.existingReviewPackagesReusable,
+      unverifiedSourcePaths: b5Handoff.sourcesWithoutByteSha256,
+      handoff: handoffPath },
+    orphanCrosswalk: { matchedToOtherCurrentBatch: result.orphanCrosswalk.matchedToOtherCurrentBatch,
+      byAssignedBatch: result.orphanCrosswalk.byAssignedBatch,
+      preservedReviewPackages: result.orphanCrosswalk.preservedPreparedReviewPackages,
+      checksumVerifiedReviewPackages: result.orphanCrosswalk.verifiedPreparedReviewPackages,
+      pathOnlySources: result.orphanCrosswalk.pathOnlySources },
     byStatus: result.byStatus, totals: result.totals, errors: result.errors.length, report: target }, null, 2));
   if (!result.sourceReceiptCoverageComplete) process.exitCode = 1;
   return result;

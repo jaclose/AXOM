@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { attestSourceBytes, reconcileB4 } from "./academic-b4-reconcile.mjs";
+import { attestSourceBytes, reconcileB4, crosswalkB4Orphans, buildB5ReclassificationHandoff } from "./academic-b4-reconcile.mjs";
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -125,4 +125,83 @@ test("optional live source SHA recheck streams exact original bytes without alte
     assert.equal(invalid.proven.size, 0);
     assert.ok(invalid.failures.length > 0);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("historical B4 receipts are crosswalked to exact current B5 identities without promoting scored answers", () => {
+  const current = [{ canonical_input_key: "byte:" + a }];
+  const full = [{ canonical_input_key: "byte:" + a }, { canonical_input_key: "byte:" + b }];
+  const priority = { processing_order: [
+    { id: "B4", job_indices: [0] },
+    { id: "B5", job_indices: [1] },
+  ] };
+  const first = base(0, "byte:" + a);
+  const moved = base(0, "byte:" + b, {
+    status: "review-prepared", detected: 3, canonicalReadable: 3,
+    reviewRequired: 3, unresolved: 0, rejected: 0,
+  });
+  const report = crosswalkB4Orphans([first, moved], current, full, priority,
+    () => ({ valid: true, questions: 3, unreadable: 0 }));
+  assert.equal(report.total, 1);
+  assert.equal(report.matchedToOtherCurrentBatch, 1);
+  assert.equal(report.byAssignedBatch.B5, 1);
+  assert.equal(report.preservedPreparedReviewPackages, 1);
+  assert.equal(report.verifiedPreparedReviewPackages, 1);
+  assert.equal(report.byteShaConfirmedByReceipt, 1);
+  assert.equal(report.rows[0].currentJobIndex, 1);
+  assert.equal(report.rows[0].classification, "currently_queued_other_batch");
+  assert.match(report.rows[0].nextAction, /fresh source\/review receipt/);
+});
+
+test("path-only historical sources remain unverified even when moved between queues", () => {
+  const path = "path:/Volumes/JDabSSD/Medical School/T4/Quiz 1.pdf";
+  const full = [{ canonical_input_key: "byte:" + a }, { canonical_input_key: path }];
+  const priority = { processing_order: [
+    { id: "B4", job_indices: [0] }, { id: "B5", job_indices: [1] },
+  ] };
+  const moved = base(0, path, {
+    status: "unavailable", detected: 0, canonicalReadable: 0, reviewRequired: 0,
+    unresolved: 0, rejected: 0, packagePath: undefined, packageQuestionsSha256: undefined,
+  });
+  const result = crosswalkB4Orphans([moved], [full[0]], full, priority);
+  assert.equal(result.matchedToOtherCurrentBatch, 1);
+  assert.equal(result.pathOnlySources, 1);
+  assert.equal(result.byteShaConfirmedByReceipt, 0);
+  assert.equal(result.rows[0].sourceIdentity, "path-only");
+  assert.equal(result.rows[0].immutableShaSupported, false);
+});
+
+test("B5 migration plan is SHA-versioned, zero-copy and cannot approve old review answers", () => {
+  const active=[{canonical_input_key:"byte:"+a}];
+  const b5=[{canonical_input_key:"byte:"+b,source_path:"/private/source-b.pdf"}];
+  const all=[...active,...b5];
+  const priority={processing_order:[
+    {id:"B4",job_indices:[0]},
+    {id:"B5",jobs:[{...b5[0],queue_index:1}]},
+  ]};
+  const old=base(0,"byte:"+b,{status:"review-prepared",detected:3,canonicalReadable:3,
+    reviewRequired:3,unresolved:0,rejected:0,
+    packagePath:"/private/package-b",packageQuestionsSha256:a});
+  const proof=crosswalkB4Orphans([old],active,all,priority,
+    ()=>({valid:true,questions:3,unreadable:0}));
+  const plan=buildB5ReclassificationHandoff(proof,priority);
+  assert.equal(plan.matchedHistoricalReceipts,1);
+  assert.equal(plan.missingFromHistoricalReceipts,0);
+  assert.equal(plan.existingReviewPackagesReusable,1);
+  assert.equal(plan.actionsCompleted,0);
+  assert.equal(plan.permissionedCloudInstallations,0);
+  assert.equal(plan.tasks[0].targetQueuePosition,0);
+  assert.equal(plan.tasks[0].sourceSha256,b);
+  assert.equal(plan.tasks[0].validatedCorrectAnswers,0);
+  assert.equal(plan.tasks[0].packageChecksumVerified,true);
+  assert.match(plan.sourceQueueSha256,/^[a-f0-9]{64}$/);
+});
+
+test("B5 migration refuses an orphan attributed to an unrelated or ambiguous queue",()=>{
+  const priority={processing_order:[{id:"B5",jobs:[{canonical_input_key:"byte:"+b}]}]};
+  const bad={rows:[{classification:"absent_from_current_canonical_queue",
+    sourceKey:"byte:"+a,currentBatches:[],sourceIdentity:"byte-sha256"}]};
+  assert.throws(()=>buildB5ReclassificationHandoff(bad,priority),/cannot be safely attributed/);
+  assert.throws(()=>buildB5ReclassificationHandoff({rows:[]},
+    {processing_order:[{id:"B5",jobs:[{canonical_input_key:"byte:"+b},{canonical_input_key:"byte:"+b}]}]}),
+    /duplicate canonical source keys/);
 });

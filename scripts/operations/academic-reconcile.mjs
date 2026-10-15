@@ -58,7 +58,7 @@ export function expandedSourceInventory(manifestRows, sourceSummary) {
   };
 }
 
-export function reconcileAcademicContent({ inventory, dispositions, receipts, tracker, production }) {
+export function reconcileAcademicContent({ inventory, dispositions, receipts, tracker, production, pdfTriage, corpusAudit }) {
   const errors = [], blockers = [], warnings = [];
   if (!inventory || !Array.isArray(inventory.entries) || !inventory.summary) {
     return { complete: false, errors: ["Source inventory has no entries and summary."], blockers: [], warnings: [], counts: {} };
@@ -190,6 +190,83 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
         errors.push("Media receipts claim verified figures but production has zero academic files.");
       }
       if (production.projectId !== "jofkmfwkidubxcutkwzf") errors.push("Production snapshot is not the verified AXOM Production project.");
+      const elapsed = Date.now() - Date.parse(production.observedAt);
+      if (elapsed < -5 * 60_000 || elapsed > 60 * 60_000)
+        blockers.push("Production database snapshot is stale or future-dated; repeat an authorized read-only query before release certification.");
+    }
+  }
+  // A previously hashed source is not necessarily accessible today. Distinguish
+  // disconnected academic storage from deletion or successful ingestion.
+  let pdfTriageMetrics;
+  if (pdfTriage !== undefined) {
+    if (pdfTriage?.schema !== "axom-academic-pdf-triage-v1" || !Array.isArray(pdfTriage.rows)
+      || !integer(pdfTriage.queueDistinctPdfJobs) || !Number.isFinite(Date.parse(pdfTriage.runAt))) {
+      errors.push("PDF availability ledger is absent, malformed or has no timestamp.");
+    } else {
+      const seenPdf = new Set(), byStatus = {};
+      for (const entry of pdfTriage.rows) {
+        if (!SHA256.test(entry.source_sha256 ?? "") || seenPdf.has(entry.source_sha256)) {
+          errors.push("PDF availability ledger has a missing or repeated source fingerprint.");
+          continue;
+        }
+        seenPdf.add(entry.source_sha256);
+        if (!byHash.has(entry.source_sha256)) errors.push(`PDF availability SHA ${entry.source_sha256.slice(0, 12)} is not in the source manifest.`);
+        byStatus[entry.status] = (byStatus[entry.status] ?? 0) + 1;
+      }
+      if (pdfTriage.rows.length !== pdfTriage.queueDistinctPdfJobs)
+        blockers.push(`PDF availability triage covers ${pdfTriage.rows.length}/${pdfTriage.queueDistinctPdfJobs} queued original PDF sources; rescan the remainder.`);
+      const unmounted = byStatus.source_volume_unmounted ?? 0;
+      const missing = byStatus.source_path_unavailable ?? 0;
+      const lowText = byStatus.low_text_scan_or_figures ?? 0;
+      const failed = (byStatus.reader_failure_needs_review ?? 0) + (byStatus.pdfinfo_unreadable ?? 0);
+      if (unmounted) blockers.push(`${unmounted} PDF originals depend on an unmounted academic drive; reconnect before declaring corpus coverage.`);
+      if (missing) blockers.push(`${missing} PDF originals lack an accessible authorized path; reconcile exact SHA aliases.`);
+      if (lowText) blockers.push(`${lowText} low-text/image-heavy PDF originals need bounded OCR or explicit manual review before completeness.`);
+      if (failed) blockers.push(`${failed} PDF originals failed bounded inspection and need a tracked parser disposition.`);
+      const age = Date.now() - Date.parse(pdfTriage.runAt);
+      if (age < -5 * 60000 || age > 24 * 60 * 60000)
+        blockers.push("PDF availability snapshot is stale or future-dated; rerun the staged triage before accepting physical-source coverage.");
+      pdfTriageMetrics = { pdfJobsRecorded: pdfTriage.rows.length, pdfJobsInQueue: pdfTriage.queueDistinctPdfJobs,
+        pdfVolumeUnmounted: unmounted, pdfPathsMissing: missing, pdfLowText: lowText, pdfReaderFailures: failed };
+    }
+  }
+  // Reuse the single canonical B4 acceptance report rather than maintaining a
+  // second corpus parser/checker with competing source denominators. Orphan
+  // receipts from old queue revisions must stay visible, never double-counted.
+  let b4AuditMetrics;
+  if (corpusAudit !== undefined) {
+    if (!corpusAudit || corpusAudit.format !== "axom-b4-corpus-acceptance-v1"
+      || !Number.isFinite(Date.parse(corpusAudit.generatedAt ?? ""))
+      || !integer(corpusAudit.queuedSources) || !integer(corpusAudit.receivedSourceDispositions)
+      || !integer(corpusAudit.missingReceipts) || !integer(corpusAudit.orphanReceipts)
+      || !integer(corpusAudit.pathOnlySourceJobs)
+      || !integer(corpusAudit.totals?.detected)
+      || !integer(corpusAudit.totals?.canonicalReadable)
+      || !integer(corpusAudit.totals?.missingSources)
+      || !integer(corpusAudit.totals?.unverifiedByteProofSources))
+      errors.push("Canonical B4 acceptance schema or timestamp is invalid.");
+    else {
+      if (corpusAudit.receivedSourceDispositions !== corpusAudit.queuedSources
+        || corpusAudit.missingReceipts)
+        blockers.push(`B4 source preparation accounted for ${corpusAudit.receivedSourceDispositions}/${corpusAudit.queuedSources} current queue entries; resolve missing receipts.`);
+      if (corpusAudit.sourceReceiptCoverageComplete !== true || corpusAudit.orphanReceipts)
+        blockers.push(`B4 corpus has ${corpusAudit.orphanReceipts} orphan receipts from earlier queue versions; preserve and reconcile before claiming completion.`);
+      if (corpusAudit.sourceIdentityCoverageComplete !== true
+        || corpusAudit.pathOnlySourceJobs || corpusAudit.totals.unverifiedByteProofSources)
+        blockers.push(`B4 source identity still has ${corpusAudit.pathOnlySourceJobs} path-only originals and ${corpusAudit.totals.unverifiedByteProofSources} unverified source-byte receipts.`);
+      if (corpusAudit.totals.missingSources)
+        blockers.push(`${corpusAudit.totals.missingSources} B4 originals are currently unavailable; do not represent them as installed.`);
+      if (corpusAudit.academicReleaseComplete !== false
+        || corpusAudit.verifiedCloudQuestionCount !== 0 || corpusAudit.verifiedScorableQuestionCount !== 0)
+        errors.push("B4 offline review preparation cannot assert scored or authenticated cloud-installed content.");
+      b4AuditMetrics = { b4JobsExpected: corpusAudit.queuedSources,
+        b4JobsAudited: corpusAudit.receivedSourceDispositions,
+        b4OrphanReceipts: corpusAudit.orphanReceipts,
+        b4PathOnlySources: corpusAudit.pathOnlySourceJobs,
+        b4UnverifiedByteProofSources: corpusAudit.totals.unverifiedByteProofSources,
+        b4Candidates: corpusAudit.totals.detected,
+        b4CanonicallyReadable: corpusAudit.totals.canonicalReadable,
+        b4OriginalsUnavailable: corpusAudit.totals.missingSources };
     }
   }
   if (!Array.isArray(dispositionRows) || !Array.isArray(receiptRows) || !Array.isArray(trackerRows)) warnings.push("This is a discovery baseline, not a release acceptance certificate.");
@@ -203,6 +280,8 @@ export function reconcileAcademicContent({ inventory, dispositions, receipts, tr
     expectedBaselineTrackerActivities: expectedTracker, reportedTrackerActivities: tmap.size,
     installedTrackerActivities: [...tmap.values()].filter(item => item.installed === true).length,
     cloudReceiptSources: rmap.size,
+    ...(pdfTriageMetrics ?? {}),
+    ...(b4AuditMetrics ?? {}),
     ...(figureBearingSources ? { figureBearingSources, declaredFigureReferences, verifiedFigureReferences } : {}),
     ...(production ? { productionSnapshotAt: production.observedAt,
       productionAcademicCollections: production.academicCollections,
@@ -222,7 +301,7 @@ function parseArgs(args) {
   const options = { strict: false };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--strict") { options.strict = true; continue; }
-    if (!["--inventory", "--inventory-jsonl", "--source-summary", "--dispositions", "--receipts", "--tracker", "--production-snapshot", "--out"].includes(args[i])) throw new Error(`Unknown argument: ${args[i]}`);
+    if (!["--inventory", "--inventory-jsonl", "--source-summary", "--dispositions", "--receipts", "--tracker", "--production-snapshot", "--pdf-triage", "--corpus-audit", "--out"].includes(args[i])) throw new Error(`Unknown argument: ${args[i]}`);
     if (!args[i + 1]) throw new Error(`Missing path after ${args[i]}`);
     options[args[i].slice(2)] = args[++i];
   }
@@ -243,7 +322,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       : readJsonIfPresent(inventoryPath);
     const report = reconcileAcademicContent({ inventory,
       dispositions: readJsonIfPresent(a.dispositions), receipts: readJsonIfPresent(a.receipts),
-      tracker: readJsonIfPresent(a.tracker), production: readJsonIfPresent(a["production-snapshot"]) });
+      tracker: readJsonIfPresent(a.tracker), production: readJsonIfPresent(a["production-snapshot"]),
+      pdfTriage: readJsonIfPresent(a["pdf-triage"]), corpusAudit: readJsonIfPresent(a["corpus-audit"]) });
     const destination = resolve(a.out ?? "artifacts/qbank-6way-20261014/reconciliation.json");
     mkdirSync(dirname(destination), { recursive: true });
     writeFileSync(destination, JSON.stringify({ generatedAt: new Date().toISOString(), ...report }, null, 2));
