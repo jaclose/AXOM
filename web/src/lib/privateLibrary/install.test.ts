@@ -155,6 +155,28 @@ describe("prepared private library installation", () => {
 });
 
 describe("shared image identity in prepared libraries", () => {
+  it("resolves root-level bank media beside bank.json", async () => {
+    const b = await bundle();
+    const bank = JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)) as PreparedBank;
+    const png = new Uint8Array([
+      137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,
+    ]);
+    const checksum = await sha256(png);
+    bank.pkg.questions[0].assets = [{
+      id: "root-figure", filename: "root-figure.png", mimeType: "image/png",
+      role: "question", questionId: "sample-1", checksum,
+    }];
+    const read = vi.fn(async (path: string) => {
+      expect(path).toBe("assets/root-figure.png");
+      return png;
+    });
+
+    const files = await bankFiles(bank, read, "bank.json");
+
+    expect(files.map(file => file.name)).toEqual(["root-figure.png"]);
+    expect(read).toHaveBeenCalledOnce();
+  });
+
   it("materializes a reused source-page image once even when question-local asset IDs differ", async () => {
     const b = await bundle();
     const bank = JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)) as PreparedBank;

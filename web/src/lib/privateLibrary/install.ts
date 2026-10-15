@@ -35,6 +35,11 @@ export function readPreparedBank(value: unknown): PreparedBank {
   return { ...bank, issues: [...bank.issues, ...issues], unreadableQuestions: (bank.unreadableQuestions ?? 0) + bank.pkg.questions.length - parsed.questions.length, pkg: { manifest, questions: parsed.questions } };
 }
 const reviewBlobKey = (checksum: string) => `private-library:${checksum}`;
+function bankAssetPath(bankFile: string, filename: string): string {
+  const separator = bankFile.lastIndexOf("/");
+  const prefix = separator === -1 ? "" : bankFile.slice(0, separator + 1);
+  return safeLibraryPath(`${prefix}assets/${filename}`);
+}
 export async function bankFiles(bank: PreparedBank, read?: LibraryReader, bankFile?: string, assertCurrent: () => void = () => {}): Promise<File[]> {
   const files: File[] = [];
   // Several question assets can refer to the *same* source-page file while
@@ -58,7 +63,7 @@ export async function bankFiles(bank: PreparedBank, read?: LibraryReader, bankFi
     const key = reviewBlobKey(asset.checksum);
     let record = await getQuestionAttachmentBlob(key);
     if (!record && read && bankFile) {
-      const bytes = await read(safeLibraryPath(`${bankFile.slice(0, bankFile.lastIndexOf("/"))}/assets/${asset.filename}`));
+      const bytes = await read(bankAssetPath(bankFile, asset.filename));
       const info = readImageInfo(bytes);
       if (!info || !QUESTION_ATTACHMENT_TYPES.includes(info.mimeType as QuestionAttachmentMimeType) || bytes.length > 8 * 1024 * 1024 || await sha256(bytes) !== asset.checksum) throw new Error(`Image integrity check failed: ${asset.filename}`);
       record = { blob: new Blob([bytes as BlobPart], { type: info.mimeType }), mimeType: info.mimeType as QuestionAttachmentMimeType, byteSize: bytes.length, questionId: asset.questionId, updatedAt: new Date().toISOString() };
