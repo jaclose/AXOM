@@ -4,7 +4,12 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QuestionAttachmentsPanel } from "./QuestionAttachmentsPanel";
 import { DB_NAME } from "../../lib/localVault";
-import { listQuestionAttachmentBlobKeys, type QuestionImageAttachment } from "../../lib/questionAttachments";
+import {
+  getQuestionAttachmentBlob,
+  listQuestionAttachmentBlobKeys,
+  putQuestionAttachmentBlob,
+  type QuestionImageAttachment,
+} from "../../lib/questionAttachments";
 
 function deleteDatabase(name: string): Promise<void> {
   return new Promise((resolve) => {
@@ -91,12 +96,38 @@ describe("QuestionAttachmentsPanel", () => {
 
   it("removes an attachment (metadata + blob) and identifies the file", async () => {
     const attachment = metadata();
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: new Blob([PNG_BYTES], { type: "image/png" }),
+      mimeType: "image/png",
+      byteSize: PNG_BYTES.byteLength,
+      questionId: "q1",
+      updatedAt: attachment.updatedAt,
+    });
     const changes: QuestionImageAttachment[][] = [];
     render(<QuestionAttachmentsPanel questionId="q1" attachments={[attachment]} onChange={(next) => changes.push(next)} />);
     fireEvent.click(screen.getByRole("button", { name: "Remove slide.png" }));
     await waitFor(() => expect(changes).toEqual([[]]));
     await waitFor(() => expect(screen.getByRole("status").textContent).toContain('Removed "slide.png"'));
     expect(await listQuestionAttachmentBlobKeys()).toEqual([]);
+  });
+
+  it("removes canonical private-library metadata without deleting shared bytes", async () => {
+    const blobKey = `private-library:sha256:${"a".repeat(64)}`;
+    const attachment = metadata({ id: "canonical-a", blobKey });
+    await putQuestionAttachmentBlob(blobKey, {
+      blob: new Blob([PNG_BYTES], { type: "image/png" }),
+      mimeType: "image/png",
+      byteSize: PNG_BYTES.byteLength,
+      questionId: "private-library",
+      updatedAt: attachment.updatedAt,
+    });
+    const changes: QuestionImageAttachment[][] = [];
+    render(<QuestionAttachmentsPanel questionId="q1" attachments={[attachment]} onChange={(next) => changes.push(next)} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove slide.png" }));
+
+    await waitFor(() => expect(changes).toEqual([[]]));
+    expect((await getQuestionAttachmentBlob(blobKey, { localOnly: true }))?.byteSize).toBe(PNG_BYTES.byteLength);
   });
 
   it("normal text paste is never intercepted", () => {

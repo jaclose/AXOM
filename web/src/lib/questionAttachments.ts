@@ -46,6 +46,13 @@ export interface QuestionAttachmentBlobRecord {
   updatedAt: string;
 }
 
+/** Private-library media is content-addressed and may be referenced by more
+ * than one question or review document. Removing one metadata reference must
+ * never delete the shared canonical bytes. */
+export function isPrivateLibraryAttachmentBlobKey(blobKey: string): boolean {
+  return blobKey.startsWith("private-library:");
+}
+
 // --- metadata normalization (mirrors normalizeQuestionAnnotations) ----------
 
 export function normalizeQuestionAttachments(value: unknown): QuestionImageAttachment[] | undefined {
@@ -298,7 +305,7 @@ export async function runQuestionAttachmentMaintenance(
   const stored = await listQuestionAttachmentBlobKeys();
   // Private review documents have their own references. Preserve their bytes if
   // an older app/backup cannot read a document; recovery must remain possible.
-  const orphans = stored.filter((key) => !referenced.has(key) && !key.startsWith("private-library:"));
+  const orphans = stored.filter((key) => !referenced.has(key) && !isPrivateLibraryAttachmentBlobKey(key));
   await deleteQuestionAttachmentBlobs(orphans);
   const storedSet = new Set(stored);
   const missing = [...referenced].filter((key) => !storedSet.has(key));

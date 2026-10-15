@@ -25,12 +25,17 @@ import {
   type ReviewedImportPersistencePlan,
   type ReviewedQuestionInput,
 } from "./questionImportFinalization";
-import { getQuestionAttachmentBlob, type QuestionImageAttachment } from "./questionAttachments";
+import {
+  deleteQuestionAttachmentBlobs,
+  getQuestionAttachmentBlob,
+  isPrivateLibraryAttachmentBlobKey,
+  type QuestionImageAttachment,
+} from "./questionAttachments";
 import type { ImportLibrary } from "./questionImportHistory";
 import { attachNamedImages, imageNameKey, matchNamedImages } from "./questionImportImages";
 import { evaluateImportDrafts, type DraftImportEvaluation } from "./questionImportTrust";
 import { normalizeTags, suggestCategory } from "./taxonomy";
-import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "./localVault";
+import { assertVaultWrite, assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "./localVault";
 import { saveSourceOriginal } from "./decode/sources";
 import { MAX_SOURCE_ORIGINAL_BYTES, originalFileIdentity } from "./sourceOriginal";
 
@@ -301,6 +306,7 @@ export function prepareReviewedImport(
 
 export interface ReviewedImportStore extends QuestionImportPersistence {
   updateQuestion(id: string, patch: Partial<QuestionRecord>): unknown;
+  updateQuestionSet?(id: string, patch: Partial<QuestionSet>): unknown;
 }
 
 export type SavedReviewedImport =
@@ -375,7 +381,8 @@ export async function saveReviewedImport(
       // Saved ids come back in the order the questions were given.
       const questionId = persisted.questionIds[index];
       if (!names.length || !questionId) continue;
-      const existing = prepared.equivalent?.attachments?.[index] ?? [];
+      const priorAttachments = prepared.equivalent?.attachments?.[index];
+      const existing = priorAttachments ?? [];
       const usable = new Set<string>();
       for (const attachment of existing) {
         if (await getQuestionAttachmentBlob(attachment.blobKey)) usable.add(imageNameKey(attachment.fileName));
@@ -385,8 +392,8 @@ export async function saveReviewedImport(
       if (!needed.length) continue;
       report.missing += matchNamedImages(needed, images).filter((match) => !match.file).length;
       if (!images.length) continue;
-      const result = await attachNamedImages({ names: needed, files: images, questionId });
       const content = prepared.plan.questions[index]?.content;
+      const result = await attachNamedImages({ names: needed, files: images, questionId, contentAssets: content?.assets });
       if (content) result.attachments = result.attachments.map((attachment) => {
         const asset = content.assets.find((item) => imageNameKey(item.filename) === imageNameKey(attachment.fileName));
         return asset ? { ...attachment, assetId: asset.id, role: asset.role } : { ...attachment, role: "source_page" };
@@ -398,10 +405,35 @@ export async function saveReviewedImport(
           const replaced = new Set(result.attachments.map(attachment => imageNameKey(attachment.fileName)));
           await store.updateQuestion(questionId, { attachments: [...existing.filter(attachment => !replaced.has(imageNameKey(attachment.fileName))), ...result.attachments] });
           await flushLocalVaultWrites();
+          assertVaultWrite(checkpoint + 1);
           assertVaultWritesSince(checkpoint);
           report.attached += result.attachments.length;
         } catch {
-          report.problems.push(`Question ${index + 1}: its images could not be linked on this device. Keep the source files and export a backup before closing AXOM.`);
+          const temporaryBlobKeys = result.attachments
+            .map(attachment => attachment.blobKey)
+            .filter(blobKey => !isPrivateLibraryAttachmentBlobKey(blobKey));
+          let rollbackConfirmed = false;
+          let rollbackProblem = "";
+          try {
+            const rollbackCheckpoint = getVaultWriteCheckpoint();
+            await store.updateQuestion(questionId, { attachments: priorAttachments });
+            await flushLocalVaultWrites();
+            assertVaultWrite(rollbackCheckpoint + 1);
+            assertVaultWritesSince(rollbackCheckpoint);
+            rollbackConfirmed = true;
+          } catch (rollbackCause) {
+            rollbackProblem = rollbackCause instanceof Error ? rollbackCause.message : "attachment metadata rollback failed";
+          }
+          let cleanupProblem = "";
+          if (rollbackConfirmed) {
+            try {
+              await deleteQuestionAttachmentBlobs(temporaryBlobKeys);
+            } catch (cleanupCause) {
+              cleanupProblem = cleanupCause instanceof Error ? cleanupCause.message : "temporary image cleanup failed";
+            }
+          }
+          const retained = rollbackConfirmed ? "" : ` AXOM could not confirm the prior attachment metadata, so it retained the image bytes to avoid breaking a possibly saved link. ${rollbackProblem}`;
+          report.problems.push(`Question ${index + 1}: its images could not be linked on this device. Keep the source files and export a backup before closing AXOM.${retained}${cleanupProblem ? ` Temporary image cleanup also needs attention: ${cleanupProblem}` : ""}`);
         }
       }
       report.problems.push(...result.problems);

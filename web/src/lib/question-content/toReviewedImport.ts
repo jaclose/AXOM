@@ -17,6 +17,7 @@
 // Ordered blocks and role-aware media travel through that same save path.
 // ===========================================================================
 import { CURRICULA } from "../curricula";
+import { canonicalModuleKey } from "../course-engine/vocabulary";
 import type { ImportDestination, ReviewedDraft, ReviewedImportRequest } from "../questionImportSave";
 import type { QuestionSource } from "../questions";
 import { legacyQuestionFields } from "./legacyFields";
@@ -36,6 +37,9 @@ export interface PackageImportOptions {
   acknowledged?: ReadonlySet<string>;
   /** Notes on how the file was read, kept on the saved set. */
   notes?: readonly string[];
+  /** Reviewed filing layered over source-declared package scope. The package
+   * and every question retain their original scope as evidence. */
+  reviewedFiling?: { readonly module: string; readonly term: number };
 }
 
 export interface HeldQuestion {
@@ -72,21 +76,58 @@ export interface PackageReviewedImport {
   held: HeldQuestion[];
   withheldAssets: WithheldAsset[];
   /** Where the sets are filed, and whether the curriculum agrees that the module sits in that term. */
-  filing: { module: string; week: number; term: number; curriculumTerm?: string; agrees: boolean };
+  filing: { module: string; week?: number; term: number; curriculumTerm?: string; agrees: boolean };
 }
 
 const FILE_TYPE: Record<string, string> = { pdf: "pdf", docx: "docx", doc: "docx", pptx: "pptx", txt: "text", md: "text" };
 
 function curriculumTermOf(module: string): string | undefined {
+  const key = canonicalModuleKey(module);
   for (const curriculum of CURRICULA) {
-    const term = curriculum.terms.find((entry) => entry.courses.some((course) => course.modules.includes(module)));
+    const term = curriculum.terms.find((entry) => entry.courses.some((course) => (
+      course.modules.some((known) => canonicalModuleKey(known) === key)
+    )));
     if (term) return term.name;
   }
   return undefined;
 }
 
+function checkedReviewedFiling(value: PackageImportOptions["reviewedFiling"]): { module: string; term: number } | undefined {
+  if (value === undefined) return undefined;
+  const candidate = value as unknown as Record<string, unknown>;
+  const keys = candidate && typeof candidate === "object" && !Array.isArray(candidate)
+    ? Object.keys(candidate).sort()
+    : [];
+  const module = candidate?.module;
+  const term = candidate?.term;
+  if (keys.length !== 2 || keys[0] !== "module" || keys[1] !== "term"
+    || typeof module !== "string"
+    || module !== module.trim()
+    || module.length === 0
+    || module.length > 80
+    || module.includes("/")
+    || module.includes("\\")
+    || /[&+,|]/.test(module)
+    || /\b(?:and|or|plus|versus|vs\.?)\b/i.test(module)
+    || ![...module].every((character) => {
+      const code = character.charCodeAt(0);
+      return code > 31 && code !== 127 && code !== 0x2028 && code !== 0x2029;
+    })
+    || typeof term !== "number" || !Number.isSafeInteger(term) || term < 1 || term > 5) {
+    throw new Error("The reviewed filing must name one module and a Term 1-5 destination without assigning a week.");
+  }
+  const expectedTerm = curriculumTermOf(module);
+  if (expectedTerm && expectedTerm !== `Term ${term}`) {
+    throw new Error(`${module} belongs to ${expectedTerm}, not Term ${term}.`);
+  }
+  return { module, term };
+}
+
 export function packageToReviewedImport(pkg: ImportPackage, issues: readonly PackageIssue[], options: PackageImportOptions = {}): PackageReviewedImport {
   const { manifest } = pkg;
+  const reviewedFiling = checkedReviewedFiling(options.reviewedFiling);
+  const filing: { module: string; term: number; week?: number } = reviewedFiling
+    ?? { module: manifest.course.name, term: manifest.course.term, week: manifest.course.week };
   const held: HeldQuestion[] = [];
   const withheldAssets: WithheldAsset[] = [];
   const going: { question: PackageQuestion; advisories: string[]; accepted: string[] }[] = [];
@@ -192,7 +233,7 @@ export function packageToReviewedImport(pkg: ImportPackage, issues: readonly Pac
         sourceType: source,
         // One source, and one saved set for each of its own sets.
         setTitle: several && place ? `${manifest.bank.title}: ${place}` : manifest.bank.title,
-        scope: { module: manifest.course.name, week: manifest.course.week, ...(options.courseId ? { courseId: options.courseId } : {}) },
+        scope: { module: filing.module, ...(filing.week !== undefined ? { week: filing.week } : {}), ...(options.courseId ? { courseId: options.courseId } : {}) },
         parserWarnings: [...(options.notes ?? [])],
       },
       questionIds: members.map((entry) => entry.question.id),
@@ -200,17 +241,17 @@ export function packageToReviewedImport(pkg: ImportPackage, issues: readonly Pac
     };
   });
 
-  const curriculumTerm = curriculumTermOf(manifest.course.name);
+  const curriculumTerm = curriculumTermOf(filing.module);
   return {
     imports,
     held,
     withheldAssets,
     filing: {
-      module: manifest.course.name,
-      week: manifest.course.week,
-      term: manifest.course.term,
+      module: filing.module,
+      ...(filing.week !== undefined ? { week: filing.week } : {}),
+      term: filing.term,
       ...(curriculumTerm ? { curriculumTerm } : {}),
-      agrees: curriculumTerm === undefined || curriculumTerm === `Term ${manifest.course.term}`,
+      agrees: curriculumTerm === undefined || curriculumTerm === `Term ${filing.term}`,
     },
   };
 }

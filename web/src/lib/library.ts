@@ -72,6 +72,12 @@ export interface QuestionSet {
   kind?: QuestionSetKind;
   /** The set this one was drawn from, for review and custom sets. */
   parentSetId?: ID;
+  /** Durable replay guard for a bearer-link import. Never stores the bearer token. */
+  importProvenance?: {
+    version: 1;
+    shareId: string;
+    contentDigest: string;
+  };
 }
 
 /**

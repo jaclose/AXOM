@@ -7,6 +7,8 @@ import { withReviewedAnswer } from "../../lib/question-content/readiness";
 import { isAssetVisible, type ContentViewMode } from "../../lib/question-content/visibility";
 import { summarizePackage } from "../../lib/question-content/validate";
 import { courseForScope } from "../../lib/course-engine/questionBank";
+import { preparedBankImportOptions } from "../../lib/privateLibrary/install";
+import type { PreparedBank } from "../../lib/privateLibrary/types";
 import { Field, SelectField, TextAreaField } from "../ui/Modal";
 import { GButton, GhostButton } from "../ui/primitives";
 import { QuestionBlocks } from "./QuestionContent";
@@ -17,7 +19,11 @@ import type { QuestionBlock, TableBlock } from "../../lib/question-content/block
 import { editReviewedBlock, editReviewedTableCell, unresolvedExtractionIssues, type ReviewBlockLocation, type ReviewSection } from "../../lib/question-content/reviewEdits";
 
 export type TaggedBank = Extract<PdfBankExtraction, { tagged: true }>;
-export type ReviewBank = Omit<Pick<TaggedBank, "pkg" | "conversionIssues" | "files" | "sourceText" | "sourceBytes" | "originalFile" | "notes" | "warnings" | "unplaced">, "sourceText"> & { sourceText: { rawText: string; pageTexts?: string[] } };
+export type ReviewBank = Omit<Pick<TaggedBank, "pkg" | "conversionIssues" | "files" | "sourceText" | "sourceBytes" | "originalFile" | "notes" | "warnings" | "unplaced">, "sourceText"> & {
+  sourceText: { rawText: string; pageTexts?: string[] };
+  /** A reviewed destination is layered over immutable source scope. */
+  reviewedFiling?: PreparedBank["reviewedFiling"];
+};
 export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: ReviewBank; onBack: () => void; onSaved?: (result: ImportFinalizationResult) => void; onReviewed?: (pkg: ImportPackage, result: BankSave) => Promise<void> }) {
   const [pkg, setPackage] = useState(bank.pkg);
   const [index, setIndex] = useState(0);
@@ -32,7 +38,9 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
   const question = pkg.questions[index];
   const verdict = question && assessed.verdicts.get(question.id);
   const globalErrors = assessed.issues.filter((issue) => issue.severity === "error" && !issue.questionId);
-  const validLocation = pkg.manifest.course.name.trim() && pkg.manifest.course.term > 0 && pkg.manifest.course.week > 0;
+  const validLocation = bank.reviewedFiling
+    ? Boolean(bank.reviewedFiling.module.trim() && /^Term [1-5]$/.test(bank.reviewedFiling.term))
+    : Boolean(pkg.manifest.course.name.trim() && pkg.manifest.course.term > 0 && pkg.manifest.course.week > 0);
   function fileUnder(patch: Partial<typeof pkg.manifest.course>) {
     setPackage((current) => ({ ...current, manifest: { ...current.manifest, course: { ...current.manifest.course, ...patch } } }));
     setResult(undefined);
@@ -81,30 +89,46 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
     });
   }
   async function save() {
-    setBusy(true); setError("");
+    setBusy(true); setError(""); setResult(undefined);
     try {
+      const options = bank.reviewedFiling
+        ? preparedBankImportOptions({
+          pkg,
+          issues: bank.conversionIssues,
+          sourceText: bank.sourceText,
+          sourceBytes: bank.sourceBytes,
+          notes: bank.notes,
+          reviewedFiling: bank.reviewedFiling,
+        })
+        : {
+          sourceText: bank.sourceText,
+          sourceBytes: bank.sourceBytes,
+          notes: bank.notes,
+          courseId: courseForScope({ module: pkg.manifest.course.name }, useStore.getState().courses)?.id,
+        };
       const saved = await saveBank(pkg, assessed.issues, bank.files, {
         library: () => { const state = useStore.getState(); return { questions: state.questions ?? [], questionSets: state.questionSets ?? [], documents: state.documents ?? [] }; },
         store: () => useStore.getState(),
-      }, { sourceText: bank.sourceText, sourceBytes: bank.sourceBytes, originalFile: bank.originalFile, notes: bank.notes,
-        courseId: courseForScope({ module: pkg.manifest.course.name }, useStore.getState().courses)?.id });
-      setResult(saved);
+      }, { ...options, originalFile: bank.originalFile });
       if (saved.status !== "failed") await onReviewed?.(pkg, saved);
+      setResult(saved);
     } catch (failure) { setError(failure instanceof Error ? failure.message : "The import could not be saved. Keep this source file and try again."); }
     finally { setBusy(false); }
   }
   const savedIds = result?.sections.flatMap((section) => section.savedIds) ?? [];
   return <section className="bank-import-review stack" aria-label="Source question bank preview" style={{ gap: 18 }}>
     <header><p className="sub">Source → Review → Save</p><h2>{pkg.manifest.bank.title}</h2>
-      <p role="status">{pkg.questions.length} questions · {assessed.counts.ready} ready · {assessed.counts["needs-review"]} need review · {assessed.counts.unresolved} unresolved</p>
+      <p role="status">{pkg.questions.length} questions · {assessed.counts.ready} ready for import · {assessed.counts["needs-review"]} need review · {assessed.counts.unresolved} unresolved</p>
       <p className="sub">{summary.tables} tables · {summary.images} images · {summary.answerReveals} answer-reveal images</p>
     </header>
     <div className="grid grid-3">
-      <Field label="Bank module" value={pkg.manifest.course.name} onChange={(event) => fileUnder({ name: event.target.value })} />
-      <Field label="Bank term" type="number" min={1} value={pkg.manifest.course.term || ""} onChange={(event) => fileUnder({ term: Number(event.target.value) })} />
-      <Field label="Bank week" type="number" min={1} value={pkg.manifest.course.week || ""} onChange={(event) => fileUnder({ week: Number(event.target.value) })} />
+      <Field label={bank.reviewedFiling ? "Source module" : "Bank module"} disabled={Boolean(bank.reviewedFiling)} value={pkg.manifest.course.name} onChange={(event) => fileUnder({ name: event.target.value })} />
+      <Field label={bank.reviewedFiling ? "Source term" : "Bank term"} disabled={Boolean(bank.reviewedFiling)} type="number" min={1} value={pkg.manifest.course.term || ""} onChange={(event) => fileUnder({ term: Number(event.target.value) })} />
+      <Field label={bank.reviewedFiling ? "Source week" : "Bank week"} disabled={Boolean(bank.reviewedFiling)} type="number" min={1} value={pkg.manifest.course.week || ""} onChange={(event) => fileUnder({ week: Number(event.target.value) })} />
     </div>
-    {!pkg.manifest.source.sourceWeekDeclared && <p className="sub">The week is your filing choice; it is not stated by the source.</p>}
+    {bank.reviewedFiling
+      ? <p className="sub">Source evidence stays {pkg.manifest.course.name} · Term {pkg.manifest.course.term} · Week {pkg.manifest.course.week}. Reviewed placement: {bank.reviewedFiling.module} · {bank.reviewedFiling.term} · week unassigned.</p>
+      : !pkg.manifest.source.sourceWeekDeclared && <p className="sub">The week is your filing choice; it is not stated by the source.</p>}
     {[...bank.warnings, ...bank.unplaced.map((entry) => entry.reason), ...globalErrors.map((issue) => issue.message)].map((note, n) => <p key={n} className="sub">{note}</p>)}
     {question && <article className="bank-import-question">
       <div className="row wrap gap8">
@@ -115,7 +139,7 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
           <option value="question">While answering</option><option value="answered">After answering</option><option value="review">Source review</option>
         </SelectField>
       </div>
-      <p className="sub">{verdict?.readiness === "ready" ? "READY" : "NEEDS REVIEW"} · Source page {question.source.page ?? "not stated"}{question.source.set ? ` · Set ${question.source.set}` : ""} · Original question {question.source.questionNumber ?? index + 1}</p>
+      <p className="sub">{verdict?.readiness === "ready" ? "READY FOR IMPORT" : "NEEDS REVIEW"} · Source page {question.source.page ?? "not stated"}{question.source.set ? ` · Set ${question.source.set}` : ""} · Original question {question.source.questionNumber ?? index + 1}</p>
       {mode === "review" && <BankImportSourcePage originalFile={bank.originalFile} sourceName={pkg.manifest.source.filename} sourcePage={question.source.page} />}
       <QuestionBlocks blocks={question.stem} content={question} files={bank.files} mode={mode} />
       {question.choiceTable && <QuestionBlocks blocks={[question.choiceTable]} content={question} files={bank.files} mode={mode} section="choice" />}
@@ -142,15 +166,20 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
       </div>}
     </article>}
     {error && <p role="alert">{error}</p>}
-    {result && <div role={result.status === "failed" ? "alert" : "status"}>
-      {result.status === "saved" ? `${savedIds.length} question${savedIds.length === 1 ? "" : "s"} saved on this device.` : result.status === "already-saved" ? "Already imported. No duplicate questions were added." : result.status === "nothing-ready" ? "No verified questions to save yet." : "The import did not finish."}
+    {result && <div role={result.status === "failed" || result.status === "partial" ? "alert" : "status"}>
+      {result.status === "saved" ? `${savedIds.length} question${savedIds.length === 1 ? "" : "s"} saved on this device.`
+        : result.status === "already-saved" ? "Already imported. No duplicate questions were added."
+        : result.status === "partial" ? `${savedIds.length} question${savedIds.length === 1 ? "" : "s"} saved on this device. Other bank sections still need attention; retry will reuse these records.`
+        : result.status === "nothing-ready" ? "No answer-ready questions to save yet."
+        : "No bank section finished. Nothing new was reported as saved."}
       {result.errors.map((note) => <p key={note}>{note}</p>)}
+      {result.incompleteSections.filter((section) => section.savedIds.length > 0).map((section) => <p key={`${section.setTitle}-${section.questionIds.join("-")}-${section.reason}`}>{section.savedIds.length} existing question{section.savedIds.length === 1 ? " remains" : "s remain"} saved, but {section.reason}</p>)}
       {result.sections.flatMap((section) => section.images.problems).map((note) => <p key={note}>{note}</p>)}
       {result.held.length > 0 && <p>{result.held.length} question{result.held.length === 1 ? "" : "s"} still need{result.held.length === 1 ? "s" : ""} review and {result.held.length === 1 ? "was" : "were"} not imported. Keep the source file to review {result.held.length === 1 ? "it" : "them"} later.</p>}
     </div>}
     <div className="row wrap gap8">
       <GhostButton disabled={busy} onClick={onBack}>Choose another file</GhostButton>
-      <GButton variant="primary" disabled={busy || !validLocation || !assessed.counts.ready || Boolean(globalErrors.length)} onClick={() => void save()}>{busy ? "Saving…" : `Import ${assessed.counts.ready} verified questions`}</GButton>
+      <GButton variant="primary" disabled={busy || !validLocation || !assessed.counts.ready || Boolean(globalErrors.length)} onClick={() => void save()}>{busy ? "Saving…" : `Import ${assessed.counts.ready} answer-ready question${assessed.counts.ready === 1 ? "" : "s"}`}</GButton>
       {savedIds.length > 0 && <GButton onClick={() => onSaved?.({ setId: result?.sections[0]?.setId, documentId: result?.sections[0]?.documentId, questionIds: savedIds })}>Open imported bank</GButton>}
     </div>
   </section>;

@@ -115,6 +115,9 @@ export async function downloadAcademicCourse(revision: string, progress: (messag
     if (path.endsWith(".json")) captured.set(path, bytes);
     return bytes;
   }, progress, scope);
+  if (installation.status === "partial") {
+    throw new Error(`${installation.questionIds.length} course question${installation.questionIds.length === 1 ? " remains" : "s remain"} saved on this device, but the download is incomplete. ${installation.warnings.slice(0, 3).join(" ")} Retry this course before enrollment.`);
+  }
   const bindings = await academicBindings(useStore.getState(), installation, revision, read.files, captured);
   scope.assertCurrent();
   if (typeof window !== "undefined") await import("../../pages/QuestionWorkspacePage");

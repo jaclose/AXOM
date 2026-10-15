@@ -1,5 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { imageNameKey, matchNamedImages, namedImages } from "./questionImportImages";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { indexedDB, IDBKeyRange } from "fake-indexeddb";
+import { sha256Hex } from "./checksum";
+import { attachNamedImages, imageNameKey, matchNamedImages, namedImages } from "./questionImportImages";
+import {
+  deleteQuestionAttachmentBlobs,
+  getQuestionAttachmentBlob,
+  listQuestionAttachmentBlobKeys,
+  putQuestionAttachmentBlob,
+} from "./questionAttachments";
+
+afterEach(() => { vi.unstubAllGlobals(); });
 
 const file = (name: string) => ({ name });
 
@@ -31,5 +41,91 @@ describe("images named by an import", () => {
 
   it("lists each named image once across the drafts", () => {
     expect(namedImages([{ attachmentNames: ["a.png"] }, {}, { attachmentNames: ["A.PNG", "b.jpg"] }])).toEqual(["a.png", "b.jpg"]);
+  });
+
+  it("keeps per-question metadata while reusing one verified private-library blob", async () => {
+    vi.stubGlobal("indexedDB", indexedDB);
+    vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+    const bytes = new TextEncoder().encode("same verified image bytes");
+    const digest = await sha256Hex(bytes);
+    const checksum = `sha256:${digest}`;
+    const blobKey = `private-library:${checksum}`;
+    const storedBlob = new Blob([bytes], { type: "image/png" });
+    const supplied = new File([bytes], "shared-source-page.png", { type: "image/png" });
+    const asset = {
+      id: "source-page",
+      filename: supplied.name,
+      mimeType: supplied.type,
+      byteSize: supplied.size,
+      role: "source_page" as const,
+      questionId: "source-question",
+      checksum,
+    };
+    await putQuestionAttachmentBlob(blobKey, {
+      blob: storedBlob,
+      mimeType: "image/png",
+      byteSize: storedBlob.size,
+      questionId: "private-review",
+      updatedAt: "2026-10-15T00:00:00.000Z",
+    });
+    try {
+      const first = await attachNamedImages({
+        names: [supplied.name], files: [supplied], questionId: "ready-one", contentAssets: [asset],
+      });
+      const second = await attachNamedImages({
+        names: [supplied.name], files: [supplied], questionId: "ready-two", contentAssets: [{ ...asset, id: "source-page-two", questionId: "source-question-two" }],
+      });
+      expect(first.problems).toEqual([]);
+      expect(second.problems).toEqual([]);
+      expect(first.attachments[0]).toMatchObject({ blobKey, fileName: supplied.name, byteSize: supplied.size });
+      expect(second.attachments[0]).toMatchObject({ blobKey, fileName: supplied.name, byteSize: supplied.size });
+      expect(first.attachments[0].id).not.toBe(second.attachments[0].id);
+      expect((await listQuestionAttachmentBlobKeys()).filter((key) => key === blobKey)).toEqual([blobKey]);
+    } finally {
+      await deleteQuestionAttachmentBlobs([blobKey]);
+    }
+  });
+
+  it("does not trust a filename or claimed private checksum when the supplied bytes differ", async () => {
+    vi.stubGlobal("indexedDB", indexedDB);
+    vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+    const canonicalBytes = new TextEncoder().encode("AAAA");
+    const suppliedBytes = new TextEncoder().encode("BBBB");
+    const checksum = `sha256:${await sha256Hex(canonicalBytes)}`;
+    const blobKey = `private-library:${checksum}`;
+    const canonical = new Blob([canonicalBytes], { type: "image/png" });
+    const supplied = new File([suppliedBytes], "same-name.png", { type: "image/png" });
+    await putQuestionAttachmentBlob(blobKey, {
+      blob: canonical,
+      mimeType: "image/png",
+      byteSize: canonical.size,
+      questionId: "private-review",
+      updatedAt: "2026-10-15T00:00:00.000Z",
+    });
+    let createdKey: string | undefined;
+    try {
+      const result = await attachNamedImages({
+        names: [supplied.name],
+        files: [supplied],
+        questionId: "ordinary-import",
+        contentAssets: [{
+          id: "untrusted",
+          filename: supplied.name,
+          mimeType: supplied.type,
+          byteSize: supplied.size,
+          role: "question",
+          questionId: "ordinary-import",
+          checksum,
+        }],
+      });
+      createdKey = result.attachments[0]?.blobKey;
+      expect(result.problems).toEqual([]);
+      expect(createdKey).toBeTruthy();
+      expect(createdKey).not.toBe(blobKey);
+      expect(await getQuestionAttachmentBlob(createdKey!)).toMatchObject({ byteSize: supplied.size, questionId: "ordinary-import" });
+      expect(await (await getQuestionAttachmentBlob(blobKey))?.blob.text()).toBe("AAAA");
+    } finally {
+      await deleteQuestionAttachmentBlobs([blobKey, ...(createdKey ? [createdKey] : [])]);
+    }
   });
 });

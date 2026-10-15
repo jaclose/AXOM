@@ -30,15 +30,29 @@ beforeAll(async () => {
   await db.exec(readFileSync(new URL("../../../../supabase/migrations/20261011190000_academic_library.sql", import.meta.url), "utf8"));
   await db.exec(readFileSync(new URL("../../../../supabase/migrations/20261013210000_academic_course_lookup.sql", import.meta.url), "utf8"));
   await db.exec(readFileSync(new URL("../../../../supabase/migrations/20261013220000_content_storage_boundaries.sql", import.meta.url), "utf8"));
+  await db.exec(readFileSync(new URL("../../../../supabase/migrations/20261015230042_enforce_academic_source_identity.sql", import.meta.url), "utf8"));
 }, 30_000);
 afterAll(async () => db?.close());
 async function as<T>(user: string, sql: string, params: unknown[] = []) {
   await db.exec(`reset role; select set_config('request.jwt.claim.sub','${user}',false); set role authenticated;`);
   try { return (await db.query<T>(sql, params)).rows; } finally { await db.exec("reset role;"); }
 }
+function sourceHash() {
+  return randomUUID().replaceAll("-", "").repeat(2);
+}
+function revisionArgs(collection: string, sourceSha: string, contentHash = H) {
+  return [
+    JSON.stringify({ title: "Synthetic course", module: "SAMPLE", term: "Term 1" }),
+    "SAMPLE - Course plan:\nWeek 1:\nLecture 1 Example [Lecture]",
+    JSON.stringify({ sourceChecksums: [sourceSha] }),
+    JSON.stringify([{ path: "catalog.json", sha256: H, byte_size: 2, mime_type: "application/json" }]),
+    contentHash,
+    collection,
+  ];
+}
 async function create() {
   const collection = randomUUID();
-  const args = [JSON.stringify({ title: "Synthetic course", module: "SAMPLE", term: "Term 1" }), "SAMPLE - Course plan:\nWeek 1:\nLecture 1 Example [Lecture]", "{}", JSON.stringify([{ path: "catalog.json", sha256: H, byte_size: 2, mime_type: "application/json" }]), H, collection];
+  const args = revisionArgs(collection, sourceHash());
   const [row] = await as<{ value: { collection_id: string; revision_id: string } }>(A, "select public.academic_create_revision($1,$2,$3,$4,$5,$6) as value", args);
   return { ...row.value, args };
 }
@@ -70,6 +84,34 @@ describe("academic catalog authorization and publication", () => {
     await upload(c.collection_id, 3);
     await expect(as(A, "select public.academic_finish_revision($1)", [c.revision_id])).rejects.toThrow(/Upload incomplete/);
     await expect(as(B, "select public.academic_create_revision($1,$2,$3,$4,$5,$6)", c.args)).rejects.toThrow(/Collection unavailable/);
+  });
+  it("reserves one owner source identity across separate upload invocations and catalog IDs", async () => {
+    const sharedSource = "f".repeat(64);
+    const firstCollection = randomUUID();
+    const secondCollection = randomUUID();
+    const firstArgs = revisionArgs(firstCollection, sharedSource, "c".repeat(64));
+    const secondArgs = revisionArgs(secondCollection, sharedSource, "d".repeat(64));
+
+    await expect(as(A, "select public.academic_create_revision($1,$2,$3,$4,$5,$6)", firstArgs))
+      .resolves.toHaveLength(1);
+    await expect(as(A, "select public.academic_create_revision($1,$2,$3,$4,$5,$6)", secondArgs))
+      .rejects.toThrow(/already registered under another collection/);
+    expect((await db.query<{ collection_id: string }>(
+      "select collection_id from public.academic_source_identities where owner_id=$1 and source_sha256=$2",
+      [A, sharedSource],
+    )).rows).toEqual([{ collection_id: firstCollection }]);
+    expect((await db.query<{ n: number }>(
+      "select count(*)::integer as n from public.academic_collections where id=$1",
+      [secondCollection],
+    )).rows).toEqual([{ n: 0 }]);
+    expect((await db.query<{ n: number }>(
+      "select count(*)::integer as n from public.academic_revisions where collection_id=$1",
+      [secondCollection],
+    )).rows).toEqual([{ n: 0 }]);
+
+    await expect(as(B, "select public.academic_create_revision($1,$2,$3,$4,$5,$6)", [
+      ...revisionArgs(randomUUID(), sharedSource, "e".repeat(64)),
+    ])).resolves.toHaveLength(1);
   });
   it("shares only an approved immutable revision and withdraws metadata and media together", async () => {
     const c = await create(); await upload(c.collection_id);

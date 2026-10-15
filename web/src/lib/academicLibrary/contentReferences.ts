@@ -47,11 +47,20 @@ export function academicRecord(bank: PreparedBank, reference: AcademicRecordRefe
   if (reference.adapterVersion !== 1) throw new Error("This course content requires a compatible AXOM version.");
   if (reference.kind === "document") return bank.sourceText;
   if (reference.kind === "review") return { rawText: JSON.stringify(bank) };
+  // Adapter v1 reconstructs scope from the source manifest. A reviewed filing
+  // deliberately changes installed scope while preserving that manifest, so
+  // emitting a v1 question reference would give old and new clients two
+  // incompatible meanings for the same version. Keep the full private record
+  // until an explicitly versioned cloud adapter is deployed.
+  if (bank.reviewedFiling)
+    throw new Error("Reviewed filing requires a newer academic question adapter. Keep the private recovery copy.");
   if (!reference.questionId || !reference.reviewedAt || !Number.isFinite(Date.parse(reference.reviewedAt))) throw new Error("Invalid academic question reference.");
   let adapted = adaptedBanks.get(bank);
   if (!adapted) {
     const assessed = assessBank(bank.pkg, bank.issues, bank.pkg.questions.flatMap(question => question.assets.filter(asset => asset.checksum).map(asset => ({ name: asset.filename }))));
-    adapted = packageToReviewedImport(bank.pkg, assessed.issues, { sourceText: bank.sourceText, sourceBytes: bank.sourceBytes, notes: bank.notes });
+    adapted = packageToReviewedImport(bank.pkg, assessed.issues, {
+      sourceText: bank.sourceText, sourceBytes: bank.sourceBytes, notes: bank.notes,
+    });
     adaptedBanks.set(bank, adapted);
   }
   for (const section of adapted.imports) {

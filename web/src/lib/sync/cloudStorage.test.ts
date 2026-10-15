@@ -2,14 +2,14 @@
 import { indexedDB, IDBKeyRange } from "fake-indexeddb";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { compressText, decompressText } from "../compressedText";
+import { compressText, decompressText, sha256 } from "../compressedText";
 import { workspaceDigest } from "./workspaceDigest";
 import { makeSeed } from "../seed";
-import { getQuestionAttachmentBlob, putQuestionAttachmentBlob } from "../questionAttachments";
+import { deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, putQuestionAttachmentBlob } from "../questionAttachments";
 import { snapshotWorkspace } from "./workspaceSnapshot";
 import { prepareCloudSnapshot, decodeCloudSnapshot } from "./cloudSnapshot";
 import { CONTENT_BUCKET, clearCloudContentCache, hydrateCloudContent, splitCloudContent, uploadCloudContent } from "./cloudContent";
-import { MEDIA_BUCKET, uploadCloudMedia, validateWorkspaceMedia } from "./cloudMedia";
+import { MEDIA_BUCKET, uploadCloudMedia, validateWorkspaceMedia, workspaceMedia } from "./cloudMedia";
 import { installCloudMediaCache, saveCloudMediaIndex } from "./cloudMediaCache";
 import type { NoctyriumState } from "../types";
 import { deferContent } from "./deferredContent";
@@ -169,6 +169,47 @@ describe("private cloud content and media", () => {
     expect(download).toHaveBeenCalledTimes(1);
     dispose(); dispose = undefined;
     expect(await (await getQuestionAttachmentBlob(restoredKey))!.blob.arrayBuffer()).toEqual(await blob.arrayBuffer());
+    expect(download).toHaveBeenCalledTimes(1);
+  });
+
+  it("reconstructs one checksum-addressed object for two question-local references on a fresh device", async () => {
+    const state = fixture();
+    const blob = new Blob([new Uint8Array([137, 80, 78, 71, 4, 5, 6])], { type: "image/png" });
+    const hash = await sha256(new Uint8Array(await blob.arrayBuffer()));
+    const blobKey = `private-library:sha256:${hash}`;
+    const first = {
+      id: "source-page-one", assetId: "source-page-one", blobKey,
+      fileName: "shared-source-page.png", mimeType: "image/png" as const,
+      byteSize: blob.size, altText: "Shared source page", role: "question" as const,
+      createdAt: state.questions[0].createdAt, updatedAt: state.questions[0].updatedAt,
+    };
+    const second = { ...first, id: "source-page-two", assetId: "source-page-two" };
+    state.questions = [
+      { ...state.questions[0], id: "q1", attachments: [first] },
+      { ...state.questions[0], id: "q2", attachments: [second] },
+    ];
+    await putQuestionAttachmentBlob(blobKey, {
+      blob, mimeType: "image/png", byteSize: blob.size,
+      questionId: "q1", updatedAt: first.updatedAt,
+    });
+
+    expect(workspaceMedia(state).size).toBe(1);
+    const manifest = await uploadCloudMedia(client, "account-a", state, guard);
+    expect(manifest).toHaveLength(1);
+    expect(manifest[0]).toMatchObject({ blobKey, hash, byteSize: blob.size });
+    expect(upload.mock.calls.filter(([bucket]) => bucket === MEDIA_BUCKET)).toHaveLength(1);
+
+    await deleteQuestionAttachmentBlobs([blobKey]);
+    await saveCloudMediaIndex("account-a", manifest);
+    dispose = installCloudMediaCache("account-a", () => state);
+    const restored = await getQuestionAttachmentBlob(blobKey);
+    expect(await restored!.blob.arrayBuffer()).toEqual(await blob.arrayBuffer());
+    expect(restored!.questionId).toBe("q2");
+    expect(state.questions.map(question => question.attachments?.[0])).toEqual([
+      expect.objectContaining({ id: "source-page-one", assetId: "source-page-one", blobKey }),
+      expect.objectContaining({ id: "source-page-two", assetId: "source-page-two", blobKey }),
+    ]);
+    expect(await getQuestionAttachmentBlob(blobKey)).toStrictEqual(restored);
     expect(download).toHaveBeenCalledTimes(1);
   });
 

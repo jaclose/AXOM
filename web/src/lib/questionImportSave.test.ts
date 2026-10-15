@@ -9,6 +9,12 @@ import { blockedDraftIndexes, prepareReviewedImport, saveReviewedImport, type Re
 import type { QuestionRecord } from "./questions";
 import * as imageImport from "./questionImportImages";
 import * as vault from "./localVault";
+import {
+  deleteQuestionAttachmentBlobs,
+  listQuestionAttachmentBlobKeys,
+  putQuestionAttachmentBlob,
+  type QuestionImageAttachment,
+} from "./questionAttachments";
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -171,6 +177,7 @@ describe("saveReviewedImport", () => {
     let release!: () => void;
     const pending = new Promise<void>((resolve) => { release = resolve; });
     const flush = vi.spyOn(vault, "flushLocalVaultWrites").mockReturnValue(pending);
+    vi.spyOn(vault, "assertVaultWrite").mockImplementation(() => undefined);
     vi.spyOn(vault, "assertVaultWritesSince").mockImplementation(() => {
       if (fail) throw new Error("Storage full");
     });
@@ -183,6 +190,108 @@ describe("saveReviewedImport", () => {
     const result = await saving;
     expect(result).toMatchObject({ ok: true, images: { attached: fail ? 0 : 1, missing: 0 } });
     if (result.ok) expect(result.images.problems).toHaveLength(fail ? 1 : 0);
+  });
+
+  it("removes only newly created ordinary image blobs when question linking fails", async () => {
+    vi.stubGlobal("indexedDB", indexedDB);
+    vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+    const baselineKey = "existing-attachment-baseline";
+    await putQuestionAttachmentBlob(baselineKey, {
+      blob: new Blob(["existing"], { type: "image/png" }),
+      mimeType: "image/png",
+      byteSize: 8,
+      questionId: "existing-question",
+      updatedAt: "2026-10-15T00:00:00.000Z",
+    });
+    const baseline = (await listQuestionAttachmentBlobKeys()).sort();
+    const { store } = memoryStore();
+    store.updateQuestion = vi.fn()
+      .mockImplementationOnce(() => { throw new Error("Synthetic question-link failure"); })
+      .mockImplementation(() => undefined);
+    vi.spyOn(vault, "flushLocalVaultWrites").mockResolvedValue(undefined);
+    vi.spyOn(vault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(vault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    const prepared = prepareReviewedImport(request({ drafts: drafts().map((draft, index) => ({
+      ...draft,
+      attachmentNames: index === 0 ? ["figure.png"] : [],
+    })) }), empty, make());
+    if (!prepared.ok) throw new Error("expected prepared import");
+    try {
+      const saved = await saveReviewedImport(prepared, store, [new File(["new image"], "figure.png", { type: "image/png" })]);
+      expect(saved).toMatchObject({ ok: true, images: { attached: 0, missing: 0, problems: [expect.stringMatching(/could not be linked/i)] } });
+      expect(store.updateQuestion).toHaveBeenCalledTimes(2);
+      expect((await listQuestionAttachmentBlobKeys()).sort()).toEqual(baseline);
+    } finally {
+      const current = await listQuestionAttachmentBlobKeys();
+      await deleteQuestionAttachmentBlobs(current.filter(key => !baseline.includes(key) || key === baselineKey));
+    }
+  });
+
+  it("restores same-name attachment metadata before deleting a new blob after durable linking fails", async () => {
+    vi.stubGlobal("indexedDB", indexedDB);
+    vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+    const prior: QuestionImageAttachment = {
+      id: "prior-metadata",
+      blobKey: "prior-missing-blob",
+      fileName: "figure.png",
+      mimeType: "image/png",
+      byteSize: 5,
+      altText: "Prior figure",
+      createdAt: "2026-10-14T00:00:00.000Z",
+      updatedAt: "2026-10-14T00:00:00.000Z",
+      role: "exhibit",
+    };
+    const replacement: QuestionImageAttachment = {
+      ...prior,
+      id: "replacement-metadata",
+      blobKey: "replacement-new-blob",
+      byteSize: 9,
+      altText: "",
+      updatedAt: "2026-10-15T00:00:00.000Z",
+    };
+    const baseline = (await listQuestionAttachmentBlobKeys()).sort();
+    const withImage = drafts().map((draft, index) => ({
+      ...draft,
+      attachmentNames: index === 0 ? ["figure.png"] : [],
+    }));
+    const prepared = prepareReviewedImport(request({ drafts: withImage }), empty, make());
+    if (!prepared.ok || !prepared.plan.questionSet) throw new Error("expected prepared import");
+    prepared.equivalent = {
+      setId: prepared.plan.questionSet.id,
+      questionIds: ["existing-question", "existing-question-two"],
+      attachments: [[prior], []],
+    };
+    let currentAttachments: QuestionImageAttachment[] | undefined = [prior];
+    const { store } = memoryStore();
+    store.updateQuestion = vi.fn((_id, patch) => {
+      currentAttachments = patch.attachments;
+    });
+    vi.spyOn(imageImport, "attachNamedImages").mockImplementation(async () => {
+      await putQuestionAttachmentBlob(replacement.blobKey, {
+        blob: new Blob(["new image"], { type: "image/png" }),
+        mimeType: "image/png",
+        byteSize: 9,
+        questionId: "existing-question",
+        updatedAt: replacement.updatedAt,
+      });
+      return { attachments: [replacement], problems: [] };
+    });
+    vi.spyOn(vault, "flushLocalVaultWrites").mockResolvedValue(undefined);
+    const assertExact = vi.spyOn(vault, "assertVaultWrite")
+      .mockImplementationOnce(() => { throw new Error("Synthetic durable link refusal"); })
+      .mockImplementation(() => undefined);
+    vi.spyOn(vault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    try {
+      const saved = await saveReviewedImport(prepared, store, [new File(["new image"], "figure.png", { type: "image/png" })]);
+      expect(saved).toMatchObject({ ok: true, images: { attached: 0, missing: 0, problems: [expect.stringMatching(/could not be linked/i)] } });
+      expect(store.updateQuestion).toHaveBeenCalledTimes(2);
+      expect(currentAttachments).toEqual([prior]);
+      expect(assertExact).toHaveBeenCalledTimes(2);
+      expect((await listQuestionAttachmentBlobKeys()).sort()).toEqual(baseline);
+    } finally {
+      const current = await listQuestionAttachmentBlobKeys();
+      await deleteQuestionAttachmentBlobs(current.filter(key => !baseline.includes(key)));
+    }
   });
 
   it("saves original source bytes before committing questions and records a verified identity", async () => {

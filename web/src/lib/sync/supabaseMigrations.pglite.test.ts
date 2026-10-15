@@ -73,6 +73,7 @@ const PRIVILEGED = [
 const PRIVATE_TABLES = [
   "account_profiles", "workspaces", "workspace_revisions", "sync_conflicts", "question_set_shares", "account_devices", "ai_usage",
   "academic_catalog_releases", "academic_catalog_entries", "academic_catalog_files", "academic_catalog_grants",
+  "academic_source_identities",
 ];
 describe("Supabase migrations on real Postgres", () => {
   it("revokes group/shared access when the currently selected academic revision is pending or rejected", async () => {
@@ -173,6 +174,12 @@ describe("Supabase migrations on real Postgres", () => {
     expect(await canExecute(db, "anon", "public.revoke_question_set_share(uuid)")).toBe(false);
     expect(await canExecute(db, "authenticated", "public.revoke_question_set_share(uuid)")).toBe(true);
     expect(await canExecute(db, "anon", "public.resolve_question_set_share(text)")).toBe(true);
+    expect((await db.query<{ ok: boolean }>(
+      "select has_column_privilege('anon','public.question_set_shares','id','select') as ok",
+    )).rows[0].ok).toBe(false);
+    expect((await db.query<{ ok: boolean }>(
+      "select has_column_privilege('authenticated','public.question_set_shares','id','select') as ok",
+    )).rows[0].ok).toBe(true);
     // Read authorization is callable; publication is restricted to the operator role.
     for (const role of ["anon", "authenticated"]) {
       expect(await canExecute(db, role, "public.can_read_academic_release(uuid)")).toBe(true);
@@ -251,10 +258,30 @@ describe("Supabase migrations on real Postgres", () => {
     await as(db, "authenticated", A, "select public.touch_account_device('77777777-7777-4777-8777-777777777777'::uuid,'Chrome on Mac','web',2)");
     await as(db, "authenticated", A, "select public.touch_account_device('77777777-7777-4777-8777-777777777777'::uuid,'Chrome on Mac','web',3)");
     expect(await count(A, "account_devices")).toBe(1); expect(await count(B, "account_devices")).toBe(0);
-    const share = (await as(db, "authenticated", A, "select public.create_question_set_share('set-1', $1::jsonb) as r", [JSON.stringify({ shareFormatVersion: 1, title: "Cardio", questions: [{ stem: "Q" }] })])).rows[0].r as { share_token: string };
+    const shareSnapshot = { shareFormatVersion: 1, title: "Cardio", questions: [{ stem: "Q" }], createdAt: "2026-10-15T12:00:00Z" };
+    const share = (await as(db, "authenticated", A, "select public.create_question_set_share('set-1', $1::jsonb) as r", [JSON.stringify(shareSnapshot)])).rows[0].r as {
+      id: string; share_token: string; expires_at: string; idempotent: boolean;
+    };
     expect(share.share_token).toMatch(/^[0-9a-f]{48}$/);
+    expect(share.idempotent).toBe(false);
+    expect(Date.parse(share.expires_at)).toBeGreaterThan(Date.now() + 6 * 24 * 60 * 60 * 1_000);
+    expect(Date.parse(share.expires_at)).toBeLessThanOrEqual(Date.now() + 7 * 24 * 60 * 60 * 1_000 + 5_000);
+    const retry = (await as(db, "authenticated", A,
+      "select public.create_question_set_share('set-1', $1::jsonb) as r",
+      [JSON.stringify({ ...shareSnapshot, createdAt: "2026-10-15T12:01:00Z" })])).rows[0].r as {
+      id: string; share_token: string; idempotent: boolean;
+    };
+    expect(retry).toMatchObject({ id: share.id, share_token: share.share_token, idempotent: true });
     const resolved = await as(db, "anon", null, "select title from public.resolve_question_set_share($1)", [share.share_token]); expect(resolved.rows).toEqual([{ title: "Cardio" }]);
-    expect(Number((await as(db, "anon", null, "select count(*)::int as n from public.question_set_shares")).rows[0].n)).toBe(0);
+    await expect(as(db, "anon", null, "select count(*)::int as n from public.question_set_shares"))
+      .rejects.toThrow(/permission denied/);
+    await as(db, "authenticated", B, "select public.create_question_set_share('set-b', $1::jsonb)", [JSON.stringify({ ...shareSnapshot, title: "B only" })]);
+    expect((await as(db, "authenticated", A,
+      "select source_question_set_id from public.question_set_shares order by source_question_set_id")).rows)
+      .toEqual([{ source_question_set_id: "set-1" }]);
+    expect((await as(db, "authenticated", B,
+      "select source_question_set_id from public.question_set_shares order by source_question_set_id")).rows)
+      .toEqual([{ source_question_set_id: "set-b" }]);
     await expect(as(db, "authenticated", A, "update public.question_set_shares set snapshot_payload='{}'::jsonb")).rejects.toThrow(/permission denied/);
     await as(db, "authenticated", A, "select public.delete_my_cloud_data()");
     const { rows: left } = await db.query<{ n: number }>(`select

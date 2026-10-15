@@ -5,7 +5,7 @@ import { TRACKER_KIND_FOR_ACTIVITY } from "./activity";
 import { courseTemplateVersions, savedCourseTemplates, type SavedCourseTemplate } from "./templateLibrary";
 import {
   planCourseTemplate, reconcileCourseTemplate,
-  type CourseTemplatePlan, type TemplateReconciliation,
+  type CourseTemplatePlan, type CourseTemplateSection, type TemplateReconciliation,
 } from "./templateParse";
 import { canonicalModuleKey } from "./vocabulary";
 
@@ -57,6 +57,30 @@ interface Workspace {
   courses: readonly Course[];
   tracker: readonly TrackerItem[];
 }
+
+export interface CohortTargetAssessment {
+  status: "legacy-unversioned" | "matched-version" | "needs-review";
+  cohortLabels: string[];
+  includesUnknown: boolean;
+}
+
+/** Explicit source cohorts cannot target an unversioned course shell. */
+export function assessCohortTarget(
+  sections: readonly CourseTemplateSection[], approvedTargetCohort?: string,
+): CohortTargetAssessment {
+  const cohortLabels = [...new Set(sections.flatMap((section) => {
+    const label = section.context?.cohort?.trim();
+    return label ? [label] : [];
+  }))];
+  const includesUnknown = sections.some((section) => !section.context?.cohort?.trim());
+  if (!cohortLabels.length) return { status: "legacy-unversioned", cohortLabels, includesUnknown };
+  const approved = approvedTargetCohort?.trim();
+  if (approved && !includesUnknown && cohortLabels.length === 1 && cohortLabels[0] === approved) {
+    return { status: "matched-version", cohortLabels, includesUnknown };
+  }
+  return { status: "needs-review", cohortLabels, includesUnknown };
+}
+
 const normalizeTerm = (name: string): string | undefined => {
   const match = name.trim().match(/^(?:t|term)\s*0*(\d{1,2})$/i);
   return match ? `term${Number(match[1])}` : undefined;
@@ -82,6 +106,59 @@ const sameModuleShell = (term: string, left: string, right: string): boolean => 
   return a === b || (normalizeTerm(term) === "term5"
     && ["mi", "nmi"].includes(a) && ["mi", "nmi"].includes(b));
 };
+
+export interface LegacyOwnerEvidence {
+  kind: "unique-target" | "ambiguous" | "unknown";
+  candidateCourseIds: string[];
+}
+
+/** Determine whether a course-less tracker row has exactly one possible owner. */
+export function resolveLegacyOwnerEvidence({
+  term, module, selectedCourseCode, terms, courses, tracker,
+}: {
+  term: string;
+  module: string;
+  selectedCourseCode: string;
+  terms: readonly Term[];
+  courses: readonly Course[];
+  tracker: readonly TrackerItem[];
+}): LegacyOwnerEvidence {
+  const matchingTerms = terms.filter((entry) => normalizeTerm(entry.name) === normalizeTerm(term));
+  const matchingTermIds = new Set(matchingTerms.map((entry) => entry.id));
+  const candidates = new Map<string, { id: string; target: boolean }>();
+  const selectedCourses = courses.filter((course) => matchingTermIds.has(course.termId)
+    && sameCourseShell(term, course.code, selectedCourseCode));
+  for (const course of courses) {
+    if (!matchingTermIds.has(course.termId)
+      || !course.modules.some((entry) => canonicalModuleKey(entry.name) === canonicalModuleKey(module))) continue;
+    candidates.set(course.id, { id: course.id, target: sameCourseShell(term, course.code, selectedCourseCode) });
+  }
+  const prospectiveTarget = selectedCourses.length === 1
+    ? selectedCourses[0].id : `course:${codeKey(selectedCourseCode)}`;
+  candidates.set(prospectiveTarget, { id: prospectiveTarget, target: true });
+
+  for (const row of tracker) {
+    const parts = row.path.split("/").filter(Boolean);
+    const suffix = parts.at(-1) ?? "";
+    const hasWeek = /^(?:week\s*\d+|unscheduled)$/i.test(suffix);
+    const moduleIndex = parts.length - (hasWeek ? 2 : 1);
+    if (moduleIndex < 2
+      || normalizeTerm(parts[0] ?? "") !== normalizeTerm(term)
+      || canonicalModuleKey(parts[moduleIndex] ?? "") !== canonicalModuleKey(module)) continue;
+    const coursePath = parts.slice(1, moduleIndex).join("/");
+    const known = courses.find((course) => matchingTermIds.has(course.termId)
+      && sameCourseShell(term, course.code, coursePath));
+    const id = known?.id ?? `course:${codeKey(coursePath)}`;
+    candidates.set(id, { id, target: sameCourseShell(term, coursePath, selectedCourseCode) });
+  }
+  const values = [...candidates.values()];
+  if (!values.length) return { kind: "unknown", candidateCourseIds: [] };
+  const uniqueTarget = values.length === 1 && values[0].target;
+  return {
+    kind: uniqueTarget ? "unique-target" : "ambiguous",
+    candidateCourseIds: values.map((candidate) => candidate.id),
+  };
+}
 
 function currentTemplateSections(documents: readonly SourceDocument[]): SavedCourseTemplate[] {
   return courseTemplateVersions(savedCourseTemplates(documents))
@@ -117,6 +194,20 @@ export function previewCurriculumTemplateInstallation(
   const issues: CurriculumTemplateInstallIssue[] = [];
   for (const [key, sources] of byModule) {
     const sourceName = sources[0].section.module;
+    const cohort = assessCohortTarget(sources.map((source) => source.section));
+    if (cohort.status === "needs-review") {
+      const identity = cohort.cohortLabels.length > 1
+        ? `conflicting cohorts ${cohort.cohortLabels.join(", ")}`
+        : cohort.includesUnknown
+          ? `cohort ${cohort.cohortLabels[0]} mixed with source files that do not state a cohort`
+          : `cohort ${cohort.cohortLabels[0]}`;
+      issues.push({
+        sourceModule: sourceName,
+        sourceFiles: sources.length,
+        reason: `Source identity declares ${identity}, but the destination course has no reviewed cohort binding. Choose a version-specific owner before installing.`,
+      });
+      continue;
+    }
     const statedTerms = new Set<string>();
     const badSourceTerms: string[] = [];
     for (const source of sources) {
@@ -186,7 +277,13 @@ export function previewCurriculumTemplateInstallation(
         week: undefined, weekSource: undefined,
       })),
     };
-    const reconcile = reconcileCourseTemplate(plan, workspace.tracker);
+    const ownership = resolveLegacyOwnerEvidence({
+      term, module: moduleName, selectedCourseCode: courseCode,
+      terms: workspace.terms, courses: workspace.courses, tracker: workspace.tracker,
+    });
+    const reconcile = reconcileCourseTemplate(plan, workspace.tracker, {
+      legacyCourseAdoption: ownership.kind === "unique-target" ? "confirmed-unique" : "review",
+    });
     modules.push({
       term, courseCode, courseName: course?.name ?? owner.name, module: moduleName,
       path: [term, courseCode, moduleName].join("/"), sourceFiles: sources.length,

@@ -23,10 +23,10 @@ test("three private PDFs through the actual QBank, with uncertain keys excluded 
     await expect(preview.getByLabel("Bank week")).toHaveValue("2");
     if (manifest.bank.id.includes("pharmacodynamics")) {
       await expect(preview).toContainText("15 questions · 0 ready · 15 need review");
-      await expect(preview.getByRole("button", { name: "Import 0 verified questions" })).toBeDisabled();
+      await expect(preview.getByRole("button", { name: "Import 0 answer-ready questions" })).toBeDisabled();
     } else {
       const count = manifest.bank.id.includes("biostats") ? 15 : 17;
-      await preview.getByRole("button", { name: `Import ${count} verified questions` }).click();
+      await preview.getByRole("button", { name: `Import ${count} answer-ready question${count === 1 ? "" : "s"}` }).click();
       await expect(preview).toContainText(`${count} questions saved on this device.`);
       await preview.getByRole("button", { name: "Open imported bank" }).click();
     }

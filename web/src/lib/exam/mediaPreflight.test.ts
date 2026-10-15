@@ -112,6 +112,41 @@ describe("bounded figure-byte trust", () => {
     expect(changed.issues.map((value) => value.code)).toEqual(["checksum-mismatch"]);
   });
 
+  it("allows two questions to share one exact checksum-addressed private-library object", async () => {
+    const digest = createHash("sha256").update(new Uint8Array(await png.arrayBuffer())).digest("hex");
+    const blobKey = `private-library:sha256:${digest}`;
+    const sharedQuestion = (id: string, assetId: string) => question({
+      id,
+      content: content([
+        asset(assetId, "question", { questionId: id, checksum: `sha256:${digest}` }),
+      ], [{ type: "image", assetId }]),
+      attachments: [attachment(assetId, "question", { blobKey })],
+    });
+    const sharedRecord = record("q2");
+    const verified = await preflightQuestionMedia([
+      sharedQuestion("q1", "figure-one"),
+      sharedQuestion("q2", "figure-two"),
+    ], {
+      load: async () => sharedRecord,
+      decode: async () => true,
+      hash: async () => digest,
+    });
+
+    expect(verified).toMatchObject({
+      total: 2, available: 2, hashesVerified: 2, decoded: 2,
+      issues: [], blockedQuestionIds: [],
+    });
+
+    const unbound = sharedQuestion("q1", "figure-one");
+    unbound.attachments![0].blobKey = "private-library:not-the-checksum";
+    const refused = await preflightQuestionMedia([unbound], {
+      load: async () => sharedRecord,
+      decode: async () => true,
+      hash: async () => digest,
+    });
+    expect(refused.issues).toEqual([{ questionId: "q1", assetId: "figure-one", code: "wrong-question" }]);
+  });
+
   it("rejects invalid decodes even when the stored byte count matches", async () => {
     const result = await preflightQuestionMedia([clinical()], { load: async () => record(), decode: async () => false });
     expect(result.issues[0].code).toBe("decode-failed");

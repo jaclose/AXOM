@@ -1602,9 +1602,19 @@ function FileTab({ busyFile, setBusyFile, onParsed, onBankSaved, stagedSources, 
     try {
       const { installPrivateLibrary } = await import("../../lib/privateLibrary/install");
       const installed = await installPrivateLibrary(prepared.read, setProgress);
+      if (installed.questionIds.length) {
+        onBankSaved({ setId: installed.setIds[0], documentId: installed.documentIds[0], questionIds: installed.questionIds });
+      }
+      if (installed.status === "partial") {
+        pushToast({
+          title: "Prepared library partly installed",
+          body: `${installed.questionIds.length} answer-ready question${installed.questionIds.length === 1 ? " remains" : "s remain"} saved locally. ${installed.warnings.slice(0, 2).join(" ")} Keep this package selected and retry the unfinished sources.`,
+          tone: "warn",
+        });
+        return;
+      }
       setPrepared(undefined);
       pushToast({ title: "Prepared library installed on this device", body: `${installed.questionIds.length} question records confirmed in the local workspace; cloud sync is not yet verified.`, tone: "success" });
-      onBankSaved({ setId: installed.setIds[0], documentId: installed.documentIds[0], questionIds: installed.questionIds });
     } catch (error) {
       pushToast({ title: "Package installation incomplete", body: error instanceof Error ? error.message : "Review source coverage and retry the failed sources.", tone: "warn" });
     } finally { setInstalling(false); }

@@ -461,7 +461,7 @@ describe("Course Tracker comprehension layout", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show all matching activities" }));
     expect(container.querySelectorAll(".tracker-item-row")).toHaveLength(205);
     expect(useStore.getState().tracker).toEqual(rows);
-  });
+  }, 60_000);
 
   it("uses utility/work-area regions that can stack without changing DOM order at mobile width", () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });

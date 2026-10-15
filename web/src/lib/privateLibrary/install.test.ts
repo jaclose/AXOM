@@ -4,10 +4,10 @@ import { Blob as NativeBlob, File as NativeFile } from "node:buffer";
 import { useStore } from "../store";
 import { closeWorkspace, openEmptyWorkspace, reloadWorkspace } from "../question-content/persistenceHarness.testing";
 import { sha256 } from "../question-content/assets";
-import { bankFiles, folderLibraryReader, installPrivateLibrary, readCatalog, readPreparedBank, safeLibraryPath } from "./install";
-import { PRIVATE_LIBRARY_FORMAT, PRIVATE_REVIEW_DOCUMENT, type PreparedBank, type PrivateLibraryCatalog } from "./types";
+import { bankFiles, folderLibraryReader, installPrivateLibrary, mergeStoredReview, readCatalog, readPreparedBank, safeLibraryPath } from "./install";
+import { PRIVATE_LIBRARY_DOCUMENT, PRIVATE_LIBRARY_FORMAT, PRIVATE_REVIEW_DOCUMENT, type PreparedBank, type PrivateLibraryCatalog } from "./types";
 import { privateReviewMedia } from "./media";
-import { collectQuestionAttachmentPayloads, deleteQuestionAttachmentBlobs, restoreQuestionAttachmentPayloads, runQuestionAttachmentMaintenance } from "../questionAttachments";
+import { collectQuestionAttachmentPayloads, deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, listQuestionAttachmentBlobKeys, restoreQuestionAttachmentPayloads, runQuestionAttachmentMaintenance } from "../questionAttachments";
 import { buildCourseBooks } from "../bookshelf/courseBooks";
 import { withPreparedCourses, loadPreparedCourse } from "../bookshelf/preparedCourses";
 import { academicBindings, academicRecord } from "../academicLibrary/contentReferences";
@@ -24,8 +24,11 @@ async function bundle() {
   const files = new Map([["catalog.json", encode(catalog)], ["templates/test.txt", template], ["banks/test/bank.json", encode(bank)]]);
   return { catalog, files, read: async (path: string) => { const file = files.get(path); if (!file) throw new Error("Missing file"); return file; } };
 }
+function stubSuccessfulImageDecode(width = 1, height = 1) {
+  vi.stubGlobal("createImageBitmap", vi.fn(async () => ({ width, height, close: vi.fn() })));
+}
 beforeEach(async () => { await openEmptyWorkspace(); vi.stubGlobal("Blob", NativeBlob); vi.stubGlobal("File", NativeFile); });
-afterEach(closeWorkspace);
+afterEach(async () => { await closeWorkspace(); vi.unstubAllGlobals(); });
 describe("prepared private library installation", () => {
   it("binds original documents by their verified file checksum, never a filename match", async () => {
     const b = await bundle();
@@ -104,14 +107,150 @@ describe("prepared private library installation", () => {
     b.files.set("templates/test.txt", original);
     const bank = b.files.get("banks/test/bank.json")!;
     b.files.delete("banks/test/bank.json");
-    await expect(installPrivateLibrary(b.read)).rejects.toThrow("another installation attempt");
+    const partial = await installPrivateLibrary(b.read);
+    expect(partial).toMatchObject({ status: "partial", questionIds: [] });
+    expect(partial.warnings.join(" ")).toMatch(/Missing file/);
+    const partialCatalog = useStore.getState().documents.find(document => document.fileType === PRIVATE_LIBRARY_DOCUMENT);
+    expect(partialCatalog).toBeTruthy();
+    expect(JSON.parse(partialCatalog!.rawText).sources[0]).toMatchObject({ status: "failed", ready: 0 });
     b.files.set("banks/test/bank.json", bank);
-    await installPrivateLibrary(b.read);
+    await expect(installPrivateLibrary(b.read)).resolves.toMatchObject({ status: "complete", warnings: [] });
     expect(useStore.getState().questions).toHaveLength(1);
+  });
+  it("returns a partial receipt with every durable question when a reused filing needs retry", async () => {
+    const b = await bundle();
+    await expect(installPrivateLibrary(b.read)).resolves.toMatchObject({ status: "complete", questionIds: [expect.any(String)] });
+    const bank = JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)) as PreparedBank;
+    const released = structuredClone(bank.pkg.questions[0]);
+    released.id = "sample-2";
+    released.source.questionNumber = 2;
+    released.stem = [{ type: "text", text: "Which sample is labeled second?" }];
+    bank.pkg.questions.push(released);
+    const reviewedBank: PreparedBank = {
+      ...bank,
+      reviewedFiling: { term: "Term 5", module: "GOER", evidence: "human-reviewed", weekAssignment: "unassigned" },
+    };
+    b.catalog.sources[0].ready = 2;
+    b.files.set("catalog.json", encode(b.catalog));
+    b.files.set("banks/test/bank.json", encode(reviewedBank));
+
+    const commitReviewedRefiling = useStore.getState().commitReviewedRefiling;
+    const refused = vi.fn(async () => ({ ok: false as const, message: "Synthetic reviewed filing failure", rollbackFailures: [] }));
+    useStore.setState({ commitReviewedRefiling: refused });
+    let partial: Awaited<ReturnType<typeof installPrivateLibrary>>;
+    try {
+      partial = await installPrivateLibrary(b.read);
+    } finally {
+      useStore.setState({ commitReviewedRefiling });
+    }
+
+    expect(refused).toHaveBeenCalledTimes(1);
+    expect(partial).toMatchObject({ status: "partial" });
+    expect(partial.questionIds).toHaveLength(2);
+    expect(partial.setIds).toHaveLength(2);
+    expect(partial.warnings.join(" ")).toMatch(/2 answer-ready questions remain saved.*Synthetic reviewed filing failure/);
+    const questions = useStore.getState().questions;
+    expect(questions).toHaveLength(2);
+    expect(questions.find(question => question.content?.id === "sample-1")).toMatchObject({ module: "DEMO", week: 1 });
+    expect(questions.find(question => question.content?.id === "sample-2")).toMatchObject({ module: "GOER", week: undefined });
+    const catalog = useStore.getState().documents.find(document => document.fileType === PRIVATE_LIBRARY_DOCUMENT);
+    expect(JSON.parse(catalog!.rawText).sources[0]).toMatchObject({ status: "review-required", ready: 2 });
   });
   it("refuses traversal and unsupported library versions", () => {
     for (const path of ["../secret", "/secret", "banks/../../secret", "banks\\secret"]) expect(() => safeLibraryPath(path)).toThrow();
     expect(() => readCatalog({ format: PRIVATE_LIBRARY_FORMAT, schemaVersion: 2 })).toThrow();
+  });
+  it("accepts only an exact immutable reviewed filing envelope", async () => {
+    const b = await bundle();
+    const original = JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)) as Record<string, unknown>;
+    const valid = readPreparedBank({ ...original, reviewedFiling: {
+      term: "Term 5", module: "GOER", evidence: "human-reviewed", weekAssignment: "unassigned",
+    } });
+    expect(valid.reviewedFiling).toEqual({
+      term: "Term 5", module: "GOER", evidence: "human-reviewed", weekAssignment: "unassigned",
+    });
+    expect(Object.isFrozen(valid.reviewedFiling)).toBe(true);
+
+    expect(readPreparedBank({ ...original, reviewedFiling: {
+      term: "Term 5", module: "DEMO", evidence: "source-metadata", weekAssignment: "unassigned",
+    } }).reviewedFiling?.module).toBe("DEMO");
+
+    for (const module of ["FTM-1", "PRE-MIDTERM"]) {
+      const matching = structuredClone(original) as { pkg: PreparedBank["pkg"] } & Record<string, unknown>;
+      matching.pkg.manifest.course.name = module;
+      expect(readPreparedBank({ ...matching, reviewedFiling: {
+        term: "Term 5", module, evidence: "source-metadata", weekAssignment: "unassigned",
+      } }).reviewedFiling?.module).toBe(module);
+    }
+
+    const base = { term: "Term 5", module: "GOER", evidence: "source-metadata", weekAssignment: "unassigned" };
+    for (const reviewedFiling of [
+      { ...base, term: "Term 0" },
+      { ...base, module: " GOER" },
+      { ...base, module: "GOER/ER" },
+      { ...base, module: "GOER\nER", evidence: "human-reviewed" },
+      { ...base, module: "A".repeat(81) },
+      { ...base, evidence: "filename-inference" },
+      { ...base, weekAssignment: 2 },
+      { ...base, week: 2 },
+      { ...base, title: "unexpected field" },
+    ]) expect(() => readPreparedBank({ ...original, reviewedFiling })).toThrow("invalid reviewed filing");
+
+    expect(() => readPreparedBank({ ...original, reviewedFiling: base })).toThrow("must agree");
+    const mixed = structuredClone(original) as { pkg: PreparedBank["pkg"] } & Record<string, unknown>;
+    mixed.pkg.questions[0].course = "ER";
+    expect(() => readPreparedBank({ ...mixed, reviewedFiling: {
+      term: "Term 5", module: "GOER", evidence: "human-reviewed", weekAssignment: "unassigned",
+    } })).toThrow("cannot collapse several original modules or terms");
+  });
+  it("preserves only reviewer-editable content while adopting corrected source metadata", async () => {
+    const b = await bundle();
+    const incoming = readPreparedBank(JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)));
+    const stored = structuredClone(incoming);
+    const reviewed = stored.pkg.questions[0];
+    reviewed.stem = [{ type: "text", text: "Which sample did the reviewer confirm first?" }];
+    reviewed.correctAnswer = { labels: ["B"], evidence: "reviewer" };
+    reviewed.flags = [{ type: "answer_needs_review", message: "Stale review flag" }];
+    reviewed.assets = [{ id: "old-figure", filename: "old.png", mimeType: "image/png", role: "reference", questionId: reviewed.id,
+      checksum: `sha256:${"b".repeat(64)}` }];
+
+    const corrected = structuredClone(incoming);
+    corrected.pkg.questions[0].source.page = 7;
+    corrected.pkg.questions[0].assets = [{ id: "corrected-figure", filename: "corrected.png", mimeType: "image/png", role: "source_page",
+      questionId: reviewed.id, sourcePage: 7, checksum: `sha256:${"c".repeat(64)}` }];
+    corrected.pkg.questions[0].flags = [{ type: "source_inconsistency", message: "Correction retained as source evidence." }];
+
+    const merged = mergeStoredReview(corrected, stored, `sha256:${"a".repeat(64)}`);
+    expect(merged.pkg.questions[0].stem).toEqual(reviewed.stem);
+    expect(merged.pkg.questions[0].correctAnswer).toEqual({ labels: ["B"], evidence: "reviewer" });
+    expect(merged.pkg.questions[0].source.page).toBe(7);
+    expect(merged.pkg.questions[0].assets).toEqual(corrected.pkg.questions[0].assets);
+    expect(merged.pkg.questions[0].flags).toEqual(corrected.pkg.questions[0].flags);
+  });
+  it("refuses to overlay saved review work without one valid matching source checksum", async () => {
+    const b = await bundle();
+    const incoming = readPreparedBank(JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)));
+    const missing = structuredClone(incoming);
+    delete missing.pkg.questions[0].provenance.sourceChecksum;
+    expect(() => mergeStoredReview(missing, missing)).toThrow("conflicts with saved local review work");
+
+    const changed = structuredClone(incoming);
+    changed.pkg.questions[0].provenance.sourceChecksum = `sha256:${"d".repeat(64)}`;
+    expect(() => mergeStoredReview(changed, incoming, `sha256:${"a".repeat(64)}`)).toThrow("conflicts with saved local review work");
+  });
+  it("takes refreshed filing only from the incoming verified package", async () => {
+    const b = await bundle();
+    const plain = readPreparedBank(JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)));
+    const stored = readPreparedBank({ ...structuredClone(plain), reviewedFiling: {
+      term: "Term 5", module: "GOER", evidence: "human-reviewed", weekAssignment: "unassigned",
+    } });
+    expect(mergeStoredReview(plain, stored, `sha256:${"a".repeat(64)}`).reviewedFiling).toBeUndefined();
+
+    const refreshed = readPreparedBank({ ...structuredClone(plain), reviewedFiling: {
+      term: "Term 5", module: "PRE-MIDTERM", evidence: "human-reviewed", weekAssignment: "unassigned",
+    } });
+    expect(mergeStoredReview(refreshed, stored, `sha256:${"a".repeat(64)}`).reviewedFiling)
+      .toEqual(refreshed.reviewedFiling);
   });
   it("keeps unreadable rows review-gated without withholding readable siblings", async () => {
     const b = await bundle();
@@ -123,6 +262,7 @@ describe("prepared private library installation", () => {
     expect(parsed.issues).toEqual(expect.arrayContaining([expect.objectContaining({ questionId: "broken-row", severity: "error" })]));
   });
   it("retains held images across reload and the existing portable media export/restore path", async () => {
+    stubSuccessfulImageDecode();
     const b = await bundle();
     const bank = JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json"))) as PreparedBank;
     const png = new Uint8Array([137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1]);
@@ -156,6 +296,7 @@ describe("prepared private library installation", () => {
 
 describe("shared image identity in prepared libraries", () => {
   it("resolves root-level bank media beside bank.json", async () => {
+    stubSuccessfulImageDecode();
     const b = await bundle();
     const bank = JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)) as PreparedBank;
     const png = new Uint8Array([
@@ -178,6 +319,7 @@ describe("shared image identity in prepared libraries", () => {
   });
 
   it("materializes a reused source-page image once even when question-local asset IDs differ", async () => {
+    stubSuccessfulImageDecode();
     const b = await bundle();
     const bank = JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)) as PreparedBank;
     const png = new Uint8Array([
@@ -209,5 +351,144 @@ describe("shared image identity in prepared libraries", () => {
     conflicting.pkg.questions[1].assets[0].checksum = "sha256:" + "f".repeat(64);
     await expect(bankFiles(conflicting, read, "banks/test/prepared-bank.json"))
       .rejects.toThrow(/two different images are named/i);
+  });
+
+  it("installs shared verified bytes once while retaining attachment metadata for both ready questions", async () => {
+    stubSuccessfulImageDecode();
+    const b = await bundle();
+    const bank = JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)) as PreparedBank;
+    const png = new Uint8Array([
+      137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,
+    ]);
+    const checksum = await sha256(png);
+    const blobKey = `private-library:${checksum}`;
+    const first = bank.pkg.questions[0];
+    const sharedAsset = {
+      id: "shared-page-one", filename: "shared-page.png", mimeType: "image/png",
+      role: "source_page" as const, questionId: first.id, checksum,
+      byteSize: png.byteLength, width: 1, height: 1,
+    };
+    bank.pkg.questions = [
+      { ...first, stem: [...first.stem, { type: "image", assetId: sharedAsset.id, role: "source_page" }], assets: [sharedAsset] },
+      {
+        ...structuredClone(first),
+        id: "sample-2",
+        source: { ...first.source, questionNumber: 2 },
+        stem: [
+          { type: "text", text: "Which sample is labeled second?" },
+          { type: "image", assetId: "shared-page-two", role: "source_page" },
+        ],
+        assets: [{ ...sharedAsset, id: "shared-page-two", questionId: "sample-2" }],
+      },
+    ];
+    b.catalog.sources[0].ready = 2;
+    b.files.set("catalog.json", encode(b.catalog));
+    b.files.set("banks/test/bank.json", encode(bank));
+    b.files.set("banks/test/assets/shared-page.png", png);
+    await deleteQuestionAttachmentBlobs([blobKey]);
+    try {
+      await installPrivateLibrary(b.read);
+      await reloadWorkspace();
+      const questions = useStore.getState().questions;
+      expect(questions).toHaveLength(2);
+      const attachments = questions.flatMap((question) => question.attachments ?? []);
+      expect(attachments).toHaveLength(2);
+      expect(new Set(attachments.map((attachment) => attachment.id)).size).toBe(2);
+      expect(new Set(attachments.map((attachment) => attachment.blobKey))).toEqual(new Set([blobKey]));
+      expect((await listQuestionAttachmentBlobKeys()).filter((key) => key === blobKey)).toEqual([blobKey]);
+      expect(await getQuestionAttachmentBlob(blobKey)).toMatchObject({ byteSize: png.byteLength, mimeType: "image/png" });
+
+      const backup = await collectQuestionAttachmentPayloads(questions, { localOnly: true });
+      expect(backup.missingBlobKeys).toEqual([]);
+      expect(backup.payloads).toHaveLength(2);
+      await deleteQuestionAttachmentBlobs([blobKey]);
+      expect((await restoreQuestionAttachmentPayloads(backup.payloads, questions)).restored).toBeGreaterThanOrEqual(1);
+      expect((await getQuestionAttachmentBlob(attachments[0].blobKey))?.byteSize).toBe(png.byteLength);
+      expect((await getQuestionAttachmentBlob(attachments[1].blobKey))?.byteSize).toBe(png.byteLength);
+
+      const [removed, survivor] = questions;
+      useStore.getState().removeQuestion(removed.id);
+      await reloadWorkspace();
+      expect(useStore.getState().questions.map((question) => question.id)).toEqual([survivor.id]);
+      expect(useStore.getState().questions[0].attachments?.[0].blobKey).toBe(blobKey);
+      expect((await getQuestionAttachmentBlob(blobKey, { localOnly: true }))?.byteSize).toBe(png.byteLength);
+    } finally {
+      await deleteQuestionAttachmentBlobs([blobKey]);
+    }
+  });
+
+  const gifHeader = Uint8Array.from(Buffer.from("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==", "base64")).subarray(0, 12);
+  const jpegHeader = Uint8Array.from([0xff, 0xd8, 0xff, 0xc0, 0, 17, 8, 0, 1, 0, 1, 0]);
+  const webpHeader = new Uint8Array(30);
+  webpHeader.set(Buffer.from("RIFF"), 0);
+  webpHeader.set(Buffer.from("WEBP"), 8);
+  webpHeader.set(Buffer.from("VP8X"), 12);
+
+  it.each([
+    { name: "GIF", mimeType: "image/gif" as const, bytes: gifHeader },
+    { name: "JPEG", mimeType: "image/jpeg" as const, bytes: jpegHeader },
+    { name: "WebP", mimeType: "image/webp" as const, bytes: webpHeader },
+  ])("rejects header-only $name bytes without persisting them", async ({ mimeType, bytes }) => {
+    const b = await bundle();
+    const bank = JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)) as PreparedBank;
+    const checksum = await sha256(bytes);
+    const filename = `header.${mimeType.split("/")[1]}`;
+    bank.pkg.questions[0].assets = [{
+      id: "broken-header", filename, mimeType, role: "question", questionId: "sample-1", checksum,
+    }];
+    b.files.set(`banks/test/assets/${filename}`, bytes);
+    vi.stubGlobal("createImageBitmap", vi.fn(async () => { throw new Error("decoder refused header-only bytes"); }));
+    await deleteQuestionAttachmentBlobs([`private-library:${checksum}`]);
+
+    await expect(bankFiles(bank, b.read, "banks/test/bank.json")).rejects.toThrow(/integrity check failed/i);
+    expect(await getQuestionAttachmentBlob(`private-library:${checksum}`)).toBeUndefined();
+  });
+
+  it("validates every image before persisting the first attachment", async () => {
+    const b = await bundle();
+    const bank = JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)) as PreparedBank;
+    const png = new Uint8Array([
+      137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,
+    ]);
+    const pngChecksum = await sha256(png);
+    const brokenChecksum = await sha256(jpegHeader);
+    bank.pkg.questions[0].assets = [
+      { id: "valid-first", filename: "valid.png", mimeType: "image/png", role: "question", questionId: "sample-1", checksum: pngChecksum },
+      { id: "broken-second", filename: "broken.jpg", mimeType: "image/jpeg", role: "question", questionId: "sample-1", checksum: brokenChecksum },
+    ];
+    b.files.set("banks/test/assets/valid.png", png);
+    b.files.set("banks/test/assets/broken.jpg", jpegHeader);
+    vi.stubGlobal("createImageBitmap", vi.fn(async (blob: Blob) => {
+      if (blob.type === "image/jpeg") throw new Error("decoder refused header-only bytes");
+      return { width: 1, height: 1, close: vi.fn() };
+    }));
+    await deleteQuestionAttachmentBlobs([`private-library:${pngChecksum}`, `private-library:${brokenChecksum}`]);
+
+    await expect(bankFiles(bank, b.read, "banks/test/bank.json")).rejects.toThrow(/broken\.jpg/i);
+    expect(await getQuestionAttachmentBlob(`private-library:${pngChecksum}`)).toBeUndefined();
+    expect(await getQuestionAttachmentBlob(`private-library:${brokenChecksum}`)).toBeUndefined();
+  });
+
+  it("rejects decoded or declared image dimensions that disagree with verified bytes", async () => {
+    const b = await bundle();
+    const bank = JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)) as PreparedBank;
+    const png = new Uint8Array([
+      137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,
+    ]);
+    const checksum = await sha256(png);
+    bank.pkg.questions[0].assets = [{
+      id: "mismatch", filename: "mismatch.png", mimeType: "image/png", role: "question",
+      questionId: "sample-1", checksum, width: 2, height: 1,
+    }];
+    b.files.set("banks/test/assets/mismatch.png", png);
+    stubSuccessfulImageDecode(1, 1);
+    await deleteQuestionAttachmentBlobs([`private-library:${checksum}`]);
+    await expect(bankFiles(bank, b.read, "banks/test/bank.json")).rejects.toThrow(/dimensions do not match/i);
+    expect(await getQuestionAttachmentBlob(`private-library:${checksum}`)).toBeUndefined();
+
+    delete bank.pkg.questions[0].assets[0].width;
+    vi.stubGlobal("createImageBitmap", vi.fn(async () => ({ width: 2, height: 1, close: vi.fn() })));
+    await expect(bankFiles(bank, b.read, "banks/test/bank.json")).rejects.toThrow(/fully decoded/i);
+    expect(await getQuestionAttachmentBlob(`private-library:${checksum}`)).toBeUndefined();
   });
 });

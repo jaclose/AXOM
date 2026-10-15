@@ -17,9 +17,10 @@ afterEach(async () => {
 });
 
 describe("portable binary media backup", () => {
-  it("round-trips held images once without embedding base64 in workspace JSON", async () => {
+  it("round-trips distinct question references to one shared image without embedding base64 in workspace JSON", async () => {
     await putQuestionAttachmentBlob(attachment.blobKey, { blob: new Blob(["AXOM"]), mimeType: "image/png", byteSize: 4, questionId: "held-question", updatedAt: attachment.updatedAt });
-    const references = [...refs, { id: "second-use", attachments: [attachment] }];
+    const secondAttachment = { ...attachment, id: "figure-second", assetId: "source-page-second" };
+    const references = [...refs, { id: "second-use", attachments: [secondAttachment] }];
     expect(mediaBackupBytes(references)).toBe(4);
     const exported = await createMediaBackupArchive({ _app: "AXOM", documents: [{ rawText: "kept" }] }, references);
     expect(exported.attachmentCount).toBe(1); expect(exported.missingBlobKeys).toEqual([]);
@@ -27,9 +28,11 @@ describe("portable binary media backup", () => {
     expect(JSON.parse(backup.rawText).documents).toEqual([{ rawText: "kept" }]);
     expect(backup.rawText).not.toContain("base64");
     await deleteQuestionAttachmentBlobs([attachment.blobKey]);
-    expect(await backup.restoreMedia(refs)).toEqual({ restored: 1, skipped: 0 });
-    expect(await (await getQuestionAttachmentBlob(attachment.blobKey))!.blob.text()).toBe("AXOM");
-    expect(await backup.restoreMedia(refs)).toEqual({ restored: 0, skipped: 1 });
+    expect(await backup.restoreMedia(references)).toEqual({ restored: 1, skipped: 0 });
+    const restored = await getQuestionAttachmentBlob(attachment.blobKey);
+    expect(await restored!.blob.text()).toBe("AXOM");
+    expect(restored!.questionId).toBe("second-use");
+    expect(await backup.restoreMedia(references)).toEqual({ restored: 0, skipped: 1 });
   });
 
   it("reports missing images and retains compatibility with existing JSON backups", async () => {

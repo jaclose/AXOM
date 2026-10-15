@@ -4,14 +4,17 @@
 // twice. The content is the invented fixture.
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { flushLocalVaultWrites, localVaultStorage } from "../localVault";
 import { deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob } from "../questionAttachments";
 import type { ReviewedImportStore } from "../questionImportSave";
+import { useStore } from "../store";
 import { saveBank } from "./bankImport";
+import { preparedBankImportOptions } from "../privateLibrary/install";
 import { parsePackage } from "./packageJson";
 import { closeWorkspace, importPackage, openEmptyWorkspace, realWorkspace, reloadWorkspace, storedImageCount, workspaceOnDisk } from "./persistenceHarness.testing";
 import type { ImportPackage, PackageIssue } from "./package";
-import { packageToReviewedImport } from "./toReviewedImport";
+import { packageToReviewedImport, type PackageImportOptions } from "./toReviewedImport";
 import { validatePackage } from "./validate";
 import { isAssetVisible } from "./visibility";
 
@@ -42,7 +45,10 @@ function twoSets(): { pkg: ImportPackage; issues: PackageIssue[]; files: File[] 
 }
 
 beforeEach(openEmptyWorkspace);
-afterEach(closeWorkspace);
+afterEach(async () => {
+  vi.restoreAllMocks();
+  await closeWorkspace();
+});
 
 describe("what a package offers to the canonical import", () => {
   it("offers only the ready questions, and says why each other one is held", () => {
@@ -57,6 +63,37 @@ describe("what a package offers to the canonical import", () => {
       { questionId: "syn-q08", readiness: "needs-review", reasons: [expect.any(String)] },
     ]);
     expect(adapted.imports[0].request).toMatchObject({ scope: { module: "EXAMPLE", week: 1 }, destination: "set", setTitle: "Invented multimodal shapes" });
+  });
+
+  it("layers reviewed filing over imported records without rewriting source scope evidence", () => {
+    const { pkg, issues } = invented();
+    const before = structuredClone(pkg);
+    const adapted = packageToReviewedImport(pkg, issues, preparedBankImportOptions({
+      pkg, issues, sourceText: SOURCE_TEXT, sourceBytes: 4321, notes: [],
+      reviewedFiling: { term: "Term 5", module: "GOER", evidence: "human-reviewed", weekAssignment: "unassigned" },
+    }));
+
+    expect(adapted.imports[0].request.scope).toEqual({ module: "GOER" });
+    expect(adapted.filing).toMatchObject({ module: "GOER", term: 5 });
+    expect(adapted.filing).not.toHaveProperty("week");
+    expect(pkg).toEqual(before);
+    expect(adapted.imports[0].request.drafts[0].content).toEqual(before.questions[0]);
+  });
+
+  it("rejects malformed, mismatched, and week-assigned reviewed filing options", () => {
+    const { pkg, issues } = invented();
+    expect(() => packageToReviewedImport(pkg, issues, {
+      reviewedFiling: { module: "FTCM", term: 4, week: 2 } as PackageImportOptions["reviewedFiling"],
+    })).toThrow(/without assigning a week/);
+    expect(() => packageToReviewedImport(pkg, issues, {
+      reviewedFiling: { module: "FTCM", term: 5 },
+    })).toThrow(/belongs to Term 4/);
+    expect(() => packageToReviewedImport(pkg, issues, {
+      reviewedFiling: { module: " ", term: 4 },
+    })).toThrow(/Term 1-5 destination/);
+    expect(() => packageToReviewedImport(pkg, issues, {
+      reviewedFiling: { module: "GOER & FTCM", term: 4 },
+    })).toThrow(/one module/);
   });
 
   it("takes a question that needs review only once a person has accepted it, and retains restricted pictures for post-answer review", () => {
@@ -160,6 +197,212 @@ describe("a source that holds more than one set of questions", () => {
     expect(again.sections.map((section) => section.setId)).toEqual(saved.sections.map((section) => section.setId));
     const after = await workspaceOnDisk();
     expect([after.documents.length, after.questionSets.length, after.questions.length, await storedImageCount()]).toEqual([1, 2, 4, 1]);
+  });
+
+  it("refiles every reused set together after review", async () => {
+    const { pkg, files } = twoSets();
+    const source = { ...pkg, manifest: { ...pkg.manifest, course: { name: "GOER", term: 5, week: 2 } } };
+    const issues = validatePackage(source, { assetFiles: new Set(files.map((file) => file.name)) });
+    const first = await importPackage(source, issues, files);
+
+    const reviewed = await importPackage(source, issues, files, {
+      reviewedFiling: { module: "FTCM", term: 4 },
+    });
+
+    expect(reviewed).toMatchObject({ status: "already-saved", errors: [] });
+    expect(reviewed.sections.map((section) => section.setId)).toEqual(first.sections.map((section) => section.setId));
+    const after = await reloadWorkspace();
+    expect(after.questionSets).toHaveLength(2);
+    expect(after.questionSets.every((set) => set.scope?.module === "FTCM" && set.scope.week === undefined && set.scope.courseId === undefined)).toBe(true);
+    expect(after.questions).toHaveLength(4);
+    expect(after.questions.every((question) => question.module === "FTCM" && question.week === undefined && question.courseId === undefined)).toBe(true);
+  });
+
+  it("reports an atomic multi-set refiling failure without partial success", async () => {
+    const { pkg, files } = twoSets();
+    const source = { ...pkg, manifest: { ...pkg.manifest, course: { name: "GOER", term: 5, week: 2 } } };
+    const issues = validatePackage(source, { assetFiles: new Set(files.map((file) => file.name)) });
+    const first = await importPackage(source, issues, files);
+    const actual = realWorkspace.store();
+    let refilingAttempts = 0;
+    const failSecond: ReviewedImportStore = {
+      ...actual,
+      commitReviewedRefiling: async () => {
+        refilingAttempts += 1;
+        return { ok: false, message: "Synthetic atomic refiling failure", rollbackFailures: [] };
+      },
+    };
+
+    const reviewed = await saveBank(source, issues, files, {
+      library: realWorkspace.library,
+      store: () => failSecond,
+    }, { reviewedFiling: { module: "FTCM", term: 4 } });
+
+    expect(reviewed.status).toBe("failed");
+    expect(reviewed.incompleteSections).toEqual(expect.arrayContaining([
+      expect.objectContaining({ setId: first.sections[0].setId, savedIds: first.sections[0].savedIds, reused: true }),
+    ]));
+    expect(reviewed.sections).toEqual([]);
+    expect(reviewed.errors.join(" ")).toMatch(/Synthetic atomic refiling failure/);
+    expect(refilingAttempts).toBe(1);
+    const after = await reloadWorkspace();
+    expect(after.questionSets).toHaveLength(2);
+    expect(after.questionSets.every((set) => set.scope?.module === "GOER" && set.scope.week === 2)).toBe(true);
+    expect(after.questions).toHaveLength(4);
+    expect(after.questions.every((question) => question.module === "GOER" && question.week === 2)).toBe(true);
+  });
+
+  it("refuses every reviewed refiling before question scope changes when atomic refiling is unavailable", async () => {
+    const { pkg, files } = twoSets();
+    const source = { ...pkg, manifest: { ...pkg.manifest, course: { name: "GOER", term: 5, week: 2 } } };
+    const issues = validatePackage(source, { assetFiles: new Set(files.map((file) => file.name)) });
+    await importPackage(source, issues, files);
+    const actual = realWorkspace.store();
+    let questionUpdates = 0;
+    const unsupported: ReviewedImportStore = {
+      ...actual,
+      updateQuestion: (id, patch) => {
+        questionUpdates += 1;
+        return actual.updateQuestion(id, patch);
+      },
+      commitReviewedRefiling: undefined,
+    };
+
+    const reviewed = await saveBank(source, issues, files, {
+      library: realWorkspace.library,
+      store: () => unsupported,
+    }, { reviewedFiling: { module: "FTCM", term: 4 } });
+
+    expect(reviewed.status).toBe("failed");
+    expect(reviewed.sections).toEqual([]);
+    expect(reviewed.errors.join(" ")).toMatch(/cannot durably update reused source sets/);
+    expect(questionUpdates).toBe(0);
+    const after = await reloadWorkspace();
+    expect(after.questionSets.every((set) => set.scope?.module === "GOER" && set.scope.week === 2)).toBe(true);
+    expect(after.questions.every((question) => question.module === "GOER" && question.week === 2)).toBe(true);
+  });
+
+  it("makes an identical concurrent refiling share the first durable result", async () => {
+    const { pkg, files } = twoSets();
+    const source = { ...pkg, manifest: { ...pkg.manifest, course: { name: "GOER", term: 5, week: 2 } } };
+    const issues = validatePackage(source, { assetFiles: new Set(files.map((file) => file.name)) });
+    await importPackage(source, issues, files);
+    const actual = realWorkspace.store();
+    let commits = 0;
+    const counted: ReviewedImportStore = {
+      ...actual,
+      commitReviewedRefiling: async (plan) => {
+        commits += 1;
+        return actual.commitReviewedRefiling!(plan);
+      },
+    };
+    let storeReads = 0;
+    const workspace = { library: realWorkspace.library, store: () => { storeReads += 1; return counted; } };
+    let rejectAtomicWrite!: (error: Error) => void;
+    const deferredFailure = new Promise<void>((_resolve, reject) => { rejectAtomicWrite = reject; });
+    const originalSetItem = localVaultStorage.setItem.bind(localVaultStorage);
+    vi.spyOn(localVaultStorage, "setItem")
+      .mockImplementationOnce(() => deferredFailure)
+      .mockImplementation((name, value) => originalSetItem(name, value));
+
+    const first = saveBank(source, issues, files, workspace, { reviewedFiling: { module: "FTCM", term: 4 } });
+    await vi.waitFor(() => {
+      expect(commits).toBe(1);
+      expect(useStore.getState().questionSets.every((set) => set.scope?.module === "FTCM")).toBe(true);
+    });
+    const second = saveBank(source, issues, files, workspace, { reviewedFiling: { module: "FTCM", term: 4 } });
+    await vi.waitFor(() => expect(storeReads).toBeGreaterThanOrEqual(6));
+    expect(commits).toBe(1);
+    rejectAtomicWrite(new Error("Deferred duplicate refiling failure"));
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    expect(firstResult).toMatchObject({ status: "failed", sections: [] });
+    expect(secondResult).toMatchObject({ status: "failed", sections: [] });
+    expect(firstResult.errors.join(" ")).toMatch(/Deferred duplicate refiling failure/);
+    expect(secondResult.errors).toEqual(firstResult.errors);
+    expect(commits).toBe(1);
+    const after = await reloadWorkspace();
+    expect(after.questionSets.every((set) => set.scope?.module === "GOER" && set.scope.week === 2)).toBe(true);
+    expect(after.questions.every((question) => question.module === "GOER" && question.week === 2)).toBe(true);
+  });
+
+  it("serializes conflicting concurrent refilings before reading live scope", async () => {
+    const { pkg, files } = twoSets();
+    const source = { ...pkg, manifest: { ...pkg.manifest, course: { name: "GOER", term: 5, week: 2 } } };
+    const issues = validatePackage(source, { assetFiles: new Set(files.map((file) => file.name)) });
+    await importPackage(source, issues, files);
+    const actual = realWorkspace.store();
+    const commits: string[] = [];
+    const counted: ReviewedImportStore = {
+      ...actual,
+      commitReviewedRefiling: async (plan) => {
+        commits.push(plan.sets[0]?.targetScope.module ?? "missing");
+        return actual.commitReviewedRefiling!(plan);
+      },
+    };
+    let storeReads = 0;
+    const workspace = { library: realWorkspace.library, store: () => { storeReads += 1; return counted; } };
+    let rejectAtomicWrite!: (error: Error) => void;
+    const deferredFailure = new Promise<void>((_resolve, reject) => { rejectAtomicWrite = reject; });
+    const originalSetItem = localVaultStorage.setItem.bind(localVaultStorage);
+    vi.spyOn(localVaultStorage, "setItem")
+      .mockImplementationOnce(() => deferredFailure)
+      .mockImplementation((name, value) => originalSetItem(name, value));
+
+    const first = saveBank(source, issues, files, workspace, { reviewedFiling: { module: "FTCM", term: 4 } });
+    await vi.waitFor(() => expect(commits).toEqual(["FTCM"]));
+    const second = saveBank(source, issues, files, workspace, { reviewedFiling: { module: "NCRS", term: 4 } });
+    await vi.waitFor(() => expect(storeReads).toBeGreaterThanOrEqual(6));
+    expect(commits).toEqual(["FTCM"]);
+    rejectAtomicWrite(new Error("Deferred first refiling failure"));
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    expect(firstResult.status).toBe("failed");
+    expect(secondResult).toMatchObject({ status: "already-saved", errors: [] });
+    expect(commits).toEqual(["FTCM", "NCRS"]);
+    const after = await reloadWorkspace();
+    expect(after.questionSets.every((set) => set.scope?.module === "NCRS" && set.scope.week === undefined)).toBe(true);
+    expect(after.questions.every((question) => question.module === "NCRS" && question.week === undefined)).toBe(true);
+  });
+
+  it("keeps a newly saved section when a reused sibling refiling fails", async () => {
+    const { pkg, files } = invented();
+    const source = { ...pkg, manifest: { ...pkg.manifest, course: { name: "GOER", term: 5, week: 2 } } };
+    const firstPackage = { ...source, questions: source.questions.filter((question) => question.id === "syn-q01") };
+    const firstIssues = validatePackage(firstPackage, { assetFiles: new Set(files.map((file) => file.name)) });
+    await importPackage(firstPackage, firstIssues, files);
+    const mixedPackage = { ...source, questions: source.questions.filter((question) => ["syn-q01", "syn-q02"].includes(question.id)) };
+    const mixedIssues = validatePackage(mixedPackage, { assetFiles: new Set(files.map((file) => file.name)) });
+    const actual = realWorkspace.store();
+    const refused: ReviewedImportStore = {
+      ...actual,
+      commitReviewedRefiling: async () => ({ ok: false, message: "Synthetic reused-section failure", rollbackFailures: [] }),
+    };
+
+    const result = await saveBank(mixedPackage, mixedIssues, files, {
+      library: realWorkspace.library,
+      store: () => refused,
+    }, { reviewedFiling: { module: "FTCM", term: 4 } });
+
+    expect(result.status).toBe("partial");
+    expect(result.errors.join(" ")).toMatch(/Synthetic reused-section failure/);
+    expect(result.sections).toHaveLength(1);
+    expect(result.sections[0]).toMatchObject({ reused: false, questionIds: ["syn-q02"] });
+    expect(result.incompleteSections).toEqual([
+      expect.objectContaining({
+        reused: true,
+        questionIds: ["syn-q01"],
+        savedIds: expect.arrayContaining([expect.any(String)]),
+        reason: expect.stringMatching(/Synthetic reused-section failure/),
+      }),
+    ]);
+    const after = await reloadWorkspace();
+    expect(after.questions).toHaveLength(2);
+    expect(after.questions.find((question) => question.content?.id === "syn-q01")).toMatchObject({ module: "GOER", week: 2 });
+    const newQuestion = after.questions.find((question) => question.content?.id === "syn-q02");
+    expect(newQuestion).toMatchObject({ module: "FTCM" });
+    expect(newQuestion).not.toHaveProperty("week");
+    expect(after.questionSets).toHaveLength(2);
   });
 });
 
@@ -266,6 +509,86 @@ describe("a package through the canonical import", () => {
     const again = await importPackage(pkg, issues, files, { acknowledged: new Set(["syn-q03"]) });
     expect(again.status).toBe("already-saved");
     expect((await workspaceOnDisk()).questions).toHaveLength(7);
+  });
+
+  it("refiles an existing source set in place and keeps learner state when a sibling is released", async () => {
+    const { pkg, files } = invented();
+    const source = {
+      ...pkg,
+      manifest: { ...pkg.manifest, course: { name: "GOER", term: 5, week: 2 } },
+    };
+    const issues = validatePackage(source, { assetFiles: new Set(files.map((file) => file.name)) });
+    const first = await importPackage(source, issues, files);
+    const firstSet = first.sections[0];
+    const attemptedId = firstSet.savedIds[firstSet.questionIds.indexOf("syn-q04")];
+    useStore.getState().recordQuestionAttempt(attemptedId, {
+      answerKey: "A", status: "incorrect", quizSessionId: "reviewed-refiling-proof", mode: "tutor",
+    });
+    await flushLocalVaultWrites();
+    const before = await workspaceOnDisk();
+    const beforeQuestion = before.questions.find((question) => question.id === attemptedId)!;
+    const beforeSet = before.questionSets.find((set) => set.id === firstSet.setId)!;
+
+    const reviewed = await importPackage(source, issues, files, {
+      acknowledged: new Set(["syn-q03"]),
+      reviewedFiling: { module: "FTCM", term: 4 },
+    });
+
+    expect(reviewed).toMatchObject({ status: "saved", errors: [] });
+    expect(reviewed.sections.some((section) => section.reused && section.setId === firstSet.setId)).toBe(true);
+    const after = await reloadWorkspace();
+    const afterQuestion = after.questions.find((question) => question.id === attemptedId)!;
+    const afterSet = after.questionSets.find((set) => set.id === firstSet.setId)!;
+    expect(after.questions).toHaveLength(7);
+    expect(new Set(after.questions.map((question) => question.id)).size).toBe(7);
+    expect(new Set(after.questions.map((question) => question.content?.id)).size).toBe(7);
+    expect(after.questions.find((question) => question.content?.id === "syn-q03")).toMatchObject({ module: "FTCM" });
+    expect(after.questions.every((question) => question.module === "FTCM" && question.week === undefined && question.courseId === undefined)).toBe(true);
+    expect(after.questionSets.every((set) => set.scope?.module === "FTCM" && set.scope.week === undefined && set.scope.courseId === undefined)).toBe(true);
+    expect(afterSet).toMatchObject({ id: beforeSet.id, questionIds: beforeSet.questionIds, scope: { module: "FTCM" } });
+    expect(afterQuestion).toMatchObject({ id: beforeQuestion.id, module: "FTCM" });
+    expect(afterQuestion.content).toEqual(beforeQuestion.content);
+    expect(afterQuestion.attachments).toEqual(beforeQuestion.attachments);
+    expect(afterQuestion.attempts).toEqual(beforeQuestion.attempts);
+    expect(afterQuestion.status).toBe(beforeQuestion.status);
+    expect(afterQuestion.userAnswerKey).toBe(beforeQuestion.userAnswerKey);
+    expect(afterQuestion.notes).toBe(beforeQuestion.notes);
+    expect(afterQuestion.annotations).toEqual(beforeQuestion.annotations);
+    expect(afterQuestion).not.toHaveProperty("week");
+  });
+
+  it("retains the prior scope when an atomic reviewed refiling is refused", async () => {
+    const { pkg, files } = invented();
+    const source = {
+      ...pkg,
+      manifest: { ...pkg.manifest, course: { name: "GOER", term: 5, week: 2 } },
+    };
+    const issues = validatePackage(source, { assetFiles: new Set(files.map((file) => file.name)) });
+    const first = await importPackage(source, issues, files);
+    const actual = realWorkspace.store();
+    let refilingAttempts = 0;
+    const failOnce: ReviewedImportStore = {
+      ...actual,
+      commitReviewedRefiling: async () => {
+        refilingAttempts += 1;
+        return { ok: false, message: "Synthetic atomic refiling failure", rollbackFailures: [] };
+      },
+    };
+
+    const reviewed = await saveBank(source, issues, files, {
+      library: realWorkspace.library,
+      store: () => failOnce,
+    }, { reviewedFiling: { module: "FTCM", term: 4 } });
+
+    expect(reviewed.status).toBe("failed");
+    expect(reviewed.errors.join(" ")).toMatch(/Synthetic atomic refiling failure/);
+    expect(refilingAttempts).toBe(1);
+    const after = await reloadWorkspace();
+    expect(after.questions).toHaveLength(first.sections[0].savedIds.length);
+    expect(after.questions.every((question) => question.module === "GOER" && question.week === 2)).toBe(true);
+    expect(after.questionSets).toEqual([
+      expect.objectContaining({ id: first.sections[0].setId, scope: { module: "GOER", week: 2 } }),
+    ]);
   });
 
   it("says nothing is ready when every question is held, and writes nothing", async () => {

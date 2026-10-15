@@ -1,7 +1,7 @@
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sha256 } from "../question-content/assets";
-import { academicAssetPath, assertAcademicFigureBudget, academicCollectionId, prepareAcademicUpload, uploadAcademicCourse, type AcademicUpload } from "./upload";
+import { academicAssetPath, assertAcademicFigureBudget, academicCollectionId, academicUploadHash, prepareAcademicUpload, uploadAcademicCourse, type AcademicUpload } from "./upload";
 
 const tus = vi.hoisted(() => ({
   blobs: new Map<string, Blob>(),
@@ -71,6 +71,26 @@ async function untemplatedBankFixture() {
   return { ...f, bank };
 }
 
+async function templateBackedBankFixture(template = "T5 - GOER - Lectures:\nWeek 1:\nLecture 1 Sample [Lecture]") {
+  const f = await untemplatedBankFixture();
+  const bytes = encode(template);
+  f.catalog.templates = [{ name: "plan.txt", file: "templates/plan.txt", checksum: (await sha256(bytes)).slice(7) }];
+  f.files.set("templates/plan.txt", bytes);
+  f.files.set("catalog.json", encode(JSON.stringify(f.catalog)));
+  return f;
+}
+
+function writeFixtureCatalog(f: Awaited<ReturnType<typeof untemplatedBankFixture>>) {
+  f.files.set("banks/sample/bank.json", encode(JSON.stringify(f.bank)));
+  f.files.set("catalog.json", encode(JSON.stringify(f.catalog)));
+}
+
+function stubSuccessfulBrowserDecode(width = 1, height = 1) {
+  const decode = vi.fn(async (_blob: Blob) => ({ width, height, close: vi.fn() }));
+  vi.stubGlobal("createImageBitmap", decode);
+  return decode;
+}
+
 function mockedStorage(upload: AcademicUpload, collection: string) {
   const blobs = tus.blobs;
   const bucket = {
@@ -105,6 +125,7 @@ function mockedStorage(upload: AcademicUpload, collection: string) {
   return { client, bucket, rpc, from, receipt, current, count };
 }
 beforeEach(() => { tus.blobs.clear(); tus.calls = 0; tus.resumed = false; tus.fail = false; tus.prior = []; });
+afterEach(() => vi.unstubAllGlobals());
 
 it("maps figures for both root-level and nested prepared banks without malformed paths", () => {
   expect(academicAssetPath("bank.json", "figure.png")).toBe("assets/figure.png");
@@ -154,6 +175,10 @@ it("accepts verified private question collections without fabricating an officia
   const bank = JSON.parse(new TextDecoder().decode(prepared.files[0].bytes));
   expect(bank.pkg.questions[0].id).toBe("synthetic-q1");
   expect(bank.pkg.manifest.source.sourceWeekDeclared).toBe(false);
+  expect(bank.pkg.manifest.course).toEqual({ name: "GOER", term: 5, week: 2 });
+  expect(bank.reviewedFiling).toEqual({
+    term: "Term 5", module: "GOER", evidence: "source-metadata", weekAssignment: "unassigned",
+  });
   const accountId = "account-a";
   const backend = mockedStorage(prepared, await academicCollectionId(accountId, prepared.catalogId));
   await expect(uploadAcademicCourse(backend.client, accountId, prepared, () => {}, () => {}))
@@ -162,6 +187,95 @@ it("accepts verified private question collections without fabricating an officia
     metadata: expect.objectContaining({ term: "Term 5", ready_questions: 1 }),
     template: "", provenance: expect.objectContaining({ weekAssignment: "unassigned" }),
   }));
+});
+
+it("requires source-metadata filing to agree, but lets explicit human review correct one stale source scope", async () => {
+  const f = await untemplatedBankFixture();
+  await expect(prepareAcademicUpload(f.read, {
+    term: "Term 4", module: "FTCM", evidence: "source-metadata",
+  })).rejects.toThrow(/Source-metadata filing must agree/);
+
+  const corrected = await prepareAcademicUpload(f.read, {
+    term: "Term 4", module: "FTCM", evidence: "human-reviewed",
+  });
+  const bank = JSON.parse(new TextDecoder().decode(
+    corrected.files.find(file => file.path === "banks/sample/bank.json")!.bytes,
+  ));
+  expect(bank.reviewedFiling).toEqual({
+    term: "Term 4", module: "FTCM", evidence: "human-reviewed", weekAssignment: "unassigned",
+  });
+  expect(bank.pkg.manifest.course).toEqual({ name: "GOER", term: 5, week: 2 });
+});
+
+it("replaces a valid incoming filing envelope with the current explicit review instead of trusting it", async () => {
+  const f = await untemplatedBankFixture();
+  (f.bank as typeof f.bank & { reviewedFiling: object }).reviewedFiling = {
+    term: "Term 1", module: "MSK", evidence: "human-reviewed", weekAssignment: "unassigned",
+  };
+  writeFixtureCatalog(f);
+  await expect(prepareAcademicUpload(f.read)).rejects.toThrow(/verified term, module/);
+  const corrected = await prepareAcademicUpload(f.read, {
+    term: "Term 5", module: "GOER", evidence: "human-reviewed",
+  });
+  const bank = JSON.parse(new TextDecoder().decode(
+    corrected.files.find(file => file.path === "banks/sample/bank.json")!.bytes,
+  ));
+  expect(bank.reviewedFiling).toEqual({
+    term: "Term 5", module: "GOER", evidence: "human-reviewed", weekAssignment: "unassigned",
+  });
+});
+
+it("proves a template owns every source, bank and question scope before it bypasses manual review", async () => {
+  const valid = await templateBackedBankFixture();
+  await expect(prepareAcademicUpload(valid.read)).resolves.toMatchObject({
+    metadata: expect.objectContaining({ module: "GOER", term: "Term 5" }),
+  });
+
+  const sourceMismatch = await templateBackedBankFixture();
+  (sourceMismatch.catalog.sources[0] as { module: string }).module = "NCRS";
+  writeFixtureCatalog(sourceMismatch);
+  await expect(prepareAcademicUpload(sourceMismatch.read)).rejects.toThrow(/source module.*course plan/i);
+
+  const bankMismatch = await templateBackedBankFixture();
+  bankMismatch.bank.pkg.manifest.course.name = "NCRS";
+  writeFixtureCatalog(bankMismatch);
+  await expect(prepareAcademicUpload(bankMismatch.read)).rejects.toThrow(/bank's module or term/i);
+
+  const questionMismatch = await templateBackedBankFixture();
+  (questionMismatch.bank.pkg.questions[0] as typeof questionMismatch.bank.pkg.questions[0] & { course: string }).course = "NCRS";
+  writeFixtureCatalog(questionMismatch);
+  await expect(prepareAcademicUpload(questionMismatch.read)).rejects.toThrow(/question's module or term/i);
+
+  const termMismatch = await templateBackedBankFixture();
+  termMismatch.bank.pkg.manifest.course.term = 4;
+  writeFixtureCatalog(termMismatch);
+  await expect(prepareAcademicUpload(termMismatch.read)).rejects.toThrow(/bank's module or term/i);
+
+  const mixedContract = await templateBackedBankFixture();
+  (mixedContract.bank as typeof mixedContract.bank & { reviewedFiling: object }).reviewedFiling = {
+    term: "Term 5", module: "GOER", evidence: "human-reviewed", weekAssignment: "unassigned",
+  };
+  writeFixtureCatalog(mixedContract);
+  await expect(prepareAcademicUpload(mixedContract.read)).rejects.toThrow(/cannot also carry a manual reviewed filing/i);
+});
+
+it("accepts a documented module alias but rejects an unowned original-only source", async () => {
+  const alias = await templateBackedBankFixture("T2 - NB Block 2 - Lectures:\nWeek 1:\nLecture 1 Sample [Lecture]");
+  (alias.catalog.sources[0] as { module: string }).module = "NB2";
+  alias.bank.pkg.manifest.course = { name: "NB2", term: 2, week: 1 };
+  writeFixtureCatalog(alias);
+  await expect(prepareAcademicUpload(alias.read)).resolves.toMatchObject({
+    metadata: expect.objectContaining({ module: "NB Block 2", term: "Term 2" }),
+  });
+
+  const unowned = await templateBackedBankFixture();
+  const original = encode("synthetic original");
+  unowned.catalog.sources.push({ id: "unowned", name: "unowned.txt", sourcePath: "unowned.txt",
+    checksum: (await sha256(original)).slice(7), status: "reference/template-only", reason: "Synthetic",
+    ready: 0, review: 0, originalFile: "sources/unowned.txt" });
+  unowned.files.set("sources/unowned.txt", original);
+  writeFixtureCatalog(unowned);
+  await expect(prepareAcademicUpload(unowned.read)).rejects.toThrow(/must name the module owned/);
 });
 
 it("fails closed when a reviewed collection claims inflated ready or incorrect source SHA", async () => {
@@ -195,6 +309,26 @@ it("refuses a figure whose bytes do not match its declared image type", async ()
   })).rejects.toThrow(/image content does not match/);
 });
 
+it("rejects package-declared image size or dimensions that disagree with decoded bytes", async () => {
+  stubSuccessfulBrowserDecode();
+  const f = await untemplatedBankFixture();
+  const png = Uint8Array.from(Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXnkAAAAASUVORK5CYII=", "base64",
+  ));
+  const question = f.bank.pkg.questions[0] as unknown as {
+    assets: Array<Record<string, unknown>>; stem: Array<Record<string, unknown>>;
+  };
+  question.assets.push({ id: "declared", filename: "declared.png", mimeType: "image/png",
+    width: 2, height: 1, byteSize: png.length + 1,
+    role: "question", questionId: "synthetic-q1", checksum: await sha256(png) });
+  question.stem.push({ type: "image", assetId: "declared", role: "question", alt: "Declared figure" });
+  f.files.set("banks/sample/assets/declared.png", png);
+  f.files.set("banks/sample/bank.json", encode(JSON.stringify(f.bank)));
+  await expect(prepareAcademicUpload(f.read, {
+    term: "Term 5", module: "GOER", evidence: "human-reviewed",
+  })).rejects.toThrow(/declared MIME, byte-size or dimensions/);
+});
+
 it("holds an otherwise valid figure that exceeds the installer 8 MiB attachment ceiling", async () => {
   const f = await untemplatedBankFixture();
   const largePng = new Uint8Array(8 * 1024 * 1024 + 1);
@@ -213,6 +347,7 @@ it("holds an otherwise valid figure that exceeds the installer 8 MiB attachment 
 });
 
 it("rejects case-equivalent figure names with conflicting bytes before accepting cloud upload", async () => {
+  stubSuccessfulBrowserDecode();
   const f = await untemplatedBankFixture();
   const p1 = Uint8Array.from(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXnkAAAAASUVORK5CYII=", "base64"));
   const p2 = new Uint8Array(p1);
@@ -253,6 +388,7 @@ it("rejects same-set duplicate question numbers even if both printed answer keys
 });
 
 it("accepts a small genuine GIF because the learner's attachment installer supports it", async () => {
+  stubSuccessfulBrowserDecode();
   const f = await untemplatedBankFixture();
   const gif = Uint8Array.from(Buffer.from("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==", "base64"));
   const q = f.bank.pkg.questions[0] as unknown as { assets: Array<Record<string, unknown>>; stem: Array<Record<string, unknown>> };
@@ -267,7 +403,317 @@ it("accepts a small genuine GIF because the learner's attachment installer suppo
   });
 });
 
+it("rejects a header-only GIF with a matching SHA before registering any private course", async () => {
+  const f = await untemplatedBankFixture();
+  const complete = Uint8Array.from(Buffer.from("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==", "base64"));
+  const headerOnly = complete.subarray(0, 12);
+  const q = f.bank.pkg.questions[0] as unknown as { assets: Array<Record<string, unknown>>; stem: Array<Record<string, unknown>> };
+  q.assets.push({ id: "broken", filename: "header.gif", mimeType: "image/gif",
+    role: "question", questionId: "synthetic-q1", checksum: await sha256(headerOnly) });
+  q.stem.push({ type: "image", assetId: "broken", role: "question", alt: "Invalid header-only GIF" });
+  f.files.set("banks/sample/assets/header.gif", headerOnly);
+  f.files.set("banks/sample/bank.json", encode(JSON.stringify(f.bank)));
+  await expect(prepareAcademicUpload(f.read, {
+    term: "Term 5", module: "GOER", evidence: "human-reviewed",
+  })).rejects.toThrow(/truncated|fully decoded/);
+});
+
+it("guards direct upload calls against undecodable or SHA-mismatched GIFs before any cloud RPC", async () => {
+  const upload = await prepareAcademicUpload((await fixture()).read);
+  const tiny = Uint8Array.from(Buffer.from("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==", "base64"));
+  const bytes = tiny.subarray(0, 12);
+  const asset = {
+    path: "assets/figure.gif", sha256: (await sha256(bytes)).slice(7),
+    byte_size: bytes.length, mime_type: "image/gif", bytes,
+  };
+  upload.files.push(asset);
+  const backend = mockedStorage(upload, await academicCollectionId("account-a", upload.catalogId));
+  await expect(uploadAcademicCourse(backend.client, "account-a", upload, () => {}, () => {}))
+    .rejects.toThrow(/truncated|fully decoded/);
+  expect(backend.rpc).not.toHaveBeenCalled();
+  expect(backend.bucket.upload).not.toHaveBeenCalled();
+
+  // A decodable GIF is still untrusted when its immutable manifest lies.
+  asset.bytes = tiny;
+  asset.byte_size = tiny.length;
+  await expect(uploadAcademicCourse(backend.client, "account-a", upload, () => {}, () => {}))
+    .rejects.toThrow(/SHA-256/);
+  expect(backend.rpc).not.toHaveBeenCalled();
+});
+
+const truncatedPng = Uint8Array.from(Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXnkAAAAASUVORK5CYII=", "base64",
+)).subarray(0, 24);
+const sniffableWebp = new Uint8Array(30);
+sniffableWebp.set(Buffer.from("RIFF"), 0);
+sniffableWebp.set(Buffer.from("WEBP"), 8);
+sniffableWebp.set(Buffer.from("VP8X"), 12);
+const headerOnlyFormats = [
+  { extension: "png", mime: "image/png", bytes: truncatedPng },
+  { extension: "jpg", mime: "image/jpeg", bytes: Uint8Array.from([0xff, 0xd8, 0xff, 0xc0, 0, 17, 8, 0, 1, 0, 1, 0]) },
+  { extension: "webp", mime: "image/webp", bytes: sniffableWebp },
+  { extension: "gif", mime: "image/gif", bytes: Uint8Array.from(Buffer.from("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==", "base64")) },
+] as const;
+
+it.each(headerOnlyFormats)("does not prepare $mime for cloud if the browser rejects matching-header bytes", async ({ extension, mime, bytes }) => {
+  const f = await untemplatedBankFixture();
+  const question = f.bank.pkg.questions[0] as unknown as {
+    assets: Array<Record<string, unknown>>; stem: Array<Record<string, unknown>>;
+  };
+  const filename = `figure.${extension}`;
+  question.assets.push({ id: "image", filename, mimeType: mime, role: "question",
+    questionId: "synthetic-q1", checksum: await sha256(bytes) });
+  question.stem.push({ type: "image", assetId: "image", role: "question", alt: "Test figure" });
+  f.files.set(`banks/sample/assets/${filename}`, bytes);
+  f.files.set("banks/sample/bank.json", encode(JSON.stringify(f.bank)));
+  const decode = vi.fn(async (_blob: Blob) => { throw new Error("invalid browser image"); });
+  vi.stubGlobal("window", {});
+  vi.stubGlobal("createImageBitmap", decode);
+  vi.stubGlobal("Image", undefined);
+  await expect(prepareAcademicUpload(f.read, {
+    term: "Term 5", module: "GOER", evidence: "human-reviewed",
+  })).rejects.toThrow(/fully decoded/);
+  expect(decode).toHaveBeenCalledOnce();
+});
+
+it.each(headerOnlyFormats)("rechecks $mime decoded bytes on direct replay before creating any cloud revision", async ({ extension, mime, bytes }) => {
+  const upload = await prepareAcademicUpload((await fixture()).read);
+  upload.files.push({ path: `assets/replay.${extension}`, mime_type: mime,
+    bytes, byte_size: bytes.length, sha256: (await sha256(bytes)).slice(7) });
+  const backend = mockedStorage(upload, await academicCollectionId("account-a", upload.catalogId));
+  const decode = vi.fn(async (_blob: Blob) => { throw new Error("undecodable on this browser"); });
+  vi.stubGlobal("window", {});
+  vi.stubGlobal("createImageBitmap", decode);
+  vi.stubGlobal("Image", undefined);
+  await expect(uploadAcademicCourse(backend.client, "account-a", upload, () => {}, () => {}))
+    .rejects.toThrow(/fully decoded/);
+  expect(decode).toHaveBeenCalledOnce();
+  expect(backend.rpc).not.toHaveBeenCalled();
+  expect(backend.bucket.upload).not.toHaveBeenCalled();
+});
+
+it("rejects a direct-replay PNG whose bytes or MIME disagree with its immutable manifest", async () => {
+  const upload = await prepareAcademicUpload((await fixture()).read);
+  const asset = headerOnlyFormats[0];
+  const preparedFile = {
+    path: "assets/replay.png", mime_type: "image/png", bytes: asset.bytes,
+    byte_size: asset.bytes.length, sha256: (await sha256(asset.bytes)).slice(7),
+  };
+  upload.files.push(preparedFile);
+  const backend = mockedStorage(upload, await academicCollectionId("account-a", upload.catalogId));
+  preparedFile.byte_size++;
+  await expect(uploadAcademicCourse(backend.client, "account-a", upload, () => {}, () => {}))
+    .rejects.toThrow(/byte size|SHA-256/);
+  preparedFile.byte_size--;
+  preparedFile.sha256 = "b".repeat(64);
+  await expect(uploadAcademicCourse(backend.client, "account-a", upload, () => {}, () => {}))
+    .rejects.toThrow(/SHA-256/);
+  preparedFile.sha256 = (await sha256(asset.bytes)).slice(7);
+  preparedFile.path = "assets/replay.jpg";
+  await expect(uploadAcademicCourse(backend.client, "account-a", upload, () => {}, () => {}))
+    .rejects.toThrow(/path.*MIME type/);
+  expect(backend.rpc).not.toHaveBeenCalled();
+});
+
+it("revalidates package asset declarations on direct replay before any cloud RPC", async () => {
+  stubSuccessfulBrowserDecode();
+  const f = await untemplatedBankFixture();
+  const png = Uint8Array.from(Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXnkAAAAASUVORK5CYII=", "base64",
+  ));
+  const question = f.bank.pkg.questions[0] as unknown as {
+    assets: Array<Record<string, unknown>>; stem: Array<Record<string, unknown>>;
+  };
+  question.assets.push({ id: "replay", filename: "replay.png", mimeType: "image/png",
+    role: "question", questionId: "synthetic-q1", checksum: await sha256(png) });
+  question.stem.push({ type: "image", assetId: "replay", role: "question", alt: "Replay figure" });
+  f.files.set("banks/sample/assets/replay.png", png);
+  f.files.set("banks/sample/bank.json", encode(JSON.stringify(f.bank)));
+  const upload = await prepareAcademicUpload(f.read, {
+    term: "Term 5", module: "GOER", evidence: "human-reviewed",
+  });
+  const bankFile = upload.files.find(file => file.path === "banks/sample/bank.json")!;
+  const bank = JSON.parse(new TextDecoder().decode(bankFile.bytes));
+  bank.pkg.questions[0].assets[0].byteSize++;
+  bankFile.bytes = encode(JSON.stringify(bank));
+  bankFile.byte_size = bankFile.bytes.length;
+  bankFile.sha256 = (await sha256(bankFile.bytes)).slice(7);
+  const backend = mockedStorage(upload, await academicCollectionId("account-a", upload.catalogId));
+  await expect(uploadAcademicCourse(backend.client, "account-a", upload, () => {}, () => {}))
+    .rejects.toThrow(/declared MIME, byte-size or dimensions/);
+  expect(backend.rpc).not.toHaveBeenCalled();
+  expect(backend.bucket.upload).not.toHaveBeenCalled();
+});
+
+it("rejects unsafe, duplicate, oversized or noncanonical direct replay manifests before registration", async () => {
+  const original = await prepareAcademicUpload((await fixture()).read);
+  const backend = mockedStorage(original, await academicCollectionId("account-a", original.catalogId));
+  const catalog = original.files.find(file => file.path === "catalog.json")!;
+
+  const duplicate: AcademicUpload = { ...original, files: [...original.files, { ...catalog }] };
+  await expect(uploadAcademicCourse(backend.client, "account-a", duplicate, () => {}, () => {}))
+    .rejects.toThrow(/duplicate or case-conflicting/);
+
+  const unsafe: AcademicUpload = { ...original, files: original.files.map(file => ({ ...file })) };
+  unsafe.files[0].path = "../catalog.json";
+  await expect(uploadAcademicCourse(backend.client, "account-a", unsafe, () => {}, () => {}))
+    .rejects.toThrow(/unsafe/i);
+
+  const tooMany: AcademicUpload = {
+    ...original,
+    files: Array.from({ length: 1501 }, (_, index) => ({ ...catalog, path: `files/${index}.json` })),
+  };
+  await expect(uploadAcademicCourse(backend.client, "account-a", tooMany, () => {}, () => {}))
+    .rejects.toThrow(/1–1500/);
+
+  const changedMetadata: AcademicUpload = { ...original, metadata: { ...original.metadata, title: "Mutated after preparation" } };
+  await expect(uploadAcademicCourse(backend.client, "account-a", changedMetadata, () => {}, () => {}))
+    .rejects.toThrow(/upload hash.*canonical/i);
+  expect(backend.rpc).not.toHaveBeenCalled();
+  expect(backend.bucket.upload).not.toHaveBeenCalled();
+});
+
+it("rejects duplicate source SHA claims before creating a cloud revision", async () => {
+  const upload = await prepareAcademicUpload((await fixture()).read);
+  const sourceSha = "a".repeat(64);
+  const catalogFile = upload.files.find(file => file.path === "catalog.json")!;
+  const catalog = JSON.parse(new TextDecoder().decode(catalogFile.bytes));
+  catalog.sources = ["source-one", "source-two"].map(id => ({
+    id, name: `${id}.txt`, sourcePath: `${id}.txt`, checksum: sourceSha,
+    module: "SAMPLE", status: "reference/template-only", reason: "Synthetic reference",
+    ready: 0, review: 0,
+  }));
+  catalogFile.bytes = encode(JSON.stringify(catalog));
+  catalogFile.byte_size = catalogFile.bytes.length;
+  catalogFile.sha256 = (await sha256(catalogFile.bytes)).slice(7);
+  upload.provenance.sourceChecksums = [sourceSha, sourceSha];
+  const backend = mockedStorage(upload, await academicCollectionId("account-a", upload.catalogId));
+
+  await expect(uploadAcademicCourse(backend.client, "account-a", upload, () => {}, () => {}))
+    .rejects.toThrow(/duplicate source SHA/);
+  expect(backend.rpc).not.toHaveBeenCalled();
+  expect(backend.bucket.upload).not.toHaveBeenCalled();
+});
+
+it("surfaces the server owner/source identity conflict without uploading bytes", async () => {
+  const upload = await prepareAcademicUpload((await fixture()).read);
+  const backend = mockedStorage(upload, await academicCollectionId("account-a", upload.catalogId));
+  backend.rpc.mockResolvedValueOnce({
+    data: null,
+    error: {
+      code: "23505",
+      message: "Academic source is already registered under another collection",
+    },
+  });
+
+  await expect(uploadAcademicCourse(backend.client, "account-a", upload, () => {}, () => {}))
+    .rejects.toThrow(/already registered in another private academic collection/i);
+  expect(backend.bucket.upload).not.toHaveBeenCalled();
+});
+
+it("rejects duplicate question identities across banks before creating a cloud revision", async () => {
+  const fixtureData = await untemplatedBankFixture();
+  const upload = await prepareAcademicUpload(fixtureData.read, {
+    term: "Term 5", module: "GOER", evidence: "human-reviewed",
+  });
+  const catalogFile = upload.files.find(file => file.path === "catalog.json")!;
+  const catalog = JSON.parse(new TextDecoder().decode(catalogFile.bytes));
+  const firstBankFile = upload.files.find(file => file.path === "banks/sample/bank.json")!;
+  const secondBank = JSON.parse(new TextDecoder().decode(firstBankFile.bytes));
+  const secondSourceSha = "b".repeat(64);
+  secondBank.pkg.manifest.bank.id = "second-bank";
+  secondBank.pkg.questions[0].provenance.sourceChecksum = `sha256:${secondSourceSha}`;
+  const secondBankBytes = encode(JSON.stringify(secondBank));
+  upload.files.push({
+    path: "banks/second/bank.json", bytes: secondBankBytes,
+    byte_size: secondBankBytes.length, sha256: (await sha256(secondBankBytes)).slice(7),
+    mime_type: "application/json",
+  });
+  catalog.sources.push({
+    ...catalog.sources[0], id: "second-source", checksum: secondSourceSha,
+    bankFile: "banks/second/bank.json",
+  });
+  catalogFile.bytes = encode(JSON.stringify(catalog));
+  catalogFile.byte_size = catalogFile.bytes.length;
+  catalogFile.sha256 = (await sha256(catalogFile.bytes)).slice(7);
+  upload.provenance.sourceChecksums.push(secondSourceSha);
+  upload.metadata.ready_questions = 2;
+  const backend = mockedStorage(upload, await academicCollectionId("account-a", upload.catalogId));
+
+  await expect(uploadAcademicCourse(backend.client, "account-a", upload, () => {}, () => {}))
+    .rejects.toThrow(/Duplicate question identities across source collections/);
+  expect(backend.rpc).not.toHaveBeenCalled();
+  expect(backend.bucket.upload).not.toHaveBeenCalled();
+});
+
+it("takes an immutable upload snapshot before an awaited account check can mutate the caller's object", async () => {
+  const upload = await prepareAcademicUpload((await fixture()).read);
+  const expectedMetadata = structuredClone(upload.metadata);
+  const expectedHash = upload.hash;
+  const expectedCatalogId = upload.catalogId;
+  const expectedFile = upload.files[0];
+  const expectedPath = expectedFile.path;
+  const expectedSha = expectedFile.sha256;
+  const expectedBytes = new Uint8Array(expectedFile.bytes);
+  const collection = await academicCollectionId("account-a", expectedCatalogId);
+  const backend = mockedStorage(upload, collection);
+  let mutated = false;
+  const assertCurrent = vi.fn(async () => {
+    if (!mutated) {
+      mutated = true;
+      upload.catalogId = "mutated-catalog";
+      upload.hash = "f".repeat(64);
+      upload.metadata.title = "Mutated during account verification";
+      upload.provenance.sourceChecksums.push("e".repeat(64));
+      upload.files[0].path = "mutated.json";
+      upload.files[0].sha256 = "d".repeat(64);
+      upload.files[0].bytes.fill(0);
+      upload.localOnlyOriginals.push({ sourceId: "mutated", sha256: "c".repeat(64),
+        byteSize: 50 * 1024 * 1024 + 1, reason: "over-limit" });
+    }
+    await Promise.resolve();
+  });
+
+  await expect(uploadAcademicCourse(backend.client, "account-a", upload, assertCurrent, () => {}))
+    .resolves.toMatchObject({ collection_id: collection, revision_id: "revision" });
+  expect(backend.rpc).toHaveBeenCalledWith("academic_create_revision", expect.objectContaining({
+    collection, content_hash: expectedHash, metadata: expectedMetadata,
+    files: expect.arrayContaining([expect.objectContaining({ path: expectedPath, sha256: expectedSha })]),
+  }));
+  const stored = tus.blobs.get(`academic-content/${collection}/${expectedSha}`);
+  expect(stored).toBeDefined();
+  expect(new Uint8Array(await stored!.arrayBuffer())).toEqual(expectedBytes);
+});
+
+it("rejects unknown replay fields and semantically altered banks before any cloud operation", async () => {
+  const strict = await prepareAcademicUpload((await fixture()).read);
+  (strict.metadata as Record<string, unknown>).privateWorkspace = "must not cross the boundary";
+  const strictBackend = mockedStorage(strict, await academicCollectionId("account-a", strict.catalogId));
+  await expect(uploadAcademicCourse(strictBackend.client, "account-a", strict, () => {}, () => {}))
+    .rejects.toThrow(/unexpected or missing fields/);
+  expect(strictBackend.rpc).not.toHaveBeenCalled();
+  expect(strictBackend.bucket.upload).not.toHaveBeenCalled();
+
+  const f = await untemplatedBankFixture();
+  const upload = await prepareAcademicUpload(f.read, {
+    term: "Term 5", module: "GOER", evidence: "human-reviewed",
+  });
+  const bankFile = upload.files.find(file => file.path === "banks/sample/bank.json")!;
+  const bank = JSON.parse(new TextDecoder().decode(bankFile.bytes));
+  delete bank.pkg.questions[0].provenance.sourceChecksum;
+  bankFile.bytes = encode(JSON.stringify(bank));
+  bankFile.byte_size = bankFile.bytes.length;
+  bankFile.sha256 = (await sha256(bankFile.bytes)).slice(7);
+  upload.hash = await academicUploadHash(upload);
+  const backend = mockedStorage(upload, await academicCollectionId("account-a", upload.catalogId));
+  await expect(uploadAcademicCourse(backend.client, "account-a", upload, () => {}, () => {}))
+    .rejects.toThrow(/missing or claims a different original source checksum/);
+  expect(backend.rpc).not.toHaveBeenCalled();
+  expect(backend.bucket.upload).not.toHaveBeenCalled();
+});
+
 it("rejects a GIF upload with actionable guidance when the database migration is not installed", async () => {
+  stubSuccessfulBrowserDecode();
   const f = await untemplatedBankFixture();
   const gif = Uint8Array.from(Buffer.from("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==", "base64"));
   const question = f.bank.pkg.questions[0] as unknown as { assets: Array<Record<string, unknown>>; stem: Array<Record<string, unknown>> };
@@ -293,10 +739,10 @@ it("rejects duplicate source paths that claim different immutable hashes", async
   const original = encode("verified synthetic source");
   const real = (await sha256(original)).slice(7);
   f.catalog.sources.push(
-    { id: "source-a", name: "source.txt", sourcePath: "source.txt", checksum: real,
+    { id: "source-a", name: "source.txt", sourcePath: "source.txt", checksum: real, module: "SAMPLE",
       status: "reference/template-only", reason: "Reference", ready: 0, review: 0,
       originalFile: "sources/source.txt" },
-    { id: "source-b", name: "source.txt", sourcePath: "source.txt", checksum: "f".repeat(64),
+    { id: "source-b", name: "source.txt", sourcePath: "source.txt", checksum: "f".repeat(64), module: "SAMPLE",
       status: "reference/template-only", reason: "Conflicting identity", ready: 0, review: 0,
       originalFile: "sources/source.txt" },
   );
@@ -311,7 +757,7 @@ it("verifies repeated source-path bytes rather than trusting an earlier identica
   const sha = (await sha256(source)).slice(7);
   for (const id of ["source-one", "source-two"]) {
     f.catalog.sources.push({
-      id, name: "shared.txt", sourcePath: "shared.txt", checksum: sha,
+      id, name: "shared.txt", sourcePath: "shared.txt", checksum: sha, module: "SAMPLE",
       status: "reference/template-only", reason: "One immutable shared original",
       originalFile: "sources/shared.txt", ready: 0, review: 0,
     });
@@ -387,7 +833,7 @@ it("preserves source provenance and explicit local-only exceptions above the 50 
   const large = new Uint8Array(50 * 1024 * 1024 + 1);
   large[0] = 37; large[1] = 80; large[2] = 68; large[3] = 70;
   const checksum = (await sha256(large)).slice(7);
-  f.catalog.sources.push({ id: "oversize-original", name: "original.pdf", sourcePath: "original.pdf", checksum,
+  f.catalog.sources.push({ id: "oversize-original", name: "original.pdf", sourcePath: "original.pdf", checksum, module: "SAMPLE",
     status: "reference/template-only", reason: "Retain source provenance",
     originalFile: "sources/original.pdf", ready: 0, review: 0 });
   f.files.set("sources/original.pdf", large);
@@ -403,6 +849,18 @@ it("preserves source provenance and explicit local-only exceptions above the 50 
   expect(savedCatalog.sources[0].checksum).toBe(checksum);
   expect(savedCatalog.sources[0].originalFile).toBeUndefined();
   expect(savedCatalog.sources[0].reason).toMatch(/remains local-only/);
+
+  const tampered: AcademicUpload = {
+    ...upload,
+    localOnlyOriginals: upload.localOnlyOriginals.map(original => ({ ...original, sha256: "b".repeat(64) })),
+  };
+  tampered.hash = await academicUploadHash(tampered);
+  expect(tampered.hash).not.toBe(upload.hash);
+  const backend = mockedStorage(tampered, await academicCollectionId("account-a", tampered.catalogId));
+  await expect(uploadAcademicCourse(backend.client, "account-a", tampered, () => {}, () => {}))
+    .rejects.toThrow(/local-only original manifest differs/);
+  expect(backend.rpc).not.toHaveBeenCalled();
+  expect(backend.bucket.upload).not.toHaveBeenCalled();
 });
 
 it("prepares a referenced original larger than 6 MiB and uploads it with resumable tus", async () => {

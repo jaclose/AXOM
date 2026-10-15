@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ImportPackage } from "../../lib/question-content/package";
+import * as bankImport from "../../lib/question-content/bankImport";
 import { BankImportReview, type ReviewBank } from "./BankImportReview";
 
 const pkg = (evidence: "printed-key" | "answer-reveal-slide"): ImportPackage => ({
@@ -25,7 +26,7 @@ function bank(evidence: "printed-key" | "answer-reveal-slide"): ReviewBank {
     ? [{ severity: "warning", questionId: "q1", code: "possible_answer_marking", message: "Marked slide requires review." }] : [],
     files: [], sourceText: { rawText: "Source text for review" }, sourceBytes: 100, notes: [], warnings: [], unplaced: [] };
 }
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("structured question import review", () => {
   it("keeps the original source-page renderer out of answering mode", async () => {
@@ -41,7 +42,7 @@ describe("structured question import review", () => {
   it("allows correcting stem text and tables without dropping source or media structure; requires re-confirmation", async () => {
     const user = userEvent.setup();
     render(<BankImportReview bank={bank("printed-key")} onBack={() => {}} />);
-    expect(screen.getByText(/1 questions · 1 ready/)).toBeTruthy();
+    expect(screen.getByText(/1 questions · 1 ready for import/)).toBeTruthy();
     await user.click(screen.getByText("Correct extracted text, answer choices or tables"));
     fireEvent.change(screen.getByLabelText("Question 1 stem · block 1"),
       { target: { value: "What finding indicates metabolic alkalosis?" } });
@@ -52,8 +53,8 @@ describe("structured question import review", () => {
     await user.selectOptions(screen.getByLabelText("Preview mode"), "review");
     await user.selectOptions(screen.getByLabelText("Verified answer"), "B");
     await user.click(screen.getByRole("button", { name: "Confirm answer from source" }));
-    expect(await screen.findByText(/1 questions · 1 ready/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Import 1 verified questions" }).hasAttribute("disabled")).toBe(false);
+    expect(await screen.findByText(/1 questions · 1 ready for import/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Import 1 answer-ready question" }).hasAttribute("disabled")).toBe(false);
   });
   it("clears answer-reveal uncertainty only after explicit human confirmation", async () => {
     const user = userEvent.setup();
@@ -62,6 +63,82 @@ describe("structured question import review", () => {
     await user.selectOptions(screen.getByLabelText("Preview mode"), "review");
     await user.selectOptions(screen.getByLabelText("Verified answer"), "B");
     await user.click(screen.getByRole("button", { name: "Confirm answer from source" }));
-    await waitFor(() => expect(screen.getByText(/1 questions · 1 ready/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/1 questions · 1 ready for import/)).toBeTruthy());
+  });
+
+  it("preserves source scope while saving to the reviewed unassigned placement", async () => {
+    const user = userEvent.setup();
+    const save = vi.spyOn(bankImport, "saveBank").mockResolvedValue({
+      status: "saved", sections: [{ setTitle: "Synthetic review", questionIds: ["q1"], savedIds: ["saved-q1"], reused: false,
+        images: { attached: 0, missing: 0, problems: [] } }], incompleteSections: [], held: [], withheldAssets: [],
+      filing: { module: "FTCM", term: 4, agrees: true }, errors: [],
+    });
+    render(<BankImportReview bank={{ ...bank("printed-key"), reviewedFiling: {
+      module: "FTCM", term: "Term 4", evidence: "human-reviewed", weekAssignment: "unassigned",
+    } }} onBack={() => {}} />);
+
+    expect(screen.getByLabelText("Source module")).toHaveProperty("disabled", true);
+    expect(screen.getByLabelText("Source term")).toHaveProperty("disabled", true);
+    expect(screen.getByLabelText("Source week")).toHaveProperty("disabled", true);
+    expect(screen.getByText(/Reviewed placement: FTCM · Term 4 · week unassigned/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Import 1 answer-ready question" }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+
+    const [savedPackage, , , , options] = save.mock.calls[0];
+    expect(savedPackage.manifest.course).toEqual({ name: "GOER", term: 5, week: 2 });
+    expect(options).toBeDefined();
+    if (!options) throw new Error("Expected reviewed import options.");
+    expect(options.reviewedFiling).toEqual({ module: "FTCM", term: 4 });
+    expect(options).not.toHaveProperty("courseId");
+  });
+
+  it("reports durable questions honestly when another bank section remains incomplete", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(bankImport, "saveBank").mockResolvedValue({
+      status: "partial",
+      sections: [{
+        setTitle: "Synthetic review", questionIds: ["q1"], savedIds: ["saved-q1"], reused: false,
+        setId: "saved-set", images: { attached: 0, missing: 0, problems: [] },
+      }],
+      incompleteSections: [{
+        setTitle: "Synthetic review · reused section", questionIds: ["q0"], savedIds: ["existing-q0"],
+        setId: "existing-set", reused: true, reason: "Reviewed filing could not be saved.",
+      }],
+      held: [], withheldAssets: [], filing: { module: "FTCM", term: 4, agrees: true },
+      errors: ["Reviewed filing could not be saved."],
+    });
+    render(<BankImportReview bank={bank("printed-key")} onBack={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Import 1 answer-ready question" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("1 question saved on this device");
+    expect(alert.textContent).toContain("Other bank sections still need attention");
+    expect(alert.textContent).toContain("1 existing question remains saved");
+    expect(screen.getByRole("button", { name: "Open imported bank" })).toBeTruthy();
+  });
+
+  it("does not display import success until prepared-library finalization is durable", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(bankImport, "saveBank").mockResolvedValue({
+      status: "saved",
+      sections: [{
+        setTitle: "Synthetic review", questionIds: ["q1"], savedIds: ["saved-q1"], reused: false,
+        setId: "saved-set", images: { attached: 0, missing: 0, problems: [] },
+      }],
+      incompleteSections: [], held: [], withheldAssets: [],
+      filing: { module: "GOER", term: 5, agrees: true }, errors: [],
+    });
+    const onReviewed = vi.fn().mockRejectedValue(new Error(
+      "1 imported question remains saved, but AXOM could not confirm the reviewed source and library catalog on this device.",
+    ));
+    render(<BankImportReview bank={bank("printed-key")} onBack={() => {}} onReviewed={onReviewed} />);
+
+    await user.click(screen.getByRole("button", { name: "Import 1 answer-ready question" }));
+
+    expect((await screen.findByRole("alert")).textContent).toMatch(/question remains saved.*could not confirm.*catalog/i);
+    expect(onReviewed).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/1 question saved on this device/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open imported bank" })).toBeNull();
   });
 });

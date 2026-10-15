@@ -109,7 +109,7 @@ export function prepareCloudQuiz(input:readonly CatalogEntry[],wanted:number,sig
         const result=await saveBank(bank.pkg,assessment.issues,files,{
           library:()=>{guard.assert();return useStore.getState();},store:()=>{guard.assert();return guardedStore(guard.assert);},
         },{sourceText:bank.sourceText,sourceBytes:bank.sourceBytes,notes:bank.notes});
-        if(result.status==="failed")throw new Error("The selected set could not be saved. Previously saved content and progress remain intact.");
+        if(result.status==="failed"||result.status==="partial")throw new Error("The selected set did not finish saving. Durable sections and prior progress remain intact; retry will reuse them.");
         for(const section of result.sections){if(section.setId)setIds.add(section.setId);for(const id of section.savedIds)questionIds.add(id);}
       }
       await guard.verify();await flushLocalVaultWrites();assertVaultWritesSince(checkpoint);

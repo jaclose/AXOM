@@ -11,6 +11,7 @@ import {
   createQuestionAttachment,
   deleteQuestionAttachmentBlobs,
   getQuestionAttachmentBlob,
+  isPrivateLibraryAttachmentBlobKey,
   MAX_QUESTION_ATTACHMENTS,
   type QuestionImageAttachment,
 } from "../../lib/questionAttachments";
@@ -127,6 +128,10 @@ export function QuestionAttachmentsPanel({
     onChange(next);
     attachmentsRef.current = next;
     if (preview?.id === attachment.id) setPreview(null);
+    if (isPrivateLibraryAttachmentBlobKey(attachment.blobKey)) {
+      setStatus(`Removed "${attachment.fileName}".`);
+      return;
+    }
     try {
       await deleteQuestionAttachmentBlobs([attachment.blobKey]);
       setStatus(`Removed "${attachment.fileName}".`);

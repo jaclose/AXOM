@@ -211,6 +211,83 @@ describe("review-first bulk school curriculum installation", () => {
       passes: 3, ankiPasses: 1, note: "Learner-owned", updated: "2026-10-15T08:00:00Z",
     });
   });
+
+  it("holds explicit cohort identities before any cohort-agnostic write", () => {
+    const cohortSource = (cohort?: string) => [
+      "T4 - FTCM - Lectures:",
+      "@academic-term: T4",
+      ...(cohort ? [`@cohort: ${cohort}`] : []),
+      "FTCM Lecture 01 Demo [Lecture]",
+    ].join("\n");
+    const existing = { terms: [], courses: [], tracker: [{
+      id: "keep", path: "Term 4/PPM 500/FTCM/Week 2", label: "Learner work",
+      kind: "Lecture" as const, passes: 4, ankiPasses: 2, yield: "review" as const,
+      updated: "2026-10-14T00:00:00.000Z",
+    }] };
+    for (const docs of [
+      [saved(cohortSource("D"), "d.txt", "d"), saved(cohortSource("E"), "e.txt", "e")],
+      [saved(cohortSource("D"), "d.txt", "d"), saved(cohortSource(), "unknown.txt", "unknown")],
+      [saved(cohortSource("D"), "d.txt", "d")],
+    ]) {
+      const before = structuredClone(existing);
+      const preview = previewCurriculumTemplateInstallation(SGU_CURRICULUM, docs, existing);
+      expect(preview).toMatchObject({
+        activeSourceFiles: docs.length, modules: [], create: 0, update: 0,
+        issues: [{ sourceModule: "FTCM", sourceFiles: docs.length,
+          reason: expect.stringMatching(/no reviewed cohort binding/i) }],
+      });
+      expect(() => applyCurriculumTemplateInstallation(existing, preview, idMaker())).toThrow(/no new/i);
+      expect(existing).toEqual(before);
+    }
+  });
+
+  it("holds a course-less row when two courses can own its module", () => {
+    const elective: Course = {
+      id: "elective", termId: term2.id, code: "ELECTIVE", name: "Elective",
+      files: 0, modules: [{ id: "elective-nb2", name: "NB Block 2" }],
+    };
+    const legacy: TrackerItem = {
+      id: "legacy", path: "T2/NB2/Week 9", label: "NB Lecture 01 Old title",
+      templateKey: "nb2|lecture|1", activity: "lecture", kind: "Lecture",
+      weekSource: "learner", passes: 5, ankiPasses: 2, note: "keep",
+      yield: "review", updated: "2026-10-14T00:00:00.000Z",
+    };
+    const foreign: TrackerItem = {
+      ...legacy,
+      id: "elective-row",
+      path: "T2/ELECTIVE/NB Block 2/Week 9",
+      note: "keep with elective",
+    };
+    const workspace = { ...empty, courses: [course2, elective], tracker: [legacy, foreign] };
+    const before = structuredClone(workspace);
+    const preview = previewCurriculumTemplateInstallation(
+      SGU_CURRICULUM, [saved(lecture, "lec.txt", "lec")], workspace);
+    expect(preview).toMatchObject({ create: 0, update: 0, reviewRequired: 1 });
+    expect(preview.modules[0].reconcile.review?.[0]).toMatchObject({ candidateIds: ["legacy"] });
+    expect(() => applyCurriculumTemplateInstallation(workspace, preview, idMaker())).toThrow(/no new/i);
+    expect(workspace).toEqual(before);
+    expect(workspace.tracker[1]).toBe(foreign);
+  });
+
+  it("refiles a course-less row only when the selected course is its unique owner", () => {
+    const legacy: TrackerItem = {
+      id: "legacy", path: "T2/NB2/Week 9", label: "NB Lecture 01 Old title",
+      templateKey: "nb2|lecture|1", activity: "lecture", kind: "Lecture",
+      weekSource: "learner", passes: 5, ankiPasses: 2, note: "keep",
+      yield: "review", updated: "2026-10-14T00:00:00.000Z",
+    };
+    const workspace = { ...empty, tracker: [legacy] };
+    const preview = previewCurriculumTemplateInstallation(
+      SGU_CURRICULUM, [saved(lecture, "lec.txt", "lec")], workspace);
+    expect(preview).toMatchObject({ create: 0, update: 1, reviewRequired: 0 });
+    const installed = applyCurriculumTemplateInstallation(workspace, preview, idMaker());
+    expect(installed.tracker[0]).toEqual({
+      ...legacy,
+      path: "T2/01 BPM 501/NB2/Week 9",
+      label: "NB Lecture 01 Synaptic Transmission",
+    });
+    expect(workspace.tracker[0]).toBe(legacy);
+  });
 });
 
 const privateRoot = process.env.AXOM_TEMPLATE_ROOT;

@@ -19,7 +19,7 @@ import { effectiveRole, isAssetVisible, visibleBlocks, type ContentViewMode } fr
 import { useStore } from "../lib/store";
 
 type Bank = Extract<PdfBankExtraction, { tagged: true }>;
-type State = "idle" | "reading" | "preview" | "saving" | "saved" | "already-saved" | "nothing-ready" | "failed" | "not-tagged" | "error";
+type State = "idle" | "reading" | "preview" | "saving" | "saved" | "already-saved" | "partial" | "nothing-ready" | "failed" | "not-tagged" | "error";
 
 const DIGEST = "axom.harness.pdf-import.expected";
 const FILING = "axom.harness.pdf-import.filing";
@@ -318,6 +318,7 @@ async function save(): Promise<void> {
   const words: Record<typeof saved.status, string> = {
     saved: "Saved.",
     "already-saved": "These questions were already saved. Nothing was written.",
+    partial: "Some questions were saved. See the remaining section errors.",
     "nothing-ready": "No question is ready, so nothing was saved.",
     failed: "The import failed. See the errors.",
   };

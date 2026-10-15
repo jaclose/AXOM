@@ -389,7 +389,11 @@ describe("course templates", () => {
     const old = [{ id: "progress-preserved", path: "Term 2/NB2/Week 9",
       label: "NB Lecture 01 Anatomy", templateKey: "nb2|lecture|1",
       weekSource: "learner" as const }];
-    expect(reconcileCourseTemplate(plan, old)).toEqual({
+    expect(reconcileCourseTemplate(plan, old)).toMatchObject({
+      create: [], update: [], unchanged: 0,
+      review: [{ candidateIds: ["progress-preserved"] }],
+    });
+    expect(reconcileCourseTemplate(plan, old, { legacyCourseAdoption: "confirmed-unique" })).toEqual({
       create: [], unchanged: 0,
       update: [{ id: "progress-preserved", path: "Term 2/BPM 501/NB2/Week 9",
         label: "NB Lecture 01 Anatomy", weekSource: "learner" }],

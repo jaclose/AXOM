@@ -8,6 +8,7 @@ import type { ParsedQuestionDraft } from "../../lib/questionParse";
 import { ImportPanel, parseStoredDocument, preserveUserReviewedMappings } from "./ImportPanel";
 import { importFromCsv, importFromJson } from "../../lib/questionImport";
 import { pushToast } from "../../lib/toast";
+import * as localVault from "../../lib/localVault";
 
 const mocked = vi.hoisted(() => ({
   addDocument: vi.fn(),
@@ -47,7 +48,10 @@ beforeEach(() => {
   mocked.documents.splice(0);
   mocked.addQuestion.mockReturnValue({ ok: true, errors: [], id: "question-1" });
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 describe("source-document-first import", () => {
   it("blocks an unresolved mapping even if confidence is malformed high", () => {
@@ -313,6 +317,9 @@ describe("source-document-first import", () => {
 
   it("lists the images an import names, takes the files, and attaches each to its question as an exhibit", async () => {
     const user = userEvent.setup();
+    // This component harness replaces the persisted Zustand store with spies,
+    // so model the exact adapter receipt that a real updateQuestion emits.
+    const exactVaultWrite = vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
     mocked.updateQuestion = vi.fn();
     mocked.addQuestion
       .mockReturnValueOnce({ ok: true, errors: [], id: "question-1" })
@@ -343,6 +350,7 @@ describe("source-document-first import", () => {
     expect(mocked.updateQuestion).toHaveBeenCalledWith("question-2", {
       attachments: [expect.objectContaining({ fileName: "ECG-2.png", mimeType: "image/png", role: "exhibit" })],
     });
+    expect(exactVaultWrite).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(pushToast).toHaveBeenCalledWith(expect.objectContaining({
       title: "1 image attached to its question",
       body: expect.stringContaining("1 named image was not added"),

@@ -331,10 +331,16 @@ export interface TemplateReconciliation {
   notInSelection?: Array<{ id: string; label: string; path: string }>;
 }
 
+export interface TemplateReconciliationOptions {
+  /** Course-less legacy rows require independent ownership proof before refiling. */
+  legacyCourseAdoption?: "confirmed-unique" | "review";
+}
+
 /** Plan against the existing workspace, without mutating passes, attendance, or links. */
 export function reconcileCourseTemplate(
   plan: CourseTemplatePlan,
   existing: ReadonlyArray<{ id: string; path: string; label: string; activity?: CourseActivity; templateKey?: string; weekSource?: "template" | "inferred" | "learner" }>,
+  options: TemplateReconciliationOptions = {},
 ): TemplateReconciliation {
   // Only rows under this module AND this term can match. An identical activity
   // title in another term is never a duplicate of this student's work.
@@ -381,6 +387,15 @@ export function reconcileCourseTemplate(
     }
     const match = candidates[0];
     if (match) {
+      if (options.legacyCourseAdoption !== "confirmed-unique"
+        && isCourseLessLegacyTrackerPath(match.path, plan)) {
+        review.push({
+          item,
+          reason: "This course-less legacy activity needs a uniquely evidenced course owner before AXOM can refile it.",
+          candidateIds: [match.id],
+        });
+        continue;
+      }
       matched.add(match.id);
       // Retain a learner's exact week, and never drag a course-filed row back
       // into an old module-root layout when a legacy importer lacks course.
@@ -426,6 +441,18 @@ export function reconcileCourseTemplate(
   if (review.length) result.review = review;
   if (notInSelection.length) result.notInSelection = notInSelection;
   return result;
+}
+
+/** True only for a same-term/module legacy row that has no course path segment. */
+export function isCourseLessLegacyTrackerPath(path: string, plan: CourseTemplatePlan): boolean {
+  if (!plan.course) return false;
+  const segments = path.split("/").filter(Boolean);
+  const last = segments.at(-1) ?? "";
+  const hasWeekSuffix = /^week\s*\d+$/i.test(last) || /^unscheduled$/i.test(last);
+  const moduleIndex = segments.length - (hasWeekSuffix ? 2 : 1);
+  if (moduleIndex !== 1) return false;
+  return termIdentity(segments[0]) === termIdentity(plan.term)
+    && canonicalModuleKey(segments[moduleIndex] ?? "") === canonicalModuleKey(plan.module);
 }
 
 /** Preserve explicit course filing and student week decisions during reimports. */

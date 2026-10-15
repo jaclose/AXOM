@@ -80,7 +80,12 @@ import {
 } from "./questionFilters";
 import type { QuestionOrdering } from "./questionOrdering";
 import { reconcileQuestionAnnotationSources } from "./questionAnnotations";
-import { deleteQuestionAttachmentBlobs, listQuestionAttachmentBlobKeys, runQuestionAttachmentMaintenance } from "./questionAttachments";
+import {
+  deleteQuestionAttachmentBlobs,
+  isPrivateLibraryAttachmentBlobKey,
+  listQuestionAttachmentBlobKeys,
+  runQuestionAttachmentMaintenance,
+} from "./questionAttachments";
 import { privateReviewMedia } from "./privateLibrary/media";
 import type { QuizBlock, QuizSession } from "./quiz";
 import { buildQuestionSetFromFilter, type QuestionSet, type SourceDocument } from "./library";
@@ -89,14 +94,67 @@ import { repairOrphans } from "./orphanRepair";
 import type {
   ReviewedImportPersistencePlan,
   ReviewedImportPersistenceResult,
+  ReviewedRefilingPlan,
+  ReviewedRefilingResult,
 } from "./questionImportFinalization";
 import {
   nextSchedule, validateAnkiCard,
   type AnkiCard, type CardReviewLog, type ReviewRating,
 } from "./ankiCards";
+import {
+  importSharedQuestionSet,
+  readSharedQuestionImportProvenance,
+  sharedQuestionSetDigest,
+  type SharedQuestionImportIdentity,
+  type SharedQuestionSetSnapshot,
+} from "./sharing/questionSetShare";
 
 const uid = () => crypto.randomUUID();
 const now = () => new Date().toISOString();
+
+export type SharedQuestionSetImportCommitResult =
+  | {
+      ok: true;
+      questionSetId: string;
+      questionIds: string[];
+      added: number;
+      reused: number;
+      alreadyImported: boolean;
+    }
+  | { ok: false; message: string; rollbackFailures: string[] };
+
+const activeSharedQuestionImports = new Map<string, {
+  contentDigest: string;
+  promise: Promise<SharedQuestionSetImportCommitResult>;
+}>();
+
+function coordinateSharedQuestionImport(
+  identity: SharedQuestionImportIdentity,
+  run: () => Promise<SharedQuestionSetImportCommitResult>,
+): Promise<SharedQuestionSetImportCommitResult> {
+  if (typeof identity?.shareId !== "string" || typeof identity?.contentDigest !== "string") return run();
+  const active = activeSharedQuestionImports.get(identity.shareId);
+  if (active) {
+    if (active.contentDigest !== identity.contentDigest.toLowerCase()) {
+      return Promise.resolve({
+        ok: false,
+        message: "This share ID is already being imported from different content.",
+        rollbackFailures: [],
+      });
+    }
+    return active.promise;
+  }
+  const promise = run().finally(() => {
+    if (activeSharedQuestionImports.get(identity.shareId)?.promise === promise) {
+      activeSharedQuestionImports.delete(identity.shareId);
+    }
+  });
+  activeSharedQuestionImports.set(identity.shareId, {
+    contentDigest: identity.contentDigest.toLowerCase(),
+    promise,
+  });
+  return promise;
+}
 
 interface Actions {
   // profile
@@ -235,8 +293,15 @@ interface Actions {
 
   // question workspace (Phase 4) — records are validated at the boundary
   addQuestion: (input: unknown) => { ok: boolean; errors: string[]; id?: string };
+  /** Validate and durably persist one bearer-link question-set snapshot. */
+  commitSharedQuestionSetImport: (input: {
+    snapshot: SharedQuestionSetSnapshot;
+    identity: SharedQuestionImportIdentity;
+  }) => Promise<SharedQuestionSetImportCommitResult>;
   /** Validate and durably persist one complete reviewed import snapshot. */
   commitReviewedImport: (plan: ReviewedImportPersistencePlan) => Promise<ReviewedImportPersistenceResult>;
+  /** Atomically persist reviewed filing changes for reused source sets. */
+  commitReviewedRefiling: (plan: ReviewedRefilingPlan) => Promise<ReviewedRefilingResult>;
   updateQuestion: (id: string, patch: Partial<QuestionRecord>) => void;
   removeQuestion: (id: string) => void;
   recordQuestionAttempt: (id: string, attempt: Omit<QuestionAttempt, "at">) => void;
@@ -1051,6 +1116,146 @@ export const useStore = create<Store>()(
         set((s) => ({ questions: [record, ...(s.questions ?? [])] }));
         return { ok: true, errors: [], id: record.id };
       },
+      commitSharedQuestionSetImport: (input) => coordinateSharedQuestionImport(input.identity, async () => {
+        const failure = (message: string, rollbackFailures: string[] = []): SharedQuestionSetImportCommitResult => ({
+          ok: false,
+          message,
+          rollbackFailures,
+        });
+        let verifiedDigest: string;
+        try {
+          verifiedDigest = await sharedQuestionSetDigest(input.snapshot);
+        } catch (error) {
+          return failure(error instanceof Error ? error.message : "The shared set content could not be verified.");
+        }
+        if (typeof input.identity?.contentDigest !== "string"
+          || verifiedDigest !== input.identity.contentDigest.toLowerCase()) {
+          return failure("The shared set content digest does not match its protected snapshot.");
+        }
+
+        const current = get();
+        let plan: ReturnType<typeof importSharedQuestionSet>;
+        try {
+          plan = importSharedQuestionSet({
+            snapshot: input.snapshot,
+            identity: input.identity,
+            existingQuestions: current.questions ?? [],
+            existingSets: current.questionSets ?? [],
+          });
+        } catch (error) {
+          return failure(error instanceof Error ? error.message : "The shared set could not be imported safely.");
+        }
+
+        if (plan.alreadyImported) {
+          return {
+            ok: true,
+            questionSetId: plan.set.id,
+            questionIds: [...plan.set.questionIds],
+            added: 0,
+            reused: plan.reused,
+            alreadyImported: true,
+          };
+        }
+
+        const previous = {
+          questions: current.questions ?? [],
+          questionSets: current.questionSets ?? [],
+        };
+        const validId = (value: unknown): value is string => (
+          typeof value === "string" && value.length > 0 && value === value.trim()
+        );
+        const insertedQuestionIds = plan.questions.map((question) => question.id);
+        if (!validId(plan.set.id) || previous.questionSets.some((questionSet) => questionSet.id === plan.set.id)) {
+          return failure("The shared question set could not receive a unique local ID.");
+        }
+        if (insertedQuestionIds.some((id) => !validId(id))
+          || new Set(insertedQuestionIds).size !== insertedQuestionIds.length
+          || insertedQuestionIds.some((id) => previous.questions.some((question) => question.id === id))) {
+          return failure("The shared questions could not receive unique local IDs.");
+        }
+        const provenance = readSharedQuestionImportProvenance(plan.set);
+        if (!provenance || provenance.shareId !== input.identity.shareId
+          || provenance.contentDigest !== input.identity.contentDigest.toLowerCase()) {
+          return failure("The shared set import identity could not be verified.");
+        }
+        if (plan.set.sourceDocumentIds.length || plan.set.scope) {
+          return failure("A shared set cannot import another workspace's source or course associations.");
+        }
+        const unsafeQuestion = plan.questions.find((question) => (
+          Boolean(question.courseId || question.module || question.week || question.setId || question.sourceDocumentId)
+          || Boolean(question.attachments?.length || question.annotations?.length || question.notes || question.userAnswerKey)
+          || question.attempts.length > 0
+        ));
+        if (unsafeQuestion) {
+          return failure("A shared question contains local-only learner or source associations.");
+        }
+        const knownQuestionIds = new Set([
+          ...previous.questions.map((question) => question.id),
+          ...insertedQuestionIds,
+        ]);
+        if (plan.set.questionIds.length !== input.snapshot.questions.length
+          || new Set(plan.set.questionIds).size !== plan.set.questionIds.length
+          || plan.set.questionIds.some((id) => !knownQuestionIds.has(id))) {
+          return failure("The shared set's local membership could not be verified.");
+        }
+
+        const next = {
+          questions: [...plan.questions, ...previous.questions],
+          questionSets: [plan.set, ...previous.questionSets],
+        };
+        const sameValue = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
+        const insertedQuestions = new Map(plan.questions.map((question) => [question.id, question]));
+        const writeSequence = getVaultWriteCheckpoint() + 1;
+        try {
+          await set(() => next);
+          assertVaultWrite(writeSequence);
+        } catch (error) {
+          const rollbackFailures = new Set<string>();
+          const rollbackSequence = getVaultWriteCheckpoint() + 1;
+          try {
+            await set((live) => {
+              const liveSets = live.questionSets ?? [];
+              const liveImportedSet = liveSets.find((questionSet) => questionSet.id === plan.set.id);
+              const retainImportedSet = Boolean(liveImportedSet && !sameValue(liveImportedSet, plan.set));
+              if (retainImportedSet) rollbackFailures.add(`question set ${plan.set.id}`);
+              const referencedByRetainedSet = new Set(liveSets
+                .filter((questionSet) => questionSet.id !== plan.set.id || retainImportedSet)
+                .flatMap((questionSet) => questionSet.questionIds));
+              const rolledBackQuestions = (live.questions ?? []).filter((question) => {
+                const inserted = insertedQuestions.get(question.id);
+                if (!inserted) return true;
+                if (referencedByRetainedSet.has(question.id) || !sameValue(question, inserted)) {
+                  rollbackFailures.add(`question ${question.id}`);
+                  return true;
+                }
+                return false;
+              });
+              return {
+                questions: rolledBackQuestions,
+                questionSets: liveSets.filter((questionSet) => (
+                  questionSet.id !== plan.set.id || retainImportedSet
+                )),
+              };
+            });
+            assertVaultWrite(rollbackSequence);
+          } catch {
+            rollbackFailures.add("shared question set import state");
+          }
+          return failure(
+            error instanceof Error ? error.message : "AXOM could not persist the shared question set.",
+            [...rollbackFailures],
+          );
+        }
+
+        return {
+          ok: true,
+          questionSetId: plan.set.id,
+          questionIds: [...plan.set.questionIds],
+          added: plan.questions.length,
+          reused: plan.reused,
+          alreadyImported: false,
+        };
+      }),
       commitReviewedImport: async (plan) => {
         const current = get();
         const failure = (message: string, rollbackFailures: string[] = []): ReviewedImportPersistenceResult => ({
@@ -1210,7 +1415,8 @@ export const useStore = create<Store>()(
         const sameValue = (left: unknown, right: unknown) => (
           JSON.stringify(left) === JSON.stringify(right)
         );
-        const insertedQuestionIds = new Set(validatedQuestions.map((question) => question.id));
+        const insertedQuestions = new Map(validatedQuestions.map((question) => [question.id, question]));
+        const insertedQuestionIds = new Set(insertedQuestions.keys());
         const insertedSetId = questionSet?.id;
         const createdDocumentId = documentWrite?.kind === "create" ? documentWrite.document.id : undefined;
         const priorDocuments = new Map(previous.documents.map((document) => [document.id, document]));
@@ -1234,26 +1440,78 @@ export const useStore = create<Store>()(
             await set((live) => {
               const liveQuestionSets = live.questionSets ?? [];
               const liveQuestions = live.questions ?? [];
-              for (const liveSet of liveQuestionSets) {
-                if (liveSet.id !== insertedSetId
-                  && liveSet.questionIds.some((id) => insertedQuestionIds.has(id))) {
-                  rollbackFailures.add(`question set ${liveSet.id}`);
+              const liveInsertedSet = insertedSetId
+                ? liveQuestionSets.find((item) => item.id === insertedSetId)
+                : undefined;
+              const retainInsertedSet = Boolean(
+                liveInsertedSet
+                && questionSet
+                && !sameValue(liveInsertedSet, questionSet),
+              );
+              if (retainInsertedSet) rollbackFailures.add(`question set ${insertedSetId}`);
+
+              // A foreign set, or an inserted set changed while its write was
+              // pending, owns its current membership. Preserve every inserted
+              // question that membership now references. Independently retain
+              // an inserted question whose learner-owned fields changed.
+              const referencedByRetainedSet = new Set(liveQuestionSets
+                .filter((item) => item.id !== insertedSetId || retainInsertedSet)
+                .flatMap((item) => item.questionIds));
+              let rolledBackQuestions = liveQuestions.filter((question) => {
+                const inserted = insertedQuestions.get(question.id);
+                if (!inserted) return true;
+                if (referencedByRetainedSet.has(question.id) || !sameValue(question, inserted)) {
+                  rollbackFailures.add(`question ${question.id}`);
+                  return true;
                 }
-              }
+                return false;
+              });
+              let rolledBackQuestionSets = liveQuestionSets.filter((item) => (
+                item.id !== insertedSetId || retainInsertedSet
+              ));
+
+              // A concurrently deleted inserted question must not leave a
+              // retained set with a dangling membership ID. Foreign sets are
+              // otherwise preserved byte-for-byte.
+              const remainingQuestionIds = new Set(rolledBackQuestions.map((question) => question.id));
+              rolledBackQuestionSets = rolledBackQuestionSets.map((item) => {
+                const questionIds = item.questionIds.filter((id) => (
+                  !insertedQuestionIds.has(id) || remainingQuestionIds.has(id)
+                ));
+                if (questionIds.length === item.questionIds.length) return item;
+                if (item.id !== insertedSetId) {
+                  rollbackFailures.add(`question set ${item.id}.questionIds`);
+                }
+                return { ...item, questionIds };
+              });
+
+              // Retained inserted questions may still carry the tentative
+              // import's primary set ID. Unlink that ID when the set rolled
+              // back (or no longer contains the question) rather than leaving
+              // a dangling or contradictory ownership edge.
+              const retainedImportedSet = insertedSetId
+                ? rolledBackQuestionSets.find((item) => item.id === insertedSetId)
+                : undefined;
+              const retainedImportedQuestionIds = new Set(retainedImportedSet?.questionIds ?? []);
+              rolledBackQuestions = rolledBackQuestions.map((question) => (
+                insertedQuestions.has(question.id)
+                && question.setId === insertedSetId
+                && (!retainedImportedSet || !retainedImportedQuestionIds.has(question.id))
+                  ? { ...question, setId: undefined }
+                  : question
+              ));
 
               const createdDocumentHasConcurrentReferences = Boolean(createdDocumentId) && (
-                liveQuestionSets.some((liveSet) => (
-                  liveSet.id !== insertedSetId
-                  && liveSet.sourceDocumentIds.includes(createdDocumentId!)
+                rolledBackQuestionSets.some((liveSet) => (
+                  liveSet.sourceDocumentIds.includes(createdDocumentId!)
                 ))
-                || liveQuestions.some((question) => (
-                  !insertedQuestionIds.has(question.id)
-                  && question.sourceDocumentId === createdDocumentId
-                ))
+                || rolledBackQuestions.some((question) => question.sourceDocumentId === createdDocumentId)
               );
               if (createdDocumentHasConcurrentReferences) {
                 rollbackFailures.add(`source document ${createdDocumentId} (concurrent references)`);
               }
+
+              const retainedInsertedSetDocumentIds = new Set(retainedImportedSet?.sourceDocumentIds ?? []);
 
               let rolledBackDocuments = (live.documents ?? [])
                 .filter((document) => (
@@ -1268,7 +1526,8 @@ export const useStore = create<Store>()(
                   // only the inserted set ID, preserving every other live link.
                   if (insertedSetId
                     && document.linkedQuestionSetIds.includes(insertedSetId)
-                    && !beforeDocument?.linkedQuestionSetIds.includes(insertedSetId)) {
+                    && !beforeDocument?.linkedQuestionSetIds.includes(insertedSetId)
+                    && !retainedInsertedSetDocumentIds.has(document.id)) {
                     restore.linkedQuestionSetIds = document.linkedQuestionSetIds
                       .filter((id) => id !== insertedSetId);
                   }
@@ -1290,6 +1549,12 @@ export const useStore = create<Store>()(
                     if (key === "id" || sameValue(beforeValues[key], committedValues[key])) continue;
                     if (key === "linkedQuestionSetIds") {
                       const liveLinks = restore.linkedQuestionSetIds ?? document.linkedQuestionSetIds;
+                      const insertedLinkWasNew = Boolean(
+                        insertedSetId && !beforeDocument.linkedQuestionSetIds.includes(insertedSetId),
+                      );
+                      const comparableLiveLinks = insertedLinkWasNew
+                        ? liveLinks.filter((id) => id !== insertedSetId)
+                        : liveLinks;
                       const committedLinks = committedDocument.linkedQuestionSetIds
                         .filter((id) => id !== insertedSetId || beforeDocument.linkedQuestionSetIds.includes(id));
                       if (sameValue(committedLinks, beforeDocument.linkedQuestionSetIds)) {
@@ -1297,9 +1562,13 @@ export const useStore = create<Store>()(
                         // removed above; retain unrelated concurrent links.
                         continue;
                       }
-                      if (sameValue(liveLinks, committedLinks)) {
-                        restore.linkedQuestionSetIds = [...beforeDocument.linkedQuestionSetIds];
-                      } else if (!sameValue(liveLinks, beforeDocument.linkedQuestionSetIds)) {
+                      if (sameValue(comparableLiveLinks, committedLinks)) {
+                        restore.linkedQuestionSetIds = insertedLinkWasNew
+                          && retainedInsertedSetDocumentIds.has(document.id)
+                          && document.linkedQuestionSetIds.includes(insertedSetId!)
+                          ? [...beforeDocument.linkedQuestionSetIds, insertedSetId!]
+                          : [...beforeDocument.linkedQuestionSetIds];
+                      } else if (!sameValue(comparableLiveLinks, beforeDocument.linkedQuestionSetIds)) {
                         rollbackFailures.add(`source document ${document.id}.linkedQuestionSetIds`);
                       }
                       continue;
@@ -1321,6 +1590,7 @@ export const useStore = create<Store>()(
                 rolledBackDocuments = rolledBackDocuments.map((document) => (
                   document.linkedQuestionSetIds.includes(insertedSetId)
                     && !priorDocuments.get(document.id)?.linkedQuestionSetIds.includes(insertedSetId)
+                    && !retainedInsertedSetDocumentIds.has(document.id)
                     ? {
                         ...document,
                         linkedQuestionSetIds: document.linkedQuestionSetIds.filter((id) => id !== insertedSetId),
@@ -1338,9 +1608,28 @@ export const useStore = create<Store>()(
                   : document
               ));
 
+              // Complete the local graph repair for transaction-created IDs.
+              // This does not touch unrelated pre-existing orphan state.
+              const remainingDocumentIds = new Set(rolledBackDocuments.map((document) => document.id));
+              rolledBackQuestions = rolledBackQuestions.map((question) => (
+                insertedQuestions.has(question.id)
+                && question.sourceDocumentId
+                && !remainingDocumentIds.has(question.sourceDocumentId)
+                  ? { ...question, sourceDocumentId: undefined }
+                  : question
+              ));
+              rolledBackQuestionSets = rolledBackQuestionSets.map((item) => (
+                item.id === insertedSetId
+                  ? {
+                      ...item,
+                      sourceDocumentIds: item.sourceDocumentIds.filter((id) => remainingDocumentIds.has(id)),
+                    }
+                  : item
+              ));
+
               return {
-                questions: liveQuestions.filter((question) => !insertedQuestionIds.has(question.id)),
-                questionSets: liveQuestionSets.filter((item) => item.id !== insertedSetId),
+                questions: rolledBackQuestions,
+                questionSets: rolledBackQuestionSets,
                 documents: rolledBackDocuments,
               };
             });
@@ -1361,6 +1650,129 @@ export const useStore = create<Store>()(
           documentId: documentWrite?.kind === "create" ? documentWrite.document.id : documentWrite?.id,
         };
       },
+      commitReviewedRefiling: async (plan) => {
+        const failure = (message: string, rollbackFailures: string[] = []): ReviewedRefilingResult => ({
+          ok: false,
+          message,
+          rollbackFailures,
+        });
+        const sameScope = (
+          left: { module?: string; week?: number; courseId?: string } | undefined,
+          right: { module?: string; week?: number; courseId?: string } | undefined,
+        ) => left?.module === right?.module
+          && left?.week === right?.week
+          && left?.courseId === right?.courseId;
+        const current = get();
+        const previous = {
+          questions: current.questions ?? [],
+          questionSets: current.questionSets ?? [],
+        };
+
+        if (!plan.sets.length) return failure("The reviewed refiling does not contain any source sets.");
+
+        const setTargets = new Map<string, (typeof plan.sets)[number]["targetScope"]>();
+        const questionTargets = new Map<string, (typeof plan.sets)[number]["targetScope"]>();
+        for (const request of plan.sets) {
+          if (!request.setId || request.setId !== request.setId.trim()) {
+            return failure("Every reused source set must have a stable ID before refiling.");
+          }
+          if (!request.targetScope.module
+            || request.targetScope.module !== request.targetScope.module.trim()) {
+            return failure("Every reviewed filing must name one valid module.");
+          }
+          if (setTargets.has(request.setId)) {
+            return failure(`Reused source set "${request.setId}" appears more than once in one refiling.`);
+          }
+
+          const questionSet = previous.questionSets.find((candidate) => candidate.id === request.setId);
+          if (!questionSet) {
+            return failure(`Reused source set "${request.setId}" no longer exists.`);
+          }
+          const expectedQuestionIds = request.questions.map((question) => question.questionId);
+          if (!expectedQuestionIds.length
+            || new Set(expectedQuestionIds).size !== expectedQuestionIds.length
+            || questionSet.questionIds.length !== expectedQuestionIds.length
+            || questionSet.questionIds.some((id, index) => id !== expectedQuestionIds[index])) {
+            return failure(`Reused source set "${request.setId}" changed membership before refiling.`);
+          }
+          if (!sameScope(questionSet.scope, request.expectedScope)) {
+            return failure(`Reused source set "${request.setId}" changed filing before refiling.`);
+          }
+
+          for (const expected of request.questions) {
+            if (questionTargets.has(expected.questionId)) {
+              return failure(`Question "${expected.questionId}" belongs to more than one reused source set.`);
+            }
+            const question = previous.questions.find((candidate) => candidate.id === expected.questionId);
+            if (!question || question.setId !== request.setId) {
+              return failure(`Question "${expected.questionId}" changed source-set ownership before refiling.`);
+            }
+            if (!sameScope(question, expected.expectedScope)) {
+              return failure(`Question "${expected.questionId}" changed filing before refiling.`);
+            }
+            questionTargets.set(expected.questionId, request.targetScope);
+          }
+          setTargets.set(request.setId, request.targetScope);
+        }
+
+        const next = {
+          questions: previous.questions.map((question) => {
+            const target = questionTargets.get(question.id);
+            if (!target) return question;
+            const { module: _module, week: _week, courseId: _courseId, ...unchanged } = question;
+            return { ...unchanged, ...target };
+          }),
+          questionSets: previous.questionSets.map((questionSet) => {
+            const target = setTargets.get(questionSet.id);
+            return target ? { ...questionSet, scope: target } : questionSet;
+          }),
+        };
+        const priorQuestions = new Map(previous.questions.map((question) => [question.id, question]));
+        const priorQuestionSets = new Map(previous.questionSets.map((questionSet) => [questionSet.id, questionSet]));
+
+        const writeSequence = getVaultWriteCheckpoint() + 1;
+        try {
+          await set(() => next);
+          assertVaultWrite(writeSequence);
+          return { ok: true };
+        } catch (error) {
+          const rollbackFailures: string[] = [];
+          const rollbackSequence = getVaultWriteCheckpoint() + 1;
+          try {
+            // Revert only the filing fields this transaction still owns. A
+            // later edit may have added, removed, or changed these records
+            // while the vault write was pending; never erase or resurrect it.
+            await set((live) => ({
+              questions: (live.questions ?? []).map((question) => {
+                const target = questionTargets.get(question.id);
+                const prior = priorQuestions.get(question.id);
+                if (!target || !prior || question.setId !== prior.setId || !sameScope(question, target)) return question;
+                const { module: _module, week: _week, courseId: _courseId, ...unchanged } = question;
+                return {
+                  ...unchanged,
+                  ...(prior.module ? { module: prior.module } : {}),
+                  ...(prior.week !== undefined ? { week: prior.week } : {}),
+                  ...(prior.courseId ? { courseId: prior.courseId } : {}),
+                };
+              }),
+              questionSets: (live.questionSets ?? []).map((questionSet) => {
+                const target = setTargets.get(questionSet.id);
+                const prior = priorQuestionSets.get(questionSet.id);
+                return target && prior && sameScope(questionSet.scope, target)
+                  ? { ...questionSet, scope: prior.scope }
+                  : questionSet;
+              }),
+            }));
+            assertVaultWrite(rollbackSequence);
+          } catch {
+            rollbackFailures.push("reviewed filing state");
+          }
+          return failure(
+            error instanceof Error ? error.message : "AXOM could not persist the reviewed filing.",
+            rollbackFailures,
+          );
+        }
+      },
       updateQuestion: (id, patch) =>
         set((s) => ({
           questions: (s.questions ?? []).map((q) => {
@@ -1372,10 +1784,13 @@ export const useStore = create<Store>()(
           }),
         })),
       removeQuestion: (id) => set((s) => {
-        // Q2b-2: deleting a question deletes its attachment bytes (targeted,
-        // fire-and-forget; the post-restore sweep is the backstop).
+        // Q2b-2: delete question-owned attachment bytes. Content-addressed
+        // private-library media can have sibling/review-document references,
+        // so removing one question only removes that question's metadata.
         const removed = (s.questions ?? []).find((q) => q.id === id);
-        const blobKeys = (removed?.attachments ?? []).map((attachment) => attachment.blobKey);
+        const blobKeys = (removed?.attachments ?? [])
+          .map((attachment) => attachment.blobKey)
+          .filter((blobKey) => !isPrivateLibraryAttachmentBlobKey(blobKey));
         if (blobKeys.length) void deleteQuestionAttachmentBlobs(blobKeys).catch(() => {});
         return {
           questions: (s.questions ?? []).filter((q) => q.id !== id),

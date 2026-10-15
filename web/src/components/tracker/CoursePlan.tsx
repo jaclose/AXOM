@@ -41,7 +41,9 @@ export function CoursePlan({ book, bank, availableQuestions, onBack, onOpen, onC
       <div className="course-plan-cover" aria-hidden="true"><span>{book.term}</span><strong>{book.module}</strong><BookOpen size={40} strokeWidth={1} /></div>
       <div><p className="course-eyebrow">{book.term}{book.academicContext?.academicTerm ? ` · ${book.academicContext.academicTerm}` : book.courseCode ? ` · ${book.courseCode}` : ""}</p><h1 tabIndex={-1}>{book.module}</h1>
         <p>{book.courseName || "Your weekly course plan"}</p>
-        <div className="course-plan-facts"><span><b>{book.weeks.length}</b> weeks</span><span><b>{book.count}</b> activities</span><span><b>{bank?.ready ?? availableQuestions ?? 0}</b> ready questions</span></div>
+        <div className="course-plan-facts"><span><b>{book.weeks.length}</b> weeks</span><span><b>{book.count}</b> activities</span>{bank
+          ? <span><b>{bank.ready}</b> locally answer-ready</span>
+          : <span><b>{availableQuestions ?? 0}</b> reviewed available to download</span>}</div>
         {loaded && <p className="course-activation"><Check size={ICON_SIZE.body} /> In My Courses{book.loadedActivities !== undefined ? ` · ${book.loadedActivities} activities loaded` : ""}</p>}
       </div>
     </div>

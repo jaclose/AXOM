@@ -123,6 +123,17 @@ async function decodeImage(blob: Blob): Promise<boolean> {
   } finally { URL.revokeObjectURL(url); }
 }
 
+/** Private-library review media is deliberately content-addressed so several
+ * question-local references can share one immutable byte object. A legacy
+ * blob record can name only one question, so the exact checksum-bound key is
+ * the ownership proof for that narrow case. All other attachment keys remain
+ * isolated to their recorded question. */
+function hasContentAddressedOwnership(ref: RequiredQuestionMedia): boolean {
+  return typeof ref.checksum === "string"
+    && /^sha256:[a-f0-9]{64}$/i.test(ref.checksum)
+    && ref.attachment?.blobKey.toLowerCase() === `private-library:${ref.checksum.toLowerCase()}`;
+}
+
 function issue(ref: RequiredQuestionMedia, code: MediaIssueCode): MediaIssue {
   return { questionId: ref.questionId, assetId: ref.assetId, code };
 }
@@ -159,7 +170,7 @@ export async function preflightQuestionMedia(
     try { record = await load(attachment.blobKey); }
     catch { return { code: "lookup-failed" }; }
     if (!record?.blob) return { code: "missing-bytes" };
-    if (record.questionId !== ref.questionId) return { code: "wrong-question" };
+    if (record.questionId !== ref.questionId && !hasContentAddressedOwnership(ref)) return { code: "wrong-question" };
     if (record.byteSize !== attachment.byteSize || record.blob.size !== attachment.byteSize) return { code: "size-mismatch" };
     if (record.mimeType !== attachment.mimeType || (record.blob.type && record.blob.type !== attachment.mimeType)) return { code: "type-mismatch" };
     let hashVerified = false;

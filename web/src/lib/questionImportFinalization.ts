@@ -15,6 +15,8 @@ export interface QuestionImportPersistence {
    * compatibility fallback for narrow adapters and component tests.
    */
   commitReviewedImport?(plan: ReviewedImportPersistencePlan): Awaitable<ReviewedImportPersistenceResult>;
+  /** Refile reused source sets and their questions as one durable workspace snapshot. */
+  commitReviewedRefiling?(plan: ReviewedRefilingPlan): Awaitable<ReviewedRefilingResult>;
   addQuestion(input: unknown): Awaitable<{ ok: boolean; errors: string[]; id?: string }>;
   removeQuestion(id: string): Awaitable<void>;
   addQuestionSet(set: QuestionSet): Awaitable<void>;
@@ -60,6 +62,21 @@ export interface ReviewedImportPersistencePlan {
 
 export type ReviewedImportPersistenceResult =
   | { ok: true; questionIds: string[]; questionSetId?: string; documentId?: string }
+  | { ok: false; message: string; rollbackFailures: string[] };
+
+export type ReviewedFilingScope = { module: string; week?: number; courseId?: string };
+
+export interface ReviewedRefilingPlan {
+  sets: Array<{
+    setId: string;
+    expectedScope?: QuestionSet["scope"];
+    questions: Array<{ questionId: string; expectedScope?: ReviewedFilingScope }>;
+    targetScope: ReviewedFilingScope;
+  }>;
+}
+
+export type ReviewedRefilingResult =
+  | { ok: true }
   | { ok: false; message: string; rollbackFailures: string[] };
 
 export interface CoordinatedReviewedImportResult {
