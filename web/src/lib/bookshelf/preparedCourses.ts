@@ -40,12 +40,13 @@ function hasVerifiedHostedBinding(book: CourseBook, documents: readonly SourceDo
       const reference = JSON.parse(document.rawText) as {
         collectionId?: unknown; revisionId?: unknown; accountId?: unknown; templateIds?: unknown;
       };
+      const templateIds = reference.templateIds;
       return reference.collectionId === collectionId
         && typeof reference.revisionId === "string"
         && document.id === `academic-${reference.revisionId}`
         && typeof reference.accountId === "string" && reference.accountId.length > 0
-        && Array.isArray(reference.templateIds)
-        && book.templateIds.every((id) => reference.templateIds!.includes(id));
+        && Array.isArray(templateIds)
+        && book.templateIds.every((id) => templateIds.includes(id));
     } catch { return false; }
   });
 }
