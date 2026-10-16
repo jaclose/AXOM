@@ -1,6 +1,6 @@
 import { expect, reloadAfterSave, seedOnboarded, test } from "./fixtures";
 
-for (const width of [1440, 390]) test(`Journal saves and reloads a page at ${width}px`, async ({ page }) => {
+for (const width of [1440, 768, 390]) test(`Journal saves and reloads a page at ${width}px`, async ({ page }) => {
   await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.addInitScript((theme) => localStorage.setItem("axom.theme", theme), width === 390 ? "light" : "dark");

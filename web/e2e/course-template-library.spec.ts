@@ -5,7 +5,7 @@ const ORIGINAL = "FTM 1 - Lectures:\nWeek 1:\nLecture 01 Sample cells [Lecture]\
 const UPDATED = ORIGINAL.replace("Sample tissue", "Updated sample tissue");
 const file = (text: string) => ({ name: "Sample-course.txt", mimeType: "text/plain", buffer: Buffer.from(text) });
 
-for (const width of [1440, 390]) {
+for (const width of [1440, 768, 390]) {
   test(`saved template versions support selective loading, export and progress at ${width}px`, async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
