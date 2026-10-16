@@ -5,11 +5,14 @@ import { useStore } from "../../lib/store";
 import { useAccount } from "../../lib/account/accountStore";
 import { academicPreview, downloadAcademicCourse, enrollAcademicCourse, type AcademicCourse } from "../../lib/academicLibrary/client";
 import { prepareCourseTemplate } from "../../lib/course-engine/templateLibrary";
-import { withPreparedCourses, loadPreparedCourse } from "../../lib/bookshelf/preparedCourses";
+import { parseCourseTemplate } from "../../lib/course-engine/templateParse";
+import { canonicalModuleKey, moduleKey } from "../../lib/course-engine/vocabulary";
+import { canonicalCourseOwnerUniverse, withPreparedCourses, loadPreparedCourse } from "../../lib/bookshelf/preparedCourses";
 import { buildQuestionBankBooks } from "../../lib/bookshelf/questionBankBooks";
-import type { CourseBook } from "../../lib/bookshelf/courseBooks";
+import { courseBookId, type CourseBook } from "../../lib/bookshelf/courseBooks";
 import type { SourceDocument } from "../../lib/library";
 import type { LibraryInstallation } from "../../lib/privateLibrary/install";
+import type { Course, Term, TrackerItem } from "../../lib/types";
 import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "../../lib/localVault";
 import { CoursePlan } from "./CoursePlan";
 import { GButton } from "../ui/primitives";
@@ -46,6 +49,58 @@ async function saveReference(value: DownloadReference, assertCurrent: () => void
   await flushLocalVaultWrites(); assertVaultWritesSince(checkpoint);
 }
 
+const termIdentity = (value: string): string => {
+  const numbered = value.trim().match(/^(?:t|term)\s*0*(\d{1,2})$/i);
+  return numbered ? `term${Number(numbered[1])}` : moduleKey(value);
+};
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Bind a hosted collection to one stable local course owner. Revisions of the
+ * same collection reuse this identity; another collection can never inherit
+ * its tracker rows merely because the catalog labels are alike. */
+export function connectedCourseBook(
+  course: AcademicCourse,
+  template: SourceDocument,
+  workspace: { terms: readonly Term[]; courses: readonly Course[]; tracker: readonly TrackerItem[] } = {
+    terms: [], courses: [], tracker: [],
+  },
+): CourseBook {
+  if (!UUID.test(course.id)) throw new Error("This course has an invalid collection identity.");
+  const section = parseCourseTemplate(template.rawText, template.fileName);
+  if (section.problems.length || !section.items.length || !section.term
+    || termIdentity(section.term) !== termIdentity(course.term)
+    || canonicalModuleKey(section.module) !== canonicalModuleKey(course.module)) {
+    throw new Error("This course plan does not match the catalog term and module. Your current course has not changed.");
+  }
+  const courseCode = `academic:${course.id}`;
+  const exact: CourseBook = {
+    kind: "course",
+    id: courseBookId(course.term, courseCode, course.module),
+    title: course.module,
+    identifier: courseCode,
+    shelf: course.term,
+    count: 0,
+    countLabel: "0 activities",
+    state: "empty",
+    stateNote: "Not loaded yet.",
+    module: course.module,
+    term: course.term,
+    courseCode,
+    courseName: course.title,
+    origin: "curriculum",
+    weeks: [],
+    unfiled: 0,
+    done: 0,
+    templateIds: [template.id],
+  };
+  const owners = canonicalCourseOwnerUniverse(workspace, exact);
+  const book = withPreparedCourses([exact], [template], workspace.tracker, owners)[0];
+  if (!book || book.templateIds?.length !== 1 || book.templateIds[0] !== template.id) {
+    throw new Error("This course plan could not be bound to its exact saved template.");
+  }
+  return book;
+}
+
 export function ConnectedCoursePlan({ course, onBack, onOpen, onCustomize, onSharingSaved }: {
   course: AcademicCourse; onBack: () => void; onOpen: (book: CourseBook) => void; onCustomize: (book: CourseBook) => void; onSharingSaved: () => void;
 }) {
@@ -59,22 +114,31 @@ export function ConnectedCoursePlan({ course, onBack, onOpen, onCustomize, onSha
   const downloaded = useMemo(() => reference(state.documents, course, accountId), [state.documents, course, accountId]);
   const cachedTemplate = state.documents.find(document => downloaded?.templateIds.includes(document.id));
   useEffect(() => {
-    if (cachedTemplate) { setTemplate(cachedTemplate); setError(""); return; }
+    if (cachedTemplate) {
+      try { connectedCourseBook(course, cachedTemplate); setTemplate(cachedTemplate); setError(""); }
+      catch (cause) { setTemplate(undefined); setError(cause instanceof Error ? cause.message : "The saved course plan could not be opened."); }
+      return;
+    }
     let cancelled = false;
     setTemplate(undefined); setError("");
     void academicPreview(course.current_revision_id, accountId).then(preview => {
       if (preview.collection_id !== course.id) throw new Error("This preview does not match the selected course.");
       return prepareCourseTemplate(preview.template_text, `${course.module} course plan.txt`);
     })
+      .then(document => { connectedCourseBook(course, document); return document; })
       .then(document => { if (!cancelled) { setTemplate(document); setError(""); } })
       .catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : "The course preview could not be opened."); });
     return () => { cancelled = true; };
-  }, [course.current_revision_id, course.id, course.module, accountId, retry, cachedTemplate]);
+  }, [course, accountId, retry, cachedTemplate]);
   const book = useMemo(() => {
     if (!template) return;
-    const result = withPreparedCourses([], [template], state.tracker)[0];
-    return result ? { ...result, id: `remote:${course.id}`, term: course.term, courseName: course.title } : undefined;
-  }, [template, state.tracker, course]);
+    try {
+      return connectedCourseBook(course, template, {
+        terms: state.terms, courses: state.courses, tracker: state.tracker,
+      });
+    }
+    catch { return undefined; }
+  }, [template, state.terms, state.courses, state.tracker, course]);
   const bank = useMemo(() => {
     if (!downloaded) return;
     const ids = new Set(downloaded.questionIds);
