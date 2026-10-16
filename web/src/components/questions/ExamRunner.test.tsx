@@ -18,9 +18,19 @@ const mocked = vi.hoisted(() => ({
   saveQuizSession: vi.fn(),
   addQuestionSet: vi.fn(),
   bulkAddTrackerItems: vi.fn(),
+  vaultCheckpoint: vi.fn(() => 0),
+  vaultFlush: vi.fn(async () => {}),
+  vaultAssertWrite: vi.fn(),
+  vaultAssertWritesSince: vi.fn(),
 }));
 
 vi.mock("../../lib/store", () => ({ useStore: () => mocked.store }));
+vi.mock("../../lib/localVault", () => ({
+  getVaultWriteCheckpoint: mocked.vaultCheckpoint,
+  flushLocalVaultWrites: mocked.vaultFlush,
+  assertVaultWrite: mocked.vaultAssertWrite,
+  assertVaultWritesSince: mocked.vaultAssertWritesSince,
+}));
 vi.mock("../../lib/ai", () => ({
   resolveActiveProvider: () => null,
   explainSimply: vi.fn(),
@@ -96,12 +106,18 @@ const memoryLocalStorage = {
 beforeEach(() => {
   vi.stubGlobal("localStorage", memoryLocalStorage);
   localStorage.clear();
+  sessionStorage.clear();
+  mocked.vaultCheckpoint.mockReturnValue(0);
+  mocked.vaultFlush.mockResolvedValue(undefined);
+  mocked.vaultAssertWrite.mockImplementation(() => undefined);
+  mocked.vaultAssertWritesSince.mockImplementation(() => undefined);
 });
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   localStorage.clear();
+  sessionStorage.clear();
   vi.unstubAllGlobals();
 });
 
@@ -834,6 +850,103 @@ describe("ExamRunner keeps what was answered", () => {
 
     expect(mocked.commitQuizRun).not.toHaveBeenCalled();
     expect(mocked.recordQuestionAttempt).not.toHaveBeenCalled();
+  });
+});
+
+describe("ExamRunner durable finalization", () => {
+  it("keeps the recovery snapshot until the exact workspace write is confirmed", async () => {
+    setStore();
+    mocked.vaultCheckpoint.mockReturnValue(7);
+    let releaseWrite!: () => void;
+    mocked.vaultFlush.mockReturnValue(new Promise<void>((resolve) => { releaseWrite = resolve; }));
+    const user = userEvent.setup();
+    render(<ExamRunner mode="exam" retakeIds={[question.id]} onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "B. Beta" }));
+    await user.click(screen.getByRole("button", { name: "Submit & finish" }));
+
+    expect(mocked.commitQuizRun).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem(STORAGE_KEYS.quizActiveSession)).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "Exam · 1 of 1" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "B. Beta" })).toHaveProperty("disabled", true);
+    expect(screen.getAllByRole("button", { name: "Saving…" }).length).toBeGreaterThan(0);
+    expect(screen.queryByText("Block results")).toBeNull();
+
+    releaseWrite();
+    await waitFor(() => expect(screen.getByText("Block results")).toBeTruthy());
+    expect(mocked.vaultAssertWrite).toHaveBeenCalledWith(8);
+    expect(mocked.vaultAssertWritesSince).toHaveBeenCalledWith(7);
+    expect(localStorage.getItem(STORAGE_KEYS.quizActiveSession)).toBeNull();
+  });
+
+  it("keeps a failed finish recoverable and retries under the same id", async () => {
+    setStore();
+    mocked.vaultFlush.mockRejectedValueOnce(new Error("Synthetic vault refusal"));
+    const user = userEvent.setup();
+    render(<ExamRunner mode="exam" retakeIds={[question.id]} onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "B. Beta" }));
+    await user.click(screen.getByRole("button", { name: "Submit & finish" }));
+
+    expect((await screen.findByRole("alert")).textContent).toMatch(/answers are still open and recoverable/i);
+    const retained = JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession)!);
+    expect(retained).toMatchObject({ runId: expect.any(String), picked: "B" });
+    expect(mocked.commitQuizRun).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Block results")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Retry submit & finish" }));
+    await waitFor(() => expect(screen.getByText("Block results")).toBeTruthy());
+    expect(mocked.commitQuizRun).toHaveBeenCalledTimes(2);
+    const [first, retried] = mocked.commitQuizRun.mock.calls.map(([run]) => run);
+    expect(retried.session.id).toBe(first.session.id);
+    expect(retried.attempts[0].attempt.quizSessionId).toBe(first.session.id);
+    expect(localStorage.getItem(STORAGE_KEYS.quizActiveSession)).toBeNull();
+  });
+
+  it("does not close an answered block when save-and-exit durability fails", async () => {
+    setStore();
+    mocked.vaultAssertWritesSince.mockImplementationOnce(() => { throw new Error("Synthetic finalization refusal"); });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    render(<ExamRunner mode="exam" retakeIds={[question.id]} onClose={onClose} />);
+
+    await user.click(screen.getByRole("button", { name: "B. Beta" }));
+    await user.click(screen.getByRole("button", { name: "Exit block" }));
+
+    expect((await screen.findByRole("alert")).textContent).toMatch(/final save not confirmed/i);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(localStorage.getItem(STORAGE_KEYS.quizActiveSession)).not.toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Retry save & exit" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(mocked.commitQuizRun).toHaveBeenCalledTimes(2);
+    expect(mocked.commitQuizRun.mock.calls[1][0].session.id).toBe(mocked.commitQuizRun.mock.calls[0][0].session.id);
+    expect(localStorage.getItem(STORAGE_KEYS.quizActiveSession)).toBeNull();
+    confirm.mockRestore();
+  });
+
+  it("finishing one run keeps another tab's recovery mirror discoverable", async () => {
+    setStore();
+    const startedAt = "2026-07-10T01:00:00.000Z";
+    const current = {
+      mode: "exam", runId: "run-current", poolIds: [question.id], index: 0,
+      answers: [{ questionId: question.id, answerKey: "B", correct: true, flagged: false, seconds: 5 }],
+      picked: "B", revealed: false, startedAt, timed: false,
+      filters: { count: 1, status: "all", ordered: true },
+    };
+    const other = { ...current, runId: "run-other", picked: "A", answers: [] };
+    localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify(current));
+    localStorage.setItem(`${STORAGE_KEYS.quizActiveSession}:run:${other.runId}`, JSON.stringify(other));
+    const user = userEvent.setup();
+    render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Submit & finish" }));
+    await waitFor(() => expect(screen.getByText("Block results")).toBeTruthy());
+
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession)!).runId).toBe("run-other");
+    expect(JSON.parse(localStorage.getItem(`${STORAGE_KEYS.quizActiveSession}:run:run-other`)!).runId).toBe("run-other");
+    expect(localStorage.getItem(`${STORAGE_KEYS.quizActiveSession}:run:run-current`)).toBeNull();
   });
 });
 

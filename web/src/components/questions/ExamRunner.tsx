@@ -46,6 +46,12 @@ import type { QuizCalculatorValue } from "./QuizCalculator";
 import { ExamSimulator } from "./ExamSimulator";
 import { ExamRunnerMediaNotice } from "./ExamRunnerMediaNotice";
 import {
+  assertVaultWrite,
+  assertVaultWritesSince,
+  flushLocalVaultWrites,
+  getVaultWriteCheckpoint,
+} from "../../lib/localVault";
+import {
   BLOCK_PRESETS, EXAM_SKINS, blockCounts, formatClock, readSuspendedBlock, writeSuspendedBlock,
   type BlockPreset, type ExamSkin, type SuspendedBlock,
 } from "../../lib/examSim";
@@ -78,17 +84,88 @@ interface ActiveQuizSnapshot {
   runId?: string;
   certainty?: AnswerCertainty;
 }
-function readActiveQuiz(): ActiveQuizSnapshot | undefined {
+
+const ACTIVE_QUIZ_RUN_ID_KEY = `${STORAGE_KEYS.quizActiveSession}:run-id`;
+const ACTIVE_QUIZ_RUN_PREFIX = `${STORAGE_KEYS.quizActiveSession}:run:`;
+
+function parseActiveQuiz(raw: string | null): ActiveQuizSnapshot | undefined {
   try {
-    const value = JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession) ?? "null") as ActiveQuizSnapshot | null;
+    const value = JSON.parse(raw ?? "null") as ActiveQuizSnapshot | null;
     if (!value || (value.mode !== "tutor" && value.mode !== "exam")
       || !Array.isArray(value.poolIds) || !value.poolIds.length
       || value.poolIds.some((id) => typeof id !== "string" || !id)
       || new Set(value.poolIds).size !== value.poolIds.length
       || !Array.isArray(value.answers) || !value.filters || typeof value.filters !== "object"
+      || (value.runId !== undefined && (typeof value.runId !== "string" || !value.runId))
       || typeof value.startedAt !== "string" || !Number.isFinite(Date.parse(value.startedAt))) return undefined;
     return value;
   } catch { return undefined; }
+}
+
+function activeQuizRunKey(runId: string): string {
+  return `${ACTIVE_QUIZ_RUN_PREFIX}${runId}`;
+}
+
+function rememberedQuizRunId(): string | undefined {
+  try {
+    const value = sessionStorage.getItem(ACTIVE_QUIZ_RUN_ID_KEY);
+    return value || undefined;
+  } catch { return undefined; }
+}
+
+function rememberQuizRun(runId: string): void {
+  try { sessionStorage.setItem(ACTIVE_QUIZ_RUN_ID_KEY, runId); } catch { /* the legacy recovery key remains available */ }
+}
+
+/** Prefer this tab's run mirror, then accept the original single-key snapshot
+ * written by older AXOM builds. New writes retain both forms. */
+function readActiveQuiz(): ActiveQuizSnapshot | undefined {
+  try {
+    const remembered = rememberedQuizRunId();
+    const scoped = remembered ? parseActiveQuiz(localStorage.getItem(activeQuizRunKey(remembered))) : undefined;
+    if (scoped) return scoped;
+    const legacy = parseActiveQuiz(localStorage.getItem(STORAGE_KEYS.quizActiveSession));
+    if (legacy?.runId) rememberQuizRun(legacy.runId);
+    return legacy;
+  } catch { return undefined; }
+}
+
+function writeActiveQuiz(snapshot: ActiveQuizSnapshot): void {
+  const serialized = JSON.stringify(snapshot);
+  if (snapshot.runId) {
+    rememberQuizRun(snapshot.runId);
+    try { localStorage.setItem(activeQuizRunKey(snapshot.runId), serialized); } catch { /* retain the legacy path below */ }
+  }
+  try { localStorage.setItem(STORAGE_KEYS.quizActiveSession, serialized); } catch { /* the run mirror may still be recoverable */ }
+}
+
+function anotherActiveQuiz(excludingKey: string): ActiveQuizSnapshot | undefined {
+  try {
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (!key || key === excludingKey || !key.startsWith(ACTIVE_QUIZ_RUN_PREFIX)) continue;
+      const candidate = parseActiveQuiz(localStorage.getItem(key));
+      if (candidate) return candidate;
+    }
+  } catch { /* no replacement is available */ }
+  return undefined;
+}
+
+/** Remove only this run. If another tab has a different run, keep its legacy
+ * mirror discoverable for older routes and older AXOM builds. */
+function clearActiveQuiz(runId: string): void {
+  const runKey = activeQuizRunKey(runId);
+  try { localStorage.removeItem(runKey); } catch { /* best effort after the durable workspace save */ }
+  try {
+    if (sessionStorage.getItem(ACTIVE_QUIZ_RUN_ID_KEY) === runId) sessionStorage.removeItem(ACTIVE_QUIZ_RUN_ID_KEY);
+  } catch { /* optional per-tab pointer */ }
+  try {
+    const legacy = parseActiveQuiz(localStorage.getItem(STORAGE_KEYS.quizActiveSession));
+    if (legacy?.runId && legacy.runId !== runId) return;
+    const replacement = anotherActiveQuiz(runKey);
+    if (replacement) localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify(replacement));
+    else localStorage.removeItem(STORAGE_KEYS.quizActiveSession);
+  } catch { /* best effort after the durable workspace save */ }
 }
 
 /** Keep an explicit study request intact: a partially downloaded set must
@@ -252,9 +329,11 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       : startBlock({ ids, mode: initialMode, now: Date.now() });
   });
   const blockRef = useRef(block);
+  const finalizingRef = useRef(false);
   const restoredTutorReplayRef = useRef(false);
   /** Run one engine action and return the block it made, so a handler can save from it at once. */
   const act = useCallback((action: ExamAction): ExamBlock => {
+    if (finalizingRef.current) return blockRef.current;
     const next = examReducer(blockRef.current, action);
     if (next !== blockRef.current) {
       blockRef.current = next;
@@ -307,6 +386,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const [aiText, setAiText] = useState<string | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [editingMapping, setEditingMapping] = useState(false);
+  const [finalizing, setFinalizing] = useState(false);
+  const [finalizeError, setFinalizeError] = useState<string>();
 
   // --- Q2a player toolkit: reading scale (persisted device pref), calculator,
   // and scroll-to-top on advance. Strike-outs live in the block, per question.
@@ -339,6 +420,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   }, [stage, restorePending, retakePending, pool, mediaReady, mediaPhase, verifyMedia]);
 
   function chooseCertainty(level: AnswerCertainty) {
+    if (finalizingRef.current) return;
     const id = pool[index]?.id;
     if (!id) return;
     setCertainties((all) => {
@@ -436,13 +518,9 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       return saved.answerKey || saved.flagged ? [saved] : [];
     });
     const snapshot: ActiveQuizSnapshot = { mode, poolIds: pool.map((item) => item.id), index, answers, picked, revealed, startedAt, timed, filters, runId, certainty };
-    try { localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify(snapshot)); } catch { /* Local Vault remains authoritative for saved work. */ }
+    writeActiveQuiz(snapshot);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [block, category, certainties, checked, count, examType, mode, ordered, pool, restorePending, retakePending, mediaReady, runId, setIds, questionIds, stage, startedAt, status, timed]);
-
-  function clearActiveQuiz() {
-    try { localStorage.removeItem(STORAGE_KEYS.quizActiveSession); } catch { /* non-fatal */ }
-  }
 
   // The resume snapshot is written synchronously; the workspace save is not. If
   // the page closed between "Check answer" and that save, the snapshot knows an
@@ -480,14 +558,14 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const elapsedSeconds = Math.floor((nowTick - Date.parse(startedAt)) / 1000);
   const timeLeft = timeLimitSeconds !== undefined ? Math.max(0, timeLimitSeconds - elapsedSeconds) : undefined;
   useEffect(() => {
-    if (stage === "running" && mediaReady && !restorePending && !retakePending && pool.length > 0 && timeLeft === 0 && timed) finishBlock();
+    if (stage === "running" && mediaReady && !restorePending && !retakePending && pool.length > 0 && timeLeft === 0 && timed) void finishBlock();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeLeft, stage, timed, restorePending, retakePending, mediaReady, pool.length]);
 
   // Answer shortcuts match the actual A–J options. M flags; F also flags only
   // when this question does not contain an F answer choice (legacy shortcut).
   useEffect(() => {
-    if (stage !== "running" || !question || !mediaReady) return;
+    if (stage !== "running" || !question || !mediaReady || finalizing) return;
     function onKey(e: KeyboardEvent) {
       const target = e.target instanceof HTMLElement ? e.target : null;
       if (target?.closest('input, textarea, select, button, a, [contenteditable="true"], [role="button"]')) return;
@@ -526,7 +604,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stage, question?.id, revealed, picked, mode, errorType, confidence, certainty, mediaReady]);
+  }, [stage, question?.id, revealed, picked, mode, errorType, confidence, certainty, mediaReady, finalizing]);
 
   // Tutor tools consume Escape before the containing modal. The first press
   // closes the utility/mode; a later press retains the established leave-block
@@ -632,7 +710,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       if (suspended && !confirm("Starting a new block discards your suspended block. Continue?")) return;
       writeSuspendedBlock(null);
       setSuspended(undefined);
-      clearActiveQuiz();
+      clearActiveQuiz(runId);
       setSimRun({ skin: examInterface, pool: built, timeLimitSeconds: timed ? built.length * SECONDS_PER_ITEM : undefined });
       if (runBlockId) {
         const savedBlock = (s.quizBlocks ?? []).find((block) => block.id === runBlockId);
@@ -683,7 +761,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   }
 
   function submitTutor() {
-    if (!picked || !question || revealed) return;
+    if (finalizingRef.current || !picked || !question || revealed) return;
     // Checking the answer seals the question: reading the explanation is not time spent answering.
     const record = answerIn(act({ type: "reveal", now: Date.now() }), question.id, Date.now());
     setChecked((all) => ({ ...all, [question.id]: record }));
@@ -694,6 +772,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
 
   /** The reason for a miss and the confidence afterwards are saved as they are chosen. */
   function classifyTutorAttempt(patch: { errorType?: QuestionErrorType | ""; confidence?: 1 | 2 | 3 | 4 | 5 }) {
+    if (finalizingRef.current) return;
     const review = {
       errorType: patch.errorType !== undefined ? patch.errorType : errorType,
       confidence: patch.confidence !== undefined ? patch.confidence : confidence,
@@ -710,6 +789,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
    * shows it as it was left. The time on the question being left is banked.
    */
   function showQuestion(target: number) {
+    if (finalizingRef.current) return;
     const moved = act({ type: "go", index: target, now: Date.now() });
     const id = moved.ids[moved.index];
     // Show what this run saved for a checked question, so changing one field cannot blank the other.
@@ -721,14 +801,14 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   }
 
   function nextQuestion() {
-    if (index + 1 >= pool.length) finishBlock();
+    if (index + 1 >= pool.length) void finishBlock();
     else showQuestion(index + 1);
   }
 
   /** In an exam the pick is the answer: moving on keeps it, and there is nothing else to record. */
   function submitExamAndNext() {
     if (!picked) return;
-    if (index + 1 >= pool.length) finishBlock();
+    if (index + 1 >= pool.length) void finishBlock();
     else showQuestion(index + 1);
   }
 
@@ -736,24 +816,59 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     if (index > 0) showQuestion(index - 1);
   }
 
-  function finishBlock() {
+  async function confirmFinalWorkspaceWrite(write: () => void, onDurable: () => void): Promise<void> {
+    if (finalizingRef.current) return;
+    finalizingRef.current = true;
+    setFinalizing(true);
+    setFinalizeError(undefined);
+    const checkpoint = getVaultWriteCheckpoint();
+    try {
+      // Both finalization actions below are one Zustand set(), so persist queues
+      // one serialized workspace. Flush it, prove that exact next adapter write
+      // started, then reject any failed write coalesced after the checkpoint.
+      write();
+      await flushLocalVaultWrites();
+      assertVaultWrite(checkpoint + 1);
+      assertVaultWritesSince(checkpoint);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "The local workspace write could not be confirmed.";
+      setFinalizeError(`Your answers are still open and recoverable. AXOM could not confirm the final save. ${detail}`);
+      pushToast({
+        title: "Block is still open",
+        body: "AXOM kept the recovery copy. Free browser storage if needed, then use the same finish or exit action again.",
+        tone: "warn",
+      });
+      finalizingRef.current = false;
+      setFinalizing(false);
+      return;
+    }
+    finalizingRef.current = false;
+    setFinalizing(false);
+    onDurable();
+  }
+
+  async function finishBlock() {
+    if (finalizingRef.current) return;
     const result = runSession(blockRef.current);
     // Exam mode records attempts at the END so nothing leaks mid-block. They go
     // in with the session as one save. Tutor answers were saved as each was
     // checked, so a tutor block only adds its result here.
-    if (mode === "exam") {
-      s.commitQuizRun({
-        attempts: result.answers
-          .filter((a) => a.answerKey || a.flagged)
-          .map((a) => ({ questionId: a.questionId, attempt: attemptFor(a) })),
-        session: result,
-      });
-    } else {
-      s.saveQuizSession(result);
-    }
-    clearActiveQuiz();
-    setSession(result);
-    setStage("results");
+    await confirmFinalWorkspaceWrite(() => {
+      if (mode === "exam") {
+        s.commitQuizRun({
+          attempts: result.answers
+            .filter((a) => a.answerKey || a.flagged)
+            .map((a) => ({ questionId: a.questionId, attempt: attemptFor(a) })),
+          session: result,
+        });
+      } else {
+        s.saveQuizSession(result);
+      }
+    }, () => {
+      clearActiveQuiz(runId);
+      setSession(result);
+      setStage("results");
+    });
   }
 
   /** This run's session record: every pool question, answered or not. */
@@ -779,19 +894,26 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
    * Leaving a block keeps what was answered. The dialog has always said only
    * unanswered questions are discarded; an exam block used to discard the lot.
    */
-  function leaveBlock() {
+  async function leaveBlock() {
+    if (finalizingRef.current) return;
     if (!confirm("Leave this block? Answered questions are saved. Unanswered ones are not scored.")) return;
     const left = runSession(blockRef.current, true);
     const answered = left.answers.filter((a) => a.answerKey);
     if (answered.length) {
-      s.commitQuizRun({
-        attempts: mode === "exam"
-          ? answered.map((a) => ({ questionId: a.questionId, attempt: attemptFor(a) }))
-          : [],
-        session: left,
+      await confirmFinalWorkspaceWrite(() => {
+        s.commitQuizRun({
+          attempts: mode === "exam"
+            ? answered.map((a) => ({ questionId: a.questionId, attempt: attemptFor(a) }))
+            : [],
+          session: left,
+        });
+      }, () => {
+        clearActiveQuiz(runId);
+        onClose();
       });
+      return;
     }
-    clearActiveQuiz();
+    clearActiveQuiz(runId);
     onClose();
   }
 
@@ -877,7 +999,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   }
 
   function toggleFlag() {
-    if (!question) return;
+    if (finalizingRef.current || !question) return;
     const flagged = itemState(act({ type: "mark" }), question.id).marked;
     // A flag belongs to the question, so it is there in the bank after the block.
     s.updateQuestion(question.id, { marked: flagged });
@@ -1372,31 +1494,32 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         mode === "tutor"
           ? (
             <>
-              <GhostButton onClick={leaveBlock}><X size={ICON_SIZE.body} /> Exit block</GhostButton>
-              <GhostButton disabled={index === 0} onClick={goPrevious}><ChevronLeft size={ICON_SIZE.body} /> Previous</GhostButton>
-              <GhostButton onClick={toggleFlag} aria-label="Flag question" aria-pressed={item.marked}>
+              <GhostButton disabled={finalizing} onClick={leaveBlock}><X size={ICON_SIZE.body} /> {finalizing ? "Saving…" : finalizeError ? "Retry save & exit" : "Exit block"}</GhostButton>
+              <GhostButton disabled={finalizing || index === 0} onClick={goPrevious}><ChevronLeft size={ICON_SIZE.body} /> Previous</GhostButton>
+              <GhostButton disabled={finalizing} onClick={toggleFlag} aria-label="Flag question" aria-pressed={item.marked}>
                 <Flag size={ICON_SIZE.body} /> {item.marked ? "Flagged" : "Mark review"}
               </GhostButton>
               {!revealed
-                ? <GButton variant="primary" disabled={!picked} onClick={submitTutor}>Check answer</GButton>
-                : <GButton variant="primary" onClick={nextQuestion}>{index + 1 >= pool.length ? "Finish block" : "Next question"}</GButton>}
+                ? <GButton variant="primary" disabled={finalizing || !picked} onClick={submitTutor}>Check answer</GButton>
+                : <GButton variant="primary" disabled={finalizing} onClick={nextQuestion}>{finalizing ? "Saving…" : index + 1 >= pool.length ? (finalizeError ? "Retry finish" : "Finish block") : "Next question"}</GButton>}
             </>
           )
           : (
             <>
-              <GhostButton onClick={leaveBlock}><X size={ICON_SIZE.body} /> Exit block</GhostButton>
-              <GhostButton disabled={index === 0} onClick={goPrevious}><ChevronLeft size={ICON_SIZE.body} /> Previous</GhostButton>
-              <GhostButton onClick={toggleFlag} aria-label="Flag question" aria-pressed={item.marked}>
+              <GhostButton disabled={finalizing} onClick={leaveBlock}><X size={ICON_SIZE.body} /> {finalizing ? "Saving…" : finalizeError ? "Retry save & exit" : "Exit block"}</GhostButton>
+              <GhostButton disabled={finalizing || index === 0} onClick={goPrevious}><ChevronLeft size={ICON_SIZE.body} /> Previous</GhostButton>
+              <GhostButton disabled={finalizing} onClick={toggleFlag} aria-label="Flag question" aria-pressed={item.marked}>
                 <Flag size={ICON_SIZE.body} /> {item.marked ? "Flagged" : "Mark review"}
               </GhostButton>
-              <GhostButton onClick={finishBlock}>End block</GhostButton>
-              <GButton variant="primary" disabled={!picked} onClick={submitExamAndNext}>
-                {index + 1 >= pool.length ? "Submit & finish" : "Submit & next"}
+              <GhostButton disabled={finalizing} onClick={finishBlock}>{finalizing ? "Saving…" : finalizeError ? "Retry end block" : "End block"}</GhostButton>
+              <GButton variant="primary" disabled={finalizing || !picked} onClick={submitExamAndNext}>
+                {finalizing ? "Saving…" : index + 1 >= pool.length ? (finalizeError ? "Retry submit & finish" : "Submit & finish") : "Submit & next"}
               </GButton>
             </>
           )
       }
     >
+      {finalizeError && <div className="form-warning danger" role="alert"><b>Final save not confirmed.</b> {finalizeError}</div>}
       <div className="quiz-progress" aria-hidden="true">
         <span className="quiz-progress-fill" style={{ width: `${Math.round(((index + (revealed ? 1 : 0)) / pool.length) * 100)}%` }} />
       </div>
@@ -1413,7 +1536,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         {question.sourcePage && <Tag tone="neutral">p.{question.sourcePage}</Tag>}
         {question.bank && <span className="sub truncate" style={{ maxWidth: 200 }}>{question.bank}</span>}
         {item.struck.length > 0 && !revealed && (
-          <GhostButton className="quiz-tool" onClick={() => item.struck.forEach((key) => act({ type: "strike", key }))} aria-label="Reset eliminations">
+          <GhostButton disabled={finalizing} className="quiz-tool" onClick={() => item.struck.forEach((key) => act({ type: "strike", key }))} aria-label="Reset eliminations">
             <RotateCcw size={ICON_SIZE.microInline} /> Reset eliminations
           </GhostButton>
         )}
@@ -1449,7 +1572,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
                 <button type="button" className="option-pick"
                   aria-label={`${opt.key}. ${opt.text}`}
                   aria-pressed={isPicked}
-                  disabled={revealed}
+                  disabled={finalizing || revealed}
                   onClick={() => act({ type: "pick", key: opt.key })}>
                   <span className="mono option-key">{opt.key}</span>
                   <span className="option-text"><QuestionContent question={question} part="choice" choice={opt.key} mode={revealed ? "answered" : "question"} fallback={opt.text} /></span>
@@ -1461,7 +1584,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
                     <button type="button" className="option-strike"
                       aria-label={`${isStruck ? "Restore" : "Eliminate"} option ${opt.key}`}
                       aria-pressed={isStruck}
-                      disabled={revealed}
+                      disabled={finalizing || revealed}
                       onClick={() => act({ type: "strike", key: opt.key })}>
                       <Minus size={ICON_SIZE.body} />
                     </button>
@@ -1479,6 +1602,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
               {CERTAINTY_LEVELS.map((level) => (
                 <button type="button" key={level} className={`filter-pill ${certainty === level ? "on" : ""}`}
                   aria-pressed={certainty === level}
+                  disabled={finalizing}
                   onClick={() => chooseCertainty(level)}>
                   {ANSWER_CERTAINTY_LABEL[level]}
                 </button>
