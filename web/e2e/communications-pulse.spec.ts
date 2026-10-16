@@ -17,14 +17,20 @@ test.beforeEach(({ page }) => {
 });
 test.afterEach(({ page }) => { expect(consoleIssues.get(page)).toEqual(expectedConsoleIssues.get(page) ?? []); });
 
-async function setup(page: Page) {
+async function setup(page: Page, options: { settingsFailures?: number } = {}) {
   let prefs = preferences("America/Grenada").map(p => ({ ...p, enabled: ["weekly_report", "monthly_report", "annual_pulse"].includes(p.category) }));
   let requests: { id: string; kind: string; status: string; scheduled_for?: string }[] = [];
   let campaign: Record<string, unknown> | null = null;
+  let settingsFailures = options.settingsFailures ?? 0;
   await page.addInitScript(() => { (window as Window & { __AXOM_E2E_ACCOUNT__?: object }).__AXOM_E2E_ACCOUNT__ = { url: "https://communications-test.supabase.co", key: "synthetic-public-test-key" }; });
   await page.route("https://communications-test.supabase.co/**", async route => {
     const action = new URL(route.request().url()).searchParams.get("action"); const body = route.request().postDataJSON() ?? {};
     let response: unknown = [];
+    if (action === "settings" && settingsFailures > 0) {
+      settingsFailures -= 1;
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ error: "Communications temporarily unavailable." }) });
+      return;
+    }
     if (action === "settings") response = { preferences: prefs, identity: { accent: "#c8a96a", theme: "dark" }, history: [{ id: "one", type: "weekly_report", status: "delivered", created_at: "2026-10-04T12:00:00Z" }], privacy: requests, admin: true, deliveryMode: "disabled", deletionEnabled: true, hasProtectedCopy: true };
     else if (action === "preferences") { prefs = body.preferences; response = { saved: true }; }
     else if (action === "unsubscribe-all") { prefs = prefs.map(p => ({ ...p, enabled: false })); response = { saved: true }; }
@@ -55,6 +61,7 @@ async function setup(page: Page) {
     await dev.flushVault();
     dev.useAccount.setState({ phase: "signed-in", user: { id: "11111111-1111-4111-8111-111111111111", email: "alex@example.invalid", displayName: "Alex Morgan" }, link: "unlinked" });
   });
+  return { allowSettings: () => { settingsFailures = 0; } };
 }
 async function captureLightAccent(page: Page, name: string) {
   await page.evaluate(async () => {
@@ -71,6 +78,43 @@ async function captureLightAccent(page: Page, name: string) {
     const { applyPalettePreference } = await import(/* @vite-ignore */ modulePath);
     applyPalettePreference({ id: "classic" });
   });
+}
+async function assertPreviewPinsAndReleases(page: Page) {
+  const surface = page.locator(".surface-scroll").first();
+  const preview = page.locator(".comms-preview");
+  const layout = page.locator(".comms-layout");
+  await surface.evaluate(element => { element.scrollTop = 0; });
+  await expect.poll(() => surface.evaluate(element => Math.round(element.scrollTop))).toBe(0);
+
+  const surfaceBox = await surface.boundingBox();
+  const previewBox = await preview.boundingBox();
+  const layoutBox = await layout.boundingBox();
+  const maxScroll = await surface.evaluate(element => element.scrollHeight - element.clientHeight);
+  expect(surfaceBox).not.toBeNull();
+  expect(previewBox).not.toBeNull();
+  expect(layoutBox).not.toBeNull();
+
+  const stickyStart = previewBox!.y - surfaceBox!.y - 18;
+  const stickyRelease = layoutBox!.y - surfaceBox!.y + layoutBox!.height - previewBox!.height - 18;
+  expect(stickyRelease - stickyStart).toBeGreaterThan(120);
+  expect(maxScroll - stickyRelease).toBeGreaterThan(40);
+
+  const pinnedScroll = Math.round(Math.min(stickyRelease - 50, stickyStart + 120));
+  await surface.evaluate((element, top) => { element.scrollTop = top; }, pinnedScroll);
+  await expect.poll(() => surface.evaluate(element => Math.round(element.scrollTop))).toBe(pinnedScroll);
+  const pinnedBox = await preview.boundingBox();
+  const secondPinnedScroll = Math.round(Math.min(stickyRelease - 30, pinnedScroll + 70));
+  await surface.evaluate((element, top) => { element.scrollTop = top; }, secondPinnedScroll);
+  await expect.poll(() => surface.evaluate(element => Math.round(element.scrollTop))).toBe(secondPinnedScroll);
+  const secondPinnedBox = await preview.boundingBox();
+  expect(Math.abs(secondPinnedBox!.y - pinnedBox!.y)).toBeLessThanOrEqual(2);
+
+  const releasedScroll = Math.round(Math.min(maxScroll, stickyRelease + 100));
+  await surface.evaluate((element, top) => { element.scrollTop = top; }, releasedScroll);
+  await expect.poll(() => surface.evaluate(element => Math.round(element.scrollTop))).toBe(releasedScroll);
+  const releasedBox = await preview.boundingBox();
+  expect(releasedBox!.y).toBeLessThan(secondPinnedBox!.y - 20);
+  await surface.evaluate(element => { element.scrollTop = 0; });
 }
 for (const width of [1440, 390]) test(`communications, privacy and Pulse at ${width}px`, async ({ page }) => {
   await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
@@ -126,6 +170,111 @@ for (const width of [1440, 390]) test(`communications, privacy and Pulse at ${wi
   await page.screenshot({ path: `${out}/pulse-hero-${width}-light.png` });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect(errors).toEqual([]);
+});
+
+test("communications stays bounded and keyboard-ready across launch viewports", async ({ page }) => {
+  await setup(page);
+  await page.evaluate(() => { location.hash = "communications"; });
+  await expect(page.getByRole("heading", { name: "An inbox with intention." })).toBeVisible();
+
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 768, height: 900 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await page.getByRole("heading", { name: "An inbox with intention." }).scrollIntoViewIfNeeded();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && Array.from(document.querySelectorAll<HTMLElement>(".surface-scroll")).every(element => element.scrollWidth <= element.clientWidth))).toBe(true);
+
+    const main = await page.locator("main.comms-page").boundingBox();
+    const heading = await page.locator(".comms-heading").boundingBox();
+    const preview = await page.locator(".comms-preview").boundingBox();
+    expect(main).not.toBeNull();
+    expect(heading).not.toBeNull();
+    expect(preview).not.toBeNull();
+    expect(heading!.x).toBeGreaterThanOrEqual(main!.x - 1);
+    expect(heading!.x + heading!.width).toBeLessThanOrEqual(main!.x + main!.width + 1);
+    expect(preview!.x).toBeGreaterThanOrEqual(main!.x - 1);
+    expect(preview!.x + preview!.width).toBeLessThanOrEqual(main!.x + main!.width + 1);
+
+    const previewLayout = await page.locator(".comms-preview").evaluate(element => ({ position: getComputedStyle(element).position, frameHeight: (element.querySelector("iframe") as HTMLElement).getBoundingClientRect().height }));
+    if (viewport.width > 880) {
+      expect(previewLayout.position).toBe("sticky");
+      expect(previewLayout.frameHeight).toBeLessThanOrEqual(460);
+      await assertPreviewPinsAndReleases(page);
+    } else {
+      expect(previewLayout.position).toBe("static");
+      expect(previewLayout.frameHeight).toBeLessThanOrEqual(680);
+    }
+
+    for (const link of await page.locator(".comms-nav a").all()) expect((await link.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    for (const select of await page.locator(".comms-preview-controls select").all()) expect((await select.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    if (viewport.width === 390) {
+      for (const button of [
+        page.getByRole("button", { name: "Save preferences", exact: true }),
+        page.getByRole("button", { name: "Unsubscribe from all optional emails" }),
+        page.getByRole("button", { name: "Download this email preview" }),
+      ]) expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      await page.emulateMedia({ reducedMotion: "no-preference" });
+      const normalDuration = await page.locator(".comms-switch").first().evaluate(element => Number.parseFloat(getComputedStyle(element, "::after").transitionDuration));
+      expect(normalDuration).toBeGreaterThan(0);
+      await page.evaluate(() => { document.documentElement.dataset.motion = "reduce"; });
+      const reducedDuration = await page.locator(".comms-switch").first().evaluate(element => Number.parseFloat(getComputedStyle(element, "::after").transitionDuration));
+      expect(reducedDuration).toBeLessThan(0.001);
+      await page.evaluate(() => { delete document.documentElement.dataset.motion; });
+    }
+  }
+
+  const emailPreferences = page.getByRole("link", { name: "Email preferences", exact: true });
+  await emailPreferences.focus();
+  await expect(emailPreferences).toBeFocused();
+  expect(await emailPreferences.evaluate(element => getComputedStyle(element).outlineStyle)).not.toBe("none");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  expect(await page.locator(".comms-heading").evaluate(element => getComputedStyle(element, "::after").display)).toBe("none");
+  await page.screenshot({ path: `${out}/communications-fit-390.png`, fullPage: true });
+});
+
+test("dirty communications preferences require an explicit route choice", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await setup(page);
+  await page.evaluate(() => { location.hash = "communications"; });
+  await expect(page.getByRole("heading", { name: "An inbox with intention." })).toBeVisible();
+  await page.getByRole("switch", { name: /Essays & Notes/ }).check();
+
+  const dashboard = page.getByRole("button", { name: "Dashboard", exact: true });
+  await dashboard.click();
+  await expect(page.getByRole("alertdialog")).toContainText("Leave without saving?");
+  await expect(page).toHaveURL(/#communications$/);
+  await page.screenshot({ path: `${out}/communications-unsaved-1440.png`, fullPage: true });
+  await page.getByRole("button", { name: "Stay and review" }).click();
+  await expect(dashboard).toBeFocused();
+
+  for (const { destination, viewport } of [
+    { destination: page.getByRole("link", { name: /AXOM Pulse/ }), viewport: { width: 1440, height: 900 } },
+    { destination: page.getByRole("link", { name: "Privacy & Data", exact: true }), viewport: { width: 768, height: 900 } },
+    { destination: page.getByRole("link", { name: "Communications studio", exact: true }), viewport: { width: 390, height: 844 } },
+  ]) {
+    await page.setViewportSize(viewport);
+    await destination.click();
+    await expect(page.getByRole("alertdialog")).toContainText("Leave without saving?");
+    await expect(page).toHaveURL(/#communications$/);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && Array.from(document.querySelectorAll<HTMLElement>(".surface-scroll")).every(element => element.scrollWidth <= element.clientWidth))).toBe(true);
+    await page.getByRole("button", { name: "Stay and review" }).click();
+    await expect(destination).toBeFocused();
+  }
+
+  await page.getByRole("link", { name: "Privacy & Data", exact: true }).click();
+  await page.screenshot({ path: `${out}/communications-unsaved-390.png`, fullPage: true });
+  await page.getByRole("button", { name: "Discard changes and continue" }).click();
+  await expect(page.getByRole("heading", { name: "Your data stays yours." })).toBeVisible();
+});
+
+test("communications retry and primary actions stay touch-ready", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const control = await setup(page, { settingsFailures: Number.MAX_SAFE_INTEGER });
+  await page.evaluate(() => { location.hash = "communications"; });
+  const retry = page.getByRole("button", { name: "Try again" });
+  await expect(retry).toBeVisible();
+  expect((await retry.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  control.allowSettings();
+  await retry.click();
+  await expect(page.getByRole("button", { name: "Save preferences", exact: true })).toBeEnabled();
 });
 
 test("studio previews, validates an audience and schedules only after explicit review", async ({ page }) => {
