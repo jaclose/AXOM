@@ -6,12 +6,18 @@ import { openEmptyWorkspace, closeWorkspace } from "../question-content/persiste
 import { prepareCourseTemplate } from "../course-engine/templateLibrary";
 import { withPreparedCourses, loadPreparedCourse } from "./preparedCourses";
 import { commitCourseLoad } from "./loadCourse";
+import { buildCourseBooks } from "./courseBooks";
 beforeEach(openEmptyWorkspace);
 afterEach(async () => { vi.restoreAllMocks(); await closeWorkspace(); });
 async function course() {
   const document = await prepareCourseTemplate("T5 - GOER - Lectures:\nWeek 2:\nLecture 01 Synthetic [Lecture]\n", "synthetic.txt");
   useStore.getState().addDocument(document); await vault.flushLocalVaultWrites();
-  return withPreparedCourses([], [document])[0];
+  const books = buildCourseBooks({ terms: [], courses: [], tracker: [], curricula: [{
+    id: "guarded-load", label: "Guarded load", terms: [{
+      name: "Term 5", courses: [{ code: "PPM 501", name: "Principles & Practice of Medicine II", modules: ["GOER"] }],
+    }],
+  }] });
+  return withPreparedCourses(books, [document])[0];
 }
 it("refuses an activation whose account guard is already invalid", async () => {
   const book = await course(), before = useStore.getState();

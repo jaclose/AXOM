@@ -130,6 +130,47 @@ describe("prepared-course ownership", () => {
     expect(workspaceSnapshot()).toEqual(before);
   });
 
+  it("keeps an unmatched template available for filing but will not synthesize its course", async () => {
+    const document = await prepareCourseTemplate(
+      "T2 - SYNTHETIC - Course plan:\nWeek 1:\nLecture 01 Evidence [Lecture]\n",
+      "unmatched-course-plan.txt",
+    );
+    useStore.setState({ terms: [], courses: [], documents: [document], tracker: [] });
+    await vault.flushLocalVaultWrites();
+    const [unbound] = withPreparedCourses([], [document]);
+    const before = workspaceSnapshot();
+
+    expect(unbound).toMatchObject({
+      term: "Term 2",
+      module: "SYNTHETIC",
+      state: "available",
+      templateIds: [document.id],
+    });
+    expect(unbound.courseCode).toBeUndefined();
+    await expect(loadPreparedCourse(unbound)).resolves.toMatchObject({
+      status: "failed",
+      message: expect.stringMatching(/choose the course that owns/i),
+    });
+    expect(workspaceSnapshot()).toEqual(before);
+    expect(useStore.getState().courses.some(course => course.code === "Term 2")).toBe(false);
+    expect(useStore.getState().tracker.some(item => item.path === "Term 2/SYNTHETIC/Week 1")).toBe(false);
+  });
+
+  it("rejects an exact template whose claimed course code has no canonical owner", async () => {
+    const document = await preparedDocument();
+    useStore.setState({ terms: [], courses: [], documents: [document], tracker: [] });
+    await vault.flushLocalVaultWrites();
+    const unbound = withPreparedCourses([], [document])[0];
+    const claimed = { ...unbound, courseCode: "SYNTHETIC", identifier: "SYNTHETIC" };
+    const before = workspaceSnapshot();
+
+    await expect(loadPreparedCourse(claimed)).resolves.toMatchObject({
+      status: "failed",
+      message: expect.stringMatching(/choose the course that owns/i),
+    });
+    expect(workspaceSnapshot()).toEqual(before);
+  });
+
   it("rejects a stale exact template list as a whole without loading its valid member", async () => {
     const document = await preparedDocument();
     useStore.setState({ terms, courses, documents: [document], tracker: [] });

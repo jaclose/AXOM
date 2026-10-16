@@ -29,6 +29,19 @@ const bookOwnerKey = (book: CourseBook): string => [
   termKey(book.term), moduleKey(book.courseCode ?? ""), canonicalModuleKey(book.module),
 ].join("|");
 
+const HOSTED_COURSE_CODE = /^academic:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function hasResolvedCourseOwner(book: CourseBook, canonicalBooks: readonly CourseBook[]): boolean {
+  const courseCode = book.courseCode?.trim();
+  if (!courseCode) return false;
+  if (canonicalBooks.some(owner => sameBook(owner, book))) return true;
+
+  // Downloaded catalogs and hosted academic collections carry an exact source
+  // binding even before their course structure exists in the workspace.
+  if (!book.templateIds?.length) return false;
+  return Boolean(book.curriculumId?.trim()) || HOSTED_COURSE_CODE.test(courseCode);
+}
+
 function distinctOwners(books: readonly CourseBook[]): CourseBook[] {
   const byOwner = new Map<string, CourseBook>();
   for (const book of books) {
@@ -185,6 +198,10 @@ export async function loadPreparedCourse(
     const [{ useStore }, vault] = await Promise.all([import("../store"), import("../localVault")]);
     assertCurrent();
     const s = useStore.getState();
+    const canonicalBooks = buildCourseBooks({ ...s, curricula: CURRICULA });
+    if (!hasResolvedCourseOwner(book, canonicalBooks)) {
+      return { status: "failed", message: "Choose the course that owns this prepared plan before loading it. Nothing was changed." };
+    }
     const ownershipBooks = canonicalCourseOwnerUniverse(s, book);
     const resolution = resolveTemplatesForBook(s.documents, book, ownershipBooks);
     if (resolution.error) return { status: "failed", message: resolution.error };
