@@ -4,7 +4,7 @@ import {
   Database, Download, ShieldCheck, PackageCheck,
   Sunrise, Check, Circle, ArrowRightCircle, ExternalLink,
   SlidersHorizontal, GripVertical, PlusCircle, X,
-  AlertTriangle, CalendarClock,
+  CalendarClock,
   BookOpenCheck, ListTodo, BatteryMedium, Activity, Flame, Gamepad2,
   ChevronUp, ChevronDown, GraduationCap, Target, Gauge, Timer, BarChart3, Sparkles, AudioWaveform,
   CalendarDays, Map as MapIcon, TrendingUp, Stethoscope, Link2, LayoutGrid, Star } from "lucide-react";
@@ -12,7 +12,7 @@ import { ICON_SIZE } from "../lib/iconSize";
 import { useLuster } from "../lib/useLuster";
 import { useStore } from "../lib/store";
 import { dayTotals, productiveTotals, todayGrade, gradeLabel, gradeColor, gradeTargetsFor, prettyDate, lastNDays, isoDate } from "../lib/scoring";
-import { missedStandupDays, planForDay } from "../lib/journal";
+import { missedStandupDays } from "../lib/journal";
 import type {
   TrackerItem, DashboardLayoutPreferences, DashboardWidgetId,
   DashboardWidgetPreferences, DashboardWidgetSize,
@@ -61,6 +61,8 @@ import {
 import { Modal } from "../components/ui/Modal";
 import { dueQuestions, questionMappingStatus, summarizeQuestionMappings } from "../lib/questions";
 import { deriveDailyWordStatsFromNormalizedHistory } from "../lib/dailyWordStats";
+import { ReflectionInbox } from "../components/dashboard/ReflectionInbox";
+import { DashboardNotificationCenter } from "../components/dashboard/DashboardNotificationCenter";
 
 const HOSTED_ALPHA_URL = "https://noctyrium-cktjdhuhw-jacloses-projects.vercel.app/#dashboard";
 
@@ -191,6 +193,7 @@ export function DashboardPage() {
       <DoctordleReminder />
 
       <div className="dashboard-edit-toolbar">
+        <DashboardNotificationCenter />
         <GhostButton
           className="dashboard-edit-toggle"
           aria-expanded={editDashboard}
@@ -1258,29 +1261,7 @@ function StandupPrompt() {
   }
 
   if (missed.length) {
-    return (
-      <GlassCard pad className="standup-prompt-card missed">
-        <div className="standup-prompt-head">
-          <span className="standup-prompt-mark warn"><AlertTriangle size={ICON_SIZE.emphasis} /></span>
-          <div className="grow">
-            <b>{missed.length} prior reflection{missed.length === 1 ? " is" : "s are"} still open</b>
-            <span>Catch up only if it would help. Existing journal content is never overwritten.</span>
-          </div>
-        </div>
-        <div className="standup-prompt-days">
-          {missed.map((key) => {
-            const plan = planForDay(s.dayPlans, key);
-            return (
-              <button key={key} type="button" className="standup-day-chip remediable" onClick={() => gotoJournalDay(key)}>
-                <CalendarClock size={ICON_SIZE.body} />
-                <span>{prettyDate(`${key}T12:00:00`)}</span>
-                {plan && <em>“{plan.intention.length > 26 ? `${plan.intention.slice(0, 26)}…` : plan.intention}”</em>}
-              </button>
-            );
-          })}
-        </div>
-      </GlassCard>
-    );
+    return <ReflectionInbox dayKeys={missed} dayPlans={s.dayPlans} activeDayKey={today} workspaceKey={s.profile.userId} />;
   }
 
   return null;

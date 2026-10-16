@@ -17,14 +17,18 @@ export async function communicationsRequest<T>(action: string, body: object = {}
   if (data?.error) throw new Error(String(data.error)); return data as T;
 }
 export function useCommunications() {
-  const userId = useAccount(s => s.user?.id); const [data, setData] = useState<CommunicationsSettings | null>(null);
+  const userId = useAccount(s => s.user?.id);
+  const [ownedData, setOwnedData] = useState<{ userId: string; value: CommunicationsSettings } | null>(null);
   const account = useRef(userId); account.current = userId;
   const [loading, setLoading] = useState(false); const [error, setError] = useState("");
   const reload = useCallback(async () => {
-    if (!userId) { setData(null); setError("Sign in to manage email delivery. You can preview your local reports below."); return; }
+    if (!userId) { setOwnedData(null); setError("Sign in to manage email delivery. You can preview your local reports below."); return; }
     setLoading(true); setError("");
-    try { const result = await communicationsRequest<CommunicationsSettings>("settings"); if (account.current === userId) setData(result); } catch (e) { if (account.current === userId) setError(e instanceof Error ? e.message : "Unable to load communications."); } finally { if (account.current === userId) setLoading(false); }
+    try { const result = await communicationsRequest<CommunicationsSettings>("settings"); if (account.current === userId) setOwnedData({ userId, value: result }); } catch (e) { if (account.current === userId) setError(e instanceof Error ? e.message : "Unable to load communications."); } finally { if (account.current === userId) setLoading(false); }
   }, [userId]);
-  useEffect(() => { setData(null); void reload(); }, [reload]);
+  useEffect(() => { setOwnedData(null); void reload(); }, [reload]);
+  // Account changes render before the clearing effect runs. Bind every result
+  // to the account that fetched it so a prior account can never flash onscreen.
+  const data = ownedData && ownedData.userId === userId ? ownedData.value : null;
   return { data, loading, error, reload };
 }

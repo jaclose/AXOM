@@ -1,0 +1,141 @@
+import { useLayoutEffect, useMemo, useState } from "react";
+import { ArrowRight, Clock3, Inbox, X } from "lucide-react";
+import type { DayPlan } from "../../lib/types";
+import { ICON_SIZE } from "../../lib/iconSize";
+import { prettyDate } from "../../lib/scoring";
+import { planForDay } from "../../lib/journal";
+import { journalReminderLedger } from "../../lib/journalReminder";
+import { useToasts } from "../../lib/toast";
+import { gotoJournalDay } from "../../lib/uiStore";
+import { GlassCard, GButton, GhostButton } from "../ui/primitives";
+import "../../styles/dashboard-inbox.css";
+
+const STORAGE_KEY = "axom.reflectionInbox.v1";
+const SNOOZE_MS = 4 * 60 * 60_000;
+
+interface ReflectionInboxCourtesy {
+  hiddenForDay?: string;
+  snoozedUntil?: string;
+}
+interface ReflectionInboxProps {
+  dayKeys: string[];
+  dayPlans: DayPlan[];
+  activeDayKey: string;
+  workspaceKey: string;
+  now?: () => Date;
+  onOpenDay?: (dayKey: string) => void;
+}
+
+function courtesyStorageKey(workspaceKey: string): string {
+  return `${STORAGE_KEY}:${encodeURIComponent(workspaceKey.trim() || "local")}`;
+}
+
+function readCourtesy(storageKey: string): ReflectionInboxCourtesy | null {
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Partial<ReflectionInboxCourtesy>;
+    return {
+      hiddenForDay: typeof value.hiddenForDay === "string" ? value.hiddenForDay : undefined,
+      snoozedUntil: typeof value.snoozedUntil === "string" && Number.isFinite(Date.parse(value.snoozedUntil))
+        ? value.snoozedUntil
+        : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeCourtesy(storageKey: string, value: ReflectionInboxCourtesy) {
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(value));
+  } catch {
+    // Courtesy state may be unavailable in private storage contexts. The
+    // learner's Journal remains untouched either way.
+  }
+}
+
+export function ReflectionInbox({
+  dayKeys,
+  dayPlans,
+  activeDayKey,
+  workspaceKey,
+  now = () => new Date(),
+  onOpenDay = gotoJournalDay,
+}: ReflectionInboxProps) {
+  const [expanded, setExpanded] = useState(false);
+  const storageKey = courtesyStorageKey(workspaceKey);
+  const [storedCourtesy, setStoredCourtesy] = useState(() => ({ key: storageKey, value: readCourtesy(storageKey) }));
+  const courtesy = storedCourtesy.key === storageKey ? storedCourtesy.value : readCourtesy(storageKey);
+  const recommended = dayKeys[0];
+  const recommendedPlan = useMemo(() => planForDay(dayPlans, recommended), [dayPlans, recommended]);
+  const recommendedIntention = recommendedPlan?.intention.trim() ?? "";
+  const recommendedSummary = recommendedIntention.length > 72
+    ? `${recommendedIntention.slice(0, 72).trimEnd()}…`
+    : recommendedIntention;
+  const hidden = courtesy?.hiddenForDay === activeDayKey
+    || Boolean(courtesy?.snoozedUntil && Date.parse(courtesy.snoozedUntil) > now().getTime());
+
+  // This visible dashboard surface is the catch-up reminder for this route.
+  // Record it before the shell watcher's passive effect and clear any reminder
+  // already raised on another route so the learner never receives both.
+  useLayoutEffect(() => {
+    if (!recommended) return;
+    journalReminderLedger.markShown(activeDayKey, recommended);
+    const { toasts, dismiss } = useToasts.getState();
+    toasts
+      .filter((toast) => toast.dedupe?.startsWith("missed-standup:"))
+      .forEach((toast) => dismiss(toast.id));
+  }, [activeDayKey, recommended]);
+
+  if (!dayKeys.length || hidden) return null;
+
+  function defer(kind: "later" | "today") {
+    const next: ReflectionInboxCourtesy = kind === "later"
+      ? { snoozedUntil: new Date(now().getTime() + SNOOZE_MS).toISOString() }
+      : { hiddenForDay: activeDayKey };
+    writeCourtesy(storageKey, next);
+    setStoredCourtesy({ key: storageKey, value: next });
+  }
+
+  return (
+    <GlassCard className="reflection-inbox" role="region" aria-labelledby="reflection-inbox-title">
+      <span className="reflection-inbox__mark" aria-hidden="true"><Inbox size={ICON_SIZE.emphasis} /></span>
+      <div className="reflection-inbox__copy">
+        <b id="reflection-inbox-title">Reflection inbox</b>
+        <span>
+          {dayKeys.length === 1 ? "One day is ready when you are." : `${dayKeys.length} days are ready when you are.`}
+          {recommendedSummary ? ` Start with “${recommendedSummary}”.` : " A few honest lines is enough."}
+        </span>
+      </div>
+      <div className="reflection-inbox__actions">
+        <GButton size="sm" variant="primary" onClick={() => onOpenDay(recommended)}>
+          Continue {prettyDate(`${recommended}T12:00:00`)} <ArrowRight size={ICON_SIZE.body} aria-hidden="true" />
+        </GButton>
+        {dayKeys.length > 1 && (
+          <GhostButton aria-expanded={expanded} aria-controls="reflection-inbox-days" onClick={() => setExpanded((value) => !value)}>
+            {expanded ? "Hide list" : `View all ${dayKeys.length}`}
+          </GhostButton>
+        )}
+      </div>
+      {expanded && dayKeys.length > 1 && (
+        <div id="reflection-inbox-days" className="reflection-inbox__days">
+          {dayKeys.map((key) => {
+            const plan = planForDay(dayPlans, key);
+            return (
+              <button key={key} type="button" className="reflection-inbox__day" onClick={() => onOpenDay(key)}>
+                <span><b>{prettyDate(`${key}T12:00:00`)}</b>{plan?.intention.trim() && <small>{plan.intention.trim()}</small>}</span>
+                <ArrowRight size={ICON_SIZE.body} aria-hidden="true" />
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <div className="reflection-inbox__courtesy" aria-label="Reflection reminder options">
+        <GhostButton onClick={() => defer("later")}><Clock3 size={ICON_SIZE.body} aria-hidden="true" /> Later</GhostButton>
+        <GhostButton onClick={() => defer("today")}><X size={ICON_SIZE.body} aria-hidden="true" /> Not today</GhostButton>
+      </div>
+      <span className="reflection-inbox__assurance">Opening a day never replaces an existing Journal entry.</span>
+    </GlassCard>
+  );
+}
