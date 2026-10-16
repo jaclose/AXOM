@@ -125,7 +125,7 @@ describe("Settings information architecture", () => {
     const user = userEvent.setup();
     render(<SettingsModal onClose={() => {}} initialTab="data" />);
     expect(screen.getByText(/workspace lives on this device and saves as you work/i)).toBeTruthy();
-    expect(screen.getByText(/If you sign in, protected copies/i)).toBeTruthy();
+    expect(screen.getByText(/If you sign in and enable account protection/i)).toBeTruthy();
     expect(screen.queryByText(/your account is synced/i)).toBeNull();
     expect(screen.queryByText(/workspace follows you across devices/i)).toBeNull();
 

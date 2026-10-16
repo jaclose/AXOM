@@ -185,16 +185,18 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
     return exportCopy("complete");
   }
 
-  async function exportCopy(scope: BackupScope) {
-    if (backupBusy) return;
+  async function exportCopy(scope: BackupScope): Promise<boolean> {
+    if (backupBusy) return false;
     setBackupBusy(true); setMsg(scope === "saved-work" ? "Preparing your saved work and files on this device…" : "Preparing your workspace, images and original files…");
     try {
       const { attachmentCount, missingBlobKeys, originalCount, missingOriginalIds, deferredSourceCount } = await exportStateWithAttachments(useStore.getState(), scope);
       const missing = missingBlobKeys.length
         ? ` ${missingBlobKeys.length} image attachments could not be read and were exported as metadata only.` : "";
       setMsg(`${scope === "saved-work" ? "Downloaded your saved-work copy. Only files already on this device are included." : "Downloaded your backup file."}${deferredSourceCount ? ` ${deferredSourceCount} sources remain as download references and need the original account and content access.` : ""}${attachmentCount ? ` Includes ${attachmentCount} image attachments.` : ""}${originalCount ? ` Includes ${originalCount} original files.` : ""}${missing}${missingOriginalIds.length ? ` ${missingOriginalIds.length} original files were unavailable or exceeded the portable file limit. Their source references are included.` : ""}`);
+      return true;
     } catch (error) {
       setMsg(`Backup was not exported. ${error instanceof Error ? error.message : "Try again after checking storage."}${scope === "complete" ? " Export saved work to keep a copy without downloading course files." : ""}`);
+      return false;
     } finally { setBackupBusy(false); }
   }
 
@@ -261,7 +263,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
             <div>
               <div className="sync-title">Local-first workspace</div>
               <div className="sub">
-                Your workspace lives on this device and saves as you work. If you sign in, protected copies are also kept in your account.
+                Your workspace lives on this device and saves as you work. If you sign in and enable account protection, AXOM can keep protected versions in your account.
               </div>
               <div style={{ marginTop: 8 }}><LastSavedLine /></div>
             </div>

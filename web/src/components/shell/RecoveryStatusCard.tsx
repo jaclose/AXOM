@@ -23,7 +23,7 @@ export interface RecoveryStatusCardProps {
   marker?: StorageMigrationFailure | null;
   /** Omit to read the existing last-seen build metadata. */
   previousBuild?: BuildInfo | null;
-  onExport: () => void | Promise<void>;
+  onExport: () => void | boolean | Promise<void | boolean>;
   onChoosePortableRestore: () => void | Promise<void>;
   /** A reload handler is sufficient because startup reruns the migration. */
   onRetry: () => ActionResult | Promise<ActionResult>;
@@ -55,7 +55,7 @@ export function RecoveryStatusCard({
   ));
   const [verification, setVerification] = useState<Verification>({ status: "none" });
   const [busy, setBusy] = useState<"export" | "portable" | "restore" | "retry" | null>(null);
-  const [actionStatus, setActionStatus] = useState("");
+  const [actionStatus, setActionStatus] = useState<{ message: string; failed: boolean } | null>(null);
   const priorBuild = previousBuild === undefined ? readLastSeenBuild() : previousBuild;
 
   useEffect(() => {
@@ -95,12 +95,17 @@ export function RecoveryStatusCard({
     successMessage: string,
   ) {
     setBusy(kind);
-    setActionStatus("");
+    setActionStatus(null);
     try {
-      await action();
-      setActionStatus(successMessage);
+      const result = await action();
+      setActionStatus(result === false
+        ? { message: "That recovery action did not finish. Review the details below and try again.", failed: true }
+        : { message: successMessage, failed: false });
     } catch (error) {
-      setActionStatus(error instanceof Error ? error.message : "That recovery action could not be completed.");
+      setActionStatus({
+        message: error instanceof Error ? error.message : "That recovery action could not be completed.",
+        failed: true,
+      });
     } finally {
       setBusy(null);
     }
@@ -108,7 +113,7 @@ export function RecoveryStatusCard({
 
   async function retryStartup() {
     setBusy("retry");
-    setActionStatus("");
+    setActionStatus(null);
     try {
       const result = await onRetry();
       if (retrySucceeded(result)) {
@@ -116,11 +121,17 @@ export function RecoveryStatusCard({
         onResolved?.();
         return;
       }
-      setActionStatus(retryFailed(result)
-        ? "AXOM still could not complete the storage update. The original workspace remains in place."
-        : "Startup retry requested. This card remains until the update completes successfully.");
+      setActionStatus({
+        message: retryFailed(result)
+          ? "AXOM still could not complete the storage update. The original workspace remains in place."
+          : "Startup retry requested. This card remains until the update completes successfully.",
+        failed: retryFailed(result),
+      });
     } catch (error) {
-      setActionStatus(error instanceof Error ? error.message : "AXOM could not retry startup.");
+      setActionStatus({
+        message: error instanceof Error ? error.message : "AXOM could not retry startup.",
+        failed: true,
+      });
     } finally {
       setBusy(null);
     }
@@ -191,7 +202,11 @@ export function RecoveryStatusCard({
         </GButton>
       </div>
 
-      {actionStatus && <div className="backup-status" role="status">{actionStatus}</div>}
+      {actionStatus && (
+        <div className="backup-status" role={actionStatus.failed ? "alert" : "status"}>
+          {actionStatus.message}
+        </div>
+      )}
 
       <details>
         <summary>Technical details</summary>

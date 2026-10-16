@@ -16,11 +16,31 @@ export function PrivacyPage() {
   const backup = async () => {
     setBusy(true); setMessage(""); setBackupResult(null);
     try {
-      const { attachmentCount, missingBlobKeys } = await exportStateWithAttachments(useStore.getState());
-      const missing = new Set(missingBlobKeys).size;
-      setBackupResult({ incomplete: missing > 0, message: missing
-        ? `Backup downloaded, but ${missing} image attachment${missing === 1 ? " is" : "s are"} missing. Keep this device and your original files. Restore the missing media and download another backup before relying on this copy.`
-        : `Local backup downloaded.${attachmentCount ? ` Includes ${attachmentCount} image attachment${attachmentCount === 1 ? "" : "s"}.` : ""}` });
+      const {
+        attachmentCount,
+        missingBlobKeys,
+        originalCount,
+        missingOriginalIds,
+        deferredSourceCount,
+      } = await exportStateWithAttachments(useStore.getState());
+      const missingImages = new Set(missingBlobKeys).size;
+      const missingOriginals = new Set(missingOriginalIds).size;
+      const incomplete = missingImages > 0 || missingOriginals > 0 || deferredSourceCount > 0;
+      const included = [
+        attachmentCount ? `${attachmentCount} image attachment${attachmentCount === 1 ? "" : "s"}` : "",
+        originalCount ? `${originalCount} original file${originalCount === 1 ? "" : "s"}` : "",
+      ].filter(Boolean).join(" and ");
+      const gaps = [
+        missingImages ? `${missingImages} image attachment${missingImages === 1 ? " is" : "s are"} missing` : "",
+        missingOriginals ? `${missingOriginals} original file${missingOriginals === 1 ? " is" : "s are"} unavailable` : "",
+        deferredSourceCount ? `${deferredSourceCount} source${deferredSourceCount === 1 ? " remains" : "s remain"} as account download references` : "",
+      ].filter(Boolean).join("; ");
+      setBackupResult({
+        incomplete,
+        message: incomplete
+          ? `Backup downloaded, but it is not a complete offline copy: ${gaps}. Keep this device and your original files, restore the missing content, and download another backup before relying on it.${included ? ` Included ${included}.` : ""}`
+          : `Local backup downloaded.${included ? ` Includes ${included}.` : ""}`,
+      });
     } catch (error) {
       setBackupResult({ incomplete: true, message: `Backup could not be downloaded. Your data remains on this device. ${error instanceof Error ? error.message : "Please try again."}` });
     } finally { setBusy(false); }
@@ -35,6 +55,14 @@ export function PrivacyPage() {
       {step === "backup" && <div className="privacy-confirm"><h3>Would you like a copy first?</h3><p>Download a local backup before continuing.</p>{backupNotice}<div className="comms-actions"><GButton disabled={busy} onClick={() => void backup()}>Download my data</GButton><GButton onClick={() => setStep("confirm")}>Continue without backup</GButton><GButton onClick={() => setStep("closed")}>Cancel</GButton></div></div>}
       {step === "confirm" && <form className="privacy-confirm" onSubmit={e => { e.preventDefault(); void perform(() => communicationsRequest("request-deletion", { confirmation }), "Deletion scheduled. You can cancel below before processing begins.").then(ok => { if (ok) { setStep("closed"); setConfirmation(""); } }); }}><h3>Confirm account deletion</h3><p>You must have signed in within the last 10 minutes. Optional emails stop while deletion is pending.</p>{backupNotice}<label>Type DELETE MY ACCOUNT<input name="delete-confirmation" autoComplete="off" value={confirmation} onChange={e => setConfirmation(e.target.value)} /></label><div className="comms-actions"><GButton type="submit" disabled={busy || confirmation !== "DELETE MY ACCOUNT"}>Schedule deletion in 7 days</GButton><GButton type="button" onClick={() => setStep("closed")}>Cancel</GButton></div></form>}
     </div></section><p role="status" className="comms-status">{message}</p>
-    <section className="comms-history"><h2>Your requests</h2><GButton size="sm" disabled={busy || remote.loading} onClick={() => void remote.reload()}>Refresh status</GButton>{!remote.data?.privacy.length ? <p>No account data requests yet.</p> : <ul>{remote.data.privacy.map(request => <li key={request.id}><div><strong>{request.kind === "export" ? "Account export" : "Account deletion"}</strong><small>{request.scheduled_for ? new Date(request.scheduled_for).toLocaleString() : ""}</small></div><span className="comms-state">{request.status}</span>{request.kind === "export" && request.status === "ready" && <button disabled={busy} onClick={() => void perform(async () => { const result = await communicationsRequest<{ url: string }>("export-link", { id: request.id }); const link = document.createElement("a"); link.href = result.url; link.rel = "noreferrer"; link.click(); }, "Private download opened.")}>Download</button>}{request.kind === "deletion" && ["scheduled", "failed"].includes(request.status) && <button disabled={busy} onClick={() => void perform(() => communicationsRequest("cancel-deletion", { id: request.id }), "Deletion cancelled.")}>Cancel deletion</button>}</li>)}</ul>}</section>
+    <section className="comms-history"><h2>Your requests</h2><GButton size="sm" disabled={busy || remote.loading} onClick={() => void remote.reload()}>Refresh status</GButton>{remote.loading
+      ? <p role="status">Loading request history…</p>
+      : remote.error
+        ? <p role="alert">Request history is unavailable. Check your connection or sign in, then refresh.</p>
+        : !remote.data
+          ? <p>Sign in to view account data requests.</p>
+          : remote.data.privacy.length === 0
+            ? <p>No account data requests yet.</p>
+            : <ul>{remote.data.privacy.map(request => <li key={request.id}><div><strong>{request.kind === "export" ? "Account export" : "Account deletion"}</strong><small>{request.scheduled_for ? new Date(request.scheduled_for).toLocaleString() : ""}</small></div><span className="comms-state">{request.status}</span>{request.kind === "export" && request.status === "ready" && <button disabled={busy} onClick={() => void perform(async () => { const result = await communicationsRequest<{ url: string }>("export-link", { id: request.id }); const link = document.createElement("a"); link.href = result.url; link.rel = "noreferrer"; link.click(); }, "Private download opened.")}>Download</button>}{request.kind === "deletion" && ["scheduled", "failed"].includes(request.status) && <button disabled={busy} onClick={() => void perform(() => communicationsRequest("cancel-deletion", { id: request.id }), "Deletion cancelled.")}>Cancel deletion</button>}</li>)}</ul>}</section>
   </main>;
 }

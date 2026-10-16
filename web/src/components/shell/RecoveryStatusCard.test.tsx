@@ -140,4 +140,22 @@ describe("RecoveryStatusCard", () => {
     await waitFor(() => expect(screen.getByText("Snapshot could not be verified")).toBeTruthy());
     expect(screen.getByRole<HTMLButtonElement>("button", { name: /restore safety snapshot/i }).disabled).toBe(true);
   });
+
+  it("does not announce export success when the exporter reports failure", async () => {
+    const user = userEvent.setup();
+    render(
+      <RecoveryStatusCard
+        marker={marker}
+        onExport={vi.fn().mockResolvedValue(false)}
+        onChoosePortableRestore={vi.fn()}
+        onRetry={vi.fn()}
+        verifyBackup={vi.fn().mockResolvedValue(inspection)}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /export current workspace/i }));
+
+    expect((await screen.findByRole("alert")).textContent).toMatch(/did not finish/i);
+    expect(screen.queryByText(/export started/i)).toBeNull();
+  });
 });
