@@ -28,18 +28,35 @@ describe("portable binary media backup", () => {
     expect(JSON.parse(backup.rawText).documents).toEqual([{ rawText: "kept" }]);
     expect(backup.rawText).not.toContain("base64");
     await deleteQuestionAttachmentBlobs([attachment.blobKey]);
-    expect(await backup.restoreMedia(references)).toEqual({ restored: 1, skipped: 0 });
+    const staged = await backup.restoreMedia(references);
+    expect(staged).toMatchObject({ restored: 1, skipped: 0 });
     const restored = await getQuestionAttachmentBlob(attachment.blobKey);
     expect(await restored!.blob.text()).toBe("AXOM");
     expect(restored!.questionId).toBe("second-use");
-    expect(await backup.restoreMedia(references)).toEqual({ restored: 0, skipped: 1 });
+    expect(await backup.restoreMedia(references)).toMatchObject({ restored: 0, skipped: 1 });
+    await staged.rollback();
+    expect(await getQuestionAttachmentBlob(attachment.blobKey)).toBeUndefined();
   });
 
   it("reports missing images and retains compatibility with existing JSON backups", async () => {
     expect((await createMediaBackupArchive({}, refs)).missingBlobKeys).toEqual([attachment.blobKey]);
     const payload = { _app: "AXOM", [ATTACHMENT_EXPORT_KEY]: [{ ...attachment, questionId: "held-question", base64: "QVhPTQ==" }] };
     const backup = await readPortableBackup(new File([JSON.stringify(payload)], "older.json"));
-    expect(await backup.restoreMedia(refs)).toEqual({ restored: 1, skipped: 0 });
+    expect(await backup.restoreMedia(refs)).toMatchObject({ restored: 1, skipped: 0 });
+  });
+
+  it("never overwrites existing bytes when a portable backup reuses their blob key", async () => {
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: new Blob(["SAFE"]), mimeType: "image/png", byteSize: 4,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    const payload = {
+      _app: "AXOM",
+      [ATTACHMENT_EXPORT_KEY]: [{ ...attachment, questionId: "held-question", base64: "QVhPTQ==" }],
+    };
+    const backup = await readPortableBackup(new File([JSON.stringify(payload)], "collision.json"));
+    await expect(backup.restoreMedia(refs)).rejects.toThrow("existing storage key with different bytes");
+    expect(await (await getQuestionAttachmentBlob(attachment.blobKey))!.blob.text()).toBe("SAFE");
   });
 
   it("round-trips verified originals, retries safely and preserves a newer local edition", async () => {

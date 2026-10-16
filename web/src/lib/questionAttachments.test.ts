@@ -16,6 +16,7 @@ import {
   normalizeQuestionAttachments,
   putQuestionAttachmentBlob,
   restoreQuestionAttachmentPayloads,
+  stageQuestionAttachmentPayloads,
   runQuestionAttachmentMaintenance,
   validateQuestionAttachmentFile,
   type QuestionImageAttachment,
@@ -236,6 +237,36 @@ describe("portable backup payloads", () => {
     );
     expect(result).toEqual({ restored: 0, skipped: 1 });
     expect(await listQuestionAttachmentBlobKeys()).toEqual([]);
+  });
+
+  it("stages only absent immutable blob keys and rolls back only its own bytes", async () => {
+    const existing = metadata({ id: "existing" });
+    const added = metadata({ id: "added" });
+    await putQuestionAttachmentBlob(existing.blobKey, {
+      blob: new Blob([PNG_BYTES.buffer as ArrayBuffer]), mimeType: "image/png",
+      byteSize: PNG_BYTES.byteLength, questionId: "q1", updatedAt: existing.updatedAt,
+    });
+    const stage = await stageQuestionAttachmentPayloads([
+      { ...existing, questionId: "q1", base64: await blobToBase64(new Blob([PNG_BYTES.buffer as ArrayBuffer])) },
+      { ...added, questionId: "q1", base64: await blobToBase64(new Blob([PNG_BYTES.buffer as ArrayBuffer])) },
+    ], [{ id: "q1", attachments: [existing, added] }]);
+    expect(stage).toMatchObject({ restored: 1, skipped: 1 });
+    await stage.rollback();
+    expect(await getQuestionAttachmentBlob(existing.blobKey)).toBeTruthy();
+    expect(await getQuestionAttachmentBlob(added.blobKey)).toBeUndefined();
+  });
+
+  it("rejects a colliding immutable blob key without changing its bytes", async () => {
+    const meta = metadata({ id: "collision", byteSize: 8 });
+    await putQuestionAttachmentBlob(meta.blobKey, {
+      blob: new Blob(["original"]), mimeType: "image/png", byteSize: 8,
+      questionId: "q1", updatedAt: meta.updatedAt,
+    });
+    await expect(stageQuestionAttachmentPayloads(
+      [{ ...meta, questionId: "q1", base64: await blobToBase64(new Blob(["imported"])) }],
+      [{ id: "q1", attachments: [meta] }],
+    )).rejects.toThrow("existing storage key with different bytes");
+    expect(await (await getQuestionAttachmentBlob(meta.blobKey))!.blob.text()).toBe("original");
   });
 });
 

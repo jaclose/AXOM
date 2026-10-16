@@ -6,8 +6,9 @@ import { readSourceOriginal, saveSourceOriginal } from "./decode/sources";
 import type { SourceDocument } from "./library";
 import {
   ATTACHMENT_EXPORT_KEY, MAX_QUESTION_ATTACHMENT_BYTES, blobToBase64,
-  extractQuestionAttachmentPayloads, getQuestionAttachmentBlob, restoreQuestionAttachmentPayloads,
+  extractQuestionAttachmentPayloads, getQuestionAttachmentBlob, stageQuestionAttachmentPayloads,
   type QuestionImageAttachment, type QuestionAttachmentExportPayload, type AttachmentReadOptions,
+  type StagedQuestionAttachmentRestore,
 } from "./questionAttachments";
 
 type References = ReadonlyArray<{ id: string; attachments?: readonly QuestionImageAttachment[] }>;
@@ -61,15 +62,15 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
 export interface PortableBackupRead {
   rawText: string;
   restoreOriginals: (documents: readonly SourceDocument[]) => Promise<{ restored: number; skipped: number }>;
-  restoreMedia: (references: References) => Promise<{ restored: number; skipped: number }>;
+  restoreMedia: (references: References) => Promise<StagedQuestionAttachmentRestore>;
 }
 
-/** Restore one image at a time through the existing timestamp/ownership rules. */
+/** Read and validate a portable copy before any workspace state is adopted. */
 export async function readPortableBackup(file: File): Promise<PortableBackupRead> {
   if (!file.name.toLowerCase().endsWith(".zip")) {
     const rawText = await file.text();
     const payloads = extractQuestionAttachmentPayloads(JSON.parse(rawText));
-    return { rawText, restoreMedia: refs => restoreQuestionAttachmentPayloads(payloads, refs), restoreOriginals: async () => ({ restored: 0, skipped: 0 }) };
+    return { rawText, restoreMedia: refs => stageQuestionAttachmentPayloads(payloads, refs), restoreOriginals: async () => ({ restored: 0, skipped: 0 }) };
   }
   if (file.size > 2 * 1024 * 1024 * 1024) throw new Error("This backup exceeds the 2 GB archive limit.");
   const zip = await JSZip.loadAsync(new Uint8Array(await file.arrayBuffer()));
@@ -120,15 +121,13 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
     }
     return { restored, skipped };
   }, restoreMedia: async references => {
-    let restored = 0, skipped = 0;
+    const payloads: QuestionAttachmentExportPayload[] = [];
     for (const item of media) {
       const bytes = await zip.file(item.file)!.async("uint8array");
       if (bytes.length > MAX_QUESTION_ATTACHMENT_BYTES) throw new Error("A backup image exceeds the safety limit.");
       const base64 = await blobToBase64(new Blob([bytes as BlobPart]));
-      const payloads = extractQuestionAttachmentPayloads({ [ATTACHMENT_EXPORT_KEY]: [{ ...item.metadata, base64 }] });
-      const result = await restoreQuestionAttachmentPayloads(payloads, references);
-      restored += result.restored; skipped += result.skipped;
+      payloads.push(...extractQuestionAttachmentPayloads({ [ATTACHMENT_EXPORT_KEY]: [{ ...item.metadata, base64 }] }));
     }
-    return { restored, skipped };
+    return stageQuestionAttachmentPayloads(payloads, references);
   } };
 }

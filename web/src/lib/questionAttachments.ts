@@ -320,6 +320,13 @@ export interface QuestionAttachmentExportPayload extends QuestionImageAttachment
   base64: string;
 }
 
+export interface StagedQuestionAttachmentRestore {
+  restored: number;
+  skipped: number;
+  /** Remove only blob keys this restore inserted. Existing bytes are immutable. */
+  rollback: () => Promise<void>;
+}
+
 export const ATTACHMENT_EXPORT_KEY = "questionAttachmentPayloads";
 
 export async function collectQuestionAttachmentPayloads(
@@ -370,6 +377,103 @@ export function extractQuestionAttachmentPayloads(raw: unknown): QuestionAttachm
     payloads.push({ ...normalized, questionId, base64 });
   }
   return payloads;
+}
+
+function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.byteLength !== right.byteLength) return false;
+  for (let index = 0; index < left.byteLength; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
+}
+
+/**
+ * Stage portable-backup images before adopting their workspace metadata.
+ * Blob keys are immutable identities here: matching existing bytes are reused,
+ * while a different payload for an occupied key aborts without overwriting it.
+ * Rollback is consequently bounded to keys inserted by this exact operation.
+ */
+export async function stageQuestionAttachmentPayloads(
+  payloads: readonly QuestionAttachmentExportPayload[],
+  questions: ReadonlyArray<{ id: string; attachments?: readonly QuestionImageAttachment[] }>,
+): Promise<StagedQuestionAttachmentRestore> {
+  const surviving = new Map<string, QuestionImageAttachment & { questionId: string }>();
+  for (const question of questions) {
+    for (const attachment of question.attachments ?? []) {
+      surviving.set(attachment.blobKey, { ...attachment, questionId: question.id });
+    }
+  }
+
+  const inserted = new Map<string, QuestionAttachmentBlobRecord>();
+  let restored = 0;
+  let skipped = 0;
+
+  const rollback = async () => {
+    const failures: string[] = [];
+    for (const [blobKey, staged] of inserted) {
+      try {
+        const current = await getQuestionAttachmentBlob(blobKey, { localOnly: true });
+        if (!current) continue;
+        const [currentBytes, stagedBytes] = await Promise.all([
+          current.blob.arrayBuffer().then(buffer => new Uint8Array(buffer)),
+          staged.blob.arrayBuffer().then(buffer => new Uint8Array(buffer)),
+        ]);
+        if (current.mimeType !== staged.mimeType || current.questionId !== staged.questionId
+          || current.updatedAt !== staged.updatedAt || !equalBytes(currentBytes, stagedBytes)) {
+          failures.push(blobKey);
+          continue;
+        }
+        await deleteQuestionAttachmentBlobs([blobKey]);
+      } catch {
+        failures.push(blobKey);
+      }
+    }
+    if (failures.length) {
+      throw new Error(`AXOM could not confirm cleanup for ${failures.length} staged image attachment${failures.length === 1 ? "" : "s"}.`);
+    }
+  };
+
+  try {
+    for (const payload of payloads) {
+      const target = surviving.get(payload.blobKey);
+      if (!target) { skipped += 1; continue; }
+      const bytes = base64ToBytes(payload.base64);
+      if (!bytes || bytes.byteLength === 0 || bytes.byteLength > MAX_QUESTION_ATTACHMENT_BYTES
+        || bytes.byteLength !== payload.byteSize || bytes.byteLength !== target.byteSize
+        || payload.mimeType !== target.mimeType) {
+        throw new Error("A backup image failed validation. No existing image was overwritten.");
+      }
+
+      const existing = await getQuestionAttachmentBlob(payload.blobKey, { localOnly: true });
+      if (existing) {
+        const existingBytes = new Uint8Array(await existing.blob.arrayBuffer());
+        if (existing.mimeType !== payload.mimeType || !equalBytes(existingBytes, bytes)) {
+          throw new Error("A backup image uses an existing storage key with different bytes. No existing image was overwritten.");
+        }
+        skipped += 1;
+        continue;
+      }
+
+      const record: QuestionAttachmentBlobRecord = {
+        blob: new Blob([bytes.buffer as ArrayBuffer], { type: payload.mimeType }),
+        mimeType: payload.mimeType,
+        byteSize: bytes.byteLength,
+        questionId: target.questionId,
+        updatedAt: payload.updatedAt,
+      };
+      await putQuestionAttachmentBlob(payload.blobKey, record);
+      inserted.set(payload.blobKey, record);
+      restored += 1;
+    }
+    return { restored, skipped, rollback };
+  } catch (error) {
+    try {
+      await rollback();
+    } catch (rollbackError) {
+      throw new Error(`Image staging failed, and cleanup could not be confirmed after ${error instanceof Error ? error.message : "an image write failed"}. ${rollbackError instanceof Error ? rollbackError.message : "Keep this tab open and retry."}`, { cause: rollbackError });
+    }
+    throw error;
+  }
 }
 
 /** Write imported payload bytes for every attachment the merged/restored state

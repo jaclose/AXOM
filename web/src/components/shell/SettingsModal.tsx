@@ -8,13 +8,13 @@ import {
 import { ICON_SIZE } from "../../lib/iconSize";
 import { Modal, Field } from "../ui/Modal";
 import { GButton, Tag } from "../ui/primitives";
-import { useStore } from "../../lib/store";
+import { useStore, type Store } from "../../lib/store";
 import { privateReviewMedia } from "../../lib/privateLibrary/media";
 import { compactAvatarDataUrl } from "../../lib/avatarImage";
-import { exportStateWithAttachments, mergeStates, parseImport, type BackupScope } from "../../lib/backup";
+import { exportStateWithAttachments, mergeStates, parseImport, toPortableState, type BackupScope } from "../../lib/backup";
 import { contentMetadata } from "../../lib/sync/deferredContent";
 import { retainDownloadedContent } from "../../lib/sync/contentDownloads";
-import { readPortableBackup } from "../../lib/backupArchive";
+import { readPortableBackup, type PortableBackupRead } from "../../lib/backupArchive";
 import { flushLocalVaultWrites, assertVaultWritesSince, getVaultWriteCheckpoint } from "../../lib/localVault";
 import {
   runQuestionAttachmentMaintenance,
@@ -27,7 +27,7 @@ import { PromiseCutscene } from "./PromiseCutscene";
 import { FOCUS_OPTIONS, focusOption, normalizedFocusIds } from "../../lib/experience";
 import { EDUCATION_TRACKS, resolveTrack } from "../../lib/tracks";
 import { SavedPromise } from "./PromiseCutscene";
-import type { DashboardWidgetId, EducationTrackId, ExperienceFocusId } from "../../lib/types";
+import type { DashboardWidgetId, EducationTrackId, ExperienceFocusId, NoctyriumState } from "../../lib/types";
 import { HardDrive } from "lucide-react";
 import { SCHEMA_VERSION, APP_BUILD_LABEL } from "../../lib/seed";
 import { lastBackupAt } from "../../lib/backup";
@@ -91,6 +91,123 @@ function initialSubsection(tab: SettingsTab): PersonalizationSubsection {
   return tab === "rhythm" || tab === "dashboard" || tab === "program" ? tab : "study";
 }
 
+type PortableRestoreMode = "replace" | "merge";
+type PortableRestoreServices = {
+  getState: () => Store;
+  getCheckpoint: () => number;
+  flush: () => Promise<void>;
+  assertWritesSince: (checkpoint: number) => void;
+  maintainAttachments: typeof runQuestionAttachmentMaintenance;
+  recordRestore: typeof recordRestoreEvent;
+};
+
+const portableRestoreServices: PortableRestoreServices = {
+  getState: useStore.getState,
+  getCheckpoint: getVaultWriteCheckpoint,
+  flush: flushLocalVaultWrites,
+  assertWritesSince: assertVaultWritesSince,
+  maintainAttachments: runQuestionAttachmentMaintenance,
+  recordRestore: recordRestoreEvent,
+};
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : "Keep your backup and try again.";
+}
+
+/** Commit a prepared portable restore as one recoverable workspace transaction. */
+export async function persistPortableRestore(input: {
+  current: Store;
+  fileName: string;
+  mode: PortableRestoreMode;
+  restoredState: NoctyriumState;
+  restoreMedia: PortableBackupRead["restoreMedia"];
+  restoreOriginals: PortableBackupRead["restoreOriginals"];
+  onProgress?: (message: string) => void;
+}, services: PortableRestoreServices = portableRestoreServices): Promise<string> {
+  const { current, fileName, mode, restoredState, restoreMedia, restoreOriginals, onProgress } = input;
+  const priorState = toPortableState(current);
+  const metadata = contentMetadata(restoredState);
+  const references = [...(metadata.questions ?? []), ...privateReviewMedia(metadata.documents)];
+
+  if (services.getState() !== current) {
+    throw new Error("Your workspace changed while preparing recovery. Nothing was replaced; retry when saving finishes.");
+  }
+
+  onProgress?.("Preparing images and original files before changing your workspace…");
+  let mediaStage: Awaited<ReturnType<PortableBackupRead["restoreMedia"]>>;
+  try {
+    mediaStage = await restoreMedia(references);
+  } catch (error) {
+    throw new Error(`Image files could not be prepared. ${errorText(error)} The workspace was not changed.`, { cause: error });
+  }
+
+  let originals: Awaited<ReturnType<PortableBackupRead["restoreOriginals"]>>;
+  try {
+    originals = await restoreOriginals(metadata.documents ?? []);
+  } catch (error) {
+    try {
+      await mediaStage.rollback();
+    } catch (rollbackError) {
+      throw new Error(`Original files could not be prepared, and staged image cleanup could not be confirmed. ${errorText(rollbackError)} The workspace was not changed; keep this tab open.`, { cause: rollbackError });
+    }
+    throw new Error(`Original files could not be prepared. ${errorText(error)} The workspace was not changed. Verified original-file bytes may remain cached.`, { cause: error });
+  }
+
+  if (services.getState() !== current) {
+    try {
+      await mediaStage.rollback();
+    } catch (rollbackError) {
+      throw new Error(`Your workspace changed during recovery, and staged image cleanup could not be confirmed. ${errorText(rollbackError)} No workspace was replaced; keep this tab open.`, { cause: rollbackError });
+    }
+    throw new Error("Your workspace changed while preparing recovery. Nothing was replaced; retry when saving finishes. Verified original-file bytes may remain cached.");
+  }
+
+  onProgress?.("Saving the recovered workspace on this device…");
+  try {
+    const checkpoint = services.getCheckpoint();
+    current.replaceAll(restoredState);
+    await services.flush();
+    services.assertWritesSince(checkpoint);
+  } catch (targetError) {
+    let workspaceRollbackError: unknown;
+    let mediaRollbackError: unknown;
+    try {
+      const rollbackCheckpoint = services.getCheckpoint();
+      current.replaceAll(priorState);
+      await services.flush();
+      services.assertWritesSince(rollbackCheckpoint);
+    } catch (error) {
+      workspaceRollbackError = error;
+    }
+    try {
+      await mediaStage.rollback();
+    } catch (error) {
+      mediaRollbackError = error;
+    }
+
+    if (workspaceRollbackError) {
+      throw new Error(`The recovered workspace could not be confirmed on disk, and AXOM could not confirm the prior workspace rollback. Keep this tab open and export the workspace before retrying. Save error: ${errorText(targetError)} Rollback error: ${errorText(workspaceRollbackError)}`, { cause: targetError });
+    }
+    if (mediaRollbackError) {
+      throw new Error(`The recovered workspace was not saved. Your prior workspace was restored and confirmed, but staged image cleanup could not be confirmed. ${errorText(mediaRollbackError)}`, { cause: targetError });
+    }
+    throw new Error(`The recovered workspace was not saved. Your prior workspace was restored and confirmed on this device. ${errorText(targetError)} Verified original-file bytes may remain cached.`, { cause: targetError });
+  }
+
+  services.recordRestore({ kind: mode === "merge" ? "portable-merge" : "portable-restore", detail: fileName });
+  let cleanupWarning = "";
+  try {
+    const maintenance = await services.maintainAttachments(references);
+    if (maintenance.missingBlobKeys.length) {
+      cleanupWarning = ` ${maintenance.missingBlobKeys.length} referenced image attachment${maintenance.missingBlobKeys.length === 1 ? " is" : "s are"} still missing. Keep this backup; retry after checking storage or choose a complete copy.`;
+    }
+  } catch (error) {
+    cleanupWarning = ` The workspace is saved, but image cleanup could not finish. ${errorText(error)}`;
+  }
+
+  return `${mode === "merge" ? "Merged" : "Restored"} ${fileName}. Saved on this device.${mediaStage.restored ? ` Restored ${mediaStage.restored} image attachment${mediaStage.restored === 1 ? "" : "s"}.` : ""}${originals.restored ? ` Restored ${originals.restored} original file${originals.restored === 1 ? "" : "s"}.` : ""}${restoredState.deferredContent ? " Some course files still need downloading from the original account." : ""}${cleanupWarning}`;
+}
+
 export function SettingsModal({ onClose, initialTab = "general" }: { onClose: () => void; initialTab?: SettingsTab }) {
   const store = useStore();
   const { profile } = store;
@@ -147,7 +264,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
     tabRefs.current[nextSection]?.focus();
   }
 
-  async function doImport(file: File, mode: "replace" | "merge") {
+  async function doImport(file: File, mode: PortableRestoreMode) {
     if (backupBusy) return;
     setBackupBusy(true); setMsg("Reading your backup…");
     try {
@@ -160,18 +277,15 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
       if (!confirm(message)) { setMsg("Restore cancelled. No data changed."); return; }
       const current = useStore.getState();
       const restoredState = mode === "merge" ? mergeStates(current, next) : await retainDownloadedContent(next, current);
-      if (useStore.getState() !== current) throw new Error("Your workspace changed while preparing recovery. No data was replaced; retry when saving finishes.");
-      const checkpoint = getVaultWriteCheckpoint();
-      current.replaceAll(restoredState);
-      setMsg("Saving your workspace, images and original files…");
-      await flushLocalVaultWrites(); assertVaultWritesSince(checkpoint);
-      const metadata = contentMetadata(restoredState);
-      const references = [...(metadata.questions ?? []), ...privateReviewMedia(metadata.documents)];
-      const { restored } = await restoreMedia(references);
-      const originals = await restoreOriginals(metadata.documents ?? []);
-      await runQuestionAttachmentMaintenance(references);
-      recordRestoreEvent({ kind: mode === "merge" ? "portable-merge" : "portable-restore", detail: file.name });
-      setMsg(`${mode === "merge" ? "Merged" : "Restored"} ${file.name}. Saved on this device.${restored ? ` Restored ${restored} image attachments.` : ""}${originals.restored ? ` Restored ${originals.restored} original files.` : ""}${restoredState.deferredContent ? " Some course files still need downloading from the original account." : ""}`);
+      setMsg(await persistPortableRestore({
+        current,
+        fileName: file.name,
+        mode,
+        restoredState,
+        restoreMedia,
+        restoreOriginals,
+        onProgress: setMsg,
+      }));
     } catch (e) {
       setMsg(`Recovery did not finish. ${e instanceof Error ? e.message : "Keep your backup and try again."}`);
     } finally {

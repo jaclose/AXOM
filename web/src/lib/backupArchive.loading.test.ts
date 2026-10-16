@@ -30,7 +30,7 @@ describe("portable backup module availability", () => {
       blobToBase64: vi.fn(),
       extractQuestionAttachmentPayloads: vi.fn(() => []),
       getQuestionAttachmentBlob: vi.fn(),
-      restoreQuestionAttachmentPayloads: vi.fn(async () => ({ restored: 0, skipped: 0 })),
+      stageQuestionAttachmentPayloads: vi.fn(async () => ({ restored: 0, skipped: 0, rollback: vi.fn() })),
     }));
 
     const payload = { _app: "AXOM", terms: [], documents: [{ rawText: "synthetic test data" }] };
@@ -52,7 +52,7 @@ describe("portable backup module availability", () => {
     const file = new NativeFile([new Uint8Array(bytes)], "backup.zip") as unknown as File;
     const restored = await readPortableBackup(file);
     expect(JSON.parse(restored.rawText)).toMatchObject(payload);
-    expect(await restored.restoreMedia([])).toEqual({ restored: 0, skipped: 0 });
+    expect(await restored.restoreMedia([])).toMatchObject({ restored: 0, skipped: 0 });
     expect(zipLoads).toBe(1);
   });
 });
