@@ -76,7 +76,7 @@ describe("DashboardNotificationCenter", () => {
     expect(screen.getByText("Security notice")).toBeTruthy();
     expect(screen.queryByText("Daily learning")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Mark all read" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark recent read" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Notifications" })).toBeTruthy());
     expect(new Set(JSON.parse(localStorage.getItem("axom.communicationReads.v1:account-a") ?? "[]") as string[])).toEqual(
       new Set(["delivered-1:delivered", "failed-1:failed"]),
@@ -139,7 +139,7 @@ describe("DashboardNotificationCenter", () => {
     fireEvent.click(screen.getByRole("button", { name: "Notifications, 11 unread" }));
     expect(screen.getByText("9+")).toBeTruthy();
     expect(screen.getAllByText("Weekly Report")).toHaveLength(8);
-    fireEvent.click(screen.getByRole("button", { name: "Mark all read" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark recent read" }));
     expect(screen.getByRole("button", { name: "Notifications" })).toBeTruthy();
     expect(JSON.parse(localStorage.getItem("axom.communicationReads.v1:account-a") ?? "[]")).toHaveLength(11);
   });

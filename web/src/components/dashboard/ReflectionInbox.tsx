@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { ArrowRight, Clock3, Inbox, X } from "lucide-react";
 import type { DayPlan } from "../../lib/types";
 import { ICON_SIZE } from "../../lib/iconSize";
@@ -12,6 +12,7 @@ import "../../styles/dashboard-inbox.css";
 
 const STORAGE_KEY = "axom.reflectionInbox.v1";
 const SNOOZE_MS = 4 * 60 * 60_000;
+const systemNow = () => new Date();
 
 interface ReflectionInboxCourtesy {
   hiddenForDay?: string;
@@ -60,10 +61,11 @@ export function ReflectionInbox({
   dayPlans,
   activeDayKey,
   workspaceKey,
-  now = () => new Date(),
+  now = systemNow,
   onOpenDay = gotoJournalDay,
 }: ReflectionInboxProps) {
   const [expanded, setExpanded] = useState(false);
+  const [, refreshSnooze] = useState(0);
   const storageKey = courtesyStorageKey(workspaceKey);
   const [storedCourtesy, setStoredCourtesy] = useState(() => ({ key: storageKey, value: readCourtesy(storageKey) }));
   const courtesy = storedCourtesy.key === storageKey ? storedCourtesy.value : readCourtesy(storageKey);
@@ -75,18 +77,35 @@ export function ReflectionInbox({
     : recommendedIntention;
   const hidden = courtesy?.hiddenForDay === activeDayKey
     || Boolean(courtesy?.snoozedUntil && Date.parse(courtesy.snoozedUntil) > now().getTime());
+  const targetSignature = dayKeys.join("\u001f");
+
+  useEffect(() => {
+    const expiresAt = courtesy?.snoozedUntil ? Date.parse(courtesy.snoozedUntil) : Number.NaN;
+    if (!Number.isFinite(expiresAt)) return;
+    const remaining = expiresAt - now().getTime();
+    if (remaining <= 0) return;
+    const timer = window.setTimeout(
+      () => refreshSnooze((value) => value + 1),
+      Math.min(remaining + 16, 2_147_483_647),
+    );
+    return () => window.clearTimeout(timer);
+  }, [courtesy?.snoozedUntil, now, storageKey]);
 
   // This visible dashboard surface is the catch-up reminder for this route.
   // Record it before the shell watcher's passive effect and clear any reminder
   // already raised on another route so the learner never receives both.
   useLayoutEffect(() => {
     if (!recommended) return;
-    journalReminderLedger.markShown(activeDayKey, recommended);
+    // The Dashboard inbox represents the complete missed-day queue. Marking
+    // every visible target prevents the shell watcher from surfacing an older
+    // toast beside this calmer, learner-controlled surface.
+    targetSignature.split("\u001f").filter(Boolean)
+      .forEach((target) => journalReminderLedger.markShown(activeDayKey, target));
     const { toasts, dismiss } = useToasts.getState();
     toasts
       .filter((toast) => toast.dedupe?.startsWith("missed-standup:"))
       .forEach((toast) => dismiss(toast.id));
-  }, [activeDayKey, recommended]);
+  }, [activeDayKey, recommended, targetSignature]);
 
   if (!dayKeys.length || hidden) return null;
 

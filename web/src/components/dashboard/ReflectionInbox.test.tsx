@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { journalReminderLedger } from "../../lib/journalReminder";
 import { useToasts } from "../../lib/toast";
@@ -39,6 +39,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   useToasts.setState({ toasts: [] });
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 describe("ReflectionInbox", () => {
@@ -95,6 +96,25 @@ describe("ReflectionInbox", () => {
     expect(screen.getByRole("region", { name: "Reflection inbox" })).toBeTruthy();
   });
 
+  it("returns automatically when a four-hour reminder expires on an open dashboard", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-15T12:00:00.000Z"));
+    render(
+      <ReflectionInbox
+        dayKeys={["2026-10-14"]}
+        dayPlans={plans}
+        activeDayKey="2026-10-15"
+        workspaceKey="profile-a"
+        now={() => new Date(Date.now())}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Later" }));
+    expect(screen.queryByRole("region", { name: "Reflection inbox" })).toBeNull();
+
+    act(() => vi.advanceTimersByTime(4 * 60 * 60_000 + 20));
+    expect(screen.getByRole("region", { name: "Reflection inbox" })).toBeTruthy();
+  });
+
   it("keeps a same-day dismissal when the eligible days change but not across workspaces", () => {
     const { rerender } = render(
       <ReflectionInbox dayKeys={["2026-10-14"]} dayPlans={plans} activeDayKey="2026-10-15" workspaceKey="profile-a" />,
@@ -129,5 +149,20 @@ describe("ReflectionInbox", () => {
 
     expect(useToasts.getState().toasts).toHaveLength(0);
     expect(journalReminderLedger.nextTarget("2026-10-15", ["2026-10-14"])).toBeUndefined();
+  });
+
+  it("keeps the dashboard authoritative for every visible missed day", () => {
+    render(
+      <ReflectionInbox
+        dayKeys={["2026-10-18", "2026-10-17"]}
+        dayPlans={[]}
+        activeDayKey="2026-10-20"
+        workspaceKey="profile-a"
+      />,
+    );
+
+    journalReminderLedger.skip("2026-10-20", "2026-10-18");
+    expect(journalReminderLedger.nextTarget("2026-10-20", ["2026-10-18", "2026-10-17"]))
+      .toBeUndefined();
   });
 });

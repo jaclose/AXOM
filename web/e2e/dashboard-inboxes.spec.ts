@@ -1,6 +1,6 @@
-import { expect, seedOnboarded, test } from "./fixtures";
+import { expect, reloadAfterSave, seedOnboarded, test } from "./fixtures";
 
-for (const width of [1440, 390]) {
+for (const width of [1440, 768, 390]) {
   test(`reflection and notification inboxes stay calm and contained at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await page.goto("/#dashboard", { waitUntil: "networkidle" });
@@ -21,7 +21,11 @@ for (const width of [1440, 390]) {
       };
       const recent = prior(1);
       const older = prior(4);
-      localStorage.removeItem("axom.reflectionInbox.v1");
+      const syncMetadata = JSON.parse(localStorage.getItem("axom.sync.metadata.v1") ?? "{}") as { deviceId?: string };
+      if (syncMetadata.deviceId) {
+        const courtesyScope = `device:${syncMetadata.deviceId}:account:local`;
+        localStorage.removeItem(`axom.reflectionInbox.v1:${encodeURIComponent(courtesyScope)}`);
+      }
       useStore.setState({
         dayPlans: [
           { dayKey: recent, intention: "Finish the cardiology lectures", wins: [], createdAt: `${recent}T08:00:00.000Z` },
@@ -51,10 +55,26 @@ for (const width of [1440, 390]) {
     expect(bounds).not.toBeNull();
     expect(bounds!.x).toBeGreaterThanOrEqual(0);
     expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+    expect(bounds!.y).toBeGreaterThanOrEqual(0);
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(width === 390 ? 844 : 900);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
     await page.keyboard.press("Escape");
     await expect(panel).toBeHidden();
     await expect(page.getByRole("button", { name: "Notifications" })).toBeFocused();
+
+    await inbox.getByRole("button", { name: "Not today" }).click();
+    await expect(inbox).toBeHidden();
+    await page.evaluate(async () => {
+      type Dev = {
+        useStore: { getState: () => { updateProfile: (patch: { name: string }) => void } };
+        flushVault: () => Promise<void>;
+      };
+      const dev = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
+      dev.useStore.getState().updateProfile({ name: "Renamed AXOM E2E" });
+      await dev.flushVault();
+    });
+    await reloadAfterSave(page);
+    await expect(inbox).toBeHidden();
   });
 }

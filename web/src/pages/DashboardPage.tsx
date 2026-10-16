@@ -63,6 +63,8 @@ import { dueQuestions, questionMappingStatus, summarizeQuestionMappings } from "
 import { deriveDailyWordStatsFromNormalizedHistory } from "../lib/dailyWordStats";
 import { ReflectionInbox } from "../components/dashboard/ReflectionInbox";
 import { DashboardNotificationCenter } from "../components/dashboard/DashboardNotificationCenter";
+import { useAccount } from "../lib/account/accountStore";
+import { deviceId } from "../lib/sync/syncMetadata";
 
 const HOSTED_ALPHA_URL = "https://noctyrium-cktjdhuhw-jacloses-projects.vercel.app/#dashboard";
 
@@ -1189,6 +1191,8 @@ function ExamCountdownWidget() {
 // disappears entirely when there's nothing to do.
 function StandupPrompt() {
   const s = useStore();
+  const accountId = useAccount((state) => state.user?.id);
+  const [localDeviceId] = useState(deviceId);
   const dailyLoopRequest = useUi((state) => state.dailyLoopRequest);
   const clearDailyLoopRequest = useUi((state) => state.clearDailyLoopRequest);
   const missed = missedStandupDays(s);
@@ -1261,7 +1265,14 @@ function StandupPrompt() {
   }
 
   if (missed.length) {
-    return <ReflectionInbox dayKeys={missed} dayPlans={s.dayPlans} activeDayKey={today} workspaceKey={s.profile.userId} />;
+    return (
+      <ReflectionInbox
+        dayKeys={missed}
+        dayPlans={s.dayPlans}
+        activeDayKey={today}
+        workspaceKey={`device:${localDeviceId}:account:${accountId ?? "local"}`}
+      />
+    );
   }
 
   return null;

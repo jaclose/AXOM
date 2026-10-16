@@ -161,7 +161,7 @@ export function DashboardNotificationCenter() {
           <header>
             <div><span>Inbox</span><h2>Notifications</h2></div>
             <div className="dashboard-notifications__header-actions">
-              {unread > 0 && <GhostButton onClick={() => markRead(outcomes)}><CheckCheck size={ICON_SIZE.body} aria-hidden="true" /> Mark all read</GhostButton>}
+              {unread > 0 && <GhostButton onClick={() => markRead(outcomes)}><CheckCheck size={ICON_SIZE.body} aria-hidden="true" /> Mark recent read</GhostButton>}
               <GhostButton className="dashboard-notifications__close" aria-label="Close notifications" onClick={() => { setOpen(false); buttonRef.current?.focus(); }}>
                 <X size={ICON_SIZE.body} aria-hidden="true" />
               </GhostButton>

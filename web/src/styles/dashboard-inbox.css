@@ -101,8 +101,8 @@
 .dashboard-notifications { position: relative; }
 .dashboard-notifications__trigger {
   position: relative;
-  width: 38px;
-  min-height: 38px;
+  width: 44px;
+  min-height: 44px;
   color: var(--text-60);
 }
 .dashboard-notifications__trigger:hover,
@@ -237,7 +237,7 @@
 }
 @keyframes dashboard-notification-spin { to { transform: rotate(360deg); } }
 
-@media (max-width: 760px) {
+@media (max-width: 800px) {
   .reflection-inbox { grid-template-columns: auto minmax(0, 1fr); }
   .reflection-inbox__copy > span { white-space: normal; }
   .reflection-inbox__actions,
