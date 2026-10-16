@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
  */
 const migrationsDir = fileURLToPath(new URL("../../../../supabase/migrations/", import.meta.url));
 const files = readdirSync(migrationsDir).filter((name) => name.endsWith(".sql")).sort();
+const privacyBarrierMigration = "20261016011812_harden_privacy_request_barrier.sql";
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
 const HASH = "a".repeat(64);
@@ -70,6 +71,13 @@ const PRIVILEGED = [
   "public.touch_account_device(uuid,text,text,bigint)",
   "public.axom_account_accepts_cloud_writes()",
   "public.delete_my_cloud_data()", "public.consume_ai_quota()", "public.revoke_question_set_share(uuid)",
+];
+const SERVICE_ONLY_PRIVACY = [
+  "public.quarantine_stale_privacy_requests(timestamp with time zone)",
+  "public.claim_privacy_request(uuid,timestamp with time zone)",
+  "public.finalize_privacy_export(uuid,text,timestamp with time zone)",
+  "public.begin_account_deletion_cleanup(uuid)",
+  "public.record_account_deletion_failure(uuid,boolean)",
 ];
 const PRIVATE_TABLES = [
   "account_profiles", "workspaces", "workspace_revisions", "sync_conflicts", "question_set_shares", "account_devices", "ai_usage",
@@ -306,6 +314,232 @@ describe("Supabase migrations on real Postgres", () => {
     } finally { await db.close(); }
   }, 60_000);
 
+  it("serializes export and deletion and revokes bearer shares at the irreversible boundary", async () => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
+    const exportRequest = "33333333-3333-4333-8333-333333333333";
+    const deletionRequest = "44444444-4444-4444-8444-444444444444";
+    const otherShareOwner = "22222222-2222-4222-8222-222222222222";
+    const collection = "55555555-5555-4555-8555-555555555555";
+    const revision = "66666666-6666-4666-8666-666666666666";
+    const shareSnapshot = JSON.stringify({
+      shareFormatVersion: 1,
+      title: "Deletion boundary",
+      questions: [{ stem: "Q" }],
+      createdAt: "2026-10-16T00:00:00Z",
+    });
+    try {
+      await db.query("insert into auth.users(id,email) values ($1,'a@x.test'),($2,'b@x.test')", [A, otherShareOwner]);
+      await db.query(`insert into public.academic_collections
+        (id,owner_id,title,module,term,visibility,review_status)
+        values($1,$2,'Owner shared bank','OWNER','Term 1','shared','approved')`, [collection, A]);
+      await db.query(`insert into public.academic_revisions
+        (id,collection_id,content_hash,template_text,status,approved_at)
+        values($1,$2,$3,'Week 1','ready',now())`, [revision, collection, HASH]);
+      await db.query("update public.academic_collections set current_revision_id=$2 where id=$1", [collection, revision]);
+      const ownerShare = (await as(db, "authenticated", A,
+        "select public.create_question_set_share('owner-set', $1::jsonb) as result", [shareSnapshot])).rows[0].result as { share_token: string };
+      const otherShare = (await as(db, "authenticated", otherShareOwner,
+        "select public.create_question_set_share('other-set', $1::jsonb) as result", [shareSnapshot])).rows[0].result as { share_token: string };
+      await db.query(`insert into public.privacy_requests(id,user_id,kind,status,scheduled_for)
+        values($1,$3,'export','requested',null),($2,$3,'deletion','scheduled','2000-01-01')`,
+      [exportRequest, deletionRequest, A]);
+
+      expect((await as(db, "service_role", null,
+        "select public.claim_privacy_request($1,'2026-10-16T01:00:00Z') as claimed", [exportRequest])).rows)
+        .toEqual([{ claimed: true }]);
+      expect((await as(db, "service_role", null,
+        "select public.claim_privacy_request($1,'2026-10-16T01:00:00Z') as claimed", [deletionRequest])).rows)
+        .toEqual([{ claimed: false }]);
+      expect((await as(db, "service_role", null,
+        "select public.finalize_privacy_export($1,$2,'2026-10-23T01:00:00Z') as finalized",
+        [exportRequest, `${A}/${exportRequest}.json`])).rows).toEqual([{ finalized: true }]);
+      expect((await as(db, "service_role", null,
+        "select public.claim_privacy_request($1,'2026-10-16T01:00:00Z') as claimed", [deletionRequest])).rows)
+        .toEqual([{ claimed: true }]);
+
+      // Preflight is still reversible, so an existing share remains usable.
+      expect((await as(db, "anon", null,
+        "select title from public.resolve_question_set_share($1)", [ownerShare.share_token])).rows)
+        .toEqual([{ title: "Deletion boundary" }]);
+      expect((await as(db, "authenticated", otherShareOwner,
+        "select title from public.academic_collections where id=$1", [collection])).rows)
+        .toEqual([{ title: "Owner shared bank" }]);
+      expect((await as(db, "service_role", null,
+        "select public.begin_account_deletion_cleanup($1) as started", [deletionRequest])).rows)
+        .toEqual([{ started: true }]);
+      // The state marker, share revocation and academic withdrawal are one
+      // database transaction. Visibility metadata is retained as evidence.
+      expect((await db.query("select failure_code from public.privacy_requests where id=$1", [deletionRequest])).rows)
+        .toEqual([{ failure_code: "deletion-cleanup-started" }]);
+      expect((await db.query("select withdrawn,visibility from public.academic_collections where id=$1", [collection])).rows)
+        .toEqual([{ withdrawn: true, visibility: "shared" }]);
+      expect((await as(db, "anon", null,
+        "select title from public.resolve_question_set_share($1)", [ownerShare.share_token])).rows).toEqual([]);
+      expect((await as(db, "authenticated", otherShareOwner,
+        "select title from public.academic_collections where id=$1", [collection])).rows).toEqual([]);
+      expect((await as(db, "anon", null,
+        "select title from public.resolve_question_set_share($1)", [otherShare.share_token])).rows)
+        .toEqual([{ title: "Deletion boundary" }]);
+
+      await db.query("update public.privacy_requests set status='failed',failure_code='deletion-reconciliation-required' where id=$1", [deletionRequest]);
+      await expect(db.query(`insert into public.privacy_requests(user_id,kind,status,scheduled_for)
+        values($1,'deletion','scheduled',now()+interval '7 days')`, [A])).rejects.toMatchObject({ code: "23505" });
+      await db.query(`insert into public.privacy_requests(user_id,kind,status)
+        values($1,'export','requested')`, [A]);
+      const pendingExport = (await db.query<{ id: string }>("select id from public.privacy_requests where user_id=$1 and kind='export' and status='requested'", [A])).rows[0].id;
+      expect((await as(db, "service_role", null,
+        "select public.claim_privacy_request($1,now()) as claimed", [pendingExport])).rows)
+        .toEqual([{ claimed: false }]);
+
+      const functions = await db.query<{ name: string; volatility: string; definition: string }>(`
+        select p.proname as name, p.provolatile as volatility,
+               pg_get_functiondef(p.oid) as definition
+        from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+        where n.nspname='public'
+          and p.proname in ('axom_account_accepts_cloud_writes','create_question_set_share','begin_account_deletion_cleanup')`);
+      const gate = functions.rows.find(row => row.name === "axom_account_accepts_cloud_writes")!;
+      const publisher = functions.rows.find(row => row.name === "create_question_set_share")!;
+      const cleanup = functions.rows.find(row => row.name === "begin_account_deletion_cleanup")!;
+      expect(gate.volatility).toBe("v");
+      expect(publisher.definition.indexOf("pg_advisory_xact_lock"))
+        .toBeLessThan(publisher.definition.indexOf("axom_account_accepts_cloud_writes"));
+      expect(cleanup.definition).toContain("pg_advisory_xact_lock");
+    } finally { await db.close(); }
+  }, 60_000);
+
+  it("classifies a lost cleanup response from committed database state", async () => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
+    const destructive = "33333333-3333-4333-8333-333333333333";
+    const reversible = "44444444-4444-4444-8444-444444444444";
+    try {
+      await db.query("insert into auth.users(id,email) values ($1,'a@x.test'),($2,'b@x.test')", [A, B]);
+      await db.query(`insert into public.privacy_requests(id,user_id,kind,status,failure_code)
+        values($1,$3,'deletion','processing','deletion-preflight'),
+              ($2,$4,'deletion','processing','deletion-preflight')`, [destructive, reversible, A, B]);
+      expect((await as(db, "service_role", null,
+        "select public.begin_account_deletion_cleanup($1) as started", [destructive])).rows)
+        .toEqual([{ started: true }]);
+
+      expect((await as(db, "service_role", null,
+        "select public.record_account_deletion_failure($1,false) as code", [destructive])).rows)
+        .toEqual([{ code: "deletion-reconciliation-required" }]);
+      expect((await as(db, "service_role", null,
+        "select public.record_account_deletion_failure($1,false) as code", [reversible])).rows)
+        .toEqual([{ code: "deletion-preflight-failed" }]);
+      expect((await db.query("select id,status,failure_code from public.privacy_requests order by id")).rows)
+        .toEqual([
+          { id: destructive, status: "failed", failure_code: "deletion-reconciliation-required" },
+          { id: reversible, status: "failed", failure_code: "deletion-preflight-failed" },
+        ]);
+    } finally { await db.close(); }
+  }, 60_000);
+
+  it("quarantines stale external work instead of making it eligible for automatic replay", async () => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
+    const request = "33333333-3333-4333-8333-333333333333";
+    try {
+      await db.query("insert into auth.users(id,email) values ($1,'a@x.test')", [A]);
+      await db.query(`insert into public.privacy_requests(id,user_id,kind,status,processing_at)
+        values($1,$2,'export','processing','2000-01-01')`, [request, A]);
+      expect((await as(db, "service_role", null,
+        "select public.quarantine_stale_privacy_requests('2026-10-16') as quarantined")).rows)
+        .toEqual([{ quarantined: 1 }]);
+      expect((await db.query("select status,failure_code from public.privacy_requests where id=$1", [request])).rows)
+        .toEqual([{ status: "failed", failure_code: "export-reconciliation-required" }]);
+      await expect(db.query("insert into public.privacy_requests(user_id,kind,status) values($1,'export','requested')", [A]))
+        .rejects.toMatchObject({ code: "23505" });
+    } finally { await db.close(); }
+  }, 60_000);
+
+  it("upgrades legacy duplicate privacy candidates without dropping their evidence", async () => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false, stopBefore: privacyBarrierMigration });
+    const scheduledDeletion = "33333333-3333-4333-8333-333333333333";
+    const failedDeletion = "44444444-4444-4444-8444-444444444444";
+    const requestedExport = "55555555-5555-4555-8555-555555555555";
+    const failedExport = "66666666-6666-4666-8666-666666666666";
+    try {
+      await db.query("insert into auth.users(id,email) values ($1,'a@x.test'),($2,'b@x.test')", [A, B]);
+      await db.query(`insert into public.privacy_requests
+        (id,user_id,kind,status,failure_code,scheduled_for,completion_payload,created_at)
+        values
+          ($1,$5,'deletion','scheduled',null,'2026-10-20','{"scheduled":true}','2026-10-15'),
+          ($2,$5,'deletion','failed','deletion-reconciliation-required',null,'{"failed":true}','2026-10-14'),
+          ($3,$6,'export','requested',null,null,'{"requested":true}','2026-10-15'),
+          ($4,$6,'export','failed','export-reconciliation-required',null,'{"failed":true}','2026-10-14')`,
+      [scheduledDeletion, failedDeletion, requestedExport, failedExport, A, B]);
+
+      await db.exec(`begin;${readFileSync(migrationsDir + privacyBarrierMigration, "utf8")}commit;`);
+
+      const rows = await db.query<{
+        id: string;
+        status: string;
+        failure_code: string | null;
+        completion_payload: Record<string, unknown> | null;
+      }>("select id,status,failure_code,completion_payload from public.privacy_requests order by id");
+      expect(rows.rows.find(row => row.id === failedDeletion)).toMatchObject({
+        status: "failed",
+        failure_code: "deletion-reconciliation-required",
+        completion_payload: { failed: true },
+      });
+      expect(rows.rows.find(row => row.id === failedExport)).toMatchObject({
+        status: "failed",
+        failure_code: "export-reconciliation-required",
+        completion_payload: { failed: true },
+      });
+      expect(rows.rows.find(row => row.id === scheduledDeletion)).toMatchObject({
+        status: "cancelled",
+        failure_code: "legacy-single-flight-duplicate",
+        completion_payload: {
+          _axom_privacy_migration: {
+            migration: "20261016011812",
+            reason: "legacy-single-flight-duplicate",
+            canonical_request_id: failedDeletion,
+            original_status: "scheduled",
+            original_failure_code: null,
+          },
+          prior_completion_payload: { scheduled: true },
+        },
+      });
+      expect(rows.rows.find(row => row.id === requestedExport)).toMatchObject({
+        status: "cancelled",
+        failure_code: "legacy-single-flight-duplicate",
+        completion_payload: {
+          _axom_privacy_migration: {
+            canonical_request_id: failedExport,
+            original_status: "requested",
+          },
+          prior_completion_payload: { requested: true },
+        },
+      });
+      await expect(db.query(`insert into public.privacy_requests(user_id,kind,status)
+        values($1,'export','requested')`, [B])).rejects.toMatchObject({ code: "23505" });
+      await expect(db.query(`insert into public.privacy_requests(user_id,kind,status,scheduled_for)
+        values($1,'deletion','scheduled',now()+interval '7 days')`, [A])).rejects.toMatchObject({ code: "23505" });
+    } finally { await db.close(); }
+  }, 60_000);
+
+  it("aborts legacy normalization when duplicate candidates include active external work", async () => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false, stopBefore: privacyBarrierMigration });
+    const processing = "33333333-3333-4333-8333-333333333333";
+    const failed = "44444444-4444-4444-8444-444444444444";
+    try {
+      await db.query("insert into auth.users(id,email) values ($1,'a@x.test')", [A]);
+      await db.query(`insert into public.privacy_requests(id,user_id,kind,status,failure_code,processing_at)
+        values($1,$3,'deletion','processing','deletion-preflight',now()),
+              ($2,$3,'deletion','failed','deletion-reconciliation-required',null)`, [processing, failed, A]);
+
+      await expect(db.exec(`begin;${readFileSync(migrationsDir + privacyBarrierMigration, "utf8")}commit;`))
+        .rejects.toThrow(/manual reconciliation of duplicate processing requests/i);
+      await db.exec("rollback");
+
+      expect((await db.query("select id,status,failure_code from public.privacy_requests order by id")).rows)
+        .toEqual([
+          { id: processing, status: "processing", failure_code: "deletion-preflight" },
+          { id: failed, status: "failed", failure_code: "deletion-reconciliation-required" },
+        ]);
+    } finally { await db.close(); }
+  }, 60_000);
+
   it("rejects stale authenticated claims after the Auth user is deleted", async () => {
     const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
     const collection = "33333333-3333-4333-8333-333333333333";
@@ -379,6 +613,11 @@ describe("Supabase migrations on real Postgres", () => {
       expect(await canExecute(db, role,
         "axom_private.create_question_set_share_without_account_gate(text,jsonb)"),
       `${role} on internal share publisher`).toBe(false);
+    }
+    for (const signature of SERVICE_ONLY_PRIVACY) {
+      expect(await canExecute(db, "anon", signature), `anon on ${signature}`).toBe(false);
+      expect(await canExecute(db, "authenticated", signature), `authenticated on ${signature}`).toBe(false);
+      expect(await canExecute(db, "service_role", signature), `service_role on ${signature}`).toBe(true);
     }
     expect(await canExecute(db, "anon", "public.revoke_question_set_share(uuid)")).toBe(false);
     expect(await canExecute(db, "authenticated", "public.revoke_question_set_share(uuid)")).toBe(true);

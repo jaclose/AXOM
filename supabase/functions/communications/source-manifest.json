@@ -10,7 +10,7 @@
     "web/src/lib/communications/model.ts": "df12dc539c4f478044491d3a4a498aa50b7cf2cefd0b4ef5620c20eace895f2b",
     "web/src/lib/communications/server/campaigns.ts": "90e1728f7962b9bc7fb6dd57047a05e22abb39891f8623eddf3857d73729fbcc",
     "web/src/lib/communications/server/handler.ts": "1de76c7182aed1a008d52ea94ee1828beb6d1aeb13facf8d0d19c152bd64902c",
-    "web/src/lib/communications/server/privacy.ts": "95244275c897d61f8f136d41253ed07c3b04e0546cc8c6ce829a15527d78c178",
+    "web/src/lib/communications/server/privacy.ts": "848ac32a002dd49fb013c3053da7def6d8f0750a43050119ec221f0c7409a977",
     "web/src/lib/communications/server/provider.ts": "3b8d69d1c2959955e384192ed124e8fc4d05374d165f406895ea34c15dbc2535",
     "web/src/lib/communications/server/service.ts": "e94e0ecace2489f01d52b66e908238e53dc6bf0c30e4c74e22134b8ff01bf074",
     "web/src/lib/communications/snapshot.ts": "256864b7340135a748f3e51744311f6d5fa1692bd0f3b783584c998720f5d86d",
@@ -20,7 +20,7 @@
     "web/src/lib/learning-intelligence/attempts.ts": "7aad725357592550afcabe88b60bb66a2a4ce2abe9e7695e09b4415c1b680d98",
     "web/src/lib/learning-intelligence/patterns.ts": "96ad68a9638b45ca7a48094b7ee8b5af5c9027c57b1ec8aeae6442ec9c852b25",
     "web/src/lib/learning-intelligence/questionFeatures.ts": "a75b3a03ccdf1edb53b268a222bb629c41b057f82a9010257b62047bd8d4ec88",
-    "web/src/lib/localVault.ts": "6f3fae11fa04dede8a72cfc111f51a5b182a587c7c6be384aae46aaf59e2aea5",
+    "web/src/lib/localVault.ts": "e6db176d56281cc55986fdfdcd62aa206421eb696e3f61177e7e8a0d651a9c33",
     "web/src/lib/questionAnnotations.ts": "d697acb109debc8747b57c0efda3136a3982c16dd99be4391b0ae444b25275a4",
     "web/src/lib/questionAttachments.ts": "391d2e6bfd9df0c15d15df63d0801c8a89c389669ea2cb4659ca23979fbcb5a3",
     "web/src/lib/questions.ts": "dc002f056ad1852df89ba7e6e7e2a2d284cdb1dd73e645a4f35a90011fd17a83",
@@ -32,7 +32,7 @@
   },
   "bundle": {
     "path": "supabase/functions/communications/service.js",
-    "sha256": "796d6390ba02caf2e4d644c7c657ff58593f78031b57606b30f03a09d8f30ff0"
+    "sha256": "3caf56676d09381e7d235709fbdf5f1b967ef39bd73aca7e1e3b55cd2235177c"
   },
   "authTemplates": {
     "supabase/templates/communications/confirmation.html": "4dd18e7542a9200ce4ade0b1aa46dbc66a70ea20dd317fb3f241bef50f37a70b",

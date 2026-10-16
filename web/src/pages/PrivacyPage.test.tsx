@@ -118,4 +118,24 @@ describe("PrivacyPage", () => {
     await waitFor(() => expect(within(history).getByText("Account export")).toBeTruthy());
     expect(within(history).queryByText(/no account data requests/i)).toBeNull();
   });
+
+  it("offers cancellation only while deletion is genuinely reversible", () => {
+    remote = {
+      data: settings([
+        { id: "scheduled", kind: "deletion", status: "scheduled" },
+        { id: "preflight", kind: "deletion", status: "failed", failure_code: "deletion-preflight-failed" },
+        { id: "irreversible", kind: "deletion", status: "failed", failure_code: "deletion-reconciliation-required" },
+        { id: "retryable-export", kind: "export", status: "failed", failure_code: "privacy-processing-failed" },
+      ]),
+      loading: false,
+      error: "",
+      reload: mocks.reload,
+    };
+    render(<PrivacyPage />);
+
+    const history = screen.getByRole("heading", { name: "Your requests" }).closest("section")!;
+    expect(within(history).getAllByRole("button", { name: "Cancel deletion" })).toHaveLength(2);
+    expect(within(history).getAllByText(/needs operator review and cannot be retried or cancelled automatically/i)).toHaveLength(1);
+    expect(within(history).getByText(/you can request another account export/i)).toBeTruthy();
+  });
 });

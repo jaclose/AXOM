@@ -8,6 +8,7 @@ import {
   removeOwnedAcademicStorage,
   removeOwnedAccountStorage,
   removeOwnedExportStorage,
+  requestPrivacy,
 } from "./server/privacy";
 import { ProviderError } from "./server/provider";
 import { validateEditorial } from "./server/campaigns";
@@ -22,6 +23,7 @@ type BoundaryResult = {
 
 function database(results: BoundaryResult[] = []) {
   const calls: { table: string; method: string; args: unknown[] }[] = [];
+  const rpcCalls: { name: string; args: Record<string, unknown> | undefined }[] = [];
   const from = vi.fn((table: string) => {
     const result = results.shift() ?? { data: null, error: null };
     const chain: Record<string, unknown> = {};
@@ -30,9 +32,48 @@ function database(results: BoundaryResult[] = []) {
     return chain;
   });
   const user = { id: "account-a", email: "alex@example.invalid", email_confirmed_at: "2026-01-01", user_metadata: { role: "admin" } } as unknown as User;
-  const storage = { listV2: vi.fn(), upload: vi.fn(), remove: vi.fn() };
-  const db = { from, rpc: vi.fn(async () => ({ data: true, error: null })), auth: { getUser: vi.fn(async () => ({ data: { user }, error: null })), admin: { getUserById: vi.fn(async () => ({ data: { user }, error: null })) } }, storage: { from: vi.fn(() => storage) } } as unknown as SupabaseClient;
-  return { db, calls, storage };
+  const storage = {
+    listV2: vi.fn().mockResolvedValue({
+      data: { objects: [], folders: [], hasNext: false },
+      error: null,
+    }),
+    upload: vi.fn(),
+    remove: vi.fn(),
+  };
+  const rpc = vi.fn(async (name: string, args?: Record<string, unknown>) => {
+    rpcCalls.push({ name, args });
+    // Keep existing boundary fixtures aligned while the production path moves
+    // the same transitions into atomic database functions.
+    if (name === "quarantine_stale_privacy_requests") {
+      const exports = results.shift() ?? ok();
+      const deletions = results.shift() ?? ok();
+      return exports.error ? exports : deletions.error ? deletions : ok(0);
+    }
+    if (["claim_privacy_request", "finalize_privacy_export", "begin_account_deletion_cleanup"].includes(name)) {
+      const result = results.shift() ?? ok(true);
+      return result.data == null && !result.error ? ok(true) : result;
+    }
+    if (name === "record_account_deletion_failure") {
+      const fallbackCode = args?.p_requires_reconciliation
+        ? "deletion-reconciliation-required"
+        : "deletion-preflight-failed";
+      const queued = results.shift();
+      const result = !queued || (queued.data == null && !queued.error)
+        ? ok(fallbackCode)
+        : queued;
+      if (!result.error && typeof result.data === "string") {
+        calls.push({
+          table: "privacy_requests",
+          method: "update",
+          args: [{ status: "failed", failure_code: result.data }],
+        });
+      }
+      return result;
+    }
+    return { data: true, error: null };
+  });
+  const db = { from, rpc, auth: { getUser: vi.fn(async () => ({ data: { user }, error: null })), admin: { getUserById: vi.fn(async () => ({ data: { user }, error: null })) } }, storage: { from: vi.fn(() => storage) } } as unknown as SupabaseClient;
+  return { db, calls, rpcCalls, storage };
 }
 const job: EmailJob = { id: "job-a", user_id: "account-a", type: "weekly_report", category: "weekly_report", idempotency_key: "account-a:week", status: "processing", attempts: 1, variables: {}, created_at: new Date().toISOString() };
 const ok = (data: unknown = null) => ({ data, error: null });
@@ -142,14 +183,14 @@ describe("deletion dependency safety", () => {
   });
 
   it.each([
-    { scenario: "deletion starts", blocked: [{ status: "processing", failure_code: "deletion-preflight" }], accountRemoved: false },
-    { scenario: "the Auth row disappears", blocked: [], accountRemoved: true },
-  ])("removes a privileged export upload when $scenario between safety checks", async ({ blocked, accountRemoved }) => {
+    { scenario: "cleanup succeeds", removalError: null, failureCode: "privacy-processing-failed" },
+    { scenario: "cleanup cannot be confirmed", removalError: { message: "unavailable" }, failureCode: "export-deletion-reconciliation-required" },
+  ])("does not publish an export after its atomic barrier is lost when $scenario", async ({ removalError, failureCode }) => {
     const request = { id: "11111111-1111-4111-8111-111111111111", user_id: "account-a", kind: "export", status: "requested" };
     const { db, calls, storage } = database([
       ok(), ok(), ok([request]), ok({ id: request.id }),
       ok([]), ok([]), ok([]),
-      ok([]), ok(blocked), ok(),
+      ok(false), ok(),
       ok([]), ok([]), ok(), ok(), ok(),
     ]);
     const service = new CommunicationsService(db, {});
@@ -159,13 +200,8 @@ describe("deletion dependency safety", () => {
     vi.spyOn(service, "preferenceRows").mockResolvedValue(preferences());
     vi.spyOn(service, "identity").mockResolvedValue({ accent: "#c8a96a", theme: "dark", locale: "en" });
     const enqueue = vi.spyOn(service, "enqueue").mockResolvedValue();
-    if (accountRemoved) {
-      db.auth.admin.getUserById = vi.fn()
-        .mockResolvedValueOnce({ data: { user: account }, error: null })
-        .mockResolvedValueOnce({ data: { user: null }, error: { message: "not found" } });
-    }
     storage.upload.mockResolvedValue({ data: { path: `account-a/${request.id}.json` }, error: null });
-    storage.remove.mockResolvedValue({ data: [{ name: `${request.id}.json` }], error: null });
+    storage.remove.mockResolvedValue({ data: removalError ? null : [{ name: `${request.id}.json` }], error: removalError });
 
     await expect(processPrivacy(service)).resolves.toBe(0);
 
@@ -175,7 +211,91 @@ describe("deletion dependency safety", () => {
     expect(calls).toContainEqual({
       table: "privacy_requests",
       method: "update",
-      args: [{ status: "failed", failure_code: "export-cancelled-for-deletion" }],
+      args: [{ status: "failed", failure_code: failureCode }],
+    });
+  });
+
+  it("quarantines an ambiguous export finalization response without deleting its object", async () => {
+    const request = { id: "11111111-1111-4111-8111-111111111111", user_id: "account-a", kind: "export", status: "requested" };
+    const { db, calls, storage } = database([
+      ok(), ok(), ok([request]), ok({ id: request.id }),
+      ok([]), ok([]), ok([]),
+      { data: null, error: { message: "finalization response lost" } }, ok(),
+      ok([]), ok([]), ok(), ok(), ok(),
+    ]);
+    const service = new CommunicationsService(db, {});
+    const account = { id: "account-a", email: "alex@example.invalid", email_confirmed_at: "2026-01-01", user_metadata: {} } as unknown as User;
+    vi.spyOn(service, "workspace").mockResolvedValue(null);
+    vi.spyOn(service, "user").mockResolvedValue(account);
+    vi.spyOn(service, "preferenceRows").mockResolvedValue(preferences());
+    vi.spyOn(service, "identity").mockResolvedValue({ accent: "#c8a96a", theme: "dark", locale: "en" });
+    const enqueue = vi.spyOn(service, "enqueue").mockResolvedValue();
+    storage.upload.mockResolvedValue({ data: { path: `account-a/${request.id}.json` }, error: null });
+
+    await expect(processPrivacy(service)).resolves.toBe(0);
+
+    expect(storage.upload).toHaveBeenCalledOnce();
+    expect(storage.remove).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(calls).toContainEqual({
+      table: "privacy_requests",
+      method: "update",
+      args: [{ status: "failed", failure_code: "export-deletion-reconciliation-required" }],
+    });
+  });
+
+  it("retains reconciliation after an ambiguous upload even when one remove is acknowledged", async () => {
+    const request = { id: "11111111-1111-4111-8111-111111111111", user_id: "account-a", kind: "export", status: "requested" };
+    const { db, calls, storage } = database([
+      ok(), ok(), ok([request]), ok({ id: request.id }),
+      ok([]), ok([]), ok([]),
+      ok(),
+      ok([]), ok([]), ok(), ok(), ok(),
+    ]);
+    const service = new CommunicationsService(db, {});
+    const account = { id: "account-a", email: "alex@example.invalid", email_confirmed_at: "2026-01-01", user_metadata: {} } as unknown as User;
+    vi.spyOn(service, "workspace").mockResolvedValue(null);
+    vi.spyOn(service, "user").mockResolvedValue(account);
+    vi.spyOn(service, "preferenceRows").mockResolvedValue(preferences());
+    vi.spyOn(service, "identity").mockResolvedValue({ accent: "#c8a96a", theme: "dark", locale: "en" });
+    storage.upload.mockRejectedValue(new Error("upload response lost"));
+    storage.remove.mockResolvedValue({ data: [{ name: `${request.id}.json` }], error: null });
+
+    await expect(processPrivacy(service)).resolves.toBe(0);
+
+    expect(storage.remove).toHaveBeenCalledWith([`account-a/${request.id}.json`]);
+    expect(storage.listV2).not.toHaveBeenCalled();
+    expect(calls).toContainEqual({
+      table: "privacy_requests",
+      method: "update",
+      args: [{ status: "failed", failure_code: "export-deletion-reconciliation-required" }],
+    });
+  });
+
+  it("asks Postgres to classify a lost deletion-boundary response", async () => {
+    const request = { id: "delete-a", user_id: "account-a", kind: "deletion", status: "scheduled", scheduled_for: "2000-01-01" };
+    const { db, calls, rpcCalls } = database([
+      ok(), ok(), ok([request]), ok(true),
+      { data: [], error: null, count: 0 }, ok([]),
+      { data: [], error: null, count: 0 },
+      { data: null, error: { message: "cleanup response lost" } },
+      ok("deletion-reconciliation-required"),
+    ]);
+    const service = new CommunicationsService(db, { AXOM_ACCOUNT_DELETION_ENABLED: "true" });
+    vi.spyOn(service, "identity").mockResolvedValue({ accent: "#c8a96a", theme: "dark", locale: "en" });
+    db.auth.admin.deleteUser = vi.fn();
+
+    await expect(processPrivacy(service)).resolves.toBe(0);
+
+    expect(db.auth.admin.deleteUser).not.toHaveBeenCalled();
+    expect(rpcCalls).toContainEqual({
+      name: "record_account_deletion_failure",
+      args: { p_request_id: request.id, p_requires_reconciliation: false },
+    });
+    expect(calls).toContainEqual({
+      table: "privacy_requests",
+      method: "update",
+      args: [{ status: "failed", failure_code: "deletion-reconciliation-required" }],
     });
   });
 
@@ -308,6 +428,21 @@ describe("deletion dependency safety", () => {
     await expect(cancelDeletion(irreversibleService, "account-a", "delete-b"))
       .rejects.toThrow("can no longer be cancelled");
     expect(irreversible.calls.some(call => call.method === "update")).toBe(false);
+  });
+
+  it.each([
+    ["deletion-preflight-failed", "Cancel the existing failed deletion request"],
+    ["deletion-reconciliation-required", "needs manual reconciliation"],
+  ])("does not silently reschedule a failed deletion in %s", async (failureCode, message) => {
+    const { db } = database([
+      { data: null, error: { code: "23505", message: "duplicate" } },
+      ok([{ status: "failed", failure_code: failureCode }]),
+    ]);
+    const service = new CommunicationsService(db, {});
+    const enqueue = vi.spyOn(service, "enqueue").mockResolvedValue();
+
+    await expect(requestPrivacy(service, "account-a", "deletion")).rejects.toThrow(message);
+    expect(enqueue).not.toHaveBeenCalled();
   });
 
   it("treats no academic collections as a completed, retry-safe cleanup", async () => {

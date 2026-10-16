@@ -63,6 +63,16 @@ export function PrivacyPage() {
           ? <p>Sign in to view account data requests.</p>
           : remote.data.privacy.length === 0
             ? <p>No account data requests yet.</p>
-            : <ul>{remote.data.privacy.map(request => <li key={request.id}><div><strong>{request.kind === "export" ? "Account export" : "Account deletion"}</strong><small>{request.scheduled_for ? new Date(request.scheduled_for).toLocaleString() : ""}</small></div><span className="comms-state">{request.status}</span>{request.kind === "export" && request.status === "ready" && <button disabled={busy} onClick={() => void perform(async () => { const result = await communicationsRequest<{ url: string }>("export-link", { id: request.id }); const link = document.createElement("a"); link.href = result.url; link.rel = "noreferrer"; link.click(); }, "Private download opened.")}>Download</button>}{request.kind === "deletion" && ["scheduled", "failed"].includes(request.status) && <button disabled={busy} onClick={() => void perform(() => communicationsRequest("cancel-deletion", { id: request.id }), "Deletion cancelled.")}>Cancel deletion</button>}</li>)}</ul>}</section>
+            : <ul>{remote.data.privacy.map(request => {
+              const cancellableDeletion = request.kind === "deletion"
+                && (request.status === "scheduled"
+                  || (request.status === "failed" && request.failure_code === "deletion-preflight-failed"));
+              const needsReconciliation = request.status === "failed"
+                && request.failure_code?.endsWith("reconciliation-required");
+              const retryableExport = request.kind === "export"
+                && request.status === "failed"
+                && !needsReconciliation;
+              return <li key={request.id}><div><strong>{request.kind === "export" ? "Account export" : "Account deletion"}</strong><small>{request.scheduled_for ? new Date(request.scheduled_for).toLocaleString() : ""}</small>{needsReconciliation && <small>This request needs operator review and cannot be retried or cancelled automatically.</small>}{retryableExport && <small>This export did not complete. You can request another account export.</small>}</div><span className="comms-state">{request.status}</span>{request.kind === "export" && request.status === "ready" && <button disabled={busy} onClick={() => void perform(async () => { const result = await communicationsRequest<{ url: string }>("export-link", { id: request.id }); const link = document.createElement("a"); link.href = result.url; link.rel = "noreferrer"; link.click(); }, "Private download opened.")}>Download</button>}{cancellableDeletion && <button disabled={busy} onClick={() => void perform(() => communicationsRequest("cancel-deletion", { id: request.id }), "Deletion cancelled.")}>Cancel deletion</button>}</li>;
+            })}</ul>}</section>
   </main>;
 }

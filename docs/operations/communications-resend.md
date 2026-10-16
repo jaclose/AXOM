@@ -213,8 +213,15 @@ The cron task must invoke the full URL including `action=worker`. Observe actual
 execution time and queue age before scaling. Each pass is bounded, but this initial
 implementation is optimized for an early product audience, not unbounded bulk campaigns.
 Increase throughput only after measuring provider rate limits and Edge execution budgets.
-A 10-minute global lease handles overlapping invocations; stale exports retry after
-15 minutes, while interrupted deletions require manual reconciliation.
+A 10-minute global lease handles normal overlapping invocations. Postgres also owns a
+per-account privacy claim: an export and deletion cannot cross their external I/O
+boundaries concurrently. Any export or deletion still processing after 15 minutes is
+quarantined for manual reconciliation and is not automatically replayed.
+The share publisher and deletion boundary take the same owner advisory lock and recheck
+the account gate inside it. When deletion crosses that boundary, the transaction revokes
+the owner's bearer question links, withdraws every owned academic collection from other
+learners and records `deletion-cleanup-started` together. It retains the collection's prior
+visibility and group metadata as reconciliation evidence.
 
 The worker still processes privacy exports and deletion jobs when email mode is disabled.
 Deletion has its own separate flag. To pause all work, disable the scheduler as well as
@@ -284,7 +291,35 @@ receipt loop backs off and stops after five failures or the 23-hour boundary.
 For `deletion-reconciliation-required`, inspect whether Auth removal occurred, provider
 contact removal completed and temporary export objects remain. Reconcile the one request
 with recorded evidence; do not batch retry destructive work. Suppression continues while
-an account-owned failed deletion remains unresolved. The user can cancel a failed request.
+an account-owned failed deletion remains unresolved. Users can cancel only a scheduled
+request or a `deletion-preflight-failed` request, where destructive cleanup never started.
+They cannot cancel or reschedule reconciliation-required work.
+
+`export-reconciliation-required` and `export-deletion-reconciliation-required` also keep
+the account claim closed. Confirm the worker is no longer running, inspect the exact
+`communications-exports/<user-id>/` prefix, remove or preserve the object according to
+the request record, and only then clear the failed barrier through a reviewed operator
+procedure. Do not create a replacement export while either marker exists.
+An ambiguous Storage upload response always uses the reconciliation barrier even when one
+remove call is acknowledged, because that call is not a generation fence. A deterministic
+database finalization refusal can be retryable only after remove succeeds and a complete
+owner-prefix re-list confirms the exact object is absent.
+
+Before applying `20261016011812_harden_privacy_request_barrier.sql`, inspect legacy privacy
+rows. The migration preserves non-processing duplicate evidence inside
+`completion_payload._axom_privacy_migration`, retains one canonical blocker and cancels only
+the normalized duplicate row. It aborts if a duplicate candidate group contains a
+`processing` row; reconcile that exact account manually before rerunning the migration.
+
+Hosted Storage remains a cross-service acceptance boundary. A
+[resumable TUS upload URL](https://supabase.com/docs/guides/storage/uploads/resumable-uploads)
+can remain valid for up to 24 hours after creation. The database write barrier prevents
+new app writes, but a previously authorized in-flight upload must not be assumed cancelled
+by a local migration or PGlite test. Before live deletion acceptance, stop client upload
+sessions, wait out or explicitly invalidate outstanding upload capabilities where the
+host supports it, then re-list every exact owner and academic collection prefix after the
+24-hour window. Treat any late object as reconciliation-required; never claim that Auth,
+Postgres and Storage deletion is atomic.
 
 Rollback application code first while retaining additive tables and consent history.
 Remove/disable the welcome trigger if reverting the backend. Do not drop queues, snapshots

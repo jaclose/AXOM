@@ -185,31 +185,35 @@ export async function removeOwnedExportStorage(service: CommunicationsService, u
   await executeStorageCleanup(service, await planOwnedExportStorage(service, userId));
 }
 
-async function assertExportWriteAllowed(service: CommunicationsService, userId: string): Promise<void> {
-  const [account, deletionResult] = await Promise.all([
-    service.db.auth.admin.getUserById(userId),
-    service.db.from("privacy_requests")
-      .select("status,failure_code")
-      .eq("user_id", userId)
-      .eq("kind", "deletion")
-      .in("status", ["processing", "failed"])
-      .limit(20),
-  ]);
-  if (account.error || !account.data.user) throw new Error("export-cancelled-for-deletion");
-  const deletions = checked(deletionResult) as { status: string; failure_code: string | null }[] | null;
-  if ((deletions ?? []).some(row => row.status === "processing"
-    || (row.status === "failed" && row.failure_code === "deletion-reconciliation-required"))) {
-    throw new Error("export-cancelled-for-deletion");
-  }
-}
-
-async function removeExportAfterDeletionRace(
+async function removeExportAfterBarrierLoss(
   service: CommunicationsService,
   objectPath: string,
   cause: unknown,
+  retryAfterConfirmedAbsence: boolean,
 ): Promise<never> {
   const removed = await service.db.storage.from("communications-exports").remove([objectPath]);
   if (removed.error) throw new Error("export-deletion-reconciliation-required", { cause });
+  // A failed upload response is ambiguous even after one remove acknowledgement:
+  // the cross-service write has no generation fence. Only a deterministic
+  // database refusal may become retryable, and only after an empty re-list.
+  if (!retryAfterConfirmedAbsence) {
+    throw new Error("export-deletion-reconciliation-required", { cause });
+  }
+  try {
+    const ownerId = objectPath.slice(0, objectPath.indexOf("/"));
+    const verification = await planStoragePrefix(
+      service,
+      "communications-exports",
+      ownerId,
+      "export-storage",
+    );
+    if (verification.removals.some(removal =>
+      (typeof removal === "string" ? removal : removal.path) === objectPath)) {
+      throw new Error("export-storage-cleanup-unconfirmed");
+    }
+  } catch (error) {
+    throw new Error("export-deletion-reconciliation-required", { cause: error });
+  }
   throw cause;
 }
 
@@ -218,7 +222,22 @@ export async function requestPrivacy(service: CommunicationsService, userId: str
   if (!user.email_confirmed_at) throw new Error("Verify your email before continuing.");
   const scheduled = new Date(Date.now() + 7 * 86400000).toISOString();
   const result = await service.db.from("privacy_requests").insert({ user_id: userId, kind, status: kind === "deletion" ? "scheduled" : "requested", scheduled_for: kind === "deletion" ? scheduled : null, notification_email: kind === "deletion" ? user.email : null }).select("id").single();
-  if (result.error?.code === "23505") return;
+  if (result.error?.code === "23505") {
+    const existing = checked(await service.db.from("privacy_requests")
+      .select("status,failure_code")
+      .eq("user_id", userId)
+      .eq("kind", kind)
+      .order("created_at", { ascending: false })
+      .limit(20)) as { status: string; failure_code: string | null }[] | null;
+    const failed = (existing ?? []).find(row => row.status === "failed");
+    if (failed) {
+      if (kind === "deletion" && failed.failure_code === "deletion-preflight-failed") {
+        throw new Error("Cancel the existing failed deletion request before scheduling another.");
+      }
+      throw new Error(`${kind === "deletion" ? "Deletion" : "Export"} needs manual reconciliation before another request can be scheduled.`);
+    }
+    return;
+  }
   const row = required(result);
   await service.enqueue({ userId, type: kind === "deletion" ? "deletion_requested" : "export_requested", key: `${row.id}:requested`, variables: { requestId: row.id } });
   if (kind === "deletion") await service.enqueue({ userId, type: "deletion_scheduled", key: `${row.id}:scheduled`, variables: { date: scheduled } });
@@ -237,19 +256,19 @@ export async function cancelDeletion(service: CommunicationsService, userId: str
 }
 export async function processPrivacy(service: CommunicationsService): Promise<number> {
   const now = new Date().toISOString();
-  // Export retries overwrite the same private object. Interrupted deletions need operator reconciliation.
+  // Any stale job may have crossed an external I/O boundary. Keep its durable
+  // account barrier closed until an operator confirms Storage and worker state.
   const stale = new Date(Date.now() - 15 * 60000).toISOString();
-  checked(await service.db.from("privacy_requests").update({ status: "requested", processing_at: null }).eq("kind", "export").eq("status", "processing").lt("processing_at", stale));
-  checked(await service.db.from("privacy_requests").update({ status: "failed", failure_code: "deletion-reconciliation-required" }).eq("kind", "deletion").eq("status", "processing").lt("processing_at", stale));
+  checked(await service.db.rpc("quarantine_stale_privacy_requests", { p_stale_before: stale }));
   const requests = checked(await service.db.from("privacy_requests").select("*").in("status", ["requested", "scheduled"]).order("created_at").limit(10));
   let processed = 0;
   for (const request of requests ?? []) {
     if (request.kind === "deletion" && (request.scheduled_for > now || service.env.AXOM_ACCOUNT_DELETION_ENABLED !== "true")) continue;
-    const claimed = checked(await service.db.from("privacy_requests").update({
-      status: "processing",
-      processing_at: now,
-      failure_code: request.kind === "deletion" ? "deletion-preflight" : null,
-    }).eq("id", request.id).eq("status", request.status).select("id").maybeSingle()); if (!claimed) continue;
+    const claimed = checked(await service.db.rpc("claim_privacy_request", {
+      p_request_id: request.id,
+      p_now: now,
+    }));
+    if (!claimed) continue;
     let destructiveDeletionStarted = false;
     try {
       if (request.kind === "export") {
@@ -259,20 +278,39 @@ export async function processPrivacy(service: CommunicationsService): Promise<nu
         const object_path = `${request.user_id}/${request.id}.json`;
         const serialized = JSON.stringify(data);
         if (new TextEncoder().encode(serialized).byteLength > 25000000) throw new Error("export-too-large");
-        // The public worker is normally serialized by its global lease, but a
-        // lease can expire and privileged code can call this processor
-        // directly. Storage service-role writes bypass RLS, so check the
-        // account and deletion barrier immediately around the upload. If
-        // deletion wins the race, remove the just-written object before the
-        // request can be made ready.
-        await assertExportWriteAllowed(service, request.user_id);
-        checked(await service.db.storage.from("communications-exports").upload(object_path, serialized, { contentType: "application/json", upsert: true }));
+        // The Postgres claim is a durable account barrier. Deletion cannot
+        // claim this account until export finalization or explicit operator
+        // reconciliation, even if the global worker lease expires.
         try {
-          await assertExportWriteAllowed(service, request.user_id);
+          checked(await service.db.storage.from("communications-exports").upload(object_path, serialized, { contentType: "application/json", upsert: true }));
         } catch (error) {
-          await removeExportAfterDeletionRace(service, object_path, error);
+          // A lost Storage response can be ambiguous: remove the exact object
+          // before allowing a safe retry. Failed removal closes the barrier for
+          // operator reconciliation.
+          await removeExportAfterBarrierLoss(service, object_path, error, false);
         }
-        checked(await service.db.from("privacy_requests").update({ status: "ready", object_path, expires_at: new Date(Date.now() + 7 * 86400000).toISOString() }).eq("id", request.id));
+        const expiresAt = new Date(Date.now() + 7 * 86400000).toISOString();
+        let finalized: unknown;
+        try {
+          finalized = checked(await service.db.rpc("finalize_privacy_export", {
+            p_request_id: request.id,
+            p_object_path: object_path,
+            p_expires_at: expiresAt,
+          }));
+        } catch (error) {
+          // The RPC may have committed before its response was lost. Preserve
+          // both row and object for reconciliation instead of deleting a
+          // possibly ready export or automatically replaying the request.
+          throw new Error("export-deletion-reconciliation-required", { cause: error });
+        }
+        if (!finalized) {
+          await removeExportAfterBarrierLoss(
+            service,
+            object_path,
+            new Error("export-barrier-lost"),
+            true,
+          );
+        }
         await service.enqueue({ userId: request.user_id, type: "export_ready", key: `${request.id}:ready`, variables: { requestId: request.id } });
       } else {
         // Claiming the request creates the database-backed upload barrier. Do
@@ -287,12 +325,9 @@ export async function processPrivacy(service: CommunicationsService): Promise<nu
         const academicPlans = await planOwnedAcademicStorage(service, request.user_id);
         const accountPlans = await Promise.all(ACCOUNT_STORAGE_BUCKETS.map(bucket =>
           planStoragePrefix(service, bucket, request.user_id, "account-storage")));
-        required(await service.db.from("privacy_requests")
-          .update({ failure_code: "deletion-cleanup-started" })
-          .eq("id", request.id)
-          .eq("status", "processing")
-          .eq("failure_code", "deletion-preflight")
-          .select("id").single());
+        if (!checked(await service.db.rpc("begin_account_deletion_cleanup", {
+          p_request_id: request.id,
+        }))) throw new Error("deletion-barrier-lost");
         destructiveDeletionStarted = true;
         await executeStorageCleanup(service, exportPlan);
         if (identity.contact_id) {
@@ -322,12 +357,18 @@ export async function processPrivacy(service: CommunicationsService): Promise<nu
       processed++;
     } catch (error) {
       // Keep failed work visible; destructive jobs are never retried blindly.
-      const failureCode = request.kind === "deletion"
-        ? destructiveDeletionStarted ? "deletion-reconciliation-required" : "deletion-preflight-failed"
-        : error instanceof Error && ["export-cancelled-for-deletion", "export-deletion-reconciliation-required"].includes(error.message)
+      if (request.kind === "deletion") {
+        checked(await service.db.rpc("record_account_deletion_failure", {
+          p_request_id: request.id,
+          p_requires_reconciliation: destructiveDeletionStarted,
+        }));
+      } else {
+        const failureCode = error instanceof Error
+          && ["export-cancelled-for-deletion", "export-deletion-reconciliation-required"].includes(error.message)
           ? error.message
           : "privacy-processing-failed";
-      checked(await service.db.from("privacy_requests").update({ status: "failed", failure_code: failureCode }).eq("id", request.id));
+        checked(await service.db.from("privacy_requests").update({ status: "failed", failure_code: failureCode }).eq("id", request.id).eq("status", "processing"));
+      }
     }
   }
   const receipts = checked(await service.db.from("privacy_requests").select("id,notification_email,completion_payload,completion_attempt_at,completion_attempts").eq("kind", "deletion").eq("status", "completed").eq("completed_email_sent", false) .is("failure_code", null).lte("completion_retry_at", now).not("notification_email", "is", null).limit(10));
