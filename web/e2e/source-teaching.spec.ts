@@ -79,7 +79,7 @@ test(`source teaching and saved block review survive reload at ${width}px`, asyn
   await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
   await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
   await page.getByRole("button", { name: "Practice Cardiology review", exact: true }).click();
-  await page.getByText("Advanced: order, category & exam interface", { exact: true }).click();
+  await page.getByText("Advanced: order, category and timing", { exact: true }).click();
   await page.getByText("Keep document order (instead of shuffling)").click();
   await page.getByRole("button", { name: "Start tutor block" }).click();
 
@@ -112,11 +112,11 @@ test(`source teaching and saved block review survive reload at ${width}px`, asyn
   expect(saved[0]).toMatchObject({ sourcePage: 2, analyses: [{ origin: "source", status: "reviewed" }] });
   expect(saved[0].analyses![0].references.map((reference) => reference.page)).toEqual([2, 3, 4]);
 
-  // The page it rests on: the saved text at once, and the page as drawn once the original file is attached.
+  // The imported original remains device-local across reload, so the source
+  // page opens without asking the learner to attach the same file again.
   await kept.getByRole("button", { name: "See the source, page 2" }).click();
-  await expect(kept.getByText("The original file is not on this device", { exact: false })).toBeVisible();
+  await expect(kept.getByLabel("Attach the original file of Cardiology review")).toHaveCount(0);
   await kept.getByRole("button", { name: "Page 4" }).click();
-  await kept.getByLabel("Attach the original file of Cardiology review").setInputFiles(pdf);
   const drawn = kept.getByRole("img", { name: "Cardiology review, page 4" });
   await expect(drawn).toBeVisible();
   const size = await drawn.evaluate((canvas: HTMLCanvasElement) => ({ width: canvas.width, height: canvas.height, shown: canvas.getBoundingClientRect().width }));

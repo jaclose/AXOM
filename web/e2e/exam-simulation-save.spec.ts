@@ -9,7 +9,6 @@ import { STORAGE_KEYS } from "../src/lib/brand";
 test("a submitted Examplify block is saved as one run and survives a reload", async ({ page }) => {
   const errors = collectPageErrors(page);
   await openSeededSet(page, 3);
-  await page.getByText("Advanced: order, category & exam interface", { exact: true }).click();
   await page.getByRole("radio", { name: /ExamSoft \(Examplify\)/ }).click();
   await page.getByRole("button", { name: "Exam (feedback at the end)" }).click();
   await page.getByRole("button", { name: /Start exam block/ }).click();
