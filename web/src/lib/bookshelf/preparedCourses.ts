@@ -33,7 +33,8 @@ const HOSTED_COURSE_CODE = /^academic:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
 
 function hasVerifiedHostedBinding(book: CourseBook, documents: readonly SourceDocument[]): boolean {
   const collectionId = book.courseCode?.trim().match(HOSTED_COURSE_CODE)?.[0]?.slice("academic:".length);
-  if (!collectionId || !book.templateIds?.length) return false;
+  const selectedTemplateIds = book.templateIds;
+  if (!collectionId || !selectedTemplateIds?.length) return false;
   return documents.some((document) => {
     if (document.fileType !== "axom-academic-reference") return false;
     try {
@@ -46,7 +47,7 @@ function hasVerifiedHostedBinding(book: CourseBook, documents: readonly SourceDo
         && document.id === `academic-${reference.revisionId}`
         && typeof reference.accountId === "string" && reference.accountId.length > 0
         && Array.isArray(templateIds)
-        && book.templateIds.every((id) => templateIds.includes(id));
+        && selectedTemplateIds.every((id) => templateIds.includes(id));
     } catch { return false; }
   });
 }
