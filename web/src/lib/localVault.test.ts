@@ -6,6 +6,7 @@ import {
   getVaultWriteCheckpoint,
   flushLocalVaultWrites,
   localVaultStorage,
+  resetLocalVaultRuntimeForTests,
   writeLocalFallback,
 } from "./localVault";
 import { STORAGE_KEYS } from "./brand";
@@ -23,6 +24,7 @@ const storage = {
 
 beforeEach(async () => {
   values.clear();
+  resetLocalVaultRuntimeForTests();
   vi.stubGlobal("indexedDB", fakeIndexedDb);
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
   vi.stubGlobal("localStorage", storage);
@@ -32,6 +34,28 @@ beforeEach(async () => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("IndexedDB-first local vault", () => {
+  it("prevents a stale second runtime from replacing a newer workspace", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const snapshot = (label: string) => JSON.stringify({ state: { profile: { userId: "jd" }, label }, version: 34 });
+    await localVaultStorage.setItem(key, snapshot("shared base"));
+    await flushLocalVaultWrites();
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot("shared base"));
+
+    vi.resetModules();
+    const secondTab = await import("./localVault");
+    expect(await secondTab.localVaultStorage.getItem(key)).toBe(snapshot("shared base"));
+
+    await localVaultStorage.setItem(key, snapshot("first tab edit"));
+    await flushLocalVaultWrites();
+    const staleCheckpoint = secondTab.getVaultWriteCheckpoint();
+    await secondTab.localVaultStorage.setItem(key, snapshot("stale second tab edit"));
+    await secondTab.flushLocalVaultWrites();
+
+    expect(() => secondTab.assertVaultWritesSince(staleCheckpoint))
+      .toThrow(secondTab.VAULT_CONFLICT_MESSAGE);
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot("first tab edit"));
+  });
+
   it("keeps a confirmed vault save successful when optional localStorage metadata is full", async () => {
     const persisted = JSON.stringify({ state: { profile: { userId: "jd" }, value: "durable" } });
     const marker = vi.spyOn(storage, "setItem").mockImplementation(() => { throw new DOMException("Full", "QuotaExceededError"); });

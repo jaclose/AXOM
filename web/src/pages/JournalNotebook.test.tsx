@@ -345,6 +345,23 @@ describe("Journal notebook foundation", () => {
     expect(screen.getByRole("alert").textContent).toMatch(/still open.*could not confirm.*local storage/i);
   });
 
+  it("explains a stale-tab conflict without claiming the open draft was saved", async () => {
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => {
+      const conflict = new Error(localVault.VAULT_CONFLICT_MESSAGE);
+      conflict.name = "VaultConflictError";
+      throw conflict;
+    });
+    render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal/i }));
+    fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: "Keep this tab's draft visible" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Not saved on this device")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toBe(localVault.VAULT_CONFLICT_MESSAGE);
+    expect(screen.getByDisplayValue("Keep this tab's draft visible")).toBeTruthy();
+    expect(screen.queryByText("Saved to this workspace")).toBeNull();
+  });
+
   it("shows the exact account size refusal beside Journal images with recovery actions", async () => {
     useAccount.setState({
       link: "linked",

@@ -23,6 +23,32 @@ const scopedStateKey = (name: string, userId: string) => `${name}:user:${userId}
 const fallbackMarkerKey = (name: string) => `${name}:fallback-newer`;
 let vaultWriteSequence = 0;
 const vaultWriteFailures = new Map<number, Error>();
+const observedWorkspaceSnapshots = new Map<string, string | null>();
+const conflictedWorkspaceKeys = new Set<string>();
+
+export const VAULT_CONFLICT_MESSAGE = "Another AXOM tab saved a newer workspace. This tab did not overwrite it. Keep this tab open, export or copy any unsaved work, then reload AXOM and retry.";
+
+class VaultConflictError extends Error {
+  readonly code = "AXOM_VAULT_CONFLICT";
+
+  constructor() {
+    super(VAULT_CONFLICT_MESSAGE);
+    this.name = "VaultConflictError";
+  }
+}
+
+export function isVaultConflictError(error: unknown): error is Error & { code?: string } {
+  return error instanceof Error && (
+    error.name === "VaultConflictError"
+    || ("code" in error && error.code === "AXOM_VAULT_CONFLICT")
+  );
+}
+
+/** Test isolation for the one module-local runtime that represents a browser tab. */
+export function resetLocalVaultRuntimeForTests(): void {
+  observedWorkspaceSnapshots.clear();
+  conflictedWorkspaceKeys.clear();
+}
 
 /** Capture the current adapter position before a write that must be durable. */
 export function getVaultWriteCheckpoint(): number {
@@ -90,6 +116,38 @@ function snapshotFingerprint(value: string): string {
     hash = Math.imul(hash, 0x01000193);
   }
   return `${value.length}:${(hash >>> 0).toString(16)}`;
+}
+
+function workspaceFingerprint(value: string | null | undefined): string | null {
+  return typeof value === "string" ? snapshotFingerprint(value) : null;
+}
+
+function observesWorkspace(name: string): boolean {
+  return name === STORAGE_KEYS.persistedState;
+}
+
+function rememberWorkspaceSnapshot(name: string, value: string | null): void {
+  if (observesWorkspace(name) && !conflictedWorkspaceKeys.has(name)) {
+    observedWorkspaceSnapshots.set(name, workspaceFingerprint(value));
+  }
+}
+
+function workspaceExpectation(name: string): { fingerprint: string | null } | undefined {
+  if (!observesWorkspace(name)) return undefined;
+  if (conflictedWorkspaceKeys.has(name)) throw new VaultConflictError();
+  return {
+    // A runtime that has not hydrated cannot safely replace an existing vault.
+    // Zustand hydrates before normal writes; null only permits a genuinely new vault.
+    fingerprint: observedWorkspaceSnapshots.get(name) ?? null,
+  };
+}
+
+function assertFallbackStillCurrent(name: string, current: string | null, expected: { fingerprint: string | null } | undefined): void {
+  if (!expected || current === null) return;
+  if (workspaceFingerprint(current) !== expected.fingerprint) {
+    conflictedWorkspaceKeys.add(name);
+    throw new VaultConflictError();
+  }
 }
 
 /**
@@ -201,15 +259,72 @@ async function withStore<T>(
   });
 }
 
-/** One transaction: the workspace, the active-profile pointer and the per-profile copy. */
-function writeVault(name: string, value: string, userId: string): Promise<unknown> {
-  return withStore("readwrite", (store) => {
-    store.put(value, name);
-    if (userId) {
-      store.put(userId, activeUserKey(name));
-      store.put(value, scopedStateKey(name, userId));
-    }
-    return store.get(name);
+/** One transaction: compare the hydrated workspace, then replace its primary,
+ * active-profile pointer and per-profile copy. IndexedDB keeps the comparison
+ * and writes atomic across browser tabs. */
+async function writeVault(
+  name: string,
+  value: string,
+  userId: string,
+  expected?: { fingerprint: string | null },
+): Promise<void> {
+  const db = await openVault();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    let conflict: VaultConflictError | null = null;
+    let settled = false;
+
+    const write = (current: string | undefined) => {
+      // A missing record is a fresh/recreated vault, not a competing revision.
+      // Conflicts only exist when another concrete workspace replaced the one
+      // this runtime hydrated.
+      if (expected && typeof current === "string" && workspaceFingerprint(current) !== expected.fingerprint) {
+        conflict = new VaultConflictError();
+        conflictedWorkspaceKeys.add(name);
+        tx.abort();
+        return;
+      }
+      store.put(value, name);
+      if (userId) {
+        store.put(userId, activeUserKey(name));
+        store.put(value, scopedStateKey(name, userId));
+      }
+    };
+
+    const primary = store.get(name);
+    primary.onsuccess = () => {
+      if (typeof primary.result === "string") {
+        write(primary.result);
+        return;
+      }
+      const active = store.get(activeUserKey(name));
+      active.onsuccess = () => {
+        if (typeof active.result !== "string" || !active.result) {
+          write(undefined);
+          return;
+        }
+        const scoped = store.get(scopedStateKey(name, active.result));
+        scoped.onsuccess = () => write(typeof scoped.result === "string" ? scoped.result : undefined);
+      };
+    };
+
+    tx.oncomplete = () => {
+      db.close();
+      if (!settled) resolve();
+      settled = true;
+    };
+    tx.onerror = () => {
+      if (conflict || settled) return;
+      db.close();
+      reject(tx.error ?? new Error("Local vault transaction failed"));
+      settled = true;
+    };
+    tx.onabort = () => {
+      db.close();
+      if (!settled) reject(conflict ?? tx.error ?? new Error("Local vault transaction failed"));
+      settled = true;
+    };
   });
 }
 
@@ -243,17 +358,24 @@ const vaultStorage: StateStorage = {
       } catch {
         // Still not writable: the copy stays in localStorage for the next start.
       }
+      rememberWorkspaceSnapshot(name, newer);
       return newer;
     }
 
     try {
       const value = await withStore<string | undefined>("readonly", (store) => store.get(name), openExistingVault);
-      if (value) return value;
+      if (value) {
+        rememberWorkspaceSnapshot(name, value);
+        return value;
+      }
 
       const activeUser = await withStore<string | undefined>("readonly", (store) => store.get(activeUserKey(name)), openExistingVault);
       if (activeUser) {
         const scoped = await withStore<string | undefined>("readonly", (store) => store.get(scopedStateKey(name, activeUser)), openExistingVault);
-        if (scoped) return scoped;
+        if (scoped) {
+          rememberWorkspaceSnapshot(name, scoped);
+          return scoped;
+        }
       }
     } catch {
       // Fall back below.
@@ -270,6 +392,7 @@ const vaultStorage: StateStorage = {
         // localStorage still has the data; no need to interrupt app load.
       }
     }
+    rememberWorkspaceSnapshot(name, fallback);
     return fallback;
   },
 
@@ -278,16 +401,32 @@ const vaultStorage: StateStorage = {
     const userId = persistedUserId(value);
     const fallbackStore = localFallback();
     try {
-      await writeVault(name, value, userId);
+      const expected = workspaceExpectation(name);
+      const currentFallback = newerFallbackCopy(fallbackStore, name);
+      assertFallbackStillCurrent(name, currentFallback, expected);
+      // A valid newer fallback is the effective current workspace. Any other
+      // successful tab write would have cleared its shared marker, so promotion
+      // may replace the older IndexedDB copy without treating it as a conflict.
+      const vaultExpectation = currentFallback !== null ? undefined : expected;
+      await writeVault(name, value, userId, vaultExpectation);
       clearFallbackCopy(fallbackStore, name, userId);
+      rememberWorkspaceSnapshot(name, value);
       markVaultWrite("indexeddb");
     } catch (indexedDbError) {
+      if (isVaultConflictError(indexedDbError)) {
+        conflictedWorkspaceKeys.add(name);
+        vaultWriteFailures.set(writeSequence, indexedDbError);
+        markVaultWriteFailure();
+        return;
+      }
       // IndexedDB can be blocked/private-mode unavailable. In that case retain
       // the full localStorage fallback so the app stays usable and data-safe.
       let saved: boolean;
       let failure: unknown;
       const previousFallback = newerFallbackCopy(fallbackStore, name);
       try {
+        const expected = workspaceExpectation(name);
+        assertFallbackStillCurrent(name, previousFallback, expected);
         // Marker first: it is tiny, and one that does not match the copy beside
         // it is ignored, so a copy that failed to land is never read as newer.
         fallbackStore?.setItem(fallbackMarkerKey(name), snapshotFingerprint(value));
@@ -295,10 +434,13 @@ const vaultStorage: StateStorage = {
         saved = true;
       } catch (fallbackError) {
         failure = fallbackError;
+        const conflict = isVaultConflictError(fallbackError);
+        if (conflict) conflictedWorkspaceKeys.add(name);
         // The workspace copy can land before the per-profile copy runs out of room.
-        try { saved = fallbackStore?.getItem(name) === value; } catch { saved = false; }
+        try { saved = !conflict && fallbackStore?.getItem(name) === value; } catch { saved = false; }
       }
       if (saved) {
+        rememberWorkspaceSnapshot(name, value);
         markVaultWrite("local-fallback");
       } else {
         // A quota failure leaves the preceding workspace in place. Keep its

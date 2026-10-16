@@ -395,12 +395,14 @@ function JournalWritingPage({
         return "saved";
       }
       return "superseded";
-    } catch {
+    } catch (cause) {
       if (draftVersion === draftVersionRef.current) {
         dirtyRef.current = true;
         if (mountedRef.current) {
           setSaveState("failed");
-          setSaveError("Your latest changes are still open, but AXOM could not confirm them in local storage. Export a portable backup, then retry Save.");
+          setSaveError(localVault.isVaultConflictError(cause)
+            ? cause.message
+            : "Your latest changes are still open, but AXOM could not confirm them in local storage. Export a portable backup, then retry Save.");
         }
         return "failed";
       }
