@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createRef } from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
@@ -150,6 +150,24 @@ describe("mobile sidebar accessibility", () => {
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByRole("button", { name: "Close navigation menu" })).toBeNull();
     expect(document.activeElement).toBe(trigger);
+  });
+
+  it("closes after a rapid mobile destination pick", async () => {
+    render(<App />);
+    const trigger = screen.getByRole("button", { name: "Open navigation menu" });
+    const sidebar = document.getElementById("app-sidebar")!;
+    const journal = within(sidebar).getByRole("button", { name: "Journal", hidden: true });
+
+    act(() => {
+      fireEvent.click(trigger);
+      fireEvent.click(journal);
+    });
+
+    await waitFor(() => expect(window.location.hash).toBe("#journal"));
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(sidebar.getAttribute("aria-hidden")).toBe("true");
+    expect(sidebar.hasAttribute("inert")).toBe(true);
+    expect(screen.queryByRole("button", { name: "Close navigation menu" })).toBeNull();
   });
 });
 

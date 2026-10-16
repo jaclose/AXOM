@@ -144,6 +144,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
     history: "push" | "replace" | "external";
   } | null>(null);
   const [drawer, setDrawer] = useState(false);
+  const drawerOpenRef = useRef(false);
   const [settings, setSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("profile");
   const [refreshing, setRefreshing] = useState(false);
@@ -169,11 +170,17 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
   // Show the tour once after onboarding; "Replay tour" simply clears tourDone.
   const showTour = onboarded && !tourDone;
 
+  const openDrawer = useCallback(() => {
+    drawerOpenRef.current = true;
+    setDrawer(true);
+  }, []);
+
   const closeDrawer = useCallback(() => {
-    if (!drawer) return;
+    if (!drawerOpenRef.current) return;
+    drawerOpenRef.current = false;
     restoreMenuFocusRef.current = true;
     setDrawer(false);
-  }, [drawer]);
+  }, []);
 
   const registerRouteTransitionGuard = useCallback<RegisterJournalTransitionGuard>((guard) => {
     routeTransitionGuardRef.current = guard;
@@ -444,7 +451,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
             route={routeKey}
             title={nav.label}
             subtitle={nav.subtitle}
-            onMenu={() => setDrawer(true)}
+            onMenu={openDrawer}
             menuButtonRef={menuButtonRef}
             drawerOpen={drawer}
             onRefresh={refresh}
