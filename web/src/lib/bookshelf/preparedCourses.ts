@@ -20,10 +20,10 @@ const sectionMatchesBook = (section: Pick<CourseTemplateSection, "module" | "ter
 const matchingBooks = (section: Pick<CourseTemplateSection, "module" | "term">, books: readonly CourseBook[]): CourseBook[] =>
   books.filter((book) => sectionMatchesBook(section, book));
 
-const sameBook = (left: CourseBook, right: CourseBook): boolean => left.id === right.id
-  || (termKey(left.term) === termKey(right.term)
-    && moduleKey(left.courseCode ?? "") === moduleKey(right.courseCode ?? "")
-    && canonicalModuleKey(left.module) === canonicalModuleKey(right.module));
+const sameBook = (left: CourseBook, right: CourseBook): boolean =>
+  termKey(left.term) === termKey(right.term)
+  && moduleKey(left.courseCode ?? "") === moduleKey(right.courseCode ?? "")
+  && canonicalModuleKey(left.module) === canonicalModuleKey(right.module);
 
 const bookOwnerKey = (book: CourseBook): string => [
   termKey(book.term), moduleKey(book.courseCode ?? ""), canonicalModuleKey(book.module),
@@ -31,15 +31,47 @@ const bookOwnerKey = (book: CourseBook): string => [
 
 const HOSTED_COURSE_CODE = /^academic:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function hasResolvedCourseOwner(book: CourseBook, canonicalBooks: readonly CourseBook[]): boolean {
+function hasVerifiedHostedBinding(book: CourseBook, documents: readonly SourceDocument[]): boolean {
+  const collectionId = book.courseCode?.trim().match(HOSTED_COURSE_CODE)?.[0]?.slice("academic:".length);
+  if (!collectionId || !book.templateIds?.length) return false;
+  return documents.some((document) => {
+    if (document.fileType !== "axom-academic-reference") return false;
+    try {
+      const reference = JSON.parse(document.rawText) as {
+        collectionId?: unknown; revisionId?: unknown; accountId?: unknown; templateIds?: unknown;
+      };
+      return reference.collectionId === collectionId
+        && typeof reference.revisionId === "string"
+        && document.id === `academic-${reference.revisionId}`
+        && typeof reference.accountId === "string" && reference.accountId.length > 0
+        && Array.isArray(reference.templateIds)
+        && book.templateIds.every((id) => reference.templateIds!.includes(id));
+    } catch { return false; }
+  });
+}
+
+function belongsToCurriculum(book: CourseBook): boolean {
+  const curriculum = CURRICULA.find((candidate) => candidate.id === book.curriculumId);
+  return Boolean(curriculum?.terms.some((term) => termKey(term.name) === termKey(book.term)
+    && term.courses.some((course) => moduleKey(course.code) === moduleKey(book.courseCode ?? "")
+      && course.modules.some((module) => canonicalModuleKey(module) === canonicalModuleKey(book.module)))));
+}
+
+function hasResolvedCourseOwner(
+  book: CourseBook,
+  canonicalBooks: readonly CourseBook[],
+  documents: readonly SourceDocument[],
+): boolean {
   const courseCode = book.courseCode?.trim();
   if (!courseCode) return false;
   if (canonicalBooks.some(owner => sameBook(owner, book))) return true;
 
-  // Downloaded catalogs and hosted academic collections carry an exact source
-  // binding even before their course structure exists in the workspace.
+  // A claimed curriculum id is useful only when its real outline contains this
+  // exact term/course/module owner. Hosted courses must also have the durable
+  // authenticated download receipt written before activation; a UUID-shaped
+  // string by itself is not ownership evidence.
   if (!book.templateIds?.length) return false;
-  return Boolean(book.curriculumId?.trim()) || HOSTED_COURSE_CODE.test(courseCode);
+  return belongsToCurriculum(book) || hasVerifiedHostedBinding(book, documents);
 }
 
 function distinctOwners(books: readonly CourseBook[]): CourseBook[] {
@@ -199,7 +231,7 @@ export async function loadPreparedCourse(
     assertCurrent();
     const s = useStore.getState();
     const canonicalBooks = buildCourseBooks({ ...s, curricula: CURRICULA });
-    if (!hasResolvedCourseOwner(book, canonicalBooks)) {
+    if (!hasResolvedCourseOwner(book, canonicalBooks, s.documents)) {
       return { status: "failed", message: "Choose the course that owns this prepared plan before loading it. Nothing was changed." };
     }
     const ownershipBooks = canonicalCourseOwnerUniverse(s, book);
