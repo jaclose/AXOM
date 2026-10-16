@@ -8,6 +8,23 @@ import { useUi } from "./lib/uiStore";
 import { GUIDED_TOUR_STEPS } from "./components/shell/GuidedTour";
 import * as localVault from "./lib/localVault";
 import { dayKey } from "./lib/scoring";
+import type { CommunicationsSettings } from "./lib/communications/client";
+import { preferences } from "./lib/communications/model";
+
+const communicationsMocks = vi.hoisted(() => ({
+  request: vi.fn(),
+  remote: {
+    data: null as CommunicationsSettings | null,
+    loading: false,
+    error: "",
+    reload: vi.fn(),
+  },
+}));
+
+vi.mock("./lib/communications/client", () => ({
+  communicationsRequest: communicationsMocks.request,
+  useCommunications: () => communicationsMocks.remote,
+}));
 
 beforeEach(() => {
   localStorage.clear();
@@ -19,6 +36,11 @@ beforeEach(() => {
   seed.profile.promisePromptStatus = undefined;
   useStore.setState(seed);
   useUi.setState({ settingsRequest: null, onboardingRequested: false, journalDay: null });
+  communicationsMocks.request.mockReset();
+  communicationsMocks.remote.data = null;
+  communicationsMocks.remote.loading = false;
+  communicationsMocks.remote.error = "";
+  communicationsMocks.remote.reload.mockReset();
   window.location.hash = "dashboard";
   vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
   vi.stubGlobal("IntersectionObserver", class { observe() {} disconnect() {} unobserve() {} });
@@ -272,5 +294,70 @@ describe("Journal route durability", () => {
     expect(screen.getByDisplayValue("Keep this draft if setup cannot begin")).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Who are you studying as?" })).toBeNull();
     expect(useUi.getState().onboardingRequested).toBe(false);
+  });
+});
+
+describe("Communications route protection", () => {
+  it("guards browser history and direct hash changes until dirty preferences are confirmed", async () => {
+    useStore.setState((state) => ({
+      profile: {
+        ...state.profile,
+        onboarded: true,
+        tourDone: true,
+        promisePromptStatus: {
+          state: "deferred",
+          updatedAt: "2026-10-15T12:00:00.000Z",
+          promptVersion: "promise-prompt-v1",
+        },
+      },
+    }));
+    communicationsMocks.remote.data = {
+      preferences: preferences("America/Grenada").map((preference) => (
+        preference.category === "essays_from_jafar" ? { ...preference, enabled: true } : preference
+      )),
+      identity: { accent: "#c8a96a", theme: "dark" },
+      history: [],
+      privacy: [],
+      admin: false,
+      deliveryMode: "live",
+      deletionEnabled: false,
+      hasProtectedCopy: true,
+    };
+    window.history.replaceState(null, "", "#communications");
+
+    render(<App />);
+    const essays = await screen.findByRole("switch", { name: /Essays & Notes/ });
+    await waitFor(() => expect((essays as HTMLInputElement).checked).toBe(true));
+    fireEvent.click(essays);
+    expect(screen.getByText("Unsaved changes")).toBeTruthy();
+    essays.focus();
+
+    act(() => {
+      window.history.pushState(null, "", "#privacy");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+
+    const historyNotice = await screen.findByRole("alertdialog");
+    expect(historyNotice.textContent).toMatch(/Leave without saving/);
+    expect(screen.getByRole("heading", { name: "An inbox with intention." })).toBeTruthy();
+    expect((essays as HTMLInputElement).checked).toBe(false);
+    fireEvent.keyDown(historyNotice, { key: "Escape" });
+
+    await waitFor(() => expect(window.location.hash).toBe("#communications"));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect((essays as HTMLInputElement).checked).toBe(false);
+    await waitFor(() => expect(document.activeElement).toBe(essays));
+
+    act(() => {
+      window.history.replaceState(null, "", "#privacy");
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+
+    const hashNotice = await screen.findByRole("alertdialog");
+    expect(hashNotice.textContent).toContain("Privacy & Data");
+    fireEvent.click(within(hashNotice).getByRole("button", { name: "Discard changes and continue" }));
+
+    expect(await screen.findByRole("heading", { name: "Your data stays yours." })).toBeTruthy();
+    expect(screen.queryByText("Unsaved changes")).toBeNull();
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, Check, Download, Mail, ShieldCheck } from "lucide-react";
 import { CommunicationsBrand } from "../components/communications/CommunicationsBrand";
 import { GButton } from "../components/ui/primitives";
@@ -10,7 +10,31 @@ import { useOpticalMotion } from "../lib/communications/useOpticalMotion";
 import { useStore } from "../lib/store";
 import "../styles/communications.css";
 
-export function CommunicationsPage() {
+type AppTransitionGuard = (transition: () => void) => Promise<boolean>;
+type RegisterAppTransitionGuard = (guard: AppTransitionGuard) => () => void;
+type PendingNavigation = {
+  href?: string;
+  label: string;
+  commit?: () => void;
+  settle?: (completed: boolean) => void;
+};
+
+const ROUTE_LABELS: Record<string, string> = {
+  communications: "Communications",
+  "communications-admin": "Communications studio",
+  dashboard: "Dashboard",
+  privacy: "Privacy & Data",
+  pulse: "AXOM Pulse",
+};
+
+function requestedRouteLabel() {
+  const route = window.location.hash.slice(1).split("?")[0];
+  return ROUTE_LABELS[route] ?? (route ? route.replaceAll("-", " ") : "the selected page");
+}
+
+export function CommunicationsPage({ registerAppTransitionGuard }: {
+  registerAppTransitionGuard?: RegisterAppTransitionGuard;
+} = {}) {
   const opticalRoot = useOpticalMotion<HTMLElement>();
   const state = useStore();
   const remote = useCommunications();
@@ -21,9 +45,33 @@ export function CommunicationsPage() {
   const [message, setMessage] = useState("");
   const [messageRole, setMessageRole] = useState<"status" | "alert">("status");
   const [dirty, setDirty] = useState(false);
-  const [pendingNavigation, setPendingNavigation] = useState<{ href: string; label: string } | null>(null);
+  const dirtyRef = useRef(false);
+  dirtyRef.current = dirty;
+  const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null);
   const navigationNoticeRef = useRef<HTMLElement>(null);
   const navigationTriggerRef = useRef<HTMLElement | null>(null);
+  const pageTitleRef = useRef<HTMLHeadingElement>(null);
+
+  const guardAppTransition = useCallback<AppTransitionGuard>((transition) => {
+    if (!dirtyRef.current) {
+      transition();
+      return Promise.resolve(true);
+    }
+
+    const active = document.activeElement;
+    navigationTriggerRef.current = active instanceof HTMLElement && active !== document.body
+      ? active
+      : null;
+    return new Promise<boolean>((settle) => {
+      setPendingNavigation({
+        label: requestedRouteLabel(),
+        commit: transition,
+        settle,
+      });
+    });
+  }, []);
+
+  useEffect(() => registerAppTransitionGuard?.(guardAppTransition), [guardAppTransition, registerAppTransitionGuard]);
 
   useEffect(() => {
     if (remote.data) {
@@ -121,16 +169,28 @@ export function CommunicationsPage() {
     }
   };
   const stayOnPage = () => {
+    const pending = pendingNavigation;
     setPendingNavigation(null);
-    window.requestAnimationFrame(() => navigationTriggerRef.current?.focus());
+    pending?.settle?.(false);
+    window.requestAnimationFrame(() => (navigationTriggerRef.current ?? pageTitleRef.current)?.focus());
   };
   const discardAndNavigate = () => {
     if (!pendingNavigation) return;
-    const { href } = pendingNavigation;
+    const { commit, href, settle } = pendingNavigation;
     navigationTriggerRef.current = null;
     setPendingNavigation(null);
+    dirtyRef.current = false;
     setDirty(false);
-    window.location.hash = href.slice(1);
+    if (commit) {
+      try {
+        commit();
+        settle?.(true);
+      } catch {
+        settle?.(false);
+      }
+      return;
+    }
+    if (href) window.location.hash = href.slice(1);
   };
 
   const history = remote.loading
@@ -145,7 +205,7 @@ export function CommunicationsPage() {
     <header className="comms-heading comms-glass" data-optical="">
       <div>
         <CommunicationsBrand label="Communications" />
-        <h1 id="comms-title">An inbox with intention.</h1>
+        <h1 ref={pageTitleRef} id="comms-title" tabIndex={-1}>An inbox with intention.</h1>
         <p>Your learning, at the right distance. Choose what reaches you.</p>
       </div>
       <a className="comms-pulse-link" href={`#pulse?year=${new Date().getFullYear()}`} aria-label="AXOM Pulse">

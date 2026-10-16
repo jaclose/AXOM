@@ -463,6 +463,8 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
                 <Suspense fallback={<div className="route-loading" role="status" aria-live="polite">Opening your workspace…</div>}>
                   {routeKey === "journal"
                     ? <JournalPage registerAppTransitionGuard={registerRouteTransitionGuard} />
+                    : routeKey === "communications"
+                      ? <LazyCommunicationsPage registerAppTransitionGuard={registerRouteTransitionGuard} />
                     : <Page />}
                   {/* Commits with the page itself, so the film only hands over to real content. */}
                   <PresentationReady />
