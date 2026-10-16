@@ -78,10 +78,16 @@ export function buildQuizPool(
   filters: QuizFilters,
   questionSets: readonly Pick<QuestionSet, "id" | "questionIds">[] = [],
 ): QuestionRecord[] {
+  const identityCounts = new Map<string, number>();
+  for (const question of questions) {
+    identityCounts.set(question.id, (identityCounts.get(question.id) ?? 0) + 1);
+  }
   // Imported mappings are runnable only after the canonical review gate says
-  // they are trustworthy. This prevents a provisional/unresolved key from
-  // being scored or revealed as fact.
-  let pool = questions.filter((q) => q.options.length >= 2 && questionMappingStatus(q) === "ready");
+  // they are trustworthy. An ID claimed by multiple records is likewise
+  // ambiguous: exclude every claimant instead of silently choosing one.
+  let pool = questions.filter((q) => identityCounts.get(q.id) === 1
+    && q.options.length >= 2
+    && questionMappingStatus(q) === "ready");
   let explicitMembership = false;
   if (filters.setIds?.length) {
     const setsById = new Map(questionSets.map((set) => [set.id, set]));

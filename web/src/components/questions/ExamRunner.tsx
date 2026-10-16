@@ -613,7 +613,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
 
   function begin() {
     const filters = currentFilters();
-    const built = buildQuizPool(readyQuestions, filters, questionSets);
+    const built = buildQuizPool(questions, filters, questionSets);
     if (built.length === 0) {
       pushToast({ title: "No questions match", body: "Loosen the filters or import more questions first.", tone: "warn" });
       return;
@@ -830,7 +830,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     // A changed/missing key must not be scored from a stale simulation snapshot.
     const validatedAnswers = answerList.map((answer) => {
       const key = trustedSessionKey(originalById.get(answer.questionId), questionsById.get(answer.questionId));
-      return { ...answer, correct: answer.answerKey && key ? answer.answerKey === key : undefined };
+      return { ...answer, correct: key ? answer.answerKey === key : undefined };
     });
     const result: QuizSession = {
       id: crypto.randomUUID(),
@@ -998,7 +998,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   // ------------------------------------------------------------------ render
 
   if (stage === "setup") {
-    const available = buildQuizPool(readyQuestions, { ...currentFilters(), count: readyQuestions.length, ordered: true }, questionSets).length;
+    const available = buildQuizPool(questions, { ...currentFilters(), count: questions.length, ordered: true }, questionSets).length;
     const selectedSets = questionSets.filter((set) => setIds.includes(set.id));
     const sourceTitle = wholeBank ? "Whole question bank" : selectedSets.length === 1 ? selectedSets[0].title : `${selectedSets.length} selected sets`;
     const canStart = count <= 1000 && available > 0 && (wholeBank || selectedSets.length > 0) && Number.isInteger(count) && count > 0;
@@ -1123,7 +1123,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
 
   if (stage === "results" && session) {
     if (reviewingAnswers) return <SessionReviewModal session={session} onClose={() => setReviewingAnswers(false)} onPractice={(ids) => {
-      const retry = buildQuizPool(readyQuestions.filter((entry) => ids.includes(entry.id)), { count: ids.length, status: "all", ordered: true });
+      const retry = buildQuizPool(questions.filter((entry) => ids.includes(entry.id)), { count: ids.length, status: "all", ordered: true });
       if (!retry.length) return;
       setPool(retry);
       setMode("tutor");
@@ -1141,7 +1141,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     const missed = missedQuestionIds(session);
     const byId = new Map(questions.map((q) => [q.id, q]));
     const retakePool = buildQuizPool(
-      readyQuestions.filter((question) => missed.includes(question.id)),
+      questions.filter((question) => missed.includes(question.id)),
       { count: Math.max(1, missed.length), status: "all", ordered: true },
     );
     const reasonCounts = new Map<ReviewReason, number>();

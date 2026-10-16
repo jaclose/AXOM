@@ -1268,6 +1268,26 @@ describe("file import", () => {
 });
 
 describe("quiz pools and scoring", () => {
+  it("excludes every record whose canonical question ID is ambiguous", () => {
+    const firstClaim = makeQuestion({ id: "duplicate", stem: "First claim", questionNumber: 1 });
+    const conflictingClaim = makeQuestion({ id: "duplicate", stem: "Conflicting claim", questionNumber: 2 });
+    const unique = makeQuestion({ id: "unique", questionNumber: 3 });
+
+    const questions = [firstClaim, conflictingClaim, unique];
+    expect(buildQuizPool(questions, {
+      count: 10,
+      status: "all",
+      ordered: true,
+    }).map((question) => question.id)).toEqual(["unique"]);
+    expect(buildQuizPool(questions, {
+      count: 10,
+      status: "all",
+      setIds: ["selected"],
+      ordered: true,
+    }, [{ id: "selected", questionIds: ["duplicate", "unique"] }])
+      .map((question) => question.id)).toEqual(["unique"]);
+  });
+
   it("excludes unresolved and review-suggested mappings from runnable pools", () => {
     const ready = makeQuestion({ id: "ready", correctKey: "B" });
     const unresolved = makeQuestion({ id: "unresolved", correctKey: "A", needsReview: true });

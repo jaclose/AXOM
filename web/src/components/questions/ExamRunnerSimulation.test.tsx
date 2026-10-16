@@ -24,6 +24,19 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("ExamRunner simulation", () => {
+  it("does not offer an ID claimed by both ready and review-required records", async () => {
+    await act(async () => {
+      await useStore.setState({
+        questions: [q("duplicate"), { ...q("duplicate"), needsReview: true }, q("unique")],
+      });
+    });
+
+    render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+
+    expect(screen.getByRole("region", { name: "Practice source" }).textContent)
+      .toContain("1 matches your filters");
+  });
+
   it("runs a UWorld-style block and records the session", () => {
     const onClose = vi.fn();
     render(<ExamRunner mode="exam" onClose={onClose} />);
@@ -40,6 +53,10 @@ describe("ExamRunner simulation", () => {
     const session = useStore.getState().quizSessions[0];
     expect(session).toMatchObject({ mode: "exam", timed: true, timeLimitSeconds: 180, simulation: { skin: "uworld", preset: "usmle-2026" } });
     expect(session.answers.filter((answer) => answer.correct)).toHaveLength(1);
+    expect(session.answers.filter((answer) => !answer.answerKey)).toEqual([
+      expect.objectContaining({ correct: false }),
+    ]);
+    expect(session.score).toEqual({ correct: 1, scored: 2, total: 2, pct: 50 });
     expect(useStore.getState().questions.find((item) => item.id === session.answers.find((answer) => answer.answerKey)!.questionId)!.attempts).toHaveLength(1);
   });
 
