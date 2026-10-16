@@ -1,6 +1,6 @@
 import { test, expect, seedOnboarded, reloadAfterSave } from "./fixtures";
 
-for (const width of [1440, 390]) test(`course bank stays focused, builds across weeks and saves answers at ${width}px`, async ({ page }) => {
+for (const width of [1440, 768, 390]) test(`course bank stays focused, builds across weeks and saves answers at ${width}px`, async ({ page }) => {
   await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
