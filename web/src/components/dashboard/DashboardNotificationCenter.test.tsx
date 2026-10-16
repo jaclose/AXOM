@@ -68,7 +68,7 @@ afterEach(() => {
 describe("DashboardNotificationCenter", () => {
   it("shows only meaningful communication outcomes and persists read state per account", async () => {
     render(<DashboardNotificationCenter />);
-    const trigger = screen.getByRole("button", { name: "Notifications, 2 unread" });
+    const trigger = screen.getByRole("button", { name: "Notifications, 1 item needs attention" });
     fireEvent.click(trigger);
 
     expect(screen.getByRole("dialog", { name: "Notifications" })).toBeTruthy();
@@ -76,7 +76,7 @@ describe("DashboardNotificationCenter", () => {
     expect(screen.getByText("Security notice")).toBeTruthy();
     expect(screen.queryByText("Daily learning")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Mark recent read" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark all read" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Notifications" })).toBeTruthy());
     expect(new Set(JSON.parse(localStorage.getItem("axom.communicationReads.v1:account-a") ?? "[]") as string[])).toEqual(
       new Set(["delivered-1:delivered", "failed-1:failed"]),
@@ -87,7 +87,7 @@ describe("DashboardNotificationCenter", () => {
     memoryLocalStorage.setItem("axom.communicationReads.v1:account-a", JSON.stringify(["delivered-1:delivered", "failed-1:delivered"]));
     render(<DashboardNotificationCenter />);
 
-    expect(screen.getByRole("button", { name: "Notifications, 1 unread" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Notifications, 1 item needs attention" })).toBeTruthy();
   });
 
   it("keeps account failures actionable without turning the bell into a persistent banner", () => {
@@ -113,7 +113,7 @@ describe("DashboardNotificationCenter", () => {
 
   it("closes with Escape and returns focus to the bell", () => {
     render(<DashboardNotificationCenter />);
-    const trigger = screen.getByRole("button", { name: "Notifications, 2 unread" });
+    const trigger = screen.getByRole("button", { name: "Notifications, 1 item needs attention" });
     fireEvent.click(trigger);
     expect(document.activeElement).toBe(screen.getByRole("dialog", { name: "Notifications" }));
     fireEvent.keyDown(document, { key: "Escape" });
@@ -122,7 +122,7 @@ describe("DashboardNotificationCenter", () => {
     expect(document.activeElement).toBe(trigger);
   });
 
-  it("counts every meaningful unread outcome while keeping the panel concise", () => {
+  it("keeps routine history available without turning it into an attention badge", () => {
     remote = {
       data: settings(Array.from({ length: 11 }, (_, index) => ({
         id: `delivered-${index}`,
@@ -136,11 +136,31 @@ describe("DashboardNotificationCenter", () => {
     };
     render(<DashboardNotificationCenter />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Notifications, 11 unread" }));
-    expect(screen.getByText("9+")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
+    expect(screen.queryByText("9+")).toBeNull();
     expect(screen.getAllByText("Weekly Report")).toHaveLength(8);
-    fireEvent.click(screen.getByRole("button", { name: "Mark recent read" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark all read" }));
     expect(screen.getByRole("button", { name: "Notifications" })).toBeTruthy();
     expect(JSON.parse(localStorage.getItem("axom.communicationReads.v1:account-a") ?? "[]")).toHaveLength(11);
+  });
+
+  it("closes on focus departure without stealing focus from the next control", async () => {
+    render(<><DashboardNotificationCenter /><button type="button">Continue studying</button></>);
+    fireEvent.click(screen.getByRole("button", { name: "Notifications, 1 item needs attention" }));
+    const next = screen.getByRole("button", { name: "Continue studying" });
+    next.focus();
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Notifications" })).toBeNull());
+    expect(document.activeElement).toBe(next);
+  });
+
+  it("returns focus to the bell after an outside blank-area dismissal", async () => {
+    render(<DashboardNotificationCenter />);
+    const trigger = screen.getByRole("button", { name: "Notifications, 1 item needs attention" });
+    fireEvent.click(trigger);
+    fireEvent.pointerDown(document.body);
+
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(screen.queryByRole("dialog", { name: "Notifications" })).toBeNull();
   });
 });

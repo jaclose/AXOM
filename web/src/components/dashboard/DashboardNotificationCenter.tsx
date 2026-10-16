@@ -10,6 +10,16 @@ import "../../styles/dashboard-inbox.css";
 type CommunicationRecord = CommunicationsSettings["history"][number];
 const READ_KEY = "axom.communicationReads.v1";
 const VISIBLE_STATUSES = new Set(["sent", "delivered", "failed", "bounced", "complained", "suppressed"]);
+const ATTENTION_TYPES = new Set([
+  "auth",
+  "security",
+  "export_requested",
+  "export_ready",
+  "deletion_requested",
+  "deletion_scheduled",
+  "deletion_cancelled",
+  "deletion_completed",
+]);
 
 function storageKey(userId: string) {
   return `${READ_KEY}:${userId}`;
@@ -36,6 +46,10 @@ function readToken(item: CommunicationRecord): string {
     ? item.status
     : "delivered";
   return `${item.id}:${outcome}`;
+}
+
+function needsAttention(item: CommunicationRecord): boolean {
+  return !["sent", "delivered"].includes(item.status) || ATTENTION_TYPES.has(item.type);
 }
 
 function communicationTitle(type: string): string {
@@ -92,6 +106,7 @@ export function DashboardNotificationCenter() {
   );
   const history = outcomes.slice(0, 8);
   const unread = outcomes.filter((item) => !read.has(readToken(item))).length;
+  const attentionUnread = outcomes.filter((item) => needsAttention(item) && !read.has(readToken(item))).length;
 
   useEffect(() => {
     setRead(userId ? readIds(userId) : new Set());
@@ -106,6 +121,14 @@ export function DashboardNotificationCenter() {
     positionPanel();
     panelRef.current?.focus();
     const closeOutside = (event: PointerEvent) => {
+      if (rootRef.current?.contains(event.target as Node)) return;
+      setOpen(false);
+      window.setTimeout(() => {
+        const focused = document.activeElement;
+        if (!focused || focused === document.body || !document.contains(focused)) buttonRef.current?.focus();
+      }, 0);
+    };
+    const closeAfterFocusLeaves = (event: FocusEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
     };
     const closeWithEscape = (event: KeyboardEvent) => {
@@ -114,11 +137,13 @@ export function DashboardNotificationCenter() {
       buttonRef.current?.focus();
     };
     document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("focusin", closeAfterFocusLeaves);
     document.addEventListener("keydown", closeWithEscape);
     window.addEventListener("resize", positionPanel);
     window.addEventListener("scroll", positionPanel, true);
     return () => {
       document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("focusin", closeAfterFocusLeaves);
       document.removeEventListener("keydown", closeWithEscape);
       window.removeEventListener("resize", positionPanel);
       window.removeEventListener("scroll", positionPanel, true);
@@ -139,14 +164,15 @@ export function DashboardNotificationCenter() {
         ref={buttonRef}
         type="button"
         className="ghost-btn icon-only dashboard-notifications__trigger"
-        aria-label={unread ? `Notifications, ${unread} unread` : "Notifications"}
+        aria-label={attentionUnread ? `Notifications, ${attentionUnread} ${attentionUnread === 1 ? "item needs" : "items need"} attention` : "Notifications"}
+        title="Notifications"
         aria-expanded={open}
         aria-controls={panelId}
         aria-haspopup="dialog"
         onClick={() => setOpen((value) => !value)}
       >
         <Bell size={ICON_SIZE.emphasis} aria-hidden="true" />
-        {unread > 0 && <span className="dashboard-notifications__badge" aria-hidden="true">{unread > 9 ? "9+" : unread}</span>}
+        {attentionUnread > 0 && <span className="dashboard-notifications__badge" aria-hidden="true">{attentionUnread > 9 ? "9+" : attentionUnread}</span>}
       </button>
       {open && (
         <section
@@ -161,7 +187,7 @@ export function DashboardNotificationCenter() {
           <header>
             <div><span>Inbox</span><h2>Notifications</h2></div>
             <div className="dashboard-notifications__header-actions">
-              {unread > 0 && <GhostButton onClick={() => markRead(outcomes)}><CheckCheck size={ICON_SIZE.body} aria-hidden="true" /> Mark recent read</GhostButton>}
+              {unread > 0 && <GhostButton onClick={() => markRead(outcomes)}><CheckCheck size={ICON_SIZE.body} aria-hidden="true" /> Mark all read</GhostButton>}
               <GhostButton className="dashboard-notifications__close" aria-label="Close notifications" onClick={() => { setOpen(false); buttonRef.current?.focus(); }}>
                 <X size={ICON_SIZE.body} aria-hidden="true" />
               </GhostButton>
@@ -184,11 +210,11 @@ export function DashboardNotificationCenter() {
               <ul className="dashboard-notifications__list">
                 {history.map((item) => {
                   const unreadItem = !read.has(readToken(item));
-                  const needsAttention = !["sent", "delivered"].includes(item.status);
+                  const attentionItem = needsAttention(item);
                   return (
                     <li key={item.id} className={unreadItem ? "is-unread" : ""}>
                       <a href="#communications" onClick={() => markRead([item])}>
-                        <span className={needsAttention ? "is-attention" : ""} aria-hidden="true">{needsAttention ? <CircleAlert size={ICON_SIZE.body} /> : <Mail size={ICON_SIZE.body} />}</span>
+                        <span className={attentionItem ? "is-attention" : ""} aria-hidden="true">{attentionItem ? <CircleAlert size={ICON_SIZE.body} /> : <Mail size={ICON_SIZE.body} />}</span>
                         <span><b>{communicationTitle(item.type)}</b><small>{statusLabel(item.status)} · {relativeTime(item.sent_at ?? item.created_at)}</small>{unreadItem && <span className="sr-only"> Unread.</span>}</span>
                         {unreadItem && <i aria-hidden="true" />}
                       </a>

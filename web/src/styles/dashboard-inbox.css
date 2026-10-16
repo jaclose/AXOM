@@ -127,7 +127,10 @@
   z-index: 88;
   top: calc(100% + 8px);
   right: 0;
+  display: flex;
+  flex-direction: column;
   width: min(370px, calc(100vw - 32px));
+  max-height: min(560px, calc(100vh - 32px));
   overflow: hidden;
   border: 1px solid var(--glass-card-border);
   border-top-color: color-mix(in srgb, white 28%, var(--glass-card-border));
@@ -145,6 +148,7 @@
 }
 .dashboard-notifications__panel > header {
   display: flex;
+  flex: 0 0 auto;
   min-height: 67px;
   align-items: center;
   justify-content: space-between;
@@ -160,14 +164,14 @@
   text-transform: uppercase;
 }
 .dashboard-notifications__panel h2 { margin: 5px 0 0; font-size: var(--fs-lg); }
-.dashboard-notifications__panel header .ghost-btn { min-height: 34px; color: var(--text-60); font-size: var(--fs-xs); }
+.dashboard-notifications__panel header .ghost-btn { min-height: 44px; color: var(--text-60); font-size: var(--fs-xs); }
 .dashboard-notifications__header-actions { display: flex; align-items: center; gap: 3px; }
 .dashboard-notifications__panel header .dashboard-notifications__close {
-  width: 34px;
-  min-width: 34px;
+  width: 44px;
+  min-width: 44px;
   padding: 0;
 }
-.dashboard-notifications__body { max-height: min(410px, 58vh); overflow-y: auto; }
+.dashboard-notifications__body { min-height: 0; flex: 1 1 auto; overflow-y: auto; }
 .dashboard-notifications__state {
   display: grid;
   min-height: 190px;
@@ -212,7 +216,7 @@
 .dashboard-notifications__list b { overflow: hidden; font-size: var(--fs-sm); text-overflow: ellipsis; white-space: nowrap; }
 .dashboard-notifications__list small { margin-top: 3px; color: var(--text-45); font-size: var(--fs-xs); }
 .dashboard-notifications__list i { width: 7px; height: 7px; border-radius: 50%; background: var(--gold); }
-.dashboard-notifications__panel > footer { border-top: 1px solid var(--hairline-soft); }
+.dashboard-notifications__panel > footer { flex: 0 0 auto; border-top: 1px solid var(--hairline-soft); }
 .dashboard-notifications__panel > footer a {
   display: flex;
   min-height: 45px;
