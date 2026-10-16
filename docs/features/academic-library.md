@@ -55,14 +55,19 @@ existing object bytes before accepting a lost response, and requires server
 acknowledgement before reporting success. Late acknowledgements never roll the current
 revision backward. Enrollment adds selected weeks within the same revision.
 
-The current upload control accepts one prepared course with one plan, at most 1,500
-files / 512 MiB total and **6 MiB per file**. Larger original files require a later
-resumable-file transport. Unreferenced ZIP entries and learner backup fields are not
-uploaded. Local paths in catalog entries are replaced by source filenames. Sharing
-controls now live under the owned course preview. Private, shared and membership-backed
-group choices call the existing permissioned RPC. Same-scope refresh preserves the open
-plan; account/query changes still discard prior metadata immediately. The administrative
-review interface is not yet delivered.
+The current upload control accepts one prepared course with either one reviewed plan or
+an explicitly confirmed term and module for unscheduled content, at most 1,500 files /
+512 MiB total and **50 MiB per uploaded file**. Files through 6 MiB use the immutable
+Storage uploader; larger files use authenticated tus transport in 6 MiB chunks and can
+resume an eligible partial transfer. Every stored object is downloaded and SHA-256
+verified before revision activation. Original binaries above 50 MiB remain local-only
+with an explicit catalog receipt, while their reviewed question packages may still
+upload. Unreferenced ZIP entries and learner backup fields are not uploaded. Local paths
+in catalog entries are replaced by source filenames. Sharing controls now live under the
+owned course preview. Private, shared and membership-backed group choices call the
+existing permissioned RPC. Same-scope refresh preserves the open plan; account/query
+changes still discard prior metadata immediately. The administrative review interface
+is not yet delivered.
 
 Account requests reuse the recovery owner's `accountOperationClient`: requests retain
 the starting token and reject a changed account. Catalog results are scoped by account
@@ -134,9 +139,10 @@ and their figures referenced academic objects, with zero private course-image co
 These are single-run local observations, not hosted latency or total account-size claims.
 
 **Still incomplete:** paged learner history, persistent offline cache usage/removal
-controls, general private-upload original-binary sync, larger/resumable uploads and administrative
-review, remaining supplied courses, hosted daily challenges and release/package
-acceptance. Legacy checkpoints still use the compatible full-source restore path.
+controls, general private-upload original-binary sync, cloud copies for academic
+originals above 50 MiB and administrative review, remaining supplied courses, hosted
+daily challenges and release/package acceptance. Legacy checkpoints still use the
+compatible full-source restore path.
 Never report this checkpoint as completion of canonical 1.1 or a production deployment.
 
 ## Original files and portable recovery

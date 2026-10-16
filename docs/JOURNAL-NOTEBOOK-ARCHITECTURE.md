@@ -29,7 +29,7 @@ shell must wrap—never replace—the semantic form and persistence layer.
 
 ## Data model and persistence
 
-The workspace remains schema v32 and IndexedDB-first. No database version or
+The workspace remains schema v34 and IndexedDB-first. No database version or
 object store changes are required.
 
 Existing `JournalEntry` fields remain canonical for standup, reminder, report,
