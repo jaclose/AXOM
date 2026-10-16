@@ -1,4 +1,4 @@
-import { loadSupabase } from "../account/supabase";
+import { accountOperationClient, loadSupabase } from "../account/supabase";
 import {
   sharedQuestionSetDigest,
   validateShare,
@@ -28,6 +28,16 @@ async function client() {
   return configured;
 }
 
+async function ownerClient(action: string) {
+  try {
+    const operation = await accountOperationClient();
+    await operation.assertCurrent();
+    return operation;
+  } catch (cause) {
+    throw new Error(action, { cause });
+  }
+}
+
 export async function publishShare(
   sourceId: string,
   snapshot: SharedQuestionSetSnapshot,
@@ -36,24 +46,24 @@ export async function publishShare(
     throw new Error("Question Set identity is invalid.");
   }
   validateShare(snapshot);
-  const configured = await client();
-  const { data: { user } } = await configured.auth.getUser();
-  if (!user) throw new Error("Sign in to create an unlisted share link.");
-  const { data, error } = await configured.rpc("create_question_set_share", {
+  const operation = await ownerClient("Sign in to create an unlisted share link.");
+  const { data, error } = await operation.client.rpc("create_question_set_share", {
     p_source_id: sourceId,
     p_snapshot: snapshot,
   });
   if (error) throw new Error(error.message);
+  await operation.assertCurrent();
   const share = parseOwnedShare(data, true);
-  if (share.sourceId !== sourceId) throw new Error("The sharing service returned the wrong Question Set identity.");
+  if (share.sourceId !== sourceId || share.title !== snapshot.title
+    || share.questionCount !== snapshot.questions.length) {
+    throw new Error("The sharing service returned the wrong Question Set identity or summary.");
+  }
   return share;
 }
 
 export async function listQuestionSetShares(): Promise<OwnedQuestionSetShare[]> {
-  const configured = await client();
-  const { data: { user } } = await configured.auth.getUser();
-  if (!user) throw new Error("Sign in to manage unlisted share links.");
-  const { data, error } = await configured
+  const operation = await ownerClient("Sign in to manage unlisted share links.");
+  const { data, error } = await operation.client
     .from("question_set_shares")
     .select("id,source_question_set_id,share_token,title,question_count,created_at,expires_at")
     .is("revoked_at", null)
@@ -61,6 +71,7 @@ export async function listQuestionSetShares(): Promise<OwnedQuestionSetShare[]> 
     .order("created_at", { ascending: false })
     .limit(20);
   if (error) throw new Error(error.message);
+  await operation.assertCurrent();
   if (!Array.isArray(data)) throw new Error("The sharing service returned an invalid management list.");
   return data.map((row) => parseOwnedShare(row, false));
 }
@@ -91,8 +102,10 @@ export async function resolveShare(token: string): Promise<ResolvedQuestionSetSh
 
 export async function revokeShare(id: string) {
   if (!validUuid(id)) throw new Error("Question share identity is invalid.");
-  const { error } = await (await client()).rpc("revoke_question_set_share", { p_share_id: id });
+  const operation = await ownerClient("Sign in to revoke an unlisted share link.");
+  const { error } = await operation.client.rpc("revoke_question_set_share", { p_share_id: id });
   if (error) throw new Error(error.message);
+  await operation.assertCurrent();
 }
 
 function validUuid(value: string): boolean {
@@ -110,6 +123,7 @@ function parseOwnedShare(value: unknown, requireIdempotency: boolean): OwnedQues
     || typeof value.question_count !== "number" || !Number.isSafeInteger(value.question_count) || value.question_count < 0
     || !validTimestamp(value.created_at)
     || !validTimestamp(value.expires_at)
+    || !boundedShareTimes(value.created_at, value.expires_at)
     || (requireIdempotency && typeof value.idempotent !== "boolean")) {
     throw new Error("The sharing service returned an invalid link record.");
   }
@@ -123,6 +137,12 @@ function parseOwnedShare(value: unknown, requireIdempotency: boolean): OwnedQues
     expiresAt: value.expires_at,
     ...(typeof value.idempotent === "boolean" ? { idempotent: value.idempotent } : {}),
   };
+}
+
+const MAX_SHARE_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
+function boundedShareTimes(createdAt: string, expiresAt: string): boolean {
+  const lifetime = Date.parse(expiresAt) - Date.parse(createdAt);
+  return lifetime > 0 && lifetime <= MAX_SHARE_LIFETIME_MS;
 }
 
 function validTimestamp(value: unknown): value is string {

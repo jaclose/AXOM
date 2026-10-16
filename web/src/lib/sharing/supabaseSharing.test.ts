@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { loadSupabase } from "../account/supabase";
+import { accountOperationClient, loadSupabase } from "../account/supabase";
 import { createQuestionSetShare } from "./questionSetShare";
-import { listQuestionSetShares, publishShare, resolveShare } from "./supabaseSharing";
+import { listQuestionSetShares, publishShare, resolveShare, revokeShare } from "./supabaseSharing";
 
-vi.mock("../account/supabase", () => ({ loadSupabase: vi.fn() }));
+vi.mock("../account/supabase", () => ({ accountOperationClient: vi.fn(), loadSupabase: vi.fn() }));
 
 const SHARE_ID = "00000000-0000-4000-8000-000000000001";
 const TOKEN = "a".repeat(48);
@@ -54,11 +54,24 @@ function configured(
   user: object | null = { id: "owner" },
   from?: ReturnType<typeof vi.fn>,
 ) {
-  vi.mocked(loadSupabase).mockResolvedValue({
+  const service = {
     auth: { getUser: vi.fn().mockResolvedValue({ data: { user } }) },
     rpc,
     from,
-  } as never);
+  };
+  const assertCurrent = vi.fn().mockResolvedValue(undefined);
+  vi.mocked(loadSupabase).mockResolvedValue(service as never);
+  if (user) {
+    vi.mocked(accountOperationClient).mockResolvedValue({
+      client: service,
+      userId: "id" in user ? String(user.id) : "owner",
+      assertCurrent,
+      resumable: { endpoint: "https://example.invalid/upload", headers: {} },
+    } as never);
+  } else {
+    vi.mocked(accountOperationClient).mockRejectedValue(new Error("Sign in again to protect this workspace."));
+  }
+  return { assertCurrent, service };
 }
 
 beforeEach(() => vi.clearAllMocks());
@@ -132,7 +145,7 @@ describe("question-share Supabase boundary", () => {
 
   it("returns bounded server metadata for a published owner link", async () => {
     const rpc = vi.fn().mockResolvedValue({ data: serverShare(), error: null });
-    configured(rpc);
+    const operation = configured(rpc);
 
     await expect(publishShare("source-set", snapshot())).resolves.toEqual({
       id: SHARE_ID,
@@ -147,6 +160,28 @@ describe("question-share Supabase boundary", () => {
     expect(rpc).toHaveBeenCalledWith("create_question_set_share", expect.objectContaining({
       p_source_id: "source-set",
     }));
+    expect(operation.assertCurrent).toHaveBeenCalledTimes(2);
+    expect(loadSupabase).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale owner response after an account switch instead of returning its link", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: serverShare(), error: null });
+    const operation = configured(rpc);
+    operation.assertCurrent.mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("The signed-in account changed. This operation was stopped."));
+
+    await expect(publishShare("source-set", snapshot())).rejects.toThrow(/account changed/i);
+    expect(rpc).toHaveBeenCalledOnce();
+  });
+
+  it("rejects published metadata for a different snapshot", async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: serverShare({ title: "A different set" }),
+      error: null,
+    });
+    configured(rpc);
+
+    await expect(publishShare("source-set", snapshot())).rejects.toThrow(/identity or summary/i);
   });
 
   it("lists only the bounded management fields requested for the signed-in owner", async () => {
@@ -198,6 +233,33 @@ describe("question-share Supabase boundary", () => {
     configured(vi.fn(), { id: "owner" }, vi.fn().mockReturnValue(query));
 
     await expect(listQuestionSetShares()).rejects.toThrow(/invalid link record/i);
+  });
+
+  it("rejects a management row whose bearer capability exceeds seven days", async () => {
+    const query = {
+      select: vi.fn(), is: vi.fn(), gt: vi.fn(), order: vi.fn(), limit: vi.fn(),
+    };
+    query.select.mockReturnValue(query);
+    query.is.mockReturnValue(query);
+    query.gt.mockReturnValue(query);
+    query.order.mockReturnValue(query);
+    query.limit.mockResolvedValue({
+      data: [serverShare({ expires_at: "2026-10-23T12:00:00.000Z" })],
+      error: null,
+    });
+    configured(vi.fn(), { id: "owner" }, vi.fn().mockReturnValue(query));
+
+    await expect(listQuestionSetShares()).rejects.toThrow(/invalid link record/i);
+  });
+
+  it("pins share revocation to its starting account and confirms the session afterwards", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: null });
+    const operation = configured(rpc);
+
+    await revokeShare(SHARE_ID);
+
+    expect(rpc).toHaveBeenCalledWith("revoke_question_set_share", { p_share_id: SHARE_ID });
+    expect(operation.assertCurrent).toHaveBeenCalledTimes(2);
   });
 
   it("describes created links as unlisted when authentication is missing", async () => {
