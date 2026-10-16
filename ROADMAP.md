@@ -36,7 +36,7 @@ below remain the living status ledger for those items.
 
 | Item | Status | Notes |
 | --- | --- | --- |
-| OCR for scanned PDFs / screenshots | blocked | Needs a local OCR path (tesseract.js evaluation) or secure server-side OCR. Scans currently store provenance only — the UI says so. |
+| OCR for scanned PDFs / screenshots | in-progress | A private, opt-in operator path now uses local Poppler + Tesseract for image-only PDFs up to 20 pages. Its transcription is always provisional and review-held, never practice-ready. Browser import still has no OCR and truthfully stores scans as provenance only; screenshot OCR and wider activation remain deferred pending benchmark and source-review evidence. |
 | Legacy Word `.doc` import | blocked | Mammoth handles modern DOCX only. Binary `.doc` needs a separate, security-reviewed conversion path. |
 | Original source-binary retention | blocked (architecture only) | The library stores extracted/page text, metadata, and SHA-256 checksums today, not PDF/DOCX bytes. **Decision recorded 2026-07-14 (Jafar, Wave 6 finalization): do NOT implement retention yet — architecture only.** Approved architecture: user-selectable retention with extracted-text as the default; per-import "keep original file" opt-in; blobs in a **separate IndexedDB object store**, never in the workspace payload; portable JSON backups stay lightweight (originals excluded unless explicitly included); storage-quota warning required. FS-Access handles remain a Chromium-only later enhancement. Implementation waits for an explicit go-ahead; gates Wave 6C. |
 | Complex PDF layout recovery | in-progress | Digital text extraction is live and page-aware; columns, tables, unusual positioning, and damaged text layers can still require review. |

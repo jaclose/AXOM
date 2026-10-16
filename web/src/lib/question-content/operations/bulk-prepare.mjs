@@ -34,6 +34,7 @@ const force = args.includes("--force");
 if (args.includes("--help")) {
   console.log("AXOM private source preparer: --batch B4 --offset 0 --limit 40 | --indices 475,1256 [--dry-run] [--force].");
   console.log("No account cloud writes. Removable SSD originals must be mounted. Output is Git-ignored.");
+  console.log("Optional image-only PDF OCR: ROLE2_ENABLE_OCR=1 (local pdftoppm + Tesseract English, 20-page cap, review-only output).");
   process.exit(0);
 }
 const loadJson = async path => JSON.parse(await readFile(path, "utf8"));
