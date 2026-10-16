@@ -2,23 +2,37 @@ import { describe, expect, it, vi } from "vitest";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { CommunicationsService, type EmailJob } from "./server/service";
 import { createCommunicationsHandler } from "./server/handler";
-import { processPrivacy } from "./server/privacy";
+import {
+  cancelDeletion,
+  processPrivacy,
+  removeOwnedAcademicStorage,
+  removeOwnedAccountStorage,
+  removeOwnedExportStorage,
+} from "./server/privacy";
+import { ProviderError } from "./server/provider";
 import { validateEditorial } from "./server/campaigns";
 import { preferences } from "./model";
 
 // A boundary fake records actual PostgREST calls; SQL/RLS is tested separately in PGlite.
-function database(results: { data: unknown; error: { code?: string; message: string } | null }[] = []) {
+type BoundaryResult = {
+  data: unknown;
+  error: { code?: string; message: string } | null;
+  count?: number | null;
+};
+
+function database(results: BoundaryResult[] = []) {
   const calls: { table: string; method: string; args: unknown[] }[] = [];
   const from = vi.fn((table: string) => {
     const result = results.shift() ?? { data: null, error: null };
     const chain: Record<string, unknown> = {};
-    for (const method of ["select", "insert", "update", "upsert", "delete", "eq", "in", "neq", "gt", "gte", "lt", "lte", "is", "not", "order", "limit", "single", "maybeSingle"]) chain[method] = (...args: unknown[]) => { calls.push({ table, method, args }); return chain; };
+    for (const method of ["select", "insert", "update", "upsert", "delete", "eq", "in", "neq", "gt", "gte", "lt", "lte", "is", "not", "order", "limit", "range", "single", "maybeSingle"]) chain[method] = (...args: unknown[]) => { calls.push({ table, method, args }); return chain; };
     chain.then = (resolve: (r: typeof result) => unknown) => Promise.resolve(result).then(resolve);
     return chain;
   });
   const user = { id: "account-a", email: "alex@example.invalid", email_confirmed_at: "2026-01-01", user_metadata: { role: "admin" } } as unknown as User;
-  const db = { from, rpc: vi.fn(async () => ({ data: true, error: null })), auth: { getUser: vi.fn(async () => ({ data: { user }, error: null })), admin: { getUserById: vi.fn(async () => ({ data: { user }, error: null })) } }, storage: { from: vi.fn() } } as unknown as SupabaseClient;
-  return { db, calls };
+  const storage = { listV2: vi.fn(), upload: vi.fn(), remove: vi.fn() };
+  const db = { from, rpc: vi.fn(async () => ({ data: true, error: null })), auth: { getUser: vi.fn(async () => ({ data: { user }, error: null })), admin: { getUserById: vi.fn(async () => ({ data: { user }, error: null })) } }, storage: { from: vi.fn(() => storage) } } as unknown as SupabaseClient;
+  return { db, calls, storage };
 }
 const job: EmailJob = { id: "job-a", user_id: "account-a", type: "weekly_report", category: "weekly_report", idempotency_key: "account-a:week", status: "processing", attempts: 1, variables: {}, created_at: new Date().toISOString() };
 const ok = (data: unknown = null) => ({ data, error: null });
@@ -86,7 +100,7 @@ describe("communications server boundaries", () => {
     expect(calls.some(c => c.table === "email_events" && c.method === "update")).toBe(true);
   });
   it("emails an authenticated export landing page so queue retries cannot freeze an expiring download URL", async () => {
-    const { db } = database([ok(null), ok([]), ok({ status: "ready", object_path: "account-a/export.json", expires_at: "2099-01-01" }), ok({ id: "job-a" }), ok()]);
+    const { db } = database([ok(null), ok([]), ok({ status: "ready", object_path: "account-a/request-a.json", expires_at: "2099-01-01" }), ok({ id: "job-a" }), ok()]);
     const service = new CommunicationsService(db, { AXOM_EMAIL_FROM_ACCOUNT: "AXOM <account@example.invalid>" });
     vi.spyOn(service, "preferenceRows").mockResolvedValue(preferences());
     vi.spyOn(service, "context").mockResolvedValue({ displayName: "Alex", accent: "#c8a96a", theme: "dark", locale: "en", timezone: "UTC", orbUrl: "https://axom.info/icons/axom-orb-512.png" });
@@ -99,6 +113,12 @@ describe("communications server boundaries", () => {
     const { db } = database([ok({ status: "ready", object_path: "account-a/export.json", expires_at: "2000-01-01" })]);
     await expect(new CommunicationsService(db, {}).exportLink("account-a", "request-a")).rejects.toThrow("export-expired"); expect(db.storage.from).not.toHaveBeenCalled();
   });
+  it("does not sign an export path outside the authenticated request namespace", async () => {
+    const { db } = database([ok({ status: "ready", object_path: "account-b/request-a.json", expires_at: "2099-01-01" })]);
+    await expect(new CommunicationsService(db, {}).exportLink("account-a", "request-a"))
+      .rejects.toThrow("export-storage-index-invalid");
+    expect(db.storage.from).not.toHaveBeenCalled();
+  });
   it("rejects unknown personalization and non-HTTPS editorial links before saving", () => {
     expect(() => validateEditorial({ title: "{{secret}}", excerpt: "A note", url: "https://axom.info" })).toThrow("Unsupported template variable");
     expect(() => validateEditorial({ title: "A note", excerpt: "A note", url: "javascript:alert(1)" })).toThrow("HTTPS");
@@ -108,13 +128,376 @@ describe("communications server boundaries", () => {
 
 describe("deletion dependency safety", () => {
   it("keeps Auth intact when a linked provider contact cannot be removed without its credential", async () => {
-    const { db, calls } = database([ok(), ok(), ok([{ id: "delete-a", user_id: "account-a", kind: "deletion", status: "scheduled", scheduled_for: "2000-01-01" }]), ok({ id: "delete-a" }), ok([]), ok(), ok([]), ok([]), ok(), ok(), ok()]);
+    const { db, calls, storage } = database([
+      ok(), ok(), ok([{ id: "delete-a", user_id: "account-a", kind: "deletion", status: "scheduled", scheduled_for: "2000-01-01" }]),
+      ok({ id: "delete-a" }), { data: [], error: null, count: 0 }, ok(), ok([]), ok([]), ok(), ok(), ok(),
+    ]);
     const service = new CommunicationsService(db, { AXOM_ACCOUNT_DELETION_ENABLED: "true" });
     vi.spyOn(service, "identity").mockResolvedValue({ accent: "#c8a96a", theme: "dark", locale: "en", contact_id: "contact-a" });
     db.auth.admin.deleteUser = vi.fn();
+    storage.listV2.mockResolvedValue({ data: { objects: [], folders: [], hasNext: false }, error: null });
     expect(await processPrivacy(service)).toBe(0);
     expect(db.auth.admin.deleteUser).not.toHaveBeenCalled();
-    expect(calls).toContainEqual({ table: "privacy_requests", method: "update", args: [{ status: "failed", failure_code: "privacy-processing-failed" }] });
+    expect(calls).toContainEqual({ table: "privacy_requests", method: "update", args: [{ status: "failed", failure_code: "deletion-preflight-failed" }] });
+  });
+
+  it.each([
+    { scenario: "deletion starts", blocked: [{ status: "processing", failure_code: "deletion-preflight" }], accountRemoved: false },
+    { scenario: "the Auth row disappears", blocked: [], accountRemoved: true },
+  ])("removes a privileged export upload when $scenario between safety checks", async ({ blocked, accountRemoved }) => {
+    const request = { id: "11111111-1111-4111-8111-111111111111", user_id: "account-a", kind: "export", status: "requested" };
+    const { db, calls, storage } = database([
+      ok(), ok(), ok([request]), ok({ id: request.id }),
+      ok([]), ok([]), ok([]),
+      ok([]), ok(blocked), ok(),
+      ok([]), ok([]), ok(), ok(), ok(),
+    ]);
+    const service = new CommunicationsService(db, {});
+    const account = { id: "account-a", email: "alex@example.invalid", email_confirmed_at: "2026-01-01", user_metadata: {} } as unknown as User;
+    vi.spyOn(service, "workspace").mockResolvedValue(null);
+    vi.spyOn(service, "user").mockResolvedValue(account);
+    vi.spyOn(service, "preferenceRows").mockResolvedValue(preferences());
+    vi.spyOn(service, "identity").mockResolvedValue({ accent: "#c8a96a", theme: "dark", locale: "en" });
+    const enqueue = vi.spyOn(service, "enqueue").mockResolvedValue();
+    if (accountRemoved) {
+      db.auth.admin.getUserById = vi.fn()
+        .mockResolvedValueOnce({ data: { user: account }, error: null })
+        .mockResolvedValueOnce({ data: { user: null }, error: { message: "not found" } });
+    }
+    storage.upload.mockResolvedValue({ data: { path: `account-a/${request.id}.json` }, error: null });
+    storage.remove.mockResolvedValue({ data: [{ name: `${request.id}.json` }], error: null });
+
+    await expect(processPrivacy(service)).resolves.toBe(0);
+
+    expect(storage.upload).toHaveBeenCalledOnce();
+    expect(storage.remove).toHaveBeenCalledWith([`account-a/${request.id}.json`]);
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(calls).toContainEqual({
+      table: "privacy_requests",
+      method: "update",
+      args: [{ status: "failed", failure_code: "export-cancelled-for-deletion" }],
+    });
+  });
+
+  it("removes recorded and orphaned exports only from the exact owner prefix", async () => {
+    const orphan = "account-a/orphaned-before-metadata.json";
+    const exportId = "11111111-1111-4111-8111-111111111111";
+    const { db, storage } = database([{ data: [{ id: exportId, object_path: `account-a/${exportId}.json` }], error: null, count: 1 }]);
+    storage.listV2.mockResolvedValueOnce({
+      data: { objects: [{ name: "orphaned-before-metadata.json", key: orphan }], folders: [], hasNext: false },
+      error: null,
+    }).mockResolvedValue({ data: { objects: [], folders: [], hasNext: false }, error: null });
+    storage.remove.mockResolvedValue({ data: [{ name: orphan }], error: null });
+
+    await removeOwnedExportStorage(new CommunicationsService(db, {}), "account-a");
+
+    expect(db.storage.from).toHaveBeenCalledWith("communications-exports");
+    expect(storage.remove).toHaveBeenCalledWith([orphan]);
+  });
+
+  it("rejects corrupted export metadata before touching another owner's path", async () => {
+    const exportId = "11111111-1111-4111-8111-111111111111";
+    const { db, storage } = database([{ data: [{ id: exportId, object_path: `account-b/${exportId}.json` }], error: null, count: 1 }]);
+
+    await expect(removeOwnedExportStorage(new CommunicationsService(db, {}), "account-a"))
+      .rejects.toThrow("export-storage-index-invalid");
+
+    expect(db.storage.from).not.toHaveBeenCalled();
+    expect(storage.remove).not.toHaveBeenCalled();
+  });
+
+  it("rejects a foreign object returned for an exact owner prefix before removing anything", async () => {
+    const { db, storage } = database([{ data: [], error: null, count: 0 }]);
+    storage.listV2.mockResolvedValue({
+      data: {
+        objects: [{ name: "foreign.json", key: "account-b/foreign.json" }],
+        folders: [],
+        hasNext: false,
+      },
+      error: null,
+    });
+
+    await expect(removeOwnedExportStorage(new CommunicationsService(db, {}), "account-a"))
+      .rejects.toThrow("export-storage-object-invalid");
+
+    expect(storage.remove).not.toHaveBeenCalled();
+  });
+
+  it("paginates nested owner objects and translates listed versions for exact removal", async () => {
+    const { db, storage } = database([{ data: [], error: null, count: 0 }]);
+    storage.listV2.mockResolvedValueOnce({
+      data: {
+        objects: [{ name: "nested/archived.json", key: "account-a/nested/archived.json", version: "version-a" }],
+        folders: [],
+        hasNext: true,
+        nextCursor: "page-2",
+      },
+      error: null,
+    }).mockResolvedValueOnce({
+      data: {
+        objects: [{ name: "current.json", key: "account-a/current.json" }],
+        folders: [],
+        hasNext: false,
+      },
+      error: null,
+    }).mockResolvedValue({ data: { objects: [], folders: [], hasNext: false }, error: null });
+    storage.remove.mockResolvedValue({ data: [], error: null });
+
+    await removeOwnedExportStorage(new CommunicationsService(db, {}), "account-a");
+
+    expect(storage.listV2).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      prefix: "account-a/",
+      with_delimiter: false,
+      noncurrentVersions: "include",
+      deleteMarkers: "include",
+    }));
+    expect(storage.listV2).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      prefix: "account-a/",
+      cursor: "page-2",
+    }));
+    expect(storage.remove).toHaveBeenCalledWith([
+      { path: "account-a/nested/archived.json", versionId: "version-a" },
+      "account-a/current.json",
+    ]);
+  });
+
+  it("quarantines corrupted expired-export metadata instead of deleting a foreign object", async () => {
+    const exportId = "11111111-1111-4111-8111-111111111111";
+    const { db, calls } = database([
+      ok(), ok(), ok([]), ok([]),
+      ok([{ id: exportId, user_id: "account-a", object_path: `account-b/${exportId}.json` }]),
+      ok(), ok(), ok(), ok(),
+    ]);
+
+    await expect(processPrivacy(new CommunicationsService(db, {}))).resolves.toBe(0);
+
+    expect(db.storage.from).not.toHaveBeenCalled();
+    expect(calls).toContainEqual({
+      table: "privacy_requests",
+      method: "update",
+      args: [{ failure_code: "export-storage-index-invalid" }],
+    });
+  });
+
+  it("fails closed on an empty paginated Storage response", async () => {
+    const { db, storage } = database();
+    storage.listV2.mockResolvedValue({
+      data: { objects: [], folders: [], hasNext: true, nextCursor: "next" },
+      error: null,
+    });
+
+    await expect(removeOwnedAccountStorage(new CommunicationsService(db, {}), "account-a"))
+      .rejects.toThrow("account-storage-cleanup-unconfirmed");
+
+    expect(storage.remove).not.toHaveBeenCalled();
+  });
+
+  it("allows preflight cancellation but rejects reconciliation-required deletion", async () => {
+    const cancellable = database([
+      ok({ id: "delete-a", status: "failed", failure_code: "deletion-preflight-failed" }),
+      ok({ id: "delete-a" }),
+    ]);
+    const cancellableService = new CommunicationsService(cancellable.db, {});
+    const enqueue = vi.spyOn(cancellableService, "enqueue").mockResolvedValue();
+    await expect(cancelDeletion(cancellableService, "account-a", "delete-a")).resolves.toBeUndefined();
+    expect(enqueue).toHaveBeenCalledWith({ userId: "account-a", type: "deletion_cancelled", key: "delete-a:cancelled" });
+
+    const irreversible = database([ok({ id: "delete-b", status: "failed", failure_code: "deletion-reconciliation-required" })]);
+    const irreversibleService = new CommunicationsService(irreversible.db, {});
+    vi.spyOn(irreversibleService, "enqueue").mockResolvedValue();
+    await expect(cancelDeletion(irreversibleService, "account-a", "delete-b"))
+      .rejects.toThrow("can no longer be cancelled");
+    expect(irreversible.calls.some(call => call.method === "update")).toBe(false);
+  });
+
+  it("treats no academic collections as a completed, retry-safe cleanup", async () => {
+    const { db, storage } = database([
+      { data: [], error: null, count: 0 },
+      { data: [], error: null, count: 0 },
+    ]);
+    const service = new CommunicationsService(db, {});
+
+    await removeOwnedAcademicStorage(service, "account-a");
+    await removeOwnedAcademicStorage(service, "account-a");
+
+    expect(db.storage.from).not.toHaveBeenCalled();
+    expect(storage.listV2).not.toHaveBeenCalled();
+    expect(storage.remove).not.toHaveBeenCalled();
+  });
+
+  it("empties every exact account Storage prefix without crossing into another owner", async () => {
+    const owner = "11111111-1111-4111-8111-111111111111";
+    const foreignOwner = "22222222-2222-4222-8222-222222222222";
+    const hash = "a".repeat(64);
+    const { db, storage } = database();
+    storage.listV2.mockResolvedValueOnce({
+      data: {
+        objects: [
+          { name: hash, key: `${owner}/${hash}` },
+          { name: hash, key: `${owner}/legacy/${hash}`, version: "archived-v1" },
+        ],
+        folders: [],
+        hasNext: false,
+      },
+      error: null,
+    }).mockResolvedValue({ data: { objects: [], folders: [], hasNext: false }, error: null });
+    storage.remove.mockResolvedValue({ data: [{ name: hash }], error: null });
+    const service = new CommunicationsService(db, {});
+
+    await removeOwnedAccountStorage(service, owner);
+    await removeOwnedAccountStorage(service, owner);
+
+    expect(db.storage.from).toHaveBeenNthCalledWith(1, "workspace-media");
+    expect(db.storage.from).toHaveBeenNthCalledWith(2, "workspace-content");
+    expect(db.storage.from).toHaveBeenNthCalledWith(3, "workspace-originals");
+    expect(storage.listV2).toHaveBeenCalledTimes(12);
+    expect(storage.listV2.mock.calls.every(([options]) => options.prefix === `${owner}/`)).toBe(true);
+    expect(storage.remove).toHaveBeenCalledOnce();
+    expect(storage.remove).toHaveBeenCalledWith([
+      `${owner}/${hash}`,
+      { path: `${owner}/legacy/${hash}`, versionId: "archived-v1" },
+    ]);
+    expect(JSON.stringify([storage.listV2.mock.calls, storage.remove.mock.calls])).not.toContain(foreignOwner);
+  });
+
+  it("removes and re-lists only the owner's academic object prefixes", async () => {
+    const ownCollection = "11111111-1111-4111-8111-111111111111";
+    const foreignCollection = "22222222-2222-4222-8222-222222222222";
+    const hashA = "a".repeat(64);
+    const hashB = "b".repeat(64);
+    const { db, calls, storage } = database([
+      { data: [{ id: ownCollection }], error: null, count: 1 },
+      { data: [{ id: ownCollection }], error: null, count: 1 },
+    ]);
+    storage.listV2.mockResolvedValueOnce({
+      data: {
+        objects: [
+          { name: hashA, key: `${ownCollection}/${hashA}` },
+          { name: hashB, key: `${ownCollection}/${hashB}` },
+        ],
+        folders: [],
+        hasNext: false,
+      },
+      error: null,
+    }).mockResolvedValue({ data: { objects: [], folders: [], hasNext: false }, error: null });
+    storage.remove.mockResolvedValue({ data: [], error: null });
+    const service = new CommunicationsService(db, {});
+
+    await removeOwnedAcademicStorage(service, "account-a");
+    await removeOwnedAcademicStorage(service, "account-a");
+
+    expect(storage.remove).toHaveBeenCalledOnce();
+    expect(storage.remove).toHaveBeenCalledWith([
+      `${ownCollection}/${hashA}`,
+      `${ownCollection}/${hashB}`,
+    ]);
+    expect(calls.filter(call => call.table === "academic_collections" && call.method === "eq"))
+      .toEqual([
+        { table: "academic_collections", method: "eq", args: ["owner_id", "account-a"] },
+        { table: "academic_collections", method: "eq", args: ["owner_id", "account-a"] },
+      ]);
+    expect(JSON.stringify([storage.listV2.mock.calls, storage.remove.mock.calls])).not.toContain(foreignCollection);
+  });
+
+  it("fails closed when Storage does not acknowledge owner-object removal", async () => {
+    const collection = "11111111-1111-4111-8111-111111111111";
+    const { db, storage } = database([{
+      data: [{ id: collection }], error: null, count: 1,
+    }]);
+    storage.listV2.mockResolvedValue({
+      data: { objects: [{ name: "a".repeat(64), key: `${collection}/${"a".repeat(64)}` }], folders: [], hasNext: false },
+      error: null,
+    });
+    storage.remove.mockResolvedValue({ data: null, error: { message: "unavailable" } });
+
+    await expect(removeOwnedAcademicStorage(new CommunicationsService(db, {}), "account-a"))
+      .rejects.toThrow("academic-storage-remove-failed");
+  });
+
+  it("does not delete the Auth user when academic Storage cleanup fails", async () => {
+    const request = { id: "delete-a", user_id: "account-a", kind: "deletion", status: "scheduled", scheduled_for: "2000-01-01" };
+    const collection = "11111111-1111-4111-8111-111111111111";
+    const { db, calls, storage } = database([
+      ok(), ok(), ok([request]), ok({ id: request.id }),
+      { data: [], error: null, count: 0 }, ok([]),
+      { data: [{ id: collection }], error: null, count: 1 }, ok({ id: request.id }),
+      ok(), ok([]), ok([]), ok(), ok(), ok(),
+    ]);
+    const service = new CommunicationsService(db, { AXOM_ACCOUNT_DELETION_ENABLED: "true" });
+    vi.spyOn(service, "identity").mockResolvedValue({ accent: "#c8a96a", theme: "dark", locale: "en" });
+    const deleteUser = vi.fn();
+    db.auth.admin.deleteUser = deleteUser;
+    storage.listV2.mockResolvedValueOnce({ data: { objects: [], folders: [], hasNext: false }, error: null })
+      .mockResolvedValueOnce({
+      data: { objects: [{ name: "a".repeat(64), key: `${collection}/${"a".repeat(64)}` }], folders: [], hasNext: false },
+      error: null,
+      }).mockResolvedValue({ data: { objects: [], folders: [], hasNext: false }, error: null });
+    storage.remove.mockResolvedValue({ data: null, error: { message: "unavailable" } });
+
+    expect(await processPrivacy(service)).toBe(0);
+
+    expect(deleteUser).not.toHaveBeenCalled();
+    expect(calls).toContainEqual({ table: "privacy_requests", method: "update", args: [{ status: "failed", failure_code: "deletion-reconciliation-required" }] });
+  });
+
+  it("does not delete the Auth user when account Storage cleanup fails", async () => {
+    const request = { id: "delete-a", user_id: "account-a", kind: "deletion", status: "scheduled", scheduled_for: "2000-01-01" };
+    const { db, calls, storage } = database([
+      ok(), ok(), ok([request]), ok({ id: request.id }),
+      { data: [], error: null, count: 0 }, ok([]),
+      { data: [], error: null, count: 0 }, ok({ id: request.id }),
+      ok(), ok([]), ok([]), ok(), ok(), ok(),
+    ]);
+    const service = new CommunicationsService(db, { AXOM_ACCOUNT_DELETION_ENABLED: "true" });
+    vi.spyOn(service, "identity").mockResolvedValue({ accent: "#c8a96a", theme: "dark", locale: "en" });
+    const deleteUser = vi.fn();
+    db.auth.admin.deleteUser = deleteUser;
+    storage.listV2.mockResolvedValueOnce({ data: { objects: [], folders: [], hasNext: false }, error: null })
+      .mockResolvedValueOnce({
+        data: { objects: [{ name: "a".repeat(64), key: `account-a/${"a".repeat(64)}` }], folders: [], hasNext: false },
+        error: null,
+      }).mockResolvedValue({ data: { objects: [], folders: [], hasNext: false }, error: null });
+    storage.remove.mockResolvedValue({ data: null, error: { message: "unavailable" } });
+
+    expect(await processPrivacy(service)).toBe(0);
+
+    expect(db.storage.from).toHaveBeenCalledWith("workspace-media");
+    expect(deleteUser).not.toHaveBeenCalled();
+    expect(calls).toContainEqual({ table: "privacy_requests", method: "update", args: [{ status: "failed", failure_code: "deletion-reconciliation-required" }] });
+  });
+
+  it("deletes Auth only after owner academic objects are removed and absence is confirmed", async () => {
+    const request = { id: "delete-a", user_id: "account-a", kind: "deletion", status: "scheduled", scheduled_for: "2000-01-01" };
+    const collection = "11111111-1111-4111-8111-111111111111";
+    const hash = "a".repeat(64);
+    const { db, storage } = database([
+      ok(), ok(), ok([request]), ok({ id: request.id }),
+      { data: [], error: null, count: 0 }, ok([]),
+      { data: [{ id: collection }], error: null, count: 1 }, ok({ id: request.id }),
+      ok(), ok([]), ok([]), ok(), ok(), ok(),
+    ]);
+    const service = new CommunicationsService(db, {
+      AXOM_ACCOUNT_DELETION_ENABLED: "true",
+      RESEND_API_KEY: "synthetic-test-key",
+    });
+    vi.spyOn(service, "identity").mockResolvedValue({ accent: "#c8a96a", theme: "dark", locale: "en", contact_id: "already-removed" });
+    const removeContact = vi.spyOn(service.provider, "request").mockRejectedValue(new ProviderError(404));
+    const deleteUser = vi.fn(async () => ({ data: { user: { id: "account-a" } as User }, error: null }));
+    db.auth.admin.deleteUser = deleteUser;
+    storage.listV2.mockResolvedValueOnce({ data: { objects: [], folders: [], hasNext: false }, error: null })
+      .mockResolvedValueOnce({
+      data: { objects: [{ name: hash, key: `${collection}/${hash}` }], folders: [], hasNext: false },
+      error: null,
+      }).mockResolvedValue({ data: { objects: [], folders: [], hasNext: false }, error: null });
+    storage.remove.mockResolvedValue({ data: [{ name: hash }], error: null });
+
+    expect(await processPrivacy(service)).toBe(1);
+
+    expect(storage.remove).toHaveBeenCalledWith([`${collection}/${hash}`]);
+    expect(storage.listV2).toHaveBeenCalledTimes(10);
+    expect(removeContact).toHaveBeenCalledWith("/contacts/already-removed", "DELETE");
+    expect(deleteUser).toHaveBeenCalledWith("account-a");
+    expect(storage.listV2.mock.invocationCallOrder.at(-1)).toBeLessThan(deleteUser.mock.invocationCallOrder[0]);
   });
 });
 

@@ -68,6 +68,7 @@ const PRIVILEGED = [
   "public.push_workspace_revision(bigint,integer,text,jsonb,uuid,uuid,text)",
   "public.create_question_set_share(text,jsonb)",
   "public.touch_account_device(uuid,text,text,bigint)",
+  "public.axom_account_accepts_cloud_writes()",
   "public.delete_my_cloud_data()", "public.consume_ai_quota()", "public.revoke_question_set_share(uuid)",
 ];
 const PRIVATE_TABLES = [
@@ -164,12 +165,220 @@ describe("Supabase migrations on real Postgres", () => {
     } finally { await db.close(); }
   }, 60_000);
 
+  it("cascades an academic owner's relational graph without deleting another owner's content", async () => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
+    const C = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    const ownerCollection = "33333333-3333-4333-8333-333333333333";
+    const ownerRevision = "44444444-4444-4444-8444-444444444444";
+    const foreignCollection = "55555555-5555-4555-8555-555555555555";
+    const foreignRevision = "66666666-6666-4666-8666-666666666666";
+    const challenge = "77777777-7777-4777-8777-777777777777";
+    const foreignHash = "b".repeat(64);
+    const scalar = async (sql: string, params: unknown[] = []) =>
+      Number((await db.query<{ n: number }>(sql, params)).rows[0].n);
+    try {
+      await db.query("insert into auth.users(id,email) values ($1,'owner@x.test'),($2,'other@x.test'),($3,'empty@x.test')", [A, B, C]);
+      await db.query(`insert into public.academic_collections(id,owner_id,title,module,term)
+        values($1,$2,'Owner bank','OWNER','Term 1'),($3,$4,'Other bank','OTHER','Term 1')`,
+      [ownerCollection, A, foreignCollection, B]);
+      await db.query(`insert into public.academic_revisions(id,collection_id,content_hash,template_text,status)
+        values($1,$2,$3,'Owner week','ready'),($4,$5,$6,'Other week','ready')`,
+      [ownerRevision, ownerCollection, HASH, foreignRevision, foreignCollection, foreignHash]);
+      await db.query(`insert into public.academic_files(revision_id,path,object_path,sha256,byte_size,mime_type)
+        values($1,'owner.json',$2,$3,7,'application/json'),($4,'other.json',$5,$6,7,'application/json')`,
+      [ownerRevision, `${ownerCollection}/${HASH}`, HASH, foreignRevision, `${foreignCollection}/${foreignHash}`, foreignHash]);
+      await db.query("update public.academic_collections set current_revision_id=$2 where id=$1", [ownerCollection, ownerRevision]);
+      await db.query("update public.academic_collections set current_revision_id=$2 where id=$1", [foreignCollection, foreignRevision]);
+      await db.query(`insert into public.academic_enrollments(user_id,collection_id,revision_id,weeks)
+        values($1,$2,$3,'{1}'),($4,$5,$6,'{1}')`,
+      [B, ownerCollection, ownerRevision, A, foreignCollection, foreignRevision]);
+      await db.query("insert into public.academic_source_identities(owner_id,source_sha256,collection_id) values($1,$2,$3)",
+        [A, HASH, ownerCollection]);
+      await db.query(`insert into public.academic_challenges(id,collection_id,revision_id,day,questions)
+        values($1,$2,$3,'2026-10-15','[{"id":"q1"}]')`,
+      [challenge, ownerCollection, ownerRevision]);
+      await db.query("insert into public.academic_challenge_participants(challenge_id,user_id,alias) values($1,$2,'Other learner')", [challenge, B]);
+      await db.query(`insert into public.academic_challenge_attempts(user_id,question_key,challenge_id,event_id,answer_key,assisted,points)
+        values($1,'q1',$2,'88888888-8888-4888-8888-888888888888','A',false,1)`, [B, challenge]);
+      await db.query("insert into storage.objects(bucket_id,name,metadata) values('academic-content',$1,'{}'),('academic-content',$2,'{}')",
+        [`${ownerCollection}/${HASH}`, `${foreignCollection}/${foreignHash}`]);
+
+      // The service deletes and verifies only the owner's immutable prefix
+      // before Auth deletion. The database migration owns relational cleanup.
+      await db.query("delete from storage.objects where bucket_id='academic-content' and name=$1", [`${ownerCollection}/${HASH}`]);
+      await db.query("delete from auth.users where id=$1", [A]);
+      await db.query("delete from auth.users where id=$1", [C]);
+
+      expect(await scalar("select count(*)::int as n from public.academic_collections where id=$1", [ownerCollection])).toBe(0);
+      expect(await scalar("select count(*)::int as n from public.academic_revisions where id=$1", [ownerRevision])).toBe(0);
+      expect(await scalar("select count(*)::int as n from public.academic_files where revision_id=$1", [ownerRevision])).toBe(0);
+      expect(await scalar("select count(*)::int as n from public.academic_enrollments")).toBe(0);
+      expect(await scalar("select count(*)::int as n from public.academic_challenges where id=$1", [challenge])).toBe(0);
+      expect(await scalar("select count(*)::int as n from public.academic_challenge_participants where challenge_id=$1", [challenge])).toBe(0);
+      expect(await scalar("select count(*)::int as n from public.academic_challenge_attempts where challenge_id=$1", [challenge])).toBe(0);
+      expect(await scalar("select count(*)::int as n from public.academic_source_identities where owner_id=$1", [A])).toBe(0);
+      expect(await scalar("select count(*)::int as n from auth.users where id=$1", [C])).toBe(0);
+
+      expect(await scalar("select count(*)::int as n from public.academic_collections where id=$1", [foreignCollection])).toBe(1);
+      expect(await scalar("select count(*)::int as n from public.academic_revisions where id=$1", [foreignRevision])).toBe(1);
+      expect(await scalar("select count(*)::int as n from public.academic_files where revision_id=$1", [foreignRevision])).toBe(1);
+      expect((await db.query("select name from storage.objects where bucket_id='academic-content'")).rows)
+        .toEqual([{ name: `${foreignCollection}/${foreignHash}` }]);
+    } finally { await db.close(); }
+  }, 60_000);
+
+  it("blocks owner uploads and manifests throughout deletion cleanup and reconciliation", async () => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
+    const collection = "33333333-3333-4333-8333-333333333333";
+    const revision = "44444444-4444-4444-8444-444444444444";
+    const request = "55555555-5555-4555-8555-555555555555";
+    const secondHash = "b".repeat(64);
+    const shareSnapshot = JSON.stringify({
+      shareFormatVersion: 1,
+      title: "Deletion barrier",
+      questions: [{ stem: "Q" }],
+      createdAt: "2026-10-16T00:00:00Z",
+    });
+    const save = (user: string, base: number, hash: string) => as(db, "authenticated", user,
+      "select public.push_workspace_revision($1,34,$2,$3::jsonb,gen_random_uuid(),gen_random_uuid(),'automatic') as result",
+      [base, hash, JSON.stringify({ value: hash })]);
+    const upload = (user: string, bucket: string, hash: string) => as(db, "authenticated", user,
+      "insert into storage.objects(bucket_id,name,metadata) values($1,$2,'{\"size\":7}')",
+      [bucket, `${user}/${hash}`]);
+    try {
+      const { rows: barrierPolicies } = await db.query<{ policyname: string; cmd: string; qual: string | null; with_check: string | null }>(`
+        select policyname,cmd,qual,with_check from pg_policies
+        where schemaname='storage' and tablename='objects'
+          and policyname in ('account_deletion_storage_write_barrier','account_deletion_storage_update_barrier')
+        order by policyname`);
+      expect(barrierPolicies.map(policy => [policy.policyname, policy.cmd])).toEqual([
+        ["account_deletion_storage_update_barrier", "UPDATE"],
+        ["account_deletion_storage_write_barrier", "INSERT"],
+      ]);
+      expect(barrierPolicies.every(policy =>
+        `${policy.qual ?? ""} ${policy.with_check ?? ""}`.includes("axom_account_accepts_cloud_writes"))).toBe(true);
+
+      await db.query("insert into auth.users(id,email) values ($1,'a@x.test'),($2,'b@x.test')", [A, B]);
+      await db.query(`insert into public.academic_collections(id,owner_id,title,module,term)
+        values($1,$2,'Owner bank','OWNER','Term 1')`, [collection, A]);
+      await db.query(`insert into public.academic_revisions(id,collection_id,content_hash,template_text,status)
+        values($1,$2,$3,'Owner week','uploading')`, [revision, collection, HASH]);
+      await db.query(`insert into public.academic_files(revision_id,path,object_path,sha256,byte_size,mime_type)
+        values($1,'bank.json',$2,$3,7,'application/json')`, [revision, `${collection}/${HASH}`, HASH]);
+      expect((await save(A, 0, HASH)).rows[0].result).toMatchObject({ status: "accepted" });
+      expect((await save(B, 0, HASH)).rows[0].result).toMatchObject({ status: "accepted" });
+      const existingShare = (await as(db, "authenticated", A,
+        "select public.create_question_set_share('existing', $1::jsonb) as result", [shareSnapshot])).rows[0].result;
+
+      await db.query(`insert into public.privacy_requests(id,user_id,kind,status,failure_code)
+        values($1,$2,'deletion','processing','deletion-preflight')`, [request, A]);
+      for (const bucket of ["workspace-media", "workspace-content", "workspace-originals"]) {
+        await expect(upload(A, bucket, HASH)).rejects.toMatchObject({ code: "42501" });
+      }
+      await expect(as(db, "authenticated", A,
+        "insert into storage.objects(bucket_id,name,metadata) values('academic-content',$1,'{\"size\":7}')",
+        [`${collection}/${HASH}`])).rejects.toMatchObject({ code: "42501" });
+      await expect(save(A, 1, secondHash)).rejects.toMatchObject({ code: "PT409" });
+      await expect(as(db, "authenticated", A,
+        "select public.create_question_set_share('existing', $1::jsonb)", [shareSnapshot]))
+        .rejects.toMatchObject({ code: "PT409" });
+      await expect(as(db, "authenticated", A,
+        "select public.create_question_set_share('new', $1::jsonb)", [shareSnapshot]))
+        .rejects.toMatchObject({ code: "PT409" });
+      await expect(upload(B, "workspace-media", HASH)).resolves.toBeDefined();
+      await expect(as(db, "authenticated", B,
+        "select public.create_question_set_share('other-owner', $1::jsonb)", [shareSnapshot]))
+        .resolves.toBeDefined();
+
+      await db.query("update public.privacy_requests set status='failed',failure_code='deletion-preflight-failed' where id=$1", [request]);
+      await expect(upload(A, "workspace-media", HASH)).resolves.toBeDefined();
+      expect((await save(A, 1, secondHash)).rows[0].result).toMatchObject({ status: "accepted" });
+      expect((await as(db, "authenticated", A,
+        "select public.create_question_set_share('existing', $1::jsonb) as result", [shareSnapshot])).rows[0].result)
+        .toMatchObject({ id: (existingShare as { id: string }).id, idempotent: true });
+
+      await db.query("update public.privacy_requests set failure_code='deletion-reconciliation-required' where id=$1", [request]);
+      await expect(upload(A, "workspace-content", secondHash)).rejects.toMatchObject({ code: "42501" });
+      await expect(save(A, 2, "c".repeat(64))).rejects.toMatchObject({ code: "PT409" });
+      await expect(as(db, "authenticated", A,
+        "select public.create_question_set_share('existing', $1::jsonb)", [shareSnapshot]))
+        .rejects.toMatchObject({ code: "PT409" });
+    } finally { await db.close(); }
+  }, 60_000);
+
+  it("rejects stale authenticated claims after the Auth user is deleted", async () => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
+    const collection = "33333333-3333-4333-8333-333333333333";
+    const revision = "44444444-4444-4444-8444-444444444444";
+    const staleHash = "b".repeat(64);
+    const paths = [
+      ["workspace-media", `${A}/${HASH}`],
+      ["workspace-content", `${A}/${HASH}`],
+      ["workspace-originals", `${A}/${HASH}`],
+      ["academic-content", `${collection}/${HASH}`],
+    ] as const;
+    const shareSnapshot = JSON.stringify({
+      shareFormatVersion: 1,
+      title: "Stale token",
+      questions: [{ stem: "Q" }],
+    });
+    try {
+      await db.query("insert into auth.users(id,email) values ($1,'a@x.test'),($2,'b@x.test')", [A, B]);
+      await db.query(`insert into public.academic_collections(id,owner_id,title,module,term)
+        values($1,$2,'Owner bank','OWNER','Term 1')`, [collection, A]);
+      await db.query(`insert into public.academic_revisions(id,collection_id,content_hash,template_text,status)
+        values($1,$2,$3,'Owner week','uploading')`, [revision, collection, HASH]);
+      await db.query(`insert into public.academic_files(revision_id,path,object_path,sha256,byte_size,mime_type)
+        values($1,'bank.json',$2,$3,7,'application/json')`, [revision, `${collection}/${HASH}`, HASH]);
+      for (const [bucket, path] of paths) {
+        await as(db, "authenticated", A,
+          "insert into storage.objects(bucket_id,name,metadata) values($1,$2,'{\"size\":7}')", [bucket, path]);
+      }
+      await as(db, "authenticated", A,
+        "select public.create_question_set_share('before-delete', $1::jsonb)", [shareSnapshot]);
+
+      await db.query("delete from auth.users where id=$1", [A]);
+
+      expect((await as(db, "authenticated", A,
+        "select public.axom_account_accepts_cloud_writes() as allowed")).rows)
+        .toEqual([{ allowed: false }]);
+      for (const [bucket, path] of paths) {
+        const stalePath = bucket === "academic-content" ? `${collection}/${staleHash}` : `${A}/${staleHash}`;
+        await expect(as(db, "authenticated", A,
+          "insert into storage.objects(bucket_id,name,metadata) values($1,$2,'{\"size\":7}')", [bucket, stalePath]))
+          .rejects.toMatchObject({ code: "42501" });
+        await expect(as(db, "authenticated", A, `insert into storage.objects(bucket_id,name,metadata)
+          values($1,$2,'{"size":9}')
+          on conflict(bucket_id,name) do update set metadata=excluded.metadata`, [bucket, path]))
+          .rejects.toMatchObject({ code: "42501" });
+      }
+      await expect(as(db, "authenticated", A,
+        "select public.create_question_set_share('after-delete', $1::jsonb)", [shareSnapshot]))
+        .rejects.toMatchObject({ code: "PT409" });
+
+      expect((await as(db, "authenticated", B,
+        "select public.axom_account_accepts_cloud_writes() as allowed")).rows)
+        .toEqual([{ allowed: true }]);
+      await expect(as(db, "authenticated", B,
+        "insert into storage.objects(bucket_id,name,metadata) values('workspace-media',$1,'{\"size\":7}')",
+        [`${B}/${HASH}`])).resolves.toBeDefined();
+      await expect(as(db, "authenticated", B,
+        "select public.create_question_set_share('other-owner', $1::jsonb)", [shareSnapshot]))
+        .resolves.toBeDefined();
+    } finally { await db.close(); }
+  }, 60_000);
+
   it.each([false, true])("apply cleanly and lock function ACLs (rls_auto_enable present: %s)", async (rlsAutoEnable) => {
     const db = await supabaseLikeDatabase({ rlsAutoEnable });
     for (const signature of PRIVILEGED) {
       expect(await canExecute(db, "anon", signature), `anon on ${signature}`).toBe(false);
       expect(await canExecute(db, "authenticated", signature), `authenticated on ${signature}`).toBe(true);
       expect(await canExecute(db, "service_role", signature), `service_role on ${signature}`).toBe(true);
+    }
+    for (const role of ["anon", "authenticated", "service_role"]) {
+      expect(await canExecute(db, role,
+        "axom_private.create_question_set_share_without_account_gate(text,jsonb)"),
+      `${role} on internal share publisher`).toBe(false);
     }
     expect(await canExecute(db, "anon", "public.revoke_question_set_share(uuid)")).toBe(false);
     expect(await canExecute(db, "authenticated", "public.revoke_question_set_share(uuid)")).toBe(true);

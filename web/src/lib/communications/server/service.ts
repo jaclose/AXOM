@@ -197,6 +197,7 @@ export class CommunicationsService {
   async exportRecord(id: string, requestId: string) {
     const row = required(await this.db.from("privacy_requests").select("object_path,expires_at,status").eq("id", requestId).eq("user_id", id).eq("kind", "export").single());
     if (row.status !== "ready" || !row.object_path || Date.parse(row.expires_at) <= Date.now()) throw new Error("export-expired-request-again");
+    if (row.object_path !== `${id}/${requestId}.json`) throw new Error("export-storage-index-invalid");
     return row;
   }
   async exportLink(id: string, requestId: string): Promise<string> {
