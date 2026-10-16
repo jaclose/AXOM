@@ -165,6 +165,35 @@ describe("ExamSimulator", () => {
     expect(onFinish).toHaveBeenCalledOnce();
   });
 
+  it("announces saving and keeps an expired run locked through a retry", async () => {
+    vi.useFakeTimers();
+    let rejectSave!: (error: Error) => void;
+    const onFinish = vi.fn()
+      .mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectSave = reject; }))
+      .mockResolvedValueOnce(undefined);
+    render(<ExamSimulator skin="nbme" mode="exam" pool={pool} runId="stable-run" timeLimitSeconds={1} onFinish={onFinish} onSuspend={vi.fn()} />);
+    fireEvent.click(screen.getByRole("radio", { name: "A. Alpha" }));
+
+    act(() => { vi.advanceTimersByTime(1_000); });
+    expect(screen.getByRole("status").textContent).toMatch(/saving block/i);
+    expect(screen.getByRole("dialog", { name: /NBME.*simulation/ }).getAttribute("aria-busy")).toBe("true");
+    await act(async () => { rejectSave(new Error("Synthetic device refusal")); });
+    const warning = screen.getByRole("alert");
+    expect(warning.textContent).toMatch(/Synthetic device refusal/);
+
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(screen.getByText("Item 1 of 3", { selector: "b" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: "B. Beta" }));
+    expect((screen.getByRole("radio", { name: "A. Alpha" }) as HTMLInputElement).checked).toBe(true);
+
+    await act(async () => { fireEvent.click(within(warning).getByRole("button", { name: "Retry save" })); });
+    expect(onFinish).toHaveBeenCalledTimes(2);
+    expect(onFinish.mock.calls[1][0]).toBe(onFinish.mock.calls[0][0]);
+    expect(onFinish.mock.calls[1][1]).toBe(onFinish.mock.calls[0][1]);
+    expect(onFinish.mock.calls[1][2]).toBe(onFinish.mock.calls[0][2]);
+    expect(onFinish.mock.calls[1][2]).toMatchObject({ runId: "stable-run" });
+  });
+
   it("searches the lab values panel", () => {
     render(<ExamSimulator skin="nbme" mode="exam" pool={pool} onFinish={vi.fn()} onSuspend={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Lab Values" }));

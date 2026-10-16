@@ -903,6 +903,27 @@ describe("ExamRunner durable finalization", () => {
     expect(localStorage.getItem(STORAGE_KEYS.quizActiveSession)).toBeNull();
   });
 
+  it("does not claim browser recovery when every snapshot write fails", async () => {
+    setStore();
+    mocked.vaultFlush.mockRejectedValueOnce(new Error("Synthetic vault refusal"));
+    const originalSetItem = memoryLocalStorage.setItem.bind(memoryLocalStorage);
+    const storageWrite = vi.spyOn(memoryLocalStorage, "setItem").mockImplementation((key, value) => {
+      if (key.startsWith(STORAGE_KEYS.quizActiveSession)) throw new Error("Synthetic browser storage refusal");
+      originalSetItem(key, value);
+    });
+    const user = userEvent.setup();
+    render(<ExamRunner mode="exam" retakeIds={[question.id]} onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "B. Beta" }));
+    await user.click(screen.getByRole("button", { name: "Submit & finish" }));
+
+    const warning = await screen.findByRole("alert");
+    expect(warning.textContent).toMatch(/could not create or update browser recovery/i);
+    expect(warning.textContent).not.toMatch(/open and recoverable/i);
+    expect(screen.getByRole("heading", { name: "Exam · 1 of 1" })).toBeTruthy();
+    storageWrite.mockRestore();
+  });
+
   it("does not close an answered block when save-and-exit durability fails", async () => {
     setStore();
     mocked.vaultAssertWritesSince.mockImplementationOnce(() => { throw new Error("Synthetic finalization refusal"); });
@@ -946,6 +967,31 @@ describe("ExamRunner durable finalization", () => {
 
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession)!).runId).toBe("run-other");
     expect(JSON.parse(localStorage.getItem(`${STORAGE_KEYS.quizActiveSession}:run:run-other`)!).runId).toBe("run-other");
+    expect(localStorage.getItem(`${STORAGE_KEYS.quizActiveSession}:run:run-current`)).toBeNull();
+  });
+
+  it("finishing one run preserves another tab's valid legacy snapshot without a run id", async () => {
+    setStore();
+    const current = {
+      mode: "exam", runId: "run-current", poolIds: [question.id], index: 0,
+      answers: [{ questionId: question.id, answerKey: "B", correct: true, flagged: false, seconds: 5 }],
+      picked: "B", revealed: false, startedAt: "2026-07-10T01:00:00.000Z", timed: false,
+      filters: { count: 1, status: "all", ordered: true },
+    };
+    const legacy = {
+      ...current, runId: undefined, picked: "A", answers: [],
+      startedAt: "2026-07-10T02:00:00.000Z",
+    };
+    sessionStorage.setItem(`${STORAGE_KEYS.quizActiveSession}:run-id`, current.runId);
+    localStorage.setItem(`${STORAGE_KEYS.quizActiveSession}:run:${current.runId}`, JSON.stringify(current));
+    localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify(legacy));
+    const user = userEvent.setup();
+    render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Submit & finish" }));
+    await waitFor(() => expect(screen.getByText("Block results")).toBeTruthy());
+
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession)!)).toEqual(legacy);
     expect(localStorage.getItem(`${STORAGE_KEYS.quizActiveSession}:run:run-current`)).toBeNull();
   });
 });
@@ -1144,6 +1190,17 @@ describe("Late tutor recovery and extended option shortcuts", () => {
 });
 
 describe("Exact retake recovery", () => {
+  it("keeps every duplicate-ID claimant out of an exact retake", () => {
+    setStore();
+    mocked.store = { ...mocked.store, questions: [question, { ...question, needsReview: true }] };
+    render(<ExamRunner mode="tutor" retakeIds={[question.id]} onClose={vi.fn()} />);
+
+    expect(screen.getByRole("dialog", { name: "Prepare your requested questions" })).toBeTruthy();
+    expect(screen.getByText(/question ID is claimed by multiple records/i)).toBeTruthy();
+    expect(localStorage.getItem(STORAGE_KEYS.quizActiveSession)).toBeNull();
+    expect(mocked.commitQuizRun).not.toHaveBeenCalled();
+  });
+
   it("waits for the entire requested set and preserves its requested order during late hydration", async () => {
     setStore();
     const second: QuestionRecord = { ...question, id: "requested-first", stem: "Retake question loaded later" };

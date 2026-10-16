@@ -146,7 +146,7 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
 
   return (
     <div ref={exam.rootRef} className={`exam-sim xfy ${reviewing ? "is-review" : ""} ${toolkit ? "has-toolkit" : ""}`} role="dialog" aria-modal="true"
-      aria-label="ExamSoft (Examplify) exam simulation" tabIndex={-1} style={style} onClick={anyMenu ? closeMenus : undefined}>
+      aria-label="ExamSoft (Examplify) exam simulation" aria-busy={exam.finishStatus === "saving"} tabIndex={-1} style={style} onClick={anyMenu ? closeMenus : undefined}>
       {/* ------------------------------------------------------------------ top */}
       <header className="xfy-top">
         <div className="xfy-brand" title="AXOM practice block in the Examplify layout">
@@ -157,7 +157,7 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
         <span className="xfy-title">{title}{reviewing ? " · Review" : exam.block.mode === "tutor" ? " · Tutor" : ""}</span>
 
         <div className="xfy-top-right">
-          <button type="button" className="xfy-controls xfy-exit" aria-label={reviewing ? "Close review" : "Save & exit"} onClick={reviewing ? onClose : exam.suspend}>
+          <button type="button" className="xfy-controls xfy-exit" disabled={!reviewing && exam.finishLocked} aria-label={reviewing ? "Close review" : "Save & exit"} onClick={reviewing ? onClose : exam.suspend}>
             <X size={16} aria-hidden="true" /> <span>{reviewing ? "Close review" : "Save & exit"}</span>
           </button>
           {/* The exam keeps its clock at the top of the screen; an alarm sits over it. */}
@@ -243,7 +243,7 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
               aria-label={`Question ${index + 1} of ${pool.length}. ${collapsed ? "Show" : "Hide"} the question text`}>
               Question {index + 1} <ChevronDown size={16} className={collapsed ? "turned" : ""} aria-hidden="true" />
             </button>
-            <button type="button" className={`xfy-flag ${item.marked ? "on" : ""}`} onClick={exam.mark} disabled={reviewing} aria-pressed={item.marked}>
+            <button type="button" className={`xfy-flag ${item.marked ? "on" : ""}`} onClick={exam.mark} disabled={reviewing || exam.finishLocked} aria-pressed={item.marked}>
               {item.marked ? "Unflag question" : "Flag question"}
             </button>
             <div className="xfy-marks" role="group" aria-label="Highlighter">
@@ -304,7 +304,7 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
               const isWrong = revealed && selected && correctKey !== undefined && correctKey !== option.key;
               return (
                 <div key={option.key} className={`xfy-choice ${selected ? "selected" : ""} ${struck ? "struck" : ""} ${isCorrect ? "correct" : ""} ${isWrong ? "wrong" : ""}`}>
-                  <button type="button" className="xfy-choice-main" role="radio" aria-checked={selected} disabled={revealed}
+                  <button type="button" className="xfy-choice-main" role="radio" aria-checked={selected} disabled={revealed || exam.finishLocked}
                     aria-label={`${option.key}. ${option.text}${struck ? " (struck out)" : ""}`} onClick={() => exam.pick(option.key)}>
                     <b>{option.key}</b>
                     <span><QuestionContent question={question} part="choice" choice={option.key} fallback={option.text} /></span>
@@ -327,7 +327,7 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
           </div>
 
           {exam.block.mode === "tutor" && !reviewing && !revealed && (
-            <button type="button" className="xfy-check" disabled={!item.answerKey} onClick={exam.reveal}>Check answer</button>
+            <button type="button" className="xfy-check" disabled={!item.answerKey || exam.finishLocked} onClick={exam.reveal}>Check answer</button>
           )}
           {revealed && <ExplanationBody question={question} picked={item.answerKey} correctKey={correctKey} result={result} seconds={exam.seconds} />}
         </section>
@@ -392,8 +392,8 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
         <span className="xfy-count">{index + 1} of {pool.length} questions</span>
         <span className="xfy-version">AXOM {BUILD_INFO.version}</span>
         <div className="xfy-bottom-right">
-          <button type="button" className="xfy-prev" disabled={index === 0} onClick={exam.previous}>Previous</button>
-          <button type="button" className="xfy-next" disabled={index + 1 >= pool.length} onClick={exam.next}>Next</button>
+          <button type="button" className="xfy-prev" disabled={index === 0 || exam.finishLocked} onClick={exam.previous}>Previous</button>
+          <button type="button" className="xfy-next" disabled={index + 1 >= pool.length || exam.finishLocked} onClick={exam.next}>Next</button>
         </div>
       </footer>
 
@@ -421,6 +421,13 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
       )}
       {alarmEditor && <AlarmEditor timed={timeLimitSeconds !== undefined} onCreate={addAlarm} onCancel={() => setAlarmEditor(false)} />}
       {exam.confirmEnd && <SubmitDialog exam={exam} onReview={(next) => { exam.setConfirmEnd(false); setFilter(next); }} />}
+      {!reviewing && exam.finishStatus !== "idle" && (
+        <div className="sim-alert" role={exam.finishStatus === "error" ? "alert" : "status"} aria-live="polite" aria-atomic="true">
+          {exam.finishStatus === "saving" && <><b>Saving exam…</b><span>Keep this window open.</span></>}
+          {exam.finishStatus === "error" && <><b>Save not confirmed.</b><span>{exam.finishError}</span><button type="button" onClick={() => void exam.finish()}>Retry save</button></>}
+          {exam.finishStatus === "complete" && <b>Exam saved.</b>}
+        </div>
+      )}
     </div>
   );
 }
@@ -587,7 +594,7 @@ function SubmitDialog({ exam, onReview }: { exam: ExamBlockApi; onReview: (filte
         )}
         <div className="xfy-submit-actions">
           <button type="button" className="xfy-prev" onClick={() => exam.setConfirmEnd(false)}>Return to Exam</button>
-          <button type="button" className="xfy-next" disabled={!ready} onClick={exam.finish}>Submit</button>
+          <button type="button" className="xfy-next" disabled={!ready || exam.finishLocked} onClick={() => void exam.finish()}>Submit</button>
         </div>
       </div>
     </div>

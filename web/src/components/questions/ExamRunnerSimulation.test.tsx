@@ -5,6 +5,7 @@ import type { QuestionRecord } from "../../lib/questions";
 import { makeSeed } from "../../lib/seed";
 import { useStore } from "../../lib/store";
 import { readSuspendedBlock, writeSuspendedBlock } from "../../lib/examSim";
+import * as localVault from "../../lib/localVault";
 import { ExamRunner } from "./ExamRunner";
 
 vi.mock("../../lib/ai", () => ({ resolveActiveProvider: () => null, explainSimply: vi.fn(), explainWhyWrong: vi.fn(), memoryHook: vi.fn() }));
@@ -37,7 +38,7 @@ describe("ExamRunner simulation", () => {
       .toContain("1 matches your filters");
   });
 
-  it("runs a UWorld-style block and records the session", () => {
+  it("runs a UWorld-style block and records the session", async () => {
     const onClose = vi.fn();
     render(<ExamRunner mode="exam" onClose={onClose} />);
     fireEvent.click(screen.getByRole("radio", { name: /UWorld-style/ }));
@@ -49,7 +50,7 @@ describe("ExamRunner simulation", () => {
     fireEvent.click(within(sim).getAllByRole("radio", { name: "B. Beta" })[0]);
     fireEvent.click(within(sim).getByRole("button", { name: /End Block/ }));
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "End Block" }));
-    expect(screen.getByText("Block results")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("Block results")).toBeTruthy());
     const session = useStore.getState().quizSessions[0];
     expect(session).toMatchObject({ mode: "exam", timed: true, timeLimitSeconds: 180, simulation: { skin: "uworld", preset: "usmle-2026" } });
     expect(session.answers.filter((answer) => answer.correct)).toHaveLength(1);
@@ -75,9 +76,51 @@ describe("ExamRunner simulation", () => {
     fireEvent.click(screen.getByRole("button", { name: /Resume/ }));
     expect((screen.getAllByRole("radio", { name: "A. Alpha" })[0] as HTMLInputElement).checked).toBe(true);
   });
+
+  it("retains final recovery and retries one stable run without duplicate attempts", async () => {
+    const flush = vi.spyOn(localVault, "flushLocalVaultWrites")
+      .mockRejectedValueOnce(new Error("Synthetic vault refusal"))
+      .mockResolvedValueOnce(undefined);
+    render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("radio", { name: /UWorld-style/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Start exam block/ }));
+    fireEvent.click(screen.getAllByRole("radio", { name: "B. Beta" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: /End Block/ }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "End Block" }));
+
+    const warning = await screen.findByRole("alert");
+    expect(warning.textContent).toMatch(/recovery is still on this device/i);
+    const recovery = readSuspendedBlock();
+    expect(recovery?.runId).toEqual(expect.any(String));
+    expect(useStore.getState().quizSessions).toHaveLength(1);
+    expect(useStore.getState().questions.flatMap((item) => item.attempts)).toHaveLength(1);
+
+    fireEvent.click(within(warning).getByRole("button", { name: "Retry save" }));
+    await waitFor(() => expect(screen.getByText("Block results")).toBeTruthy());
+    expect(useStore.getState().quizSessions).toHaveLength(1);
+    expect(useStore.getState().quizSessions[0].id).toBe(recovery?.runId);
+    expect(useStore.getState().questions.flatMap((item) => item.attempts)).toHaveLength(1);
+    expect(readSuspendedBlock()).toBeUndefined();
+    flush.mockRestore();
+  });
 });
 
 describe("Suspended exam source recovery", () => {
+  it("does not resume when any requested ID has multiple claimants", () => {
+    const now = new Date().toISOString();
+    writeSuspendedBlock({
+      version: 1, runId: "duplicate-resume", skin: "nbme", mode: "exam", poolIds: ["q1"], index: 0,
+      items: {}, elapsedMs: 0, notes: "", startedAt: now, suspendedAt: now,
+    });
+    useStore.setState({ questions: [q("q1"), { ...q("q1"), needsReview: true }] });
+    render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    expect(screen.getByText(/Suspended block · USMLE \/ NBME/)).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: /simulation/ })).toBeNull();
+    expect(readSuspendedBlock()?.runId).toBe("duplicate-resume");
+  });
+
   it("keeps a suspended block intact until all trusted question records are available", async () => {
     const now = new Date().toISOString();
     writeSuspendedBlock({
@@ -126,7 +169,7 @@ describe("Simulation uses current source evidence at submission", () => {
     expect(session?.score).toMatchObject({ correct: 0, scored: 0, total: 2 });
     expect(session.answers.some((answer) => answer.answerKey)).toBe(true);
     expect(session.answers.filter((answer) => answer.answerKey).every((answer) => answer.correct === undefined)).toBe(true);
-    expect(screen.getByText(/answer mapping unavailable or changed during the block/)).toBeTruthy();
+    await waitFor(() => expect(screen.getByText(/answer mapping unavailable or changed during the block/)).toBeTruthy());
   });
 });
 

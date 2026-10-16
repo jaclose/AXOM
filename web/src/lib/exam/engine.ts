@@ -340,7 +340,7 @@ export function blockAnswers(block: ExamBlock, now: number, correctKeyFor: (id: 
 }
 
 /** Everything needed to pick the block up later, with the clock and the open visit stopped at `now`. */
-export function suspendBlock(block: ExamBlock, now: number, extra: { skin: ExamSkin; timeLimitSeconds?: number }): SuspendedBlock {
+export function suspendBlock(block: ExamBlock, now: number, extra: { skin: ExamSkin; timeLimitSeconds?: number; runId?: string }): SuspendedBlock {
   const times = closeVisit(block.times, now);
   const items: Record<string, ExamItemState> = {};
   for (const id of block.ids) {
@@ -359,6 +359,7 @@ export function suspendBlock(block: ExamBlock, now: number, extra: { skin: ExamS
   }
   return {
     version: 1,
+    ...(extra.runId ? { runId: extra.runId } : {}),
     skin: extra.skin,
     mode: block.mode,
     poolIds: [...block.ids],

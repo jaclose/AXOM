@@ -52,7 +52,7 @@ import {
   getVaultWriteCheckpoint,
 } from "../../lib/localVault";
 import {
-  BLOCK_PRESETS, EXAM_SKINS, blockCounts, formatClock, readSuspendedBlock, writeSuspendedBlock,
+  BLOCK_PRESETS, EXAM_SKINS, blockCounts, clearSuspendedBlock, formatClock, readSuspendedBlock, writeSuspendedBlock,
   type BlockPreset, type ExamSkin, type SuspendedBlock,
 } from "../../lib/examSim";
 import { examReducer, itemState, startBlock, type ExamAction, type ExamBlock } from "../../lib/exam/engine";
@@ -113,8 +113,11 @@ function rememberedQuizRunId(): string | undefined {
   } catch { return undefined; }
 }
 
-function rememberQuizRun(runId: string): void {
-  try { sessionStorage.setItem(ACTIVE_QUIZ_RUN_ID_KEY, runId); } catch { /* the legacy recovery key remains available */ }
+function rememberQuizRun(runId: string): boolean {
+  try {
+    sessionStorage.setItem(ACTIVE_QUIZ_RUN_ID_KEY, runId);
+    return sessionStorage.getItem(ACTIVE_QUIZ_RUN_ID_KEY) === runId;
+  } catch { return false; }
 }
 
 /** Prefer this tab's run mirror, then accept the original single-key snapshot
@@ -130,13 +133,47 @@ function readActiveQuiz(): ActiveQuizSnapshot | undefined {
   } catch { return undefined; }
 }
 
-function writeActiveQuiz(snapshot: ActiveQuizSnapshot): void {
+function sameLegacyQuizRun(left: ActiveQuizSnapshot, right: ActiveQuizSnapshot): boolean {
+  return left.mode === right.mode && left.startedAt === right.startedAt
+    && left.poolIds.length === right.poolIds.length
+    && left.poolIds.every((id, index) => id === right.poolIds[index]);
+}
+
+function writeActiveQuiz(snapshot: ActiveQuizSnapshot): boolean {
   const serialized = JSON.stringify(snapshot);
+  let scopedSaved = false;
+  let pointerSaved = false;
   if (snapshot.runId) {
-    rememberQuizRun(snapshot.runId);
-    try { localStorage.setItem(activeQuizRunKey(snapshot.runId), serialized); } catch { /* retain the legacy path below */ }
+    pointerSaved = rememberQuizRun(snapshot.runId);
+    try {
+      const runKey = activeQuizRunKey(snapshot.runId);
+      localStorage.setItem(runKey, serialized);
+      scopedSaved = localStorage.getItem(runKey) === serialized;
+    } catch { /* retain the legacy path below */ }
   }
-  try { localStorage.setItem(STORAGE_KEYS.quizActiveSession, serialized); } catch { /* the run mirror may still be recoverable */ }
+  let legacySaved = false;
+  try {
+    const legacyRaw = localStorage.getItem(STORAGE_KEYS.quizActiveSession);
+    const legacy = parseActiveQuiz(legacyRaw);
+    const mayOwnLegacy = legacyRaw === null || legacy?.runId === snapshot.runId
+      || Boolean(legacy && !legacy.runId && sameLegacyQuizRun(legacy, snapshot));
+    if (mayOwnLegacy) {
+      localStorage.setItem(STORAGE_KEYS.quizActiveSession, serialized);
+      legacySaved = localStorage.getItem(STORAGE_KEYS.quizActiveSession) === serialized;
+    }
+  } catch { /* the run mirror may still be recoverable */ }
+  if (!snapshot.runId) return legacySaved;
+  return legacySaved || (scopedSaved && pointerSaved);
+}
+
+function questionClaims(questions: readonly QuestionRecord[]): Map<string, QuestionRecord[]> {
+  const claims = new Map<string, QuestionRecord[]>();
+  for (const question of questions) {
+    const current = claims.get(question.id);
+    if (current) current.push(question);
+    else claims.set(question.id, [question]);
+  }
+  return claims;
 }
 
 function anotherActiveQuiz(excludingKey: string): ActiveQuizSnapshot | undefined {
@@ -160,8 +197,12 @@ function clearActiveQuiz(runId: string): void {
     if (sessionStorage.getItem(ACTIVE_QUIZ_RUN_ID_KEY) === runId) sessionStorage.removeItem(ACTIVE_QUIZ_RUN_ID_KEY);
   } catch { /* optional per-tab pointer */ }
   try {
-    const legacy = parseActiveQuiz(localStorage.getItem(STORAGE_KEYS.quizActiveSession));
-    if (legacy?.runId && legacy.runId !== runId) return;
+    const legacyRaw = localStorage.getItem(STORAGE_KEYS.quizActiveSession);
+    const legacy = parseActiveQuiz(legacyRaw);
+    // A pre-run-id snapshot may belong to an older tab. Without an exact
+    // identity match, deleting it would trade one successful save for another
+    // learner's unrecoverable work.
+    if (legacyRaw !== null && legacy?.runId !== runId) return;
     const replacement = anotherActiveQuiz(runKey);
     if (replacement) localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify(replacement));
     else localStorage.removeItem(STORAGE_KEYS.quizActiveSession);
@@ -172,8 +213,11 @@ function clearActiveQuiz(runId: string): void {
  * never silently become a smaller (and misleading) exam or review session. */
 function completeRequestedPool(ids: readonly string[], questions: readonly QuestionRecord[]): QuestionRecord[] | undefined {
   if (!ids.length || new Set(ids).size !== ids.length) return undefined;
-  const available = new Map(questions.map((question) => [question.id, question]));
-  const ordered = ids.map((id) => available.get(id));
+  const claims = questionClaims(questions);
+  const ordered = ids.map((id) => {
+    const candidates = claims.get(id);
+    return candidates?.length === 1 ? candidates[0] : undefined;
+  });
   return ordered.every((question) => question && questionPracticeReadiness(question) === "ready")
     ? ordered as QuestionRecord[] : undefined;
 }
@@ -261,7 +305,6 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const s = useStore();
   const questions = s.questions ?? EMPTY_QUESTIONS;
   const questionsById = useMemo(() => new Map(questions.map((question) => [question.id, question])), [questions]);
-  const readyQuestions = useMemo(() => questions.filter((question) => questionPracticeReadiness(question) === "ready"), [questions]);
   const questionSets = s.questionSets ?? [];
   const restored = useMemo(() => readActiveQuiz(), []);
   const requestedRetakeIds = useMemo(() => [...new Set((retakeIds ?? []).filter((id) => typeof id === "string" && id))], [retakeIds]);
@@ -295,7 +338,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   });
   const [presetId, setPresetId] = useState<BlockPreset["id"]>("usmle-2026");
   const [suspended, setSuspended] = useState<SuspendedBlock | undefined>(() => readSuspendedBlock());
-  const [simRun, setSimRun] = useState<{ skin: ExamSkin; pool: QuestionRecord[]; timeLimitSeconds?: number; resume?: SuspendedBlock } | null>(null);
+  const [simRun, setSimRun] = useState<{ runId: string; skin: ExamSkin; pool: QuestionRecord[]; timeLimitSeconds?: number; resume?: SuspendedBlock } | null>(null);
 
   // --- run state
   const [pool, setPool] = useState<QuestionRecord[]>(() => restored
@@ -330,6 +373,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   });
   const blockRef = useRef(block);
   const finalizingRef = useRef(false);
+  const recoveryAvailableRef = useRef(Boolean(restored));
   const restoredTutorReplayRef = useRef(false);
   /** Run one engine action and return the block it made, so a handler can save from it at once. */
   const act = useCallback((action: ExamAction): ExamBlock => {
@@ -463,7 +507,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   // never truncate it to the IDs that happened to arrive first.
   useEffect(() => {
     if (!restored || !restorePending) return;
-    const recovered = completeRestoredPool(restored, readyQuestions);
+    const recovered = completeRestoredPool(restored, questions);
     if (!recovered) return;
     const ids = recovered.map((item) => item.id);
     const recoveredBlock = blockFromPlayerSnapshot(restored, ids, Date.now());
@@ -482,13 +526,13 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     setStartedAt(restored.startedAt);
     setNowTick(Date.now());
     setRestorePending(false);
-  }, [restored, restorePending, readyQuestions, questions, runId]);
+  }, [restored, restorePending, questions, runId]);
 
   // An explicit retake is a fixed list too. Wait for all of its questions
   // rather than starting a shortened review because the vault hydrated late.
   useEffect(() => {
     if (restored || !retakePending) return;
-    const ready = completeRequestedPool(requestedRetakeIds, readyQuestions);
+    const ready = completeRequestedPool(requestedRetakeIds, questions);
     if (!ready) return;
     const now = Date.now();
     const started = new Date(now).toISOString();
@@ -502,7 +546,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     setLocalAnnotations(annotations);
     localAnnotationsRef.current = annotations;
     setRetakePending(false);
-  }, [initialMode, readyQuestions, requestedRetakeIds, restored, retakePending]);
+  }, [initialMode, questions, requestedRetakeIds, restored, retakePending]);
 
   useEffect(() => {
     if (stage !== "running" || pool.length === 0 || restorePending || retakePending || !mediaReady) return;
@@ -518,7 +562,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       return saved.answerKey || saved.flagged ? [saved] : [];
     });
     const snapshot: ActiveQuizSnapshot = { mode, poolIds: pool.map((item) => item.id), index, answers, picked, revealed, startedAt, timed, filters, runId, certainty };
-    writeActiveQuiz(snapshot);
+    recoveryAvailableRef.current = writeActiveQuiz(snapshot);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [block, category, certainties, checked, count, examType, mode, ordered, pool, restorePending, retakePending, mediaReady, runId, setIds, questionIds, stage, startedAt, status, timed]);
 
@@ -708,10 +752,11 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   function startBuiltBlock(built: QuestionRecord[]) {
     if (examInterface !== "axom") {
       if (suspended && !confirm("Starting a new block discards your suspended block. Continue?")) return;
-      writeSuspendedBlock(null);
+      if (suspended?.runId) clearSuspendedBlock(suspended.runId);
+      else writeSuspendedBlock(null);
       setSuspended(undefined);
       clearActiveQuiz(runId);
-      setSimRun({ skin: examInterface, pool: built, timeLimitSeconds: timed ? built.length * SECONDS_PER_ITEM : undefined });
+      setSimRun({ runId, skin: examInterface, pool: built, timeLimitSeconds: timed ? built.length * SECONDS_PER_ITEM : undefined });
       if (runBlockId) {
         const savedBlock = (s.quizBlocks ?? []).find((block) => block.id === runBlockId);
         if (savedBlock) s.saveQuizBlock({ ...savedBlock, lastRunAt: new Date().toISOString() });
@@ -832,10 +877,14 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       assertVaultWritesSince(checkpoint);
     } catch (error) {
       const detail = error instanceof Error ? error.message : "The local workspace write could not be confirmed.";
-      setFinalizeError(`Your answers are still open and recoverable. AXOM could not confirm the final save. ${detail}`);
+      setFinalizeError(recoveryAvailableRef.current
+        ? `Your answers are still open and recoverable. AXOM could not confirm the final save. ${detail}`
+        : `Your answers remain open in this window, but AXOM could not create or update browser recovery. Keep this window open and retry. ${detail}`);
       pushToast({
         title: "Block is still open",
-        body: "AXOM kept the recovery copy. Free browser storage if needed, then use the same finish or exit action again.",
+        body: recoveryAvailableRef.current
+          ? "AXOM kept the recovery copy. Free browser storage if needed, then use the same finish or exit action again."
+          : "Browser recovery is unavailable. Keep this window open, free browser storage if needed, then retry the same finish or exit action.",
         tone: "warn",
       });
       finalizingRef.current = false;
@@ -919,21 +968,32 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
 
   function resumeSuspended() {
     if (!suspended) return;
-    const available = new Map(readyQuestions.map((question) => [question.id, question]));
-    const resolved = suspended.poolIds.map((id) => available.get(id));
-    const ready = resolved.filter((question): question is QuestionRecord => Boolean(question));
-    if (ready.length !== suspended.poolIds.length || new Set(suspended.poolIds).size !== suspended.poolIds.length) {
+    const ready = completeRequestedPool(suspended.poolIds, questions);
+    if (!ready) {
+      const claims = questionClaims(questions);
+      const available = suspended.poolIds.filter((id) => {
+        const candidates = claims.get(id);
+        return candidates?.length === 1 && questionPracticeReadiness(candidates[0]) === "ready";
+      }).length;
       pushToast({
         title: "Suspended exam needs its questions",
-        body: `${ready.length} of ${suspended.poolIds.length} questions are ready on this device. Restore or review the missing records before resuming. Your saved answers were not discarded.`,
+        body: `${available} of ${suspended.poolIds.length} questions are uniquely ready on this device. Restore or review missing, uncertain or duplicate records before resuming. Your saved answers were not discarded.`,
         tone: "warn",
       });
       return;
     }
+    const resumed = { ...suspended, runId: suspended.runId ?? crypto.randomUUID() };
+    try {
+      writeSuspendedBlock(resumed);
+      setSuspended(resumed);
+    } catch (error) {
+      pushToast({ title: "Exam is still suspended", body: error instanceof Error ? error.message : "Could not prepare recovery for this exam.", tone: "warn" });
+      return;
+    }
     const continueSuspended = () => media.verify(ready, () => {
       if (!readSuspendedBlock()) return;
-      setMode(suspended.mode);
-      setSimRun({ skin: suspended.skin, pool: ready, timeLimitSeconds: suspended.timeLimitSeconds, resume: suspended });
+      setMode(resumed.mode);
+      setSimRun({ runId: resumed.runId!, skin: resumed.skin, pool: ready, timeLimitSeconds: resumed.timeLimitSeconds, resume: resumed });
       setStage("sim");
     }, { fresh: true });
     retryMediaStartRef.current = continueSuspended;
@@ -942,12 +1002,24 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
 
   function discardSuspended() {
     if (!confirm("Discard the suspended block? Its answers will not be scored.")) return;
-    writeSuspendedBlock(null);
+    if (suspended?.runId) clearSuspendedBlock(suspended.runId);
+    else writeSuspendedBlock(null);
     setSuspended(undefined);
   }
 
-  function finishSimulation(answerList: QuizAnswer[], meta: { startedAt: string; elapsedSeconds: number }) {
-    if (!simRun) return;
+  async function finishSimulation(
+    answerList: QuizAnswer[],
+    meta: { startedAt: string; endedAt: string; elapsedSeconds: number },
+    recovery: SuspendedBlock,
+  ): Promise<void> {
+    if (!simRun) throw new Error("This exam run is no longer open.");
+    const durableRecovery = { ...recovery, runId: simRun.runId };
+    try {
+      writeSuspendedBlock(durableRecovery);
+      setSuspended(durableRecovery);
+    } catch {
+      throw new Error("AXOM could not create a browser recovery copy. Keep this exam window open and retry. No score was saved.");
+    }
     const originalById = new Map(simRun.pool.map((question) => [question.id, question]));
     // A changed/missing key must not be scored from a stale simulation snapshot.
     const validatedAnswers = answerList.map((answer) => {
@@ -955,10 +1027,10 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       return { ...answer, correct: key ? answer.answerKey === key : undefined };
     });
     const result: QuizSession = {
-      id: crypto.randomUUID(),
+      id: simRun.runId,
       mode,
       startedAt: meta.startedAt,
-      endedAt: new Date().toISOString(),
+      endedAt: meta.endedAt,
       timed: simRun.timeLimitSeconds !== undefined,
       timeLimitSeconds: simRun.timeLimitSeconds,
       filters: currentFilters(),
@@ -967,13 +1039,24 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       score: scoreSession(validatedAnswers),
       simulation: { skin: simRun.skin, preset: simRun.resume ? undefined : presetId, elapsedSeconds: meta.elapsedSeconds },
     };
-    s.commitQuizRun({
-      attempts: validatedAnswers
-        .filter((a) => a.answerKey || a.flagged)
-        .map((a) => ({ questionId: a.questionId, attempt: attemptFor(a, {}, "simulation", result.id) })),
-      session: result,
-    });
-    writeSuspendedBlock(null);
+    const checkpoint = getVaultWriteCheckpoint();
+    try {
+      s.commitQuizRun({
+        attempts: validatedAnswers
+          .filter((a) => a.answerKey || a.flagged)
+          .map((a) => ({ questionId: a.questionId, attempt: attemptFor(a, {}, "simulation", result.id) })),
+        session: result,
+      });
+      await flushLocalVaultWrites();
+      // commitQuizRun is one synchronous Zustand set(), which schedules the
+      // next single local-vault adapter write before any await can interleave.
+      assertVaultWrite(checkpoint + 1);
+      assertVaultWritesSince(checkpoint);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "The local workspace write could not be confirmed.";
+      throw new Error(`AXOM could not confirm the final save. Your exam recovery is still on this device. Retry save. ${detail}`, { cause: error });
+    }
+    clearSuspendedBlock(simRun.runId);
     setSuspended(undefined);
     setPool(simRun.pool);
     setSession(result);
@@ -1221,6 +1304,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         skin={simRun.skin}
         mode={mode}
         pool={simRun.pool}
+        runId={simRun.runId}
         timeLimitSeconds={simRun.timeLimitSeconds}
         resume={simRun.resume}
         onFinish={finishSimulation}
@@ -1365,13 +1449,14 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
 
   if (stage === "running" && ((restorePending && restored) || (retakePending && requestedRetakeIds.length))) {
     const pendingIds = restorePending && restored ? restored.poolIds : requestedRetakeIds;
-    const byId = new Map(questions.map((entry) => [entry.id, entry]));
-    const missing = pendingIds.filter((id) => !byId.has(id)).length;
+    const claims = questionClaims(questions);
+    const missing = pendingIds.filter((id) => !claims.has(id)).length;
+    const duplicate = pendingIds.filter((id) => (claims.get(id)?.length ?? 0) > 1).length;
     const needsReview = pendingIds.filter((id) => {
-      const candidate = byId.get(id);
-      return candidate && questionPracticeReadiness(candidate) !== "ready";
+      const candidates = claims.get(id);
+      return candidates?.length === 1 && questionPracticeReadiness(candidates[0]) !== "ready";
     }).length;
-    const available = pendingIds.length - missing - needsReview;
+    const available = pendingIds.length - missing - duplicate - needsReview;
     const savedSession = Boolean(restorePending && restored);
     return (
       <Modal title={savedSession ? "Recover your saved question block" : "Prepare your requested questions"} onClose={onClose}
@@ -1380,6 +1465,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           <b>{available} of {pendingIds.length} questions are ready on this device</b>
           <p>
             {missing > 0 ? `${missing} question record${missing === 1 ? " is" : "s are"} not available locally. ` : ""}
+            {duplicate > 0 ? `${duplicate} question ID${duplicate === 1 ? " is" : "s are"} claimed by multiple records. ` : ""}
             {needsReview > 0 ? `${needsReview} question${needsReview === 1 ? " needs" : "s need"} answer or source review. ` : ""}
             Restore missing collections or resolve uncertain mappings to practice this exact selection.
           </p>

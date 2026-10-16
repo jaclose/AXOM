@@ -1,5 +1,9 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { answersFromItems, blockCounts, clockElapsedMs, formatClock, pauseClock, resumeClock, reviewIndices } from "./examSim";
+import {
+  EXAM_SIM_SUSPENDED_KEY, answersFromItems, blockCounts, clearSuspendedBlock, clockElapsedMs, formatClock,
+  pauseClock, resumeClock, reviewIndices, writeSuspendedBlock, type SuspendedBlock,
+} from "./examSim";
 import { searchLabValues, LAB_SECTIONS } from "../data/labValues";
 
 const ids = ["a", "b", "c", "d"];
@@ -10,6 +14,26 @@ const items = {
 };
 
 describe("exam simulation engine", () => {
+  it("clears only the finalized run and preserves valid legacy recovery", () => {
+    localStorage.clear();
+    sessionStorage.clear();
+    const startedAt = "2026-10-15T12:00:00.000Z";
+    const legacy: SuspendedBlock = {
+      version: 1, skin: "nbme", mode: "exam", poolIds: ["legacy"], index: 0, items: {}, elapsedMs: 0,
+      notes: "legacy", startedAt, suspendedAt: startedAt,
+    };
+    const current: SuspendedBlock = {
+      ...legacy, runId: "current", poolIds: ["current"], notes: "current",
+      startedAt: "2026-10-15T13:00:00.000Z", suspendedAt: "2026-10-15T13:01:00.000Z",
+    };
+    localStorage.setItem(EXAM_SIM_SUSPENDED_KEY, JSON.stringify(legacy));
+    writeSuspendedBlock(current);
+    clearSuspendedBlock("current");
+
+    expect(JSON.parse(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)!)).toEqual(legacy);
+    expect(localStorage.getItem(`${EXAM_SIM_SUSPENDED_KEY}:run:current`)).toBeNull();
+  });
+
   it("groups items for Item Review", () => {
     expect(blockCounts(ids, items)).toEqual({ answered: 2, incomplete: 2, marked: 2, seen: 3, total: 4 });
     expect(reviewIndices(ids, items, "incomplete")).toEqual([1, 3]);

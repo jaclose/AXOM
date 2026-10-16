@@ -31,12 +31,17 @@ export interface ExamSimulatorProps {
   skin: ExamSkin;
   mode: "exam" | "tutor";
   pool: QuestionRecord[];
+  runId?: string;
   timeLimitSeconds?: number;
   title?: string;
   resume?: SuspendedBlock;
   /** A finished block to read through in the same interface: read-only, results shown. */
   review?: FinishedBlock;
-  onFinish: (answers: QuizAnswer[], meta: { startedAt: string; elapsedSeconds: number }) => void;
+  onFinish: (
+    answers: QuizAnswer[],
+    meta: { startedAt: string; endedAt: string; elapsedSeconds: number },
+    recovery: SuspendedBlock,
+  ) => void | Promise<void>;
   onSuspend: (block: SuspendedBlock) => void;
   /** Leave a review. */
   onClose?: () => void;
@@ -132,7 +137,7 @@ function ClassicExam({ exam, skin, mode, onClose }: {
   );
 
   return (
-    <div ref={exam.rootRef} className={`exam-sim skin-${skin} theme-${prefs.theme} ${reviewing ? "is-review" : ""}`} role="dialog" aria-modal="true" aria-label={`${EXAM_SKINS[skin].label} exam simulation`} tabIndex={-1} style={style}>
+    <div ref={exam.rootRef} className={`exam-sim skin-${skin} theme-${prefs.theme} ${reviewing ? "is-review" : ""}`} role="dialog" aria-modal="true" aria-label={`${EXAM_SKINS[skin].label} exam simulation`} aria-busy={exam.finishStatus === "saving"} tabIndex={-1} style={style}>
       {/* ---------------------------------------------------------------- top */}
       <header className="exam-sim-top">
         <div className="sim-top-left">
@@ -140,7 +145,7 @@ function ClassicExam({ exam, skin, mode, onClose }: {
             <b>Item {index + 1} of {pool.length}</b>
             {skin === "uworld" && <small>Question Id: {shortId}</small>}
           </div>
-          <button type="button" className={`sim-mark ${item.marked ? "on" : ""}`} onClick={exam.mark} disabled={reviewing} aria-pressed={item.marked} aria-label="Mark item for review">
+          <button type="button" className={`sim-mark ${item.marked ? "on" : ""}`} onClick={exam.mark} disabled={reviewing || exam.finishLocked} aria-pressed={item.marked} aria-label="Mark item for review">
             {item.marked ? <SquareCheck size={16} /> : <Square size={16} />} <Flag size={15} className="sim-flag" /> <span>Mark</span>
           </button>
         </div>
@@ -215,7 +220,7 @@ function ClassicExam({ exam, skin, mode, onClose }: {
                 <div key={option.key} className={`sim-choice ${selected ? "selected" : ""} ${struck ? "struck" : ""} ${isCorrect ? "correct" : ""} ${isWrong ? "wrong" : ""}`}
                   onContextMenu={(event) => { event.preventDefault(); exam.strike(option.key); }}>
                   <label>
-                    <input type="radio" name={`sim-${question.id}`} checked={selected} disabled={revealed} onChange={() => exam.pick(option.key)} aria-label={`${option.key}. ${option.text}`} />
+                    <input type="radio" name={`sim-${question.id}`} checked={selected} disabled={revealed || exam.finishLocked} onChange={() => exam.pick(option.key)} aria-label={`${option.key}. ${option.text}`} />
                     <span className="sim-choice-key">{option.key}.</span>
                     <span className="sim-choice-text"><QuestionContent question={question} part="choice" choice={option.key} fallback={option.text} /></span>
                   </label>
@@ -233,7 +238,7 @@ function ClassicExam({ exam, skin, mode, onClose }: {
           </fieldset>
 
           {mode === "tutor" && !revealed && (
-            <button type="button" className="sim-submit" disabled={!item.answerKey} onClick={exam.reveal}>Submit</button>
+            <button type="button" className="sim-submit" disabled={!item.answerKey || exam.finishLocked} onClick={exam.reveal}>Submit</button>
           )}
           {revealed && <ExplanationBody question={question} picked={item.answerKey} correctKey={correctKey} result={result} seconds={exam.seconds} />}
         </section>
@@ -269,8 +274,8 @@ function ClassicExam({ exam, skin, mode, onClose }: {
           {reviewing
             ? <button type="button" className="sim-bottom-btn end" onClick={onClose}><X size={14} /> Close review</button>
             : <>
-              <button type="button" className="sim-bottom-btn" onClick={exam.suspend}><PauseCircle size={16} /> Save & exit</button>
-              <button type="button" className="sim-bottom-btn end" onClick={exam.requestEnd}><Square size={14} /> End Block</button>
+              <button type="button" className="sim-bottom-btn" disabled={exam.finishLocked} onClick={exam.suspend}><PauseCircle size={16} /> Save & exit</button>
+              <button type="button" className="sim-bottom-btn end" disabled={exam.finishLocked} onClick={exam.requestEnd}><Square size={14} /> End Block</button>
             </>}
         </div>
       </footer>
@@ -326,6 +331,13 @@ function ClassicExam({ exam, skin, mode, onClose }: {
         <div className="sim-alert" role="alert">
           <AlarmClock size={18} /> <b>5 minutes remaining</b> in this block.
           <button type="button" onClick={exam.dismissAlarm} aria-label="Dismiss time alert"><X size={15} /></button>
+        </div>
+      )}
+      {!reviewing && exam.finishStatus !== "idle" && (
+        <div className="sim-alert" role={exam.finishStatus === "error" ? "alert" : "status"} aria-live="polite" aria-atomic="true">
+          {exam.finishStatus === "saving" && <><b>Saving block…</b><span>Keep this window open.</span></>}
+          {exam.finishStatus === "error" && <><b>Save not confirmed.</b><span>{exam.finishError}</span><button type="button" onClick={() => void exam.finish()}>Retry save</button></>}
+          {exam.finishStatus === "complete" && <b>Block saved.</b>}
         </div>
       )}
     </div>

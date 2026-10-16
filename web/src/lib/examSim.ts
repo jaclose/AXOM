@@ -113,9 +113,13 @@ export function formatClock(totalSeconds: number): string {
 
 export const EXAM_SIM_SUSPENDED_KEY = "axom.examSim.suspended.v1";
 export const EXAM_SIM_PREFS_KEY = "axom.examSim.prefs.v1";
+const EXAM_SIM_RUN_ID_KEY = `${EXAM_SIM_SUSPENDED_KEY}:run-id`;
+const EXAM_SIM_RUN_PREFIX = `${EXAM_SIM_SUSPENDED_KEY}:run:`;
 
 export interface SuspendedBlock {
   version: 1;
+  /** Stable identity for durable finalization. Absent on legacy snapshots. */
+  runId?: string;
   skin: ExamSkin;
   mode: "exam" | "tutor";
   poolIds: string[];
@@ -128,23 +132,129 @@ export interface SuspendedBlock {
   suspendedAt: string;
 }
 
-export function readSuspendedBlock(): SuspendedBlock | undefined {
+function parseSuspendedBlock(raw: string | null): SuspendedBlock | undefined {
   try {
-    const value = JSON.parse(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY) ?? "null") as SuspendedBlock | null;
-    if (!value || value.version !== 1 || !Array.isArray(value.poolIds) || !value.poolIds.length || !(value.skin in EXAM_SKINS)) return undefined;
+    const value = JSON.parse(raw ?? "null") as SuspendedBlock | null;
+    if (!value || value.version !== 1 || !Array.isArray(value.poolIds) || !value.poolIds.length
+      || value.poolIds.some((id) => typeof id !== "string" || !id)
+      || (value.runId !== undefined && (typeof value.runId !== "string" || !value.runId))
+      || !(value.skin in EXAM_SKINS)) return undefined;
     return value;
   } catch {
     return undefined;
   }
 }
 
-export function writeSuspendedBlock(block: SuspendedBlock | null): void {
+function suspendedRunKey(runId: string): string {
+  return `${EXAM_SIM_RUN_PREFIX}${runId}`;
+}
+
+function rememberSuspendedRun(runId: string): boolean {
   try {
-    if (block) localStorage.setItem(EXAM_SIM_SUSPENDED_KEY, JSON.stringify(block));
-    else localStorage.removeItem(EXAM_SIM_SUSPENDED_KEY);
+    sessionStorage.setItem(EXAM_SIM_RUN_ID_KEY, runId);
+    return sessionStorage.getItem(EXAM_SIM_RUN_ID_KEY) === runId;
   } catch {
-    if (block) throw new Error("Your exam could not be saved. Keep this window open and try again, or finish the block to save your answers.");
+    return false;
   }
+}
+
+function sameLegacySuspendedRun(left: SuspendedBlock, right: SuspendedBlock): boolean {
+  return left.mode === right.mode && left.skin === right.skin && left.startedAt === right.startedAt
+    && left.poolIds.length === right.poolIds.length
+    && left.poolIds.every((id, index) => id === right.poolIds[index]);
+}
+
+function anotherSuspendedBlock(excludingKey: string): SuspendedBlock | undefined {
+  try {
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (!key || key === excludingKey || !key.startsWith(EXAM_SIM_RUN_PREFIX)) continue;
+      const candidate = parseSuspendedBlock(localStorage.getItem(key));
+      if (candidate) return candidate;
+    }
+  } catch { /* no replacement is available */ }
+  return undefined;
+}
+
+export function readSuspendedBlock(): SuspendedBlock | undefined {
+  try {
+    const remembered = sessionStorage.getItem(EXAM_SIM_RUN_ID_KEY);
+    const scoped = remembered ? parseSuspendedBlock(localStorage.getItem(suspendedRunKey(remembered))) : undefined;
+    if (scoped) return scoped;
+    const legacy = parseSuspendedBlock(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY));
+    if (legacy?.runId) rememberSuspendedRun(legacy.runId);
+    return legacy;
+  } catch {
+    return undefined;
+  }
+}
+
+export function writeSuspendedBlock(block: SuspendedBlock | null): void {
+  if (!block) {
+    try {
+      const remembered = sessionStorage.getItem(EXAM_SIM_RUN_ID_KEY);
+      if (remembered) localStorage.removeItem(suspendedRunKey(remembered));
+      sessionStorage.removeItem(EXAM_SIM_RUN_ID_KEY);
+      localStorage.removeItem(EXAM_SIM_SUSPENDED_KEY);
+    } catch { /* explicit legacy cleanup remains best effort */ }
+    return;
+  }
+
+  const serialized = JSON.stringify(block);
+  try {
+    if (!block.runId) {
+      localStorage.setItem(EXAM_SIM_SUSPENDED_KEY, serialized);
+      if (localStorage.getItem(EXAM_SIM_SUSPENDED_KEY) === serialized) return;
+      throw new Error("The browser did not retain the suspended exam.");
+    }
+
+    const pointerSaved = rememberSuspendedRun(block.runId);
+    const runKey = suspendedRunKey(block.runId);
+    let scopedSaved = false;
+    try {
+      localStorage.setItem(runKey, serialized);
+      scopedSaved = localStorage.getItem(runKey) === serialized;
+    } catch { /* the legacy key may still retain this run */ }
+
+    let legacySaved = false;
+    try {
+      const legacyRaw = localStorage.getItem(EXAM_SIM_SUSPENDED_KEY);
+      const legacy = parseSuspendedBlock(legacyRaw);
+      // Upgrade the same pre-run-id snapshot, but never overwrite a different
+      // valid suspended exam merely because this tab finalized later.
+      const mayOwnLegacy = legacyRaw === null || legacy?.runId === block.runId
+        || Boolean(legacy && !legacy.runId && sameLegacySuspendedRun(legacy, block));
+      if (mayOwnLegacy) {
+        localStorage.setItem(EXAM_SIM_SUSPENDED_KEY, serialized);
+        legacySaved = localStorage.getItem(EXAM_SIM_SUSPENDED_KEY) === serialized;
+      }
+    } catch { /* the per-run mirror may still be exact and discoverable */ }
+
+    if (legacySaved || (scopedSaved && pointerSaved)) return;
+    throw new Error("The browser did not retain the suspended exam.");
+  } catch {
+    throw new Error("Your exam could not be saved. Keep this window open and try again, or finish the block to save your answers.");
+  }
+}
+
+/** Clear only the run whose durable workspace save was confirmed. A legacy
+ * snapshot with no id, or a different tab's id, is deliberately preserved. */
+export function clearSuspendedBlock(runId: string): void {
+  const runKey = suspendedRunKey(runId);
+  try { localStorage.removeItem(runKey); } catch { /* best effort after the durable save */ }
+  try {
+    if (sessionStorage.getItem(EXAM_SIM_RUN_ID_KEY) === runId) sessionStorage.removeItem(EXAM_SIM_RUN_ID_KEY);
+  } catch { /* optional per-tab pointer */ }
+  try {
+    const legacyRaw = localStorage.getItem(EXAM_SIM_SUSPENDED_KEY);
+    if (legacyRaw !== null) {
+      const legacy = parseSuspendedBlock(legacyRaw);
+      if (!legacy || legacy.runId !== runId) return;
+    }
+    const replacement = anotherSuspendedBlock(runKey);
+    if (replacement) localStorage.setItem(EXAM_SIM_SUSPENDED_KEY, JSON.stringify(replacement));
+    else localStorage.removeItem(EXAM_SIM_SUSPENDED_KEY);
+  } catch { /* best effort after the durable save */ }
 }
 
 export interface ExamSimPrefs {
