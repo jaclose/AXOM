@@ -7,6 +7,7 @@ import { useUi } from "../lib/uiStore";
 import { dayKey } from "../lib/scoring";
 import { localDateKey } from "../lib/dailyRollover";
 import type { JournalImageAttachment } from "../lib/journalNotebook";
+import * as journalNotebook from "../lib/journalNotebook";
 import * as localVault from "../lib/localVault";
 import { useAccount } from "../lib/account/accountStore";
 import { JournalPage } from "./JournalPage";
@@ -107,6 +108,40 @@ describe("Journal notebook foundation", () => {
     expect(screen.getByLabelText("Journal notebook")).toBeTruthy();
     expect(screen.getByDisplayValue("Keep the notebook open")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Open today’s page/i })).toBeNull();
+  });
+
+  it("waits for an in-flight image before navigating and persists it with the page", async () => {
+    let finishImage!: (attachment: JournalImageAttachment) => void;
+    vi.spyOn(journalNotebook, "readJournalImage").mockReturnValue(new Promise((resolve) => { finishImage = resolve; }));
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal/i }));
+
+    const input = screen.getByLabelText("Choose a journal image");
+    fireEvent.change(input, { target: { files: [new File(["axom"], "study-desk.png", { type: "image/png" })] } });
+    fireEvent.click(screen.getByRole("button", { name: "Previous journal page" }));
+
+    expect(screen.getByRole("heading", { name: "Today’s page" })).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Adding…" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => { finishImage(localImage); await Promise.resolve(); });
+
+    expect(await screen.findByDisplayValue("Yesterday was grounded.")).toBeTruthy();
+    expect(useStore.getState().journal.find((entry) => entry.date.startsWith(TODAY_KEY))?.attachments)
+      .toEqual([localImage]);
+  });
+
+  it("does not rewrite an unchanged historical page during navigation", async () => {
+    const flush = vi.spyOn(localVault, "flushLocalVaultWrites");
+    render(<JournalPage />);
+    fireEvent.click(screen.getByText("Yesterday was grounded.").closest("button")!);
+
+    fireEvent.click(screen.getByRole("button", { name: "Next journal page" }));
+
+    expect(await screen.findByRole("heading", { name: "Today’s page" })).toBeTruthy();
+    expect(flush).not.toHaveBeenCalled();
+    expect(useStore.getState().journal.find((entry) => entry.id === "yesterday")?.updatedAt).toBeUndefined();
   });
 
   it("gates requested-day and editor-close transitions on the same exact write check", async () => {

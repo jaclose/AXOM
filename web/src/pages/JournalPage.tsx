@@ -309,6 +309,7 @@ function JournalWritingPage({
   const transitionPendingRef = useRef(false);
   const lifecyclePersistPendingRef = useRef(false);
   const persistQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const attachmentReadRef = useRef<Promise<void> | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const pageHeadingRef = useRef<HTMLHeadingElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -427,6 +428,13 @@ function JournalWritingPage({
     transitionPendingRef.current = true;
     cancelScheduledSave();
     try {
+      const pendingAttachment = attachmentReadRef.current;
+      if (pendingAttachment) await pendingAttachment;
+      if (!mountedRef.current) return false;
+      if (!dirtyRef.current) {
+        transition();
+        return true;
+      }
       while (mountedRef.current) {
         const result = await persist();
         if (result === "superseded") continue;
@@ -473,7 +481,7 @@ function JournalWritingPage({
     pageHeadingRef.current?.focus({ preventScroll: true });
     const unregisterTransitionGuard = registerTransitionGuard(requestDurableTransition);
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!dirtyRef.current) return;
+      if (!dirtyRef.current && !attachmentReadRef.current) return;
       event.preventDefault();
       event.returnValue = "";
     };
@@ -535,13 +543,21 @@ function JournalWritingPage({
     if (!file) return;
     setAttachmentError("");
     setAddingImage(true);
+    const read = (async () => {
+      try {
+        const attachment = await readJournalImage(file, draftRef.current.attachments);
+        setDraft((current) => ({ ...current, attachments: [...current.attachments, attachment] }));
+      } catch (error) {
+        setAttachmentError(error instanceof Error ? error.message : "AXOM could not add that image.");
+      } finally {
+        setAddingImage(false);
+      }
+    })();
+    attachmentReadRef.current = read;
     try {
-      const attachment = await readJournalImage(file, draftRef.current.attachments);
-      setDraft((current) => ({ ...current, attachments: [...current.attachments, attachment] }));
-    } catch (error) {
-      setAttachmentError(error instanceof Error ? error.message : "AXOM could not add that image.");
+      await read;
     } finally {
-      setAddingImage(false);
+      if (attachmentReadRef.current === read) attachmentReadRef.current = null;
     }
   }
 
@@ -690,8 +706,8 @@ function JournalWritingPage({
             </label>
             <GButton size="sm" onClick={exportPage}><Download size={ICON_SIZE.body} /> Export page</GButton>
             {remediationMode && <GButton size="sm" onClick={() => { void requestDurableTransition(onClose); }}><X size={ICON_SIZE.body} /> Cancel</GButton>}
-            <GButton size="sm" onClick={() => { void persist(); }}><Save size={ICON_SIZE.body} /> Save</GButton>
-            <GButton variant="primary" size="sm" onClick={completeToday}><CheckCircle2 size={ICON_SIZE.body} /> Done for today</GButton>
+            <GButton size="sm" disabled={addingImage} onClick={() => { void persist(); }}><Save size={ICON_SIZE.body} /> Save</GButton>
+            <GButton variant="primary" size="sm" disabled={addingImage} onClick={completeToday}><CheckCircle2 size={ICON_SIZE.body} /> Done for today</GButton>
           </div>
         </article>
 
