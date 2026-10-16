@@ -439,6 +439,30 @@ describe("a package through the canonical import", () => {
     expect(blob?.byteSize).toBe(files.find((file) => file.name === "syn-q04-micrograph.png")!.size);
   });
 
+  it("reports a partial import instead of attaching image bytes that fail the package checksum", async () => {
+    const { pkg, issues, files } = invented();
+    const original = files.find((file) => file.name === "syn-q04-micrograph.png")!;
+    const changedBytes = new Uint8Array(await original.arrayBuffer());
+    changedBytes[changedBytes.length - 1] ^= 1;
+    const altered = files.map((file) => file.name === "syn-q04-micrograph.png"
+      ? new File([changedBytes], file.name, { type: file.type })
+      : file);
+
+    const saved = await importPackage(pkg, issues, altered);
+
+    expect(saved.status).toBe("partial");
+    expect(saved.errors.join(" ")).toMatch(/does not match the reviewed package checksum/);
+    expect(saved.sections[0].images).toMatchObject({ attached: 2, missing: 0 });
+    expect(saved.sections[0].images.problems).toEqual([
+      expect.stringMatching(/did not attach different image bytes/),
+    ]);
+    const after = await reloadWorkspace();
+    const affected = after.questions.find((question) => question.content?.id === "syn-q04");
+    expect(affected).toBeDefined();
+    expect(affected?.attachments ?? []).toEqual([]);
+    expect(await storedImageCount()).toBe(2);
+  });
+
   it("stores answer pictures with stable roles, hidden until the answer is checked", async () => {
     const { pkg, issues, files } = invented();
     const saved = await importPackage(pkg, issues, files, { acknowledged: new Set(["syn-q03"]) });

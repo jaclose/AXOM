@@ -82,22 +82,54 @@ function attachmentId(): string {
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 }
 
-function matchingContentAsset(
+function resolveContentAsset(
   name: string,
   file: File,
   assets: readonly QuestionAsset[],
-): QuestionAsset | undefined {
+): { asset?: QuestionAsset; problem?: string } {
   const referenced = imageNameKey(name);
   const supplied = imageNameKey(file.name);
   const matches = assets.filter((asset) => {
     const key = imageNameKey(asset.filename);
     return key === referenced || key === supplied;
   });
-  if (!matches.length) return undefined;
-  const identities = new Set(matches.map((asset) => asset.checksum).filter(Boolean));
-  return identities.size === 1 && matches.every((asset) => asset.checksum === matches[0].checksum)
-    ? matches[0]
-    : undefined;
+  if (!matches.length) return {};
+  const conflicts = <T>(values: Array<T | undefined>): boolean => new Set(values.filter((value) => value !== undefined)).size > 1;
+  if (conflicts(matches.map((asset) => asset.checksum?.toLowerCase()))
+    || conflicts(matches.map((asset) => asset.mimeType))
+    || conflicts(matches.map((asset) => asset.byteSize))
+    || conflicts(matches.map((asset) => asset.width))
+    || conflicts(matches.map((asset) => asset.height))) {
+    return { problem: `"${file.name}" has conflicting reviewed image identities. Review the package before attaching any bytes.` };
+  }
+  // Prefer the most fully described reference so a duplicate placement with
+  // sparse metadata cannot weaken an available checksum or size assertion.
+  const asset = [...matches].sort((left, right) => (
+    Number(Boolean(right.checksum)) + Number(right.byteSize !== undefined) + Number(right.width !== undefined) + Number(right.height !== undefined)
+    - Number(Boolean(left.checksum)) - Number(left.byteSize !== undefined) - Number(left.width !== undefined) - Number(left.height !== undefined)
+  ))[0];
+  return { asset };
+}
+
+async function declaredAssetProblem(file: File, asset: QuestionAsset | undefined): Promise<string | undefined> {
+  if (!asset) return undefined;
+  if (asset.mimeType !== file.type) {
+    return `"${file.name}" is ${file.type || "an unknown type"}, but the reviewed package declares ${asset.mimeType}. Re-export or review the source image.`;
+  }
+  if (asset.byteSize !== undefined && asset.byteSize !== file.size) {
+    return `"${file.name}" is ${file.size} bytes, but the reviewed package declares ${asset.byteSize}. Re-export or review the source image.`;
+  }
+  if (asset.checksum !== undefined) {
+    if (!/^sha256:[a-f0-9]{64}$/i.test(asset.checksum)) {
+      return `"${file.name}" has an invalid reviewed SHA-256 identity. Re-export or review the source image.`;
+    }
+    const actual = await sha256Hex(await file.arrayBuffer());
+    if (!actual) return `"${file.name}" could not be integrity-checked on this device, so AXOM did not attach it.`;
+    if (actual.toLowerCase() !== asset.checksum.slice(7).toLowerCase()) {
+      return `"${file.name}" does not match the reviewed package checksum. AXOM did not attach different image bytes to this question.`;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -114,7 +146,7 @@ async function linkVerifiedPrivateLibraryImage(input: {
   existing: readonly QuestionImageAttachment[];
   contentAssets: readonly QuestionAsset[];
 }): Promise<AttachmentCreationResult | undefined> {
-  const asset = matchingContentAsset(input.name, input.file, input.contentAssets);
+  const asset = resolveContentAsset(input.name, input.file, input.contentAssets).asset;
   const checksum = asset?.checksum?.toLowerCase();
   if (!checksum || !/^sha256:[a-f0-9]{64}$/.test(checksum)) return undefined;
   const blobKey = `private-library:${checksum}`;
@@ -190,12 +222,25 @@ export async function attachNamedImages(input: {
   const problems: string[] = [];
   for (const match of matchNamedImages(input.names, input.files)) {
     if (!match.file) continue;
+    const resolved = input.contentAssets?.length
+      ? resolveContentAsset(match.name, match.file, input.contentAssets)
+      : {};
+    if (resolved.problem) {
+      problems.push(resolved.problem);
+      continue;
+    }
+    const asset = resolved.asset;
+    const integrityProblem = await declaredAssetProblem(match.file, asset);
+    if (integrityProblem) {
+      problems.push(integrityProblem);
+      continue;
+    }
     const linked = input.contentAssets?.length
       ? await linkVerifiedPrivateLibraryImage({
           file: match.file,
           name: match.name,
           existing: attachments,
-          contentAssets: input.contentAssets,
+          contentAssets: asset ? [asset] : input.contentAssets,
         })
       : undefined;
     const created = linked ?? await createQuestionAttachment({ file: match.file, questionId: input.questionId, existing: attachments });

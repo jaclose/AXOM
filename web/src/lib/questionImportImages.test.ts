@@ -86,7 +86,7 @@ describe("images named by an import", () => {
     }
   });
 
-  it("does not trust a filename or claimed private checksum when the supplied bytes differ", async () => {
+  it("refuses supplied bytes that differ from the reviewed package checksum", async () => {
     vi.stubGlobal("indexedDB", indexedDB);
     vi.stubGlobal("IDBKeyRange", IDBKeyRange);
     const canonicalBytes = new TextEncoder().encode("AAAA");
@@ -102,7 +102,6 @@ describe("images named by an import", () => {
       questionId: "private-review",
       updatedAt: "2026-10-15T00:00:00.000Z",
     });
-    let createdKey: string | undefined;
     try {
       const result = await attachNamedImages({
         names: [supplied.name],
@@ -118,14 +117,55 @@ describe("images named by an import", () => {
           checksum,
         }],
       });
-      createdKey = result.attachments[0]?.blobKey;
-      expect(result.problems).toEqual([]);
-      expect(createdKey).toBeTruthy();
-      expect(createdKey).not.toBe(blobKey);
-      expect(await getQuestionAttachmentBlob(createdKey!)).toMatchObject({ byteSize: supplied.size, questionId: "ordinary-import" });
+      expect(result.attachments).toEqual([]);
+      expect(result.problems).toEqual([expect.stringMatching(/does not match the reviewed package checksum/)]);
       expect(await (await getQuestionAttachmentBlob(blobKey))?.blob.text()).toBe("AAAA");
     } finally {
-      await deleteQuestionAttachmentBlobs([blobKey, ...(createdKey ? [createdKey] : [])]);
+      await deleteQuestionAttachmentBlobs([blobKey]);
     }
+  });
+
+  it.each([
+    { field: "mime type", asset: { mimeType: "image/jpeg" }, problem: /declares image\/jpeg/ },
+    { field: "byte size", asset: { byteSize: 999 }, problem: /declares 999/ },
+    { field: "checksum syntax", asset: { checksum: "sha256:not-a-digest" }, problem: /invalid reviewed SHA-256 identity/ },
+  ])("refuses a file whose declared $field does not match", async ({ asset, problem }) => {
+    const supplied = new File(["image bytes"], "figure.png", { type: "image/png" });
+    const result = await attachNamedImages({
+      names: [supplied.name],
+      files: [supplied],
+      questionId: "q1",
+      contentAssets: [{
+        id: "figure",
+        filename: supplied.name,
+        mimeType: "image/png",
+        byteSize: supplied.size,
+        role: "question",
+        questionId: "q1",
+        ...asset,
+      }],
+    });
+    expect(result.attachments).toEqual([]);
+    expect(result.problems).toEqual([expect.stringMatching(problem)]);
+  });
+
+  it("refuses conflicting package identities for one supplied image", async () => {
+    const supplied = new File(["image bytes"], "figure.png", { type: "image/png" });
+    const result = await attachNamedImages({
+      names: [supplied.name],
+      files: [supplied],
+      questionId: "q1",
+      contentAssets: ["a", "b"].map((id, index) => ({
+        id,
+        filename: supplied.name,
+        mimeType: supplied.type,
+        byteSize: supplied.size,
+        role: "question" as const,
+        questionId: "q1",
+        checksum: `sha256:${String(index).repeat(64)}`,
+      })),
+    });
+    expect(result.attachments).toEqual([]);
+    expect(result.problems).toEqual([expect.stringMatching(/conflicting reviewed image identities/)]);
   });
 });
