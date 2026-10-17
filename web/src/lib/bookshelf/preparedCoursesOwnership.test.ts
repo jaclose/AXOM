@@ -376,6 +376,59 @@ describe("prepared-course ownership", () => {
     await expect(loadPreparedCourse(book)).resolves.toEqual({ status: "saved-on-device" });
   });
 
+  it("never projects a downloaded hosted template onto a same-named local course", async () => {
+    const template = await preparedDocument();
+    const collection = "11111111-1111-4111-8111-111111111111";
+    const revision = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const reference = academicReference(template, collection, revision);
+    const local = booksFor([courses[0]])[0];
+    const hosted = connectedCourseBook(academicCourse(collection, revision), template, {
+      terms, courses: [courses[0]], tracker: [],
+    });
+
+    const [projectedLocal] = withPreparedCourses([local], [template, reference]);
+    const [projectedHosted] = withPreparedCourses([{ ...hosted, templateIds: undefined }], [template, reference], [], [local, hosted]);
+
+    expect(projectedLocal).toMatchObject({ courseCode: "BPM 501", count: 0 });
+    expect(projectedLocal.templateIds).toBeUndefined();
+    expect(projectedHosted).toMatchObject({
+      courseCode: `academic:${collection}`,
+      count: 2,
+      templateIds: [template.id],
+    });
+  });
+
+  it("keeps same-family hosted revisions inside their collection owner", async () => {
+    const collectionA = "11111111-1111-4111-8111-111111111111";
+    const collectionB = "22222222-2222-4222-8222-222222222222";
+    const templateA = await prepareCourseTemplate(
+      "T2 - ER - Course plan:\nWeek 1:\nLecture 01 Collection A [Lecture]\n",
+      "er-course-plan.txt",
+      "2026-10-14T00:00:00.000Z",
+    );
+    const templateB = await prepareCourseTemplate(
+      "T2 - ER - Course plan:\nWeek 1:\nLecture 01 Collection B [Lecture]\n",
+      "er-course-plan.txt",
+      "2026-10-15T00:00:00.000Z",
+    );
+    const courseA = academicCourse(collectionA, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    const courseB = academicCourse(collectionB, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+    const bookA = connectedCourseBook(courseA, templateA);
+    const bookB = connectedCourseBook(courseB, templateB);
+    const [projectedA] = withPreparedCourses(
+      [{ ...bookA, templateIds: undefined }],
+      [templateA, templateB, academicReference(templateA, collectionA, courseA.current_revision_id), academicReference(templateB, collectionB, courseB.current_revision_id)],
+      [],
+      [bookA, bookB],
+    );
+
+    expect(projectedA).toMatchObject({
+      courseCode: `academic:${collectionA}`,
+      templateIds: [templateA.id],
+    });
+    expect(projectedA.weeks[0].items[0].label).toBe("Lecture 01 Collection A");
+  });
+
   it("rejects a connected preview whose parsed term or module differs from its catalog", async () => {
     const template = await preparedDocument();
     const collection = "11111111-1111-4111-8111-111111111111";

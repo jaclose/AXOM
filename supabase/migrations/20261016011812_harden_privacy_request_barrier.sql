@@ -12,6 +12,17 @@ begin
   if exists (
     select 1
     from public.privacy_requests p
+    where p.user_id is not null
+      and p.status = 'processing'
+    group by p.user_id
+    having count(distinct p.kind) > 1
+  ) then
+    raise exception 'privacy migration requires manual reconciliation of conflicting processing request kinds';
+  end if;
+
+  if exists (
+    select 1
+    from public.privacy_requests p
     where p.user_id is not null and (
       p.status in ('requested', 'processing', 'scheduled')
       or (p.kind = 'deletion' and p.status = 'failed')
@@ -108,6 +119,46 @@ where user_id is not null and (
     )
   )
 );
+
+-- Admission uses the same account lock as worker claims. Checking in the
+-- service before inserting would race deletion; checking only at claim time
+-- accepts a request that cannot run and emits a misleading receipt.
+create function public.guard_privacy_export_admission() returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(new.user_id::text, 0)
+  );
+  if exists (
+    select 1 from public.privacy_requests p
+    where p.user_id = new.user_id
+      and p.kind = 'deletion'
+      and (
+        p.status = 'processing'
+        or (
+          p.status = 'failed'
+          and p.failure_code is distinct from 'deletion-preflight-failed'
+        )
+      )
+  ) then
+    raise exception 'Export is unavailable while account deletion is processing or needs manual reconciliation.'
+      using errcode = 'PT409';
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.guard_privacy_export_admission()
+  from public, anon, authenticated;
+grant execute on function public.guard_privacy_export_admission()
+  to service_role;
+create trigger guard_privacy_export_admission
+before insert on public.privacy_requests
+for each row
+when (new.user_id is not null and new.kind = 'export' and new.status = 'requested')
+execute function public.guard_privacy_export_admission();
 
 -- The write gate is used by RLS, triggers and the share publisher. Unknown
 -- failed deletion states are treated as destructive until explicitly proven
@@ -259,7 +310,9 @@ begin
         where p.user_id = account_id
           and p.kind = 'export'
           and (
-            p.status = 'processing'
+            -- An export admitted before this claim owns the next turn even
+            -- when no worker has picked it up yet.
+            p.status in ('requested', 'processing')
             or (
               p.status = 'failed'
               and p.failure_code in (

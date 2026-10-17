@@ -73,6 +73,7 @@ const PRIVILEGED = [
   "public.delete_my_cloud_data()", "public.consume_ai_quota()", "public.revoke_question_set_share(uuid)",
 ];
 const SERVICE_ONLY_PRIVACY = [
+  "public.guard_privacy_export_admission()",
   "public.quarantine_stale_privacy_requests(timestamp with time zone)",
   "public.claim_privacy_request(uuid,timestamp with time zone)",
   "public.finalize_privacy_export(uuid,text,timestamp with time zone)",
@@ -344,6 +345,11 @@ describe("Supabase migrations on real Postgres", () => {
         values($1,$3,'export','requested',null),($2,$3,'deletion','scheduled','2000-01-01')`,
       [exportRequest, deletionRequest, A]);
 
+      // If export admission won the owner lock, due deletion must not overtake
+      // that accepted export before a worker has had a chance to claim it.
+      expect((await as(db, "service_role", null,
+        "select public.claim_privacy_request($1,'2026-10-16T01:00:00Z') as claimed", [deletionRequest])).rows)
+        .toEqual([{ claimed: false }]);
       expect((await as(db, "service_role", null,
         "select public.claim_privacy_request($1,'2026-10-16T01:00:00Z') as claimed", [exportRequest])).rows)
         .toEqual([{ claimed: true }]);
@@ -384,12 +390,11 @@ describe("Supabase migrations on real Postgres", () => {
       await db.query("update public.privacy_requests set status='failed',failure_code='deletion-reconciliation-required' where id=$1", [deletionRequest]);
       await expect(db.query(`insert into public.privacy_requests(user_id,kind,status,scheduled_for)
         values($1,'deletion','scheduled',now()+interval '7 days')`, [A])).rejects.toMatchObject({ code: "23505" });
-      await db.query(`insert into public.privacy_requests(user_id,kind,status)
-        values($1,'export','requested')`, [A]);
-      const pendingExport = (await db.query<{ id: string }>("select id from public.privacy_requests where user_id=$1 and kind='export' and status='requested'", [A])).rows[0].id;
-      expect((await as(db, "service_role", null,
-        "select public.claim_privacy_request($1,now()) as claimed", [pendingExport])).rows)
-        .toEqual([{ claimed: false }]);
+      await expect(as(db, "service_role", null,
+        "insert into public.privacy_requests(user_id,kind,status) values($1,'export','requested')", [A]))
+        .rejects.toMatchObject({ code: "PT409" });
+      expect((await db.query("select id from public.privacy_requests where user_id=$1 and kind='export' and status='requested'", [A])).rows)
+        .toEqual([]);
 
       const functions = await db.query<{ name: string; volatility: string; definition: string }>(`
         select p.proname as name, p.provolatile as volatility,
@@ -404,6 +409,49 @@ describe("Supabase migrations on real Postgres", () => {
       expect(publisher.definition.indexOf("pg_advisory_xact_lock"))
         .toBeLessThan(publisher.definition.indexOf("axom_account_accepts_cloud_writes"));
       expect(cleanup.definition).toContain("pg_advisory_xact_lock");
+    } finally { await db.close(); }
+  }, 60_000);
+
+  it("admits exports only before deletion processing or after a proven reversible failure", async () => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
+    const deletionRequest = "44444444-4444-4444-8444-444444444444";
+    try {
+      await db.query("insert into auth.users(id,email) values ($1,'a@x.test'),($2,'b@x.test')", [A, B]);
+      await db.query(`insert into public.privacy_requests(id,user_id,kind,status,scheduled_for)
+        values($1,$2,'deletion','scheduled',now()+interval '7 days')`, [deletionRequest, A]);
+      for (const [status, failureCode] of [
+        ["processing", "deletion-preflight"],
+        ["processing", "deletion-cleanup-started"],
+        ["failed", "deletion-reconciliation-required"],
+        ["failed", "unknown-legacy-failure"],
+        ["failed", null],
+      ]) {
+        await db.query("update public.privacy_requests set status=$2,failure_code=$3 where id=$1", [deletionRequest, status, failureCode]);
+        await expect(as(db, "service_role", null,
+          "insert into public.privacy_requests(user_id,kind,status) values($1,'export','requested')", [A]))
+          .rejects.toMatchObject({ code: "PT409" });
+      }
+      expect((await db.query("select id from public.privacy_requests where user_id=$1 and kind='export'", [A])).rows).toEqual([]);
+      // Another account is not blocked by this owner's reconciliation state.
+      await as(db, "service_role", null,
+        "insert into public.privacy_requests(user_id,kind,status) values($1,'export','requested')", [B]);
+
+      for (const [status, failureCode] of [
+        ["scheduled", null],
+        ["failed", "deletion-preflight-failed"],
+        ["cancelled", null],
+        ["completed", null],
+      ]) {
+        await db.query("update public.privacy_requests set status=$2,failure_code=$3 where id=$1", [deletionRequest, status, failureCode]);
+        await as(db, "service_role", null,
+          "insert into public.privacy_requests(user_id,kind,status) values($1,'export','requested')", [A]);
+        await db.query("update public.privacy_requests set status='completed' where user_id=$1 and kind='export'", [A]);
+      }
+      const definition = (await db.query<{ definition: string }>(
+        "select pg_get_functiondef('public.guard_privacy_export_admission()'::regprocedure) as definition")).rows[0].definition;
+      expect(definition.indexOf("pg_advisory_xact_lock")).toBeLessThan(definition.indexOf("from public.privacy_requests"));
+      expect((await db.query("select count(*)::integer as count from public.privacy_requests where user_id=$1 and kind='export'", [A])).rows)
+        .toEqual([{ count: 4 }]);
     } finally { await db.close(); }
   }, 60_000);
 
@@ -536,6 +584,28 @@ describe("Supabase migrations on real Postgres", () => {
         .toEqual([
           { id: processing, status: "processing", failure_code: "deletion-preflight" },
           { id: failed, status: "failed", failure_code: "deletion-reconciliation-required" },
+        ]);
+    } finally { await db.close(); }
+  }, 60_000);
+
+  it("aborts privacy migration when export and deletion are both processing", async () => {
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false, stopBefore: privacyBarrierMigration });
+    const activeExport = "33333333-3333-4333-8333-333333333333";
+    const activeDeletion = "44444444-4444-4444-8444-444444444444";
+    try {
+      await db.query("insert into auth.users(id,email) values ($1,'a@x.test')", [A]);
+      await db.query(`insert into public.privacy_requests(id,user_id,kind,status,failure_code,processing_at)
+        values($1,$3,'export','processing','export-pending',now()),
+              ($2,$3,'deletion','processing','deletion-preflight',now())`, [activeExport, activeDeletion, A]);
+
+      await expect(db.exec(`begin;${readFileSync(migrationsDir + privacyBarrierMigration, "utf8")}commit;`))
+        .rejects.toThrow(/conflicting processing request kinds/i);
+      await db.exec("rollback");
+
+      expect((await db.query("select id,kind,status from public.privacy_requests order by id")).rows)
+        .toEqual([
+          { id: activeExport, kind: "export", status: "processing" },
+          { id: activeDeletion, kind: "deletion", status: "processing" },
         ]);
     } finally { await db.close(); }
   }, 60_000);

@@ -395,7 +395,7 @@ describe("QuestionWorkspacePage collection recovery routing", () => {
     const user = userEvent.setup();
     render(<QuestionWorkspacePage />);
     await user.click(screen.getByRole("button", { name: "Browse weeks" }));
-    await user.click(screen.getByRole("button", { name: "Review answer evidence for School IMCQ needing review" }));
+    await user.click(screen.getByRole("button", { name: "Resolve unresolved questions for School IMCQ needing review" }));
     expect(screen.getByRole("tab", { name: "Bank (1)" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("button", { name: "Needs source review" })).toBeTruthy();
   });

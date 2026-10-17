@@ -222,6 +222,9 @@ export async function requestPrivacy(service: CommunicationsService, userId: str
   if (!user.email_confirmed_at) throw new Error("Verify your email before continuing.");
   const scheduled = new Date(Date.now() + 7 * 86400000).toISOString();
   const result = await service.db.from("privacy_requests").insert({ user_id: userId, kind, status: kind === "deletion" ? "scheduled" : "requested", scheduled_for: kind === "deletion" ? scheduled : null, notification_email: kind === "deletion" ? user.email : null }).select("id").single();
+  if (kind === "export" && result.error?.code === "PT409") {
+    throw new Error("Export is unavailable while account deletion is processing or needs manual reconciliation.");
+  }
   if (result.error?.code === "23505") {
     const existing = checked(await service.db.from("privacy_requests")
       .select("status,failure_code")
@@ -242,7 +245,7 @@ export async function requestPrivacy(service: CommunicationsService, userId: str
   await service.enqueue({ userId, type: kind === "deletion" ? "deletion_requested" : "export_requested", key: `${row.id}:requested`, variables: { requestId: row.id } });
   if (kind === "deletion") await service.enqueue({ userId, type: "deletion_scheduled", key: `${row.id}:scheduled`, variables: { date: scheduled } });
 }
-export async function cancelDeletion(service: CommunicationsService, userId: string, requestId: string): Promise<void> {
+export async function cancelDeletion(service: CommunicationsService, userId: string, requestId: string): Promise<{ notificationQueued: boolean }> {
   const current = checked(await service.db.from("privacy_requests").select("id,status,failure_code").eq("id", requestId).eq("user_id", userId).eq("kind", "deletion").maybeSingle());
   const cancellable = current?.status === "scheduled"
     || (current?.status === "failed" && current.failure_code === "deletion-preflight-failed");
@@ -252,7 +255,14 @@ export async function cancelDeletion(service: CommunicationsService, userId: str
   if (current.status === "failed") query = query.eq("failure_code", "deletion-preflight-failed");
   const row = checked(await query.select("id").maybeSingle());
   if (!row) throw new Error("Deletion can no longer be cancelled, or it was already cancelled.");
-  await service.enqueue({ userId, type: "deletion_cancelled", key: `${row.id}:cancelled` });
+  // The confirmed state transition is authoritative. A non-essential receipt
+  // must not turn a successful cancellation into an ambiguous UI failure.
+  try {
+    await service.enqueue({ userId, type: "deletion_cancelled", key: `${row.id}:cancelled` });
+    return { notificationQueued: true };
+  } catch {
+    return { notificationQueued: false };
+  }
 }
 export async function processPrivacy(service: CommunicationsService): Promise<number> {
   const now = new Date().toISOString();
@@ -260,10 +270,15 @@ export async function processPrivacy(service: CommunicationsService): Promise<nu
   // account barrier closed until an operator confirms Storage and worker state.
   const stale = new Date(Date.now() - 15 * 60000).toISOString();
   checked(await service.db.rpc("quarantine_stale_privacy_requests", { p_stale_before: stale }));
-  const requests = checked(await service.db.from("privacy_requests").select("*").in("status", ["requested", "scheduled"]).order("created_at").limit(10));
+  let eligible = service.db.from("privacy_requests").select("*");
+  eligible = service.env.AXOM_ACCOUNT_DELETION_ENABLED === "true"
+    ? eligible.or(`and(kind.eq.export,status.eq.requested),and(kind.eq.deletion,status.eq.scheduled,scheduled_for.lte.${now})`)
+    : eligible.eq("kind", "export").eq("status", "requested");
+  // Filter before limiting so future deletion requests cannot occupy the
+  // entire worker batch and starve ready exports or due deletions.
+  const requests = checked(await eligible.order("created_at").limit(10));
   let processed = 0;
   for (const request of requests ?? []) {
-    if (request.kind === "deletion" && (request.scheduled_for > now || service.env.AXOM_ACCOUNT_DELETION_ENABLED !== "true")) continue;
     const claimed = checked(await service.db.rpc("claim_privacy_request", {
       p_request_id: request.id,
       p_now: now,

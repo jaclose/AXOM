@@ -11,13 +11,10 @@ type CommunicationRecord = CommunicationsSettings["history"][number];
 const READ_KEY = "axom.communicationReads.v1";
 const VISIBLE_STATUSES = new Set(["sent", "delivered", "failed", "bounced", "complained", "suppressed"]);
 const ATTENTION_TYPES = new Set([
-  "auth",
   "security",
-  "export_requested",
   "export_ready",
   "deletion_requested",
   "deletion_scheduled",
-  "deletion_cancelled",
   "deletion_completed",
 ]);
 
@@ -50,6 +47,12 @@ function readToken(item: CommunicationRecord): string {
 
 function needsAttention(item: CommunicationRecord): boolean {
   return !["sent", "delivered"].includes(item.status) || ATTENTION_TYPES.has(item.type);
+}
+
+function prioritizeHistory(outcomes: CommunicationRecord[], read: Set<string>): CommunicationRecord[] {
+  const unreadAttention = outcomes.filter((item) => needsAttention(item) && !read.has(readToken(item)));
+  const prioritizedIds = new Set(unreadAttention.map((item) => item.id));
+  return [...unreadAttention, ...outcomes.filter((item) => !prioritizedIds.has(item.id))].slice(0, 8);
 }
 
 function communicationTitle(type: string): string {
@@ -104,7 +107,7 @@ export function DashboardNotificationCenter() {
     () => (remote.data?.history ?? []).filter((item) => VISIBLE_STATUSES.has(item.status)),
     [remote.data?.history],
   );
-  const history = outcomes.slice(0, 8);
+  const history = prioritizeHistory(outcomes, read);
   const unread = outcomes.filter((item) => !read.has(readToken(item))).length;
   const attentionUnread = outcomes.filter((item) => needsAttention(item) && !read.has(readToken(item))).length;
 

@@ -39,10 +39,16 @@ beforeEach(() => {
     { id: "c2", termId: "t2", code: "BPM", name: "Biochemistry", modules: [{ id: "m2", name: "Biomolecules" }] },
     { id: "c4", termId: "t4", code: "NCRS", name: "Neuroscience", modules: [{ id: "m4", name: "Neuro" }] },
   ] as Course[];
-  state.questions = [question("ready"), question("needs-review", { needsReview: true }), question("t2")];
+  state.questions = [
+    question("ready"),
+    question("review-suggested", { extraction: { confidence: "medium", reviewed: false } }),
+    question("unresolved", { needsReview: true }),
+    question("t2"),
+  ];
   state.questionSets = [
-    set("imcq", "IMCQ 1", ["ready", "ready", "needs-review", "missing"], "c4", "Neuro"),
-    set("unready", "Week 1 Review", ["needs-review"], "c4", "Neuro"),
+    set("imcq", "IMCQ 1", ["ready", "ready", "review-suggested", "unresolved", "missing"], "c4", "Neuro"),
+    set("suggested", "IMCQ Suggested", ["review-suggested"], "c4", "Neuro"),
+    set("unresolved", "IMCQ Unresolved", ["unresolved"], "c4", "Neuro"),
     set("pq", "School PQ 1", ["t2"], "c2", "Biomolecules"),
   ];
 });
@@ -50,13 +56,28 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe("CourseBankBrowser academic navigation", () => {
-  it("shows stored, ready, review and missing record counts without double-counting", () => {
+  it("identifies image-linked questions without previewing source or answer images", () => {
+    state.questions[0] = question("ready", { attachments: [{
+      id: "answer-slide", blobKey: "answer-slide", fileName: "review-slide.png", mimeType: "image/png",
+      byteSize: 100, altText: "Private answer slide", role: "answer_reveal",
+      createdAt: "2026-10-14T00:00:00Z", updatedAt: "2026-10-14T00:00:00Z",
+    }] });
+    render(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 1 }} onPractice={vi.fn()} />);
+    expect(screen.getByText("1 with image references")).toBeTruthy();
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.queryByText("Private answer slide")).toBeNull();
+    expect(screen.getByRole("button", { name: "Practice week" }).textContent).toContain("1 ready");
+  });
+
+  it("shows canonical ready, review-suggested, unresolved and missing counts without double-counting", () => {
     const onPractice = vi.fn();
     render(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 1 }} onPractice={onPractice} />);
-    expect(screen.getByText(/2 stored · 1 ready · 1 need review · 1 missing/)).toBeTruthy();
+    expect(screen.getByText(/3 stored · 1 ready · 1 review suggested · 1 unresolved · 1 missing/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Practice IMCQ 1" }).hasAttribute("disabled")).toBe(false);
-    expect(screen.getByRole("button", { name: "Practice Week 1 Review" }).hasAttribute("disabled")).toBe(true);
-    expect(screen.getByText("Review the answer evidence or options before practice.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Practice IMCQ Suggested" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Practice IMCQ Unresolved" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText("Review the imported answer evidence before practice.")).toBeTruthy();
+    expect(screen.getByText("Resolve the missing or conflicting answer evidence before practice.")).toBeTruthy();
   });
 
   it("practices only ready collections and deduplicates shared question IDs", async () => {
@@ -75,21 +96,28 @@ describe("CourseBankBrowser academic navigation", () => {
     await user.selectOptions(screen.getByRole("combobox", { name: "Filter by term" }), "Term 4");
     await user.selectOptions(screen.getByRole("combobox", { name: "Filter by course" }), "c4");
     await user.selectOptions(screen.getByRole("combobox", { name: "Filter by collection type" }), "IMCQ");
-    await user.selectOptions(screen.getByRole("combobox", { name: "Filter by readiness" }), "review");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Filter by readiness" }), "review-suggested");
     await user.type(screen.getByRole("searchbox", { name: "Search question sets" }), "IMCQ");
     const bank = screen.getByRole("region", { name: "Course question bank" });
     expect(within(bank).getByText("IMCQ 1")).toBeTruthy();
+    expect(within(bank).getByText("IMCQ Suggested")).toBeTruthy();
+    expect(within(bank).queryByText("IMCQ Unresolved")).toBeNull();
     expect(within(bank).queryByText("School PQ 1")).toBeNull();
-    expect(within(bank).queryByText("Week 1 Review")).toBeNull();
+    await user.selectOptions(screen.getByRole("combobox", { name: "Filter by readiness" }), "unresolved");
+    expect(within(bank).getByText("IMCQ 1")).toBeTruthy();
+    expect(within(bank).getByText("IMCQ Unresolved")).toBeTruthy();
+    expect(within(bank).queryByText("IMCQ Suggested")).toBeNull();
     await user.selectOptions(screen.getByRole("combobox", { name: "Filter by readiness" }), "missing");
     expect(within(bank).getByText("IMCQ 1")).toBeTruthy();
+    expect(within(bank).queryByText("IMCQ Suggested")).toBeNull();
+    expect(within(bank).queryByText("IMCQ Unresolved")).toBeNull();
   });
 
   it("explains unavailable sets rather than launching an empty practice block", () => {
     state.questions = [];
     render(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 1 }} onPractice={vi.fn()} />);
     expect(screen.getByRole("button", { name: "Practice IMCQ 1" }).hasAttribute("disabled")).toBe(true);
-    expect(screen.getAllByText("Question records are unavailable on this device; restore or re-import this source.")).toHaveLength(2);
+    expect(screen.getAllByText("Question records are unavailable on this device; restore or re-import this source.")).toHaveLength(3);
     expect(screen.getByRole("button", { name: "Practice week" }).hasAttribute("disabled")).toBe(true);
   });
 });
@@ -110,17 +138,20 @@ describe("CourseBankBrowser ambiguous curriculum scope", () => {
 });
 
 describe("CourseBankBrowser recovery routes", () => {
-  it("offers evidence review for stored uncertain questions and import for missing IDs", async () => {
+  it("routes review-suggested and unresolved records separately and imports missing IDs", async () => {
     const user = userEvent.setup();
     const onReviewQuestionIds = vi.fn();
     const onRestoreMissing = vi.fn();
     render(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 1 }}
       onPractice={vi.fn()} onReviewQuestionIds={onReviewQuestionIds} onRestoreMissing={onRestoreMissing} />);
-    await user.click(screen.getByRole("button", { name: "Review answer evidence for IMCQ 1" }));
-    expect(onReviewQuestionIds).toHaveBeenCalledWith(["needs-review"]);
+    await user.click(screen.getByRole("button", { name: "Review suggested mappings for IMCQ 1" }));
+    expect(onReviewQuestionIds).toHaveBeenNthCalledWith(1, ["review-suggested"]);
+    await user.click(screen.getByRole("button", { name: "Resolve unresolved questions for IMCQ 1" }));
+    expect(onReviewQuestionIds).toHaveBeenNthCalledWith(2, ["unresolved"]);
     await user.click(screen.getByRole("button", { name: "Import missing source for IMCQ 1" }));
     expect(onRestoreMissing).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("button", { name: "Practice Week 1 Review" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Practice IMCQ Suggested" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Practice IMCQ Unresolved" }).hasAttribute("disabled")).toBe(true);
   });
 });
 

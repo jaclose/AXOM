@@ -144,6 +144,49 @@ describe("DashboardNotificationCenter", () => {
     expect(JSON.parse(localStorage.getItem("axom.communicationReads.v1:account-a") ?? "[]")).toHaveLength(11);
   });
 
+  it("reveals an older unread attention item ahead of eight newer routine records", () => {
+    remote = {
+      data: settings([
+        ...Array.from({ length: 8 }, (_, index) => ({
+          id: `routine-${index}`,
+          type: "weekly_report",
+          status: "delivered",
+          created_at: `2026-10-15T${String(18 - index).padStart(2, "0")}:00:00.000Z`,
+        })),
+        { id: "older-security", type: "security", status: "delivered", created_at: "2026-10-15T09:00:00.000Z" },
+      ]),
+      loading: false,
+      error: "",
+      reload,
+    };
+    render(<DashboardNotificationCenter />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Notifications, 1 item needs attention" }));
+    expect(screen.getByText("Security notice")).toBeTruthy();
+    expect(screen.getAllByRole("listitem")).toHaveLength(8);
+    expect(screen.getAllByText("Weekly Report")).toHaveLength(7);
+  });
+
+  it("keeps successful auth and request acknowledgements as routine history", () => {
+    remote = {
+      data: settings([
+        { id: "auth-success", type: "auth", status: "delivered", created_at: "2026-10-15T12:00:00.000Z" },
+        { id: "export-requested", type: "export_requested", status: "sent", created_at: "2026-10-15T11:00:00.000Z" },
+        { id: "deletion-cancelled", type: "deletion_cancelled", status: "delivered", created_at: "2026-10-15T10:00:00.000Z" },
+      ]),
+      loading: false,
+      error: "",
+      reload,
+    };
+    render(<DashboardNotificationCenter />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
+    expect(screen.getByText("Account sign-in")).toBeTruthy();
+    expect(screen.getByText("Account export requested")).toBeTruthy();
+    expect(screen.getByText("Account deletion cancelled")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Notifications,/ })).toBeNull();
+  });
+
   it("closes on focus departure without stealing focus from the next control", async () => {
     render(<><DashboardNotificationCenter /><button type="button">Continue studying</button></>);
     fireEvent.click(screen.getByRole("button", { name: "Notifications, 1 item needs attention" }));

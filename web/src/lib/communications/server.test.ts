@@ -27,7 +27,7 @@ function database(results: BoundaryResult[] = []) {
   const from = vi.fn((table: string) => {
     const result = results.shift() ?? { data: null, error: null };
     const chain: Record<string, unknown> = {};
-    for (const method of ["select", "insert", "update", "upsert", "delete", "eq", "in", "neq", "gt", "gte", "lt", "lte", "is", "not", "order", "limit", "range", "single", "maybeSingle"]) chain[method] = (...args: unknown[]) => { calls.push({ table, method, args }); return chain; };
+    for (const method of ["select", "insert", "update", "upsert", "delete", "eq", "in", "or", "neq", "gt", "gte", "lt", "lte", "is", "not", "order", "limit", "range", "single", "maybeSingle"]) chain[method] = (...args: unknown[]) => { calls.push({ table, method, args }); return chain; };
     chain.then = (resolve: (r: typeof result) => unknown) => Promise.resolve(result).then(resolve);
     return chain;
   });
@@ -412,6 +412,24 @@ describe("deletion dependency safety", () => {
     expect(storage.remove).not.toHaveBeenCalled();
   });
 
+  it("filters future deletions before limiting the privacy worker batch", async () => {
+    const boundary = database([ok(), ok(), ok([])]);
+
+    await expect(processPrivacy(new CommunicationsService(boundary.db, {
+      AXOM_ACCOUNT_DELETION_ENABLED: "true",
+    }))).resolves.toBe(0);
+
+    const eligibility = boundary.calls.find(call =>
+      call.table === "privacy_requests" && call.method === "or");
+    expect(eligibility?.args[0]).toMatch(/kind\.eq\.export,status\.eq\.requested/);
+    expect(eligibility?.args[0]).toMatch(/kind\.eq\.deletion,status\.eq\.scheduled,scheduled_for\.lte\./);
+    expect(boundary.calls).toContainEqual({
+      table: "privacy_requests",
+      method: "limit",
+      args: [10],
+    });
+  });
+
   it("allows preflight cancellation but rejects reconciliation-required deletion", async () => {
     const cancellable = database([
       ok({ id: "delete-a", status: "failed", failure_code: "deletion-preflight-failed" }),
@@ -419,7 +437,8 @@ describe("deletion dependency safety", () => {
     ]);
     const cancellableService = new CommunicationsService(cancellable.db, {});
     const enqueue = vi.spyOn(cancellableService, "enqueue").mockResolvedValue();
-    await expect(cancelDeletion(cancellableService, "account-a", "delete-a")).resolves.toBeUndefined();
+    await expect(cancelDeletion(cancellableService, "account-a", "delete-a"))
+      .resolves.toEqual({ notificationQueued: true });
     expect(enqueue).toHaveBeenCalledWith({ userId: "account-a", type: "deletion_cancelled", key: "delete-a:cancelled" });
 
     const irreversible = database([ok({ id: "delete-b", status: "failed", failure_code: "deletion-reconciliation-required" })]);
@@ -428,6 +447,23 @@ describe("deletion dependency safety", () => {
     await expect(cancelDeletion(irreversibleService, "account-a", "delete-b"))
       .rejects.toThrow("can no longer be cancelled");
     expect(irreversible.calls.some(call => call.method === "update")).toBe(false);
+  });
+
+  it("keeps a confirmed deletion cancellation successful when its receipt cannot be queued", async () => {
+    const cancelled = database([
+      ok({ id: "delete-a", status: "scheduled", failure_code: null }),
+      ok({ id: "delete-a" }),
+    ]);
+    const service = new CommunicationsService(cancelled.db, {});
+    vi.spyOn(service, "enqueue").mockRejectedValue(new Error("queue-unavailable"));
+
+    await expect(cancelDeletion(service, "account-a", "delete-a"))
+      .resolves.toEqual({ notificationQueued: false });
+    expect(cancelled.calls).toContainEqual({
+      table: "privacy_requests",
+      method: "update",
+      args: [{ status: "cancelled", notification_email: null, failure_code: null }],
+    });
   });
 
   it.each([
@@ -443,6 +479,19 @@ describe("deletion dependency safety", () => {
 
     await expect(requestPrivacy(service, "account-a", "deletion")).rejects.toThrow(message);
     expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("does not acknowledge or notify an export rejected by the atomic deletion admission barrier", async () => {
+    const { db, calls } = database([
+      { data: null, error: { code: "PT409", message: "account deletion barrier" } },
+    ]);
+    const service = new CommunicationsService(db, {});
+    const enqueue = vi.spyOn(service, "enqueue").mockResolvedValue();
+
+    await expect(requestPrivacy(service, "account-a", "export"))
+      .rejects.toThrow("Export is unavailable while account deletion is processing or needs manual reconciliation.");
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(calls.filter(call => call.method === "select")).toHaveLength(1);
   });
 
   it("treats no academic collections as a completed, retry-safe cleanup", async () => {

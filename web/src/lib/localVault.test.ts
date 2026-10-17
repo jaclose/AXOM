@@ -7,6 +7,7 @@ import {
   flushLocalVaultWrites,
   localVaultStorage,
   resetLocalVaultRuntimeForTests,
+  VAULT_CONFLICT_MESSAGE,
   writeLocalFallback,
 } from "./localVault";
 import { STORAGE_KEYS } from "./brand";
@@ -54,6 +55,105 @@ describe("IndexedDB-first local vault", () => {
     expect(() => secondTab.assertVaultWritesSince(staleCheckpoint))
       .toThrow(secondTab.VAULT_CONFLICT_MESSAGE);
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("first tab edit"));
+  });
+
+  it("rejects a fallback save when another tab commits before its vault transaction", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const snapshot = (label: string) => JSON.stringify({ state: { profile: { userId: "jd" }, label }, version: 34 });
+    await localVaultStorage.setItem(key, snapshot("vault base"));
+
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, snapshot("fallback edit"));
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+
+    const competingTab = await openCurrentVault();
+    let competingCommit: Promise<void> | null = null;
+    const getItem = vi.spyOn(storage, "getItem").mockImplementation((name) => {
+      const value = values.get(name) ?? null;
+      if (name === key && competingCommit === null && values.has(markerKey)) {
+        // This tab already read the valid marker. Before its IndexedDB
+        // transaction starts, another tab commits and clears that fallback.
+        competingCommit = putDirect(competingTab, key, snapshot("newer tab edit"));
+        values.delete(markerKey);
+      }
+      return value;
+    });
+
+    const checkpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, snapshot("stale fallback tab edit"));
+    await flushLocalVaultWrites();
+    await competingCommit;
+    const saved = await getDirect(competingTab, key);
+    getItem.mockRestore();
+    competingTab.close();
+
+    expect(() => assertVaultWritesSince(checkpoint)).toThrow(VAULT_CONFLICT_MESSAGE);
+    expect(saved).toBe(snapshot("newer tab edit"));
+  });
+
+  it("does not promote a fallback over a commit that wins before promotion", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const markerKey = `${key}:fallback-newer`;
+    const snapshot = (label: string) => JSON.stringify({ state: { profile: { userId: "jd" }, label }, version: 34 });
+    await localVaultStorage.setItem(key, snapshot("vault base"));
+
+    vi.stubGlobal("indexedDB", undefined);
+    await localVaultStorage.setItem(key, snapshot("fallback edit"));
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+
+    const competingTab = await openCurrentVault();
+    let competingCommit: Promise<void> | null = null;
+    const getItem = vi.spyOn(storage, "getItem").mockImplementation((name) => {
+      const value = values.get(name) ?? null;
+      if (name === key && competingCommit === null && values.has(markerKey)) {
+        competingCommit = putDirect(competingTab, key, snapshot("newer tab edit"));
+        values.delete(markerKey);
+      }
+      return value;
+    });
+
+    const hydrated = await localVaultStorage.getItem(key);
+    await competingCommit;
+    const saved = await getDirect(competingTab, key);
+    getItem.mockRestore();
+    competingTab.close();
+
+    expect(hydrated).toBe(snapshot("newer tab edit"));
+    expect(saved).toBe(snapshot("newer tab edit"));
+  });
+
+  it("promotes and keeps saving an auxiliary-key fallback after IndexedDB recovers", async () => {
+    const key = STORAGE_KEYS.aiGenerations;
+    const older = JSON.stringify({ schemaVersion: 1, generations: [{ id: "older" }] });
+    const fallback = JSON.stringify({ schemaVersion: 1, generations: [{ id: "fallback" }] });
+    const next = JSON.stringify({ schemaVersion: 1, generations: [{ id: "next" }] });
+
+    await localVaultStorage.setItem(key, older);
+    expect(await localVaultStorage.getItem(key)).toBe(older);
+
+    const db = await openCurrentVault();
+    try {
+      vi.stubGlobal("indexedDB", undefined);
+      await localVaultStorage.setItem(key, fallback);
+
+      expect(await getDirect(db, key)).toBe(older);
+      expect(localStorage.getItem(key)).toBe(fallback);
+      expect(JSON.parse(localStorage.getItem(`${key}:fallback-newer`) ?? "null"))
+        .toMatchObject({ version: 1, baseFingerprint: expect.any(String) });
+
+      vi.stubGlobal("indexedDB", fakeIndexedDb);
+      expect(await localVaultStorage.getItem(key)).toBe(fallback);
+      expect(localStorage.getItem(key)).toBeNull();
+      expect(await getDirect(db, key)).toBe(fallback);
+
+      await localVaultStorage.setItem(key, next);
+      await flushLocalVaultWrites();
+      expect(await getDirect(db, key)).toBe(next);
+      expect(await localVaultStorage.getItem(key)).toBe(next);
+    } finally {
+      db.close();
+    }
   });
 
   it("keeps a confirmed vault save successful when optional localStorage metadata is full", async () => {
@@ -296,6 +396,22 @@ function putDirect(db: IDBDatabase, key: string, value: string): Promise<void> {
     tx.objectStore("state").put(value, key);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
+  });
+}
+
+function getDirect(db: IDBDatabase, key: string): Promise<string | undefined> {
+  return new Promise((resolve, reject) => {
+    const request = db.transaction("state", "readonly").objectStore("state").get(key);
+    request.onsuccess = () => resolve(typeof request.result === "string" ? request.result : undefined);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function openCurrentVault(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = fakeIndexedDb.open(STORAGE_KEYS.vaultDb, 3);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
   });
 }
 

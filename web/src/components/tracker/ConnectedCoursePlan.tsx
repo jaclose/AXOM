@@ -8,10 +8,11 @@ import { prepareCourseTemplate } from "../../lib/course-engine/templateLibrary";
 import { parseCourseTemplate } from "../../lib/course-engine/templateParse";
 import { canonicalModuleKey, moduleKey } from "../../lib/course-engine/vocabulary";
 import { canonicalCourseOwnerUniverse, withPreparedCourses, loadPreparedCourse } from "../../lib/bookshelf/preparedCourses";
-import { buildQuestionBankBooks } from "../../lib/bookshelf/questionBankBooks";
+import { buildQuestionBankBooks, type QuestionBankBook } from "../../lib/bookshelf/questionBankBooks";
 import { courseBookId, type CourseBook } from "../../lib/bookshelf/courseBooks";
-import type { SourceDocument } from "../../lib/library";
+import type { QuestionSet, SourceDocument } from "../../lib/library";
 import type { LibraryInstallation } from "../../lib/privateLibrary/install";
+import type { QuestionRecord } from "../../lib/questions";
 import type { Course, Term, TrackerItem } from "../../lib/types";
 import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "../../lib/localVault";
 import { CoursePlan } from "./CoursePlan";
@@ -35,6 +36,7 @@ function reference(documents: SourceDocument[], course: AcademicCourse, accountI
     const value = JSON.parse(doc.rawText) as DownloadReference;
     if (!value || value.accountId !== accountId || value.revisionId !== revision || value.collectionId !== course.id
       || ![value.templateIds, value.documentIds, value.questionIds, value.setIds].every(ids => Array.isArray(ids) && ids.every(id => typeof id === "string" && id.length > 0))
+      || [value.templateIds, value.documentIds, value.questionIds, value.setIds].some(ids => new Set(ids).size !== ids.length)
       || (value.pendingWeeks && (!Array.isArray(value.pendingWeeks) || value.pendingWeeks.some(week => !Number.isInteger(week) || week < 1 || week > 60)))) return;
     return value;
   } catch { return; }
@@ -101,6 +103,55 @@ export function connectedCourseBook(
   return book;
 }
 
+/** Project only the question membership named by this collection's durable
+ * download receipt onto its exact local hosted-course owner. A same-named
+ * local course, or simply the first generated bank, is never sufficient. */
+export function connectedQuestionBank(
+  course: Pick<AcademicCourse, "id" | "module" | "term">,
+  downloaded: Pick<DownloadReference, "questionIds" | "setIds"> | undefined,
+  workspace: {
+    terms: readonly Term[];
+    courses: readonly Course[];
+    questions: readonly QuestionRecord[];
+    questionSets: readonly QuestionSet[];
+  },
+): QuestionBankBook | undefined {
+  if (!downloaded?.questionIds.length) return;
+  const courseCode = `academic:${course.id}`;
+  const owners = workspace.courses.filter(owner => owner.code === courseCode
+    && termIdentity(workspace.terms.find(term => term.id === owner.termId)?.name ?? "") === termIdentity(course.term)
+    && owner.modules.some(module => canonicalModuleKey(module.name) === canonicalModuleKey(course.module)));
+  if (owners.length !== 1) return;
+  const owner = owners[0];
+  const questionIds = new Set(downloaded.questionIds);
+  const setIds = new Set(downloaded.setIds);
+  if (questionIds.size !== downloaded.questionIds.length || setIds.size !== downloaded.setIds.length) return;
+  const questions = workspace.questions.filter(question => questionIds.has(question.id));
+  const sets = workspace.questionSets.filter(set => setIds.has(set.id));
+  if (questions.length !== questionIds.size || sets.length !== setIds.size) return;
+  if (questions.some(question => (question.courseId && question.courseId !== owner.id)
+    || (question.module && canonicalModuleKey(question.module) !== canonicalModuleKey(course.module)))
+    || sets.some(set => (set.scope?.courseId && set.scope.courseId !== owner.id)
+      || (set.scope?.module && canonicalModuleKey(set.scope.module) !== canonicalModuleKey(course.module)))) return;
+  const scopedQuestions = questions.map(question => ({
+    ...question, courseId: owner.id, module: question.module ?? course.module,
+  }));
+  const scopedSets = sets.map(set => ({
+    ...set, scope: { ...set.scope, courseId: owner.id, module: set.scope?.module ?? course.module },
+  }));
+  const matches = buildQuestionBankBooks({
+    terms: workspace.terms,
+    courses: workspace.courses,
+    questions: scopedQuestions,
+    sets: scopedSets,
+  }).filter(bank => bank.courseId === owner.id
+    && canonicalModuleKey(bank.module) === canonicalModuleKey(course.module)
+    && termIdentity(bank.term) === termIdentity(course.term));
+  if (matches.length !== 1) return;
+  const represented = new Set(matches[0].weeks.flatMap(week => week.collections.flatMap(collection => collection.questionIds ?? [])));
+  return represented.size === questionIds.size && [...questionIds].every(id => represented.has(id)) ? matches[0] : undefined;
+}
+
 export function ConnectedCoursePlan({ course, onBack, onOpen, onCustomize, onSharingSaved }: {
   course: AcademicCourse; onBack: () => void; onOpen: (book: CourseBook) => void; onCustomize: (book: CourseBook) => void; onSharingSaved: () => void;
 }) {
@@ -140,12 +191,13 @@ export function ConnectedCoursePlan({ course, onBack, onOpen, onCustomize, onSha
     catch { return undefined; }
   }, [template, state.terms, state.courses, state.tracker, course]);
   const bank = useMemo(() => {
-    if (!downloaded) return;
-    const ids = new Set(downloaded.questionIds);
-    const sets = new Set(downloaded.setIds);
-    return buildQuestionBankBooks({ terms: state.terms, courses: state.courses,
-      questions: state.questions.filter(question => ids.has(question.id)), sets: state.questionSets.filter(set => sets.has(set.id)) })[0];
-  }, [downloaded, state.terms, state.courses, state.questions, state.questionSets]);
+    return connectedQuestionBank(course, downloaded, {
+      terms: state.terms,
+      courses: state.courses,
+      questions: state.questions,
+      questionSets: state.questionSets,
+    });
+  }, [course, downloaded, state.terms, state.courses, state.questions, state.questionSets]);
   async function load(weeks: number[]) {
     if (!book || !weeks.length) return { status: "nothing-to-save" as const };
     setError("");

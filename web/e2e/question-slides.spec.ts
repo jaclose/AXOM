@@ -4,6 +4,7 @@ import { test, expect, seedOnboarded, reloadAfterSave } from "./fixtures";
 // Optional for shared machines under graphics pressure; never a GPU performance test.
 test.use({ launchOptions: process.env.AXOM_E2E_SOFTWARE_GRAPHICS === "1" ? { args: ["--disable-gpu"] } : {} });
 const hash = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+const EDITED_STEM = "Reviewer clarification: identify the option labeled Alpha without removing the source figure.";
 
 function originalPdf() {
   const content = "BT /F1 20 Tf 30 160 Td (Synthetic source slide. Answer A.) Tj ET";
@@ -52,6 +53,19 @@ for (const width of [1440, 390]) for (const mode of ["tutor", "exam"] as const) 
     await page.getByRole("button", { name: "Install prepared library", exact: true }).click();
     await (await chooser).setFiles({ name: "slides-test.zip", mimeType: "application/zip", buffer: await bundle() });
     await expect(page.getByRole("region", { name: "Prepared library" }).getByRole("status")).toContainText("Library installed.");
+    await page.evaluate(async (stem) => {
+      type Question = { id: string; content?: { id?: string } };
+      type State = { questions: Question[]; updateQuestion: (id: string, patch: { stem: string }) => void };
+      type Dev = { useStore: { getState: () => State }; flushVault: () => Promise<void> };
+      const dev = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
+      const state = dev.useStore.getState();
+      const questions = state.questions.filter(candidate => ["slides-1", "slides-2"].includes(candidate.content?.id ?? ""));
+      if (questions.length !== 2) throw new Error("The synthetic image-bearing questions were not installed.");
+      // Practice deliberately randomizes order. Edit both distinct fixtures so
+      // this regression checks the current question rather than assuming a draw.
+      for (const question of questions) state.updateQuestion(question.id, { stem: `${stem} (${question.content?.id})` });
+      await dev.flushVault();
+    }, EDITED_STEM);
     await page.locator(".qb-hero-actions").getByRole("button", { name: "Create Quiz", exact: true }).click();
     await page.getByLabel("Custom question count").fill("2");
     await page.getByRole("button", { name: "Slides", exact: true }).click();
@@ -61,6 +75,7 @@ for (const width of [1440, 390]) for (const mode of ["tutor", "exam"] as const) 
     const tip = player.getByRole("button", { name: "Got it", exact: true });
     if (await tip.isVisible()) await tip.click();
     await expect(player.locator('[data-question-view="slides"]')).toBeVisible();
+    await expect(player.getByText(EDITED_STEM, { exact: false })).toBeVisible();
     await expect(player.locator('[data-asset-role="stem"] img')).toBeVisible();
     await expect(player.locator('[data-asset-role="answer_reveal"], [data-asset-role="source_page"], canvas')).toHaveCount(0);
     await player.getByRole("button", { name: "A. Alpha", exact: true }).click();
@@ -72,15 +87,17 @@ for (const width of [1440, 390]) for (const mode of ["tutor", "exam"] as const) 
     await player.getByRole("button", { name: "Slides", exact: true }).click();
     expect(await player.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`slides-${mode}-${width}.png`), fullPage: true });
+    await reloadAfterSave(page);
+    await expect(player.locator('[data-question-view="slides"]')).toBeVisible();
+    await expect(player.getByText(EDITED_STEM, { exact: false })).toBeVisible();
+    await expect(player.locator('[data-asset-role="stem"] img')).toBeVisible();
+    await expect(player.locator('[data-asset-role="answer_reveal"], [data-asset-role="source_page"], canvas')).toHaveCount(0);
+    await expect(player.getByRole("button", { name: "A. Alpha", exact: true })).toHaveAttribute("aria-pressed", "true");
     if (mode === "tutor") {
       await player.getByRole("button", { name: "Check answer", exact: true }).click();
       await expect(player.locator('[data-asset-role="answer_reveal"] img')).toBeVisible();
       await expect(player.locator('[data-asset-role="source_page"], canvas')).toHaveCount(0);
     }
-    await reloadAfterSave(page);
-    await expect(player.locator('[data-question-view="slides"]')).toBeVisible();
-    await expect(player.getByRole("button", { name: "A. Alpha", exact: true })).toHaveAttribute("aria-pressed", "true");
-    if (mode === "exam") await expect(player.locator('[data-asset-role="answer_reveal"], canvas')).toHaveCount(0);
     await player.getByRole("button", { name: mode === "tutor" ? "Next question" : "Submit & next", exact: true }).click();
     await expect(player.locator('[data-asset-role="answer_reveal"], [data-asset-role="source_page"], canvas')).toHaveCount(0);
     await player.getByRole("button", { name: "A. Alpha", exact: true }).click();

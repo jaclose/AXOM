@@ -11,13 +11,14 @@ import { collectQuestionAttachmentPayloads, deleteQuestionAttachmentBlobs, getQu
 import { buildCourseBooks } from "../bookshelf/courseBooks";
 import { withPreparedCourses, loadPreparedCourse } from "../bookshelf/preparedCourses";
 import { academicBindings, academicRecord } from "../academicLibrary/contentReferences";
+import { CURRICULA } from "../curricula";
 
 const encode = (value: unknown) => new TextEncoder().encode(typeof value === "string" ? value : JSON.stringify(value));
 async function bundle() {
-  const template = encode("T5 - DEMO - Lectures:\nWeek 1:\nLecture 01 Example topic [Lecture]");
+  const template = encode("T5 - GOER - Lectures:\nWeek 1:\nLecture 01 Example topic [Lecture]");
   const checksum = (await sha256(template)).slice(7);
   const sourceHash = "a".repeat(64);
-  const bank: PreparedBank = { pkg: { manifest: { schemaVersion: 1, course: { name: "DEMO", term: 5, week: 1 }, bank: { id: "sample", title: "Sample bank", discipline: "Example" }, source: { filename: "sample.txt", sourceWeekDeclared: true }, questionsFile: "questions.json", assetsDirectory: "assets" }, questions: [
+  const bank: PreparedBank = { pkg: { manifest: { schemaVersion: 1, course: { name: "GOER", term: 5, week: 1 }, bank: { id: "sample", title: "Sample bank", discipline: "Example" }, source: { filename: "sample.txt", sourceWeekDeclared: true }, questionsFile: "questions.json", assetsDirectory: "assets" }, questions: [
     { id: "sample-1", source: { filename: "sample.txt", questionNumber: 1 }, stem: [{ type: "text", text: "Which sample is labeled first?" }], choices: [{ id: "a", label: "A", blocks: [{ type: "text", text: "Sample one" }] }, { id: "b", label: "B", blocks: [{ type: "text", text: "Sample two" }] }], correctAnswer: { labels: ["A"], evidence: "printed-key" }, assets: [], provenance: { method: "authored", sourceChecksum: `sha256:${sourceHash}` } },
   ] }, issues: [], sourceText: { rawText: "Original sample source." }, sourceBytes: 23, notes: [] };
   const catalog: PrivateLibraryCatalog = { format: PRIVATE_LIBRARY_FORMAT, schemaVersion: 1, id: "test", version: "one", templates: [{ file: "templates/test.txt", name: "test.txt", checksum }], sources: [{ id: "test-source", name: "sample.txt", sourcePath: "sample.txt", checksum: sourceHash, status: "prepared", reason: "Validated", ready: 1, review: 0, bankFile: "banks/test/bank.json" }] };
@@ -83,13 +84,14 @@ describe("prepared private library installation", () => {
     expect(useStore.getState().questions).toHaveLength(1);
     const question = useStore.getState().questions[0];
     useStore.getState().updateQuestion(question.id, { notes: "My reasoning", tags: ["my-remediation"], stem: "My clarified question wording?" });
-    const books = withPreparedCourses(buildCourseBooks({ terms: [], courses: [], tracker: [], curricula: [{ id: "demo", label: "Demo", terms: [{ name: "Term 5", courses: [{ code: "DEMO", name: "Demo course", modules: ["DEMO"] }] }] }] }), useStore.getState().documents);
-    expect(books[0].weeks[0].total).toBe(1);
-    await loadPreparedCourse(books[0]);
+    const books = withPreparedCourses(buildCourseBooks({ terms: [], courses: [], tracker: [], curricula: CURRICULA }), useStore.getState().documents);
+    const book = books.find(candidate => candidate.courseCode === "PPM 501" && candidate.module === "GOER")!;
+    expect(book.weeks[0].total).toBe(1);
+    await expect(loadPreparedCourse(book)).resolves.toEqual({ status: "saved-on-device" });
     const item = useStore.getState().tracker.find(t => t.templateKey)!;
     useStore.getState().updateTrackerItem(item.id, { passes: 2, label: "My personal title" });
     await installPrivateLibrary(b.read);
-    await loadPreparedCourse(books[0]);
+    await expect(loadPreparedCourse(book)).resolves.toEqual({ status: "nothing-to-save" });
     await reloadWorkspace();
     expect(useStore.getState().questions).toHaveLength(1);
     expect(useStore.getState().questions[0].notes).toBe("My reasoning");
@@ -151,7 +153,7 @@ describe("prepared private library installation", () => {
     expect(partial.warnings.join(" ")).toMatch(/2 answer-ready questions remain saved.*Synthetic reviewed filing failure/);
     const questions = useStore.getState().questions;
     expect(questions).toHaveLength(2);
-    expect(questions.find(question => question.content?.id === "sample-1")).toMatchObject({ module: "DEMO", week: 1 });
+    expect(questions.find(question => question.content?.id === "sample-1")).toMatchObject({ module: "GOER", week: 1 });
     expect(questions.find(question => question.content?.id === "sample-2")).toMatchObject({ module: "GOER", week: undefined });
     const catalog = useStore.getState().documents.find(document => document.fileType === PRIVATE_LIBRARY_DOCUMENT);
     expect(JSON.parse(catalog!.rawText).sources[0]).toMatchObject({ status: "review-required", ready: 2 });
@@ -172,8 +174,8 @@ describe("prepared private library installation", () => {
     expect(Object.isFrozen(valid.reviewedFiling)).toBe(true);
 
     expect(readPreparedBank({ ...original, reviewedFiling: {
-      term: "Term 5", module: "DEMO", evidence: "source-metadata", weekAssignment: "unassigned",
-    } }).reviewedFiling?.module).toBe("DEMO");
+      term: "Term 5", module: "GOER", evidence: "source-metadata", weekAssignment: "unassigned",
+    } }).reviewedFiling?.module).toBe("GOER");
 
     for (const module of ["FTM-1", "PRE-MIDTERM"]) {
       const matching = structuredClone(original) as { pkg: PreparedBank["pkg"] } & Record<string, unknown>;
@@ -196,7 +198,7 @@ describe("prepared private library installation", () => {
       { ...base, title: "unexpected field" },
     ]) expect(() => readPreparedBank({ ...original, reviewedFiling })).toThrow("invalid reviewed filing");
 
-    expect(() => readPreparedBank({ ...original, reviewedFiling: base })).toThrow("must agree");
+    expect(() => readPreparedBank({ ...original, reviewedFiling: { ...base, module: "ER" } })).toThrow("must agree");
     const mixed = structuredClone(original) as { pkg: PreparedBank["pkg"] } & Record<string, unknown>;
     mixed.pkg.questions[0].course = "ER";
     expect(() => readPreparedBank({ ...mixed, reviewedFiling: {
@@ -283,6 +285,70 @@ describe("prepared private library installation", () => {
     expect((await restoreQuestionAttachmentPayloads(collected.payloads, refs)).restored).toBe(1);
     const doc = useStore.getState().documents.find(d => d.fileType === PRIVATE_REVIEW_DOCUMENT)!;
     expect(await bankFiles(readPreparedBank(JSON.parse(doc.rawText)))).toHaveLength(1);
+  });
+  it("keeps answer-ready siblings when corrupt media belongs only to a held question", async () => {
+    const b = await bundle();
+    const bank = JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)) as PreparedBank;
+    const corrupt = new Uint8Array([137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1]);
+    const checksum = await sha256(corrupt);
+    const held = structuredClone(bank.pkg.questions[0]);
+    held.id = "held-corrupt-media";
+    held.source.questionNumber = 2;
+    delete held.correctAnswer;
+    held.flags = [{ type: "answer_needs_review", message: "Confirm the answer against the original source." }];
+    held.assets = [{
+      id: "held-corrupt-figure", filename: "held-corrupt.png", mimeType: "image/png",
+      role: "question", questionId: held.id, checksum,
+    }];
+    held.stem.push({ type: "image", assetId: "held-corrupt-figure", role: "question", alt: "Held source figure" });
+    bank.pkg.questions.push(held);
+    b.catalog.sources[0] = { ...b.catalog.sources[0], review: 1 };
+    b.files.set("catalog.json", encode(b.catalog));
+    b.files.set("banks/test/bank.json", encode(bank));
+    b.files.set("banks/test/assets/held-corrupt.png", corrupt);
+    vi.stubGlobal("createImageBitmap", vi.fn(async () => { throw new Error("decoder rejected corrupt bytes"); }));
+    await deleteQuestionAttachmentBlobs([`private-library:${checksum}`]);
+
+    const result = await installPrivateLibrary(b.read);
+
+    expect(result).toMatchObject({ status: "partial" });
+    expect(result.questionIds).toHaveLength(1);
+    expect(result.warnings.join(" ")).toMatch(/held-corrupt\.png.*review/i);
+    expect(useStore.getState().questions).toHaveLength(1);
+    expect(useStore.getState().questions[0].content?.id).toBe("sample-1");
+    expect(await getQuestionAttachmentBlob(`private-library:${checksum}`)).toBeUndefined();
+    const catalog = useStore.getState().documents.find(document => document.fileType === PRIVATE_LIBRARY_DOCUMENT)!;
+    expect(JSON.parse(catalog.rawText).sources[0]).toMatchObject({ status: "review-required", ready: 1, review: 1 });
+    const review = useStore.getState().documents.find(document => document.fileType === PRIVATE_REVIEW_DOCUMENT)!;
+    expect(JSON.parse(review.rawText).pkg.questions.find((question: { id: string }) => question.id === held.id)?.assets)
+      .toEqual(held.assets);
+    expect(JSON.parse(review.rawText).issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ questionId: held.id, severity: "error", code: "missing_required_media" }),
+    ]));
+  });
+  it("still rejects corrupt media required by an answer-ready question", async () => {
+    const b = await bundle();
+    const bank = JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)) as PreparedBank;
+    const corrupt = new Uint8Array([137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1]);
+    const checksum = await sha256(corrupt);
+    bank.pkg.questions[0].assets = [{
+      id: "ready-corrupt-figure", filename: "ready-corrupt.png", mimeType: "image/png",
+      role: "question", questionId: "sample-1", checksum,
+    }];
+    bank.pkg.questions[0].stem.push({ type: "image", assetId: "ready-corrupt-figure", role: "question", alt: "Required source figure" });
+    b.files.set("banks/test/bank.json", encode(bank));
+    b.files.set("banks/test/assets/ready-corrupt.png", corrupt);
+    vi.stubGlobal("createImageBitmap", vi.fn(async () => { throw new Error("decoder rejected corrupt bytes"); }));
+    await deleteQuestionAttachmentBlobs([`private-library:${checksum}`]);
+
+    const result = await installPrivateLibrary(b.read);
+
+    expect(result).toMatchObject({ status: "partial", questionIds: [] });
+    expect(result.warnings.join(" ")).toMatch(/integrity[^.]*: ready-corrupt\.png/i);
+    expect(useStore.getState().questions).toHaveLength(0);
+    expect(await getQuestionAttachmentBlob(`private-library:${checksum}`)).toBeUndefined();
+    const catalog = useStore.getState().documents.find(document => document.fileType === PRIVATE_LIBRARY_DOCUMENT)!;
+    expect(JSON.parse(catalog.rawText).sources[0]).toMatchObject({ status: "failed", ready: 0 });
   });
   it("reads only files inside the one browser-selected prepared folder", async () => {
     const file = new File(["catalog"], "catalog.json");

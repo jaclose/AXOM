@@ -208,54 +208,85 @@ function bankAssetPath(bankFile: string, filename: string): string {
   const prefix = separator === -1 ? "" : bankFile.slice(0, separator + 1);
   return safeLibraryPath(`${prefix}assets/${filename}`);
 }
-export async function bankFiles(bank: PreparedBank, read?: LibraryReader, bankFile?: string, assertCurrent: () => void = () => {}): Promise<File[]> {
+interface BankFilePartition {
+  /** Images used by these questions remain fail-closed. Omit for the strict public reader. */
+  requiredQuestionIds?: ReadonlySet<string>;
+  /** Called only when an invalid image belongs exclusively to an already-held question. */
+  onHeldMediaIssue?: (issue: PackageIssue) => void;
+}
+export async function bankFiles(
+  bank: PreparedBank,
+  read?: LibraryReader,
+  bankFile?: string,
+  assertCurrent: () => void = () => {},
+  partition: BankFilePartition = {},
+): Promise<File[]> {
   const files: File[] = [];
   const pendingRecords: Array<{ key: string; record: QuestionAttachmentBlobRecord }> = [];
   // Several question assets can refer to the *same* source-page file while
   // having distinct question-local asset IDs. The image matcher intentionally
   // refuses ambiguous duplicate filenames. Supply each verified file once,
   // and refuse collisions where identical names claim different bytes.
-  const byFileName = new Map<string, (typeof bank.pkg.questions)[number]["assets"][number]>();
-  for (const asset of bank.pkg.questions.flatMap(question => question.assets)) {
-    if (!asset.checksum) continue;
-    const key = asset.filename.trim().split(/[\\/]/).pop()!.normalize("NFC").toLowerCase();
-    const previous = byFileName.get(key);
-    if (previous && previous.checksum !== asset.checksum) {
-      throw new Error(`Two different images are named ${asset.filename}. Rename and review their references before importing.`);
+  const byFileName = new Map<string, {
+    asset: (typeof bank.pkg.questions)[number]["assets"][number];
+    questionIds: Set<string>;
+  }>();
+  for (const question of bank.pkg.questions) {
+    for (const asset of question.assets) {
+      const key = asset.filename.trim().split(/[\\/]/).pop()!.normalize("NFC").toLowerCase();
+      const previous = byFileName.get(key);
+      if (previous && previous.asset.checksum !== asset.checksum) {
+        throw new Error(`Two different images are named ${asset.filename}. Rename and review their references before importing.`);
+      }
+      if (previous) previous.questionIds.add(question.id);
+      else byFileName.set(key, { asset, questionIds: new Set([question.id]) });
     }
-    if (!previous) byFileName.set(key, asset);
   }
-  for (const asset of byFileName.values()) {
-    if (!asset.checksum) continue;
-    // The assessor holds questions whose essential images are absent. One
-    // incomplete extraction must not prevent verified siblings from loading.
-    const key = reviewBlobKey(asset.checksum);
-    const stored = await getQuestionAttachmentBlob(key);
-    const bytes = read && bankFile
-      ? await read(bankAssetPath(bankFile, asset.filename))
-      : stored ? new Uint8Array(await stored.blob.arrayBuffer()) : undefined;
-    if (!bytes) throw new Error("A review image is missing on this device. Reinstall the private bundle to restore it.");
-    let image: InstallableAcademicImage;
+  for (const { asset, questionIds } of byFileName.values()) {
+    const required = partition.requiredQuestionIds === undefined
+      || [...questionIds].some(questionId => partition.requiredQuestionIds!.has(questionId));
     try {
-      image = await assertInstallableAcademicImageBytes(bytes, asset.mimeType);
+      if (!asset.checksum) throw new Error(`Image integrity check failed: ${asset.filename}. The package does not provide a checksum for these bytes.`);
+      const key = reviewBlobKey(asset.checksum);
+      const stored = await getQuestionAttachmentBlob(key);
+      const bytes = read && bankFile
+        ? await read(bankAssetPath(bankFile, asset.filename))
+        : stored ? new Uint8Array(await stored.blob.arrayBuffer()) : undefined;
+      if (!bytes) throw new Error("A review image is missing on this device. Reinstall the private bundle to restore it.");
+      let image: InstallableAcademicImage;
+      try {
+        image = await assertInstallableAcademicImageBytes(bytes, asset.mimeType);
+      } catch (cause) {
+        const reason = cause instanceof Error ? cause.message : "The image could not be verified.";
+        throw new Error(`Image integrity check failed: ${asset.filename}. ${reason}`, { cause });
+      }
+      if (await sha256(bytes) !== asset.checksum
+        || (asset.byteSize !== undefined && asset.byteSize !== image.byteSize)
+        || (asset.width !== undefined && asset.width !== image.width)
+        || (asset.height !== undefined && asset.height !== image.height))
+        throw new Error(`Image integrity check failed: ${asset.filename}. Its checksum, byte size or dimensions do not match the verified bytes.`);
+      const record: QuestionAttachmentBlobRecord = {
+        blob: new Blob([bytes as BlobPart], { type: image.mimeType }),
+        mimeType: image.mimeType,
+        byteSize: image.byteSize,
+        questionId: asset.questionId,
+        updatedAt: new Date().toISOString(),
+      };
+      if (read && bankFile) pendingRecords.push({ key, record });
+      files.push(new File([record.blob], asset.filename, { type: record.mimeType }));
     } catch (cause) {
       const reason = cause instanceof Error ? cause.message : "The image could not be verified.";
-      throw new Error(`Image integrity check failed: ${asset.filename}. ${reason}`, { cause });
+      const failure = reason.includes(asset.filename)
+        ? cause instanceof Error ? cause : new Error(reason)
+        : new Error(`Image integrity check failed: ${asset.filename}. ${reason}`, { cause });
+      if (required || !partition.onHeldMediaIssue) throw failure;
+      for (const questionId of questionIds) partition.onHeldMediaIssue({
+        severity: "error",
+        code: "missing_required_media",
+        questionId,
+        message: `${asset.filename} could not be verified and was not installed. Review this held question against the original source before importing it. ${failure.message}`,
+      });
     }
-    if (await sha256(bytes) !== asset.checksum
-      || (asset.byteSize !== undefined && asset.byteSize !== image.byteSize)
-      || (asset.width !== undefined && asset.width !== image.width)
-      || (asset.height !== undefined && asset.height !== image.height))
-      throw new Error(`Image integrity check failed: ${asset.filename}. Its checksum, byte size or dimensions do not match the verified bytes.`);
-    const record: QuestionAttachmentBlobRecord = {
-      blob: new Blob([bytes as BlobPart], { type: image.mimeType }),
-      mimeType: image.mimeType,
-      byteSize: image.byteSize,
-      questionId: asset.questionId,
-      updatedAt: new Date().toISOString(),
-    };
-    if (read && bankFile) pendingRecords.push({ key, record });
-    files.push(new File([record.blob], asset.filename, { type: record.mimeType }));
   }
   // Validate every referenced file before the first IndexedDB write so a
   // corrupt later sibling cannot leave a partially persisted image set.
@@ -345,10 +376,20 @@ async function install(read: LibraryReader, progress: (message: string) => void,
       const bank = storedReview
         ? mergeStoredReview(incomingBank, JSON.parse(storedReview.rawText), `sha256:${source.checksum}`)
         : incomingBank;
+      const declaredAssetFiles = bank.pkg.questions.flatMap(question => question.assets.map(asset => ({ name: asset.filename })));
+      const preliminary = assessBank(bank.pkg, bank.issues, declaredAssetFiles);
+      if (preliminary.issues.some(issue => issue.severity === "error" && !issue.questionId)) throw new Error("Bank validation failed.");
+      const readyQuestionIds = new Set([...preliminary.verdicts].flatMap(([questionId, verdict]) => (
+        verdict.readiness === "ready" ? [questionId] : []
+      )));
+      const heldMediaIssues: PackageIssue[] = [];
       report("verifying figure assets");
-      const files = await bankFiles(bank, read, source.bankFile, assertCurrent);
+      const files = await bankFiles(bank, read, source.bankFile, assertCurrent, {
+        requiredQuestionIds: readyQuestionIds,
+        onHeldMediaIssue: issue => heldMediaIssues.push(issue),
+      });
       report("reviewing answer evidence");
-      const assessed = assessBank(bank.pkg, bank.issues, files);
+      const assessed = assessBank(bank.pkg, [...bank.issues, ...heldMediaIssues], files);
       if (assessed.issues.some(i => i.severity === "error" && !i.questionId)) throw new Error("Bank validation failed.");
       // Canonical question import must see its source document. Held-only
       // documents can share one snapshot instead of rewriting tens of MB each.
@@ -382,13 +423,19 @@ async function install(read: LibraryReader, progress: (message: string) => void,
       source.review = result.held.length + (bank.unreadableQuestions ?? 0);
       const sourceWarnings: string[] = [];
       if (bank.unreadableQuestions) sourceWarnings.push(`${bank.unreadableQuestions} extracted rows could not be read. Open the original to review them; they are excluded from scored practice.`);
+      if (heldMediaIssues.length) {
+        source.status = "review-required";
+        sourceWarnings.push(`${heldMediaIssues.length} media problem${heldMediaIssues.length === 1 ? "" : "s"} in review-held questions could not be verified. Those questions remain unresolved and were not imported: ${heldMediaIssues.slice(0, 3).map(issue => issue.message).join(" ")}`);
+      }
       if (result.status === "partial" || result.status === "failed") {
         source.status = "review-required";
         sourceWarnings.push(`${source.ready} answer-ready question${source.ready === 1 ? " remains" : "s remain"} saved on this device, but this source did not finish: ${result.errors.slice(0, 3).join(" ")}`);
       }
       if (sourceWarnings.length) source.reason = sourceWarnings.join(" ");
-      if (result.status === "partial" || result.status === "failed") warnings.push(`${source.name}: ${source.reason}`);
-      const rawText = JSON.stringify(bank);
+      if (heldMediaIssues.length || result.status === "partial" || result.status === "failed") warnings.push(`${source.name}: ${source.reason}`);
+      const rawText = JSON.stringify(heldMediaIssues.length
+        ? { ...bank, issues: [...bank.issues, ...heldMediaIssues] }
+        : bank);
       const state = currentStore();
       // Preserve an existing reviewer's decisions when refreshing the same source version.
       const id = `private-review-${source.checksum}`;

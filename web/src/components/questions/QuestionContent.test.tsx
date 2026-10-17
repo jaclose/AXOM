@@ -2,7 +2,14 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { QuestionAsset, PackageQuestion } from "../../lib/question-content/package";
-import { QuestionBlocks } from "./QuestionContent";
+import { getQuestionAttachmentBlob, type QuestionImageAttachment } from "../../lib/questionAttachments";
+import { questionMappingStatus, type QuestionRecord } from "../../lib/questions";
+import { QuestionBlocks, QuestionContent } from "./QuestionContent";
+
+vi.mock("../../lib/questionAttachments", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../lib/questionAttachments")>(),
+  getQuestionAttachmentBlob: vi.fn(),
+}));
 
 const source = (id: string): QuestionAsset => ({
   id: "shared-asset-id", questionId: "sample-q", filename: "source-figure.png", mimeType: "image/png",
@@ -50,5 +57,52 @@ describe("source figure lifecycle and rapid question navigation", () => {
 
     view.unmount();
     expect(revoke).toHaveBeenCalledWith("blob:axom-next");
+  });
+
+  it("keeps a required source figure visible after the reviewed stem text is edited", async () => {
+    const asset: QuestionAsset = {
+      id: "edited-stem-figure", questionId: "edited-stem-question", filename: "edited-stem.png",
+      mimeType: "image/png", role: "stem", checksum: `sha256:${"a".repeat(64)}`,
+    };
+    const answerAsset: QuestionAsset = {
+      id: "edited-stem-answer", questionId: asset.questionId, filename: "edited-stem-answer.png",
+      mimeType: "image/png", role: "answer_reveal", revealOf: asset.id,
+    };
+    const attachment: QuestionImageAttachment = {
+      id: "edited-stem-attachment", assetId: asset.id, fileName: asset.filename, mimeType: "image/png",
+      byteSize: 3, altText: "", createdAt: "2026-10-15T00:00:00.000Z", updatedAt: "2026-10-15T00:00:00.000Z",
+      blobKey: "edited-stem-blob", role: "stem",
+    };
+    const question: QuestionRecord = {
+      id: "edited-stem-question", source: "imported", stem: "Reviewed wording asks for the diagnosis.",
+      options: [{ key: "A", text: "Alpha" }, { key: "B", text: "Beta" }], correctKey: "B",
+      correctAnswerText: "Beta", status: "unseen", tags: [], attempts: [], createdAt: "2026-10-15T00:00:00.000Z",
+      updatedAt: "2026-10-15T00:00:00.000Z", extraction: { confidence: "high", reviewed: true },
+      attachments: [attachment],
+      content: {
+        id: asset.questionId, source: { filename: "source.pdf", questionNumber: 1 },
+        stem: [
+          { type: "text", text: "Original source wording asks for the diagnosis." },
+          { type: "image", assetId: asset.id, alt: "Essential diagnostic figure" },
+          { type: "image", assetId: answerAsset.id, alt: "Answer-marked source slide" },
+        ],
+        choices: [{ id: "a", label: "A", blocks: [{ type: "text", text: "Alpha" }] }, { id: "b", label: "B", blocks: [{ type: "text", text: "Beta" }] }],
+        correctAnswer: { labels: ["B"], evidence: "printed-key" }, assets: [asset, answerAsset], provenance: { method: "pdf-import" },
+      },
+    };
+    vi.mocked(getQuestionAttachmentBlob).mockResolvedValue({
+      blob: new Blob(["png"], { type: "image/png" }), mimeType: "image/png", byteSize: 3,
+      questionId: question.id, updatedAt: attachment.updatedAt,
+    });
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:edited-stem") });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+
+    expect(questionMappingStatus(question)).toBe("ready");
+    const view = render(<QuestionContent question={question} part="stem" fallback={<p>{question.stem}</p>} />);
+
+    expect(screen.getByText(question.stem)).toBeTruthy();
+    expect(view.container.querySelector('[data-asset-role="answer_reveal"]')).toBeNull();
+    await waitFor(() => expect(screen.getByRole("img", { name: "Essential diagnostic figure" }).getAttribute("src"))
+      .toBe("blob:edited-stem"));
   });
 });

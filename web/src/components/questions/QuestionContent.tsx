@@ -103,7 +103,7 @@ export function QuestionBlocks({ blocks, content, attachments, files, mode, sect
   })}</div>;
 }
 
-/** Edited legacy text wins over source blocks. Otherwise render the source in order. */
+/** Edited legacy text wins over source wording. Required source figures still render. */
 export function QuestionContent({ question, part, choice, mode = "question", fallback }: {
   question: QuestionRecord; part: "stem" | "choice" | "explanation"; choice?: string; mode?: ContentViewMode; fallback: ReactNode;
 }) {
@@ -111,7 +111,19 @@ export function QuestionContent({ question, part, choice, mode = "question", fal
   if (!content) return fallback;
   const blocks = part === "stem" ? content.stem : part === "explanation" ? content.explanation ?? [] : content.choices.find((entry) => entry.label === choice)?.blocks ?? [];
   const plain = part === "stem" ? question.stem : part === "explanation" ? question.explanation ?? "" : question.options.find((entry) => entry.key === choice)?.text ?? "";
-  if (!blocks.length || blocksToPlainText(blocks).trim() !== plain.trim()) return fallback;
+  if (!blocks.length) return fallback;
+  if (blocksToPlainText(blocks).trim() !== plain.trim()) {
+    // `content` is immutable source evidence while the legacy text fields are
+    // reviewer-editable. Do not restore stale source wording after an edit, but
+    // also do not let that text override silently remove a required figure from
+    // an otherwise scoreable question. Visibility still runs through the same
+    // role gate, so answer-reveal and explanation media cannot leak early.
+    const sourceFigures = blocks.filter((block) => block.type === "image");
+    return <>{fallback}{sourceFigures.length > 0 && <QuestionBlocks
+      blocks={sourceFigures} content={content} attachments={question.attachments}
+      mode={mode} section={part} enlarge={part !== "choice"}
+    />}</>;
+  }
   return <QuestionBlocks blocks={blocks} content={content} attachments={question.attachments} mode={mode} section={part} enlarge={part !== "choice"} />;
 }
 

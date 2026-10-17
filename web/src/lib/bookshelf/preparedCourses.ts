@@ -31,24 +31,48 @@ const bookOwnerKey = (book: CourseBook): string => [
 
 const HOSTED_COURSE_CODE = /^academic:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+interface HostedTemplateReference {
+  collectionId: string;
+  templateIds: string[];
+}
+
+function hostedTemplateReference(document: SourceDocument): HostedTemplateReference | undefined {
+  if (document.fileType !== "axom-academic-reference") return;
+  try {
+    const reference = JSON.parse(document.rawText) as {
+      collectionId?: unknown; revisionId?: unknown; accountId?: unknown; templateIds?: unknown;
+    };
+    if (typeof reference.collectionId !== "string" || !HOSTED_COURSE_CODE.test(`academic:${reference.collectionId}`)
+      || typeof reference.revisionId !== "string" || document.id !== `academic-${reference.revisionId}`
+      || typeof reference.accountId !== "string" || !reference.accountId.length
+      || !Array.isArray(reference.templateIds)
+      || reference.templateIds.some(id => typeof id !== "string" || !id.length)) return;
+    return { collectionId: reference.collectionId, templateIds: reference.templateIds };
+  } catch { return; }
+}
+
+function hostedTemplateOwners(documents: readonly SourceDocument[], templateId: string): Set<string> {
+  return new Set(documents.flatMap(document => {
+    const reference = hostedTemplateReference(document);
+    return reference?.templateIds.includes(templateId) ? [reference.collectionId] : [];
+  }));
+}
+
+function templateBelongsToBook(documents: readonly SourceDocument[], templateId: string, book: CourseBook): boolean {
+  const owners = hostedTemplateOwners(documents, templateId);
+  if (!owners.size) return true;
+  const collectionId = book.courseCode?.trim().match(HOSTED_COURSE_CODE)?.[0]?.slice("academic:".length);
+  return Boolean(collectionId && owners.has(collectionId));
+}
+
 function hasVerifiedHostedBinding(book: CourseBook, documents: readonly SourceDocument[]): boolean {
   const collectionId = book.courseCode?.trim().match(HOSTED_COURSE_CODE)?.[0]?.slice("academic:".length);
   const selectedTemplateIds = book.templateIds;
   if (!collectionId || !selectedTemplateIds?.length) return false;
   return documents.some((document) => {
-    if (document.fileType !== "axom-academic-reference") return false;
-    try {
-      const reference = JSON.parse(document.rawText) as {
-        collectionId?: unknown; revisionId?: unknown; accountId?: unknown; templateIds?: unknown;
-      };
-      const templateIds = reference.templateIds;
-      return reference.collectionId === collectionId
-        && typeof reference.revisionId === "string"
-        && document.id === `academic-${reference.revisionId}`
-        && typeof reference.accountId === "string" && reference.accountId.length > 0
-        && Array.isArray(templateIds)
-        && selectedTemplateIds.every((id) => templateIds.includes(id));
-    } catch { return false; }
+    const reference = hostedTemplateReference(document);
+    return reference?.collectionId === collectionId
+      && selectedTemplateIds.every((id) => reference.templateIds.includes(id));
   });
 }
 
@@ -120,16 +144,21 @@ function resolveTemplatesForBook(
       return { templates: [], error: "This course plan is no longer the exact saved version. Reopen the course before loading it." };
     }
     const templates = exact as SavedCourseTemplate[];
+    if (templates.some(({ document }) => !templateBelongsToBook(documents, document.id, book))) {
+      return { templates: [], error: "A downloaded course plan belongs to a different hosted course. Nothing was loaded." };
+    }
     if (templates.some(({ section }) => !sectionMatchesBook(section, book))) {
       return { templates: [], error: "A saved course plan belongs to a different term or module. Nothing was loaded." };
     }
     return { templates };
   }
 
-  const candidates = courseTemplateVersions(saved).map(versions => versions[0]).filter(({ section }) =>
-    sectionMatchesBook(section, book));
+  const candidates = courseTemplateVersions(saved.filter(({ document, section }) =>
+    sectionMatchesBook(section, book) && templateBelongsToBook(documents, document.id, book)))
+    .map(versions => versions[0]);
   if (!candidates.length) return { templates: [], error: "No prepared course plan matches this term and module." };
-  const owned = candidates.filter(({ section }) => {
+  const owned = candidates.filter(({ document, section }) => {
+    if (hostedTemplateOwners(documents, document.id).size) return true;
     const owners = matchingBooks(section, ownershipBooks);
     return owners.length === 1 && sameBook(owners[0], book);
   });
@@ -189,7 +218,8 @@ export function withPreparedCourses(
   ownershipBooks?: readonly CourseBook[],
 ): CourseBook[] {
   const collection = [...books];
-  for (const { section } of savedCourseTemplates(documents)) {
+  for (const { document, section } of savedCourseTemplates(documents)) {
+    if (hostedTemplateOwners(documents, document.id).size) continue;
     if (matchingBooks(section, collection).length) continue;
     const term = section.term ?? "Term unconfirmed";
     collection.push({ kind: "course", id: courseBookId(term, term, section.module), title: section.module, module: section.module,

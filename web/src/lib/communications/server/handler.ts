@@ -79,7 +79,10 @@ export function createCommunicationsHandler(db: SupabaseClient, env: Env, fetche
         if (body.confirmation !== "DELETE MY ACCOUNT" || !recentLogin(bearer)) throw new RequestError("Sign in again, then type DELETE MY ACCOUNT to confirm.", 403);
         await requestPrivacy(service, user.id, "deletion"); return json({ requested: true }, 200, cors);
       }
-      if (action === "cancel-deletion") { await cancelDeletion(service, user.id, String(body.id)); return json({ cancelled: true }, 200, cors); }
+      if (action === "cancel-deletion") {
+        const result = await cancelDeletion(service, user.id, String(body.id));
+        return json({ cancelled: true, ...result }, 200, cors);
+      }
       if (action === "pulse") {
         const year = Number(body.year); if (!Number.isInteger(year) || year < 2020 || year > new Date().getUTCFullYear()) throw new RequestError("Choose a valid year.");
         const context = await service.context(user.id); const end = year === new Date().getUTCFullYear() ? localClockDate(context.timezone) : `${year}-12-31`;

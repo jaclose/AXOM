@@ -5307,6 +5307,7 @@ async function Dt(e, t, n) {
 		scheduled_for: n === "deletion" ? i : null,
 		notification_email: n === "deletion" ? r.email : null
 	}).select("id").single();
+	if (n === "export" && a.error?.code === "PT409") throw Error("Export is unavailable while account deletion is processing or needs manual reconciliation.");
 	if (a.error?.code === "23505") {
 		let r = (J(await e.db.from("privacy_requests").select("status,failure_code").eq("user_id", t).eq("kind", n).order("created_at", { ascending: !1 }).limit(20)) ?? []).find((e) => e.status === "failed");
 		if (r) throw n === "deletion" && r.failure_code === "deletion-preflight-failed" ? Error("Cancel the existing failed deletion request before scheduling another.") : Error(`${n === "deletion" ? "Deletion" : "Export"} needs manual reconciliation before another request can be scheduled.`);
@@ -5336,18 +5337,24 @@ async function Ot(e, t, n) {
 	r.status === "failed" && (i = i.eq("failure_code", "deletion-preflight-failed"));
 	let a = J(await i.select("id").maybeSingle());
 	if (!a) throw Error("Deletion can no longer be cancelled, or it was already cancelled.");
-	await e.enqueue({
-		userId: t,
-		type: "deletion_cancelled",
-		key: `${a.id}:cancelled`
-	});
+	try {
+		return await e.enqueue({
+			userId: t,
+			type: "deletion_cancelled",
+			key: `${a.id}:cancelled`
+		}), { notificationQueued: !0 };
+	} catch {
+		return { notificationQueued: !1 };
+	}
 }
 async function kt(e) {
 	let t = (/* @__PURE__ */ new Date()).toISOString(), n = (/* @__PURE__ */ new Date(Date.now() - 15 * 6e4)).toISOString();
 	J(await e.db.rpc("quarantine_stale_privacy_requests", { p_stale_before: n }));
-	let r = J(await e.db.from("privacy_requests").select("*").in("status", ["requested", "scheduled"]).order("created_at").limit(10)), i = 0;
-	for (let n of r ?? []) {
-		if (n.kind === "deletion" && (n.scheduled_for > t || e.env.AXOM_ACCOUNT_DELETION_ENABLED !== "true") || !J(await e.db.rpc("claim_privacy_request", {
+	let r = e.db.from("privacy_requests").select("*");
+	r = e.env.AXOM_ACCOUNT_DELETION_ENABLED === "true" ? r.or(`and(kind.eq.export,status.eq.requested),and(kind.eq.deletion,status.eq.scheduled,scheduled_for.lte.${t})`) : r.eq("kind", "export").eq("status", "requested");
+	let i = J(await r.order("created_at").limit(10)), a = 0;
+	for (let n of i ?? []) {
+		if (!J(await e.db.rpc("claim_privacy_request", {
 			p_request_id: n.id,
 			p_now: t
 		}))) continue;
@@ -5420,7 +5427,7 @@ async function kt(e) {
 					failure_code: null
 				}).eq("id", n.id));
 			}
-			i++;
+			a++;
 		} catch (t) {
 			if (n.kind === "deletion") J(await e.db.rpc("record_account_deletion_failure", {
 				p_request_id: n.id,
@@ -5435,8 +5442,8 @@ async function kt(e) {
 			}
 		}
 	}
-	let a = J(await e.db.from("privacy_requests").select("id,notification_email,completion_payload,completion_attempt_at,completion_attempts").eq("kind", "deletion").eq("status", "completed").eq("completed_email_sent", !1).is("failure_code", null).lte("completion_retry_at", t).not("notification_email", "is", null).limit(10));
-	for (let t of a ?? []) if (!(!e.env.RESEND_API_KEY || !["live", "test"].includes(e.env.AXOM_EMAIL_MODE ?? ""))) try {
+	let o = J(await e.db.from("privacy_requests").select("id,notification_email,completion_payload,completion_attempt_at,completion_attempts").eq("kind", "deletion").eq("status", "completed").eq("completed_email_sent", !1).is("failure_code", null).lte("completion_retry_at", t).not("notification_email", "is", null).limit(10));
+	for (let t of o ?? []) if (!(!e.env.RESEND_API_KEY || !["live", "test"].includes(e.env.AXOM_EMAIL_MODE ?? ""))) try {
 		if (!J(await e.db.from("email_suppressions").select("email").eq("email", t.notification_email.toLowerCase()).maybeSingle())) {
 			if (t.completion_attempt_at && Date.now() - Date.parse(t.completion_attempt_at) > 23 * 36e5) {
 				J(await e.db.from("privacy_requests").update({ failure_code: "receipt-reconciliation-required" }).eq("id", t.id));
@@ -5476,15 +5483,15 @@ async function kt(e) {
 			failure_code: n >= 5 ? "receipt-reconciliation-required" : null
 		}).eq("id", t.id));
 	}
-	let o = J(await e.db.from("privacy_requests").select("id,user_id,object_path").eq("kind", "export").lt("expires_at", t).not("object_path", "is", null).limit(100));
-	for (let t of o ?? []) {
+	let s = J(await e.db.from("privacy_requests").select("id,user_id,object_path").eq("kind", "export").lt("expires_at", t).not("object_path", "is", null).limit(100));
+	for (let t of s ?? []) {
 		if (typeof t.id != "string" || !yt.test(t.id) || typeof t.user_id != "string" || t.object_path !== `${t.user_id}/${t.id}.json`) {
 			J(await e.db.from("privacy_requests").update({ failure_code: "export-storage-index-invalid" }).eq("id", t.id));
 			continue;
 		}
 		J(await e.db.storage.from("communications-exports").remove([t.object_path])), J(await e.db.from("privacy_requests").update({ object_path: null }).eq("id", t.id));
 	}
-	return J(await e.db.from("communication_tokens").delete().lt("expires_at", t)), J(await e.db.from("email_events").delete().lt("created_at", (/* @__PURE__ */ new Date(Date.now() - 30 * 864e5)).toISOString()).not("processed_at", "is", null)), J(await e.db.from("communication_rate_limits").delete().lt("window_start", (/* @__PURE__ */ new Date(Date.now() - 864e5)).toISOString())), i;
+	return J(await e.db.from("communication_tokens").delete().lt("expires_at", t)), J(await e.db.from("email_events").delete().lt("created_at", (/* @__PURE__ */ new Date(Date.now() - 30 * 864e5)).toISOString()).not("processed_at", "is", null)), J(await e.db.from("communication_rate_limits").delete().lt("window_start", (/* @__PURE__ */ new Date(Date.now() - 864e5)).toISOString())), a;
 }
 //#endregion
 //#region web/src/lib/communications/server/campaigns.ts
@@ -5731,7 +5738,10 @@ function Rt(e, t, r) {
 				if (m.confirmation !== "DELETE MY ACCOUNT" || !Lt(u)) throw new X("Sign in again, then type DELETE MY ACCOUNT to confirm.", 403);
 				return await Dt(i, f.id, "deletion"), Z({ requested: !0 }, 200, s);
 			}
-			if (l === "cancel-deletion") return await Ot(i, f.id, String(m.id)), Z({ cancelled: !0 }, 200, s);
+			if (l === "cancel-deletion") return Z({
+				cancelled: !0,
+				...await Ot(i, f.id, String(m.id))
+			}, 200, s);
 			if (l === "pulse") {
 				let e = Number(m.year);
 				if (!Number.isInteger(e) || e < 2020 || e > (/* @__PURE__ */ new Date()).getUTCFullYear()) throw new X("Choose a valid year.");
