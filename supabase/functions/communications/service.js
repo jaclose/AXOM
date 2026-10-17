@@ -5483,13 +5483,29 @@ async function kt(e) {
 			failure_code: n >= 5 ? "receipt-reconciliation-required" : null
 		}).eq("id", t.id));
 	}
-	let s = J(await e.db.from("privacy_requests").select("id,user_id,object_path").eq("kind", "export").lt("expires_at", t).not("object_path", "is", null).limit(100));
+	let s = J(await e.db.from("privacy_requests").select("id,user_id,object_path,failure_code").eq("kind", "export").lt("expires_at", t).not("object_path", "is", null).limit(100));
 	for (let t of s ?? []) {
 		if (typeof t.id != "string" || !yt.test(t.id) || typeof t.user_id != "string" || t.object_path !== `${t.user_id}/${t.id}.json`) {
-			J(await e.db.from("privacy_requests").update({ failure_code: "export-storage-index-invalid" }).eq("id", t.id));
+			if (t.failure_code == null || t.failure_code === "export-storage-index-invalid") {
+				let n = e.db.from("privacy_requests").update({ failure_code: "export-storage-index-invalid" }).eq("id", t.id).eq("object_path", t.object_path);
+				n = t.failure_code == null ? n.is("failure_code", null) : n.eq("failure_code", t.failure_code), J(await n);
+			}
 			continue;
 		}
-		J(await e.db.storage.from("communications-exports").remove([t.object_path])), J(await e.db.from("privacy_requests").update({ object_path: null }).eq("id", t.id));
+		try {
+			if (J(await e.db.storage.from("communications-exports").remove([t.object_path])), (await xt(e, "communications-exports", t.user_id, "export-storage")).removals.some((e) => (typeof e == "string" ? e : e.path) === t.object_path)) throw Error("export-storage-cleanup-unconfirmed");
+		} catch {
+			if (t.failure_code == null || t.failure_code === "export-storage-cleanup-unconfirmed") {
+				let n = e.db.from("privacy_requests").update({ failure_code: "export-storage-cleanup-unconfirmed" }).eq("id", t.id).eq("object_path", t.object_path);
+				n = t.failure_code == null ? n.is("failure_code", null) : n.eq("failure_code", t.failure_code), J(await n);
+			}
+			continue;
+		}
+		let n = t.failure_code === "export-storage-cleanup-unconfirmed", r = e.db.from("privacy_requests").update({
+			object_path: null,
+			...n ? { failure_code: null } : {}
+		}).eq("id", t.id).eq("object_path", t.object_path);
+		n && (r = r.eq("failure_code", t.failure_code)), J(await r);
 	}
 	return J(await e.db.from("communication_tokens").delete().lt("expires_at", t)), J(await e.db.from("email_events").delete().lt("created_at", (/* @__PURE__ */ new Date(Date.now() - 30 * 864e5)).toISOString()).not("processed_at", "is", null)), J(await e.db.from("communication_rate_limits").delete().lt("window_start", (/* @__PURE__ */ new Date(Date.now() - 864e5)).toISOString())), a;
 }

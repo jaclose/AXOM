@@ -322,8 +322,13 @@ broad permissive policy. An existing public export bucket makes migration fail c
 Objects are capped at 25 MB, retained seven days and accessed using 15-minute signed links.
 The email opens authenticated Privacy & Data, where the download link is minted on demand;
 a delayed or retried email never freezes an expired storage URL.
-Expired objects and capabilities are pruned. Stale export processing can retry the same
-object idempotently.
+Expired objects and capabilities are pruned. An export's stored path is cleared only
+after a separate, fully paginated owner-prefix read confirms the exact object and its
+versions are absent. A removal error, surviving version or uncertain listing retains
+the retry path; other exports under the same owner remain untouched. Cleanup flags
+use observed-value guards and never replace unrelated reconciliation flags, including
+those blocking account deletion. Confirmed removal clears only the cleanup flag it
+observed. Stale export processing can retry the same object idempotently.
 
 Deletion: scheduled → processing → completed or failed; scheduled/failed requests can
 be cancelled while an account remains. A seven-day grace period is an explicit product

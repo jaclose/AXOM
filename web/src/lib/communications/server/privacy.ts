@@ -409,15 +409,49 @@ export async function processPrivacy(service: CommunicationsService): Promise<nu
       checked(await service.db.from("privacy_requests").update({ completion_attempts: attempts, completion_retry_at: new Date(Date.now() + Math.pow(2, attempts) * 60000).toISOString(), failure_code: attempts >= 5 ? "receipt-reconciliation-required" : null }).eq("id", receipt.id));
     }
   }
-  const expired = checked(await service.db.from("privacy_requests").select("id,user_id,object_path").eq("kind", "export").lt("expires_at", now).not("object_path", "is", null).limit(100));
+  const expired = checked(await service.db.from("privacy_requests").select("id,user_id,object_path,failure_code").eq("kind", "export").lt("expires_at", now).not("object_path", "is", null).limit(100));
   for (const row of expired ?? []) {
     if (typeof row.id !== "string" || !UUID.test(row.id) || typeof row.user_id !== "string"
       || row.object_path !== `${row.user_id}/${row.id}.json`) {
-      checked(await service.db.from("privacy_requests").update({ failure_code: "export-storage-index-invalid" }).eq("id", row.id));
+      if (row.failure_code == null || row.failure_code === "export-storage-index-invalid") {
+        let invalid = service.db.from("privacy_requests")
+          .update({ failure_code: "export-storage-index-invalid" })
+          .eq("id", row.id).eq("object_path", row.object_path);
+        invalid = row.failure_code == null
+          ? invalid.is("failure_code", null) : invalid.eq("failure_code", row.failure_code);
+        checked(await invalid);
+      }
       continue;
     }
-    checked(await service.db.storage.from("communications-exports").remove([row.object_path]));
-    checked(await service.db.from("privacy_requests").update({ object_path: null }).eq("id", row.id));
+    try {
+      checked(await service.db.storage.from("communications-exports").remove([row.object_path]));
+      // Keep the durable retry handle until an independent, fully paginated
+      // read confirms this exact object (including old versions) is absent.
+      // Other unexpired exports in the same owner prefix must remain untouched.
+      const verification = await planStoragePrefix(service, "communications-exports", row.user_id, "export-storage");
+      if (verification.removals.some(removal =>
+        (typeof removal === "string" ? removal : removal.path) === row.object_path)) {
+        throw new Error("export-storage-cleanup-unconfirmed");
+      }
+    } catch {
+      // Reconciliation flags protect account deletion. Never replace an existing
+      // flag, or one written concurrently after this batch was read.
+      if (row.failure_code == null || row.failure_code === "export-storage-cleanup-unconfirmed") {
+        let failed = service.db.from("privacy_requests")
+          .update({ failure_code: "export-storage-cleanup-unconfirmed" })
+          .eq("id", row.id).eq("object_path", row.object_path);
+        failed = row.failure_code == null
+          ? failed.is("failure_code", null) : failed.eq("failure_code", row.failure_code);
+        checked(await failed);
+      }
+      continue;
+    }
+    const clearCleanupFailure = row.failure_code === "export-storage-cleanup-unconfirmed";
+    let completed = service.db.from("privacy_requests")
+      .update({ object_path: null, ...(clearCleanupFailure ? { failure_code: null } : {}) })
+      .eq("id", row.id).eq("object_path", row.object_path);
+    if (clearCleanupFailure) completed = completed.eq("failure_code", row.failure_code);
+    checked(await completed);
   }
   checked(await service.db.from("communication_tokens").delete().lt("expires_at", now));
   checked(await service.db.from("email_events").delete().lt("created_at", new Date(Date.now() - 30 * 86400000).toISOString()).not("processed_at", "is", null));

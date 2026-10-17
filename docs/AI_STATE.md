@@ -6,10 +6,10 @@ authority: current-state
 # AXOM current AI state
 
 Snapshot: 2026-10-17 UTC, `feat/academic-library-v1` in
-`AXOM-academic-library-v1`. Consolidated `81e1a5bb` is on local main; pushed
+`AXOM-academic-library-v1`. Consolidated `81e1a5bb` and recovery `68c1670f` are on local main; pushed
 feature remains `abb504fe`, with `origin/main` last observed at `d5f9c030`.
-The current follow-up preserves exact missing-question recovery context without
-rewriting imported identities. Local-main integration requires fresh protected
+The current follow-up binds revisions to their collection classification and verifies
+expired-export removal before clearing retry paths. Integration requires fresh protected
 index checks. Existing domain contracts remain authoritative.
 
 Batch reviewed local work instead of making intermediate release pushes. Vercel
@@ -85,6 +85,9 @@ Requested exports block deletion claims; processing or reconciliation-required
 deletions reject new exports. Cancellation remains successful if only its
 notification receipt fails. Ready worker requests are filtered before the batch
 limit, and actionable unread notifications cannot hide behind routine history.
+Expired-export paths survive uncertain removal; guarded cleanup flags cannot replace
+deletion barriers. Revisions compare term/module/academic-term/cohort under the owner
+lock before source reservation or hash replay; mismatches cannot reclassify a collection.
 
 Preserve existing upload/source-identity checks, atomic reviewed filing and
 attachment rollback. Seven-day unlisted shares remain consent-based and
@@ -94,7 +97,7 @@ cross-service work requires operator reconciliation.
 
 The last authenticated production inspection on 2026-10-15 recorded 23
 migrations through `20261013230000`. It is not a fresh production check.
-Eight later migrations remain locally replayed only:
+Nine later migrations remain locally tested only:
 
 - `20261014120000_workspace_originals.sql`;
 - `20261014121000_academic_revision_order.sql`;
@@ -102,8 +105,9 @@ Eight later migrations remain locally replayed only:
 - `20261015133000_academic_gif_media_support.sql`;
 - `20261015225638_bound_question_share_recovery.sql`;
 - `20261015230042_enforce_academic_source_identity.sql`;
-- `20261016002404_cascade_academic_owner_deletion.sql`; and
-- `20261016011812_harden_privacy_request_barrier.sql`.
+- `20261016002404_cascade_academic_owner_deletion.sql`;
+- `20261016011812_harden_privacy_request_barrier.sql`; and
+- `20261017233759_enforce_academic_collection_classification.sql`.
 
 Journal transitions wait for confirmed vault writes; failure preserves the
 draft. Closeout-to-Journal is opt-in. Local images remain exportable beyond the
@@ -114,30 +118,28 @@ guarantee.
 
 Node 22.23.1 on macOS. Consolidation `81e1a5bb` validation:
 
-- full unit/SQL suite: 389 files passed, 19 skipped; 3,791 tests passed,
-  28 skipped, zero failures, with two workers;
-- full web TypeScript, ESLint and production build passed, including Daily Games
-  bundle isolation;
-- Chrome: 14 targeted journeys passed across course/QBank interface, template
-  version/load/export/progress, course practice/save, image import/enlargement
-  and edited-stem Questions/Slides tutor/exam persistence;
-- interface matrix covers 1440/768/390 px, both themes, keyboard and reduced
-  motion with no browser console warnings/errors;
-- update consent, two-build workspace recovery, other-tab preservation and
-  offline Daily Games reopening passed using installed Chrome;
-- repository tests: 43 passed; hygiene and bootstrap budgets passed;
-- communications artifact integrity passed for 28 inputs, 7 auth/security
-  files, 20 email types and 160 preview variants;
-- scoped ESLint and `git diff --check` passed.
+- full unit/SQL: 389 files/3,791 tests passed, 19 files/28 tests skipped,
+  zero failures, two workers;
+- TypeScript, ESLint, build, Daily Games isolation and 43 repository tests passed;
+- Chrome: 14 course/QBank/template/image journeys passed, covering
+  1440/768/390 px, both themes, keyboard and reduced motion with no console warnings/errors;
+- Chrome update consent, two-build recovery, other-tab preservation and offline
+  Daily Games passed;
+- hygiene, bootstrap budgets, diff checks and communications integrity passed
+  (28 inputs, 7 auth files, 20 email types, 160 previews).
 
-Recovery follow-up: 51 affected tests, two Chrome journeys at 1440/390 px,
-typecheck, lint, build and 43 repository tests passed. Checks cover separate
-re-imports, exact-ID partial/full presence, reload, unchanged notes/membership,
-cancelled recovery retaining drafts, rollback, both themes and reduced motion.
+Boundary follow-up: 166 targeted tests including migration replay, types/lint/build,
+43 repository tests and communications integrity passed. SQL uses isolated PGlite;
+real concurrent connections and hosted behavior remain unverified.
+
+Recovery follow-up: 51 tests, two Chrome journeys at 1440/390 px,
+typecheck, lint, build and 43 repository tests passed: exact-ID recovery,
+separate imports, reload, retained drafts, rollback, themes and reduced motion.
+The 23:24 UTC Chrome check passed real IndexedDB text contention, blocked navigation,
+unsaved Markdown export and cold-tab recovery, with no console errors/warnings.
 Full suites were not repeated. Full Playwright `test:e2e` and `verify:all` remain
 unrun for this candidate; targeted acceptance is not the full release gate.
-Installed Chrome substitutes for absent bundled Chromium. Keep concurrency low:
-earlier high-concurrency runs exhausted disk, recovered without deletion.
+Installed Chrome substitutes for absent bundled Chromium. Keep concurrency low.
 
 Existing build warnings concern `jszip`/`webUpdates` static/dynamic imports
 and chunks over 500 kB. The prior GitHub advisory snapshot (56: 14 high,
@@ -150,17 +152,16 @@ and zero academic collections, revisions, files, storage objects or question
 shares. No owner-authenticated production upload, reload, share recovery,
 media/checksum readback or revocation was completed.
 
-Before production acceptance: apply all eight migrations through the approved
+Before production acceptance: apply all nine migrations through the approved
 path; upload only cleared private material as its authenticated owner; reload it
 through the learner UI; verify media/checksums and revocation; and record exact
-receipts. Also complete a true multi-connection privacy-lock check, a real
-Journal multi-tab check, QBank opener-clone recovery analysis, Safari/WebKit and
+receipts. Also complete a true multi-connection privacy-lock check, Journal
+image-race and broader multi-tab coverage, QBank opener-clone recovery analysis, Safari/WebKit and
 packaged-desktop acceptance, and dependency-advisory review. The missing SSD
 sources, B4/B5 review queues and absent T4/T5 coverage remain blockers to
 complete academic-library acceptance.
 
-Disk headroom fluctuates sharply with concurrent checks; inspect it before any
-large operation and keep test concurrency bounded. Preserve services/source
-files; no cleanup is authorized. The ignored shared beta checkpoint owns current
-ChatGPT dispatch receipts and pending audits. Accepted prompts are not completed
-audits. This is local implementation, not a production-verified academic release.
+Inspect disk before large checks; preserve services and sources, with no cleanup.
+The ignored shared beta checkpoint owns chat receipts and pending audits.
+Accepted prompts are not completed audits. Local implementation is not a
+production-verified academic release.

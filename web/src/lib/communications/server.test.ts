@@ -397,7 +397,164 @@ describe("deletion dependency safety", () => {
       method: "update",
       args: [{ failure_code: "export-storage-index-invalid" }],
     });
+    expect(calls).toContainEqual({ table: "privacy_requests", method: "is", args: ["failure_code", null] });
   });
+
+  it.each(["surviving-object", "surviving-version", "listing-error", "invalid-pagination", "removal-error"])(
+    "retains an expired export's retry path after %s",
+    async outcome => {
+      const id = "11111111-1111-4111-8111-111111111111";
+      const path = `account-a/${id}.json`;
+      const { db, calls, storage } = database([
+        ok(), ok(), ok([]), ok([]),
+        ok([{ id, user_id: "account-a", object_path: path }]),
+      ]);
+      storage.remove.mockResolvedValue(outcome === "removal-error"
+        ? { data: null, error: { message: "private provider detail" } }
+        : ok([]));
+      storage.listV2.mockResolvedValue(outcome === "listing-error"
+        ? { data: null, error: { message: "private provider detail" } }
+        : ok({
+          objects: outcome === "invalid-pagination" ? [] : [{ name: `${id}.json`, key: path,
+            ...(outcome === "surviving-version" ? { version: "prior-version" } : {}) }],
+          folders: [], hasNext: outcome === "invalid-pagination",
+        }));
+
+      await expect(processPrivacy(new CommunicationsService(db, {}))).resolves.toBe(0);
+
+      expect(storage.remove).toHaveBeenCalledWith([path]);
+      expect(calls).toContainEqual({ table: "privacy_requests", method: "update",
+        args: [{ failure_code: "export-storage-cleanup-unconfirmed" }] });
+      expect(calls.filter(call => call.method === "update").some(call =>
+        Object.hasOwn(call.args[0] as object, "object_path"))).toBe(false);
+      expect(JSON.stringify(calls)).not.toContain("private provider detail");
+    },
+  );
+
+  it("retains expired-export metadata when its surviving version is on a later page", async () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    const path = `account-a/${id}.json`;
+    const { db, calls, storage } = database([
+      ok(), ok(), ok([]), ok([]), ok([{ id, user_id: "account-a", object_path: path }]),
+    ]);
+    storage.remove.mockResolvedValue(ok([]));
+    storage.listV2.mockResolvedValueOnce(ok({
+      objects: [{ name: "unexpired.json", key: "account-a/unexpired.json" }],
+      folders: [], hasNext: true, nextCursor: "second-page",
+    })).mockResolvedValueOnce(ok({
+      objects: [{ name: `${id}.json`, key: path, version: "old-version" }],
+      folders: [], hasNext: false,
+    }));
+
+    await processPrivacy(new CommunicationsService(db, {}));
+
+    expect(storage.listV2).toHaveBeenNthCalledWith(2, expect.objectContaining({ cursor: "second-page" }));
+    expect(storage.remove).toHaveBeenCalledExactlyOnceWith([path]);
+    expect(calls).toContainEqual({ table: "privacy_requests", method: "update",
+      args: [{ failure_code: "export-storage-cleanup-unconfirmed" }] });
+  });
+
+  it.each([
+    ["export-reconciliation-required", false],
+    ["export-deletion-reconciliation-required", false],
+    ["export-reconciliation-required", true],
+    ["export-deletion-reconciliation-required", true],
+  ] as const)("preserves the %s barrier when expired export metadata is invalid: %s", async (failureCode, invalid) => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    const path = `${invalid ? "account-b" : "account-a"}/${id}.json`;
+    const { db, calls, storage } = database([
+      ok(), ok(), ok([]), ok([]),
+      ok([{ id, user_id: "account-a", object_path: path, failure_code: failureCode }]),
+    ]);
+    storage.remove.mockResolvedValue({ data: null, error: { message: "storage unavailable" } });
+
+    await expect(processPrivacy(new CommunicationsService(db, {}))).resolves.toBe(0);
+
+    expect(calls.filter(call => call.table === "privacy_requests" && call.method === "update")).toEqual([]);
+    expect(storage.remove).toHaveBeenCalledTimes(invalid ? 0 : 1);
+  });
+
+  it.each([null, "export-storage-cleanup-unconfirmed"])(
+    "conditions expired-export cleanup failure writes on the observed flag (%s)", async failureCode => {
+      const id = "11111111-1111-4111-8111-111111111111";
+      const path = `account-a/${id}.json`;
+      const { db, calls, storage } = database([
+        ok(), ok(), ok([]), ok([]),
+        ok([{ id, user_id: "account-a", object_path: path, failure_code: failureCode }]),
+      ]);
+      storage.remove.mockResolvedValue({ data: null, error: { message: "storage unavailable" } });
+
+      await processPrivacy(new CommunicationsService(db, {}));
+
+      const updateIndex = calls.findIndex(call => call.method === "update");
+      expect(calls.slice(updateIndex, updateIndex + 4)).toEqual([
+        { table: "privacy_requests", method: "update", args: [{ failure_code: "export-storage-cleanup-unconfirmed" }] },
+        { table: "privacy_requests", method: "eq", args: ["id", id] },
+        { table: "privacy_requests", method: "eq", args: ["object_path", path] },
+        { table: "privacy_requests", method: failureCode == null ? "is" : "eq", args: ["failure_code", failureCode] },
+      ]);
+    },
+  );
+
+  it("continues expired-export cleanup after one object's storage removal fails", async () => {
+    const ids = ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"];
+    const { db, calls, storage } = database([
+      ok(), ok(), ok([]), ok([]),
+      ok(ids.map(id => ({ id, user_id: "account-a", object_path: `account-a/${id}.json`, failure_code: null }))),
+    ]);
+    storage.remove.mockResolvedValueOnce({ data: null, error: { message: "storage unavailable" } })
+      .mockResolvedValueOnce(ok([]));
+
+    await expect(processPrivacy(new CommunicationsService(db, {}))).resolves.toBe(0);
+
+    expect(storage.remove).toHaveBeenNthCalledWith(2, [`account-a/${ids[1]}.json`]);
+    expect(calls.filter(call => call.method === "update").map(call => call.args[0])).toEqual([
+      { failure_code: "export-storage-cleanup-unconfirmed" }, { object_path: null },
+    ]);
+  });
+
+  it("surfaces an expired-export metadata clear failure after storage absence is verified", async () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    const path = `account-a/${id}.json`;
+    const { db, calls, storage } = database([
+      ok(), ok(), ok([]), ok([]), ok([{ id, user_id: "account-a", object_path: path, failure_code: null }]),
+      { data: null, error: { message: "metadata unavailable" } },
+    ]);
+    storage.remove.mockResolvedValue(ok([]));
+
+    await expect(processPrivacy(new CommunicationsService(db, {}))).rejects.toThrow("database-operation-failed");
+
+    expect(calls.filter(call => call.method === "update").map(call => call.args[0])).toEqual([{ object_path: null }]);
+    expect(storage.listV2).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([null, "export-storage-cleanup-unconfirmed", "privacy-processing-failed"])(
+    "clears only an absent expired object's path and its own cleanup failure (%s)",
+    async failureCode => {
+      const id = "11111111-1111-4111-8111-111111111111";
+      const path = `account-a/${id}.json`;
+      const { db, calls, storage } = database([
+        ok(), ok(), ok([]), ok([]),
+        ok([{ id, user_id: "account-a", object_path: path, failure_code: failureCode }]),
+      ]);
+      storage.remove.mockResolvedValue(ok([]));
+      storage.listV2.mockResolvedValue(ok({
+        objects: [{ name: `${id}.json.other`, key: `${path}.other` }],
+        folders: [], hasNext: false,
+      }));
+
+      await expect(processPrivacy(new CommunicationsService(db, {}))).resolves.toBe(0);
+
+      expect(storage.remove).toHaveBeenCalledExactlyOnceWith([path]);
+      expect(storage.listV2).toHaveBeenCalledWith(expect.objectContaining({
+        prefix: "account-a/", noncurrentVersions: "include", deleteMarkers: "include",
+      }));
+      expect(calls).toContainEqual({ table: "privacy_requests", method: "update",
+        args: [{ object_path: null, ...(failureCode === "export-storage-cleanup-unconfirmed" ? { failure_code: null } : {}) }] });
+      expect(calls).toContainEqual({ table: "privacy_requests", method: "eq", args: ["object_path", path] });
+      expect(storage.listV2.mock.invocationCallOrder[0]).toBeGreaterThan(storage.remove.mock.invocationCallOrder[0]);
+    },
+  );
 
   it("fails closed on an empty paginated Storage response", async () => {
     const { db, storage } = database();

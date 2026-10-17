@@ -55,6 +55,15 @@ existing object bytes before accepting a lost response, and requires server
 acknowledgement before reporting success. Late acknowledgements never roll the current
 revision backward. Enrollment adds selected weeks within the same revision.
 
+The forward migration `20261017233759_enforce_academic_collection_classification.sql`
+binds that stable collection identity to its term, module, academic term and cohort.
+The revision RPC compares all four fields under the existing owner row lock, treating
+nulls explicitly, before reserving source checksums or returning a matching content
+hash. A mismatch fails without creating a revision or changing reservations; it does
+not silently reclassify the collection. Matching classification still permits a new
+source revision or an idempotent retry. This migration is locally tested only, not
+applied to a hosted database.
+
 The current upload control accepts one prepared course with either one reviewed plan or
 an explicitly confirmed term and module for unscheduled content, at most 1,500 files /
 512 MiB total and **50 MiB per uploaded file**. Files through 6 MiB use the immutable

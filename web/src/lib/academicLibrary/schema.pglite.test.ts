@@ -31,6 +31,7 @@ beforeAll(async () => {
   await db.exec(readFileSync(new URL("../../../../supabase/migrations/20261013210000_academic_course_lookup.sql", import.meta.url), "utf8"));
   await db.exec(readFileSync(new URL("../../../../supabase/migrations/20261013220000_content_storage_boundaries.sql", import.meta.url), "utf8"));
   await db.exec(readFileSync(new URL("../../../../supabase/migrations/20261015230042_enforce_academic_source_identity.sql", import.meta.url), "utf8"));
+  await db.exec(readFileSync(new URL("../../../../supabase/migrations/20261017233759_enforce_academic_collection_classification.sql", import.meta.url), "utf8"));
 }, 30_000);
 afterAll(async () => db?.close());
 async function as<T>(user: string, sql: string, params: unknown[] = []) {
@@ -40,9 +41,15 @@ async function as<T>(user: string, sql: string, params: unknown[] = []) {
 function sourceHash() {
   return randomUUID().replaceAll("-", "").repeat(2);
 }
-function revisionArgs(collection: string, sourceSha: string, contentHash = H) {
+type Classification = {
+  term: string;
+  module: string;
+  academic_term: string | null;
+  cohort: string | null;
+};
+function revisionArgs(collection: string, sourceSha: string, contentHash = H, classification: Partial<Classification> = {}) {
   return [
-    JSON.stringify({ title: "Synthetic course", module: "SAMPLE", term: "Term 1" }),
+    JSON.stringify({ title: "Synthetic course", module: "SAMPLE", term: "Term 1", ...classification }),
     "SAMPLE - Course plan:\nWeek 1:\nLecture 1 Example [Lecture]",
     JSON.stringify({ sourceChecksums: [sourceSha] }),
     JSON.stringify([{ path: "catalog.json", sha256: H, byte_size: 2, mime_type: "application/json" }]),
@@ -55,6 +62,14 @@ async function create() {
   const args = revisionArgs(collection, sourceHash());
   const [row] = await as<{ value: { collection_id: string; revision_id: string } }>(A, "select public.academic_create_revision($1,$2,$3,$4,$5,$6) as value", args);
   return { ...row.value, args };
+}
+async function collectionState(collection: string) {
+  return {
+    collection: (await db.query("select * from public.academic_collections where id=$1", [collection])).rows,
+    sources: (await db.query("select * from public.academic_source_identities where collection_id=$1 order by source_sha256", [collection])).rows,
+    revisions: (await db.query("select * from public.academic_revisions where collection_id=$1 order by id", [collection])).rows,
+    files: (await db.query("select * from public.academic_files where revision_id in (select id from public.academic_revisions where collection_id=$1) order by revision_id, path", [collection])).rows,
+  };
 }
 async function upload(collection: string, bytes = 2) {
   return as(A, "insert into storage.objects(bucket_id,name,metadata) values('academic-content',$1,$2)", [`${collection}/${H}`, JSON.stringify({ size: bytes })]);
@@ -112,6 +127,75 @@ describe("academic catalog authorization and publication", () => {
     await expect(as(B, "select public.academic_create_revision($1,$2,$3,$4,$5,$6)", [
       ...revisionArgs(randomUUID(), sharedSource, "e".repeat(64)),
     ])).resolves.toHaveLength(1);
+  });
+  describe.each([
+    { hashCase: "same content hash", contentHash: H },
+    { hashCase: "new content hash", contentHash: "b".repeat(64) },
+  ])("collection classification with $hashCase", ({ contentHash }) => {
+    it.each([
+      { field: "term", stored: "Term 1", incoming: "Term 2" },
+      { field: "module", stored: "SAMPLE", incoming: "OTHER" },
+      { field: "academic_term", stored: "2026 Fall", incoming: "2027 Spring" },
+      { field: "cohort", stored: "Cohort A", incoming: "Cohort B" },
+      { field: "academic_term", stored: null, incoming: "2026 Fall" },
+      { field: "academic_term", stored: "2026 Fall", incoming: null },
+      { field: "cohort", stored: null, incoming: "Cohort A" },
+      { field: "cohort", stored: "Cohort A", incoming: null },
+    ])("rejects $field changing from $stored to $incoming without mutation", async ({ field, stored, incoming }) => {
+      const collection = randomUUID();
+      await as(A, "select public.academic_create_revision($1,$2,$3,$4,$5,$6)",
+        revisionArgs(collection, sourceHash(), H, { [field]: stored }));
+      const before = await collectionState(collection);
+      const rejectedSource = sourceHash();
+
+      await expect(as(A, "select public.academic_create_revision($1,$2,$3,$4,$5,$6)",
+        revisionArgs(collection, rejectedSource, contentHash, { [field]: incoming })))
+        .rejects.toThrow(/Academic collection classification does not match/);
+
+      expect(await collectionState(collection)).toEqual(before);
+      expect((await db.query(
+        "select * from public.academic_source_identities where owner_id=$1 and source_sha256=$2",
+        [A, rejectedSource],
+      )).rows).toEqual([]);
+    });
+  });
+  it.each([
+    { label: "omitted optional fields", classification: {} },
+    { label: "null optional fields", classification: { academic_term: null, cohort: null } },
+    { label: "populated optional fields", classification: { academic_term: "2026 Fall", cohort: "Cohort A" } },
+  ])("creates and replays a new revision with unchanged classification and $label", async ({ classification }) => {
+    const collection = randomUUID();
+    const [first] = await as<{ value: { revision_id: string } }>(A,
+      "select public.academic_create_revision($1,$2,$3,$4,$5,$6) value",
+      revisionArgs(collection, sourceHash(), H, classification));
+    const before = await collectionState(collection);
+    const newSource = sourceHash();
+    const args = revisionArgs(collection, newSource, "b".repeat(64), classification);
+    const [next] = await as<{ value: { collection_id: string; revision_id: string } }>(A,
+      "select public.academic_create_revision($1,$2,$3,$4,$5,$6) value", args);
+
+    expect(next.value.collection_id).toBe(collection);
+    expect(next.value.revision_id).not.toBe(first.value.revision_id);
+    const after = await collectionState(collection);
+    expect(after.collection).toEqual(before.collection);
+    expect(after.sources).toHaveLength(2);
+    expect(after.sources).toEqual(expect.arrayContaining([expect.objectContaining({ source_sha256: newSource })]));
+    expect(after.revisions).toHaveLength(2);
+    expect(after.files).toHaveLength(2);
+    expect(await as(A, "select public.academic_create_revision($1,$2,$3,$4,$5,$6) value", args)).toEqual([next]);
+    expect(await collectionState(collection)).toEqual(after);
+  });
+  it("rejects changed classification before checking another collection's reserved source", async () => {
+    const c = await create();
+    const reservedSource = sourceHash();
+    await as(A, "select public.academic_create_revision($1,$2,$3,$4,$5,$6)",
+      revisionArgs(randomUUID(), reservedSource));
+    const before = await collectionState(c.collection_id);
+
+    await expect(as(A, "select public.academic_create_revision($1,$2,$3,$4,$5,$6)",
+      revisionArgs(c.collection_id, reservedSource, H, { module: "OTHER" })))
+      .rejects.toThrow(/Academic collection classification does not match/);
+    expect(await collectionState(c.collection_id)).toEqual(before);
   });
   it("shares only an approved immutable revision and withdraws metadata and media together", async () => {
     const c = await create(); await upload(c.collection_id);
