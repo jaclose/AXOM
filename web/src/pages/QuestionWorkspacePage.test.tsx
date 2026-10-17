@@ -412,6 +412,115 @@ describe("QuestionWorkspacePage collection recovery routing", () => {
     await user.click(screen.getByRole("button", { name: "Import missing source for Absent source PQ" }));
     expect(screen.getByRole("tab", { name: "Import" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("heading", { name: "Import questions" })).toBeTruthy();
+    const recovery = screen.getByRole("region", { name: "Missing question recovery" });
+    expect(within(recovery).getByRole("heading", { name: "Recover Absent source PQ" })).toBeTruthy();
+    expect(recovery.textContent).toContain("1 of 1 original question records still missing");
+    expect(recovery.textContent).toContain("It does not repair this collection automatically");
+  });
+
+  it("keeps a fresh finalized import separate and the original recovery unresolved", async () => {
+    const original = { ...set("missing-set", "Original source PQ", "lost-question", "2026-10-14T12:00:00Z"),
+      questionIds: ["kept", "lost-question"] };
+    useStore.setState({ questions: [question({ id: "kept", notes: "Preserve this note" })], questionSets: [original] });
+    const user = userEvent.setup();
+    render(<QuestionWorkspacePage />);
+    await user.click(screen.getByRole("button", { name: "Browse weeks" }));
+    await user.click(screen.getByRole("button", { name: "Import missing source for Original source PQ" }));
+    await user.click(within(screen.getByLabelText("Import source type")).getByRole("button", { name: "Paste text" }));
+    await user.type(screen.getByLabelText("Structured question text"), [
+      "1. Which option is correct?", "A. Alpha", "B. Beta", "Answer: B", "Explanation: Beta follows from the source.",
+    ].join("\n"));
+    await user.click(screen.getByRole("button", { name: "Parse and review" }));
+    await user.click(screen.getByRole("button", { name: "Finalize import" }));
+    await waitFor(() => expect(useStore.getState().questionSets).toHaveLength(2));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Finalize import" })).toBeNull());
+    expect(screen.getByRole("tab", { name: "Import" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("region", { name: "Missing question recovery" }).textContent).toContain("1 of 1 original question records still missing");
+    expect(useStore.getState().questionSets.find(item => item.id === original.id)).toEqual(original);
+    expect(useStore.getState().questions.find(item => item.id === "kept")?.notes).toBe("Preserve this note");
+    expect(useStore.getState().questions.some(item => item.id === "lost-question")).toBe(false);
+  });
+
+  it("retains intent through tab navigation and reacts to exact partial and complete records", async () => {
+    const original = { ...set("missing-set", "Original source PQ", "lost-a", "2026-10-14T12:00:00Z"), questionIds: ["lost-a", "lost-b"] };
+    useStore.setState({ questions: [], questionSets: [original] });
+    const user = userEvent.setup();
+    render(<QuestionWorkspacePage />);
+    await user.click(screen.getByRole("button", { name: "Browse weeks" }));
+    await user.click(screen.getByRole("button", { name: "Import missing source for Original source PQ" }));
+    await user.click(screen.getByRole("button", { name: "Back to collection" }));
+    await user.click(screen.getByRole("tab", { name: "Import" }));
+    expect(screen.getByRole("region", { name: "Missing question recovery" }).textContent).toContain("2 of 2 original question records still missing");
+    act(() => { useStore.setState({ questions: [question({ id: "lost-a" })] }); });
+    expect(screen.getByRole("region", { name: "Missing question recovery" }).textContent).toContain("1 of 2 original question records still missing");
+    act(() => { useStore.setState({ questions: [question({ id: "lost-a" }), question({ id: "lost-b", needsReview: true })] }); });
+    const recovery = screen.getByRole("region", { name: "Missing question recovery" });
+    expect(recovery.textContent).toContain("All original question records are present in this workspace");
+    expect(recovery.textContent).toContain("2 present now. 1 ready to practice. 1 need answer review.");
+    expect(recovery.textContent).toContain("not a saved backup or durable recovery");
+    expect(recovery.textContent).not.toContain("records recovered");
+    expect(useStore.getState().questionSets).toEqual([original]);
+    act(() => { useStore.setState({ questions: [] }); });
+    expect(recovery.textContent).toContain("2 of 2 original question records still missing");
+    expect(recovery.textContent).toContain("0 present now. 0 ready to practice. 0 need answer review.");
+  });
+
+  it.each(["Cancel recovery", "Add your own material"])("clears recovery explicitly with %s", async (control) => {
+    useStore.setState({ questionSets: [set("missing-set", "Absent source PQ", "lost-question", "2026-10-14T12:00:00Z")] });
+    const user = userEvent.setup();
+    render(<QuestionWorkspacePage />);
+    await user.click(screen.getByRole("button", { name: "Browse weeks" }));
+    await user.click(screen.getByRole("button", { name: "Import missing source for Absent source PQ" }));
+    await user.click(screen.getByRole("button", { name: control }));
+    expect(screen.queryByRole("region", { name: "Missing question recovery" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Import questions" })).toBeTruthy();
+  });
+
+  it("keeps the unfinished import intact when cancelling only recovery", async () => {
+    useStore.setState({ questionSets: [set("missing-set", "Absent source PQ", "lost-question", "2026-10-14T12:00:00Z")] });
+    const user = userEvent.setup();
+    render(<QuestionWorkspacePage />);
+    await user.click(screen.getByRole("button", { name: "Browse weeks" }));
+    await user.click(screen.getByRole("button", { name: "Import missing source for Absent source PQ" }));
+    await user.click(within(screen.getByLabelText("Import source type")).getByRole("button", { name: "Paste text" }));
+    await user.type(screen.getByLabelText("Structured question text"), "1. Keep this pending question?\nA. Alpha\nB. Beta\nAnswer: B");
+    await user.click(screen.getByRole("button", { name: "Parse and review" }));
+    expect(screen.getByText(/Keep this pending question\?/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Cancel recovery" }));
+    expect(screen.queryByRole("region", { name: "Missing question recovery" })).toBeNull();
+    expect(screen.getByText(/Keep this pending question\?/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Finalize import" })).toBeTruthy();
+    expect(useStore.getState().questions).toHaveLength(0);
+  });
+
+  it("clears recovery when parsing an unrelated saved source", async () => {
+    useStore.setState({
+      questionSets: [set("missing-set", "Absent source PQ", "lost-question", "2026-10-14T12:00:00Z")],
+      documents: [{ id: "other-source", title: "Other saved source", fileName: "other.txt", fileType: "text/plain",
+        uploadedAt: "2026-10-14T12:00:00Z", rawText: "1. Which option?\nA. Alpha\nB. Beta\nAnswer: B", sizeBytes: 50,
+        tags: [], linkedQuestionSetIds: [], libraryOnly: true }],
+    });
+    const user = userEvent.setup();
+    render(<QuestionWorkspacePage />);
+    await user.click(screen.getByRole("button", { name: "Browse weeks" }));
+    await user.click(screen.getByRole("button", { name: "Import missing source for Absent source PQ" }));
+    await user.click(screen.getByRole("tab", { name: "Source Library (1)" }));
+    await user.click(screen.getByRole("button", { name: "Parse into questions" }));
+    expect(screen.queryByRole("region", { name: "Missing question recovery" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Finalize import" })).toBeTruthy();
+  });
+
+  it("stops claiming recovery if the original collection changes or disappears", async () => {
+    const original = set("missing-set", "Absent source PQ", "lost-question", "2026-10-14T12:00:00Z");
+    useStore.setState({ questionSets: [original] });
+    const user = userEvent.setup();
+    render(<QuestionWorkspacePage />);
+    await user.click(screen.getByRole("button", { name: "Browse weeks" }));
+    await user.click(screen.getByRole("button", { name: "Import missing source for Absent source PQ" }));
+    act(() => { useStore.setState({ questionSets: [{ ...original, questionIds: ["new-id"] }], questions: [question({ id: "lost-question" })] }); });
+    expect(screen.getByRole("region", { name: "Missing question recovery" }).textContent).toContain("The original collection changed");
+    act(() => { useStore.setState({ questionSets: [] }); });
+    expect(screen.getByRole("region", { name: "Missing question recovery" }).textContent).toContain("The original collection is no longer available");
   });
 });
 

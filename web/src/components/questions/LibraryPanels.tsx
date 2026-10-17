@@ -13,6 +13,7 @@ import { GlassCard, GButton, GhostButton, PanelHeader, Tag, EmptyState } from ".
 import { Modal } from "../ui/Modal";
 import { pushToast } from "../../lib/toast";
 import type { QuestionRecord } from "../../lib/questions";
+import type { MissingQuestionRecovery } from "../../lib/questionRecovery";
 import { QuestionSetCard } from "./QuestionSetCard";
 import type { Course, Term } from "../../lib/types";
 import { ICON_SIZE } from "../../lib/iconSize";
@@ -148,7 +149,7 @@ export function QuestionSetList({
   onRunSet: (set: QuestionSet) => void;
   onRunSets?: (sets: QuestionSet[]) => void;
   onReviewIssues?: (ids: string[]) => void;
-  onImportMissing?: () => void;
+  onImportMissing?: (request: MissingQuestionRecovery) => void;
   onReviewMisses?: (ids: string[]) => void;
   onOpenInsights?: () => void;
   recent?: boolean;

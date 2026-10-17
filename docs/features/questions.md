@@ -26,6 +26,17 @@ module and week, findings and review reasons are in
 Optional AI uses the [provider boundary](../architecture/backend.md), with validated,
 reviewed outputs. A specification is not proof all source formats are implemented.
 
+Missing-record recovery retains the selected collection's identity, original
+membership, source references and course scope in a transient request
+(`lib/questionRecovery.ts`). Only the original missing IDs appearing uniquely in
+the canonical store count as present; answer readiness is reported separately.
+Presence is a live workspace observation, not proof of durable save or backup;
+pending writes may still roll back.
+New imports remain separate and never replace IDs by title, text or position.
+Deleted, changed or ambiguous collections require a fresh selection. Recovery
+context survives tab navigation, but not a full reload; reopening the collection
+recomputes its current gaps. Cancelling recovery does not delete imported work.
+
 Content made of ordered blocks (tables, images and equations in place), the import
 package and the DOCX template: [question content](question-content.md).
 
@@ -36,4 +47,6 @@ and [evaluation harness](../QUESTION-IMPORT-EVALUATION-HARNESS.md).
 Tests: `questionImportEvaluation.test.ts`, `questionImportAtomic.test.ts`,
 `components/questions/ImportPanel.persistence.test.tsx`; E2E
 `web/e2e/question-bank-persistence.spec.ts` and related mapped-import/practice specs.
+Exact-ID recovery is covered by `questionRecovery.test.ts`, the collection/page
+tests and `web/e2e/question-missing-recovery.spec.ts`.
 Start with the relevant stage, not the entire parser or all question tests.

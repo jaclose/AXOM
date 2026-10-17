@@ -6,6 +6,7 @@ import { canonicalModuleKey } from "../../lib/course-engine/vocabulary";
 import type { QuestionRecord } from "../../lib/questions";
 import { questionPracticeReadiness, type QuestionPracticeReadiness } from "../../lib/questionFilters";
 import type { QuestionSet } from "../../lib/library";
+import { captureMissingQuestionRecovery, type MissingQuestionRecovery } from "../../lib/questionRecovery";
 import { GButton, GhostButton } from "../ui/primitives";
 import { ICON_SIZE } from "../../lib/iconSize";
 import "../../styles/course-bank.css";
@@ -18,7 +19,7 @@ interface Props {
   onSelectionChange?: (ids: string[]) => void;
   onPractice?: (sets: QuestionSet[]) => void;
   onReviewQuestionIds?: (ids: string[]) => void;
-  onRestoreMissing?: () => void;
+  onRestoreMissing?: (request: MissingQuestionRecovery) => void;
   renderSet?: (set: QuestionSet) => ReactNode;
 }
 
@@ -205,7 +206,7 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
                 {state.ready === 0 && <small className="qb-collection-warning" role="status">
                   {state.unresolved > 0 ? "Resolve the missing or conflicting answer evidence before practice."
                     : state.reviewSuggested > 0 ? "Review the imported answer evidence before practice."
-                    : state.missing > 0 ? "Question records are unavailable on this device; restore or re-import this source."
+                    : state.missing > 0 ? "Question records are unavailable on this device. Re-importing does not automatically restore this collection."
                     : "This collection has no saved questions available for practice."}
                 </small>}
               </div>
@@ -226,7 +227,7 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
                     }))])}>Resolve unresolved · {state.unresolved}</GhostButton>}
                   {state.missing > 0 && onRestoreMissing && <GhostButton
                     aria-label={`Import missing source for ${set.title}`}
-                    onClick={onRestoreMissing}>Import missing source</GhostButton>}
+                    onClick={() => onRestoreMissing(captureMissingQuestionRecovery(set, questionsById))}>Import missing source</GhostButton>}
                 </div>
               )}
             </article>;

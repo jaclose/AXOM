@@ -19,8 +19,9 @@ import {
 } from "../lib/questions";
 import type { QuizBlock, QuizFilters, QuizMode } from "../lib/quiz";
 import { questionPracticeReadiness } from "../lib/questionFilters";
+import { inspectMissingQuestionRecovery, type MissingQuestionRecovery } from "../lib/questionRecovery";
 import type { QuestionSet, SourceDocument } from "../lib/library";
-import { GlassCard, PanelHeader, EmptyState } from "../components/ui/primitives";
+import { GlassCard, PanelHeader, EmptyState, GButton } from "../components/ui/primitives";
 import { ImportPanel, parseStoredDocument, type ImportSeed } from "../components/questions/ImportPanel";
 import { ExamRunner } from "../components/questions/ExamRunner";
 import { ExamRunnerMediaNotice } from "../components/questions/ExamRunnerMediaNotice";
@@ -40,6 +41,7 @@ import { AxomBrandLockup } from "../components/ui/BrandMark";
 import { coachWeakness, resolveActiveProvider } from "../lib/ai";
 import { pushToast } from "../lib/toast";
 import { ModuleTour, type ModuleTourStep } from "../components/shell/ModuleTour";
+import { TechnicalDetails } from "../components/shell/TechnicalDetails";
 import { ICON_SIZE } from "../lib/iconSize";
 import { STORAGE_KEYS } from "../lib/brand";
 
@@ -143,6 +145,10 @@ export function QuestionWorkspacePage() {
   });
   const [importSeed, setImportSeed] = useState<ImportSeed | null>(null);
   const [importEntry, setImportEntry] = useState<"file" | "paste">("file");
+  const [missingRecovery, setMissingRecovery] = useState<MissingQuestionRecovery | null>(null);
+  const recovery = useMemo(() => missingRecovery
+    ? inspectMissingQuestionRecovery(missingRecovery, questionSets, questions) : null,
+  [missingRecovery, questionSets, questions]);
   const [bankReview, setBankReview] = useState<{ ids?: string[]; key: number }>({ key: 0 });
   const [coach, setCoach] = useState<{ diagnosis: string; suggestedBlock: string } | null>(null);
   const [coachBusy, setCoachBusy] = useState(false);
@@ -250,12 +256,14 @@ export function QuestionWorkspacePage() {
     setRunner({ mode: block.mode, presetFilters: block.filters, presetTimed: block.timed, blockId: block.id });
   }
   function generateFrom(doc: SourceDocument) {
+    setMissingRecovery(null);
     setImportSeed({ reference: { title: doc.title, text: doc.rawText } });
     setImportEntry("file");
     setTab("import");
   }
 
   function parseFrom(doc: SourceDocument) {
+    setMissingRecovery(null);
     const result = parseStoredDocument(doc);
     setImportSeed({
       drafts: result.drafts,
@@ -275,8 +283,16 @@ export function QuestionWorkspacePage() {
   }
 
   function openImport(entry: "file" | "paste" = "file") {
+    setMissingRecovery(null);
     setImportSeed(null);
     setImportEntry(entry);
+    setTab("import");
+  }
+
+  function openMissingRecovery(request: MissingQuestionRecovery) {
+    setMissingRecovery(request);
+    setImportSeed(null);
+    setImportEntry("file");
     setTab("import");
   }
 
@@ -577,23 +593,55 @@ export function QuestionWorkspacePage() {
         )
       )}
 
-      {tab === "import" && (
+      {tab === "import" && <>
+        {missingRecovery && recovery && <GlassCard>
+          <section aria-label="Missing question recovery">
+            <h2>Recover {missingRecovery.setTitle}</h2>
+            <div role="status" aria-live="polite">
+              {recovery.state === "pending" || recovery.state === "complete" ? <>
+                <p>{recovery.remainingIds.length === 0
+                  ? "All original question records are present in this workspace."
+                  : `${recovery.remainingIds.length} of ${missingRecovery.missingQuestionIds.length} original question records still missing.`}</p>
+                <p className="sub">{recovery.restoredIds.length} present now. {recovery.ready} ready to practice. {recovery.review} need answer review.</p>
+                {recovery.ambiguousIds.length > 0 && <p>Some original question identities have conflicting copies. Review is required before recovery can be confirmed.</p>}
+              </> : <p>{recovery.state === "removed"
+                ? "The original collection is no longer available. Cancel recovery and select a current collection."
+                : recovery.state === "changed"
+                  ? "The original collection changed. Cancel recovery and select it again to check its current questions."
+                  : "The original collection has conflicting copies. Review is required before recovery can be confirmed."}</p>}
+            </div>
+            <p className="sub">This checks current workspace presence, not a saved backup or durable recovery.</p>
+            <p className="sub">A new import saves separate questions. It does not repair this collection automatically. Only restoring the original records can fill these gaps.</p>
+            <TechnicalDetails label="Recovery details">
+              <p>Collection: {missingRecovery.setId}</p>
+              <p>Original missing question IDs: {missingRecovery.missingQuestionIds.join(", ")}</p>
+            </TechnicalDetails>
+            <div className="row wrap gap8">
+              <GButton variant="primary" onClick={() => {
+                if (missingRecovery.scope?.module) setBankLocation({ ...missingRecovery.scope, module: missingRecovery.scope.module });
+                setBankView("weeks");
+                setTab("sets");
+              }}>Back to collection</GButton>
+              <GButton onClick={() => setMissingRecovery(null)}>Cancel recovery</GButton>
+            </div>
+          </section>
+        </GlassCard>}
         <ImportPanel
           key={`${importSeed?.sourceDocumentId ?? importSeed?.reference?.title ?? importSeed?.fileName ?? "plain"}-${importEntry}`}
           seed={importSeed}
           initialTab={importEntry}
           onFinalized={(result) => {
             setImportSeed(null);
-            setTab(result.setId ? "sets" : "library");
+            if (!missingRecovery) setTab(result.setId ? "sets" : "library");
           }}
         />
-      )}
+      </>}
       {tab === "sets" && <>
         <div className="cb-view-switch" role="group" aria-label="Question bank view">
           <button aria-pressed={bankView === "books"} onClick={() => setBankView("books")}>Bookshelf</button>
           <button aria-pressed={bankView === "weeks"} onClick={() => setBankView("weeks")}>Browse weeks</button>
         </div>
-        {bankView === "books" ? <QuestionBankLibrary onImport={() => setTab("import")} onCreate={() => setRunner({ mode: "tutor" })}
+        {bankView === "books" ? <QuestionBankLibrary onImport={() => openImport("file")} onCreate={() => setRunner({ mode: "tutor" })}
           onOpenBank={(book, week) => { setBankLocation({ module: book.module, courseId: book.courseId, week }); setBankView("weeks"); }}
           onPractice={(selection) => { setBankView("weeks"); setBankLocation(selection); setRunner({ mode: "tutor", presetFilters: { setIds: selection.setIds, questionIds: selection.questionIds, count: selection.count } }); }} /> :
         <QuestionSetList key={JSON.stringify(bankLocation)} initialScope={bankLocation}
@@ -604,7 +652,7 @@ export function QuestionWorkspacePage() {
             setRunner({ mode: "tutor", presetFilters: { setIds: sets.map((set) => set.id), questionIds: readyIds, count: Math.min(readyIds.length, 1000) } });
           }}
           onReviewIssues={openMappingReview}
-          onImportMissing={() => openImport("file")}
+          onImportMissing={openMissingRecovery}
           onReviewMisses={(ids) => ids.length && setRunner({ mode: "tutor", retakeIds: ids })}
           onOpenInsights={() => setTab("insights")}
         />

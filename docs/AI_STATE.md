@@ -6,14 +6,11 @@ authority: current-state
 # AXOM current AI state
 
 Snapshot: 2026-10-17 UTC, `feat/academic-library-v1` in
-`AXOM-academic-library-v1`, based on pushed checkpoint `abb504fe`.
-This checkpoint consolidates course/QBank presentation, faithful image handling,
-exact course ownership, vault recovery and privacy admission. Local main
-integration is authorized after protected-index checks; `origin/main` was last
-verified at `d5f9c030`. Prior integrated work includes bounded PDF/OCR,
-durable exam finalization, transactional restore, owner-bound sharing, Journal
-image/conflict barriers and responsive Communications. The existing domain
-contracts remain authoritative; this checkpoint does not replace them.
+`AXOM-academic-library-v1`. Consolidated `81e1a5bb` is on local main; pushed
+feature remains `abb504fe`, with `origin/main` last observed at `d5f9c030`.
+The current follow-up preserves exact missing-question recovery context without
+rewriting imported identities. Local-main integration requires fresh protected
+index checks. Existing domain contracts remain authoritative.
 
 Batch reviewed local work instead of making intermediate release pushes. Vercel
 Git deployments follow pushes, not local commit count. `origin/main` drives the
@@ -65,6 +62,11 @@ ready, review-suggested, unresolved and missing states with exact recovery
 routes, readable week metrics and mobile actions. Image-reference counts
 describe metadata only; browsing never exposes answer-bearing thumbnails.
 
+Missing-record recovery retains original collection IDs, membership and source
+scope. A fresh import stays separate; only exact original records satisfy the
+live presence check, which is not proof of durable save. Cancel preserves an
+unfinished import. See [Questions](features/questions.md) for the contract.
+
 Reviewer-edited wording retains original source figures through the existing
 visibility gate. During private installation, invalid media used exclusively by
 already-held questions remains unpersisted and explicitly unresolved; verified
@@ -110,7 +112,7 @@ guarantee.
 
 ## Current validation
 
-Node 22.23.1 on macOS. Current local validation:
+Node 22.23.1 on macOS. Consolidation `81e1a5bb` validation:
 
 - full unit/SQL suite: 389 files passed, 19 skipped; 3,791 tests passed,
   28 skipped, zero failures, with two workers;
@@ -128,14 +130,14 @@ Node 22.23.1 on macOS. Current local validation:
   files, 20 email types and 160 preview variants;
 - scoped ESLint and `git diff --check` passed.
 
-The first full run was interrupted below 250 MiB free; stopping high-concurrency
-workers restored headroom without deletion. Bounded reruns passed after fixing
-a stale recovery-button label.
-The initial image-test extension assumed randomized question order; both
-distinct synthetic fixtures now receive reviewer edits before launch, and all
-four desktop/mobile tutor/exam cases pass. Full Playwright `test:e2e` and the
-single `verify:all` command were not run; do not call targeted acceptance a full
-browser release gate. Bundled Chromium is absent; installed Chrome was used.
+Recovery follow-up: 51 affected tests, two Chrome journeys at 1440/390 px,
+typecheck, lint, build and 43 repository tests passed. Checks cover separate
+re-imports, exact-ID partial/full presence, reload, unchanged notes/membership,
+cancelled recovery retaining drafts, rollback, both themes and reduced motion.
+Full suites were not repeated. Full Playwright `test:e2e` and `verify:all` remain
+unrun for this candidate; targeted acceptance is not the full release gate.
+Installed Chrome substitutes for absent bundled Chromium. Keep concurrency low:
+earlier high-concurrency runs exhausted disk, recovered without deletion.
 
 Existing build warnings concern `jszip`/`webUpdates` static/dynamic imports
 and chunks over 500 kB. The prior GitHub advisory snapshot (56: 14 high,
@@ -159,7 +161,6 @@ complete academic-library acceptance.
 
 Disk headroom fluctuates sharply with concurrent checks; inspect it before any
 large operation and keep test concurrency bounded. Preserve services/source
-files; no cleanup is authorized. Normal ChatGPT dispatches were rate-limited
-after four accepted follow-ups; the ignored shared beta checkpoint records the
-remaining assignments. Do not claim all chats are running. This is a local
-implementation checkpoint, not a production-verified academic release.
+files; no cleanup is authorized. The ignored shared beta checkpoint owns current
+ChatGPT dispatch receipts and pending audits. Accepted prompts are not completed
+audits. This is local implementation, not a production-verified academic release.

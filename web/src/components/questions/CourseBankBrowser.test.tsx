@@ -117,7 +117,7 @@ describe("CourseBankBrowser academic navigation", () => {
     state.questions = [];
     render(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 1 }} onPractice={vi.fn()} />);
     expect(screen.getByRole("button", { name: "Practice IMCQ 1" }).hasAttribute("disabled")).toBe(true);
-    expect(screen.getAllByText("Question records are unavailable on this device; restore or re-import this source.")).toHaveLength(3);
+    expect(screen.getAllByText("Question records are unavailable on this device. Re-importing does not automatically restore this collection.")).toHaveLength(3);
     expect(screen.getByRole("button", { name: "Practice week" }).hasAttribute("disabled")).toBe(true);
   });
 });
@@ -150,8 +150,26 @@ describe("CourseBankBrowser recovery routes", () => {
     expect(onReviewQuestionIds).toHaveBeenNthCalledWith(2, ["unresolved"]);
     await user.click(screen.getByRole("button", { name: "Import missing source for IMCQ 1" }));
     expect(onRestoreMissing).toHaveBeenCalledTimes(1);
+    expect(onRestoreMissing).toHaveBeenCalledWith({
+      setId: "imcq", setTitle: "IMCQ 1", createdAt: "2026-10-14T00:00:00Z",
+      expectedQuestionIds: ["ready", "ready", "review-suggested", "unresolved", "missing"],
+      missingQuestionIds: ["missing"], sourceDocumentIds: [],
+      scope: { courseId: "c4", module: "Neuro", week: 1 },
+    });
     expect(screen.getByRole("button", { name: "Practice IMCQ Suggested" }).hasAttribute("disabled")).toBe(true);
     expect(screen.getByRole("button", { name: "Practice IMCQ Unresolved" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("keeps two collections' missing recovery requests separate", async () => {
+    state.questionSets.push(set("second", "Second IMCQ", ["ready", "missing-two", "missing-two"], "c4", "Neuro"));
+    const user = userEvent.setup();
+    const restore = vi.fn();
+    render(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 1 }} onRestoreMissing={restore} />);
+    await user.click(screen.getByRole("button", { name: "Import missing source for IMCQ 1" }));
+    await user.click(screen.getByRole("button", { name: "Import missing source for Second IMCQ" }));
+    expect(restore.mock.calls.map(([request]) => [request.setId, request.missingQuestionIds])).toEqual([
+      ["imcq", ["missing"]], ["second", ["missing-two"]],
+    ]);
   });
 });
 
