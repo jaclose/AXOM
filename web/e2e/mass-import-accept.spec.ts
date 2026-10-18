@@ -26,7 +26,7 @@ const FILES = [
 async function openQueue(page: Page) {
   await page.goto("/#questions");
   await page.getByRole("button", { name: "Add your own material", exact: true }).click();
-  await page.getByRole("button", { name: "Import several files" }).click();
+  await page.getByRole("button", { name: "High-volume batch queue", exact: true }).click();
 }
 
 async function addFiles(page: Page, files: typeof FILES) {
@@ -105,3 +105,87 @@ test("valid files are accepted together, and adding the same folder again adds n
   expect(await library(page)).toEqual(saved);
   expect(errors).toEqual([]);
 });
+
+for (const width of [1440, 390]) {
+  test(`pending acceptance retains rows through failure and retry (${width}px)`, async ({ page }, testInfo) => {
+    const errors: string[] = [];
+    page.on("pageerror", error => errors.push(error.message));
+    page.on("console", message => {
+      if (["error", "warning"].includes(message.type())) errors.push(message.text());
+    });
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await page.emulateMedia({ reducedMotion: "reduce", colorScheme: width === 390 ? "light" : "dark" });
+    await page.addInitScript(theme => localStorage.setItem("axom.theme", theme), width === 390 ? "light" : "dark");
+    // Delay only this fresh test context's save boundary. Successful releases
+    // still execute the unchanged canonical save and real IndexedDB writes.
+    await page.route("**/src/lib/questionImportSave.ts*", async route => {
+      const response = await route.fetch();
+      const source = await response.text();
+      const declaration = "export async function saveReviewedImport(prepared, store, images = []) {";
+      expect(source).toContain(declaration);
+      await route.fulfill({ response, body: source.replace(declaration, `${declaration}
+        const gate = window.__AXOM_IMPORT_TEST_GATE__;
+        if (gate) {
+          delete window.__AXOM_IMPORT_TEST_GATE__;
+          await gate.promise;
+          if (gate.fail) return { ok: false, message: "Synthetic write failed", rollbackFailures: [] };
+        }`) });
+    });
+    const arm = (fail: boolean) => page.evaluate(shouldFail => {
+      const target = window as unknown as {
+        __AXOM_IMPORT_TEST_GATE__?: { promise: Promise<void>; fail: boolean };
+        __AXOM_RELEASE_IMPORT__?: () => void;
+      };
+      target.__AXOM_IMPORT_TEST_GATE__ = {
+        fail: shouldFail,
+        promise: new Promise<void>(resolve => { target.__AXOM_RELEASE_IMPORT__ = resolve; }),
+      };
+    }, fail);
+    const release = () => page.evaluate(() => {
+      (window as unknown as { __AXOM_RELEASE_IMPORT__: () => void }).__AXOM_RELEASE_IMPORT__();
+    });
+
+    await seedOnboarded(page);
+    await openQueue(page);
+    await addFiles(page, FILES.slice(0, 2));
+    const first = FILES[0].name;
+    const second = FILES[1].name;
+    const removeFirst = page.getByRole("button", { name: `Remove ${first}` });
+    const removeSecond = page.getByRole("button", { name: `Remove ${second}` });
+    await arm(true);
+    await page.getByRole("button", { name: "Accept all valid (2)" }).click();
+    await expect(row(page, first)).toContainText("saving");
+    await expect(removeFirst).toBeDisabled();
+    await expect(removeSecond).toBeDisabled();
+    await removeFirst.evaluate(button => (button as HTMLButtonElement).click());
+    await expect(row(page, first)).toBeVisible();
+    expect((await library(page)).questions).toBe(0);
+    await row(page, second).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath(`pending-${width}.png`), fullPage: true });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+
+    await release();
+    await expect(page.getByText("Accepted 1", { exact: true })).toBeVisible();
+    await expect(row(page, first)).toContainText("Synthetic write failed");
+    await expect(page.getByRole("button", { name: `Edit ${first}` })).toBeEnabled();
+    await expect(removeFirst).toBeEnabled();
+    expect((await library(page)).questions).toBe(1);
+
+    await arm(false);
+    await page.getByRole("button", { name: `Accept ${first}` }).click();
+    await expect(removeFirst).toBeDisabled();
+    await expect(removeSecond).toBeDisabled();
+    await release();
+    await expect(page.getByText("Accepted 2", { exact: true })).toBeVisible();
+    await expect(removeFirst).toBeEnabled();
+    await removeFirst.focus();
+    await page.keyboard.press("Enter");
+    await expect(row(page, first)).toHaveCount(0);
+    const saved = await library(page);
+    expect(saved.questions).toBe(3);
+    expect(saved.sets).toHaveLength(2);
+    await reloadAfterSave(page);
+    expect(await library(page)).toEqual(saved);
+    expect(errors).toEqual([]);
+  });
+}

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { indexedDB as fakeIndexedDb, IDBKeyRange } from "fake-indexeddb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -88,6 +88,57 @@ const counts = () => {
 };
 
 describe("Mass import: accept", () => {
+  describe.each(["single", "batch"] as const)("pending %s acceptance", mode => {
+    it.each(["success", "failure"] as const)("keeps removal locked until %s settles", async outcome => {
+      const actual = await vi.importActual<typeof import("../../lib/questionImportSave")>("../../lib/questionImportSave");
+      let release!: () => void;
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      vi.mocked(saveReviewedImport).mockImplementationOnce(async (...args) => {
+        await gate;
+        return outcome === "success" ? actual.saveReviewedImport(...args) : { ok: false, message: "Synthetic write failed", rollbackFailures: [] };
+      });
+      const user = userEvent.setup();
+      render(<MassImport onInspect={vi.fn()} />);
+      await add(user, file("a-thorax.txt", text(VEIN, NERVE)), file("b-endocrine.txt", text(HORMONE)));
+      const removeFirst = screen.getByRole("button", { name: "Remove a-thorax.txt" }) as HTMLButtonElement;
+      const removeSecond = screen.getByRole("button", { name: "Remove b-endocrine.txt" }) as HTMLButtonElement;
+      const acceptFirst = screen.getByRole("button", { name: mode === "single" ? "Accept a-thorax.txt" : "Accept all valid (2)" });
+
+      // Native events in one React batch also exercise the imperative guard,
+      // before disabled props necessarily reach the existing DOM controls.
+      act(() => {
+        acceptFirst.click();
+        removeFirst.click();
+        removeSecond.click();
+        acceptFirst.click();
+      });
+      await waitFor(() => expect(saveReviewedImport).toHaveBeenCalledTimes(1));
+      expect(removeFirst.disabled).toBe(true);
+      expect(removeSecond.disabled).toBe(true);
+      await user.click(removeFirst);
+      expect(row("a-thorax.txt")).toBeTruthy();
+      expect(row("b-endocrine.txt")).toBeTruthy();
+      expect(counts()).toEqual([0, 0, 0]);
+
+      release();
+      await waitFor(() => expect(removeFirst.disabled).toBe(false));
+      expect(saveReviewedImport).toHaveBeenCalledTimes(mode === "batch" ? 2 : 1);
+      const firstCounts = outcome === "success" ? [2, 1, 1] : [0, 0, 0];
+      expect(counts()).toEqual(firstCounts.map(value => value + (mode === "batch" ? 1 : 0)));
+      if (outcome === "success") {
+        expect(within(row("a-thorax.txt")).getByText("accepted")).toBeTruthy();
+      } else {
+        expect(within(row("a-thorax.txt")).getByText(/Synthetic write failed/)).toBeTruthy();
+        expect((screen.getByRole("button", { name: "Edit a-thorax.txt" }) as HTMLButtonElement).disabled).toBe(false);
+        expect((screen.getByRole("button", { name: "Accept a-thorax.txt" }) as HTMLButtonElement).disabled).toBe(false);
+      }
+      await user.click(removeFirst);
+      expect(screen.queryByText("a-thorax.txt")).toBeNull();
+      expect(row("b-endocrine.txt")).toBeTruthy();
+      expect(counts()).toEqual(firstCounts.map(value => value + (mode === "batch" ? 1 : 0)));
+    });
+  });
+
   it("saves a ready file through the review screen's own save path", async () => {
     const user = userEvent.setup();
     render(<MassImport onInspect={vi.fn()} />);

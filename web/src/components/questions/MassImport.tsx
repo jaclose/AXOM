@@ -82,6 +82,7 @@ export function MassImport({
   const [queue, setQueue] = useState<QueuedFile[]>([]);
   const [processing, setProcessing] = useState(false);
   const [accepting, setAccepting] = useState(false);
+  const acceptingRef = useRef(false);
   const store = useStore();
   const storeRef = useRef(store);
   useEffect(() => { storeRef.current = store; }, [store]);
@@ -192,6 +193,8 @@ export function MassImport({
   }
 
   function removeQueuedFile(id: string) {
+    // Removing a queue row cannot cancel a persistence operation already begun.
+    if (acceptingRef.current) return;
     const index = queue.findIndex((file) => file.id === id);
     const focusFile = queue[index + 1] ?? queue[index - 1];
     fileMap.delete(id);
@@ -322,23 +325,35 @@ export function MassImport({
   }
 
   async function accept(id: string) {
+    if (acceptingRef.current) return;
+    acceptingRef.current = true;
     const file = queueRef.current.find((entry) => entry.id === id);
     setAccepting(true);
-    const done = await acceptOne(id);
-    setAccepting(false);
-    pushToast(done
-      ? { title: `${file?.fileName ?? "File"} accepted`, body: "It is saved as a question set, with its source.", tone: "success" }
-      : { title: "Not accepted", body: "This file changed or could not be saved. Edit it to review its questions.", tone: "warn" });
+    try {
+      const done = await acceptOne(id);
+      pushToast(done
+        ? { title: `${file?.fileName ?? "File"} accepted`, body: "It is saved as a question set, with its source.", tone: "success" }
+        : { title: "Not accepted", body: "This file changed or could not be saved. Edit it to review its questions.", tone: "warn" });
+    } finally {
+      acceptingRef.current = false;
+      setAccepting(false);
+    }
   }
 
   async function acceptAllValid() {
+    if (acceptingRef.current) return;
     const ids = queueRef.current.filter((file) => evaluations.get(file.id)?.valid).map((file) => file.id);
     if (!ids.length) return;
+    acceptingRef.current = true;
     setAccepting(true);
     let done = 0;
-    // One at a time: each save changes what the next file is compared with.
-    for (const id of ids) if (await acceptOne(id)) done += 1;
-    setAccepting(false);
+    try {
+      // One at a time: each save changes what the next file is compared with.
+      for (const id of ids) if (await acceptOne(id)) done += 1;
+    } finally {
+      acceptingRef.current = false;
+      setAccepting(false);
+    }
     const left = ids.length - done;
     pushToast({
       title: `${done} file${done === 1 ? "" : "s"} accepted`,
@@ -530,6 +545,7 @@ export function MassImport({
                       </GhostButton>
                     )}
                     <GhostButton id={`mass-import-remove-${file.id}`} aria-label={`Remove ${file.fileName}`}
+                      disabled={accepting}
                       onClick={() => removeQueuedFile(file.id)}>
                       <Trash2 size={ICON_SIZE.body} />
                     </GhostButton>

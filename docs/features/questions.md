@@ -26,6 +26,11 @@ module and week, findings and review reasons are in
 Optional AI uses the [provider boundary](../architecture/backend.md), with validated,
 reviewed outputs. A specification is not proof all source formats are implemented.
 
+Batch queue removal is not save cancellation. While single-file or batch acceptance
+is pending, all queue removal is locked, including same-render event races. The lock
+ends when acceptance settles; failed rows retain their source and review controls.
+Removing a completed row affects only the queue, not its saved questions or source.
+
 Missing-record recovery retains the selected collection's identity, original
 membership, source references and course scope in a transient request
 (`lib/questionRecovery.ts`). Only the original missing IDs appearing uniquely in

@@ -5,12 +5,11 @@ authority: current-state
 ---
 # AXOM current AI state
 
-Snapshot: 2026-10-17 UTC, `feat/academic-library-v1` in
-`AXOM-academic-library-v1`. Consolidated `81e1a5bb` and recovery `68c1670f` are on local main; pushed
-feature remains `abb504fe`, with `origin/main` last observed at `d5f9c030`.
-The current follow-up binds revisions to their collection classification and verifies
-expired-export removal before clearing retry paths. Integration requires fresh protected
-index checks. Existing domain contracts remain authoritative.
+Snapshot: 2026-10-18 UTC, `feat/academic-library-v1` in
+`AXOM-academic-library-v1`. Queue-removal follow-up to local `d8b7f283`:
+single/batch acceptance retains rows and retry inputs until saves settle.
+Last observed remotes: feature `abb504fe`, main `d5f9c030`. Fresh protected-index
+checks are required for integration. Domain contracts remain authoritative.
 
 Batch reviewed local work instead of making intermediate release pushes. Vercel
 Git deployments follow pushes, not local commit count. `origin/main` drives the
@@ -20,14 +19,11 @@ for this checkpoint.
 
 ## Ownership and protected work
 
-Read the current coordination board and its single CONVERGENCE ledger before
-another integration. Preserve other owners' original checkouts and untracked or
-staged files. The local `main` checkout contains 45 protected staged user
-additions. Never include them in an ordinary commit. Preflight found no
-path/prefix overlap with the incoming feature; repeat that check against the
-exact final SHA, then use a fast-forward only. Compare the protected staged
-entries, cached patch and working-file hashes before and after. Do not switch,
-reset, stash or rewrite either checkout.
+Read the coordination board and CONVERGENCE before integration. Preserve other
+owners' checkouts and files. Local `main` has 45 protected staged additions;
+never include them in an ordinary commit. Recheck exact/prefix overlaps against
+the final SHA, then fast-forward only. Compare protected staged entries, cached
+patch and working-file hashes before/after. Never switch, reset, stash or rewrite.
 
 The staged AMBOSS research, source-coverage metadata, stale handoffs, backup
 patch, generated ZIP/demo copies and simulator crawler are excluded. They need
@@ -118,15 +114,17 @@ guarantee.
 
 Node 22.23.1 on macOS. Consolidation `81e1a5bb` validation:
 
-- full unit/SQL: 389 files/3,791 tests passed, 19 files/28 tests skipped,
-  zero failures, two workers;
-- TypeScript, ESLint, build, Daily Games isolation and 43 repository tests passed;
-- Chrome: 14 course/QBank/template/image journeys passed, covering
-  1440/768/390 px, both themes, keyboard and reduced motion with no console warnings/errors;
-- Chrome update consent, two-build recovery, other-tab preservation and offline
-  Daily Games passed;
-- hygiene, bootstrap budgets, diff checks and communications integrity passed
-  (28 inputs, 7 auth files, 20 email types, 160 previews).
+- unit/SQL: 3,791 passed, 28 skipped; types/lint/build, Daily Games isolation,
+  43 repo tests, hygiene/budgets and communications integrity passed;
+- Chrome: 14 course/QBank/template/image journeys at 1440/768/390, themes,
+  keyboard/reduced motion, zero console warnings/errors; update consent,
+  two-build recovery, other-tab preservation and offline Daily Games passed.
+
+Queue-removal follow-up: 19 focused tests, independent review, types/lint/build,
+43 repo tests and three Chrome journeys passed. Delayed failure/retry, settled
+removal and reload passed at 1440/390 px, themes/reduced motion/keyboard, with
+zero browser errors/warnings. Screenshots inspected. A stale selector was fixed;
+disk recovered without cleanup after stopping the initial timed-out run.
 
 Boundary follow-up: 166 targeted tests including migration replay, types/lint/build,
 43 repository tests and communications integrity passed. SQL uses isolated PGlite;
