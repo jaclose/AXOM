@@ -22,11 +22,22 @@ describe("doctordleCaseNumber", () => {
 });
 
 describe("doctordleStreak", () => {
-  it("counts solved cases in a row, including yesterday before today is logged", () => {
-    const history = log({ results: { 437: "solved", 438: "solved", 439: "solved" } });
+  it("counts logged attempts regardless of outcome, including yesterday before today is logged", () => {
+    const history = log({ results: { 437: "solved", 438: "missed", 439: "solved" } });
     expect(doctordleStreak(history, 440)).toBe(3);
-    expect(doctordleStreak({ ...history, results: { ...history.results, 440: "missed" } }, 440)).toBe(0);
+    expect(doctordleStreak({ ...history, results: { ...history.results, 440: "missed" } }, 440)).toBe(4);
     expect(doctordleStreak(log({ results: { 438: "solved" } }), 440)).toBe(0);
+  });
+
+  it("does not count opening, snoozing or skipping a case, or bridge unlogged cases", () => {
+    const history = log({
+      results: { 437: "missed", 438: "solved", 440: "missed" },
+      opened: [439], skipped: [439], snoozedUntil: NOON + 60_000,
+    });
+    expect(doctordleStreak(history, 440)).toBe(1);
+    expect(doctordleStreak(history, 441)).toBe(1);
+    expect(doctordleStreak(history, 442)).toBe(0);
+    expect(doctordleStreak(log({ opened: [440], skipped: [440] }), 440)).toBe(0);
   });
 });
 
@@ -61,5 +72,20 @@ describe("store", () => {
     expect(saved.opened).toEqual([440]);
     expect(saved.results).toEqual({ 440: "solved" });
     expect(normalizeDoctordleLog({ results: { x: "solved", 3: "won" }, opened: ["a", 5] })).toMatchObject({ opened: [5], results: {} });
+  });
+
+  it("restores missed attempts as streak days without rewriting outcomes or inflating solved totals", () => {
+    useDoctordle.setState({ log: log({ results: { 438: "solved", 439: "missed" } }) });
+    useDoctordle.getState().recordResult("missed", NOON);
+    useDoctordle.getState().recordResult("missed", NOON + 60_000);
+    const saved = localStorage.getItem("axom.doctordle.v1")!;
+    const restored = normalizeDoctordleLog(JSON.parse(saved));
+    useDoctordle.setState({ log: restored });
+    expect(restored.results).toEqual({ 438: "solved", 439: "missed", 440: "missed" });
+    expect(doctordleStreak(useDoctordle.getState().log, 440)).toBe(3);
+    expect(Object.values(restored.results).filter((result) => result === "solved")).toHaveLength(1);
+    expect(localStorage.getItem("axom.doctordle.v1")).toBe(saved);
+    useDoctordle.getState().recordResult("solved", NOON + 120_000);
+    expect(doctordleStreak(useDoctordle.getState().log, 440)).toBe(3);
   });
 });

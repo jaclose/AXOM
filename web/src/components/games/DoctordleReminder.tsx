@@ -52,7 +52,7 @@ export function DoctordleReminder() {
     result: { title: "How did it go?", body: "AXOM only knows what you tell it." },
     play: { title: "It's a quick one", body: "Open it now, or sit this case out." },
     logged: {
-      title: logged === "solved" ? (streak > 1 ? `Logged. ${streak} in a row.` : "Logged. Nice one.") : "Logged.",
+      title: streak > 1 ? `Logged. ${streak} in a row.` : logged === "solved" ? "Logged. Nice one." : "Logged. Today counts.",
       body: `The next case lands in ${compactCountdown(msUntilDoctordle(now))}.`,
     },
   };

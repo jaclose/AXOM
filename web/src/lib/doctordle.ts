@@ -63,11 +63,11 @@ export function normalizeDoctordleLog(value: unknown): DoctordleLog {
   };
 }
 
-/** Consecutive solved cases ending today (or yesterday, before today is logged). Matches doctordle.org's own streak. */
+/** AXOM participation streak: logged attempts ending today or yesterday, regardless of outcome. */
 export function doctordleStreak(log: DoctordleLog, today: number): number {
   let day = log.results[today] ? today : today - 1;
   let streak = 0;
-  while (log.results[day] === "solved") { streak += 1; day -= 1; }
+  while (log.results[day] === "solved" || log.results[day] === "missed") { streak += 1; day -= 1; }
   return streak;
 }
 

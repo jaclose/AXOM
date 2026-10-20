@@ -28,7 +28,6 @@ export function deriveDailyWordStatsFromNormalizedHistory(
   let currentStreak = 0;
   let maxStreak = 0;
   let streakDate = "";
-  let previousDateWon = false;
 
   for (const puzzle of completed) {
     if (puzzle.won) {
@@ -40,18 +39,10 @@ export function deriveDailyWordStatsFromNormalizedHistory(
     // Older/same-day completions can be imported or arise after a list-version
     // change. They count as games but never inflate or reset the live streak.
     if (streakDate && puzzle.puzzleDate <= streakDate) continue;
-    // JD (Ideas 3): revealing the word "still gets the streak for the day".
-    // A revealed day keeps the streak alive but is never a win above.
-    const keepsStreak = puzzle.won || puzzle.revealed === true;
-    if (!keepsStreak) {
-      currentStreak = 0;
-    } else if (previousDateWon && isNextCalendarDate(streakDate, puzzle.puzzleDate)) {
-      currentStreak += 1;
-    } else {
-      currentStreak = 1;
-    }
+    // Streaks reward completing the daily puzzle, including losses and reveals.
+    // Wins and their guess distribution stay separate from participation.
+    currentStreak = isNextCalendarDate(streakDate, puzzle.puzzleDate) ? currentStreak + 1 : 1;
     streakDate = puzzle.puzzleDate;
-    previousDateWon = keepsStreak;
     maxStreak = Math.max(maxStreak, currentStreak);
   }
 

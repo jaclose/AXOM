@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Activity, BookOpen, CalendarDays, Clock, HelpCircle, History, Layers, Minus, Plus, Target, Timer, TrendingUp, X, Zap } from "lucide-react";
 import { useStore } from "../lib/store";
@@ -221,9 +221,8 @@ export function ProductivityPage() {
         </GlassCard>
       </div>}
 
-      <ActivityLog logs={s.logs} activeDayKey={s.activeDayKey} />
-
       <div data-module-tour="productivity-focus"><Pomodoro /></div>
+      <ActivityLog logs={s.logs} activeDayKey={s.activeDayKey} />
       {moduleTourOpen && (
         <ModuleTour name="Productivity" route="productivity" steps={PRODUCTIVITY_TOUR_STEPS} onExit={() => setModuleTourOpen(false)} />
       )}
@@ -497,14 +496,21 @@ function buildMonthCells(days: PeriodDay[]): Array<PeriodDay | null> {
 // grouped by day, newest first — "you logged a lecture at this time".
 function ActivityLog({ logs, activeDayKey }: { logs: StudyLog[]; activeDayKey: string }) {
   const [expanded, setExpanded] = useState(false);
-  const limit = expanded ? 200 : 14;
+  const feedId = useId();
+  const previewLimit = 5;
+  const expandedLimit = 200;
+  const limit = expanded ? expandedLimit : previewLimit;
   const visible = logs.slice(0, limit);
   const groups = useMemo(() => groupLogsByDay(visible), [visible]);
   const todayKey = activeDayKey;
+  const canExpand = logs.length > previewLimit || logs.some((log) => log.note);
+  const expandLabel = logs.length > expandedLimit
+    ? `Show latest ${expandedLimit} events`
+    : logs.length > previewLimit ? `Show all ${logs.length} events` : "Expand notes";
 
   return (
-    <GlassCard pad className="activity-log-card">
-      <PanelHeader title="Activity Log" sub="Every logged block, newest first — a running history of your effort"
+    <GlassCard pad className={`activity-log-card${expanded ? " is-expanded" : " is-preview"}`} role="region" aria-label="Activity Log">
+      <PanelHeader title="Activity Log" headingLevel={2} sub="Recent activity, newest first. Your full history stays available."
         action={
           <div className="row gap6">
             <Tag tone={logs.length ? "cyan" : "neutral"}>{logs.length} event{logs.length === 1 ? "" : "s"}</Tag>
@@ -521,7 +527,11 @@ function ActivityLog({ logs, activeDayKey }: { logs: StudyLog[]; activeDayKey: s
         </div>
       ) : (
         <>
-          <div className="activity-feed">
+          <p className="activity-preview-count" aria-live="polite">
+            Showing {visible.length} of {logs.length} event{logs.length === 1 ? "" : "s"}
+            {logs.length > expandedLimit && expanded ? ". Open full activity for older entries." : "."}
+          </p>
+          <div className="activity-feed" id={feedId}>
             {groups.map((group) => (
               <div className="activity-day" key={group.key}>
                 <div className="activity-day-head">
@@ -544,9 +554,9 @@ function ActivityLog({ logs, activeDayKey }: { logs: StudyLog[]; activeDayKey: s
               </div>
             ))}
           </div>
-          {logs.length > 14 && (
-            <button type="button" className="activity-toggle" onClick={() => setExpanded((open) => !open)}>
-              {expanded ? "Show less" : `Show all ${logs.length} events`}
+          {canExpand && (
+            <button type="button" className="activity-toggle" aria-expanded={expanded} aria-controls={feedId} onClick={() => setExpanded((open) => !open)}>
+              {expanded ? "Show less" : expandLabel}
             </button>
           )}
         </>

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Page } from "@playwright/test";
 import type { PreparedBank } from "../src/lib/privateLibrary/types";
+import type { CommunicationsSettings } from "../src/lib/communications/client";
 import { seedOnboarded, expect } from "./fixtures";
 const origin = "https://academic-fixture.invalid";
 export const collection = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -47,6 +48,11 @@ export async function academicCatalogFixture(page: Page) {
     if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers });
     requests.push(path);
     const json = (value: unknown, status = 200) => route.fulfill({ status, headers, json: value });
+    // Onboarding briefly mounts the dashboard's account notification inbox.
+    if (request.method() === "POST" && path === "/functions/v1/communications" && url.searchParams.get("action") === "settings") return json({
+      preferences: [], identity: { accent: "cyan", theme: "dark" }, history: [], privacy: [],
+      admin: false, deliveryMode: "dry-run", deletionEnabled: false, hasProtectedCopy: false,
+    } satisfies CommunicationsSettings);
     if (path.endsWith("/rpc/academic_catalog")) return failCatalog ? json({ message: "Fixture unavailable" },503) : json([course]);
     if (path.endsWith("/rpc/academic_course")) return json(course);
     if (path.endsWith("/academic_revisions")) return json({ id: revision, collection_id: collection, template_text: template.toString(), ready_questions: 1, review_questions: 0 });

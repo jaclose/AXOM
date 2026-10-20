@@ -4183,6 +4183,8 @@
 @media (max-width: 560px) { .anki-endpoint-row { flex-direction: column; align-items: stretch; } }
 
 /* ---- Activity Log (GitHub-style feed, Productivity) ---- */
+.activity-log-card .panel-head, .activity-log-card .panel-head > .row { flex-wrap: wrap; }
+.activity-preview-count { margin: 10px 0 0; color: var(--text-60); font-size: var(--fs-xs); }
 .activity-feed { display: flex; flex-direction: column; margin-top: 6px; }
 .activity-day { position: relative; }
 .activity-day-head {
@@ -4208,15 +4210,17 @@
 .activity-dot.orange { color: var(--orange); border-color: color-mix(in srgb, var(--orange) 42%, transparent); }
 .activity-dot.red { color: var(--red); border-color: rgba(255,99,108,0.42); }
 .activity-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.activity-text { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text-80); }
-.activity-note { font-size: var(--fs-xs); color: var(--text-45); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.activity-text { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text-80); overflow-wrap: anywhere; }
+.activity-note { font-size: var(--fs-xs); color: var(--text-60); white-space: pre-wrap; overflow-wrap: anywhere; }
+.activity-log-card.is-preview .activity-note { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .activity-time { flex-shrink: 0; font-size: var(--fs-xs); color: var(--text-45); font-variant-numeric: tabular-nums; }
 .activity-toggle {
-  margin-top: 12px; width: 100%; padding: 9px; border-radius: var(--radius-sm); font-size: var(--fs-sm); font-weight: var(--fw-bold);
-  color: var(--text-60); background: rgba(255,255,255,0.035); border: 1px solid rgba(230,226,214,0.09);
+  margin-top: 8px; width: 100%; min-height: 40px; padding: 9px; border-radius: var(--radius-sm); font-size: var(--fs-sm); font-weight: var(--fw-bold);
+  color: var(--text-80); background: var(--surface-1); border: 1px solid var(--hairline);
   cursor: pointer; transition: color .15s ease, border-color .15s ease;
 }
 .activity-toggle:hover { color: var(--text); border-color: rgba(var(--accent-rgb),0.35); }
+.activity-toggle:focus-visible { outline: 2px solid var(--gold-line); outline-offset: 3px; }
 .activity-empty { display: flex; align-items: center; gap: 12px; padding: 16px 6px; color: var(--text-45); }
 .activity-empty svg { color: var(--cyan); flex-shrink: 0; }
 .activity-empty b { display: block; font-size: var(--fs-base); color: var(--text-80); }

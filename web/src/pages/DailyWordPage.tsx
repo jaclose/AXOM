@@ -209,7 +209,7 @@ export function DailyWordPage() {
     setStatus(won
       ? `Correct. Solved in ${guesses.length} guess${guesses.length === 1 ? "" : "es"}.`
       : completed
-        ? "Six guesses used. The puzzle is complete."
+        ? "Six guesses used. The puzzle is complete. Your streak counts today."
         : summarizeEvaluation(row));
   }, [answer, draft, puzzle, upsertPuzzle, words]);
 
@@ -393,7 +393,7 @@ export function DailyWordPage() {
       {puzzle.completed && (
         <div className="daily-word-done" role="group" aria-label="Today's result">
           <span className="daily-word-done-score">
-            <b>{puzzle.won ? `Solved in ${puzzle.guesses.length}` : puzzle.revealed ? "Revealed. Streak kept." : "Not this time"}</b>
+            <b>{puzzle.won ? `Solved in ${puzzle.guesses.length}` : puzzle.revealed ? "Revealed. Streak kept." : "Not this time. Streak kept."}</b>
             <span aria-label={`Time until the next Daily Word puzzle: ${nextPuzzleCountdown}`}><Clock3 size={ICON_SIZE.microInline} aria-hidden="true" /> Next word in {nextPuzzleCountdown}</span>
           </span>
           <GButton size="sm" variant="primary" onClick={shareResult}><Copy size={ICON_SIZE.body} /> Share result</GButton>
@@ -415,7 +415,7 @@ export function DailyWordPage() {
       {puzzle.completed && winOpen && (
         <Modal title={puzzle.won ? "Puzzle solved" : puzzle.revealed ? "Word revealed" : "Puzzle complete"} onClose={() => setWinOpen(false)} className="daily-word-win">
           <p className="daily-word-win-kicker">
-            Today's word · #{dailyWordNumber(puzzle.puzzleDate)} · {puzzle.won ? `solved in ${puzzle.guesses.length} ${puzzle.guesses.length === 1 ? "guess" : "guesses"}` : puzzle.revealed ? "revealed, streak kept" : "six guesses used"}
+            Today's word · #{dailyWordNumber(puzzle.puzzleDate)} · {puzzle.won ? `solved in ${puzzle.guesses.length} ${puzzle.guesses.length === 1 ? "guess" : "guesses"}` : puzzle.revealed ? "revealed, streak kept" : "six guesses used, streak kept"}
           </p>
           <p className="daily-word-answer">Answer: <b>{answer}</b></p>
           <div className="daily-word-stats" aria-label="Daily Word statistics">

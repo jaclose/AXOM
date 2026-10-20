@@ -240,7 +240,7 @@ describe("Daily Word history, statistics, and sharing", () => {
     expect(normalizeDailyWordHistory([{ nope: true }, complete, complete])).toHaveLength(1);
   });
 
-  it("derives idempotent games, wins, distribution, consecutive streaks, and loss reset", () => {
+  it("derives idempotent games, wins, distribution, and participation streaks separated by unplayed dates", () => {
     const history = [
       completedPuzzle("2026-07-08", true, 2, "2026-07-08T18:00:00Z"),
       completedPuzzle("2026-07-09", true, 3, "2026-07-09T18:00:00Z"),
@@ -248,10 +248,51 @@ describe("Daily Word history, statistics, and sharing", () => {
       completedPuzzle("2026-07-12", true, 4, "2026-07-12T18:00:00Z"),
     ];
     const stats = deriveDailyWordStats([...history, history[3]]);
-    expect(stats).toMatchObject({ gamesPlayed: 4, wins: 3, currentStreak: 1, maxStreak: 2 });
+    expect(stats).toMatchObject({ gamesPlayed: 4, wins: 3, currentStreak: 1, maxStreak: 3 });
     expect(stats.guessDistribution).toMatchObject({ 2: 1, 3: 1, 4: 1, 6: 0 });
     expect(deriveDailyWordStatsFromNormalizedHistory(normalizeDailyWordHistory([...history, history[3]])))
       .toEqual(stats);
+  });
+
+  it("keeps losses and reveals in a restored participation streak without turning them into wins", () => {
+    const history = [
+      completedPuzzle("2026-07-12", true, 2, "2026-07-12T18:00:00Z"),
+      completedPuzzle("2026-07-13", false, 6, "2026-07-13T18:00:00Z"),
+      { ...completedPuzzle("2026-07-14", false, 2, "2026-07-14T18:00:00Z"), revealed: true },
+      completedPuzzle("2026-07-15", false, 6, "2026-07-15T18:00:00Z"),
+      completedPuzzle("2026-07-16", true, 4, "2026-07-16T18:00:00Z"),
+    ];
+    const serialized = JSON.stringify([...history, history[3]]);
+    const restored = normalizeDailyWordHistory(JSON.parse(serialized));
+    const stats = deriveDailyWordStatsFromNormalizedHistory(restored);
+    expect(stats).toMatchObject({ gamesPlayed: 5, wins: 2, currentStreak: 5, maxStreak: 5 });
+    expect(stats.guessDistribution).toMatchObject({ 2: 1, 4: 1, 6: 0 });
+    expect(restored.map(({ won }) => won)).toEqual([true, false, false, false, true]);
+    expect(JSON.stringify([...history, history[3]])).toBe(serialized);
+  });
+
+  it("does not count unfinished attempts as participation or bridge an unplayed day", () => {
+    const incomplete = {
+      ...createDailyWordPuzzle("2026-07-13", "America/Grenada", "general-1"),
+      guesses: ["CRANE"],
+    };
+    const history = [completedPuzzle("2026-07-12", false, 6, "2026-07-12T18:00:00Z"), incomplete];
+    expect(deriveDailyWordStats(history)).toMatchObject({ gamesPlayed: 1, wins: 0, currentStreak: 1 });
+    expect(deriveDailyWordStats([...history, completedPuzzle("2026-07-14", false, 6, "2026-07-14T18:00:00Z")]))
+      .toMatchObject({ gamesPlayed: 2, wins: 0, currentStreak: 1, maxStreak: 1 });
+  });
+
+  it("counts same-day version changes as games, not extra streak days", () => {
+    const original = completedPuzzle("2026-07-12", false, 6, "2026-07-12T18:00:00Z");
+    const versioned = {
+      ...original,
+      puzzleId: buildDailyWordPuzzleId("general-2", "2026-07-12"),
+      wordListVersion: "general-2",
+      completedAt: "2026-07-12T19:00:00Z",
+      updatedAt: "2026-07-12T19:00:00Z",
+    };
+    expect(deriveDailyWordStats([original, versioned]))
+      .toMatchObject({ gamesPlayed: 2, wins: 0, currentStreak: 1, maxStreak: 1 });
   });
 
   it("does not inflate the live streak when an older completion arrives later", () => {

@@ -43,6 +43,18 @@ describe("DoctordleCheckIn", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(useDoctordle.getState().log.snoozedUntil).toBeGreaterThan(NOON);
   });
+
+  it("keeps the streak when the learner reports an unsuccessful attempt", () => {
+    useDoctordle.setState({ log: {
+      ...EMPTY_DOCTORDLE_LOG, opened: [440], lastOpenedAt: NOON - 30_000,
+      results: { 438: "missed", 439: "solved" },
+    } });
+    render(<DoctordleCheckIn suspended={false} />);
+    act(() => { vi.advanceTimersByTime(900); });
+    fireEvent.click(screen.getByRole("button", { name: "Missed it" }));
+    expect(useDoctordle.getState().log.results).toEqual({ 438: "missed", 439: "solved", 440: "missed" });
+    expect(screen.getByText("Logged. 3 in a row.")).toBeTruthy();
+  });
 });
 
 describe("DoctordleReminder", () => {
@@ -62,6 +74,15 @@ describe("DoctordleReminder", () => {
     expect(screen.getByText("Logged. Nice one.")).toBeTruthy();
     act(() => { vi.advanceTimersByTime(3_000); });
     expect(screen.queryByText(/Doctordle|Logged/)).toBeNull();
+  });
+
+  it("keeps a missed attempt in the dashboard streak without recording a solve", () => {
+    useDoctordle.setState({ log: { ...regular, results: { 438: "solved", 439: "missed" } } });
+    render(<DoctordleReminder />);
+    fireEvent.click(screen.getByRole("button", { name: "Yes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Missed it" }));
+    expect(useDoctordle.getState().log.results[440]).toBe("missed");
+    expect(screen.getByText("Logged. 3 in a row.")).toBeTruthy();
   });
 
   it("No offers the game, and opening it hands over to the return check-in", () => {

@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createDailyWordPuzzle, type DailyWordPuzzleState } from "../lib/dailyWord";
+import { createDailyWordPuzzle, deriveDailyWordStats, type DailyWordPuzzleState } from "../lib/dailyWord";
 import { useStore } from "../lib/store";
 import { DailyWordPage } from "./DailyWordPage";
 
@@ -96,6 +96,8 @@ describe("DailyWordPage input and scoring integration", () => {
     await user.click(screen.getByRole("button", { name: "Enter" }));
     expect(screen.getByRole("status").textContent).toContain("Not recognized in AXOM’s current dictionary.");
     expect(useStore.getState().dailyWordPuzzles[0].guesses).toEqual([]);
+    expect(deriveDailyWordStats(useStore.getState().dailyWordPuzzles))
+      .toMatchObject({ gamesPlayed: 0, wins: 0, currentStreak: 0 });
   });
 
   it("rejects duplicate guesses without persisting a second copy", async () => {
@@ -170,11 +172,16 @@ describe("DailyWordPage input and scoring integration", () => {
     expect(useStore.getState().dailyWordPuzzles[0].guesses).toEqual(["APPLE"]);
   });
 
-  it("completes a six-guess loss, reveals the answer, and rejects further submission", async () => {
+  it("completes a six-guess loss, keeps the participation streak, and rejects further submission", async () => {
     const puzzle = activePuzzle(["ALLEY", "LEVEL", "SHEEP", "BANAL", "SASSY"]);
-    act(() => { useStore.setState({ dailyWordPuzzles: [puzzle] }); });
+    const previous = {
+      ...createDailyWordPuzzle("2026-07-11", "America/Grenada", "general-1", new Date("2026-07-11T14:00:00Z")),
+      guesses: ["APPLE"], completed: true, won: true,
+      completedAt: "2026-07-11T14:10:00.000Z", updatedAt: "2026-07-11T14:10:00.000Z",
+    };
+    act(() => { useStore.setState({ dailyWordPuzzles: [previous, puzzle] }); });
     render(<DailyWordPage />);
-    await openPuzzle();
+    await openPuzzle(2);
 
     enterPhysicalWord("CRANE");
     fireEvent.keyDown(window, { key: "Enter" });
@@ -182,12 +189,17 @@ describe("DailyWordPage input and scoring integration", () => {
     expect(await screen.findByRole("heading", { name: "Puzzle complete" })).toBeTruthy();
     expect(screen.getByRole("status").textContent).toContain("Six guesses used");
     expect(screen.getByText(/Answer:/).textContent).toContain("APPLE");
-    expect(useStore.getState().dailyWordPuzzles[0]).toMatchObject({ completed: true, won: false });
-    expect(useStore.getState().dailyWordPuzzles[0].guesses).toHaveLength(6);
+    expect(useStore.getState().dailyWordPuzzles.find(({ puzzleId }) => puzzleId === puzzle.puzzleId))
+      .toMatchObject({ completed: true, won: false, guesses: [...puzzle.guesses, "CRANE"] });
+    expect(screen.getByRole("status").textContent).toContain("Your streak counts today.");
+    expect(screen.getByText("Streak").parentElement?.textContent).toBe("2Streak");
+    expect(screen.getByText("Win %").parentElement?.textContent).toBe("50Win %");
+    expect(deriveDailyWordStats(useStore.getState().dailyWordPuzzles))
+      .toMatchObject({ gamesPlayed: 2, wins: 1, currentStreak: 2, maxStreak: 2 });
 
     fireEvent.keyDown(window, { key: "A" });
     fireEvent.keyDown(window, { key: "Enter" });
-    expect(useStore.getState().dailyWordPuzzles[0].guesses).toHaveLength(6);
+    expect(useStore.getState().dailyWordPuzzles.find(({ puzzleId }) => puzzleId === puzzle.puzzleId)?.guesses).toHaveLength(6);
   });
 });
 
@@ -330,9 +342,9 @@ describe("DailyWordPage persistence, sharing, and accessibility", () => {
   });
 });
 
-async function openPuzzle() {
+async function openPuzzle(expectedHistoryLength = 1) {
   await screen.findByRole("heading", { level: 1, name: "AXOM Daily Word" });
-  await waitFor(() => expect(useStore.getState().dailyWordPuzzles).toHaveLength(1));
+  await waitFor(() => expect(useStore.getState().dailyWordPuzzles).toHaveLength(expectedHistoryLength));
 }
 
 function enterPhysicalWord(word: string) {

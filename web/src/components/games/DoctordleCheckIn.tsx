@@ -50,7 +50,7 @@ export function DoctordleCheckIn({ suspended }: { suspended: boolean }) {
   const caseNumber = doctordleCaseNumber(now);
   const answer = (result: DoctordleResult) => { useDoctordle.getState().recordResult(result); setAnswered(result); };
   const later = () => { useDoctordle.getState().snooze(LATER_MS); setOpen(false); };
-  const streak = answered === "solved" ? doctordleStreak(useDoctordle.getState().log, caseNumber) : 0;
+  const streak = answered ? doctordleStreak(useDoctordle.getState().log, caseNumber) : 0;
 
   return createPortal(
     <div className={`game-checkin ${answered ? "is-answered" : ""}`} role="dialog" aria-modal="false" aria-labelledby={titleId}>
@@ -59,7 +59,7 @@ export function DoctordleCheckIn({ suspended }: { suspended: boolean }) {
       </span>
       {answered ? (
         <div className="game-checkin-copy" role="status">
-          <b id={titleId}>{answered === "solved" ? (streak > 1 ? `Nice. ${streak} in a row.` : "Nice one.") : "Logged."}</b>
+          <b id={titleId}>{answered === "solved" ? (streak > 1 ? `Nice. ${streak} in a row.` : "Nice one.") : (streak > 1 ? `Logged. ${streak} in a row.` : "Logged. Today counts.")}</b>
           <span>{answered === "solved" ? "Saved on this device." : `The next case lands in ${compactCountdown(msUntilDoctordle(new Date(now)))}.`}</span>
         </div>
       ) : (

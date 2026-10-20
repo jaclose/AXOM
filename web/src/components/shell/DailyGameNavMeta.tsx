@@ -40,7 +40,7 @@ function GameMeta({ game }: { game: "daily-word" | "doctordle" }) {
   const now = useClockNow("minute");
   const puzzles = useStore((state) => state.dailyWordPuzzles);
   const doctordleLog = useDoctordle((state) => state.log);
-  // Doctordle's streak is the learner's own "Got it" check-ins (lib/doctordle.ts).
+  // Doctordle's AXOM streak counts logged attempts, whether solved or missed.
   const streak = game === "daily-word"
     ? deriveDailyWordStatsFromNormalizedHistory(puzzles).currentStreak
     : doctordleStreak(doctordleLog, doctordleCaseNumber(now.getTime()));

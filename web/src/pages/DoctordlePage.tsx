@@ -41,7 +41,7 @@ export function DoctordlePage() {
     <GlassCard pad className="doctordle-log" aria-labelledby="doctordle-log-title">
       <div className="doctordle-log-head">
         <h2 id="doctordle-log-title">Your check-ins</h2>
-        <p>Only what you tell AXOM, kept on this device. doctordle.org keeps its own stats; nothing is read from it.</p>
+        <p>Only what you tell AXOM, kept on this device. Every logged attempt counts toward your AXOM streak, even if you miss it. doctordle.org keeps its own stats; nothing is read from it.</p>
       </div>
       <div className="doctordle-stats">
         <span><b>{streak > 0 && <Flame size={ICON_SIZE.body} aria-hidden="true" />}{streak}</b> in a row</span>

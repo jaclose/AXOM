@@ -6,22 +6,22 @@ authority: current-state
 # AXOM current AI state
 
 Snapshot: 2026-10-20 UTC, `feat/academic-library-v1` in
-`AXOM-academic-library-v1`. Release candidate following local `81f7c1f4` adds
-exact-day reflection dismissal without changing Journal data. Remotes freshly
-observed: feature `abb504fe`, main `d5f9c030`. Domain contracts remain authoritative.
+`AXOM-academic-library-v1`, HEAD `78c00e04`. This reflection batch was pushed to
+main and deployed (authenticated deployment `7203032971`); six old dates were
+dismissed in the live UI and stayed dismissed after reload. Domain contracts remain authoritative.
 
-Batch reviewed local work instead of making intermediate release pushes. Vercel
-Git deployments follow pushes, not local commit count. `origin/main` drives the
-live release. JD approved one tested batch push/deployment on October 20,
-including this hotfix and pending reviewed QBank/template work. That does not
-authorize database migration execution, private publication or later releases.
-Check the actual deployed commit and protected index before release claims.
+Batch pushes: `origin/main` triggers Vercel production, local commits do not.
+After the reflection release, JD approved one additional tested
+batch: participation streaks, compact Activity Log and catalog CI fixture repair.
+That approval is unused; the validated follow-up awaits commit and integration.
+It does not authorize migrations, private publication or subsequent releases.
+Verify deployed SHA and protected index before release claims.
 
 ## Ownership and protected work
 
 Read the coordination board and CONVERGENCE before integration. Preserve other
-owners' checkouts and files. Local `main` has 45 protected staged additions;
-never include them in an ordinary commit. Recheck exact/prefix overlaps against
+owners' checkouts and files. Local `main` has 45 protected staged additions and
+six untracked private sources; exclude all. Recheck overlaps against
 the final SHA, then fast-forward only. Compare protected staged entries, cached
 patch and working-file hashes before/after. Never switch, reset, stash or rewrite.
 
@@ -54,14 +54,15 @@ The private October 20 delivery folder reconciles 28 templates and 655 sources;
 current parsing assesses 439 ready, 582 review-required, 10,968 unresolved and
 23 unreadable retained rows. Source/template/media checksums were checked outside
 Git. Prepared files are not proof of installation, browser decoding or cloud delivery.
+Supported automated folder selection did not start the live import; manual folder
+selection remains pending. No ZIP was created; partial compression suggests the
+full archive would exceed the 1 GiB import cap. Hold import while disk is critical.
 
 ## Implemented behavior
 
-The Course Library groups plans by term and distinguishes the course map,
-available plans and local/account context. QBank collections expose separate
-ready, review-suggested, unresolved and missing states with exact recovery
-routes, readable week metrics and mobile actions. Image-reference counts
-describe metadata only; browsing never exposes answer-bearing thumbnails.
+Course Library separates term/course maps, plans and local/account context.
+QBank distinguishes ready, review-suggested, unresolved and missing records.
+Image counts describe metadata only; no answer-bearing browsing thumbnails.
 
 Missing-record recovery retains original collection IDs, membership and source
 scope. A fresh import stays separate; only exact original records satisfy the
@@ -81,11 +82,9 @@ membership. Vault fallback promotion compares the last observed durable base
 inside an IndexedDB transaction for workspace and auxiliary keys. Workspace
 conflicts remain latched; unsupported first-ever offline cases fail conservatively.
 
-Privacy export/deletion and revision classification retain account-lock guards.
-Uncertain export removal retains paths; cleanup flags never bypass barriers.
-Preserve source-identity checks, atomic reviewed filing, attachment rollback,
-consent-based revocable shares and owner-only recovery. Ambiguous cross-service
-work requires operator reconciliation, never inferred success.
+Preserve account locks, source identity, atomic reviewed filing, attachment rollback,
+revocable shares and owner-only recovery. Uncertain removals retain paths;
+ambiguous cross-service work requires reconciliation, not inferred success.
 
 The last authenticated production inspection on 2026-10-15 recorded 23
 migrations through `20261013230000`. It is not a fresh production check.
@@ -101,10 +100,8 @@ Nine later migrations remain locally tested only:
 - `20261016011812_harden_privacy_request_barrier.sql`; and
 - `20261017233759_enforce_academic_collection_classification.sql`.
 
-Journal transitions wait for confirmed vault writes; failure preserves the
-draft. Closeout-to-Journal is opt-in. Local images remain exportable beyond the
-14 MB account-copy limit. Browser teardown is best effort, not a durability
-guarantee.
+Journal transitions await confirmed writes; failures preserve drafts. Closeout
+copy is opt-in. Images export beyond the 14 MB account limit; teardown is best effort.
 
 Reflection inbox now remembers exact dismissed dates per browser/device/account,
 including across reload and day rollover. New missed dates remain eligible;
@@ -114,29 +111,29 @@ See [reminder lifecycle](DAILY-LOOP-REMINDER-LIFECYCLE.md).
 
 ## Current validation
 
-Node 22.23.1 on macOS. Consolidation `81e1a5bb` validation:
+Follow-up: 65 participation-streak unit tests and two desktop/mobile Chrome journeys
+passed; completed losses/misses count, wins remain accurate, reload retains history.
+Activity Log: 10 unit tests and two Chrome journeys passed; five-entry preview follows
+Pomodoro and preserves full history. Both interfaces' screenshots were reviewed.
+Catalog CI fixture repair: three Chrome journeys passed locally. Production Quality
+run `39443209953` failed missing mocked communications/settings HTTP responses;
+the fixture now handles only that expected route. Remote CI has not rerun.
+Initial streak checks hit ENOSPC and exposed two test-fixture assumptions, corrected
+before passing reruns. Space recovered from 164 MiB to 7.4 GiB without agent cleanup.
+Types/lint/build, Daily Games isolation, 43 repo tests and hygiene passed; no second push yet.
 
-- unit/SQL: 3,791 passed, 28 skipped; types/lint/build, Daily Games isolation,
-  43 repo tests, hygiene/budgets and communications integrity passed;
-- Chrome: 14 course/QBank/template/image journeys at 1440/768/390, themes,
-  keyboard/reduced motion, zero console warnings/errors; update consent,
-  two-build recovery, other-tab preservation and offline Daily Games passed.
+Node 22.23.1 on macOS. Prior receipts remain in Git and the coordination board:
+`81e1a5bb` passed 3,791 unit/SQL tests (28 skipped), 14 academic Chrome journeys,
+types/lint/build, bundle isolation, repo and communications checks. Follow-ups
+passed queue removal (19 tests/three journeys), classification/privacy (166 tests,
+isolated PGlite), and exact-ID recovery (51 tests/two journeys). Each passed release
+checks; hosted and real multi-connection SQL behavior remain unverified.
 
-Prior follow-ups passed: queue removal (19 tests, three Chrome journeys),
-classification/privacy boundaries (166 tests including isolated PGlite replay),
-and exact-ID recovery (51 tests, two Chrome journeys). Each passed types/lint/build
-and 43 repo tests. Browser coverage included reload, retries, desktop/phone,
-themes, keyboard and reduced motion without console errors/warnings. Separate
-IndexedDB checks covered contention, navigation blocking and cold-tab recovery.
-Real multi-connection SQL and hosted behavior remain unverified.
-
-October 20 hotfix: 36 focused tests passed, including Undo retry and concurrent
-preference preservation. Nine Chrome journeys passed: desktop/phone dismissal,
-reload/day rollover/other-tab/data preservation, inbox layout, and question Slides
-with figures/PDF originals. A stale dev optimizer caused the first PDF test failures;
-restarting the owned server resolved them. Types/lint/build and 43 repo tests passed.
-Full Playwright and `verify:all` remain unrun; targeted checks are not the full gate.
-Use installed Chrome and serial checks; do not duplicate suites.
+Reflection release `78c00e04`: 36 tests, nine Chrome journeys, types/lint/build and
+43 repo tests passed, covering Undo/retry, reload/day rollover, cross-tab/data
+preservation and question Slides with figures/PDF originals. Initial PDF optimizer
+failures cleared after restarting the owned server. Full Playwright and `verify:all`
+remain unrun. Use installed Chrome and serial checks; never duplicate suites.
 
 Existing build warnings concern `jszip`/`webUpdates` static/dynamic imports
 and chunks over 500 kB. The prior GitHub advisory snapshot (56: 14 high,
@@ -158,7 +155,6 @@ packaged-desktop acceptance, and dependency-advisory review. The missing SSD
 sources, B4/B5 review queues and absent T4/T5 coverage remain blockers to
 complete academic-library acceptance.
 
-Inspect disk before large checks; preserve services and sources, with no cleanup.
-The ignored shared beta checkpoint owns chat receipts and pending audits.
-Accepted prompts are not completed audits. Local implementation is not a
-production-verified academic release.
+Inspect disk before checks; preserve services/sources, no cleanup. Shared beta
+checkpoint holds chat receipts, not completed audits. Local checks are not
+production academic acceptance.
