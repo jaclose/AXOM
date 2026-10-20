@@ -84,3 +84,16 @@ same day without overwriting existing writing.
 The reminder ledger controls presentation only. It never deletes activity,
 marks a target complete, rewrites a Journal page, or changes Command Brief until
 the user saves an actual plan or closeout.
+
+## Past-day reflection inbox
+
+Dashboard's Reflection inbox offers Later (four hours), Not today, and Dismiss
+these days. Dismiss remembers only the exact currently eligible dates in
+device/account-scoped localStorage; reload and day rollover do not restore their
+reminders. New missed dates remain eligible. The shell catch-up watcher observes
+the same preferences, including changes from another tab.
+
+Dismissal never changes Journal entries, day plans, logs or completion. Its toast
+offers Undo; failed saves remain visible and failed Undo offers Retry Undo.
+Token-specific Undo markers cannot erase a newer dismissal in another tab. This
+is a browser-local preference, not an account-synced Journal mutation.

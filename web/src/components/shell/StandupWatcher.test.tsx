@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { STORAGE_KEYS } from "../../lib/brand";
+import { useAccount } from "../../lib/account/accountStore";
+import { dismissReflectionDays, reflectionDismissalKey } from "../../lib/reflectionDismissals";
+import { deviceId } from "../../lib/sync/syncMetadata";
 import { prettyDate } from "../../lib/scoring";
 import { useStore } from "../../lib/store";
 import { pushToast, REMINDER_TOAST_DURATION_MS, useToasts } from "../../lib/toast";
@@ -42,6 +45,7 @@ beforeEach(() => {
   window.location.hash = "";
   useToasts.setState({ toasts: [] });
   useUi.setState({ journalDay: null });
+  useAccount.setState({ user: null });
 });
 
 afterEach(() => {
@@ -52,6 +56,39 @@ afterEach(() => {
 });
 
 describe("StandupWatcher", () => {
+  it("suppresses dismissed dates after day rollover but offers a new missed date", async () => {
+    const workspaceKey = `device:${deviceId()}:account:local`;
+    dismissReflectionDays(workspaceKey, ["2026-10-17", "2026-10-18"]);
+    setReminderState("2026-10-20", ["2026-10-17", "2026-10-18"]);
+    const first = renderWatcher();
+    expect(useToasts.getState().toasts).toHaveLength(0);
+    first.unmount();
+    setReminderState("2026-10-21", ["2026-10-17", "2026-10-18", "2026-10-20"]);
+    renderWatcher();
+    expect(await screen.findByText(`Journal catch-up for ${prettyDate("2026-10-20T12:00:00")}`)).toBeTruthy();
+    expect(useToasts.getState().toasts).toHaveLength(1);
+  });
+
+  it("removes an already-visible toast when its day is dismissed on this device", async () => {
+    setReminderState("2026-10-23", ["2026-10-22"]);
+    renderWatcher();
+    expect(await screen.findByRole("button", { name: "Complete catch-up" })).toBeTruthy();
+    act(() => { dismissReflectionDays(`device:${deviceId()}:account:local`, ["2026-10-22"]); });
+    expect(useToasts.getState().toasts).toHaveLength(0);
+  });
+
+  it("suppresses an in-flight toast when another tab saves the same exact-day preference", async () => {
+    setReminderState("2026-10-25", ["2026-10-24"]);
+    renderWatcher();
+    expect(await screen.findByRole("button", { name: "Complete catch-up" })).toBeTruthy();
+    const key = reflectionDismissalKey(`device:${deviceId()}:account:local`, "2026-10-24");
+    act(() => {
+      localStorage.setItem(key, "another-tab-token");
+      window.dispatchEvent(new StorageEvent("storage", { key }));
+    });
+    expect(useToasts.getState().toasts).toHaveLength(0);
+  });
+
   it("names the newest missed date and routes catch-up to that exact day without changing journal data", async () => {
     const existing: JournalEntry = {
       id: "existing",

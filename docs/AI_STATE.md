@@ -5,17 +5,17 @@ authority: current-state
 ---
 # AXOM current AI state
 
-Snapshot: 2026-10-18 UTC, `feat/academic-library-v1` in
-`AXOM-academic-library-v1`. Queue-removal follow-up to local `d8b7f283`:
-single/batch acceptance retains rows and retry inputs until saves settle.
-Last observed remotes: feature `abb504fe`, main `d5f9c030`. Fresh protected-index
-checks are required for integration. Domain contracts remain authoritative.
+Snapshot: 2026-10-20 UTC, `feat/academic-library-v1` in
+`AXOM-academic-library-v1`. Release candidate following local `81f7c1f4` adds
+exact-day reflection dismissal without changing Journal data. Remotes freshly
+observed: feature `abb504fe`, main `d5f9c030`. Domain contracts remain authoritative.
 
 Batch reviewed local work instead of making intermediate release pushes. Vercel
 Git deployments follow pushes, not local commit count. `origin/main` drives the
-live release and still requires fresh production-aware approval. No push,
-production deployment, migration, academic upload or publication was performed
-for this checkpoint.
+live release. JD approved one tested batch push/deployment on October 20,
+including this hotfix and pending reviewed QBank/template work. That does not
+authorize database migration execution, private publication or later releases.
+Check the actual deployed commit and protected index before release claims.
 
 ## Ownership and protected work
 
@@ -50,6 +50,11 @@ T4/T5 lack authoritative denominators. Local GOER has five banks, 28 ready and
 `/Volumes/JDabSSD` is unavailable. Its older 1,280-file scan must not replace
 B4's 1,402 unavailable dispositions. `academicReleaseComplete` remains false.
 
+The private October 20 delivery folder reconciles 28 templates and 655 sources;
+current parsing assesses 439 ready, 582 review-required, 10,968 unresolved and
+23 unreadable retained rows. Source/template/media checksums were checked outside
+Git. Prepared files are not proof of installation, browser decoding or cloud delivery.
+
 ## Implemented behavior
 
 The Course Library groups plans by term and distinguishes the course map,
@@ -76,20 +81,11 @@ membership. Vault fallback promotion compares the last observed durable base
 inside an IndexedDB transaction for workspace and auxiliary keys. Workspace
 conflicts remain latched; unsupported first-ever offline cases fail conservatively.
 
-Privacy export admission and deletion claims use the same account lock.
-Requested exports block deletion claims; processing or reconciliation-required
-deletions reject new exports. Cancellation remains successful if only its
-notification receipt fails. Ready worker requests are filtered before the batch
-limit, and actionable unread notifications cannot hide behind routine history.
-Expired-export paths survive uncertain removal; guarded cleanup flags cannot replace
-deletion barriers. Revisions compare term/module/academic-term/cohort under the owner
-lock before source reservation or hash replay; mismatches cannot reclassify a collection.
-
-Preserve existing upload/source-identity checks, atomic reviewed filing and
-attachment rollback. Seven-day unlisted shares remain consent-based and
-revocable; recovery is owner-only. Destructive cleanup must revoke links and
-withdraw owned academic content before external deletion. Ambiguous
-cross-service work requires operator reconciliation.
+Privacy export/deletion and revision classification retain account-lock guards.
+Uncertain export removal retains paths; cleanup flags never bypass barriers.
+Preserve source-identity checks, atomic reviewed filing, attachment rollback,
+consent-based revocable shares and owner-only recovery. Ambiguous cross-service
+work requires operator reconciliation, never inferred success.
 
 The last authenticated production inspection on 2026-10-15 recorded 23
 migrations through `20261013230000`. It is not a fresh production check.
@@ -110,6 +106,12 @@ draft. Closeout-to-Journal is opt-in. Local images remain exportable beyond the
 14 MB account-copy limit. Browser teardown is best effort, not a durability
 guarantee.
 
+Reflection inbox now remembers exact dismissed dates per browser/device/account,
+including across reload and day rollover. New missed dates remain eligible;
+shell reminders share suppression. Undo has a retry path and token-specific
+markers preserve concurrent newer dismissals. Journal, plans and logs are untouched.
+See [reminder lifecycle](DAILY-LOOP-REMINDER-LIFECYCLE.md).
+
 ## Current validation
 
 Node 22.23.1 on macOS. Consolidation `81e1a5bb` validation:
@@ -120,24 +122,21 @@ Node 22.23.1 on macOS. Consolidation `81e1a5bb` validation:
   keyboard/reduced motion, zero console warnings/errors; update consent,
   two-build recovery, other-tab preservation and offline Daily Games passed.
 
-Queue-removal follow-up: 19 focused tests, independent review, types/lint/build,
-43 repo tests and three Chrome journeys passed. Delayed failure/retry, settled
-removal and reload passed at 1440/390 px, themes/reduced motion/keyboard, with
-zero browser errors/warnings. Screenshots inspected. A stale selector was fixed;
-disk recovered without cleanup after stopping the initial timed-out run.
+Prior follow-ups passed: queue removal (19 tests, three Chrome journeys),
+classification/privacy boundaries (166 tests including isolated PGlite replay),
+and exact-ID recovery (51 tests, two Chrome journeys). Each passed types/lint/build
+and 43 repo tests. Browser coverage included reload, retries, desktop/phone,
+themes, keyboard and reduced motion without console errors/warnings. Separate
+IndexedDB checks covered contention, navigation blocking and cold-tab recovery.
+Real multi-connection SQL and hosted behavior remain unverified.
 
-Boundary follow-up: 166 targeted tests including migration replay, types/lint/build,
-43 repository tests and communications integrity passed. SQL uses isolated PGlite;
-real concurrent connections and hosted behavior remain unverified.
-
-Recovery follow-up: 51 tests, two Chrome journeys at 1440/390 px,
-typecheck, lint, build and 43 repository tests passed: exact-ID recovery,
-separate imports, reload, retained drafts, rollback, themes and reduced motion.
-The 23:24 UTC Chrome check passed real IndexedDB text contention, blocked navigation,
-unsaved Markdown export and cold-tab recovery, with no console errors/warnings.
-Full suites were not repeated. Full Playwright `test:e2e` and `verify:all` remain
-unrun for this candidate; targeted acceptance is not the full release gate.
-Installed Chrome substitutes for absent bundled Chromium. Keep concurrency low.
+October 20 hotfix: 36 focused tests passed, including Undo retry and concurrent
+preference preservation. Nine Chrome journeys passed: desktop/phone dismissal,
+reload/day rollover/other-tab/data preservation, inbox layout, and question Slides
+with figures/PDF originals. A stale dev optimizer caused the first PDF test failures;
+restarting the owned server resolved them. Types/lint/build and 43 repo tests passed.
+Full Playwright and `verify:all` remain unrun; targeted checks are not the full gate.
+Use installed Chrome and serial checks; do not duplicate suites.
 
 Existing build warnings concern `jszip`/`webUpdates` static/dynamic imports
 and chunks over 500 kB. The prior GitHub advisory snapshot (56: 14 high,

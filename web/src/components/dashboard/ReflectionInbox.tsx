@@ -5,7 +5,8 @@ import { ICON_SIZE } from "../../lib/iconSize";
 import { prettyDate } from "../../lib/scoring";
 import { planForDay } from "../../lib/journal";
 import { journalReminderLedger } from "../../lib/journalReminder";
-import { useToasts } from "../../lib/toast";
+import { dismissReflectionDays, useDismissedReflectionDays } from "../../lib/reflectionDismissals";
+import { pushToast, useToasts } from "../../lib/toast";
 import { gotoJournalDay } from "../../lib/uiStore";
 import { GlassCard, GButton, GhostButton } from "../ui/primitives";
 import "../../styles/dashboard-inbox.css";
@@ -69,7 +70,9 @@ export function ReflectionInbox({
   const storageKey = courtesyStorageKey(workspaceKey);
   const [storedCourtesy, setStoredCourtesy] = useState(() => ({ key: storageKey, value: readCourtesy(storageKey) }));
   const courtesy = storedCourtesy.key === storageKey ? storedCourtesy.value : readCourtesy(storageKey);
-  const recommended = dayKeys[0];
+  const dismissedDays = useDismissedReflectionDays(workspaceKey, dayKeys);
+  const eligibleDays = dayKeys.filter((day) => !dismissedDays.has(day));
+  const recommended = eligibleDays[0];
   const recommendedPlan = useMemo(() => planForDay(dayPlans, recommended), [dayPlans, recommended]);
   const recommendedIntention = recommendedPlan?.intention.trim() ?? "";
   const recommendedSummary = recommendedIntention.length > 72
@@ -107,7 +110,7 @@ export function ReflectionInbox({
       .forEach((toast) => dismiss(toast.id));
   }, [activeDayKey, recommended, targetSignature]);
 
-  if (!dayKeys.length || hidden) return null;
+  if (!eligibleDays.length || hidden) return null;
 
   function defer(kind: "later" | "today") {
     const next: ReflectionInboxCourtesy = kind === "later"
@@ -117,13 +120,47 @@ export function ReflectionInbox({
     setStoredCourtesy({ key: storageKey, value: next });
   }
 
+  function dismissDays() {
+    const result = dismissReflectionDays(workspaceKey, eligibleDays);
+    const undo = () => {
+      if (result.undo().length) {
+        pushToast({
+          title: "Could not undo dismissal",
+          body: "Your browser could not save the reminder preference. Retry when storage is available.",
+          tone: "warn",
+          actionLabel: "Retry Undo",
+          onAction: undo,
+          duration: 20_000,
+        });
+      }
+    };
+    if (result.dismissedDays.length) {
+      pushToast({
+        title: result.failedDays.length ? "Some reminder preferences could not be saved" : "Catch-up reminders dismissed",
+        body: result.failedDays.length
+          ? "Some preferences could not be confirmed. Please retry any remaining days. Your Journal is unchanged."
+          : "These days will not remind you again on this device. Your Journal is unchanged.",
+        tone: result.failedDays.length ? "warn" : "success",
+        duration: 12_000,
+        actionLabel: "Undo",
+        onAction: undo,
+      });
+    } else if (result.failedDays.length) {
+      pushToast({
+        title: "Could not dismiss these days",
+        body: "Your browser could not confirm dismissal. Please retry when storage is available. Your Journal is unchanged.",
+        tone: "warn",
+      });
+    }
+  }
+
   return (
     <GlassCard className="reflection-inbox" role="region" aria-labelledby="reflection-inbox-title">
       <span className="reflection-inbox__mark" aria-hidden="true"><Inbox size={ICON_SIZE.emphasis} /></span>
       <div className="reflection-inbox__copy">
         <b id="reflection-inbox-title">Reflection inbox</b>
         <span>
-          {dayKeys.length === 1 ? "One day is ready when you are." : `${dayKeys.length} days are ready when you are.`}
+          {eligibleDays.length === 1 ? "One day is ready when you are." : `${eligibleDays.length} days are ready when you are.`}
           {recommendedSummary ? ` Start with “${recommendedSummary}”.` : " A few honest lines is enough."}
         </span>
       </div>
@@ -131,15 +168,15 @@ export function ReflectionInbox({
         <GButton size="sm" variant="primary" onClick={() => onOpenDay(recommended)}>
           Continue {prettyDate(`${recommended}T12:00:00`)} <ArrowRight size={ICON_SIZE.body} aria-hidden="true" />
         </GButton>
-        {dayKeys.length > 1 && (
+        {eligibleDays.length > 1 && (
           <GhostButton aria-expanded={expanded} aria-controls="reflection-inbox-days" onClick={() => setExpanded((value) => !value)}>
-            {expanded ? "Hide list" : `View all ${dayKeys.length}`}
+            {expanded ? "Hide list" : `View all ${eligibleDays.length}`}
           </GhostButton>
         )}
       </div>
-      {expanded && dayKeys.length > 1 && (
+      {expanded && eligibleDays.length > 1 && (
         <div id="reflection-inbox-days" className="reflection-inbox__days">
-          {dayKeys.map((key) => {
+          {eligibleDays.map((key) => {
             const plan = planForDay(dayPlans, key);
             return (
               <button key={key} type="button" className="reflection-inbox__day" onClick={() => onOpenDay(key)}>
@@ -153,6 +190,7 @@ export function ReflectionInbox({
       <div className="reflection-inbox__courtesy" aria-label="Reflection reminder options">
         <GhostButton onClick={() => defer("later")}><Clock3 size={ICON_SIZE.body} aria-hidden="true" /> Later</GhostButton>
         <GhostButton onClick={() => defer("today")}><X size={ICON_SIZE.body} aria-hidden="true" /> Not today</GhostButton>
+        <GhostButton className="reflection-inbox__dismiss" onClick={dismissDays} title="Stop reminders for these past days on this device. Future days are unaffected.">Dismiss these days</GhostButton>
       </div>
       <span className="reflection-inbox__assurance">Opening a day never replaces an existing Journal entry.</span>
     </GlassCard>

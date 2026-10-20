@@ -47,8 +47,14 @@
 .reflection-inbox__courtesy {
   grid-column: 2 / 3;
   gap: 3px;
+  flex-wrap: wrap;
 }
 .reflection-inbox__courtesy .ghost-btn { padding-inline: 7px; color: var(--text-45); font-size: var(--fs-xs); }
+.reflection-inbox__courtesy .reflection-inbox__dismiss {
+  color: var(--text-85);
+  font-size: var(--fs-sm);
+  min-height: 36px;
+}
 .reflection-inbox__assurance {
   grid-column: 3 / 4;
   justify-self: end;
