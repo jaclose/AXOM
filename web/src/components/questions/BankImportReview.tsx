@@ -37,6 +37,19 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
   const summary = useMemo(() => summarizePackage(pkg, assessed.issues), [pkg, assessed.issues]);
   const question = pkg.questions[index];
   const verdict = question && assessed.verdicts.get(question.id);
+  // A marked answer slide is useful review evidence, not an approved key.
+  // A person still has to view the source and deliberately confirm it.
+  const markedSourceCandidate = question?.correctAnswer?.evidence === "answer-reveal-slide"
+    && question.correctAnswer.labels.length === 1
+    && question.choices.some((choice) => choice.label === question.correctAnswer?.labels[0])
+      ? question.correctAnswer.labels[0] : "";
+  const reviewedAnswerSelection = answer || markedSourceCandidate;
+  // Some older packages place the reveal image inside the explanation and also
+  // register it as supporting media. Render each source asset only once.
+  const placedAssetIds = new Set(question
+    ? [...question.stem, ...(question.explanation ?? []), ...question.choices.flatMap((choice) => choice.blocks)]
+      .flatMap((block) => block.type === "image" ? [block.assetId] : [])
+    : []);
   const globalErrors = assessed.issues.filter((issue) => issue.severity === "error" && !issue.questionId);
   const validLocation = bank.reviewedFiling
     ? Boolean(bank.reviewedFiling.module.trim() && /^Term [1-5]$/.test(bank.reviewedFiling.term))
@@ -53,9 +66,9 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
     setResult(undefined);
   }
   function confirmSourceAnswer() {
-    if (!question || !answer) return;
+    if (!question || !reviewedAnswerSelection) return;
     setPackage((current) => ({ ...current, questions: current.questions.map((entry) =>
-      entry.id === question.id ? withReviewedAnswer(entry, answer) : entry) }));
+      entry.id === question.id ? withReviewedAnswer(entry, reviewedAnswerSelection) : entry) }));
     setConfirmedAnswerIds((current) => new Set([...current, question.id]));
     setAnswer(""); setResult(undefined);
   }
@@ -147,7 +160,7 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
       {mode !== "question" && <>
         <p>Answer: {question.correctAnswer?.labels.join(", ") || "Requires verification"}</p>
         <QuestionBlocks blocks={question.explanation ?? []} content={question} files={bank.files} mode={mode} section="explanation" />
-        <QuestionBlocks blocks={question.assets.filter((asset) => ["answer_reveal", "reference", "source_page"].includes(asset.role) && isAssetVisible(asset.role, mode)).map((asset) => ({ type: "image", assetId: asset.id, role: asset.role, alt: "Source answer or reference" }))} content={question} files={bank.files} mode={mode} />
+        <QuestionBlocks blocks={question.assets.filter((asset) => !placedAssetIds.has(asset.id) && ["answer_reveal", "reference", "source_page"].includes(asset.role) && isAssetVisible(asset.role, mode)).map((asset) => ({ type: "image", assetId: asset.id, role: asset.role, alt: "Source answer or reference" }))} content={question} files={bank.files} mode={mode} />
       </>}
       <details className="stack gap8" aria-label={`Edit question ${index + 1} from source`}>
         <summary>Correct extracted text, answer choices or tables</summary>
@@ -160,9 +173,12 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
         {question.explanation?.length ? blockEditors(question.explanation, "explanation", "Explanation") : <p className="sub">The source has no extracted explanation. Add it to the original document and reimport if needed.</p>}
       </details>
       {verdict && [...verdict.reasons, ...verdict.advisories].map((note, n) => <p key={n} className="sub">{note}</p>)}
-      {verdict?.readiness !== "ready" && <div className="row wrap gap8">
-        <SelectField label="Verified answer" value={answer} onChange={(event) => setAnswer(event.target.value)}><option value="">Choose after checking the source</option>{question.choices.map((choice) => <option key={choice.id}>{choice.label}</option>)}</SelectField>
-        <GButton disabled={!answer || mode === "question"} onClick={confirmSourceAnswer}>Confirm answer from source</GButton>
+      {verdict?.readiness !== "ready" && <div className="stack gap6">
+        {markedSourceCandidate && <p className="sub">The original answer slide marks {markedSourceCandidate}. This is a candidate, not a reviewer-approved key. Verify the image and explanation before confirming.</p>}
+        <div className="row wrap gap8">
+          <SelectField label="Verified answer" value={reviewedAnswerSelection} onChange={(event) => setAnswer(event.target.value)}><option value="">Choose after checking the source</option>{question.choices.map((choice) => <option key={choice.id}>{choice.label}</option>)}</SelectField>
+          <GButton disabled={!reviewedAnswerSelection || mode === "question"} onClick={confirmSourceAnswer}>Confirm answer from source</GButton>
+        </div>
       </div>}
     </article>}
     {error && <p role="alert">{error}</p>}

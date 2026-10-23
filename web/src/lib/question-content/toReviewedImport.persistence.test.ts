@@ -118,24 +118,46 @@ describe("what a package offers to the canonical import", () => {
     expect(adapted.held.find((entry) => entry.questionId === "syn-q02")).toEqual({ questionId: "syn-q02", readiness: "needs-review", reasons: ["The answer is only shown by a mark."] });
   });
 
-  it("blocks a merged 9-choice PDF and a one-choice slide even when review is acknowledged", () => {
+  it("accepts a source-faithful nine-choice MCQ without truncating choice I", () => {
     const { pkg, files } = invented();
     const nineChoices = Array.from({ length: 9 }, (_, i) => ({
       id: "synthetic-option-" + i,
-      label: String.fromCharCode(65+i),
+      label: String.fromCharCode(65 + i),
+      blocks: [{ type: "text" as const, text: "Synthetic alternative " + i }],
+    }));
+    const nine = { ...pkg, questions: pkg.questions.map(q => q.id === "syn-q01"
+      ? { ...q, choices: nineChoices, correctAnswer: { labels: ["I"], evidence: "printed-key" as const } }
+      : q) };
+    const result = packageToReviewedImport(nine, validatePackage(nine, {
+      assetFiles: new Set(files.map(file => file.name)),
+    }));
+    const accepted = result.imports.flatMap(section => section.questionIds);
+    expect(accepted).toContain("syn-q01");
+    const section = result.imports.find(section => section.questionIds.includes("syn-q01"))!;
+    const draft = section.request.drafts[section.questionIds.indexOf("syn-q01")];
+    expect(draft.options).toHaveLength(9);
+    expect(draft.options[8]).toMatchObject({ key: "I" });
+    expect(draft.correctKey).toBe("I");
+  });
+
+  it("rejects one-choice and eleven-choice malformed sources even when review is acknowledged", () => {
+    const { pkg, files } = invented();
+    const elevenChoices = Array.from({ length: 11 }, (_, i) => ({
+      id: "synthetic-option-" + i,
+      label: String.fromCharCode(65 + i),
       blocks: [{ type: "text" as const, text: "Synthetic alternative " + i }],
     }));
     const malformed = { ...pkg, questions: pkg.questions.map((q) =>
-      q.id === "syn-q01" ? { ...q, choices: nineChoices } :
+      q.id === "syn-q04" ? { ...q, choices: elevenChoices } :
       q.id === "syn-q02" ? { ...q, choices: [q.choices[0]] } : q) };
     const result = packageToReviewedImport(malformed, validatePackage(malformed, {
-      assetFiles: new Set(files.map(file=>file.name)),
-    }), { acknowledged: new Set(["syn-q01","syn-q02"]) });
+      assetFiles: new Set(files.map(file => file.name)),
+    }), { acknowledged: new Set(["syn-q02", "syn-q04"]) });
     const accepted = result.imports.flatMap(section => section.questionIds);
-    expect(accepted).not.toContain("syn-q01");
     expect(accepted).not.toContain("syn-q02");
-    expect(result.held.find(q=>q.questionId==="syn-q01")?.reasons.join(" ")).toMatch(/2–8/);
-    expect(result.held.find(q=>q.questionId==="syn-q02")?.reasons.join(" ")).toMatch(/2–8/);
+    expect(accepted).not.toContain("syn-q04");
+    expect(result.held.find(q => q.questionId === "syn-q02")?.reasons.join(" ")).toMatch(/2–10/);
+    expect(result.held.find(q => q.questionId === "syn-q04")?.reasons.join(" ")).toMatch(/2–10/);
   });
   it("lets an advisory note travel with a ready question without marking it as reviewed by hand", () => {
     const { pkg, issues } = invented();
