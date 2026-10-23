@@ -179,7 +179,7 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
           <SelectField label="Verified answer" value={reviewedAnswerSelection} onChange={(event) => setAnswer(event.target.value)}><option value="">Choose after checking the source</option>{question.choices.map((choice) => <option key={choice.id}>{choice.label}</option>)}</SelectField>
           <GButton disabled={!reviewedAnswerSelection || mode === "question"} onClick={confirmSourceAnswer}>Confirm answer from source</GButton>
         </div>
-      </div>
+      </div>}
     </article>}
     {error && <p role="alert">{error}</p>}
     {result && <div role={result.status === "failed" || result.status === "partial" ? "alert" : "status"}>
