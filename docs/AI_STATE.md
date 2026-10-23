@@ -5,7 +5,10 @@ authority: current-state
 ---
 # AXOM current AI state
 
-Snapshot: 2026-10-20 UTC, `feat/academic-library-v1` in
+2026-10-23: `codex/rhps-esoft-acceptance-20261023`, base `dc055a2f`;
+[intake](../web/src/lib/privateLibrary/INPUT_COMPATIBILITY.md). Unreleased.
+
+Prior snapshot: 2026-10-20 UTC, `feat/academic-library-v1` in
 `AXOM-academic-library-v1`, HEAD `78c00e04`. This reflection batch was pushed to
 main and deployed (authenticated deployment `7203032971`); six old dates were
 dismissed in the live UI and stayed dismissed after reload. Domain contracts remain authoritative.

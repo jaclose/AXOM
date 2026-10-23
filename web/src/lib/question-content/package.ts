@@ -11,6 +11,8 @@ import type { AssetRole, QuestionBlock, TableBlock } from "./blocks";
 
 /** Bumped only when an older AXOM could misread a newer package. See `MIGRATIONS` in packageJson.ts. */
 export const PACKAGE_SCHEMA_VERSION = 1;
+/** Source-backed MCQs may have nine labelled alternatives; larger extractions remain held. */
+export const MAX_PACKAGE_CHOICES = 9;
 
 // --- manifest ----------------------------------------------------------------
 

@@ -148,7 +148,8 @@ export function PreparedLibrary() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
-  const [opened, setOpened] = useState<{ id: string; bank: PreparedBank; files: File[] }>();
+  const [opened, setOpened] = useState<{ id: string; bank: PreparedBank; files: File[]; originalFile?: Blob }>();
+  const reviewRequest = useRef(0);
   const [originalAvailability, setOriginalAvailability] = useState<Record<string, "checking" | "available" | "missing">>({});
   async function install(read: LibraryReader) {
     setBusy(true); setError("");
@@ -170,12 +171,20 @@ export function PreparedLibrary() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalogDoc?.id]);
   async function review(id: string) {
+    const request = ++reviewRequest.current;
     setError("");
     try {
       const doc = documents.find(d => d.id === id)!;
       const bank = readPreparedBank(JSON.parse(doc.rawText));
-      setOpened({ id, bank, files: await bankFiles(bank) });
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Review could not open."); }
+      const source = catalog?.sources.find(candidate => `private-review-${candidate.checksum}` === id);
+      const originalDocument = source?.originalFile && documents.find(candidate =>
+        candidate.fileType !== PRIVATE_REVIEW_DOCUMENT && candidate.checksum?.replace(/^sha256:/, "") === source.checksum);
+      const files = await bankFiles(bank);
+      const originalFile = originalDocument ? await readSourceOriginal(originalDocument.id, originalDocument.checksum) : undefined;
+      if (request === reviewRequest.current) setOpened({ id, bank, files, originalFile });
+    } catch (cause) {
+      if (request === reviewRequest.current) setError(cause instanceof Error ? cause.message : "Review could not open.");
+    }
   }
   async function original(checksum: string, name: string) {
     setError("");
@@ -272,7 +281,7 @@ export function PreparedLibrary() {
       {sources.length > 40 && <p>{sources.length - 40} more sources. Narrow the search to find a specific collection.</p>}
     </details>}
     {opened && <Modal title="Source review" className="course-template-modal" onClose={() => setOpened(undefined)}>
-      <BankImportReview bank={{ ...opened.bank, sourceText: { ...opened.bank.sourceText, pageTexts: opened.bank.sourceText.pageTexts ?? [] }, files: opened.files, conversionIssues: opened.bank.issues, warnings: [], unplaced: [] }} onBack={() => setOpened(undefined)}
+      <BankImportReview bank={{ ...opened.bank, originalFile: opened.originalFile, sourceText: { ...opened.bank.sourceText, pageTexts: opened.bank.sourceText.pageTexts ?? [] }, files: opened.files, conversionIssues: opened.bank.issues, warnings: [], unplaced: [] }} onBack={() => setOpened(undefined)}
         onReviewed={(pkg, result) => persistPreparedLibraryReview(opened.id, opened.bank, pkg, result)} />
     </Modal>}
   </section>;
