@@ -24,7 +24,7 @@ const mocked = vi.hoisted(() => ({
   vaultAssertWritesSince: vi.fn(),
 }));
 
-vi.mock("../../lib/store", () => ({ useStore: () => mocked.store }));
+vi.mock("../../lib/store", () => ({ useStore: Object.assign(() => mocked.store, { getState: () => ({ ...mocked.store, profile: { userId: "test-user" } }), subscribe: () => () => {} }) }));
 vi.mock("../../lib/localVault", () => ({
   getVaultWriteCheckpoint: mocked.vaultCheckpoint,
   flushLocalVaultWrites: mocked.vaultFlush,
@@ -132,11 +132,14 @@ describe("ExamRunner saved blocks and selection semantics", () => {
     localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify({
       mode: "tutor", poolIds: [question.id], index: 0, answers: [], picked: "A",
       revealed: false, startedAt: "2026-07-10T01:00:00.000Z", timed: false,
-      filters: { count: 1, status: "all", ordered: true },
+      filters: { count: 1, status: "incorrect", ordered: true, setIds: ["weekly-set"], categories: ["Anatomy"] },
     }));
     render(<ExamRunner mode="tutor" onClose={() => {}} />);
     expect(screen.getByText(question.stem)).toBeTruthy();
     expect(screen.getByRole("button", { name: /A\. Alpha/i }).getAttribute("aria-pressed")).toBe("true");
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession)!).filters).toMatchObject({
+      status: "incorrect", setIds: ["weekly-set"], categories: ["Anatomy"], ordered: true,
+    });
   });
   it("reopens a timed block as timed and advances lastRunAt only when Start is pressed", async () => {
     setStore();
@@ -587,7 +590,7 @@ describe("ExamRunner keeps what was answered", () => {
       answerKey: "A", status: "incorrect", mode: "tutor", quizSessionId: expect.any(String),
     }));
 
-    await user.click(screen.getByRole("button", { name: "Close" }));
+    await user.click(screen.getByRole("button", { name: "End early" }));
     expect(confirm).toHaveBeenCalledWith("Leave this block? Answered questions are saved. Unanswered ones are not scored.");
     expect(onClose).toHaveBeenCalledTimes(1);
     // The block is kept as a session that ended early, under the same run id.
@@ -650,7 +653,7 @@ describe("ExamRunner keeps what was answered", () => {
 
     await user.click(screen.getByRole("button", { name: "B. Beta" }));
     await user.click(screen.getByRole("button", { name: "Submit & next" }));
-    await user.click(screen.getByRole("button", { name: "Close" }));
+    await user.click(screen.getByRole("button", { name: "End early" }));
 
     expect(mocked.commitQuizRun).toHaveBeenCalledTimes(1);
     const run = mocked.commitQuizRun.mock.calls[0][0];
@@ -671,7 +674,7 @@ describe("ExamRunner keeps what was answered", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<ExamRunner mode="exam" retakeIds={[question.id]} onClose={() => {}} />);
 
-    await user.click(screen.getByRole("button", { name: "Close" }));
+    await user.click(screen.getByRole("button", { name: "End early" }));
 
     expect(mocked.commitQuizRun).not.toHaveBeenCalled();
     expect(mocked.recordQuestionAttempt).not.toHaveBeenCalled();
@@ -728,7 +731,7 @@ describe("ExamRunner keeps what was answered", () => {
     render(<ExamRunner mode="exam" retakeIds={[question.id]} onClose={() => {}} />);
 
     await user.click(screen.getByRole("button", { name: "B. Beta" }));
-    await user.click(screen.getByRole("button", { name: "Close" }));
+    await user.click(screen.getByRole("button", { name: "End early" }));
 
     expect(committedAttempts()).toEqual([{ questionId: question.id, attempt: expect.objectContaining({ answerKey: "B", status: "correct" }) }]);
     confirm.mockRestore();
@@ -745,7 +748,7 @@ describe("ExamRunner keeps what was answered", () => {
     await user.click(screen.getByRole("button", { name: "Check answer" }));
     await user.click(screen.getByRole("button", { name: "Next question" }));
     await user.click(screen.getByRole("button", { name: "A. Alpha" }));
-    await user.click(screen.getByRole("button", { name: "Close" }));
+    await user.click(screen.getByRole("button", { name: "End early" }));
 
     expect(mocked.recordQuestionAttempt).toHaveBeenCalledTimes(1);
     const { session } = mocked.commitQuizRun.mock.calls[0][0];
@@ -791,7 +794,7 @@ describe("ExamRunner keeps what was answered", () => {
     await user.click(screen.getByRole("button", { name: "B. Beta" }));
 
     const snapshot = JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession)!);
-    expect(Object.keys(snapshot).sort()).toEqual(["answers", "filters", "index", "mode", "picked", "poolIds", "revealed", "runId", "startedAt", "timed"]);
+    expect(Object.keys(snapshot).sort()).toEqual(["answers", "elapsedMs", "filters", "index", "items", "mode", "notes", "pausedMs", "picked", "poolIds", "revealed", "runId", "startedAt", "timed"]);
     expect(snapshot).toMatchObject({ mode: "exam", poolIds: [question.id, second.id], index: 1, picked: "B", revealed: false });
     expect(snapshot.answers).toEqual([
       { questionId: question.id, answerKey: "A", correct: false, flagged: false, seconds: expect.any(Number), certainty: "sure" },
@@ -933,7 +936,7 @@ describe("ExamRunner durable finalization", () => {
     render(<ExamRunner mode="exam" retakeIds={[question.id]} onClose={onClose} />);
 
     await user.click(screen.getByRole("button", { name: "B. Beta" }));
-    await user.click(screen.getByRole("button", { name: "Exit block" }));
+    await user.click(screen.getByRole("button", { name: "End early" }));
 
     expect((await screen.findByRole("alert")).textContent).toMatch(/final save not confirmed/i);
     expect(onClose).not.toHaveBeenCalled();

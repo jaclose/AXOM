@@ -268,7 +268,7 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
               {moreOpen && (
                 <div className="xfy-menu xfy-more-menu" role="menu">
                   <button type="button" role="menuitem" disabled={!item.struck.length || revealed} onClick={() => item.struck.forEach((key) => exam.strike(key))}>Restore struck-out choices</button>
-                  <button type="button" role="menuitem" disabled={!exam.annotations.length} onClick={() => exam.annotations.forEach((annotation) => exam.onDeleteAnnotation(annotation.id))}>Clear highlighting</button>
+                  <button type="button" role="menuitem" disabled={!exam.annotations.length} onClick={exam.clearAnnotations}>Clear highlighting</button>
                 </div>
               )}
             </div>
@@ -276,7 +276,9 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
 
           {!collapsed && (
             <div className={`xfy-stem ${tool === "highlight" ? "tool-highlight" : ""} ${tool === "erase" ? "tool-erase" : ""}`}>
-              <div aria-label={question.content ? "Question stem" : undefined} tabIndex={question.content ? -1 : undefined} ref={question.content ? exam.stemRef : undefined}><QuestionContent question={question} part="stem" fallback={<AnnotatedQuestionText
+              <div><QuestionContent question={question} part="stem" mode={revealed ? "answered" : "question"}
+                annotation={{ annotations: exam.annotations, label: "Question stem", focusRef: exam.stemRef,
+                  eraseMode: tool === "erase", onDelete: exam.onDeleteAnnotation, onSelection: exam.onSelection }} fallback={<AnnotatedQuestionText
                 text={question.stem}
                 annotations={exam.annotations}
                 className="xfy-stem-text"

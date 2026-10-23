@@ -41,6 +41,7 @@ function conflictKey(moduleKey: string, index: number, templateKey: string): str
 
 interface ModulePreview {
   key: string;
+  edition: string;
   plan: CourseTemplatePlan;
   changes: TemplateReconciliation;
   counts: Array<[CourseActivity, number]>;
@@ -140,7 +141,7 @@ export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templa
   const previews = useMemo<ModulePreview[]>(() => {
     const byModule = new Map<string, CourseTemplateSection[]>();
     for (const section of sections) {
-      const key = `${section.term ?? ""}|${canonicalModuleKey(section.module)}`;
+      const key = `${section.term ?? ""}|${canonicalModuleKey(section.module)}|${section.context?.academicTerm ?? ""}|${section.context?.cohort ?? ""}`;
       byModule.set(key, [...(byModule.get(key) ?? []), section]);
     }
     return [...byModule.entries()].map(([key, group]) => {
@@ -167,7 +168,7 @@ export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templa
       // Filter only after planning so week inference and stable activity IDs do
       // not change when the learner selects a subset.
       const items = plan.items.filter((item) => !chosen.excludedWeeks?.includes(String(item.week ?? "unscheduled")) && !chosen.excludedActivities?.includes(item.activity));
-      return { key, plan, selected: items.length, changes: reconcileCourseTemplate({ ...plan, items }, s.tracker), counts: [...counts.entries()], weeks: [...weeks.entries()].sort(([a], [b]) => Number(a) - Number(b)) };
+      return { key, edition: [group[0].context?.academicTerm, group[0].context?.cohort].filter(Boolean).join(" · ") || "Undated source", plan, selected: items.length, changes: reconcileCourseTemplate({ ...plan, items }, s.tracker), counts: [...counts.entries()], weeks: [...weeks.entries()].sort(([a], [b]) => Number(a) - Number(b)) };
     });
     // knownTerm reads s.courses; listing it keeps the memo honest.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -204,6 +205,10 @@ export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templa
     const candidates = matchingCourses(preview.plan.module, chosen.termId);
     return candidates.length > 1 && !candidates.some((entry) => entry.id === chosen.courseId);
   }).length;
+  const mixedEditions = previews.some((preview, index) => previews.some((other, otherIndex) => index !== otherIndex
+    && canonicalModuleKey(preview.plan.module) === canonicalModuleKey(other.plan.module)
+    && preview.plan.term === other.plan.term && preview.plan.course === other.plan.course
+    && preview.edition !== other.edition));
 
   function patchSetup(preview: ModulePreview, patch: Partial<ModuleSetup>) {
     setConflictResolutions({});
@@ -217,6 +222,7 @@ export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templa
   }
 
   async function apply() {
+    if (mixedEditions) return;
     setBusy(true);
     setError("");
     const checkpoint = getVaultWriteCheckpoint();
@@ -272,13 +278,14 @@ export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templa
       onClose={onClose}
       footer={<>
         <GButton onClick={onClose}>Cancel</GButton>
-        <GButton variant="primary" disabled={busy || adding + updating === 0 || ambiguousTerms > 0 || ambiguousCourses > 0} onClick={() => void apply()}>
+        <GButton variant="primary" disabled={busy || adding + updating === 0 || ambiguousTerms > 0 || ambiguousCourses > 0 || mixedEditions} onClick={() => void apply()}>
           {adding + updating === 0 ? "Nothing to add" : `Add ${adding} item${adding === 1 ? "" : "s"}${updating ? ` and update ${updating}` : ""}`}
         </GButton>
       </>}
     >
       <div className="stack" style={{ gap: 14 }}>
         {error && <p role="alert">{error}</p>}
+        {mixedEditions && <p role="alert">Several editions target the same course. Clear this selection, then select the dated or historical plan you want from saved templates. Each original remains in your library.</p>}
         <details open={libraryOpen} onToggle={(event) => setLibraryOpen(event.currentTarget.open)}>
           <summary>Browse saved templates</summary>
           <SavedCourseTemplates documents={s.documents} onUse={(document) => {
@@ -318,6 +325,7 @@ export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templa
             <section key={preview.key} className="template-module" aria-label={`Template for ${preview.plan.module}`}>
               <div className="row wrap" style={{ justifyContent: "space-between", gap: 8 }}>
                 <b>{preview.plan.module}</b>
+                <span className="sub">{preview.edition}</span>
                 <span className="sub">
                   {preview.plan.weekCount ? `${preview.plan.weekCount} week${preview.plan.weekCount === 1 ? "" : "s"} · ` : ""}
                   {preview.plan.items.length} items

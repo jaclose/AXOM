@@ -7,6 +7,7 @@ import { useEffect, useRef, useState, type ClipboardEvent } from "react";
 import { ImagePlus, Trash2, X } from "lucide-react";
 import { GhostButton } from "../ui/primitives";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { captureQuestionWorkspace } from "../../lib/questionNoteImages";
 import {
   createQuestionAttachment,
   deleteQuestionAttachmentBlobs,
@@ -29,10 +30,12 @@ export function QuestionAttachmentsPanel({
 }: {
   questionId: string;
   attachments: QuestionImageAttachment[];
-  onChange: (next: QuestionImageAttachment[]) => void;
+  onChange: (next: QuestionImageAttachment[]) => void | Promise<unknown>;
 }) {
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const generation = useRef(0);
   const [preview, setPreview] = useState<QuestionImageAttachment | null>(null);
   const [urls, setUrls] = useState<Record<string, string | "missing">>({});
   const fileRef = useRef<HTMLInputElement>(null);
@@ -73,15 +76,23 @@ export function QuestionAttachmentsPanel({
     };
   }, [questionId, blobSignature]);
 
-  useEffect(() => { setPreview(null); setStatus(""); }, [questionId]);
+  useEffect(() => {
+    setPreview(null); setStatus(""); setBusy(false); busyRef.current = false;
+    return () => { generation.current += 1; };
+  }, [questionId]);
 
   async function addFiles(files: readonly File[]) {
-    if (!files.length || busy) return;
+    if (!files.length || busyRef.current) return;
+    busyRef.current = true;
+    const started = generation.current;
+    const scope = captureQuestionWorkspace();
     setBusy(true);
     const failures: string[] = [];
     let added = 0;
     // Deterministic: original selection order; one failure never discards the rest.
-    for (const file of files) {
+    try { for (const file of files) {
+      scope.assertCurrent();
+      if (generation.current !== started) break;
       const result = await createQuestionAttachment({
         file,
         questionId,
@@ -90,19 +101,25 @@ export function QuestionAttachmentsPanel({
       if (result.status === "created") {
         const next = [...attachmentsRef.current, result.attachment];
         try {
-          onChange(next);
+          scope.assertCurrent();
+          if (generation.current !== started) break;
+          await onChange(next);
+          scope.assertCurrent();
+          if (generation.current !== started) break;
           attachmentsRef.current = next;
           added += 1;
         } catch {
-          // Metadata persistence failed — remove the just-written blob so no
-          // orphan survives, then surface the failure.
-          await deleteQuestionAttachmentBlobs([result.attachment.blobKey]).catch(() => {});
-          failures.push(`"${result.attachment.fileName}" could not be saved.`);
+          // A failed acknowledgement does not prove metadata was unwritten.
+          // Retain the bytes so retry/recovery can never create a broken image.
+          failures.push(`"${result.attachment.fileName}" save could not be confirmed. Its image bytes were kept; retry before leaving.`);
         }
       } else {
         failures.push(result.message);
       }
-    }
+    } } catch (error) {
+      failures.push(error instanceof Error ? error.message : "Image save could not be confirmed.");
+    } finally { scope.dispose(); if (generation.current === started) busyRef.current = false; }
+    if (generation.current !== started) return;
     setBusy(false);
     setStatus([
       added ? `${added} image${added === 1 ? "" : "s"} attached.` : "",
@@ -122,10 +139,16 @@ export function QuestionAttachmentsPanel({
   }
 
   async function removeAttachment(attachment: QuestionImageAttachment) {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    const started = generation.current;
+    try {
     // Metadata first (authoritative), then the blob; a failed blob delete is
     // surfaced and the sweep can finish the cleanup later.
     const next = attachmentsRef.current.filter((item) => item.id !== attachment.id);
-    onChange(next);
+    await onChange(next);
+    if (generation.current !== started) return;
     attachmentsRef.current = next;
     if (preview?.id === attachment.id) setPreview(null);
     if (isPrivateLibraryAttachmentBlobKey(attachment.blobKey)) {
@@ -138,14 +161,31 @@ export function QuestionAttachmentsPanel({
     } catch {
       setStatus(`Removed "${attachment.fileName}" from this question; its stored bytes will be cleaned up on the next maintenance pass.`);
     }
+    } catch {
+      if (generation.current === started) setStatus(`Removal of "${attachment.fileName}" could not be confirmed. Its image bytes were kept.`);
+    } finally {
+      if (generation.current === started) busyRef.current = false;
+      if (generation.current === started) setBusy(false);
+    }
   }
 
-  function updateAltText(attachment: QuestionImageAttachment, altText: string) {
+  async function updateAltText(attachment: QuestionImageAttachment, altText: string) {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    const started = generation.current;
     const now = new Date().toISOString();
     const next = attachmentsRef.current.map((item) =>
       item.id === attachment.id ? { ...item, altText: altText.trim().slice(0, 500), updatedAt: now } : item);
-    onChange(next);
-    attachmentsRef.current = next;
+    try {
+      await onChange(next);
+      if (generation.current === started) attachmentsRef.current = next;
+    } catch {
+      if (generation.current === started) setStatus("Description save could not be confirmed. Retry before leaving.");
+    } finally {
+      if (generation.current === started) busyRef.current = false;
+      if (generation.current === started) setBusy(false);
+    }
   }
 
   function openPreview(attachment: QuestionImageAttachment, trigger: HTMLElement) {
@@ -211,15 +251,18 @@ export function QuestionAttachmentsPanel({
                   <input
                     className="field question-attachment-alt"
                     type="text"
-                    value={attachment.altText}
+                    key={`${questionId}:${attachment.id}:${attachment.updatedAt}`}
+                    defaultValue={attachment.altText}
+                    disabled={busy}
                     placeholder="Description not added"
                     aria-label={`Description for ${attachment.fileName}`}
-                    onChange={(event) => updateAltText(attachment, event.target.value)}
+                    onBlur={(event) => { if (event.target.value !== attachment.altText) void updateAltText(attachment, event.target.value); }}
                   />
                 </div>
                 <GhostButton
                   className="icon-only"
                   aria-label={`Remove ${attachment.fileName}`}
+                  disabled={busy}
                   onClick={() => void removeAttachment(attachment)}
                 >
                   <Trash2 size={ICON_SIZE.body} />

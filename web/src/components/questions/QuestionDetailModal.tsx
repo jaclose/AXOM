@@ -25,6 +25,7 @@ import { AnnotatedQuestionText, type QuestionTextSelection } from "./AnnotatedQu
 import { QuestionAnnotationToolbar } from "./QuestionAnnotationToolbar";
 import { QuestionNotesPanel } from "./QuestionNotesPanel";
 import { QuestionAttachmentsPanel } from "./QuestionAttachmentsPanel";
+import { saveQuestionNoteImages } from "../../lib/questionNoteImages";
 
 const ERROR_TYPES = Object.keys(ERROR_TYPE_LABEL) as QuestionErrorType[];
 
@@ -410,13 +411,12 @@ export function QuestionDetailModal({ question, onClose }: { question: QuestionR
             onSave={(notes) => s.updateQuestion(question.id, { notes: notes.trim() || undefined })}
           />
           <QuestionAttachmentsPanel
+            key={question.id}
             questionId={question.id}
             attachments={attachmentsList.filter(attachment => !attachment.role)}
-            onChange={(next) => {
-              const combined = [...attachmentsList.filter(attachment => attachment.role), ...next];
-              const value = combined.length ? combined : undefined;
+            onChange={async (next) => {
+              const combined = await saveQuestionNoteImages(question.id, next);
               setAttachmentsList(combined);
-              s.updateQuestion(question.id, { attachments: value });
             }}
           />
         </>

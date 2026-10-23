@@ -121,6 +121,33 @@ describe("prepareReviewedImport", () => {
 });
 
 describe("saveReviewedImport", () => {
+  it("retains unassigned image bytes in the source library and reuses their identity on retry", async () => {
+    vi.stubGlobal("indexedDB", indexedDB); vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+    const image = new File([new Uint8Array([137, 80, 78, 71])], "unplaced.png", { type: "image/png" });
+    const prepared = prepareReviewedImport(request({ preserveUnassignedImages: true }), empty, make());
+    if (!prepared.ok) throw new Error("expected import");
+    const { store } = memoryStore();
+    expect((await saveReviewedImport(prepared, store, [image])).ok).toBe(true);
+    const document = vi.mocked(store.addDocument).mock.calls[0][0];
+    expect(document).toMatchObject({ fileName: "unplaced.png", tags: ["import-image", "review-required"], libraryOnly: true });
+    const bytes = await readSourceOriginal(document.id, document.checksum);
+    expect(new Uint8Array(await bytes!.arrayBuffer())).toEqual(new Uint8Array(await image.arrayBuffer()));
+    const retry = prepareReviewedImport(request({ preserveUnassignedImages: true }), { ...empty, documents: [document] }, make());
+    if (!retry.ok) throw new Error("expected retry");
+    await saveReviewedImport(retry, store, [image]);
+    expect(store.addDocument).toHaveBeenCalledTimes(1);
+    expect(store.updateDocument).toHaveBeenCalledWith(document.id, { originalFile: document.originalFile });
+    await deleteSourceOriginal(document.id);
+  });
+
+  it("does not retire an import when an unassigned image cannot be preserved", async () => {
+    const prepared = prepareReviewedImport(request({ preserveUnassignedImages: true }), empty, make());
+    if (!prepared.ok) throw new Error("expected import");
+    const { store, commits } = memoryStore();
+    const result = await saveReviewedImport(prepared, store, [new File(["image"], "unknown.bmp", { type: "image/bmp" })]);
+    expect(result).toMatchObject({ ok: false, message: expect.stringContaining("unknown.bmp could not be preserved") });
+    expect(commits).toEqual([]);
+  });
   it("writes the prepared import once, as one commit", async () => {
     const { store, state, commits } = memoryStore();
     const prepared = prepareReviewedImport(request(), empty, make());

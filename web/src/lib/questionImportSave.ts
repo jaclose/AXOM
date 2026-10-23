@@ -38,6 +38,7 @@ import { normalizeTags, suggestCategory } from "./taxonomy";
 import { assertVaultWrite, assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "./localVault";
 import { saveSourceOriginal } from "./decode/sources";
 import { MAX_SOURCE_ORIGINAL_BYTES, originalFileIdentity } from "./sourceOriginal";
+import { sha256Hex } from "./checksum";
 
 export type ImportDestination = "set" | "doc" | "both";
 
@@ -64,6 +65,8 @@ export interface ImportSourceFile {
 }
 
 export interface ReviewedImportRequest {
+  /** Loose-source review only. Structured banks retain held media in their own review document. */
+  preserveUnassignedImages?: boolean;
   /** Only the questions to save. */
   drafts: readonly ReviewedDraft[];
   destination: ImportDestination;
@@ -89,6 +92,8 @@ export type ReviewedImportRefusal =
   | { ok: false; reason: "invalid-question"; errors: string[] };
 
 export interface PreparedReviewedImport {
+  preserveUnassignedImages?: boolean;
+  existingDocuments: readonly SourceDocument[];
   originalFile?: Blob;
   ok: true;
   fingerprint: string;
@@ -292,6 +297,8 @@ export function prepareReviewedImport(
 
   return {
     ok: true,
+    existingDocuments: library.documents,
+    preserveUnassignedImages: request.preserveUnassignedImages,
     originalFile: document?.originalFile,
     fingerprint,
     plan: { questions: wantsSet ? questions : [], questionSet, documentWrite },
@@ -334,6 +341,34 @@ export async function saveReviewedImport(
 ): Promise<SavedReviewedImport> {
   store.assertCurrent?.();
   const noImages = { attached: 0, missing: 0, problems: [] as string[] };
+  // Unassigned figures are evidence, not disposable preview state. Keep their
+  // verified originals in the existing library before retiring this review.
+  const named = prepared.wantsSet ? prepared.attachmentNames.flat() : [];
+  const assigned = new Set(matchNamedImages(named, images).flatMap(match => match.file ? [match.file] : []));
+  for (const image of prepared.preserveUnassignedImages ? images.filter(file => !assigned.has(file)) : []) {
+    try {
+      const checksum = await sha256Hex(await image.arrayBuffer());
+      store.assertCurrent?.();
+      const prior = prepared.existingDocuments.find(document => document.checksum === checksum);
+      const document: SourceDocument = prior ?? {
+        id: `import-image-${checksum}`, title: image.name, fileName: image.name,
+        fileType: image.type, sizeBytes: image.size, checksum, uploadedAt: new Date().toISOString(),
+        rawText: `Unassigned image retained from ${prepared.setTitle}. Its question and role require review.`,
+        tags: ["import-image", "review-required"], linkedQuestionSetIds: [], libraryOnly: true,
+      };
+      const originalFile = originalFileIdentity(document, image);
+      await saveSourceOriginal(document, image);
+      store.assertCurrent?.();
+      const checkpoint = getVaultWriteCheckpoint();
+      if (prior) await store.updateDocument(prior.id, { originalFile });
+      else await store.addDocument({ ...document, originalFile });
+      await flushLocalVaultWrites();
+      store.assertCurrent?.();
+      assertVaultWritesSince(checkpoint);
+    } catch (error) {
+      return { ok: false, message: `Unassigned image ${image.name} could not be preserved. ${error instanceof Error ? error.message : "Keep the file and retry."}`, rollbackFailures: [] };
+    }
+  }
   let plan = prepared.plan;
   let originalSource: { status: "local-pending-sync" | "local-only-oversize"; bytes: number; message?: string } | undefined;
   if (prepared.originalFile && plan.documentWrite) {

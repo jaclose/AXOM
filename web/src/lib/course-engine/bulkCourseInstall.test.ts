@@ -29,6 +29,15 @@ const idMaker = () => {
   return () => `role4-generated-${++i}`;
 };
 describe("review-first bulk school curriculum installation", () => {
+  it("keeps Fall 2026 separate from curriculum Term 2 and refuses a mixed undated edition", () => {
+    const current = saved("T2 - NB2 - Lectures:\n@academic-term: Fall 2026\n@source-revision: 2026-10-07\n@week-policy: explicit\n\nWeek 4:\nNB Lecture 01 Synaptic Transmission [Lecture]", "current.txt", "current");
+    const preview = previewCurriculumTemplateInstallation(SGU_CURRICULUM, [current], empty);
+    expect(preview).toMatchObject({ create: 1, sourceStatedWeeks: 1, issues: [] });
+    expect(preview.modules[0]).toMatchObject({ term: "T2", module: "NB2" });
+    const mixed = previewCurriculumTemplateInstallation(SGU_CURRICULUM, [current, saved(assessment, "old.txt", "old")], empty);
+    expect(mixed.modules).toEqual([]);
+    expect(mixed.issues[0].reason).toMatch(/dated plan with an undated plan/);
+  });
   it("never turns inferred grouping into an official week by default", () => {
     const plan = previewCurriculumTemplateInstallation(
       SGU_CURRICULUM, [saved(lecture, "lec.txt", "lec"), saved(assessment, "group.txt", "group")], empty);

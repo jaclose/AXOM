@@ -31,6 +31,24 @@ is pending, all queue removal is locked, including same-render event races. The 
 ends when acceptance settles; failed rows retain their source and review controls.
 Removing a completed row affects only the queue, not its saved questions or source.
 
+Single-file and batch intake use `lib/readQuestionImportFile.ts`: canonical PDF/DOCX
+adapters take precedence, and loose text is parsed in full within explicit limits.
+Only the stored text preview is shortened. An over-limit source fails before staging
+partial questions. The original file remains available for exact recovery.
+
+Loose image mapping retains unassigned files as verified Source Library originals.
+Missing images or failed metadata writes leave review open; retry repairs the existing
+set. Structured banks keep their separate held-media review contract. Thumbnails and
+zoom show source context without changing reveal roles. Personal note-image updates
+use an account/workspace guard and confirm the vault receipt before acknowledging
+success or deleting superseded local bytes.
+
+`QuestionContentAnnotations` maps selection offsets into the same canonical text
+while preserving rich markup and tables. Changed text does not silently relocate
+old marks. The native player's Save & exit stores the active block's picks, strikes,
+visits, notes and elapsed time before closing; time spent suspended is excluded.
+Mode/presentation selection belongs in setup, with source slides available in review.
+
 Missing-record recovery retains the selected collection's identity, original
 membership, source references and course scope in a transient request
 (`lib/questionRecovery.ts`). Only the original missing IDs appearing uniquely in

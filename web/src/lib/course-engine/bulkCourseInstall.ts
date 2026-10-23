@@ -210,11 +210,20 @@ export function previewCurriculumTemplateInstallation(
     }
     const statedTerms = new Set<string>();
     const badSourceTerms: string[] = [];
+    const sessions = new Set(sources.map(source => source.section.context?.academicTerm)
+      .filter((value): value is string => Boolean(value && !normalizeTerm(value))));
+    if (sessions.size > 1 || (sessions.size === 1 && sources.some(source => !source.section.context?.academicTerm))) {
+      issues.push({ sourceModule: sourceName, sourceFiles: sources.length,
+        reason: "These plans describe different academic sessions or mix a dated plan with an undated plan. Select one source version before loading this module." });
+      continue;
+    }
     for (const source of sources) {
       for (const namedTerm of [source.section.term, source.section.context?.academicTerm]) {
         if (!namedTerm) continue;
         const normalized = normalizeTerm(namedTerm);
         if (normalized) statedTerms.add(normalized);
+        // Academic session is version identity, not the numbered curriculum term.
+        else if (namedTerm === source.section.context?.academicTerm && /^(?:spring|summer|fall|autumn|winter)\s+20\d{2}$/i.test(namedTerm.trim())) continue;
         else badSourceTerms.push(namedTerm);
       }
     }

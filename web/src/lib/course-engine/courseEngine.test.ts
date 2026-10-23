@@ -50,6 +50,14 @@ describe("reading where a file belongs from its name", () => {
     expect(mapping.term).toMatchObject({ value: "T2", evidence: "NB Block 2 belongs to T2" });
   });
 
+  it("recognizes abbreviated review weeks without treating review or quiz numbers as weeks", () => {
+    expect(map("ER/ER W1 Review.pdf").week?.value).toBe(1);
+    expect(map("ER/ER W2-3 Review.pdf")).toMatchObject({ week: { value: 2 }, weekEnd: 3 });
+    expect(map("ER/JD ER Review 2.pdf").week).toBeUndefined();
+    expect(map("ER/ER IMCQ 2.pdf").week).toBeUndefined();
+    expect(map("ER/ER Review2026.pdf").week).toBeUndefined();
+  });
+
   it("prefers a module named outright in a folder over a prefix two modules share", () => {
     const mapping = map("Bank/T1/CPR2 2/CPR 33 Hemoglobinopathies Practice Questions with Answers.pdf");
     expect(mapping.module).toMatchObject({ value: "CPR 2" });

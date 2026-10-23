@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { examReducer, itemState, startBlock, type ExamAction, type ExamBlock } from "./engine";
-import { blockFromPlayerSnapshot, certaintiesFromPlayerSnapshot, checkedFromPlayerSnapshot, playerAnswer, type PlayerSnapshot } from "./playerBlock";
+import { blockFromPlayerSnapshot, certaintiesFromPlayerSnapshot, checkedFromPlayerSnapshot, playerAnswer, playerRecoveryState, type PlayerSnapshot } from "./playerBlock";
 import { recordedSeconds } from "./questionTime";
 
 const T0 = 1_700_000_000_000;
@@ -51,6 +51,21 @@ describe("what the AXOM player counts as an answer", () => {
 });
 
 describe("the AXOM player's resume snapshot", () => {
+  it("restores unchecked picks, struck choices, notes and visited time without scoring them", () => {
+    const before = run(startBlock({ ids, mode: "tutor", now: T0 }),
+      { type: "pick", key: "A" }, { type: "strike", key: "B" }, { type: "mark" },
+      { type: "note", text: "Private reasoning" }, { type: "go", index: 1, now: T0 + 8000 },
+      { type: "strike", key: "C" });
+    const snapshot: PlayerSnapshot = { mode: "tutor", index: 1, startedAt: before.startedAt,
+      answers: [], revealed: false, ...playerRecoveryState(before, T0 + 10_000) };
+    const after = blockFromPlayerSnapshot(JSON.parse(JSON.stringify(snapshot)), ids, T0 + 60_000);
+    expect(itemState(after, "q1")).toMatchObject({ answerKey: "A", struck: ["B"], marked: true, revealed: false });
+    expect(itemState(after, "q2").struck).toEqual(["C"]);
+    expect(after.notes).toBe("Private reasoning");
+    expect(after.clock.elapsedMs).toBe(10_000);
+    expect(recordedSeconds(after.times, "q1", T0 + 61_000)).toBe(8);
+    expect(playerAnswer(after, "q1", T0 + 61_000, "A").answerKey).toBeUndefined();
+  });
   const exam: PlayerSnapshot = {
     mode: "exam", index: 1, startedAt: "2026-07-10T01:00:00.000Z", revealed: false, picked: "C",
     answers: [

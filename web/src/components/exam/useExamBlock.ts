@@ -106,6 +106,7 @@ export interface ExamBlockApi {
   annotations: QuestionTextAnnotation[];
   onSelection: (range: { startOffset: number; endOffset: number } | null) => void;
   onDeleteAnnotation: (annotationId: string) => void;
+  clearAnnotations: () => void;
 
   /** Keys every interface shares (move, flag, choose, strike, tutor submit). True when the key was used. */
   handleKey: (event: KeyboardEvent) => boolean;
@@ -316,6 +317,13 @@ export function useExamBlock({ skin, mode, pool, runId, timeLimitSeconds, resume
     updateQuestion(question.id, { annotations: remaining });
   }, [annotationsById, interactionLocked, question, reviewing, updateQuestion]);
 
+  const clearAnnotations = useCallback(() => {
+    if (!question || reviewing || interactionLocked()) return;
+    const remaining = (annotationsById[question.id] ?? []).filter(annotation => annotation.target !== "stem");
+    setAnnotationsById(current => ({ ...current, [question.id]: remaining }));
+    updateQuestion(question.id, { annotations: remaining });
+  }, [annotationsById, interactionLocked, question, reviewing, updateQuestion]);
+
   const handleKey = useCallback((event: KeyboardEvent): boolean => {
     if (interactionLocked()) return false;
     if (matchesAnyChord(event, profile.keys.next)) { next(); return true; }
@@ -348,7 +356,7 @@ export function useExamBlock({ skin, mode, pool, runId, timeLimitSeconds, resume
     go, next, previous, pick, strike, mark, reveal, setNotes,
     confirmEnd, setConfirmEnd, itemReview, setItemReview, requestEnd, finish, suspend,
     finishLocked, finishStatus, finishError,
-    prefs, setPrefs, tool, setTool, annotations, onSelection, onDeleteAnnotation,
+    prefs, setPrefs, tool, setTool, annotations, onSelection, onDeleteAnnotation, clearAnnotations,
     handleKey, rootRef, stemRef,
   };
 }

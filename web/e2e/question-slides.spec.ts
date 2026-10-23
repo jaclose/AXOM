@@ -40,7 +40,7 @@ async function bundle() {
 }
 
 for (const width of [1440, 390]) for (const mode of ["tutor", "exam"] as const) {
-  test(`${mode} Questions and Slides share answers, reveal rules and saved review at ${width}`, async ({ page }, testInfo) => {
+  test(`${mode} setup presentation retains answers, reveal rules and saved review at ${width}`, async ({ page }, testInfo) => {
     test.setTimeout(120_000);
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await page.emulateMedia({ colorScheme: mode === "exam" ? "dark" : "light", reducedMotion: "reduce" });
@@ -80,11 +80,10 @@ for (const width of [1440, 390]) for (const mode of ["tutor", "exam"] as const) 
     await expect(player.locator('[data-asset-role="answer_reveal"], [data-asset-role="source_page"], canvas')).toHaveCount(0);
     await player.getByRole("button", { name: "A. Alpha", exact: true }).click();
     await player.getByRole("button", { name: "Eliminate option B", exact: true }).click();
-    await player.getByRole("button", { name: "Questions", exact: true }).focus();
-    await page.keyboard.press("Enter");
+    await expect(player.getByRole("button", { name: "Questions", exact: true })).toHaveCount(0);
+    await expect(player.getByRole("button", { name: "Slides", exact: true })).toHaveCount(0);
     await expect(player.getByRole("button", { name: "A. Alpha", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(player.getByRole("button", { name: "Restore option B", exact: true })).toHaveAttribute("aria-pressed", "true");
-    await player.getByRole("button", { name: "Slides", exact: true }).click();
     expect(await player.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`slides-${mode}-${width}.png`), fullPage: true });
     await reloadAfterSave(page);
@@ -93,6 +92,7 @@ for (const width of [1440, 390]) for (const mode of ["tutor", "exam"] as const) 
     await expect(player.locator('[data-asset-role="stem"] img')).toBeVisible();
     await expect(player.locator('[data-asset-role="answer_reveal"], [data-asset-role="source_page"], canvas')).toHaveCount(0);
     await expect(player.getByRole("button", { name: "A. Alpha", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(player.getByRole("button", { name: "Restore option B", exact: true })).toHaveAttribute("aria-pressed", "true");
     if (mode === "tutor") {
       await player.getByRole("button", { name: "Check answer", exact: true }).click();
       await expect(player.locator('[data-asset-role="answer_reveal"] img')).toBeVisible();

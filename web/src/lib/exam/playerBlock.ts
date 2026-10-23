@@ -31,6 +31,10 @@ export interface PlayerSnapshot {
   startedAt: string;
   /** How sure the learner said they were about the question on screen. */
   certainty?: AnswerCertainty;
+  /** Additive recovery data: legacy builds can still read the answers above. */
+  items?: Readonly<Record<string, RestoredItem>>;
+  elapsedMs?: number;
+  notes?: string;
 }
 
 const clampIndex = (index: number, length: number) => Math.min(Math.max(0, Math.floor(index) || 0), Math.max(0, length - 1));
@@ -38,9 +42,10 @@ const clampIndex = (index: number, length: number) => Math.min(Math.max(0, Math.
 /** The block a snapshot describes, picked up again now. */
 export function blockFromPlayerSnapshot(snapshot: PlayerSnapshot, ids: readonly string[], now: number): ExamBlock {
   const tutor = snapshot.mode === "tutor";
-  const items: Record<string, RestoredItem> = {};
+  const items: Record<string, RestoredItem> = { ...snapshot.items };
   for (const answer of snapshot.answers) {
     items[answer.questionId] = {
+      ...items[answer.questionId],
       answerKey: answer.answerKey,
       marked: answer.flagged,
       visited: true,
@@ -61,7 +66,18 @@ export function blockFromPlayerSnapshot(snapshot: PlayerSnapshot, ids: readonly 
       // In an exam the pick on screen is the answer, newer than any recorded on an earlier visit.
       : { ...known, answerKey: snapshot.picked ?? known?.answerKey };
   }
-  return restoreBlock({ ids, mode: snapshot.mode, index, items, startedAt: snapshot.startedAt, now });
+  return restoreBlock({ ids, mode: snapshot.mode, index, items, elapsedMs: snapshot.elapsedMs, notes: snapshot.notes, startedAt: snapshot.startedAt, now });
+}
+
+/** Save every visited item, including unchecked picks and eliminated choices. */
+export function playerRecoveryState(block: ExamBlock, now: number): Pick<PlayerSnapshot, "items" | "elapsedMs" | "notes"> {
+  return {
+    items: Object.fromEntries(Object.entries(block.items).map(([id, item]) => [id, {
+      ...item, seconds: recordedSeconds(block.times, id, now),
+    }])),
+    elapsedMs: block.clock.elapsedMs + (block.clock.runningSince === undefined ? 0 : Math.max(0, now - block.clock.runningSince)),
+    notes: block.notes,
+  };
 }
 
 /** How sure the learner said they were, by question, as a snapshot recorded it. */

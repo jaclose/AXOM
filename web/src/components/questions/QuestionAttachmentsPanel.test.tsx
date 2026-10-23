@@ -48,9 +48,24 @@ function metadata(overrides: Partial<QuestionImageAttachment> = {}): QuestionIma
 }
 
 describe("QuestionAttachmentsPanel", () => {
+  it("waits for metadata durability, locks simultaneous uploads, and retains bytes on a rejected save", async () => {
+    let reject!: (error: Error) => void;
+    const pending = new Promise<void>((_, fail) => { reject = fail; });
+    const change = vi.fn(() => pending);
+    render(<QuestionAttachmentsPanel questionId="q1" attachments={[]} onChange={change} />);
+    const input = screen.getByLabelText("Attach images to this question");
+    fireEvent.change(input, { target: { files: [pngFile()] } });
+    fireEvent.change(input, { target: { files: [pngFile("duplicate.png")] } });
+    await waitFor(() => expect(change).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("button", { name: "Attaching…" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("status").textContent).not.toContain("image attached.");
+    reject(new Error("Disk full"));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("save could not be confirmed"));
+    expect(await listQuestionAttachmentBlobKeys()).toHaveLength(1);
+  });
   it("uploads via the picker, persists the blob, and reports success politely", async () => {
     const changes: QuestionImageAttachment[][] = [];
-    render(<QuestionAttachmentsPanel questionId="q1" attachments={[]} onChange={(next) => changes.push(next)} />);
+    render(<QuestionAttachmentsPanel questionId="q1" attachments={[]} onChange={(next) => { changes.push(next); }} />);
     const input = screen.getByLabelText("Attach images to this question");
     fireEvent.change(input, { target: { files: [pngFile()] } });
     await waitFor(() => expect(changes).toHaveLength(1));
@@ -71,7 +86,7 @@ describe("QuestionAttachmentsPanel", () => {
 
   it("one failing file never discards the successful ones (order preserved)", async () => {
     const changes: QuestionImageAttachment[][] = [];
-    render(<QuestionAttachmentsPanel questionId="q1" attachments={[]} onChange={(next) => changes.push(next)} />);
+    render(<QuestionAttachmentsPanel questionId="q1" attachments={[]} onChange={(next) => { changes.push(next); }} />);
     const bad = new File(["nope"], "doc.pdf", { type: "application/pdf" });
     fireEvent.change(screen.getByLabelText("Attach images to this question"), {
       target: { files: [pngFile("one.png"), bad, pngFile("two.png")] },
@@ -89,6 +104,7 @@ describe("QuestionAttachmentsPanel", () => {
     const alt = screen.getByLabelText("Description for slide.png") as HTMLInputElement;
     expect(alt.placeholder).toBe("Description not added");
     fireEvent.change(alt, { target: { value: "Renal histology slide" } });
+    fireEvent.blur(alt);
     expect(onChange).toHaveBeenCalledWith([
       expect.objectContaining({ id: "attachment-a", altText: "Renal histology slide" }),
     ]);
@@ -104,7 +120,7 @@ describe("QuestionAttachmentsPanel", () => {
       updatedAt: attachment.updatedAt,
     });
     const changes: QuestionImageAttachment[][] = [];
-    render(<QuestionAttachmentsPanel questionId="q1" attachments={[attachment]} onChange={(next) => changes.push(next)} />);
+    render(<QuestionAttachmentsPanel questionId="q1" attachments={[attachment]} onChange={(next) => { changes.push(next); }} />);
     fireEvent.click(screen.getByRole("button", { name: "Remove slide.png" }));
     await waitFor(() => expect(changes).toEqual([[]]));
     await waitFor(() => expect(screen.getByRole("status").textContent).toContain('Removed "slide.png"'));
@@ -122,7 +138,7 @@ describe("QuestionAttachmentsPanel", () => {
       updatedAt: attachment.updatedAt,
     });
     const changes: QuestionImageAttachment[][] = [];
-    render(<QuestionAttachmentsPanel questionId="q1" attachments={[attachment]} onChange={(next) => changes.push(next)} />);
+    render(<QuestionAttachmentsPanel questionId="q1" attachments={[attachment]} onChange={(next) => { changes.push(next); }} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Remove slide.png" }));
 

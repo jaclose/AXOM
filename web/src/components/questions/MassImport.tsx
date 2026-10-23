@@ -12,12 +12,8 @@
 // ===========================================================================
 import { useEffect, useRef, useState, useMemo } from "react";
 import { FileUp, RefreshCw, CheckCircle2, AlertTriangle, Trash2, Pencil, Check, CheckCheck, SkipForward, Undo2 } from "lucide-react";
-import { associateAnswerSource, parseAnswerSections, parseQuestionBlocks, type ParsedQuestionDraft } from "../../lib/questionParse";
-import { importFromCsv, importFromJson } from "../../lib/questionImport";
-import { extractDocxText, extractPdfText, extractPlainText } from "../../lib/extractText";
-import { proposePdfMarkedAnswers } from "../../lib/pdfMarkedAnswers";
-import { attachPdfFigures } from "../../lib/pdfFigures";
-import { parsePdfQuestions } from "../../lib/pdfQuestionImport";
+import { associateAnswerSource, parseAnswerSections, type ParsedQuestionDraft } from "../../lib/questionParse";
+import { type FigurePlacement } from "../../lib/pdfFigures";
 import { courseForScope } from "../../lib/course-engine/questionBank";
 import { useStore } from "../../lib/store";
 import { MAPPING_STATUS_LABEL, describeMapping, inferSourceMapping } from "../../lib/course-engine/sourceMapping";
@@ -26,8 +22,9 @@ import { vocabularyFromCourses } from "../../lib/course-engine/vocabulary";
 import { documentTitleFromFile } from "../../lib/library";
 import type { QuestionSource } from "../../lib/questions";
 import { GlassCard, GButton, GhostButton, PanelHeader, Tag, EmptyState } from "../ui/primitives";
-import { sha256Hex } from "../../lib/checksum";
 import type { ImportSeed } from "./ImportPanel";
+import { readQuestionImportFile, type QuestionFileBank } from "../../lib/readQuestionImportFile";
+import { manifestForFile } from "../../lib/question-content/knownBanks";
 import { draftImportStatus } from "../../lib/questionImportTrust";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { naturalCollator } from "../../lib/naturalSort";
@@ -56,6 +53,8 @@ interface QueuedFile {
   error?: string;
   /** Figures cut from a PDF, carried into the review with its questions. */
   images?: File[];
+  imagePlacements?: FigurePlacement[];
+  bank?: QuestionFileBank;
   /** Set once the file is saved: what went in. */
   accepted?: { questions: number; images: number };
   /** When the learner skipped this file, now or in an earlier import. */
@@ -99,7 +98,7 @@ export function MassImport({
   /** Whether each parsed file can be accepted as it is, and if not, what is in the way. */
   const evaluations = useMemo(() => {
     const library = { questions: store.questions ?? [], questionSets: store.questionSets ?? [], documents: store.documents ?? [] };
-    return new Map<string, CandidateEvaluation>(queue.filter((file) => reviewable(file.status)).map((file) => [file.id, evaluateImportCandidate({
+    return new Map<string, CandidateEvaluation>(queue.filter((file) => reviewable(file.status) && !file.bank).map((file) => [file.id, evaluateImportCandidate({
       drafts: file.drafts,
       fileName: file.fileName,
       checksum: file.checksum,
@@ -142,7 +141,7 @@ export function MassImport({
     queueRef.current = remaining;
     setQueue(remaining);
     if (focusFile) {
-      const inspectable = reviewable(focusFile.status) && focusFile.drafts.length > 0;
+      const inspectable = reviewable(focusFile.status) && (focusFile.drafts.length > 0 || focusFile.bank);
       focusAfterQueueUpdate(inspectable
         ? `mass-import-inspect-${focusFile.id}`
         : `mass-import-remove-${focusFile.id}`);
@@ -215,64 +214,22 @@ export function MassImport({
     if (!file) return;
     patch(id, { status: "extracting" });
     try {
-      const kind = fileKind(file);
-      let rawText = "";
-      let pageTexts: string[] | undefined;
-      let checksum: string | undefined;
-      let warnings: string[] = [];
-      let figureBytes: ArrayBuffer | undefined;
-
-      if (kind === "pdf" || kind === "docx") {
-        const buffer = await file.arrayBuffer();
-        checksum = await sha256Hex(buffer);
-        // pdf.js takes ownership of the bytes it is given, so the figure pass reads its own copy.
-        figureBytes = kind === "pdf" ? buffer.slice(0) : undefined;
-        const extracted = kind === "pdf" ? await extractPdfText(buffer) : await extractDocxText(buffer);
-        rawText = extracted.text;
-        pageTexts = kind === "pdf" ? extracted.pages : undefined;
-        warnings = [...extracted.warnings];
-        if (extracted.empty) {
-          patch(id, { status: "no-text", rawText: "", pageTexts, checksum, warnings, drafts: [] });
-          return;
-        }
-      } else if (kind === "csv" || kind === "json") {
-        const buffer = await file.arrayBuffer();
-        checksum = await sha256Hex(buffer);
-        const plain = extractPlainText(new TextDecoder().decode(buffer));
-        rawText = plain.text;
-        warnings.push(...plain.warnings);
-      } else {
-        const buffer = await file.arrayBuffer();
-        checksum = await sha256Hex(buffer);
-        const plain = extractPlainText(new TextDecoder().decode(buffer));
-        rawText = plain.text;
-        warnings.push(...plain.warnings);
+      const state = storeRef.current;
+      const read = await readQuestionImportFile(file, manifestForFile(file.name, state.terms, state.courses));
+      if (read.kind === "bank") {
+        patch(id, { status: "needs-review", bank: read.bank, rawText: read.bank.sourceText.rawText,
+          pageTexts: read.bank.sourceText.pageTexts, images: read.bank.files,
+          warnings: [...read.bank.warnings, ...read.bank.notes],
+          answerKeyDetected: read.bank.pkg.questions.some(question => Boolean(question.correctAnswer?.labels.length)) });
+        return;
       }
-
-      patch(id, { status: "parsing", rawText, pageTexts, checksum });
-      // A PDF is read with its pages, so a slide deck is read slide by slide.
-      const read = kind === "pdf" && pageTexts ? parsePdfQuestions(rawText, pageTexts) : undefined;
-      const result = read ? { drafts: read.drafts, warnings: read.notes }
-        : kind === "csv" ? importFromCsv(rawText) : kind === "json" ? importFromJson(rawText) : { drafts: parseQuestionBlocks(rawText), warnings: [] };
-      const drafts = result.drafts;
-      warnings = [...warnings, ...result.warnings];
-      if (figureBytes) warnings.push(...await proposePdfMarkedAnswers(figureBytes.slice(0), drafts, read?.deckPages));
-      const figures = figureBytes && pageTexts
-        ? await attachPdfFigures(figureBytes, file.name, drafts, pageTexts, read?.deckPages)
-        : { images: [], notes: [] };
-      warnings.push(...figures.notes);
-      const answerKeyDetected = drafts.some((d) => d.correctKey);
-      const importStatus = massImportFileStatus(drafts);
-      // A file skipped in an earlier import comes back as skipped, in view, not as new work.
-      const skipped = drafts.length > 0 ? skippedImport(checksum) : undefined;
+      const skipped = read.drafts.length > 0 ? skippedImport(read.document.checksum) : undefined;
       patch(id, {
-        status: skipped ? "skipped" : importStatus,
-        skippedAt: skipped?.skippedAt,
-        drafts,
-        warnings,
-        answerKeyDetected,
-        images: figures.images,
-        error: drafts.length === 0 ? "No questions detected" : undefined,
+        status: skipped ? "skipped" : massImportFileStatus(read.drafts),
+        skippedAt: skipped?.skippedAt, drafts: read.drafts, warnings: read.warnings,
+        rawText: read.document.rawText, pageTexts: read.document.pageTexts, checksum: read.document.checksum,
+        answerKeyDetected: read.drafts.some(draft => draft.correctKey), images: read.images,
+        imagePlacements: read.placements, error: read.drafts.length === 0 ? "No questions detected" : undefined,
       });
     } catch (err) {
       patch(id, { status: "error", error: err instanceof Error ? err.message : "Could not read this file." });
@@ -303,9 +260,10 @@ export function MassImport({
 
     const title = documentTitleFromFile(file.fileName);
     const prepared = prepareReviewedImport({
+      preserveUnassignedImages: true,
       drafts: file.drafts.map((draft) => ({ ...draft, source: file.source })),
       destination: "both",
-      document: { title, fileName: file.fileName, fileType: file.fileType, sizeBytes: file.sizeBytes, rawText: file.rawText, pageTexts: file.pageTexts, checksum: file.checksum },
+      document: { title, originalFile: fileMap.get(id), fileName: file.fileName, fileType: file.fileType, sizeBytes: file.sizeBytes, rawText: file.rawText, pageTexts: file.pageTexts, checksum: file.checksum },
       sourceType: file.source,
       setTitle: title,
       scope: evaluation.scope ? { ...evaluation.scope, courseId: courseForScope(evaluation.scope, current.courses)?.id } : undefined,
@@ -317,6 +275,10 @@ export function MassImport({
     const saved = await saveReviewedImport(prepared, current, file.images ?? []);
     if (!saved.ok) {
       patch(id, { status: massImportFileStatus(file.drafts), error: saved.message });
+      return false;
+    }
+    if (saved.images.missing || saved.images.problems.length) {
+      patch(id, { status: "needs-review", error: "Questions saved, but images still need review. Edit this file and retry to repair the same set.", warnings: [...file.warnings, ...saved.images.problems] });
       return false;
     }
     fileMap.delete(id);
@@ -411,9 +373,9 @@ export function MassImport({
     return `${blocks.slice(0, 2).map((block) => block.message).join(" ")}${more > 0 ? ` And ${more} more.` : ""}`;
   };
   const editPayload = (file: QueuedFile) => ({
-    batchQueueId: file.id,
+    batchQueueId: file.id, bank: file.bank,
     title: documentTitleFromFile(file.fileName),
-    drafts: file.drafts, images: file.images,
+    drafts: file.drafts, images: file.images, imagePlacements: file.imagePlacements, originalFile: fileMap.get(file.id),
     rawText: file.rawText,
     fileName: file.fileName,
     fileType: file.fileType,
@@ -479,7 +441,7 @@ export function MassImport({
                     <span className="sub truncate">
                       {file.fileType.toUpperCase()} · {Math.round(file.sizeBytes / 1024)} KB
                       {reviewable(file.status) || file.status === "skipped"
-                        ? ` · ${file.drafts.length} question${file.drafts.length === 1 ? "" : "s"} · answer key ${file.answerKeyDetected ? "found" : "not found"}`
+                        ? ` · ${file.bank?.pkg.questions.length ?? file.drafts.length} questions · answer key ${file.answerKeyDetected ? "found" : "not found"}`
                         : ""}
                       {file.status === "accepted" && file.accepted
                         ? ` · ${file.accepted.questions} question${file.accepted.questions === 1 ? "" : "s"} saved${file.accepted.images ? ` · ${file.accepted.images} image${file.accepted.images === 1 ? "" : "s"} attached` : ""}`
@@ -505,7 +467,7 @@ export function MassImport({
                         <Check size={ICON_SIZE.body} /> Accept
                       </GhostButton>
                     )}
-                    {reviewable(file.status) && file.drafts.length > 0 && (
+                    {reviewable(file.status) && (file.drafts.length > 0 || file.bank) && (
                       <GhostButton
                         id={`mass-import-inspect-${file.id}`}
                         aria-label={`Edit ${file.fileName}`}
@@ -515,7 +477,7 @@ export function MassImport({
                         <Pencil size={ICON_SIZE.body} /> Edit
                       </GhostButton>
                     )}
-                    {reviewable(file.status) && file.drafts.length > 0 && (
+                    {reviewable(file.status) && (file.drafts.length > 0 || file.bank) && (
                       <GhostButton
                         aria-label={`Skip ${file.fileName}`}
                         title="Leave this file out. It stays skipped if you add it again."

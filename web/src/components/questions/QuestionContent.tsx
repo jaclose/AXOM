@@ -1,30 +1,46 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { getQuestionAttachmentBlob, type QuestionImageAttachment } from "../../lib/questionAttachments";
-import { blocksToPlainText, sanitizeRichText, type AssetRole, type QuestionBlock, type TableBlock } from "../../lib/question-content/blocks";
+import { blockToPlainText, blocksToPlainText, sanitizeRichText, type AssetRole, type QuestionBlock, type TableBlock } from "../../lib/question-content/blocks";
 import type { PackageQuestion, QuestionAsset } from "../../lib/question-content/package";
 import { effectiveRole, isAssetVisible, visibleBlocks, type ContentViewMode } from "../../lib/question-content/visibility";
 import type { QuestionRecord } from "../../lib/questions";
 import { Modal } from "../ui/Modal";
 import "../../styles/question-content.css";
+import { useContentAnnotations, type ContentAnnotationControls } from "./QuestionContentAnnotations";
 
 function Rich({ value }: { value: string }) {
   return <span dangerouslySetInnerHTML={{ __html: sanitizeRichText(value) }} />;
 }
 
-function ContentTable({ block }: { block: TableBlock }) {
+function ContentTable({ block, start = 0, text, rich }: { block: TableBlock; start?: number;
+  text?: (value: string, offset: number) => ReactNode; rich?: (value: string, offset: number) => ReactNode;
+}) {
+  let cursor = start + (block.caption ? block.caption.length + 1 : 0);
+  const offsets = [...(block.headers ? [block.headers] : []), ...block.rows].map((row, index) => {
+    const key = block.rowKeys ? (index === 0 && block.headers ? "" : block.rowKeys[index - (block.headers ? 1 : 0)] ?? "") : undefined;
+    const rowStart = cursor;
+    if (key !== undefined) cursor += key.length + 3;
+    const cells = row.map((cell, column) => {
+      const offset = cursor;
+      cursor += (block.rich ? blockToPlainText({ type: "rich_text", html: cell }) : cell).length + (column < row.length - 1 ? 3 : 0);
+      return offset;
+    });
+    cursor += 1;
+    return { rowStart, key, cells };
+  });
   const rows = [...(block.headers ? [block.headers] : []), ...block.rows];
   const renderRow = (row: string[], rowIndex: number) => <tr key={rowIndex}>
-    {block.rowKeys && <th scope="row">{rowIndex === 0 && block.headers ? "" : block.rowKeys[rowIndex - (block.headers ? 1 : 0)]}</th>}
+    {block.rowKeys && <th scope="row">{text ? text(offsets[rowIndex].key ?? "", offsets[rowIndex].rowStart) : offsets[rowIndex].key}</th>}
     {row.map((cell, column) => {
       const merge = block.merges?.find((entry) => entry.row === rowIndex && entry.column === column);
       const covered = block.merges?.some((entry) => (entry.row !== rowIndex || entry.column !== column) && rowIndex >= entry.row && rowIndex < entry.row + entry.rowSpan && column >= entry.column && column < entry.column + entry.columnSpan);
       if (covered) return null;
       const Tag = rowIndex === 0 && block.headers || block.rowHeaders && column === 0 ? "th" : "td";
-      return <Tag key={column} rowSpan={merge?.rowSpan} colSpan={merge?.columnSpan}>{block.rich ? <Rich value={cell} /> : cell}</Tag>;
+      return <Tag key={column} rowSpan={merge?.rowSpan} colSpan={merge?.columnSpan}>{block.rich ? (rich ? rich(cell, offsets[rowIndex].cells[column]) : <Rich value={cell} />) : text ? text(cell, offsets[rowIndex].cells[column]) : cell}</Tag>;
     })}
   </tr>;
   return <div className="qcontent-table-scroll" tabIndex={0} aria-label={block.caption ?? "Question table"}>
-    <table>{block.caption && <caption>{block.caption}</caption>}{block.headers && <thead>{renderRow(rows[0], 0)}</thead>}
+    <table>{block.caption && <caption>{text ? text(block.caption, start) : block.caption}</caption>}{block.headers && <thead>{renderRow(rows[0], 0)}</thead>}
       <tbody>{rows.slice(block.headers ? 1 : 0).map((row, index) => renderRow(row, index + (block.headers ? 1 : 0)))}</tbody>
     </table>
   </div>;
@@ -78,19 +94,28 @@ function ContentImage({ asset, attachment, files, alt, enlarge }: {
   </>;
 }
 
-export function QuestionBlocks({ blocks, content, attachments, files, mode, section = "stem", enlarge = true }: {
+export function QuestionBlocks({ blocks, content, attachments, files, mode, section = "stem", enlarge = true, annotation }: {
   blocks: readonly QuestionBlock[]; content: PackageQuestion; attachments?: readonly QuestionImageAttachment[]; files?: readonly File[];
-  mode: ContentViewMode; section?: AssetRole; enlarge?: boolean;
+  mode: ContentViewMode; section?: AssetRole; enlarge?: boolean; annotation?: ContentAnnotationControls;
 }) {
+  const marked = useContentAnnotations(blocksToPlainText(blocks), annotation);
+  let cursor = 0;
+  const positions = new Map(blocks.map(block => {
+    const length = blockToPlainText(block).length;
+    const start = cursor;
+    if (length) cursor += length + 2;
+    return [block, start] as const;
+  }));
   const assets = new Map(content.assets.map((asset) => [asset.id, asset]));
   const shown = visibleBlocks(blocks, mode, (block) => effectiveRole(block.role, assets.get(block.assetId)?.role, section));
-  return <div className="qcontent-blocks">{shown.map((block, index) => {
+  return <div className="qcontent-blocks" {...marked.rootProps}>{shown.map((block, index) => {
+    const offset = positions.get(block) ?? 0;
     switch (block.type) {
-      case "text": return <p key={index}>{block.text}</p>;
-      case "rich_text": return <p key={index}><Rich value={block.html} /></p>;
-      case "table": return <ContentTable key={index} block={block} />;
-      case "equation": return <p key={index} className="qcontent-equation">{block.plainText ?? block.latex}</p>;
-      case "callout": return <p key={index} className="qcontent-callout">{block.text}</p>;
+      case "text": return <p key={index}>{marked.renderText(block.text, offset)}</p>;
+      case "rich_text": return <p key={index}>{annotation ? marked.renderRich(block.html, offset) : <Rich value={block.html} />}</p>;
+      case "table": return <ContentTable key={index} block={block} start={offset} text={annotation ? marked.renderText : undefined} rich={annotation ? marked.renderRich : undefined} />;
+      case "equation": return <p key={index} className="qcontent-equation">{marked.renderText(block.plainText ?? block.latex ?? "", offset)}</p>;
+      case "callout": return <p key={index} className="qcontent-callout">{marked.renderText(block.text, offset)}</p>;
       case "divider": return <hr key={index} />;
       case "image": {
         const asset = assets.get(block.assetId);
@@ -100,19 +125,19 @@ export function QuestionBlocks({ blocks, content, attachments, files, mode, sect
         </figure> : <p key={index} role="status">A required figure is missing.</p>;
       }
     }
-  })}</div>;
+  })}{marked.repairNotice}</div>;
 }
 
 /** Edited legacy text wins over source wording. Required source figures still render. */
-export function QuestionContent({ question, part, choice, mode = "question", fallback }: {
-  question: QuestionRecord; part: "stem" | "choice" | "explanation"; choice?: string; mode?: ContentViewMode; fallback: ReactNode;
+export function QuestionContent({ question, part, choice, mode = "question", fallback, annotation }: {
+  question: QuestionRecord; part: "stem" | "choice" | "explanation"; choice?: string; mode?: ContentViewMode; fallback: ReactNode; annotation?: ContentAnnotationControls;
 }) {
   const content = question.content;
   if (!content) return fallback;
   const blocks = part === "stem" ? content.stem : part === "explanation" ? content.explanation ?? [] : content.choices.find((entry) => entry.label === choice)?.blocks ?? [];
   const plain = part === "stem" ? question.stem : part === "explanation" ? question.explanation ?? "" : question.options.find((entry) => entry.key === choice)?.text ?? "";
   if (!blocks.length) return fallback;
-  if (blocksToPlainText(blocks).trim() !== plain.trim()) {
+  if (blocksToPlainText(blocks) !== plain) {
     // `content` is immutable source evidence while the legacy text fields are
     // reviewer-editable. Do not restore stale source wording after an edit, but
     // also do not let that text override silently remove a required figure from
@@ -124,7 +149,7 @@ export function QuestionContent({ question, part, choice, mode = "question", fal
       mode={mode} section={part} enlarge={part !== "choice"}
     />}</>;
   }
-  return <QuestionBlocks blocks={blocks} content={content} attachments={question.attachments} mode={mode} section={part} enlarge={part !== "choice"} />;
+  return <QuestionBlocks blocks={blocks} content={content} attachments={question.attachments} mode={mode} section={part} enlarge={part !== "choice"} annotation={annotation} />;
 }
 
 export function QuestionSupportingContent({ question, mode }: { question: QuestionRecord; mode: ContentViewMode }) {

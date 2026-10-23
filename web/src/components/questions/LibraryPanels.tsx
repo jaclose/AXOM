@@ -27,6 +27,7 @@ import {
 import { CourseBankBrowser, type BankLocation } from "./CourseBankBrowser";
 import { sortByNaturalTitle } from "../../lib/naturalSort";
 import { reviewTaskInputs } from "../../lib/courseWork";
+import { SourceOriginalPreview } from "./SourceOriginalPreview";
 
 const NO_QUESTIONS: QuestionRecord[] = [];
 const NO_DOCUMENTS: SourceDocument[] = [];
@@ -122,6 +123,7 @@ export function SourceLibrary({
       {preview && (
         <Modal title={preview.title} onClose={() => setPreview(null)}>
           <div className="sub">{preview.fileName} · uploaded {preview.uploadedAt.slice(0, 10)}</div>
+          {preview.originalFile && <SourceOriginalPreview document={preview} />}
           {preview.rawText
             ? <div className="question-stem" style={{ maxHeight: 360, overflowY: "auto" }}>{preview.rawText.slice(0, 20_000)}{preview.rawText.length > 20_000 ? "\n…" : ""}</div>
             : <div className="sub">No extractable text — this file is stored as provenance only (scan/image; OCR isn't available in-app yet).</div>}

@@ -58,7 +58,8 @@ import {
 import { examReducer, itemState, startBlock, type ExamAction, type ExamBlock } from "../../lib/exam/engine";
 import { requiredMediaIdentity } from "../../lib/exam/mediaPreflight";
 import { useMediaGate } from "../../lib/exam/useMediaGate";
-import { blockFromPlayerSnapshot, certaintiesFromPlayerSnapshot, checkedFromPlayerSnapshot, playerAnswer } from "../../lib/exam/playerBlock";
+import { blockFromPlayerSnapshot, certaintiesFromPlayerSnapshot, checkedFromPlayerSnapshot, playerAnswer, playerRecoveryState, type PlayerSnapshot } from "../../lib/exam/playerBlock";
+import { captureQuestionWorkspace, saveQuestionNoteImages } from "../../lib/questionNoteImages";
 
 const ERROR_TYPES = Object.keys(ERROR_TYPE_LABEL) as QuestionErrorType[];
 const EXAM_TYPES = Object.keys(EXAM_TYPE_LABEL) as QuestionExamType[];
@@ -77,12 +78,14 @@ function readInterface(): ExamInterface {
 }
 /** Every preset runs at the USMLE pace of 90 seconds per item. */
 const SECONDS_PER_ITEM = 90;
-interface ActiveQuizSnapshot {
+interface ActiveQuizSnapshot extends PlayerSnapshot {
   mode: QuizMode; poolIds: string[]; index: number; answers: QuizAnswer[];
   picked?: string; revealed: boolean; startedAt: string; timed: boolean; filters: QuizFilters;
   /** Absent on a snapshot written before runs carried an id. */
   runId?: string;
   certainty?: AnswerCertainty;
+  pausedAt?: number;
+  pausedMs?: number;
 }
 
 const ACTIVE_QUIZ_RUN_ID_KEY = `${STORAGE_KEYS.quizActiveSession}:run-id`;
@@ -319,15 +322,16 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const [runId, setRunId] = useState<string>(() => restored?.runId ?? sessionId ?? crypto.randomUUID());
 
   // --- setup state
-  const [count, setCount] = useState(presetFilters?.count ?? (simulate ? 20 : 10));
-  const [status, setStatus] = useState<QuizFilters["status"]>(presetFilters?.status ?? "all");
-  const [category, setCategory] = useState(presetFilters?.categories?.[0] ?? "");
-  const [examType, setExamType] = useState<QuestionExamType | "">(presetFilters?.examTypes?.[0] ?? "");
+  const recoveredFilters = restored?.filters ?? presetFilters;
+  const [count, setCount] = useState(recoveredFilters?.count ?? (simulate ? 20 : 10));
+  const [status, setStatus] = useState<QuizFilters["status"]>(recoveredFilters?.status ?? "all");
+  const [category, setCategory] = useState(recoveredFilters?.categories?.[0] ?? "");
+  const [examType, setExamType] = useState<QuestionExamType | "">(recoveredFilters?.examTypes?.[0] ?? "");
   const [choosingSources, setChoosingSources] = useState(false);
-  const [wholeBank, setWholeBank] = useState(!presetFilters?.setIds?.length);
-  const [setIds, setSetIds] = useState<string[]>(presetFilters?.setIds ?? []);
-  const [questionIds, setQuestionIds] = useState<string[] | undefined>(() => presetFilters?.questionIds ?? restored?.filters.questionIds);
-  const [ordered, setOrdered] = useState(presetFilters?.ordered ?? false);
+  const [wholeBank, setWholeBank] = useState(!recoveredFilters?.setIds?.length);
+  const [setIds, setSetIds] = useState<string[]>(recoveredFilters?.setIds ?? []);
+  const [questionIds, setQuestionIds] = useState<string[] | undefined>(() => recoveredFilters?.questionIds);
+  const [ordered, setOrdered] = useState(recoveredFilters?.ordered ?? false);
   const [timed, setTimed] = useState(restored?.timed ?? (simulate || presetTimed));
   const [runBlockId, setRunBlockId] = useState(blockId);
   const [minutesPerQ] = useState(1.5);
@@ -413,6 +417,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const [checked, setChecked] = useState<Record<string, QuizAnswer>>(() => (restored ? checkedFromPlayerSnapshot(restored) : {}));
   const [startedAt, setStartedAt] = useState<string>(() => restored?.startedAt ?? new Date().toISOString());
   const [nowTick, setNowTick] = useState(() => Date.now());
+  const [pausedMs, setPausedMs] = useState(() => Math.max(0, restored?.pausedMs ?? 0)
+    + (restored?.pausedAt ? Math.max(0, Date.now() - restored.pausedAt) : 0));
   const [annotationTool, setAnnotationTool] = useState<AnnotationTool>(null);
   const [annotationSelection, setAnnotationSelection] = useState<{
     target: QuestionAnnotationTarget;
@@ -561,10 +567,10 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       const saved = answerIn(block, item.id, at);
       return saved.answerKey || saved.flagged ? [saved] : [];
     });
-    const snapshot: ActiveQuizSnapshot = { mode, poolIds: pool.map((item) => item.id), index, answers, picked, revealed, startedAt, timed, filters, runId, certainty };
+    const snapshot: ActiveQuizSnapshot = { mode, poolIds: pool.map((item) => item.id), index, answers, picked, revealed, startedAt, timed, filters, runId, certainty, pausedMs, ...playerRecoveryState(block, at) };
     recoveryAvailableRef.current = writeActiveQuiz(snapshot);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [block, category, certainties, checked, count, examType, mode, ordered, pool, restorePending, retakePending, mediaReady, runId, setIds, questionIds, stage, startedAt, status, timed]);
+  }, [block, category, certainties, checked, count, examType, mode, ordered, pool, restorePending, retakePending, mediaReady, runId, setIds, questionIds, stage, startedAt, status, timed, pausedMs]);
 
   // The resume snapshot is written synchronously; the workspace save is not. If
   // the page closed between "Check answer" and that save, the snapshot knows an
@@ -599,7 +605,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     return () => window.clearInterval(t);
   }, [stage, timed, mediaReady]);
 
-  const elapsedSeconds = Math.floor((nowTick - Date.parse(startedAt)) / 1000);
+  const elapsedSeconds = Math.max(0, Math.floor((nowTick - Date.parse(startedAt) - pausedMs) / 1000));
   const timeLeft = timeLimitSeconds !== undefined ? Math.max(0, timeLimitSeconds - elapsedSeconds) : undefined;
   useEffect(() => {
     if (stage === "running" && mediaReady && !restorePending && !retakePending && pool.length > 0 && timeLeft === 0 && timed) void finishBlock();
@@ -767,6 +773,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     const runStartedAt = new Date().toISOString();
     setPool(built);
     setStartedAt(runStartedAt);
+    setPausedMs(0);
     openBlock(startBlock({ ids: built.map((item) => item.id), mode, now: Date.now(), startedAt: runStartedAt }));
     setCertainties({});
     setChecked({});
@@ -937,6 +944,46 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       score: scoreSession(answerList),
       ...(endedEarly ? { endedEarly: true } : {}),
     };
+  }
+
+  async function saveAndExit() {
+    if (finalizingRef.current) return;
+    finalizingRef.current = true;
+    setFinalizing(true);
+    setFinalizeError(undefined);
+    const scope = captureQuestionWorkspace();
+    try {
+      const checkpoint = getVaultWriteCheckpoint();
+      // Persist the latest workspace, including any note/annotation update
+      // whose earlier write failed, before claiming this block can be closed.
+      s.commitQuizRun({ attempts: [] });
+      await flushLocalVaultWrites();
+      scope.assertCurrent();
+      assertVaultWrite(checkpoint + 1);
+      assertVaultWritesSince(checkpoint);
+      const at = Date.now();
+      const source = blockRef.current;
+      const answers = pool.flatMap((question) => {
+        const answer = answerIn(source, question.id, at);
+        return answer.answerKey || answer.flagged ? [answer] : [];
+      });
+      const snapshot: ActiveQuizSnapshot = {
+        mode, poolIds: pool.map((question) => question.id), index: source.index,
+        answers, picked: itemState(source, source.ids[source.index]).answerKey,
+        revealed: mode === "tutor" && itemState(source, source.ids[source.index]).revealed,
+        startedAt, timed, filters: currentFilters(), runId, certainty, pausedAt: at, pausedMs,
+        ...playerRecoveryState(source, at),
+      };
+      if (!writeActiveQuiz(snapshot)) throw new Error("Browser storage could not confirm the recovery copy.");
+      recoveryAvailableRef.current = true;
+      onClose();
+    } catch (error) {
+      setFinalizeError(`Keep this block open and retry. ${error instanceof Error ? error.message : "The save could not be confirmed."}`);
+    } finally {
+      scope.dispose();
+      finalizingRef.current = false;
+      setFinalizing(false);
+    }
   }
 
   /**
@@ -1341,6 +1388,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       setSession(null);
       setRunId(crypto.randomUUID());
       setStartedAt(new Date().toISOString());
+      setPausedMs(0);
       setReviewingAnswers(false);
       setStage("running");
     }} />;
@@ -1373,6 +1421,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
                 // A retake is its own run: its answers are new attempts.
                 setRunId(crypto.randomUUID());
                 setStartedAt(new Date().toISOString());
+                setPausedMs(0);
                 setStage("running");
               }}>Retake {retakePool.length} missed</GhostButton>
             )}
@@ -1575,12 +1624,13 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       title={`${mode === "exam" ? "Exam" : "Tutor"} · ${index + 1} of ${pool.length}`}
       className="quiz-player-modal"
       bodyClassName="quiz-player-body"
-      onClose={leaveBlock}
+      onClose={() => void saveAndExit()}
       footer={
         mode === "tutor"
           ? (
             <>
-              <GhostButton disabled={finalizing} onClick={leaveBlock}><X size={ICON_SIZE.body} /> {finalizing ? "Saving…" : finalizeError ? "Retry save & exit" : "Exit block"}</GhostButton>
+              <GhostButton disabled={finalizing} onClick={() => void saveAndExit()} title="Save this block and pause its timer. Reopen Create Quiz to resume.">Save &amp; exit</GhostButton>
+              <GhostButton disabled={finalizing} onClick={leaveBlock}><X size={ICON_SIZE.body} /> {finalizing ? "Saving…" : finalizeError ? "Retry save & exit" : "End early"}</GhostButton>
               <GhostButton disabled={finalizing || index === 0} onClick={goPrevious}><ChevronLeft size={ICON_SIZE.body} /> Previous</GhostButton>
               <GhostButton disabled={finalizing} onClick={toggleFlag} aria-label="Flag question" aria-pressed={item.marked}>
                 <Flag size={ICON_SIZE.body} /> {item.marked ? "Flagged" : "Mark review"}
@@ -1592,7 +1642,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           )
           : (
             <>
-              <GhostButton disabled={finalizing} onClick={leaveBlock}><X size={ICON_SIZE.body} /> {finalizing ? "Saving…" : finalizeError ? "Retry save & exit" : "Exit block"}</GhostButton>
+              <GhostButton disabled={finalizing} onClick={() => void saveAndExit()} title="Save this block and pause its timer. Reopen Create Quiz to resume.">Save &amp; exit</GhostButton>
+              <GhostButton disabled={finalizing} onClick={leaveBlock}><X size={ICON_SIZE.body} /> {finalizing ? "Saving…" : finalizeError ? "Retry save & exit" : "End early"}</GhostButton>
               <GhostButton disabled={finalizing || index === 0} onClick={goPrevious}><ChevronLeft size={ICON_SIZE.body} /> Previous</GhostButton>
               <GhostButton disabled={finalizing} onClick={toggleFlag} aria-label="Flag question" aria-pressed={item.marked}>
                 <Flag size={ICON_SIZE.body} /> {item.marked ? "Flagged" : "Mark review"}
@@ -1609,7 +1660,6 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       <div className="quiz-progress" aria-hidden="true">
         <span className="quiz-progress-fill" style={{ width: `${Math.round(((index + (revealed ? 1 : 0)) / pool.length) * 100)}%` }} />
       </div>
-      <QuestionViewControls view={presentation.view} onChange={presentation.choose} notice={presentation.notice} mode={mode} />
       <main className={`tutor-workspace-shell ${activePanel ? "panel-open" : ""}`} aria-label="Tutor question workspace">
       <section className="tutor-question-region" aria-labelledby="tutor-question-heading">
       <h2 id="tutor-question-heading" className="sr-only">Question {index + 1} of {pool.length}</h2>
@@ -1630,8 +1680,11 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
 
       <div className="quiz-reading" style={{ "--quiz-reading-scale": readingScale } as CSSProperties}>
         <QuestionViewFrame view={presentation.view}>
-        <div aria-label={question.content ? "Question stem" : undefined} tabIndex={question.content ? -1 : undefined} ref={question.content ? stemRef : undefined}>
-        <QuestionContent question={question} part="stem" mode={revealed ? "answered" : "question"} fallback={
+        <div>
+        <QuestionContent question={question} part="stem" mode={revealed ? "answered" : "question"}
+          annotation={{ annotations: stemAnnotations, label: "Question stem", focusRef: stemRef,
+            onDelete: deleteAnnotation, eraseMode: annotationTool?.kind === "eraser",
+            onSelection: (range) => handleAnnotationSelection("stem", range) }} fallback={
           <AnnotatedQuestionText
           text={question.stem}
           annotations={stemAnnotations}
@@ -1708,7 +1761,9 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             onMarkExplanationWrong={() => flagExtractionIssue("explanation")}
             onMarkAnswerWrong={() => flagExtractionIssue("answer")}
             onEditMapping={() => setEditingMapping((value) => !value)}
-            explanationContent={question.explanation ? (<QuestionContent question={question} part="explanation" mode="answered" fallback={
+            explanationContent={question.explanation ? (<QuestionContent question={question} part="explanation" mode="answered"
+              annotation={{ annotations: explanationAnnotations, label: "Question explanation", onDelete: deleteAnnotation,
+                eraseMode: annotationTool?.kind === "eraser", onSelection: range => handleAnnotationSelection("explanation", range) }} fallback={
               <AnnotatedQuestionText
                 text={question.explanation.trim()}
                 annotations={explanationAnnotations}
@@ -1823,14 +1878,14 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             </div>
           )}
           <QuestionAttachmentsPanel
+            key={`note-images-${question.id}`}
             questionId={question.id}
             attachments={(question.attachments ?? []).filter((attachment) => !attachment.role)}
-            onChange={(noteImages) => {
+            onChange={async (noteImages) => {
               // The question's own exhibits stay with the stem; this panel manages note images only.
-              const next = [...(question.attachments ?? []).filter((attachment) => attachment.role), ...noteImages];
+              const next = await saveQuestionNoteImages(question.id, noteImages);
               const value = next.length ? next : undefined;
               setPool((current) => current.map((item) => item.id === question.id ? { ...item, attachments: value } : item));
-              s.updateQuestion(question.id, { attachments: value });
             }}
           />
         </>

@@ -20,9 +20,11 @@ const mocked = vi.hoisted(() => ({
   updateDocument: vi.fn(),
   updateQuestion: vi.fn(),
   documents: [] as SourceDocument[],
+  terms: [],
+  courses: [],
 }));
 
-vi.mock("../../lib/store", () => ({ useStore: () => mocked }));
+vi.mock("../../lib/store", () => ({ useStore: Object.assign(() => mocked, { getState: () => mocked }) }));
 vi.mock("../../lib/toast", () => ({ pushToast: vi.fn() }));
 vi.mock("../../lib/ai", () => ({
   checkProviderHealth: vi.fn(async () => ({ ok: false, detail: "No provider" })),
@@ -333,16 +335,21 @@ describe("source-document-first import", () => {
     }} />);
 
     const images = screen.getByRole("region", { name: "Images" });
-    expect(within(images).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["ecg-2.pngnot added yet", "slide-2.jpgnot added yet"]);
+    expect(within(images).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      expect.stringContaining("ecg-2.pngnot added yetSource page not recordedQuestion 2: Which rhythm is shown?"),
+      expect.stringContaining("slide-2.jpgnot added yetSource page not recordedQuestion 2: Which rhythm is shown?"),
+    ]);
     expect(screen.getByRole("button", { name: /Which rhythm is shown/ }).textContent).toContain("image ecg-2.png (not added yet)");
 
     await user.upload(within(images).getByLabelText("Add image files for this import"), [
       new File([new Uint8Array(32)], "ECG-2.png", { type: "image/png" }),
       new File([new Uint8Array(32)], "holiday.png", { type: "image/png" }),
     ]);
-    expect(within(within(images).getByRole("list", { name: "Named images" })).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["ecg-2.pngready", "slide-2.jpgnot added yet"]);
-    expect(within(images).getByText(/Not named by any question, so left out: holiday.png/)).toBeTruthy();
-    // A file no question names is offered a question to go on, and is left out unless it gets one.
+    expect(within(within(images).getByRole("list", { name: "Named images" })).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      expect.stringContaining("ecg-2.pngready"), expect.stringContaining("slide-2.jpgnot added yet"),
+    ]);
+    expect(within(images).getByText(/kept in the Source Library for review/)).toBeTruthy();
+    // Unassigned images stay available as source evidence without an invented question association.
     expect(within(within(images).getByRole("list", { name: "Images not on a question" })).getByLabelText("Attach holiday.png to a question")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Finalize import" }));
@@ -352,9 +359,10 @@ describe("source-document-first import", () => {
     });
     expect(exactVaultWrite).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(pushToast).toHaveBeenCalledWith(expect.objectContaining({
-      title: "1 image attached to its question",
-      body: expect.stringContaining("1 named image was not added"),
+      title: "Questions saved; image review is still open",
+      body: expect.stringContaining("1 named image files are still missing"),
     })));
+    expect(screen.getByRole("button", { name: "Finalize import" })).toBeTruthy();
   });
 
   it("returns to the full source text without losing it and reparses an edit", async () => {

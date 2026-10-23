@@ -9,6 +9,11 @@ import { MassImport, massImportFileStatus } from "./MassImport";
 
 vi.mock("../../lib/checksum", () => ({ sha256Hex: vi.fn(async () => "sha256-test") }));
 // The PDF bytes here are a stand-in, so the figure pass is stubbed like the text pass.
+vi.mock("../../lib/question-content/pdf/extractPdfBank", () => ({ extractPdfBank: vi.fn(async () => ({ tagged: false })) }));
+vi.mock("../../lib/question-content/pdf/extractCompletePdfSource", () => ({ extractCompletePdfSource: async (...args: Parameters<typeof extractPdfText>) => {
+  const source = await extractPdfText(...args);
+  return { ...source, previewText: source.text, previewPages: source.pages };
+} }));
 vi.mock("../../lib/pdfFigures", () => ({ attachPdfFigures: vi.fn(async () => ({ images: [], notes: [] })) }));
 vi.mock("../../lib/extractText", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../lib/extractText")>(),

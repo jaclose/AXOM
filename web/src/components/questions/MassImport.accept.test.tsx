@@ -15,10 +15,10 @@ import { MassImport } from "./MassImport";
 // again adds nothing. All content is invented.
 
 vi.mock("../../lib/toast", () => ({ pushToast: vi.fn() }));
-// A checksum that follows the bytes, so the same file is recognised and a changed one is not.
-vi.mock("../../lib/checksum", () => ({
-  sha256Hex: vi.fn(async (buffer: ArrayBuffer) => `sha-${[...new Uint8Array(buffer)].reduce((hash, byte) => (hash * 31 + byte) >>> 0, 7).toString(16)}`),
-}));
+vi.mock("../../lib/checksum", async () => {
+  const { createHash } = await import("node:crypto");
+  return { sha256Hex: vi.fn(async (buffer: ArrayBuffer) => createHash("sha256").update(new Uint8Array(buffer)).digest("hex")) };
+});
 vi.mock("../../lib/questionImportSave", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/questionImportSave")>();
   return { ...actual, saveReviewedImport: vi.fn(actual.saveReviewedImport) };

@@ -391,7 +391,7 @@ export async function attachPdfFigures<T extends { stem: string; sourcePage?: nu
   drafts: T[],
   pageTexts: readonly string[],
   deckPages: readonly DeckPage[] = [],
-): Promise<{ images: File[]; notes: string[] }> {
+): Promise<{ images: File[]; notes: string[]; placements?: FigurePlacement[] }> {
   if (drafts.length === 0) return { images: [], notes: [] };
   try {
     const found = await extractPdfFigures(buffer, fileName);
@@ -435,7 +435,7 @@ export async function attachPdfFigures<T extends { stem: string; sourcePage?: nu
     if (found.figures.length > 0) {
       notes.unshift(`${found.figures.length} image${found.figures.length === 1 ? "" : "s"} found in this PDF, ${placed} attached to a question by its place on the page.`);
     }
-    return { images: found.figures.map((figure) => figure.file), notes: [...notes, ...found.warnings] };
+    return { placements, images: found.figures.map((figure) => figure.file), notes: [...notes, ...found.warnings] };
   } catch {
     return { images: [], notes: ["AXOM could not read the images in this PDF. The questions were imported without them. Add an image to a question after it is saved, from the question itself."] };
   }

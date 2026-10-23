@@ -71,7 +71,7 @@ interface Segment {
 // underscore form only counts as a copy marker after a space.
 const COPY_MARKERS = /\s*(?:\(\d+\)|\bcopy(?:\s*\d+)?\b|\s_\d+_)\s*/gi;
 // An underscore is a word character, so "\b" misses "2026_Week 1".
-const WEEK = /(?:^|[^a-z0-9])(?:weeks?|wks?)[\s_]*0*(\d{1,2})(?:\s*(?:and|to|[_&+-])\s*0*(\d{1,2}))?(?![0-9])/i;
+const WEEK = /(?:^|[^a-z0-9])(?:weeks?|wks?|w)[\s_]*0*(\d{1,2})(?:\s*(?:and|to|[_&+-])\s*0*(\d{1,2}))?(?![0-9])/i;
 const TERM = /\b(?:term\s*|t)([1-9])\b/i;
 
 export function inferSourceMapping(relativePath: string, vocabulary: SourceVocabulary): SourceMapping {

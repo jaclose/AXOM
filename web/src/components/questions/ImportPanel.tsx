@@ -16,12 +16,11 @@ import {
 } from "lucide-react";
 import { useStore } from "../../lib/store";
 import { createImportMappingLedger, parseQuestionBlocks, type ParsedQuestionDraft } from "../../lib/questionParse";
-import { detectImportFormat, importFromCsv, importFromJson, importFromText } from "../../lib/questionImport";
-import { extractDocxText, extractPdfText, extractPlainText } from "../../lib/extractText";
-import { proposePdfMarkedAnswers } from "../../lib/pdfMarkedAnswers";
-import { attachPdfFigures } from "../../lib/pdfFigures";
+import { importFromCsv, importFromJson, importFromText } from "../../lib/questionImport";
+import { extractDocxText } from "../../lib/extractText";
+import { type FigurePlacement } from "../../lib/pdfFigures";
 import { parsePdfQuestions } from "../../lib/pdfQuestionImport";
-import { documentTitleFromFile, type SourceDocument } from "../../lib/library";
+import { type SourceDocument } from "../../lib/library";
 import {
   EXAM_TYPE_LABEL, QUESTION_CATEGORIES,
   type QuestionDifficulty, type QuestionExamType, type QuestionRecord, type QuestionSource,
@@ -50,6 +49,9 @@ import { MassImport } from "./MassImport";
 import { flagImportDuplicates } from "../../lib/questionDuplicates";
 import { imageNameKey, imageReferenceKey, matchNamedImages, namedImages } from "../../lib/questionImportImages";
 import type { RawSelection } from "../../lib/privateLibrary/rawAcademicInput";
+
+import { ImportImagePreview } from "./ImportImagePreview";
+import { readQuestionImportFile } from "../../lib/readQuestionImportFile";
 
 export type ImportTab = "paste" | "file" | "batch" | "ai";
 type SaveMode = "set" | "doc" | "both";
@@ -87,6 +89,9 @@ export interface ImportSeed {
   warnings?: string[];
   /** Figures already cut from the file, named as the drafts name them. */
   images?: File[];
+  imagePlacements?: FigurePlacement[];
+  originalFile?: File;
+  bank?: ReviewBank;
   source?: QuestionSource;
   /** Internal queue identity used to retire one multi-file row after success. */
   batchQueueId?: string;
@@ -223,6 +228,7 @@ export function ImportPanel({
     seed?.drafts && seed.rawText != null
       ? {
           existingDocumentId: seed.sourceDocumentId,
+          originalFile: seed.originalFile,
           title: seed.title ?? "Imported",
           fileName: seed.fileName ?? "import",
           fileType: seed.fileType ?? "imported",
@@ -232,6 +238,7 @@ export function ImportPanel({
           checksum: seed.checksum,
         }
       : null);
+  const [batchBank, setBatchBank] = useState<ReviewBank>();
   const [busyFile, setBusyFile] = useState<string | null>(null);
   // Save options (§save modes): radio for destination, checkbox for AI.
   const [saveMode, setSaveMode] = useState<SaveMode>(() =>
@@ -257,6 +264,7 @@ export function ImportPanel({
   const mountedRef = useRef(true);
   // Image files the learner adds for questions that name one ("Attachment: ecg.png").
   const [imageFiles, setImageFiles] = useState<File[]>(() => seed?.images ?? []);
+  const [imagePlacements, setImagePlacements] = useState<FigurePlacement[]>(seed?.imagePlacements ?? []);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -300,11 +308,12 @@ export function ImportPanel({
     setFinalizing(false);
   }
 
-  function loadDrafts(parsed: ParsedQuestionDraft[], warnings: string[], source: QuestionSource, doc: PendingDocument | null, ai = false, images: File[] = []) {
+  function loadDrafts(parsed: ParsedQuestionDraft[], warnings: string[], source: QuestionSource, doc: PendingDocument | null, ai = false, images: File[] = [], placements: FigurePlacement[] = []) {
     finalizingRef.current = false;
     setFinalizing(false);
     // Figures cut from a PDF arrive with its questions and go through the same
     // path as images the learner adds by hand.
+    setImagePlacements(placements);
     setImageFiles(images); // Avoid carrying pictures from a prior source into the next review.
     // A file imported before comes in with what it already brought left unselected.
     const known = applyPriorImport(flagImportDuplicates(parsed, s.questions ?? []), doc, settledLibrary());
@@ -351,6 +360,7 @@ export function ImportPanel({
     // Checked, shaped and written by lib/questionImportSave: the same path
     // mass import's "Accept" takes.
     const prepared = prepareReviewedImport({
+      preserveUnassignedImages: true,
       drafts: approved,
       destination: modeOverride,
       document: pendingDoc,
@@ -410,6 +420,14 @@ export function ImportPanel({
           : saved.message,
         tone: "warn",
       });
+      return;
+    }
+    if (saved.images.missing || saved.images.problems.length) {
+      finalizingRef.current = false;
+      setFinalizing(false);
+      setStep("review");
+      pushToast({ title: "Questions saved; image review is still open", tone: "warn",
+        body: [...saved.images.problems, saved.images.missing ? `${saved.images.missing} named image files are still missing. Add them and retry to repair this same set.` : ""].filter(Boolean).join(" ") });
       return;
     }
     if (saved.reused) {
@@ -620,6 +638,11 @@ export function ImportPanel({
   /** Put an image the import could not place on the question the learner picks. */
   function attachImage(name: string, reviewId: string) {
     if (!reviewId) return;
+    const placement = imagePlacements.find(item => imageReferenceKey(item.name) === imageReferenceKey(name));
+    if (placement?.held) {
+      pushToast({ title: "Image kept for source review", body: placement.reason ?? "This image may reveal an answer. It cannot be attached as a question figure.", tone: "warn" });
+      return;
+    }
     setDrafts((all) => all.map((draft) => (draft.reviewId === reviewId
       ? { ...draft, attachmentNames: [...new Set([...(draft.attachmentNames ?? []), name])] }
       : draft)));
@@ -769,7 +792,7 @@ export function ImportPanel({
         : saveMode !== "doc" && blockedCount > 0
           ? `${blockedCount} included question${blockedCount === 1 ? " still needs" : "s still need"} correction or explicit review before finalization.`
           : unusedImages.length > 0 && saveMode !== "doc"
-            ? `The reviewed import is ready to finalize. ${unusedImages.length} image${unusedImages.length === 1 ? " is" : "s are"} not on any question and will be left out.`
+            ? `The reviewed import is ready to finalize. ${unusedImages.length} unassigned image${unusedImages.length === 1 ? " will" : "s will"} be kept in the Source Library for review.`
             : "The reviewed import is ready to finalize.";
 
   return (
@@ -794,7 +817,10 @@ export function ImportPanel({
         })}
       </nav>
 
-      {!reviewing && (
+      {batchBank && <BankImportReview bank={batchBank} onBack={() => setBatchBank(undefined)} onSaved={(result) => {
+        if (result.questionIds.length === batchBank.pkg.questions.length) { setBatchBank(undefined); finishSuccessfulImport(result); }
+      }} />}
+      {!reviewing && !batchBank && (
         <div className="stack gap12">
           <div className="row wrap gap6" aria-label="Import source type">
             {([
@@ -868,9 +894,10 @@ export function ImportPanel({
         </div>
       )}
 
-      <div hidden={reviewing || tab !== "batch"}>
+      <div hidden={reviewing || Boolean(batchBank) || tab !== "batch"}>
         <MassImport finalizedQueueId={finalizedBatchQueueId} onInspect={(payload) => {
           setActiveBatchQueueId(payload.batchQueueId);
+          if (payload.bank) { setBatchBank(payload.bank); return; }
           loadDrafts(
             payload.drafts ?? [],
             payload.warnings ?? [],
@@ -878,6 +905,7 @@ export function ImportPanel({
             payload.rawText != null
               ? {
                   existingDocumentId: payload.sourceDocumentId,
+                  originalFile: payload.originalFile,
                   title: payload.title ?? "Imported",
                   fileName: payload.fileName ?? "import",
                   fileType: payload.fileType ?? "imported",
@@ -889,6 +917,7 @@ export function ImportPanel({
               : null,
             false,
             payload.images ?? [],
+            payload.imagePlacements ?? [],
           );
         }} />
       </div>
@@ -997,30 +1026,52 @@ export function ImportPanel({
                   {imageMatches.map((match) => (
                     <li key={match.name} className={match.file ? "matched" : "missing"}>
                       {match.file ? <CheckCircle2 size={ICON_SIZE.microInline} aria-hidden="true" /> : <X size={ICON_SIZE.microInline} aria-hidden="true" />}
+                      {match.file && <ImportImagePreview file={match.file} />}
+                      <div className="import-image-context">
                       <span>{match.name}</span>
                       <small>{match.file ? (imageNameKey(match.file.name) === imageNameKey(match.name) ? "ready" : `using ${match.file.name}`) : "not added yet"}</small>
+                      <small>{imagePlacements.find(item => item.name === match.file?.name)?.page
+                        ? `Source page ${imagePlacements.find(item => item.name === match.file?.name)?.page}` : "Source page not recorded"}</small>
+                      {drafts.filter(draft => draft.attachmentNames?.some(name => imageReferenceKey(name) === imageReferenceKey(match.name))).map(draft => <div key={draft.reviewId}>
+                        <p><b>Question {draft.questionNumber ?? drafts.indexOf(draft) + 1}</b>: {draft.stem.slice(0, 220)}</p>
+                        <div className="row wrap gap6">{([-1, 1] as const).map(direction => <button type="button" className="gbtn" key={direction}
+                          disabled={direction < 0 ? draft.attachmentNames?.[0] === match.name : draft.attachmentNames?.at(-1) === match.name}
+                          onClick={() => setDrafts(current => current.map(item => {
+                            if (item.reviewId !== draft.reviewId) return item;
+                            const names = [...(item.attachmentNames ?? [])]; const index = names.indexOf(match.name); const target = index + direction;
+                            if (index < 0 || target < 0 || target >= names.length) return item;
+                            [names[index], names[target]] = [names[target], names[index]];
+                            return { ...item, attachmentNames: names };
+                          }))} aria-label={`Move ${match.name} ${direction < 0 ? "earlier" : "later"} in question ${draft.questionNumber ?? drafts.indexOf(draft) + 1}`}>{direction < 0 ? "Move earlier" : "Move later"}</button>)}</div>
+                      </div>)}
                       <button type="button" className="import-image-detach" aria-label={`Take ${match.name} off its question`} title="Take this image off its question"
                         onClick={() => detachImage(match.name)}>
-                        <X size={ICON_SIZE.microInline} aria-hidden="true" />
+                        <X size={ICON_SIZE.microInline} aria-hidden="true" /> Unassign image
                       </button>
+                      </div>
                     </li>
                   ))}
                 </ul>
               )}
               {unusedImages.length > 0 && (
                 <>
-                  <div className="sub">Not named by any question, so left out: {unusedImages.map((file) => file.name).join(", ")}. To keep one, attach it to its question here.</div>
+                  <div className="sub">These images will be kept in the Source Library for review. Assign one here when its question is certain.</div>
                   <ul className="import-image-list" aria-label="Images not on a question">
                     {unusedImages.map((file) => (
                       <li key={file.name} className="missing">
+                        <ImportImagePreview file={file} />
+                        <div className="import-image-context">
                         <span>{file.name}</span>
-                        <select className="field week-move" aria-label={`Attach ${file.name} to a question`} value=""
+                        <small>{imagePlacements.find(item => item.name === file.name)?.page ? `Source page ${imagePlacements.find(item => item.name === file.name)?.page}` : "Source page not recorded"}</small>
+                        {imagePlacements.find(item => item.name === file.name)?.held && <p role="status">Kept for source review. {imagePlacements.find(item => item.name === file.name)?.reason}</p>}
+                        <select disabled={Boolean(imagePlacements.find(item => item.name === file.name)?.held)} className="field week-move" aria-label={`Attach ${file.name} to a question`} value=""
                           onChange={(event) => attachImage(file.name, event.target.value)}>
                           <option value="">Attach to a question</option>
                           {drafts.map((draft, index) => (draft.include
-                            ? <option key={draft.reviewId} value={draft.reviewId}>Question {draft.questionNumber ?? index + 1}{draft.sourcePage ? `, page ${draft.sourcePage}` : ""}</option>
+                            ? <option key={draft.reviewId} value={draft.reviewId}>Question {draft.questionNumber ?? index + 1}{draft.sourcePage ? `, page ${draft.sourcePage}` : ""}: {draft.stem.slice(0, 100)}</option>
                             : null))}
                         </select>
+                        </div>
                       </li>
                     ))}
                   </ul>
@@ -1362,7 +1413,7 @@ function FileTab({ busyFile, setBusyFile, onParsed, onBankSaved, stagedSources, 
   onBankSaved: (result: ImportFinalizationResult) => void;
   busyFile: string | null;
   setBusyFile: (name: string | null) => void;
-  onParsed: (drafts: ParsedQuestionDraft[], warnings: string[], source: QuestionSource, doc: PendingDocument | null, ai?: boolean, images?: File[]) => void;
+  onParsed: (drafts: ParsedQuestionDraft[], warnings: string[], source: QuestionSource, doc: PendingDocument | null, ai?: boolean, images?: File[], placements?: FigurePlacement[]) => void;
   stagedSources: readonly StagedSource[];
   stagedSkipped: readonly string[];
   onStage: (selection: RawSelection) => void;
@@ -1388,7 +1439,7 @@ function FileTab({ busyFile, setBusyFile, onParsed, onBankSaved, stagedSources, 
     if (file.size > 128 * 1024 * 1024) throw new Error("The answer-key file exceeds 128 MB. Split or export a smaller key.");
     const bytes = await file.arrayBuffer();
     const suffix = file.name.toLowerCase();
-    const extracted = suffix.endsWith(".pdf") ? await extractPdfText(bytes.slice(0))
+    const extracted = suffix.endsWith(".pdf") ? await (await import("../../lib/question-content/pdf/extractCompletePdfSource")).extractCompletePdfSource(bytes.slice(0))
       : suffix.endsWith(".docx") ? await extractDocxText(bytes.slice(0))
       : { text: new TextDecoder("utf-8", { fatal: true }).decode(bytes), warnings: [] as string[] };
     return {
@@ -1416,124 +1467,25 @@ function FileTab({ busyFile, setBusyFile, onParsed, onBankSaved, stagedSources, 
   async function handleFile(file: File, stagedId?: string) {
     onInspectStaged(stagedId);
     const relatedImages = stagedSources.find(row => row.id === stagedId)?.images ?? [];
-    const name = file.name.toLowerCase();
-    const isPdf = file.type === "application/pdf" || name.endsWith(".pdf");
-    const isDocx = name.endsWith(".docx") || file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
     setBusyFile(file.name);
     setProgress(`Opening ${file.name}…`);
     try {
-      if (isPdf) {
-        const { extractPdfBank } = await import("../../lib/question-content/pdf/extractPdfBank");
-        const state = useStore.getState();
-        const extractedBank = await extractPdfBank(file, manifestForFile(file.name, state.terms, state.courses));
-        if (extractedBank.tagged) { if (stagedId) onStagedCandidates(stagedId, extractedBank.pkg.questions.length); setBankStagedId(stagedId); setBank(await withPackageKey(extractedBank, stagedId)); return; }
-      }
-      if (isDocx) {
-        // Ordinary Word files have a first-class block converter: retain
-        // embedded figures, tables, formulae and evidence instead of flattening
-        // everything through the legacy text-only parser.
-        const { extractDocxBank } = await import("../../lib/question-content/docx/extractDocxBank");
-        const state = useStore.getState();
-        const converted = await extractDocxBank(file, manifestForFile(file.name, state.terms, state.courses));
-        if (converted.pkg.questions.length) { if (stagedId) onStagedCandidates(stagedId, converted.pkg.questions.length); setBankStagedId(stagedId); setBank(await withPackageKey(converted, stagedId)); return; }
-      }
-      if (isPdf || isDocx) {
-        const buffer = await file.arrayBuffer();
-        const checksum = await sha256Hex(buffer);
-        // pdf.js takes ownership of the bytes it is given, so the figure pass reads its own copy.
-        const figureBytes = isPdf ? buffer.slice(0) : undefined;
-        const extracted = isPdf ? await (await import("../../lib/question-content/pdf/extractCompletePdfSource"))
-          .extractCompletePdfSource(buffer, ({ readPages, totalPages }) => setProgress(`Scanning page ${readPages}/${totalPages} in ${file.name}…`))
-          : await extractDocxText(buffer);
-        const doc: PendingDocument = {
-          originalFile: file,
-          title: documentTitleFromFile(file.name),
-          fileName: file.name,
-          fileType: isPdf ? "pdf" : "docx",
-          sizeBytes: file.size,
-          rawText: "previewText" in extracted && typeof extracted.previewText === "string"
-            ? extracted.previewText : extracted.text,
-          pageTexts: isPdf && "previewPages" in extracted && Array.isArray(extracted.previewPages)
-            && extracted.previewPages.every((page): page is string => typeof page === "string")
-            ? extracted.previewPages : undefined,
-          checksum,
-        };
-        if (extracted.empty) {
-          if (stagedId) onStagedCandidates(stagedId, 0);
-          onParsed([], extracted.warnings, isPdf ? "pdf" : "imported", doc);
-          return;
-        }
-        const read = isPdf ? parsePdfQuestions(extracted.text, extracted.pages) : { drafts: parseQuestionBlocks(extracted.text), notes: [], deckPages: undefined };
-        const paired = await withDraftKey(read.drafts, stagedId);
-        const drafts = paired.drafts;
-        const markNotes = figureBytes ? await proposePdfMarkedAnswers(figureBytes.slice(0), drafts, read.deckPages) : [];
-        const { images, notes: figureNotes } = figureBytes
-          ? await attachPdfFigures(figureBytes, file.name, drafts, extracted.pages ?? [], read.deckPages)
-          : { images: [], notes: [] };
-        if (stagedId) onStagedCandidates(stagedId, drafts.length);
-        onParsed(
-          drafts,
-          [
-            ...extracted.warnings,
-            ...read.notes,
-            ...paired.warnings,
-            ...figureNotes,
-            ...markNotes,
-            ...(drafts.length === 0 ? ["Text was extracted but no question pattern was found — review the file, or keep it as a library document."] : []),
-          ],
-          isPdf ? "pdf" : "imported",
-          doc,
-          false,
-          [...images, ...relatedImages],
-        );
+      const state = useStore.getState();
+      const read = await readQuestionImportFile(file, manifestForFile(file.name, state.terms, state.courses), setProgress);
+      if (read.kind === "bank") {
+        if (stagedId) onStagedCandidates(stagedId, read.bank.pkg.questions.length);
+        setBankStagedId(stagedId);
+        setBank(await withPackageKey(read.bank, stagedId));
         return;
       }
-
-      if (file.type.startsWith("image/")) {
-        const checksum = await sha256Hex(await file.arrayBuffer());
-        onParsed([], [
-          `Attached ${file.name}. Image imports store provenance only — there is no in-app OCR yet. Paste the question text instead.`,
-        ], "image", {
-          originalFile: file,
-          title: documentTitleFromFile(file.name),
-          fileName: file.name,
-          fileType: file.type,
-          sizeBytes: file.size,
-          rawText: "",
-          checksum,
-        });
-        return;
-      }
-
-      const format = detectImportFormat(file.name, file.type);
-      if (format === "unsupported") {
-        pushToast({ title: "Unsupported file type", body: "Use PDF, DOCX, TXT, Markdown, CSV, or JSON.", tone: "warn" });
-        return;
-      }
-      const [text, checksum] = await Promise.all([
-        file.text(),
-        file.arrayBuffer().then(sha256Hex),
-      ]);
-      const plain = extractPlainText(text);
-      const result = format === "csv" ? importFromCsv(plain.text) : format === "json" ? importFromJson(plain.text) : importFromText(plain.text);
-      const paired = await withDraftKey(result.drafts, stagedId);
+      const paired = await withDraftKey(read.drafts, stagedId);
       if (stagedId) onStagedCandidates(stagedId, paired.drafts.length);
-      onParsed(paired.drafts, [...plain.warnings, ...result.warnings, ...paired.warnings], "imported", {
-        originalFile: file,
-        title: documentTitleFromFile(file.name),
-        fileName: file.name,
-        fileType: format,
-        sizeBytes: file.size,
-        rawText: plain.text,
-        checksum,
-      }, false, relatedImages);
+      onParsed(paired.drafts, [...read.warnings, ...paired.warnings], read.source,
+        read.document, false, [...read.images, ...relatedImages], read.placements);
     } catch (err) {
       if (stagedId) onInspectStaged(undefined);
       pushToast({ title: "Import failed", body: err instanceof Error ? err.message : "Could not read this file.", tone: "warn" });
-    } finally {
-      setBusyFile(null);
-      setProgress("");
-    }
+    } finally { setBusyFile(null); setProgress(""); }
   }
 
   async function previewPrepared(name: string, input: File | File[]) {

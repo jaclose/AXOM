@@ -15,6 +15,8 @@ import { ImportPanel } from "./ImportPanel";
 vi.mock("../../lib/toast", () => ({ pushToast: vi.fn() }));
 vi.mock("../../lib/checksum", () => ({ sha256Hex: vi.fn(async () => "sha256-batch-figure") }));
 vi.mock("../../lib/pdfFigures", () => ({ attachPdfFigures: vi.fn(async () => ({ images: [], notes: [] })) }));
+vi.mock("../../lib/question-content/pdf/extractPdfBank", () => ({ extractPdfBank: vi.fn(async () => ({ tagged: false })) }));
+vi.mock("../../lib/question-content/pdf/extractCompletePdfSource", () => ({ extractCompletePdfSource: (...args: Parameters<typeof extractPdfText>) => extractPdfText(...args) }));
 vi.mock("../../lib/extractText", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../lib/extractText")>(),
   extractPdfText: vi.fn(),
@@ -89,15 +91,15 @@ describe("Review: an image the import could not place", () => {
     return { drafts, rawText, title: "Deck", fileName: "deck.pdf", fileType: "pdf", checksum: "deck-checksum", images: [tracing, film] };
   };
 
-  it("is listed, says it will be left out, and goes on the question the learner picks", async () => {
+  it("is retained for source review and goes on the question the learner picks", async () => {
     const user = userEvent.setup();
     render(<ImportPanel seed={seed()} />);
     const images = screen.getByRole("region", { name: "Images" });
     const unplaced = () => within(images).queryByRole("list", { name: "Images not on a question" });
     expect(within(unplaced()!).getByRole("listitem").textContent).toContain("deck-p3-fig1.png");
-    expect(screen.getByText("The reviewed import is ready to finalize. 1 image is not on any question and will be left out.")).toBeTruthy();
+    expect(screen.getByText("The reviewed import is ready to finalize. 1 unassigned image will be kept in the Source Library for review.")).toBeTruthy();
 
-    await user.selectOptions(within(images).getByLabelText("Attach deck-p3-fig1.png to a question"), "Question 2");
+    await user.selectOptions(within(images).getByLabelText("Attach deck-p3-fig1.png to a question"), within(images).getByRole("option", { name: /^Question 2:/ }));
     expect(unplaced()).toBeNull();
     expect(within(images).getByRole("list", { name: "Named images" }).textContent).toContain("deck-p3-fig1.png");
     expect(screen.getByRole("group", { name: /A film is shown/ }).textContent).toContain("image deck-p3-fig1.png");
@@ -113,7 +115,7 @@ describe("Review: an image the import could not place", () => {
     await user.click(within(images).getByRole("button", { name: "Take deck-p2-fig1.png off its question" }));
     expect(screen.getByRole("group", { name: /A tracing is shown/ }).textContent).not.toContain("image deck-p2-fig1.png");
     expect(within(images).getByRole("list", { name: "Images not on a question" }).textContent).toContain("deck-p2-fig1.png");
-    expect(screen.getByText("The reviewed import is ready to finalize. 2 images are not on any question and will be left out.")).toBeTruthy();
+    expect(screen.getByText("The reviewed import is ready to finalize. 2 unassigned images will be kept in the Source Library for review.")).toBeTruthy();
   });
 });
 

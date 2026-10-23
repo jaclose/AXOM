@@ -177,3 +177,14 @@ import/media/review/persistence journeys use the new navigator. Real-source insp
 proposals; three stay unresolved. This is extraction evidence, not verified answer keys.
 SKILLS_USED: design-production-router, redesign-existing-projects (UI only); pdf:pdf
 (native source inspection). No additional dependency or storage schema.
+
+Course-template previews keep academic sessions/cohorts separate from numbered
+curriculum terms. Different editions of the same course/module cannot be applied
+together; the originals stay saved while the learner chooses one edition. Updates
+retain stable activity identities and manual progress. Source mapping recognizes
+literal `W1`/`W2-3` labels, keeps ranges explicit, and does not equate quiz numbers or
+numbered module folders with teaching weeks. Module-wide reviews need no invented
+week; the QBank keeps them in the module's unscheduled group or Unfiled when ownership
+is uncertain. Local corpus acceptance is opt-in through
+`web/e2e/private-corpus-reload.local.spec.ts`; private package paths and receipts remain
+outside the public repository.
