@@ -4,7 +4,8 @@ import { readManifest, readQuestionsFile } from "../question-content/packageJson
 import { assessBank } from "../question-content/assessBank";
 import type { PackageIssue } from "../question-content/package";
 import type { PreparedBank, PrivateLibraryCatalog } from "./types";
-import { resolveLibraryInputRoot, safeInputPath, type LibraryInputEntry } from "./inputRoot";
+import { isPackagingMetadata, resolveLibraryInputRoot, safeInputPath, type LibraryInputEntry } from "./inputRoot";
+import { resolveQuestionExport } from "./questionExport";
 
 type Reader = (path: string) => Promise<Uint8Array>;
 const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
@@ -37,9 +38,11 @@ export async function resolveLibraryReader(entries: readonly LibraryInputEntry[]
     return bytes;
   };
   if (root.kind === "catalog") return async path => readSelected(`${root.prefix}${safeInputPath(path)}`);
+  if (root.kind === "question-export") return resolveQuestionExport(root.questionsPath, readSelected);
 
   const virtual = new Map<string, Uint8Array>(), aliases = new Map<string, string>();
   const sources: PrivateLibraryCatalog["sources"] = [], fingerprints: string[] = [];
+  const referencedQuestionPaths = new Set<string>();
   const seenSource = new Map<string, string>();
   for (const manifestPath of root.manifestPaths) {
     const base = parent(manifestPath), issues: PackageIssue[] = [];
@@ -47,6 +50,7 @@ export async function resolveLibraryReader(entries: readonly LibraryInputEntry[]
     const manifest = readManifest(parseJson(manifestBytes, "manifest.json"), issues);
     if (!manifest) throw new Error(`The package at ${base || "the selected root"} has an unsupported manifest.`);
     const questionPath = `${base}${safeInputPath(manifest.questionsFile)}`;
+    referencedQuestionPaths.add(questionPath);
     const questionBytes = await readSelected(questionPath);
     const rawQuestions = parseJson(questionBytes, manifest.questionsFile);
     if (object(rawQuestions).bankId !== manifest.bank.id) throw new Error(`The questions do not belong to ${manifest.bank.title}. Re-export the package.`);
@@ -60,6 +64,7 @@ export async function resolveLibraryReader(entries: readonly LibraryInputEntry[]
     const sourceCandidates = [...new Set([`${base}source/${sourceName}`, `${base}${sourceName}`])].filter(path => byPath.has(safeInputPath(path)));
     if (sourceCandidates.length > 1) throw new Error(`${manifest.bank.title} contains two possible originals. Keep one exact source in its source folder.`);
     const sourceFile = sourceCandidates[0];
+    if (sourceFile) referencedQuestionPaths.add(sourceFile);
     const original = sourceFile ? await readSelected(sourceFile) : undefined;
     const declared = new Set(parsed.questions.map(question => question.provenance.sourceChecksum).filter((value): value is string => Boolean(value)).map(hex));
     if ([...declared].some(value => !/^[a-f0-9]{64}$/.test(value)) || declared.size > 1) {
@@ -74,10 +79,12 @@ export async function resolveLibraryReader(entries: readonly LibraryInputEntry[]
       continue; // Exact source/package duplicates refer to the first copy, never add questions.
     }
     seenSource.set(checksum, fingerprint); fingerprints.push(fingerprint);
-    const prefix = `_axom-input/${checksum}`, assetDirectory = safeInputPath(manifest.assetsDirectory);
+    const prefix = `_axom-input/${checksum}`, assetDirectory = safeInputPath(manifest.assetsDirectory.replace(/\/$/, ""));
     const assetChecks = new Map<string, { checksum: string; byteSize: number; mimeType: string; width?: number; height?: number }>();
     for (const question of parsed.questions) {
-      if (original && !question.provenance.sourceChecksum) question.provenance.sourceChecksum = `sha256:${checksum}`;
+      // The digest was checked above. Canonicalize its notation so the first
+      // install and reimport use the same source identity, without adding evidence.
+      if (original || question.provenance.sourceChecksum) question.provenance.sourceChecksum = `sha256:${checksum}`;
       for (const asset of question.assets) {
         const name = safeInputPath(asset.filename), assetPath = `${base}${assetDirectory}/${name}`;
         let info = assetChecks.get(name);
@@ -124,6 +131,8 @@ export async function resolveLibraryReader(entries: readonly LibraryInputEntry[]
       status: ready ? "prepared" : "review-required", reason: "Native package mapped automatically. Source answer evidence still requires the existing review rules.",
       bankFile, ...(originalFile ? { originalFile } : {}), ready, review });
   }
+  if ([...byPath.keys()].some(path => !isPackagingMetadata(path) && leaf(path) === "questions.json" && !referencedQuestionPaths.has(path)))
+    throw new Error("Native packages and separate question exports were selected together. Import the exports separately so no questions are omitted.");
   const identity = hex(await sha256(encode([...fingerprints].sort())));
   const catalog: PrivateLibraryCatalog = { format: "axom-private-library", schemaVersion: 1, id: `native-${identity.slice(0, 24)}`,
     version: `native-input-v1-${identity.slice(0, 16)}`, templates: [], sources };

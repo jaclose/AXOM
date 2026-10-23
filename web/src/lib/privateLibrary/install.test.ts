@@ -12,6 +12,7 @@ import { buildCourseBooks } from "../bookshelf/courseBooks";
 import { withPreparedCourses, loadPreparedCourse } from "../bookshelf/preparedCourses";
 import { academicBindings, academicRecord } from "../academicLibrary/contentReferences";
 import { CURRICULA } from "../curricula";
+import { assessBank } from "../question-content/assessBank";
 
 const encode = (value: unknown) => new TextEncoder().encode(typeof value === "string" ? value : JSON.stringify(value));
 async function bundle() {
@@ -31,6 +32,32 @@ function stubSuccessfulImageDecode(width = 1, height = 1) {
 beforeEach(async () => { await openEmptyWorkspace(); vi.stubGlobal("Blob", NativeBlob); vi.stubGlobal("File", NativeFile); });
 afterEach(async () => { await closeWorkspace(); vi.unstubAllGlobals(); });
 describe("prepared private library installation", () => {
+  it.each([undefined, "a".repeat(64), `sha256:${"d".repeat(64)}`])("rejects invalid source bindings on the first install: %s", async (sourceChecksum) => {
+    const b = await bundle();
+    const bank = readPreparedBank(JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)));
+    bank.pkg.questions[0].provenance.sourceChecksum = sourceChecksum;
+    b.files.set("banks/test/bank.json", encode(bank));
+    const result = await installPrivateLibrary(b.read);
+    expect(result.status).toBe("partial");
+    expect(result.warnings.join(" ")).toContain("does not match its recorded source checksum");
+    expect(useStore.getState().questions).toHaveLength(0);
+    expect(useStore.getState().documents.filter(document => document.fileType === PRIVATE_REVIEW_DOCUMENT)).toHaveLength(0);
+  });
+  it("keeps a held candidate key on reimport without restoring a reviewer-cleared key", async () => {
+    const b = await bundle();
+    const bank = readPreparedBank(JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)));
+    const candidate = bank.pkg.questions[0];
+    candidate.correctAnswer = { labels: ["A"], evidence: "answer-reveal-slide" };
+    candidate.flags = [{ type: "answer_needs_review", message: "Check the observed source mark." }];
+    const merged = mergeStoredReview(bank, bank, `sha256:${"a".repeat(64)}`);
+    expect(merged.pkg.questions[0].correctAnswer).toEqual(candidate.correctAnswer);
+    expect(assessBank(merged.pkg, merged.issues, []).counts).toEqual({ ready: 0, "needs-review": 1, unresolved: 0 });
+    const cleared = structuredClone(bank);
+    delete cleared.pkg.questions[0].correctAnswer;
+    const reinstalled = mergeStoredReview(bank, cleared, `sha256:${"a".repeat(64)}`);
+    expect(reinstalled.pkg.questions[0].correctAnswer).toBeUndefined();
+    expect(assessBank(reinstalled.pkg, reinstalled.issues, []).counts.ready).toBe(0);
+  });
   it("binds original documents by their verified file checksum, never a filename match", async () => {
     const b = await bundle();
     const original = encode("Verified original document bytes.");

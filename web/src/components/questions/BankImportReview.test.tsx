@@ -26,9 +26,150 @@ function bank(evidence: "printed-key" | "answer-reveal-slide"): ReviewBank {
     ? [{ severity: "warning", questionId: "q1", code: "possible_answer_marking", message: "Marked slide requires review." }] : [],
     files: [], sourceText: { rawText: "Source text for review" }, sourceBytes: 100, notes: [], warnings: [], unplaced: [] };
 }
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("structured question import review", () => {
+  it.each([undefined, 37])("shows only a declared original question number (%s)", (questionNumber) => {
+    const reviewBank = bank("printed-key");
+    reviewBank.pkg.questions[0].source.questionNumber = questionNumber;
+    render(<BankImportReview bank={reviewBank} onBack={() => {}} />);
+    expect(screen.getByText(/Source page 2/).textContent).toBe(
+      `READY FOR IMPORT · Source page 2${questionNumber !== undefined ? ` · Original question ${questionNumber}` : ""}`,
+    );
+    expect(screen.queryByText(/Original question 1(?:\D|$)/)).toBeNull();
+  });
+
+  it.each(["stem", "choice", "explanation"] as const)("renders an answer-reveal asset placed in the %s once without altering source records", async (section) => {
+    const user = userEvent.setup();
+    vi.stubGlobal("URL", class extends URL {
+      static createObjectURL = vi.fn(() => "blob:placed-answer");
+      static revokeObjectURL = vi.fn();
+    });
+    const reviewBank = bank("printed-key");
+    const question = reviewBank.pkg.questions[0];
+    question.assets = [{ id: "reveal", questionId: question.id, filename: "reveal.png", mimeType: "image/png", role: "answer_reveal" }];
+    const block = { type: "image" as const, assetId: "reveal", alt: "Placed answer slide" };
+    if (section === "stem") question.stem.push(block);
+    else if (section === "choice") question.choices[0].blocks.push(block);
+    else question.explanation!.push(block);
+    reviewBank.files = [new File(["synthetic image"], "reveal.png", { type: "image/png" })];
+    const originalPackage = JSON.stringify(reviewBank.pkg);
+    render(<BankImportReview bank={reviewBank} onBack={() => {}} />);
+
+    expect(screen.queryByRole("img")).toBeNull();
+    for (const mode of ["answered", "review"]) {
+      await user.selectOptions(screen.getByLabelText("Preview mode"), mode);
+      expect(await screen.findByRole("img", { name: "Placed answer slide" })).toBeTruthy();
+      expect(screen.getAllByRole("img")).toHaveLength(1);
+    }
+    await user.selectOptions(screen.getByLabelText("Preview mode"), "question");
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(JSON.stringify(reviewBank.pkg)).toBe(originalPackage);
+  });
+
+  it("keeps unplaced reveals and references accessible after answering and whole source pages review-only", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("URL", class extends URL {
+      static createObjectURL = vi.fn((file: File) => `blob:${file.name}`);
+      static revokeObjectURL = vi.fn();
+    });
+    const reviewBank = bank("printed-key");
+    const question = reviewBank.pkg.questions[0];
+    question.assets = (["answer_reveal", "reference", "source_page"] as const).map((role) => ({
+      id: role, questionId: question.id, filename: `${role}.png`, mimeType: "image/png", role,
+    }));
+    reviewBank.files = question.assets.map((asset) => new File(["synthetic image"], asset.filename, { type: "image/png" }));
+    render(<BankImportReview bank={reviewBank} onBack={() => {}} />);
+
+    expect(screen.queryByRole("img")).toBeNull();
+    await user.selectOptions(screen.getByLabelText("Preview mode"), "answered");
+    await waitFor(() => expect(screen.getAllByRole("img")).toHaveLength(2));
+    expect(screen.getAllByRole("img").map((image) => image.getAttribute("src"))).toEqual([
+      "blob:answer_reveal.png", "blob:reference.png",
+    ]);
+    await user.selectOptions(screen.getByLabelText("Preview mode"), "review");
+    await waitFor(() => expect(screen.getAllByRole("img")).toHaveLength(3));
+    expect(screen.getAllByRole("img").map((image) => image.getAttribute("src"))).toContain("blob:source_page.png");
+    await user.selectOptions(screen.getByLabelText("Preview mode"), "question");
+    expect(screen.queryByRole("img")).toBeNull();
+  });
+
+  it("does not bypass a placed source-page restriction through the supporting-asset fallback", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("URL", class extends URL {
+      static createObjectURL = vi.fn(() => "blob:restricted-page");
+      static revokeObjectURL = vi.fn();
+    });
+    const reviewBank = bank("printed-key");
+    const question = reviewBank.pkg.questions[0];
+    question.assets = [{ id: "page", questionId: question.id, filename: "page.png", mimeType: "image/png", role: "answer_reveal" }];
+    question.stem.push({ type: "image", assetId: "page", role: "source_page", alt: "Original source page" });
+    reviewBank.files = [new File(["synthetic image"], "page.png", { type: "image/png" })];
+    render(<BankImportReview bank={reviewBank} onBack={() => {}} />);
+
+    expect(screen.queryByRole("img")).toBeNull();
+    await user.selectOptions(screen.getByLabelText("Preview mode"), "answered");
+    expect(screen.queryByRole("img")).toBeNull();
+    await user.selectOptions(screen.getByLabelText("Preview mode"), "review");
+    expect(await screen.findByRole("img", { name: "Original source page" })).toBeTruthy();
+    expect(screen.getAllByRole("img")).toHaveLength(1);
+  });
+
+  it("distinguishes ready, review and unresolved questions in the count and current-question status", async () => {
+    const user = userEvent.setup();
+    const reviewBank = bank("printed-key");
+    const question = reviewBank.pkg.questions[0];
+    reviewBank.pkg.questions.push(
+      { ...question, id: "q2", correctAnswer: { labels: ["B"], evidence: "answer-reveal-slide" } },
+      { ...question, id: "q3", correctAnswer: undefined },
+    );
+    render(<BankImportReview bank={reviewBank} onBack={() => {}} />);
+
+    expect(screen.getByText("3 questions · 1 ready for import · 1 need review · 1 unresolved")).toBeTruthy();
+    expect(screen.getByText(/^READY FOR IMPORT · Source page/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Next question" }));
+    expect(screen.getByText(/^NEEDS REVIEW · Source page/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Next question" }));
+    expect(screen.getByText(/^UNRESOLVED · Source page/)).toBeTruthy();
+  });
+
+  it("labels a bare answer letter as an unverified candidate without changing it", async () => {
+    const user = userEvent.setup();
+    const reviewBank = bank("printed-key");
+    reviewBank.pkg.questions[0].correctAnswer = { labels: ["B"] };
+    render(<BankImportReview bank={reviewBank} onBack={() => {}} />);
+
+    expect(screen.queryByText(/Candidate key/)).toBeNull();
+    await user.selectOptions(screen.getByLabelText("Preview mode"), "review");
+    expect(screen.getByText("Candidate key (unverified): B")).toBeTruthy();
+    expect(reviewBank.pkg.questions[0].correctAnswer).toEqual({ labels: ["B"] });
+  });
+
+  it.each(["printed-key", "reviewer"] as const)("preserves the %s source key label when an unrelated structural issue holds the question", async (evidence) => {
+    const user = userEvent.setup();
+    const reviewBank = bank("printed-key");
+    reviewBank.pkg.questions[0].correctAnswer = { labels: ["B"], evidence };
+    reviewBank.conversionIssues.push({ questionId: "q1", severity: "error", code: "missing_required_media", message: "A required source figure is missing." });
+    render(<BankImportReview bank={reviewBank} onBack={() => {}} />);
+
+    await user.selectOptions(screen.getByLabelText("Preview mode"), "review");
+    expect(screen.getByText(/^UNRESOLVED · Source page/)).toBeTruthy();
+    expect(screen.getByText("Source key: B")).toBeTruthy();
+  });
+
+  it("shows a printed key as a candidate when its answer has an explicit review flag", async () => {
+    const user = userEvent.setup();
+    const reviewBank = bank("printed-key");
+    reviewBank.pkg.questions[0].flags = [{ type: "answer_needs_review", message: "The answer needs checking against the original." }];
+    render(<BankImportReview bank={reviewBank} onBack={() => {}} />);
+
+    await user.selectOptions(screen.getByLabelText("Preview mode"), "review");
+    expect(screen.getByText("Candidate key (unverified): B")).toBeTruthy();
+    await user.selectOptions(screen.getByLabelText("Verified answer"), "B");
+    await user.click(screen.getByRole("button", { name: "Confirm answer from source" }));
+    expect(screen.getByText("Source key: B")).toBeTruthy();
+  });
+
   it("keeps the original source-page renderer out of answering mode", async () => {
     const user = userEvent.setup();
     const original = new File(["original PDF bytes"], "synthetic.pdf", { type: "application/pdf" });
