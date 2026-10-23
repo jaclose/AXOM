@@ -136,10 +136,10 @@ describe("a slide, read by where things sit", () => {
     expect(body.elements.map((element) => (element.kind === "paragraph" ? element.text : element.kind))).toEqual(["1. Which value sets the dosing interval?", "A. Half-life"]);
   });
 
-  it("reads a letter in one box and its answer in another, at the same height, as one line", () => {
+  it.each(["B", "I"])("reads label %s in one box and its answer in another, at the same height, as one line", (label) => {
     const s = slide();
-    const body = readTaggedPage(s.page(node("Sect", node("P", s.text("Clearance", 100, 300, 18)), node("P", s.text("B.", 60, 301, 18))), { slide: true }));
-    expect(body.elements).toEqual([{ kind: "paragraph", text: "B. Clearance" }]);
+    const body = readTaggedPage(s.page(node("Sect", node("P", s.text("Clearance", 100, 300, 18)), node("P", s.text(`${label}.`, 60, 301, 18))), { slide: true }));
+    expect(body.elements).toEqual([{ kind: "paragraph", text: `${label}. Clearance` }]);
   });
 
   /** A graph at the right of the slide, drawn as two shapes, with its numbers and letters as text of the slide. */

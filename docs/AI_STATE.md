@@ -10,6 +10,10 @@ Snapshot: 2026-10-23. Main QBank/course integration is isolated on
 QBank working folder. The other AXOM worktrees and their staged/private files are
 protected. This is a local implementation checkpoint, not a release certificate.
 
+The RHPS owner's clean `2ae5bcaf` importer handoff is integrated: source checksum
+bindings, complete flat exports, nine-choice parsing and bounded media readiness.
+See [intake compatibility](../web/src/lib/privateLibrary/INPUT_COMPATIBILITY.md).
+
 ## Authority and ownership
 
 JD requested the master import, practice, course and academic-library build, then
