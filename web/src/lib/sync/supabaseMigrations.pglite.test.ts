@@ -357,7 +357,7 @@ describe("Supabase migrations on real Postgres", () => {
         "select public.claim_privacy_request($1,'2026-10-16T01:00:00Z') as claimed", [deletionRequest])).rows)
         .toEqual([{ claimed: false }]);
       expect((await as(db, "service_role", null,
-        "select public.finalize_privacy_export($1,$2,'2026-10-23T01:00:00Z') as finalized",
+        "select public.finalize_privacy_export($1,$2,now() + interval '7 days') as finalized",
         [exportRequest, `${A}/${exportRequest}.json`])).rows).toEqual([{ finalized: true }]);
       expect((await as(db, "service_role", null,
         "select public.claim_privacy_request($1,'2026-10-16T01:00:00Z') as claimed", [deletionRequest])).rows)

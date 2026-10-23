@@ -377,7 +377,8 @@ describe("QuestionWorkspacePage Course Tracker handoff", () => {
     await user.click(screen.getByRole("button", { name: "A. Alpha" }));
     await user.click(screen.getByRole("button", { name: "Check answer" }));
     await user.click(screen.getByRole("button", { name: "Finish block" }));
-    expect(screen.getByRole("heading", { name: "Block results" })).toBeTruthy();
+    // Results appear only after the asynchronous workspace save is confirmed.
+    expect(await screen.findByRole("heading", { name: "Block results" })).toBeTruthy();
     expect(useStore.getState().quizSessions.some((item) => item.questionIds.includes("tracker-ready"))).toBe(true);
     await user.click(screen.getByRole("button", { name: "Return to Course Tracker" }));
     expect(window.location.hash).toBe("#tracker");
