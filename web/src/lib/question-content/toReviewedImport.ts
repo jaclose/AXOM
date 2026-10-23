@@ -146,12 +146,12 @@ export function packageToReviewedImport(pkg: ImportPackage, issues: readonly Pac
     const reasons = [...verdict.reasons];
     let readiness = verdict.readiness;
     let saveable = Boolean(question.correctAnswer);
-    if (question.choices.length < 2 || question.choices.length > 8) {
+    if (question.choices.length < 2 || question.choices.length > 10) {
       // A PowerPoint title or PDF section with dozens of choices is not one
       // defensible MCQ. Review acknowledgment must not bypass this shape gate.
       saveable = false;
       if (readiness === "ready") readiness = "needs-review";
-      reasons.push(`Source extraction identified ${question.choices.length} choices; this import supports 2–8 per question. Split/reparse the original instead of accepting a malformed question.`);
+      reasons.push(`Source extraction identified ${question.choices.length} choices; this import supports 2–10 per question. Split/reparse the original instead of accepting a malformed question.`);
     }
     if (fields.options.some((option) => !option.text.trim())) {
       // A choice that is only a picture has no text for the current question record to show.
