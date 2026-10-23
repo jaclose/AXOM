@@ -7,13 +7,11 @@ import { ASSET_ROLES, type AssetRole } from "./question-content/blocks";
 // inline base64 payloads inside the exported file only.
 // ===========================================================================
 import { ATTACHMENT_STORE_NAME, DB_NAME, DB_VERSION, ensureVaultStores } from "./localVault";
+import { MAX_QUESTION_ATTACHMENT_BYTES, MAX_QUESTION_ATTACHMENTS, MAX_QUESTION_ATTACHMENT_TOTAL_BYTES } from "./questionAttachmentLimits";
+export { MAX_QUESTION_ATTACHMENT_BYTES, MAX_QUESTION_ATTACHMENTS, MAX_QUESTION_ATTACHMENT_TOTAL_BYTES } from "./questionAttachmentLimits";
 
 export const QUESTION_ATTACHMENT_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
 export type QuestionAttachmentMimeType = (typeof QUESTION_ATTACHMENT_TYPES)[number];
-
-export const MAX_QUESTION_ATTACHMENT_BYTES = 8 * 1024 * 1024;        // 8 MB per image
-export const MAX_QUESTION_ATTACHMENTS = 10;                          // per question
-export const MAX_QUESTION_ATTACHMENT_TOTAL_BYTES = 30 * 1024 * 1024; // per question
 
 export interface QuestionImageAttachment {
   id: string;

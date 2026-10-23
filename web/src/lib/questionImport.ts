@@ -133,8 +133,8 @@ export function importFromCsv(text: string): ImportResult {
   // Option columns: single letters (a,b,c…) or "option a"/"choice a"/"option1".
   const optionCols: Array<{ index: number; key: string }> = [];
   header.forEach((h, i) => {
-    const single = h.match(/^([a-h])$/);
-    const worded = h.match(/^(?:option|choice)\s*_?([a-h1-8])$/);
+    const single = h.match(/^([a-i])$/);
+    const worded = h.match(/^(?:option|choice)\s*_?([a-i1-9])$/);
     const letter = single?.[1] ?? worded?.[1];
     if (!letter) return;
     const key = /\d/.test(letter) ? String.fromCharCode(64 + Number(letter)) : letter.toUpperCase();
@@ -234,7 +234,7 @@ export function importFromJson(text: string): ImportResult {
 function comparable(value: string): string {
   return value
     .toLowerCase()
-    .replace(/^\(?[a-h]\)?[).:\-–]\s*/i, "")
+    .replace(/^\(?[a-i]\)?[).:\-–]\s*/i, "")
     .replace(/\s*([+/%])\s*/g, "$1")
     .replace(/\s+/g, " ")
     .replace(/[\s.,;:!?]+$/g, "")
@@ -249,12 +249,12 @@ export function resolveStructuredAnswer(value: string | undefined, options: Ques
     ruleId: "answer.structured-missing",
   };
   const raw = evidence.replace(/^(?:the\s+)?(?:correct\s+)?answer\s*(?:is)?\s*[:\-–]?\s*/i, "").trim();
-  const keyOnly = raw.match(/^\(\s*([A-Ha-h])\s*\)$|^([A-Ha-h])$/);
+  const keyOnly = raw.match(/^\(\s*([A-Ia-i])\s*\)$|^([A-Ia-i])$/);
   if (keyOnly) return resolveExplicitStructuredAnswer(keyOnly[1] ?? keyOnly[2], "", evidence, options);
 
   // Punctuation is explicit letter evidence and must be adjudicated before
   // considering full-text remapping.
-  const labeled = raw.match(/^\(?\s*([A-Ha-h])\s*\)?\s*[).:\-–—]\s*(.*)$/);
+  const labeled = raw.match(/^\(?\s*([A-Ia-i])\s*\)?\s*[).:\-–—]\s*(.*)$/);
   if (labeled) return resolveExplicitStructuredAnswer(labeled[1], labeled[2], evidence, options);
 
   // Full-text equality precedes unpunctuated letter parsing so option text such
@@ -273,7 +273,7 @@ export function resolveStructuredAnswer(value: string | undefined, options: Ques
     warning: `Answer text matches multiple options (${fullTextMatches.map((option) => option.key).join(", ")}) — left unset for review.`,
   };
 
-  const letterWithTail = raw.match(/^\(?([A-Ha-h])\)?\s+(.+)$/);
+  const letterWithTail = raw.match(/^\(?([A-Ia-i])\)?\s+(.+)$/);
   if (letterWithTail) return resolveExplicitStructuredAnswer(letterWithTail[1], letterWithTail[2], evidence, options);
   if (/^[A-Za-z]$/.test(raw)) return {
     status: "unresolved", candidateKey: undefined, confidence: "low", needsReview: true,

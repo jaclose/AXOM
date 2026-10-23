@@ -2,9 +2,12 @@
 export interface LibraryInputEntry { path: string; byteSize: number; }
 export type LibraryInputRoot =
   | { kind: "catalog"; prefix: string; catalogPath: string }
-  | { kind: "native-packages"; manifestPaths: string[] };
+  | { kind: "native-packages"; manifestPaths: string[] }
+  | { kind: "question-export"; questionsPath: string };
 export const INPUT_MAX_FILES = 30_000;
 export const INPUT_MAX_FILE_BYTES = 128 * 1024 * 1024;
+/** Large originals can be retained and inspected one page at a time. Text extraction has its own page bounds. */
+export const INPUT_MAX_PDF_BYTES = 256 * 1024 * 1024;
 export const INPUT_MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;
 /** Bounds for reading a selection. Installing on this device keeps the
  * defaults; publishing reads one course at a time and may allow more. */
@@ -33,8 +36,11 @@ export function validateLibraryInputEntries(entries: readonly LibraryInputEntry[
   let total = 0;
   for (const entry of entries) {
     const path = safeInputPath(entry.path);
-    if (!Number.isSafeInteger(entry.byteSize) || entry.byteSize < 0 || entry.byteSize > limits.maxFileBytes) {
-      throw new Error("A collection file exceeds the supported size. Import that source separately.");
+    const limit = /\.pdf$/i.test(path) && limits.maxFileBytes === INPUT_MAX_FILE_BYTES
+      ? INPUT_MAX_PDF_BYTES
+      : limits.maxFileBytes;
+    if (!Number.isSafeInteger(entry.byteSize) || entry.byteSize < 0 || entry.byteSize > limit) {
+      throw new Error(`A collection file exceeds the supported ${limit / 1024 / 1024} MiB size. Keep the original and prepare smaller source segments.`);
     }
     total += entry.byteSize;
     if (total > limits.maxTotalBytes) throw new Error("This expanded collection is too large. Split it into smaller collections.");
@@ -54,12 +60,15 @@ export function resolveLibraryInputRoot(entries: readonly LibraryInputEntry[], l
   if (catalogs.length === 1) {
     const catalogPath = catalogs[0], prefix = catalogPath.slice(0, -"catalog.json".length);
     // Do not choose one nested library and silently ignore another bank beside it.
-    if (prefix && paths.some(path => !path.startsWith(prefix) && path.split("/").pop() === "manifest.json")) {
+    if (prefix && paths.some(path => !path.startsWith(prefix) && ["manifest.json", "questions.json"].includes(path.split("/").pop()!))) {
       throw new Error("A prepared library and separate question packages were selected together. Import the collections separately.");
     }
     return { kind: "catalog", prefix, catalogPath };
   }
   const manifestPaths = paths.filter(path => path.split("/").pop() === "manifest.json").sort();
   if (manifestPaths.length) return { kind: "native-packages", manifestPaths };
+  const questionPaths = paths.filter(path => path.split("/").pop() === "questions.json");
+  if (questionPaths.length > 1) throw new Error("Several question exports were selected. Import each complete export separately.");
+  if (questionPaths.length === 1) return { kind: "question-export", questionsPath: questionPaths[0] };
   throw new Error("No prepared collection or AXOM question package was found. For PDFs, Word files or question text, use Question Bank > Import files. You do not need to create a catalog.json file.");
 }

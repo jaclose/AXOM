@@ -112,6 +112,31 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("PreparedLibrary truthfulness", () => {
+  it.each([true, false])("makes only the checksum-matched stored original available in source review (available: %s)", async (available) => {
+    const original = new Blob(["synthetic original PDF"], { type: "application/pdf" });
+    mocks.readOriginal.mockImplementation(async (id: string) => available && id === `private-source-${checksum}` ? original : undefined);
+    mocks.documents.unshift({ ...mocks.documents[1], id: "unrelated-same-name", checksum: `sha256:${"b".repeat(64)}` });
+    const prepared: PreparedBank = {
+      pkg: {
+        manifest: { schemaVersion: 1, course: { name: "FTCM", term: 1, week: 1 },
+          bank: { id: "bank", title: "Stored source review", discipline: "Medicine" },
+          source: { filename: "Source.pdf", sourceWeekDeclared: false }, questionsFile: "questions.json", assetsDirectory: "assets" },
+        questions: [{ id: "source-question", source: { filename: "Source.pdf", page: 2 },
+          stem: [{ type: "text", text: "Which synthetic option is marked?" }],
+          choices: [{ id: "a", label: "A", blocks: [{ type: "text", text: "Alpha" }] }, { id: "b", label: "B", blocks: [{ type: "text", text: "Beta" }] }],
+          assets: [], provenance: { method: "pdf-import", sourceChecksum: `sha256:${checksum}` } }],
+      }, issues: [], sourceText: { rawText: "Synthetic source" }, sourceBytes: original.size, notes: [],
+    };
+    mocks.documents.find(document => document.id === `private-review-${checksum}`)!.rawText = JSON.stringify(prepared);
+    render(<PreparedLibrary />);
+    fireEvent.click(screen.getByRole("button", { name: "Review source" }));
+    await screen.findByRole("region", { name: "Source question bank preview" });
+    fireEvent.change(screen.getByLabelText("Preview mode"), { target: { value: "review" } });
+    expect(Boolean(screen.queryByRole("button", { name: "View original PDF page" }))).toBe(available);
+    expect(mocks.readOriginal).toHaveBeenCalledWith(`private-source-${checksum}`, `sha256:${checksum}`);
+    expect(mocks.readOriginal).not.toHaveBeenCalledWith("unrelated-same-name", expect.anything());
+  });
+
   it("counts only practice-ready local records and checks original availability", async () => {
     render(<PreparedLibrary />);
 

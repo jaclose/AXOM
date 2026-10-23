@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import browserPdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { INPUT_MAX_PDF_BYTES } from "../../lib/privateLibrary/inputRoot";
 
 /** Original PDF inspection remains strictly in import review. Nothing here
  * becomes a scored-practice attachment or a verified answer automatically. */
@@ -27,7 +28,7 @@ export function BankImportSourcePage({ originalFile, sourceName, sourcePage }: {
     setError("");
     void (async () => {
       try {
-        if (originalFile.size > 128 * 1024 * 1024) throw new Error("This PDF exceeds 128 MB. Split the source to inspect pages.");
+        if (originalFile.size > INPUT_MAX_PDF_BYTES) throw new Error("This PDF exceeds 256 MiB. Keep the original and prepare smaller source segments to inspect pages.");
         const pdfjs = await import("pdfjs-dist");
         if (closed) return;
         pdfjs.GlobalWorkerOptions.workerSrc = browserPdfWorkerUrl;
