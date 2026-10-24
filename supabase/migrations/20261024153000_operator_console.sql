@@ -122,7 +122,7 @@ returns table (user_id uuid, email text, display_name text, role text, created_a
   last_sign_in_at timestamptz, ai_enabled boolean, ai_daily_limit integer, ai_used_today integer)
 language plpgsql stable security definer set search_path = '' as $$
 begin
-  if public.axom_operator_role() not in ('owner','admin') then
+  if coalesce(public.axom_operator_role(),'none') not in ('owner','admin') then
     raise exception 'Account management access required' using errcode = '42501';
   end if;
   if length(query_text) > 100 then raise exception 'Search is too long'; end if;
@@ -185,10 +185,10 @@ create function public.axom_operator_set_role(target uuid, wanted text)
 returns void language plpgsql security definer set search_path = '' as $$
 declare actor uuid := auth.uid();
 begin
-  if public.axom_operator_role() <> 'owner' then
+  if public.axom_operator_role() is distinct from 'owner' then
     raise exception 'Only the verified owner may assign roles' using errcode='42501';
   end if;
-  if target is null or target = actor or wanted not in ('admin','moderator','member')
+  if target is null or target = actor or wanted is null or wanted not in ('admin','moderator','member')
     or not exists (select 1 from auth.users where id=target)
     or exists (select 1 from public.axom_operator_roles where user_id=target and role='owner') then
     raise exception 'Invalid role change' using errcode='42501';
@@ -209,7 +209,7 @@ create function public.axom_operator_set_ai(target uuid, permitted boolean, requ
 returns void language plpgsql security definer set search_path = '' as $$
 declare actor uuid := auth.uid();
 begin
-  if public.axom_operator_role() <> 'owner' then
+  if public.axom_operator_role() is distinct from 'owner' then
     raise exception 'Only the verified owner may manage AI limits' using errcode='42501';
   end if;
   if target is null or permitted is null or requested_limit not between 0 and 1000
@@ -233,7 +233,7 @@ begin
   if public.axom_operator_role() is null then
     raise exception 'Operator access required' using errcode='42501';
   end if;
-  if resolution not in ('dismiss','remove') then raise exception 'Invalid resolution'; end if;
+  if resolution is null or resolution not in ('dismiss','remove') then raise exception 'Invalid resolution'; end if;
   if not exists (select 1 from public.social_post_reports where post_id=target) then
     raise exception 'Report no longer exists';
   end if;
