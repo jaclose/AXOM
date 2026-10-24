@@ -64,8 +64,10 @@ describe("Community and operator security against real Postgres RLS", () => {
     const id = request[0].id;
     await expect(as(B,"insert into public.social_connections(requester_id,addressee_id) values($1,$2)",[B,A])).rejects.toThrow(/duplicate key/);
     expect(await as(A,"update public.social_connections set status='accepted',accepted_at=now() where id=$1 returning id",[id])).toEqual([]);
+    await expect(as(B,"update public.social_connections set requester_id=$1,status='accepted',accepted_at=now() where id=$2",[B,id]))
+      .rejects.toThrow(/Only the recipient/);
     await as(B,"update public.social_connections set status='accepted',accepted_at=now() where id=$1",[id]);
-    await expect(as(B,"update public.social_connections set requester_id=$1 where id=$2",[B,id])).rejects.toThrow(/Only the recipient|row-level security/);
+    expect(await as(B,"update public.social_connections set requester_id=$1 where id=$2 returning id",[B,id])).toEqual([]);
 
     const post = await as<{id:string}>(A,"insert into public.social_posts(user_id,kind,activity_day,minutes,cards,questions,caption) values($1,'progress',current_date,80,30,9,'Study day') returning id",[A]);
     expect(await as(B,"select id from public.social_posts where id=$1",[post[0].id])).toEqual([{id:post[0].id}]);
