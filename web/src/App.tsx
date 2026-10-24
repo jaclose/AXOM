@@ -78,6 +78,7 @@ const LazyHelpPage = lazy(() => import("./pages/HelpPage").then((module) => ({ d
 const LazyAboutPage = lazy(() => import("./pages/AboutPage").then((module) => ({ default: module.AboutPage })));
 const LazyLeaderboardsPage = lazy(() => import("./pages/LeaderboardsPage").then((module) => ({ default: module.LeaderboardsPage })));
 const LazyCommunityPage = lazy(() => import("./pages/CommunityPage").then((module) => ({ default: module.CommunityPage })));
+const LazyHostPage = lazy(() => import("./pages/HostPage").then((module) => ({ default: module.HostPage })));
 const LazyPremedExperienceLogPage = lazy(() => import("./pages/PremedExperienceLogPage").then((module) => ({ default: module.PremedExperienceLogPage })));
 const LazyActivityHistoryPage = lazy(() => import("./pages/ActivityHistoryPage").then((module) => ({ default: module.ActivityHistoryPage })));
 const LazyStudyMethodsPage = lazy(() => import("./pages/StudyMethodsPage").then((module) => ({ default: module.StudyMethodsPage })));
@@ -127,6 +128,7 @@ const PAGES: Record<string, () => JSX.Element> = {
   appchecker: () => <LazyApplicationCheckerPage />,
   leaderboards: () => <LazyLeaderboardsPage />,
   community: () => <LazyCommunityPage />,
+  host: () => <LazyHostPage />,
   "daily-games": () => <LazyDailyGamesPage />,
   "daily-word": () => <LazyDailyWordPage />,
   doctordle: () => <LazyDoctordlePage />,
@@ -393,7 +395,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
   }
 
   const routeKey = route.split("?")[0];
-  const communicationNav: Record<string, { label: string; subtitle: string }> = { communications: { label: "Communications", subtitle: "Your inbox, on your terms" }, privacy: { label: "Privacy & Data", subtitle: "Keep, download and remove" }, "communications-admin": { label: "Communications studio", subtitle: "Considered writing and delivery" } };
+  const communicationNav: Record<string, { label: string; subtitle: string }> = { communications: { label: "Communications", subtitle: "Your inbox, on your terms" }, privacy: { label: "Privacy & Data", subtitle: "Keep, download and remove" }, "communications-admin": { label: "Communications studio", subtitle: "Considered writing and delivery" }, host: { label: "Host dashboard", subtitle: "Private AXOM operations and permissions" } };
   const nav = NAV.find((n) => n.id === routeKey) ?? communicationNav[routeKey] ?? NAV[0];
   const Page: ComponentType = PAGES[routeKey] ?? DashboardPage;
 
