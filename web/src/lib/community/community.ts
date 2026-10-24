@@ -131,6 +131,14 @@ export async function setReaction(accountId: string, postId: string, liked: bool
   if (response.error && !(liked && response.error.code === "23505")) throw new Error(errorMessage);
 }
 
+export async function reportCommunityPost(accountId: string, postId: string,
+  reason: "spam" | "harassment" | "copyright" | "inaccurate" | "other"): Promise<void> {
+  const { error } = await (await scoped(accountId)).from("social_post_reports").insert({
+    post_id: postId, reporter_id: accountId, reason,
+  });
+  if (error) throw new Error(error.code === "23505" ? "You have already reported this post." : errorMessage);
+}
+
 /** Shares only a per-day aggregate and only after the learner explicitly publishes.
  * Duplicate log IDs are ignored as in the existing personal leaderboard. */
 export function dayProgress(logs: readonly StudyLog[], dayKey: string): { minutes: number; cards: number; questions: number } {
