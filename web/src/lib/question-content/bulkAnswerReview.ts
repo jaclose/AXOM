@@ -22,7 +22,6 @@ export function eligibleSlideReviewKeys(
     if (before.verdicts.get(question.id)?.readiness !== "needs-review"
       || key?.evidence !== "answer-reveal-slide" || key.labels.length !== 1
       || !question.source.page || question.source.page < 1
-      || !question.assets.some(asset => asset.role === "answer_reveal" && files.some(file => file.name === asset.filename))
       || !question.choices.some(choice => choice.label === key.labels[0])) continue;
     candidates.set(question.id, key.labels[0]);
   }
