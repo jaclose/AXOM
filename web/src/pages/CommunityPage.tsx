@@ -5,10 +5,11 @@ import { useStore } from "../lib/store";
 import { isoDate } from "../lib/scoring";
 import {
   acceptFriend, dayProgress, deleteCommunityPost, joinCommunity, leaveCommunity, loadCommunity,
-  publishCommunityPost, removeFriend, requestFriend, setDiscoverable, setReaction, sharedWeeklyStandings,
+  publishCommunityPost, reportCommunityPost, removeFriend, requestFriend, setDiscoverable, setReaction, sharedWeeklyStandings,
   type CommunityConnection, type CommunityProfile, type CommunitySnapshot,
 } from "../lib/community/community";
 import { GButton, GhostButton, GlassCard, PanelHeader, Tag } from "../components/ui/primitives";
+import { operatorRole } from "../lib/operator/hostClient";
 import "../styles/community.css";
 
 type PostKind = "progress" | "question_set";
@@ -39,6 +40,9 @@ export function CommunityPage() {
   const [day, setDay] = useState(today);
   const [caption, setCaption] = useState("");
   const [setTitle, setSetTitle] = useState("");
+  const [hostAvailable, setHostAvailable] = useState(false);
+  const [reportPostId, setReportPostId] = useState<string | null>(null);
+  const [reportReason, setReportReason] = useState<"spam" | "harassment" | "copyright" | "inaccurate" | "other">("other");
 
   useEffect(() => {
     setHandle((account?.displayName ?? "learner").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 30));
@@ -56,6 +60,12 @@ export function CommunityPage() {
     return () => { active = false; };
   }, [accountId, refreshId]);
 
+  useEffect(() => {
+    let active = true;
+    setHostAvailable(false);
+    if (accountId) void operatorRole(accountId).then(role => { if (active) setHostAvailable(Boolean(role)); }).catch(() => {});
+    return () => { active = false; };
+  }, [accountId]);
   const mine = data?.profiles.find(p => p.user_id === accountId);
   const profiles = useMemo(() => new Map(data?.profiles.map(p => [p.user_id, p]) ?? []), [data]);
   const relationships = data?.connections ?? [];
@@ -116,6 +126,7 @@ export function CommunityPage() {
     <div className="row wrap gap8">
       <Tag tone={mine ? "green" : "neutral"}>{mine ? "Community profile active" : "Not yet visible"}</Tag>
       <GButton size="sm" disabled={loading || busy} onClick={() => setRefreshId(value => value + 1)}><RefreshCw size={14} /> Refresh</GButton>
+      {hostAvailable && <a className="ghost-btn" href="#host">Host dashboard</a>}
     </div>
     {loading && <p role="status">Loading shared activity…</p>}
     {error && <p role="alert" className="community-error">{error}</p>}
@@ -201,7 +212,19 @@ export function CommunityPage() {
                     <Heart size={15} fill={youLiked ? "currentColor" : "none"} /> {reactCounts.get(post.id) ?? 0} {youLiked ? "Liked" : "Like"}
                   </GButton>
                   {post.user_id === accountId && <GhostButton disabled={busy} onClick={() => void act(() => deleteCommunityPost(accountId, post.id), "Post removed.")}><Trash2 size={15} /> Delete</GhostButton>}
+                  {post.user_id !== accountId && <GhostButton disabled={busy} onClick={() => { setReportPostId(reportPostId === post.id ? null : post.id); setReportReason("other"); }}>Report</GhostButton>}
                 </div>
+                {reportPostId === post.id && <div className="community-report-form">
+                  <label>Reason for reporting
+                    <select value={reportReason} onChange={e => setReportReason(e.target.value as typeof reportReason)}>
+                      <option value="spam">Spam</option><option value="harassment">Harassment</option>
+                      <option value="copyright">Copyright concern</option><option value="inaccurate">Misleading study content</option>
+                      <option value="other">Other concern</option>
+                    </select>
+                  </label>
+                  <GButton size="sm" disabled={busy} onClick={() => { setReportPostId(null); void act(() => reportCommunityPost(accountId, post.id, reportReason), "Report sent to moderators."); }}>Submit report</GButton>
+                  <GhostButton onClick={() => setReportPostId(null)}>Cancel</GhostButton>
+                </div>}
               </article>;
             })}</div>
           </GlassCard>
