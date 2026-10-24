@@ -3,9 +3,9 @@ import { BarChart3, CircleAlert, Crown, RefreshCw, ShieldCheck, ShieldX, Users, 
 import { useAccount } from "../lib/account/accountStore";
 import {
   loadOperatorDashboard, resolveReport, setOperatorAI, setOperatorRole,
-  type OperatorAccount, type OperatorDashboard, type OperatorRole,
+  type OperatorAccount, type OperatorDashboard,
 } from "../lib/operator/hostClient";
-import { GButton, GhostButton, GlassCard, PanelHeader, Tag } from "../components/ui/primitives";
+import { GButton, GlassCard, PanelHeader, Tag } from "../components/ui/primitives";
 import "../styles/host-console.css";
 
 function date(value: string | null): string {
