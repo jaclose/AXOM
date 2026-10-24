@@ -67,12 +67,40 @@ revoke all on public.social_profiles,public.social_connections,public.social_pos
 grant select,insert,update,delete on public.social_profiles,public.social_connections,public.social_posts to authenticated;
 grant select,insert,delete on public.social_reactions to authenticated;
 
+-- Profile visibility and friend-request policies otherwise form an RLS cycle:
+-- profiles -> connections -> profiles. Both helpers are private, tightly
+-- scoped to auth.uid(), and execute with the migration owner's privileges.
+-- Never expose the private schema through Supabase Data API.
+create schema if not exists private;
+revoke all on schema private from public;
+grant usage on schema private to authenticated;
+
+create function private.social_connected_to(profile_owner uuid)
+returns boolean language sql stable security definer set search_path = '' as $
+  select (select auth.uid()) is not null
+    and exists (
+      select 1 from public.social_connections f
+      where f.status = 'accepted' and (
+        (f.requester_id = profile_owner and f.addressee_id = (select auth.uid()))
+        or (f.addressee_id = profile_owner and f.requester_id = (select auth.uid()))
+      )
+    );
+$;
+revoke all on function private.social_connected_to(uuid) from public, anon, authenticated;
+grant execute on function private.social_connected_to(uuid) to authenticated;
+
+create function private.social_is_discoverable(other_user uuid)
+returns boolean language sql stable security definer set search_path = '' as $
+  select exists (
+    select 1 from public.social_profiles p
+    where p.user_id = other_user and p.discoverable
+  );
+$;
+revoke all on function private.social_is_discoverable(uuid) from public, anon, authenticated;
+grant execute on function private.social_is_discoverable(uuid) to authenticated;
+
 create policy social_profiles_view on public.social_profiles for select to authenticated
-using (user_id = (select auth.uid()) or discoverable or exists (
-  select 1 from public.social_connections f where f.status = 'accepted'
-  and ((f.requester_id = user_id and f.addressee_id = (select auth.uid()))
-    or (f.addressee_id = user_id and f.requester_id = (select auth.uid())))
-));
+using (user_id = (select auth.uid()) or discoverable or private.social_connected_to(user_id));
 create policy social_profiles_create on public.social_profiles for insert to authenticated
 with check (user_id = (select auth.uid()));
 create policy social_profiles_edit on public.social_profiles for update to authenticated
@@ -84,7 +112,7 @@ create policy social_connection_parties on public.social_connections for select 
 using (requester_id = (select auth.uid()) or addressee_id = (select auth.uid()));
 create policy social_connection_request on public.social_connections for insert to authenticated
 with check (requester_id = (select auth.uid()) and status = 'pending' and accepted_at is null
-  and exists (select 1 from public.social_profiles p where p.user_id = addressee_id and p.discoverable));
+  and private.social_is_discoverable(addressee_id));
 create policy social_connection_accept on public.social_connections for update to authenticated
 using (addressee_id = (select auth.uid()) and status = 'pending')
 with check (addressee_id = (select auth.uid()) and status = 'accepted' and accepted_at is not null);
