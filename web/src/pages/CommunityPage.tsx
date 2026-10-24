@@ -40,6 +40,7 @@ export function CommunityPage() {
   const [day, setDay] = useState(today);
   const [caption, setCaption] = useState("");
   const [setTitle, setSetTitle] = useState("");
+  const [peopleSearch, setPeopleSearch] = useState("");
   const [hostAvailable, setHostAvailable] = useState(false);
   const [reportPostId, setReportPostId] = useState<string | null>(null);
   const [reportReason, setReportReason] = useState<"spam" | "harassment" | "copyright" | "inaccurate" | "other">("other");
@@ -72,7 +73,8 @@ export function CommunityPage() {
   const friendIds = useMemo(() => new Set(relationships.filter(c => c.status === "accepted" && accountId).map(c => otherPerson(c, accountId!))), [relationships, accountId]);
   const incoming = relationships.filter(c => c.status === "pending" && c.addressee_id === accountId);
   const outgoing = relationships.filter(c => c.status === "pending" && c.requester_id === accountId);
-  const people = (data?.profiles ?? []).filter(p => p.user_id !== accountId && (p.discoverable || friendIds.has(p.user_id)));
+  const people = (data?.profiles ?? []).filter(p => p.user_id !== accountId && (p.discoverable || friendIds.has(p.user_id))
+    && [p.display_name, p.handle].some(value => value.toLowerCase().includes(peopleSearch.trim().toLowerCase())));
   const progress = useMemo(() => dayProgress(logs, day), [logs, day]);
   const rankings = useMemo(() => sharedWeeklyStandings(
     (data?.posts ?? []).filter(post => post.user_id === accountId || friendIds.has(post.user_id)), today
@@ -245,6 +247,7 @@ export function CommunityPage() {
           </GlassCard>
           <GlassCard pad>
             <PanelHeader headingLevel={2} title="Find friends" sub="Searchable accounts that chose to join Community." />
+            <label className="community-search">Find someone<input value={peopleSearch} onChange={e => setPeopleSearch(e.target.value)} placeholder="Name or handle" /></label>
             {incoming.length > 0 && <div className="community-invites"><h3>Requests for you</h3>
               {incoming.map(connection => <div key={connection.id} className="community-person">
                 <span className="community-avatar">{initials(person(connection.requester_id))}</span>
