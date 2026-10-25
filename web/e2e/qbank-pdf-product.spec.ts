@@ -103,3 +103,30 @@ test("answer-marked slides are review-gated and stay hidden until a tutor answer
   await page.keyboard.press("Enter");
   await expect(page.locator('[data-asset-role="answer_reveal"] img')).toBeVisible();
 });
+
+
+test("slide-marked answer keys can be reviewed in one attested batch without bypassing question gating", async ({ page }) => {
+  await seedOnboarded(page);
+  await page.goto("/#questions");
+  await page.getByRole("button", { name: "Add your own material", exact: true }).click();
+  await page.getByLabel("Choose question files or a ZIP to import").setInputFiles({
+    name: "FTM1 Review Slide Bank.pdf", mimeType: "application/pdf", buffer: Buffer.from(inventedDeckPdf()),
+  });
+  const preview = page.getByRole("region", { name: "Source question bank preview" });
+  await expect(preview).toContainText("3 questions · 0 ready for import", { timeout: 30000 });
+  await preview.getByLabel("Bank module").fill("FTM 1");
+  await preview.getByLabel("Bank term").fill("1");
+  await preview.getByLabel("Bank week").fill("2");
+  const bulk = preview.locator(".bank-import-bulk");
+  const eligible = bulk.getByRole("checkbox", { name: /Select source answer for question/ });
+  const total = await eligible.count();
+  expect(total).toBeGreaterThan(0);
+  await expect(preview.getByRole("button", { name: "Import 0 answer-ready questions" })).toBeDisabled();
+  await bulk.getByRole("button", { name: "Select all eligible" }).click();
+  await expect(bulk.getByRole("button", { name: new RegExp("^Confirm " + total + " selected source answers?$") })).toBeDisabled();
+  await bulk.getByRole("checkbox", { name: "Attest selected answers checked against the original source" }).check();
+  await bulk.getByRole("button", { name: new RegExp("^Confirm " + total + " selected source answers?$") }).click();
+  await expect(preview.getByRole("button", { name: new RegExp("^Import " + total + " answer-ready questions?$") })).toBeEnabled();
+  await preview.getByRole("button", { name: new RegExp("^Import " + total + " answer-ready questions?$") }).click();
+  await expect(preview).toContainText(total + (total === 1 ? " question saved" : " questions saved") + " on this device.");
+});

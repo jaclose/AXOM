@@ -17,6 +17,7 @@ import type { ImportFinalizationResult } from "./ImportPanel";
 import type { ImportPackage } from "../../lib/question-content/package";
 import type { QuestionBlock, TableBlock } from "../../lib/question-content/blocks";
 import { editReviewedBlock, editReviewedTableCell, unresolvedExtractionIssues, type ReviewBlockLocation, type ReviewSection } from "../../lib/question-content/reviewEdits";
+import { eligibleSlideReviewKeys } from "../../lib/question-content/bulkAnswerReview";
 
 export type TaggedBank = Extract<PdfBankExtraction, { tagged: true }>;
 export type ReviewBank = Omit<Pick<TaggedBank, "pkg" | "conversionIssues" | "files" | "sourceText" | "sourceBytes" | "originalFile" | "notes" | "warnings" | "unplaced">, "sourceText"> & {
@@ -33,8 +34,13 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
   const [error, setError] = useState("");
   const [answer, setAnswer] = useState("");
   const [confirmedAnswerIds, setConfirmedAnswerIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [bulkSelected, setBulkSelected] = useState<ReadonlySet<string>>(() => new Set());
+  const [bulkAttested, setBulkAttested] = useState(false);
   const assessed = useMemo(() => assessBank(pkg, unresolvedExtractionIssues(bank.conversionIssues, confirmedAnswerIds), bank.files), [pkg, bank, confirmedAnswerIds]);
   const summary = useMemo(() => summarizePackage(pkg, assessed.issues), [pkg, assessed.issues]);
+  const slideKeys = useMemo(() => eligibleSlideReviewKeys(pkg, bank.conversionIssues, bank.files, confirmedAnswerIds, Boolean(bank.originalFile)),
+    [pkg, bank.conversionIssues, bank.files, confirmedAnswerIds, bank.originalFile]);
+  const chosenKeys = [...bulkSelected].filter(id => slideKeys.has(id));
   const question = pkg.questions[index];
   const verdict = question && assessed.verdicts.get(question.id);
   const globalErrors = assessed.issues.filter((issue) => issue.severity === "error" && !issue.questionId);
@@ -48,7 +54,11 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
   function edited(patch: ImportPackage) {
     if (patch === pkg) return;
     setPackage(patch);
-    if (question) setConfirmedAnswerIds((current) => { const next = new Set(current); next.delete(question.id); return next; });
+    if (question) {
+      setConfirmedAnswerIds((current) => { const next = new Set(current); next.delete(question.id); return next; });
+      setBulkSelected((current) => { const next = new Set(current); next.delete(question.id); return next; });
+    }
+    setBulkAttested(false);
     setAnswer("");
     setResult(undefined);
   }
@@ -57,7 +67,27 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
     setPackage((current) => ({ ...current, questions: current.questions.map((entry) =>
       entry.id === question.id ? withReviewedAnswer(entry, answer) : entry) }));
     setConfirmedAnswerIds((current) => new Set([...current, question.id]));
+    setBulkSelected((current) => { const next = new Set(current); next.delete(question.id); return next; });
+    setBulkAttested(false);
     setAnswer(""); setResult(undefined);
+  }
+  function confirmSelectedSourceAnswers() {
+    if (!bulkAttested || !chosenKeys.length) return;
+    const approved = new Map(chosenKeys.map(id => [id, slideKeys.get(id)!]));
+    const time = new Date().toISOString();
+    setPackage((current) => ({ ...current, questions: current.questions.map((entry) => {
+      const label = approved.get(entry.id);
+      if (!label || entry.correctAnswer?.evidence !== "answer-reveal-slide"
+        || entry.correctAnswer.labels.length !== 1 || entry.correctAnswer.labels[0] !== label) return entry;
+      const reviewed = withReviewedAnswer(entry, label);
+      const note = `Human source-attested batch answer review at ${time}.`;
+      return { ...reviewed, provenance: { ...reviewed.provenance,
+        notes: reviewed.provenance.notes ? `${reviewed.provenance.notes} | ${note}` : note } };
+    }) }));
+    setConfirmedAnswerIds((current) => new Set([...current, ...approved.keys()]));
+    setBulkSelected(new Set());
+    setBulkAttested(false);
+    setResult(undefined);
   }
   function editBlock(where: ReviewBlockLocation, value: string) {
     if (question) edited(editReviewedBlock(pkg, question.id, where, value));
@@ -130,6 +160,38 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
       ? <p className="sub">Source evidence stays {pkg.manifest.course.name} · Term {pkg.manifest.course.term} · Week {pkg.manifest.course.week}. Reviewed placement: {bank.reviewedFiling.module} · {bank.reviewedFiling.term} · week unassigned.</p>
       : !pkg.manifest.source.sourceWeekDeclared && <p className="sub">The week is your filing choice; it is not stated by the source.</p>}
     {[...bank.warnings, ...bank.unplaced.map((entry) => entry.reason), ...globalErrors.map((issue) => issue.message)].map((note, n) => <p key={n} className="sub">{note}</p>)}
+    {slideKeys.size > 0 && <details className="bank-import-bulk" open>
+      <summary>Batch review: {slideKeys.size} source-marked answer{slideKeys.size === 1 ? "" : "s"}</summary>
+      <p className="sub">Compare each candidate with its original answer slide. Only candidates that would otherwise become fully ready are listed. Structural and ambiguous questions stay in review.</p>
+      <div className="row wrap gap8">
+        <GhostButton onClick={() => { setBulkSelected(new Set(slideKeys.keys())); setBulkAttested(false); }}>Select all eligible</GhostButton>
+        <GhostButton onClick={() => { setBulkSelected(new Set()); setBulkAttested(false); }}>Clear selection</GhostButton>
+        <span className="sub">{chosenKeys.length} of {slideKeys.size} selected</span>
+      </div>
+      <div style={{ maxHeight: 340, overflowY: "auto", border: "1px solid var(--hairline)", borderRadius: "var(--radius-md)" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead><tr><th scope="col">Review</th><th scope="col">Original</th><th scope="col">Candidate</th><th scope="col">Source</th></tr></thead>
+          <tbody>{pkg.questions.map((entry, questionIndex) => {
+            const candidate = slideKeys.get(entry.id);
+            if (!candidate) return null;
+            return <tr key={entry.id}>
+              <td><input type="checkbox" checked={bulkSelected.has(entry.id)} aria-label={`Select source answer for question ${questionIndex + 1}`}
+                onChange={event => { setBulkSelected(current => { const next = new Set(current); if (event.target.checked) next.add(entry.id); else next.delete(entry.id); return next; }); setBulkAttested(false); }} /></td>
+              <td>Question {entry.source.questionNumber ?? questionIndex + 1}</td>
+              <td><b>{candidate}</b></td>
+              <td><GhostButton onClick={() => { setIndex(questionIndex); setMode("review"); }}>Inspect page {entry.source.page}</GhostButton></td>
+            </tr>;
+          })}</tbody>
+        </table>
+      </div>
+      <label className="row gap8" style={{ alignItems: "flex-start" }}>
+        <input type="checkbox" checked={bulkAttested} onChange={event => setBulkAttested(event.target.checked)} aria-label="Attest selected answers checked against the original source" />
+        <span>I personally checked the selected keys against their original source pages. A slide-derived candidate is not automatically a verified answer.</span>
+      </label>
+      <GButton variant="primary" disabled={!bulkAttested || !chosenKeys.length} onClick={confirmSelectedSourceAnswers}>
+        Confirm {chosenKeys.length} selected source answer{chosenKeys.length === 1 ? "" : "s"}
+      </GButton>
+    </details>}
     {question && <article className="bank-import-question">
       <div className="row wrap gap8">
         <GhostButton disabled={index === 0} onClick={() => { setIndex(index - 1); setAnswer(""); }}>Previous question</GhostButton>
