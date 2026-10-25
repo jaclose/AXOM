@@ -17,6 +17,8 @@
 .community-grid { display: grid; grid-template-columns: minmax(0,1.55fr) minmax(290px,1fr); gap: 18px; align-items: start; }
 .community-main,.community-aside { min-width: 0; gap: 18px; }
 .community-onboard .community-fields { margin: 18px 0; }
+.community-page .community-checkbox { display: flex; align-items: center; gap: 10px; margin-block: 15px; }
+.community-checkbox input { width: 18px; min-height: 18px; flex: 0 0 18px; accent-color: var(--gold); }
 .community-fields { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(210px,100%),1fr)); gap: 14px; margin-block: 15px; }
 .community-choice { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0 18px; }
 .community-choice button { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--hairline); border-radius: var(--radius-pill); padding: 9px 14px; background: var(--surface-1); color: var(--text-70); cursor: pointer; }
@@ -67,7 +69,7 @@
 .community-settings-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 12px 0; font-size: 12px; }
 .community-privacy > .ghost-btn { margin-top: 14px; }
 @media(max-width: 880px) { .community-grid { grid-template-columns: 1fr; } .community-banner { align-items: flex-start; } }
-@media(max-width: 560px) { .community-publish .gbtn { width: 100%; justify-content: center; } .community-person .gbtn { min-height: 36px; } .community-activity-summary > div { padding: 11px 8px; } }
+@media(max-width: 560px) { .community-publish .gbtn { width: 100%; justify-content: center; } .community-page :is(.gbtn,.ghost-btn,.community-choice button) { min-height: 44px; } .community-activity-summary > div { padding: 11px 8px; } }
 @media(prefers-reduced-motion: reduce) { .community-page * { scroll-behavior: auto; } }
 .community-report-form { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; margin-top: 13px; padding: 12px; border: 1px solid var(--hairline); border-radius: var(--radius-md); }
 .community-report-form label { flex: 1 1 220px; }

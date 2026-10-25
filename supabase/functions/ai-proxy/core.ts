@@ -165,3 +165,16 @@ export function upstreamError(status: number): { status: number; error: string }
   if (status === 401 || status === 403) return { status: 503, error: "Cloud AI is misconfigured on the server." };
   return { status: 502, error: "The AI service is unavailable right now." };
 }
+
+/** Missing or malformed policy data never authorizes a billable request. */
+export function cloudAllowance(value: unknown, failed = false):
+  | { allowed: true; remaining: number }
+  | { allowed: false; status: number; error: string } {
+  if (failed || typeof value !== "number" || !Number.isSafeInteger(value) || value < -1 || value > 999) {
+    return { allowed: false, status: 503, error: "Could not verify your Cloud AI allowance. Try again later." };
+  }
+  if (value === -1) {
+    return { allowed: false, status: 429, error: "Cloud AI is disabled for this account or today's request allowance is used up. Daily allowances reset at 00:00 UTC." };
+  }
+  return { allowed: true, remaining: value };
+}

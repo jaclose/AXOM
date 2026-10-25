@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { StudyLog } from "../types";
-import { dayProgress, sharedWeeklyStandings, type CommunityPost } from "./community";
+import { dayProgress, sharedWeeklyStandings, validCommunitySnapshot, type CommunityPost } from "./community";
 
 const log = (id: string, dayKey: string, patch: Partial<StudyLog> = {}): StudyLog => ({
   id, dayKey, ts: dayKey + "T14:00:00Z", type: "Anki", minutes: 20, cards: 30, ...patch,
@@ -40,5 +40,19 @@ describe("voluntary community aggregates", () => {
       { userId:"friend", minutes:165,cards:20,questions:10,days:2 },
       { userId:"me", minutes:60,cards:10,questions:5,days:1 },
     ]);
+  });
+  it("never ranks private posts and counts each learner day once", () => {
+    expect(sharedWeeklyStandings([
+      post("private", "me", "2026-10-24", 300, { visibility: "private" }),
+      post("shared", "friend", "2026-10-24", 45),
+      post("repeated", "friend", "2026-10-24", 45),
+    ], "2026-10-24")).toEqual([{ userId: "friend", minutes: 45, cards: 10, questions: 5, days: 1 }]);
+  });
+  it("rejects malformed server snapshots rather than rendering cast data", () => {
+    const snapshot = { profiles: [], connections: [], posts: [post("one", "friend", "2026-10-24", 45)], reactions: [] };
+    expect(validCommunitySnapshot(snapshot)).toBe(true);
+    expect(validCommunitySnapshot({ ...snapshot, posts: [{ ...snapshot.posts[0], questions: "450" }] })).toBe(false);
+    expect(validCommunitySnapshot({ ...snapshot, posts: [{ ...snapshot.posts[0], visibility: "everyone" }] })).toBe(false);
+    expect(validCommunitySnapshot({ ...snapshot, connections: [{ id: "x", status: "owner" }] })).toBe(false);
   });
 });

@@ -6,13 +6,13 @@ begin;
 create table public.axom_operator_roles (
   user_id uuid primary key references auth.users(id) on delete cascade,
   role text not null check (role in ('owner','admin','moderator')),
-  granted_by uuid references auth.users(id),
+  granted_by uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 create table public.axom_operator_audit (
   id uuid primary key default gen_random_uuid(),
-  actor_id uuid not null references auth.users(id),
+  actor_id uuid references auth.users(id) on delete set null,
   action text not null check (length(action) between 3 and 80),
   target_id uuid,
   metadata jsonb not null default '{}'::jsonb,
@@ -23,7 +23,7 @@ create table public.axom_ai_entitlements (
   user_id uuid primary key references auth.users(id) on delete cascade,
   enabled boolean not null default true,
   daily_limit integer not null default 60 check (daily_limit between 0 and 1000),
-  updated_by uuid references auth.users(id),
+  updated_by uuid references auth.users(id) on delete set null,
   updated_at timestamptz not null default now()
 );
 create table public.social_post_reports (
@@ -45,6 +45,9 @@ revoke all on public.axom_operator_roles, public.axom_operator_audit,
 grant select on public.axom_operator_roles, public.axom_operator_audit, public.axom_ai_entitlements to authenticated;
 grant select,insert,delete on public.social_post_reports to authenticated;
 grant all on public.axom_operator_roles, public.axom_operator_audit,public.axom_ai_entitlements,public.social_post_reports to service_role;
+
+create trigger social_report_privacy_barrier before insert or update or delete on public.social_post_reports
+for each row execute function private.social_write_guard();
 
 create function public.axom_operator_role() returns text
 language sql stable security definer set search_path = '' as $$
@@ -78,6 +81,7 @@ declare
   v_used integer;
 begin
   if v_user is null then raise exception 'not authenticated' using errcode = '28000'; end if;
+  perform private.require_account_write_access();
   select e.daily_limit, e.enabled into v_limit, v_enabled
     from public.axom_ai_entitlements e where e.user_id = v_user;
   if not found then v_limit := 60; v_enabled := true; end if;
@@ -181,13 +185,15 @@ end $$;
 revoke all on function public.axom_operator_reports() from public,anon,authenticated;
 grant execute on function public.axom_operator_reports() to authenticated;
 
-create function public.axom_operator_set_role(target uuid, wanted text)
+create function public.axom_operator_set_role(target uuid, wanted text, reason text)
 returns void language plpgsql security definer set search_path = '' as $$
 declare actor uuid := auth.uid();
 begin
   if public.axom_operator_role() is distinct from 'owner' then
     raise exception 'Only the verified owner may assign roles' using errcode='42501';
   end if;
+  perform private.require_account_write_access();
+  if reason is null or length(trim(reason)) not between 8 and 500 then raise exception 'Give a reason of 8 to 500 characters' using errcode='22023'; end if;
   if target is null or target = actor or wanted is null or wanted not in ('admin','moderator','member')
     or not exists (select 1 from auth.users where id=target)
     or exists (select 1 from public.axom_operator_roles where user_id=target and role='owner') then
@@ -200,19 +206,21 @@ begin
     on conflict(user_id) do update set role=excluded.role,granted_by=actor,updated_at=now();
   end if;
   insert into public.axom_operator_audit(actor_id,action,target_id,metadata)
-    values(actor,'account.role',target,jsonb_build_object('assigned',wanted));
+    values(actor,'account.role',target,jsonb_build_object('assigned',wanted,'reason',trim(reason)));
 end $$;
-revoke all on function public.axom_operator_set_role(uuid,text) from public,anon,authenticated;
-grant execute on function public.axom_operator_set_role(uuid,text) to authenticated;
+revoke all on function public.axom_operator_set_role(uuid,text,text) from public,anon,authenticated;
+grant execute on function public.axom_operator_set_role(uuid,text,text) to authenticated;
 
-create function public.axom_operator_set_ai(target uuid, permitted boolean, requested_limit integer)
+create function public.axom_operator_set_ai(target uuid, permitted boolean, requested_limit integer, reason text)
 returns void language plpgsql security definer set search_path = '' as $$
 declare actor uuid := auth.uid();
 begin
   if public.axom_operator_role() is distinct from 'owner' then
     raise exception 'Only the verified owner may manage AI limits' using errcode='42501';
   end if;
-  if target is null or permitted is null or requested_limit not between 0 and 1000
+  perform private.require_account_write_access();
+  if reason is null or length(trim(reason)) not between 8 and 500 then raise exception 'Give a reason of 8 to 500 characters' using errcode='22023'; end if;
+  if target is null or permitted is null or requested_limit is null or requested_limit not between 0 and 1000
     or not exists (select 1 from auth.users where id = target) then
     raise exception 'Invalid AI policy' using errcode='22023';
   end if;
@@ -221,10 +229,10 @@ begin
   on conflict(user_id) do update set enabled=excluded.enabled,daily_limit=excluded.daily_limit,
     updated_by=actor,updated_at=now();
   insert into public.axom_operator_audit(actor_id,action,target_id,metadata)
-    values(actor,'ai.policy',target,jsonb_build_object('enabled',permitted,'daily_limit',requested_limit));
+    values(actor,'ai.policy',target,jsonb_build_object('enabled',permitted,'daily_limit',requested_limit,'reason',trim(reason)));
 end $$;
-revoke all on function public.axom_operator_set_ai(uuid,boolean,integer) from public,anon,authenticated;
-grant execute on function public.axom_operator_set_ai(uuid,boolean,integer) to authenticated;
+revoke all on function public.axom_operator_set_ai(uuid,boolean,integer,text) from public,anon,authenticated;
+grant execute on function public.axom_operator_set_ai(uuid,boolean,integer,text) to authenticated;
 
 create function public.axom_operator_resolve_report(target uuid, resolution text)
 returns void language plpgsql security definer set search_path = '' as $$
@@ -233,6 +241,7 @@ begin
   if public.axom_operator_role() is null then
     raise exception 'Operator access required' using errcode='42501';
   end if;
+  perform private.require_account_write_access();
   if resolution is null or resolution not in ('dismiss','remove') then raise exception 'Invalid resolution'; end if;
   if not exists (select 1 from public.social_post_reports where post_id=target) then
     raise exception 'Report no longer exists';

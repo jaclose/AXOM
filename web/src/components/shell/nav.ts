@@ -4,7 +4,7 @@ import type { ExperimentalFlags } from "../../lib/types";
 import {
   LayoutGrid, BookOpen, BadgeCheck, Brain, LineChart, Calendar, ListChecks,
   BookText, Share2, Library, Folder, Link, Wand2, LifeBuoy, ClipboardCheck, Trophy, Compass, Info, CalendarCheck,
-  HelpCircle, Users, BookOpenCheck, WholeWord, Stethoscope, Gamepad2, Blocks, AudioWaveform,
+  HelpCircle, Users, BookOpenCheck, WholeWord, Stethoscope, Gamepad2, Blocks, AudioWaveform, ShieldCheck,
 } from "lucide-react";
 
 export interface NavItem {
@@ -37,6 +37,7 @@ export const MODULE_STATUS_META = {
 // All routable pages, keyed for lookup. Order here is not the sidebar order
 // (that lives in the SIDEBAR_* groups below).
 export const NAV = [
+  { id: "host", label: "Host", subtitle: "Account permissions and platform operations", icon: ShieldCheck },
   { id: "dashboard", label: "Dashboard", subtitle: "Your command center at a glance", icon: LayoutGrid },
   { id: "courses", label: "Courses", subtitle: "Term-based course map with module-level folders", icon: BookOpen },
   { id: "tracker", label: "Course Tracker", subtitle: "Lecture, DLA, and PQ completion map", icon: BadgeCheck },
@@ -124,7 +125,7 @@ export const SIDEBAR_PREP = ["step", "premed", "appchecker"];
 // used modules live in Misc and start hidden (lib/navLayout.ts).
 export const SIDEBAR_TOOLS = ["soundscapes", "habits", "resources", "integrations", "leaderboards"];
 export const SIDEBAR_MISC = ["tasks", "methods", "prompts", "folders"];
-export const SIDEBAR_BOTTOM = ["building"];
+export const SIDEBAR_BOTTOM = ["host", "building"];
 // Dashboard can't be hidden; everything else is subscribe/unsubscribe-able.
 export const SIDEBAR_LOCKED = new Set(["dashboard"]);
 

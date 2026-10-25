@@ -1,6 +1,6 @@
 .host-page { width: 100%; max-width: 1450px; margin-inline: auto; padding-bottom: 42px; gap: 18px; }
-.host-page :is(input,select) { color: var(--text); background: var(--surface-1); border: 1px solid var(--hairline); padding: 9px 11px; width: 100%; border-radius: var(--radius-sm); min-height: 40px; }
-.host-page :is(input,select,button):focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.host-page :is(input,select,textarea) { color: var(--text); background: var(--surface-1); border: 1px solid var(--hairline); padding: 9px 11px; width: 100%; border-radius: var(--radius-sm); min-height: 40px; font: inherit; }
+.host-page :is(input,select,textarea,button):focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .host-page label { display: grid; gap: 6px; font-size: 12px; min-width: 0; }
 .host-page .sub { color: var(--text-70); line-height: 1.6; font-size: 12px; }
 .host-banner { display: flex; align-items: center; justify-content: space-between; gap: 25px; flex-wrap: wrap; border-radius: var(--radius-xl); padding: clamp(20px,4vw,36px); border: 1px solid var(--glass-card-border); background: linear-gradient(125deg,var(--surface-2),rgba(var(--accent-rgb),.09),var(--glass-card-fill)); }
@@ -23,6 +23,9 @@
 .host-account-head small { overflow-wrap: anywhere; color: var(--text-70); font-size: 11px; }
 .host-account-controls { display: grid; gap: 9px; grid-template-columns: repeat(2,minmax(0,1fr)); align-items: end; }
 .host-account-controls :is(.gbtn) { width: 100%; min-height: 40px; }
+.host-change-reason { grid-column: 1 / -1; }
+.host-change-reason textarea { resize: vertical; }
+.host-change-reason small { color: var(--text-70); font-weight: 400; }
 .host-queue { display: grid; margin-top: 15px; }
 .host-queue-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 13px 0; border-top: 1px solid var(--hairline); }
 .host-queue-row > div { display: grid; gap: 4px; }
@@ -40,5 +43,5 @@
 .host-audit b { font-size: 12px; }
 .host-audit small { overflow-wrap: anywhere; color: var(--text-70); font-size: 11px; }
 @media(max-width: 970px) { .host-layout { grid-template-columns: 1fr; } }
-@media(max-width: 560px) { .host-stats { grid-template-columns: repeat(2,minmax(0,1fr)); } .host-account-controls { grid-template-columns: 1fr; } }
+@media(max-width: 560px) { .host-stats { grid-template-columns: repeat(2,minmax(0,1fr)); } .host-account-controls { grid-template-columns: 1fr; } .host-page :is(.gbtn,.ghost-btn,input,select) { min-height: 44px; } }
 @media(prefers-reduced-motion: reduce) { .host-page * { scroll-behavior: auto; } }

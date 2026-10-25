@@ -9,11 +9,11 @@ import {
   type CommunityConnection, type CommunityProfile, type CommunitySnapshot,
 } from "../lib/community/community";
 import { GButton, GhostButton, GlassCard, PanelHeader, Tag } from "../components/ui/primitives";
-import { operatorRole } from "../lib/operator/hostClient";
+import { operatorRole, useAccountIdentity } from "../lib/operator/hostClient";
 import "../styles/community.css";
 
 type PostKind = "progress" | "question_set";
-type Audience = "friends" | "community";
+type Audience = "private" | "friends" | "community";
 function otherPerson(friendship: CommunityConnection, me: string) {
   return friendship.requester_id === me ? friendship.addressee_id : friendship.requester_id;
 }
@@ -22,6 +22,11 @@ function initials(label: string) {
 }
 
 export function CommunityPage() {
+  const identity = useAccountIdentity();
+  return <CommunityAccountPage key={identity} />;
+}
+
+function CommunityAccountPage() {
   const account = useAccount(state => state.user);
   const logs = useStore(state => state.logs);
   const sets = useStore(state => state.questionSets);
@@ -36,13 +41,16 @@ export function CommunityPage() {
   const [handle, setHandle] = useState("");
   const [publicName, setPublicName] = useState("");
   const [kind, setKind] = useState<PostKind>("progress");
-  const [audience, setAudience] = useState<Audience>("friends");
+  const [audience, setAudience] = useState<Audience>("private");
+  const [joinDiscoverable, setJoinDiscoverable] = useState(false);
+  const [bio, setBio] = useState("");
   const [day, setDay] = useState(today);
   const [caption, setCaption] = useState("");
   const [setTitle, setSetTitle] = useState("");
   const [peopleSearch, setPeopleSearch] = useState("");
   const [hostAvailable, setHostAvailable] = useState(false);
   const [reportPostId, setReportPostId] = useState<string | null>(null);
+  const [deletePostId, setDeletePostId] = useState<string | null>(null);
   const [reportReason, setReportReason] = useState<"spam" | "harassment" | "copyright" | "inaccurate" | "other">("other");
 
   useEffect(() => {
@@ -51,12 +59,11 @@ export function CommunityPage() {
   }, [accountId, account?.displayName]);
   useEffect(() => {
     let active = true;
-    setData(undefined);
     if (!accountId) return;
     setLoading(true);
     setError("");
     void loadCommunity(accountId).then(result => { if (active) setData(result); })
-      .catch(cause => { if (active) setError(cause instanceof Error ? cause.message : "Community is unavailable."); })
+      .catch(cause => { if (active) { setData(undefined); setError(cause instanceof Error ? cause.message : "Community is unavailable."); } })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [accountId, refreshId]);
@@ -69,7 +76,7 @@ export function CommunityPage() {
   }, [accountId]);
   const mine = data?.profiles.find(p => p.user_id === accountId);
   const profiles = useMemo(() => new Map(data?.profiles.map(p => [p.user_id, p]) ?? []), [data]);
-  const relationships = data?.connections ?? [];
+  const relationships = useMemo(() => data?.connections ?? [], [data?.connections]);
   const friendIds = useMemo(() => new Set(relationships.filter(c => c.status === "accepted" && accountId).map(c => otherPerson(c, accountId!))), [relationships, accountId]);
   const incoming = relationships.filter(c => c.status === "pending" && c.addressee_id === accountId);
   const outgoing = relationships.filter(c => c.status === "pending" && c.requester_id === accountId);
@@ -78,10 +85,10 @@ export function CommunityPage() {
   const progress = useMemo(() => dayProgress(logs, day), [logs, day]);
   const rankings = useMemo(() => sharedWeeklyStandings(
     (data?.posts ?? []).filter(post => post.user_id === accountId || friendIds.has(post.user_id)), today
-  ), [data, friendIds, today]);
+  ), [data, friendIds, today, accountId]);
   const maxMinutes = Math.max(1, ...rankings.map(r => r.minutes));
   const socialPosts = data?.posts ?? [];
-  const reactions = data?.reactions ?? [];
+  const reactions = useMemo(() => data?.reactions ?? [], [data?.reactions]);
   const reactCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const item of reactions) counts.set(item.post_id, (counts.get(item.post_id) ?? 0) + 1);
@@ -93,7 +100,7 @@ export function CommunityPage() {
     setBusy(true); setError(""); setMessage("");
     try {
       await effect();
-      if (resetForm) setCaption("");
+      if (resetForm) { setCaption(""); setAudience("private"); }
       setMessage(success);
       setRefreshId(value => value + 1);
     } catch (cause) {
@@ -131,18 +138,22 @@ export function CommunityPage() {
       {hostAvailable && <a className="ghost-btn" href="#host">Host dashboard</a>}
     </div>
     {loading && <p role="status">Loading shared activity…</p>}
-    {error && <p role="alert" className="community-error">{error}</p>}
+    {error && <div role="alert" className="community-error"><p>{error}</p><GButton size="sm" disabled={loading || busy} onClick={() => setRefreshId(value => value + 1)}>Retry Community</GButton></div>}
     {message && <p role="status" className="sub">{message}</p>}
     {!loading && !data && !error && <p className="sub">Unable to load Community right now.</p>}
 
     {data && !mine && <GlassCard pad className="community-onboard">
       <PanelHeader title="Join Community" headingLevel={2} sub="Your name and handle become searchable only when you opt in." />
+      <form onSubmit={event => { event.preventDefault(); void act(() => joinCommunity(accountId, handle, publicName, bio, joinDiscoverable), joinDiscoverable ? "Your profile is now discoverable." : "Your profile is saved and hidden from discovery."); }}>
       <div className="community-fields">
-        <label>Public handle <input value={handle} maxLength={30} autoComplete="off" onChange={e => setHandle(e.target.value.toLowerCase())} placeholder="your_handle" /></label>
-        <label>Display name <input value={publicName} maxLength={80} onChange={e => setPublicName(e.target.value)} /></label>
+        <label>Public handle <input name="handle" value={handle} minLength={3} maxLength={30} pattern="[a-z0-9][a-z0-9_]{2,29}" required autoCapitalize="none" spellCheck={false} autoComplete="username" disabled={busy} onChange={e => setHandle(e.target.value.toLowerCase())} placeholder="your_handle" /></label>
+        <label>Display name <input name="display-name" value={publicName} maxLength={80} required autoComplete="name" disabled={busy} onChange={e => setPublicName(e.target.value)} /></label>
+        <label>Biography <textarea name="bio" value={bio} maxLength={240} disabled={busy} onChange={event => setBio(event.target.value)} /></label>
       </div>
+      <label className="community-checkbox"><input type="checkbox" checked={joinDiscoverable} disabled={busy} onChange={event => setJoinDiscoverable(event.target.checked)} /> Make my profile discoverable</label>
       <p className="sub">Your journal, notes, question answers, exam results and study history are never posted automatically.</p>
-      <GButton variant="primary" disabled={busy} onClick={() => void act(() => joinCommunity(accountId, handle, publicName), "Your profile is now discoverable.")}>Create public profile</GButton>
+      <GButton type="submit" variant="primary" disabled={busy}>{busy ? "Creating profile…" : "Create profile"}</GButton>
+      </form>
     </GlassCard>}
 
     {data && mine && <>
@@ -151,11 +162,11 @@ export function CommunityPage() {
           <GlassCard pad className="community-composer">
             <PanelHeader headingLevel={2} title="Share an update" sub="Posting is manual. Others see only this card, never your underlying workspace." />
             <div className="community-choice" role="group" aria-label="Update type">
-              <button className={kind === "progress" ? "selected" : ""} type="button" onClick={() => setKind("progress")} aria-pressed={kind === "progress"}><Activity size={16} /> Daily progress</button>
-              <button className={kind === "question_set" ? "selected" : ""} type="button" onClick={() => setKind("question_set")} aria-pressed={kind === "question_set"}><Share2 size={16} /> Question Set</button>
+              <button className={kind === "progress" ? "selected" : ""} type="button" disabled={busy} onClick={() => setKind("progress")} aria-pressed={kind === "progress"}><Activity size={16} aria-hidden="true" /> Daily progress</button>
+              <button className={kind === "question_set" ? "selected" : ""} type="button" disabled={busy} onClick={() => setKind("question_set")} aria-pressed={kind === "question_set"}><Share2 size={16} aria-hidden="true" /> Question Set</button>
             </div>
             {kind === "progress" ? <div className="community-day">
-              <label>Study day <input type="date" value={day} max={today} min="2020-01-01" onChange={e => setDay(e.target.value)} /></label>
+              <label>Study day <input type="date" value={day} max={today} min="2020-01-01" disabled={busy} onChange={e => setDay(e.target.value)} /></label>
               <div className="community-activity-summary">
                 <div><strong>{progress.minutes}</strong><span>minutes</span></div>
                 <div><strong>{progress.cards}</strong><span>cards</span></div>
@@ -164,7 +175,7 @@ export function CommunityPage() {
               <p className="sub">Only academic activity recorded in AXOM for the selected day. If you did not log questions, this count may be zero.</p>
             </div> : <div className="community-fields">
               <label>Question Set to celebrate
-                <select value={setTitle} onChange={e => setSetTitle(e.target.value)}>
+                <select value={setTitle} disabled={busy} onChange={e => setSetTitle(e.target.value)}>
                   <option value="">Choose a set</option>
                   {sets.filter(set => Boolean(set.title?.trim())).slice(0, 200).map(set => <option key={set.id} value={set.title}>{set.title}</option>)}
                 </select>
@@ -172,11 +183,12 @@ export function CommunityPage() {
               <p className="sub">This posts the title only, not the questions or a private share link. Published Question Sets still require their existing sharing permissions.</p>
             </div>}
             <label className="community-caption">Write a note (optional)
-              <textarea value={caption} maxLength={500} rows={3} placeholder="What went well today?" onChange={e => setCaption(e.target.value)} />
+              <textarea name="caption" value={caption} maxLength={500} rows={3} disabled={busy} placeholder="What went well today?" onChange={e => setCaption(e.target.value)} />
             </label>
             <div className="community-publish">
               <label>Who can see this?
-                <select value={audience} onChange={e => setAudience(e.target.value as Audience)}>
+                <select value={audience} disabled={busy} onChange={e => setAudience(e.target.value as Audience)}>
+                  <option value="private">Only me</option>
                   <option value="friends">Accepted friends</option>
                   <option value="community">Community</option>
                 </select>
@@ -185,8 +197,9 @@ export function CommunityPage() {
                 onClick={() => void act(() => publishCommunityPost(accountId, {
                   kind, visibility: audience, activityDay: day,
                   ...progress, setTitle: kind === "question_set" ? setTitle : undefined, caption,
-                }), "Update shared.", true)}><Share2 size={16} /> Publish</GButton>
+                }), audience === "private" ? "Update saved privately." : "Update shared.", true)}><Share2 size={16} /> Publish</GButton>
             </div>
+            <p className="sub">Only me is the default each time. Private posts never contribute to the shared leaderboard.</p>
           </GlassCard>
 
           <GlassCard pad className="community-feed">
@@ -198,11 +211,12 @@ export function CommunityPage() {
                 <div className="community-post-head">
                   <span className="community-avatar">{initials(person(post.user_id))}</span>
                   <div><strong>{person(post.user_id)}</strong><small>@{profiles.get(post.user_id)?.handle ?? "learner"} · {new Date(post.created_at).toLocaleDateString()}</small></div>
-                  <Tag tone="neutral">{post.visibility === "friends" ? "Friends" : "Community"}</Tag>
+                  <Tag tone="neutral">{post.visibility === "private" ? "Only me" : post.visibility === "friends" ? "Friends" : "Community"}</Tag>
                 </div>
                 {post.kind === "progress" ? <div className="community-post-feature">
                   <div><Activity size={16}/><b>Daily study</b><small>{post.activity_day}</small></div>
                   <div className="community-totals"><span><b>{post.minutes}</b> min</span><span><b>{post.cards}</b> cards</span><span><b>{post.questions}</b> questions</span></div>
+                  <small>Self-shared study log totals. Not independently verified.</small>
                 </div> : <div className="community-post-feature">
                   <div><Share2 size={16}/><b>Question Set</b></div>
                   <h3>{post.set_title}</h3>
@@ -211,11 +225,12 @@ export function CommunityPage() {
                 {post.caption && <p className="community-post-caption">{post.caption}</p>}
                 <div className="community-post-actions">
                   <GButton size="sm" disabled={busy} aria-pressed={youLiked} onClick={() => void act(() => setReaction(accountId, post.id, !youLiked), youLiked ? "Reaction removed." : "Reaction saved.")}>
-                    <Heart size={15} fill={youLiked ? "currentColor" : "none"} /> {reactCounts.get(post.id) ?? 0} {youLiked ? "Liked" : "Like"}
+                    <Heart size={15} fill={youLiked ? "currentColor" : "none"} /> {reactCounts.get(post.id) ?? 0} {youLiked ? "Kudos given" : "Kudos"}
                   </GButton>
-                  {post.user_id === accountId && <GhostButton disabled={busy} onClick={() => void act(() => deleteCommunityPost(accountId, post.id), "Post removed.")}><Trash2 size={15} /> Delete</GhostButton>}
+                  {post.user_id === accountId && <GhostButton disabled={busy} onClick={() => setDeletePostId(deletePostId === post.id ? null : post.id)}><Trash2 size={15} aria-hidden="true" /> Delete</GhostButton>}
                   {post.user_id !== accountId && <GhostButton disabled={busy} onClick={() => { setReportPostId(reportPostId === post.id ? null : post.id); setReportReason("other"); }}>Report</GhostButton>}
                 </div>
+                {deletePostId === post.id && <div className="community-report-form" role="group" aria-label="Confirm post removal"><p>Remove this post and its reactions? Your private study records stay intact.</p><GButton size="sm" variant="danger" disabled={busy} onClick={() => void act(async () => { await deleteCommunityPost(accountId, post.id); setDeletePostId(null); }, "Post removed.")}>Remove my post</GButton><GhostButton disabled={busy} onClick={() => setDeletePostId(null)}>Keep post</GhostButton></div>}
                 {reportPostId === post.id && <div className="community-report-form">
                   <label>Reason for reporting
                     <select value={reportReason} onChange={e => setReportReason(e.target.value as typeof reportReason)}>
@@ -267,7 +282,7 @@ export function CommunityPage() {
                   : <GButton size="sm" disabled={busy} onClick={() => void act(() => requestFriend(accountId, profile.user_id), "Friend request sent.")}><UserPlus size={14} /> Add</GButton>}
               </div>;
             })}</div>}
-            {outgoing.length > 0 && <p className="sub">{outgoing.length} outgoing request{outgoing.length === 1 ? "" : "s"} waiting for acceptance.</p>}
+            {outgoing.length > 0 && <div className="community-invites"><h3>Requests you sent</h3>{outgoing.map(connection => <div className="community-person" key={connection.id}><span className="grow"><b>{person(connection.addressee_id)}</b><small>Waiting for acceptance</small></span><GhostButton disabled={busy} onClick={() => void act(() => removeFriend(accountId, connection.id), "Friend request cancelled.")}>Cancel request</GhostButton></div>)}</div>}
           </GlassCard>
           <GlassCard pad className="community-privacy">
             <PanelHeader headingLevel={2} title="Your privacy" sub="Control whether your profile appears in discovery." />

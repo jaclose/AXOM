@@ -1,5 +1,7 @@
 import { accountOperationClient } from "../account/supabase";
 import type { StudyLog } from "../types";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { academicAccountScope } from "../academicLibrary/accountScope";
 
 export interface CommunityProfile {
   user_id: string;
@@ -18,7 +20,7 @@ export interface CommunityPost {
   id: string;
   user_id: string;
   kind: "progress" | "question_set";
-  visibility: "friends" | "community";
+  visibility: "private" | "friends" | "community";
   activity_day: string | null;
   minutes: number;
   cards: number;
@@ -38,69 +40,110 @@ export interface CommunitySnapshot {
 const HANDLE = /^[a-z0-9][a-z0-9_]{2,29}$/;
 const errorMessage = "The community could not be reached. Your local work has not changed.";
 
-async function scoped(accountId: string) {
-  const scope = await accountOperationClient();
-  if (scope.userId !== accountId) throw new Error("The signed-in account changed. Reopen Community.");
-  return scope.client;
+async function withClient<T>(accountId: string, run: (client: SupabaseClient) => Promise<T>): Promise<T> {
+  const guard = academicAccountScope(accountId);
+  try {
+    guard.assertCurrent();
+    const scope = await accountOperationClient();
+    guard.assertCurrent();
+    if (scope.userId !== accountId) throw new Error("The signed-in account changed. Reopen Community.");
+    await scope.assertCurrent();
+    const result = await run(scope.client);
+    guard.assertCurrent();
+    await scope.assertCurrent();
+    guard.assertCurrent();
+    return result;
+  } finally { guard.dispose(); }
+}
+
+const row = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+const text = (value: unknown) => typeof value === "string";
+const count = (value: unknown) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+const bounded = (value: unknown, max: number, check: (item: unknown) => boolean) => Array.isArray(value) && value.length <= max && value.every(check);
+export function validCommunitySnapshot(value: unknown): value is CommunitySnapshot {
+  return row(value)
+    && bounded(value.profiles, 100, item => row(item) && [item.user_id, item.handle, item.display_name, item.bio].every(text) && typeof item.discoverable === "boolean")
+    && bounded(value.connections, 150, item => row(item) && [item.id, item.requester_id, item.addressee_id].every(text) && ["pending", "accepted"].includes(String(item.status)))
+    && bounded(value.posts, 100, item => row(item) && [item.id, item.user_id, item.caption, item.created_at].every(text)
+      && ["progress", "question_set"].includes(String(item.kind)) && ["private", "friends", "community"].includes(String(item.visibility))
+      && (item.activity_day === null || text(item.activity_day)) && (item.set_title === null || text(item.set_title))
+      && count(item.minutes) && count(item.cards) && count(item.questions))
+    && bounded(value.reactions, 2000, item => row(item) && text(item.post_id) && text(item.user_id));
 }
 
 /** RLS returns only discoverable people, existing friends and posts visible to the viewer.
  * Personal journals, source files and stored workspaces are never fetched here. */
 export async function loadCommunity(accountId: string): Promise<CommunitySnapshot> {
-  const client = await scoped(accountId);
+  return withClient(accountId, async client => {
   const [profiles, connections, posts] = await Promise.all([
     client.from("social_profiles").select("user_id,handle,display_name,bio,discoverable").order("handle").limit(100),
     client.from("social_connections").select("id,requester_id,addressee_id,status").order("created_at", { ascending: false }).limit(150),
     client.from("social_posts").select("id,user_id,kind,visibility,activity_day,minutes,cards,questions,set_title,caption,created_at").order("created_at", { ascending: false }).limit(100),
   ]);
   if (profiles.error || connections.error || posts.error) throw new Error(errorMessage);
-  const postRows = (posts.data ?? []) as CommunityPost[];
+  const postRows = posts.data ?? [];
+  if (!Array.isArray(postRows) || postRows.some(item => !row(item) || !text(item.id))) throw new Error("Community returned incomplete activity. Refresh before continuing.");
   let reactions: CommunityReaction[] = [];
   if (postRows.length) {
     const response = await client.from("social_reactions").select("post_id,user_id").in("post_id", postRows.map(post => post.id)).limit(2000);
     if (response.error) throw new Error(errorMessage);
     reactions = (response.data ?? []) as CommunityReaction[];
   }
-  return {
+  const snapshot = {
     profiles: (profiles.data ?? []) as CommunityProfile[],
     connections: (connections.data ?? []) as CommunityConnection[],
-    posts: postRows,
+    posts: postRows as CommunityPost[],
     reactions,
   };
+  if (!validCommunitySnapshot(snapshot)) throw new Error("Community returned incomplete data. Refresh before continuing.");
+  return snapshot;
+  });
 }
 
-export async function joinCommunity(accountId: string, handle: string, displayName: string, bio = ""): Promise<void> {
+export async function joinCommunity(accountId: string, handle: string, displayName: string, bio = "", discoverable = false): Promise<void> {
   const normalized = handle.trim().toLowerCase();
   if (!HANDLE.test(normalized)) throw new Error("Choose a handle of 3 to 30 lowercase letters, digits or underscores.");
   if (!displayName.trim() || displayName.trim().length > 80 || bio.length > 240) throw new Error("Check your name and bio.");
-  const { error } = await (await scoped(accountId)).from("social_profiles").upsert({
+  return withClient(accountId, async client => {
+  const { error } = await client.from("social_profiles").upsert({
     user_id: accountId, handle: normalized, display_name: displayName.trim(), bio: bio.trim(),
-    discoverable: true, updated_at: new Date().toISOString(),
+    discoverable, updated_at: new Date().toISOString(),
   }, { onConflict: "user_id" });
   if (error) throw new Error(error.code === "23505" ? "This handle is taken. Choose another." : errorMessage);
+  });
 }
 
 export async function setDiscoverable(accountId: string, discoverable: boolean): Promise<void> {
-  const { error } = await (await scoped(accountId)).from("social_profiles").update({ discoverable, updated_at: new Date().toISOString() }).eq("user_id", accountId);
-  if (error) throw new Error(errorMessage);
+  return withClient(accountId, async client => {
+    const { data, error } = await client.from("social_profiles").update({ discoverable, updated_at: new Date().toISOString() }).eq("user_id", accountId).select("user_id");
+    if (error || data?.length !== 1) throw new Error("Your privacy choice could not be confirmed. Refresh before retrying.");
+  });
 }
 export async function leaveCommunity(accountId: string): Promise<void> {
-  const { error } = await (await scoped(accountId)).from("social_profiles").delete().eq("user_id", accountId);
+  return withClient(accountId, async client => {
+  const { error } = await client.from("social_profiles").delete().eq("user_id", accountId);
   if (error) throw new Error(errorMessage);
+  });
 }
 export async function requestFriend(accountId: string, otherId: string): Promise<void> {
   if (otherId === accountId) return;
-  const { error } = await (await scoped(accountId)).from("social_connections").insert({ requester_id: accountId, addressee_id: otherId, status: "pending" });
+  return withClient(accountId, async client => {
+  const { error } = await client.from("social_connections").insert({ requester_id: accountId, addressee_id: otherId, status: "pending" });
   if (error) throw new Error(error.code === "23505" ? "A request or friendship already exists." : errorMessage);
+  });
 }
 export async function acceptFriend(accountId: string, connectionId: string): Promise<void> {
-  const { data, error } = await (await scoped(accountId)).from("social_connections")
+  return withClient(accountId, async client => {
+  const { data, error } = await client.from("social_connections")
     .update({ status: "accepted", accepted_at: new Date().toISOString() }).eq("id", connectionId).eq("addressee_id", accountId).eq("status", "pending").select("id");
   if (error || data?.length !== 1) throw new Error("This request is no longer available.");
+  });
 }
 export async function removeFriend(accountId: string, connectionId: string): Promise<void> {
-  const { error } = await (await scoped(accountId)).from("social_connections").delete().eq("id", connectionId);
+  return withClient(accountId, async client => {
+  const { error } = await client.from("social_connections").delete().eq("id", connectionId);
   if (error) throw new Error(errorMessage);
+  });
 }
 export async function publishCommunityPost(accountId: string, post: {
   kind: CommunityPost["kind"]; visibility: CommunityPost["visibility"];
@@ -108,7 +151,14 @@ export async function publishCommunityPost(accountId: string, post: {
   setTitle?: string; caption: string;
 }): Promise<void> {
   if (post.caption.length > 500 || (post.setTitle?.length ?? 0) > 160) throw new Error("This update is too long.");
-  const { error } = await (await scoped(accountId)).from("social_posts").insert({
+  if (!["private", "friends", "community"].includes(post.visibility)) throw new Error("Choose who can see this update.");
+  if (post.kind === "progress" && (!post.activityDay || !/^\d{4}-\d{2}-\d{2}$/.test(post.activityDay)
+    || !Number.isFinite(Date.parse(`${post.activityDay}T12:00:00Z`)))) throw new Error("Choose a valid study day.");
+  if (post.kind === "question_set" && !post.setTitle?.trim()) throw new Error("Choose a Question Set title.");
+  if (![post.minutes ?? 0, post.cards ?? 0, post.questions ?? 0].every(count)
+    || (post.minutes ?? 0) > 1440 || (post.cards ?? 0) > 20000 || (post.questions ?? 0) > 20000) throw new Error("The recorded study totals are outside the supported limits.");
+  return withClient(accountId, async client => {
+  const { error } = await client.from("social_posts").insert({
     user_id: accountId, kind: post.kind, visibility: post.visibility,
     activity_day: post.kind === "progress" ? post.activityDay : null,
     minutes: post.kind === "progress" ? post.minutes ?? 0 : 0,
@@ -117,26 +167,32 @@ export async function publishCommunityPost(accountId: string, post: {
     set_title: post.kind === "question_set" ? post.setTitle?.trim() : null,
     caption: post.caption.trim(),
   });
-  if (error) throw new Error(error.code === "23505" ? "You already shared progress for this day. Remove the earlier post to share it again." : errorMessage);
+  if (error) throw new Error(error.code === "23505" ? "You already saved progress for this day. Remove the earlier post before publishing another." : errorMessage);
+  });
 }
 export async function deleteCommunityPost(accountId: string, postId: string): Promise<void> {
-  const { error } = await (await scoped(accountId)).from("social_posts").delete().eq("id", postId).eq("user_id", accountId);
+  return withClient(accountId, async client => {
+  const { error } = await client.from("social_posts").delete().eq("id", postId).eq("user_id", accountId);
   if (error) throw new Error(errorMessage);
+  });
 }
 export async function setReaction(accountId: string, postId: string, liked: boolean): Promise<void> {
-  const client = await scoped(accountId);
+  return withClient(accountId, async client => {
   const response = liked
     ? await client.from("social_reactions").insert({ user_id: accountId, post_id: postId })
     : await client.from("social_reactions").delete().eq("user_id", accountId).eq("post_id", postId);
   if (response.error && !(liked && response.error.code === "23505")) throw new Error(errorMessage);
+  });
 }
 
 export async function reportCommunityPost(accountId: string, postId: string,
   reason: "spam" | "harassment" | "copyright" | "inaccurate" | "other"): Promise<void> {
-  const { error } = await (await scoped(accountId)).from("social_post_reports").insert({
+  return withClient(accountId, async client => {
+  const { error } = await client.from("social_post_reports").insert({
     post_id: postId, reporter_id: accountId, reason,
   });
   if (error) throw new Error(error.code === "23505" ? "You have already reported this post." : errorMessage);
+  });
 }
 
 /** Shares only a per-day aggregate and only after the learner explicitly publishes.
@@ -160,8 +216,12 @@ export function sharedWeeklyStandings(posts: readonly CommunityPost[], today: st
   threshold.setDate(threshold.getDate() - 6);
   const after = [threshold.getFullYear(),String(threshold.getMonth()+1).padStart(2,"0"),String(threshold.getDate()).padStart(2,"0")].join("-");
   const byUser = new Map<string, { userId: string; minutes: number; cards: number; questions: number; days: number }>();
+  const seen = new Set<string>();
   for (const post of posts) {
-    if (post.kind !== "progress" || !post.activity_day || post.activity_day < after || post.activity_day > today) continue;
+    if (post.visibility === "private" || post.kind !== "progress" || !post.activity_day || post.activity_day < after || post.activity_day > today) continue;
+    const dayIdentity = `${post.user_id}:${post.activity_day}`;
+    if (seen.has(dayIdentity)) continue;
+    seen.add(dayIdentity);
     const current = byUser.get(post.user_id) ?? { userId: post.user_id, minutes: 0, cards: 0, questions: 0, days: 0 };
     current.minutes += post.minutes;
     current.cards += post.cards;

@@ -31,7 +31,7 @@ create table public.social_posts (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.social_profiles(user_id) on delete cascade,
   kind text not null check (kind in ('progress','question_set')),
-  visibility text not null default 'friends' check (visibility in ('friends','community')),
+  visibility text not null default 'private' check (visibility in ('private','friends','community')),
   activity_day date,
   minutes integer not null default 0 check (minutes between 0 and 1440),
   cards integer not null default 0 check (cards between 0 and 20000),
@@ -74,6 +74,38 @@ grant select,insert,delete on public.social_reactions to authenticated;
 create schema if not exists private;
 revoke all on schema private from public;
 grant usage on schema private to authenticated;
+
+-- Use the same owner lock and current privacy barrier as the existing account
+-- writers. A client cannot repopulate data while deletion is being claimed.
+create function private.require_account_write_access() returns void
+language plpgsql security definer set search_path = '' as $$
+declare actor uuid := auth.uid();
+begin
+  if actor is null then raise exception 'Sign in to continue' using errcode = '42501'; end if;
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(actor::text,0));
+  if not public.axom_account_accepts_cloud_writes() then
+    raise exception 'Account is unavailable or deletion cleanup is in progress' using errcode = 'PT409';
+  end if;
+end $$;
+revoke all on function private.require_account_write_access() from public,anon,authenticated;
+
+create function private.social_write_guard() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  -- Trusted deletion workers have no learner sub; authenticated writes do.
+  if auth.uid() is not null then perform private.require_account_write_access(); end if;
+  if tg_op = 'DELETE' then return old; end if;
+  return new;
+end $$;
+revoke all on function private.social_write_guard() from public,anon,authenticated;
+create trigger social_profile_privacy_barrier before insert or update or delete on public.social_profiles
+for each row execute function private.social_write_guard();
+create trigger social_connection_privacy_barrier before insert or update or delete on public.social_connections
+for each row execute function private.social_write_guard();
+create trigger social_post_privacy_barrier before insert or update or delete on public.social_posts
+for each row execute function private.social_write_guard();
+create trigger social_reaction_privacy_barrier before insert or update or delete on public.social_reactions
+for each row execute function private.social_write_guard();
 
 create function private.social_connected_to(profile_owner uuid)
 returns boolean language sql stable security definer set search_path = '' as $$
@@ -123,7 +155,7 @@ create policy social_posts_view on public.social_posts for select to authenticat
 using (user_id = (select auth.uid())
   or (visibility = 'community' and exists (
     select 1 from public.social_profiles p where p.user_id = social_posts.user_id and p.discoverable))
-  or (exists (select 1 from public.social_connections f where f.status = 'accepted'
+  or (visibility <> 'private' and exists (select 1 from public.social_connections f where f.status = 'accepted'
     and ((f.requester_id = social_posts.user_id and f.addressee_id = (select auth.uid()))
       or (f.addressee_id = social_posts.user_id and f.requester_id = (select auth.uid()))))));
 create policy social_posts_publish on public.social_posts for insert to authenticated

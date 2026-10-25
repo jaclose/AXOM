@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { BarChart3, CircleAlert, Crown, RefreshCw, ShieldCheck, ShieldX, Users, Zap } from "lucide-react";
 import { useAccount } from "../lib/account/accountStore";
 import {
-  loadOperatorDashboard, resolveReport, setOperatorAI, setOperatorRole,
+  loadOperatorDashboard, resolveReport, setOperatorAI, setOperatorRole, useAccountIdentity,
   type OperatorAccount, type OperatorDashboard,
 } from "../lib/operator/hostClient";
 import { GButton, GlassCard, PanelHeader, Tag } from "../components/ui/primitives";
@@ -13,6 +13,11 @@ function date(value: string | null): string {
 }
 
 export function HostPage() {
+  const identity = useAccountIdentity();
+  return <HostAccountPage key={identity} />;
+}
+
+function HostAccountPage() {
   const userId = useAccount(s => s.user?.id);
   const [dashboard, setDashboard] = useState<OperatorDashboard>();
   const [refresh, setRefresh] = useState(0);
@@ -23,6 +28,7 @@ export function HostPage() {
   const [search, setSearch] = useState("");
   const [roleDrafts, setRoleDrafts] = useState<Record<string, "admin" | "moderator" | "member">>({});
   const [aiDrafts, setAiDrafts] = useState<Record<string, { enabled: boolean; limit: string }>>({});
+  const [reasons, setReasons] = useState<Record<string, string>>({});
   useEffect(() => {
     let alive = true;
     setDashboard(undefined);
@@ -50,6 +56,7 @@ export function HostPage() {
   }
   function controlFor(account: OperatorAccount) {
     const draft = aiDrafts[account.user_id] ?? { enabled: account.ai_enabled, limit: String(account.ai_daily_limit) };
+    const reason = reasons[account.user_id] ?? "";
     return <div className="host-account-controls">
       <label>Role
         <select value={roleDrafts[account.user_id] ?? account.role ?? "member"}
@@ -59,11 +66,11 @@ export function HostPage() {
           <option value="member">Member</option><option value="moderator">Moderator</option><option value="admin">Administrator</option>
         </select>
       </label>
-      {owner && account.role !== "owner" && <GButton size="sm" disabled={busy || (roleDrafts[account.user_id] ?? account.role ?? "member") === (account.role ?? "member")}
+      {owner && account.role !== "owner" && <GButton size="sm" disabled={busy || reason.trim().length < 8 || (roleDrafts[account.user_id] ?? account.role ?? "member") === (account.role ?? "member")}
         onClick={() => {
           const wanted = roleDrafts[account.user_id];
-          if (!wanted || !window.confirm("Apply this account's new server-side role?")) return;
-          void change(() => setOperatorRole(userId!, account.user_id, wanted), "Role updated and audited.");
+          if (!wanted) return;
+          void change(() => setOperatorRole(userId!, account.user_id, wanted, reason), "Role updated and audited.");
         }}>Apply role</GButton>}
       <label>Cloud AI
         <select value={draft.enabled ? "enabled" : "disabled"} disabled={!owner || busy}
@@ -75,14 +82,17 @@ export function HostPage() {
         <input type="number" min={0} max={1000} step={1} value={draft.limit} disabled={!owner || busy}
           onChange={e => setAiDrafts(current => ({...current,[account.user_id]:{...draft,limit:e.target.value}}))} />
       </label>
-      {owner && <GButton size="sm" disabled={busy || (!((aiDrafts[account.user_id]?.enabled ?? account.ai_enabled) !== account.ai_enabled)
+      {owner && <GButton size="sm" disabled={busy || reason.trim().length < 8 || (!((aiDrafts[account.user_id]?.enabled ?? account.ai_enabled) !== account.ai_enabled)
         && Number(aiDrafts[account.user_id]?.limit ?? account.ai_daily_limit) === account.ai_daily_limit)}
         onClick={() => {
           const limit = Number(draft.limit);
           if (!Number.isInteger(limit) || limit < 0 || limit > 1000) { setError("Quota must be 0 to 1000."); return; }
-          if (!window.confirm("Apply this user's cloud AI permission and daily quota?")) return;
-          void change(() => setOperatorAI(userId!, account.user_id, draft.enabled, limit), "AI policy saved and audited.");
+          void change(() => setOperatorAI(userId!, account.user_id, draft.enabled, limit, reason), "AI policy saved and audited.");
         }}>Apply AI policy</GButton>}
+      {owner && <label className="host-change-reason">Reason for changing {account.display_name ?? "this account"}
+        <textarea value={reason} minLength={8} maxLength={500} rows={2} disabled={busy} onChange={event => setReasons(current => ({ ...current, [account.user_id]: event.target.value }))} placeholder="Record why this access or allowance is changing." />
+        <small>Required for role and AI changes. Saved in the audit history.</small>
+      </label>}
     </div>;
   }
   return <div className="host-page stack">
@@ -99,7 +109,7 @@ export function HostPage() {
       <a className="ghost-btn" href="#questions">Question Bank</a>
     </div>
     {loading && <p role="status">Checking operator access…</p>}
-    {error && <p role="alert" className="host-warning">{error}</p>}
+    {error && <div role="alert" className="host-warning"><p>{error}</p><GButton size="sm" disabled={loading || busy} onClick={() => setRefresh(n => n + 1)}>Retry Host</GButton></div>}
     {message && <p role="status" className="sub">{message}</p>}
     {!userId && <GlassCard pad><PanelHeader title="Sign-in required" headingLevel={2} sub="Use your verified AXOM account to access host operations." /></GlassCard>}
     {!loading && userId && dashboard?.role === null && <GlassCard pad><PanelHeader title="Operator permission required" headingLevel={2}
@@ -111,7 +121,7 @@ export function HostPage() {
         <div className="host-stats">
           {([
             ["Registered accounts", dashboard.overview.registered_accounts, Users],
-            ["Public profiles", dashboard.overview.shared_profiles, Users],
+            ["Community profiles", dashboard.overview.shared_profiles, Users],
             ["Review submissions", dashboard.overview.academic_review_pending, CircleAlert],
             ["Moderation reports", dashboard.overview.reports_pending, ShieldX],
             ["AI requests, 7 days", dashboard.overview.ai_requests_7d, Zap],
@@ -172,7 +182,8 @@ export function HostPage() {
           {dashboard.audit.length === 0 && <p className="sub">No privileged changes yet.</p>}
           {dashboard.audit.map(item => <div className="host-audit" key={item.id}>
             <b>{item.action}</b><small>{date(item.created_at)}</small>
-            <small>Actor: {item.actor_id.slice(0,8)} · Target: {item.target_id?.slice(0,8) ?? "none"}</small>
+            <small>Actor: {item.actor_id?.slice(0,8) ?? "Deleted account"} · Target: {item.target_id?.slice(0,8) ?? "none"}</small>
+            {typeof item.metadata.reason === "string" && <p className="sub">{item.metadata.reason}</p>}
           </div>)}
         </GlassCard>}
       </aside>
