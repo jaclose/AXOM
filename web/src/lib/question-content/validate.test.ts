@@ -46,8 +46,8 @@ describe("checking a package", () => {
     expect(isRunnable("q1", validatePackage(pkg))).toBe(false);
   });
 
-  it("does not treat 10+ merged answer choices as one runnable medical MCQ", () => {
-    const options = Array.from({ length: 10 }, (_, i) => ({
+  it("does not treat 11+ merged answer choices as one runnable medical MCQ", () => {
+    const options = Array.from({ length: 11 }, (_, i) => ({
       id: "q1-choice-" + i,
       label: String.fromCharCode(65 + i),
       blocks: [{ type: "text" as const, text: "Synthetic choice " + i }],

@@ -162,24 +162,34 @@ describe("what a package offers to the canonical import", () => {
     expect(result.imports[0].request.drafts[0].options).toHaveLength(9);
     expect(result.imports[0].request.drafts[0].correctKey).toBe("I");
   });
-  it("blocks an over-limit 10-choice PDF and a one-choice slide even when review is acknowledged", () => {
+  it("retains all ten alternatives and a J key from a valid source question", () => {
     const { pkg, files } = invented();
-    const tenChoices = Array.from({ length: 10 }, (_, i) => ({
+    const tenChoices = Array.from({ length: 10 }, (_, i) => ({ id: `ten-${i}`, label: String.fromCharCode(65 + i), blocks: [{ type: "text" as const, text: `Distinct alternative ${i}` }] }));
+    const valid = { ...pkg, questions: [{ ...pkg.questions[0], choices: tenChoices, correctAnswer: { labels: ["J"], evidence: "printed-key" as const } }] };
+    const result = packageToReviewedImport(valid, validatePackage(valid, { assetFiles: new Set(files.map(file => file.name)) }));
+    expect(result.held).toHaveLength(0);
+    expect(result.imports[0].request.drafts[0].options).toHaveLength(10);
+    expect(result.imports[0].request.drafts[0].correctKey).toBe("J");
+  });
+
+  it("rejects one-choice and eleven-choice malformed sources even when review is acknowledged", () => {
+    const { pkg, files } = invented();
+    const elevenChoices = Array.from({ length: 11 }, (_, i) => ({
       id: "synthetic-option-" + i,
-      label: String.fromCharCode(65+i),
+      label: String.fromCharCode(65 + i),
       blocks: [{ type: "text" as const, text: "Synthetic alternative " + i }],
     }));
     const malformed = { ...pkg, questions: pkg.questions.map((q) =>
-      q.id === "syn-q01" ? { ...q, choices: tenChoices } :
+      q.id === "syn-q04" ? { ...q, choices: elevenChoices } :
       q.id === "syn-q02" ? { ...q, choices: [q.choices[0]] } : q) };
     const result = packageToReviewedImport(malformed, validatePackage(malformed, {
-      assetFiles: new Set(files.map(file=>file.name)),
-    }), { acknowledged: new Set(["syn-q01","syn-q02"]) });
+      assetFiles: new Set(files.map(file => file.name)),
+    }), { acknowledged: new Set(["syn-q02", "syn-q04"]) });
     const accepted = result.imports.flatMap(section => section.questionIds);
-    expect(accepted).not.toContain("syn-q01");
     expect(accepted).not.toContain("syn-q02");
-    expect(result.held.find(q=>q.questionId==="syn-q01")?.reasons.join(" ")).toMatch(/2–9/);
-    expect(result.held.find(q=>q.questionId==="syn-q02")?.reasons.join(" ")).toMatch(/2–9/);
+    expect(accepted).not.toContain("syn-q04");
+    expect(result.held.find(q => q.questionId === "syn-q02")?.reasons.join(" ")).toMatch(/2–10/);
+    expect(result.held.find(q => q.questionId === "syn-q04")?.reasons.join(" ")).toMatch(/2–10/);
   });
   it("lets an advisory note travel with a ready question without marking it as reviewed by hand", () => {
     const { pkg, issues } = invented();
