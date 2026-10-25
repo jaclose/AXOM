@@ -76,7 +76,7 @@ revoke all on schema private from public;
 grant usage on schema private to authenticated;
 
 create function private.social_connected_to(profile_owner uuid)
-returns boolean language sql stable security definer set search_path = '' as $
+returns boolean language sql stable security definer set search_path = '' as $$
   select (select auth.uid()) is not null
     and exists (
       select 1 from public.social_connections f
@@ -85,17 +85,17 @@ returns boolean language sql stable security definer set search_path = '' as $
         or (f.addressee_id = profile_owner and f.requester_id = (select auth.uid()))
       )
     );
-$;
+$$;
 revoke all on function private.social_connected_to(uuid) from public, anon, authenticated;
 grant execute on function private.social_connected_to(uuid) to authenticated;
 
 create function private.social_is_discoverable(other_user uuid)
-returns boolean language sql stable security definer set search_path = '' as $
+returns boolean language sql stable security definer set search_path = '' as $$
   select exists (
     select 1 from public.social_profiles p
     where p.user_id = other_user and p.discoverable
   );
-$;
+$$;
 revoke all on function private.social_is_discoverable(uuid) from public, anon, authenticated;
 grant execute on function private.social_is_discoverable(uuid) to authenticated;
 
