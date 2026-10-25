@@ -40,13 +40,14 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
   const verifiedKey = question?.correctAnswer
     && ["printed-key", "reviewer"].includes(question.correctAnswer.evidence ?? "")
     && !assessed.issues.some((issue) => issue.questionId === question.id && issue.code === "answer_needs_review");
-  // A marked answer slide is useful review evidence, not an approved key.
-  // A person still has to view the source and deliberately confirm it.
-  const markedSourceCandidate = question?.correctAnswer?.evidence === "answer-reveal-slide"
-    && question.correctAnswer.labels.length === 1
+  // A source-marked key is a suggestion, not reviewer confirmation. It only
+  // preselects the human-review control; scoring stays gated on a click.
+  const candidateAnswer = question?.correctAnswer?.labels.length === 1
     && question.choices.some((choice) => choice.label === question.correctAnswer?.labels[0])
-      ? question.correctAnswer.labels[0] : "";
-  const reviewedAnswerSelection = answer || markedSourceCandidate;
+    ? question.correctAnswer.labels[0] : "";
+  // A marked answer slide gets its own wording: the reviewer must view the image.
+  const markedSourceCandidate = question?.correctAnswer?.evidence === "answer-reveal-slide" ? candidateAnswer : "";
+  const reviewedAnswerSelection = answer || candidateAnswer;
   // Some older packages place the reveal image inside the explanation and also
   // register it as supporting media. Render each source asset only once.
   const placedAssetIds = new Set(question
@@ -177,7 +178,9 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
       </details>
       {verdict && [...verdict.reasons, ...verdict.advisories].map((note, n) => <p key={n} className="sub">{note}</p>)}
       {verdict?.readiness !== "ready" && <div className="stack gap6">
-        {markedSourceCandidate && <p className="sub">The original answer slide marks {markedSourceCandidate}. This is a candidate, not a reviewer-approved key. Verify the image and explanation before confirming.</p>}
+        {markedSourceCandidate
+          ? <p className="sub">The original answer slide marks {markedSourceCandidate}. This is a candidate, not a reviewer-approved key. Verify the image and explanation before confirming.</p>
+          : candidateAnswer && <p className="sub">Suggested source key: {candidateAnswer} · {question.correctAnswer?.evidence ?? "origin unspecified"}. This is not verified until you inspect the answer page and confirm it.</p>}
         <div className="row wrap gap8">
           <SelectField label="Verified answer" value={reviewedAnswerSelection} onChange={(event) => setAnswer(event.target.value)}><option value="">Choose after checking the source</option>{question.choices.map((choice) => <option key={choice.id}>{choice.label}</option>)}</SelectField>
           <GButton disabled={!reviewedAnswerSelection || mode === "question"} onClick={confirmSourceAnswer}>Confirm answer from source</GButton>

@@ -170,6 +170,32 @@ describe("structured question import review", () => {
     expect(screen.getByText("Source key: B")).toBeTruthy();
   });
 
+  it("renders one answer-reveal image when the asset is both placed and indexed", async () => {
+    const user = userEvent.setup();
+    const sample = bank("answer-reveal-slide");
+    const question = sample.pkg.questions[0];
+    question.assets.push({ id: "source-answer", filename: "answer.png", mimeType: "image/png",
+      role: "answer_reveal", questionId: "q1" });
+    question.explanation?.push({ type: "image", assetId: "source-answer", role: "answer_reveal" });
+    sample.files = [new File(["image placeholder"], "answer.png", { type: "image/png" })];
+    const view = render(<BankImportReview bank={sample} onBack={() => {}} />);
+    expect(view.container.querySelectorAll('[data-asset-role="answer_reveal"]')).toHaveLength(0);
+    await user.selectOptions(screen.getByLabelText("Preview mode"), "review");
+    expect(view.container.querySelectorAll('[data-asset-role="answer_reveal"]')).toHaveLength(1);
+  });
+
+  it("prefills a marked-source candidate but never confirms it automatically", async () => {
+    const user = userEvent.setup();
+    render(<BankImportReview bank={bank("answer-reveal-slide")} onBack={() => {}} />);
+    expect(screen.getByText(/1 questions · 0 ready/)).toBeTruthy();
+    expect(screen.getByLabelText("Verified answer")).toHaveProperty("value", "B");
+    expect(screen.getByText(/The original answer slide marks B/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Confirm answer from source" }).hasAttribute("disabled")).toBe(true);
+    await user.selectOptions(screen.getByLabelText("Preview mode"), "review");
+    expect(screen.getByText(/1 questions · 0 ready/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Confirm answer from source" }));
+    await waitFor(() => expect(screen.getByText(/1 questions · 1 ready for import/)).toBeTruthy());
+  });
   it("keeps the original source-page renderer out of answering mode", async () => {
     const user = userEvent.setup();
     const original = new File(["original PDF bytes"], "synthetic.pdf", { type: "application/pdf" });
