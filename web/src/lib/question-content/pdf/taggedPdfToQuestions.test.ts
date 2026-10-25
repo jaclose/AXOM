@@ -182,17 +182,36 @@ describe("a tagged document with one set", () => {
     expect(questionReadiness(second, result.issues).readiness).toBe("ready");
   });
 
-  it("keeps the parser's doubt when a numbered question follows an explanation with nothing between them", () => {
+  it("confirms a boundary from consecutive numbering, whole choices and the later question's own key", () => {
     const result = taggedPdfToQuestions({ pages: [page(1, [
       p("1. Which nerve supplies the diaphragm?"), ...choices("Vagus nerve", "Phrenic nerve", "Intercostal nerve"),
       p("Answer: B"), p("Explanation: The phrenic nerve arises from the third to fifth cervical roots."),
       p("2. Which muscle is the main muscle of quiet breathing in?"), ...choices("Diaphragm", "Rectus abdominis", "Trapezius"),
       p("Answer: A"), p("Explanation: The diaphragm does most of the work of quiet breathing."),
     ])] }, DEFAULTS);
-    // The tags say these are two blocks. They do not say the second is a question and not a numbered
-    // point of the explanation, so the parser's caution is kept and no key is saved on its word.
+    // An explanation's numbered point is never followed by lettered choices and
+    // its own printed key, so the document itself settles the boundary.
+    expect(result.questions.map((question) => question.correctAnswer?.labels)).toEqual([["B"], ["A"]]);
+  });
+
+  it("keeps the parser's doubt when the later block carries no printed key of its own", () => {
+    const result = taggedPdfToQuestions({ pages: [page(1, [
+      p("1. Which nerve supplies the diaphragm?"), ...choices("Vagus nerve", "Phrenic nerve", "Intercostal nerve"),
+      p("Answer: B"), p("Explanation: The phrenic nerve arises from the third to fifth cervical roots."),
+      p("2. Which muscle is the main muscle of quiet breathing in?"), ...choices("Diaphragm", "Rectus abdominis", "Trapezius"),
+    ])] }, DEFAULTS);
     expect(result.questions.map((question) => question.correctAnswer)).toEqual([undefined, undefined]);
     expect(result.questions.map((question) => questionReadiness(question, result.issues).readiness)).not.toContain("ready");
+  });
+
+  it("keeps the parser's doubt when the numbering after an explanation skips", () => {
+    const result = taggedPdfToQuestions({ pages: [page(1, [
+      p("1. Which nerve supplies the diaphragm?"), ...choices("Vagus nerve", "Phrenic nerve", "Intercostal nerve"),
+      p("Answer: B"), p("Explanation: The phrenic nerve arises from the third to fifth cervical roots."),
+      p("3. Which muscle is the main muscle of quiet breathing in?"), ...choices("Diaphragm", "Rectus abdominis", "Trapezius"),
+      p("Answer: A"), p("Explanation: The diaphragm does most of the work of quiet breathing."),
+    ])] }, DEFAULTS);
+    expect(result.questions.map((question) => question.correctAnswer)).toEqual([undefined, undefined]);
   });
 });
 

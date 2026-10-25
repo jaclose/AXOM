@@ -18,6 +18,7 @@ import {
   type ExplanationCleanupOperation,
 } from "./questionExplanation";
 import { hasLabelledRecords, normalizeLabelledRecords } from "./questionLabelledRecords";
+import { resolveRepeatedNumbering } from "./questionNumbering";
 
 export interface ParsedQuestionDraft {
   content?: import("./question-content/package").PackageQuestion;
@@ -1065,20 +1066,22 @@ export function parseQuestionBlocks(raw: string): ParsedQuestionDraft[] {
     }
   }
 
-  const numbers = drafts
-    .filter((d) => d.questionNumber !== undefined)
-    .map((d) => `${draftSection.get(d) ?? 0}:${d.sourceLabel ?? ""}:${d.questionNumber}`);
-  if (new Set(numbers).size !== numbers.length) {
-    for (const d of drafts) {
-      d.warnings.push("Duplicate question numbers in this document — check the split.");
-      d.needsReview = true;
-      d.confidence = "low";
-      d.overallImportConfidence = Math.min(d.overallImportConfidence ?? 0.45, 0.45);
-      d.parserRuleIds = [...new Set([...(d.parserRuleIds ?? []), "conflict.duplicate-question-number"])];
-    }
+  // Section restarts and repeated (answered) printings are explained by the
+  // document itself; only numbering it cannot explain stays flagged.
+  const resolved = resolveRepeatedNumbering(drafts, (d) => `${draftSection.get(d) ?? 0}:${d.sourceLabel ?? ""}`).drafts;
+  if (!entries.size) return resolved;
+  // A separate answer section is keyed by bare number. After a section restart
+  // that number can name several questions, so it is applied only where unique.
+  const numberCounts = new Map<number, number>();
+  for (const d of resolved) if (d.questionNumber !== undefined) numberCounts.set(d.questionNumber, (numberCounts.get(d.questionNumber) ?? 0) + 1);
+  const unique = new Map([...entries].filter(([number]) => (numberCounts.get(number) ?? 0) <= 1));
+  for (const d of resolved) {
+    if (d.questionNumber === undefined || !entries.has(d.questionNumber) || unique.has(d.questionNumber)) continue;
+    d.needsReview = true;
+    d.warnings.push(`The answer section lists question ${d.questionNumber}, but that number appears in more than one part of this document. Match the answer by hand.`);
+    d.parserRuleIds = [...new Set([...(d.parserRuleIds ?? []), "conflict.answer-section-number-repeats"])];
   }
-
-  return entries.size ? applyAnswerEntries(drafts, entries) : drafts;
+  return unique.size ? applyAnswerEntries(resolved, unique) : resolved;
 }
 
 /**
