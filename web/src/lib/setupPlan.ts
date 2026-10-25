@@ -37,7 +37,7 @@ export interface FocusChoice { id: string; label: string; track: EducationTrackI
 export interface ToolOption { id: SetupTool; label: string; detail: string; group: "learn" | "questions" | "cards" }
 
 export const PATH_OPTIONS: readonly PathOption[] = [
-  { id: "sgu", label: "St. George's", detail: "SGU MD, terms 1 to 5" },
+  { id: "sgu", label: "AXOM term-based MD", detail: "Medical foundations, terms 1 to 5" },
   { id: "usmd", label: "US MD", detail: "Allopathic medical school" },
   { id: "do", label: "DO", detail: "Osteopathic medical school" },
   { id: "img", label: "International", detail: "Medical school outside the US" },
@@ -85,7 +85,7 @@ export const TOOL_OPTIONS: readonly ToolOption[] = [
   { id: "lectures", label: "Lecture review", detail: "Passes over lectures", group: "learn" },
   { id: "questions", label: "Practice questions", detail: "School or your own", group: "questions" },
   { id: "uworld", label: "UWorld", detail: "Question bank", group: "questions" },
-  { id: "amboss", label: "AMBOSS", detail: "Library and questions", group: "questions" },
+  { id: "amboss", label: "External QBank", detail: "Library and practice questions", group: "questions" },
   { id: "anki", label: "Anki", detail: "Spaced repetition", group: "cards" },
   { id: "noji", label: "Noji", detail: "Flashcards", group: "cards" },
   { id: "quizlet", label: "Quizlet", detail: "Flashcards", group: "cards" },
@@ -139,7 +139,7 @@ export function cardSystemFromTools(tools: readonly SetupTool[]): CardSystem | n
 /** The study workflow the rest of AXOM reads (Course Tracker, Up next, plans). */
 export function workflowFromChoices(choices: SetupChoices): StudyWorkflowPreferences {
   const tools = new Set(choices.tools);
-  const banks = [tools.has("uworld") ? "UWorld" : "", tools.has("amboss") ? "AMBOSS" : ""].filter(Boolean);
+  const banks = [tools.has("uworld") ? "UWorld" : "", tools.has("amboss") ? "External QBank" : ""].filter(Boolean);
   const methods: StudyMethodPreference[] = [
     { id: "lecture-passes", enabled: tools.has("lectures") },
     { id: "practice-questions", enabled: usesQuestions(choices.tools), timing: choices.questionTiming, ...(banks.length ? { usage: `Uses ${banks.join(" and ")}` } : {}) },

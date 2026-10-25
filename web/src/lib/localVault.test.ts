@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   assertVaultWrite,
   assertVaultWritesSince,
+  DB_VERSION,
   getVaultWriteCheckpoint,
   flushLocalVaultWrites,
   localVaultStorage,
@@ -37,7 +38,8 @@ afterEach(() => vi.unstubAllGlobals());
 describe("IndexedDB-first local vault", () => {
   it("prevents a stale second runtime from replacing a newer workspace", async () => {
     const key = STORAGE_KEYS.persistedState;
-    const snapshot = (label: string) => JSON.stringify({ state: { profile: { userId: "jd" }, label }, version: 34 });
+    const largeLibraryState = "source review ".repeat(90_000);
+    const snapshot = (label: string) => JSON.stringify({ state: { profile: { userId: "jd" }, label, largeLibraryState }, version: 34 });
     await localVaultStorage.setItem(key, snapshot("shared base"));
     await flushLocalVaultWrites();
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("shared base"));
@@ -197,6 +199,24 @@ describe("IndexedDB-first local vault", () => {
     expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBe(persisted);
   });
 
+  it("uses a viable localStorage fallback above the IndexedDB chunk threshold", async () => {
+    vi.stubGlobal("indexedDB", undefined);
+    const persisted = JSON.stringify({
+      state: {
+        profile: { userId: "jd", name: "JD" },
+        documents: [{ id: "medium", rawText: "r".repeat(1_100_000) }],
+      },
+      version: 34,
+    });
+
+    const checkpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(STORAGE_KEYS.persistedState, persisted);
+
+    expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+    expect(localStorage.getItem(STORAGE_KEYS.persistedState)).toBe(persisted);
+    expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBe(persisted);
+  });
+
   it("rejects instead of claiming durability when neither storage path is available", () => {
     const persisted = JSON.stringify({ state: { questions: [{ id: "not-durable" }] }, version: 32 });
 
@@ -236,15 +256,149 @@ describe("IndexedDB-first local vault", () => {
     expect(localStorage.getItem(`${STORAGE_KEYS.persistedState}:active-user`)).toBeNull();
   });
 
-  it("falls back deterministically instead of hanging when a v2 upgrade is blocked by an old tab", async () => {
-    const oldConnection = await openVersionOneVault();
-    const persisted = JSON.stringify({ state: { profile: { userId: "jd" }, questions: [{ id: "safe" }] }, version: 32 });
+  it("requires the physical v4 upgrade before writing chunks and falls back while a v3 tab blocks it", async () => {
+    const oldConnection = await openVersionThreeVault();
+    const key = STORAGE_KEYS.persistedState;
+    const base = JSON.stringify({ state: { profile: { userId: "jd" }, label: "v3 base" }, version: 34 });
+    await putDirect(oldConnection, key, base);
+    expect(await localVaultStorage.getItem(key)).toBe(base);
+    const persisted = JSON.stringify({
+      state: {
+        profile: { userId: "jd" },
+        documents: [{
+          id: "private-review-large",
+          fileType: "axom-private-bank-review",
+          libraryOnly: true,
+          rawText: "review source ".repeat(500_000),
+        }],
+      },
+      version: 34,
+    });
+    const latest = persisted.replace("private-review-large", "private-review-latest");
+    const checkpoint = getVaultWriteCheckpoint();
     await expect(Promise.race([
-      localVaultStorage.setItem(STORAGE_KEYS.persistedState, persisted),
+      localVaultStorage.setItem(key, persisted),
       new Promise((_, reject) => setTimeout(() => reject(new Error("setItem hung")), 500)),
     ])).resolves.toBeUndefined();
-    expect(localStorage.getItem(STORAGE_KEYS.persistedState)).toBe(persisted);
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(checkpoint)).not.toThrow();
+    expect(await getDirect(oldConnection, key)).toBe(base);
+    expect(localStorage.getItem(key)).toBe(persisted);
+
+    await expect(Promise.race([
+      localVaultStorage.setItem(key, latest),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("later setItem hung")), 500)),
+    ])).resolves.toBeUndefined();
+    expect(await getDirect(oldConnection, key)).toBe(base);
+    expect(localStorage.getItem(key)).toBe(latest);
     oldConnection.close();
+
+    // The next read promotes the fallback only after the v4 barrier can land.
+    expect(await localVaultStorage.getItem(key)).toBe(latest);
+    await waitFor(async () => {
+      await localVaultStorage.getItem(key);
+      return localStorage.getItem(key) === null;
+    });
+    expect(localStorage.getItem(key)).toBeNull();
+    const upgraded = await openCurrentVault();
+    expect(upgraded.version).toBe(DB_VERSION);
+    expect(JSON.parse((await getDirect(upgraded, key))!)).toMatchObject({
+      format: "axom-local-vault-chunks",
+      version: 1,
+      length: latest.length,
+    });
+    upgraded.close();
+  });
+
+  it("does not let a v3 writer open after a chunked primary commits behind the v4 barrier", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const persisted = JSON.stringify({
+      state: { profile: { userId: "jd" }, documents: [{ rawText: "x".repeat(1_100_000) }] },
+      version: 34,
+    });
+
+    await localVaultStorage.setItem(key, persisted);
+    await flushLocalVaultWrites();
+
+    const current = await openCurrentVault();
+    expect(current.version).toBe(4);
+    expect(JSON.parse((await getDirect(current, key))!)).toMatchObject({ format: "axom-local-vault-chunks" });
+    current.close();
+    await expect(openVaultAtVersion(3)).rejects.toMatchObject({ name: "VersionError" });
+    expect(await localVaultStorage.getItem(key)).toBe(persisted);
+  });
+
+  it("closes a late upgrade connection after the request already reported that it was blocked", async () => {
+    const initialClose = vi.fn();
+    const lateClose = vi.fn();
+    const initialDb = {
+      version: 1,
+      objectStoreNames: { contains: () => true },
+      createObjectStore: vi.fn(),
+      close: initialClose,
+      onversionchange: null,
+    } as unknown as IDBDatabase;
+    const lateDb = {
+      close: lateClose,
+      onversionchange: null,
+    } as unknown as IDBDatabase;
+    let openCount = 0;
+    const open = vi.fn(() => {
+      openCount += 1;
+      if (openCount > 2) throw new Error("IndexedDB unavailable after blocked upgrade");
+      const request = {} as IDBOpenDBRequest;
+      Object.defineProperty(request, "result", { value: openCount === 1 ? initialDb : lateDb });
+      if (openCount === 1) {
+        queueMicrotask(() => {
+          request.onupgradeneeded?.call(request, {} as IDBVersionChangeEvent);
+          request.onsuccess?.call(request, {} as Event);
+        });
+      } else {
+        queueMicrotask(() => {
+          request.onblocked?.call(request, {} as IDBVersionChangeEvent);
+          setTimeout(() => request.onsuccess?.call(request, {} as Event), 0);
+        });
+      }
+      return request;
+    });
+    vi.stubGlobal("indexedDB", { open });
+    const persisted = JSON.stringify({ state: { profile: { userId: "jd" } }, version: 34 });
+
+    await localVaultStorage.setItem(STORAGE_KEYS.persistedState, persisted);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    expect(initialClose).toHaveBeenCalledOnce();
+    expect(lateClose).toHaveBeenCalledOnce();
+    expect(localStorage.getItem(STORAGE_KEYS.persistedState)).toBe(persisted);
+  });
+
+  it("round-trips the live-size private workspace through chunks across a fresh runtime", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const persisted = JSON.stringify({
+      state: {
+        profile: { userId: "jd" },
+        documents: [{
+          id: "private-review-live-size",
+          fileType: "axom-private-bank-review",
+          libraryOnly: true,
+          rawText: "r".repeat(17_561_151),
+        }],
+      },
+      version: 34,
+    });
+
+    await localVaultStorage.setItem(key, persisted);
+    await flushLocalVaultWrites();
+    const db = await openCurrentVault();
+    const manifest = JSON.parse((await getDirect(db, key))!) as { format: string; chunkCount: number; length: number };
+    expect(manifest).toMatchObject({ format: "axom-local-vault-chunks", length: persisted.length });
+    expect(manifest.chunkCount).toBeGreaterThan(16);
+    expect(localStorage.getItem(key)).toBeNull();
+    db.close();
+
+    vi.resetModules();
+    const freshRuntime = await import("./localVault");
+    expect(await freshRuntime.localVaultStorage.getItem(key)).toBe(persisted);
   });
 });
 
@@ -253,14 +407,13 @@ describe("a save that could not reach IndexedDB", () => {
   const snapshot = (label: string) => JSON.stringify({ state: { profile: { userId: "jd" }, label }, version: 34 });
 
   it("is read back at the next start instead of the older copy still in IndexedDB", async () => {
-    // Regression: an old tab blocks the vault upgrade, so the save lands in
-    // localStorage. The next start read IndexedDB first, returned the older
-    // workspace, and the following save deleted the newer copy.
-    const oldTab = await openVersionOneVault();
-    await putDirect(oldTab, key, snapshot("older"));
+    // When IndexedDB is unavailable, the next start must not read its older
+    // workspace ahead of the marked fallback and then delete the newer copy.
+    await localVaultStorage.setItem(key, snapshot("older"));
+    vi.stubGlobal("indexedDB", undefined);
     await localVaultStorage.setItem(key, snapshot("newer"));
     expect(localStorage.getItem(key)).toBe(snapshot("newer"));
-    oldTab.close();
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
 
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("newer"));
     // Once the vault is writable the copy moves across and the fallback goes.
@@ -272,11 +425,8 @@ describe("a save that could not reach IndexedDB", () => {
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("newer"));
   });
 
-  it("keeps saving to the fallback while the upgrade stays blocked", async () => {
-    // Regression: the browser queues later open requests behind the blocked
-    // one in silence, so the second save never returned and nothing after it
-    // was written anywhere.
-    const oldTab = await openVersionOneVault();
+  it("keeps saving to the fallback while IndexedDB stays unavailable", async () => {
+    vi.stubGlobal("indexedDB", undefined);
     const saves = (async () => {
       await localVaultStorage.setItem(key, snapshot("first"));
       await localVaultStorage.setItem(key, snapshot("second"));
@@ -287,9 +437,9 @@ describe("a save that could not reach IndexedDB", () => {
       new Promise((_, reject) => setTimeout(() => reject(new Error("a later save hung")), 500)),
     ])).resolves.toBeUndefined();
     expect(localStorage.getItem(key)).toBe(snapshot("third"));
-    oldTab.close();
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
 
-    // Once the other tab is gone the vault takes over again.
+    // Once IndexedDB is available the vault takes over again.
     await waitFor(async () => {
       await localVaultStorage.setItem(key, snapshot("fourth"));
       return localStorage.getItem(key) === null;
@@ -298,14 +448,14 @@ describe("a save that could not reach IndexedDB", () => {
   });
 
   it("stays readable from the fallback while IndexedDB is still not writable", async () => {
-    const oldTab = await openVersionOneVault();
-    await putDirect(oldTab, key, snapshot("older"));
+    await localVaultStorage.setItem(key, snapshot("older"));
+    vi.stubGlobal("indexedDB", undefined);
     await localVaultStorage.setItem(key, snapshot("newer"));
 
-    // The old tab is still open, so the copy cannot be moved across yet.
+    // IndexedDB is still unavailable, so the copy cannot be moved across yet.
     expect(await localVaultStorage.getItem(key)).toBe(snapshot("newer"));
     expect(localStorage.getItem(key)).toBe(snapshot("newer"));
-    oldTab.close();
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
   });
 
   it("never lets an unmarked localStorage copy override the vault", async () => {
@@ -409,17 +559,27 @@ function getDirect(db: IDBDatabase, key: string): Promise<string | undefined> {
 
 function openCurrentVault(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = fakeIndexedDb.open(STORAGE_KEYS.vaultDb, 3);
+    const request = fakeIndexedDb.open(STORAGE_KEYS.vaultDb, DB_VERSION);
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
 }
 
-function openVersionOneVault(): Promise<IDBDatabase> {
+function openVaultAtVersion(version: number): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = fakeIndexedDb.open(STORAGE_KEYS.vaultDb, 1);
+    const request = fakeIndexedDb.open(STORAGE_KEYS.vaultDb, version);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function openVersionThreeVault(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = fakeIndexedDb.open(STORAGE_KEYS.vaultDb, 3);
     request.onupgradeneeded = () => {
       if (!request.result.objectStoreNames.contains("state")) request.result.createObjectStore("state");
+      if (!request.result.objectStoreNames.contains("backups")) request.result.createObjectStore("backups");
+      if (!request.result.objectStoreNames.contains("questionAttachmentBlobs")) request.result.createObjectStore("questionAttachmentBlobs");
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);

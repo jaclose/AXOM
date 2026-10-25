@@ -5,13 +5,14 @@ import type { SourceDocument } from "../../lib/library";
 import type { QuestionRecord } from "../../lib/questions";
 import type { ImportPackage } from "../../lib/question-content/package";
 import type { BankSave } from "../../lib/question-content/bankImport";
-import { PRIVATE_LIBRARY_DOCUMENT, PRIVATE_REVIEW_DOCUMENT, type PreparedBank } from "../../lib/privateLibrary/types";
+import { PRIVATE_LIBRARY_DOCUMENT, PRIVATE_REVIEW_DOCUMENT, type PreparedBank, type PrivateLibraryCatalog } from "../../lib/privateLibrary/types";
 import { persistPreparedLibraryReview, practiceReadyQuestionCount, PreparedLibrary } from "./PreparedLibrary";
 
 const mocks = vi.hoisted(() => ({
   documents: [] as SourceDocument[],
   questions: [] as QuestionRecord[],
   readOriginal: vi.fn(),
+  probeOriginal: vi.fn(),
   folderReader: vi.fn(),
   installLibrary: vi.fn(),
   setState: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock("../../lib/localVault", () => ({
 }));
 vi.mock("../../lib/decode/sources", () => ({
   readSourceOriginal: (...args: unknown[]) => mocks.readOriginal(...args),
+  hasStoredSourceOriginal: (...args: unknown[]) => mocks.probeOriginal(...args),
 }));
 vi.mock("../../lib/privateLibrary/install", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/privateLibrary/install")>();
@@ -75,6 +77,7 @@ function question(id: string, patch: Partial<QuestionRecord> = {}): QuestionReco
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.readOriginal.mockResolvedValue(undefined);
+  mocks.probeOriginal.mockResolvedValue(false);
   mocks.folderReader.mockReturnValue(async () => new Uint8Array());
   mocks.installLibrary.mockResolvedValue({
     status: "complete", warnings: [], templateIds: [], documentIds: [], questionIds: [], setIds: [],
@@ -112,8 +115,105 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("PreparedLibrary truthfulness", () => {
+  it("combines installed catalogs, de-duplicates sources, and totals local readiness and held review", () => {
+    const secondChecksum = "b".repeat(64);
+    const thirdChecksum = "e".repeat(64);
+    const olderCatalog = JSON.parse(mocks.documents[0].rawText);
+    olderCatalog.templates = [{ file: "templates/shared.txt", name: "Shared", checksum: "c".repeat(64) }];
+    olderCatalog.sources[0].review = 496;
+    mocks.documents[0] = { ...mocks.documents[0], rawText: JSON.stringify(olderCatalog) };
+    const esoftCatalog = {
+      ...olderCatalog,
+      id: "esoft", version: "esoft-test",
+      sources: [{
+        ...olderCatalog.sources[0], id: "esoft-source", name: "ESoft source.pdf", sourcePath: "ESoft source.pdf",
+        checksum: secondChecksum, bankFile: "banks/esoft-source.json", originalFile: undefined, ready: 0, review: 3018,
+      }],
+    };
+    const cumulativeCatalog = {
+      ...olderCatalog,
+      id: "cumulative", version: "cumulative-test",
+      templates: [olderCatalog.templates[0], { file: "templates/new.txt", name: "New", checksum: "d".repeat(64) }],
+      sources: [{
+        ...olderCatalog.sources[0], id: "cumulative-source", name: "Cumulative source.pdf", sourcePath: "Cumulative source.pdf",
+        checksum: thirdChecksum, bankFile: "banks/cumulative-source.json", originalFile: undefined, ready: 0, review: 6,
+      }, {
+        ...olderCatalog.sources[0], name: "Newest RHPS Source.pdf", sourcePath: "Newest RHPS Source.pdf", originalFile: undefined,
+      }],
+    };
+    mocks.documents.unshift(
+      {
+        id: "private-library-cumulative", title: "Prepared academic library", fileName: "catalog.json",
+        fileType: PRIVATE_LIBRARY_DOCUMENT, uploadedAt: stamp, rawText: JSON.stringify(cumulativeCatalog), sizeBytes: 1,
+        tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+      },
+      {
+        id: "private-library-esoft", title: "Prepared academic library", fileName: "catalog.json",
+        fileType: PRIVATE_LIBRARY_DOCUMENT, uploadedAt: stamp, rawText: JSON.stringify(esoftCatalog), sizeBytes: 1,
+        tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+      },
+    );
+    mocks.questions.push(...Array.from({ length: 18 }, (_, index) => question(`rhps-ready-${index}`)));
+
+    render(<PreparedLibrary />);
+
+    expect(screen.getByText("2 templates · 19 locally answer-ready questions")).toBeTruthy();
+    expect(screen.getByText(/Source coverage & review \(3520 held\)/)).toBeTruthy();
+    expect(screen.getByText(/3 installed collections · Content versions cumulative-test, esoft-test, test/)).toBeTruthy();
+    expect(screen.getByText("Newest RHPS Source.pdf")).toBeTruthy();
+    expect(screen.getByText("ESoft source.pdf")).toBeTruthy();
+    expect(screen.getByText("Cumulative source.pdf")).toBeTruthy();
+    expect(screen.queryByText("Source.pdf")).toBeNull();
+  });
+
+  it("keeps a bank-bearing catalog as review owner when a newer reference-only catalog repeats its checksum", () => {
+    const bankCatalog = JSON.parse(mocks.documents[0].rawText) as PrivateLibraryCatalog;
+    bankCatalog.sources[0].review = 496;
+    mocks.documents[0] = { ...mocks.documents[0], rawText: JSON.stringify(bankCatalog) };
+    const referenceCatalog: PrivateLibraryCatalog = {
+      ...bankCatalog,
+      id: "reference-only",
+      version: "reference-only-test",
+      sources: [{
+        ...bankCatalog.sources[0],
+        id: "reference-copy",
+        status: "reference/template-only",
+        reason: "Reference PDF only",
+        bankFile: undefined,
+        originalFile: "sources/reference.pdf",
+        ready: 0,
+        review: 0,
+      }],
+    };
+    mocks.documents.unshift({
+      id: "private-library-reference", title: "Reference library", fileName: "catalog.json",
+      fileType: PRIVATE_LIBRARY_DOCUMENT, uploadedAt: stamp, rawText: JSON.stringify(referenceCatalog), sizeBytes: 1,
+      tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+    });
+
+    render(<PreparedLibrary />);
+
+    expect(screen.getByText(/1 locally answer-ready · 1 stored for review · 496 held in source/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Review source" })).toBeTruthy();
+  });
+
+  it("keeps valid installed collections visible when another catalog is damaged", () => {
+    mocks.documents.unshift({
+      id: "private-library-damaged", title: "Damaged academic library", fileName: "catalog.json",
+      fileType: PRIVATE_LIBRARY_DOCUMENT, uploadedAt: stamp, rawText: "{not json", sizeBytes: 1,
+      tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+    });
+
+    render(<PreparedLibrary />);
+
+    expect(screen.getByText("0 templates · 1 locally answer-ready questions")).toBeTruthy();
+    expect(screen.getByText("Source.pdf")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toMatch(/1 installed library catalog could not be read.*Other prepared collections remain available/i);
+  });
+
   it.each([true, false])("makes only the checksum-matched stored original available in source review (available: %s)", async (available) => {
     const original = new Blob(["synthetic original PDF"], { type: "application/pdf" });
+    mocks.probeOriginal.mockResolvedValue(available);
     mocks.readOriginal.mockImplementation(async (id: string) => available && id === `private-source-${checksum}` ? original : undefined);
     mocks.documents.unshift({ ...mocks.documents[1], id: "unrelated-same-name", checksum: `sha256:${"b".repeat(64)}` });
     const prepared: PreparedBank = {
@@ -133,6 +233,7 @@ describe("PreparedLibrary truthfulness", () => {
     await screen.findByRole("region", { name: "Source question bank preview" });
     fireEvent.change(screen.getByLabelText("Preview mode"), { target: { value: "review" } });
     expect(Boolean(screen.queryByRole("button", { name: "View original PDF page" }))).toBe(available);
+    expect(mocks.probeOriginal).toHaveBeenCalledWith(`private-source-${checksum}`, `sha256:${checksum}`);
     expect(mocks.readOriginal).toHaveBeenCalledWith(`private-source-${checksum}`, `sha256:${checksum}`);
     expect(mocks.readOriginal).not.toHaveBeenCalledWith("unrelated-same-name", expect.anything());
   });
@@ -144,11 +245,13 @@ describe("PreparedLibrary truthfulness", () => {
     screen.getByText(/1 locally answer-ready · 1 stored for review · 4 held in source · Prepared package/);
     await waitFor(() => expect(screen.getByText(/Original listed but missing on this device/)).toBeTruthy());
     expect(screen.getByRole("button", { name: "Open original" }).hasAttribute("disabled")).toBe(true);
+    expect(mocks.probeOriginal).toHaveBeenCalledWith(`private-source-${checksum}`, `sha256:${checksum}`);
+    expect(mocks.readOriginal).not.toHaveBeenCalled();
     expect(screen.queryByText(/99 ready/)).toBeNull();
     expect(practiceReadyQuestionCount(mocks.questions, checksum)).toBe(1);
   });
 
-  it("checks large original files sequentially instead of loading the visible list together", async () => {
+  it("checks original storage sequentially without reconstructing the visible files", async () => {
     const secondChecksum = "b".repeat(64);
     const catalog = JSON.parse(mocks.documents[0].rawText) as {
       sources: Array<Record<string, unknown>>;
@@ -169,13 +272,32 @@ describe("PreparedLibrary truthfulness", () => {
     });
     let releaseFirst!: () => void;
     const first = new Promise<undefined>((resolve) => { releaseFirst = () => resolve(undefined); });
-    mocks.readOriginal.mockImplementationOnce(() => first).mockResolvedValue(undefined);
+    mocks.probeOriginal.mockImplementationOnce(() => first).mockResolvedValue(false);
 
     render(<PreparedLibrary />);
 
-    await waitFor(() => expect(mocks.readOriginal).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mocks.probeOriginal).toHaveBeenCalledTimes(1));
+    expect(mocks.readOriginal).not.toHaveBeenCalled();
     releaseFirst();
-    await waitFor(() => expect(mocks.readOriginal).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mocks.probeOriginal).toHaveBeenCalledTimes(2));
+    expect(mocks.readOriginal).not.toHaveBeenCalled();
+  });
+
+  it("reuses the storage presence probe across search changes without reading original bytes", async () => {
+    mocks.probeOriginal.mockResolvedValue(true);
+    render(<PreparedLibrary />);
+
+    await waitFor(() => expect(screen.getByText(/Original stored on this device; verified when opened/)).toBeTruthy());
+    expect(mocks.probeOriginal).toHaveBeenCalledTimes(1);
+    expect(mocks.readOriginal).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText("Find a source"), { target: { value: "no match" } });
+    expect(screen.getByText("No prepared sources match this search.")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Find a source"), { target: { value: "Source" } });
+
+    await waitFor(() => expect(screen.getByText(/Original stored on this device; verified when opened/)).toBeTruthy());
+    expect(mocks.probeOriginal).toHaveBeenCalledTimes(1);
+    expect(mocks.readOriginal).not.toHaveBeenCalled();
   });
 
   it("keeps a partial installation visible as a warning with its durable count", async () => {
@@ -197,6 +319,44 @@ describe("PreparedLibrary truthfulness", () => {
       /2 answer-ready questions remain saved on this device.*reviewed filing needs another try/i,
     ));
     expect(mocks.installLibrary).toHaveBeenCalledTimes(1);
+  });
+
+  it("turns an installation quota failure into concise recovery guidance", async () => {
+    mocks.installLibrary.mockImplementation(async (_read: unknown, progress: (message: string) => void) => {
+      progress("Protecting your current workspace…");
+      progress("Preparing your library · 2 of 3 sources · saving reviewed questions");
+      throw new DOMException("QuotaExceededError: write failed", "QuotaExceededError");
+    });
+    render(<PreparedLibrary />);
+
+    fireEvent.change(screen.getByLabelText("Prepared library folder"), {
+      target: { files: [new File(["catalog"], "catalog.json")] },
+    });
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe(
+      "Browser storage on this device is full. AXOM stopped while preparing your library · 2 of 3 sources · saving reviewed questions. Content confirmed before this step remains saved; this step was not confirmed. Free disk space, then retry the same bundle.",
+    ));
+    expect(screen.getByRole("alert").textContent).not.toMatch(/QuotaExceededError|write failed/i);
+  });
+
+  it("normalizes a synchronous folder-reader quota error but preserves other precise import errors", async () => {
+    const quota = new DOMException("The quota has been exceeded.", "QuotaExceededError");
+    mocks.folderReader.mockImplementationOnce(() => { throw new Error("Folder access failed", { cause: quota }); });
+    render(<PreparedLibrary />);
+
+    fireEvent.change(screen.getByLabelText("Prepared library folder"), {
+      target: { files: [new File(["catalog"], "catalog.json")] },
+    });
+
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Browser storage on this device is full. No new content was confirmed. Free disk space, then retry the same bundle.",
+    );
+
+    mocks.folderReader.mockImplementationOnce(() => { throw new Error("Catalog checksum does not match this bundle."); });
+    fireEvent.change(screen.getByLabelText("Prepared library folder"), {
+      target: { files: [new File(["catalog"], "catalog.json")] },
+    });
+    expect(screen.getByRole("alert").textContent).toBe("Catalog checksum does not match this bundle.");
   });
 
   it("persists the reviewed source and catalog in one checked vault snapshot", async () => {
@@ -238,6 +398,51 @@ describe("PreparedLibrary truthfulness", () => {
     expect(JSON.parse(savedReview.rawText).pkg.manifest.bank.title).toBe("Reviewed source");
     const savedCatalog = JSON.parse(mocks.documents.find(document => document.fileType === PRIVATE_LIBRARY_DOCUMENT)!.rawText);
     expect(savedCatalog.sources[0]).toMatchObject({ ready: 1, review: 0, status: "prepared" });
+  });
+
+  it("updates the catalog that contains the reviewed source when several are installed", async () => {
+    const targetCatalog = mocks.documents[0];
+    const unrelatedChecksum = "b".repeat(64);
+    const unrelatedCatalog = {
+      format: "axom-private-library", schemaVersion: 1, id: "unrelated", version: "unrelated-test", templates: [],
+      sources: [{
+        id: "unrelated", name: "Unrelated.pdf", sourcePath: "Unrelated.pdf", checksum: unrelatedChecksum,
+        module: "FTCM", status: "review-required", reason: "Unrelated review", bankFile: "banks/unrelated.json",
+        ready: 0, review: 12,
+      }],
+    };
+    const unrelatedDocument: SourceDocument = {
+      id: "private-library-unrelated", title: "Prepared academic library", fileName: "catalog.json",
+      fileType: PRIVATE_LIBRARY_DOCUMENT, uploadedAt: stamp, rawText: JSON.stringify(unrelatedCatalog), sizeBytes: 1,
+      tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+    };
+    mocks.documents.unshift(unrelatedDocument);
+    const pkg: ImportPackage = {
+      manifest: {
+        schemaVersion: 1, course: { name: "FTCM", term: 1, week: 1 },
+        bank: { id: "bank", title: "Reviewed source", discipline: "Medicine" },
+        source: { filename: "Source.pdf", sourceWeekDeclared: false },
+        questionsFile: "questions.json", assetsDirectory: "assets",
+      },
+      questions: [],
+    };
+    const bank: PreparedBank = { pkg, issues: [], sourceText: { rawText: "Reviewed" }, sourceBytes: 8, notes: [] };
+    const result: BankSave = {
+      status: "saved",
+      sections: [{
+        setTitle: "Reviewed source", questionIds: ["source-ready"], savedIds: ["ready"], reused: false,
+        images: { attached: 0, missing: 0, problems: [] },
+      }],
+      incompleteSections: [], held: [], withheldAssets: [],
+      filing: { module: "FTCM", term: 1, agrees: true }, errors: [],
+    };
+
+    await persistPreparedLibraryReview(`private-review-${checksum}`, bank, pkg, result, targetCatalog.id);
+
+    expect(JSON.parse(mocks.documents.find(document => document.id === unrelatedDocument.id)!.rawText))
+      .toEqual(unrelatedCatalog);
+    const savedTarget = JSON.parse(mocks.documents.find(document => document.id === targetCatalog.id)!.rawText);
+    expect(savedTarget.sources[0]).toMatchObject({ checksum, ready: 1, review: 0, status: "prepared" });
   });
 
   it("reports a truthful partial result when the reviewed catalog snapshot is not durable", async () => {

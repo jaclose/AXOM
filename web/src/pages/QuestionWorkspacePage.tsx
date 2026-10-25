@@ -16,6 +16,7 @@ import {
   summarizeQuestionMappings, weakTopics,
   ERROR_TYPE_LABEL,
   type QuestionRecord,
+  type QuestionMode,
 } from "../lib/questions";
 import type { QuizBlock, QuizFilters, QuizMode } from "../lib/quiz";
 import { questionPracticeReadiness } from "../lib/questionFilters";
@@ -37,13 +38,14 @@ import { BlockBuilder } from "../components/questions/BlockBuilder";
 import { QuestionBankLibrary } from "../components/questions/QuestionBankLibrary";
 import type { BankLocation } from "../components/questions/CourseBankBrowser";
 import { BankBrowser } from "../components/questions/BankBrowser";
-import { AxomBrandLockup } from "../components/ui/BrandMark";
 import { coachWeakness, resolveActiveProvider } from "../lib/ai";
 import { pushToast } from "../lib/toast";
 import { ModuleTour, type ModuleTourStep } from "../components/shell/ModuleTour";
 import { TechnicalDetails } from "../components/shell/TechnicalDetails";
 import { ICON_SIZE } from "../lib/iconSize";
 import { STORAGE_KEYS } from "../lib/brand";
+import { TeachingCoveragePanel } from "../components/questions/TeachingCoveragePanel";
+import { summarizePrivateReviewBacklog } from "../lib/privateLibrary/reviewBacklog";
 
 const NO_QUESTIONS: QuestionRecord[] = [];
 const NO_SETS: QuestionSet[] = [];
@@ -59,13 +61,13 @@ export const QUESTION_BANK_TOUR_STEPS: readonly ModuleTourStep[] = [
 type BankTab = "overview" | "import" | "sets" | "library" | "blocks" | "bank" | "insights";
 
 const ALL_TABS: Array<[BankTab, string]> = [
-  ["overview", "Command Center"],
-  ["import", "Import"],
-  ["sets", "Question Sets"],
-  ["library", "Source Library"],
-  ["blocks", "Block Builder"],
-  ["bank", "Bank"],
+  ["sets", "Library"],
+  ["overview", "Study"],
+  ["blocks", "Build"],
+  ["bank", "Questions"],
   ["insights", "Insights"],
+  ["library", "Sources"],
+  ["import", "Add"],
 ];
 
 /** Direct question review uses the same image-evidence gate as exam blocks.
@@ -130,7 +132,9 @@ export function QuestionWorkspacePage() {
     setHandoffVersion((version) => version + 1);
   }, [courseLaunch]);
   const questionSets = s.questionSets ?? NO_SETS;
-  const documents = useMemo(() => (s.documents ?? NO_DOCUMENTS).filter(doc => !["axom-private-library-catalog", "axom-private-bank-review"].includes(doc.fileType)), [s.documents]);
+  const allDocuments = s.documents ?? NO_DOCUMENTS;
+  const documents = useMemo(() => allDocuments.filter(doc => !["axom-private-library-catalog", "axom-private-bank-review"].includes(doc.fileType)), [allDocuments]);
+  const privateReview = useMemo(() => summarizePrivateReviewBacklog(allDocuments), [allDocuments]);
   const [tab, setTab] = useState<BankTab>("sets");
   const [bankView, setBankView] = useState<"books" | "weeks">("books");
   const [bankLocation, setBankLocation] = useState<BankLocation>();
@@ -149,7 +153,7 @@ export function QuestionWorkspacePage() {
   const recovery = useMemo(() => missingRecovery
     ? inspectMissingQuestionRecovery(missingRecovery, questionSets, questions) : null,
   [missingRecovery, questionSets, questions]);
-  const [bankReview, setBankReview] = useState<{ ids?: string[]; key: number }>({ key: 0 });
+  const [bankReview, setBankReview] = useState<{ ids?: string[]; mode?: QuestionMode | "all"; key: number }>({ key: 0 });
   const [coach, setCoach] = useState<{ diagnosis: string; suggestedBlock: string } | null>(null);
   const [coachBusy, setCoachBusy] = useState(false);
   const [moduleTourOpen, setModuleTourOpen] = useState(false);
@@ -176,7 +180,7 @@ export function QuestionWorkspacePage() {
     location.hash = "tracker";
   }
 
-  const isFirstUse = questionSets.length === 0 && questions.length === 0;
+  const isFirstUse = questionSets.length === 0 && questions.length === 0 && privateReview.held === 0;
   const runnableQuestions = useMemo(() => questions.filter((question) => questionPracticeReadiness(question) === "ready"), [questions]);
   const due = useMemo(() => dueQuestions(runnableQuestions), [runnableQuestions]);
   const incorrect = runnableQuestions.filter((question) => question.status === "incorrect");
@@ -186,6 +190,7 @@ export function QuestionWorkspacePage() {
   const collectionMetrics = useMemo(() => questionCollectionMetrics(questions), [questions]);
   const mapping = useMemo(() => summarizeQuestionMappings(questions), [questions]);
   const runnable = runnableQuestions.length;
+  const heldForReview = questions.length - runnable + privateReview.held;
   const unseen = runnableQuestions.filter((question) => question.attempts.length === 0).length;
   const lastSession = useMemo(() => (s.quizSessions ?? [])
     .map((session, index) => ({ session, index, time: timestamp(session.startedAt) }))
@@ -229,11 +234,11 @@ export function QuestionWorkspacePage() {
   const visibleTabs = useMemo(() => {
     if (!isFirstUse) return ALL_TABS.map(([id, label]) => [id, tabLabel(id, label, questionSets.length, documents.length, questions.length, s.quizBlocks?.length ?? 0)] as [BankTab, string]);
     const tabs: Array<[BankTab, string]> = [
-      ["sets", "Browse Courses / Question Sets"],
-      ["overview", "Overview"],
-      ["import", "Import custom material"],
+      ["sets", "Library"],
+      ["overview", "How it works"],
+      ["import", "Add material"],
     ];
-    if (documents.length > 0) tabs.push(["library", `Source Library (${documents.length})`]);
+    if (documents.length > 0) tabs.push(["library", `Sources (${documents.length})`]);
     return tabs;
   }, [documents.length, isFirstUse, questionSets.length, questions.length, s.quizBlocks?.length]);
 
@@ -297,12 +302,17 @@ export function QuestionWorkspacePage() {
   }
 
   function openMappingReview(ids = mapping.issueQuestionIds) {
-    setBankReview((current) => ({ ids, key: current.key + 1 }));
+    setBankReview((current) => ({ ids, mode: "mapping-review", key: current.key + 1 }));
+    setTab("bank");
+  }
+
+  function openTeachingReview(ids: string[]) {
+    setBankReview((current) => ({ ids, mode: "all", key: current.key + 1 }));
     setTab("bank");
   }
 
   function selectTab(nextTab: BankTab) {
-    if (nextTab === "bank") setBankReview((current) => ({ key: current.key + 1 }));
+    if (nextTab === "bank") setBankReview((current) => ({ mode: "all", key: current.key + 1 }));
     setTab(nextTab);
   }
 
@@ -382,33 +392,37 @@ export function QuestionWorkspacePage() {
     <>
       <div
         ref={entryRef}
-        className={`qb-hero ${tab === "sets" ? "qb-course-header" : "tx-marble"} ${isFirstUse ? "qb-first-use" : "qb-returning-hero"}`}
+        className={`qb-hero qb-practice-header tx-marble ${isFirstUse ? "qb-first-use" : "qb-returning-hero"}`}
         data-tour="question-bank-entry"
       >
         <div className="qb-hero-inner">
           <div className="qb-hero-head">
             <div className="stack qb-heading-copy">
-              <AxomBrandLockup layout="horizontal" size="sm" subtitle="Study engine" markFramed />
-              <h1 className="qb-page-title">Question Bank</h1>
+              <h1 className="sr-only">Question Bank</h1>
+              <span className="qb-eyebrow">Practice workspace</span>
+              <h2 className="qb-page-title">Choose the set. Then study.</h2>
               <p className="qb-lede">
                 {isFirstUse
-                  ? "Choose your course, open a question set, and start learning."
-                  : "Continue the right set, resolve uncertain mappings, and understand what your attempts are showing."}
+                  ? "Start with a course collection below. Add your own material only when you need it."
+                  : "Open a course set, practice only ready questions, and keep uncertain answers in review."}
               </p>
             </div>
             <div className="qb-hero-actions" data-module-tour="qb-import">
-              {suspendedSim && <button className="qb-cta primary" onClick={() => setRunner({ mode: suspendedSim.mode, simulate: true })}><Play size={ICON_SIZE.emphasis} /> Continue</button>}
-              <button className="qb-cta primary" disabled={!runnable} onClick={() => setRunner({ mode: "tutor" })}><Play size={ICON_SIZE.emphasis} /> Create Quiz</button>
-              <button className="qb-cta ghost" onClick={() => { setTab("sets"); setBankView("books"); }}><BookOpen size={ICON_SIZE.body} /> Browse Courses / Question Sets</button>
-              {courseLaunch && <button className="qb-cta ghost" onClick={returnToCourseTracker} aria-label={`Return to Course Tracker from ${courseLaunch.module}`}><BookOpen size={ICON_SIZE.body} /> Return to Course Tracker · {courseLaunch.module}{courseLaunch.week ? ` / Week ${courseLaunch.week}` : ""}</button>}
-              <button className="qb-cta ghost" onClick={() => openImport("file")}><FileInput size={ICON_SIZE.body} /> Add your own material</button>
+              {suspendedSim && <button className="qb-cta primary" onClick={() => setRunner({ mode: suspendedSim.mode, simulate: true })}><Play size={ICON_SIZE.emphasis} /> Continue session</button>}
+              <button className="qb-cta primary" disabled={!runnable} onClick={() => setRunner({ mode: "tutor" })}><Play size={ICON_SIZE.emphasis} /> Quick practice</button>
+              {courseLaunch && <button className="qb-cta ghost qb-course-return" onClick={returnToCourseTracker} aria-label={`Return to Course Tracker from ${courseLaunch.module}`}><BookOpen size={ICON_SIZE.body} /> Return to Course Tracker · {courseLaunch.module}{courseLaunch.week ? ` / Week ${courseLaunch.week}` : ""}</button>}
               <button className="qb-cta ghost" onClick={() => setModuleTourOpen(true)} aria-label="Open Question Bank help tour">
                 <HelpCircle size={ICON_SIZE.body} /> Help
               </button>
             </div>
           </div>
+          <dl className="qb-inventory" aria-label="Question Bank inventory">
+            <div><dt>Ready to practice</dt><dd>{runnable}</dd></div>
+            <div><dt>Held for review</dt><dd>{heldForReview}</dd></div>
+            <div><dt>Saved sets</dt><dd>{questionSets.length}</dd></div>
+          </dl>
           {isFirstUse ? (
-            <p className="qb-format-note">Prepared courses and banks live in your library. Custom imports are optional.</p>
+            <p className="qb-format-note">Library → question set → practice. Every held question stays out of scored blocks until its answer is supported.</p>
           ) : (
             <p className="qb-session-note">
               {lastSession
@@ -623,6 +637,7 @@ export function QuestionWorkspacePage() {
                 setTab("sets");
               }}>Back to collection</GButton>
               <GButton onClick={() => setMissingRecovery(null)}>Cancel recovery</GButton>
+              <GButton onClick={() => openImport("file")}>Start a separate import</GButton>
             </div>
           </section>
         </GlassCard>}
@@ -638,10 +653,10 @@ export function QuestionWorkspacePage() {
       </>}
       {tab === "sets" && <>
         <div className="cb-view-switch" role="group" aria-label="Question bank view">
-          <button aria-pressed={bankView === "books"} onClick={() => setBankView("books")}>Bookshelf</button>
-          <button aria-pressed={bankView === "weeks"} onClick={() => setBankView("weeks")}>Browse weeks</button>
+          <button aria-pressed={bankView === "books"} onClick={() => setBankView("books")}>Courses</button>
+          <button aria-pressed={bankView === "weeks"} onClick={() => setBankView("weeks")}>Weeks &amp; sets</button>
         </div>
-        {bankView === "books" ? <QuestionBankLibrary onImport={() => openImport("file")} onCreate={() => setRunner({ mode: "tutor" })}
+        {bankView === "books" ? <QuestionBankLibrary heldForReview={heldForReview} onImport={() => openImport("file")} onCreate={() => setRunner({ mode: "tutor" })}
           onOpenBank={(book, week) => { setBankLocation({ module: book.module, courseId: book.courseId, week }); setBankView("weeks"); }}
           onPractice={(selection) => { setBankView("weeks"); setBankLocation(selection); setRunner({ mode: "tutor", presetFilters: { setIds: selection.setIds, questionIds: selection.questionIds, count: selection.count } }); }} /> :
         <QuestionSetList key={JSON.stringify(bankLocation)} initialScope={bankLocation}
@@ -664,13 +679,14 @@ export function QuestionWorkspacePage() {
         <BankBrowser
           key={bankReview.key}
           onOpen={setOpen}
-          initialMode={bankReview.ids ? "mapping-review" : "all"}
+          initialMode={bankReview.mode ?? "all"}
           questionIds={bankReview.ids}
         />
       )}
 
       {tab === "insights" && (
         <>
+          <TeachingCoveragePanel onReview={openTeachingReview} />
           <AnalysisPanel onPractice={(ids) => ids.length && setRunner({ mode: "tutor", retakeIds: ids })} />
           {/* The older breakdowns stay available, one step back from the findings. */}
           <details className="qb-breakdowns">

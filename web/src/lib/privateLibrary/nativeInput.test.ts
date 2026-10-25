@@ -72,7 +72,7 @@ describe("local native packages without a user-authored catalog", () => {
     expect(catalog.format).toBe("axom-private-library");
     expect(catalog.sources).toHaveLength(1);
     expect(catalog.sources[0]).toMatchObject({ ready: 1, review: 0, module: "EXAMPLE" });
-    expect(bank.pkg.manifest).toEqual(manifest);
+    expect(bank.pkg.manifest).toEqual({ ...manifest, schemaVersion: 2 });
     expect(bank.pkg.questions[0].stem).toEqual(question("q1").stem);
     expect(await read(catalog.sources[0].originalFile)).toEqual(source);
     expect([...files].map(([name, bytes]) => [name, Buffer.from(bytes).toString("base64")])).toEqual(before);

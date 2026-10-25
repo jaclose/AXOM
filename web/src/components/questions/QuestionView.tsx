@@ -47,7 +47,8 @@ export function QuestionViewControls({ view, onChange, mode, onModeChange, notic
 
 /** The very same reading/answer DOM in two layouts, with no second player. */
 export function QuestionViewFrame({ view, children }: { view: QuestionView; children: ReactNode }) {
-  return <div className={`question-view-frame ${view === "slides" ? "question-view-slide" : ""}`} data-question-view={view}>
+  return <div className={`question-view-frame ${view === "slides" ? "question-view-slide" : ""}`}
+    data-question-view={view} data-study-text="question">
     {view === "slides" && <p className="question-slide-label">Study slide</p>}
     {children}
   </div>;

@@ -1,6 +1,6 @@
 import { STORAGE_KEYS } from "./brand";
 import { createLocalBackup, readLocalBackup } from "./localBackup";
-import { flushLocalVaultWrites, localVaultStorage } from "./localVault";
+import { flushLocalVaultWrites, localVaultStorage, resolveVaultSnapshotRecord } from "./localVault";
 import { useStore } from "./store";
 import { saveNativeSnapshot } from "../services/nativeSqlite";
 
@@ -26,8 +26,15 @@ export async function createUpdateCheckpoint(desktop: boolean): Promise<string> 
   }
   const key = await createLocalBackup(state.schemaVersion);
   const snapshot = key ? await readLocalBackup(key) : null;
-  const snapshotState = snapshot?.indexedDb?.records[STORAGE_KEYS.persistedState]
-    ?? snapshot?.localStorage[STORAGE_KEYS.persistedState];
+  let snapshotState: string | undefined;
+  try {
+    snapshotState = snapshot?.indexedDb
+      ? resolveVaultSnapshotRecord(snapshot.indexedDb.records, STORAGE_KEYS.persistedState)
+        ?? snapshot.localStorage[STORAGE_KEYS.persistedState]
+      : snapshot?.localStorage[STORAGE_KEYS.persistedState];
+  } catch {
+    // Missing or damaged chunks make the checkpoint unverifiable below.
+  }
   if (!key || snapshotState !== serialized) {
     throw new Error("Could not verify the recovery snapshot. The update has been paused; your current workspace is still open.");
   }

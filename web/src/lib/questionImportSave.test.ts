@@ -7,6 +7,7 @@ import { parseQuestionBlocks } from "./questionParse";
 import type { QuestionImportPersistence, ReviewedImportPersistencePlan } from "./questionImportFinalization";
 import { blockedDraftIndexes, prepareReviewedImport, saveReviewedImport, type ReviewedDraft, type ReviewedImportRequest } from "./questionImportSave";
 import type { QuestionRecord } from "./questions";
+import type { PackageQuestion } from "./question-content/package";
 import * as imageImport from "./questionImportImages";
 import * as vault from "./localVault";
 import {
@@ -117,6 +118,30 @@ describe("prepareReviewedImport", () => {
     expect(prepared.existingDocumentId).toBe("doc-1");
     expect(prepared.plan.documentWrite).toMatchObject({ kind: "update", id: "doc-1", patch: { libraryOnly: false, linkedQuestionSetIds: [prepared.plan.questionSet!.id] } });
     expect(prepared.plan.questions.every((question) => question.sourceDocumentId === "doc-1")).toBe(true);
+  });
+
+  it("adds matching source-checked package teaching only as a review proposal", () => {
+    const [base, ...rest] = drafts();
+    const content = {
+      id: "source-q1", source: { filename: file.fileName, questionNumber: 1 },
+      stem: [{ type: "text", text: base.stem }],
+      choices: base.options.map((option) => ({ id: `source-q1-${option.key}`, label: option.key, blocks: [{ type: "text", text: option.text }] })),
+      correctAnswer: { labels: ["A"], evidence: "printed-key" }, explanation: [{ type: "text", text: base.explanation! }], assets: [],
+      teaching: {
+        version: 1, answerLabel: "A", whyCorrect: "The pulmonary vein returns oxygenated blood.",
+        mechanism: "Pulmonary veins carry oxygenated blood to the left atrium.", highYieldRule: "Follow blood flow direction.",
+        distractors: base.options.filter((option) => option.key !== "A").map((option) => ({ label: option.key, option: option.text, explanation: `${option.key} does not match the stated flow.` })),
+        sourceReferences: [{ sourceId: "source-slides", pdfPages: [4], purpose: "Mechanism" }],
+        factCheck: { status: "SOURCE_CHECKED", humanReviewerApproved: false, answerChanged: false, limitations: [] },
+      },
+      provenance: { method: "manual-transcription" },
+    } satisfies PackageQuestion;
+    const prepared = prepareReviewedImport(request({ drafts: [{ ...base, content }, ...rest] }), empty, make());
+    if (!prepared.ok) throw new Error("expected a prepared import");
+    const saved = prepared.plan.questions[0];
+    expect(saved.analyses).toHaveLength(1);
+    expect(saved.analyses?.[0]).toMatchObject({ questionId: saved.id, origin: "source", status: "proposed" });
+    expect(saved.content).toBe(content);
   });
 });
 

@@ -518,7 +518,7 @@ function downloadAcademicCatalogMetadata(coverage: CurriculumCoverage) {
     url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = "axom-sgu-course-metadata-v1.json";
+    link.download = "axom-course-metadata-v1.json";
     link.style.display = "none";
     document.body.appendChild(link);
     link.click();
@@ -539,10 +539,10 @@ function CurriculumCoverageCard({ coverage }: { coverage: CurriculumCoverage }) 
     <GlassCard pad className="tracker-curriculum-coverage">
       <details>
         <summary>
-          <b>SGU Terms 1–5 · curriculum coverage</b>
+          <b>Terms 1–5 · curriculum coverage</b>
           <span className="sub">{coverage.modulesWithTemplates}/{coverage.totalModules} modules have saved templates · {coverage.installedTemplateItems}/{coverage.sourceItems} saved-template activities represented in tracker</span>
         </summary>
-        <p className="sub">Coverage counts only templates saved in this workspace and tracker rows actually present. The SGU course outline names modules, not a complete official activity schedule. An unavailable template means expected activities are <b>unknown</b>, not zero.</p>
+        <p className="sub">Coverage counts only templates saved in this workspace and tracker rows actually present. The AXOM course outline names modules, not a complete verified activity schedule. An unavailable template means expected activities are <b>unknown</b>, not zero.</p>
         <div className="tracker-catalog-action">
           <GButton size="tiny" onClick={() => downloadAcademicCatalogMetadata(coverage)}>Export metadata-only catalog</GButton>
           <span className="sub">Local JSON only. Excludes uploaded source documents, questions, answers and personal progress; does not authorize redistribution.</span>
@@ -567,10 +567,10 @@ function CurriculumCoverageCard({ coverage }: { coverage: CurriculumCoverage }) 
             </div>
           </details>
         ))}
-        {coverage.unmappedTrackerRows > 0 && <p className="sub" role="note">{coverage.unmappedTrackerRows} tracker activit{coverage.unmappedTrackerRows === 1 ? "y" : "ies"} cannot be uniquely attributed to this SGU course outline. These may be personal tasks or ambiguous legacy paths; they remain preserved in the Course Tracker for review.</p>}
+        {coverage.unmappedTrackerRows > 0 && <p className="sub" role="note">{coverage.unmappedTrackerRows} tracker activit{coverage.unmappedTrackerRows === 1 ? "y" : "ies"} cannot be uniquely attributed to this course outline. These may be personal tasks or ambiguous legacy paths; they remain preserved in the Course Tracker for review.</p>}
         {coverage.unmappedTemplateModules.length > 0 && <p className="sub">Templates without a unique outline match: {coverage.unmappedTemplateModules.join(", ")}. Confirm course ownership before installing.</p>}
         <p className="sub">Week numbers inferred from blank-line groups or even spacing require schedule verification; they are not confirmed school dates. Question collections and ready counts are calculated from locally stored records, not remote uploads, original-file availability, or official activity completeness.</p>
-        {(coverage.unassignedQuestionCollections > 0 || coverage.unassignedQuestions > 0) && <p className="sub" role="note">{coverage.unassignedQuestionCollections} collections and {coverage.unassignedQuestions} question records cannot be uniquely assigned to this SGU term/module outline. They remain in the Question Bank for review, not silently attached to a course.</p>}
+        {(coverage.unassignedQuestionCollections > 0 || coverage.unassignedQuestions > 0) && <p className="sub" role="note">{coverage.unassignedQuestionCollections} collections and {coverage.unassignedQuestions} question records cannot be uniquely assigned to this term/module outline. They remain in the Question Bank for review, not silently attached to a course.</p>}
       </details>
     </GlassCard>
   );

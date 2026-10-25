@@ -12,6 +12,7 @@ import {
   PACKAGE_SCHEMA_VERSION,
   PROVENANCE_METHODS,
   QUESTION_FLAG_TYPES,
+  TEACHING_FACT_CHECK_STATUSES,
   type AnswerKey,
   type ImportPackage,
   type IssueCode,
@@ -19,6 +20,7 @@ import {
   type PackageIssue,
   type PackageManifest,
   type PackageQuestion,
+  type PackageTeaching,
   type ProvenanceMetadata,
   type QuestionAsset,
   type QuestionChoice,
@@ -65,7 +67,11 @@ function warnUnknown(value: Json, known: readonly string[], path: string, ctx: R
  * version: the first change of shape adds `1: (raw) => ...` and bumps
  * PACKAGE_SCHEMA_VERSION, and older packages keep importing.
  */
-const MIGRATIONS: Record<number, (raw: Json) => Json> = {};
+const MIGRATIONS: Record<number, (raw: Json) => Json> = {
+  // V2 adds optional structured teaching. V1 content needs no repair: it is
+  // lifted unchanged and the new field remains absent.
+  1: (raw) => ({ ...raw, schemaVersion: 2 }),
+};
 
 function toCurrentVersion(raw: unknown, what: string, ctx: ReadContext): Json | undefined {
   if (!isRecord(raw)) {
@@ -292,7 +298,7 @@ export function readManifest(raw: unknown, issues: PackageIssue[]): PackageManif
 
 function writeManifest(manifest: PackageManifest): Json {
   return {
-    schemaVersion: manifest.schemaVersion,
+    schemaVersion: PACKAGE_SCHEMA_VERSION,
     course: { name: manifest.course.name, term: manifest.course.term, week: manifest.course.week },
     bank: compact({ id: manifest.bank.id, title: manifest.bank.title, discipline: manifest.bank.discipline, topic: manifest.bank.topic }),
     source: compact({
@@ -309,7 +315,7 @@ function writeManifest(manifest: PackageManifest): Json {
 
 const QUESTION_KEYS = [
   "id", "course", "term", "week", "bankId", "discipline", "topic", "subtopic", "source", "stem", "choices",
-  "choiceTable", "correctAnswer", "explanation", "assets", "flags", "provenance",
+  "choiceTable", "correctAnswer", "explanation", "teaching", "assets", "flags", "provenance",
 ] as const;
 const ASSET_KEYS = [
   "id", "filename", "mimeType", "width", "height", "byteSize", "sourceFile", "sourcePage", "role", "questionId",
@@ -364,6 +370,187 @@ function writeAsset(asset: QuestionAsset): Json {
     bounds: asset.bounds && { x: asset.bounds.x, y: asset.bounds.y, width: asset.bounds.width, height: asset.bounds.height },
     revealOf: asset.revealOf,
     crop: asset.crop && { left: asset.crop.left, top: asset.crop.top, right: asset.crop.right, bottom: asset.crop.bottom },
+  });
+}
+
+const TEACHING_KEYS = [
+  "version", "answerLabel", "concept", "whyCorrect", "mechanism", "highYieldRule",
+  "distractors", "sourceReferences", "factCheck",
+] as const;
+const TEACHING_DISTRACTOR_KEYS = ["label", "option", "explanation", "wouldFitIf"] as const;
+const TEACHING_REFERENCE_KEYS = ["sourceId", "pdfPages", "purpose", "documentId"] as const;
+const TEACHING_FACT_CHECK_KEYS = [
+  "status", "checkedOn", "checkedBy", "humanReviewerApproved", "answerChanged",
+  "limitations", "answerKeyEvidence", "supportingExcerpts",
+] as const;
+const TEACHING_ANSWER_EVIDENCE_KEYS = ["sourceId", "pdfPage", "questionNumber", "printedAnswer", "method"] as const;
+const TEACHING_EXCERPT_KEYS = ["sourceId", "pdfPage", "excerpt", "inspection"] as const;
+
+function readTeaching(value: unknown, ctx: ReadContext): PackageTeaching | undefined {
+  const reject = (message: string, path = "teaching"): undefined => {
+    note(ctx, "error", "invalid_question", message, path);
+    return undefined;
+  };
+  if (!isRecord(value) || value.version !== 1) {
+    return reject("Structured teaching needs version 1. Newer teaching must be reviewed by a newer AXOM.");
+  }
+  warnUnknown(value, TEACHING_KEYS, "teaching", ctx);
+  const answerLabel = filled(value.answerLabel);
+  const whyCorrect = filled(value.whyCorrect);
+  const mechanism = filled(value.mechanism);
+  const highYieldRule = filled(value.highYieldRule);
+  if (!answerLabel || !/^[A-I]$/.test(answerLabel) || !whyCorrect || !mechanism || !highYieldRule) {
+    return reject("Structured teaching needs an answer label, why-correct explanation, mechanism and high-yield rule.");
+  }
+
+  if (!Array.isArray(value.distractors) || value.distractors.length > 12) {
+    return reject("Structured teaching distractors must be a bounded list.", "teaching.distractors");
+  }
+  const distractors = value.distractors.flatMap((entry, index) => {
+    if (!isRecord(entry)) return [];
+    warnUnknown(entry, TEACHING_DISTRACTOR_KEYS, `teaching.distractors[${index}]`, ctx);
+    const label = filled(entry.label);
+    const explanation = filled(entry.explanation);
+    return label && explanation ? [{
+      label,
+      ...optional("option", filled(entry.option)),
+      explanation,
+      ...optional("wouldFitIf", filled(entry.wouldFitIf)),
+    }] : [];
+  });
+  if (distractors.length !== value.distractors.length) {
+    return reject("Every structured distractor needs a label and explanation.", "teaching.distractors");
+  }
+  if (new Set(distractors.map((entry) => entry.label)).size !== distractors.length
+    || distractors.some((entry) => !/^[A-I]$/.test(entry.label) || entry.label === answerLabel)) {
+    return reject("Structured distractor labels must be unique source choice labels and cannot name the verified answer.", "teaching.distractors");
+  }
+
+  if (!Array.isArray(value.sourceReferences) || value.sourceReferences.length > 32) {
+    return reject("Structured teaching source references must be a bounded list.", "teaching.sourceReferences");
+  }
+  const sourceReferences = value.sourceReferences.flatMap((entry, index) => {
+    if (!isRecord(entry)) return [];
+    warnUnknown(entry, TEACHING_REFERENCE_KEYS, `teaching.sourceReferences[${index}]`, ctx);
+    const sourceId = filled(entry.sourceId);
+    const purpose = filled(entry.purpose);
+    const pdfPages = Array.isArray(entry.pdfPages) && entry.pdfPages.length <= 64
+      && entry.pdfPages.every((page) => integer(page) !== undefined && (page as number) > 0)
+      ? entry.pdfPages as number[]
+      : undefined;
+    return sourceId && purpose && pdfPages ? [{
+      sourceId,
+      pdfPages,
+      purpose,
+      ...optional("documentId", filled(entry.documentId)),
+    }] : [];
+  });
+  if (sourceReferences.length !== value.sourceReferences.length) {
+    return reject("Every structured source reference needs its exact source id, positive PDF pages and purpose.", "teaching.sourceReferences");
+  }
+
+  const fact = value.factCheck;
+  if (!isRecord(fact)) return reject("Structured teaching needs explicit fact-check metadata.", "teaching.factCheck");
+  warnUnknown(fact, TEACHING_FACT_CHECK_KEYS, "teaching.factCheck", ctx);
+  const status = oneOf(TEACHING_FACT_CHECK_STATUSES, fact.status);
+  const limitations = textList(fact.limitations);
+  if (!status || typeof fact.humanReviewerApproved !== "boolean" || typeof fact.answerChanged !== "boolean" || !limitations) {
+    return reject("Fact-check metadata needs a known status, human-review decision, answer-change decision and limitations list.", "teaching.factCheck");
+  }
+
+  let answerKeyEvidence: PackageTeaching["factCheck"]["answerKeyEvidence"];
+  if (fact.answerKeyEvidence !== undefined) {
+    const evidence = fact.answerKeyEvidence;
+    if (!isRecord(evidence)) return reject("Answer-key evidence is not an object.", "teaching.factCheck.answerKeyEvidence");
+    warnUnknown(evidence, TEACHING_ANSWER_EVIDENCE_KEYS, "teaching.factCheck.answerKeyEvidence", ctx);
+    const sourceId = filled(evidence.sourceId);
+    const pdfPage = integer(evidence.pdfPage);
+    const method = filled(evidence.method);
+    if (!sourceId || !pdfPage || pdfPage < 1 || !method) {
+      return reject("Answer-key evidence needs an exact source id, positive PDF page and method.", "teaching.factCheck.answerKeyEvidence");
+    }
+    answerKeyEvidence = {
+      sourceId, pdfPage,
+      ...optional("questionNumber", integer(evidence.questionNumber)),
+      ...optional("printedAnswer", filled(evidence.printedAnswer)),
+      method,
+    };
+  }
+
+  let supportingExcerpts: NonNullable<PackageTeaching["factCheck"]["supportingExcerpts"]> | undefined;
+  if (fact.supportingExcerpts !== undefined) {
+    if (!Array.isArray(fact.supportingExcerpts) || fact.supportingExcerpts.length > 32) {
+      return reject("Supporting excerpts must be a bounded list.", "teaching.factCheck.supportingExcerpts");
+    }
+    supportingExcerpts = fact.supportingExcerpts.flatMap((entry, index) => {
+      if (!isRecord(entry)) return [];
+      warnUnknown(entry, TEACHING_EXCERPT_KEYS, `teaching.factCheck.supportingExcerpts[${index}]`, ctx);
+      const sourceId = filled(entry.sourceId);
+      const pdfPage = integer(entry.pdfPage);
+      const excerpt = filled(entry.excerpt);
+      return sourceId && pdfPage && pdfPage > 0 && excerpt ? [{
+        sourceId, pdfPage, excerpt, ...optional("inspection", filled(entry.inspection)),
+      }] : [];
+    });
+    if (supportingExcerpts.length !== fact.supportingExcerpts.length) {
+      return reject("Every supporting excerpt needs an exact source id, positive PDF page and text.", "teaching.factCheck.supportingExcerpts");
+    }
+  }
+
+  return {
+    version: 1,
+    answerLabel,
+    ...optional("concept", filled(value.concept)),
+    whyCorrect,
+    mechanism,
+    highYieldRule,
+    distractors,
+    sourceReferences,
+    factCheck: {
+      status,
+      ...optional("checkedOn", filled(fact.checkedOn)),
+      ...optional("checkedBy", filled(fact.checkedBy)),
+      humanReviewerApproved: fact.humanReviewerApproved,
+      answerChanged: fact.answerChanged,
+      limitations,
+      ...optional("answerKeyEvidence", answerKeyEvidence),
+      ...optional("supportingExcerpts", supportingExcerpts),
+    },
+  };
+}
+
+function writeTeaching(teaching: PackageTeaching): Json {
+  return compact({
+    version: teaching.version,
+    answerLabel: teaching.answerLabel,
+    concept: teaching.concept,
+    whyCorrect: teaching.whyCorrect,
+    mechanism: teaching.mechanism,
+    highYieldRule: teaching.highYieldRule,
+    distractors: teaching.distractors.map((entry) => compact({
+      label: entry.label, option: entry.option, explanation: entry.explanation, wouldFitIf: entry.wouldFitIf,
+    })),
+    sourceReferences: teaching.sourceReferences.map((entry) => compact({
+      sourceId: entry.sourceId, pdfPages: entry.pdfPages, purpose: entry.purpose, documentId: entry.documentId,
+    })),
+    factCheck: compact({
+      status: teaching.factCheck.status,
+      checkedOn: teaching.factCheck.checkedOn,
+      checkedBy: teaching.factCheck.checkedBy,
+      humanReviewerApproved: teaching.factCheck.humanReviewerApproved,
+      answerChanged: teaching.factCheck.answerChanged,
+      limitations: teaching.factCheck.limitations,
+      answerKeyEvidence: teaching.factCheck.answerKeyEvidence && compact({
+        sourceId: teaching.factCheck.answerKeyEvidence.sourceId,
+        pdfPage: teaching.factCheck.answerKeyEvidence.pdfPage,
+        questionNumber: teaching.factCheck.answerKeyEvidence.questionNumber,
+        printedAnswer: teaching.factCheck.answerKeyEvidence.printedAnswer,
+        method: teaching.factCheck.answerKeyEvidence.method,
+      }),
+      supportingExcerpts: teaching.factCheck.supportingExcerpts?.map((entry) => compact({
+        sourceId: entry.sourceId, pdfPage: entry.pdfPage, excerpt: entry.excerpt, inspection: entry.inspection,
+      })),
+    }),
   });
 }
 
@@ -476,6 +663,7 @@ function readQuestion(value: unknown, index: number, issues: PackageIssue[]): Pa
     ...optional("choiceTable", choiceTable),
     ...optional("correctAnswer", value.correctAnswer === undefined ? undefined : readAnswer(value.correctAnswer, ctx)),
     ...optional("explanation", explanation?.length ? explanation : undefined),
+    ...optional("teaching", value.teaching === undefined ? undefined : readTeaching(value.teaching, ctx)),
     assets,
     ...optional("flags", flags.length ? flags : undefined),
     provenance,
@@ -497,6 +685,7 @@ function writeQuestion(question: PackageQuestion): Json {
     choiceTable: question.choiceTable && writeBlock(question.choiceTable),
     correctAnswer: question.correctAnswer && compact({ labels: question.correctAnswer.labels, evidence: question.correctAnswer.evidence }),
     explanation: question.explanation?.map(writeBlock),
+    teaching: question.teaching && writeTeaching(question.teaching),
     assets: question.assets.map(writeAsset),
     flags: question.flags?.map((flag) => ({ type: flag.type, message: flag.message })),
     provenance: compact({

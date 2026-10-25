@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BUILD_INFO } from "./buildInfo";
-import { releaseAnnouncementId, shouldAnnounceRelease } from "./releaseNotes";
+import { RELEASE_HISTORY, neutralizeLegacyReleaseCopy, releaseAnnouncementId, shouldAnnounceRelease } from "./releaseNotes";
 import type { StorageMigrationResult } from "./storageMigrations";
 
 const status = (previous = "0.0.1-prebeta"): StorageMigrationResult => ({
@@ -21,5 +21,15 @@ describe("post-update release announcements", () => {
   });
   it("never advertises a downgrade as a new release", () => {
     expect(shouldAnnounceRelease(status("1.0.0"), [])).toBe(false);
+  });
+
+  it("projects historical notes into AXOM-owned learner copy", () => {
+    const projected = neutralizeLegacyReleaseCopy(
+      "SGU shared · St. George's University · AMBOSS · jdabbagh@sgu.edu · SGU course shells",
+    );
+    expect(projected).toBe(
+      "course shared · the source institution · external question bank · the feedback address · term-based course templates",
+    );
+    expect(JSON.stringify(RELEASE_HISTORY)).not.toMatch(/\b(?:SGU|AMBOSS|St\.?\s*George'?s)\b|@sgu\.edu/i);
   });
 });

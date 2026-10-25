@@ -193,9 +193,10 @@ function ClassicExam({ exam, skin, mode, onClose }: {
           </button>
         )}
 
-        <section className="exam-sim-item" data-exam-scroll aria-labelledby="sim-item-heading">
+        <section className="exam-sim-item" data-exam-scroll aria-labelledby="sim-item-heading"
+          data-study-question data-question-id={question.id}>
           <h2 id="sim-item-heading" className="sr-only">Item {index + 1} of {pool.length}</h2>
-          <div className={`sim-stem ${tool === "highlight" ? "tool-highlight" : ""} ${tool === "erase" ? "tool-erase" : ""}`}>
+          <div className={`sim-stem ${tool === "highlight" ? "tool-highlight" : ""} ${tool === "erase" ? "tool-erase" : ""}`} data-study-part="stem">
             <div aria-label={question.content ? "Question stem" : undefined} tabIndex={question.content ? -1 : undefined} ref={question.content ? exam.stemRef : undefined}><QuestionContent question={question} part="stem" fallback={<AnnotatedQuestionText
               text={question.stem}
               annotations={exam.annotations}
@@ -217,7 +218,8 @@ function ClassicExam({ exam, skin, mode, onClose }: {
               const isCorrect = revealed && correctKey === option.key;
               const isWrong = revealed && selected && correctKey !== undefined && correctKey !== option.key;
               return (
-                <div key={option.key} className={`sim-choice ${selected ? "selected" : ""} ${struck ? "struck" : ""} ${isCorrect ? "correct" : ""} ${isWrong ? "wrong" : ""}`}
+                <div key={option.key} data-study-part="choice" data-choice-key={option.key}
+                  className={`sim-choice ${selected ? "selected" : ""} ${struck ? "struck" : ""} ${isCorrect ? "correct" : ""} ${isWrong ? "wrong" : ""}`}
                   onContextMenu={(event) => { event.preventDefault(); exam.strike(option.key); }}>
                   <label>
                     <input type="radio" name={`sim-${question.id}`} checked={selected} disabled={revealed || exam.finishLocked} onChange={() => exam.pick(option.key)} aria-label={`${option.key}. ${option.text}`} />

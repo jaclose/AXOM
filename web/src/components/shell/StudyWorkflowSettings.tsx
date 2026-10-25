@@ -23,7 +23,7 @@ const METHODS: Array<{ id: StudyMethodId; label: string; detail: string; icon: L
   { id: "notes", label: "Notes", detail: "Concept notes", icon: PenLine },
   { id: "teach-aloud", label: "Teach aloud", detail: "Explain it to learn it", icon: Mic },
   { id: "recall", label: "Recall sessions", detail: "Blank-page recall", icon: Brain },
-  { id: "external-resource", label: "Resources", detail: "UWorld, AMBOSS, videos", icon: Library },
+  { id: "external-resource", label: "Resources", detail: "Question banks, videos, references", icon: Library },
   { id: "custom", label: "Something else", detail: "Tell AXOM below", icon: Plus },
 ];
 

@@ -15,6 +15,10 @@ button.qcontent-image { cursor: zoom-in; }
 .qcontent-missing { display: block; border-left: 2px solid var(--gold); padding: 12px; }
 .qcontent-equation { font-family: var(--font-mono, monospace); overflow-x: auto; }
 .qcontent-callout { border-left: 2px solid var(--gold); padding-left: 16px; }
+.question-teaching-visuals { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--hairline); border-radius: var(--radius-md); background: var(--surface-1); }
+.question-teaching-visuals .qcontent-blocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 14px; }
+.question-teaching-visuals .qcontent-blocks figure { margin: 0; }
+.question-teaching-visuals .qcontent-image { border-radius: var(--radius-sm); overflow: hidden; }
 
 .bank-import-question { border-block: 1px solid var(--hairline); padding: 22px 0; }
 .bank-import-choices { list-style: none; padding: 0; }
