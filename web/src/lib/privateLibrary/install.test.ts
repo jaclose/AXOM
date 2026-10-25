@@ -13,6 +13,8 @@ import { withPreparedCourses, loadPreparedCourse } from "../bookshelf/preparedCo
 import { academicBindings, academicRecord } from "../academicLibrary/contentReferences";
 import { CURRICULA } from "../curricula";
 import { assessBank } from "../question-content/assessBank";
+import { STORAGE_KEYS } from "../brand";
+import { createLocalBackup, refreshLocalBackupSummaries, resetLocalBackupRuntimeForTests } from "../localBackup";
 
 const encode = (value: unknown) => new TextEncoder().encode(typeof value === "string" ? value : JSON.stringify(value));
 async function bundle() {
@@ -29,8 +31,8 @@ async function bundle() {
 function stubSuccessfulImageDecode(width = 1, height = 1) {
   vi.stubGlobal("createImageBitmap", vi.fn(async () => ({ width, height, close: vi.fn() })));
 }
-beforeEach(async () => { await openEmptyWorkspace(); vi.stubGlobal("Blob", NativeBlob); vi.stubGlobal("File", NativeFile); });
-afterEach(async () => { await closeWorkspace(); vi.unstubAllGlobals(); });
+beforeEach(async () => { await openEmptyWorkspace(); resetLocalBackupRuntimeForTests(); vi.stubGlobal("Blob", NativeBlob); vi.stubGlobal("File", NativeFile); });
+afterEach(async () => { resetLocalBackupRuntimeForTests(); await closeWorkspace(); vi.unstubAllGlobals(); });
 describe("prepared private library installation", () => {
   it.each([undefined, "a".repeat(64), `sha256:${"d".repeat(64)}`])("rejects invalid source bindings on the first install: %s", async (sourceChecksum) => {
     const b = await bundle();
@@ -126,6 +128,25 @@ describe("prepared private library installation", () => {
     expect(useStore.getState().questions[0].stem).toBe("My clarified question wording?");
     expect(useStore.getState().tracker.filter(t => t.templateKey)).toHaveLength(1);
     expect(useStore.getState().tracker.find(t => t.id === item.id)).toMatchObject({ passes: 2, label: "My personal title" });
+  });
+  it("hydrates markerless durable backups before choosing import snapshot retention", async () => {
+    const priorKeys = await Promise.all([
+      createLocalBackup(31, 8),
+      createLocalBackup(32, 8),
+      createLocalBackup(33, 8),
+    ]);
+    expect(priorKeys.every(Boolean)).toBe(true);
+    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+      const key = localStorage.key(index);
+      if (key?.startsWith(STORAGE_KEYS.localBackupPrefix)) localStorage.removeItem(key);
+    }
+    resetLocalBackupRuntimeForTests();
+
+    await installPrivateLibrary((await bundle()).read);
+
+    const retained = await refreshLocalBackupSummaries();
+    expect(retained).toHaveLength(4);
+    expect(priorKeys.every(key => retained.some(summary => summary.key === key))).toBe(true);
   });
   it("rejects damaged templates before declaring installation complete, and resumes missing banks", async () => {
     const b = await bundle();

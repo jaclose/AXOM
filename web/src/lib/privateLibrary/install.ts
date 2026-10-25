@@ -11,7 +11,7 @@ import { sha256 } from "../question-content/assets";
 import { getQuestionAttachmentBlob, putQuestionAttachmentBlob, type QuestionAttachmentBlobRecord } from "../questionAttachments";
 import { assertInstallableAcademicImageBytes, type InstallableAcademicImage } from "../academicLibrary/gifIntegrity";
 import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "../localVault";
-import { createLocalBackup, listLocalBackups } from "../localBackup";
+import { createLocalBackup, refreshLocalBackupSummaries } from "../localBackup";
 import { BUILD_INFO } from "../buildInfo";
 import { readSourceOriginal, saveSourceOriginal } from "../decode/sources";
 import { questionPracticeReadiness } from "../questionFilters";
@@ -327,7 +327,9 @@ async function install(read: LibraryReader, progress: (message: string) => void,
   progress("Protecting your current workspace…");
   await flushLocalVaultWrites();
   assertCurrent();
-  await createLocalBackup(BUILD_INFO.schemaVersion, listLocalBackups().length + 2);
+  const localBackups = await refreshLocalBackupSummaries();
+  assertCurrent();
+  await createLocalBackup(BUILD_INFO.schemaVersion, localBackups.length + 2);
   const checkpoint = getVaultWriteCheckpoint();
   for (const entry of catalog.templates) {
     const bytes = await read(entry.file);

@@ -24,7 +24,7 @@ it.skipIf(!process.env.AXOM_PRIVATE_BUNDLE)("installs every private export recor
   }));
   const file = new NativeFile([readFileSync(process.env.AXOM_PRIVATE_BUNDLE!)], "private-export.zip") as unknown as File;
   const read = await zipLibraryReader(file), catalog = readCatalog(JSON.parse(new TextDecoder().decode(await read("catalog.json"))));
-  const counts = { total: 0, ready: 0, needsReview: 0, unresolved: 0, assetReferences: 0, explanations: 0 };
+  const counts = { total: 0, ready: 0, needsReview: 0, unresolved: 0, assetReferences: 0, explanations: 0, structuredTeaching: 0 };
   const banks = [];
   const prepared = process.env.AXOM_PREPARED_OUTPUT ? new JSZip() : undefined;
   prepared?.file("catalog.json", Buffer.from(await read("catalog.json")));
@@ -45,10 +45,18 @@ it.skipIf(!process.env.AXOM_PRIVATE_BUNDLE)("installs every private export recor
     counts.total += bank.pkg.questions.length; counts.ready += assessment.counts.ready; counts.needsReview += assessment.counts["needs-review"];
     counts.unresolved += assessment.counts.unresolved; counts.assetReferences += assets;
     counts.explanations += bank.pkg.questions.filter(q => q.explanation?.some(b => b.type === "text" && b.text.trim())).length;
+    counts.structuredTeaching += bank.pkg.questions.filter(q => q.teaching).length;
   }
   const first = await installPrivateLibrary(read);
   expect(first.status, first.warnings.join("\n")).toBe("complete"); expect(first.warnings).toEqual([]);
+  const savedTeaching = useStore.getState().questions.filter(question => question.content?.teaching);
+  for (const question of savedTeaching) {
+    const materialized = question.analyses?.find(analysis => analysis.promptVersion?.startsWith("package-teaching-v"));
+    expect(materialized, `Structured teaching did not materialize for ${question.content?.id}`).toBeDefined();
+    expect(materialized?.status).toBe(question.content?.teaching?.factCheck.humanReviewerApproved ? "reviewed" : "proposed");
+  }
   const snapshot = () => ({ questions: useStore.getState().questions.map(q => q.id).sort(),
+    teaching: useStore.getState().questions.flatMap(q => q.analyses?.filter(analysis => analysis.promptVersion?.startsWith("package-teaching-v")).map(analysis => [q.id, analysis]) ?? []).sort(),
     reviews: useStore.getState().documents.filter(d => d.fileType === PRIVATE_REVIEW_DOCUMENT).map(d => {
       const bank = readPreparedBank(JSON.parse(d.rawText));
       // Flags are an unordered set; all source text, choices, media and keys remain exact.
@@ -61,6 +69,6 @@ it.skipIf(!process.env.AXOM_PRIVATE_BUNDLE)("installs every private export recor
   expect(second.status, second.warnings.join("\n")).toBe("complete"); expect(snapshot()).toEqual(saved);
   if (prepared) writeFileSync(process.env.AXOM_PREPARED_OUTPUT!, await prepared.generateAsync({ type: "nodebuffer", compression: "DEFLATE" }), { flag: "wx" });
   if (process.env.AXOM_ACCEPTANCE_REPORT) writeFileSync(process.env.AXOM_ACCEPTANCE_REPORT, JSON.stringify({ counts, banks,
-    installation: { first: first.status, repeat: second.status, persistedQuestionCount: saved.questions.length, reviewDocuments: saved.reviews.length },
+    installation: { first: first.status, repeat: second.status, persistedQuestionCount: saved.questions.length, materializedTeaching: saved.teaching.length, reviewDocuments: saved.reviews.length },
     limitations: ["Node integration uses a header-based image decoder; native browser decode is separately tested."] }, null, 2));
 }, 120_000);

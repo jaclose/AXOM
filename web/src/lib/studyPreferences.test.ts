@@ -31,4 +31,18 @@ describe("study workflow resolution", () => {
     expect(normalized.customContext).toHaveLength(700);
     expect(normalized.methods).toEqual([{ id: "anki", enabled: true, label: undefined, timing: undefined }]);
   });
+
+  it("neutralizes legacy provider branding in product-owned workflow labels", () => {
+    const normalized = normalizeStudyWorkflow({
+      configured: true,
+      methods: [{ id: "external-resource", enabled: true, label: "AMBOSS", usage: "Uses AMBOSS for questions" }],
+    });
+    expect(normalized.methods).toEqual([{
+      id: "external-resource",
+      enabled: true,
+      label: "External QBank",
+      usage: "Uses External QBank for questions",
+      timing: undefined,
+    }]);
+  });
 });

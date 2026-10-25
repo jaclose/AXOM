@@ -2,7 +2,13 @@ import { blocksToPlainText } from "../question-content/blocks";
 import { readImageInfo, sha256, SHOWABLE_IMAGE_TYPES } from "../question-content/assets";
 import { BANK_ID_PATTERN, readQuestionsFile } from "../question-content/packageJson";
 import { assessBank } from "../question-content/assessBank";
-import { QUESTION_FLAG_TYPES, type PackageIssue, type PackageManifest } from "../question-content/package";
+import {
+  PACKAGE_SCHEMA_VERSION,
+  QUESTION_FLAG_TYPES,
+  type PackageIssue,
+  type PackageManifest,
+  type PackageTeaching,
+} from "../question-content/package";
 import type { PreparedBank, PrivateLibraryCatalog } from "./types";
 import { safeInputPath } from "./inputRoot";
 
@@ -13,6 +19,34 @@ const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value
 const hex = (value: string) => value.replace(/^sha256:/, "");
 const text = (value: unknown) => typeof value === "string" ? value : "";
 const positive = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+
+/**
+ * Some source-audit exports predate package schema v2 and keep their teaching
+ * fields beside the immutable question. Lift that exact, explicit shape into
+ * the canonical envelope. A correctAnswer claim is deliberately insufficient:
+ * the audit must name the already-verified label separately.
+ */
+function teachingFromFlatRow(row: Json): PackageTeaching | Json | undefined {
+  if (record(row.teaching)) return row.teaching;
+  const answerLabel = text(row.verifiedExistingAnswer);
+  const whyCorrect = text(row.whyCorrect);
+  const mechanism = text(row.mechanism);
+  const highYieldRule = text(row.highYieldPrinciple) || text(row.highYieldRule);
+  if (!answerLabel || !whyCorrect || !mechanism || !highYieldRule
+    || !Array.isArray(row.distractors) || !Array.isArray(row.sourceReferences)
+    || !record(row.factCheck)) return undefined;
+  return {
+    version: 1,
+    answerLabel,
+    ...(text(row.topic) ? { concept: text(row.topic) } : {}),
+    whyCorrect,
+    mechanism,
+    highYieldRule,
+    distractors: row.distractors,
+    sourceReferences: row.sourceReferences,
+    factCheck: row.factCheck,
+  };
+}
 
 /** Flat exports retain their own provenance. A bare answer letter is never a reviewed key. */
 export async function resolveQuestionExport(questionsPath: string, read: Reader): Promise<Reader> {
@@ -52,7 +86,7 @@ export async function resolveQuestionExport(questionsPath: string, read: Reader)
     const week = positive(first.week) ? first.week : 0;
     const exportName = `${bankId}.questions.json`, subset = groups.size === 1 ? original : encode(group), checksum = hex(await sha256(subset));
     const prefix = `_axom-export/${checksum}`;
-    const manifest: PackageManifest = { schemaVersion: 1, course: { name: module, term: first.term, week },
+    const manifest: PackageManifest = { schemaVersion: PACKAGE_SCHEMA_VERSION, course: { name: module, term: first.term, week },
       bank: { id: bankId, title: text(first.bankTitle) || bankId, discipline: text(first.discipline) || module },
       source: { filename: exportName, sourceWeekDeclared: false, axomAssignedWeek: week },
       questionsFile: "questions.json", assetsDirectory: "assets" };
@@ -121,14 +155,15 @@ export async function resolveQuestionExport(questionsPath: string, read: Reader)
         ? { id: text(choice.id) || `${id}-${text(choice.label) || index}`, label: choice.label, blocks: Array.isArray(choice.blocks) ? blocks(choice.blocks) : [{ type: "text", text: text(choice.text) }] } : choice)
         : "ABCDEFGHI".split("").flatMap(label => text(row[label.toLowerCase()]) ? [{ id: `${id}-${label}`, label, blocks: [{ type: "text", text: row[label.toLowerCase()] }] }] : []);
       const explanation = [...(typeof row.explanation === "string" && row.explanation ? [{ type: "text", text: row.explanation }] : blocks(row.explanation)), ...blocks(row.explanationBlocks)];
+      const teaching = teachingFromFlatRow(row);
       converted.push({ id, bankId, course: module, term: first.term, week: positive(row.week) ? row.week : 0,
         topic: text(row.topic), source: { filename, ...Object.fromEntries(["page", "pageEnd", "questionNumber", "set", "setTitle"].filter(key => source[key] !== undefined).map(key => [key, source[key]])) },
         stem: Array.isArray(row.stem) ? blocks(row.stem) : Array.isArray(row.stemBlocks) ? blocks(row.stemBlocks) : [{ type: "text", text: text(row.stem) || text(row.question) }], choices,
         ...(row.choiceTable ? { choiceTable: blocks([row.choiceTable])[0] } : {}), ...(correctAnswer ? { correctAnswer } : {}),
-        explanation, assets, flags, provenance: { method: "manual-transcription", tool: "AXOM flat export adapter v1", sourceChecksum: `sha256:${checksum}`,
+        explanation, ...(teaching ? { teaching } : {}), assets, flags, provenance: { method: "manual-transcription", tool: "AXOM flat export adapter v2", sourceChecksum: `sha256:${checksum}`,
           notes: `Converted from a supplied JSON export; extraction method and answer verification were not established. Original metadata is retained in ${exportName}. The export checksum identifies that JSON subset, not the referenced PDF.` } });
     }
-    const parsed = readQuestionsFile({ schemaVersion: 1, bankId, questions: converted }, issues);
+    const parsed = readQuestionsFile({ schemaVersion: PACKAGE_SCHEMA_VERSION, bankId, questions: converted }, issues);
     if (!parsed || parsed.questions.length !== group.length) throw new Error(`${bankId} contains unreadable records. No rows were silently dropped.`);
     const pkg = { manifest, questions: parsed.questions }, files = pkg.questions.flatMap(q => q.assets.map(asset => ({ name: asset.filename })));
     const assessment = assessBank(pkg, issues, files);
