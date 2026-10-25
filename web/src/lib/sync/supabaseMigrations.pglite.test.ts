@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 const migrationsDir = fileURLToPath(new URL("../../../../supabase/migrations/", import.meta.url));
 const files = readdirSync(migrationsDir).filter((name) => name.endsWith(".sql")).sort();
 const privacyBarrierMigration = "20261016011812_harden_privacy_request_barrier.sql";
+const immutableReleaseMigration = "20261023213000_academic_release_catalog.sql";
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
 const HASH = "a".repeat(64);
@@ -87,7 +88,10 @@ const PRIVATE_TABLES = [
 ];
 describe("Supabase migrations on real Postgres", () => {
   it("revokes group/shared access when the currently selected academic revision is pending or rejected", async () => {
-    const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
+    // Historical shared-source behavior remains regression-tested at the last
+    // migration that exposed it. The immutable-release suite verifies the
+    // current owner-only source boundary and learner release projection.
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false, stopBefore: immutableReleaseMigration });
     const collection = "77777777-7777-4777-8777-777777777777";
     const oldRevision = "88888888-8888-4888-8888-888888888888";
     const newRevision = "99999999-9999-4999-8999-999999999999";
@@ -145,7 +149,7 @@ describe("Supabase migrations on real Postgres", () => {
   }, 60_000);
 
   it("references one academic object for two learners while enforcing review, withdrawal and acknowledged personal history", async () => {
-    const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false, stopBefore: immutableReleaseMigration });
     const collection = "33333333-3333-4333-8333-333333333333";
     const revision = "44444444-4444-4444-8444-444444444444";
     try {
@@ -316,7 +320,7 @@ describe("Supabase migrations on real Postgres", () => {
   }, 60_000);
 
   it("serializes export and deletion and revokes bearer shares at the irreversible boundary", async () => {
-    const db = await supabaseLikeDatabase({ rlsAutoEnable: false });
+    const db = await supabaseLikeDatabase({ rlsAutoEnable: false, stopBefore: immutableReleaseMigration });
     const exportRequest = "33333333-3333-4333-8333-333333333333";
     const deletionRequest = "44444444-4444-4444-8444-444444444444";
     const otherShareOwner = "22222222-2222-4222-8222-222222222222";

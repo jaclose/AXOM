@@ -651,6 +651,17 @@ async function preflightAcademicUpload(upload: AcademicUpload): Promise<Academic
   return files;
 }
 
+/** Revalidate a prepared private revision before deriving a separate learner
+ * release. The returned snapshot owns its bytes, so publication preparation
+ * cannot mutate or alias the private source revision. */
+export async function verifiedAcademicUploadSnapshot(value: AcademicUpload): Promise<AcademicUpload> {
+  const snapshot = snapshotAcademicUpload(value);
+  const files = await preflightAcademicUpload(snapshot);
+  const ownedFiles = [...files];
+  Object.freeze(ownedFiles);
+  return Object.freeze({ ...snapshot, files: ownedFiles });
+}
+
 /** A course-specific prepared package, never a portable learner backup. Only
  * referenced content enters the upload; unrelated ZIP files are not enumerated. */
 export async function prepareAcademicUpload(read: LibraryReader, unscheduled?: AcademicUnscheduledScope): Promise<AcademicUpload> {

@@ -2,7 +2,7 @@ import type { Resource } from "./types";
 
 export const RESOURCE_GROUPS = [
   "Personal Core",
-  "Medical School / SGU",
+  "Medical School / Course",
   "Anki / Boards",
   "MCAT",
   "Pre-Med",
@@ -68,7 +68,7 @@ export function resourceGroup(resource: Pick<Resource, "category" | "tags" | "ti
   if (resource.category === "Drives") {
     const first = resource.tags?.[0];
     if (first && !["sgu", "shared", "drive"].includes(first.toLowerCase())) return first;
-    return "Medical School / SGU";
+    return "Medical School / Course";
   }
   if (/mcat/i.test(resource.category)) return "MCAT";
   if (/pre[-\s]?med|amcas|aacom/i.test(resource.category)) return "Pre-Med";

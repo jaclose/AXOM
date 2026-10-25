@@ -27,13 +27,47 @@ export function validAcademicAsset(value: unknown): value is AcademicAssetRefere
   try { return safeLibraryPath(item.path) === item.path; } catch { return false; }
 }
 
+interface AcademicObjectFile {
+  path: string;
+  object_path: string;
+  sha256: string;
+  byte_size: number;
+  mime_type: string;
+}
+
+function validAcademicObjectFile(file: unknown, reference: AcademicAssetReference, release: boolean): file is AcademicObjectFile {
+  const value = file as AcademicObjectFile | undefined;
+  if (!value || value.path !== reference.path || value.sha256 !== reference.sha256
+    || !Number.isSafeInteger(value.byte_size) || value.byte_size < 1 || value.byte_size > 50 * 1024 * 1024
+    || typeof value.mime_type !== "string" || typeof value.object_path !== "string") return false;
+  const parts = value.object_path.split("/");
+  const collection = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(parts[0] ?? "");
+  return collection && (release
+    ? parts.length === 3 && parts[1] === "release" && parts[2] === value.sha256
+    : parts.length === 2 && parts[1] === value.sha256);
+}
+
 /** Every read reuses actual revision/file RLS. No signed URL or service key is
  * persisted in a learner checkpoint. Hash-addressed objects stay canonical. */
 export async function downloadAcademicAsset(client: SupabaseClient, reference: AcademicAssetReference): Promise<Blob> {
   if (!validAcademicAsset(reference)) throw new Error("Invalid academic content reference.");
-  const { data: file, error } = await client.from("academic_files").select("object_path,sha256,byte_size,mime_type")
-    .eq("revision_id", reference.revisionId).eq("path", reference.path).single();
-  if (error || !file || file.sha256 !== reference.sha256) throw new Error("This course revision is unavailable to your account. Your progress and downloaded copy are preserved.");
+  const released = await client.rpc("academic_release_files_for_revision", { revision: reference.revisionId });
+  let file: AcademicObjectFile | undefined;
+  if (!released.error && Array.isArray(released.data) && released.data.length) {
+    if (released.data.length > 1500) throw new Error("This course release has an invalid file index.");
+    const candidates = released.data.filter(candidate => (candidate as { path?: unknown })?.path === reference.path);
+    if (candidates.length !== 1 || !validAcademicObjectFile(candidates[0], reference, true)) {
+      throw new Error("This course release no longer matches your saved content reference.");
+    }
+    file = candidates[0] as AcademicObjectFile;
+  } else {
+    const source = await client.from("academic_files").select("path,object_path,sha256,byte_size,mime_type")
+      .eq("revision_id", reference.revisionId).eq("path", reference.path).single();
+    if (source.error || !validAcademicObjectFile(source.data, reference, false)) {
+      throw new Error("This course revision is unavailable to your account. Your progress and downloaded copy are preserved.");
+    }
+    file = source.data;
+  }
   const result = await client.storage.from("academic-content").download(file.object_path);
   if (result.error || !result.data || result.data.size !== file.byte_size
     || await sha256(new Uint8Array(await result.data.arrayBuffer())) !== reference.sha256) throw new Error("The course source failed its download integrity check.");

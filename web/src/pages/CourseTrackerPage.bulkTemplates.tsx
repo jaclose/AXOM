@@ -83,12 +83,12 @@ export function BulkCurriculumTemplateInstall() {
     <GlassCard pad className="tracker-bulk-course-template">
       <details>
         <summary>
-          <b>{hasSources ? "Install saved curriculum activities" : "Set up SGU course outline"}</b>
+          <b>{hasSources ? "Install saved curriculum activities" : "Set up AXOM course outline"}</b>
           <span className="sub">{preview.activeSourceFiles} source templates · {preview.sourceActivities} known activities · {pending} to add/update</span>
         </summary>
         {hasSources
-          ? <p className="sub">These are private templates already saved in your AXOM workspace. AXOM maps them to the existing SGU term/course/module outline, never creates unknown lectures, and never overwrites study passes, notes or attendance.</p>
-          : <p className="sub">No academic activity templates are saved on this device. You can still add the five-term SGU course/module outline as empty navigation containers. This will not create lectures, assessments, week schedules, study completions or questions. Import approved sources separately when available.</p>}
+          ? <p className="sub">These are private templates already saved in your AXOM workspace. AXOM maps them to the existing term/course/module outline, never creates unknown lectures, and never overwrites study passes, notes or attendance.</p>
+          : <p className="sub">No academic activity templates are saved on this device. You can still add the five-term AXOM course/module outline as empty navigation containers. This will not create lectures, assessments, week schedules, study completions or questions. Import approved sources separately when available.</p>}
         <div className="tracker-bulk-template-stats">
           <span><b>{preview.modules.length}</b> uniquely matched modules</span>
           <span><b>{preview.sourceStatedWeeks}</b> activity lines with a source-stated week</span>
@@ -112,13 +112,13 @@ export function BulkCurriculumTemplateInstall() {
         <label className="tracker-bulk-outline">
           <input type="checkbox" checked={includeOutline} disabled={busy}
             onChange={(event) => { setIncludeOutline(event.target.checked); resetMessage(); }} />
-          <span>Also create the missing <b>Term 1–5 course/module outline shells</b> from AXOM's embedded catalog. This outline uses older <b>PPM 500/501</b> labels (official Fall 2025+ SGU catalog: <b>PCM 500/501</b>) and <b>NMI</b> where the current catalog says <b>MI</b>; review course identities before syncing or sharing. These are empty structural shells, with no invented lectures, dates or question banks.</span>
+          <span>Also create the missing <b>Term 1–5 course/module outline shells</b> from AXOM's embedded catalog. This outline uses older <b>PPM 500/501</b> labels (reviewed Fall 2025+ source catalog: <b>PCM 500/501</b>) and <b>NMI</b> where the current catalog says <b>MI</b>; review course identities before syncing or sharing. These are empty structural shells, with no invented lectures, dates or question banks.</span>
         </label>
         {includeOutline && <p className="sub">{preview.missingOutlineModules} school-outline module containers are not yet represented in your workspace. These are structural containers, not verified academic activity schedules.</p>}
         {consentRequired && <label className="tracker-bulk-confirm">
           <input type="checkbox" checked={provisionalConfirmed} disabled={busy}
             onChange={(event) => setProvisionalConfirmed(event.target.checked)} />
-          <span>I reviewed the {preview.provisionalWeeks} provisional placements. They are <b>not</b> official SGU teaching weeks, and I can change them later.</span>
+          <span>I reviewed the {preview.provisionalWeeks} provisional placements. They are <b>not</b> verified teaching weeks, and I can change them later.</span>
         </label>}
         {preview.issues.length > 0 && <div className="tracker-bulk-issues" role="note">
           <b>{preview.issues.length} source/module groups held for review</b>

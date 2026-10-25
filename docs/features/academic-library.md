@@ -30,11 +30,12 @@ Catalog pages contain at most 24 metadata records. Preview retrieves template te
 an explicit download passes hash-verified course files through the canonical private
 library installer. File indexes paginate independently of the REST row limit.
 
-`academic-content` is a private bucket. Uploads default to private. Owners may request
-group/shared visibility; another account can read only approved revisions. Reviewer
-membership and group membership require administrative authorization. Withdrawal
-revokes metadata and media access together. Previously approved revisions remain
-readable during review of a replacement while the collection remains shared.
+`academic-content` is a private bucket. Uploads default to private. The base migration
+introduced group/shared visibility behind reviewer approval; the release-projection
+migration below supersedes that direct publication path. Source collections stay
+private and another account reads only projected files. Reviewer and group membership
+still require administrative authorization. Withdrawal revokes release metadata and
+media access together.
 
 The additive `20261013220000_content_storage_boundaries.sql` migration also uses
 restrictive Storage policies. PostgreSQL combines ordinary policies with OR, so an
@@ -64,6 +65,36 @@ not silently reclassify the collection. Matching classification still permits a 
 source revision or an idempotent retry. This migration is locally tested only, not
 applied to a hosted database.
 
+The forward `20261023213000_academic_release_catalog.sql` contract separates private
+source revisions from learner releases. An owner attests an opaque profile key,
+content kind, classification, verified-rights state, license-evidence SHA-256 and
+publisher opt-in together with a separately generated projection manifest. Projection
+files use a dedicated collection release namespace; candidate completion verifies all
+objects and publication verifies them again. A reviewer can publish only that ready
+candidate for the current approved ready revision when both review and held counts are
+zero. Publication creates immutable release and file rows; it does not edit or delete
+the source revision.
+
+The projection builder revalidates the complete private upload, emits only ready
+questions, and preserves answer keys, explanations and every referenced question or
+answer-reveal image. It removes extracted source text, review notes, original binaries
+and source-only catalog entries. Release paths allow only `catalog.json`, templates
+and bank content, and reject audit, original, private, recovery, reference and source
+segments. Learners can read only those projected objects. The legacy source catalog,
+deep-link and enrollment boundary becomes owner-only after this migration, so a
+release cannot make a private revision reachable through an older RPC.
+
+`universal` releases appear for every authenticated account. A valid opaque profile
+key adds its matching releases while retaining the universal fallback; the key is a
+catalog selector, not an authorization secret. Owned private collections remain
+available to their owner. Mixed material that cannot yet be filed may use a private
+moderation collection with `Term 0` / `Unfiled`; database constraints prevent that
+collection from sharing or enrollment. It remains source-preserving review storage,
+not learner-ready content. This migration and its client reader are locally tested
+only and have not been applied or used to publish private material. Existing daily
+challenge records still use the owner-only legacy source boundary and need a separate
+release-projection integration before they can return to learner discovery.
+
 The current upload control accepts one prepared course with either one reviewed plan or
 an explicitly confirmed term and module for unscheduled content, at most 1,500 files /
 512 MiB total and **50 MiB per uploaded file**. Files through 6 MiB use the immutable
@@ -72,11 +103,12 @@ resume an eligible partial transfer. Every stored object is downloaded and SHA-2
 verified before revision activation. Original binaries above 50 MiB remain local-only
 with an explicit catalog receipt, while their reviewed question packages may still
 upload. Unreferenced ZIP entries and learner backup fields are not uploaded. Local paths
-in catalog entries are replaced by source filenames. Sharing controls now live under the
-owned course preview. Private, shared and membership-backed group choices call the
-existing permissioned RPC. Same-scope refresh preserves the open plan; account/query
-changes still discard prior metadata immediately. The administrative review interface
-is not yet delivered.
+in catalog entries are replaced by source filenames. The owned-course visibility
+control remains a compatibility surface, but the forward release migration accepts
+only private source visibility; publication uses owner attestation plus administrative
+review. Same-scope refresh preserves the open plan; account/query changes still
+discard prior metadata immediately. The administrative release interface is not yet
+delivered.
 
 Account requests reuse the recovery owner's `accountOperationClient`: requests retain
 the starting token and reject a changed account. Catalog results are scoped by account

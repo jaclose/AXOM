@@ -227,7 +227,7 @@ export function previewCurriculumTemplateInstallation(
         reason: problems.length ? `Source parsing needs review: ${problems.slice(0, 2).join(" ")}`
           : badSourceTerms.length ? `Source academic term is not a supported Term 1–5 identity: ${badSourceTerms.join(", ")}.`
             : statedTerms.size > 1 ? "Conflicting explicit academic terms in sources."
-              : owners.length === 0 ? "No unique match in the SGU academic outline."
+              : owners.length === 0 ? "No unique match in the AXOM academic outline."
                 : "Multiple courses own this module; choose its term and course before installing.",
       });
       continue;

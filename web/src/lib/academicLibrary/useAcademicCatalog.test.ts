@@ -1,13 +1,23 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { listAcademicCourses, type AcademicCourse } from "./client";
+import { academicProfileKey, listAcademicCourses, type AcademicCourse } from "./client";
 import { useAcademicCatalog } from "./useAcademicCatalog";
 
-vi.mock("./client", () => ({ listAcademicCourses: vi.fn() }));
+vi.mock("./client", async importOriginal => ({
+  ...await importOriginal<typeof import("./client")>(),
+  listAcademicCourses: vi.fn(),
+}));
 const course = (id: string): AcademicCourse => ({ id, title: id, module: "SAMPLE", term: "Term 1", visibility: "private", review_status: "pending", current_revision_id: id, owned: true, ready_questions: 1, review_questions: 0 });
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.resetAllMocks(); });
+
+it("accepts bounded opaque profile keys and rejects labels or paths", () => {
+  expect(academicProfileKey(undefined)).toBe("universal");
+  expect(academicProfileKey("profile.core-1")).toBe("profile.core-1");
+  expect(() => academicProfileKey("A learner profile")).toThrow(/profile key is invalid/);
+  expect(() => academicProfileKey("../profile")).toThrow(/profile key is invalid/);
+});
 
 it("discards a private response after switching accounts, including sign-out", async () => {
   vi.useFakeTimers();
@@ -57,4 +67,26 @@ it("keeps the open course mounted during same-account refresh, but clears it for
   expect(result.current.courses[0].visibility).toBe("shared");
   rerender({ query: "different" });
   expect(result.current.courses).toEqual([]);
+});
+
+it("isolates an opaque profile change and includes it in first-page and pagination requests", async () => {
+  vi.useFakeTimers();
+  vi.mocked(listAcademicCourses)
+    .mockResolvedValueOnce(Array.from({ length: 24 }, (_, i) => course(String(i))))
+    .mockResolvedValueOnce([course("profile-page")])
+    .mockResolvedValueOnce([course("other-profile")]);
+  const { result, rerender } = renderHook(
+    ({ profile }) => useAcademicCatalog("a", "", "", profile),
+    { initialProps: { profile: "profile.core-1" } },
+  );
+  await act(() => vi.advanceTimersByTimeAsync(200));
+  expect(listAcademicCourses).toHaveBeenNthCalledWith(1, "", "", undefined, "profile.core-1");
+  await act(() => result.current.loadMore());
+  expect(listAcademicCourses).toHaveBeenNthCalledWith(2, "", "", "23", "profile.core-1");
+
+  rerender({ profile: "profile.other" });
+  expect(result.current.courses).toEqual([]);
+  await act(() => vi.advanceTimersByTimeAsync(200));
+  expect(listAcademicCourses).toHaveBeenNthCalledWith(3, "", "", undefined, "profile.other");
+  expect(result.current.courses.map(item => item.id)).toEqual(["other-profile"]);
 });

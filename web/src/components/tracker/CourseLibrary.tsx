@@ -28,11 +28,12 @@ export function CourseLibrary({ onClose, onTemplate, onOpen, onCreate }: {
 }) {
   const s = useStore();
   const accountId = useAccount(account => account.user?.id);
+  const profileKey = s.profile.educationTrack ?? "universal";
   const [query, setQuery] = useState("");
   const [term, setTerm] = useState("");
   const [view, setView] = useState<"available" | "mine" | "all">("available");
   const { courses: connected, loading: catalogLoading, error: catalogError, more: moreAvailable,
-    loadMore: more, retry: retryCatalog } = useAcademicCatalog(accountId, query, term);
+    loadMore: more, retry: retryCatalog } = useAcademicCatalog(accountId, query, term, profileKey);
   const [selected, setSelected] = useState<string | null>(() => new URL(window.location.href).searchParams.get("course"));
   const [linkedCourse, setLinkedCourse] = useState<{ accountId: string; course: AcademicCourse }>();
   const [linkedError, setLinkedError] = useState("");
@@ -42,12 +43,12 @@ export function CourseLibrary({ onClose, onTemplate, onOpen, onCreate }: {
     let cancelled = false;
     setLinkedCourse(undefined); setLinkedError("");
     if (accountId && remoteId && !listedCourse) {
-      void getAcademicCourse(remoteId, accountId).then(course => {
+      void getAcademicCourse(remoteId, accountId, profileKey).then(course => {
         if (!cancelled) setLinkedCourse({ accountId, course });
       }).catch(cause => { if (!cancelled) setLinkedError(cause instanceof Error ? cause.message : "This course could not be opened."); });
     }
     return () => { cancelled = true; };
-  }, [accountId, remoteId, listedCourse]);
+  }, [accountId, profileKey, remoteId, listedCourse]);
   const heading = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const url = new URL(window.location.href);

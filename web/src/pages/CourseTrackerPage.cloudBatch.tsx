@@ -319,7 +319,7 @@ export function PrivateAcademicBatchUpload() {
               after original-source confirmation, the reviewed filing controls placement.
             </small>}
             {["Term 4", "Term 5"].includes(sourceScopes[item.key]?.term ?? "") && <small>
-              Check course/cohort version: current SGU catalog lists PCM 500/PCM 501
+              Check course/cohort version: the reviewed source catalog lists PCM 500/PCM 501
               and MI, while older AXOM shells may say PPM 500/PPM 501 or NMI.
               These are not interchangeable source proofs. Do not silently refile.
             </small>}

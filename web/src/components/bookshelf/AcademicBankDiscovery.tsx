@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ArrowUpRight, BookOpen, RefreshCw } from "lucide-react";
 import { useAccount } from "../../lib/account/accountStore";
 import { useAcademicCatalog } from "../../lib/academicLibrary/useAcademicCatalog";
+import { useStore } from "../../lib/store";
 import { openAcademicCourse } from "../../lib/academicLibrary/navigation";
 import { GButton, GlassCard, PanelHeader } from "../ui/primitives";
 import "../../styles/course-library.css";
@@ -9,8 +10,9 @@ import "../../styles/course-library.css";
 /** QBank and Course Library discover the same permissioned collection. */
 export function AcademicBankDiscovery() {
   const accountId = useAccount(state => state.user?.id);
+  const profileKey = useStore(state => state.profile.educationTrack ?? "universal");
   const [query, setQuery] = useState("");
-  const catalog = useAcademicCatalog(accountId, query, "");
+  const catalog = useAcademicCatalog(accountId, query, "", profileKey);
   return <GlassCard pad>
     <section className="academic-bank-discovery" aria-label="Available question banks">
       <PanelHeader headingLevel={2} title="Study by course" sub="Preview the weekly plan, load the weeks you need, and open their reviewed question sets."

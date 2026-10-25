@@ -31,7 +31,7 @@ import type { DashboardWidgetId, EducationTrackId, ExperienceFocusId, NoctyriumS
 import { HardDrive } from "lucide-react";
 import { SCHEMA_VERSION, APP_BUILD_LABEL } from "../../lib/seed";
 import { lastBackupAt } from "../../lib/backup";
-import { listLocalBackups } from "../../lib/localBackup";
+import { listLocalBackups, refreshLocalBackupSummaries } from "../../lib/localBackup";
 import { restoreLocalWorkspaceBackup } from "../../lib/storageRecovery";
 import { runStorageMigrations } from "../../lib/storageMigrations";
 import { requestOnboardingRerun } from "../../lib/uiStore";
@@ -216,6 +216,8 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
   const avatarRef = useRef<HTMLInputElement>(null);
   const [msg, setMsg] = useState<string>("");
   const [backupBusy, setBackupBusy] = useState(false);
+  const [hydratedLocalBackups, setHydratedLocalBackups] = useState<ReturnType<typeof listLocalBackups>>([]);
+  const localBackups = mergeLocalBackupSummaries(listLocalBackups(), hydratedLocalBackups);
   const [tab, setTab] = useState<SettingsSection>(() => normalizeSettingsTab(initialTab));
   const [personalTab, setPersonalTab] = useState<PersonalizationSubsection>(() => initialSubsection(initialTab));
   const tabsId = useId();
@@ -247,8 +249,15 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
       body: "Technical versions, diagnostics, optional provider tools, and destructive reset controls.",
     },
   };
-  const localBackups = listLocalBackups();
   const exportedAt = lastBackupAt();
+
+  useEffect(() => {
+    let active = true;
+    void refreshLocalBackupSummaries()
+      .then((backups) => { if (active) setHydratedLocalBackups(backups); })
+      .catch(() => { /* Local markers remain available when IndexedDB discovery is blocked. */ });
+    return () => { active = false; };
+  }, []);
 
   function onTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, section: SettingsSection) {
     const index = SETTINGS_SECTIONS.findIndex((item) => item.id === section);
@@ -536,6 +545,20 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
       {viewingPromise && promise && <SavedPromise onClose={() => setViewingPromise(false)} />}
     </Modal>
   );
+}
+
+function mergeLocalBackupSummaries(
+  ...groups: Array<ReturnType<typeof listLocalBackups>>
+): ReturnType<typeof listLocalBackups> {
+  const byKey = new Map<string, ReturnType<typeof listLocalBackups>[number]>();
+  for (const summaries of groups) {
+    for (const summary of summaries) {
+      const existing = byKey.get(summary.key);
+      if (!existing || summary.savedAt >= existing.savedAt) byKey.set(summary.key, summary);
+    }
+  }
+  return [...byKey.values()].sort((a, b) =>
+    b.savedAt.localeCompare(a.savedAt) || b.key.localeCompare(a.key));
 }
 
 function DailyUtilitiesSettings() {
@@ -929,7 +952,7 @@ function PersonalizationPanel() {
                   <b>{option.label}</b>
                   <span>{option.blurb}</span>
                 </div>
-                <Tag tone={option.group === "SGU Terms" ? "cyan" : option.group === "Boards" ? "purple" : "green"}>{option.group}</Tag>
+                <Tag tone={option.group === "Course Terms" ? "cyan" : option.group === "Boards" ? "purple" : "green"}>{option.group}</Tag>
                 <GButton size="sm" onClick={() => makePrimary(option.id)} disabled={primary}>
                   {primary ? "Primary" : "Make primary"}
                 </GButton>
@@ -943,12 +966,12 @@ function PersonalizationPanel() {
         <div className="settings-card-head">
           <span className="settings-card-icon"><HardDrive size={ICON_SIZE.body} aria-hidden="true" /></span>
           <div>
-            <h4 id="resources-title">SGU shared drives</h4>
-            <p>Show SGU-specific drives on the Resources page. Your personal drive and universal board packs always stay.</p>
+            <h4 id="resources-title">Course resource drives</h4>
+            <p>Show course-specific drives on the Resources page. Your personal drive and universal board packs always stay.</p>
           </div>
           <button type="button" className={`onboarding-switch ${showSgu ? "on" : ""}`}
             onClick={() => store.updateProfile({ showSguResources: !showSgu })}
-            aria-label="Show SGU shared drives" aria-pressed={showSgu} title={showSgu ? "SGU drives shown" : "SGU drives hidden"}>
+            aria-label="Show course resource drives" aria-pressed={showSgu} title={showSgu ? "Course drives shown" : "Course drives hidden"}>
             <span />
           </button>
         </div>

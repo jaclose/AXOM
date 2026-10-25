@@ -44,6 +44,39 @@ describe("flat question export preservation", () => {
       { ...row("example-2"), correctAnswer: { labels: ["A"], evidence: "printed-key" } }]);
     expect(catalog.sources.find(source => source.bankFile)!).toMatchObject({ ready: 1, review: 1 });
   });
+  it("lifts exact source-audit teaching fields without promoting human review", async () => {
+    const sourceTeaching = {
+      verifiedExistingAnswer: "A", whyCorrect: "A follows from the inspected source.",
+      mechanism: "The source supplies one causal step.", highYieldPrinciple: "Carry the causal step forward.",
+      distractors: [{ label: "B", option: "Second", explanation: "B reverses the relation." }],
+      sourceReferences: [{ sourceId: "slides", pdfPages: [12], purpose: "Mechanism" }],
+      factCheck: {
+        status: "SOURCE_CHECKED", checkedOn: "2026-10-23", checkedBy: "Source comparison",
+        humanReviewerApproved: false, answerChanged: false, limitations: [],
+        answerKeyEvidence: { sourceId: "questions", pdfPage: 3, questionNumber: 1, printedAnswer: "A", method: "Rendered-page inspection" },
+      },
+    };
+    const { banks } = await fixture([{ ...row(), correctAnswer: { labels: ["A"], evidence: "printed-key" }, ...sourceTeaching }]);
+    expect(banks[0].pkg.questions[0].teaching).toMatchObject({
+      version: 1, answerLabel: "A", highYieldRule: sourceTeaching.highYieldPrinciple,
+      factCheck: { status: "SOURCE_CHECKED", humanReviewerApproved: false, answerChanged: false },
+    });
+  });
+  it("accepts canonical teaching but never derives its answer label from correctAnswer", async () => {
+    const canonical = {
+      version: 1, answerLabel: "A", whyCorrect: "Why", mechanism: "How", highYieldRule: "Rule",
+      distractors: [{ label: "B", explanation: "Why not" }], sourceReferences: [],
+      factCheck: { status: "SOURCE_CHECKED", humanReviewerApproved: false, answerChanged: false, limitations: [] },
+    };
+    const { banks } = await fixture([
+      { ...row(), correctAnswer: { labels: ["A"], evidence: "printed-key" }, teaching: canonical },
+      { ...row("example-2"), correctAnswer: { labels: ["A"], evidence: "printed-key" },
+        whyCorrect: "Why", mechanism: "How", highYieldPrinciple: "Rule", distractors: canonical.distractors,
+        sourceReferences: [], factCheck: canonical.factCheck },
+    ]);
+    expect(banks[0].pkg.questions[0].teaching).toEqual(canonical);
+    expect(banks[0].pkg.questions[1].teaching).toBeUndefined();
+  });
   it.each(["H", "I"])("retains all nine lowercase choice fields and the source key %s", async (label) => {
     const labels = "ABCDEFGHI".split("");
     const choices = Object.fromEntries(labels.map(choice => [choice.toLowerCase(), `Source option ${choice}`]));

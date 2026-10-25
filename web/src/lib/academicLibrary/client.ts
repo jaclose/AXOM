@@ -19,11 +19,15 @@ export interface AcademicCourse {
   owned: boolean;
   ready_questions: number;
   review_questions: number;
+  release_id?: string;
+  profile_key?: string;
+  content_kind?: "course" | "question-bank" | "mixed";
+  classification?: Record<string, unknown>;
 }
 export interface AcademicPreview {
   id: string;
   collection_id: string;
-  source_revision?: string;
+  source_revision?: string | null;
   template_text: string;
   ready_questions: number;
   review_questions: number;
@@ -43,14 +47,42 @@ export async function academicClient(accountId?: string): Promise<SupabaseClient
 }
 
 /** Catalog responses contain bounded metadata only, never questions or media. */
-export async function listAcademicCourses(search = "", term = "", afterId?: string): Promise<AcademicCourse[]> {
+export function academicProfileKey(value: string | undefined): string {
+  const profile = value?.trim() || "universal";
+  if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(profile)) throw new Error("The academic profile key is invalid.");
+  return profile;
+}
+
+const releaseRpcUnavailable = (error: unknown) => {
+  if (!error || typeof error !== "object") return false;
+  const record = error as { code?: unknown; message?: unknown };
+  return ["42883", "PGRST202"].includes(String(record.code ?? ""))
+    || /academic_release_(catalog|course).*not found/i.test(String(record.message ?? ""));
+};
+
+export async function listAcademicCourses(
+  search = "", term = "", afterId?: string, profileKey = "universal",
+): Promise<AcademicCourse[]> {
   const client = await academicClient();
-  const { data, error } = await client.rpc("academic_catalog", { search, term_filter: term, after_id: afterId ?? null });
+  const profile = academicProfileKey(profileKey);
+  let { data, error } = await client.rpc("academic_release_catalog", {
+    search, term_filter: term, after_id: afterId ?? null, profile_key: profile,
+  });
+  if (error && profile === "universal" && releaseRpcUnavailable(error)) {
+    ({ data, error } = await client.rpc("academic_catalog", { search, term_filter: term, after_id: afterId ?? null }));
+  }
   if (error) throw new Error("The academic collection could not be loaded. Your downloaded courses are unchanged.");
   return readAcademicCourses(data);
 }
-export async function getAcademicCourse(collection: string, accountId: string): Promise<AcademicCourse> {
-  const { data, error } = await (await academicClient(accountId)).rpc("academic_course", { collection });
+export async function getAcademicCourse(collection: string, accountId: string, profileKey = "universal"): Promise<AcademicCourse> {
+  const client = await academicClient(accountId);
+  const profile = academicProfileKey(profileKey);
+  let { data, error } = await client.rpc("academic_release_course", {
+    collection, profile_key: profile,
+  });
+  if (error && profile === "universal" && releaseRpcUnavailable(error)) {
+    ({ data, error } = await client.rpc("academic_course", { collection }));
+  }
   if (error || !data) throw new Error("This course is unavailable to this account. Your saved material is unchanged.");
   const course = readAcademicCourses([data])[0];
   if (course.id !== collection) throw new Error("The course identity did not match this link.");
@@ -60,13 +92,29 @@ function readAcademicCourses(data: unknown): AcademicCourse[] {
   if (!Array.isArray(data) || data.length > 24 || data.some(row => !row || !uuid(row.id) || !uuid(row.current_revision_id)
     || ![row.title, row.module, row.term].every(value => typeof value === "string" && value.length > 0 && value.length <= 180)
     || typeof row.owned !== "boolean" || !counts(row) || !["private", "group", "shared"].includes(row.visibility)
-    || !["pending", "approved", "rejected"].includes(row.review_status))) throw new Error("The catalog response is invalid.");
+    || !["pending", "approved", "rejected"].includes(row.review_status)
+    || (row.release_id !== null && row.release_id !== undefined && !uuid(row.release_id))
+    || (row.profile_key !== null && row.profile_key !== undefined && academicProfileKey(row.profile_key) !== row.profile_key)
+    || (row.content_kind !== null && row.content_kind !== undefined && !["course", "question-bank", "mixed"].includes(row.content_kind))
+    || (row.classification !== undefined && (!row.classification || typeof row.classification !== "object" || Array.isArray(row.classification))))) {
+    throw new Error("The catalog response is invalid.");
+  }
   return data as AcademicCourse[];
 }
 const uuid = (value: unknown): value is string => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 const counts = (row: { ready_questions: unknown; review_questions: unknown }) => [row.ready_questions, row.review_questions].every(value => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 100000);
 export async function academicPreview(revision: string, accountId?: string): Promise<AcademicPreview> {
   const client = await academicClient(accountId);
+  const released = await client.rpc("academic_release_preview", { revision });
+  if (!released.error && released.data) {
+    const data = released.data;
+    if (data.id !== revision || !uuid(data.collection_id) || data.source_revision !== null
+      || typeof data.template_text !== "string"
+      || new TextEncoder().encode(data.template_text).length > 262144 || !counts(data)) {
+      throw new Error("This course release is invalid. Your current course has not changed.");
+    }
+    return data as AcademicPreview;
+  }
   const { data, error } = await client.from("academic_revisions").select("id,collection_id,source_revision,template_text,ready_questions,review_questions").eq("id", revision).single();
   if (error || !data || data.id !== revision || !uuid(data.collection_id) || typeof data.template_text !== "string" || new TextEncoder().encode(data.template_text).length > 262144 || !counts(data)) throw new Error("This course revision is unavailable. Your current course has not changed.");
   return data as AcademicPreview;
@@ -76,20 +124,35 @@ export async function academicPreview(revision: string, accountId?: string): Pro
  * precede every adoption, including media and original source documents. */
 export async function academicLibraryReader(client: SupabaseClient, revision: string): Promise<LibraryReader & { files: AcademicFile[] }> {
   const manifest: AcademicFile[] = [];
+  const released = await client.rpc("academic_release_files_for_revision", { revision });
+  let usesReleaseObjects = false;
+  if (!released.error && Array.isArray(released.data) && released.data.length) {
+    manifest.push(...released.data as AcademicFile[]);
+    usesReleaseObjects = true;
+  }
   // Supabase's row cap also applies to file metadata; never mistake a truncated
   // index for a complete course when a revision contains more than 1,000 files.
-  for (let start = 0; start <= 1500; start += 500) {
-    const { data, error } = await client.from("academic_files").select("path,object_path,sha256,byte_size,mime_type").eq("revision_id", revision).order("path").range(start, start + 499);
-    if (error || !Array.isArray(data)) throw new Error("The course file index is unavailable. Keep your local copy and retry.");
-    manifest.push(...data as AcademicFile[]);
-    if (data.length < 500) break;
+  if (!manifest.length) {
+    for (let start = 0; start <= 1500; start += 500) {
+      const { data, error } = await client.from("academic_files").select("path,object_path,sha256,byte_size,mime_type").eq("revision_id", revision).order("path").range(start, start + 499);
+      if (error || !Array.isArray(data)) throw new Error("The course file index is unavailable. Keep your local copy and retry.");
+      manifest.push(...data as AcademicFile[]);
+      if (data.length < 500) break;
+    }
   }
   if (!manifest.length || manifest.length > 1500) throw new Error("Invalid course file manifest.");
   const files = new Map(manifest.map(file => [safeLibraryPath(file.path), file]));
   if (files.size !== manifest.length || !files.has("catalog.json")) throw new Error("Invalid course file manifest.");
   let bytes = 0;
   for (const file of files.values()) {
-    if (!/^[a-f0-9]{64}$/.test(file.sha256) || !Number.isSafeInteger(file.byte_size) || file.byte_size < 1 || file.byte_size > 50 * 1024 * 1024 || typeof file.object_path !== "string" || !uuid(file.object_path.split("/")[0]) || file.object_path.split("/").length !== 2 || !file.object_path.endsWith(`/${file.sha256}`)) throw new Error("Invalid course file manifest.");
+    const objectParts = typeof file.object_path === "string" ? file.object_path.split("/") : [];
+    const sourceObject = objectParts.length === 2 && objectParts[1] === file.sha256;
+    const releaseObject = objectParts.length === 3 && objectParts[1] === "release" && objectParts[2] === file.sha256;
+    if (!/^[a-f0-9]{64}$/.test(file.sha256) || !Number.isSafeInteger(file.byte_size)
+      || file.byte_size < 1 || file.byte_size > 50 * 1024 * 1024
+      || !uuid(objectParts[0]) || (usesReleaseObjects ? !releaseObject : !sourceObject)) {
+      throw new Error("Invalid course file manifest.");
+    }
     bytes += file.byte_size;
   }
   if (bytes > 512 * 1024 * 1024) throw new Error("This course exceeds the supported download size.");
@@ -126,6 +189,10 @@ export async function downloadAcademicCourse(revision: string, progress: (messag
 }
 export async function enrollAcademicCourse(course: AcademicCourse, weeks: number[], accountId: string): Promise<void> {
   const client = await academicClient(accountId);
-  const { error } = await client.rpc("academic_enroll", { collection: course.id, revision: course.current_revision_id, weeks });
+  const request = course.release_id
+    ? client.rpc("academic_enroll_release", { collection: course.id, revision: course.current_revision_id,
+      weeks, profile_key: academicProfileKey(course.profile_key) })
+    : client.rpc("academic_enroll", { collection: course.id, revision: course.current_revision_id, weeks });
+  const { error } = await request;
   if (error) throw new Error("Your course is saved on this device. Account enrollment needs another try.");
 }

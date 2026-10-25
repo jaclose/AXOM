@@ -10,7 +10,7 @@
 import type { AssetRole, QuestionBlock, TableBlock } from "./blocks";
 
 /** Bumped only when an older AXOM could misread a newer package. See `MIGRATIONS` in packageJson.ts. */
-export const PACKAGE_SCHEMA_VERSION = 1;
+export const PACKAGE_SCHEMA_VERSION = 2;
 /** Source-backed MCQs may have nine labelled alternatives; larger extractions remain held. */
 export const MAX_PACKAGE_CHOICES = 9;
 
@@ -155,6 +155,88 @@ export interface QuestionFlag {
   message: string;
 }
 
+/**
+ * Review state for additive teaching. This is deliberately separate from the
+ * answer evidence on the immutable source question: checking an explanation
+ * must never promote or replace a question key.
+ */
+export const TEACHING_FACT_CHECK_STATUSES = [
+  "UNVERIFIED",
+  "SOURCE_CHECKED",
+  "INDEPENDENTLY_CHECKED",
+  "REVIEW_REQUIRED",
+  "CONFLICT",
+] as const;
+export type TeachingFactCheckStatus = (typeof TEACHING_FACT_CHECK_STATUSES)[number];
+
+export interface TeachingDistractor {
+  label: string;
+  /** The option wording copied from the reviewed teaching source, when supplied. */
+  option?: string;
+  explanation: string;
+  /** What would have to change for the option to fit, when the source states it. */
+  wouldFitIf?: string;
+}
+
+/**
+ * A source reference is retained exactly as the teaching file names it. An
+ * optional documentId is the only bridge into AXOM's source library; importers
+ * never guess that bridge from a title or file name.
+ */
+export interface TeachingSourceReference {
+  sourceId: string;
+  pdfPages: number[];
+  purpose: string;
+  documentId?: string;
+}
+
+export interface TeachingAnswerKeyEvidence {
+  sourceId: string;
+  pdfPage: number;
+  questionNumber?: number;
+  printedAnswer?: string;
+  method: string;
+}
+
+export interface TeachingSupportingExcerpt {
+  sourceId: string;
+  pdfPage: number;
+  excerpt: string;
+  inspection?: string;
+}
+
+export interface TeachingFactCheck {
+  status: TeachingFactCheckStatus;
+  checkedOn?: string;
+  checkedBy?: string;
+  /** False means a proposal waiting for review, never reviewed teaching. */
+  humanReviewerApproved: boolean;
+  /** Must be false before this metadata may become a QuestionAnalysis. */
+  answerChanged: boolean;
+  limitations: string[];
+  answerKeyEvidence?: TeachingAnswerKeyEvidence;
+  supportingExcerpts?: TeachingSupportingExcerpt[];
+}
+
+/**
+ * Versioned, additive teaching beside an immutable source question. The
+ * source stem, choices and key continue to live in their original fields.
+ */
+export interface PackageTeaching {
+  version: 1;
+  /** The already-verified source answer this teaching was written about. */
+  answerLabel: string;
+  /** Optional precise topic; filing remains owned by the question itself. */
+  concept?: string;
+  whyCorrect: string;
+  mechanism: string;
+  highYieldRule: string;
+  distractors: TeachingDistractor[];
+  /** Kept even when none can yet be resolved to a stored AXOM document. */
+  sourceReferences: TeachingSourceReference[];
+  factCheck: TeachingFactCheck;
+}
+
 export interface PackageQuestion {
   id: string;
   /** Filing. Absent means "as the manifest says"; see `questionScope`. */
@@ -172,6 +254,8 @@ export interface PackageQuestion {
   choiceTable?: TableBlock;
   correctAnswer?: AnswerKey;
   explanation?: QuestionBlock[];
+  /** Additive teaching; never rewrites the source question above. */
+  teaching?: PackageTeaching;
   assets: QuestionAsset[];
   flags?: QuestionFlag[];
   provenance: ProvenanceMetadata;
