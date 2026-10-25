@@ -4,7 +4,7 @@ import type { ExperimentalFlags } from "../../lib/types";
 import {
   LayoutGrid, BookOpen, BadgeCheck, Brain, LineChart, Calendar, ListChecks,
   BookText, Share2, Library, Folder, Link, Wand2, LifeBuoy, ClipboardCheck, Trophy, Compass, Info, CalendarCheck,
-  HelpCircle, BookOpenCheck, WholeWord, Stethoscope, Gamepad2, Blocks, AudioWaveform,
+  HelpCircle, Users, BookOpenCheck, WholeWord, Stethoscope, Gamepad2, Blocks, AudioWaveform,
 } from "lucide-react";
 
 export interface NavItem {
@@ -68,6 +68,7 @@ export const NAV = [
   { id: "anki", label: "Anki Lab", subtitle: "Turn lectures, DLAs & slides into Anki cards", icon: Wand2 },
   { id: "prompts", label: "Prompt Library", subtitle: "Reusable AI prompts for study workflows", icon: Library },
   { id: "integrations", label: "Integrations", subtitle: "Connect Anki, calendar, drives, and more", icon: Share2 },
+  { id: "community", label: "Community", subtitle: "Friends, shared study updates and weekly standings", icon: Users },
   { id: "leaderboards", label: "Leaderboards", subtitle: "Daily challenges and personal study history", icon: Trophy },
   { id: "activity", label: "Activity History", subtitle: "Full local study ledger with filters and export", icon: Calendar },
   // After Tools
@@ -96,6 +97,7 @@ export const MODULE_STATUS_BY_NAV_ID = {
   integrations: { status: "wip" },
   appchecker: { status: "wip" },
   leaderboards: { status: "wip" },
+  community: { status: "new", announcementId: "community-optin-v1" },
 } as const satisfies Partial<Record<NavItemId, ModuleStatusAssignment>>;
 
 export function getNavModuleStatusAssignment(id: string): ModuleStatusAssignment | undefined {
@@ -115,7 +117,7 @@ export const navById = (id: string): NavItem | undefined => NAV.find((n) => n.id
 // Sidebar order (Alpha 2). Tools is a collapsible folder.
 export const SIDEBAR_TODAY = ["dashboard"] as const;
 export const SIDEBAR_LEARN = ["courses", "tracker", "questions", "anki"] as const;
-export const SIDEBAR_REVIEW = ["productivity", "journal", "reports"] as const;
+export const SIDEBAR_REVIEW = ["productivity", "journal", "reports", "community"] as const;
 export const SIDEBAR_TOP = [...SIDEBAR_TODAY, ...SIDEBAR_LEARN, ...SIDEBAR_REVIEW];
 export const SIDEBAR_PREP = ["step", "premed", "appchecker"];
 // Tools are the daily-use tools, Soundscapes first (JD, Ideas 1 + 3). Rarely
