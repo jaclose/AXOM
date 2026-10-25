@@ -2,11 +2,12 @@ import type { ParsedQuestionDraft } from "./questionParse";
 import type { DeckPage } from "./deckPages";
 import browserPdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
-type Matrix = [number, number, number, number, number, number];
+export type Matrix = [number, number, number, number, number, number];
 interface Box { left: number; bottom: number; right: number; top: number }
 interface Label { key: string; x: number; y: number; height: number }
 
-function multiply(a: Matrix, b: Matrix): Matrix {
+/** `a` after `b`: maps a point through `b`, then through `a`. */
+export function multiply(a: Matrix, b: Matrix): Matrix {
   return [a[0]*b[0]+a[2]*b[1], a[1]*b[0]+a[3]*b[1], a[0]*b[2]+a[2]*b[3], a[1]*b[2]+a[3]*b[3], a[0]*b[4]+a[2]*b[5]+a[4], a[1]*b[4]+a[3]*b[5]+a[5]];
 }
 

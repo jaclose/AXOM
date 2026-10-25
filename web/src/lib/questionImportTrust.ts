@@ -54,6 +54,7 @@ export interface DraftImportSummary {
 const EXPLANATION_OPTION_RE = /^(?:answer\s+explanation|explanation|rationale|reasoning|discussion|teaching\s+point|key\s+concept|why|(?:correct|incorrect)\s+feedback)\s*[:\-–]/i;
 
 const ANSWER_CONFLICT_RULES = new Set([
+  "conflict.pdf-emphasis",
   "conflict.answer-letter-vs-text",
   "conflict.explicit-answer",
   "conflict.answer-vs-explanation",
@@ -76,7 +77,7 @@ const UNRECOGNIZED_ANSWER_RULES = new Set([
   "answer.structured-ambiguous-text",
 ]);
 
-const INFERRED_OR_AMBIGUOUS_ANSWER_RULES = new Set([
+export const INFERRED_OR_AMBIGUOUS_ANSWER_RULES: ReadonlySet<string> = new Set([
   "answer.explicit-letter-text-drift",
   "answer.text-option-match",
   "answer.trailing-text-match",

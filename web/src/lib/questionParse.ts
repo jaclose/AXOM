@@ -1211,8 +1211,13 @@ function markNumberedDraft(draft: ParsedQuestionDraft, originalBlock: string) {
     draft.questionNumber !== undefined ? `${draft.questionNumber}. ${draft.stem}` : draft.stem,
     ...draft.options.map((option) => `${option.key}. ${option.text}`),
   ].join("\n"));
+  refreshDraftConfidence(draft);
+}
+
+/** Recompute a draft's overall confidence from its per-stage confidences. */
+export function refreshDraftConfidence(draft: ParsedQuestionDraft) {
   draft.overallImportConfidence = boundedConfidence(
-    draft.questionDetectionConfidence * 0.4
+    (draft.questionDetectionConfidence ?? 0) * 0.4
       + (draft.answerDetectionConfidence ?? 0) * 0.4
       + (draft.explanationDetectionConfidence ?? 0) * 0.2,
   );

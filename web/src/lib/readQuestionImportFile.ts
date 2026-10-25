@@ -6,6 +6,7 @@ import { parseQuestionBlocks, type ParsedQuestionDraft } from "./questionParse";
 import { parsePdfQuestions } from "./pdfQuestionImport";
 import { attachPdfFigures, type FigurePlacement } from "./pdfFigures";
 import { proposePdfMarkedAnswers } from "./pdfMarkedAnswers";
+import { proposePdfEmphasisAnswers } from "./pdfEmphasisAnswers";
 import type { ImportSourceFile } from "./questionImportSave";
 import type { QuestionSource } from "./questions";
 import type { PackageManifest } from "./question-content/package";
@@ -52,10 +53,11 @@ export async function readQuestionImportFile(file: File, manifest: PackageManife
     const parsed = pdf ? parsePdfQuestions(extracted.text, extracted.pages)
       : { drafts: parseQuestionBlocks(extracted.text), notes: [], deckPages: undefined };
     const marks = pdf ? await proposePdfMarkedAnswers(bytes.slice(0), parsed.drafts, parsed.deckPages) : [];
+    const emphasis = pdf ? await proposePdfEmphasisAnswers(bytes.slice(0), parsed.drafts) : [];
     const figures = pdf ? await attachPdfFigures(bytes.slice(0), file.name, parsed.drafts, extracted.pages ?? [], parsed.deckPages)
       : { images: [] as File[], notes: [] as string[], placements: [] as FigurePlacement[] };
     return { kind: "drafts", document, drafts: parsed.drafts, source: pdf ? "pdf" : "imported",
-      images: figures.images, placements: figures.placements ?? [], warnings: [...extracted.warnings, ...parsed.notes, ...marks, ...figures.notes,
+      images: figures.images, placements: figures.placements ?? [], warnings: [...extracted.warnings, ...parsed.notes, ...marks, ...emphasis, ...figures.notes,
         ...(!parsed.drafts.length ? ["No question pattern was found. Review the source or keep it as a library document."] : [])] };
   }
   if (file.type.startsWith("image/")) return { kind: "drafts", document, drafts: [], source: "image", images: [], placements: [],

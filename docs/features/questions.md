@@ -36,6 +36,15 @@ adapters take precedence, and loose text is parsed in full within explicit limit
 Only the stored text preview is shortened. An over-limit source fails before staging
 partial questions. The original file remains available for exact recovery.
 
+PDF answer keys printed only as typography are read by `lib/pdfEmphasisAnswers.ts`:
+the single bold choice, or the single choice in a highlight colour, of each lettered
+set (fonts and fill colours come from pdf.js drawing operators, not the text layer).
+A document's marks count only when its whole convention holds: at least three sets
+mark one choice, at most 5% mark several, a colour convention uses one highlight, and
+explicitly printed keys agree. Keys inferred from explanation prose cannot veto it;
+any disagreement is flagged `conflict.pdf-emphasis` for review, never overwritten.
+`web/scripts/corpus-reparse.mjs` measures the same pass over a private corpus.
+
 Loose image mapping retains unassigned files as verified Source Library originals.
 Missing images or failed metadata writes leave review open; retry repairs the existing
 set. Structured banks keep their separate held-media review contract. Thumbnails and
