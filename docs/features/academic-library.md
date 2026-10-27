@@ -101,7 +101,8 @@ single-plan uploads keep their content hash, and each section keeps the
 content-addressed template identity the installer gives it. Older clients refuse a
 multi-section preview with an error rather than misreading it.
 
-When no section states its term, a reviewer confirms it and the upload records
+When no section states its term, a reviewer confirms it (the publisher and the
+single-package uploader both ask) and the upload records
 `planTermEvidence: "human-reviewed"` in provenance, which the content hash covers. A
 stated term always wins; a confirmation that contradicts it is refused. Hosted previews
 bind several sections to one course owner, letting an unstated section take the
@@ -129,10 +130,14 @@ uploaded on its own. `publication.ts` plans one course per term and module:
   native-package catalogs), so publishing a newer library version adds a revision to the
   same course. Moving a source between courses is refused by the server's source identity.
 
-Each course goes through `prepareAcademicUpload`, `uploadAcademicBatch` and the owner
-readback; nothing bypasses their checks. If a course exceeds 512 MiB or 1,500 files it
-is prepared again without its original-only files, which stay on the device and are
-reported. A course that cannot be prepared shows the validator's reason. After upload
+Each course goes through `prepareAcademicUpload`, `uploadAcademicBatch` (100 courses per
+run) and the owner readback; nothing bypasses their checks. If a course exceeds 512 MiB
+or 1,500 files it is prepared again without its original-only files, then without any
+original files; its questions and figures still publish and the course reports how many
+files stay on the device, as it does for originals over 50 MiB. Check prepares every
+selected course exactly as publishing does, on the device and without uploading, shows
+each reason, refuses a source claimed by two courses and unselects what needs attention.
+A course that cannot be prepared shows the validator's reason. After upload
 the owner may request sharing with every signed-in account, which requires attesting the
 right to share; a reviewer may approve in the same step. Every new revision returns to
 review. Workspace schema stays 34; no new store or catalog is created.
@@ -150,8 +155,9 @@ Production writes need JD's explicit approval for each step. On the authorized M
    `node scripts/prepare-private-library.mjs <inventory.json> <private-output>`, with
    the output outside the repository.
 4. Sign in to AXOM, open Course Library > Manage sources and custom courses > Publish a
-   prepared library, choose the prepared folder, confirm each proposed term and review
-   the plans and source files listed as staying on the device.
+   prepared library, choose the prepared folder, confirm each proposed term, review
+   the plans and source files listed as staying on the device, then Check the selected
+   courses and resolve or leave out what needs attention.
 5. Publish. Choose sharing and, as a reviewer, approval only for material you have the
    right to share with every account. Courses that fail keep their reason and stay
    selected; publishing again retries them and leaves verified courses unchanged.

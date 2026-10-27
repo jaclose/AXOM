@@ -20,8 +20,9 @@ Verify deployed SHA and protected index before release claims.
 ## Branch `jd-claude/eloquent-shannon-b2xof9` (2026-10-27, cloud)
 
 Base `dc055a2`. Adds whole-library publishing: one collection per term and module with
-every plan section, reviewer-confirmed plan terms, plan-less question collections,
-reviewer approval, a curriculum-ordered catalog and term-grouped QBank discovery
+every plan section, reviewer-confirmed plan terms (both uploaders), an on-device check
+before upload, plan-less question collections, reviewer approval, a curriculum-ordered
+catalog and term-grouped QBank discovery
 ([contract](features/academic-library.md#one-course-per-module-and-the-library-publisher)).
 Migration `20261027120000_academic_curriculum_catalog.sql` is replayed locally only.
 `5c04e71` fixes the privacy replay test whose fixed 2026-10-23 expiry fails main's suite.
