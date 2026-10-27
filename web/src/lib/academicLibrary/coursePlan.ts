@@ -21,6 +21,18 @@ export interface AcademicPlanTerm {
   evidence: "human-reviewed";
 }
 
+/** No plan section states the term and no reviewer confirmed one. Callers may
+ * ask a reviewer for the term and prepare the course again with it. */
+export class AcademicPlanTermRequiredError extends Error {
+  /** The module label of the plan's first section. */
+  readonly module: string;
+  constructor(module: string) {
+    super("This course plan does not name its term. Confirm its term, or start its first line with the term, for example \"T1 - FTM 1 - Lectures\".");
+    this.name = "AcademicPlanTermRequiredError";
+    this.module = module;
+  }
+}
+
 export interface AcademicCoursePlan {
   term: ReviewedFiling["term"];
   /** The first section's spelling; every section shares its canonical key. */
@@ -87,7 +99,7 @@ export function academicCoursePlan(texts: readonly string[], confirmed?: Academi
   if (stated.length && confirmed && confirmed.term !== stated[0])
     throw new Error(`The course plan states ${stated[0]}, which differs from the confirmed ${confirmed.term}.`);
   const term = (stated[0] ?? confirmed?.term) as ReviewedFiling["term"] | undefined;
-  if (!term) throw new Error("This course plan does not name its term. Confirm its term in Publish a prepared library, or start its first line with the term, for example \"T1 - FTM 1 - Lectures\".");
+  if (!term) throw new AcademicPlanTermRequiredError(sections[0].module.trim());
   const value = (pick: (section: CourseTemplateSection) => string | undefined) => new Set(sections.map(pick));
   const academicTerms = value(section => section.context?.academicTerm);
   const cohorts = value(section => section.context?.cohort);

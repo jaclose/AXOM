@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { useAccount } from "../../lib/account/accountStore";
 import { academicClient } from "../../lib/academicLibrary/client";
 import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
+import { AcademicPlanTermRequiredError } from "../../lib/academicLibrary/coursePlan";
 import {
   prepareAcademicUpload, uploadAcademicCourse,
   type AcademicUpload, type AcademicUnscheduledScope,
@@ -10,14 +11,16 @@ import { readCatalog, zipLibraryReader, type LibraryReader } from "../../lib/pri
 import { GButton } from "../ui/primitives";
 
 const TERMS: AcademicUnscheduledScope["term"][] = ["Term 1", "Term 2", "Term 3", "Term 4", "Term 5"];
-interface UnscheduledCandidate { accountId: string; reader: LibraryReader; filename: string }
+/** A package that needs a reviewer's classification before it can be prepared. */
+type Candidate = { accountId: string; reader: LibraryReader; filename: string }
+  & ({ kind: "unscheduled" } | { kind: "plan-term"; module: string });
 
 /** Private academic uploads are never published by selecting this control. */
 export function AcademicCourseUpload({ onSaved }: { onSaved: () => void }) {
   const accountId = useAccount(state => state.user?.id);
   const input = useRef<HTMLInputElement>(null);
   const [prepared, setPrepared] = useState<{ accountId: string; upload: AcademicUpload }>();
-  const [unscheduled, setUnscheduled] = useState<UnscheduledCandidate>();
+  const [pending, setPending] = useState<Candidate>();
   const [chosenTerm, setChosenTerm] = useState<AcademicUnscheduledScope["term"] | "">("");
   const [module, setModule] = useState("");
   const [confirmed, setConfirmed] = useState(false);
@@ -25,12 +28,12 @@ export function AcademicCourseUpload({ onSaved }: { onSaved: () => void }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const upload = prepared && prepared.accountId === accountId ? prepared.upload : undefined;
-  const candidate = unscheduled && unscheduled.accountId === accountId ? unscheduled : undefined;
+  const candidate = pending && pending.accountId === accountId ? pending : undefined;
 
   async function select(file: File) {
     if (!accountId) return;
     const scope = academicAccountScope(accountId);
-    setBusy(true); setError(""); setPrepared(undefined); setUnscheduled(undefined);
+    setBusy(true); setError(""); setPrepared(undefined); setPending(undefined);
     setChosenTerm(""); setModule(""); setConfirmed(false);
     setMessage("Checking the private academic package…");
     try {
@@ -41,13 +44,20 @@ export function AcademicCourseUpload({ onSaved }: { onSaved: () => void }) {
         if (!catalog.sources.some(source => source.bankFile)) {
           throw new Error("This package contains no reviewed course template or prepared questions.");
         }
-        setUnscheduled({ accountId, reader, filename: file.name });
+        setPending({ accountId, reader, filename: file.name, kind: "unscheduled" });
         setMessage("No verified weekly plan is included. Confirm the term and module from the original source. The questions will remain unscheduled.");
       } else {
-        const upload = await prepareAcademicUpload(reader);
-        scope.assertCurrent();
-        setPrepared({ accountId, upload });
-        setMessage("");
+        try {
+          const upload = await prepareAcademicUpload(reader);
+          scope.assertCurrent();
+          setPrepared({ accountId, upload });
+          setMessage("");
+        } catch (cause) {
+          if (!(cause instanceof AcademicPlanTermRequiredError)) throw cause;
+          scope.assertCurrent();
+          setPending({ accountId, reader, filename: file.name, kind: "plan-term", module: cause.module });
+          setMessage("");
+        }
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The academic package could not be read.");
@@ -55,18 +65,22 @@ export function AcademicCourseUpload({ onSaved }: { onSaved: () => void }) {
     } finally { scope.dispose(); setBusy(false); }
   }
 
-  async function prepareUnscheduled() {
-    if (!candidate || !accountId || !chosenTerm || !module.trim() || !confirmed) return;
+  async function prepareReviewed() {
+    if (!candidate || !accountId || !chosenTerm || !confirmed || (candidate.kind === "unscheduled" && !module.trim())) return;
     const scope = academicAccountScope(accountId);
-    setBusy(true); setError(""); setMessage("Validating the unscheduled collection and original source evidence…");
+    setBusy(true); setError("");
+    setMessage(candidate.kind === "unscheduled" ? "Validating the unscheduled collection and original source evidence…"
+      : "Validating the course plan with its confirmed term…");
     try {
-      const upload = await prepareAcademicUpload(candidate.reader, {
-        term: chosenTerm,
-        module: module.trim(),
-        evidence: "human-reviewed",
-      });
+      const upload = candidate.kind === "unscheduled"
+        ? await prepareAcademicUpload(candidate.reader, {
+          term: chosenTerm,
+          module: module.trim(),
+          evidence: "human-reviewed",
+        })
+        : await prepareAcademicUpload(candidate.reader, undefined, { planTerm: { term: chosenTerm, evidence: "human-reviewed" } });
       scope.assertCurrent();
-      setPrepared({ accountId, upload }); setUnscheduled(undefined); setMessage("");
+      setPrepared({ accountId, upload }); setPending(undefined); setMessage("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The classification could not be verified.");
       setMessage("");
@@ -100,8 +114,24 @@ export function AcademicCourseUpload({ onSaved }: { onSaved: () => void }) {
     }} />
     <GButton disabled={busy} onClick={() => input.current?.click()}>Choose prepared package</GButton>
 
-    {candidate && <fieldset className="stack gap10" disabled={busy} aria-label="Confirm unscheduled course classification">
-      <legend>Identify the original source — {candidate.filename}</legend>
+    {candidate?.kind === "plan-term" && <fieldset className="stack gap10" disabled={busy} aria-label="Confirm the course plan term">
+      <legend>Confirm the term for {candidate.module}: {candidate.filename}</legend>
+      <p className="sub">This weekly plan does not name its term. Choose the term from the official course schedule. AXOM records that you confirmed it and never guesses a term.</p>
+      <label className="stack gap6">Academic term
+        <select className="field" value={chosenTerm} onChange={event => setChosenTerm(event.target.value as AcademicUnscheduledScope["term"] | "")}>
+          <option value="">Choose the verified term</option>
+          {TERMS.map(term => <option key={term} value={term}>{term}</option>)}
+        </select>
+      </label>
+      <label className="row gap8">
+        <input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} />
+        <span>I checked this plan's term against the official course schedule.</span>
+      </label>
+      <GButton disabled={!chosenTerm || !confirmed} onClick={() => void prepareReviewed()}>Validate private collection</GButton>
+    </fieldset>}
+
+    {candidate?.kind === "unscheduled" && <fieldset className="stack gap10" disabled={busy} aria-label="Confirm unscheduled course classification">
+      <legend>Identify the original source: {candidate.filename}</legend>
       <p className="sub">This package has no verified week-by-week course plan. Use the source's actual academic context. AXOM will not invent a week or publish the material.</p>
       <label className="stack gap6">Academic term
         <select className="field" value={chosenTerm} onChange={event => setChosenTerm(event.target.value as AcademicUnscheduledScope["term"] | "")}>
@@ -117,13 +147,14 @@ export function AcademicCourseUpload({ onSaved }: { onSaved: () => void }) {
         <input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} />
         <span>I checked the source's term and module. Its academic week remains unassigned.</span>
       </label>
-      <GButton disabled={!chosenTerm || !module.trim() || !confirmed} onClick={() => void prepareUnscheduled()}>Validate private collection</GButton>
+      <GButton disabled={!chosenTerm || !module.trim() || !confirmed} onClick={() => void prepareReviewed()}>Validate private collection</GButton>
     </fieldset>}
 
     {upload && <div>
       <p>{upload.metadata.module} · {upload.metadata.term} · {upload.metadata.ready_questions} ready questions
         {upload.metadata.review_questions ? ` · ${upload.metadata.review_questions} awaiting review` : ""}
         {upload.provenance.weekAssignment === "unassigned" ? " · Week unassigned" : ""}
+        {upload.provenance.planTermEvidence ? " · Term you confirmed" : ""}
         { ` · ${(upload.files.reduce((sum, file) => sum + file.byte_size, 0) / 1024 / 1024).toFixed(2)} MiB` }
       </p>
       <GButton disabled={busy} onClick={() => void save()}>{busy ? "Saving privately…" : "Save private collection"}</GButton>

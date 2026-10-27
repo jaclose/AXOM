@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  ACADEMIC_PLAN_SECTION_BREAK, academicCoursePlan, joinAcademicPlanSections, splitAcademicPlanSections,
+  ACADEMIC_PLAN_SECTION_BREAK, AcademicPlanTermRequiredError, academicCoursePlan, joinAcademicPlanSections, splitAcademicPlanSections,
 } from "./coursePlan";
 
 const lectures = "CPR 1 - Lectures + DLAs:\n\nLecture 01 Synthetic cardiac cycle [Lecture]\nDLA 02 Synthetic pressure loops [DLA]\n";
@@ -30,6 +30,9 @@ describe("academic course plan sections", () => {
 
   it("never guesses a term the sections do not state", () => {
     expect(() => academicCoursePlan([lectures, groups])).toThrow(/does not name its term/);
+    // Typed so an uploader can ask the reviewer for the term and prepare again.
+    expect(() => academicCoursePlan([lectures, groups])).toThrow(expect.objectContaining({ name: "AcademicPlanTermRequiredError", module: "CPR 1" }));
+    expect(() => academicCoursePlan([groups])).toThrow(AcademicPlanTermRequiredError);
     expect(academicCoursePlan([term5])).toMatchObject({ term: "Term 5", module: "GOER", termStated: true });
     expect(academicCoursePlan([term5], { term: "Term 5", evidence: "human-reviewed" }).termStated).toBe(true);
     expect(() => academicCoursePlan([term5], { term: "Term 4", evidence: "human-reviewed" })).toThrow(/states Term 5/);
