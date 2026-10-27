@@ -64,7 +64,7 @@ not silently reclassify the collection. Matching classification still permits a 
 source revision or an idempotent retry. This migration is locally tested only, not
 applied to a hosted database.
 
-The current upload control accepts one prepared course with either one reviewed plan or
+The current upload control accepts one prepared course with its reviewed plan sections or
 an explicitly confirmed term and module for unscheduled content, at most 1,500 files /
 512 MiB total and **50 MiB per uploaded file**. Files through 6 MiB use the immutable
 Storage uploader; larger files use authenticated tus transport in 6 MiB chunks and can
@@ -75,8 +75,88 @@ upload. Unreferenced ZIP entries and learner backup fields are not uploaded. Loc
 in catalog entries are replaced by source filenames. Sharing controls now live under the
 owned course preview. Private, shared and membership-backed group choices call the
 existing permissioned RPC. Same-scope refresh preserves the open plan; account/query
-changes still discard prior metadata immediately. The administrative review interface
-is not yet delivered.
+changes still discard prior metadata immediately. Reviewers approve or withdraw a
+course's current revision from its preview; a cross-owner review queue is not delivered
+here (draft [PR #30](https://github.com/jaclose/AXOM/pull/30) lists submissions in its operator console).
+
+The forward migration `20261027120000_academic_curriculum_catalog.sql` pages
+`academic_catalog` by term number, module and title instead of collection UUID, with the
+unchanged `after_id` cursor resolved to its sort key on the server. A vanished cursor
+returns an empty page rather than restarting. Course Library sorts each term's courses
+by the SGU outline's module order and QBank's Study by course groups them by term
+(`catalogOrder.ts`). The same migration adds `academic_is_reviewer()`, a self-check the
+app asks once per account and session before offering review controls; reviewer
+membership stays a service-role decision and `academic_review()` still enforces it.
+This migration is locally replayed only, not applied to a hosted database.
+
+## One course per module and the library publisher
+
+A collection holds every reviewed plan section of one module. `coursePlan.ts` checks
+that the sections agree on module, any stated term, academic term and cohort, and that
+no two share a title; the latest declared source revision is recorded. The revision's
+`template_text` joins each section's exact text with the line
+`@@ AXOM course plan section @@`, which no valid section can contain because unknown
+`@` lines are parse problems. One section stays byte-identical to its file, so existing
+single-plan uploads keep their content hash, and each section keeps the
+content-addressed template identity the installer gives it. Older clients refuse a
+multi-section preview with an error rather than misreading it.
+
+When no section states its term, a reviewer confirms it and the upload records
+`planTermEvidence: "human-reviewed"` in provenance, which the content hash covers. A
+stated term always wins; a confirmation that contradicts it is refused. Hosted previews
+bind several sections to one course owner, letting an unstated section take the
+collection's term. A collection without a plan opens as a question collection: it
+downloads on request, records the same account reference, enrolls no weeks, and
+practices exactly its downloaded answer-ready questions.
+
+Course Library > Manage sources > Publish a prepared library reads the folder (or a ZIP up
+to 1 GB) written by `web/scripts/prepare-private-library.ts`. Folder reading is lazy and
+allows up to 32 GiB in total and 512 MiB per file because each course is prepared and
+uploaded on its own. `publication.ts` plans one course per term and module:
+
+- Sections group by module. A stated term decides; otherwise the SGU outline (or the
+  module's question packages, when unanimous) proposes one, and nothing publishes until
+  the reviewer confirms or chooses a term.
+- A question package belongs to the course matching its own manifest and question scope,
+  never its filename. Packages spanning several scopes, without Term 1-5, filed as
+  `Unfiled`, whose catalog module disagrees, or whose manual filing differs from their
+  source stay out with that reason. Duplicates publish once. Original-only PDF, DOCX and
+  TXT files join the single course with their recorded module; other types stay local.
+- A module with questions but no plan becomes an unscheduled course with
+  `source-metadata` evidence. Each course's catalog lists its sources by checksum, so a
+  reordered library yields the same content hash.
+- Collection identity is the library ID plus term and module (`native` for generated
+  native-package catalogs), so publishing a newer library version adds a revision to the
+  same course. Moving a source between courses is refused by the server's source identity.
+
+Each course goes through `prepareAcademicUpload`, `uploadAcademicBatch` and the owner
+readback; nothing bypasses their checks. If a course exceeds 512 MiB or 1,500 files it
+is prepared again without its original-only files, which stay on the device and are
+reported. A course that cannot be prepared shows the validator's reason. After upload
+the owner may request sharing with every signed-in account, which requires attesting the
+right to share; a reviewer may approve in the same step. Every new revision returns to
+review. Workspace schema stays 34; no new store or catalog is created.
+
+### Owner steps to publish the full library
+
+Production writes need JD's explicit approval for each step. On the authorized Mac:
+
+1. Apply the pending academic migrations, including `20261027120000`, through the
+   approved path after checking the live migration list. Never repair or skip history.
+2. Grant reviewer access once, by verified immutable `auth.users.id`, in a trusted
+   service-role session. Template only, not permission to run it:
+   `insert into public.academic_reviewers(user_id) values ('<verified-auth-user-uuid>');`
+3. Prepare the library from the inventory, from `web/`:
+   `node scripts/prepare-private-library.mjs <inventory.json> <private-output>`, with
+   the output outside the repository.
+4. Sign in to AXOM, open Course Library > Manage sources and custom courses > Publish a
+   prepared library, choose the prepared folder, confirm each proposed term and review
+   the plans and source files listed as staying on the device.
+5. Publish. Choose sharing and, as a reviewer, approval only for material you have the
+   right to share with every account. Courses that fail keep their reason and stay
+   selected; publishing again retries them and leaves verified courses unchanged.
+6. Check from a second account that the catalog lists the courses by term, a course
+   opens its weekly plan and a downloaded quiz opens its exact questions.
 
 Account requests reuse the recovery owner's `accountOperationClient`: requests retain
 the starting token and reject a changed account. Catalog results are scoped by account
@@ -149,9 +229,18 @@ These are single-run local observations, not hosted latency or total account-siz
 
 **Still incomplete:** paged learner history, persistent offline cache usage/removal
 controls, general private-upload original-binary sync, cloud copies for academic
-originals above 50 MiB and administrative review, remaining supplied courses, hosted
-daily challenges and release/package acceptance. Legacy checkpoints still use the
-compatible full-source restore path.
+originals above 50 MiB, a cross-owner review queue, publishing the remaining supplied
+courses, hosted daily challenges and release/package acceptance. Legacy checkpoints
+still use the compatible full-source restore path.
+
+2026-10-27, Node 22.23.1, Linux, Chromium: `academic-library-publish.spec.ts` publishes a
+synthetic prepared library through the real uploader, Storage readback and installer
+against an in-memory Supabase stand-in at 1440px and 390px with no console errors:
+three courses (two plan sections with a confirmed term, an unscheduled module, a stated
+term), sharing and approval, the term-ordered catalog, the merged weekly plan, and a
+downloaded question collection opening its exact quiz. PGlite covers the ordered
+catalog, cursor and reviewer self-check, and the full migration chain replays. These are
+local checks, not hosted publication or real-corpus acceptance.
 Never report this checkpoint as completion of canonical 1.1 or a production deployment.
 
 ## Original files and portable recovery

@@ -13,9 +13,22 @@ dismissed in the live UI and stayed dismissed after reload. Domain contracts rem
 Batch pushes: `origin/main` triggers Vercel production, local commits do not.
 After the reflection release, JD approved one additional tested
 batch: participation streaks, compact Activity Log and catalog CI fixture repair.
-That approval is unused; the validated follow-up awaits commit and integration.
+That batch is `dc055a2` on `origin/main`; its deployment was not verified on 2026-10-27.
 It does not authorize migrations, private publication or subsequent releases.
 Verify deployed SHA and protected index before release claims.
+
+## Branch `jd-claude/eloquent-shannon-b2xof9` (2026-10-27, cloud)
+
+Base `dc055a2`. Adds whole-library publishing: one collection per term and module with
+every plan section, reviewer-confirmed plan terms, plan-less question collections,
+reviewer approval, a curriculum-ordered catalog and term-grouped QBank discovery
+([contract](features/academic-library.md#one-course-per-module-and-the-library-publisher)).
+Migration `20261027120000_academic_curriculum_catalog.sql` is replayed locally only.
+`5c04e71` fixes the privacy replay test whose fixed 2026-10-23 expiry fails main's suite.
+Passed: full Vitest (28 skipped), PGlite replay, types/lint/build, a synthetic publish
+journey at 1440/390 and related catalog specs in Chromium. Not done: real-corpus publish,
+hosted migration, reviewer grant, second-account check; the private corpus and board
+were unreachable from the cloud. Next: JD reviews the draft PR, then the owner steps.
 
 ## Ownership and protected work
 
@@ -100,6 +113,9 @@ Nine later migrations remain locally tested only:
 - `20261016011812_harden_privacy_request_barrier.sql`; and
 - `20261017233759_enforce_academic_collection_classification.sql`.
 
+Draft [PR #30](https://github.com/jaclose/AXOM/pull/30) reports a 2026-10-25 audit with
+30 applied and only the last two pending; recheck the live list before any release.
+
 Journal transitions await confirmed writes; failures preserve drafts. Closeout
 copy is opt-in. Images export beyond the 14 MB account limit; teardown is best effort.
 
@@ -111,33 +127,12 @@ See [reminder lifecycle](DAILY-LOOP-REMINDER-LIFECYCLE.md).
 
 ## Current validation
 
-Follow-up: 65 participation-streak unit tests and two desktop/mobile Chrome journeys
-passed; completed losses/misses count, wins remain accurate, reload retains history.
-Activity Log: 10 unit tests and two Chrome journeys passed; five-entry preview follows
-Pomodoro and preserves full history. Both interfaces' screenshots were reviewed.
-Catalog CI fixture repair: three Chrome journeys passed locally. Production Quality
-run `39443209953` failed missing mocked communications/settings HTTP responses;
-the fixture now handles only that expected route. Remote CI has not rerun.
-Initial streak checks hit ENOSPC and exposed two test-fixture assumptions, corrected
-before passing reruns. Space recovered from 164 MiB to 7.4 GiB without agent cleanup.
-Types/lint/build, Daily Games isolation, 43 repo tests and hygiene passed; no second push yet.
-
-Node 22.23.1 on macOS. Prior receipts remain in Git and the coordination board:
-`81e1a5bb` passed 3,791 unit/SQL tests (28 skipped), 14 academic Chrome journeys,
-types/lint/build, bundle isolation, repo and communications checks. Follow-ups
-passed queue removal (19 tests/three journeys), classification/privacy (166 tests,
-isolated PGlite), and exact-ID recovery (51 tests/two journeys). Each passed release
-checks; hosted and real multi-connection SQL behavior remain unverified.
-
-Reflection release `78c00e04`: 36 tests, nine Chrome journeys, types/lint/build and
-43 repo tests passed, covering Undo/retry, reload/day rollover, cross-tab/data
-preservation and question Slides with figures/PDF originals. Initial PDF optimizer
-failures cleared after restarting the owned server. Full Playwright and `verify:all`
-remain unrun. Use installed Chrome and serial checks; never duplicate suites.
-
-Existing build warnings concern `jszip`/`webUpdates` static/dynamic imports
-and chunks over 500 kB. The prior GitHub advisory snapshot (56: 14 high,
-39 moderate, three low) was not refreshed. Dependency remediation is separate.
+Receipts through `dc055a2` (streaks, Activity Log, catalog fixture, reflection
+`78c00e04`, `81e1a5bb` and its follow-ups) are preserved verbatim at
+`git show dc055a2:docs/AI_STATE.md`. Hosted and real multi-connection SQL behavior
+remain unverified. Existing build warnings concern `jszip`/`webUpdates`
+static/dynamic imports and chunks over 500 kB. The GitHub advisory snapshot (56: 14
+high, 39 moderate, three low) was not refreshed; dependency remediation is separate.
 
 ## Cloud and delivery boundary
 
@@ -146,8 +141,8 @@ and zero academic collections, revisions, files, storage objects or question
 shares. No owner-authenticated production upload, reload, share recovery,
 media/checksum readback or revocation was completed.
 
-Before production acceptance: apply all nine migrations through the approved
-path; upload only cleared private material as its authenticated owner; reload it
+Before production acceptance: apply every pending migration (including
+`20261027120000` from the branch above) through the approved path; upload only cleared private material as its authenticated owner; reload it
 through the learner UI; verify media/checksums and revocation; and record exact
 receipts. Also complete a true multi-connection privacy-lock check, Journal
 image-race and broader multi-tab coverage, QBank opener-clone recovery analysis, Safari/WebKit and
