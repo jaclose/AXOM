@@ -356,9 +356,12 @@ describe("Supabase migrations on real Postgres", () => {
       expect((await as(db, "service_role", null,
         "select public.claim_privacy_request($1,'2026-10-16T01:00:00Z') as claimed", [deletionRequest])).rows)
         .toEqual([{ claimed: false }]);
+      // The function compares the expiry with the database clock and accepts at
+      // most eight days ahead, so a fixed calendar date expires with time.
+      const exportExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
       expect((await as(db, "service_role", null,
-        "select public.finalize_privacy_export($1,$2,'2026-10-23T01:00:00Z') as finalized",
-        [exportRequest, `${A}/${exportRequest}.json`])).rows).toEqual([{ finalized: true }]);
+        "select public.finalize_privacy_export($1,$2,$3) as finalized",
+        [exportRequest, `${A}/${exportRequest}.json`, exportExpiry])).rows).toEqual([{ finalized: true }]);
       expect((await as(db, "service_role", null,
         "select public.claim_privacy_request($1,'2026-10-16T01:00:00Z') as claimed", [deletionRequest])).rows)
         .toEqual([{ claimed: true }]);
