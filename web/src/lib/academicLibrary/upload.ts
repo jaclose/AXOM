@@ -9,8 +9,7 @@ import { assessBank } from "../question-content/assessBank";
 import { packageToReviewedImport } from "../question-content/toReviewedImport";
 import type { PreparedBank, PrivateLibraryCatalog, ReviewedFiling } from "../privateLibrary/types";
 import { questionScope, type PackageIssue, type QuestionAsset } from "../question-content/package";
-import { parseCourseTemplate } from "../course-engine/templateParse";
-import { canonicalModuleKey } from "../course-engine/vocabulary";
+import { academicCoursePlan, moduleIdentity, reviewedTermNumber, type AcademicCoursePlan, type AcademicPlanTerm } from "./coursePlan";
 import { accountOperationClient } from "../account/supabase";
 import { RESUMABLE_CHUNK_BYTES, uploadResumableObject, type ResumableStorageConfig } from "../sync/resumableObject";
 import { MAX_QUESTION_ATTACHMENTS, MAX_QUESTION_ATTACHMENT_BYTES, MAX_QUESTION_ATTACHMENT_TOTAL_BYTES,
@@ -22,6 +21,8 @@ const basename = (name: string) => name.split(/[\\/]/).at(-1) || "source";
 const compareAcademicPath = (left: { path: string }, right: { path: string }) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0;
 // Matches academic_files.byte_size and academic-content Storage bucket limit.
 const fileLimit = 50 * 1024 * 1024;
+/** Plan sections one course may combine; real modules have two or three. */
+const MAX_PLAN_SECTIONS = 24;
 const imageMimeByExtension: Readonly<Record<string, QuestionAttachmentMimeType>> = {
   png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif",
 };
@@ -32,28 +33,11 @@ const originalMimeByExtension: Readonly<Record<string, string>> = {
 type PrivateLibrarySource = PrivateLibraryCatalog["sources"][number];
 export type VerifiedAcademicImage = InstallableAcademicImage;
 
-function reviewedTermNumber(term: string | undefined): number | undefined {
-  const match = term?.match(/^Term ([1-5])$/);
-  return match ? Number(match[1]) : undefined;
-}
-
-function moduleIdentity(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const module = value.trim();
-  if (!module || module.length > 80 || /[/\\]/.test(module)
-    || [...module].some(character => {
-      const code = character.charCodeAt(0);
-      return code <= 31 || code === 127 || code === 0x2028 || code === 0x2029;
-    })) return undefined;
-  const identity = canonicalModuleKey(module);
-  return identity || undefined;
-}
-
 /** A template is authority only for content that demonstrably shares its
  * term and module. Merely including one parseable template must not let an
  * unrelated source or question bypass manual filing review. */
 function assertTemplateOwnsSource(
-  template: ReturnType<typeof parseCourseTemplate>, source: PrivateLibrarySource, bank?: PreparedBank,
+  template: Pick<AcademicCoursePlan, "term" | "module">, source: PrivateLibrarySource, bank?: PreparedBank,
 ): void {
   const term = reviewedTermNumber(template.term);
   const module = moduleIdentity(template.module);
@@ -152,11 +136,19 @@ export interface AcademicUnscheduledScope {
   title?: string;
   evidence: ReviewedFiling["evidence"];
 }
+export interface AcademicUploadOptions {
+  /** Required when no plan section states its term; never inferred here. */
+  planTerm?: AcademicPlanTerm;
+}
 export interface AcademicUpload {
   catalogId: string;
   metadata: Record<string, string | number | undefined>;
   template: string;
-  provenance: { sourceChecksums: string[]; scopeEvidence?: AcademicUnscheduledScope["evidence"]; weekAssignment?: "unassigned" };
+  provenance: {
+    sourceChecksums: string[]; scopeEvidence?: AcademicUnscheduledScope["evidence"]; weekAssignment?: "unassigned";
+    /** Present when a reviewer confirmed the term of a plan that does not state it. */
+    planTermEvidence?: AcademicPlanTerm["evidence"];
+  };
   files: Array<{ path: string; sha256: string; byte_size: number; mime_type: string; bytes: Uint8Array }>;
   hash: string;
   /** Verified source bytes that exceed academic-content's per-file ceiling.
@@ -229,12 +221,13 @@ function snapshotAcademicUpload(value: AcademicUpload): AcademicUpload {
   };
 
   const sourceProvenance = plainRecord(upload.provenance, "Academic provenance");
-  assertKeys(sourceProvenance, ["sourceChecksums", "scopeEvidence", "weekAssignment"], ["sourceChecksums"], "Academic provenance");
+  assertKeys(sourceProvenance, ["sourceChecksums", "scopeEvidence", "weekAssignment", "planTermEvidence"], ["sourceChecksums"], "Academic provenance");
   if (!Array.isArray(sourceProvenance.sourceChecksums) || sourceProvenance.sourceChecksums.length > 10000
     || sourceProvenance.sourceChecksums.some(checksum => typeof checksum !== "string" || !/^[a-f0-9]{64}$/.test(checksum))
     || (sourceProvenance.scopeEvidence !== undefined
       && !["source-metadata", "human-reviewed"].includes(String(sourceProvenance.scopeEvidence)))
-    || (sourceProvenance.weekAssignment !== undefined && sourceProvenance.weekAssignment !== "unassigned")) {
+    || (sourceProvenance.weekAssignment !== undefined && sourceProvenance.weekAssignment !== "unassigned")
+    || (sourceProvenance.planTermEvidence !== undefined && sourceProvenance.planTermEvidence !== "human-reviewed")) {
     throw new Error("Academic provenance has an invalid source identity or filing envelope.");
   }
   const provenance: AcademicUpload["provenance"] = {
@@ -243,6 +236,7 @@ function snapshotAcademicUpload(value: AcademicUpload): AcademicUpload {
       ? { scopeEvidence: sourceProvenance.scopeEvidence as AcademicUpload["provenance"]["scopeEvidence"] }
       : {}),
     ...(own(sourceProvenance, "weekAssignment") ? { weekAssignment: "unassigned" as const } : {}),
+    ...(own(sourceProvenance, "planTermEvidence") ? { planTermEvidence: "human-reviewed" as const } : {}),
   };
 
   if (!Array.isArray(upload.files) || !upload.files.length || upload.files.length > 1500)
@@ -325,6 +319,7 @@ function hashProvenance(provenance: AcademicUpload["provenance"]): AcademicUploa
     sourceChecksums: [...provenance.sourceChecksums],
     ...(provenance.scopeEvidence !== undefined ? { scopeEvidence: provenance.scopeEvidence } : {}),
     ...(provenance.weekAssignment !== undefined ? { weekAssignment: provenance.weekAssignment } : {}),
+    ...(provenance.planTermEvidence !== undefined ? { planTermEvidence: provenance.planTermEvidence } : {}),
   };
 }
 
@@ -388,16 +383,15 @@ function assertPreparedBankEnvelopeShape(value: unknown): void {
   }
 }
 
-function assertTemplateMetadata(
-  upload: AcademicUpload, template: ReturnType<typeof parseCourseTemplate>, templateText: string,
-): void {
-  if (upload.template !== templateText
-    || upload.metadata.title !== template.module || upload.metadata.module !== template.module
-    || upload.metadata.term !== template.term
-    || upload.metadata.academic_term !== template.context?.academicTerm
-    || upload.metadata.cohort !== template.context?.cohort
-    || upload.metadata.source_revision !== template.context?.sourceRevision
-    || upload.provenance.scopeEvidence !== undefined || upload.provenance.weekAssignment !== undefined) {
+function assertTemplateMetadata(upload: AcademicUpload, plan: AcademicCoursePlan): void {
+  if (upload.template !== plan.text
+    || upload.metadata.title !== plan.module || upload.metadata.module !== plan.module
+    || upload.metadata.term !== plan.term
+    || upload.metadata.academic_term !== plan.academicTerm
+    || upload.metadata.cohort !== plan.cohort
+    || upload.metadata.source_revision !== plan.sourceRevision
+    || upload.provenance.scopeEvidence !== undefined || upload.provenance.weekAssignment !== undefined
+    || upload.provenance.planTermEvidence !== (plan.termStated ? undefined : "human-reviewed")) {
     throw new Error("The academic upload hash is not canonical for its reviewed course plan and metadata.");
   }
 }
@@ -488,7 +482,7 @@ async function preflightAcademicUpload(upload: AcademicUpload): Promise<Academic
   const catalog = readCatalog(catalogValue);
   if (catalog.id !== upload.catalogId)
     throw new Error("The academic catalog identity differs from the direct upload envelope.");
-  if (catalog.templates.length > 1)
+  if (catalog.templates.length > MAX_PLAN_SECTIONS)
     throw new Error("Split this library into one academic collection per reviewed course.");
   if (upload.provenance.sourceChecksums.length !== catalog.sources.length
     || upload.provenance.sourceChecksums.some((checksum, index) => checksum !== catalog.sources[index].checksum))
@@ -504,22 +498,24 @@ async function preflightAcademicUpload(upload: AcademicUpload): Promise<Academic
     sourceChecksums.add(source.checksum);
   }
 
-  const templateEntry = catalog.templates[0];
-  let plan: ReturnType<typeof parseCourseTemplate> | undefined;
-  if (templateEntry) {
-    expectFile(templateEntry.file, "text/plain", templateEntry.checksum);
-    const templateFile = byPath.get(templateEntry.file);
-    if (!templateFile) throw new Error("A private academic upload is missing its reviewed course plan.");
-    const templateText = decode(templateFile.bytes);
-    plan = parseCourseTemplate(templateText);
-    if (plan.problems.length || !reviewedTermNumber(plan.term) || !moduleIdentity(plan.module) || !plan.items.length)
-      throw new Error("Review the course plan and confirm its exact Term 1-5 and module before uploading.");
-    assertTemplateMetadata(upload, plan, templateText);
+  let plan: AcademicCoursePlan | undefined;
+  if (catalog.templates.length) {
+    const texts = catalog.templates.map(entry => {
+      expectFile(entry.file, "text/plain", entry.checksum);
+      const templateFile = byPath.get(entry.file);
+      if (!templateFile) throw new Error("A private academic upload is missing its reviewed course plan.");
+      return decode(templateFile.bytes);
+    });
+    const confirmedTerm = upload.provenance.planTermEvidence
+      ? { term: upload.metadata.term as AcademicPlanTerm["term"], evidence: upload.provenance.planTermEvidence }
+      : undefined;
+    plan = academicCoursePlan(texts, confirmedTerm);
+    assertTemplateMetadata(upload, plan);
   } else {
     if (upload.template !== "" || !reviewedTermNumber(String(upload.metadata.term))
       || !moduleIdentity(upload.metadata.module) || !catalog.sources.some(source => source.bankFile)
       || !["source-metadata", "human-reviewed"].includes(upload.provenance.scopeEvidence ?? "")
-      || upload.provenance.weekAssignment !== "unassigned"
+      || upload.provenance.weekAssignment !== "unassigned" || upload.provenance.planTermEvidence !== undefined
       || upload.metadata.academic_term !== undefined || upload.metadata.cohort !== undefined
       || upload.metadata.source_revision !== undefined) {
       throw new Error("A source-only direct upload needs one reviewed term/module filing and no invented course plan.");
@@ -653,23 +649,25 @@ async function preflightAcademicUpload(upload: AcademicUpload): Promise<Academic
 
 /** A course-specific prepared package, never a portable learner backup. Only
  * referenced content enters the upload; unrelated ZIP files are not enumerated. */
-export async function prepareAcademicUpload(read: LibraryReader, unscheduled?: AcademicUnscheduledScope): Promise<AcademicUpload> {
+export async function prepareAcademicUpload(
+  read: LibraryReader, unscheduled?: AcademicUnscheduledScope, options: AcademicUploadOptions = {},
+): Promise<AcademicUpload> {
   const source = readCatalog(JSON.parse(decode(await read("catalog.json"))));
-  if (source.templates.length > 1) throw new Error("Split this library into one academic collection per reviewed course.");
-  const templateEntry = source.templates[0];
-  let template = "";
-  let plan: ReturnType<typeof parseCourseTemplate> | undefined;
-  let templateBytes: Uint8Array | undefined;
+  if (source.templates.length > MAX_PLAN_SECTIONS) throw new Error("Split this library into one academic collection per reviewed course.");
+  // Every section of one module travels together; each keeps its exact bytes.
+  const templates: Array<{ entry: PrivateLibraryCatalog["templates"][number]; bytes: Uint8Array }> = [];
+  let plan: AcademicCoursePlan | undefined;
   let reviewedFiling: ReviewedFiling | undefined;
-  if (templateEntry) {
-    templateBytes = await read(templateEntry.file);
-    if (await sha256(templateBytes) !== `sha256:${templateEntry.checksum}`) throw new Error("The course plan failed its integrity check.");
-    template = decode(templateBytes);
-    plan = parseCourseTemplate(template);
-    if (plan.problems.length || !reviewedTermNumber(plan.term) || !moduleIdentity(plan.module) || !plan.items.length)
-      throw new Error("Review the course plan and confirm its exact Term 1-5 and module before uploading.");
+  if (source.templates.length) {
+    for (const entry of source.templates) {
+      const bytes = await read(entry.file);
+      if (await sha256(bytes) !== `sha256:${entry.checksum}`) throw new Error("The course plan failed its integrity check.");
+      templates.push({ entry, bytes });
+    }
+    plan = academicCoursePlan(templates.map(template => decode(template.bytes)), options.planTerm);
     if (unscheduled) throw new Error("A collection containing a reviewed weekly plan cannot override its course classification.");
   } else {
+    if (options.planTerm) throw new Error("A confirmed course term applies only to a reviewed course plan.");
     if (!unscheduled || !reviewedTermNumber(unscheduled.term) || !["source-metadata", "human-reviewed"].includes(unscheduled.evidence)
       || !moduleIdentity(unscheduled.module)
       || (unscheduled.title !== undefined && (!unscheduled.title.trim() || unscheduled.title.trim().length > 180)))
@@ -704,7 +702,7 @@ export async function prepareAcademicUpload(read: LibraryReader, unscheduled?: A
     files.push({ path, bytes, sha256: checksum, byte_size: bytes.length, mime_type: mime }); paths.add(path);
     if (files.length > 1500 || files.reduce((sum, file) => sum + file.byte_size, 0) > 512 * 1024 * 1024) throw new Error("This collection exceeds the supported upload size.");
   }
-  if (templateEntry && templateBytes) await add(templateEntry.file, templateBytes, "text/plain", templateEntry.checksum);
+  for (const template of templates) await add(template.entry.file, template.bytes, "text/plain", template.entry.checksum);
   const sources: PrivateLibraryCatalog["sources"] = [];
   const declaredModules = new Set<string>();
   const declaredTerms = new Set<number>();
@@ -813,16 +811,18 @@ export async function prepareAcademicUpload(read: LibraryReader, unscheduled?: A
   }
   await add("catalog.json", encode({ format: source.format, schemaVersion: source.schemaVersion, id: source.id, version: source.version,
     preparerVersion: source.preparerVersion,
-    templates: templateEntry ? [{ ...templateEntry, name: basename(templateEntry.name) }] : [], sources }), "application/json");
+    templates: templates.map(({ entry }) => ({ ...entry, name: basename(entry.name) })), sources }), "application/json");
   files.sort(compareAcademicPath);
   const module = plan?.module ?? unscheduled!.module.trim();
   const term = plan?.term ?? unscheduled!.term;
-  const metadata = { title: plan?.module ?? unscheduled?.title?.trim() ?? module, module, term, academic_term: plan?.context?.academicTerm,
-    cohort: plan?.context?.cohort, source_revision: plan?.context?.sourceRevision,
+  const template = plan?.text ?? "";
+  const metadata = { title: plan?.module ?? unscheduled?.title?.trim() ?? module, module, term, academic_term: plan?.academicTerm,
+    cohort: plan?.cohort, source_revision: plan?.sourceRevision,
     ready_questions: sources.reduce((sum, item) => sum + item.ready, 0), review_questions: sources.reduce((sum, item) => sum + item.review, 0),
     local_only_originals: localOnlyOriginals.length };
   const provenance: AcademicUpload["provenance"] = { sourceChecksums: sources.map(item => item.checksum),
-    ...(unscheduled ? { scopeEvidence: unscheduled.evidence, weekAssignment: "unassigned" as const } : {}) };
+    ...(unscheduled ? { scopeEvidence: unscheduled.evidence, weekAssignment: "unassigned" as const } : {}),
+    ...(plan && !plan.termStated ? { planTermEvidence: "human-reviewed" as const } : {}) };
   const hash = await academicUploadHash({ metadata, template, provenance, files, localOnlyOriginals });
   return { catalogId: source.id, metadata, template, provenance, files, hash, localOnlyOriginals };
 }

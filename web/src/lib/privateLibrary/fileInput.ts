@@ -1,5 +1,5 @@
 import type { JSZipObject } from "jszip";
-import { INPUT_MAX_TOTAL_BYTES, resolveLibraryInputRoot, safeInputPath, type LibraryInputEntry } from "./inputRoot";
+import { INPUT_LIMITS, INPUT_MAX_TOTAL_BYTES, resolveLibraryInputRoot, safeInputPath, type LibraryInputEntry, type LibraryInputLimits } from "./inputRoot";
 import { resolveLibraryReader } from "./nativeInput";
 import { indexLibraryZip } from "./zipIndex";
 
@@ -77,8 +77,9 @@ export async function zipLibraryReader(file: File): Promise<Reader> {
   return resolveLibraryReader(entries, read);
 }
 
-/** Keep the existing synchronous API; resolution starts only on the first read. */
-export function folderLibraryReader(files: readonly File[]): Reader {
+/** Keep the existing synchronous API; resolution starts only on the first read.
+ * Files are read one at a time when requested, never all at once. */
+export function folderLibraryReader(files: readonly File[], limits: LibraryInputLimits = INPUT_LIMITS): Reader {
   const byPath = new Map<string, File>(), entries: LibraryInputEntry[] = [];
   for (const file of files) {
     const relative = file.webkitRelativePath;
@@ -87,7 +88,7 @@ export function folderLibraryReader(files: readonly File[]): Reader {
     if (byPath.has(path)) throw new Error("The selected folder contains duplicate filenames.");
     byPath.set(path, file);
   }
-  resolveLibraryInputRoot(entries);
+  resolveLibraryInputRoot(entries, limits);
   const read: Reader = async path => {
     const file = byPath.get(safeInputPath(path));
     if (!file) throw new Error("A collection file is missing from the selected folder. Choose the complete collection.");
@@ -95,7 +96,7 @@ export function folderLibraryReader(files: readonly File[]): Reader {
   };
   let resolved: Promise<Reader> | undefined;
   return async path => {
-    resolved ??= resolveLibraryReader(entries, read);
+    resolved ??= resolveLibraryReader(entries, read, limits);
     return (await resolved)(path);
   };
 }

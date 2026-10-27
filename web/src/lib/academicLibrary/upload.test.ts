@@ -890,3 +890,48 @@ it("prepares a referenced original larger than 6 MiB and uploads it with resumab
   await expect(uploadAcademicCourse(backend.client, "account-a", upload, () => {}, () => {}, resumable))
     .rejects.toThrow(/resumable course upload was interrupted/);
 });
+
+it("uploads every plan section of one module as one course, with a reviewed term when the plan states none", async () => {
+  const f = await templateBackedBankFixture("GOER - Lectures:\nWeek 1:\nLecture 1 Sample [Lecture]\n");
+  const groups = encode("GOER - Small groups:\nWeek 2:\nSG 01 Sample [Small Group]");
+  f.catalog.templates.push({ name: "groups.txt", file: "templates/groups.txt", checksum: (await sha256(groups)).slice(7) });
+  f.files.set("templates/groups.txt", groups);
+  writeFixtureCatalog(f);
+  await expect(prepareAcademicUpload(f.read)).rejects.toThrow(/does not name its term/);
+  await expect(prepareAcademicUpload(f.read, { term: "Term 5", module: "GOER", evidence: "human-reviewed" },
+    { planTerm: { term: "Term 5", evidence: "human-reviewed" } })).rejects.toThrow(/cannot override its course classification/);
+
+  const planTerm = { term: "Term 5", evidence: "human-reviewed" } as const;
+  const upload = await prepareAcademicUpload(f.read, undefined, { planTerm });
+  expect(upload.metadata).toMatchObject({ title: "GOER", module: "GOER", term: "Term 5", ready_questions: 1 });
+  expect(upload.provenance).toEqual({ sourceChecksums: ["a".repeat(64)], planTermEvidence: "human-reviewed" });
+  expect(upload.template.split("\n@@ AXOM course plan section @@\n")).toEqual([
+    "GOER - Lectures:\nWeek 1:\nLecture 1 Sample [Lecture]\n", "GOER - Small groups:\nWeek 2:\nSG 01 Sample [Small Group]",
+  ]);
+  expect(upload.files.map(file => file.path)).toEqual(["banks/sample/bank.json", "catalog.json", "templates/groups.txt", "templates/plan.txt"]);
+  expect((await prepareAcademicUpload(f.read, undefined, { planTerm })).hash).toBe(upload.hash);
+  // A plan term is a reviewed classification of the course, so it changes the content identity.
+  const stated = await templateBackedBankFixture("T5 - GOER - Lectures:\nWeek 1:\nLecture 1 Sample [Lecture]\n");
+  expect((await prepareAcademicUpload(stated.read)).provenance).toEqual({ sourceChecksums: ["a".repeat(64)] });
+
+  const accountId = "account-a";
+  const backend = mockedStorage(upload, await academicCollectionId(accountId, upload.catalogId));
+  await expect(uploadAcademicCourse(backend.client, accountId, upload, () => {}, () => {}))
+    .resolves.toMatchObject({ status: "active" });
+  expect(backend.rpc).toHaveBeenCalledWith("academic_create_revision", expect.objectContaining({
+    template: upload.template, provenance: expect.objectContaining({ planTermEvidence: "human-reviewed" }),
+  }));
+
+  // A replay cannot drop the reviewed-term evidence or reclassify the course.
+  for (const tamper of [
+    (copy: AcademicUpload) => { delete copy.provenance.planTermEvidence; },
+    (copy: AcademicUpload) => { copy.metadata.term = "Term 4"; },
+  ]) {
+    const copy = await prepareAcademicUpload(f.read, undefined, { planTerm });
+    tamper(copy);
+    copy.hash = await academicUploadHash(copy);
+    const rejected = mockedStorage(copy, await academicCollectionId(accountId, copy.catalogId));
+    await expect(uploadAcademicCourse(rejected.client, accountId, copy, () => {}, () => {})).rejects.toThrow();
+    expect(rejected.rpc).not.toHaveBeenCalled();
+  }
+});

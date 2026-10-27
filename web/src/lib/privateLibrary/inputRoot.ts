@@ -6,6 +6,10 @@ export type LibraryInputRoot =
 export const INPUT_MAX_FILES = 30_000;
 export const INPUT_MAX_FILE_BYTES = 128 * 1024 * 1024;
 export const INPUT_MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;
+/** Bounds for reading a selection. Installing on this device keeps the
+ * defaults; publishing reads one course at a time and may allow more. */
+export interface LibraryInputLimits { maxFileBytes: number; maxTotalBytes: number }
+export const INPUT_LIMITS: LibraryInputLimits = { maxFileBytes: INPUT_MAX_FILE_BYTES, maxTotalBytes: INPUT_MAX_TOTAL_BYTES };
 
 /** Filenames may contain spaces and #. This is a local path, never a URL. */
 export function safeInputPath(value: string): string {
@@ -22,18 +26,18 @@ export function isPackagingMetadata(path: string): boolean {
 }
 
 /** Shared bounded path validation for prepared packages and ordinary source folders. */
-export function validateLibraryInputEntries(entries: readonly LibraryInputEntry[]): string[] {
+export function validateLibraryInputEntries(entries: readonly LibraryInputEntry[], limits: LibraryInputLimits = INPUT_LIMITS): string[] {
   if (!entries.length) throw new Error("The selected folder is empty. Choose files or a collection to import.");
   if (entries.length > INPUT_MAX_FILES) throw new Error("This collection contains too many files. Split it into smaller collections.");
   const paths: string[] = [], seen = new Set<string>();
   let total = 0;
   for (const entry of entries) {
     const path = safeInputPath(entry.path);
-    if (!Number.isSafeInteger(entry.byteSize) || entry.byteSize < 0 || entry.byteSize > INPUT_MAX_FILE_BYTES) {
+    if (!Number.isSafeInteger(entry.byteSize) || entry.byteSize < 0 || entry.byteSize > limits.maxFileBytes) {
       throw new Error("A collection file exceeds the supported size. Import that source separately.");
     }
     total += entry.byteSize;
-    if (total > INPUT_MAX_TOTAL_BYTES) throw new Error("This expanded collection is too large. Split it into smaller collections.");
+    if (total > limits.maxTotalBytes) throw new Error("This expanded collection is too large. Split it into smaller collections.");
     const portableKey = path.toLowerCase();
     if (seen.has(portableKey)) throw new Error("This collection has duplicate or case-conflicting paths. Resolve them before importing.");
     seen.add(portableKey);
@@ -43,8 +47,8 @@ export function validateLibraryInputEntries(entries: readonly LibraryInputEntry[
 }
 
 /** A single wrapping folder is harmless; multiple catalogs are not guessed. */
-export function resolveLibraryInputRoot(entries: readonly LibraryInputEntry[]): LibraryInputRoot {
-  const paths = validateLibraryInputEntries(entries);
+export function resolveLibraryInputRoot(entries: readonly LibraryInputEntry[], limits: LibraryInputLimits = INPUT_LIMITS): LibraryInputRoot {
+  const paths = validateLibraryInputEntries(entries, limits);
   const catalogs = paths.filter(path => path.split("/").pop() === "catalog.json");
   if (catalogs.length > 1) throw new Error("Several prepared libraries were selected. Choose one collection folder or ZIP at a time.");
   if (catalogs.length === 1) {

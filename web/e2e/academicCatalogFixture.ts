@@ -55,6 +55,7 @@ export async function academicCatalogFixture(page: Page) {
     } satisfies CommunicationsSettings);
     if (path.endsWith("/rpc/academic_catalog")) return failCatalog ? json({ message: "Fixture unavailable" },503) : json([course]);
     if (path.endsWith("/rpc/academic_course")) return json(course);
+    if (path.endsWith("/rpc/academic_is_reviewer")) return json(false);
     if (path.endsWith("/academic_revisions")) return json({ id: revision, collection_id: collection, template_text: template.toString(), ready_questions: 1, review_questions: 0 });
     if (path.endsWith("/academic_files")) return json(files.map(file => ({ path: file.path, object_path: `${collection}/${hash(file.bytes)}`, sha256: hash(file.bytes), byte_size: file.bytes.length, mime_type: file.mime_type })));
     if (path.includes("/storage/v1/object/") && path.includes("/academic-content/")) {

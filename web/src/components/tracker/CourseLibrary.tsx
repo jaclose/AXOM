@@ -15,7 +15,9 @@ import { useAcademicCatalog } from "../../lib/academicLibrary/useAcademicCatalog
 import { ICON_SIZE } from "../../lib/iconSize";
 import "../../styles/course-library.css";
 import { AcademicCourseUpload } from "./AcademicCourseUpload";
+import { AcademicLibraryPublisher } from "./AcademicLibraryPublisher";
 import { getAcademicCourse, type AcademicCourse } from "../../lib/academicLibrary/client";
+import { compareCourses } from "../../lib/academicLibrary/catalogOrder";
 
 function courseCoverTitle(module: string): string {
   const words = module.trim().split(/\s+/);
@@ -93,7 +95,7 @@ export function CourseLibrary({ onClose, onTemplate, onOpen, onCreate }: {
       {shownTerms.map((sectionTerm, index) => <section className="course-term-section" key={sectionTerm} aria-labelledby={`course-term-${index}`}>
         <header className="course-term-heading"><h2 id={`course-term-${index}`}>{sectionTerm}</h2><span>{shown.filter(book => book.term === sectionTerm).length + connectedShown.filter(course => course.term === sectionTerm).length} courses</span></header>
         <div className="course-collection">
-        {connectedShown.filter(course => course.term === sectionTerm).map(course => <button key={course.id} data-course-id={course.id} className="course-card" onClick={() => setSelected(`remote:${course.id}`)} aria-label={`Preview ${course.module}, ${course.academic_term || course.term}`}>
+        {connectedShown.filter(course => course.term === sectionTerm).sort(compareCourses).map(course => <button key={course.id} data-course-id={course.id} className="course-card" onClick={() => setSelected(`remote:${course.id}`)} aria-label={`Preview ${course.module}, ${course.academic_term || course.term}`}>
           <div className="course-card-cover" aria-hidden="true"><span>{course.term}</span><strong>{courseCoverTitle(course.module)}</strong><BookOpen size={28} strokeWidth={1} /></div>
           <div className="course-card-copy"><span className="course-card-context">{course.academic_term || course.term}{course.cohort ? ` · ${course.cohort}` : ""}</span><h3>{course.module}</h3><p>{course.title}</p><span className="course-card-facts">{course.ready_questions} ready questions{course.review_questions ? ` · ${course.review_questions} awaiting review` : ""}</span><span className="course-card-state">{course.owned ? "Your upload" : "Academic collection"} · {course.visibility === "private" ? "Private" : course.review_status === "approved" ? "Reviewed" : "Sharing review pending"}</span></div><ArrowUpRight size={ICON_SIZE.control} aria-hidden="true" />
         </button>)}
@@ -102,7 +104,7 @@ export function CourseLibrary({ onClose, onTemplate, onOpen, onCreate }: {
         <div className="course-card-copy"><span className="course-card-context">{book.courseCode || book.term}</span><h3>{book.module}</h3><p>{book.courseName || "Academic module"}</p><span className="course-card-facts">{book.weeks.length ? `${book.weeks.length} weeks · ${book.count} activities` : "Weekly plan not available"}</span><span className="course-card-state">{mine(book) ? "In My Courses" : available(book) ? "Ready to preview" : "Not prepared yet"}{bankFor(book)?.ready ? ` · ${bankFor(book)?.ready} ready questions` : ""}</span></div><ArrowUpRight size={ICON_SIZE.control} aria-hidden="true" />
       </button>)}</div></section>)}
       {moreAvailable && <GButton disabled={catalogLoading} onClick={() => void more()}>Load more courses</GButton>}
-      <details className="course-management"><summary>Manage sources and custom courses</summary><p className="sub">Prepared collections and personal imports are kept separate from course activation.</p><div className="row wrap gap8"><GButton onClick={() => onTemplate()}>Saved templates and imports</GButton><GButton onClick={onCreate}>Create a custom course</GButton></div><AcademicCourseUpload key={accountId} onSaved={retryCatalog} /><PreparedLibrary /></details>
+      <details className="course-management"><summary>Manage sources and custom courses</summary><p className="sub">Prepared collections and personal imports are kept separate from course activation.</p><div className="row wrap gap8"><GButton onClick={() => onTemplate()}>Saved templates and imports</GButton><GButton onClick={onCreate}>Create a custom course</GButton></div><AcademicLibraryPublisher key={`publisher:${accountId}`} onPublished={retryCatalog} /><AcademicCourseUpload key={accountId} onSaved={retryCatalog} /><PreparedLibrary /></details>
     </>}
   </div>;
 }

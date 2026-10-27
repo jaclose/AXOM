@@ -124,6 +124,63 @@ export async function downloadAcademicCourse(revision: string, progress: (messag
   scope.assertCurrent();
   return { ...installation, bindings };
 }
+const reviewerChecks = new Map<string, Promise<boolean>>();
+/** Whether the signed-in account may approve shared courses. The server still
+ * enforces review rights; this only decides which controls to offer. Asked
+ * once per account per session: reviewer membership changes rarely, and a
+ * reload asks again. Any failure, including a backend without the check yet,
+ * offers no review controls. */
+export function isAcademicReviewer(accountId: string): Promise<boolean> {
+  let check = reviewerChecks.get(accountId);
+  if (!check) {
+    check = academicClient(accountId)
+      .then(client => client.rpc("academic_is_reviewer"))
+      .then(({ data, error }) => !error && data === true, () => false);
+    reviewerChecks.set(accountId, check);
+  }
+  return check;
+}
+
+/** Approve or withdraw approval of a course's current revision. */
+export async function reviewAcademicCourse(collection: string, approved: boolean, accountId: string): Promise<void> {
+  const { error } = await (await academicClient(accountId)).rpc("academic_review", { collection, approved });
+  if (error) throw new Error(/Reviewer access/.test(error.message ?? "")
+    ? "Only an academic reviewer can approve shared courses."
+    : "The review could not be saved. Refresh the course to check its status, then retry.");
+}
+
+export interface AcademicSharingOutcome { collectionId: string; shared: boolean; approved: boolean; error?: string }
+
+/**
+ * Ask for every listed course to be shared with every signed-in account and,
+ * for a reviewer who chose to, approve each one. Sharing alone stays private
+ * until review. Each course reports its own outcome; one failure stops none.
+ */
+export async function shareAcademicCourses(collectionIds: readonly string[], accountId: string,
+  options: { approve: boolean; assertCurrent?: () => void; signal?: AbortSignal }): Promise<AcademicSharingOutcome[]> {
+  const client = await academicClient(accountId);
+  const outcomes: AcademicSharingOutcome[] = [];
+  for (const collectionId of collectionIds) {
+    if (options.signal?.aborted) break;
+    options.assertCurrent?.();
+    const outcome: AcademicSharingOutcome = { collectionId, shared: false, approved: false };
+    const shared = await client.rpc("academic_set_visibility", { collection: collectionId, visibility: "shared", group_id: null });
+    if (shared.error) outcome.error = "Sharing could not be requested for this course.";
+    else {
+      outcome.shared = true;
+      if (options.approve) {
+        const reviewed = await client.rpc("academic_review", { collection: collectionId, approved: true });
+        if (reviewed.error) outcome.error = /Reviewer access/.test(reviewed.error.message ?? "")
+          ? "Sharing was requested; only an academic reviewer can approve it."
+          : "Sharing was requested, but approval was not saved.";
+        else outcome.approved = true;
+      }
+    }
+    outcomes.push(outcome);
+  }
+  return outcomes;
+}
+
 export async function enrollAcademicCourse(course: AcademicCourse, weeks: number[], accountId: string): Promise<void> {
   const client = await academicClient(accountId);
   const { error } = await client.rpc("academic_enroll", { collection: course.id, revision: course.current_revision_id, weeks });

@@ -4,7 +4,7 @@ import { readManifest, readQuestionsFile } from "../question-content/packageJson
 import { assessBank } from "../question-content/assessBank";
 import type { PackageIssue } from "../question-content/package";
 import type { PreparedBank, PrivateLibraryCatalog } from "./types";
-import { resolveLibraryInputRoot, safeInputPath, type LibraryInputEntry } from "./inputRoot";
+import { INPUT_LIMITS, resolveLibraryInputRoot, safeInputPath, type LibraryInputEntry, type LibraryInputLimits } from "./inputRoot";
 
 type Reader = (path: string) => Promise<Uint8Array>;
 const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
@@ -26,8 +26,8 @@ function object(value: unknown): Record<string, unknown> {
  * The generated catalog exists only in memory. No user-authored index, network,
  * changes to answer evidence, or writes to the learner workspace happen here.
  */
-export async function resolveLibraryReader(entries: readonly LibraryInputEntry[], read: Reader): Promise<Reader> {
-  const root = resolveLibraryInputRoot(entries);
+export async function resolveLibraryReader(entries: readonly LibraryInputEntry[], read: Reader, limits: LibraryInputLimits = INPUT_LIMITS): Promise<Reader> {
+  const root = resolveLibraryInputRoot(entries, limits);
   const byPath = new Map(entries.map(entry => [safeInputPath(entry.path), entry]));
   const readSelected: Reader = async path => {
     const key = safeInputPath(path), entry = byPath.get(key);
