@@ -51,6 +51,14 @@ for (const width of [1440, 390]) test(`publishes a prepared library as one cours
       await publisher.screenshot({ path: `/tmp/axom-publish-plan-${width}-${theme}.png` });
     }
 
+    // Checking prepares every course on this device and uploads nothing.
+    await publisher.getByRole("button", { name: "Check 3 courses" }).click();
+    await expect(publisher.getByText("All 3 courses are ready to publish. Nothing was uploaded.", { exact: true })).toBeVisible({ timeout: 60_000 });
+    await expect(publisher.getByText("Ready to publish", { exact: true })).toHaveCount(3);
+    expect(backend.calls.filter(call => /academic_create_revision|academic_finish_revision|\/storage\//.test(call))).toEqual([]);
+    expect(await publisher.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await publisher.screenshot({ path: `/tmp/axom-publish-checked-${width}.png` });
+
     await publisher.getByRole("button", { name: "Publish 3 courses" }).click();
     await expect(publisher.getByText("3 courses published and verified.", { exact: true })).toBeVisible({ timeout: 90_000 });
     await expect(publisher.getByText("Shared with everyone", { exact: true })).toHaveCount(3);

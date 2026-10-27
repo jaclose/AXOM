@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileArchive, FolderOpen, Library, Square, UploadCloud } from "lucide-react";
+import { FileArchive, FolderOpen, Library, ListChecks, Square, UploadCloud } from "lucide-react";
 import { useAccount } from "../../lib/account/accountStore";
 import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
 import { isAcademicReviewer, shareAcademicCourses } from "../../lib/academicLibrary/client";
@@ -16,13 +16,19 @@ import { GButton, GhostButton, Tag } from "../ui/primitives";
 
 type Term = ReviewedFiling["term"];
 const TERMS: Term[] = ["Term 1", "Term 2", "Term 3", "Term 4", "Term 5"];
+/** Source files a course leaves on this device: to fit its size limit, or because each is over 50 MB. */
+interface KeptFiles { keptLocal?: number; overLimit?: number }
 type CourseState =
-  | { state: "published"; ready: number; files: number; keptLocal?: number; shared?: boolean; approved?: boolean; sharingError?: string }
-  | { state: "failed"; message: string }
+  | { state: "checked"; ready: number; review: number; files: number; bytes: number } & KeptFiles
+  | { state: "published"; ready: number; files: number; shared?: boolean; approved?: boolean; sharingError?: string } & KeptFiles
+  | { state: "failed"; message: string; during: "check" | "publish" }
   | { state: "stopped" };
+/** uploadAcademicBatch accepts at most 100 jobs per run. */
+const BATCH_SIZE = 100;
 
 const label = (course: Pick<PlannedCourse, "term" | "module">) => `${course.term} ${course.module}`;
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
+const fileSize = (bytes: number) => bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 /** A course is worth selecting by default when it brings a plan or practice-ready questions. */
 const usefulByDefault = (course: PlannedCourse) => course.termBasis !== "proposed" && (course.sections.length > 0 || course.ready > 0);
 
@@ -39,7 +45,7 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
   const [share, setShare] = useState(true);
   const [approve, setApprove] = useState(false);
   const [rights, setRights] = useState(false);
-  const [busy, setBusy] = useState<"reading" | "publishing">();
+  const [busy, setBusy] = useState<"reading" | "checking" | "publishing">();
   const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
   const [results, setResults] = useState<Record<string, CourseState>>({});
@@ -90,6 +96,55 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
     });
   }
 
+  /** Prepare every selected course exactly as publishing does, without uploading anything. */
+  async function check() {
+    if (!accountId || !current || busy || !chosen.length) return;
+    const scope = academicAccountScope(accountId);
+    const abort = new AbortController();
+    controller.current = abort;
+    const courses = chosen;
+    setBusy("checking"); setError(""); setResults({});
+    try {
+      const { jobs, notes } = publicationJobs(current.read, current.inventory, courses);
+      const sources = new Map<string, string>();
+      const failed = new Set<string>();
+      for (const [index, job] of jobs.entries()) {
+        if (abort.signal.aborted) break;
+        const course = courses[index];
+        setProgress(`Checking ${label(course)} · ${index + 1} of ${jobs.length}`);
+        let next: CourseState;
+        try {
+          const upload = await job.prepare(abort.signal);
+          // Publishing refuses a source that another course in the run already holds.
+          const repeated = upload.provenance.sourceChecksums.find(sha => sources.has(sha));
+          if (repeated) throw new Error(`It shares a source file with ${sources.get(repeated)}. Each source can be published in one course only.`);
+          for (const sha of upload.provenance.sourceChecksums) sources.set(sha, label(course));
+          next = { state: "checked", ready: Number(upload.metadata.ready_questions), review: Number(upload.metadata.review_questions),
+            files: upload.files.length, bytes: upload.files.reduce((sum, file) => sum + file.byte_size, 0),
+            ...kept(notes.keptLocal.get(job.key), upload.localOnlyOriginals.length) };
+        } catch (cause) {
+          if (abort.signal.aborted) break;
+          failed.add(job.key);
+          next = { state: "failed", during: "check",
+            message: notes.failures.get(job.key) ?? (cause instanceof Error ? cause.message : "This course could not be prepared.") };
+        }
+        scope.assertCurrent();
+        setResults(states => ({ ...states, [job.key]: next }));
+      }
+      if (abort.signal.aborted) {
+        setProgress("Checking stopped. Nothing was uploaded.");
+        return;
+      }
+      if (failed.size) setSelected(ids => new Set([...ids].filter(id => !failed.has(id))));
+      setProgress(failed.size
+        ? `${jobs.length - failed.size} of ${plural(jobs.length, "course")} ready to publish. ${plural(failed.size, "course")} ${failed.size === 1 ? "needs" : "need"} attention and ${failed.size === 1 ? "was" : "were"} unselected. Nothing was uploaded.`
+        : `${jobs.length === 1 ? "The course is" : `All ${jobs.length} courses are`} ready to publish. Nothing was uploaded.`);
+    } catch (cause) {
+      setProgress("");
+      setError(cause instanceof Error ? cause.message : "The check could not finish. Nothing was uploaded.");
+    } finally { scope.dispose(); setBusy(undefined); if (controller.current === abort) controller.current = undefined; }
+  }
+
   async function publish() {
     if (!accountId || !current || !plan || busy || !chosen.length || (share && !rights)) return;
     const scope = academicAccountScope(accountId);
@@ -101,30 +156,34 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
     try {
       const { jobs, notes } = publicationJobs(current.read, current.inventory, courses);
       const published = new Map<string, string>();
-      const report = await uploadAcademicBatch(jobs, {
-        signal: abort.signal,
-        progress: message => {
-          const split = message.indexOf(": ");
-          const course = byKey.get(message.slice(0, split));
-          setProgress(course ? `${label(course)}: ${message.slice(split + 2)}` : message);
-        },
-        onOutcome: outcome => {
-          const course = byKey.get(outcome.key);
-          if (!course) return;
-          let next: CourseState;
-          if (outcome.state === "verified") {
-            published.set(outcome.receipt.collectionId, outcome.key);
-            next = { state: "published", ready: outcome.receipt.readyQuestions, files: outcome.receipt.verifiedFiles,
-              ...(notes.keptLocal.has(outcome.key) ? { keptLocal: notes.keptLocal.get(outcome.key) } : {}) };
-          } else if (outcome.state === "superseded") {
-            next = { state: "failed", message: "A newer version of this course is already active in your account. Nothing was replaced." };
-          } else if (outcome.state === "cancelled") next = { state: "stopped" };
-          else if (outcome.state === "auth-blocked") next = { state: "failed", message: outcome.message };
-          else if (outcome.state === "duplicate-input") next = { state: "failed", message: "This course repeats another course in the same library." };
-          else next = { state: "failed", message: notes.failures.get(outcome.key) ?? outcome.message };
-          setResults(states => ({ ...states, [outcome.key]: next }));
-        },
-      });
+      let blocked = false;
+      for (let start = 0; start < jobs.length && !blocked && !abort.signal.aborted; start += BATCH_SIZE) {
+        const report = await uploadAcademicBatch(jobs.slice(start, start + BATCH_SIZE), {
+          signal: abort.signal,
+          progress: message => {
+            const split = message.indexOf(": ");
+            const course = byKey.get(message.slice(0, split));
+            setProgress(course ? `${label(course)}: ${message.slice(split + 2)}` : message);
+          },
+          onOutcome: outcome => {
+            const course = byKey.get(outcome.key);
+            if (!course) return;
+            let next: CourseState;
+            if (outcome.state === "verified") {
+              published.set(outcome.receipt.collectionId, outcome.key);
+              next = { state: "published", ready: outcome.receipt.readyQuestions, files: outcome.receipt.verifiedFiles,
+                ...kept(notes.keptLocal.get(outcome.key), outcome.receipt.localOnlyOriginals.length) };
+            } else if (outcome.state === "superseded") {
+              next = { state: "failed", during: "publish", message: "A newer version of this course is already active in your account. Nothing was replaced." };
+            } else if (outcome.state === "cancelled") next = { state: "stopped" };
+            else if (outcome.state === "auth-blocked") next = { state: "failed", during: "publish", message: outcome.message };
+            else if (outcome.state === "duplicate-input") next = { state: "failed", during: "publish", message: "This course repeats another course in the same library." };
+            else next = { state: "failed", during: "publish", message: notes.failures.get(outcome.key) ?? outcome.message };
+            setResults(states => ({ ...states, [outcome.key]: next }));
+          },
+        });
+        blocked = report.authBlocked > 0;
+      }
       if (share && published.size && !abort.signal.aborted) {
         setProgress("Sharing the published courses…");
         const outcomes = await shareAcademicCourses([...published.keys()], accountId,
@@ -140,11 +199,12 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
           return next;
         });
       }
-      setSelected(ids => new Set([...ids].filter(id => !report.outcomes.some(outcome => outcome.key === id && outcome.state === "verified"))));
-      const missed = report.expected - report.verified;
+      const verified = new Set(published.values());
+      setSelected(ids => new Set([...ids].filter(id => !verified.has(id))));
+      const missed = jobs.length - verified.size;
       setProgress(abort.signal.aborted ? "Publishing stopped. Courses already published stay in your account."
-        : `${plural(report.verified, "course")} published and verified.${missed ? ` ${plural(missed, "course")} not published. See each course for the reason.` : ""}`);
-      if (report.verified) onPublished();
+        : `${plural(verified.size, "course")} published and verified.${missed ? ` ${plural(missed, "course")} not published. See each course for the reason.` : ""}`);
+      if (verified.size) onPublished();
     } catch (cause) {
       setProgress("");
       setError(cause instanceof Error ? cause.message : "Publishing could not start. Nothing was uploaded.");
@@ -171,7 +231,7 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
     <div className="academic-publisher-actions">
       <GButton disabled={Boolean(busy)} onClick={() => folderInput.current?.click()}><FolderOpen size={ICON_SIZE.emphasis} /> Choose library folder</GButton>
       <GButton disabled={Boolean(busy)} onClick={() => zipInput.current?.click()}><FileArchive size={ICON_SIZE.emphasis} /> Choose library ZIP</GButton>
-      {busy && <GhostButton onClick={() => controller.current?.abort()}><Square size={ICON_SIZE.body} /> Stop</GhostButton>}
+      {busy === "reading" && <GhostButton onClick={() => controller.current?.abort()}><Square size={ICON_SIZE.body} /> Stop</GhostButton>}
     </div>
 
     {plan && current && <div className="academic-publisher-plan">
@@ -231,9 +291,16 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
           <span>I have the right to share this course material with every AXOM account.</span></label>}
         <p>{share && !approve ? "Shared courses stay private until an academic reviewer approves them. " : ""}Answers, notes and progress are never shared.</p>
       </fieldset>
-      <GButton variant="primary" disabled={Boolean(busy) || !chosen.length || (share && !rights)} onClick={() => void publish()}>
-        <UploadCloud size={ICON_SIZE.emphasis} /> {busy === "publishing" ? "Publishing…" : `Publish ${plural(chosen.length, "course")}`}
-      </GButton>
+      <p className="academic-publisher-hint">Checking reads and verifies every selected course on this device, exactly as publishing will. Nothing is uploaded until you publish.</p>
+      <div className="academic-publisher-actions">
+        <GButton disabled={Boolean(busy) || !chosen.length} onClick={() => void check()}>
+          <ListChecks size={ICON_SIZE.emphasis} /> {busy === "checking" ? "Checking…" : `Check ${plural(chosen.length, "course")}`}
+        </GButton>
+        <GButton variant="primary" disabled={Boolean(busy) || !chosen.length || (share && !rights)} onClick={() => void publish()}>
+          <UploadCloud size={ICON_SIZE.emphasis} /> {busy === "publishing" ? "Publishing…" : `Publish ${plural(chosen.length, "course")}`}
+        </GButton>
+        {(busy === "checking" || busy === "publishing") && <GhostButton onClick={() => controller.current?.abort()}><Square size={ICON_SIZE.body} /> Stop</GhostButton>}
+      </div>
       <TechnicalDetails label="Library details">
         <p>Library {current.inventory.library.id}, version {current.inventory.library.version}. Each course is saved to its own collection, so publishing again updates the same course.</p>
         <ul>{plan.courses.map(course => <li key={course.catalogId}><code>{course.catalogId}</code></li>)}</ul>
@@ -257,14 +324,29 @@ function ConfirmTerm({ course, label: name, onConfirm }: { course?: PlannedCours
   </div>;
 }
 
+function kept(keptLocal: number | undefined, overLimit: number): KeptFiles {
+  return { ...(keptLocal ? { keptLocal } : {}), ...(overLimit ? { overLimit } : {}) };
+}
+
+function keptNote({ keptLocal, overLimit }: KeptFiles, future: boolean) {
+  const stay = (count: number) => future ? "will stay" : count === 1 ? "stays" : "stay";
+  return `${keptLocal ? ` ${plural(keptLocal, "source file")} ${stay(keptLocal)} on this device to fit the course size limit.` : ""}${
+    overLimit ? ` ${plural(overLimit, "source file")} over 50 MB ${stay(overLimit)} on this device.` : ""}`;
+}
+
 function CourseResult({ result }: { result: CourseState }) {
   if (result.state === "stopped") return <p className="academic-publisher-result"><Tag tone="neutral">Stopped</Tag> Not published.</p>;
-  if (result.state === "failed") return <p className="academic-publisher-result"><Tag tone="red">Not published</Tag> {result.message}</p>;
+  if (result.state === "failed") return <p className="academic-publisher-result"><Tag tone="red">{result.during === "check" ? "Needs attention" : "Not published"}</Tag> {result.message}</p>;
+  if (result.state === "checked") return <p className="academic-publisher-result">
+    <Tag>Ready to publish</Tag>
+    {" "}{plural(result.ready, "ready question")}{result.review ? `, ${result.review} awaiting review,` : ""} and {plural(result.files, "file")} checked ({fileSize(result.bytes)}).
+    {keptNote(result, true)}
+  </p>;
   return <p className="academic-publisher-result">
     <Tag tone="green">Published</Tag>
     {result.approved ? <Tag tone="gold">Shared with everyone</Tag> : result.shared ? <Tag tone="neutral">Sharing awaits review</Tag> : null}
     {" "}{plural(result.ready, "ready question")} and {plural(result.files, "file")} verified.
-    {result.keptLocal ? ` ${plural(result.keptLocal, "source file")} stay on this device to fit the course size limit.` : ""}
+    {keptNote(result, false)}
     {result.sharingError ? ` ${result.sharingError}` : ""}
   </p>;
 }

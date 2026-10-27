@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { AcademicBatchJob, AcademicBatchOutcome } from "../../lib/academicLibrary/batch";
 import type { AcademicUpload } from "../../lib/academicLibrary/upload";
-import { library } from "../../lib/academicLibrary/publicationFixture.testing";
+import { bank, library } from "../../lib/academicLibrary/publicationFixture.testing";
+import { sha256 } from "../../lib/question-content/assets";
 import { AcademicLibraryPublisher } from "./AcademicLibraryPublisher";
 
 const mocks = vi.hoisted(() => ({ reviewer: vi.fn(), share: vi.fn(), batch: vi.fn(), folder: vi.fn() }));
@@ -131,5 +132,55 @@ describe("publishing a prepared library", () => {
     const goer = screen.getByText("GOER").closest("article")!;
     expect(within(goer).getByText(/claimed ready\/review counts differ/)).toBeTruthy();
     expect(mocks.share).not.toHaveBeenCalled();
+  });
+
+  it("checks every selected course on this device without uploading, and unselects the ones that need attention", async () => {
+    const { container } = render(<AcademicLibraryPublisher onPublished={vi.fn()} />);
+    await chooseLibrary(container);
+    const catalog = JSON.parse(new TextDecoder().decode(fixture.files.get("catalog.json")!));
+    catalog.sources.find((source: { name: string }) => source.name === "goer-pq.pdf").ready = 5;
+    fixture.files.set("catalog.json", new TextEncoder().encode(JSON.stringify(catalog)));
+    fireEvent.click(screen.getByRole("button", { name: /Check 2 courses/ }));
+
+    expect(await screen.findByText("1 of 2 courses ready to publish. 1 course needs attention and was unselected. Nothing was uploaded.")).toBeTruthy();
+    const ncrs = screen.getByText("NCRS").closest("article")!;
+    expect(within(ncrs).getByText("Ready to publish")).toBeTruthy();
+    expect(within(ncrs).getByText(/1 ready question and \d+ files checked \(\d+ KB\)\./)).toBeTruthy();
+    const goer = screen.getByText("GOER").closest("article")!;
+    expect(within(goer).getByText("Needs attention")).toBeTruthy();
+    expect(within(goer).getByText(/claimed ready\/review counts differ/)).toBeTruthy();
+    expect((within(goer).getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByText(/1 course selected to publish/)).toBeTruthy();
+    expect(mocks.batch).not.toHaveBeenCalled();
+    expect(mocks.share).not.toHaveBeenCalled();
+  });
+
+  it("publishes a library of more than 100 courses in runs of 100", async () => {
+    const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
+    const files = new Map<string, Uint8Array>();
+    const sources = [];
+    for (let index = 1; index <= 101; index++) {
+      const module = `Synthetic ${String(index).padStart(3, "0")}`;
+      const original = new TextEncoder().encode(`%PDF-1.4 synthetic ${index}`);
+      const checksum = (await sha256(original)).slice(7);
+      files.set(`sources/${checksum}.pdf`, original);
+      files.set(`banks/${checksum}/bank.json`, encode(bank(`set-${index}`, module, 1, checksum)));
+      sources.push({ id: `source-${checksum}`, name: `set-${index}.pdf`, sourcePath: `${module}/set-${index}.pdf`, checksum, module,
+        status: "prepared", reason: "Validated package", bankFile: `banks/${checksum}/bank.json`, originalFile: `sources/${checksum}.pdf`, ready: 1, review: 0 });
+    }
+    files.set("catalog.json", encode({ format: "axom-private-library", schemaVersion: 1, id: "academic-library", version: "v1", templates: [], sources }));
+    mocks.folder.mockReturnValue(async (path: string) => files.get(path)!);
+    // Only the run boundaries matter here; preparation is covered above.
+    mocks.batch.mockImplementation(async (jobs: AcademicBatchJob[], options: { onOutcome?: (outcome: AcademicBatchOutcome) => void }) => {
+      for (const job of jobs) options.onOutcome?.({ key: job.key, state: "verified", receipt: { collectionId: `collection-${job.key}`,
+        revisionId: `revision-${job.key}`, readyQuestions: 1, reviewQuestions: 0, sourceReceipts: [], verifiedFiles: 3, localOnlyOriginals: [] } });
+      return { expected: jobs.length, verified: jobs.length, authBlocked: 0 };
+    });
+    const { container } = render(<AcademicLibraryPublisher onPublished={vi.fn()} />);
+    expect((await chooseLibrary(container)).textContent).toMatch(/101 courses found\. 101 courses selected to publish\./);
+    fireEvent.click(screen.getByRole("checkbox", { name: /Share with every signed-in AXOM account/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Publish 101 courses/ }));
+    expect(await screen.findByText("101 courses published and verified.")).toBeTruthy();
+    expect(mocks.batch.mock.calls.map(([jobs]) => (jobs as AcademicBatchJob[]).length)).toEqual([100, 1]);
   });
 });
