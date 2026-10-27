@@ -25,7 +25,8 @@ const catalog = {
 const read = vi.fn(async (path: string) => path === "catalog.json" ? new TextEncoder().encode(JSON.stringify(catalog)) : new Uint8Array());
 
 describe("publication jobs", () => {
-  beforeEach(() => vi.mocked(prepareAcademicUpload).mockReset());
+  // A function returned from beforeEach runs as teardown, so return nothing.
+  beforeEach(() => { vi.mocked(prepareAcademicUpload).mockReset(); });
 
   it("keeps optional originals on this device only when the course exceeds its size limit", async () => {
     const upload = { catalogId: course.catalogId } as Awaited<ReturnType<typeof prepareAcademicUpload>>;
@@ -41,6 +42,27 @@ describe("publication jobs", () => {
       await vi.mocked(prepareAcademicUpload).mock.calls[call][0]("catalog.json"))) as typeof catalog).sources.map(source => source.id);
     expect(await sourcesIn(0)).toEqual(["bank", "slides"]);
     expect(await sourcesIn(1)).toEqual(["bank"]);
+  });
+
+  it("publishes questions without any source files when the course is still too large, and explains when nothing fits", async () => {
+    const bankWithOriginal: PublicationInventory = { ...inventory, sources: inventory.sources.map(source => source.id === "bank"
+      ? { ...source, original: { extension: "pdf" } } : source) };
+    const upload = { catalogId: course.catalogId } as Awaited<ReturnType<typeof prepareAcademicUpload>>;
+    vi.mocked(prepareAcademicUpload)
+      .mockRejectedValueOnce(new Error("This collection exceeds the supported upload size."))
+      .mockRejectedValueOnce(new Error("A private academic upload must contain 1–1500 verified files."))
+      .mockResolvedValueOnce(upload);
+    const first = publicationJobs(read, bankWithOriginal, [course]);
+    await expect(first.jobs[0].prepare()).resolves.toBe(upload);
+    expect(first.notes.keptLocal.get(course.catalogId)).toBe(2);
+    const third = JSON.parse(new TextDecoder().decode(await vi.mocked(prepareAcademicUpload).mock.calls[2][0]("catalog.json"))) as typeof catalog;
+    expect(third.sources.map(source => source.id)).toEqual(["bank"]);
+
+    vi.mocked(prepareAcademicUpload).mockReset().mockRejectedValue(new Error("This collection exceeds the supported upload size."));
+    const second = publicationJobs(read, bankWithOriginal, [course]);
+    await expect(second.jobs[0].prepare()).rejects.toThrow(/larger than 512 MB or 1,500 files even without its source files/);
+    expect(prepareAcademicUpload).toHaveBeenCalledTimes(3);
+    expect(second.notes.failures.get(course.catalogId)).toMatch(/smaller groups/);
   });
 
   it("does not hide other preparation failures behind the size fallback", async () => {

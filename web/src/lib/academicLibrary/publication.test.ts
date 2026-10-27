@@ -6,6 +6,7 @@ import {
   courseLibraryReader, planPublication, publicationCatalogId, publicationJobs, readPublicationInventory,
 } from "./publication";
 import { library } from "./publicationFixture.testing";
+import { prepareAcademicUpload } from "./upload";
 
 describe("publishing a prepared library as one course per term and module", () => {
   it("plans courses in curriculum order and lists every source it leaves out", async () => {
@@ -92,10 +93,19 @@ describe("publishing a prepared library as one course per term and module", () =
     const { read } = await library();
     const inventory = await readPublicationInventory(read);
     const goer = planPublication(inventory).courses.find(course => course.module === "GOER")!;
-    const reader = courseLibraryReader(read, inventory, goer, id => !goer.optionalSourceIds.includes(id));
+    const reader = courseLibraryReader(read, inventory, goer, { include: id => !goer.optionalSourceIds.includes(id) });
     const catalog = JSON.parse(new TextDecoder().decode(await reader("catalog.json"))) as PrivateLibraryCatalog;
     expect(catalog.id).toBe("academic-library-t5-goer");
     expect(catalog.templates.map(entry => entry.name)).toEqual(["03_GOER_Lectures.txt"]);
     expect(catalog.sources.map(source => source.name)).toEqual(["goer-pq.pdf"]);
+    expect(catalog.sources[0].originalFile).toMatch(/^sources\/[a-f0-9]{64}\.pdf$/);
+    const withoutOriginals = courseLibraryReader(read, inventory, goer, { originals: false });
+    const stripped = JSON.parse(new TextDecoder().decode(await withoutOriginals("catalog.json"))) as PrivateLibraryCatalog;
+    expect(stripped.sources.map(source => source.name).sort()).toEqual(["goer-pq.pdf", "goer-slides.pdf"]);
+    expect(stripped.sources.every(source => source.originalFile === undefined)).toBe(true);
+    // Questions still publish without the source files.
+    const upload = await prepareAcademicUpload(courseLibraryReader(read, inventory, goer, { include: id => !goer.optionalSourceIds.includes(id), originals: false }));
+    expect(upload.files.some(file => file.path.endsWith(".pdf"))).toBe(false);
+    expect(upload.metadata.ready_questions).toBe(1);
   });
 });

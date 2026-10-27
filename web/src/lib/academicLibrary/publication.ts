@@ -15,7 +15,7 @@ import type { LibraryInputLimits } from "../privateLibrary/inputRoot";
 import type { PrivateLibraryCatalog, ReviewedFiling } from "../privateLibrary/types";
 import { academicCoursePlan, moduleIdentity, reviewedTermNumber, type AcademicPlanTerm } from "./coursePlan";
 import { compareCourses } from "./catalogOrder";
-import { prepareAcademicUpload, type AcademicUpload } from "./upload";
+import { prepareAcademicUpload } from "./upload";
 import type { AcademicBatchJob } from "./batch";
 
 type Term = ReviewedFiling["term"];
@@ -296,9 +296,17 @@ export function planPublication(inventory: PublicationInventory, confirmedTerms:
   return { courses: [...courses.values()].sort(compareCourses), blocked, excluded };
 }
 
+export interface CourseReaderOptions {
+  /** Sources to include; the rest stay on this device. */
+  include?: (sourceId: string) => boolean;
+  /** False publishes the question sets without their original files. */
+  originals?: boolean;
+}
+
 /** One course's catalog over the same library files; nothing is copied. */
 export function courseLibraryReader(read: LibraryReader, inventory: PublicationInventory, course: PlannedCourse,
-  include: (sourceId: string) => boolean = () => true): LibraryReader {
+  options: CourseReaderOptions = {}): LibraryReader {
+  const include = options.include ?? (() => true);
   const sources = inventory.sources.filter(source => course.sourceIds.includes(source.id) && include(source.id))
     .sort((left, right) => left.checksum.localeCompare(right.checksum));
   let catalog: Uint8Array | undefined;
@@ -311,46 +319,59 @@ export function courseLibraryReader(read: LibraryReader, inventory: PublicationI
       if (selected.some(row => !row)) throw new Error("The library changed while publishing. Choose it again and review the plan.");
       catalog = encode({ ...inventory.library, id: course.catalogId,
         templates: course.sections.map(section => ({ file: section.file, name: section.name, checksum: section.checksum })),
-        sources: selected });
+        sources: options.originals === false ? selected.map(row => ({ ...row, originalFile: undefined })) : selected });
     }
     return catalog.slice();
   };
 }
 
-/** Size errors from the uploader; the course can retry without optional originals. */
+/** Size errors from the uploader; the course can retry with fewer files. */
 const TOO_LARGE = /exceeds the supported upload size|1–1500 verified files/;
 
 export interface PublicationJobNotes {
-  /** Original-only files kept on this device so the course fits its size limit. */
+  /** Original files kept on this device so the course fits its size limit. */
   keptLocal: Map<string, number>;
   /** Why a course could not be prepared, in the validator's own words. */
   failures: Map<string, string>;
 }
 
+/**
+ * One batch job per course. A course over 512 MiB or 1,500 files retries
+ * first without its original-only files, then without any original files;
+ * its questions and figures still publish and the kept files are counted.
+ */
 export function publicationJobs(read: LibraryReader, inventory: PublicationInventory, courses: readonly PlannedCourse[]):
   { jobs: AcademicBatchJob[]; notes: PublicationJobNotes } {
   const notes: PublicationJobNotes = { keptLocal: new Map(), failures: new Map() };
   const jobs = courses.map((course): AcademicBatchJob => ({
     key: course.catalogId,
     async prepare(signal) {
-      if (course.termBasis === "proposed") throw new Error("Confirm this course's term before publishing it.");
-      const planTerm: AcademicPlanTerm | undefined = course.sections.length && course.termBasis !== "plan"
-        ? { term: course.term, evidence: "human-reviewed" } : undefined;
-      const unscheduled = course.sections.length ? undefined
-        : { term: course.term, module: course.module, evidence: "source-metadata" as const };
-      const prepare = (include?: (id: string) => boolean): Promise<AcademicUpload> => {
-        if (signal?.aborted) throw new DOMException("Publishing was cancelled.", "AbortError");
-        return prepareAcademicUpload(courseLibraryReader(read, inventory, course, include), unscheduled, planTerm ? { planTerm } : {});
-      };
       try {
-        try { return await prepare(); }
-        catch (cause) {
-          if (!(cause instanceof Error) || !TOO_LARGE.test(cause.message) || !course.optionalSourceIds.length) throw cause;
-          const optional = new Set(course.optionalSourceIds);
-          const upload = await prepare(id => !optional.has(id));
-          notes.keptLocal.set(course.catalogId, optional.size);
-          return upload;
+        if (course.termBasis === "proposed") throw new Error("Confirm this course's term before publishing it.");
+        const planTerm: AcademicPlanTerm | undefined = course.sections.length && course.termBasis !== "plan"
+          ? { term: course.term, evidence: "human-reviewed" } : undefined;
+        const unscheduled = course.sections.length ? undefined
+          : { term: course.term, module: course.module, evidence: "source-metadata" as const };
+        const optional = new Set(course.optionalSourceIds);
+        const withOriginals = course.sourceIds.filter(id => !optional.has(id)
+          && inventory.sources.some(source => source.id === id && source.original)).length;
+        const stages: Array<{ options: CourseReaderOptions; kept: number }> = [{ options: {}, kept: 0 }];
+        if (optional.size) stages.push({ options: { include: id => !optional.has(id) }, kept: optional.size });
+        if (withOriginals) stages.push({ options: { include: id => !optional.has(id), originals: false }, kept: optional.size + withOriginals });
+        for (const [index, stage] of stages.entries()) {
+          if (signal?.aborted) throw new DOMException("Publishing was cancelled.", "AbortError");
+          try {
+            const upload = await prepareAcademicUpload(courseLibraryReader(read, inventory, course, stage.options),
+              unscheduled, planTerm ? { planTerm } : {});
+            if (stage.kept) notes.keptLocal.set(course.catalogId, stage.kept);
+            return upload;
+          } catch (cause) {
+            if (!(cause instanceof Error) || !TOO_LARGE.test(cause.message)) throw cause;
+            if (index === stages.length - 1)
+              throw new Error("This course is larger than 512 MB or 1,500 files even without its source files. Publish its question sets in smaller groups.", { cause });
+          }
         }
+        throw new Error("This course could not be prepared.");
       } catch (cause) {
         // The batch receipt stays generic; keep the validator's reason for the reviewer.
         if (cause instanceof Error && cause.name !== "AbortError") notes.failures.set(course.catalogId, cause.message);
