@@ -15,6 +15,7 @@ import { useAcademicCatalog } from "../../lib/academicLibrary/useAcademicCatalog
 import { ICON_SIZE } from "../../lib/iconSize";
 import "../../styles/course-library.css";
 import { AcademicCourseUpload } from "./AcademicCourseUpload";
+import { AcademicReviewQueue } from "./AcademicReviewQueue";
 import { AcademicLibraryPublisher } from "./AcademicLibraryPublisher";
 import { getAcademicCourse, type AcademicCourse } from "../../lib/academicLibrary/client";
 import { compareCourses } from "../../lib/academicLibrary/catalogOrder";
@@ -80,6 +81,7 @@ export function CourseLibrary({ onClose, onTemplate, onOpen, onCreate }: {
     {remoteId && !connectedChosen && <div><GButton onClick={() => setSelected(null)}>All courses</GButton><p role={linkedError ? "alert" : "status"}>{linkedError || (accountId ? "Opening your course…" : "Sign in to open this course.")}</p></div>}
     {connectedChosen ? <ConnectedCoursePlan key={`${accountId}:${connectedChosen.current_revision_id}`} course={connectedChosen} onBack={() => setSelected(null)} onOpen={onOpen} onCustomize={onTemplate} onSharingSaved={retryCatalog} /> : chosen ? <CoursePlan key={chosen.id} book={chosen} bank={bankFor(chosen)} onBack={() => setSelected(null)} onOpen={onOpen} onCustomize={onTemplate} /> : <>
       <header className="course-library-heading"><div><p className="course-eyebrow">Your academic collection</p><h1 tabIndex={-1}>Course Library</h1><p>Preview the weeks. Choose what to load. Keep your progress.</p></div><GButton onClick={onClose}><ArrowLeft size={ICON_SIZE.body} /> My Courses</GButton></header>
+      <AcademicReviewQueue />
       <div className="course-library-tools">
         <div className="course-view-switch" role="group" aria-label="Course collection">
           <button aria-pressed={view === "available"} onClick={() => setView("available")}>Available courses</button>

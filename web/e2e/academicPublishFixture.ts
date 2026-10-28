@@ -58,6 +58,17 @@ export async function academicPublishFixture(page: Page, options: { reviewer?: b
     if (path === "/auth/v1/user") return json({ id: userId, aud: "authenticated", role: "authenticated", email: "owner@example.test",
       app_metadata: {}, user_metadata: {}, created_at: "2026-10-27T00:00:00Z" });
     if (path.endsWith("/rpc/academic_is_reviewer")) return json(Boolean(options.reviewer));
+    if (path.endsWith("/rpc/academic_review_queue")) {
+      if (!options.reviewer) return json([]);
+      const { after_id = null } = body() as { after_id?: string | null };
+      return json([...collections.values()].filter(collection => collection.current_revision_id
+        && collection.visibility === "shared" && collection.review_status === "pending"
+        && (!after_id || collection.id > after_id)).sort((a, b) => a.id.localeCompare(b.id)).slice(0, 24)
+        .map(collection => ({ id: collection.id, title: collection.title, module: collection.module, term: collection.term,
+          current_revision_id: collection.current_revision_id, owner_display_name: "Library owner",
+          ready_questions: current(collection)!.ready_questions, review_questions: current(collection)!.review_questions,
+          submitted_at: "2026-10-28T00:00:00Z" })));
+    }
     if (path.endsWith("/rpc/academic_create_revision")) {
       const input = body() as { metadata: Record<string, string | number | undefined>; template: string; files: Omit<FileRow, "object_path">[]; content_hash: string; collection: string };
       let collection = collections.get(input.collection);

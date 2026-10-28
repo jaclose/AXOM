@@ -1,0 +1,29 @@
+.academic-review-queue { margin:20px 0; }
+.academic-review-queue .panel-head { gap:12px; flex-wrap:wrap; }
+.academic-review-queue p { margin:0; overflow-wrap:anywhere; }
+.academic-review-queue > p, .academic-review-error { margin-top:12px; font-size:13px; }
+.academic-review-list { display:grid; margin-top:15px; }
+.academic-review-row { padding:13px 0; border-top:1px solid var(--hairline); min-width:0; }
+.academic-review-row-summary { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+.academic-review-description, .academic-review-row-actions { display:grid; gap:4px; min-width:0; }
+.academic-review-description { flex:1 1 240px; }
+.academic-review-description h3 { margin:0; font-size:14px; line-height:1.45; overflow-wrap:anywhere; }
+.academic-review-description p, .academic-review-row-actions p { font-size:12px; color:var(--text-70); }
+.academic-review-row-actions { justify-items:start; }
+.academic-review-row-actions .gbtn { margin-top:5px; }
+.academic-review-preview { margin-top:12px; padding:14px; border:1px solid var(--hairline); border-radius:var(--radius-sm); background:var(--surface-2); }
+.academic-review-preview h4 { margin:0 0 10px; font-size:13px; }
+.academic-review-preview pre { margin:0; max-width:70ch; max-height:320px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font:13px/1.7 var(--font-ui); }
+.academic-review-preview pre:focus-visible { outline:2px solid var(--gold); outline-offset:3px; }
+.academic-review-preview p { font-size:13px; line-height:1.6; }
+.academic-review-preview .academic-review-preview-note { margin-top:12px; color:var(--text-70); font-size:12px; }
+.academic-review-error .gbtn, .academic-review-preview [role="alert"] .gbtn { margin-top:8px; }
+.academic-review-decisions { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
+.academic-review-more { margin-top:12px; }
+@media (max-width:560px) {
+  .academic-review-description { flex-basis:100%; }
+  .academic-review-row-actions { width:100%; grid-template-columns:1fr auto; align-items:center; gap:6px 10px; }
+  .academic-review-row-actions > p { grid-row:2; }
+  .academic-review-row-actions > .gbtn { grid-column:2; grid-row:1 / 3; margin:0; }
+  .academic-review-preview { padding:12px; }
+}
