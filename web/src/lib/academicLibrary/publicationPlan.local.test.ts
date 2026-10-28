@@ -2,7 +2,8 @@
 /**
  * Opt-in dry run of Publish a prepared library on a REAL prepared library, on
  * the authorized local machine. It plans every course and prepares each one
- * exactly as publishing would, but uploads nothing. Run from web/ with
+ * exactly as publishing would, including a real browser image decoder, but
+ * uploads nothing. Run from web/ with
  *
  *   AXOM_PUBLISH_LIBRARY_ROOT=<prepared folder> \
  *   AXOM_PUBLISH_REPORT=<report.json outside the repository> \
@@ -16,9 +17,10 @@
  */
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { safeLibraryPath } from "../privateLibrary/install";
 import type { ReviewedFiling } from "../privateLibrary/types";
+import { openPublicationBrowserDecoder } from "./publicationBrowserDecoder.local";
 import {
   PUBLICATION_INPUT_LIMITS, planPublication, publicationJobs, readPublicationInventory, type PlannedCourse,
 } from "./publication";
@@ -36,6 +38,16 @@ function confirmedTerms(): Record<string, Term> {
 }
 
 describe.skipIf(!root)("dry run of publishing a real prepared library (opt-in only)", () => {
+  let decoder: Awaited<ReturnType<typeof openPublicationBrowserDecoder>> | undefined;
+  beforeAll(async () => {
+    decoder = await openPublicationBrowserDecoder();
+    vi.stubGlobal("createImageBitmap", decoder.decode);
+  });
+  afterAll(async () => {
+    vi.unstubAllGlobals();
+    await decoder?.close();
+  });
+
   it("plans every course and prepares each one without uploading", async () => {
     const parent = realpathSync(resolve(root!));
     const read = async (file: string) => {
@@ -79,6 +91,7 @@ describe.skipIf(!root)("dry run of publishing a real prepared library (opt-in on
           reason: notes.failures.get(job.key) ?? (cause instanceof Error ? cause.message : "This course could not be prepared.") });
       }
     }
+    decoder?.assertHealthy();
     const needsTerm = plan.courses.filter(course => course.termBasis === "proposed").map(course => ({
       moduleKey: course.moduleKey, module: course.module, proposedTerm: course.term, reason: course.proposalReason,
       sections: course.sections.map(section => section.name),
