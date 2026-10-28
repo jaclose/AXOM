@@ -17,19 +17,22 @@ That batch is `dc055a2` on `origin/main`; its deployment was not verified on 202
 It does not authorize migrations, private publication or subsequent releases.
 Verify deployed SHA and protected index before release claims.
 
-## Branch `jd-claude/eloquent-shannon-b2xof9` (2026-10-27, cloud)
+## Branch `jd-claude/eloquent-shannon-b2xof9` (2026-10-28, cloud)
 
-Base `dc055a2`. Adds whole-library publishing: one collection per term and module with
-every plan section, reviewer-confirmed plan terms (both uploaders), an on-device check
-before upload, plan-less question collections, reviewer approval, a curriculum-ordered
-catalog and term-grouped QBank discovery
+Whole-library publishing, reviewer approval and "Your published courses" (PRs 31 and 32)
+are on `origin/main` at `0cb5769` by fast-forward
 ([contract](features/academic-library.md#one-course-per-module-and-the-library-publisher)).
-Migration `20261027120000_academic_curriculum_catalog.sql` is replayed locally only.
-`5c04e71` fixes the privacy replay test whose fixed 2026-10-23 expiry fails main's suite.
-Passed: full Vitest (28 skipped), PGlite replay, types/lint/build, a synthetic publish
-journey at 1440/390 and related catalog specs in Chromium. Not done: real-corpus publish,
-hosted migration, reviewer grant, second-account check; the private corpus and board
-were unreachable from the cloud. Next: JD reviews the draft PR, then the owner steps.
+PR 34 reports the hosted migrations and reviewer grant as applied; not rechecked here.
+The real-corpus publish and second-account check remain JD's.
+
+This batch, on `0cb5769`: import review fixes from draft PRs 28 and 29 (2 to 10 choices,
+one answer image, slide-key preselection), highlights on imported stems in every exam
+interface ([question content](features/question-content.md)), the ExamSoft screen fitted
+to 360 to 390 px phones, Midnight as the default palette, a quieter sidebar, and sign-up
+with no code once Confirm email is off in the Supabase dashboard
+([accounts setup](ACCOUNTS-SETUP.md), step 3). Passed: full Vitest, lint, build, repo
+checks and the affected Chromium specs, contrast sweep included. Next: JD reviews the
+draft PR, flips Confirm email, closes PRs 28 and 29 as superseded.
 
 ## Ownership and protected work
 
