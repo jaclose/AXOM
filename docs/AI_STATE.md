@@ -5,10 +5,13 @@ authority: current-state
 ---
 # AXOM current AI state
 
-Snapshot: 2026-10-20 UTC, `feat/academic-library-v1` in
-`AXOM-academic-library-v1`, HEAD `78c00e04`. This reflection batch was pushed to
-main and deployed (authenticated deployment `7203032971`); six old dates were
-dismissed in the live UI and stayed dismissed after reload. Domain contracts remain authoritative.
+Snapshot: 2026-10-28, `codex/qbank-review-queue` in `AXOM-qbank-review`, base `ee30ee43`.
+PR #33 was green at `78121234` before this work began. Adds a reviewer-only metadata
+queue, restricted plan preview and revision-bound review RPC. The PR #30 extraction
+patch is prepared locally, unapplied. New migration `20261028160000` is locally tested
+only. Passed: types/lint/build, 3,954 tests (29 skips), six Chrome journeys and repository
+gates. Draft review/CI pending. Hosted migration and the PR #30 patch stay unapplied.
+Earlier reflection release receipts remain at `git show ee30ee43:docs/AI_STATE.md`.
 
 Batch pushes: `origin/main` triggers Vercel production, local commits do not.
 After the reflection release, JD approved one additional tested

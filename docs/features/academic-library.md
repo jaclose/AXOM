@@ -24,6 +24,30 @@ take precedence over inferred legacy lists; older source versions remain availab
 
 ## Backend boundary
 
+### Shared-course review queue
+
+Academic reviewers see the reusable **Submitted QBank review** list in Course Library.
+It extends the submission rows from draft PR #30 with owner display names, pagination,
+preview and decisions. The prepared PR #30 integration patch replaces its inline list
+with this same component and retires the old operator-only queue RPC; that patch is
+separate and unapplied while PR #30 remains on its own branch.
+
+Migration `20261028160000_academic_review_queue.sql` adds a security-definer metadata
+RPC gated by `academic_reviewers`. It lists all owners' current shared, pending, ready,
+nonwithdrawn submissions, 24 at a time. The cursor contains the last timestamp and ID,
+so removing a reviewed row does not break pagination. The displayed submitted date is
+the collection's latest submission-state update from existing upload/sharing actions;
+it does not reconstruct an unavailable original submission date. Names come from
+account profiles, with “Account owner” as the fallback. Emails and owner IDs are absent.
+
+A separate reviewer-only RPC previews the exact current revision's plan and counts.
+Question files, media and direct revision reads retain their existing access rules.
+Opening that preview enables Approve and Reject. A compatible `academic_review`
+overload locks the collection, checks the previewed revision, then delegates the existing
+review operation. Replacement uploads require a new preview. Membership is checked
+again by each RPC and refreshed on queue visits; non-reviewers receive no queue metadata.
+These are local implementation and test contracts, not applied hosted migrations.
+
 The additive `20261011190000_academic_library.sql` migration defines collections,
 immutable revisions, file manifests, reviewer/group access and personal enrollments.
 Catalog pages contain at most 24 metadata records. Preview retrieves template text;
@@ -76,8 +100,8 @@ in catalog entries are replaced by source filenames. Sharing controls now live u
 owned course preview. Private, shared and membership-backed group choices call the
 existing permissioned RPC. Same-scope refresh preserves the open plan; account/query
 changes still discard prior metadata immediately. Reviewers approve or withdraw a
-course's current revision from its preview; a cross-owner review queue is not delivered
-here (draft [PR #30](https://github.com/jaclose/AXOM/pull/30) lists submissions in its operator console).
+course's current revision from its preview. The cross-owner reviewer queue above
+extends the submission list from draft [PR #30](https://github.com/jaclose/AXOM/pull/30).
 
 The forward migration `20261027120000_academic_curriculum_catalog.sql` pages
 `academic_catalog` by term number, module and title instead of collection UUID, with the
@@ -245,7 +269,7 @@ These are single-run local observations, not hosted latency or total account-siz
 
 **Still incomplete:** paged learner history, persistent offline cache usage/removal
 controls, general private-upload original-binary sync, cloud copies for academic
-originals above 50 MiB, a cross-owner review queue, publishing the remaining supplied
+originals above 50 MiB, hosted reviewer-queue acceptance, publishing the remaining supplied
 courses, hosted daily challenges and release/package acceptance. Legacy checkpoints
 still use the compatible full-source restore path.
 
