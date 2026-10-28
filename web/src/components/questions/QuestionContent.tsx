@@ -97,8 +97,8 @@ function MarkedBlock({ html, start, length, marking, className }: {
   const plan = JSON.stringify(blockMarks(start, length, marking.annotations));
   const { erase } = marking;
   useLayoutEffect(() => {
-    if (ref.current) paintBlock(ref.current, html, JSON.parse(plan) as BlockMark[], erase);
-  }, [html, plan, erase]);
+    if (ref.current) paintBlock(ref.current, html, length, JSON.parse(plan) as BlockMark[], erase);
+  }, [html, length, plan, erase]);
   return <p ref={ref} className={className} data-stem-start={start} />;
 }
 

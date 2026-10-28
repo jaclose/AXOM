@@ -39,7 +39,7 @@ describe("stem highlight offsets for imported questions", () => {
     const html = "HCO<sub>3</sub> is high<br>and K<sup>+</sup> is low.";
     expect(blockMarks(start, 28, [{ id: "a", startOffset: start, endOffset: start + 4, tone: "yellow", exactText: "HCO3" } as never]))
       .toEqual([{ id: "a", from: 0, to: 4, tone: "yellow", label: "HCO3" }]);
-    paintBlock(paragraph, html, [{ id: "a", from: 0, to: 4, tone: "yellow", label: "HCO3" }], false);
+    paintBlock(paragraph, html, "HCO3 is high\nand K+ is low.".length, [{ id: "a", from: 0, to: 4, tone: "yellow", label: "HCO3" }], false);
     expect([...paragraph.querySelectorAll("mark")].map((mark) => mark.textContent)).toEqual(["HCO", "3"]);
     expect(plainLength(paragraph)).toBe("HCO3 is high\nand K+ is low.".length);
 
@@ -52,5 +52,20 @@ describe("stem highlight offsets for imported questions", () => {
     window.getSelection()!.addRange(range);
     const selected = stemSelection(root, window.getSelection())!;
     expect(stem.slice(selected.startOffset, selected.endOffset)).toBe("high\nand K");
+  });
+
+  it("leaves a paragraph unmarked when its rendered words differ from the stem's", () => {
+    const root = document.createElement("div");
+    const paragraph = document.createElement("p");
+    paragraph.dataset.stemStart = "0";
+    root.append(paragraph);
+    document.body.append(root);
+    // The plain stem keeps "&#8211;" as written; the page shows one dash.
+    paintBlock(paragraph, "pH 7.1&#8211;7.2", "pH 7.1&#8211;7.2".length, [{ id: "a", from: 0, to: 2, tone: "yellow", label: "pH" }], false);
+    expect(paragraph.querySelectorAll("mark")).toHaveLength(0);
+    const range = document.createRange();
+    range.selectNodeContents(paragraph);
+    window.getSelection()!.addRange(range);
+    expect(stemSelection(root, window.getSelection())).toBeNull();
   });
 });

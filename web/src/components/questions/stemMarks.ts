@@ -39,9 +39,12 @@ export function plainLength(node: Node): number {
   return length;
 }
 
+/** A paragraph whose rendered words match the stem; see `paintBlock`. */
+const MARKABLE_BLOCK = "[data-stem-start]:not([data-stem-off])";
+
 function blockAt(root: Element, container: Node): HTMLElement | undefined {
   const element = container.nodeType === Node.ELEMENT_NODE ? container as Element : container.parentElement;
-  const block = element?.closest<HTMLElement>("[data-stem-start]");
+  const block = element?.closest<HTMLElement>(MARKABLE_BLOCK);
   return block && root.contains(block) ? block : undefined;
 }
 
@@ -62,7 +65,7 @@ function stemOffsetAt(root: Element, container: Node, offset: number): number | 
 export function stemSelection(root: Element, selection: Selection | null): QuestionTextSelection | null {
   if (!selection || selection.isCollapsed || !selection.rangeCount) return null;
   const range = selection.getRangeAt(0);
-  const crossed = [...root.querySelectorAll<HTMLElement>("[data-stem-start]")].filter((block) => range.intersectsNode(block));
+  const crossed = [...root.querySelectorAll<HTMLElement>(MARKABLE_BLOCK)].filter((block) => range.intersectsNode(block));
   if (!crossed.length || !range.toString().trim()) return null;
   const first = crossed[0];
   const last = crossed[crossed.length - 1];
@@ -98,9 +101,17 @@ export function blockMarks(start: number, length: number, annotations: readonly 
   return marks;
 }
 
-/** Fill a block with its markup, then wrap each highlighted run of its text in a mark. */
-export function paintBlock(block: HTMLElement, html: string, marks: readonly BlockMark[], erase: boolean): void {
+/**
+ * Fill a block with its markup, then wrap each highlighted run of its text in a
+ * mark. A paragraph whose rendered words differ from the stem's (an entity the
+ * plain reading keeps as written) shows no marks and takes no new ones, rather
+ * than drawing them in the wrong place.
+ */
+export function paintBlock(block: HTMLElement, html: string, length: number, marks: readonly BlockMark[], erase: boolean): void {
   block.innerHTML = html;
+  const aligned = plainLength(block) === length;
+  block.toggleAttribute("data-stem-off", !aligned);
+  if (!aligned) return;
   for (const mark of marks) {
     // Find the pieces first: wrapping changes the tree being walked.
     const pieces: Array<{ node: Text; from: number; to: number }> = [];
