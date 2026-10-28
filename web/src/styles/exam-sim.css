@@ -109,8 +109,8 @@ body.exam-sim-active .rest-overlay { display: none !important; }
 .exam-sim-item > * { max-width: 920px; }
 .sim-stem { margin-bottom: 22px; }
 .sim-stem-text { white-space: pre-wrap; outline: none; }
-.sim-stem.tool-highlight .sim-stem-text { cursor: text; }
-.sim-stem.tool-erase .sim-stem-text mark { cursor: pointer; }
+.sim-stem.tool-highlight :is(.sim-stem-text, .qcontent-annotated) { cursor: text; }
+.sim-stem.tool-erase :is(.sim-stem-text, .qcontent-annotated) mark { cursor: pointer; }
 .exam-sim mark { color: inherit; border-radius: 1px; }
 .exam-sim.theme-dark mark { color: #111; }
 

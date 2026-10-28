@@ -390,8 +390,14 @@ check prints counts only.
 | 4 | `content` on `QuestionRecord`; one block renderer under every exam interface; wider attachment roles; image enlarge, zoom, pan; deletion, backup and restore of the pictures | Open. Edits `questions.ts`, `questionAttachments.ts`, `ExamRunner.tsx`: Codex's files |
 | 5 | Build the three Term 5 GOER Week 2 banks locally and run them as the real regression set | In part (`feat/goer-pdf-bank-import-v1`). All three PDFs are tagged and are built locally: 47 questions, 11 tables, 7 figures. 32 are ready (two banks, every key agreed by a second PDF reader) and were saved, reloaded and re-imported without a duplicate through the canonical import, in memory. 15 need review (the slide deck: its answers are drawn marks, 14 of 15 slides). In a real browser, on the harness page, each of the three files was chosen, read, previewed, classified, imported, reloaded and checked. The 32 ready questions were saved as three sets from two source files (the biostatistics file keeps its two sets), every stem, key, number, page and picture unchanged after the reload, every table cell found, no answer slide on the page while a question is open, nothing written by a second import. Not done: reading the deck's marks (Codex), the import screen (Codex) |
 
-Known limits to carry forward: a rendered question must apply an asset's `crop`; annotations store positions in the plain stem, so
-highlights on block text need a mapping in Phase 4. Picture bytes are stored on the
+Highlights on an imported stem are saved as positions in the plain stem, as for typed
+questions. Each paragraph (text, formatted text, callout) knows where its words start in
+that stem (`components/questions/stemMarks.ts`), so a drag maps to stem positions, a
+highlight is drawn in pieces across formatting, and dragging across a mark grows it, in
+every exam interface. Tables, figures and equations are never marked; an edited stem
+falls back to the plain text renderer.
+
+Known limits to carry forward: a rendered question must apply an asset's `crop`. Picture bytes are stored on the
 device; account sync carries the question, its blocks and the asset records, not the
 bytes ([data model](../architecture/data-model.md)). Attachments are limited to PNG,
 JPEG, WebP and GIF, ten per question, 8 MB each; a Word file may hold EMF or WMF

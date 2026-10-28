@@ -205,7 +205,7 @@ function ClassicExam({ exam, skin, mode, onClose }: {
               eraseMode={tool === "erase"}
               onDelete={exam.onDeleteAnnotation}
               onSelection={exam.onSelection}
-            />} /></div>
+            />} annotate={{ annotations: exam.annotations, onSelection: exam.onSelection, onDelete: exam.onDeleteAnnotation, eraseMode: tool === "erase" }} /></div>
           </div>
           {!question.content && (question.attachments?.length ?? 0) > 0 && <SimExhibits question={question} />}
 

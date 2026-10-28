@@ -1,10 +1,13 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getQuestionAttachmentBlob, type QuestionImageAttachment } from "../../lib/questionAttachments";
-import { blocksToPlainText, sanitizeRichText, type AssetRole, type QuestionBlock, type TableBlock } from "../../lib/question-content/blocks";
+import { reconcileTextAnnotation, type QuestionTextAnnotation } from "../../lib/questionAnnotations";
+import { blockToPlainText, blocksToPlainText, sanitizeRichText, type AssetRole, type QuestionBlock, type TableBlock } from "../../lib/question-content/blocks";
 import type { PackageQuestion, QuestionAsset } from "../../lib/question-content/package";
 import { effectiveRole, isAssetVisible, visibleBlocks, type ContentViewMode } from "../../lib/question-content/visibility";
 import type { QuestionRecord } from "../../lib/questions";
 import { Modal } from "../ui/Modal";
+import type { QuestionTextSelection } from "./AnnotatedQuestionText";
+import { blockMarks, escapeHtml, paintBlock, stemSelection, stemTextStarts, type BlockMark } from "./stemMarks";
 import "../../styles/question-content.css";
 
 function Rich({ value }: { value: string }) {
@@ -78,19 +81,46 @@ function ContentImage({ asset, attachment, files, alt, enlarge }: {
   </>;
 }
 
-export function QuestionBlocks({ blocks, content, attachments, files, mode, section = "stem", enlarge = true }: {
+/** Where the stem's paragraphs sit in the plain stem, and the highlights to draw on them. */
+interface StemMarking {
+  starts: ReadonlyMap<QuestionBlock, number>;
+  annotations: readonly QuestionTextAnnotation[];
+  erase: boolean;
+}
+
+function MarkedBlock({ html, start, length, marking, className }: {
+  html: string; start: number; length: number; marking: StemMarking; className?: string;
+}) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  // Repaint only when this paragraph's highlights change, never on a parent's
+  // re-render (a ticking timer), which would drop a drag in progress.
+  const plan = JSON.stringify(blockMarks(start, length, marking.annotations));
+  const { erase } = marking;
+  useLayoutEffect(() => {
+    if (ref.current) paintBlock(ref.current, html, JSON.parse(plan) as BlockMark[], erase);
+  }, [html, plan, erase]);
+  return <p ref={ref} className={className} data-stem-start={start} />;
+}
+
+export function QuestionBlocks({ blocks, content, attachments, files, mode, section = "stem", enlarge = true, marking }: {
   blocks: readonly QuestionBlock[]; content: PackageQuestion; attachments?: readonly QuestionImageAttachment[]; files?: readonly File[];
-  mode: ContentViewMode; section?: AssetRole; enlarge?: boolean;
+  mode: ContentViewMode; section?: AssetRole; enlarge?: boolean; marking?: StemMarking;
 }) {
   const assets = new Map(content.assets.map((asset) => [asset.id, asset]));
   const shown = visibleBlocks(blocks, mode, (block) => effectiveRole(block.role, assets.get(block.assetId)?.role, section));
+  const marked = (block: QuestionBlock, key: number, html: string, plain: string, className?: string) => {
+    const start = marking?.starts.get(block);
+    return marking && start !== undefined
+      ? <MarkedBlock key={key} html={html} start={start} length={plain.length} marking={marking} className={className} />
+      : undefined;
+  };
   return <div className="qcontent-blocks">{shown.map((block, index) => {
     switch (block.type) {
-      case "text": return <p key={index}>{block.text}</p>;
-      case "rich_text": return <p key={index}><Rich value={block.html} /></p>;
+      case "text": return marked(block, index, escapeHtml(block.text), block.text) ?? <p key={index}>{block.text}</p>;
+      case "rich_text": return marked(block, index, sanitizeRichText(block.html), blockToPlainText(block)) ?? <p key={index}><Rich value={block.html} /></p>;
       case "table": return <ContentTable key={index} block={block} />;
       case "equation": return <p key={index} className="qcontent-equation">{block.plainText ?? block.latex}</p>;
-      case "callout": return <p key={index} className="qcontent-callout">{block.text}</p>;
+      case "callout": return marked(block, index, escapeHtml(block.text), block.text, "qcontent-callout") ?? <p key={index} className="qcontent-callout">{block.text}</p>;
       case "divider": return <hr key={index} />;
       case "image": {
         const asset = assets.get(block.assetId);
@@ -103,9 +133,66 @@ export function QuestionBlocks({ blocks, content, attachments, files, mode, sect
   })}</div>;
 }
 
+/** The stem's highlights and the handlers an exam passes to AnnotatedQuestionText. */
+export interface StemAnnotations {
+  annotations: readonly QuestionTextAnnotation[];
+  onSelection?: (selection: QuestionTextSelection | null) => void;
+  onDelete?: (annotationId: string) => void;
+  eraseMode?: boolean;
+}
+
+const markId = (target: EventTarget): string | undefined =>
+  (target instanceof Element ? target.closest("mark[data-annotation-id]")?.getAttribute("data-annotation-id") : null) ?? undefined;
+
+/** An imported stem that takes highlights the way plain stem text does: drag to mark, drag across a mark to grow it. */
+function AnnotatedStem({ question, content, blocks, mode, annotate }: {
+  question: QuestionRecord; content: PackageQuestion; blocks: readonly QuestionBlock[]; mode: ContentViewMode; annotate: StemAnnotations;
+}) {
+  const root = useRef<HTMLDivElement>(null);
+  const stem = question.stem;
+  const starts = useMemo(() => stemTextStarts(blocks, stem), [blocks, stem]);
+  const reconciled = useMemo(() => annotate.annotations.map((annotation) => reconcileTextAnnotation(annotation, stem)), [annotate.annotations, stem]);
+  const active = useMemo(() => reconciled.filter((annotation) => annotation.status === "active"), [reconciled]);
+  const needsRepair = reconciled.filter((annotation) => annotation.status === "needs-repair");
+  const { onSelection, onDelete, eraseMode = false } = annotate;
+  function capture() {
+    if (!onSelection || !root.current) return;
+    const range = stemSelection(root.current, window.getSelection());
+    if (!range) { onSelection(null); return; }
+    let { startOffset, endOffset } = range;
+    while (startOffset < endOffset && /\s/.test(stem[startOffset] ?? "")) startOffset += 1;
+    while (endOffset > startOffset && /\s/.test(stem[endOffset - 1] ?? "")) endOffset -= 1;
+    onSelection(endOffset > startOffset ? { startOffset, endOffset: Math.min(endOffset, stem.length) } : null);
+  }
+  const blocksView = <QuestionBlocks blocks={blocks} content={content} attachments={question.attachments} mode={mode} section="stem"
+    marking={starts && { starts, annotations: active, erase: eraseMode }} />;
+  if (!starts) return blocksView;
+  return <div ref={root} className="qcontent-annotated" tabIndex={-1}
+    onMouseUp={capture} onKeyUp={capture} onTouchEnd={capture}
+    onClick={(event) => {
+      const id = markId(event.target);
+      if (id && eraseMode && onDelete && window.getSelection()?.isCollapsed !== false) onDelete(id);
+    }}
+    onKeyDown={(event) => {
+      const id = markId(event.target);
+      if (id && onDelete && (event.key === "Delete" || event.key === "Backspace" || (eraseMode && (event.key === "Enter" || event.key === " ")))) {
+        event.preventDefault();
+        onDelete(id);
+        window.setTimeout(() => root.current?.focus(), 0);
+      }
+    }}>
+    {blocksView}
+    {needsRepair.length > 0 && <span className="annotation-repair-status" role="status">
+      {needsRepair.length} highlight{needsRepair.length === 1 ? "" : "s"} need repair: {needsRepair.map((item) => item.exactText).join(", ")}
+    </span>}
+  </div>;
+}
+
 /** Edited legacy text wins over source wording. Required source figures still render. */
-export function QuestionContent({ question, part, choice, mode = "question", fallback }: {
+export function QuestionContent({ question, part, choice, mode = "question", fallback, annotate }: {
   question: QuestionRecord; part: "stem" | "choice" | "explanation"; choice?: string; mode?: ContentViewMode; fallback: ReactNode;
+  /** Stem highlights: an unedited imported stem takes them on its own paragraphs; an edited one through `fallback`. */
+  annotate?: StemAnnotations;
 }) {
   const content = question.content;
   if (!content) return fallback;
@@ -124,6 +211,7 @@ export function QuestionContent({ question, part, choice, mode = "question", fal
       mode={mode} section={part} enlarge={part !== "choice"}
     />}</>;
   }
+  if (part === "stem" && annotate) return <AnnotatedStem question={question} content={content} blocks={blocks} mode={mode} annotate={annotate} />;
   return <QuestionBlocks blocks={blocks} content={content} attachments={question.attachments} mode={mode} section={part} enlarge={part !== "choice"} />;
 }
 

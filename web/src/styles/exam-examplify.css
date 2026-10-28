@@ -147,8 +147,8 @@
 
 .xfy .xfy-stem { margin: 16px 0 0; max-width: 1100px; }
 .xfy .xfy-stem-text { white-space: pre-wrap; outline: none; color: #333a44; }
-.xfy .xfy-stem.tool-highlight .xfy-stem-text { cursor: text; }
-.xfy .xfy-stem.tool-erase .xfy-stem-text mark { cursor: pointer; }
+.xfy .xfy-stem.tool-highlight :is(.xfy-stem-text, .qcontent-annotated) { cursor: text; }
+.xfy .xfy-stem.tool-erase :is(.xfy-stem-text, .qcontent-annotated) mark { cursor: pointer; }
 .exam-sim.xfy mark.question-highlight { border-bottom: 0; border-radius: 0; }
 .exam-sim.xfy mark.question-highlight.tone-red { background: #ff9c9e; }
 .exam-sim.xfy mark.question-highlight.tone-yellow { background: #fff06a; }

@@ -285,7 +285,7 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
                 eraseMode={tool === "erase"}
                 onDelete={exam.onDeleteAnnotation}
                 onSelection={exam.onSelection}
-              />} /></div>
+              />} annotate={{ annotations: exam.annotations, onSelection: exam.onSelection, onDelete: exam.onDeleteAnnotation, eraseMode: tool === "erase" }} /></div>
             </div>
           )}
           {!question.content && (question.attachments?.length ?? 0) > 0 && <Exhibits question={question} opened={attachment} onOpen={setAttachment} />}

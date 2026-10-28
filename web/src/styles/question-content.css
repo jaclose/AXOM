@@ -20,3 +20,4 @@ button.qcontent-image { cursor: zoom-in; }
 .bank-import-choices { list-style: none; padding: 0; }
 .bank-import-choices li { display: flex; align-items: baseline; gap: 14px; padding: 10px 0; }
 .bank-import-choices .qcontent-blocks { flex: 1; }
+.qcontent-annotated { outline: none; -webkit-user-select: text; user-select: text; }
