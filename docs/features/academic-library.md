@@ -153,7 +153,10 @@ Production writes need JD's explicit approval for each step. On the authorized M
    `insert into public.academic_reviewers(user_id) values ('<verified-auth-user-uuid>');`
 3. Prepare the library from the inventory, from `web/`:
    `node scripts/prepare-private-library.mjs <inventory.json> <private-output>`, with
-   the output outside the repository.
+   the output outside the repository. Optionally dry-run the whole plan and check
+   without a browser: `publicationPlan.local.test.ts` (opt-in through
+   `AXOM_PUBLISH_LIBRARY_ROOT`) prepares every course as publishing would, uploads
+   nothing and writes a metadata-only report to `AXOM_PUBLISH_REPORT` outside Git.
 4. Sign in to AXOM, open Course Library > Manage sources and custom courses > Publish a
    prepared library, choose the prepared folder, confirm each proposed term, review
    the plans and source files listed as staying on the device, then Check the selected
