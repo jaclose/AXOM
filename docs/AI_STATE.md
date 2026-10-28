@@ -5,6 +5,15 @@ authority: current-state
 ---
 # AXOM current AI state
 
+## 2026-10-28 QBank production receipt
+
+CLI 2.122.0 failed on `LOCK TABLE` (25P01) at 12:35 UTC; history stayed
+30/33. CLI 2.114.0 applied versions `20261016011812`, `20261017233759`,
+`20261027120000` at 12:47:19–12:47:36 UTC with
+`db push --linked --skip-vault`. Postflight 33/33; academic RPCs verified.
+Owner reviewer grant under `service_role` verified 12:49:35–12:49:40 UTC.
+No content upload or sharing change.
+
 Snapshot: 2026-10-20 UTC, `feat/academic-library-v1` in
 `AXOM-academic-library-v1`, HEAD `78c00e04`. This reflection batch was pushed to
 main and deployed (authenticated deployment `7203032971`); six old dates were
