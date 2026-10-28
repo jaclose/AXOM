@@ -107,7 +107,7 @@ function checkQuestion(pkg: ImportPackage, question: PackageQuestion, options: V
   const labels = question.choices.map((choice) => choice.label);
   if (new Set(labels).size !== labels.length) add("error", "duplicate_id", "Two choices have the same letter.", "choices");
   if (labels.length < 2) add("warning", "choices_incomplete", "The question has fewer than two answer choices.", "choices");
-  if (labels.length > 8) add("error", "invalid_question", `The extraction combined ${labels.length} answer choices into one question. AXOM supports at most eight (A–H) here; check for merged stems or option spillover.`, "choices");
+  if (labels.length > 10) add("error", "invalid_question", `The extraction combined ${labels.length} answer choices into one question. AXOM supports at most ten (A–J) here; check for merged stems or option spillover.`, "choices");
   const tableKeys = new Set(question.choiceTable?.rowKeys ?? []);
   for (const choice of question.choices) {
     if (!choice.blocks.length && !tableKeys.has(choice.label)) add("error", "choices_incomplete", `Choice ${choice.label} has no content.`, `choices[${choice.label}]`);

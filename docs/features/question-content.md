@@ -306,6 +306,9 @@ hold the question back, and `advisories` that do not. It follows decision 7.
   recorded with evidence `reviewer` and the request for review is cleared. Only a person's
   action calls it. A proposal from a program, such as a mark read off a slide, goes to the
   person first. Run `assessBank` again afterwards.
+- **In the import review** a key read from a marked answer slide is preselected and named
+  as the slide's suggestion. It counts only when the person confirms it outside the
+  answering view; if they clear the choice, it stays cleared.
 
 ## Saving a package through the canonical import
 
@@ -330,13 +333,16 @@ const saved = await saveBank(bank.pkg, bank.issues, bank.files, { library, store
   checksum, and every set made from the file is tied to that record. Without it only the
   questions are saved.
 - Only a ready question is offered. One that needs review is offered once its id is in
-  `acknowledged`, and never without a key. Two questions of one set that share a number are
+  `acknowledged`, and never without a key. A question needs 2 to 10 choices (A to J, as
+  ExamSoft allows); more than ten means merged questions, and review cannot override that.
+  The plain-text parsers still read choice letters A to H only. Two questions of one set that share a number are
   both held. Everything held is in `held` with its reasons.
 - The sets are filed by the manifest: `scope: { module, week }`. `filing.agrees` says
   whether the curriculum puts that module in the manifest's term.
 - All image bytes are saved in the existing attachment vault. Stable asset IDs join them
   to blocks. Restricted roles are enforced by the shared renderer: answer-reveal and
-  explanation images appear after answering, whole source pages only in review.
+  explanation images appear after answering, whole source pages only in review. An image
+  a block already places is not shown again from the asset list.
 - Reimport repairs missing bytes without duplicating questions. A later answer review
   adds only newly accepted questions in a continuation set; prior attempts stay attached.
 - Advisory notes travel with the question as its warnings.

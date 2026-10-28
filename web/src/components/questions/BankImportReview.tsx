@@ -31,12 +31,25 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<BankSave>();
   const [error, setError] = useState("");
-  const [answer, setAnswer] = useState("");
+  /** The reviewer's own choice; undefined until they pick one, so clearing it is respected. */
+  const [answer, setAnswer] = useState<string>();
   const [confirmedAnswerIds, setConfirmedAnswerIds] = useState<ReadonlySet<string>>(() => new Set());
   const assessed = useMemo(() => assessBank(pkg, unresolvedExtractionIssues(bank.conversionIssues, confirmedAnswerIds), bank.files), [pkg, bank, confirmedAnswerIds]);
   const summary = useMemo(() => summarizePackage(pkg, assessed.issues), [pkg, assessed.issues]);
   const question = pkg.questions[index];
   const verdict = question && assessed.verdicts.get(question.id);
+  // A marked answer slide suggests a key; it is not a confirmed one. Preselect it
+  // for the reviewer, and count it only once they confirm it against the slide.
+  const slideKey = question?.correctAnswer?.evidence === "answer-reveal-slide" && question.correctAnswer.labels.length === 1
+    && question.choices.some((choice) => choice.label === question.correctAnswer?.labels[0])
+    ? question.correctAnswer.labels[0] : "";
+  const selectedAnswer = answer ?? slideKey;
+  // Older packages both place the answer image in the explanation and list it as
+  // supporting media. Show each source image once.
+  const placedAssetIds = new Set(question
+    ? [...question.stem, ...(question.explanation ?? []), ...question.choices.flatMap((choice) => choice.blocks)]
+      .flatMap((block) => block.type === "image" ? [block.assetId] : [])
+    : []);
   const globalErrors = assessed.issues.filter((issue) => issue.severity === "error" && !issue.questionId);
   const validLocation = bank.reviewedFiling
     ? Boolean(bank.reviewedFiling.module.trim() && /^Term [1-5]$/.test(bank.reviewedFiling.term))
@@ -49,15 +62,15 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
     if (patch === pkg) return;
     setPackage(patch);
     if (question) setConfirmedAnswerIds((current) => { const next = new Set(current); next.delete(question.id); return next; });
-    setAnswer("");
+    setAnswer(undefined);
     setResult(undefined);
   }
   function confirmSourceAnswer() {
-    if (!question || !answer) return;
+    if (!question || !selectedAnswer || mode === "question") return;
     setPackage((current) => ({ ...current, questions: current.questions.map((entry) =>
-      entry.id === question.id ? withReviewedAnswer(entry, answer) : entry) }));
+      entry.id === question.id ? withReviewedAnswer(entry, selectedAnswer) : entry) }));
     setConfirmedAnswerIds((current) => new Set([...current, question.id]));
-    setAnswer(""); setResult(undefined);
+    setAnswer(undefined); setResult(undefined);
   }
   function editBlock(where: ReviewBlockLocation, value: string) {
     if (question) edited(editReviewedBlock(pkg, question.id, where, value));
@@ -132,9 +145,9 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
     {[...bank.warnings, ...bank.unplaced.map((entry) => entry.reason), ...globalErrors.map((issue) => issue.message)].map((note, n) => <p key={n} className="sub">{note}</p>)}
     {question && <article className="bank-import-question">
       <div className="row wrap gap8">
-        <GhostButton disabled={index === 0} onClick={() => { setIndex(index - 1); setAnswer(""); }}>Previous question</GhostButton>
+        <GhostButton disabled={index === 0} onClick={() => { setIndex(index - 1); setAnswer(undefined); }}>Previous question</GhostButton>
         <span>Question {index + 1} of {pkg.questions.length}</span>
-        <GhostButton disabled={index === pkg.questions.length - 1} onClick={() => { setIndex(index + 1); setAnswer(""); }}>Next question</GhostButton>
+        <GhostButton disabled={index === pkg.questions.length - 1} onClick={() => { setIndex(index + 1); setAnswer(undefined); }}>Next question</GhostButton>
         <SelectField label="Preview mode" value={mode} onChange={(event) => setMode(event.target.value as ContentViewMode)}>
           <option value="question">While answering</option><option value="answered">After answering</option><option value="review">Source review</option>
         </SelectField>
@@ -147,7 +160,7 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
       {mode !== "question" && <>
         <p>Answer: {question.correctAnswer?.labels.join(", ") || "Requires verification"}</p>
         <QuestionBlocks blocks={question.explanation ?? []} content={question} files={bank.files} mode={mode} section="explanation" />
-        <QuestionBlocks blocks={question.assets.filter((asset) => ["answer_reveal", "reference", "source_page"].includes(asset.role) && isAssetVisible(asset.role, mode)).map((asset) => ({ type: "image", assetId: asset.id, role: asset.role, alt: "Source answer or reference" }))} content={question} files={bank.files} mode={mode} />
+        <QuestionBlocks blocks={question.assets.filter((asset) => !placedAssetIds.has(asset.id) && ["answer_reveal", "reference", "source_page"].includes(asset.role) && isAssetVisible(asset.role, mode)).map((asset) => ({ type: "image", assetId: asset.id, role: asset.role, alt: "Source answer or reference" }))} content={question} files={bank.files} mode={mode} />
       </>}
       <details className="stack gap8" aria-label={`Edit question ${index + 1} from source`}>
         <summary>Correct extracted text, answer choices or tables</summary>
@@ -160,9 +173,10 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
         {question.explanation?.length ? blockEditors(question.explanation, "explanation", "Explanation") : <p className="sub">The source has no extracted explanation. Add it to the original document and reimport if needed.</p>}
       </details>
       {verdict && [...verdict.reasons, ...verdict.advisories].map((note, n) => <p key={n} className="sub">{note}</p>)}
+      {verdict?.readiness !== "ready" && slideKey && <p className="sub">The original answer slide marks {slideKey}. It stays a suggestion until you check the slide and confirm it.</p>}
       {verdict?.readiness !== "ready" && <div className="row wrap gap8">
-        <SelectField label="Verified answer" value={answer} onChange={(event) => setAnswer(event.target.value)}><option value="">Choose after checking the source</option>{question.choices.map((choice) => <option key={choice.id}>{choice.label}</option>)}</SelectField>
-        <GButton disabled={!answer || mode === "question"} onClick={confirmSourceAnswer}>Confirm answer from source</GButton>
+        <SelectField label="Verified answer" value={selectedAnswer} onChange={(event) => setAnswer(event.target.value)}><option value="">Choose after checking the source</option>{question.choices.map((choice) => <option key={choice.id}>{choice.label}</option>)}</SelectField>
+        <GButton disabled={!selectedAnswer || mode === "question"} onClick={confirmSourceAnswer}>Confirm answer from source</GButton>
       </div>}
     </article>}
     {error && <p role="alert">{error}</p>}
