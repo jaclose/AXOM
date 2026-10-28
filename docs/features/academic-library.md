@@ -11,6 +11,23 @@ tracker reconciliation and preserves completed work, notes, personal labels and 
 Quiz navigation passes an exact set of canonical local question IDs to the existing
 question workspace. An empty scope cannot expand into all questions.
 
+### Download and practice a term
+
+Signed-in learners can download a term from its Course Library section. The action
+reads every 24-course catalog page with an empty search, then downloads courses one
+at a time through the single-course installer and durable account reference. Complete
+on-device courses are skipped. Stop finishes the current course; another run resumes
+from saved receipts. Each failed course retains its reason and can be retried without
+repeating successful downloads. No weeks are enrolled and no tracker rows are loaded.
+
+Practice Term selects the union of the account's downloaded question receipts for
+that term, including courses beyond the visible catalog page. It includes only current
+answer-ready questions on the device and uses the existing quiz handoff, active-quiz
+guard and 2,000-question limit. New receipts retain term and module for offline practice;
+older receipts use exact hosted-course ownership or a complete metadata catalog lookup.
+An incomplete legacy lookup blocks practice with a retry, rather than shortening the
+question pool. Account changes stop pending work. No workspace schema change is needed.
+
 QBank discovery uses this same paginated account catalog and opens this same weekly
 plan. The permission-checked `academic_course` lookup resolves an exact deep link
 independently of the first 24 catalog rows. A refresh failure preserves visible

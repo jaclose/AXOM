@@ -17,19 +17,18 @@ That batch is `dc055a2` on `origin/main`; its deployment was not verified on 202
 It does not authorize migrations, private publication or subsequent releases.
 Verify deployed SHA and protected index before release claims.
 
-## Branch `jd-claude/eloquent-shannon-b2xof9` (2026-10-27, cloud)
+## QBank term downloads (2026-10-28, local)
 
-Base `dc055a2`. Adds whole-library publishing: one collection per term and module with
-every plan section, reviewer-confirmed plan terms (both uploaders), an on-device check
-before upload, plan-less question collections, reviewer approval, a curriculum-ordered
-catalog and term-grouped QBank discovery
-([contract](features/academic-library.md#one-course-per-module-and-the-library-publisher)).
-Migration `20261027120000_academic_curriculum_catalog.sql` is replayed locally only.
-`5c04e71` fixes the privacy replay test whose fixed 2026-10-23 expiry fails main's suite.
-Passed: full Vitest (28 skipped), PGlite replay, types/lint/build, a synthetic publish
-journey at 1440/390 and related catalog specs in Chromium. Not done: real-corpus publish,
-hosted migration, reviewer grant, second-account check; the private corpus and board
-were unreachable from the cloud. Next: JD reviews the draft PR, then the owner steps.
+PR #31 is merged at `ee30ee43`. Its publishing contract and prior local receipts are in
+[Academic library](features/academic-library.md); hosted migration/publication remain
+separate owner work. `codex/qbank-term-download` in `AXOM-qbank-term` starts from that SHA.
+Adds sequential complete-term download, Stop/resume, failure retry and exact downloaded
+term practice. Publisher files and existing migrations are protected and unchanged.
+Passed: installation, types/lint/build, 40 affected tests, 43 repository tests, hygiene
+and five Chrome journeys (1440/390, both themes, reduced motion, no console errors).
+Full local Vitest was interrupted (exit 130) when disk fell to 255 MiB; its result is
+incomplete. Existing build warnings remain. Draft review and full CI are pending.
+Next: obtain green PR checks before starting the reviewer queue from origin/main.
 
 ## Ownership and protected work
 
