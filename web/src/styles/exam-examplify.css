@@ -318,3 +318,9 @@
   .xfy .xfy-prev, .xfy .xfy-next { min-width: 92px; padding: 0 12px; }
   .xfy .xfy-alarm { position: fixed; top: 52px; left: 8px; right: 8px; white-space: normal; }
 }
+@media (max-width: 420px) {
+  .xfy .xfy-top { gap: 6px; padding-left: 8px; }
+  .xfy .xfy-clock-wrap { padding: 0 6px; }
+  .xfy .xfy-controls, .xfy .xfy-toolkit-toggle { padding: 0 8px; gap: 4px; letter-spacing: 0.02em; }
+  .xfy .xfy-wide-only { display: none; }
+}

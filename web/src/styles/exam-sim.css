@@ -25,7 +25,8 @@ body.exam-sim-active .rest-overlay { display: none !important; }
   --sim-bad: #c62828;
   --sim-scale: 1;
   position: fixed; inset: 0; z-index: 2000;
-  display: grid; grid-template-rows: auto 1fr auto;
+  /* One column no wider than the screen: a wide top bar must not widen the question below it. */
+  display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: minmax(0, 1fr);
   background: var(--sim-bg); color: var(--sim-text);
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
   font-size: 14px; letter-spacing: 0;

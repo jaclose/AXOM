@@ -74,6 +74,24 @@ for (const skin of SKINS) test(`highlights an imported question's paragraphs in 
   expect(errors).toEqual([]);
 });
 
+for (const width of [390, 360]) for (const skin of SKINS) test(`keeps the whole question and its controls on a ${width}px phone in ${skin.dialog}`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 844 });
+  const stem = await startBlock(page, skin, "plain");
+  const exam = page.getByRole("dialog", { name: skin.dialog });
+  // Nothing reaches past the screen, so no word or button is cut off. A toolbar
+  // that scrolls sideways on purpose may hold more than fits.
+  expect(await exam.evaluate((root) => {
+    const scrolls = (node: Element) => /auto|scroll/.test(getComputedStyle(node).overflowX) && node.scrollWidth > node.clientWidth;
+    const inScroller = (node: Element) => {
+      for (let up = node.parentElement; up && up !== root; up = up.parentElement) if (scrolls(up)) return true;
+      return false;
+    };
+    return Math.max(...[...root.querySelectorAll("*")].filter((node) => !inScroller(node)).map((node) => node.getBoundingClientRect().right));
+  })).toBeLessThanOrEqual(width + 0.5);
+  await expect(stem).toBeInViewport({ ratio: 1 });
+  await expect(exam.getByRole("button", { name: skin.tool ? "Exam Controls" : /End Block/ })).toBeInViewport({ ratio: 1 });
+});
+
 function collectErrors(page: Page): string[] {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
