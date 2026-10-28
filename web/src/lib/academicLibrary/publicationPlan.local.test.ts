@@ -46,7 +46,7 @@ describe.skipIf(!root)("dry run of publishing a real prepared library (opt-in on
   afterAll(async () => {
     vi.unstubAllGlobals();
     await decoder?.close();
-  });
+  }, 120_000);
 
   it("plans every course and prepares each one without uploading", async () => {
     const parent = realpathSync(resolve(root!));
