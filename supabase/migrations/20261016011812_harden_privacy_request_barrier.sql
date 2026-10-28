@@ -2,6 +2,11 @@
 -- boundary. Keep their account-level ordering in Postgres instead of relying
 -- on two independent service-role lookups around external I/O.
 
+-- Supabase's migration runner sends statements without a transaction block,
+-- where Postgres refuses LOCK TABLE. One explicit transaction keeps the lock
+-- and every change below atomic however the file is applied.
+begin;
+
 -- Older releases allowed failed requests beside one active row. Freeze this
 -- table while selecting one canonical barrier. A duplicate processing row may
 -- already have crossed an external boundary, so abort rather than guess.
@@ -524,3 +529,5 @@ revoke all on function public.record_account_deletion_failure(uuid, boolean)
   from public, anon, authenticated;
 grant execute on function public.record_account_deletion_failure(uuid, boolean)
   to service_role;
+
+commit;
