@@ -18,6 +18,7 @@ import { AcademicCourseUpload } from "./AcademicCourseUpload";
 import { AcademicLibraryPublisher } from "./AcademicLibraryPublisher";
 import { getAcademicCourse, type AcademicCourse } from "../../lib/academicLibrary/client";
 import { compareCourses } from "../../lib/academicLibrary/catalogOrder";
+import { TermCourseActions } from "./TermCourseActions";
 
 function courseCoverTitle(module: string): string {
   const words = module.trim().split(/\s+/);
@@ -33,6 +34,7 @@ export function CourseLibrary({ onClose, onTemplate, onOpen, onCreate }: {
   const [query, setQuery] = useState("");
   const [term, setTerm] = useState("");
   const [view, setView] = useState<"available" | "mine" | "all">("available");
+  const [downloadingTerm, setDownloadingTerm] = useState<string>();
   const { courses: connected, loading: catalogLoading, error: catalogError, more: moreAvailable,
     loadMore: more, retry: retryCatalog } = useAcademicCatalog(accountId, query, term);
   const [selected, setSelected] = useState<string | null>(() => new URL(window.location.href).searchParams.get("course"));
@@ -93,7 +95,10 @@ export function CourseLibrary({ onClose, onTemplate, onOpen, onCreate }: {
       {catalogError && <div role="alert"><p>{catalogError}</p><GButton onClick={retryCatalog}>Retry collection</GButton></div>}
       {!shown.length && !connectedShown.length && !catalogLoading && <div className="course-empty"><BookOpen size={32} /><h2>{view === "mine" ? "Your courses start here" : "No courses to show"}</h2><p>{query || term ? "Try a different search or term." : "Choose an available course to preview its weekly plan. Your progress stays separate from the collection."}</p>{view !== "available" && <GButton onClick={() => setView("available")}>Browse available courses</GButton>}</div>}
       {shownTerms.map((sectionTerm, index) => <section className="course-term-section" key={sectionTerm} aria-labelledby={`course-term-${index}`}>
-        <header className="course-term-heading"><h2 id={`course-term-${index}`}>{sectionTerm}</h2><span>{shown.filter(book => book.term === sectionTerm).length + connectedShown.filter(course => course.term === sectionTerm).length} courses</span></header>
+        <header className="course-term-heading"><h2 id={`course-term-${index}`}>{sectionTerm}</h2><span>{shown.filter(book => book.term === sectionTerm).length + connectedShown.filter(course => course.term === sectionTerm).length} courses shown</span></header>
+        {accountId && connected.some(course => course.term === sectionTerm) && <TermCourseActions key={`${accountId}:${sectionTerm}`} term={sectionTerm} accountId={accountId}
+          courses={connected} disabled={Boolean(downloadingTerm)}
+          onBusyChange={busy => setDownloadingTerm(current => busy ? `${accountId}:${sectionTerm}` : current === `${accountId}:${sectionTerm}` ? undefined : current)} />}
         <div className="course-collection">
         {connectedShown.filter(course => course.term === sectionTerm).sort(compareCourses).map(course => <button key={course.id} data-course-id={course.id} className="course-card" onClick={() => setSelected(`remote:${course.id}`)} aria-label={`Preview ${course.module}, ${course.academic_term || course.term}`}>
           <div className="course-card-cover" aria-hidden="true"><span>{course.term}</span><strong>{courseCoverTitle(course.module)}</strong><BookOpen size={28} strokeWidth={1} /></div>

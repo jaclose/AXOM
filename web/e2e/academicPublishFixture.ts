@@ -1,6 +1,8 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Page, Route } from "@playwright/test";
 import type { CommunicationsSettings } from "../src/lib/communications/client";
+import type { PrivateLibraryCatalog } from "../src/lib/privateLibrary/types";
+import { bank } from "../src/lib/academicLibrary/publicationFixture.testing";
 
 const origin = "https://academic-publish.invalid";
 const userId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
@@ -12,8 +14,18 @@ interface Revision {
 interface Collection {
   id: string; title: string; module: string; term: string; academic_term: string | null; cohort: string | null;
   visibility: "private" | "group" | "shared"; review_status: "pending" | "approved" | "rejected"; current_revision_id: string | null;
+  owned?: boolean;
 }
 const termRank = (term: string) => Number(term.match(/^Term (\d{1,2})$/)?.[1] ?? 1000);
+const hash = (bytes: Uint8Array | string) => createHash("sha256").update(bytes).digest("hex");
+interface SeedCourse {
+  title: string;
+  module: string;
+  term: number;
+  readyQuestions?: number;
+  reviewQuestions?: number;
+  withPlan?: boolean;
+}
 
 /**
  * Browser contract only: an in-memory stand-in for the academic RPCs, REST
@@ -25,12 +37,16 @@ export async function academicPublishFixture(page: Page, options: { reviewer?: b
   const revisions = new Map<string, Revision>();
   const objects = new Map<string, Buffer>();
   const calls: string[] = [];
+  const catalogRequests: Array<{ search: string; term: string; afterId: string | null }> = [];
+  const downloadAttempts: string[] = [];
+  const corruptDownloads = new Set<string>();
+  const downloadHolds = new Map<string, Promise<void>>();
   const current = (collection: Collection) => collection.current_revision_id ? revisions.get(collection.current_revision_id) : undefined;
   const course = (collection: Collection) => {
     const revision = current(collection)!;
     return { id: collection.id, title: collection.title, module: collection.module, term: collection.term,
       academic_term: collection.academic_term, cohort: collection.cohort, visibility: collection.visibility,
-      review_status: collection.review_status, current_revision_id: collection.current_revision_id, owned: true,
+      review_status: collection.review_status, current_revision_id: collection.current_revision_id, owned: collection.owned ?? true,
       ready_questions: revision.ready_questions, review_questions: revision.review_questions };
   };
   await page.addInitScript(({ origin, userId }) => {
@@ -84,6 +100,14 @@ export async function academicPublishFixture(page: Page, options: { reviewer?: b
         return json({ Key: `academic-content/${name}`, Id: randomUUID() });
       }
       const bytes = objects.get(name);
+      const collection = collections.get(name.split("/")[0]);
+      if (collection && current(collection)?.files.find(file => file.path === "catalog.json")?.object_path === name) {
+        downloadAttempts.push(collection.id);
+        await downloadHolds.get(collection.id);
+        // An integrity failure uses a successful HTTP response so the journey
+        // can assert that handled download failures produce no console errors.
+        if (corruptDownloads.has(collection.id)) return route.fulfill({ status: 200, headers, body: Buffer.from("corrupt fixture bytes") });
+      }
       return bytes ? route.fulfill({ status: 200, headers, body: bytes }) : json({ statusCode: "404", error: "not_found", message: "Object not found" }, 400);
     }
     if (path.endsWith("/rpc/academic_finish_revision")) {
@@ -119,12 +143,16 @@ export async function academicPublishFixture(page: Page, options: { reviewer?: b
       return collection?.current_revision_id ? json(course(collection)) : json(null);
     }
     if (path.endsWith("/rpc/academic_catalog")) {
-      const { search = "", term_filter = "" } = body() as { search?: string; term_filter?: string };
-      return json([...collections.values()].filter(collection => collection.current_revision_id
+      const { search = "", term_filter = "", after_id = null } = body() as { search?: string; term_filter?: string; after_id?: string | null };
+      catalogRequests.push({ search, term: term_filter, afterId: after_id });
+      const ordered = [...collections.values()].filter(collection => collection.current_revision_id
         && (!term_filter || collection.term === term_filter)
         && `${collection.title} ${collection.module}`.toLowerCase().includes(String(search).toLowerCase()))
-        .sort((a, b) => termRank(a.term) - termRank(b.term) || a.module.localeCompare(b.module) || a.title.localeCompare(b.title))
-        .slice(0, 24).map(course));
+        .sort((a, b) => termRank(a.term) - termRank(b.term) || a.module.localeCompare(b.module) || a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
+      const cursorIndex = after_id === null ? -1 : ordered.findIndex(collection => collection.id === after_id);
+      if (after_id !== null && cursorIndex < 0) return json([]);
+      const start = cursorIndex + 1;
+      return json(ordered.slice(start, start + 24).map(course));
     }
     if (path.endsWith("/rpc/academic_set_visibility")) {
       const input = body() as { collection: string; visibility: Collection["visibility"] };
@@ -149,6 +177,48 @@ export async function academicPublishFixture(page: Page, options: { reviewer?: b
   return {
     calls,
     objects,
+    catalogRequests,
+    downloadAttempts,
+    holdDownload: (collectionId: string) => {
+      let release!: () => void;
+      downloadHolds.set(collectionId, new Promise<void>(resolve => { release = resolve; }));
+      return () => { downloadHolds.delete(collectionId); release(); };
+    },
+    corruptDownload: (collectionId: string) => { corruptDownloads.add(collectionId); },
+    recoverDownload: (collectionId: string) => { corruptDownloads.delete(collectionId); },
+    seedCourse: ({ title, module, term, readyQuestions = 1, reviewQuestions = 0, withPlan = false }: SeedCourse) => {
+      const collectionId = randomUUID(), revisionId = randomUUID();
+      const source = Buffer.from(`Synthetic source for ${collectionId}`), sourceHash = hash(source);
+      const prepared = bank(`term-${collectionId}`, module, term, sourceHash, readyQuestions + reviewQuestions);
+      for (const question of prepared.pkg.questions.slice(readyQuestions)) {
+        delete question.correctAnswer;
+        question.flags = [{ type: "answer_needs_review", message: "Confirm the answer against the original source." }];
+      }
+      const template = withPlan ? `T${term} - ${module} - Lectures:\nWeek 1:\nLecture 01 Synthetic course plan [Lecture]\n` : "";
+      const catalog: PrivateLibraryCatalog = {
+        format: "axom-private-library", schemaVersion: 1, id: collectionId, version: "1", preparerVersion: 3,
+        templates: withPlan ? [{ file: "templates/plan.txt", name: "Course plan.txt", checksum: hash(template) }] : [],
+        sources: [{ id: `source-${sourceHash}`, name: `${collectionId}.txt`, sourcePath: `${collectionId}.txt`, checksum: sourceHash,
+          module, status: "prepared", reason: "Synthetic reviewed source", bankFile: "banks/course/bank.json",
+          ready: readyQuestions, review: reviewQuestions }],
+      };
+      const files = [
+        { path: "catalog.json", bytes: Buffer.from(JSON.stringify(catalog)), mime_type: "application/json" },
+        { path: "banks/course/bank.json", bytes: Buffer.from(JSON.stringify(prepared)), mime_type: "application/json" },
+        ...(withPlan ? [{ path: "templates/plan.txt", bytes: Buffer.from(template), mime_type: "text/plain" }] : []),
+      ].map(({ bytes, ...file }) => {
+        const sha256 = hash(bytes), object_path = `${collectionId}/${sha256}`;
+        objects.set(object_path, bytes);
+        return { ...file, sha256, object_path, byte_size: bytes.length };
+      });
+      revisions.set(revisionId, { id: revisionId, collection_id: collectionId, content_hash: hash(JSON.stringify(catalog)), status: "ready",
+        template_text: template, source_revision: "Synthetic term fixture", ready_questions: readyQuestions, review_questions: reviewQuestions,
+        approved_at: "2026-10-28T00:00:00Z", files });
+      const collection: Collection = { id: collectionId, title, module, term: `Term ${term}`, academic_term: null, cohort: null,
+        visibility: "shared", review_status: "approved", current_revision_id: revisionId, owned: false };
+      collections.set(collectionId, collection);
+      return { ...collection, revisionId, readyQuestionIds: prepared.pkg.questions.slice(0, readyQuestions).map(question => question.id) };
+    },
     collections: () => [...collections.values()].map(collection => ({ ...collection, revision: current(collection) })),
   };
 }
