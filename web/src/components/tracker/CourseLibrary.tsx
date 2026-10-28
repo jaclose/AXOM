@@ -16,6 +16,7 @@ import { ICON_SIZE } from "../../lib/iconSize";
 import "../../styles/course-library.css";
 import { AcademicCourseUpload } from "./AcademicCourseUpload";
 import { AcademicLibraryPublisher } from "./AcademicLibraryPublisher";
+import { AcademicCollectionManager } from "./AcademicCollectionManager";
 import { getAcademicCourse, type AcademicCourse } from "../../lib/academicLibrary/client";
 import { compareCourses } from "../../lib/academicLibrary/catalogOrder";
 
@@ -104,7 +105,7 @@ export function CourseLibrary({ onClose, onTemplate, onOpen, onCreate }: {
         <div className="course-card-copy"><span className="course-card-context">{book.courseCode || book.term}</span><h3>{book.module}</h3><p>{book.courseName || "Academic module"}</p><span className="course-card-facts">{book.weeks.length ? `${book.weeks.length} weeks · ${book.count} activities` : "Weekly plan not available"}</span><span className="course-card-state">{mine(book) ? "In My Courses" : available(book) ? "Ready to preview" : "Not prepared yet"}{bankFor(book)?.ready ? ` · ${bankFor(book)?.ready} ready questions` : ""}</span></div><ArrowUpRight size={ICON_SIZE.control} aria-hidden="true" />
       </button>)}</div></section>)}
       {moreAvailable && <GButton disabled={catalogLoading} onClick={() => void more()}>Load more courses</GButton>}
-      <details className="course-management"><summary>Manage sources and custom courses</summary><p className="sub">Prepared collections and personal imports are kept separate from course activation.</p><div className="row wrap gap8"><GButton onClick={() => onTemplate()}>Saved templates and imports</GButton><GButton onClick={onCreate}>Create a custom course</GButton></div><AcademicLibraryPublisher key={`publisher:${accountId}`} onPublished={retryCatalog} /><AcademicCourseUpload key={accountId} onSaved={retryCatalog} /><PreparedLibrary /></details>
+      <details className="course-management"><summary>Manage sources and custom courses</summary><p className="sub">Prepared collections and personal imports are kept separate from course activation.</p><div className="row wrap gap8"><GButton onClick={() => onTemplate()}>Saved templates and imports</GButton><GButton onClick={onCreate}>Create a custom course</GButton></div><AcademicLibraryPublisher key={`publisher:${accountId}`} onPublished={retryCatalog} /><AcademicCollectionManager key={`manager:${accountId}`} onChanged={retryCatalog} /><AcademicCourseUpload key={accountId} onSaved={retryCatalog} /><PreparedLibrary /></details>
     </>}
   </div>;
 }

@@ -1,0 +1,30 @@
+/* Your published courses: bulk sharing and approval beside the library publisher. */
+.academic-manager { margin-block: 1.5rem; padding: 1.25rem; border: 1px solid var(--glass-card-border); border-radius: var(--radius-lg); background: var(--glass-card-fill); min-width: 0; }
+.academic-manager-heading { display: flex; gap: 14px; align-items: start; }
+.academic-manager-heading > svg { flex-shrink: 0; margin-top: 4px; color: var(--gold); }
+.academic-manager-heading h3 { margin: 0 0 6px; font: 500 18px/1.35 var(--font-display); letter-spacing: -.02em; }
+.academic-manager p { max-width: 72ch; color: var(--text-70); font-size: 13px; line-height: 1.6; }
+.academic-manager-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0 4px; }
+.academic-manager .academic-manager-summary { margin-top: 16px; color: var(--text); }
+.academic-manager-step { display: grid; gap: 10px; justify-items: start; margin: 16px 0 0; padding: 14px; border: 1px solid var(--hairline); border-radius: var(--radius-sm); min-width: 0; }
+.academic-manager-step legend { padding: 0 6px; font-weight: 600; }
+.academic-manager-step label { display: flex; gap: 10px; align-items: start; cursor: pointer; font-size: 13px; line-height: 1.5; }
+.academic-manager-step input { width: 18px; height: 18px; flex-shrink: 0; margin-top: 2px; accent-color: var(--gold); }
+.academic-manager-failures { margin-top: 14px; padding-left: 12px; border-left: 2px solid var(--gold); }
+.academic-manager-failures ul { margin: 6px 0 0; padding-left: 18px; font-size: 12px; line-height: 1.5; color: var(--text-70); overflow-wrap: anywhere; }
+.academic-manager-list { margin-top: 16px; padding: 10px 14px; border: 1px solid var(--hairline); border-radius: var(--radius-sm); }
+.academic-manager-list summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+.academic-manager-list h4 { margin: 14px 0 4px; font: 500 14px var(--font-display); }
+.academic-manager-list ul { margin: 0; padding: 0; list-style: none; }
+.academic-manager-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px 14px; align-items: center; padding: 8px 0; border-top: 1px solid var(--hairline-soft); }
+.academic-manager-list li > span:first-child { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.academic-manager-list li small { color: var(--text-60); font-size: 12px; }
+.academic-manager-facts { color: var(--text-70); font-size: 12px; font-variant-numeric: tabular-nums; }
+.academic-manager :is(input, summary):focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+.academic-manager [role="alert"] { color: var(--text); }
+@container (max-width: 560px) {
+  .academic-manager { padding: 1rem; }
+  .academic-manager-actions > .gbtn, .academic-manager-step > .gbtn { width: 100%; justify-content: center; }
+  .academic-manager-list li { grid-template-columns: minmax(0, 1fr) auto; }
+  .academic-manager-list li .academic-manager-facts { grid-column: 1; }
+}
