@@ -244,9 +244,7 @@ export function Sidebar({
             {manage ? <Check size={ICON_SIZE.body} /> : <SlidersHorizontal size={ICON_SIZE.body} />}
             <span>{manage ? "Done" : "Customize"}</span>
           </button>
-          <div className="nav-manage-hint">
-            {manage ? "Tap to show or hide. Drag, or Alt+Arrow, to reorder." : "Subscribe to sections you use; hide the rest."}
-          </div>
+          {manage && <div className="nav-manage-hint">Tap to show or hide. Drag, or Alt+Arrow, to reorder.</div>}
         </div>
 
         <nav className="nav">

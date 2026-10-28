@@ -20,6 +20,8 @@ mark reference: `AXOM_Opening_Cinematic_v1/`. This revision does not replace she
 ## 2. Tokens (web/src/styles/theme.css)
 
 Use tokens, not literals. Every token has a light and a dark value; palettes change the accent.
+theme.css holds AXOM Classic. A device shows Midnight until its person picks a palette;
+`index.html` paints it from the first frame (`DEFAULT_PALETTE_ID` in `lib/palette.ts`).
 
 | Group | Tokens |
 |---|---|
