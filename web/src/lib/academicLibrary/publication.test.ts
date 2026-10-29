@@ -73,6 +73,19 @@ describe("publishing a prepared library as one course per term and module", () =
     }
   });
 
+  it("holds a module's questions when its existing plan revisions disagree", async () => {
+    const { read } = await library();
+    const inventory = await readPublicationInventory(read);
+    const sections = inventory.sections.map(section => section.moduleKey === "cpr1"
+      ? { ...section, text: `@academic-term: ${section.name.startsWith("01") ? "Fall 2026" : "Spring 2026"}\n${section.text}` }
+      : section);
+    const plan = planPublication({ ...inventory, sections }, { cpr1: "Term 1" });
+    expect(plan.blocked.filter(section => section.moduleKey === "cpr1")).toHaveLength(2);
+    expect(plan.courses.some(course => course.moduleKey === "cpr1")).toBe(false);
+    expect(plan.excluded.find(source => source.name === "cpr1-imcq.pdf")?.reason).toMatch(/course plan needs attention/);
+    expect(plan.courses.some(course => course.moduleKey === "goer")).toBe(true);
+  });
+
   it("keeps the same collection identity and content hash for a reordered library with a new version label", async () => {
     const first = await library("forward", "v1");
     const second = await library("reverse", "v2");
@@ -107,5 +120,26 @@ describe("publishing a prepared library as one course per term and module", () =
     const upload = await prepareAcademicUpload(courseLibraryReader(read, inventory, goer, { include: id => !goer.optionalSourceIds.includes(id), originals: false }));
     expect(upload.files.some(file => file.path.endsWith(".pdf"))).toBe(false);
     expect(upload.metadata.ready_questions).toBe(1);
+  });
+
+  it("keeps an unsupported bank original local while publishing its questions", async () => {
+    const fixture = await library();
+    const bank = fixture.catalog.sources.find(source => source.name === "goer-pq.pdf")!;
+    const original = bank.originalFile!;
+    bank.originalFile = original.replace(/\.pdf$/, ".pptx");
+    fixture.files.set(bank.originalFile, fixture.files.get(original)!);
+    fixture.files.set("catalog.json", new TextEncoder().encode(JSON.stringify(fixture.catalog)));
+
+    const inventory = await readPublicationInventory(fixture.read);
+    const goer = planPublication(inventory).courses.find(course => course.moduleKey === "goer")!;
+    const { jobs, notes } = publicationJobs(fixture.read, inventory, [goer]);
+    const upload = await jobs[0].prepare();
+    const catalog = JSON.parse(new TextDecoder().decode(upload.files.find(file => file.path === "catalog.json")!.bytes)) as PrivateLibraryCatalog;
+    expect(catalog.sources.find(source => source.id === bank.id)?.originalFile).toBeUndefined();
+    expect(upload.files.some(file => file.path.endsWith(".pptx"))).toBe(false);
+    expect(upload.files.some(file => file.path.endsWith(".pdf"))).toBe(true);
+    expect(upload.metadata.ready_questions).toBe(1);
+    expect(upload.provenance.sourceChecksums).toContain(bank.checksum);
+    expect(notes.keptLocal.get(goer.catalogId)).toBe(1);
   });
 });

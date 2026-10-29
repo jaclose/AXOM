@@ -195,7 +195,8 @@ export function planPublication(inventory: PublicationInventory, confirmedTerms:
   };
 
   const usable = inventory.sections.filter(section => {
-    if (section.problem) blocked.push({ name: section.name, reason: section.problem });
+    if (section.problem) blocked.push({ name: section.name, reason: section.problem,
+      ...(section.moduleKey ? { moduleKey: section.moduleKey } : {}) });
     return !section.problem;
   });
   const byModule = new Map<string, PublicationSection[]>();
@@ -233,6 +234,10 @@ export function planPublication(inventory: PublicationInventory, confirmedTerms:
     }
   }
 
+  // A rejected plan revision cannot quietly become a question-only course.
+  const blockedModules = new Set(blocked.flatMap(section => section.moduleKey ? [section.moduleKey] : []));
+  for (const [key, course] of courses) if (blockedModules.has(course.moduleKey)) courses.delete(key);
+
   const templateChecksums = new Set(inventory.sections.map(section => section.checksum));
   const publishedChecksums = new Set([...courses.values()].flatMap(course => course.sections.map(section => section.checksum)));
   const seen = new Set<string>();
@@ -250,6 +255,10 @@ export function planPublication(inventory: PublicationInventory, confirmedTerms:
       const scope = source.bank;
       if (source.moduleKey && source.moduleKey !== scope.moduleKey) {
         exclude(source, "Its catalog module and its question package disagree. Review its filing.");
+        continue;
+      }
+      if (blockedModules.has(scope.moduleKey)) {
+        exclude(source, "Its course plan needs attention before its questions can be published.");
         continue;
       }
       let course = courses.get(courseKey(scope.term, scope.moduleKey));
@@ -281,6 +290,10 @@ export function planPublication(inventory: PublicationInventory, confirmedTerms:
     }
     if (!source.moduleKey) {
       exclude(source, "No module is recorded for this source, so AXOM cannot place it in a course.");
+      continue;
+    }
+    if (blockedModules.has(source.moduleKey)) {
+      exclude(source, "Its course plan needs attention before this file can be published.");
       continue;
     }
     const matches = [...courses.values()].filter(course => course.moduleKey === source.moduleKey);
@@ -315,11 +328,16 @@ export function courseLibraryReader(read: LibraryReader, inventory: PublicationI
     if (!catalog) {
       const original = readCatalog(JSON.parse(decode(await read("catalog.json"))));
       const rows = new Map(original.sources.map(source => [`${source.id}|${source.checksum}`, source]));
-      const selected = sources.map(source => rows.get(`${source.id}|${source.checksum}`));
-      if (selected.some(row => !row)) throw new Error("The library changed while publishing. Choose it again and review the plan.");
+      const selected = sources.map(source => {
+        const row = rows.get(`${source.id}|${source.checksum}`);
+        if (!row) throw new Error("The library changed while publishing. Choose it again and review the plan.");
+        const extension = row.originalFile?.split(".").at(-1)?.toLowerCase() ?? "";
+        return options.originals === false || (row.originalFile && !UPLOADABLE_ORIGINALS.has(extension))
+          ? { ...row, originalFile: undefined } : row;
+      });
       catalog = encode({ ...inventory.library, id: course.catalogId,
         templates: course.sections.map(section => ({ file: section.file, name: section.name, checksum: section.checksum })),
-        sources: options.originals === false ? selected.map(row => ({ ...row, originalFile: undefined })) : selected });
+        sources: selected });
     }
     return catalog.slice();
   };
@@ -353,11 +371,18 @@ export function publicationJobs(read: LibraryReader, inventory: PublicationInven
         const unscheduled = course.sections.length ? undefined
           : { term: course.term, module: course.module, evidence: "source-metadata" as const };
         const optional = new Set(course.optionalSourceIds);
-        const withOriginals = course.sourceIds.filter(id => !optional.has(id)
-          && inventory.sources.some(source => source.id === id && source.original)).length;
-        const stages: Array<{ options: CourseReaderOptions; kept: number }> = [{ options: {}, kept: 0 }];
-        if (optional.size) stages.push({ options: { include: id => !optional.has(id) }, kept: optional.size });
-        if (withOriginals) stages.push({ options: { include: id => !optional.has(id), originals: false }, kept: optional.size + withOriginals });
+        const byId = new Map(inventory.sources.map(source => [source.id, source]));
+        const unsupported = course.sourceIds.filter(id => {
+          const original = byId.get(id)?.original;
+          return original && !UPLOADABLE_ORIGINALS.has(original.extension);
+        }).length;
+        const withOriginals = course.sourceIds.filter(id => {
+          const original = byId.get(id)?.original;
+          return !optional.has(id) && original && UPLOADABLE_ORIGINALS.has(original.extension);
+        }).length;
+        const stages: Array<{ options: CourseReaderOptions; kept: number }> = [{ options: {}, kept: unsupported }];
+        if (optional.size) stages.push({ options: { include: id => !optional.has(id) }, kept: unsupported + optional.size });
+        if (withOriginals) stages.push({ options: { include: id => !optional.has(id), originals: false }, kept: unsupported + optional.size + withOriginals });
         for (const [index, stage] of stages.entries()) {
           if (signal?.aborted) throw new DOMException("Publishing was cancelled.", "AbortError");
           try {

@@ -16,7 +16,7 @@ import { GButton, GhostButton, Tag } from "../ui/primitives";
 
 type Term = ReviewedFiling["term"];
 const TERMS: Term[] = ["Term 1", "Term 2", "Term 3", "Term 4", "Term 5"];
-/** Source files a course leaves on this device: to fit its size limit, or because each is over 50 MB. */
+/** Source files a course leaves on this device because of type or size limits. */
 interface KeptFiles { keptLocal?: number; overLimit?: number }
 type CourseState =
   | { state: "checked"; ready: number; review: number; files: number; bytes: number } & KeptFiles
@@ -330,7 +330,7 @@ function kept(keptLocal: number | undefined, overLimit: number): KeptFiles {
 
 function keptNote({ keptLocal, overLimit }: KeptFiles, future: boolean) {
   const stay = (count: number) => future ? "will stay" : count === 1 ? "stays" : "stay";
-  return `${keptLocal ? ` ${plural(keptLocal, "source file")} ${stay(keptLocal)} on this device to fit the course size limit.` : ""}${
+  return `${keptLocal ? ` ${plural(keptLocal, "source file")} ${stay(keptLocal)} on this device because the file type or course size limit prevents upload.` : ""}${
     overLimit ? ` ${plural(overLimit, "source file")} over 50 MB ${stay(overLimit)} on this device.` : ""}`;
 }
 
