@@ -6,7 +6,7 @@
   "description": "Optional Vercel serverless backend for AXOM cloud sync and AI scaffolding.",
   "engines": {
     "node": ">=22.23.4 <23",
-    "npm": "10.9.8"
+    "npm": "10.9.9"
   },
   "scripts": {
     "build": "node scripts/deployment-inputs.mjs && npm --prefix web run build",
@@ -65,5 +65,5 @@
     "supabase": "^2.118.0",
     "typescript": "^5.6.3"
   },
-  "packageManager": "npm@10.9.8"
+  "packageManager": "npm@10.9.9"
 }

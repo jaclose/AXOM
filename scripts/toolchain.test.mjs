@@ -24,3 +24,18 @@ test('root and web engine floors match the pin and lockfile metadata', () => {
       `${packageRoot}package-lock.json`);
   }
 });
+
+test('bundled npm, manifests, release feed and Vercel installation stay aligned', () => {
+  const root = readJson('package.json');
+  const web = readJson('web/package.json');
+  const vercel = readJson('vercel.json');
+  const updateFeed = readFileSync(new URL('.github/workflows/update-feed.yml', repoRoot), 'utf8');
+  if (pinnedNode === '22.23.4') {
+    assert.equal(root.engines.npm, '10.9.9', 'Node 22.23.4 bundles npm 10.9.9');
+  }
+  assert.equal(root.packageManager, `npm@${root.engines.npm}`);
+  assert.equal(web.engines.npm, root.engines.npm);
+  assert.equal(web.packageManager, root.packageManager);
+  assert.ok(vercel.installCommand.startsWith(`npm install --global ${root.packageManager} && `));
+  assert.ok(updateFeed.includes(`node-version: '${pinnedNode}'`));
+});

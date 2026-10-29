@@ -19,8 +19,8 @@ another worktree or production. Save full logs outside active context and report
 
 ## Narrow commands
 
-Use Node 22.23.1 from `.nvmrc` and npm 10.9.8 (`npm run check:toolchain`).
-Both package roots support Node >=22.23.1 <23 and pin the npm version. Repository checks use
+Use Node 22.23.4 from `.nvmrc` and npm 10.9.9 (`npm run check:toolchain`).
+Both package roots support Node >=22.23.4 <23 and pin the npm version. Repository checks use
 only Node built-ins; no install is needed for documentation/tooling-only work.
 
 | Need | Command from repository root |
