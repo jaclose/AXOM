@@ -86,6 +86,23 @@ describe("publishing a prepared library as one course per term and module", () =
     expect(plan.courses.some(course => course.moduleKey === "goer")).toBe(true);
   });
 
+  it("keeps a valid course in another term when one term's plan is blocked", async () => {
+    const { read } = await library();
+    const inventory = await readPublicationInventory(read);
+    const [lectures, activities] = inventory.sections.filter(section => section.moduleKey === "cpr1");
+    const sections = [...inventory.sections.filter(section => section.moduleKey !== "cpr1"),
+      { ...lectures, term: "Term 1" as const, problem: "A source line needs review." },
+      { ...activities, term: "Term 2" as const, text: activities.text.replace(/^CPR1 -/, "T2 - CPR1 -") }];
+    const term1Bank = inventory.sources.find(source => source.name === "cpr1-imcq.pdf")!;
+    const term2Bank = { ...term1Bank, id: "term2-cpr1-bank", name: "term2-cpr1.pdf", checksum: "e".repeat(64),
+      bank: { term: "Term 2" as const, module: "CPR 1", moduleKey: "cpr1", reviewedFiling: false } };
+    const plan = planPublication({ ...inventory, sections, sources: [...inventory.sources, term2Bank] });
+    expect(plan.blocked.find(section => section.moduleKey === "cpr1")?.proposedTerm).toBe("Term 1");
+    expect(plan.courses.some(course => course.term === "Term 1" && course.moduleKey === "cpr1")).toBe(false);
+    expect(plan.courses.find(course => course.term === "Term 2" && course.moduleKey === "cpr1")?.sourceIds).toContain(term2Bank.id);
+    expect(plan.excluded.find(source => source.id === term1Bank.id)?.reason).toMatch(/course plan needs attention/);
+  });
+
   it("keeps the same collection identity and content hash for a reordered library with a new version label", async () => {
     const first = await library("forward", "v1");
     const second = await library("reverse", "v2");

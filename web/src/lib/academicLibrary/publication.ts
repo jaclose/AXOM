@@ -196,7 +196,8 @@ export function planPublication(inventory: PublicationInventory, confirmedTerms:
 
   const usable = inventory.sections.filter(section => {
     if (section.problem) blocked.push({ name: section.name, reason: section.problem,
-      ...(section.moduleKey ? { moduleKey: section.moduleKey } : {}) });
+      ...(section.moduleKey ? { moduleKey: section.moduleKey } : {}),
+      ...(section.term && TERMS.includes(section.term) ? { proposedTerm: section.term } : {}) });
     return !section.problem;
   });
   const byModule = new Map<string, PublicationSection[]>();
@@ -234,9 +235,18 @@ export function planPublication(inventory: PublicationInventory, confirmedTerms:
     }
   }
 
-  // A rejected plan revision cannot quietly become a question-only course.
-  const blockedModules = new Set(blocked.flatMap(section => section.moduleKey ? [section.moduleKey] : []));
-  for (const [key, course] of courses) if (blockedModules.has(course.moduleKey)) courses.delete(key);
+  // A rejected plan revision cannot quietly become a question-only course in its term.
+  const blockedModules = new Set<string>();
+  const blockedCourses = new Set<string>();
+  const blockedSourceModules = new Set<string>();
+  for (const section of blocked) {
+    if (!section.moduleKey) continue;
+    blockedSourceModules.add(section.moduleKey);
+    if (section.proposedTerm) blockedCourses.add(courseKey(section.proposedTerm, section.moduleKey));
+    else blockedModules.add(section.moduleKey);
+  }
+  const blockedCourse = (term: Term, moduleKey: string) => blockedModules.has(moduleKey) || blockedCourses.has(courseKey(term, moduleKey));
+  for (const [key, course] of courses) if (blockedCourse(course.term, course.moduleKey)) courses.delete(key);
 
   const templateChecksums = new Set(inventory.sections.map(section => section.checksum));
   const publishedChecksums = new Set([...courses.values()].flatMap(course => course.sections.map(section => section.checksum)));
@@ -257,7 +267,7 @@ export function planPublication(inventory: PublicationInventory, confirmedTerms:
         exclude(source, "Its catalog module and its question package disagree. Review its filing.");
         continue;
       }
-      if (blockedModules.has(scope.moduleKey)) {
+      if (blockedCourse(scope.term, scope.moduleKey)) {
         exclude(source, "Its course plan needs attention before its questions can be published.");
         continue;
       }
@@ -292,7 +302,7 @@ export function planPublication(inventory: PublicationInventory, confirmedTerms:
       exclude(source, "No module is recorded for this source, so AXOM cannot place it in a course.");
       continue;
     }
-    if (blockedModules.has(source.moduleKey)) {
+    if (blockedSourceModules.has(source.moduleKey)) {
       exclude(source, "Its course plan needs attention before this file can be published.");
       continue;
     }
