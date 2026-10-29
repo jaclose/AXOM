@@ -37,7 +37,7 @@
     "sources:inventory": "node --experimental-strip-types ./scripts/source-inventory.ts"
   },
   "engines": {
-    "node": ">=22.23.1 <23",
+    "node": ">=22.23.4 <23",
     "npm": "10.9.8"
   },
   "dependencies": {
