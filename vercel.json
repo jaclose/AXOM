@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
-  "installCommand": "npm install --global npm@10.9.8 && node scripts/toolchain.mjs && npm ci && npm --prefix web ci",
+  "installCommand": "npm install --global npm@10.9.9 && node scripts/toolchain.mjs && npm ci && npm --prefix web ci",
   "buildCommand": "npm run build",
   "outputDirectory": "web/dist",
   "headers": [
