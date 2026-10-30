@@ -205,6 +205,27 @@ describe("prepared private library installation", () => {
       term: "Term 5", module: "GOER", evidence: "human-reviewed", weekAssignment: "unassigned",
     } })).toThrow("cannot collapse several original modules or terms");
   });
+  it("keeps one Unfiled source scope intact behind an explicit human-reviewed filing", async () => {
+    const b = await bundle();
+    const original = JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)) as PreparedBank;
+    original.pkg.manifest.course = { name: "Unfiled", term: 0, week: 0 };
+    original.pkg.questions[0].course = "Unfiled";
+    original.pkg.questions[0].term = 0;
+    const filing = { term: "Term 4", module: "NCRS", evidence: "human-reviewed", weekAssignment: "unassigned" } as const;
+    const accepted = readPreparedBank({ ...original, reviewedFiling: filing });
+    expect(accepted.reviewedFiling).toEqual(filing);
+    expect(accepted.pkg.manifest.course).toEqual({ name: "Unfiled", term: 0, week: 0 });
+    expect(accepted.pkg.questions[0]).toMatchObject({ course: "Unfiled", term: 0 });
+    expect(() => readPreparedBank({ ...original, reviewedFiling: { ...filing, evidence: "source-metadata" } }))
+      .toThrow(/explicit human review/);
+
+    const mixed = structuredClone(original);
+    mixed.pkg.questions[0].term = 1;
+    expect(() => readPreparedBank({ ...mixed, reviewedFiling: filing })).toThrow(/invalid original module or term/);
+    const invalid = structuredClone(original);
+    invalid.pkg.manifest.course.name = "NCRS";
+    expect(() => readPreparedBank({ ...invalid, reviewedFiling: filing })).toThrow(/invalid original module or term/);
+  });
   it("preserves only reviewer-editable content while adopting corrected source metadata", async () => {
     const b = await bundle();
     const incoming = readPreparedBank(JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)));

@@ -10,7 +10,7 @@ import { parseCourseTemplate } from "../course-engine/templateParse";
 import { SGU_CURRICULUM } from "../curricula";
 import { questionScope } from "../question-content/package";
 import { sha256 } from "../question-content/assets";
-import { readCatalog, readPreparedBank, safeLibraryPath, type LibraryReader } from "../privateLibrary/install";
+import { hasUniformUnfiledSourceScope, readCatalog, readPreparedBank, safeLibraryPath, type LibraryReader } from "../privateLibrary/install";
 import type { LibraryInputLimits } from "../privateLibrary/inputRoot";
 import type { PrivateLibraryCatalog, ReviewedFiling } from "../privateLibrary/types";
 import { academicCoursePlan, moduleIdentity, reviewedTermNumber, type AcademicPlanTerm } from "./coursePlan";
@@ -55,7 +55,7 @@ export interface PublicationSource {
   hasBank: boolean;
   original?: { extension: string };
   /** Term and module read from the question package itself. */
-  bank?: { term: Term; module: string; moduleKey: string; reviewedFiling: boolean } | { problem: string };
+  bank?: { term: Term; module: string; moduleKey: string; reviewedFiling: boolean; reviewedUnfiled?: boolean } | { problem: string };
   duplicateOf?: string;
 }
 
@@ -150,19 +150,22 @@ export async function readPublicationInventory(
       try {
         const bank = readPreparedBank(JSON.parse(decode(await read(safeLibraryPath(source.bankFile)))));
         const manifest = bank.pkg.manifest;
-        const scopes = [{ module: manifest.course.name, term: manifest.course.term }, ...bank.pkg.questions.map(question => {
+        const filing = bank.reviewedFiling;
+        const reviewedUnfiled = Boolean(filing && hasUniformUnfiledSourceScope(manifest, bank.pkg.questions));
+        const scopes = reviewedUnfiled && filing ? [{ module: filing.module, term: reviewedTermNumber(filing.term) }] :
+          [{ module: manifest.course.name, term: manifest.course.term }, ...bank.pkg.questions.map(question => {
           const scope = questionScope(manifest, question);
           return { module: scope.course, term: scope.term };
         })];
         const keys = new Set(scopes.map(scope => `${moduleIdentity(scope.module) ?? ""}|${scope.term ?? ""}`));
         const [moduleKey, number] = [...keys][0].split("|");
         const term = `Term ${number}` as Term;
-        const filing = bank.reviewedFiling;
         entry.bank = keys.size !== 1 ? { problem: "Its questions span several modules or terms. Split the source before publishing." }
           : !moduleKey || moduleKey === "unfiled" || !TERMS.includes(term) ? { problem: "Its questions have no reviewed Term 1-5 and module." }
-            : filing && (moduleIdentity(filing.module) !== moduleKey || filing.term !== term)
+            : filing && !reviewedUnfiled && (moduleIdentity(filing.module) !== moduleKey || filing.term !== term)
               ? { problem: "Its manual filing differs from its source's own module or term. Publish it on its own after review." }
-              : { term, module: manifest.course.name.trim(), moduleKey, reviewedFiling: Boolean(filing) };
+              : { term, module: reviewedUnfiled && filing ? filing.module : manifest.course.name.trim(), moduleKey,
+                reviewedFiling: Boolean(filing), ...(reviewedUnfiled ? { reviewedUnfiled: true } : {}) };
       } catch {
         entry.bank = { problem: "Its question package could not be read." };
       }
@@ -272,7 +275,7 @@ export function planPublication(inventory: PublicationInventory, confirmedTerms:
         continue;
       }
       let course = courses.get(courseKey(scope.term, scope.moduleKey));
-      if (course?.sections.length && scope.reviewedFiling) {
+      if (course?.sections.length && scope.reviewedFiling && !scope.reviewedUnfiled) {
         exclude(source, "It carries a manual filing, which cannot be combined with this module's course plan.");
         continue;
       }
@@ -378,10 +381,14 @@ export function publicationJobs(read: LibraryReader, inventory: PublicationInven
         if (course.termBasis === "proposed") throw new Error("Confirm this course's term before publishing it.");
         const planTerm: AcademicPlanTerm | undefined = course.sections.length && course.termBasis !== "plan"
           ? { term: course.term, evidence: "human-reviewed" } : undefined;
-        const unscheduled = course.sections.length ? undefined
-          : { term: course.term, module: course.module, evidence: "source-metadata" as const };
         const optional = new Set(course.optionalSourceIds);
         const byId = new Map(inventory.sources.map(source => [source.id, source]));
+        const hasReviewedUnfiled = course.sourceIds.some(id => {
+          const bank = byId.get(id)?.bank;
+          return bank && "term" in bank && bank.reviewedUnfiled;
+        });
+        const unscheduled = course.sections.length ? undefined
+          : { term: course.term, module: course.module, evidence: hasReviewedUnfiled ? "human-reviewed" as const : "source-metadata" as const };
         const unsupported = course.sourceIds.filter(id => {
           const original = byId.get(id)?.original;
           return original && !UPLOADABLE_ORIGINALS.has(original.extension);

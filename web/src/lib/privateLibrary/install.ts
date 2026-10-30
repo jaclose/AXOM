@@ -33,9 +33,25 @@ function reviewedModuleIdentity(value: unknown): string | undefined {
   const key = canonicalModuleKey(value);
   return key || undefined;
 }
+/** The review envelope may file one uniformly Unfiled source without
+ * rewriting the source's manifest or individual question scopes. */
+export function hasUniformUnfiledSourceScope(
+  manifest: PreparedBank["pkg"]["manifest"], questions: readonly PackageQuestion[],
+): boolean {
+  if (reviewedModuleIdentity(manifest.course.name) !== "unfiled" || manifest.course.term !== 0) return false;
+  return questions.every(question => {
+    const scope = questionScope(manifest, question);
+    return reviewedModuleIdentity(scope.course) === "unfiled" && scope.term === 0;
+  });
+}
 function assertReviewedFilingMatchesSource(
   manifest: PreparedBank["pkg"]["manifest"], questions: readonly PackageQuestion[], filing: ReviewedFiling,
 ): void {
+  if (hasUniformUnfiledSourceScope(manifest, questions)) {
+    if (filing.evidence !== "human-reviewed")
+      throw new Error("An Unfiled source needs explicit human review before it can be assigned a term and module.");
+    return;
+  }
   const originalScopes = [
     { module: manifest.course.name, term: manifest.course.term },
     ...questions.map(question => {

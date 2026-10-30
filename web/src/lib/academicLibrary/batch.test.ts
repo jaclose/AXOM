@@ -4,7 +4,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { sha256 } from "../question-content/assets";
 import { academicLibraryReader } from "./client";
 import { accountOperationClient, loadSupabase } from "../account/supabase";
-import { academicCollectionId, uploadAcademicCourse, type AcademicUpload } from "./upload";
+import { academicCollectionId, prepareAcademicUpload, uploadAcademicCourse, type AcademicUpload } from "./upload";
 import { academicReconciliationLedger, uploadAcademicBatch, verifyAcademicCourseReadback } from "./batch";
 
 vi.mock("../account/supabase", () => ({ accountOperationClient: vi.fn(), loadSupabase: vi.fn() }));
@@ -185,6 +185,35 @@ describe("authenticated source-level academic readback", () => {
       questionCount: 0, reviewCount: 1, figureReferences: 0, distinctFigureFiles: 11,
       figureReadbackVerified: true, bankReadbackVerified: true, readyQuestionIds: [],
     });
+  });
+
+  it("prepares and reads back an explicitly reviewed Unfiled source without changing its original scope", async () => {
+    const f = await fixture();
+    const bank = JSON.parse(new TextDecoder().decode(f.data.get("banks/demo/bank.json")!.bytes));
+    bank.pkg.manifest.course = { name: "Unfiled", term: 0, week: 0 };
+    bank.pkg.questions[0].course = "Unfiled";
+    bank.pkg.questions[0].term = 0;
+    bank.reviewedFiling = { term: "Term 5", module: "GOER", evidence: "human-reviewed", weekAssignment: "unassigned" };
+    f.data.set("banks/demo/bank.json", { mime: "application/json", bytes: encode(bank) });
+    const catalog = JSON.parse(new TextDecoder().decode(f.data.get("catalog.json")!.bytes));
+    catalog.sources[0].module = "GOER";
+    f.data.set("catalog.json", { mime: "application/json", bytes: encode(catalog) });
+    const prepared = await prepareAcademicUpload(async path => f.data.get(path)!.bytes,
+      { term: "Term 5", module: "GOER", evidence: "human-reviewed" });
+    const storedBank = JSON.parse(new TextDecoder().decode(prepared.files.find(file => file.path === "banks/demo/bank.json")!.bytes));
+    expect(storedBank.pkg.manifest.course).toEqual({ name: "Unfiled", term: 0, week: 0 });
+    expect(storedBank.pkg.questions[0]).toMatchObject({ course: "Unfiled", term: 0 });
+    expect(storedBank.reviewedFiling).toMatchObject({ term: "Term 5", module: "GOER", evidence: "human-reviewed" });
+
+    f.upload = prepared;
+    f.data.clear();
+    for (const file of prepared.files) f.data.set(file.path, { mime: file.mime_type, bytes: file.bytes });
+    f.read.files = prepared.files.map(file => ({ path: file.path, sha256: file.sha256, byte_size: file.byte_size,
+      mime_type: file.mime_type, object_path: `${collection}/${file.sha256}` }));
+    session(f);
+    const result = await verifyAcademicCourseReadback(prepared, f.saved, owner);
+    expect(result).toMatchObject({ readyQuestions: 1, reviewQuestions: 0,
+      sourceReceipts: [{ questionCount: 1, readyQuestionIds: ["question-1"], bankReadbackVerified: true }] });
   });
 
   it("distinguishes an oversized local-only original from a cloud-verified original", async () => {

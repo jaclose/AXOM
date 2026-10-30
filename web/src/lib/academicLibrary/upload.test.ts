@@ -212,6 +212,28 @@ it("requires source-metadata filing to agree, but lets explicit human review cor
   expect(bank.pkg.manifest.course).toEqual({ name: "GOER", term: 5, week: 2 });
 });
 
+it("requires a bank-specific human review before a source-only Unfiled collection is prepared", async () => {
+  const f = await untemplatedBankFixture();
+  f.bank.pkg.manifest.course = { name: "Unfiled", term: 0, week: 0 };
+  const question = f.bank.pkg.questions[0] as typeof f.bank.pkg.questions[0] & { course?: string; term?: number };
+  question.course = "Unfiled";
+  question.term = 0;
+  const scope = { term: "Term 5", module: "GOER", evidence: "human-reviewed" } as const;
+  writeFixtureCatalog(f);
+  await expect(prepareAcademicUpload(f.read, scope)).rejects.toThrow(/own exact human-reviewed filing/);
+
+  (f.bank as typeof f.bank & { reviewedFiling?: object }).reviewedFiling = {
+    ...scope, weekAssignment: "unassigned",
+  };
+  writeFixtureCatalog(f);
+  const prepared = await prepareAcademicUpload(f.read, scope);
+  expect(prepared).toMatchObject({ template: "", metadata: { term: "Term 5", module: "GOER", ready_questions: 1 },
+    provenance: { scopeEvidence: "human-reviewed" } });
+  const backend = mockedStorage(prepared, await academicCollectionId("account-a", prepared.catalogId));
+  await expect(uploadAcademicCourse(backend.client, "account-a", prepared, () => {}, () => {}))
+    .resolves.toMatchObject({ status: "active" });
+});
+
 it("replaces a valid incoming filing envelope with the current explicit review instead of trusting it", async () => {
   const f = await untemplatedBankFixture();
   (f.bank as typeof f.bank & { reviewedFiling: object }).reviewedFiling = {
@@ -262,6 +284,33 @@ it("proves a template owns every source, bank and question scope before it bypas
   };
   writeFixtureCatalog(mixedContract);
   await expect(prepareAcademicUpload(mixedContract.read)).rejects.toThrow(/cannot also carry a manual reviewed filing/i);
+});
+
+it("accepts only a human-reviewed uniform Unfiled bank matching its course plan", async () => {
+  const f = await templateBackedBankFixture();
+  f.bank.pkg.manifest.course = { name: "Unfiled", term: 0, week: 0 };
+  const question = f.bank.pkg.questions[0] as typeof f.bank.pkg.questions[0] & { course?: string; term?: number };
+  question.course = "Unfiled";
+  question.term = 0;
+  (f.bank as typeof f.bank & { reviewedFiling?: object }).reviewedFiling = {
+    term: "Term 5", module: "GOER", evidence: "human-reviewed", weekAssignment: "unassigned",
+  };
+  writeFixtureCatalog(f);
+
+  const prepared = await prepareAcademicUpload(f.read);
+  const stored = JSON.parse(new TextDecoder().decode(prepared.files.find(file => file.path === "banks/sample/bank.json")!.bytes));
+  expect(stored.reviewedFiling).toMatchObject({ term: "Term 5", module: "GOER", evidence: "human-reviewed" });
+  expect(stored.pkg.manifest.course).toEqual({ name: "Unfiled", term: 0, week: 0 });
+  expect(stored.pkg.questions[0]).toMatchObject({ course: "Unfiled", term: 0 });
+  const backend = mockedStorage(prepared, await academicCollectionId("account-a", prepared.catalogId));
+  await expect(uploadAcademicCourse(backend.client, "account-a", prepared, () => {}, () => {}))
+    .resolves.toMatchObject({ status: "active" });
+
+  (f.bank as typeof f.bank & { reviewedFiling?: object }).reviewedFiling = {
+    term: "Term 4", module: "NCRS", evidence: "human-reviewed", weekAssignment: "unassigned",
+  };
+  writeFixtureCatalog(f);
+  await expect(prepareAcademicUpload(f.read)).rejects.toThrow(/reviewed filing does not match its course plan/);
 });
 
 it("accepts a documented module alias but rejects an unowned original-only source", async () => {

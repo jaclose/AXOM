@@ -86,6 +86,33 @@ describe("publishing a prepared library as one course per term and module", () =
     expect(plan.courses.some(course => course.moduleKey === "goer")).toBe(true);
   });
 
+  it("adds an explicitly reviewed Unfiled source to its exact question-only course", async () => {
+    const fixture = await library();
+    const source = fixture.catalog.sources.find(item => item.name === "unfiled-pq.pdf")!;
+    const bankFile = source.bankFile!;
+    const bank = JSON.parse(new TextDecoder().decode(fixture.files.get(bankFile)!));
+    bank.pkg.questions[0].course = "Unfiled";
+    bank.pkg.questions[0].term = 0;
+    bank.reviewedFiling = { term: "Term 4", module: "NCRS", evidence: "human-reviewed", weekAssignment: "unassigned" };
+    source.module = "NCRS";
+    fixture.files.set(bankFile, new TextEncoder().encode(JSON.stringify(bank)));
+    fixture.files.set("catalog.json", new TextEncoder().encode(JSON.stringify(fixture.catalog)));
+
+    const inventory = await readPublicationInventory(fixture.read);
+    const plan = planPublication(inventory);
+    const ncrs = plan.courses.find(course => course.moduleKey === "ncrs")!;
+    expect(ncrs).toMatchObject({ term: "Term 4", banks: 2, ready: 2 });
+    expect(ncrs.sourceIds).toContain(source.id);
+    expect(plan.excluded.some(entry => entry.id === source.id)).toBe(false);
+    const { jobs } = publicationJobs(fixture.read, inventory, [ncrs]);
+    const upload = await jobs[0].prepare();
+    expect(upload.provenance).toMatchObject({ scopeEvidence: "human-reviewed", weekAssignment: "unassigned" });
+    expect(upload.metadata).toMatchObject({ ready_questions: 2, module: "NCRS", term: "Term 4" });
+    const storedBank = JSON.parse(new TextDecoder().decode(upload.files.find(file => file.path === bankFile)!.bytes));
+    expect(storedBank.pkg.manifest.course).toEqual({ name: "Unfiled", term: 0, week: 1 });
+    expect(storedBank.pkg.questions[0]).toMatchObject({ course: "Unfiled", term: 0 });
+  });
+
   it("keeps a valid course in another term when one term's plan is blocked", async () => {
     const { read } = await library();
     const inventory = await readPublicationInventory(read);

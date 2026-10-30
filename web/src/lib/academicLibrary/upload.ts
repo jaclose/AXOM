@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { preparedBankImportOptions, readCatalog, readPreparedBank, safeLibraryPath, type LibraryReader } from "../privateLibrary/install";
+import { hasUniformUnfiledSourceScope, preparedBankImportOptions, readCatalog, readPreparedBank, safeLibraryPath, type LibraryReader } from "../privateLibrary/install";
 import { sha256 } from "../question-content/assets";
 import {
   assertInstallableAcademicImageBytes,
@@ -49,8 +49,14 @@ function assertTemplateOwnsSource(
       throw new Error("Every source without a question bank must name the module owned by the reviewed course plan.");
     return;
   }
-  if (bank.reviewedFiling)
-    throw new Error("A template-backed bank cannot also carry a manual reviewed filing. Split the conflicting academic scopes.");
+  if (bank.reviewedFiling) {
+    if (!hasUniformUnfiledSourceScope(bank.pkg.manifest, bank.pkg.questions)
+      || bank.reviewedFiling.evidence !== "human-reviewed")
+      throw new Error("A template-backed bank cannot also carry a manual reviewed filing. Split the conflicting academic scopes.");
+    if (bank.reviewedFiling.term !== template.term || moduleIdentity(bank.reviewedFiling.module) !== module)
+      throw new Error("The Unfiled source's reviewed filing does not match its course plan.");
+    return;
+  }
   if (moduleIdentity(bank.pkg.manifest.course.name) !== module || bank.pkg.manifest.course.term !== term)
     throw new Error("A question bank's module or term does not match the reviewed course plan.");
   for (const question of bank.pkg.questions) {
@@ -599,19 +605,26 @@ async function preflightAcademicUpload(upload: AcademicUpload): Promise<Academic
     if (plan) assertTemplateOwnsSource(plan, source, bank);
     else {
       assertReviewedFilingMetadata(upload, bank);
-      const manifestModule = moduleIdentity(bank.pkg.manifest.course.name);
-      const manifestTerm = bank.pkg.manifest.course.term;
-      if (!manifestModule || !Number.isInteger(manifestTerm) || manifestTerm < 1 || manifestTerm > 5)
-        throw new Error("A question bank has an invalid original module or term.");
-      declaredModules.add(manifestModule);
-      declaredTerms.add(manifestTerm);
-      for (const question of bank.pkg.questions) {
-        const scope = questionScope(bank.pkg.manifest, question);
-        const identity = moduleIdentity(scope.course);
-        if (!identity || !Number.isInteger(scope.term) || scope.term < 1 || scope.term > 5)
-          throw new Error("A question has an invalid or ambiguous original module or term.");
-        declaredModules.add(identity);
-        declaredTerms.add(scope.term);
+      if (hasUniformUnfiledSourceScope(bank.pkg.manifest, bank.pkg.questions)) {
+        if (bank.reviewedFiling?.evidence !== "human-reviewed")
+          throw new Error("An Unfiled question bank needs an explicit human-reviewed filing before upload.");
+        declaredModules.add(moduleIdentity(bank.reviewedFiling.module)!);
+        declaredTerms.add(reviewedTermNumber(bank.reviewedFiling.term)!);
+      } else {
+        const manifestModule = moduleIdentity(bank.pkg.manifest.course.name);
+        const manifestTerm = bank.pkg.manifest.course.term;
+        if (!manifestModule || !Number.isInteger(manifestTerm) || manifestTerm < 1 || manifestTerm > 5)
+          throw new Error("A question bank has an invalid original module or term.");
+        declaredModules.add(manifestModule);
+        declaredTerms.add(manifestTerm);
+        for (const question of bank.pkg.questions) {
+          const scope = questionScope(bank.pkg.manifest, question);
+          const identity = moduleIdentity(scope.course);
+          if (!identity || !Number.isInteger(scope.term) || scope.term < 1 || scope.term > 5)
+            throw new Error("A question has an invalid or ambiguous original module or term.");
+          declaredModules.add(identity);
+          declaredTerms.add(scope.term);
+        }
       }
     }
     assertAcademicStoredFigureBudget(bank.pkg.questions);
@@ -765,19 +778,28 @@ export async function prepareAcademicUpload(
     const parsedBank = readPreparedBank(JSON.parse(decode(await read(item.bankFile))));
     if (plan) assertTemplateOwnsSource(plan, item, parsedBank);
     if (reviewedFiling) {
-      const manifestModule = moduleIdentity(parsedBank.pkg.manifest.course.name);
-      const manifestTerm = parsedBank.pkg.manifest.course.term;
-      if (!manifestModule || !Number.isInteger(manifestTerm) || manifestTerm < 1 || manifestTerm > 5)
-        throw new Error("A question bank has an invalid original module or term. Correct its review evidence before upload.");
-      declaredModules.add(manifestModule);
-      declaredTerms.add(manifestTerm);
-      for (const question of parsedBank.pkg.questions) {
-        const scope = questionScope(parsedBank.pkg.manifest, question);
-        const identity = moduleIdentity(scope.course);
-        if (!identity || !Number.isInteger(scope.term) || scope.term < 1 || scope.term > 5)
-          throw new Error("A question has an invalid or ambiguous original module or term.");
-        declaredModules.add(identity);
-        declaredTerms.add(scope.term);
+      if (hasUniformUnfiledSourceScope(parsedBank.pkg.manifest, parsedBank.pkg.questions)) {
+        const filing = parsedBank.reviewedFiling;
+        if (!filing || filing.evidence !== "human-reviewed" || filing.term !== reviewedFiling.term
+          || moduleIdentity(filing.module) !== moduleIdentity(reviewedFiling.module))
+          throw new Error("An Unfiled question bank needs its own exact human-reviewed filing before upload.");
+        declaredModules.add(moduleIdentity(filing.module)!);
+        declaredTerms.add(reviewedTermNumber(filing.term)!);
+      } else {
+        const manifestModule = moduleIdentity(parsedBank.pkg.manifest.course.name);
+        const manifestTerm = parsedBank.pkg.manifest.course.term;
+        if (!manifestModule || !Number.isInteger(manifestTerm) || manifestTerm < 1 || manifestTerm > 5)
+          throw new Error("A question bank has an invalid original module or term. Correct its review evidence before upload.");
+        declaredModules.add(manifestModule);
+        declaredTerms.add(manifestTerm);
+        for (const question of parsedBank.pkg.questions) {
+          const scope = questionScope(parsedBank.pkg.manifest, question);
+          const identity = moduleIdentity(scope.course);
+          if (!identity || !Number.isInteger(scope.term) || scope.term < 1 || scope.term > 5)
+            throw new Error("A question has an invalid or ambiguous original module or term.");
+          declaredModules.add(identity);
+          declaredTerms.add(scope.term);
+        }
       }
     }
     const bank: PreparedBank = reviewedFiling ? { ...parsedBank, reviewedFiling } : parsedBank;
