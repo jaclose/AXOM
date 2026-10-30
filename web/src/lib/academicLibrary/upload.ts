@@ -424,13 +424,38 @@ function assertTemplateMetadata(upload: AcademicUpload, plan: AcademicCoursePlan
   }
 }
 
-function assertReviewedFilingMetadata(upload: AcademicUpload, bank: PreparedBank): void {
+/** Each source has its own evidence. A course-level human review cannot
+ * reclassify another bank that has no matching bank-level review. */
+function sourceOnlyBankFiling(bank: PreparedBank, course: ReviewedFiling, requireStoredFiling: boolean): ReviewedFiling {
   const filing = bank.reviewedFiling;
-  if (!filing || upload.template !== "" || filing.term !== upload.metadata.term
-    || filing.module !== upload.metadata.module || filing.evidence !== upload.provenance.scopeEvidence
-    || filing.weekAssignment !== upload.provenance.weekAssignment) {
-    throw new Error("The direct upload envelope does not match its reviewed source filing.");
+  if (hasUniformUnfiledSourceScope(bank.pkg.manifest, bank.pkg.questions)) {
+    if (!filing || filing.evidence !== "human-reviewed" || course.evidence !== "human-reviewed"
+      || filing.term !== course.term || moduleIdentity(filing.module) !== moduleIdentity(course.module))
+      throw new Error("An Unfiled question bank needs its own exact human-reviewed filing before upload.");
+    return filing;
   }
+  const originalModule = moduleIdentity(bank.pkg.manifest.course.name);
+  const originalTerm = bank.pkg.manifest.course.term;
+  if (!originalModule || !Number.isInteger(originalTerm) || originalTerm < 1 || originalTerm > 5)
+    throw new Error("A question bank has an invalid original module or term.");
+  for (const question of bank.pkg.questions) {
+    const scope = questionScope(bank.pkg.manifest, question);
+    if (moduleIdentity(scope.course) !== originalModule || scope.term !== originalTerm)
+      throw new Error("A question bank has mixed or invalid original modules or terms. Split it before upload.");
+  }
+  if (requireStoredFiling && !filing)
+    throw new Error("The direct upload envelope is missing a bank's reviewed source filing.");
+  const effective = filing ?? {
+    term: `Term ${originalTerm}` as ReviewedFiling["term"], module: bank.pkg.manifest.course.name,
+    evidence: "source-metadata" as const, weekAssignment: "unassigned" as const,
+  };
+  if (effective.evidence === "source-metadata"
+    && (effective.term !== `Term ${originalTerm}` || moduleIdentity(effective.module) !== originalModule))
+    throw new Error("Source-metadata filing must agree with the package's original module and term.");
+  if (effective.term !== course.term || moduleIdentity(effective.module) !== moduleIdentity(course.module)
+    || (effective.evidence === "human-reviewed" && course.evidence !== "human-reviewed"))
+    throw new Error("A bank's reviewed filing does not match its source-only course.");
+  return effective;
 }
 
 /** The server content hash covers the exact canonical manifest as well as
@@ -580,6 +605,8 @@ async function preflightAcademicUpload(upload: AcademicUpload): Promise<Academic
     if (source.module !== undefined) {
       const identity = moduleIdentity(source.module);
       if (!identity) throw new Error("A source has an invalid or ambiguous module label.");
+      if (!plan && identity !== moduleIdentity(upload.metadata.module))
+        throw new Error("A source's catalog module does not match its source-only course.");
       if (!plan) declaredModules.add(identity);
     }
     if (source.originalFile) {
@@ -604,28 +631,15 @@ async function preflightAcademicUpload(upload: AcademicUpload): Promise<Academic
       throw new Error("A prepared academic bank contains a local or noncanonical source filename.");
     if (plan) assertTemplateOwnsSource(plan, source, bank);
     else {
-      assertReviewedFilingMetadata(upload, bank);
-      if (hasUniformUnfiledSourceScope(bank.pkg.manifest, bank.pkg.questions)) {
-        if (bank.reviewedFiling?.evidence !== "human-reviewed")
-          throw new Error("An Unfiled question bank needs an explicit human-reviewed filing before upload.");
-        declaredModules.add(moduleIdentity(bank.reviewedFiling.module)!);
-        declaredTerms.add(reviewedTermNumber(bank.reviewedFiling.term)!);
-      } else {
-        const manifestModule = moduleIdentity(bank.pkg.manifest.course.name);
-        const manifestTerm = bank.pkg.manifest.course.term;
-        if (!manifestModule || !Number.isInteger(manifestTerm) || manifestTerm < 1 || manifestTerm > 5)
-          throw new Error("A question bank has an invalid original module or term.");
-        declaredModules.add(manifestModule);
-        declaredTerms.add(manifestTerm);
-        for (const question of bank.pkg.questions) {
-          const scope = questionScope(bank.pkg.manifest, question);
-          const identity = moduleIdentity(scope.course);
-          if (!identity || !Number.isInteger(scope.term) || scope.term < 1 || scope.term > 5)
-            throw new Error("A question has an invalid or ambiguous original module or term.");
-          declaredModules.add(identity);
-          declaredTerms.add(scope.term);
-        }
-      }
+      const evidence = upload.provenance.scopeEvidence;
+      if (evidence !== "source-metadata" && evidence !== "human-reviewed")
+        throw new Error("A source-only direct upload needs verified course classification evidence.");
+      const filing = sourceOnlyBankFiling(bank, {
+        term: upload.metadata.term as ReviewedFiling["term"], module: upload.metadata.module as string,
+        evidence, weekAssignment: "unassigned",
+      }, true);
+      declaredModules.add(moduleIdentity(filing.module)!);
+      declaredTerms.add(reviewedTermNumber(filing.term)!);
     }
     assertAcademicStoredFigureBudget(bank.pkg.questions);
     const verifiedAssets: { name: string }[] = [];
@@ -748,6 +762,8 @@ export async function prepareAcademicUpload(
     if (item.module !== undefined) {
       const identity = moduleIdentity(item.module);
       if (!identity) throw new Error("A source has an invalid or ambiguous module label. Correct or split the private package.");
+      if (reviewedFiling && identity !== moduleIdentity(reviewedFiling.module))
+        throw new Error("A source's catalog module does not match its source-only course.");
       if (reviewedFiling) declaredModules.add(identity);
     }
     // Remove local paths and incidental preparation diagnostics before transfer.
@@ -777,32 +793,13 @@ export async function prepareAcademicUpload(
     }
     const parsedBank = readPreparedBank(JSON.parse(decode(await read(item.bankFile))));
     if (plan) assertTemplateOwnsSource(plan, item, parsedBank);
+    let bankFiling = parsedBank.reviewedFiling;
     if (reviewedFiling) {
-      if (hasUniformUnfiledSourceScope(parsedBank.pkg.manifest, parsedBank.pkg.questions)) {
-        const filing = parsedBank.reviewedFiling;
-        if (!filing || filing.evidence !== "human-reviewed" || filing.term !== reviewedFiling.term
-          || moduleIdentity(filing.module) !== moduleIdentity(reviewedFiling.module))
-          throw new Error("An Unfiled question bank needs its own exact human-reviewed filing before upload.");
-        declaredModules.add(moduleIdentity(filing.module)!);
-        declaredTerms.add(reviewedTermNumber(filing.term)!);
-      } else {
-        const manifestModule = moduleIdentity(parsedBank.pkg.manifest.course.name);
-        const manifestTerm = parsedBank.pkg.manifest.course.term;
-        if (!manifestModule || !Number.isInteger(manifestTerm) || manifestTerm < 1 || manifestTerm > 5)
-          throw new Error("A question bank has an invalid original module or term. Correct its review evidence before upload.");
-        declaredModules.add(manifestModule);
-        declaredTerms.add(manifestTerm);
-        for (const question of parsedBank.pkg.questions) {
-          const scope = questionScope(parsedBank.pkg.manifest, question);
-          const identity = moduleIdentity(scope.course);
-          if (!identity || !Number.isInteger(scope.term) || scope.term < 1 || scope.term > 5)
-            throw new Error("A question has an invalid or ambiguous original module or term.");
-          declaredModules.add(identity);
-          declaredTerms.add(scope.term);
-        }
-      }
+      bankFiling = sourceOnlyBankFiling(parsedBank, reviewedFiling, false);
+      declaredModules.add(moduleIdentity(bankFiling.module)!);
+      declaredTerms.add(reviewedTermNumber(bankFiling.term)!);
     }
-    const bank: PreparedBank = reviewedFiling ? { ...parsedBank, reviewedFiling } : parsedBank;
+    const bank: PreparedBank = bankFiling ? { ...parsedBank, reviewedFiling: bankFiling } : parsedBank;
     bank.pkg.manifest.source.filename = basename(bank.pkg.manifest.source.filename);
     const verifiedAssets: { name: string }[] = [];
     const figureSizes = new Map<string, number>();

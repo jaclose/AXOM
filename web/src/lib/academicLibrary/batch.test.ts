@@ -6,6 +6,8 @@ import { academicLibraryReader } from "./client";
 import { accountOperationClient, loadSupabase } from "../account/supabase";
 import { academicCollectionId, prepareAcademicUpload, uploadAcademicCourse, type AcademicUpload } from "./upload";
 import { academicReconciliationLedger, uploadAcademicBatch, verifyAcademicCourseReadback } from "./batch";
+import { planPublication, publicationJobs, readPublicationInventory } from "./publication";
+import { library } from "./publicationFixture.testing";
 
 vi.mock("../account/supabase", () => ({ accountOperationClient: vi.fn(), loadSupabase: vi.fn() }));
 vi.mock("./client", () => ({ academicLibraryReader: vi.fn() }));
@@ -214,6 +216,49 @@ describe("authenticated source-level academic readback", () => {
     const result = await verifyAcademicCourseReadback(prepared, f.saved, owner);
     expect(result).toMatchObject({ readyQuestions: 1, reviewQuestions: 0,
       sourceReceipts: [{ questionCount: 1, readyQuestionIds: ["question-1"], bankReadbackVerified: true }] });
+  });
+
+  it("preserves each bank's filing evidence when a reviewed Unfiled bank joins an ordinary source", async () => {
+    const input = await library();
+    const reviewedSource = input.catalog.sources.find(source => source.name === "unfiled-pq.pdf")!;
+    const ordinarySource = input.catalog.sources.find(source => source.name === "ncrs-pq.pdf")!;
+    const reviewedBank = JSON.parse(new TextDecoder().decode(input.files.get(reviewedSource.bankFile!)!));
+    reviewedBank.pkg.questions[0].course = "Unfiled";
+    reviewedBank.pkg.questions[0].term = 0;
+    reviewedBank.reviewedFiling = { term: "Term 4", module: "NCRS", evidence: "human-reviewed", weekAssignment: "unassigned" };
+    reviewedSource.module = "NCRS";
+    input.files.set(reviewedSource.bankFile!, encode(reviewedBank));
+    input.files.set("catalog.json", encode(input.catalog));
+
+    const inventory = await readPublicationInventory(input.read);
+    const course = planPublication(inventory).courses.find(item => item.term === "Term 4" && item.moduleKey === "ncrs")!;
+    expect(course.sourceIds).toEqual(expect.arrayContaining([ordinarySource.id, reviewedSource.id]));
+    const prepared = await publicationJobs(input.read, inventory, [course]).jobs[0].prepare();
+    expect(prepared.provenance.scopeEvidence).toBe("human-reviewed");
+    const stored = (path: string) => JSON.parse(new TextDecoder().decode(prepared.files.find(file => file.path === path)!.bytes));
+    const ordinaryBank = stored(ordinarySource.bankFile!);
+    const filedBank = stored(reviewedSource.bankFile!);
+    expect(ordinaryBank.reviewedFiling).toEqual({
+      term: "Term 4", module: "NCRS", evidence: "source-metadata", weekAssignment: "unassigned",
+    });
+    expect(ordinaryBank.pkg.manifest.course).toMatchObject({ name: "NCRS", term: 4 });
+    expect(filedBank.reviewedFiling).toEqual({
+      term: "Term 4", module: "NCRS", evidence: "human-reviewed", weekAssignment: "unassigned",
+    });
+    expect(filedBank.pkg.manifest.course).toMatchObject({ name: "Unfiled", term: 0 });
+    expect(filedBank.pkg.questions[0]).toMatchObject({ course: "Unfiled", term: 0 });
+
+    const cloud = await fixture();
+    cloud.upload = prepared;
+    cloud.data.clear();
+    for (const file of prepared.files) cloud.data.set(file.path, { mime: file.mime_type, bytes: file.bytes });
+    cloud.read.files = prepared.files.map(file => ({ path: file.path, sha256: file.sha256, byte_size: file.byte_size,
+      mime_type: file.mime_type, object_path: `${collection}/${file.sha256}` }));
+    session(cloud);
+    const result = await verifyAcademicCourseReadback(prepared, cloud.saved, owner);
+    expect(result).toMatchObject({ readyQuestions: 2, reviewQuestions: 0 });
+    expect(result.sourceReceipts).toHaveLength(2);
+    expect(result.sourceReceipts.every(receipt => receipt.bankReadbackVerified && receipt.ownerAuthenticated)).toBe(true);
   });
 
   it("distinguishes an oversized local-only original from a cloud-verified original", async () => {
