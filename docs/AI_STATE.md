@@ -5,8 +5,11 @@ authority: current-state
 ---
 # AXOM current AI state
 
-2026-10-23: `codex/rhps-esoft-acceptance-20261023`, base `dc055a2f`;
-[intake](../web/src/lib/privateLibrary/INPUT_COMPATIBILITY.md). Unreleased.
+2026-10-30 release candidate `5dfafae1` integrates RHPS/ESoft import, review,
+teaching, QBank, Journal and Productivity work onto `origin/main` `0cb5769a`.
+It preserves the current publisher and excludes the incompatible unapplied
+release-catalog experiment. Private packages remain unpublished; production
+deployment and authenticated readback are pending validation.
 
 Prior snapshot: 2026-10-20 UTC, `feat/academic-library-v1` in
 `AXOM-academic-library-v1`, HEAD `78c00e04`. This reflection batch was pushed to
