@@ -1,7 +1,5 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import biostatsFixture from "../../../fixtures/qbank/goer/t5/week-02/biostats-epidemiology/manifest.json";
-import endocrineFixture from "../../../fixtures/qbank/goer/t5/week-02/endocrine-pathophysiology/manifest.json";
-import pharmaFixture from "../../../fixtures/qbank/goer/t5/week-02/pharmacodynamics-pk/manifest.json";
 import { BLUEPRINTS as STUDY_BLUEPRINTS } from "./blueprints";
 import { BLUEPRINTS as APPLICATION_BLUEPRINTS, BLUEPRINT_LANES } from "./blueprintCatalog";
 import { CURRICULA } from "./curricula";
@@ -10,6 +8,11 @@ import { SGU_DRIVES } from "./seed";
 import { PATH_OPTIONS, TOOL_OPTIONS } from "./setupPlan";
 import { EDUCATION_TRACKS } from "./tracks";
 import { knownBankManifests } from "./question-content/knownBanks";
+
+const fixtureManifest = (bank: string) => JSON.parse(readFileSync(
+  new URL(`../../../fixtures/qbank/goer/t5/week-02/${bank}/manifest.json`, import.meta.url),
+  "utf8",
+));
 
 const NON_VISIBLE_KEYS = new Set([
   "id", "trackIds", "audience", "tags", "url", "sourceUrl", "focusId",
@@ -42,7 +45,11 @@ describe("AXOM-owned learner catalog branding", () => {
   });
 
   it("keeps source institutions out of bundled learner bank manifests", () => {
-    const projectedFixtures = [biostatsFixture, endocrineFixture, pharmaFixture].map((manifest) => {
+    const projectedFixtures = [
+      fixtureManifest("biostats-epidemiology"),
+      fixtureManifest("endocrine-pathophysiology"),
+      fixtureManifest("pharmacodynamics-pk"),
+    ].map((manifest) => {
       const { institution, ...source } = manifest.source;
       expect(institution).toBeTypeOf("string");
       return { ...manifest, source };
