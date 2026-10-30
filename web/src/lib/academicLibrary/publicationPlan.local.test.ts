@@ -7,18 +7,22 @@
  *   AXOM_PUBLISH_LIBRARY_ROOT=<prepared folder> \
  *   AXOM_PUBLISH_REPORT=<report.json outside the repository> \
  *   AXOM_PUBLISH_TERMS='{"<module key>":"Term 1"}' \
+ *   AXOM_PUBLISH_DECISIONS=<filing decisions .json from the unfiled source review> \
  *   npx vitest run src/lib/academicLibrary/publicationPlan.local.test.ts --reporter=verbose
  *
  * AXOM_PUBLISH_TERMS is optional and holds terms a reviewer confirmed, keyed by
- * the module keys the report lists. The report and console carry counts,
+ * the module keys the report lists. AXOM_PUBLISH_DECISIONS is optional and files
+ * each reviewed source as decided, exactly as the publisher's "Add filing
+ * decisions" does; the library folder itself is never changed. The report and console carry counts,
  * module labels, reasons and source names only, never question text, answers
  * or file bytes. Source names can be private: keep the report out of Git.
  */
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
 import { describe, expect, it } from "vitest";
-import { safeLibraryPath } from "../privateLibrary/install";
+import { safeLibraryPath, type LibraryReader } from "../privateLibrary/install";
 import type { ReviewedFiling } from "../privateLibrary/types";
+import { applyFilingDecisions, readFilingDecisions } from "./filingDecisions";
 import {
   PUBLICATION_INPUT_LIMITS, planPublication, publicationJobs, readPublicationInventory, type PlannedCourse,
 } from "./publication";
@@ -38,7 +42,7 @@ function confirmedTerms(): Record<string, Term> {
 describe.skipIf(!root)("dry run of publishing a real prepared library (opt-in only)", () => {
   it("plans every course and prepares each one without uploading", async () => {
     const parent = realpathSync(resolve(root!));
-    const read = async (file: string) => {
+    const fromDisk: LibraryReader = async (file: string) => {
       const path = resolve(parent, safeLibraryPath(file));
       if (!path.startsWith(parent + sep)) throw new Error("A library path escaped the selected folder.");
       if (!existsSync(path)) throw new Error("A file the library references is missing.");
@@ -52,6 +56,12 @@ describe.skipIf(!root)("dry run of publishing a real prepared library (opt-in on
     if (report && (report + sep).startsWith(repository + sep))
       throw new Error("Write the dry-run report outside the repository: it can name private sources.");
 
+    const decisionsFile = process.env.AXOM_PUBLISH_DECISIONS;
+    const filed = decisionsFile
+      ? await applyFilingDecisions(fromDisk, readFilingDecisions(JSON.parse(readFileSync(resolve(decisionsFile), "utf8"))))
+      : undefined;
+    const read = filed?.read ?? fromDisk;
+    if (filed) console.log(`filing decisions  ${filed.summary.filed} filed, ${filed.summary.keptUnfiled} kept unfiled`);
     const inventory = await readPublicationInventory(read);
     const plan = planPublication(inventory, confirmedTerms());
     const ready = plan.courses.filter(course => course.termBasis !== "proposed");
@@ -84,7 +94,7 @@ describe.skipIf(!root)("dry run of publishing a real prepared library (opt-in on
       sections: course.sections.map(section => section.name),
     }));
     const result = {
-      library: inventory.library, checkedAt: new Date().toISOString(),
+      library: inventory.library, checkedAt: new Date().toISOString(), ...(filed ? { filingDecisions: filed.summary } : {}),
       totals: {
         courses: plan.courses.length, checked: checked.length, readyToPublish: checked.filter(course => course.ok).length,
         needAttention: checked.filter(course => !course.ok).length, needTerm: needsTerm.length,

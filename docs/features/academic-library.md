@@ -142,6 +142,16 @@ the owner may request sharing with every signed-in account, which requires attes
 right to share; a reviewer may approve in the same step. Every new revision returns to
 review. Workspace schema stays 34; no new store or catalog is created.
 
+Filing decisions from the unfiled source review (`axom-private-filing-decisions`, schema 2)
+file prepared sources the preparer could not place. Add filing decisions in the publisher
+(or `AXOM_PUBLISH_DECISIONS` in the dry run) applies them while the library is read:
+an accepted or corrected source is served with its catalog module, bank course and every
+question's own scope set to the decided term and module, so planning, Check and upload
+treat it like any filed source; weeks stay as the source states them. A kept-unfiled or
+undecided source is served unchanged. Decisions bind to the exact bytes reviewed: the
+catalog and each bank must match the hashes in the file, or nothing is applied. The
+library folder is never changed, and the decisions file stays private with the library.
+
 Your published courses, below the publisher, reads every course the account owns from
 the catalog page by page and shows its audience and review state by term. It shares all
 private courses at once behind the same rights attestation and, for a reviewer who
@@ -163,8 +173,10 @@ Production writes need JD's explicit approval for each step. On the authorized M
    without a browser: `publicationPlan.local.test.ts` (opt-in through
    `AXOM_PUBLISH_LIBRARY_ROOT`) prepares every course as publishing would, uploads
    nothing and writes a metadata-only report to `AXOM_PUBLISH_REPORT` outside Git.
+   Add `AXOM_PUBLISH_DECISIONS=<decisions.json>` to include the unfiled source review.
 4. Sign in to AXOM, open Course Library > Manage sources and custom courses > Publish a
-   prepared library, choose the prepared folder, confirm each proposed term, review
+   prepared library, choose the prepared folder, add the filing decisions file if the
+   unfiled sources were reviewed, confirm each proposed term, review
    the plans and source files listed as staying on the device, then Check the selected
    courses and resolve or leave out what needs attention.
 5. Publish. Choose sharing and, as a reviewer, approval only for material you have the
