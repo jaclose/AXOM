@@ -42,7 +42,7 @@ describe.skipIf(!root)("dry run of publishing a real prepared library (opt-in on
   beforeAll(async () => {
     decoder = await openPublicationBrowserDecoder();
     vi.stubGlobal("createImageBitmap", decoder.decode);
-  });
+  }, 120_000);
   afterAll(async () => {
     vi.unstubAllGlobals();
     await decoder?.close();
