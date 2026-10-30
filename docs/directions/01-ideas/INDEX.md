@@ -273,5 +273,5 @@ was already asked for in [Ideas 4](IDEAS-4.md).
 
 | ID | Idea | Status | Where |
 | --- | --- | --- | --- |
-| I11-01 | AXOM-branded emails at the Pulse standard, sent through Resend, with a designed graphic in the welcome email | NEEDS JD | templates render (I9-02); the welcome email has no graphic yet; Resend domain, SMTP and function activation per the [runbook](../../operations/communications-resend.md) |
+| I11-01 | AXOM-branded emails at the Pulse standard, sent through Resend, with a designed graphic in the welcome email | NEEDS JD | templates render (I9-02); the welcome email has its hero Orb and first steps on jd-claude/eloquent-shannon-b2xof9; Resend domain, SMTP and function activation per the [runbook](../../operations/communications-resend.md) |
 | I11-02 | AXOM runs semi or fully autonomously from measured activity, with no reliance on self-report: an all-inclusive, exclusive academic OS | NEW | product direction; first step is an audit of what is still self-reported |
