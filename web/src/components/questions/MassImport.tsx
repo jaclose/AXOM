@@ -200,14 +200,7 @@ export function MassImport({
     fileMap.delete(id);
     ownedFileIds.current.delete(id);
     setQueue((current) => current.filter((file) => file.id !== id));
-    const restoreFocus = () => {
-      const target = document.getElementById(
-        focusFile ? `mass-import-remove-${focusFile.id}` : "mass-import-add-files",
-      );
-      if (target instanceof HTMLElement) target.focus();
-    };
-    if (typeof requestAnimationFrame === "function") requestAnimationFrame(restoreFocus);
-    else setTimeout(restoreFocus, 0);
+    focusAfterQueueUpdate(focusFile ? `mass-import-remove-${focusFile.id}` : "mass-import-add-files");
   }
 
   async function processOne(id: string) {
@@ -565,6 +558,11 @@ export function MassImport({
 
 function focusAfterQueueUpdate(elementId: string) {
   const restore = () => {
+    // Every update here removes the control that held focus, so focus is on the
+    // page unless the learner has gone elsewhere. These targets are buttons: taking
+    // focus from a field would make the next space they type press one.
+    const focused = document.activeElement;
+    if (focused && focused !== document.body) return;
     const target = document.getElementById(elementId);
     if (target instanceof HTMLElement) target.focus();
   };

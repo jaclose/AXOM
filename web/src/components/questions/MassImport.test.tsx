@@ -29,6 +29,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   cleanup();
+  vi.restoreAllMocks();
   await useStore.setState(original);
 });
 
@@ -198,6 +199,56 @@ describe("Mass Import trust handoff", () => {
     await waitFor(() => expect(document.activeElement).toBe(
       screen.getByRole("button", { name: "Remove third.txt" }),
     ));
+  });
+
+  it("does not take focus from a field the learner reached before the restore frame", async () => {
+    // Held until the learner is typing elsewhere. Focus on a row's Remove button
+    // would turn the next space they type into a press of that button.
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((frame) => frames.push(frame));
+    const user = userEvent.setup();
+    render(<MassImport onInspect={vi.fn()} />);
+    render(<input aria-label="Another field" />);
+    await user.upload(screen.getByLabelText("Choose multiple question files"), [
+      new File(["notes"], "first.txt", { type: "text/plain" }),
+      new File(["notes"], "second.txt", { type: "text/plain" }),
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "Remove first.txt" }));
+    const field = screen.getByLabelText("Another field") as HTMLInputElement;
+    field.focus();
+    frames.splice(0).forEach((frame) => frame(0));
+    await user.keyboard("two words");
+
+    expect(field.value).toBe("two words");
+    expect(screen.getByRole("button", { name: "Remove second.txt" })).toBeTruthy();
+  });
+
+  it("does not take focus from a field the learner reached while a review was saving", async () => {
+    // This restore runs after the save, so by then the learner's field is where
+    // focus already is: comparing against focus at that moment would not protect it.
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((frame) => frames.push(frame));
+    const user = userEvent.setup();
+    const onInspect = vi.fn();
+    const view = render(<MassImport onInspect={onInspect} />);
+    render(<input aria-label="Another field" />);
+    const valid = "1. Stable question?\nA. Alpha\nB. Beta\nAnswer: B";
+    await user.upload(screen.getByLabelText("Choose multiple question files"), [
+      new File([valid], "first.txt", { type: "text/plain" }),
+      new File([valid], "second.txt", { type: "text/plain" }),
+    ]);
+    await user.click(screen.getByRole("button", { name: "Import files" }));
+    await screen.findByRole("button", { name: "Edit second.txt" });
+    await user.click(screen.getByRole("button", { name: "Edit first.txt" }));
+
+    const field = screen.getByLabelText("Another field");
+    field.focus();
+    view.rerender(<MassImport onInspect={onInspect} finalizedQueueId={onInspect.mock.calls[0][0].batchQueueId} />);
+    expect(screen.queryByRole("button", { name: "Edit first.txt" })).toBeNull();
+    frames.splice(0).forEach((frame) => frame(0));
+
+    expect(document.activeElement).toBe(field);
   });
 
   it("associates a separate numbered answer file and keeps it as provenance", async () => {
