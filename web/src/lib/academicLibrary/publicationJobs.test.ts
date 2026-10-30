@@ -44,6 +44,19 @@ describe("publication jobs", () => {
     expect(await sourcesIn(1)).toEqual(["bank"]);
   });
 
+  it("counts an unsupported bank original once when size fallback also keeps an optional file", async () => {
+    const mixed: PublicationInventory = { ...inventory, sources: inventory.sources.map(source => ({ ...source,
+      original: { extension: source.id === "bank" ? "pptx" : "pdf" } })) };
+    const upload = { catalogId: course.catalogId } as Awaited<ReturnType<typeof prepareAcademicUpload>>;
+    vi.mocked(prepareAcademicUpload)
+      .mockRejectedValueOnce(new Error("This collection exceeds the supported upload size."))
+      .mockResolvedValueOnce(upload);
+    const { jobs, notes } = publicationJobs(read, mixed, [course]);
+    await expect(jobs[0].prepare()).resolves.toBe(upload);
+    expect(prepareAcademicUpload).toHaveBeenCalledTimes(2);
+    expect(notes.keptLocal.get(course.catalogId)).toBe(2);
+  });
+
   it("publishes questions without any source files when the course is still too large, and explains when nothing fits", async () => {
     const bankWithOriginal: PublicationInventory = { ...inventory, sources: inventory.sources.map(source => source.id === "bank"
       ? { ...source, original: { extension: "pdf" } } : source) };
