@@ -33,9 +33,9 @@ jobs:
       - run: node scripts/toolchain.mjs
       - run: npm ci
       - run: npm run test:deployment
-      - name: Prove original GOER exclusion breaks the actual build
-        run: npm run verify:deployment -- --without-goer-allowlist --expect-build-failure
-      - name: Build clean Vercel-filtered source with the targeted allowlist
+      - name: Prove fixture allowlisting violates the deployment privacy boundary
+        run: npm run verify:deployment -- --with-fixture-probe --expect-privacy-failure
+      - name: Build clean Vercel-filtered source without fixtures
         run: npm run verify:deployment
 
   web:

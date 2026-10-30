@@ -29,15 +29,14 @@ export function requiredManifests(root) {
   requireExactFile(root, bankRegistry);
   const source = ts.createSourceFile(bankRegistry,
     readFileSync(resolve(root, bankRegistry), 'utf8'), ts.ScriptTarget.Latest, true);
-  const manifests = source.statements
+  return [...new Set(source.statements
     .filter(ts.isImportDeclaration)
     .map(statement => statement.moduleSpecifier)
     .filter(ts.isStringLiteral)
     .map(specifier => specifier.text)
     .filter(specifier => specifier.endsWith('/manifest.json'))
-    .map(specifier => relative(root, resolve(root, dirname(bankRegistry), specifier)).split(sep).join('/'));
-  if (!manifests.length) throw new Error('GOER registry has no manifest imports; cannot verify deployment inputs');
-  return manifests;
+    .map(specifier => relative(root, resolve(root, dirname(bankRegistry), specifier)).split(sep).join('/')))]
+    .sort();
 }
 
 export function checkDeploymentInputs(root) {
@@ -46,7 +45,7 @@ export function checkDeploymentInputs(root) {
     'package.json', 'package-lock.json', 'web/package.json', 'web/package-lock.json',
     'vercel.json', 'scripts/deployment-inputs.mjs', 'scripts/toolchain.mjs',
     'scripts/release-notes.mjs', 'scripts/release-notes.d.mts',
-    'web/scripts/verify-daily-games-bundle.mjs', ...manifests,
+    'web/scripts/verify-daily-games-bundle.mjs', bankRegistry, ...manifests,
   ];
   for (const file of required) requireExactFile(root, file);
   return manifests;
@@ -55,7 +54,7 @@ export function checkDeploymentInputs(root) {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
     const manifests = checkDeploymentInputs(process.cwd());
-    console.log(`Deployment inputs: ${manifests.length} required GOER manifests, exact filenames verified`);
+    console.log(`Deployment inputs: registry and ${manifests.length} external manifest import(s), exact filenames verified`);
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;
