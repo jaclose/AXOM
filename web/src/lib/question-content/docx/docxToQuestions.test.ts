@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { blockShape } from "../blocks";
-import type { ImportPackage, PackageManifest } from "../package";
+import { PACKAGE_SCHEMA_VERSION, type ImportPackage, type PackageManifest } from "../package";
 import { parsePackage, serializeManifest, serializeQuestionsFile } from "../packageJson";
 import { isRunnable, validatePackage } from "../validate";
 import { visibleBlocks, effectiveRole } from "../visibility";
@@ -16,7 +16,7 @@ const fixture = (name: string): Uint8Array => readFileSync(join(repository, "fix
 const template = (): Uint8Array => readFileSync(join(repository, "docs", "templates", "AXOM_QBANK_IMPORT_TEMPLATE.docx"));
 const defaults = { bankId: "example-bank", sourceFilename: "questions.docx" };
 const manifest: PackageManifest = {
-  schemaVersion: 1, course: { name: "GOER", term: 5, week: 2 }, bank: { id: "example-bank", title: "Example bank", discipline: "Example discipline" },
+  schemaVersion: PACKAGE_SCHEMA_VERSION, course: { name: "GOER", term: 5, week: 2 }, bank: { id: "example-bank", title: "Example bank", discipline: "Example discipline" },
   source: { filename: "questions.docx", sourceWeekDeclared: false }, questionsFile: "questions.json", assetsDirectory: "assets/",
 };
 const codes = (issues: { severity: string; code: string }[]): string[] => issues.map((issue) => `${issue.severity}:${issue.code}`);
