@@ -1215,9 +1215,6 @@ ul.template-note { padding-left: 26px; }
    surface spends its visual weight on the next decision and inventory state. */
 .qb-practice-header {
   margin-bottom: 14px;
-  background:
-    radial-gradient(80% 150% at 100% 0%, rgba(var(--accent-rgb), .09), transparent 58%),
-    color-mix(in srgb, var(--surface-1) 88%, #050506);
   box-shadow: inset 0 1px 0 rgba(230, 226, 214, .055), 0 16px 44px rgba(0, 0, 0, .28);
 }
 .qb-practice-header .qb-hero-inner { gap: 16px; padding: 22px 24px 18px; }
@@ -1355,7 +1352,7 @@ ul.template-note { padding-left: 26px; }
   .qb-inventory > div:first-child { padding-left: 0; }
   .qb-inventory dd { font-size: var(--fs-lg); }
   .qb-inventory dt { font-size: 10px; }
-  .qb-segment { margin-inline: -4px; border-radius: var(--radius-sm); }
+  .qb-segment { margin-inline: 0; border-radius: var(--radius-sm); }
   .qb-seg { flex: 0 0 auto; padding-inline: 14px; }
   .qb-study-route { width: 100%; justify-content: space-between; }
   .qb-study-route li { display: grid; justify-items: center; gap: 5px; white-space: normal; text-align: center; }
