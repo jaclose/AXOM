@@ -181,8 +181,6 @@ describe("post-global-guide promise flow", () => {
 
 describe("Journal route durability", () => {
   function openJournalShell() {
-    // The shell's daily rollover moves the active day to the local calendar date on load.
-    // The legacy 4 AM study-day key disagrees with it between midnight and 4 AM.
     useStore.setState((state) => ({
       activeDayKey: localDateKey(),
       journal: [],
