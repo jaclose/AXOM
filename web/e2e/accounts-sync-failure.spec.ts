@@ -1,4 +1,5 @@
 import type { Page, Route } from "@playwright/test";
+import type { CommunicationsSettings } from "../src/lib/communications/client";
 import { expect, seedOnboarded, test } from "./fixtures";
 
 /**
@@ -14,9 +15,10 @@ const CORS = { "access-control-allow-origin": "*", "access-control-allow-headers
 const HISTORY_FULL = { code: "54000", details: null, hint: null, message: "workspace snapshot storage limit reached; reduce the snapshot size before syncing" };
 
 type Answer = (route: Route) => Promise<void>;
+type Push = { answer: Answer; bodies: Array<Record<string, unknown>>; accepted?: { id: string; revision: number } };
 const json = (status: number, body: unknown): Answer => (route) => route.fulfill({ status, headers: { ...CORS, "content-type": "application/json" }, body: JSON.stringify(body) });
 
-async function standInAccount(page: Page, push: { answer: Answer; bodies: Array<Record<string, unknown>> }) {
+async function standInAccount(page: Page, push: Push) {
   const unexpected: string[] = [];
   await page.addInitScript(({ url, userId }) => {
     (window as unknown as { __AXOM_E2E_ACCOUNT__: unknown }).__AXOM_E2E_ACCOUNT__ = { url, key: "sb_publishable_e2e" };
@@ -32,7 +34,8 @@ async function standInAccount(page: Page, push: { answer: Answer; bodies: Array<
   }, { url: ACCOUNT_URL, userId: USER_ID });
   await page.route(`${ACCOUNT_URL}/**`, async (route) => {
     const request = route.request();
-    const path = new URL(request.url()).pathname;
+    const url = new URL(request.url());
+    const path = url.pathname;
     if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers: CORS });
     if (path === "/rest/v1/rpc/push_workspace_revision_v2") {
       push.bodies.push(request.postDataJSON() as Record<string, unknown>);
@@ -40,7 +43,17 @@ async function standInAccount(page: Page, push: { answer: Answer; bodies: Array<
     }
     if (path === "/rest/v1/rpc/touch_account_device") return route.fulfill({ status: 204, headers: CORS });
     if (path === "/rest/v1/account_profiles") return json(200, { display_name: "E2E Learner" })(route);
+    // An accepted upload counts as protected only after the app reads the stored revision back.
+    if (path === "/rest/v1/workspace_revisions" && push.accepted && url.searchParams.get("id") === `eq.${push.accepted.id}`) {
+      const sent = push.bodies.at(-1) ?? {};
+      return json(200, { id: push.accepted.id, revision: push.accepted.revision, content_hash: sent.p_content_hash, reason: sent.p_reason })(route);
+    }
     if (path === "/rest/v1/workspace_revisions" || path === "/rest/v1/account_devices") return json(200, [])(route);
+    // The signed-in shell loads the account notification inbox.
+    if (request.method() === "POST" && path === "/functions/v1/communications" && url.searchParams.get("action") === "settings") return json(200, {
+      preferences: [], identity: { accent: "cyan", theme: "dark" }, history: [], privacy: [],
+      admin: false, deliveryMode: "dry-run", deletionEnabled: false, hasProtectedCopy: false,
+    } satisfies CommunicationsSettings)(route);
     unexpected.push(`${request.method()} ${path}`);
     return json(404, { message: "not part of the stand-in account" })(route);
   });
@@ -59,7 +72,7 @@ const statusDot = (page: Page) => page.getByTitle("Account and protection");
 
 test("a refused account upload is sent once, explained, and recovers", async ({ page }) => {
   test.setTimeout(120_000);
-  const push = { answer: json(500, HISTORY_FULL), bodies: [] as Array<Record<string, unknown>> };
+  const push: Push = { answer: json(500, HISTORY_FULL), bodies: [] };
   const unexpected = await standInAccount(page, push);
   await seedOnboarded(page);
 
@@ -102,7 +115,8 @@ test("a refused account upload is sent once, explained, and recovers", async ({ 
   await expect(detail).toContainText("version history is full");
 
   // The account is repaired (migration 20261001090000): the same button protects the workspace.
-  push.answer = json(200, { status: "accepted", revision: 72, revision_id: "7a520001-3c44-4f0e-9d3a-8f1d5f0c7e2a", idempotent: false });
+  push.accepted = { id: "7a520001-3c44-4f0e-9d3a-8f1d5f0c7e2a", revision: 72 };
+  push.answer = json(200, { status: "accepted", revision: push.accepted.revision, revision_id: push.accepted.id, idempotent: false });
   await panel.getByRole("button", { name: "Try again" }).click();
   await expect(panel.locator(".account-protection b")).toHaveText("Protected");
   await expect(panel.locator(".account-protection-detail")).toHaveCount(0);
