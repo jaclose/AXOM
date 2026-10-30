@@ -31,9 +31,9 @@ webpHeader.set(Buffer.from("WEBP"), 8);
 webpHeader.set(Buffer.from("VP8X"), 12);
 
 async function fixture({ withImage = false, largeImage = false, brokenGif = false,
-  imageFormat = "png", ambiguousAnswer = false, catalogId = "fixture",
+  imageFormat = "png", ambiguousAnswer = false, heldFigureCount = 0, catalogId = "fixture",
 }: { withImage?: boolean; largeImage?: boolean; brokenGif?: boolean;
-  imageFormat?: "png" | "jpg" | "webp" | "gif"; ambiguousAnswer?: boolean; catalogId?: string } = {}) {
+  imageFormat?: "png" | "jpg" | "webp" | "gif"; ambiguousAnswer?: boolean; heldFigureCount?: number; catalogId?: string } = {}) {
   const image = brokenGif ? gif.subarray(0, 12) : largeImage ? new Uint8Array(8 * 1024 * 1024 + 1)
     : imageFormat === "gif" ? gif : imageFormat === "jpg" ? jpegHeader
     : imageFormat === "webp" ? webpHeader : png;
@@ -44,6 +44,10 @@ async function fixture({ withImage = false, largeImage = false, brokenGif = fals
     : imageFormat === "jpg" ? "image/jpeg" : imageFormat === "webp" ? "image/webp" : "image/png";
   const asset = { id: "figure", questionId: "question-1", filename,
     checksum, mimeType, byteSize: image.length, width: 1, height: 1, role: "question" };
+  const assets = Array.from({ length: heldFigureCount || Number(withImage) }, (_, index) => ({
+    ...asset, id: index ? `figure-${index + 1}` : "figure",
+    filename: index ? `figure-${index + 1}.${imageFormat}` : filename,
+  }));
   const bank = {
     pkg: {
       manifest: { schemaVersion: 1, course: { name: "Demo", term: 1, week: 1 },
@@ -52,13 +56,13 @@ async function fixture({ withImage = false, largeImage = false, brokenGif = fals
       questions: [{
         id: "question-1", source: { filename: "illustrative.pdf", questionNumber: 1 },
         stem: [{ type: "text", text: "Which label is first?" },
-          ...(withImage ? [{ type: "image", assetId: "figure", role: "question", alt: "Synthetic figure" }] : [])],
+          ...assets.map(figure => ({ type: "image", assetId: figure.id, role: "question", alt: "Synthetic figure" }))],
         choices: [
           { id: "a", label: "A", blocks: [{ type: "text", text: "Label A" }] },
           { id: "b", label: "B", blocks: [{ type: "text", text: "Label B" }] },
         ],
-        correctAnswer: { labels: ambiguousAnswer ? ["A", "B"] : ["A"], evidence: "printed-key" },
-        assets: withImage ? [asset] : [],
+        ...(heldFigureCount ? {} : { correctAnswer: { labels: ambiguousAnswer ? ["A", "B"] : ["A"], evidence: "printed-key" } }),
+        assets,
         provenance: { method: "authored", sourceChecksum: `sha256:${S}` },
       }],
     }, issues: [], sourceText: { rawText: "Synthetic, made-up teaching example." }, sourceBytes: 32, notes: [],
@@ -66,19 +70,22 @@ async function fixture({ withImage = false, largeImage = false, brokenGif = fals
   const catalog = {
     format: "axom-private-library", schemaVersion: 1, id: catalogId, version: "1", templates: [],
     sources: [{ id: "source-1", name: "illustrative.pdf", sourcePath: "illustrative.pdf", checksum: S,
-      status: "prepared", reason: "Reviewed synthetic source", ready: 1, review: 0, bankFile: "banks/demo/bank.json" }],
+      status: "prepared", reason: "Reviewed synthetic source", ready: heldFigureCount ? 0 : 1,
+      review: heldFigureCount ? 1 : 0, bankFile: "banks/demo/bank.json" }],
   };
   const data = new Map<string, { mime: string; bytes: Uint8Array }>([
     ["catalog.json", { mime: "application/json", bytes: encode(catalog) }],
     ["banks/demo/bank.json", { mime: "application/json", bytes: encode(bank) }],
-    ...(withImage ? [[`banks/demo/assets/${filename}`, { mime: mimeType, bytes: image }] as const] : []),
+    ...assets.map(figure => [`banks/demo/assets/${figure.filename}`, { mime: mimeType, bytes: image }] as const),
   ]);
   const files = await Promise.all([...data.entries()].map(async ([path, item]) => ({
     path, sha256: (await sha256(item.bytes)).slice(7), byte_size: item.bytes.length,
     mime_type: item.mime, bytes: item.bytes,
   })));
   const upload: AcademicUpload = {
-    catalogId, hash: "c".repeat(64), metadata: { ready_questions: 1, review_questions: 0 },
+    catalogId, hash: "c".repeat(64), metadata: {
+      ready_questions: heldFigureCount ? 0 : 1, review_questions: heldFigureCount ? 1 : 0,
+    },
     provenance: { sourceChecksums: [S], scopeEvidence: "human-reviewed", weekAssignment: "unassigned" },
     files, localOnlyOriginals: [], template: "",
   };
@@ -103,11 +110,13 @@ function session(
   const guard = vi.fn(async () => undefined);
   const course = {
     owned: true, current_revision_id: extras.courseCurrent ?? revision,
-    ready_questions: extras.courseReady ?? 1, review_questions: 0,
+    ready_questions: extras.courseReady ?? caseData.upload.metadata.ready_questions,
+    review_questions: caseData.upload.metadata.review_questions,
   };
   const row = {
     id: revision, status: extras.savedRevisionStatus ?? "ready",
-    collection_id: collection, content_hash: caseData.upload.hash, ready_questions: 1, review_questions: 0,
+    collection_id: collection, content_hash: caseData.upload.hash,
+    ready_questions: caseData.upload.metadata.ready_questions, review_questions: caseData.upload.metadata.review_questions,
   };
   const shared = {
     auth: { getUser: vi.fn(async () => ({ data: { user: { id: userId } }, error: null })) },
@@ -164,6 +173,18 @@ describe("authenticated source-level academic readback", () => {
     expect(shared.auth.getUser).toHaveBeenCalledOnce();
     expect(() => client.auth).toThrow(/blocks auth/);
     expect(guard).toHaveBeenCalled();
+  });
+
+  it("verifies a held source's 11 figures without claiming they are learner attachments", async () => {
+    stubSuccessfulBrowserDecode();
+    const f = await fixture({ heldFigureCount: 11 });
+    session(f);
+    const result = await verifyAcademicCourseReadback(f.upload, f.saved, owner);
+    expect(result).toMatchObject({ readyQuestions: 0, reviewQuestions: 1, verifiedFiles: 13 });
+    expect(result.sourceReceipts[0]).toMatchObject({
+      questionCount: 0, reviewCount: 1, figureReferences: 0, distinctFigureFiles: 11,
+      figureReadbackVerified: true, bankReadbackVerified: true, readyQuestionIds: [],
+    });
   });
 
   it("distinguishes an oversized local-only original from a cloud-verified original", async () => {

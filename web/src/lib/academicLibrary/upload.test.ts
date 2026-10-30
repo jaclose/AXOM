@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sha256 } from "../question-content/assets";
-import { academicAssetPath, assertAcademicFigureBudget, academicCollectionId, academicUploadHash, prepareAcademicUpload, uploadAcademicCourse, type AcademicUpload } from "./upload";
+import { academicAssetPath, assertAcademicFigureBudget, assertAcademicStoredFigureBudget, academicCollectionId, academicUploadHash, prepareAcademicUpload, uploadAcademicCourse, type AcademicUpload } from "./upload";
 
 const tus = vi.hoisted(() => ({
   blobs: new Map<string, Blob>(),
@@ -137,11 +137,16 @@ it("maps figures for both root-level and nested prepared banks without malformed
 it("enforces the local installer's per-question image count and aggregate byte budget", () => {
   const make = (count: number) => [{ assets: Array.from({ length: count }, (_, i) =>
     ({ filename: `figure-${i}.png`, checksum: "a".repeat(64) })) }];
+  expect(() => assertAcademicFigureBudget(make(10))).not.toThrow();
   expect(() => assertAcademicFigureBudget(make(11))).toThrow(/10-figure attachment limit/);
+  expect(() => assertAcademicStoredFigureBudget(make(64))).not.toThrow();
+  expect(() => assertAcademicStoredFigureBudget(make(65))).toThrow(/64-figure source limit/);
   const four = make(4);
   const oversized = new Map(four[0].assets.map(asset => [asset.filename, 8 * 1024 * 1024]));
   expect(() => assertAcademicFigureBudget(four, oversized)).toThrow(/30 MiB total/);
+  expect(() => assertAcademicStoredFigureBudget(four, oversized)).toThrow(/30 MiB total/);
   expect(() => assertAcademicFigureBudget(make(3), oversized)).not.toThrow();
+  expect(() => assertAcademicStoredFigureBudget(make(1), new Map([["figure-0.png", 8 * 1024 * 1024 + 1]]))).toThrow(/8 MiB/);
 });
 
 it("prepares only referenced academic files and omits unrelated learner fields", async () => {

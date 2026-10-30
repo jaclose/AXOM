@@ -84,16 +84,21 @@ export function assertAcademicAssetMatchesBytes(asset: QuestionAsset, image: Ver
     throw new Error(`The academic figure ${asset.filename} has declared MIME, byte-size or dimensions that differ from its verified bytes.`);
 }
 
-/** Match the canonical installer's case-insensitive physical filename rules
- * and the canonical learner question's per-question attachment budgets. */
-export function assertAcademicFigureBudget(
+const MAX_HELD_ACADEMIC_FIGURES = 64;
+
+/** All stored figures keep their integrity and byte budgets, including those
+ * on questions held from learner import. */
+function assertFigureBudget(
   questions: readonly { assets: readonly { filename: string; checksum?: string }[] }[],
-  sizes?: ReadonlyMap<string, number>,
+  sizes: ReadonlyMap<string, number> | undefined,
+  maxFigures: number,
 ): void {
   const filenames = new Map<string, string>();
   for (const question of questions) {
-    if (question.assets.length > MAX_QUESTION_ATTACHMENTS)
-      throw new Error("An academic question exceeds AXOM's 10-figure attachment limit.");
+    if (question.assets.length > maxFigures)
+      throw new Error(maxFigures === MAX_QUESTION_ATTACHMENTS
+        ? "An academic question exceeds AXOM's 10-figure attachment limit."
+        : "A held academic question exceeds AXOM's 64-figure source limit.");
     let questionBytes = 0;
     for (const asset of question.assets) {
       const key = asset.filename.trim().split(/[\\/]/).pop()?.normalize("NFC").toLowerCase();
@@ -112,6 +117,23 @@ export function assertAcademicFigureBudget(
       }
     }
   }
+}
+
+/** Held source questions are stored for review, not imported into learner
+ * practice. Their figures still have a bounded count and the same byte checks. */
+export function assertAcademicStoredFigureBudget(
+  questions: readonly { assets: readonly { filename: string; checksum?: string }[] }[],
+  sizes?: ReadonlyMap<string, number>,
+): void {
+  assertFigureBudget(questions, sizes, MAX_HELD_ACADEMIC_FIGURES);
+}
+
+/** Answer-ready questions must fit the canonical local attachment limit. */
+export function assertAcademicFigureBudget(
+  questions: readonly { assets: readonly { filename: string; checksum?: string }[] }[],
+  sizes?: ReadonlyMap<string, number>,
+): void {
+  assertFigureBudget(questions, sizes, MAX_QUESTION_ATTACHMENTS);
 }
 /** Readiness alone is not a promise that AXOM's canonical question importer
  * can produce a scored set. It additionally refuses multi-answer keys, bad
@@ -592,7 +614,7 @@ async function preflightAcademicUpload(upload: AcademicUpload): Promise<Academic
         declaredTerms.add(scope.term);
       }
     }
-    assertAcademicFigureBudget(bank.pkg.questions);
+    assertAcademicStoredFigureBudget(bank.pkg.questions);
     const verifiedAssets: { name: string }[] = [];
     const figureSizes = new Map<string, number>();
     for (const question of bank.pkg.questions) {
@@ -613,10 +635,13 @@ async function preflightAcademicUpload(upload: AcademicUpload): Promise<Academic
         figureSizes.set(asset.filename, file.byte_size);
       }
     }
-    assertAcademicFigureBudget(bank.pkg.questions, figureSizes);
+    assertAcademicStoredFigureBudget(bank.pkg.questions, figureSizes);
     const assessment = assessBank(bank.pkg, bank.issues, verifiedAssets);
     const ready = assessment.counts.ready;
     const held = assessment.counts["needs-review"] + assessment.counts.unresolved + (bank.unreadableQuestions ?? 0);
+    const readyQuestions = bank.pkg.questions.filter(question => assessment.verdicts.get(question.id)?.readiness === "ready");
+    if (readyQuestions.length !== ready) throw new Error("Academic question readiness is incomplete.");
+    assertAcademicFigureBudget(readyQuestions, figureSizes);
     if (ready !== source.ready || held !== source.review)
       throw new Error(`The prepared bank's claimed ready/review counts differ from verified answers and figures (${ready} ready; ${held} review). Reopen its review queue before private upload.`);
     assertAcademicQuestionsInstallable(bank, assessment.issues, ready, held);
@@ -759,7 +784,7 @@ export async function prepareAcademicUpload(
     bank.pkg.manifest.source.filename = basename(bank.pkg.manifest.source.filename);
     const verifiedAssets: { name: string }[] = [];
     const figureSizes = new Map<string, number>();
-    assertAcademicFigureBudget(bank.pkg.questions);
+    assertAcademicStoredFigureBudget(bank.pkg.questions);
     for (const question of bank.pkg.questions) {
       const questionSourceHash = question.provenance.sourceChecksum?.replace(/^sha256:/, "");
       if (!questionSourceHash || questionSourceHash !== item.checksum.replace(/^sha256:/, ""))
@@ -782,13 +807,16 @@ export async function prepareAcademicUpload(
         await add(path, imageBytes, mime, asset.checksum);
       }
     }
-    assertAcademicFigureBudget(bank.pkg.questions, figureSizes);
+    assertAcademicStoredFigureBudget(bank.pkg.questions, figureSizes);
     // Never trust ready/review totals supplied by a ZIP manifest. Recompute
     // with the same canonical assessor that gates local installation and
     // account for unreadable source rows explicitly.
     const assessment = assessBank(bank.pkg, bank.issues, verifiedAssets);
     const ready = assessment.counts.ready;
     const held = assessment.counts["needs-review"] + assessment.counts.unresolved + (bank.unreadableQuestions ?? 0);
+    const readyQuestions = bank.pkg.questions.filter(question => assessment.verdicts.get(question.id)?.readiness === "ready");
+    if (readyQuestions.length !== ready) throw new Error("Academic question readiness is incomplete.");
+    assertAcademicFigureBudget(readyQuestions, figureSizes);
     if (ready !== item.ready || held !== item.review)
       throw new Error(`The prepared bank's claimed ready/review counts differ from verified answers and figures (${ready} ready; ${held} review). Reopen its review queue before private upload.`);
     assertAcademicQuestionsInstallable(bank, assessment.issues, ready, held);
