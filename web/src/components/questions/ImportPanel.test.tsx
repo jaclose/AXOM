@@ -783,6 +783,52 @@ describe("source-document-first import", () => {
     await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("Option C")));
   });
 
+  it("leaves focus and typing with the learner when the restore frame lands after they moved on", async () => {
+    // Held until the title has focus and nothing is typed yet: the order a slow
+    // frame produced, which wrote the typed title into an answer option.
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((frame) => frames.push(frame));
+    const user = userEvent.setup();
+    render(<ImportPanel seed={{
+      drafts: [{
+        ...draft,
+        options: [{ key: "A", text: "Alpha" }, { key: "B", text: "Beta" }, { key: "C", text: "Gamma" }],
+      }],
+      rawText: "Question source", title: "From the file", fileName: "late-frame.txt", fileType: "text",
+    }} />);
+
+    await user.click(screen.getByRole("button", { name: /Which option is correct/ }));
+    await user.click(screen.getByRole("button", { name: "Remove option C" }));
+    const title = screen.getByLabelText("Set title") as HTMLInputElement;
+    title.focus();
+    title.select();
+    frames.splice(0).forEach((frame) => frame(0));
+    await user.keyboard("Typed by the learner");
+
+    expect(title.value).toBe("Typed by the learner");
+    expect(document.activeElement).toBe(title);
+    await user.click(screen.getByRole("button", { name: "Finalize import" }));
+    expect(mocked.addQuestionSet).toHaveBeenCalledWith(expect.objectContaining({ title: "Typed by the learner" }));
+    expect(mocked.addQuestion).toHaveBeenCalledWith(expect.objectContaining({
+      options: [{ key: "A", text: "Alpha" }, { key: "B", text: "Beta" }],
+    }));
+  });
+
+  it("keeps keyboard focus on an option after moving it", async () => {
+    const user = userEvent.setup();
+    render(<ImportPanel seed={{
+      drafts: [{
+        ...draft,
+        options: [{ key: "A", text: "Alpha" }, { key: "B", text: "Beta" }, { key: "C", text: "Gamma" }],
+      }],
+      rawText: "Question source", title: "Moved focus", fileName: "moved.txt", fileType: "text",
+    }} />);
+
+    await user.click(screen.getByRole("button", { name: /Which option is correct/ }));
+    await user.click(screen.getByRole("button", { name: "Move option B up" }));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("Option B")));
+  });
+
   it("preserves the intended answer and text when answer choices are reordered", async () => {
     const user = userEvent.setup();
     render(<ImportPanel seed={{
