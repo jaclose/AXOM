@@ -1,4 +1,5 @@
 import type { Page, Route } from "@playwright/test";
+import type { CommunicationsSettings } from "../src/lib/communications/client";
 import { expect, seedOnboarded, test } from "./fixtures";
 
 /**
@@ -12,12 +13,16 @@ const ACCOUNT_URL = "https://axom-e2e.invalid";
 const USER_ID = "8f1d7a52-3c44-4f0e-9d3a-5b1f0c7e2a11";
 const CORS = { "access-control-allow-origin": "*", "access-control-allow-headers": "*", "access-control-allow-methods": "*" };
 const HISTORY_FULL = { code: "54000", details: null, hint: null, message: "workspace snapshot storage limit reached; reduce the snapshot size before syncing" };
+const NO_ROW = { code: "PGRST116", details: "The result contains 0 rows", hint: null, message: "Cannot coerce the result to a single JSON object" };
+const NO_NOTIFICATIONS = { preferences: [], identity: { accent: "cyan", theme: "dark" }, history: [], privacy: [], admin: false, deliveryMode: "dry-run", deletionEnabled: false, hasProtectedCopy: false } satisfies CommunicationsSettings;
 
-type Answer = (route: Route) => Promise<void>;
-const json = (status: number, body: unknown): Answer => (route) => route.fulfill({ status, headers: { ...CORS, "content-type": "application/json" }, body: JSON.stringify(body) });
+type Answer = ((route: Route) => Promise<void>) & { body: unknown };
+const json = (status: number, body: unknown): Answer => Object.assign((route: Route) => route.fulfill({ status, headers: { ...CORS, "content-type": "application/json" }, body: JSON.stringify(body) }), { body });
 
 async function standInAccount(page: Page, push: { answer: Answer; bodies: Array<Record<string, unknown>> }) {
   const unexpected: string[] = [];
+  // The row the account keeps for the last upload it accepted. The app reads it back before it says "Protected".
+  let stored: { id: string; revision: number; content_hash: unknown; reason: unknown } | undefined;
   await page.addInitScript(({ url, userId }) => {
     (window as unknown as { __AXOM_E2E_ACCOUNT__: unknown }).__AXOM_E2E_ACCOUNT__ = { url, key: "sb_publishable_e2e" };
     const user = { id: userId, aud: "authenticated", role: "authenticated", email: "learner@example.com", email_confirmed_at: "2026-09-01T00:00:00Z", created_at: "2026-09-01T00:00:00Z", user_metadata: { display_name: "E2E Learner" }, app_metadata: {} };
@@ -32,14 +37,24 @@ async function standInAccount(page: Page, push: { answer: Answer; bodies: Array<
   }, { url: ACCOUNT_URL, userId: USER_ID });
   await page.route(`${ACCOUNT_URL}/**`, async (route) => {
     const request = route.request();
-    const path = new URL(request.url()).pathname;
+    const url = new URL(request.url());
+    const path = url.pathname;
     if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers: CORS });
     if (path === "/rest/v1/rpc/push_workspace_revision_v2") {
-      push.bodies.push(request.postDataJSON() as Record<string, unknown>);
+      const upload = request.postDataJSON() as Record<string, unknown>;
+      push.bodies.push(upload);
+      const answer = push.answer.body as { status?: string; revision: number; revision_id: string };
+      if (answer.status === "accepted") stored = { id: answer.revision_id, revision: answer.revision, content_hash: upload.p_content_hash, reason: upload.p_reason };
       return push.answer(route);
     }
     if (path === "/rest/v1/rpc/touch_account_device") return route.fulfill({ status: 204, headers: CORS });
     if (path === "/rest/v1/account_profiles") return json(200, { display_name: "E2E Learner" })(route);
+    // The dashboard's notification inbox asks for these on every signed-in load.
+    if (request.method() === "POST" && path === "/functions/v1/communications" && url.searchParams.get("action") === "settings") return json(200, NO_NOTIFICATIONS)(route);
+    if (path === "/rest/v1/workspace_revisions" && request.headers().accept === "application/vnd.pgrst.object+json") {
+      const owned = stored && url.searchParams.get("id") === `eq.${stored.id}` && url.searchParams.get("user_id") === `eq.${USER_ID}`;
+      return owned ? json(200, stored)(route) : json(406, NO_ROW)(route);
+    }
     if (path === "/rest/v1/workspace_revisions" || path === "/rest/v1/account_devices") return json(200, [])(route);
     unexpected.push(`${request.method()} ${path}`);
     return json(404, { message: "not part of the stand-in account" })(route);
