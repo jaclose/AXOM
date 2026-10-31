@@ -114,6 +114,10 @@
 .academic-publisher-filing { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--hairline); border-radius: var(--radius-sm); }
 .academic-publisher-filing p { margin: 0; font-size: 13px; line-height: 1.55; color: var(--text-70); }
 .academic-publisher-filing .academic-publisher-actions { margin: 10px 0 0; }
+.academic-publisher-ledger { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--hairline); border-radius: var(--radius-sm); }
+.academic-publisher-ledger p { margin: 0 0 6px; font-size: 13px; line-height: 1.55; color: var(--text-70); font-variant-numeric: tabular-nums; }
+.academic-publisher-ledger p b { color: var(--text); }
+.academic-publisher-ledger .academic-publisher-notes { margin-top: 8px; }
 .academic-publisher-term { margin: 18px 0 0; padding: 0; border: 0; min-width: 0; }
 .academic-publisher-term legend { padding: 0 0 8px; font: 500 15px var(--font-display); }
 .academic-publisher-course { display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr); gap: 6px 18px; padding: 12px 0; border-top: 1px solid var(--hairline-soft); }

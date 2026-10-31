@@ -47,10 +47,15 @@ for (const width of [1440, 390]) test(`files reviewed sources from a decisions f
     await publisher.locator('input[aria-label="Prepared library folder"]').setInputFiles(folder);
     await expect(publisher).toContainText("3 courses found. 2 courses selected to publish.");
     await expect(publisher).toContainText("Reviewed the unfiled sources?");
+    const count = publisher.locator(".academic-publisher-ledger");
+    await expect(count).toContainText("6 questions in 5 question sets: 4 in courses (4 ready, 0 awaiting review), 2 of them waiting for a confirmed term, and 2 staying on this device.");
+    await expect(count).toContainText("Every question is counted once.");
 
     await publisher.locator('input[aria-label="Filing decisions file"]').setInputFiles(decisions);
     await expect(publisher).toContainText("2 sources filed as you decided. The library on this device is unchanged.");
     await expect(publisher).toContainText("4 courses found. 3 courses selected to publish.");
+    await expect(count).toContainText("6 questions in 5 question sets: 6 in courses (6 ready, 0 awaiting review), 2 of them waiting for a confirmed term, and 0 staying on this device.");
+    await expect(count).toContainText("Every question is counted once.");
     const ncrs = publisher.locator("article", { hasText: "NCRS" });
     await expect(ncrs).toContainText("2 ready questions");
     await expect(ncrs).toContainText("2 question sets");

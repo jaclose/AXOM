@@ -152,6 +152,14 @@ undecided source is served unchanged. Decisions bind to the exact bytes reviewed
 catalog and each bank must match the hashes in the file, or nothing is applied. The
 library folder is never changed, and the decisions file stays private with the library.
 
+Every question is accounted for before anything uploads. The publisher and the dry run
+count each question row the library's packages hold, unreadable rows included, and place
+each in exactly one course of the plan (ready, or awaiting review, and whether its course
+still needs a confirmed term) or in one stated reason it stays on the device. The totals
+must reconcile: a row placed twice or nowhere shows as unaccounted, and the dry run fails.
+A package whose catalog ready and held counts disagree with its own rows is named; the
+uploader refuses it until it is prepared again.
+
 Your published courses, below the publisher, reads every course the account owns from
 the catalog page by page and shows its audience and review state by term. It shares all
 private courses at once behind the same rights attestation and, for a reviewer who

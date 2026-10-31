@@ -15,7 +15,8 @@
  * each reviewed source as decided, exactly as the publisher's "Add filing
  * decisions" does; the library folder itself is never changed. The report and console carry counts,
  * module labels, reasons and source names only, never question text, answers
- * or file bytes. Source names can be private: keep the report out of Git.
+ * or file bytes. It also accounts for every question row: in a course, or
+ * staying on this device with its reason, and fails if any row is unaccounted. Source names can be private: keep the report out of Git.
  */
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
@@ -23,6 +24,7 @@ import { describe, expect, it } from "vitest";
 import { safeLibraryPath, type LibraryReader } from "../privateLibrary/install";
 import type { ReviewedFiling } from "../privateLibrary/types";
 import { applyFilingDecisions, readFilingDecisions } from "./filingDecisions";
+import { accountQuestions } from "./questionLedger";
 import {
   PUBLICATION_INPUT_LIMITS, planPublication, publicationJobs, readPublicationInventory, type PlannedCourse,
 } from "./publication";
@@ -64,6 +66,8 @@ describe.skipIf(!root)("dry run of publishing a real prepared library (opt-in on
     if (filed) console.log(`filing decisions  ${filed.summary.filed} filed, ${filed.summary.keptUnfiled} kept unfiled`);
     const inventory = await readPublicationInventory(read);
     const plan = planPublication(inventory, confirmedTerms());
+    // Every question row the library holds, in exactly one course or one stated reason.
+    const ledger = accountQuestions(inventory, plan);
     const ready = plan.courses.filter(course => course.termBasis !== "proposed");
     const { jobs, notes } = publicationJobs(read, inventory, ready);
     const sources = new Map<string, string>();
@@ -102,17 +106,24 @@ describe.skipIf(!root)("dry run of publishing a real prepared library (opt-in on
         readyQuestions: checked.reduce((sum, course) => sum + (course.ok ? course.readyQuestions : 0), 0),
         reviewQuestions: checked.reduce((sum, course) => sum + (course.ok ? course.reviewQuestions : 0), 0),
       },
-      courses: checked, needsTerm, blocked: plan.blocked, excluded: plan.excluded,
+      questions: ledger, courses: checked, needsTerm, blocked: plan.blocked, excluded: plan.excluded,
     };
     if (report) {
       mkdirSync(dirname(report), { recursive: true });
       writeFileSync(report, `${JSON.stringify(result, null, 2)}\n`);
     }
     console.log(JSON.stringify(result.totals));
+    const leftOut = ledger.leftOut.reduce((sum, group) => sum + group.questions, 0);
+    console.log(`questions  ${ledger.total.questions} in ${ledger.total.sources} question sets: ${ledger.inCourses.questions} in courses `
+      + `(${ledger.inCourses.ready} ready, ${ledger.inCourses.held} awaiting review), ${leftOut} staying on this device, ${ledger.unaccounted} unaccounted`);
+    const count = (value: number, one: string) => `${value} ${one}${value === 1 ? "" : "s"}`;
+    for (const group of ledger.leftOut) console.log(`left out  ${count(group.questions, "question")} in ${count(group.sources, "set")}: ${group.reason}`);
+    for (const source of ledger.mismatched) console.log(`counts disagree  ${source.name}: ${source.rows} rows, catalog says ${source.ready} ready and ${source.held} held`);
     for (const course of checked) console.log(course.ok
       ? `ready  ${label(course)}: ${course.readyQuestions} ready, ${course.reviewQuestions} awaiting review, ${course.files} files`
       : `attention  ${label(course)}: ${course.reason}`);
     for (const course of needsTerm) console.log(`needs term  ${course.module} (${course.moduleKey}): proposed ${course.proposedTerm}`);
     expect(plan.courses.length + plan.blocked.length + plan.excluded.length).toBeGreaterThan(0);
+    expect(ledger.unaccounted).toBe(0);
   }, 3_600_000);
 });

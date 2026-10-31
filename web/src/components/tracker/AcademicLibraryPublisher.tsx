@@ -5,6 +5,7 @@ import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
 import { isAcademicReviewer, shareAcademicCourses } from "../../lib/academicLibrary/client";
 import { uploadAcademicBatch } from "../../lib/academicLibrary/batch";
 import { applyFilingDecisions, readFilingDecisions, type FilingSummary } from "../../lib/academicLibrary/filingDecisions";
+import { accountQuestions, type QuestionLedger } from "../../lib/academicLibrary/questionLedger";
 import {
   PUBLICATION_INPUT_LIMITS, planPublication, publicationCatalogId, publicationJobs, readPublicationInventory,
   type PlannedCourse, type PublicationInventory,
@@ -63,6 +64,7 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
 
   const current = library && library.accountId === accountId ? library : undefined;
   const plan = useMemo(() => current ? planPublication(current.inventory, confirmedTerms) : undefined, [current, confirmedTerms]);
+  const ledger = useMemo(() => current && plan ? accountQuestions(current.inventory, plan) : undefined, [current, plan]);
   const chosen = plan?.courses.filter(course => selected.has(course.catalogId) && course.termBasis !== "proposed") ?? [];
   const terms = [...new Set(plan?.courses.map(course => course.term) ?? [])];
 
@@ -283,6 +285,7 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
           {current.filing && <GhostButton disabled={Boolean(busy)} onClick={() => void decide()}>Remove decisions</GhostButton>}
         </div>
       </div>
+      {ledger && <QuestionCount ledger={ledger} />}
       {terms.map(term => <fieldset key={term} className="academic-publisher-term" disabled={Boolean(busy)}>
         <legend>{term}</legend>
         {plan.courses.filter(course => course.term === term).map(course => {
@@ -356,6 +359,25 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
     {progress && <p role="status" aria-live="polite">{progress}</p>}
     {error && <p role="alert">{error}</p>}
   </section>;
+}
+
+/** Every question the library holds, counted once: in a course, or staying on this device with its reason. */
+function QuestionCount({ ledger }: { ledger: QuestionLedger }) {
+  const leftOut = ledger.leftOut.reduce((sum, group) => sum + group.questions, 0);
+  const waiting = ledger.courses.filter(course => !course.publishable).reduce((sum, course) => sum + course.questions, 0);
+  return <div className="academic-publisher-ledger">
+    <p><b>{plural(ledger.total.questions, "question")}</b> in {plural(ledger.total.sources, "question set")}: {ledger.inCourses.questions} in courses
+      ({ledger.inCourses.ready} ready, {ledger.inCourses.held} awaiting review){waiting ? `, ${waiting} of them waiting for a confirmed term` : ""}, and {leftOut} staying on this device.</p>
+    <p role={ledger.unaccounted ? "alert" : undefined}>{ledger.unaccounted
+      ? `${plural(ledger.unaccounted, "question")} could not be placed. Do not publish this library; choose it again or prepare it again.`
+      : "Every question is counted once."}</p>
+    {ledger.mismatched.length > 0 && <p role="alert">{plural(ledger.mismatched.length, "question set")} {ledger.mismatched.length === 1 ? "disagrees" : "disagree"} with
+      {" "}{ledger.mismatched.length === 1 ? "its" : "their"} catalog counts and cannot be published until prepared again: {ledger.mismatched.map(entry => entry.name).join(", ")}.</p>}
+    {ledger.leftOut.length > 0 && <details className="academic-publisher-notes">
+      <summary>Why {plural(leftOut, "question stays", "questions stay")} on this device</summary>
+      <ul>{ledger.leftOut.map(group => <li key={group.reason}><b>{plural(group.questions, "question")} in {plural(group.sources, "set")}</b>: {group.reason}</li>)}</ul>
+    </details>}
+  </div>;
 }
 
 function ConfirmTerm({ course, label: name, onConfirm }: { course?: PlannedCourse; label?: string; onConfirm: (term: Term) => void }) {
