@@ -73,8 +73,12 @@ function clamp(value: unknown, min: number, max: number, fallback: number) { ret
 function record(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function normalizeSettings(source: Record<string, unknown>): StudyPlanSettings {
   const valid = new Set<StudyMethodId>(["lecture-passes", "practice-questions", "anki", "quizlet", "noji", "remnote", "notes", "teach-aloud", "recall", "external-resource", "custom"]);
-  const methods = Array.isArray(source.methods) ? source.methods.flatMap((candidate) => { const item = record(candidate); return valid.has(item.id as StudyMethodId) ? [{ id: item.id as StudyMethodId, enabled: item.enabled !== false, label: typeof item.label === "string" ? item.label.slice(0, 80) : undefined, timing: typeof item.timing === "string" && ["before", "after-first-pass", "after-learning", "near-exam", "ongoing"].includes(item.timing) ? item.timing as PracticeTiming : undefined, usage: typeof item.usage === "string" ? item.usage : undefined }] : []; }) : undefined;
+  const methods = Array.isArray(source.methods) ? source.methods.flatMap((candidate) => { const item = record(candidate); return valid.has(item.id as StudyMethodId) ? [{ id: item.id as StudyMethodId, enabled: item.enabled !== false, label: typeof item.label === "string" ? neutralizeCatalogBrand(item.label).slice(0, 80) : undefined, timing: typeof item.timing === "string" && ["before", "after-first-pass", "after-learning", "near-exam", "ongoing"].includes(item.timing) ? item.timing as PracticeTiming : undefined, usage: typeof item.usage === "string" ? neutralizeCatalogBrand(item.usage) : undefined }] : []; }) : undefined;
   return { methods, lecturePasses: clamp(source.lecturePasses, 1, 6, 2), reviewAfterDays: clamp(source.reviewAfterDays, 1, 14, 3), customContext: typeof source.customContext === "string" ? source.customContext : undefined };
+}
+
+function neutralizeCatalogBrand(value: string): string {
+  return value.replace(/\bAMBOSS\b/gi, "External QBank");
 }
 
 export const STUDY_METHOD_OPTIONS: Array<{ id: StudyMethodId; label: string }> = [

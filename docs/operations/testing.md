@@ -76,7 +76,7 @@ Run from the repository root after committing the candidate:
 ```sh
 npm ci
 npm run test:deployment
-npm run verify:deployment -- --without-goer-allowlist --expect-build-failure
+npm run verify:deployment -- --with-fixture-probe --expect-privacy-failure
 npm run verify:deployment
 ```
 
@@ -88,13 +88,12 @@ temporary directory. No existing node_modules, output, private files or untracke
 are copied. Commands and the full tested SHA are printed. Allow roughly 2 GB of free
 space per run in addition to the working checkout and its dependencies.
 
-The negative run removes the GOER allowlist from the rules used to prepare the source.
-It must reach the real web TypeScript build and fail with TS2307 for a GOER manifest;
-an installation error or an early input-guard failure does not count. To reproduce the
-historical rules exactly in a checkout containing that history:
-`npm run verify:deployment -- --ignore-ref c23e8c2^ --expect-build-failure`.
-The positive run executes the normal Vercel build, including exact-case input validation.
-TypeScript and all original manifests/content remain intact.
+The negative run temporarily reopens the tracked fixture tree and must be rejected by
+the deployment privacy guard before installation. This proves private/source-audit
+fixtures cannot enter a Vercel upload. The positive run executes the normal filtered
+Vercel build, including exact-case registry and build-input validation. If the registry
+adds an external manifest import later, the guard discovers it and requires that exact
+file; the current registry uses sanitized inline metadata and deploys no fixture files.
 
 Filtering uses pinned `ignore@4.0.6`, the parser used by `@vercel/client@18.8.2`
 (CLI 63.1.2), with its default exclusions and relative-pattern normalization. The
@@ -171,13 +170,15 @@ mammoth/argparse/sprintf-js findings; the latter remain in the production depend
 audit. These findings remain unresolved and require a separate scoped dependency
 maintenance change. Production dependency audits and existing quality gates remain enabled.
 
-### Validated checkpoint
+### Historical validated checkpoint
 
 Code tested: `af21e9b29580d8530a436ececd9b134fec928cbe`, on
 `fix/deployment-input-reliability`, based on integration `baf340bd`.
 [Linux CI run 38141538198](https://github.com/jaclose/AXOM/actions/runs/38141538198)
 passed all three jobs: deployment-inputs, web and native. Later documentation-only
 commits record this evidence; they do not imply a different code revision was tested.
+The GOER allowlist and missing-manifest commands below describe that historical revision;
+their retired flags are not part of the current verifier interface.
 
 | Exact command | Result / environment |
 | --- | --- |

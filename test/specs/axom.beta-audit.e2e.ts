@@ -756,8 +756,7 @@ async function completeOnboarding(
     await nameField.setValue(AUDIT_NAME)
 
     await clickAny([
-        "St. George's University",
-        'SGU',
+        'AXOM term-based MD',
     ])
 
     await clickAny([

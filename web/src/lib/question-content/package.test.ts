@@ -29,6 +29,12 @@ const read = (questions: unknown[], manifestOver: Record<string, unknown> = {}) 
   parsePackage(JSON.stringify({ ...manifest, ...manifestOver }), JSON.stringify({ schemaVersion: 1, bankId: "example-bank", questions }));
 
 describe("reading a package", () => {
+  it("lifts v1 files into the current schema without changing their questions", () => {
+    const parsed = read([question()]);
+    expect(parsed.package?.manifest.schemaVersion).toBe(PACKAGE_SCHEMA_VERSION);
+    expect(parsed.package?.questions[0]).not.toHaveProperty("teaching");
+  });
+
   it("keeps the source's wording to the character", () => {
     const parsed = read([question()]);
     expect(parsed.issues).toEqual([]);
@@ -83,6 +89,42 @@ describe("reading a package", () => {
     const parsed = read([question({ choiceTable: { type: "table", headers: ["x"], rows: [["↑"], ["↓"]] } })]);
     expect(parsed.issues).toEqual([expect.objectContaining({ severity: "error", code: "invalid_block", path: "choiceTable" })]);
   });
+
+  it("preserves strict source-checked teaching and its unresolved source names", () => {
+    const teaching = {
+      version: 1,
+      answerLabel: "B",
+      concept: "Synthetic physiology",
+      whyCorrect: "B follows directly from the supplied mechanism.",
+      mechanism: "The source describes one causal step.",
+      highYieldRule: "Carry the stated relation forward.",
+      distractors: [{ label: "A", option: "one", explanation: "A reverses the source relation." }],
+      sourceReferences: [{ sourceId: "lecture-copy", pdfPages: [4, 7], purpose: "Mechanism and contrast" }],
+      factCheck: {
+        status: "SOURCE_CHECKED",
+        checkedOn: "2026-10-23",
+        checkedBy: "Source comparison",
+        humanReviewerApproved: false,
+        answerChanged: false,
+        limitations: ["Faculty review pending"],
+        answerKeyEvidence: { sourceId: "question-copy", pdfPage: 8, questionNumber: 1, printedAnswer: "B", method: "Rendered-page inspection" },
+        supportingExcerpts: [{ sourceId: "lecture-copy", pdfPage: 4, excerpt: "A short source excerpt", inspection: "text" }],
+      },
+    };
+    const parsed = read([question({ teaching })]);
+    expect(parsed.issues).toEqual([]);
+    expect(parsed.package?.questions[0].teaching).toEqual(teaching);
+  });
+
+  it("holds malformed teaching instead of repairing labels or inventing review", () => {
+    const parsed = read([question({ teaching: {
+      version: 1, answerLabel: "b", whyCorrect: "Why", mechanism: "How", highYieldRule: "Rule",
+      distractors: [{ label: "B", explanation: "Contradicts the answer." }], sourceReferences: [],
+      factCheck: { status: "SOURCE_CHECKED", humanReviewerApproved: false, answerChanged: false, limitations: [] },
+    } })]);
+    expect(parsed.issues).toContainEqual(expect.objectContaining({ severity: "error", code: "invalid_question", path: "teaching" }));
+    expect(parsed.package?.questions[0].teaching).toBeUndefined();
+  });
 });
 
 describe("writing a package", () => {
@@ -118,6 +160,13 @@ describe("writing a package", () => {
       choiceTable: { type: "table", headers: ["β", "μ"], rowKeys: ["A", "B"], rows: [["↑", "↓"], ["↔", "↑"]] },
       correctAnswer: { labels: ["A"], evidence: "answer-reveal-slide" },
       explanation: [{ type: "rich_text", html: "t<sub>½</sub>" }, { type: "image", assetId: "ex-q02-img-3", role: "explanation" }],
+      teaching: {
+        version: 1, answerLabel: "A", concept: "Order", whyCorrect: "A follows from the source.",
+        mechanism: "The source shows the ordered relation.", highYieldRule: "Read the row before choosing.",
+        distractors: [{ label: "B", explanation: "B reverses the relation." }],
+        sourceReferences: [{ sourceId: "invented-slides", pdfPages: [5], purpose: "Teaching" }],
+        factCheck: { status: "SOURCE_CHECKED", humanReviewerApproved: false, answerChanged: false, limitations: [] },
+      },
       assets: [
         { id: "ex-q02-img-1", filename: "figure.png", mimeType: "image/png", width: 640, height: 480, byteSize: 1234, sourceFile: "invented.pdf", sourcePage: 5, role: "stem", questionId: "ex-q02", checksum: "sha256:00", derivation: "region-render", bounds: { x: 10, y: 20.5, width: 300, height: 200 } },
         { id: "ex-q02-img-2", filename: "table.png", mimeType: "image/png", role: "reference", questionId: "ex-q02" },

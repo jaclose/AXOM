@@ -21,7 +21,7 @@ import { canonicalModuleKey } from "../course-engine/vocabulary";
 import type { ImportDestination, ReviewedDraft, ReviewedImportRequest } from "../questionImportSave";
 import type { QuestionSource } from "../questions";
 import { legacyQuestionFields } from "./legacyFields";
-import type { ImportPackage, PackageIssue, PackageQuestion, QuestionAsset } from "./package";
+import { MAX_PACKAGE_CHOICES, type ImportPackage, type PackageIssue, type PackageQuestion, type QuestionAsset } from "./package";
 import { questionReadiness, type Readiness } from "./readiness";
 
 export interface PackageImportOptions {
@@ -146,12 +146,12 @@ export function packageToReviewedImport(pkg: ImportPackage, issues: readonly Pac
     const reasons = [...verdict.reasons];
     let readiness = verdict.readiness;
     let saveable = Boolean(question.correctAnswer);
-    if (question.choices.length < 2 || question.choices.length > 10) {
+    if (question.choices.length < 2 || question.choices.length > MAX_PACKAGE_CHOICES) {
       // A PowerPoint title or PDF section with dozens of choices is not one
       // defensible MCQ. Review acknowledgment must not bypass this shape gate.
       saveable = false;
       if (readiness === "ready") readiness = "needs-review";
-      reasons.push(`Source extraction identified ${question.choices.length} choices; this import supports 2–10 per question. Split/reparse the original instead of accepting a malformed question.`);
+      reasons.push(`Source extraction identified ${question.choices.length} choices; this import supports 2–${MAX_PACKAGE_CHOICES} per question. Split/reparse the original instead of accepting a malformed question.`);
     }
     if (fields.options.some((option) => !option.text.trim())) {
       // A choice that is only a picture has no text for the current question record to show.

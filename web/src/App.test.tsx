@@ -181,9 +181,11 @@ describe("post-global-guide promise flow", () => {
 
 describe("Journal route durability", () => {
   function openJournalShell() {
+    const today = localDateKey();
     useStore.setState((state) => ({
-      // The app rolls the study day over at local midnight, so seed the same day it opens on.
-      activeDayKey: localDateKey(),
+      activeDayKey: today,
+      lastActiveLocalDate: today,
+      lastTimezoneOffset: new Date().getTimezoneOffset(),
       journal: [],
       dayPlans: [],
       logs: [],
@@ -199,10 +201,11 @@ describe("Journal route durability", () => {
       },
     }));
     window.history.replaceState(null, "", "#journal");
+    return today;
   }
 
   it("keeps the Journal mounted until a sidebar route change confirms the draft write", async () => {
-    openJournalShell();
+    const today = openJournalShell();
     let confirmDurability!: () => void;
     const flush = vi.spyOn(localVault, "flushLocalVaultWrites")
       .mockReturnValue(new Promise<void>((resolve) => { confirmDurability = resolve; }));
@@ -223,7 +226,7 @@ describe("Journal route durability", () => {
 
     await act(async () => { confirmDurability(); await Promise.resolve(); });
     await waitFor(() => expect(window.location.hash).toBe("#dashboard"));
-    expect(useStore.getState().journal.find(entry => entry.date.startsWith(useStore.getState().activeDayKey)))
+    expect(useStore.getState().journal.find(entry => entry.date.startsWith(today)))
       .toMatchObject({ freeWriting: "Persist before leaving the Journal" });
   });
 
@@ -249,7 +252,7 @@ describe("Journal route durability", () => {
   });
 
   it("keeps Journal and Settings mounted until Run setup again confirms durability", async () => {
-    openJournalShell();
+    const today = openJournalShell();
     let confirmDurability!: () => void;
     const flush = vi.spyOn(localVault, "flushLocalVaultWrites")
       .mockReturnValue(new Promise<void>((resolve) => { confirmDurability = resolve; }));
@@ -273,7 +276,7 @@ describe("Journal route durability", () => {
     await act(async () => { confirmDurability(); await Promise.resolve(); });
     expect(await screen.findByRole("heading", { name: "Who are you studying as?" })).toBeTruthy();
     expect(screen.queryByDisplayValue("Persist before setup replaces the shell")).toBeNull();
-    expect(useStore.getState().journal.find(entry => entry.date.startsWith(useStore.getState().activeDayKey)))
+    expect(useStore.getState().journal.find(entry => entry.date.startsWith(today)))
       .toMatchObject({ freeWriting: "Persist before setup replaces the shell" });
   });
 

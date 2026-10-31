@@ -6,10 +6,13 @@
 // misplaced image is reported and left exactly as the source has it.
 // ===========================================================================
 import { countMedia, type AssetRole, type QuestionBlock } from "./blocks";
-import type { ImportPackage, IssueCode, IssueSeverity, PackageIssue, PackageQuestion, QuestionFlagType } from "./package";
+import { MAX_PACKAGE_CHOICES, type ImportPackage, type IssueCode, type IssueSeverity, type PackageIssue, type PackageQuestion, type QuestionFlagType } from "./package";
 import { effectiveRole } from "./visibility";
+import { MAX_QUESTION_ATTACHMENT_BYTES, MAX_QUESTION_ATTACHMENTS, MAX_QUESTION_ATTACHMENT_TOTAL_BYTES } from "../questionAttachmentLimits";
 
 export interface ValidateOptions {
+  /** Actual supplied file sizes take precedence over optional source declarations. */
+  assetFileSizes?: ReadonlyMap<string, number>;
   /** File names present in the assets folder. When given, a block whose file is absent is reported. */
   assetFiles?: ReadonlySet<string>;
 }
@@ -54,6 +57,12 @@ function checkQuestion(pkg: ImportPackage, question: PackageQuestion, options: V
   for (const flag of question.flags ?? []) add(FLAG_SEVERITY[flag.type], flag.type, flag.message);
 
   // --- assets and where they are placed
+  const assetSizes = question.assets.map(asset => options.assetFileSizes?.get(asset.filename) ?? asset.byteSize ?? 0);
+  if (question.assets.length > MAX_QUESTION_ATTACHMENTS
+    || assetSizes.some(size => size > MAX_QUESTION_ATTACHMENT_BYTES)
+    || assetSizes.reduce((total, size) => total + size, 0) > MAX_QUESTION_ATTACHMENT_TOTAL_BYTES) {
+    add("error", "unsupported_content", `This question exceeds the saved-media limit of ${MAX_QUESTION_ATTACHMENTS} images or ${MAX_QUESTION_ATTACHMENT_TOTAL_BYTES / 1024 / 1024} MiB. Keep the originals and move additional teaching pages into a source reference before importing.`, "assets");
+  }
   const assets = new Map(question.assets.map((asset) => [asset.id, asset]));
   const placed = new Set<string>();
   for (const asset of question.assets) {
@@ -107,7 +116,7 @@ function checkQuestion(pkg: ImportPackage, question: PackageQuestion, options: V
   const labels = question.choices.map((choice) => choice.label);
   if (new Set(labels).size !== labels.length) add("error", "duplicate_id", "Two choices have the same letter.", "choices");
   if (labels.length < 2) add("warning", "choices_incomplete", "The question has fewer than two answer choices.", "choices");
-  if (labels.length > 10) add("error", "invalid_question", `The extraction combined ${labels.length} answer choices into one question. AXOM supports at most ten (A–J) here; check for merged stems or option spillover.`, "choices");
+  if (labels.length > MAX_PACKAGE_CHOICES) add("error", "invalid_question", `The extraction combined ${labels.length} answer choices into one question. AXOM supports at most ${MAX_PACKAGE_CHOICES} (A–I) here; check for merged stems or option spillover.`, "choices");
   const tableKeys = new Set(question.choiceTable?.rowKeys ?? []);
   for (const choice of question.choices) {
     if (!choice.blocks.length && !tableKeys.has(choice.label)) add("error", "choices_incomplete", `Choice ${choice.label} has no content.`, `choices[${choice.label}]`);

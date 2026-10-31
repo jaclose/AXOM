@@ -10,7 +10,7 @@ export function normalizeSeparateKeyText(input: string): string {
   if (parseAnswerSections(source).entries.size) return source;
   const nonEmpty = source.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   if (!nonEmpty.length) return "";
-  const numbered = nonEmpty.filter(line => /^(?:q(?:uestion)?\s*)?\d{1,4}\s*(?:[).:\-–]\s*)?\(?[A-Ha-h]\)?(?:\s|$|[.,:;—–-])/i.test(line));
+  const numbered = nonEmpty.filter(line => /^(?:q(?:uestion)?\s*)?\d{1,4}\s*(?:[).:\-–]\s*)?\(?[A-Ia-i]\)?(?:\s|$|[.,:;—–-])/i.test(line));
   // Pure numbered keys are common separately from their question paper.
   // A file of lecture notes with occasional numbered letters is NOT a key.
   if (numbered.length < 1 || numbered.length < Math.ceil(nonEmpty.length * 0.8)) return source;

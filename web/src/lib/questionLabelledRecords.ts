@@ -149,12 +149,12 @@ function inlineBlockLabels(text: string): string {
       // happens to begin with a capital is left alone.
       let expected = 65;
       for (const line of body) {
-        const bare = line.match(/^\s*([A-H])\s+(\S.*)$/);
+        const bare = line.match(/^\s*([A-I])\s+(\S.*)$/);
         if (bare && bare[1].charCodeAt(0) === expected && !/^[).:\-–]/.test(bare[2])) {
           out.push(`${bare[1]}. ${bare[2]}`);
           expected += 1;
         } else {
-          if (/^\s*\(?[A-Ha-h][).:]\s/.test(line)) expected += 1;
+          if (/^\s*\(?[A-Ia-i][).:]\s/.test(line)) expected += 1;
           out.push(line);
         }
       }

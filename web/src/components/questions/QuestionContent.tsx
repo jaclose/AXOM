@@ -114,7 +114,7 @@ export function QuestionBlocks({ blocks, content, attachments, files, mode, sect
       ? <MarkedBlock key={key} html={html} start={start} length={plain.length} marking={marking} className={className} />
       : undefined;
   };
-  return <div className="qcontent-blocks">{shown.map((block, index) => {
+  return <div className="qcontent-blocks" data-study-text="source-content">{shown.map((block, index) => {
     switch (block.type) {
       case "text": return marked(block, index, escapeHtml(block.text), block.text) ?? <p key={index}>{block.text}</p>;
       case "rich_text": return marked(block, index, sanitizeRichText(block.html), blockToPlainText(block)) ?? <p key={index}><Rich value={block.html} /></p>;
@@ -124,7 +124,7 @@ export function QuestionBlocks({ blocks, content, attachments, files, mode, sect
       case "divider": return <hr key={index} />;
       case "image": {
         const asset = assets.get(block.assetId);
-        return asset ? <figure key={asset.id} data-asset-role={effectiveRole(block.role, asset.role, section)}>
+        return asset ? <figure key={asset.id} data-asset-role={effectiveRole(block.role, asset.role, section)} data-asset-derivation={asset.derivation}>
           <ContentImage asset={asset} files={files} attachment={attachments?.find((entry) => entry.assetId === asset.id)} alt={block.alt ?? block.caption ?? "Question figure"} enlarge={enlarge} />
           {block.caption && <figcaption>{block.caption}</figcaption>}
         </figure> : <p key={index} role="status">A required figure is missing.</p>;
@@ -223,5 +223,11 @@ export function QuestionSupportingContent({ question, mode }: { question: Questi
     ...(content.choiceTable && mode === "question" ? [content.choiceTable] : []),
     ...content.assets.filter((asset) => !placed.has(asset.id) && isAssetVisible(asset.role, mode) && (mode !== "answered" || !isAssetVisible(asset.role, "question"))).map((asset): QuestionBlock => ({ type: "image", assetId: asset.id, role: asset.role, alt: asset.role === "answer_reveal" ? "Source answer slide" : "Source figure" })),
   ];
+  if (!blocks.length) return null;
+  const teachingVisual = mode !== "question" && blocks.some((block) => block.type === "image");
+  if (teachingVisual) return <section className="question-teaching-visuals" aria-label="Teaching visuals" data-study-media="answer-support">
+    <span className="field-label">Visual explanation</span>
+    <QuestionBlocks blocks={blocks} content={content} attachments={question.attachments} mode={mode} />
+  </section>;
   return <QuestionBlocks blocks={blocks} content={content} attachments={question.attachments} mode={mode} />;
 }

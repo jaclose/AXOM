@@ -177,8 +177,8 @@ async function openSeededQuestion(page: Page, kind: "plain" | "imported"): Promi
     await dev.flushVault();
   }, kind === "imported" ? { stem: IMPORTED_STEM, content: IMPORTED } : { stem: STEM, content: undefined });
   await page.evaluate(() => { window.location.hash = "questions"; });
-  await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
-  await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
+  await page.getByRole("tab", { name: /Library \(1\)/ }).click();
+  await page.getByRole("button", { name: "Weeks & sets", exact: true }).click();
   await page.getByRole("button", { name: "Practice Highlight set", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Set up a tutor block" })).toBeVisible();
 }

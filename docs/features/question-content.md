@@ -333,8 +333,8 @@ const saved = await saveBank(bank.pkg, bank.issues, bank.files, { library, store
   checksum, and every set made from the file is tied to that record. Without it only the
   questions are saved.
 - Only a ready question is offered. One that needs review is offered once its id is in
-  `acknowledged`, and never without a key. A question needs 2 to 10 choices (A to J, as
-  ExamSoft allows); more than ten means merged questions, and review cannot override that.
+  `acknowledged`, and never without a key. A question needs 2 to 9 choices (A to I,
+  `MAX_PACKAGE_CHOICES`); more means merged questions, and review cannot override that.
   The plain-text parsers still read choice letters A to H only. Two questions of one set that share a number are
   both held. Everything held is in `held` with its reasons.
 - The sets are filed by the manifest: `scope: { module, week }`. `filing.agrees` says

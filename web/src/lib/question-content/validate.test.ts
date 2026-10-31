@@ -46,18 +46,17 @@ describe("checking a package", () => {
     expect(isRunnable("q1", validatePackage(pkg))).toBe(false);
   });
 
-  it("runs ExamSoft questions with up to ten choices but not 11+ merged answer choices", () => {
-    const choices = (count: number) => Array.from({ length: count }, (_, i) => ({
+  it("does not treat 10+ merged answer choices as one runnable medical MCQ", () => {
+    const options = Array.from({ length: 10 }, (_, i) => ({
       id: "q1-choice-" + i,
       label: String.fromCharCode(65 + i),
       blocks: [{ type: "text" as const, text: "Synthetic choice " + i }],
     }));
-    expect(isRunnable("q1", validatePackage(pack(question({ choices: choices(10) }))))).toBe(true);
-    const merged = pack(question({ choices: choices(11) }));
-    expect(validatePackage(merged)).toContainEqual(expect.objectContaining({
+    const pkg = pack(question({ choices: options }));
+    expect(validatePackage(pkg)).toContainEqual(expect.objectContaining({
       severity: "error", code: "invalid_question", questionId: "q1",
     }));
-    expect(isRunnable("q1", validatePackage(merged))).toBe(false);
+    expect(isRunnable("q1", validatePackage(pkg))).toBe(false);
   });
   it("notes a missing answer key and a missing explanation without blocking the question", () => {
     const pkg = pack(question({ correctAnswer: undefined, explanation: undefined }));

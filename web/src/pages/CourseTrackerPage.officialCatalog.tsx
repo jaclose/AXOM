@@ -14,15 +14,15 @@ export function OfficialSguClinicalCatalogReview() {
   const mismatches = report.filter((course) => course.migrationReviewRequired).length;
   return <GlassCard pad className="tracker-official-sgu-evidence">
     <details>
-      <summary><b>SGU 2025+ published curriculum overview</b><span className="sub">
+      <summary><b>Published curriculum overview</b><span className="sub">
         PCM 500 / PCM 501 · {mismatches ? `${mismatches} course mappings need review` : "Source overview aligned"}
       </span></summary>
-      <p className="sub">The official SGU catalog uses <b>PCM 500</b> for Term 4 and <b>PCM 501</b> for Term 5 from Fall 2025 onward. The current AXOM built-in outline still uses <b>PPM 500/501</b>, and labels the first Term 5 module <b>NMI</b> rather than the catalog's <b>MI</b>. Existing courses, imported questions and progress are preserved until their identities are reviewed. No automatic renaming occurs here.</p>
+      <p className="sub">The reviewed source catalog uses <b>PCM 500</b> for Term 4 and <b>PCM 501</b> for Term 5 from Fall 2025 onward. The current AXOM built-in outline still uses <b>PPM 500/501</b>, and labels the first Term 5 module <b>NMI</b> rather than the source catalog's <b>MI</b>. Existing courses, imported questions and progress are preserved until their identities are reviewed. No automatic renaming occurs here.</p>
       {report.map((course) => <section key={course.term} className="tracker-official-course">
         <div className="tracker-official-course-title">
           <b>{course.term} · {course.officialCourseCode} · {course.totalWeeks} published instructional weeks</b>
           <a href={course.officialCatalogUrl} target="_blank" rel="noopener noreferrer">
-            View SGU course catalog
+            View published source
           </a>
         </div>
         <p className="sub">AXOM outline: {course.appOutlineCourseCodes.join(", ") || "not installed"}.
@@ -31,7 +31,7 @@ export function OfficialSguClinicalCatalogReview() {
         </p>
         <div className="tracker-official-table-scroll">
           <table className="tracker-official-table">
-            <thead><tr><th>SGU catalog module</th><th>Weeks</th><th>Derived sequence</th><th>AXOM mapping</th></tr></thead>
+            <thead><tr><th>Source catalog module</th><th>Weeks</th><th>Derived sequence</th><th>AXOM mapping</th></tr></thead>
             <tbody>{course.modules.map((module) => <tr key={module.code}>
               <th scope="row"><b>{module.code}</b><small>{module.fullName}</small></th>
               <td>{module.durationWeeks}</td>

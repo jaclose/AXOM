@@ -5,7 +5,13 @@ authority: current-state
 ---
 # AXOM current AI state
 
-Snapshot: 2026-10-20 UTC, `feat/academic-library-v1` in
+2026-10-30 release candidate `5dfafae1` integrates RHPS/ESoft import, review,
+teaching, QBank, Journal and Productivity work onto `origin/main` `0cb5769a`.
+It preserves the current publisher and excludes the incompatible unapplied
+release-catalog experiment. Private packages remain unpublished; production
+deployment and authenticated readback are pending validation.
+
+Prior snapshot: 2026-10-20 UTC, `feat/academic-library-v1` in
 `AXOM-academic-library-v1`, HEAD `78c00e04`. This reflection batch was pushed to
 main and deployed (authenticated deployment `7203032971`); six old dates were
 dismissed in the live UI and stayed dismissed after reload. Domain contracts remain authoritative.
@@ -17,22 +23,15 @@ That batch is `dc055a2` on `origin/main`; its deployment was not verified on 202
 It does not authorize migrations, private publication or subsequent releases.
 Verify deployed SHA and protected index before release claims.
 
-## Branch `jd-claude/eloquent-shannon-b2xof9` (2026-10-28, cloud)
+## Branch `jd-claude/eloquent-shannon-b2xof9` (PR 37, 2026-10-31, cloud)
 
-Whole-library publishing, reviewer approval and "Your published courses" (PRs 31 and 32)
-are on `origin/main` at `0cb5769` by fast-forward
+Merges `origin/main` `16fa9bce` (9-choice cap kept). Adds slide-key preselection,
+imported-stem highlights in every exam interface, ExamSoft at 360 to 390 px, Midnight
+default, no-code sign-up config, the welcome email hero, filing decisions from the
+unfiled source review and a question ledger that must reconcile before publishing
 ([contract](features/academic-library.md#one-course-per-module-and-the-library-publisher)).
-PR 34 reports the hosted migrations and reviewer grant as applied; not rechecked here.
-The real-corpus publish and second-account check remain JD's.
-
-This batch, on `0cb5769`: import review fixes from draft PRs 28 and 29 (2 to 10 choices,
-one answer image, slide-key preselection), highlights on imported stems in every exam
-interface ([question content](features/question-content.md)), the ExamSoft screen fitted
-to 360 to 390 px phones, Midnight as the default palette, a quieter sidebar, and sign-up
-with no code once Confirm email is off in the Supabase dashboard
-([accounts setup](ACCOUNTS-SETUP.md), step 3). Passed: full Vitest, lint, build, repo
-checks and the affected Chromium specs, contrast sweep included. Next: JD reviews the
-draft PR, flips Confirm email, closes PRs 28 and 29 as superseded.
+The private library and its publish stay on JD's Mac; this cloud session cannot reach it.
+Next: JD merges PR 37, then publishes from the site and approves sharing.
 
 ## Ownership and protected work
 

@@ -31,7 +31,7 @@ export const ANSWER_SECTION_HEADING = "Answers and Explanations:";
 const NUMBERED = /^\s*(\d{1,3})[.)]\s+\S/;
 const NUMBERED_ANSWER = /^\s*(\d{1,3})[.)]\s*(?:the\s+)?(?:correct\s+)?(?:answer|ans)\b\s*(?:is\b)?\s*[:.\-–]?/i;
 const INLINE_ANSWER = /^\s*(?:the\s+)?(?:correct\s+)?(?:answer|ans)\b\s*(?:is\b)?\s*[:\-–]/i;
-const CHOICE = /^\s*\(?[A-Ha-h][.)]\s+\S/;
+const CHOICE = /^\s*\(?[A-Ia-i][.)]\s+\S/;
 const SAYS_ANSWERS = /\banswers?\b/i;
 
 /** A line short and plain enough to be a heading: not a choice, a numbered line, an answer or a sentence. */

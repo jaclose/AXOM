@@ -44,12 +44,13 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
     && question.choices.some((choice) => choice.label === question.correctAnswer?.labels[0])
     ? question.correctAnswer.labels[0] : "";
   const selectedAnswer = answer ?? slideKey;
-  // Older packages both place the answer image in the explanation and list it as
-  // supporting media. Show each source image once.
-  const placedAssetIds = new Set(question
-    ? [...question.stem, ...(question.explanation ?? []), ...question.choices.flatMap((choice) => choice.blocks)]
-      .flatMap((block) => block.type === "image" ? [block.assetId] : [])
-    : []);
+  const verifiedKey = question?.correctAnswer
+    && ["printed-key", "reviewer"].includes(question.correctAnswer.evidence ?? "")
+    && !assessed.issues.some((issue) => issue.questionId === question.id && issue.code === "answer_needs_review");
+  // Supporting images are a fallback for unplaced assets. Keep ordered source
+  // blocks authoritative so a placed answer slide is not displayed twice.
+  const placedAssetIds = new Set(question ? [question.stem, question.explanation ?? [], ...question.choices.map((choice) => choice.blocks)]
+    .flat().flatMap((block) => block.type === "image" ? [block.assetId] : []) : []);
   const globalErrors = assessed.issues.filter((issue) => issue.severity === "error" && !issue.questionId);
   const validLocation = bank.reviewedFiling
     ? Boolean(bank.reviewedFiling.module.trim() && /^Term [1-5]$/.test(bank.reviewedFiling.term))
@@ -152,13 +153,13 @@ export function BankImportReview({ bank, onBack, onSaved, onReviewed }: { bank: 
           <option value="question">While answering</option><option value="answered">After answering</option><option value="review">Source review</option>
         </SelectField>
       </div>
-      <p className="sub">{verdict?.readiness === "ready" ? "READY FOR IMPORT" : "NEEDS REVIEW"} · Source page {question.source.page ?? "not stated"}{question.source.set ? ` · Set ${question.source.set}` : ""} · Original question {question.source.questionNumber ?? index + 1}</p>
+      <p className="sub">{verdict?.readiness === "ready" ? "READY FOR IMPORT" : verdict?.readiness === "needs-review" ? "NEEDS REVIEW" : "UNRESOLVED"} · Source page {question.source.page ?? "not stated"}{question.source.set ? ` · Set ${question.source.set}` : ""}{question.source.questionNumber !== undefined ? ` · Original question ${question.source.questionNumber}` : ""}</p>
       {mode === "review" && <BankImportSourcePage originalFile={bank.originalFile} sourceName={pkg.manifest.source.filename} sourcePage={question.source.page} />}
       <QuestionBlocks blocks={question.stem} content={question} files={bank.files} mode={mode} />
       {question.choiceTable && <QuestionBlocks blocks={[question.choiceTable]} content={question} files={bank.files} mode={mode} section="choice" />}
       <ol className="bank-import-choices">{question.choices.map((choice) => <li key={choice.id}><b>{choice.label}.</b><QuestionBlocks blocks={choice.blocks} content={question} files={bank.files} mode={mode} section="choice" /></li>)}</ol>
       {mode !== "question" && <>
-        <p>Answer: {question.correctAnswer?.labels.join(", ") || "Requires verification"}</p>
+        <p>{question.correctAnswer ? `${verifiedKey ? "Source key" : "Candidate key (unverified)"}: ${question.correctAnswer.labels.join(", ")}` : "Answer: Requires verification"}</p>
         <QuestionBlocks blocks={question.explanation ?? []} content={question} files={bank.files} mode={mode} section="explanation" />
         <QuestionBlocks blocks={question.assets.filter((asset) => !placedAssetIds.has(asset.id) && ["answer_reveal", "reference", "source_page"].includes(asset.role) && isAssetVisible(asset.role, mode)).map((asset) => ({ type: "image", assetId: asset.id, role: asset.role, alt: "Source answer or reference" }))} content={question} files={bank.files} mode={mode} />
       </>}

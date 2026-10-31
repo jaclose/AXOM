@@ -54,7 +54,7 @@ export function AcademicBookmarkImporter() {
       if (file.size > 6_000_000) throw new Error("Export exceeds the 6 MB review limit.");
       const text = await file.text();
       const index = indexAcademicBookmarks(parseBookmarkHtml(text), SGU_CURRICULUM);
-      if (index.videos.length === 0) throw new Error("No approved SGU Panopto recording-viewer links were found.");
+      if (index.videos.length === 0) throw new Error("No supported Panopto recording-viewer links were found.");
       setReview(index);
       setMessage(`${index.videos.length} distinct recording links found. ${index.excludedProviderLinks} other Panopto pages excluded. Review module associations before saving.`);
     } catch (cause) {
@@ -108,7 +108,7 @@ export function AcademicBookmarkImporter() {
   return <GlassCard pad className="tracker-bookmark-import">
     <details>
       <summary><b>Import study video bookmarks</b><span className="sub">Private links · review course mapping</span></summary>
-      <p className="sub">Select a Chrome or Safari HTML bookmarks export. AXOM reads only SGU Panopto recording links, strips extra URL parameters and never downloads videos or uploads your bookmark file. Bookmarked lecture numbers are <b>not</b> an official week schedule.</p>
+      <p className="sub">Select a Chrome or Safari HTML bookmarks export. AXOM reads only supported Panopto recording links, strips extra URL parameters and never downloads videos or uploads your bookmark file. Bookmarked lecture numbers are <b>not</b> a verified week schedule.</p>
       <input ref={chooser} type="file" accept=".html,.htm,text/html"
         aria-label="Choose a browser bookmarks HTML export" hidden
         onChange={(event) => {
@@ -184,7 +184,7 @@ export function TrackerBookmarkLinks({ scope }: { scope: string }) {
 
   return <GlassCard pad className="tracker-bookmark-links">
     <div className="tracker-bookmark-heading"><b>Saved study recordings</b><span className="sub">{matches.length} private reference{matches.length === 1 ? "" : "s"}</span></div>
-    <p className="sub">These Panopto links were saved from your own bookmarks. SGU access may be required. Bookmark titles do not verify individual lecture identity or official week timing.</p>
+    <p className="sub">These Panopto links were saved from your own bookmarks. Course-platform access may be required. Bookmark titles do not verify individual lecture identity or official week timing.</p>
     <ul>{matches.slice(0, 12).map((resource) => {
       const trackerId = resource.tags.find((tag) => tag.startsWith("academic:tracker:"))?.slice("academic:tracker:".length);
       const associated = tracker.find((item) => item.id === trackerId);
