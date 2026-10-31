@@ -71,8 +71,9 @@ for (const theme of ["dark", "light"] as const) {
   });
 }
 
-/** Accent palettes recolour pills, chips and kickers; each gets a lighter pass in both themes. */
-const PALETTE_IDS = ["ivory", "amethyst", "sapphire", "midnight", "emerald", "rose", "platinum"];
+/** Accent palettes recolour pills, chips and kickers; each gets a lighter pass in both themes.
+ * Midnight, the default, has the full sweep above, so Classic takes its place here. */
+const PALETTE_IDS = ["classic", "ivory", "amethyst", "sapphire", "emerald", "rose", "platinum"];
 const PALETTE_ROUTES = ["dashboard", "tracker", "reports", "daily-word"];
 
 test("no unreadable text under any accent palette", async ({ page }, testInfo) => {

@@ -176,9 +176,9 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
             </div>
           )}
           <div className="xfy-menu-wrap">
-            <button type="button" className="xfy-controls" aria-haspopup="menu" aria-expanded={controlsOpen}
+            <button type="button" className="xfy-controls" aria-label="Exam Controls" aria-haspopup="menu" aria-expanded={controlsOpen}
               onClick={(event) => { event.stopPropagation(); setControlsOpen((open) => !open); setFilterOpen(false); setMoreOpen(false); }}>
-              Exam Controls <ChevronDown size={15} aria-hidden="true" />
+              <span className="xfy-wide-only">Exam </span>Controls <ChevronDown size={15} aria-hidden="true" />
             </button>
             {controlsOpen && (
               <div className="xfy-menu xfy-controls-menu" role="menu" aria-label="Exam controls">
@@ -285,7 +285,7 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
                 eraseMode={tool === "erase"}
                 onDelete={exam.onDeleteAnnotation}
                 onSelection={exam.onSelection}
-              />} /></div>
+              />} annotate={{ annotations: exam.annotations, onSelection: exam.onSelection, onDelete: exam.onDeleteAnnotation, eraseMode: tool === "erase" }} /></div>
             </div>
           )}
           {!question.content && (question.attachments?.length ?? 0) > 0 && <Exhibits question={question} opened={attachment} onOpen={setAttachment} />}

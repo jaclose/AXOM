@@ -53,6 +53,8 @@ export interface PublicationSource {
   /** The catalog's own module label, when it has one. */
   moduleKey?: string;
   hasBank: boolean;
+  /** Question rows in its package, unreadable rows included, when the package could be read. */
+  rows?: number;
   original?: { extension: string };
   /** Term and module read from the question package itself. */
   bank?: { term: Term; module: string; moduleKey: string; reviewedFiling: boolean } | { problem: string };
@@ -149,6 +151,7 @@ export async function readPublicationInventory(
     if (source.bankFile) {
       try {
         const bank = readPreparedBank(JSON.parse(decode(await read(safeLibraryPath(source.bankFile)))));
+        entry.rows = bank.pkg.questions.length + (bank.unreadableQuestions ?? 0);
         const manifest = bank.pkg.manifest;
         const scopes = [{ module: manifest.course.name, term: manifest.course.term }, ...bank.pkg.questions.map(question => {
           const scope = questionScope(manifest, question);

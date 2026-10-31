@@ -7,18 +7,24 @@
  *   AXOM_PUBLISH_LIBRARY_ROOT=<prepared folder> \
  *   AXOM_PUBLISH_REPORT=<report.json outside the repository> \
  *   AXOM_PUBLISH_TERMS='{"<module key>":"Term 1"}' \
+ *   AXOM_PUBLISH_DECISIONS=<filing decisions .json from the unfiled source review> \
  *   npx vitest run src/lib/academicLibrary/publicationPlan.local.test.ts --reporter=verbose
  *
  * AXOM_PUBLISH_TERMS is optional and holds terms a reviewer confirmed, keyed by
- * the module keys the report lists. The report and console carry counts,
+ * the module keys the report lists. AXOM_PUBLISH_DECISIONS is optional and files
+ * each reviewed source as decided, exactly as the publisher's "Add filing
+ * decisions" does; the library folder itself is never changed. The report and console carry counts,
  * module labels, reasons and source names only, never question text, answers
- * or file bytes. Source names can be private: keep the report out of Git.
+ * or file bytes. It also accounts for every question row: in a course, or
+ * staying on this device with its reason, and fails if any row is unaccounted. Source names can be private: keep the report out of Git.
  */
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
 import { describe, expect, it } from "vitest";
-import { safeLibraryPath } from "../privateLibrary/install";
+import { safeLibraryPath, type LibraryReader } from "../privateLibrary/install";
 import type { ReviewedFiling } from "../privateLibrary/types";
+import { applyFilingDecisions, readFilingDecisions } from "./filingDecisions";
+import { accountQuestions } from "./questionLedger";
 import {
   PUBLICATION_INPUT_LIMITS, planPublication, publicationJobs, readPublicationInventory, type PlannedCourse,
 } from "./publication";
@@ -38,7 +44,7 @@ function confirmedTerms(): Record<string, Term> {
 describe.skipIf(!root)("dry run of publishing a real prepared library (opt-in only)", () => {
   it("plans every course and prepares each one without uploading", async () => {
     const parent = realpathSync(resolve(root!));
-    const read = async (file: string) => {
+    const fromDisk: LibraryReader = async (file: string) => {
       const path = resolve(parent, safeLibraryPath(file));
       if (!path.startsWith(parent + sep)) throw new Error("A library path escaped the selected folder.");
       if (!existsSync(path)) throw new Error("A file the library references is missing.");
@@ -52,8 +58,16 @@ describe.skipIf(!root)("dry run of publishing a real prepared library (opt-in on
     if (report && (report + sep).startsWith(repository + sep))
       throw new Error("Write the dry-run report outside the repository: it can name private sources.");
 
+    const decisionsFile = process.env.AXOM_PUBLISH_DECISIONS;
+    const filed = decisionsFile
+      ? await applyFilingDecisions(fromDisk, readFilingDecisions(JSON.parse(readFileSync(resolve(decisionsFile), "utf8"))))
+      : undefined;
+    const read = filed?.read ?? fromDisk;
+    if (filed) console.log(`filing decisions  ${filed.summary.filed} filed, ${filed.summary.keptUnfiled} kept unfiled`);
     const inventory = await readPublicationInventory(read);
     const plan = planPublication(inventory, confirmedTerms());
+    // Every question row the library holds, in exactly one course or one stated reason.
+    const ledger = accountQuestions(inventory, plan);
     const ready = plan.courses.filter(course => course.termBasis !== "proposed");
     const { jobs, notes } = publicationJobs(read, inventory, ready);
     const sources = new Map<string, string>();
@@ -84,7 +98,7 @@ describe.skipIf(!root)("dry run of publishing a real prepared library (opt-in on
       sections: course.sections.map(section => section.name),
     }));
     const result = {
-      library: inventory.library, checkedAt: new Date().toISOString(),
+      library: inventory.library, checkedAt: new Date().toISOString(), ...(filed ? { filingDecisions: filed.summary } : {}),
       totals: {
         courses: plan.courses.length, checked: checked.length, readyToPublish: checked.filter(course => course.ok).length,
         needAttention: checked.filter(course => !course.ok).length, needTerm: needsTerm.length,
@@ -92,17 +106,24 @@ describe.skipIf(!root)("dry run of publishing a real prepared library (opt-in on
         readyQuestions: checked.reduce((sum, course) => sum + (course.ok ? course.readyQuestions : 0), 0),
         reviewQuestions: checked.reduce((sum, course) => sum + (course.ok ? course.reviewQuestions : 0), 0),
       },
-      courses: checked, needsTerm, blocked: plan.blocked, excluded: plan.excluded,
+      questions: ledger, courses: checked, needsTerm, blocked: plan.blocked, excluded: plan.excluded,
     };
     if (report) {
       mkdirSync(dirname(report), { recursive: true });
       writeFileSync(report, `${JSON.stringify(result, null, 2)}\n`);
     }
     console.log(JSON.stringify(result.totals));
+    const leftOut = ledger.leftOut.reduce((sum, group) => sum + group.questions, 0);
+    console.log(`questions  ${ledger.total.questions} in ${ledger.total.sources} question sets: ${ledger.inCourses.questions} in courses `
+      + `(${ledger.inCourses.ready} ready, ${ledger.inCourses.held} awaiting review), ${leftOut} staying on this device, ${ledger.unaccounted} unaccounted`);
+    const count = (value: number, one: string) => `${value} ${one}${value === 1 ? "" : "s"}`;
+    for (const group of ledger.leftOut) console.log(`left out  ${count(group.questions, "question")} in ${count(group.sources, "set")}: ${group.reason}`);
+    for (const source of ledger.mismatched) console.log(`counts disagree  ${source.name}: ${source.rows} rows, catalog says ${source.ready} ready and ${source.held} held`);
     for (const course of checked) console.log(course.ok
       ? `ready  ${label(course)}: ${course.readyQuestions} ready, ${course.reviewQuestions} awaiting review, ${course.files} files`
       : `attention  ${label(course)}: ${course.reason}`);
     for (const course of needsTerm) console.log(`needs term  ${course.module} (${course.moduleKey}): proposed ${course.proposedTerm}`);
     expect(plan.courses.length + plan.blocked.length + plan.excluded.length).toBeGreaterThan(0);
+    expect(ledger.unaccounted).toBe(0);
   }, 3_600_000);
 });

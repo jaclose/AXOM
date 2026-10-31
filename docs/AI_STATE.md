@@ -23,19 +23,15 @@ That batch is `dc055a2` on `origin/main`; its deployment was not verified on 202
 It does not authorize migrations, private publication or subsequent releases.
 Verify deployed SHA and protected index before release claims.
 
-## Branch `jd-claude/eloquent-shannon-b2xof9` (2026-10-27, cloud)
+## Branch `jd-claude/eloquent-shannon-b2xof9` (PR 37, 2026-10-31, cloud)
 
-Base `dc055a2`. Adds whole-library publishing: one collection per term and module with
-every plan section, reviewer-confirmed plan terms (both uploaders), an on-device check
-before upload, plan-less question collections, reviewer approval, a curriculum-ordered
-catalog and term-grouped QBank discovery
+Merges `origin/main` `16fa9bce` (9-choice cap kept). Adds slide-key preselection,
+imported-stem highlights in every exam interface, ExamSoft at 360 to 390 px, Midnight
+default, no-code sign-up config, the welcome email hero, filing decisions from the
+unfiled source review and a question ledger that must reconcile before publishing
 ([contract](features/academic-library.md#one-course-per-module-and-the-library-publisher)).
-Migration `20261027120000_academic_curriculum_catalog.sql` is replayed locally only.
-`5c04e71` fixes the privacy replay test whose fixed 2026-10-23 expiry fails main's suite.
-Passed: full Vitest (28 skipped), PGlite replay, types/lint/build, a synthetic publish
-journey at 1440/390 and related catalog specs in Chromium. Not done: real-corpus publish,
-hosted migration, reviewer grant, second-account check; the private corpus and board
-were unreachable from the cloud. Next: JD reviews the draft PR, then the owner steps.
+The private library and its publish stay on JD's Mac; this cloud session cannot reach it.
+Next: JD merges PR 37, then publishes from the site and approves sharing.
 
 ## Ownership and protected work
 

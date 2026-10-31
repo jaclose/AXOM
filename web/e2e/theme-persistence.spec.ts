@@ -10,13 +10,15 @@ test("pre-paint theme resolution persists light/dark/system without touching wor
   const root = page.locator("html");
   await expect(root).toHaveAttribute("data-theme-preference", "system");
   await expect(root).toHaveAttribute("data-theme", "dark");
-  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#0d0d0e");
+  // No palette chosen yet: Midnight, the default, colors the browser chrome.
+  await expect(root).toHaveAttribute("data-palette", "midnight");
+  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#070a15");
 
   await page.evaluate((key) => localStorage.setItem(key, "light"), STORAGE_KEYS.themePreference);
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(root).toHaveAttribute("data-theme-preference", "light");
   await expect(root).toHaveAttribute("data-theme", "light");
-  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#f3eee3");
+  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#f8f9fc");
 
   const storage = await page.evaluate(({ themeKey, workspaceKey }) => ({
     theme: localStorage.getItem(themeKey),
@@ -55,6 +57,13 @@ test("accent palette applies before first paint, survives reload, and ignores ta
   await page.reload({ waitUntil: "domcontentloaded" });
   const bodyDisplay = await page.evaluate(() => getComputedStyle(document.body).display);
   expect(bodyDisplay).not.toBe("none");
+
+  // Someone who chose AXOM Classic keeps it; the Midnight default never overrides a choice.
+  await page.evaluate(() => localStorage.setItem("axom.palette.v1", JSON.stringify({ version: 1, id: "classic" })));
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(root).not.toHaveAttribute("data-palette", /.+/);
+  await expect(page.locator("style#axom-palette")).toHaveCount(0);
+  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#0d0d0e");
   await page.unroute("**/src/main.tsx*");
   await page.evaluate(() => localStorage.removeItem("axom.palette.v1"));
 });

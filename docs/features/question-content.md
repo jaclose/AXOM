@@ -306,6 +306,9 @@ hold the question back, and `advisories` that do not. It follows decision 7.
   recorded with evidence `reviewer` and the request for review is cleared. Only a person's
   action calls it. A proposal from a program, such as a mark read off a slide, goes to the
   person first. Run `assessBank` again afterwards.
+- **In the import review** a key read from a marked answer slide is preselected and named
+  as the slide's suggestion. It counts only when the person confirms it outside the
+  answering view; if they clear the choice, it stays cleared.
 
 ## Saving a package through the canonical import
 
@@ -330,13 +333,16 @@ const saved = await saveBank(bank.pkg, bank.issues, bank.files, { library, store
   checksum, and every set made from the file is tied to that record. Without it only the
   questions are saved.
 - Only a ready question is offered. One that needs review is offered once its id is in
-  `acknowledged`, and never without a key. Two questions of one set that share a number are
+  `acknowledged`, and never without a key. A question needs 2 to 9 choices (A to I,
+  `MAX_PACKAGE_CHOICES`); more means merged questions, and review cannot override that.
+  The plain-text parsers still read choice letters A to H only. Two questions of one set that share a number are
   both held. Everything held is in `held` with its reasons.
 - The sets are filed by the manifest: `scope: { module, week }`. `filing.agrees` says
   whether the curriculum puts that module in the manifest's term.
 - All image bytes are saved in the existing attachment vault. Stable asset IDs join them
   to blocks. Restricted roles are enforced by the shared renderer: answer-reveal and
-  explanation images appear after answering, whole source pages only in review.
+  explanation images appear after answering, whole source pages only in review. An image
+  a block already places is not shown again from the asset list.
 - Reimport repairs missing bytes without duplicating questions. A later answer review
   adds only newly accepted questions in a continuation set; prior attempts stay attached.
 - Advisory notes travel with the question as its warnings.
@@ -384,8 +390,14 @@ check prints counts only.
 | 4 | `content` on `QuestionRecord`; one block renderer under every exam interface; wider attachment roles; image enlarge, zoom, pan; deletion, backup and restore of the pictures | Open. Edits `questions.ts`, `questionAttachments.ts`, `ExamRunner.tsx`: Codex's files |
 | 5 | Build the three Term 5 GOER Week 2 banks locally and run them as the real regression set | In part (`feat/goer-pdf-bank-import-v1`). All three PDFs are tagged and are built locally: 47 questions, 11 tables, 7 figures. 32 are ready (two banks, every key agreed by a second PDF reader) and were saved, reloaded and re-imported without a duplicate through the canonical import, in memory. 15 need review (the slide deck: its answers are drawn marks, 14 of 15 slides). In a real browser, on the harness page, each of the three files was chosen, read, previewed, classified, imported, reloaded and checked. The 32 ready questions were saved as three sets from two source files (the biostatistics file keeps its two sets), every stem, key, number, page and picture unchanged after the reload, every table cell found, no answer slide on the page while a question is open, nothing written by a second import. Not done: reading the deck's marks (Codex), the import screen (Codex) |
 
-Known limits to carry forward: a rendered question must apply an asset's `crop`; annotations store positions in the plain stem, so
-highlights on block text need a mapping in Phase 4. Picture bytes are stored on the
+Highlights on an imported stem are saved as positions in the plain stem, as for typed
+questions. Each paragraph (text, formatted text, callout) knows where its words start in
+that stem (`components/questions/stemMarks.ts`), so a drag maps to stem positions, a
+highlight is drawn in pieces across formatting, and dragging across a mark grows it, in
+every exam interface. Tables, figures and equations are never marked; an edited stem
+falls back to the plain text renderer.
+
+Known limits to carry forward: a rendered question must apply an asset's `crop`. Picture bytes are stored on the
 device; account sync carries the question, its blocks and the asset records, not the
 bytes ([data model](../architecture/data-model.md)). Attachments are limited to PNG,
 JPEG, WebP and GIF, ten per question, 8 MB each; a Word file may hold EMF or WMF
