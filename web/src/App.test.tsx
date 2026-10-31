@@ -7,7 +7,7 @@ import { useStore } from "./lib/store";
 import { useUi } from "./lib/uiStore";
 import { GUIDED_TOUR_STEPS } from "./components/shell/GuidedTour";
 import * as localVault from "./lib/localVault";
-import { dayKey } from "./lib/scoring";
+import { localDateKey } from "./lib/dailyRollover";
 import type { CommunicationsSettings } from "./lib/communications/client";
 import { preferences } from "./lib/communications/model";
 
@@ -181,8 +181,11 @@ describe("post-global-guide promise flow", () => {
 
 describe("Journal route durability", () => {
   function openJournalShell() {
+    const today = localDateKey();
     useStore.setState((state) => ({
-      activeDayKey: dayKey(),
+      activeDayKey: today,
+      lastActiveLocalDate: today,
+      lastTimezoneOffset: new Date().getTimezoneOffset(),
       journal: [],
       dayPlans: [],
       logs: [],
@@ -198,10 +201,11 @@ describe("Journal route durability", () => {
       },
     }));
     window.history.replaceState(null, "", "#journal");
+    return today;
   }
 
   it("keeps the Journal mounted until a sidebar route change confirms the draft write", async () => {
-    openJournalShell();
+    const today = openJournalShell();
     let confirmDurability!: () => void;
     const flush = vi.spyOn(localVault, "flushLocalVaultWrites")
       .mockReturnValue(new Promise<void>((resolve) => { confirmDurability = resolve; }));
@@ -222,7 +226,7 @@ describe("Journal route durability", () => {
 
     await act(async () => { confirmDurability(); await Promise.resolve(); });
     await waitFor(() => expect(window.location.hash).toBe("#dashboard"));
-    expect(useStore.getState().journal.find(entry => entry.date.startsWith(dayKey())))
+    expect(useStore.getState().journal.find(entry => entry.date.startsWith(today)))
       .toMatchObject({ freeWriting: "Persist before leaving the Journal" });
   });
 
@@ -248,7 +252,7 @@ describe("Journal route durability", () => {
   });
 
   it("keeps Journal and Settings mounted until Run setup again confirms durability", async () => {
-    openJournalShell();
+    const today = openJournalShell();
     let confirmDurability!: () => void;
     const flush = vi.spyOn(localVault, "flushLocalVaultWrites")
       .mockReturnValue(new Promise<void>((resolve) => { confirmDurability = resolve; }));
@@ -272,7 +276,7 @@ describe("Journal route durability", () => {
     await act(async () => { confirmDurability(); await Promise.resolve(); });
     expect(await screen.findByRole("heading", { name: "Who are you studying as?" })).toBeTruthy();
     expect(screen.queryByDisplayValue("Persist before setup replaces the shell")).toBeNull();
-    expect(useStore.getState().journal.find(entry => entry.date.startsWith(dayKey())))
+    expect(useStore.getState().journal.find(entry => entry.date.startsWith(today)))
       .toMatchObject({ freeWriting: "Persist before setup replaces the shell" });
   });
 
