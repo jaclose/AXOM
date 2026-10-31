@@ -523,7 +523,12 @@ export function ImportPanel({
   }
 
   function focusAfterReviewUpdate(...elementIds: Array<string | undefined>) {
+    const focusedBefore = document.activeElement;
     const restore = () => {
+      // This runs a frame after the update. If the learner has gone to another
+      // field by then, taking focus back would send their typing into a question.
+      const focused = document.activeElement;
+      if (focused && focused !== document.body && focused !== focusedBefore) return;
       for (const id of elementIds) {
         if (!id) continue;
         const element = document.getElementById(id);
