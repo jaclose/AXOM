@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { mergeStates, parseImport, toPortableState } from "./backup";
 import { makeSeed } from "./seed";
-import { normalizeProfile } from "./store";
 import { createTextAnnotation } from "./questionAnnotations";
 import { buildQuizPool } from "./quiz";
+import { normalizeProfile } from "./store";
 
 describe("portable backup safety", () => {
   it("round-trips exact learner method descriptions, timing and every preference layer", () => {
