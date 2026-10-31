@@ -7,7 +7,7 @@ import { useStore } from "./lib/store";
 import { useUi } from "./lib/uiStore";
 import { GUIDED_TOUR_STEPS } from "./components/shell/GuidedTour";
 import * as localVault from "./lib/localVault";
-import { dayKey } from "./lib/scoring";
+import { localDateKey } from "./lib/dailyRollover";
 import type { CommunicationsSettings } from "./lib/communications/client";
 import { preferences } from "./lib/communications/model";
 
@@ -182,7 +182,8 @@ describe("post-global-guide promise flow", () => {
 describe("Journal route durability", () => {
   function openJournalShell() {
     useStore.setState((state) => ({
-      activeDayKey: dayKey(),
+      // The app rolls the study day over at local midnight, so seed the same day it opens on.
+      activeDayKey: localDateKey(),
       journal: [],
       dayPlans: [],
       logs: [],
@@ -222,7 +223,7 @@ describe("Journal route durability", () => {
 
     await act(async () => { confirmDurability(); await Promise.resolve(); });
     await waitFor(() => expect(window.location.hash).toBe("#dashboard"));
-    expect(useStore.getState().journal.find(entry => entry.date.startsWith(dayKey())))
+    expect(useStore.getState().journal.find(entry => entry.date.startsWith(useStore.getState().activeDayKey)))
       .toMatchObject({ freeWriting: "Persist before leaving the Journal" });
   });
 
@@ -272,7 +273,7 @@ describe("Journal route durability", () => {
     await act(async () => { confirmDurability(); await Promise.resolve(); });
     expect(await screen.findByRole("heading", { name: "Who are you studying as?" })).toBeTruthy();
     expect(screen.queryByDisplayValue("Persist before setup replaces the shell")).toBeNull();
-    expect(useStore.getState().journal.find(entry => entry.date.startsWith(dayKey())))
+    expect(useStore.getState().journal.find(entry => entry.date.startsWith(useStore.getState().activeDayKey)))
       .toMatchObject({ freeWriting: "Persist before setup replaces the shell" });
   });
 
