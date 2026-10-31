@@ -34,6 +34,7 @@ import { ModuleTour, type ModuleTourStep } from "../components/shell/ModuleTour"
 import { cardSystemFor, type CardSystem } from "../lib/cardSystem";
 import { TrackerFirstRun } from "../components/tracker/TrackerFirstRun";
 import { ICON_SIZE } from "../lib/iconSize";
+import { externalLinkHref } from "../lib/resourceUtils";
 import { parseCourseSchedule, reconcileScheduleDuplicates, scheduleCandidatesToTracker, type ScheduleCandidate } from "../lib/courseScheduleImport";
 import { CourseLibrary } from "../components/tracker/CourseLibrary";
 import type { CourseBook } from "../lib/bookshelf/courseBooks";
@@ -1204,6 +1205,7 @@ function BlueprintTrackerItems({ install, nodes, category }: { install: Installe
 }
 
 function BlueprintTrackerRow({ install, node }: { install: InstalledBlueprint; node: InstalledBlueprintNode }) {
+  const sourceHref = externalLinkHref(node.sourceUrl);
   const update = useStore((s) => s.updateBlueprintNode);
   const patch = (input: Partial<InstalledBlueprintNode>) => update(install.id, node.id, input);
   const move = (direction: -1 | 1) => moveBlueprintNode(install, node, direction, update);
@@ -1262,7 +1264,7 @@ function BlueprintTrackerRow({ install, node }: { install: InstalledBlueprint; n
       <div className="bp-tracker-foot">
         <Tag tone={node.priority === "high" ? "orange" : node.priority === "low" ? "neutral" : "cyan"}>{node.priority} priority</Tag>
         <Tag tone={node.sourceType === "official" ? "green" : node.sourceType === "tool" ? "cyan" : "neutral"}>{node.sourceType ?? "internal"} source</Tag>
-        {node.sourceUrl && <a className="gbtn tiny" href={node.sourceUrl} target="_blank" rel="noreferrer noopener">Source <ExternalLink size={ICON_SIZE.microInline} /></a>}
+        {sourceHref && <a className="gbtn tiny" href={sourceHref} target="_blank" rel="noreferrer noopener">Source <ExternalLink size={ICON_SIZE.microInline} /></a>}
         {node.sourceVersion && <span className="sub">{node.sourceVersion}</span>}
         {node.lastVerified && <span className="sub">source audited {node.lastVerified}</span>}
       </div>

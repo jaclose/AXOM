@@ -17,6 +17,7 @@ import {
 import { routeForBlueprintLane } from "../../lib/blueprintRoutes";
 import type { BlueprintLaneId, BlueprintMode, BlueprintNodeStatus, BlueprintNodeType, BlueprintSource, InstalledBlueprint, InstalledBlueprintNode, SourceType } from "../../lib/types";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { externalLinkHref } from "../../lib/resourceUtils";
 
 const DEPTH_KEY = "noctyrium-blueprint-depth";
 const laneKey = (mode: BlueprintMode) => `noctyrium-blueprint-lane-${mode}`;
@@ -395,6 +396,7 @@ function NodeRow({ node, installId, open, onToggle }: { node: InstalledBlueprint
 }
 
 function NodeDetail({ node, installId }: { node: InstalledBlueprintNode; installId: string }) {
+  const sourceHref = externalLinkHref(node.sourceUrl);
   const update = useStore((s) => s.updateBlueprintNode);
   const patch = (p: Partial<InstalledBlueprintNode>) => update(installId, node.id, p);
   const link = (key: "linkedQuestions" | "linkedAnki" | "linkedErrorLog" | "linkedAssessments", delta: number) =>
@@ -448,11 +450,11 @@ function NodeDetail({ node, installId }: { node: InstalledBlueprintNode; install
       </label>
 
       <div className="bp-node-foot">
-        {node.sourceUrl
-          ? <a className="bp-node-source" href={node.sourceUrl} target="_blank" rel="noreferrer noopener"><ShieldCheck size={ICON_SIZE.microInline} /> {sourceStatusText(node)} <ExternalLink size={ICON_SIZE.microInline} /></a>
+        {sourceHref
+          ? <a className="bp-node-source" href={sourceHref} target="_blank" rel="noreferrer noopener"><ShieldCheck size={ICON_SIZE.microInline} /> {sourceStatusText(node)} <ExternalLink size={ICON_SIZE.microInline} /></a>
           : <span className="bp-node-source dim"><ShieldCheck size={ICON_SIZE.microInline} /> {sourceStatusText(node)}</span>}
-        {node.resourceLinks.map((r) => (
-          <a key={r.url} className={`bp-node-source kind-${r.kind}`} href={r.url} target="_blank" rel="noreferrer noopener">{r.label} <ExternalLink size={ICON_SIZE.microInline} /></a>
+        {node.resourceLinks.filter((r) => externalLinkHref(r.url)).map((r) => (
+          <a key={r.url} className={`bp-node-source kind-${r.kind}`} href={externalLinkHref(r.url)} target="_blank" rel="noreferrer noopener">{r.label} <ExternalLink size={ICON_SIZE.microInline} /></a>
         ))}
         {node.sourceVersion && <span className="bp-node-verified">{node.sourceVersion}</span>}
         {node.lastVerified && <span className="bp-node-verified">audited {node.lastVerified}</span>}

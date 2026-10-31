@@ -5,6 +5,7 @@ import { GlassCard, GButton, GhostButton, Tag, EmptyState } from "../components/
 import { Modal, Field, SelectField } from "../components/ui/Modal";
 import type { Course } from "../lib/types";
 import { ICON_SIZE } from "../lib/iconSize";
+import { externalLinkHref } from "../lib/resourceUtils";
 import type { StudyMethodId } from "../lib/studyPreferences";
 
 export function CoursesPage() {
@@ -52,8 +53,8 @@ export function CoursesPage() {
                   {c.name && <div className="cc-name">{c.name}</div>}
                   <div className="cc-files">{c.files} files · {c.modules.length} modules</div>
                   <div className="cc-actions">
-                    {c.link
-                      ? <a className="gbtn sm" href={c.link} target="_blank" rel="noreferrer">Open <ExternalLink size={ICON_SIZE.body} /></a>
+                    {externalLinkHref(c.link)
+                      ? <a className="gbtn sm" href={externalLinkHref(c.link)} target="_blank" rel="noreferrer">Open <ExternalLink size={ICON_SIZE.body} /></a>
                       : <GButton size="sm" onClick={() => setEditing(c)}>Open</GButton>}
                   </div>
                 </GlassCard>
