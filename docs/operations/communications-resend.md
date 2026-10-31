@@ -13,7 +13,7 @@ worktree has active media-lifecycle work in Settings; merge only this branch's s
 account-tab entries without replacing that work. App route/title changes also require
 normal integration review. No database migration was applied during this implementation.
 
-Install using the repository lockfiles in a fresh checkout with Node 22.23.1, then:
+Install using the repository lockfiles in a fresh checkout with Node 22.23.4, then:
 
 ```sh
 node scripts/build-communications.mjs
