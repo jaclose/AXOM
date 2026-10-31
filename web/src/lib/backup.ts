@@ -37,6 +37,7 @@ import { normalizeDashboardLayoutPreferences } from "./dashboardWidgets";
 import { normalizeJournalEntries, normalizeJournalNotebookPreferences } from "./journalNotebook";
 import { normalizeApplicationResearch } from "./applicationResearch";
 import { normalizeApplicationProfile } from "./applicationProfile";
+import { normalizeBlueprintMode, normalizeUnlocks } from "./profileFields";
 import { normalizeStudyWorkflow } from "./studyPreferences";
 
 const DATA_KEYS = [
@@ -188,10 +189,13 @@ export function mergeStates(current: NoctyriumState, imported: NoctyriumState): 
   // decisions (including deliberately unchecked facts) for an existing school.
   const research = new Map(normalizeApplicationResearch(imported.profile.applicationResearch).map(entry => [entry.schoolId, entry]));
   for (const entry of normalizeApplicationResearch(current.profile.applicationResearch)) research.set(entry.schoolId, entry);
+  const unlocks = normalizeUnlocks([...(current.profile.unlocks ?? []), ...(imported.profile.unlocks ?? [])]);
   merged.profile = {
     ...current.profile, applicationResearch: [...research.values()],
     // The profile is one learner-edited record, so current wins whole rather than field-merging.
     applicationProfile: normalizeApplicationProfile(current.profile.applicationProfile) ?? normalizeApplicationProfile(imported.profile.applicationProfile),
+    // Unlocks are permanent and follow the account, so a merge keeps both sides'.
+    ...(unlocks?.length ? { unlocks } : {}),
   };
   return merged as unknown as NoctyriumState;
 }
@@ -411,6 +415,7 @@ export function parseImport(text: string): NoctyriumState {
       energyChecks: normalizeEnergyChecks(profile.energyChecks),
       primaryTrackerScopes: normalizePrimaryScopes(profile.primaryTrackerScopes),
       // Preserve newer opt-in settings across export/import.
+      blueprintMode: normalizeBlueprintMode(profile.blueprintMode),
       taskAutofillDisabled: typeof profile.taskAutofillDisabled === "boolean" ? profile.taskAutofillDisabled : undefined,
       taskTemplates: Array.isArray(profile.taskTemplates) ? profile.taskTemplates as NoctyriumState["profile"]["taskTemplates"] : undefined,
       experimentalFlags: normalizeExperimentalFlags(profile.experimentalFlags),
@@ -428,6 +433,7 @@ export function parseImport(text: string): NoctyriumState {
       studyWorkflow: normalizeStudyWorkflow(profile.studyWorkflow),
       applicationResearch: normalizeApplicationResearch(profile.applicationResearch),
       applicationProfile: normalizeApplicationProfile(profile.applicationProfile),
+      unlocks: normalizeUnlocks(profile.unlocks),
     },
     terms: data.terms ?? [],
     courses: data.courses ?? [],
