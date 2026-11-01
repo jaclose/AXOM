@@ -5,15 +5,26 @@ authority: current-state
 ---
 # AXOM current AI state
 
-2026-11-01 local `codex/qbank-full-integration` combines draft QBank/Anki PRs
-#34 and #43–47; it is not deployed. A real upload-free dry run with JD's
-confirmed terms and MI→NMI decision prepared 20/20 courses, with zero term or
-attention prompts: 699 answer-ready, 16,252 held. All 17,559 source rows were
-accounted for; 594 stayed local. Held EMF remains unavailable to learners.
-Community Uploads and Anki term links passed their own UI checks; combined
-typecheck, lint, build, 111 focused tests, 16 term/setup tests and 11 Chrome
-browser cases pass. DERS, BSCE3, DNPR and four Unfiled decisions need source
-review. Earlier dated claims remain in
+2026-11-01 PR #59 merged as `cb0a456b` at 21:33:30 UTC. The Vercel production
+deployment for that commit is ready on axom.info. The signed-in Question Bank
+and Community Uploads UI loaded in production. Local browser checks covered
+term sorting, week selection, persistence, community states and responsive
+layouts; the merged branch passed typecheck, lint, build, repository checks and
+focused tests. The hosted production project has JD's reviewer row and both
+academic RPCs, but still has zero library collections and zero community
+submissions. No course content has been uploaded or shared.
+
+The owner-term and MI→NMI upload-free dry run prepared 20/20 available courses
+with zero term or package prompts: 699 answer-ready and 16,252 held. All 17,559
+source rows were accounted for; 594 stayed local. A separate, local-only NMI
+copy matched 82 answers to a printed key and passed a full upload-free dry run
+at 781 ready and 16,170 held; its original source and the earlier candidate
+were untouched. Redistributing that source still needs a recorded rights basis.
+Among the in-course parsed rows, 15,894 lack a parsed answer key across 816
+source banks. No missing key is promoted from a parser suggestion or medical
+inference. DERS, BSCE3 and DNPR still lack validated current question packages;
+four Unfiled decisions remain unresolved. Draft PRs #60–65 are not
+deployed. Earlier dated claims remain in
 `git show 1b189177:docs/AI_STATE.md` and the feature contract.
 
 ## 2026-10-28 QBank production receipt
