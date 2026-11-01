@@ -23,6 +23,13 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("ExamSimulator", () => {
+  it("shows the unreviewed warning inside the full-screen exam interface", () => {
+    render(<ExamSimulator skin="nbme" mode="exam" pool={pool} unreviewedCount={1}
+      onFinish={vi.fn()} onSuspend={vi.fn()} />);
+    const simulation = screen.getByRole("dialog", { name: /exam simulation/ });
+    expect(within(simulation).getByText("Unreviewed community material.")).toBeTruthy();
+  });
+
   it("runs an NBME-style block through Item Review to the end", () => {
     const onFinish = vi.fn();
     render(<ExamSimulator skin="nbme" mode="exam" pool={pool} timeLimitSeconds={270} onFinish={onFinish} onSuspend={vi.fn()} />);

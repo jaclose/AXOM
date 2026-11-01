@@ -5,9 +5,9 @@ import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
 import { AcademicPlanTermRequiredError } from "../../lib/academicLibrary/coursePlan";
 import {
   prepareAcademicUpload, uploadAcademicCourse,
-  type AcademicUpload, type AcademicUnscheduledScope,
+  type AcademicUpload, type AcademicUnscheduledScope, type AcademicUploadResult,
 } from "../../lib/academicLibrary/upload";
-import { readCatalog, zipLibraryReader, type LibraryReader } from "../../lib/privateLibrary/install";
+import { folderLibraryReader, readCatalog, zipLibraryReader, type LibraryReader } from "../../lib/privateLibrary/install";
 import { GButton } from "../ui/primitives";
 
 const TERMS: AcademicUnscheduledScope["term"][] = ["Term 1", "Term 2", "Term 3", "Term 4", "Term 5"];
@@ -16,9 +16,10 @@ type Candidate = { accountId: string; reader: LibraryReader; filename: string }
   & ({ kind: "unscheduled" } | { kind: "plan-term"; module: string });
 
 /** Private academic uploads are never published by selecting this control. */
-export function AcademicCourseUpload({ onSaved }: { onSaved: () => void }) {
+export function AcademicCourseUpload({ onSaved }: { onSaved: (result: AcademicUploadResult) => void }) {
   const accountId = useAccount(state => state.user?.id);
   const input = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
   const [prepared, setPrepared] = useState<{ accountId: string; upload: AcademicUpload }>();
   const [pending, setPending] = useState<Candidate>();
   const [chosenTerm, setChosenTerm] = useState<AcademicUnscheduledScope["term"] | "">("");
@@ -30,21 +31,22 @@ export function AcademicCourseUpload({ onSaved }: { onSaved: () => void }) {
   const upload = prepared && prepared.accountId === accountId ? prepared.upload : undefined;
   const candidate = pending && pending.accountId === accountId ? pending : undefined;
 
-  async function select(file: File) {
+  async function select(file: File | File[]) {
     if (!accountId) return;
     const scope = academicAccountScope(accountId);
     setBusy(true); setError(""); setPrepared(undefined); setPending(undefined);
     setChosenTerm(""); setModule(""); setConfirmed(false);
     setMessage("Checking the private academic package…");
     try {
-      const reader = await zipLibraryReader(file);
+      const reader = Array.isArray(file) ? folderLibraryReader(file) : await zipLibraryReader(file);
+      const filename = Array.isArray(file) ? "selected folder" : file.name;
       scope.assertCurrent();
       const catalog = readCatalog(JSON.parse(new TextDecoder().decode(await reader("catalog.json"))));
       if (catalog.templates.length === 0) {
         if (!catalog.sources.some(source => source.bankFile)) {
           throw new Error("This package contains no reviewed course template or prepared questions.");
         }
-        setPending({ accountId, reader, filename: file.name, kind: "unscheduled" });
+        setPending({ accountId, reader, filename, kind: "unscheduled" });
         setMessage("No verified weekly plan is included. Confirm the term and module from the original source. The questions will remain unscheduled.");
       } else {
         try {
@@ -55,7 +57,7 @@ export function AcademicCourseUpload({ onSaved }: { onSaved: () => void }) {
         } catch (cause) {
           if (!(cause instanceof AcademicPlanTermRequiredError)) throw cause;
           scope.assertCurrent();
-          setPending({ accountId, reader, filename: file.name, kind: "plan-term", module: cause.module });
+          setPending({ accountId, reader, filename, kind: "plan-term", module: cause.module });
           setMessage("");
         }
       }
@@ -97,7 +99,7 @@ export function AcademicCourseUpload({ onSaved }: { onSaved: () => void }) {
         ? "Your private upload was verified, but a newer revision is already active. Open the latest collection from Available courses."
         : "Private academic collection saved and verified. Open it from Available courses.");
       setPrepared(undefined);
-      onSaved();
+      onSaved(result);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The private academic collection could not be saved. Retry when connected.");
     } finally { scope.dispose(); setBusy(false); }
@@ -105,14 +107,20 @@ export function AcademicCourseUpload({ onSaved }: { onSaved: () => void }) {
 
   if (!accountId) return null;
   return <section className="academic-upload" aria-label="Private academic upload">
-    <h3>Add a prepared academic collection to your account</h3>
-    <p>Upload a reviewed AXOM ZIP package with its questions and images. An official weekly plan is optional when you confirm its term and module. All content stays private; answers and figures are checked before saving.</p>
+    <h3>Add an AXOM course to your account</h3>
+    <p>Choose an AXOM course folder with its questions and images. You can also use a ZIP. AXOM builds the course index for a package folder, so you do not need to make an archive. The first save stays private; answers and figures are checked before saving.</p>
     <input ref={input} type="file" accept=".zip" hidden onChange={event => {
       const file = event.target.files?.[0];
       event.target.value = "";
       if (file) void select(file);
     }} />
-    <GButton disabled={busy} onClick={() => input.current?.click()}>Choose prepared package</GButton>
+    <input ref={folderInput} type="file" hidden multiple {...{ webkitdirectory: "" }} aria-label="AXOM course folder" onChange={event => {
+      const files = [...(event.target.files ?? [])];
+      event.target.value = "";
+      if (files.length) void select(files);
+    }} />
+    <div className="row wrap gap8"><GButton disabled={busy} onClick={() => folderInput.current?.click()}>Choose AXOM folder</GButton>
+      <GButton disabled={busy} onClick={() => input.current?.click()}>Choose ZIP</GButton></div>
 
     {candidate?.kind === "plan-term" && <fieldset className="stack gap10" disabled={busy} aria-label="Confirm the course plan term">
       <legend>Confirm the term for {candidate.module}: {candidate.filename}</legend>

@@ -182,13 +182,19 @@ canonical store writes; interrupted work retains its local originals and retry i
 ## Community uploads and promotion
 
 Any signed-in account can upload an immutable question course privately with the
-existing academic uploader. Its owner may explicitly submit the current ready
+existing academic uploader. A native AXOM course folder works without making a
+ZIP; the uploader builds its course index locally and validates the package.
+Its owner may explicitly submit the current ready
 revision to Community Uploads after confirming sharing rights. The submission
 stays labeled **Unreviewed** and is separate from the approved course catalog.
 Signed-in readers can inspect its bounded plan preview and download the
 hash-checked question files; anonymous visitors cannot. Direct revision
 provenance remains private during community review. Community access alone
 cannot enroll a course in the tracker or place it in the official QBank.
+Downloaded community question IDs retain an account-scoped Unreviewed marker in
+the local vault and account snapshot. The marker is saved before content download,
+so an interrupted download leaves a warning. The Question Bank and every practice
+interface show the warning while allowing answer-ready questions to be practised.
 
 `20261101120000_academic_community_submissions.sql` records the exact submitted
 revision and rights attestation. Replacing that revision or withdrawing the

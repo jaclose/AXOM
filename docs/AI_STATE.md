@@ -5,23 +5,16 @@ authority: current-state
 ---
 # AXOM current AI state
 
-2026-10-30 release candidate `5dfafae1` integrates RHPS/ESoft import, review,
-teaching, QBank, Journal and Productivity work onto `origin/main` `0cb5769a`.
-It preserves the current publisher and excludes the incompatible unapplied
-release-catalog experiment. Private packages remain unpublished; production
-deployment and authenticated readback are pending validation.
-
-Prior snapshot: 2026-10-20 UTC, `feat/academic-library-v1` in
-`AXOM-academic-library-v1`, HEAD `78c00e04`. This reflection batch was pushed to
-main and deployed (authenticated deployment `7203032971`); six old dates were
-dismissed in the live UI and stayed dismissed after reload. Domain contracts remain authoritative.
-
-Batch pushes: `origin/main` triggers Vercel production, local commits do not.
-After the reflection release, JD approved one additional tested
-batch: participation streaks, compact Activity Log and catalog CI fixture repair.
-That batch is `dc055a2` on `origin/main`; its deployment was not verified on 2026-10-27.
-It does not authorize migrations, private publication or subsequent releases.
-Verify deployed SHA and protected index before release claims.
+2026-11-01 UTC: `codex/qbank-community-review` adds Community Uploads,
+folder submission, exact-revision review and durable Unreviewed practice
+warnings. It is not deployed. Chrome desktop/mobile community and week-practice
+checks, focused tests, typecheck, lint and build pass. Linked Supabase migration
+`20261101120000` was applied about 20:00 UTC; its ledger, catalog/reviewer
+functions and JD's Auth reviewer row were verified. No content was uploaded.
+Draft [PR #44](https://github.com/jaclose/AXOM/pull/44) holds the separate
+filing repair: 17,559 rows reconciled, ten terms still need decisions. MI
+belongs under NMI by owner decision; source review remains. Earlier dated
+release and deployment claims are preserved in `git show 1b189177:docs/AI_STATE.md`.
 
 ## Branch `jd-claude/eloquent-shannon-b2xof9` (2026-10-27, cloud)
 

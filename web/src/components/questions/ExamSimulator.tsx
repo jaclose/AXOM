@@ -24,6 +24,7 @@ import { QuizCalculator, type QuizCalculatorValue } from "./QuizCalculator";
 import { ExamplifyExam } from "../exam/ExamplifyExam";
 import { ExplanationBody, LabValuesPanel, useExhibitUrls } from "../exam/parts";
 import { useExamBlock, type ExamBlockApi, type FinishedBlock } from "../exam/useExamBlock";
+import { CommunityPracticeNotice } from "./CommunityPracticeNotice";
 
 type Panel = "labs" | "notes" | "calculator" | "settings" | null;
 
@@ -34,6 +35,8 @@ export interface ExamSimulatorProps {
   runId?: string;
   timeLimitSeconds?: number;
   title?: string;
+  unreviewedCount?: number;
+  communityPending?: boolean;
   resume?: SuspendedBlock;
   /** A finished block to read through in the same interface: read-only, results shown. */
   review?: FinishedBlock;
@@ -54,18 +57,22 @@ export function ExamSimulator(props: ExamSimulatorProps) {
   // AXOM's page frame "fixed" is measured from the frame and the exam sat inset.
   return createPortal(
     props.skin === "examsoft"
-      ? <ExamplifyExam exam={exam} title={title} timeLimitSeconds={props.timeLimitSeconds} onClose={props.onClose} />
-      : <ClassicExam exam={exam} skin={props.skin} mode={props.mode} onClose={props.onClose} />,
+      ? <ExamplifyExam exam={exam} title={title} timeLimitSeconds={props.timeLimitSeconds} onClose={props.onClose}
+        unreviewedCount={props.unreviewedCount} communityPending={props.communityPending} />
+      : <ClassicExam exam={exam} skin={props.skin} mode={props.mode} onClose={props.onClose}
+        unreviewedCount={props.unreviewedCount} communityPending={props.communityPending} />,
     document.body,
   );
 }
 
 /** The UWorld and NBME interfaces: a navy top bar, tools on the right, the block clock in the bottom bar. */
-function ClassicExam({ exam, skin, mode, onClose }: {
+function ClassicExam({ exam, skin, mode, onClose, unreviewedCount = 0, communityPending = false }: {
   exam: ExamBlockApi;
   skin: Exclude<ExamSkin, "examsoft">;
   mode: "exam" | "tutor";
   onClose?: () => void;
+  unreviewedCount?: number;
+  communityPending?: boolean;
 }) {
   const { pool, question, index, item, counts, entries, correctKey, revealed, result, prefs, setPrefs, tool, setTool, reviewing } = exam;
   const [panel, setPanel] = useState<Panel>(null);
@@ -137,7 +144,7 @@ function ClassicExam({ exam, skin, mode, onClose }: {
   );
 
   return (
-    <div ref={exam.rootRef} className={`exam-sim skin-${skin} theme-${prefs.theme} ${reviewing ? "is-review" : ""}`} role="dialog" aria-modal="true" aria-label={`${EXAM_SKINS[skin].label} exam simulation`} aria-busy={exam.finishStatus === "saving"} tabIndex={-1} style={style}>
+    <div ref={exam.rootRef} className={`exam-sim skin-${skin} theme-${prefs.theme} ${reviewing ? "is-review" : ""} ${unreviewedCount || communityPending ? "has-community-notice" : ""}`} role="dialog" aria-modal="true" aria-label={`${EXAM_SKINS[skin].label} exam simulation`} aria-busy={exam.finishStatus === "saving"} tabIndex={-1} style={style}>
       {/* ---------------------------------------------------------------- top */}
       <header className="exam-sim-top">
         <div className="sim-top-left">
@@ -169,6 +176,8 @@ function ClassicExam({ exam, skin, mode, onClose }: {
           <SimTool icon={<Settings size={18} />} label="Settings" active={panel === "settings"} onClick={() => setPanel((value) => (value === "settings" ? null : "settings"))} />
         </div>
       </header>
+
+      <CommunityPracticeNotice count={unreviewedCount} pending={communityPending} simulator />
 
       {/* --------------------------------------------------------------- body */}
       <div className={`exam-sim-main ${panel ? "with-panel" : ""}`}>
