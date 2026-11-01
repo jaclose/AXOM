@@ -19,6 +19,9 @@ Local generation and validation passed for 20 communications types in 160 visual
 variants and seven Supabase Auth/security templates. The communications browser journey
 and gallery also passed after the motion capture was updated for the current `?app=1`
 entry route. These are synthetic previews; they are not delivered email.
+The updated account export includes submitted journal experience feedback. Apply the
+`20261101130000_journal_experience_feedback` migration before deploying this function
+bundle; exports fail closed if that owner-scoped table is unavailable.
 
 `send-test` can enqueue only for the signed-in administrator's **own verified account**;
 it does not accept a recipient override. The worker then requires `AXOM_EMAIL_MODE=test`,

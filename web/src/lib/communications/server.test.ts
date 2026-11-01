@@ -4,6 +4,7 @@ import { CommunicationsService, type EmailJob } from "./server/service";
 import { createCommunicationsHandler } from "./server/handler";
 import {
   cancelDeletion,
+  journalFeedbackForExport,
   processPrivacy,
   removeOwnedAcademicStorage,
   removeOwnedAccountStorage,
@@ -168,6 +169,30 @@ describe("communications server boundaries", () => {
 
 
 describe("deletion dependency safety", () => {
+  it("exports every page of only the owner's journal feedback", async () => {
+    const feedback = Array.from({ length: 501 }, (_, index) => ({
+      id: `feedback-${index}`, user_id: "account-a", rating: 4, liked: "Writing flow",
+      want_more: "", missing: "", pain_points: "", comment: "", created_at: "2026-11-01T00:00:00Z",
+    }));
+    const { db, calls } = database([
+      { data: feedback.slice(0, 500), error: null, count: 501 },
+      { data: feedback.slice(500), error: null, count: 501 },
+    ]);
+    const rows = await journalFeedbackForExport(new CommunicationsService(db, {}), "account-a");
+    expect(rows).toHaveLength(501);
+    expect(rows[0]).not.toHaveProperty("user_id");
+    expect(calls.filter(call => call.table === "journal_experience_feedback" && call.method === "eq"))
+      .toEqual(Array.from({ length: 2 }, () => ({ table: "journal_experience_feedback", method: "eq", args: ["user_id", "account-a"] })));
+    expect(calls.filter(call => call.table === "journal_experience_feedback" && call.method === "range").map(call => call.args))
+      .toEqual([[0, 499], [500, 999]]);
+  });
+
+  it("rejects a foreign feedback row even if the service-role query returns it", async () => {
+    const { db } = database([{ data: [{ id: "foreign", user_id: "account-b" }], error: null, count: 1 }]);
+    await expect(journalFeedbackForExport(new CommunicationsService(db, {}), "account-a"))
+      .rejects.toThrow("journal-feedback-export-invalid");
+  });
+
   it("keeps Auth intact when a linked provider contact cannot be removed without its credential", async () => {
     const { db, calls, storage } = database([
       ok(), ok(), ok([{ id: "delete-a", user_id: "account-a", kind: "deletion", status: "scheduled", scheduled_for: "2000-01-01" }]),
@@ -187,9 +212,11 @@ describe("deletion dependency safety", () => {
     { scenario: "cleanup cannot be confirmed", removalError: { message: "unavailable" }, failureCode: "export-deletion-reconciliation-required" },
   ])("does not publish an export after its atomic barrier is lost when $scenario", async ({ removalError, failureCode }) => {
     const request = { id: "11111111-1111-4111-8111-111111111111", user_id: "account-a", kind: "export", status: "requested" };
+    const feedback = { id: "feedback-a", user_id: "account-a", rating: 5, liked: "Private pages", want_more: "", missing: "", pain_points: "", comment: "", created_at: "2026-11-01T00:00:00Z" };
     const { db, calls, storage } = database([
       ok(), ok(), ok([request]), ok({ id: request.id }),
       ok([]), ok([]), ok([]),
+      { data: [feedback], error: null, count: 1 },
       ok(false), ok(),
       ok([]), ok([]), ok(), ok(), ok(),
     ]);
@@ -206,6 +233,10 @@ describe("deletion dependency safety", () => {
     await expect(processPrivacy(service)).resolves.toBe(0);
 
     expect(storage.upload).toHaveBeenCalledOnce();
+    const exportedFeedback = JSON.parse(String(storage.upload.mock.calls[0][1])).journalFeedback;
+    expect(exportedFeedback).toHaveLength(1);
+    expect(exportedFeedback[0]).toMatchObject({ id: feedback.id, rating: 5, liked: "Private pages" });
+    expect(exportedFeedback[0]).not.toHaveProperty("user_id");
     expect(storage.remove).toHaveBeenCalledWith([`account-a/${request.id}.json`]);
     expect(enqueue).not.toHaveBeenCalled();
     expect(calls).toContainEqual({
@@ -220,6 +251,7 @@ describe("deletion dependency safety", () => {
     const { db, calls, storage } = database([
       ok(), ok(), ok([request]), ok({ id: request.id }),
       ok([]), ok([]), ok([]),
+      { data: [], error: null, count: 0 },
       { data: null, error: { message: "finalization response lost" } }, ok(),
       ok([]), ok([]), ok(), ok(), ok(),
     ]);
@@ -249,6 +281,7 @@ describe("deletion dependency safety", () => {
     const { db, calls, storage } = database([
       ok(), ok(), ok([request]), ok({ id: request.id }),
       ok([]), ok([]), ok([]),
+      { data: [], error: null, count: 0 },
       ok(),
       ok([]), ok([]), ok(), ok(), ok(),
     ]);
