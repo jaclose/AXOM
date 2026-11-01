@@ -241,7 +241,7 @@ export function JournalPage({ registerAppTransitionGuard }: {
 
   useEffect(() => {
     if (!closingDay) return;
-    const timeout = window.setTimeout(() => setClosingDay(null), reducedMotion ? 2200 : 3000);
+    const timeout = window.setTimeout(() => setClosingDay(null), reducedMotion ? 2200 : 3800);
     return () => window.clearTimeout(timeout);
   }, [closingDay, reducedMotion]);
 
@@ -552,7 +552,7 @@ function JournalWritingPage({
   const reducedMotion = useReducedMotion();
   const [zoomed, setZoomed] = useState(startZoomed);
   const [settling, setSettling] = useState(false);
-  const [hasInteractedSinceOpen, setHasInteractedSinceOpen] = useState(false);
+  const [hasInteractedSinceOpen, setHasInteractedSinceOpen] = useState(startZoomed || day !== today);
   const [composing, setComposing] = useState(false);
   const [promptMode, setPromptMode] = useState<"open" | JournalPurpose>(() => {
     const hasEarlierPromptNotes = [entry?.today, entry?.blockers, entry?.tomorrow, ...(entry?.wins ?? []), ...(entry?.losses ?? [])]
@@ -656,7 +656,7 @@ function JournalWritingPage({
   }
 
   function openFullPage() {
-    setHasInteractedSinceOpen(dirtyRef.current);
+    setHasInteractedSinceOpen(dirtyRef.current || day !== today);
     setZoomed(true);
   }
 

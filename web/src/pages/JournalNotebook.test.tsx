@@ -185,6 +185,15 @@ describe("Journal notebook foundation", () => {
     expect(screen.getByRole("dialog", { name: "Full journal" })).toBeTruthy();
   });
 
+  it("keeps a dated page opened from a reminder in full view", async () => {
+    vi.useFakeTimers();
+    useUi.setState({ journalDay: YESTERDAY_KEY });
+    await act(async () => { render(<JournalPage />); await Promise.resolve(); });
+    expect(screen.getByRole("heading", { name: "Yesterday’s page" })).toBeTruthy();
+    act(() => { vi.advanceTimersByTime(6000); });
+    expect(screen.getByRole("dialog", { name: "Full journal" })).toBeTruthy();
+  });
+
   it("returns focus and the same draft to the desk when the writer puts the page down", () => {
     vi.useFakeTimers();
     vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
