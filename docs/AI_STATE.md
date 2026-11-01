@@ -20,6 +20,17 @@ CLI 2.122.0 failed on `LOCK TABLE` (25P01) at 12:35 UTC; history stayed
 Owner reviewer grant under `service_role` verified 12:49:35–12:49:40 UTC.
 No content upload or sharing change.
 
+## 2026-11-01 QBank production receipt
+
+CLI 2.118.0 applied `20261101120000` by 20:01 UTC and `20261101130000`
+by 20:22 UTC with `db push --linked --skip-vault`, after linked-list and
+dry-run checks showed each as the sole pending version in order. The hosted
+ledger and academic reviewer/catalog/community functions were verified. The
+private academic-content bucket and file manifest accept held EMF; learner
+practice still requires a viewable figure. JD's matched Auth reviewer row
+exists. Hosted collections and community submissions were both zero. No
+course content was uploaded or sharing changed.
+
 Prior snapshot: 2026-10-20 UTC, `feat/academic-library-v1` in
 `AXOM-academic-library-v1`, HEAD `78c00e04`. This reflection batch was pushed to
 main and deployed (authenticated deployment `7203032971`); six old dates were
@@ -107,22 +118,8 @@ Preserve account locks, source identity, atomic reviewed filing, attachment roll
 revocable shares and owner-only recovery. Uncertain removals retain paths;
 ambiguous cross-service work requires reconciliation, not inferred success.
 
-The last authenticated production inspection on 2026-10-15 recorded 23
-migrations through `20261013230000`. It is not a fresh production check.
-Nine later migrations remain locally tested only:
-
-- `20261014120000_workspace_originals.sql`;
-- `20261014121000_academic_revision_order.sql`;
-- `20261014122000_academic_current_review_gate.sql`;
-- `20261015133000_academic_gif_media_support.sql`;
-- `20261015225638_bound_question_share_recovery.sql`;
-- `20261015230042_enforce_academic_source_identity.sql`;
-- `20261016002404_cascade_academic_owner_deletion.sql`;
-- `20261016011812_harden_privacy_request_barrier.sql`; and
-- `20261017233759_enforce_academic_collection_classification.sql`.
-
-Draft [PR #30](https://github.com/jaclose/AXOM/pull/30) reports a 2026-10-25 audit with
-30 applied and only the last two pending; recheck the live list before any release.
+The older 2026-10-15 and PR #30 migration counts are historical; the current
+linked receipt is above. Recheck the live list before another migration.
 
 Journal transitions await confirmed writes; failures preserve drafts. Closeout
 copy is opt-in. Images export beyond the 14 MB account limit; teardown is best effort.
@@ -144,13 +141,11 @@ high, 39 moderate, three low) was not refreshed; dependency remediation is separ
 
 ## Cloud and delivery boundary
 
-Read-only production evidence dated 2026-10-15 showed 23 recorded migrations
-and zero academic collections, revisions, files, storage objects or question
-shares. No owner-authenticated production upload, reload, share recovery,
+2026-11-01 linked SQL showed zero academic collections and zero community
+submissions. No owner-authenticated production upload, reload, share recovery,
 media/checksum readback or revocation was completed.
 
-Before production acceptance: apply every pending migration (including
-`20261027120000` from the branch above) through the approved path; upload only cleared private material as its authenticated owner; reload it
+Before production acceptance: upload only cleared private material as its authenticated owner; reload it
 through the learner UI; verify media/checksums and revocation; and record exact
 receipts. Also complete a true multi-connection privacy-lock check, Journal
 image-race and broader multi-tab coverage, QBank opener-clone recovery analysis, Safari/WebKit and
