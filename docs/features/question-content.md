@@ -76,6 +76,12 @@ Storage and schema: [data model](../architecture/data-model.md).
    keeps its own numbering and provenance. Sets are never flattened into one run of numbers
    to get round a repeated number.
 
+For a prepared library, `source-mark-verified` records a choice whose mark was checked
+against the original answer slide. It requires an attached `answer_reveal` image with
+its source file, page and SHA-256 checksum. The mark remains distinct from a printed
+key and a person's review. An unchecked extraction remains `answer-reveal-slide` and
+is held. Source conflicts and missing essential content still hold the question.
+
 **Image visibility** (`visibility.ts`, every role tested in every mode):
 
 | Role | While answering | After answering (tutor) | Review |

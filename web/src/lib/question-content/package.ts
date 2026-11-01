@@ -77,13 +77,13 @@ export interface ProvenanceMetadata {
   notes?: string;
 }
 
-export const ANSWER_EVIDENCE = ["printed-key", "answer-reveal-slide", "explanation", "reviewer"] as const;
+export const ANSWER_EVIDENCE = ["printed-key", "answer-reveal-slide", "source-mark-verified", "explanation", "reviewer"] as const;
 export type AnswerEvidence = (typeof ANSWER_EVIDENCE)[number];
 
 export interface AnswerKey {
   /** One label for a single best answer; more for a multiple-select question. */
   labels: string[];
-  /** Where the key came from. A highlighted copy of a slide is evidence, not a printed key. */
+  /** Where the key came from. A checked answer mark remains distinct from a printed key or a person's review. */
   evidence?: AnswerEvidence;
 }
 

@@ -28,6 +28,14 @@ describe("ready: a verified key and nothing that bears on answering it", () => {
     expect(questionReadiness(question({ correctAnswer: { labels: ["B"], evidence: "reviewer" } }), []).readiness).toBe("ready");
   });
 
+  it("is ready with a visually checked source mark and its exact answer image", () => {
+    const marked = question({
+      correctAnswer: { labels: ["B"], evidence: "source-mark-verified" },
+      assets: [{ id: "answer", filename: "answer.png", mimeType: "image/png", role: "answer_reveal", questionId: "q1", sourceFile: "invented-answer.pdf", sourcePage: 3, checksum: `sha256:${"a".repeat(64)}` }],
+    });
+    expect(questionReadiness(marked, [])).toEqual({ readiness: "ready", reasons: [], advisories: [] });
+  });
+
   it("is ready whatever is wrong with another question or with the package as a whole", () => {
     const issues: PackageIssue[] = [
       { severity: "error", code: "invalid_question", message: "Another question has one choice.", questionId: "q2" },
@@ -96,6 +104,21 @@ describe("an answer that is not verified is never ready", () => {
     const verdict = questionReadiness(question({ correctAnswer: { labels: ["B"], evidence: "answer-reveal-slide" } }), []);
     expect(verdict.readiness).toBe("needs-review");
     expect(verdict.reasons).toEqual([expect.stringContaining("slide that marks the answer")]);
+  });
+
+  it("a declared checked mark without the source image and checksum", () => {
+    const verdict = questionReadiness(question({ correctAnswer: { labels: ["B"], evidence: "source-mark-verified" } }), []);
+    expect(verdict.readiness).toBe("needs-review");
+    expect(verdict.reasons).toEqual([expect.stringContaining("missing its answer image")]);
+  });
+
+  it("a checked mark with a blocking source conflict", () => {
+    const marked = question({
+      correctAnswer: { labels: ["B"], evidence: "source-mark-verified" },
+      assets: [{ id: "answer", filename: "answer.png", mimeType: "image/png", role: "answer_reveal", questionId: "q1", sourceFile: "invented-answer.pdf", sourcePage: 3, checksum: `sha256:${"a".repeat(64)}` }],
+      flags: [{ type: "source_inconsistency", message: "The source has two plausible marked choices." }],
+    });
+    expect(questionReadiness(marked, []).reasons).toEqual(["The source has two plausible marked choices."]);
   });
 
   it("a key worked out from the wording of an explanation", () => {
