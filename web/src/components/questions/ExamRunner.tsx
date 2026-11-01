@@ -1633,7 +1633,9 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         <QuestionViewFrame view={presentation.view}>
         <div aria-label={question.content ? "Question stem" : undefined} tabIndex={question.content ? -1 : undefined}
           ref={question.content ? stemRef : undefined} data-study-part="stem">
-        <QuestionContent question={question} part="stem" mode={revealed ? "answered" : "question"} fallback={
+        <QuestionContent question={question} part="stem" mode={revealed ? "answered" : "question"}
+          annotations={stemAnnotations} onSelection={(range) => handleAnnotationSelection("stem", range)}
+          onDeleteAnnotation={deleteAnnotation} eraseMode={annotationTool?.kind === "eraser"} fallback={
           <AnnotatedQuestionText
           text={question.stem}
           annotations={stemAnnotations}
@@ -1710,7 +1712,9 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             onMarkExplanationWrong={() => flagExtractionIssue("explanation")}
             onMarkAnswerWrong={() => flagExtractionIssue("answer")}
             onEditMapping={() => setEditingMapping((value) => !value)}
-            explanationContent={question.explanation ? (<QuestionContent question={question} part="explanation" mode="answered" fallback={
+            explanationContent={question.explanation ? (<QuestionContent question={question} part="explanation" mode="answered"
+              annotations={explanationAnnotations} onSelection={(range) => handleAnnotationSelection("explanation", range)}
+              onDeleteAnnotation={deleteAnnotation} eraseMode={annotationTool?.kind === "eraser"} fallback={
               <AnnotatedQuestionText
                 text={question.explanation.trim()}
                 annotations={explanationAnnotations}

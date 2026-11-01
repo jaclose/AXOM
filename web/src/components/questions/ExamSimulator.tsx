@@ -197,7 +197,8 @@ function ClassicExam({ exam, skin, mode, onClose }: {
           data-study-question data-question-id={question.id}>
           <h2 id="sim-item-heading" className="sr-only">Item {index + 1} of {pool.length}</h2>
           <div className={`sim-stem ${tool === "highlight" ? "tool-highlight" : ""} ${tool === "erase" ? "tool-erase" : ""}`} data-study-part="stem">
-            <div aria-label={question.content ? "Question stem" : undefined} tabIndex={question.content ? -1 : undefined} ref={question.content ? exam.stemRef : undefined}><QuestionContent question={question} part="stem" fallback={<AnnotatedQuestionText
+            <div aria-label={question.content ? "Question stem" : undefined} tabIndex={question.content ? -1 : undefined} ref={question.content ? exam.stemRef : undefined}><QuestionContent question={question} part="stem"
+              annotations={exam.annotations} onSelection={exam.onSelection} onDeleteAnnotation={exam.onDeleteAnnotation} eraseMode={tool === "erase"} fallback={<AnnotatedQuestionText
               text={question.stem}
               annotations={exam.annotations}
               className="sim-stem-text"

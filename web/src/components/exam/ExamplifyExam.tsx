@@ -276,7 +276,8 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
 
           {!collapsed && (
             <div className={`xfy-stem ${tool === "highlight" ? "tool-highlight" : ""} ${tool === "erase" ? "tool-erase" : ""}`}>
-              <div aria-label={question.content ? "Question stem" : undefined} tabIndex={question.content ? -1 : undefined} ref={question.content ? exam.stemRef : undefined}><QuestionContent question={question} part="stem" fallback={<AnnotatedQuestionText
+              <div aria-label={question.content ? "Question stem" : undefined} tabIndex={question.content ? -1 : undefined} ref={question.content ? exam.stemRef : undefined}><QuestionContent question={question} part="stem"
+                annotations={exam.annotations} onSelection={exam.onSelection} onDeleteAnnotation={exam.onDeleteAnnotation} eraseMode={tool === "erase"} fallback={<AnnotatedQuestionText
                 text={question.stem}
                 annotations={exam.annotations}
                 className="xfy-stem-text"
