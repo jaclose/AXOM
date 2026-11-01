@@ -39,6 +39,39 @@ objects, text, or logos. The laptop's Apple silhouette is sourced from the
 [Simple Icons Apple entry](https://simpleicons.org/?q=apple); it is used only
 on the depicted computer.
 
+The four keepsake preview images in `web/public/assets/journal/previews/` are
+original hand-authored SVG illustrations of the actual cover, paper, laptop,
+and lamp variants. They are embedded only in the personalization cards; the
+adjacent live desk preview renders the user's staged selection. No third-party
+product photography is used. AirPods use a CSS silhouette; the red over-ear
+headphones use an original hand-authored SVG at
+`web/public/assets/journal/over-ear-headphones.svg`. The miniature MacBook
+reuses the same Apple mark as the full desk. No Beats logo is embedded.
+
+## Desk personalization and ambience
+
+The scene has five authored lighting presets: first light, late sun, cloud
+cover, rain, and night. They describe desk ambience, not live local weather.
+Automatic mode changes the displayed scene on an idle interval without writing
+to the profile on each change. It pauses while the document is hidden, while
+the user is writing or in full-page focus, or when reduced motion is requested.
+The desk also has manual next-scene and pause/resume controls. The saved
+preference records only the starting scene and whether automatic cycling is
+enabled.
+
+Clicking empty desk around the open book puts it down. An explicit Put book
+down control does the same; editor and other interactive controls do not
+trigger it. A dirty page passes through the same confirmed local write gate as
+other journal exits, so a failed write leaves the page open.
+
+The Personalize menu stages a scene before saving it, and previews each
+keepsake before unlock. AXOM Credits are the visible name for the existing
+earned currency. The balance selector includes completed study sessions and
+credited productivity days, subtracting saved keepsake ownership. A staged
+purchase is discarded on Cancel and charged only after Save; historical
+unlocks stay owned. New notebooks start with AirPods, while previously saved
+wired headphones remain selected.
+
 ## Data model and persistence
 
 The workspace remains schema v34 and IndexedDB-first. No database version or

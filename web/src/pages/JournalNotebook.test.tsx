@@ -8,6 +8,7 @@ import { dayKey } from "../lib/scoring";
 import { localDateKey } from "../lib/dailyRollover";
 import type { JournalImageAttachment } from "../lib/journalNotebook";
 import * as journalNotebook from "../lib/journalNotebook";
+import { normalizeStudyStreaks, studyCreditsBalance } from "../lib/studyStreaks";
 import * as localVault from "../lib/localVault";
 import { useAccount } from "../lib/account/accountStore";
 import { JournalPage } from "./JournalPage";
@@ -119,6 +120,76 @@ describe("Journal notebook foundation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Put down on desk" }));
     act(() => { vi.advanceTimersByTime(860); });
     expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Your open page" }));
+  });
+
+  it("offers an explicit put-down and closes when the surrounding desk is clicked", async () => {
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i }));
+    const desk = screen.getByRole("region", { name: "Write at your desk" });
+    expect(within(desk).getByRole("button", { name: "Put book down" })).toBeTruthy();
+    fireEvent.change(within(desk).getByLabelText("Write freely at your desk"), { target: { value: "A useful moment." } });
+    fireEvent.click(within(desk).getByLabelText("Write freely at your desk"));
+    expect(screen.getByRole("region", { name: "Write at your desk" })).toBeTruthy();
+    fireEvent.click(desk);
+    await waitFor(() => expect(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i }));
+    expect((screen.getByLabelText("Write freely at your desk") as HTMLTextAreaElement).value).toBe("A useful moment.");
+    fireEvent.click(screen.getByRole("button", { name: "Put book down" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i })).toBeTruthy());
+  });
+
+  it("shows visual keepsakes and cycles the ambient desk scene", () => {
+    render(<JournalPage />);
+    expect(screen.getByLabelText(/AXOM Credits available/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Next desk scene" }));
+    expect(screen.getByText("Cloud cover")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Pause changing desk scene" }));
+    expect(screen.getByRole("button", { name: "Resume changing desk scene" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Personalize" }));
+    const menu = screen.getByRole("dialog", { name: "Personalize your journal" });
+    fireEvent.change(within(menu).getByLabelText("Listening setup"), { target: { value: "beats" } });
+    expect(menu.querySelector(".journal-preview-scene.headphones-beats")).toBeTruthy();
+    fireEvent.click(within(menu).getByRole("button", { name: "Keepsakes" }));
+    expect(within(menu).getByRole("img", { name: "Copper cover preview" })).toBeTruthy();
+    fireEvent.click(within(menu).getByRole("button", { name: "Preview Copper cover" }));
+    expect(within(menu).getByText("Previewing Copper cover")).toBeTruthy();
+  });
+
+  it("stages a keepsake purchase until save, then keeps ownership and deducts credits", () => {
+    useStore.setState((state) => {
+      const ledger = normalizeStudyStreaks(undefined, TODAY_KEY);
+      ledger.productivity.creditedDays = [YESTERDAY_KEY, TODAY_KEY];
+      return { sessions: [], profile: { ...state.profile, studyStreaks: ledger } };
+    });
+    render(<JournalPage />);
+    expect(studyCreditsBalance(useStore.getState())).toBe(2);
+    fireEvent.click(screen.getByRole("button", { name: "Personalize" }));
+    let menu = screen.getByRole("dialog", { name: "Personalize your journal" });
+    fireEvent.click(within(menu).getByRole("button", { name: "Keepsakes" }));
+    fireEvent.click(within(menu).getByRole("button", { name: "Preview Copper cover" }));
+    fireEvent.click(within(menu).getAllByRole("button", { name: "Unlock · 2 AC" })[0]);
+    expect(within(menu).getByText("0 AXOM Credits")).toBeTruthy();
+    expect(useStore.getState().profile.journalNotebook?.unlockedStyles).not.toContain("copper");
+    fireEvent.click(within(menu).getByRole("button", { name: "Cancel" }));
+    expect(studyCreditsBalance(useStore.getState())).toBe(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Personalize" }));
+    menu = screen.getByRole("dialog", { name: "Personalize your journal" });
+    fireEvent.click(within(menu).getByRole("button", { name: "Keepsakes" }));
+    fireEvent.click(within(menu).getAllByRole("button", { name: "Unlock · 2 AC" })[0]);
+    fireEvent.click(within(menu).getByRole("button", { name: "Save changes" }));
+    expect(useStore.getState().profile.journalNotebook?.unlockedStyles).toContain("copper");
+    expect(studyCreditsBalance(useStore.getState())).toBe(0);
+    cleanup();
+    render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Personalize" }));
+    menu = screen.getByRole("dialog", { name: "Personalize your journal" });
+    fireEvent.click(within(menu).getByRole("button", { name: "Keepsakes" }));
+    expect(within(menu).getByRole("button", { name: "Owned" })).toBeTruthy();
+    expect(within(menu).getByText("0 AXOM Credits")).toBeTruthy();
   });
 
   it("keeps the Open page choice when returning from zoom to a guided desk", () => {

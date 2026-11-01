@@ -5,8 +5,8 @@ import {
 import { createPortal } from "react-dom";
 import { ICON_SIZE } from "../lib/iconSize";
 import {
-  ArrowLeft, ArrowRight, BookOpen, CalendarClock, CheckCircle2, ChevronRight,
-  Download, HeartHandshake, ImagePlus, Lock, Palette, Pencil, Plus, Save,
+  ArrowDown, ArrowLeft, ArrowRight, BookOpen, CalendarClock, CheckCircle2, ChevronRight,
+  CloudSun, Download, HeartHandshake, ImagePlus, Lock, Palette, Pause, Pencil, Play, Plus, Save,
   Trash2, Trophy, X,
 } from "lucide-react";
 import { useStore } from "../lib/store";
@@ -29,6 +29,7 @@ import { focusCheckInLedger } from "../lib/focusCheckIn";
 import { useReducedMotion } from "../lib/motion";
 import { normalizeDailyLoopReminderPreferences } from "../lib/dailyLoopReminders";
 import { journalReflectionNeedsSupport } from "../lib/journalSupport";
+import { studyCreditsBalance, STUDY_CURRENCY_NAME, STUDY_CURRENCY_SHORT } from "../lib/studyStreaks";
 import { unlock, useUnlocked } from "../lib/unlocks";
 import { useSoundscape } from "../lib/soundscapes/store";
 import { submitJournalFeedback, type JournalExperienceFeedbackInput } from "../lib/journalFeedback";
@@ -40,8 +41,6 @@ import {
   createJournalAttachmentExport,
   formatBytes,
   hasNotebookContent,
-  journalInkBalance,
-  journalInkEarned,
   nextJournalDay,
   normalizeJournalAttachments,
   normalizeJournalNotebookPreferences,
@@ -88,6 +87,33 @@ const journalPromptSets: Record<JournalPurpose, { today: string; blockers: strin
     tomorrow: "What would make tomorrow gentler?",
   },
 };
+
+const deskWeatherSequence: JournalNotebookPreferences["weather"][] = ["dawn", "sun", "overcast", "rain", "night"];
+const deskWeatherName: Record<JournalNotebookPreferences["weather"], string> = {
+  dawn: "First light",
+  sun: "Late sun",
+  overcast: "Cloud cover",
+  rain: "Rain",
+  night: "Night",
+};
+
+function nextDeskWeather(current: JournalNotebookPreferences["weather"]): JournalNotebookPreferences["weather"] {
+  return deskWeatherSequence[(deskWeatherSequence.indexOf(current) + 1) % deskWeatherSequence.length];
+}
+
+function JournalWeatherControls({ weather, automatic, paused, onNext, onToggle }: {
+  weather: JournalNotebookPreferences["weather"];
+  automatic: boolean;
+  paused: boolean;
+  onNext: () => void;
+  onToggle: () => void;
+}) {
+  return <div className="journal-weather-controls" aria-label="Desk scene weather">
+    <span className="journal-weather-label"><CloudSun size={ICON_SIZE.body} /> <b>{deskWeatherName[weather]}</b><small>{automatic ? (paused ? "Paused" : "Changing scene") : "Manual scene"}</small></span>
+    <button type="button" onClick={onNext} aria-label="Next desk scene" title="Next desk scene"><ArrowRight size={ICON_SIZE.body} /></button>
+    {automatic && <button type="button" onClick={onToggle} aria-label={paused ? "Resume changing desk scene" : "Pause changing desk scene"} title={paused ? "Resume changing desk scene" : "Pause changing desk scene"}>{paused ? <Play size={ICON_SIZE.body} /> : <Pause size={ICON_SIZE.body} />}</button>}
+  </div>;
+}
 
 function journalFeedbackRequested(): boolean {
   if (typeof window === "undefined") return false;
@@ -225,6 +251,9 @@ export function JournalPage({ registerAppTransitionGuard }: {
   const requestedJournalDayRef = useRef<string | null>(null);
   const today = s.activeDayKey || dayKey();
   const preferences = normalizeJournalNotebookPreferences((s.profile as JournalProfile).journalNotebook);
+  const credits = studyCreditsBalance(s);
+  const [sceneWeather, setSceneWeather] = useState(preferences.weather);
+  const [weatherPaused, setWeatherPaused] = useState(false);
   const missed = missedStandupDays({ journal: s.journal, logs: s.logs, dayPlans: s.dayPlans });
   const entries = useMemo(
     () => [...s.journal].sort((a, b) => entryDayKey(b).localeCompare(entryDayKey(a))),
@@ -232,6 +261,18 @@ export function JournalPage({ registerAppTransitionGuard }: {
   );
 
   useEffect(() => { announceJournalEnergyOnce(); }, []);
+
+  useEffect(() => { setSceneWeather(preferences.weather); }, [preferences.weather]);
+
+  useEffect(() => {
+    if (!preferences.weatherCycle || weatherPaused || reducedMotion) return;
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== "visible" || document.querySelector(".journal-book-stage.is-zoomed")) return;
+      if (document.activeElement instanceof Element && document.activeElement.closest(".journal-inline-book")) return;
+      setSceneWeather(nextDeskWeather);
+    }, 16000);
+    return () => window.clearInterval(interval);
+  }, [preferences.weatherCycle, weatherPaused, reducedMotion]);
 
   useEffect(() => {
     const openFromRoute = () => { if (journalFeedbackRequested()) setFeedbackOpen(true); };
@@ -311,7 +352,8 @@ export function JournalPage({ registerAppTransitionGuard }: {
         </div>
         <div className="journal-header-actions">
           <GButton size="sm" onClick={() => setFeedbackOpen(true)}>Feedback</GButton>
-          <GButton size="sm" onClick={() => setCustomizing(true)}><Palette size={ICON_SIZE.body} /> Customize</GButton>
+          <span className="journal-credit-chip" aria-label={`${credits} ${STUDY_CURRENCY_NAME} available`}><span aria-hidden="true">A</span><strong>{credits}</strong><small>{STUDY_CURRENCY_SHORT}</small></span>
+          <GButton size="sm" onClick={() => setCustomizing(true)}><Palette size={ICON_SIZE.body} /> Personalize</GButton>
           {open && <GButton size="sm" onClick={() => { void requestTransition(closeNotebook); }}><BookOpen size={ICON_SIZE.body} /> Library</GButton>}
         </div>
       </header>
@@ -322,6 +364,10 @@ export function JournalPage({ registerAppTransitionGuard }: {
           entries={entries}
           missed={missed}
           today={today}
+          sceneWeather={sceneWeather}
+          weatherPaused={weatherPaused}
+          onNextWeather={() => setSceneWeather(nextDeskWeather)}
+          onToggleWeather={() => setWeatherPaused((current) => !current)}
           onOpenDay={openDay}
         />
       ) : (
@@ -330,6 +376,10 @@ export function JournalPage({ registerAppTransitionGuard }: {
           day={selectedDay}
           today={today}
           preferences={preferences}
+          sceneWeather={sceneWeather}
+          weatherPaused={weatherPaused}
+          onNextWeather={() => setSceneWeather(nextDeskWeather)}
+          onToggleWeather={() => setWeatherPaused((current) => !current)}
           direction={turnDirection}
           startZoomed={startZoomed}
           onNavigate={navigate}
@@ -353,7 +403,6 @@ export function JournalPage({ registerAppTransitionGuard }: {
       {customizing && (
         <NotebookCustomization
           initial={preferences}
-          sessions={s.sessions ?? []}
           onClose={() => setCustomizing(false)}
           onSave={(journalNotebook) => {
             const patch = { journalNotebook } as Partial<Profile> & { journalNotebook: JournalNotebookPreferences };
@@ -381,12 +430,16 @@ export function JournalPage({ registerAppTransitionGuard }: {
 }
 
 function NotebookLibrary({
-  preferences, entries, missed, today, onOpenDay,
+  preferences, entries, missed, today, sceneWeather, weatherPaused, onNextWeather, onToggleWeather, onOpenDay,
 }: {
   preferences: JournalNotebookPreferences;
   entries: JournalEntry[];
   missed: string[];
   today: string;
+  sceneWeather: JournalNotebookPreferences["weather"];
+  weatherPaused: boolean;
+  onNextWeather: () => void;
+  onToggleWeather: () => void;
   onOpenDay: (key: string, remediation?: boolean) => void;
 }) {
   const s = useStore();
@@ -422,10 +475,12 @@ function NotebookLibrary({
   return (
     <div className="journal-library-grid">
       <section
-        className={`journal-library-hero journal-desk desk-${preferences.deskTone} weather-${preferences.weather} laptop-${preferences.laptopTone} laptop-${preferences.laptopPosition} headphones-${preferences.headphones} drink-${preferences.drink} accent-${preferences.deskAccent ?? "none"}`}
+        className={`journal-library-hero journal-desk desk-${preferences.deskTone} weather-${sceneWeather} laptop-${preferences.laptopTone} laptop-${preferences.laptopPosition} headphones-${preferences.headphones} drink-${preferences.drink} accent-${preferences.deskAccent ?? "none"}`}
         aria-labelledby="journal-library-title"
       >
+        {deskWeatherSequence.map((weather) => <span key={weather} className={`journal-weather-wash wash-${weather}`} aria-hidden="true" />)}
         <span className="journal-desk-window" aria-hidden="true" />
+        <JournalWeatherControls weather={sceneWeather} automatic={preferences.weatherCycle !== false} paused={weatherPaused} onNext={onNextWeather} onToggle={onToggleWeather} />
         <svg className="journal-desk-headphone-cable" viewBox="0 0 1000 620" preserveAspectRatio="none" aria-hidden="true">
           <path className="journal-desk-cable-desktop" d="M 112 348 C 50 392 40 355 61 311 C 71 289 83 277 97 267" />
           <path className="journal-desk-cable-mobile" d="M 98 355 C 34 362 2 297 18 205" />
@@ -534,11 +589,15 @@ interface JournalDraft {
 }
 
 function JournalWritingPage({
-  day, today, preferences, direction, startZoomed, onNavigate, onClose, onCompleted, registerTransitionGuard,
+  day, today, preferences, sceneWeather, weatherPaused, onNextWeather, onToggleWeather, direction, startZoomed, onNavigate, onClose, onCompleted, registerTransitionGuard,
 }: {
   day: string;
   today: string;
   preferences: JournalNotebookPreferences;
+  sceneWeather: JournalNotebookPreferences["weather"];
+  weatherPaused: boolean;
+  onNextWeather: () => void;
+  onToggleWeather: () => void;
   direction: TurnDirection;
   startZoomed: boolean;
   onNavigate: (direction: Exclude<TurnDirection, null>) => void;
@@ -859,6 +918,11 @@ function JournalWritingPage({
     void requestDurableTransition(() => onNavigate(nextDirection));
   }
 
+  function putBookDown() {
+    if (supportOpen || addingImage) return;
+    void requestDurableTransition(onClose);
+  }
+
   async function completeToday() {
     cancelScheduledSave();
     const current = draftRef.current;
@@ -974,8 +1038,19 @@ function JournalWritingPage({
       onCompositionEndCapture={() => { setComposing(false); noteActivity(); }}
       {...dialogProps}
     >
-      <section className={`journal-inline-scene journal-desk desk-${preferences.deskTone} weather-${preferences.weather} laptop-${preferences.laptopTone} laptop-${preferences.laptopPosition} headphones-${preferences.headphones} drink-${preferences.drink} accent-${preferences.deskAccent ?? "none"}`} aria-label="Write at your desk" hidden={zoomed}>
+      <section
+        className={`journal-inline-scene journal-desk desk-${preferences.deskTone} weather-${sceneWeather} laptop-${preferences.laptopTone} laptop-${preferences.laptopPosition} headphones-${preferences.headphones} drink-${preferences.drink} accent-${preferences.deskAccent ?? "none"}`}
+        aria-label="Write at your desk"
+        hidden={zoomed}
+        onClick={(event) => {
+          if (!(event.target instanceof Element) || event.target.closest(".journal-inline-book, button, a, input, textarea, select")) return;
+          putBookDown();
+        }}
+      >
+        {deskWeatherSequence.map((weather) => <span key={weather} className={`journal-weather-wash wash-${weather}`} aria-hidden="true" />)}
         <span className="journal-desk-window" aria-hidden="true" />
+        <JournalWeatherControls weather={sceneWeather} automatic={preferences.weatherCycle !== false} paused={weatherPaused} onNext={onNextWeather} onToggle={onToggleWeather} />
+        <GButton size="sm" className="journal-inline-putdown" onClick={putBookDown}><ArrowDown size={ICON_SIZE.body} /> Put book down</GButton>
         <svg className="journal-desk-headphone-cable" viewBox="0 0 1000 620" preserveAspectRatio="none" aria-hidden="true">
           <path className="journal-desk-cable-desktop" d="M 112 348 C 50 392 40 355 61 311 C 71 289 83 277 97 267" />
           <path className="journal-desk-cable-mobile" d="M 98 355 C 34 362 2 297 18 205" />
@@ -1266,7 +1341,7 @@ function JournalWelcome({ initial, initialReminders, onComplete }: {
       <GButton onClick={() => onComplete(initial, initialReminders)}>Skip for now</GButton>
       <GButton variant="primary" onClick={() => onComplete(draft, { ...initialReminders, closeoutEnabled, closeoutTime })}>Begin at my desk</GButton>
     </>}>
-      <p className="sub">A few choices make this feel like your place. Change them later in Customize. Your writing stays private in your workspace.</p>
+      <p className="sub">A few choices make this feel like your place. Change them later in Personalize. Your writing stays private in your workspace.</p>
       <Field label="What should we call your notebook?" value={draft.title} maxLength={80} onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
       <fieldset className="journal-choice-fieldset">
         <legend>Why do you come to the journal?</legend>
@@ -1399,19 +1474,51 @@ function JournalFeedback({ onClose }: { onClose: () => void }) {
   );
 }
 
-function NotebookCustomization({
-  initial, sessions, onClose, onSave,
-}: {
+const journalKeepsakes: Array<{ id: JournalPremiumStyle; name: string; detail: string; image: string }> = [
+  { id: "copper", name: "Copper cover", detail: "A burnished, darker leather cover.", image: "/assets/journal/previews/copper-cover.svg" },
+  { id: "linen", name: "Linen pages", detail: "Soft paper with a quiet rule.", image: "/assets/journal/previews/linen-paper.svg" },
+  { id: "starlight", name: "Starlight MacBook", detail: "A warm metal finish for the desk.", image: "/assets/journal/previews/starlight-macbook.svg" },
+  { id: "lamp", name: "Desk lamp", detail: "A pool of evening light.", image: "/assets/journal/previews/desk-lamp.svg" },
+];
+
+function JournalScenePreview({ preferences, previewStyle }: { preferences: JournalNotebookPreferences; previewStyle: JournalPremiumStyle | null }) {
+  const view = {
+    ...preferences,
+    coverTone: previewStyle === "copper" ? "copper" : preferences.coverTone,
+    paperTone: previewStyle === "linen" ? "linen" : preferences.paperTone,
+    laptopTone: previewStyle === "starlight" ? "starlight" : preferences.laptopTone,
+    deskAccent: previewStyle === "lamp" ? "lamp" : preferences.deskAccent,
+  };
+  return <figure className="journal-scene-preview">
+    <div className={`journal-preview-scene journal-desk desk-${view.deskTone} weather-${view.weather} laptop-${view.laptopTone} laptop-${view.laptopPosition} headphones-${view.headphones} drink-${view.drink} accent-${view.deskAccent}`}>
+      {deskWeatherSequence.map((weather) => <span key={weather} className={`journal-weather-wash wash-${weather}`} aria-hidden="true" />)}
+      <span className="journal-desk-window" aria-hidden="true" />
+      <span className="journal-preview-laptop" aria-hidden="true"><span /></span>
+      <span className={`journal-preview-book cover-${view.coverTone}`} aria-hidden="true"><span>A</span><i /></span>
+      <span className={`journal-preview-paper paper-${view.paperTone}`} aria-hidden="true" />
+      <span className="journal-preview-headphones" aria-hidden="true"><i /><i /></span>
+      <span className="journal-preview-drink" aria-hidden="true" />
+      <span className="journal-preview-lamp" aria-hidden="true" />
+    </div>
+    <figcaption><b>{previewStyle ? `Previewing ${journalKeepsakes.find((item) => item.id === previewStyle)?.name}` : "Your desk, as selected"}</b><span>{deskWeatherName[view.weather]} · {view.deskTone === "ink" ? "Charcoal wood" : view.deskTone === "oak" ? "Pale oak" : "Walnut"}</span></figcaption>
+  </figure>;
+}
+
+function NotebookCustomization({ initial, onClose, onSave }: {
   initial: JournalNotebookPreferences;
-  sessions: Array<{ id: string; status: string }>;
   onClose: () => void;
   onSave: (preferences: JournalNotebookPreferences) => void;
 }) {
+  const s = useStore();
   const [draft, setDraft] = useState(initial);
+  const [pane, setPane] = useState<"desk" | "notebook" | "keepsakes">("desk");
+  const [previewStyle, setPreviewStyle] = useState<JournalPremiumStyle | null>(null);
   const unlocked = draft.unlockedStyles ?? [];
-  const ink = journalInkBalance(sessions, unlocked);
+  const newlyUnlocked = unlocked.filter((style) => !(initial.unlockedStyles ?? []).includes(style)).length;
+  const credits = Math.max(0, studyCreditsBalance(s) - newlyUnlocked * JOURNAL_STYLE_COST);
+
   function unlockStyle(style: JournalPremiumStyle) {
-    if (unlocked.includes(style) || ink < JOURNAL_STYLE_COST) return;
+    if (unlocked.includes(style) || credits < JOURNAL_STYLE_COST) return;
     setDraft({
       ...draft,
       unlockedStyles: [...unlocked, style],
@@ -1420,72 +1527,78 @@ function NotebookCustomization({
       laptopTone: style === "starlight" ? "starlight" : draft.laptopTone,
       deskAccent: style === "lamp" ? "lamp" : draft.deskAccent,
     });
+    setPreviewStyle(null);
   }
-  return (
-    <Modal title="Customize your journal" onClose={onClose} footer={<>
-      <GButton onClick={() => setDraft({ ...DEFAULT_JOURNAL_NOTEBOOK, unlockedStyles: unlocked, setupCompleted: draft.setupCompleted, feedbackPrompted: draft.feedbackPrompted })}>Reset scene</GButton>
-      <GButton onClick={onClose}>Cancel</GButton>
-      <GButton variant="primary" onClick={() => onSave(normalizeJournalNotebookPreferences(draft))}>Save notebook</GButton>
-    </>}>
-      <p className="sub">Set the scene around your notebook. Your journal pages stay as they are.</p>
-      <div className="journal-ink-ledger"><b>AXOM Ink <span>{ink} available</span></b><small>{journalInkEarned(sessions)} earned from completed study sessions · {JOURNAL_STYLE_COST} Ink per keepsake. Changing a style you own is free.</small></div>
-      <div className="journal-keepsakes">
-        <GButton size="sm" disabled={unlocked.includes("copper") || ink < JOURNAL_STYLE_COST} onClick={() => unlockStyle("copper")}>{unlocked.includes("copper") ? "Copper cover owned" : `Unlock copper cover · ${JOURNAL_STYLE_COST} Ink`}</GButton>
-        <GButton size="sm" disabled={unlocked.includes("linen") || ink < JOURNAL_STYLE_COST} onClick={() => unlockStyle("linen")}>{unlocked.includes("linen") ? "Linen paper owned" : `Unlock linen paper · ${JOURNAL_STYLE_COST} Ink`}</GButton>
-        <GButton size="sm" disabled={unlocked.includes("starlight") || ink < JOURNAL_STYLE_COST} onClick={() => unlockStyle("starlight")}>{unlocked.includes("starlight") ? "Starlight MacBook owned" : `Unlock starlight MacBook · ${JOURNAL_STYLE_COST} Ink`}</GButton>
-        <GButton size="sm" disabled={unlocked.includes("lamp") || ink < JOURNAL_STYLE_COST} onClick={() => unlockStyle("lamp")}>{unlocked.includes("lamp") ? "Desk lamp owned" : `Unlock desk lamp · ${JOURNAL_STYLE_COST} Ink`}</GButton>
+
+  return <Modal title="Personalize your journal" className="journal-personalize-modal" bodyClassName="journal-personalize-body" onClose={onClose} footer={<>
+    <GButton onClick={() => { setDraft({ ...DEFAULT_JOURNAL_NOTEBOOK, unlockedStyles: unlocked, setupCompleted: draft.setupCompleted, feedbackPrompted: draft.feedbackPrompted }); setPreviewStyle(null); }}>Reset scene</GButton>
+    <GButton onClick={onClose}>Cancel</GButton>
+    <GButton variant="primary" onClick={() => onSave(normalizeJournalNotebookPreferences(draft))}>Save changes</GButton>
+  </>}>
+    <p className="journal-personalize-intro">Make the desk feel like yours. Your pages stay exactly as you wrote them.</p>
+    <div className="journal-credit-ledger"><span className="journal-credit-emblem" aria-hidden="true">A</span><div><b>{credits} {STUDY_CURRENCY_NAME}</b><small>Earn credits by completing study sessions, reaching 80% of your daily goals, and keeping a streak. Keepsakes cost {JOURNAL_STYLE_COST} {STUDY_CURRENCY_SHORT} each.</small></div></div>
+    <div className="journal-personalize-layout">
+      <div className="journal-personalize-controls">
+        <div className="journal-personalize-tabs" aria-label="Personalization sections">
+          {(["desk", "notebook", "keepsakes"] as const).map((item) => <button key={item} type="button" aria-pressed={pane === item} onClick={() => { setPane(item); setPreviewStyle(null); }}>{item === "desk" ? "Desk" : item === "notebook" ? "Notebook" : "Keepsakes"}</button>)}
+        </div>
+        {pane === "desk" && <div className="journal-personalize-section">
+          <h4>Set the scene</h4>
+          <p>Ambient scenes change the light and shadows. They are not a local weather report.</p>
+          <div className="journal-customize-grid">
+            <SelectField label="Desk surface" value={draft.deskTone} onChange={(event) => setDraft({ ...draft, deskTone: event.target.value as JournalNotebookPreferences["deskTone"] })}>
+              <option value="walnut">Walnut</option><option value="oak">Pale oak</option><option value="ink">Charcoal wood</option>
+            </SelectField>
+            <SelectField label="Scene weather" value={draft.weather} onChange={(event) => setDraft({ ...draft, weather: event.target.value as JournalNotebookPreferences["weather"] })}>
+              {deskWeatherSequence.map((weather) => <option key={weather} value={weather}>{deskWeatherName[weather]}</option>)}
+            </SelectField>
+          </div>
+          <label className="journal-cycle-choice"><input type="checkbox" checked={draft.weatherCycle !== false} onChange={(event) => setDraft({ ...draft, weatherCycle: event.target.checked })} /><span><b>Cycle scenes automatically</b><small>Moves through five scenes while the desk is idle. Pause it on the desk at any time.</small></span></label>
+          <div className="journal-customize-grid">
+            <SelectField label="Laptop finish" value={draft.laptopTone} onChange={(event) => setDraft({ ...draft, laptopTone: event.target.value as JournalNotebookPreferences["laptopTone"] })}>
+              <option value="graphite">Graphite</option><option value="silver">Silver</option><option value="starlight" disabled={!unlocked.includes("starlight")}>Starlight · {unlocked.includes("starlight") ? "owned" : `${JOURNAL_STYLE_COST} AC`}</option>
+            </SelectField>
+            <SelectField label="Laptop position" value={draft.laptopPosition} onChange={(event) => setDraft({ ...draft, laptopPosition: event.target.value as JournalNotebookPreferences["laptopPosition"] })}>
+              <option value="left">Left</option><option value="right">Right</option>
+            </SelectField>
+            <SelectField label="Listening setup" value={draft.headphones} onChange={(event) => setDraft({ ...draft, headphones: event.target.value as JournalNotebookPreferences["headphones"] })}>
+              <option value="wired">Wired headphones</option><option value="airpods">AirPods</option><option value="beats">Beats over-ear</option>
+            </SelectField>
+            <SelectField label="Drink" value={draft.drink} onChange={(event) => setDraft({ ...draft, drink: event.target.value as JournalNotebookPreferences["drink"] })}>
+              <option value="tea">Tea</option><option value="coffee">Coffee</option><option value="water">Water</option>
+            </SelectField>
+            <SelectField label="Desk light" value={draft.deskAccent ?? "none"} onChange={(event) => setDraft({ ...draft, deskAccent: event.target.value as JournalNotebookPreferences["deskAccent"] })}>
+              <option value="none">Window light</option><option value="lamp" disabled={!unlocked.includes("lamp")}>Warm lamp · {unlocked.includes("lamp") ? "owned" : `${JOURNAL_STYLE_COST} AC`}</option>
+            </SelectField>
+          </div>
+        </div>}
+        {pane === "notebook" && <div className="journal-personalize-section">
+          <h4>The book itself</h4>
+          <Field label="Notebook title" value={draft.title} maxLength={80} onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
+          <Field label="Subtitle" value={draft.subtitle} maxLength={120} onChange={(event) => setDraft({ ...draft, subtitle: event.target.value })} />
+          <div className="journal-customize-grid">
+            <SelectField label="Writing style" value={draft.writingMode ?? "guided"} onChange={(event) => setDraft({ ...draft, writingMode: event.target.value as JournalNotebookPreferences["writingMode"] })}><option value="guided">A few prompts</option><option value="free">Open page</option></SelectField>
+            <SelectField label="Journal purpose" value={draft.purpose ?? "reflect"} onChange={(event) => setDraft({ ...draft, purpose: event.target.value as JournalNotebookPreferences["purpose"] })}><option value="focus">Find focus</option><option value="reflect">Reflect</option><option value="recover">Regroup</option></SelectField>
+            <SelectField label="Cover" value={draft.coverTone} onChange={(event) => setDraft({ ...draft, coverTone: event.target.value as JournalNotebookPreferences["coverTone"] })}><option value="onyx">Onyx</option><option value="forest">Forest</option><option value="oxblood">Oxblood</option><option value="navy">Midnight navy</option><option value="copper" disabled={!unlocked.includes("copper")}>Copper · {unlocked.includes("copper") ? "owned" : `${JOURNAL_STYLE_COST} AC`}</option></SelectField>
+            <SelectField label="Paper" value={draft.paperTone} onChange={(event) => setDraft({ ...draft, paperTone: event.target.value as JournalNotebookPreferences["paperTone"] })}><option value="warm">Warm</option><option value="cream">Cream</option><option value="white">Bright</option><option value="linen" disabled={!unlocked.includes("linen")}>Linen · {unlocked.includes("linen") ? "owned" : `${JOURNAL_STYLE_COST} AC`}</option></SelectField>
+          </div>
+        </div>}
+        {pane === "keepsakes" && <div className="journal-personalize-section">
+          <h4>Choose a keepsake</h4>
+          <p>Preview each item in the desk scene before spending credits. Owned items can be selected whenever you like.</p>
+          <div className="journal-keepsake-grid">
+            {journalKeepsakes.map((item) => <article key={item.id} className="journal-keepsake-card">
+              <button type="button" className="journal-keepsake-preview" aria-label={`Preview ${item.name}`} aria-pressed={previewStyle === item.id} onClick={() => setPreviewStyle(item.id)}><img src={item.image} alt={`${item.name} preview`} width="320" height="180" /></button>
+              <div className="journal-keepsake-details"><b>{item.name}</b><small>{item.detail}</small></div>
+              <GButton size="sm" disabled={unlocked.includes(item.id) || credits < JOURNAL_STYLE_COST} onClick={() => unlockStyle(item.id)}>{unlocked.includes(item.id) ? "Owned" : `Unlock · ${JOURNAL_STYLE_COST} ${STUDY_CURRENCY_SHORT}`}</GButton>
+            </article>)}
+          </div>
+          {credits < JOURNAL_STYLE_COST && <p className="journal-credit-hint">Reach 80% of today’s goals or finish a study session to earn more credits.</p>}
+        </div>}
       </div>
-      <Field label="Notebook title" value={draft.title} maxLength={80} onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
-      <Field label="Subtitle" value={draft.subtitle} maxLength={120} onChange={(event) => setDraft({ ...draft, subtitle: event.target.value })} />
-      <SelectField label="Writing style" value={draft.writingMode ?? "guided"} onChange={(event) => setDraft({ ...draft, writingMode: event.target.value as JournalNotebookPreferences["writingMode"] })}>
-        <option value="guided">A few prompts</option><option value="free">Open page</option>
-      </SelectField>
-      <SelectField label="Journal purpose" value={draft.purpose ?? "reflect"} onChange={(event) => setDraft({ ...draft, purpose: event.target.value as JournalNotebookPreferences["purpose"] })}>
-        <option value="focus">Find focus</option><option value="reflect">Reflect</option><option value="recover">Regroup</option>
-      </SelectField>
-      <div className="row gap12">
-        <SelectField label="Cover" value={draft.coverTone} onChange={(event) => setDraft({
-          ...draft,
-          coverTone: event.target.value as JournalNotebookPreferences["coverTone"],
-        })}>
-          <option value="onyx">Onyx</option><option value="forest">Forest</option>
-          <option value="oxblood">Oxblood</option><option value="navy">Midnight navy</option>
-          <option value="copper" disabled={!unlocked.includes("copper")}>Copper {unlocked.includes("copper") ? "" : "· unlock with Ink"}</option>
-        </SelectField>
-        <SelectField label="Paper" value={draft.paperTone} onChange={(event) => setDraft({
-          ...draft,
-          paperTone: event.target.value as JournalNotebookPreferences["paperTone"],
-        })}>
-          <option value="warm">Warm</option><option value="cream">Cream</option><option value="white">Bright</option>
-          <option value="linen" disabled={!unlocked.includes("linen")}>Linen {unlocked.includes("linen") ? "" : "· unlock with Ink"}</option>
-        </SelectField>
-      </div>
-      <div className="journal-customize-grid">
-        <SelectField label="Desk" value={draft.deskTone} onChange={(event) => setDraft({ ...draft, deskTone: event.target.value as JournalNotebookPreferences["deskTone"] })}>
-          <option value="walnut">Walnut</option><option value="oak">Pale oak</option><option value="ink">Ink-stained wood</option>
-        </SelectField>
-        <SelectField label="Outside" value={draft.weather} onChange={(event) => setDraft({ ...draft, weather: event.target.value as JournalNotebookPreferences["weather"] })}>
-          <option value="sun">Late sun</option><option value="rain">Rain</option><option value="night">Night</option>
-        </SelectField>
-        <SelectField label="Laptop finish" value={draft.laptopTone} onChange={(event) => setDraft({ ...draft, laptopTone: event.target.value as JournalNotebookPreferences["laptopTone"] })}>
-          <option value="graphite">Graphite</option><option value="silver">Silver</option>
-          <option value="starlight" disabled={!unlocked.includes("starlight")}>Starlight {unlocked.includes("starlight") ? "" : "· unlock with Ink"}</option>
-        </SelectField>
-        <SelectField label="Laptop position" value={draft.laptopPosition} onChange={(event) => setDraft({ ...draft, laptopPosition: event.target.value as JournalNotebookPreferences["laptopPosition"] })}>
-          <option value="left">Left</option><option value="right">Right</option>
-        </SelectField>
-        <SelectField label="Headphones" value={draft.headphones} onChange={(event) => setDraft({ ...draft, headphones: event.target.value as JournalNotebookPreferences["headphones"] })}>
-          <option value="wired">Wired</option><option value="airpods">Wireless</option>
-        </SelectField>
-        <SelectField label="Drink" value={draft.drink} onChange={(event) => setDraft({ ...draft, drink: event.target.value as JournalNotebookPreferences["drink"] })}>
-          <option value="tea">Tea</option><option value="coffee">Coffee</option><option value="water">Water</option>
-        </SelectField>
-        <SelectField label="Desk light" value={draft.deskAccent ?? "none"} onChange={(event) => setDraft({ ...draft, deskAccent: event.target.value as JournalNotebookPreferences["deskAccent"] })}>
-          <option value="none">Window light</option><option value="lamp" disabled={!unlocked.includes("lamp")}>Warm desk lamp {unlocked.includes("lamp") ? "" : "· unlock with Ink"}</option>
-        </SelectField>
-      </div>
-    </Modal>
-  );
+      <aside className="journal-personalize-preview"><JournalScenePreview preferences={draft} previewStyle={previewStyle} /><small>Changes appear here first. Save to keep the scene.</small></aside>
+    </div>
+  </Modal>;
 }
 
 function PreviousIntention({ plan }: { plan: DayPlan }) {

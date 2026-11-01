@@ -44,8 +44,24 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
+  align-items: center;
   gap: 8px;
 }
+.journal-credit-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 3px 9px 3px 4px;
+  border: 1px solid rgba(var(--accent-rgb), .43);
+  border-radius: var(--radius-pill);
+  background: rgba(var(--accent-rgb), .09);
+  color: var(--text);
+  white-space: nowrap;
+}
+.journal-credit-chip > span, .journal-credit-emblem { display: grid; place-items: center; width: 23px; height: 23px; border-radius: 50%; background: var(--gold); color: #1d1a17; font-family: Georgia, serif; font-size: 15px; }
+.journal-credit-chip strong { font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.journal-credit-chip small { color: var(--text-60); font-size: var(--fs-micro); letter-spacing: var(--tracking-caps); }
 
 .journal-library-grid {
   display: grid;
@@ -93,6 +109,48 @@
 .journal-desk.desk-walnut .journal-desk-window { opacity: .22; }
 .journal-desk.desk-oak { --desk-high: #c3a980; --desk-low: #806b55; }
 .journal-desk.desk-ink { --desk-high: #4c5158; --desk-low: #24272f; }
+.journal-weather-wash {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 1700ms cubic-bezier(.2, .75, .2, 1);
+}
+.journal-weather-wash.wash-dawn { background: linear-gradient(105deg, rgba(240, 171, 135, .35), rgba(106, 110, 161, .23) 53%, transparent 88%); }
+.journal-weather-wash.wash-sun { background: radial-gradient(ellipse at 20% 6%, rgba(255, 220, 151, .33), transparent 65%); }
+.journal-weather-wash.wash-overcast { background: linear-gradient(120deg, rgba(125, 150, 166, .36), rgba(39, 50, 61, .28)); }
+.journal-weather-wash.wash-rain { background: linear-gradient(115deg, rgba(48, 71, 88, .42), rgba(30, 40, 52, .5)); }
+.journal-weather-wash.wash-night { background: radial-gradient(ellipse at 77% 10%, rgba(157, 169, 207, .13), rgba(7, 12, 24, .66) 73%); }
+.journal-desk.weather-dawn .journal-weather-wash.wash-dawn,
+.journal-desk.weather-sun .journal-weather-wash.wash-sun,
+.journal-desk.weather-overcast .journal-weather-wash.wash-overcast,
+.journal-desk.weather-rain .journal-weather-wash.wash-rain,
+.journal-desk.weather-night .journal-weather-wash.wash-night { opacity: 1; }
+.journal-weather-controls {
+  position: absolute;
+  z-index: 7;
+  top: 17px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  max-width: calc(100% - 36px);
+  padding: 5px;
+  border: 1px solid rgba(248, 229, 193, .3);
+  border-radius: var(--radius-pill);
+  background: rgba(19, 22, 25, .78);
+  box-shadow: 0 12px 26px rgba(8, 7, 10, .18);
+  color: #f6edda;
+  backdrop-filter: blur(8px);
+}
+.journal-weather-label { display: flex; align-items: center; gap: 6px; padding: 2px 6px 2px 8px; white-space: nowrap; }
+.journal-weather-label b { font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
+.journal-weather-label small { padding-left: 6px; border-left: 1px solid rgba(248, 229, 193, .28); color: #d8cfbb; font-size: var(--fs-micro); }
+.journal-weather-controls button { display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .11); color: #f6edda; cursor: pointer; }
+.journal-weather-controls button:hover { background: rgba(255, 255, 255, .23); }
+.journal-weather-controls button:focus-visible { outline: 2px solid #f5d99c; outline-offset: 2px; }
 .journal-desk::before,
 .journal-desk::after { position: absolute; inset: 0; content: ""; pointer-events: none; }
 .journal-desk::before {
@@ -131,6 +189,18 @@
   opacity: .87;
   animation: journalWindowDrift 16s ease-in-out infinite alternate;
 }
+.journal-desk.weather-dawn .journal-desk-window {
+  opacity: .56;
+  background:
+    linear-gradient(90deg, transparent 31%, rgba(77, 52, 54, .28) 31% 33%, transparent 33% 64%, rgba(77, 52, 54, .28) 64% 66%, transparent 66%),
+    linear-gradient(112deg, rgba(255, 213, 174, .62), rgba(196, 171, 208, .22) 66%, transparent 91%);
+}
+.journal-desk.weather-overcast .journal-desk-window {
+  opacity: .53;
+  background:
+    linear-gradient(90deg, transparent 31%, rgba(49, 61, 71, .29) 31% 33%, transparent 33% 64%, rgba(49, 61, 71, .29) 64% 66%, transparent 66%),
+    linear-gradient(112deg, rgba(202, 217, 220, .38), rgba(128, 150, 166, .22) 66%, transparent 91%);
+}
 .journal-desk.weather-rain .journal-desk-window {
   opacity: .78;
   background:
@@ -138,28 +208,6 @@
     linear-gradient(90deg, transparent 31%, rgba(29, 53, 68, .33) 31% 33%, transparent 33% 64%, rgba(29, 53, 68, .33) 64% 66%, transparent 66%),
     linear-gradient(113deg, rgba(180, 210, 225, .42), rgba(108, 139, 163, .22) 64%, transparent 90%);
   animation: journalRain 2.2s ease-in-out infinite alternate;
-}
-.journal-desk.weather-rain {
-  background:
-    linear-gradient(115deg, rgba(40, 55, 68, .42), rgba(30, 40, 52, .52)),
-    linear-gradient(116deg, var(--desk-high), var(--desk-low));
-}
-.journal-desk.desk-walnut.weather-rain {
-  background:
-    linear-gradient(115deg, rgba(40, 55, 68, .42), rgba(30, 40, 52, .52)),
-    url('/assets/journal/walnut-desk.webp') center / cover,
-    linear-gradient(116deg, var(--desk-high), var(--desk-low));
-}
-.journal-desk.weather-night {
-  background:
-    radial-gradient(ellipse at 72% 19%, rgba(226, 170, 88, .12), rgba(8, 12, 21, .62) 72%),
-    linear-gradient(116deg, color-mix(in srgb, var(--desk-high) 55%, #151720), color-mix(in srgb, var(--desk-low) 65%, #10141d));
-}
-.journal-desk.desk-walnut.weather-night {
-  background:
-    radial-gradient(ellipse at 72% 19%, rgba(226, 170, 88, .12), rgba(8, 12, 21, .62) 72%),
-    url('/assets/journal/walnut-desk.webp') center / cover,
-    linear-gradient(116deg, color-mix(in srgb, var(--desk-high) 55%, #151720), color-mix(in srgb, var(--desk-low) 65%, #10141d));
 }
 .journal-desk.weather-night .journal-desk-window {
   opacity: .84;
@@ -307,15 +355,19 @@
 .journal-desk-headphones::before { left: -14px; }
 .journal-desk-headphones::after { right: -14px; }
 .journal-desk.headphones-airpods .journal-desk-headphones {
-  top: 47%; left: 12%; width: 64px; height: 70px; border: 0;
-  border-radius: 16px 16px 26px 26px; background: linear-gradient(120deg, #e8ece8, #9aa7ab);
+  top: 52%; left: 12%; width: 70px; height: 48px; border: 2px solid #e8ece8;
+  border-radius: 19px 19px 25px 25px; background: linear-gradient(145deg, #f6f7f2, #b8c5c6 72%, #8e9b9e);
+  box-shadow: inset 0 12px 0 rgba(255, 255, 255, .28), 3px 9px 13px rgba(9, 8, 11, .3);
 }
 .journal-desk.headphones-airpods .journal-desk-headphones::before,
 .journal-desk.headphones-airpods .journal-desk-headphones::after {
-  top: -20px; bottom: auto; width: 12px; height: 33px; border-radius: 9px; background: #e8ece8;
+  top: -30px; bottom: auto; width: 11px; height: 37px; border: 2px solid #e7efef; border-radius: 8px 8px 7px 7px; background: linear-gradient(100deg, #f8faf7, #abb9bc);
 }
-.journal-desk.headphones-airpods .journal-desk-headphones::before { left: 16px; transform: rotate(-16deg); }
-.journal-desk.headphones-airpods .journal-desk-headphones::after { right: 16px; transform: rotate(16deg); }
+.journal-desk.headphones-airpods .journal-desk-headphones::before { left: 17px; transform: rotate(-14deg); }
+.journal-desk.headphones-airpods .journal-desk-headphones::after { right: 17px; transform: rotate(14deg); }
+.journal-desk.headphones-beats .journal-desk-headphones { width: 116px; height: 116px; border: 0; border-radius: 0; background: url('/assets/journal/over-ear-headphones.svg') center / contain no-repeat; }
+.journal-desk.headphones-beats .journal-desk-headphones::before,
+.journal-desk.headphones-beats .journal-desk-headphones::after { content: none; }
 .journal-desk.laptop-right .journal-desk-headphones { left: auto; right: 13%; transform: rotate(-19deg); }
 
 .journal-desk-lamp { display: none; }
@@ -860,12 +912,14 @@
   .journal-support-preview::before,
   .journal-support-preview::after { animation: none !important; }
   .journal-desk-window,
+  .journal-weather-wash,
   .journal-desk-plant span,
   .journal-desk-drink span,
   .journal-closeout,
   .journal-closeout-cover { animation: none !important; }
   .journal-hardback,
-  .journal-glance-row { transition: none !important; }
+  .journal-glance-row,
+  .journal-weather-wash { transition: none !important; }
   .journal-hardback:hover,
   .journal-hardback:focus-visible { transform: rotateY(-8deg) rotateX(2deg); }
 }
@@ -922,6 +976,11 @@
   .journal-page-list { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 430px) {
+  .journal-weather-controls { top: 10px; gap: 2px; padding: 4px; }
+  .journal-inline-scene .journal-weather-controls { left: 10px; transform: none; }
+  .journal-weather-label { gap: 4px; padding-inline: 5px; }
+  .journal-weather-label small { display: none; }
+  .journal-weather-controls button { width: 25px; height: 25px; }
   .journal-desk .journal-hardback { width: 185px; top: 42%; }
   .journal-desk-laptop { width: 178px; }
   .journal-desk-plant { width: 98px; height: 98px; }
@@ -945,7 +1004,22 @@
   border: 1px solid var(--hairline);
   border-radius: var(--radius-xl);
   overflow: hidden;
+  cursor: pointer;
 }
+.journal-inline-scene .journal-inline-putdown {
+  position: absolute;
+  z-index: 7;
+  top: 18px;
+  right: 18px;
+  border-color: rgba(245, 228, 194, .48);
+  background: rgba(25, 24, 24, .82);
+  color: #f5e9d0;
+  box-shadow: 0 8px 24px rgba(8, 7, 10, .18);
+}
+.journal-inline-scene .journal-inline-putdown:hover { background: rgba(25, 24, 24, .96); }
+.journal-inline-scene .journal-inline-putdown:focus-visible { outline: 2px solid #f5d99c; outline-offset: 3px; }
+.journal-inline-book, .journal-inline-book * { cursor: auto; }
+.journal-inline-book textarea { cursor: text; }
 .journal-inline-book {
   position: absolute;
   z-index: 3;
@@ -1361,4 +1435,99 @@
   .journal-closeout .journal-closeout-cover,
   .journal-closeout-ribbon,
   .journal-closeout-copy { animation: none !important; }
+}
+
+/* The personalizer previews the same material and light choices as the desk. */
+.modal.journal-personalize-modal { display: flex; flex-direction: column; width: min(1050px, calc(100vw - 24px)); max-width: 1050px; max-height: min(92vh, 950px); overflow: hidden; background: var(--bg-2); color: var(--text); }
+.journal-personalize-modal > .spread, .journal-personalize-modal > .modal-actions { flex-shrink: 0; }
+.journal-personalize-modal > .modal-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
+.journal-personalize-modal .modal-actions { flex-wrap: wrap; }
+.journal-personalize-intro { max-width: 60ch; margin: 0; color: var(--text-60); font-size: var(--fs-sm); line-height: var(--leading-relaxed); }
+.journal-credit-ledger { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid rgba(var(--accent-rgb), .35); border-radius: var(--radius-md); background: rgba(var(--accent-rgb), .08); }
+.journal-credit-emblem { flex: none; width: 34px; height: 34px; font-size: 22px; }
+.journal-credit-ledger div { display: grid; gap: 3px; }
+.journal-credit-ledger b { font-size: var(--fs-sm); }
+.journal-credit-ledger small { max-width: 73ch; color: var(--text-60); font-size: var(--fs-xs); line-height: var(--leading-normal); }
+.journal-personalize-layout { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(280px, .85fr); gap: 22px; min-height: 0; }
+.journal-personalize-controls, .journal-personalize-preview { min-width: 0; }
+.journal-personalize-tabs { display: flex; gap: 5px; padding: 4px; border: 1px solid var(--hairline); border-radius: var(--radius-md); background: var(--surface-2); }
+.journal-personalize-tabs button { flex: 1; min-height: 38px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-60); font: 600 var(--fs-xs)/1 var(--font-ui); cursor: pointer; }
+.journal-personalize-tabs button[aria-pressed="true"] { background: rgba(var(--accent-rgb), .15); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), .45); color: var(--text); }
+.journal-personalize-tabs button:focus-visible, .journal-keepsake-preview:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.journal-personalize-section { display: grid; gap: 12px; padding-top: 16px; }
+.journal-personalize-section h4 { margin: 0; font-size: var(--fs-lg); }
+.journal-personalize-section > p { margin: 0; color: var(--text-60); font-size: var(--fs-xs); line-height: var(--leading-relaxed); }
+.journal-personalize-section .journal-customize-grid { margin-top: 0; }
+.journal-personalize-section .field { min-width: 0; }
+.journal-cycle-choice { display: flex; gap: 10px; align-items: flex-start; padding: 12px; border: 1px solid var(--hairline); border-radius: var(--radius-sm); background: var(--surface-2); cursor: pointer; }
+.journal-cycle-choice input { width: 17px; height: 17px; margin-top: 2px; accent-color: var(--gold); }
+.journal-cycle-choice span { display: grid; gap: 3px; }
+.journal-cycle-choice b { font-size: var(--fs-sm); }
+.journal-cycle-choice small { color: var(--text-60); font-size: var(--fs-xs); line-height: var(--leading-normal); }
+.journal-personalize-preview { position: sticky; top: 0; align-self: start; display: grid; gap: 8px; padding: 10px; border: 1px solid var(--hairline); border-radius: var(--radius-lg); background: var(--surface-2); }
+.journal-personalize-preview > small { color: var(--text-60); font-size: var(--fs-xs); }
+.journal-scene-preview { display: grid; gap: 8px; margin: 0; }
+.journal-preview-scene { position: relative; aspect-ratio: 1.22; overflow: hidden; border-radius: var(--radius-sm); }
+.journal-preview-scene::after { border-radius: inherit; box-shadow: inset 0 0 48px rgba(6, 8, 12, .42); }
+.journal-preview-scene .journal-desk-window { opacity: .35; }
+.journal-scene-preview figcaption { display: grid; gap: 2px; }
+.journal-scene-preview figcaption b { color: var(--text); font-size: var(--fs-sm); }
+.journal-scene-preview figcaption span { color: var(--text-60); font-size: var(--fs-xs); }
+.journal-preview-laptop { position: absolute; z-index: 2; top: 7%; left: 7%; width: 39%; height: 30%; border: 3px solid rgba(220, 226, 222, .76); border-radius: 8px; background: linear-gradient(130deg, #7a8794, #273743); box-shadow: 5px 10px 11px rgba(7, 6, 12, .38); transform: rotate(-13deg); }
+.journal-preview-scene.laptop-right .journal-preview-laptop { left: auto; right: 7%; transform: rotate(12deg); }
+.journal-preview-scene.laptop-silver .journal-preview-laptop { background: linear-gradient(130deg, #f0f0e9, #839094); }
+.journal-preview-scene.laptop-starlight .journal-preview-laptop { background: linear-gradient(130deg, #f3eee1, #a49888); border-color: #f8eddc; }
+.journal-preview-laptop span { position: absolute; inset: 36% 40%; background: rgba(245, 239, 222, .78); -webkit-mask: url('/assets/journal/apple-mark.svg') center / contain no-repeat; mask: url('/assets/journal/apple-mark.svg') center / contain no-repeat; }
+.journal-preview-book { position: absolute; z-index: 3; top: 25%; left: 37%; display: grid; place-items: center; width: 36%; height: 56%; border: 1px solid rgba(236, 218, 180, .55); border-radius: 3px 10px 10px 3px; box-shadow: 7px 12px 16px rgba(7, 6, 11, .45), inset 8px 0 12px rgba(0,0,0,.17); transform: rotate(-7deg); }
+.journal-preview-book.cover-onyx { background: linear-gradient(145deg, #32312e, #111311 70%, #24231f); }
+.journal-preview-book.cover-forest { background: linear-gradient(145deg, #30433a, #12251e 70%, #1e342b); }
+.journal-preview-book.cover-oxblood { background: linear-gradient(145deg, #6a3437, #35171a 70%, #4d2326); }
+.journal-preview-book.cover-navy { background: linear-gradient(145deg, #2f4055, #142131 70%, #24344a); }
+.journal-preview-book.cover-copper { background: linear-gradient(145deg, #74513e, #35231f 70%, #593a31); }
+.journal-preview-book span { display: grid; place-items: center; width: 31px; height: 31px; border: 1px solid rgba(214, 186, 129, .58); border-radius: 50%; color: #e7d7ba; font: 24px Georgia, serif; }
+.journal-preview-book i { position: absolute; left: 13%; top: 0; bottom: 0; width: 2px; background: rgba(218, 189, 137, .38); }
+.journal-preview-paper { position: absolute; z-index: 2; top: 27%; left: 71%; width: 4%; height: 53%; border-radius: 0 4px 4px 0; background: #f4eddc; transform: rotate(-7deg); }
+.journal-preview-paper.paper-cream { background: #f8f0d5; }
+.journal-preview-paper.paper-white { background: #f8f7f1; }
+.journal-preview-paper.paper-linen { background: #efeadf; }
+.journal-preview-headphones { position: absolute; z-index: 2; left: 11%; bottom: 19%; width: 18%; height: 17%; border: 6px solid #171c22; border-bottom-color: transparent; border-radius: 55% 55% 12% 12%; transform: rotate(19deg); }
+.journal-preview-headphones i { position: absolute; bottom: -4px; width: 10px; height: 15px; border-radius: 4px; background: #171c22; }
+.journal-preview-headphones i:first-child { left: -8px; }
+.journal-preview-headphones i:last-child { right: -8px; }
+.journal-preview-scene.headphones-airpods .journal-preview-headphones { bottom: 22%; width: 17%; height: 10%; border: 2px solid #eff1ec; border-radius: 12px 12px 18px 18px; background: linear-gradient(130deg, #f8faf6, #abb9bd); }
+.journal-preview-scene.headphones-airpods .journal-preview-headphones i { top: -15px; bottom: auto; width: 6px; height: 22px; border: 1px solid #dce6e6; border-radius: 5px; background: #f5f8f4; }
+.journal-preview-scene.headphones-airpods .journal-preview-headphones i:first-child { left: 10px; }
+.journal-preview-scene.headphones-airpods .journal-preview-headphones i:last-child { right: 10px; }
+.journal-preview-scene.headphones-beats .journal-preview-headphones { left: 8%; bottom: 15%; width: 23%; height: 25%; border: 0; border-radius: 0; background: url('/assets/journal/over-ear-headphones.svg') center / contain no-repeat; }
+.journal-preview-scene.headphones-beats .journal-preview-headphones i { display: none; }
+.journal-preview-drink { position: absolute; z-index: 2; right: 8%; bottom: 10%; width: 19%; aspect-ratio: 1; border: 6px solid #d8d1c4; border-radius: 50%; background: radial-gradient(circle at 43% 31%, #c89b60, #5d3628 78%); box-shadow: 5px 7px 10px rgba(0,0,0,.3); }
+.journal-preview-scene.drink-coffee .journal-preview-drink { background: radial-gradient(circle at 43% 31%, #774d32, #24191a 78%); }
+.journal-preview-scene.drink-water .journal-preview-drink { background: radial-gradient(circle at 43% 31%, #d0ebdf, #5c9aa7 78%); }
+.journal-preview-lamp { display: none; }
+.journal-preview-scene.accent-lamp .journal-preview-lamp { position: absolute; z-index: 4; top: 6%; right: 6%; display: block; width: 17%; height: 14%; border: 6px solid #b6965d; border-radius: 50% 50% 5px 5px; background: #ead09b; box-shadow: 0 0 42px 18px rgba(255, 209, 119, .38); }
+.journal-keepsake-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.journal-keepsake-card { display: grid; align-content: start; gap: 7px; min-width: 0; padding: 7px; border: 1px solid var(--hairline); border-radius: var(--radius-md); background: var(--surface-2); }
+.journal-keepsake-preview { padding: 0; border: 1px solid var(--hairline); border-radius: var(--radius-sm); overflow: hidden; background: var(--surface-1); cursor: pointer; }
+.journal-keepsake-preview[aria-pressed="true"] { outline: 2px solid var(--gold); outline-offset: 2px; }
+.journal-keepsake-preview img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; }
+.journal-keepsake-details { display: grid; gap: 2px; padding-inline: 3px; }
+.journal-keepsake-details b { font-size: var(--fs-sm); }
+.journal-keepsake-details small { color: var(--text-60); font-size: var(--fs-xs); line-height: var(--leading-normal); }
+.journal-keepsake-card .gbtn { justify-self: stretch; }
+.journal-credit-hint { padding: 10px 12px; border-left: 2px solid var(--gold); background: rgba(var(--accent-rgb), .08); }
+@media (max-width: 780px) {
+  .journal-personalize-layout { grid-template-columns: minmax(0, 1fr); }
+  .journal-personalize-preview { position: static; order: -1; }
+  .journal-preview-scene { aspect-ratio: 1.8; }
+}
+@media (max-width: 520px) {
+  .journal-personalize-modal { padding: 16px; }
+  .journal-personalize-modal .modal-actions { justify-content: stretch; }
+  .journal-personalize-modal .modal-actions .gbtn { flex: 1; min-height: 42px; }
+  .journal-personalize-modal .modal-actions .gbtn:first-child { flex-basis: 100%; }
+  .journal-keepsake-grid { grid-template-columns: minmax(0, 1fr); }
+  .journal-personalize-preview { padding: 7px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .journal-preview-scene .journal-desk-window, .journal-preview-scene .journal-weather-wash { animation: none !important; transition: none !important; }
 }

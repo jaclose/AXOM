@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" role="img" aria-label="Linen journal paper preview">
+  <defs><linearGradient id="desk" x2="1" y2="1"><stop stop-color="#675349"/><stop offset="1" stop-color="#292629"/></linearGradient><linearGradient id="paper" x2="1" y2="1"><stop stop-color="#f5f0e6"/><stop offset="1" stop-color="#dcd4c4"/></linearGradient><filter id="shadow"><feDropShadow dx="7" dy="10" stdDeviation="6" flood-opacity=".35"/></filter></defs>
+  <path fill="url(#desk)" d="M0 0h320v180H0z"/><g filter="url(#shadow)" transform="rotate(6 160 90)"><rect x="62" y="14" width="196" height="154" rx="6" fill="url(#paper)"/><path d="M91 54h139M91 73h139M91 92h139M91 111h139M91 130h139M91 149h139" stroke="#7d6e58" stroke-opacity=".23"/><path d="M76 14v154" stroke="#a99476" stroke-opacity=".38"/></g><text x="96" y="45" fill="#6b5b49" font-family="Georgia,serif" font-size="15" transform="rotate(6 96 45)">Today’s page</text>
+</svg>
