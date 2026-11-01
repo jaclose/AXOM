@@ -27,7 +27,7 @@ jobs:
             web/public/application-schools.json
           sparse-checkout-cone-mode: false
           lfs: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Compile and run deterministic regression suite
