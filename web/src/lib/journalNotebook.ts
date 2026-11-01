@@ -7,12 +7,24 @@ export const JOURNAL_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "im
 
 export type JournalCoverTone = "onyx" | "forest" | "oxblood" | "navy";
 export type JournalPaperTone = "warm" | "cream" | "white";
+export type JournalDeskTone = "walnut" | "oak" | "ink";
+export type JournalDeskWeather = "sun" | "rain" | "night";
+export type JournalLaptopTone = "silver" | "graphite";
+export type JournalLaptopPosition = "left" | "right";
+export type JournalHeadphones = "wired" | "airpods";
+export type JournalDrink = "tea" | "coffee" | "water";
 
 export interface JournalNotebookPreferences {
   title: string;
   subtitle: string;
   coverTone: JournalCoverTone;
   paperTone: JournalPaperTone;
+  deskTone: JournalDeskTone;
+  weather: JournalDeskWeather;
+  laptopTone: JournalLaptopTone;
+  laptopPosition: JournalLaptopPosition;
+  headphones: JournalHeadphones;
+  drink: JournalDrink;
 }
 
 export const DEFAULT_JOURNAL_NOTEBOOK: JournalNotebookPreferences = {
@@ -20,6 +32,12 @@ export const DEFAULT_JOURNAL_NOTEBOOK: JournalNotebookPreferences = {
   subtitle: "Daily pages",
   coverTone: "onyx",
   paperTone: "warm",
+  deskTone: "walnut",
+  weather: "sun",
+  laptopTone: "graphite",
+  laptopPosition: "left",
+  headphones: "wired",
+  drink: "tea",
 };
 
 export interface JournalImageAttachment {
@@ -87,6 +105,12 @@ export function normalizeJournalNotebookPreferences(value: unknown): JournalNote
     subtitle: cleanText(record.subtitle, DEFAULT_JOURNAL_NOTEBOOK.subtitle, 120),
     coverTone: isCoverTone(record.coverTone) ? record.coverTone : DEFAULT_JOURNAL_NOTEBOOK.coverTone,
     paperTone: isPaperTone(record.paperTone) ? record.paperTone : DEFAULT_JOURNAL_NOTEBOOK.paperTone,
+    deskTone: isOneOf(record.deskTone, ["walnut", "oak", "ink"] as const) ? record.deskTone : DEFAULT_JOURNAL_NOTEBOOK.deskTone,
+    weather: isOneOf(record.weather, ["sun", "rain", "night"] as const) ? record.weather : DEFAULT_JOURNAL_NOTEBOOK.weather,
+    laptopTone: isOneOf(record.laptopTone, ["silver", "graphite"] as const) ? record.laptopTone : DEFAULT_JOURNAL_NOTEBOOK.laptopTone,
+    laptopPosition: isOneOf(record.laptopPosition, ["left", "right"] as const) ? record.laptopPosition : DEFAULT_JOURNAL_NOTEBOOK.laptopPosition,
+    headphones: isOneOf(record.headphones, ["wired", "airpods"] as const) ? record.headphones : DEFAULT_JOURNAL_NOTEBOOK.headphones,
+    drink: isOneOf(record.drink, ["tea", "coffee", "water"] as const) ? record.drink : DEFAULT_JOURNAL_NOTEBOOK.drink,
   };
 }
 
@@ -319,6 +343,10 @@ function isCoverTone(value: unknown): value is JournalCoverTone {
 
 function isPaperTone(value: unknown): value is JournalPaperTone {
   return value === "warm" || value === "cream" || value === "white";
+}
+
+function isOneOf<const T extends readonly string[]>(value: unknown, options: T): value is T[number] {
+  return options.some((option) => option === value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

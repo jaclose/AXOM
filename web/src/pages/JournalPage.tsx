@@ -25,6 +25,8 @@ import { readRestLog } from "../lib/rest";
 import { focusCheckInLedger } from "../lib/focusCheckIn";
 import { useReducedMotion } from "../lib/motion";
 import { journalReflectionNeedsSupport } from "../lib/journalSupport";
+import { unlock, useUnlocked } from "../lib/unlocks";
+import { useSoundscape } from "../lib/soundscapes/store";
 import {
   DEFAULT_JOURNAL_NOTEBOOK,
   buildJournalGlanceSections,
@@ -67,6 +69,7 @@ export function JournalPage({ registerAppTransitionGuard }: {
   const [remediationMode, setRemediationMode] = useState(false);
   const [turnDirection, setTurnDirection] = useState<TurnDirection>(null);
   const [customizing, setCustomizing] = useState(false);
+  const [closingDay, setClosingDay] = useState<string | null>(null);
   const transitionGuardRef = useRef<JournalTransitionGuard | null>(null);
   const requestedJournalDayRef = useRef<string | null>(null);
   const today = s.activeDayKey || dayKey();
@@ -78,6 +81,12 @@ export function JournalPage({ registerAppTransitionGuard }: {
   );
 
   useEffect(() => { announceJournalEnergyOnce(); }, []);
+
+  useEffect(() => {
+    if (!closingDay) return;
+    const timeout = window.setTimeout(() => setClosingDay(null), reducedMotion ? 2200 : 3000);
+    return () => window.clearTimeout(timeout);
+  }, [closingDay, reducedMotion]);
 
   const registerTransitionGuard = useCallback<RegisterJournalTransitionGuard>((guard) => {
     transitionGuardRef.current = guard;
@@ -160,8 +169,20 @@ export function JournalPage({ registerAppTransitionGuard }: {
           remediationMode={remediationMode}
           onNavigate={navigate}
           onClose={closeNotebook}
+          onCompleted={(key) => {
+            setOpen(false);
+            setRemediationMode(false);
+            if (key === today) setClosingDay(key);
+          }}
           registerTransitionGuard={registerTransitionGuard}
         />
+      )}
+
+      {closingDay && (
+        <div className="journal-closeout" role="status" aria-live="polite">
+          <span className={`journal-closeout-cover cover-${preferences.coverTone}`} aria-hidden="true"><span>A</span></span>
+          <span className="journal-closeout-copy"><time dateTime={closingDay}>{prettyDate(`${closingDay}T12:00:00`)}</time><strong>Day logged.</strong></span>
+        </div>
       )}
 
       {customizing && (
@@ -189,9 +210,55 @@ function NotebookLibrary({
   onOpenDay: (key: string, remediation?: boolean) => void;
 }) {
   const s = useStore();
+  const againUnlocked = useUnlocked("again");
+  const [ipadOn, setIpadOn] = useState(false);
+  const [wallpaper, setWallpaper] = useState(0);
+  const [offCycles, setOffCycles] = useState(0);
+  const [unlockedNow, setUnlockedNow] = useState(false);
+  const [audioError, setAudioError] = useState("");
+  const [screenTime, setScreenTime] = useState("");
+
+  function toggleIpad() {
+    if (!ipadOn) {
+      setIpadOn(true);
+      setWallpaper((current) => (current + 1) % 3);
+      setScreenTime(new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date()));
+      return;
+    }
+    setIpadOn(false);
+    const cycles = offCycles + 1;
+    if (cycles < 3) {
+      setOffCycles(cycles);
+      return;
+    }
+    setOffCycles(0);
+    if (!unlock("again")) return;
+    setUnlockedNow(true);
+    void useSoundscape.getState().play("again", { version: "original" }).then(() => {
+      setAudioError(useSoundscape.getState().error ?? "");
+    });
+  }
+
   return (
     <div className="journal-library-grid">
-      <section className="journal-library-hero" aria-labelledby="journal-library-title">
+      <section
+        className={`journal-library-hero journal-desk desk-${preferences.deskTone} weather-${preferences.weather} laptop-${preferences.laptopTone} laptop-${preferences.laptopPosition} headphones-${preferences.headphones} drink-${preferences.drink}`}
+        aria-labelledby="journal-library-title"
+      >
+        <span className="journal-desk-window" aria-hidden="true" />
+        <span className="journal-desk-laptop" aria-hidden="true"><span className="journal-desk-laptop-mark" /></span>
+        <span className="journal-desk-headphones" aria-hidden="true"><span /></span>
+        <span className="journal-desk-plant" aria-hidden="true"><span /><span /><span /><span /><span /><i /></span>
+        <span className="journal-desk-drink" aria-hidden="true"><span /></span>
+        <button
+          type="button"
+          className={`journal-desk-ipad wallpaper-${wallpaper}${ipadOn ? " is-on" : ""}`}
+          onClick={toggleIpad}
+          aria-label={`Turn ${ipadOn ? "off" : "on"} desk iPad`}
+          aria-pressed={ipadOn}
+        >
+          <span className="journal-desk-ipad-screen"><time>{screenTime}</time><span className="journal-desk-ipad-home" /></span>
+        </button>
         <button
           type="button"
           className={`journal-hardback cover-${preferences.coverTone}`}
@@ -212,6 +279,8 @@ function NotebookLibrary({
           </GButton>
           <span>{entries.length ? `${entries.length} saved page${entries.length === 1 ? "" : "s"}` : "Your first page is ready"}</span>
         </div>
+        {(unlockedNow || againUnlocked) && <p className="journal-desk-unlocked" role="status">{unlockedNow ? "Again unlocked. It is now in Your sounds." : "Again is in Your sounds."}</p>}
+        {audioError && <p className="journal-desk-audio-error" role="alert">Again unlocked, but audio could not start: {audioError}</p>}
       </section>
 
       <aside className="journal-library-shelf" aria-label="Journal pages">
@@ -279,7 +348,7 @@ interface JournalDraft {
 }
 
 function JournalWritingPage({
-  day, today, preferences, direction, remediationMode, onNavigate, onClose, registerTransitionGuard,
+  day, today, preferences, direction, remediationMode, onNavigate, onClose, onCompleted, registerTransitionGuard,
 }: {
   day: string;
   today: string;
@@ -288,6 +357,7 @@ function JournalWritingPage({
   remediationMode: boolean;
   onNavigate: (direction: Exclude<TurnDirection, null>) => void;
   onClose: () => void;
+  onCompleted: (day: string) => void;
   registerTransitionGuard: RegisterJournalTransitionGuard;
 }) {
   const s = useStore();
@@ -524,7 +594,7 @@ function JournalWritingPage({
     void requestDurableTransition(() => onNavigate(nextDirection));
   }
 
-  function completeToday() {
+  async function completeToday() {
     cancelScheduledSave();
     const current = draftRef.current;
     if (!hasNotebookContent(current) && !entryIdRef.current) {
@@ -539,7 +609,8 @@ function JournalWritingPage({
     setDraftState(next);
     setSaveState("saving");
     setSaveError("");
-    void persist("complete");
+    const result = await persist("complete");
+    if (result === "saved") onCompleted(day);
   }
 
   function handleBookKeyDown(event: KeyboardEvent<HTMLElement>) {
@@ -739,7 +810,7 @@ function JournalWritingPage({
             <GButton size="sm" onClick={exportPage}><Download size={ICON_SIZE.body} /> Export page</GButton>
             {remediationMode && <GButton size="sm" onClick={() => { void requestDurableTransition(onClose); }}><X size={ICON_SIZE.body} /> Cancel</GButton>}
             <GButton size="sm" disabled={addingImage} onClick={() => { void persist(); }}><Save size={ICON_SIZE.body} /> Save</GButton>
-            <GButton variant="primary" size="sm" disabled={addingImage} onClick={completeToday}><CheckCircle2 size={ICON_SIZE.body} /> Done for today</GButton>
+            <GButton variant="primary" size="sm" disabled={addingImage} onClick={() => { void completeToday(); }}><CheckCircle2 size={ICON_SIZE.body} /> Done for today</GButton>
           </div>
         </article>
 
@@ -857,12 +928,12 @@ function NotebookCustomization({
 }) {
   const [draft, setDraft] = useState(initial);
   return (
-    <Modal title="Customize notebook" onClose={onClose} footer={<>
+    <Modal title="Customize your journal" onClose={onClose} footer={<>
       <GButton onClick={() => setDraft(DEFAULT_JOURNAL_NOTEBOOK)}>Reset</GButton>
       <GButton onClick={onClose}>Cancel</GButton>
       <GButton variant="primary" onClick={() => onSave(normalizeJournalNotebookPreferences(draft))}>Save notebook</GButton>
     </>}>
-      <p className="sub">Change the cover and paper without changing any journal pages.</p>
+      <p className="sub">Set the scene around your notebook. Your journal pages stay as they are.</p>
       <Field label="Notebook title" value={draft.title} maxLength={80} onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
       <Field label="Subtitle" value={draft.subtitle} maxLength={120} onChange={(event) => setDraft({ ...draft, subtitle: event.target.value })} />
       <div className="row gap12">
@@ -878,6 +949,26 @@ function NotebookCustomization({
           paperTone: event.target.value as JournalNotebookPreferences["paperTone"],
         })}>
           <option value="warm">Warm</option><option value="cream">Cream</option><option value="white">Bright</option>
+        </SelectField>
+      </div>
+      <div className="journal-customize-grid">
+        <SelectField label="Desk" value={draft.deskTone} onChange={(event) => setDraft({ ...draft, deskTone: event.target.value as JournalNotebookPreferences["deskTone"] })}>
+          <option value="walnut">Walnut</option><option value="oak">Pale oak</option><option value="ink">Ink-stained wood</option>
+        </SelectField>
+        <SelectField label="Outside" value={draft.weather} onChange={(event) => setDraft({ ...draft, weather: event.target.value as JournalNotebookPreferences["weather"] })}>
+          <option value="sun">Late sun</option><option value="rain">Rain</option><option value="night">Night</option>
+        </SelectField>
+        <SelectField label="Laptop finish" value={draft.laptopTone} onChange={(event) => setDraft({ ...draft, laptopTone: event.target.value as JournalNotebookPreferences["laptopTone"] })}>
+          <option value="graphite">Graphite</option><option value="silver">Silver</option>
+        </SelectField>
+        <SelectField label="Laptop position" value={draft.laptopPosition} onChange={(event) => setDraft({ ...draft, laptopPosition: event.target.value as JournalNotebookPreferences["laptopPosition"] })}>
+          <option value="left">Left</option><option value="right">Right</option>
+        </SelectField>
+        <SelectField label="Headphones" value={draft.headphones} onChange={(event) => setDraft({ ...draft, headphones: event.target.value as JournalNotebookPreferences["headphones"] })}>
+          <option value="wired">Wired</option><option value="airpods">Wireless</option>
+        </SelectField>
+        <SelectField label="Drink" value={draft.drink} onChange={(event) => setDraft({ ...draft, drink: event.target.value as JournalNotebookPreferences["drink"] })}>
+          <option value="tea">Tea</option><option value="coffee">Coffee</option><option value="water">Water</option>
         </SelectField>
       </div>
     </Modal>

@@ -11,6 +11,7 @@ import * as journalNotebook from "../lib/journalNotebook";
 import * as localVault from "../lib/localVault";
 import { useAccount } from "../lib/account/accountStore";
 import { JournalPage } from "./JournalPage";
+import { useSoundscape } from "../lib/soundscapes/store";
 
 // Derive dates exactly the way the app does — hard-coded calendar dates made
 // this suite expire two days after it was written (found 2026-07-15).
@@ -63,6 +64,29 @@ afterEach(() => {
 });
 
 describe("Journal notebook foundation", () => {
+  it("unlocks Again only after three complete iPad on/off cycles", async () => {
+    const play = vi.spyOn(useSoundscape.getState(), "play").mockResolvedValue(undefined);
+    render(<JournalPage />);
+
+    for (let cycle = 0; cycle < 2; cycle += 1) {
+      fireEvent.click(screen.getByRole("button", { name: "Turn on desk iPad" }));
+      expect(screen.getByRole("button", { name: "Turn off desk iPad" }).getAttribute("aria-pressed")).toBe("true");
+      fireEvent.click(screen.getByRole("button", { name: "Turn off desk iPad" }));
+    }
+    expect(useStore.getState().profile.unlocks ?? []).not.toContain("again");
+    expect(play).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Turn on desk iPad" }));
+    fireEvent.click(screen.getByRole("button", { name: "Turn off desk iPad" }));
+    await waitFor(() => expect(useStore.getState().profile.unlocks).toContain("again"));
+    expect(play).toHaveBeenCalledWith("again", { version: "original" });
+    expect(screen.getByText("Again unlocked. It is now in Your sounds.")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Turn on desk iPad" }));
+    fireEvent.click(screen.getByRole("button", { name: "Turn off desk iPad" }));
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+
   it("opens the premium notebook and turns pages with buttons without losing text", async () => {
     // This component test has no hydrated IndexedDB subscriber. Persistence
     // semantics are exercised below and in localVault.test; here the durable
@@ -348,11 +372,12 @@ describe("Journal notebook foundation", () => {
     await waitFor(() => expect(flush).toHaveBeenCalledTimes(1));
     expect(screen.getByText("Saving to this workspace…")).toBeTruthy();
     expect(screen.queryByText("Saved to this workspace")).toBeNull();
+    expect(screen.queryByText("Day logged.")).toBeNull();
     expect(useStore.getState().journal.find((entry) => entry.date.startsWith(TODAY_KEY)))
       .toMatchObject({ freeWriting: "A completed durable page", notebookStatus: "complete" });
 
     await act(async () => { confirmDurability(); await Promise.resolve(); });
-    expect(screen.getByText("Saved to this workspace")).toBeTruthy();
+    expect(screen.getByText("Day logged.")).toBeTruthy();
     expect(assertExactWrite).toHaveBeenCalledTimes(1);
     expect(assertWritesSince).toHaveBeenCalledTimes(1);
   });

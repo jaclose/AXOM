@@ -3,6 +3,7 @@ import { mergeStates, parseImport, toPortableState } from "./backup";
 import { makeSeed, SCHEMA_VERSION } from "./seed";
 import { createTextAnnotation } from "./questionAnnotations";
 import { buildQuizPool } from "./quiz";
+import { DEFAULT_JOURNAL_NOTEBOOK } from "./journalNotebook";
 
 describe("portable backup safety", () => {
   it("round-trips exact learner method descriptions, timing and every preference layer", () => {
@@ -21,6 +22,7 @@ describe("portable backup safety", () => {
   it("round-trips notebook metadata, autosaved writing, and bounded local attachments on the current schema", () => {
     const state = makeSeed();
     state.profile.journalNotebook = {
+      ...DEFAULT_JOURNAL_NOTEBOOK,
       title: "Clinical notebook",
       subtitle: "Daily rounds",
       coverTone: "forest",

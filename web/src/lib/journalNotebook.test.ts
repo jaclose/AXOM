@@ -88,16 +88,22 @@ describe("journal notebook data projection", () => {
     expect(nextJournalDay("2026-12-31")).toBe("2027-01-01");
   });
 
-  it("normalizes customizable cover metadata without technical or unsafe values", () => {
+  it("normalizes notebook and desk preferences without unsafe values", () => {
     expect(normalizeJournalNotebookPreferences({
       title: "  Residency journal  ",
       subtitle: "Daily review",
       coverTone: "forest",
       paperTone: "cream",
-    })).toMatchObject({ title: "Residency journal", coverTone: "forest", paperTone: "cream" });
-    expect(normalizeJournalNotebookPreferences({ coverTone: "script", paperTone: "remote" })).toMatchObject({
+      deskTone: "oak",
+      weather: "rain",
+      laptopPosition: "right",
+    })).toMatchObject({ title: "Residency journal", coverTone: "forest", paperTone: "cream", deskTone: "oak", weather: "rain", laptopPosition: "right" });
+    expect(normalizeJournalNotebookPreferences({ coverTone: "script", paperTone: "remote", deskTone: "../../wood", weather: "storm", laptopPosition: "offscreen" })).toMatchObject({
       coverTone: "onyx",
       paperTone: "warm",
+      deskTone: "walnut",
+      weather: "sun",
+      laptopPosition: "left",
     });
   });
 
