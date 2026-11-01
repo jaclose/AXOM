@@ -60,7 +60,7 @@ export async function proposePdfMarkedAnswers(buffer: ArrayBuffer, drafts: Parse
       const text = await page.getTextContent();
       const labels = text.items.flatMap((item): Label[] => {
         if (!("str" in item)) return [];
-        const key = item.str.match(/^\s*([A-H])[.)](?:\s|$)/)?.[1];
+        const key = item.str.match(/^\s*([A-I])[.)](?:\s|$)/)?.[1];
         return key ? [{ key, x: item.transform[4], y: item.transform[5], height: item.height }] : [];
       });
       const ops = await page.getOperatorList();

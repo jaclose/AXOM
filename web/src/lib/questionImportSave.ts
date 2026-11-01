@@ -38,6 +38,7 @@ import { normalizeTags, suggestCategory } from "./taxonomy";
 import { assertVaultWrite, assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "./localVault";
 import { saveSourceOriginal } from "./decode/sources";
 import { MAX_SOURCE_ORIGINAL_BYTES, originalFileIdentity } from "./sourceOriginal";
+import { materializeTeachingAnalysis } from "./question-content/materializeTeaching";
 
 export type ImportDestination = "set" | "doc" | "both";
 
@@ -151,72 +152,80 @@ export function prepareReviewedImport(
   const setTitle = request.setTitle.trim() || "Untitled set";
   const scope = request.scope?.module ? request.scope : undefined;
 
-  const questions: ReviewedQuestionInput[] = drafts.map((draft, index) => ({
-    id: make.id(),
-    source: draft.source,
-    stem: draft.stem,
-    content: draft.content,
-    options: draft.options,
-    correctKey: draft.correctKey,
-    // Always derive this from the current edited option list at the boundary.
-    correctAnswerText: draft.options.find((option) => option.key === draft.correctKey)?.text,
-    explanation: draft.explanation,
-    choiceRationales: draft.choiceRationales,
-    needsReview: undefined,
-    topic: draft.topic,
-    system: draft.system,
-    objective: draft.objective,
-    category: resolveCategory(draft, request.category),
-    bank: setTitle,
-    // Stamped on each question as well as the set, so a question keeps its
-    // place in the course when it is later drawn into another set.
-    module: scope?.module,
-    week: scope?.week,
-    courseId: scope?.courseId,
-    setId,
-    sourceDocumentId: documentId,
-    sourceFile: document ? {
-      name: document.fileName,
-      type: document.fileType,
-      size: document.sizeBytes,
-      addedAt: reviewedAt,
-    } : undefined,
-    questionNumber: draft.questionNumber,
-    sourcePage: draft.sourcePage,
-    examType: request.examType,
-    difficulty: request.difficulty,
-    citation: draft.reference !== undefined
-      ? (draft.reference.trim() || undefined)
-      : draft.sourceLabel ?? document?.fileName,
-    tags: normalizeTags([...(draft.tags ?? []), ...suggestCategory(draftText(draft)).tags]),
-    status: "unseen",
-    ai: draft.aiGenerated ? { generated: true, provider: request.aiProviderLabel } : undefined,
-    extraction: {
-      confidence: extractionConfidence(evaluations[index]),
-      reviewed: true,
-      reviewedAt,
-      questionDetectionConfidence: draft.questionDetectionConfidence,
-      answerDetectionConfidence: draft.answerDetectionConfidence,
-      explanationDetectionConfidence: draft.explanationDetectionConfidence,
-      overallImportConfidence: draft.overallImportConfidence,
-      warnings: draft.warnings,
-      parserRuleIds: [...new Set([
-        ...(draft.parserRuleIds ?? []),
-        ...(draft.reviewAcknowledged ? ["import.user-reviewed"] : []),
-      ])],
-      sourceSnippet: draft.sourceSnippet,
-      questionSourceSnippet: draft.questionSourceSnippet,
-      questionSourcePage: draft.questionSourcePage,
-      answerEvidence: draft.answerEvidence,
-      answerEvidenceSnippet: draft.answerEvidenceSnippet,
-      answerEvidencePage: draft.answerEvidencePage,
-      explanationSourceSnippet: draft.explanationSourceSnippet,
-      explanationSourcePage: draft.explanationSourcePage,
-      explanationSource: draft.explanationSource,
-      explanationRawCandidate: draft.explanationRawCandidate,
-      explanationCleanupOperations: draft.explanationCleanupOperations,
-    },
-  }));
+  const questions: ReviewedQuestionInput[] = drafts.map((draft, index) => {
+    const question: ReviewedQuestionInput = {
+      id: make.id(),
+      source: draft.source,
+      stem: draft.stem,
+      content: draft.content,
+      options: draft.options,
+      correctKey: draft.correctKey,
+      // Always derive this from the current edited option list at the boundary.
+      correctAnswerText: draft.options.find((option) => option.key === draft.correctKey)?.text,
+      explanation: draft.explanation,
+      choiceRationales: draft.choiceRationales,
+      needsReview: undefined,
+      topic: draft.topic,
+      system: draft.system,
+      objective: draft.objective,
+      category: resolveCategory(draft, request.category),
+      bank: setTitle,
+      // Stamped on each question as well as the set, so a question keeps its
+      // place in the course when it is later drawn into another set.
+      module: scope?.module,
+      week: scope?.week,
+      courseId: scope?.courseId,
+      setId,
+      sourceDocumentId: documentId,
+      sourceFile: document ? {
+        name: document.fileName,
+        type: document.fileType,
+        size: document.sizeBytes,
+        addedAt: reviewedAt,
+      } : undefined,
+      questionNumber: draft.questionNumber,
+      sourcePage: draft.sourcePage,
+      examType: request.examType,
+      difficulty: request.difficulty,
+      citation: draft.reference !== undefined
+        ? (draft.reference.trim() || undefined)
+        : draft.sourceLabel ?? document?.fileName,
+      tags: normalizeTags([...(draft.tags ?? []), ...suggestCategory(draftText(draft)).tags]),
+      status: "unseen",
+      ai: draft.aiGenerated ? { generated: true, provider: request.aiProviderLabel } : undefined,
+      extraction: {
+        confidence: extractionConfidence(evaluations[index]),
+        reviewed: true,
+        reviewedAt,
+        questionDetectionConfidence: draft.questionDetectionConfidence,
+        answerDetectionConfidence: draft.answerDetectionConfidence,
+        explanationDetectionConfidence: draft.explanationDetectionConfidence,
+        overallImportConfidence: draft.overallImportConfidence,
+        warnings: draft.warnings,
+        parserRuleIds: [...new Set([
+          ...(draft.parserRuleIds ?? []),
+          ...(draft.reviewAcknowledged ? ["import.user-reviewed"] : []),
+        ])],
+        sourceSnippet: draft.sourceSnippet,
+        questionSourceSnippet: draft.questionSourceSnippet,
+        questionSourcePage: draft.questionSourcePage,
+        answerEvidence: draft.answerEvidence,
+        answerEvidenceSnippet: draft.answerEvidenceSnippet,
+        answerEvidencePage: draft.answerEvidencePage,
+        explanationSourceSnippet: draft.explanationSourceSnippet,
+        explanationSourcePage: draft.explanationSourcePage,
+        explanationSource: draft.explanationSource,
+        explanationRawCandidate: draft.explanationRawCandidate,
+        explanationCleanupOperations: draft.explanationCleanupOperations,
+      },
+    };
+    const analysis = materializeTeachingAnalysis({
+      teaching: draft.content?.teaching,
+      question,
+      generatedAt: reviewedAt,
+    });
+    return analysis ? { ...question, analyses: [analysis] } : question;
+  });
 
   if (wantsSet) {
     const errors = questions.flatMap((input, index) => {

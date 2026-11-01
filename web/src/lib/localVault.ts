@@ -9,7 +9,13 @@ export const BACKUP_STORE_NAME = "backups";
 /** Question-note image bytes live here, keyed by blobKey — never in the JSON
  * workspace state and never in localStorage (Q2b-2). */
 export const ATTACHMENT_STORE_NAME = "questionAttachmentBlobs";
-export const DB_VERSION = 3;
+/**
+ * Physical vault schema version. Version 4 is the coordination barrier for
+ * chunked workspace values: a v3 tab must close before the first chunk
+ * manifest can be committed, and cannot reopen against the upgraded vault.
+ * This is independent from the logical Zustand store schema.
+ */
+export const DB_VERSION = 4;
 
 /** Shared upgrade path: create any missing stores without touching existing data. */
 export function ensureVaultStores(db: IDBDatabase) {
@@ -25,6 +31,9 @@ let vaultWriteSequence = 0;
 const vaultWriteFailures = new Map<number, Error>();
 const observedVaultSnapshots = new Map<string, string | null>();
 const conflictedWorkspaceKeys = new Set<string>();
+/** A blocked versionchange request cannot be cancelled. Fail later upgrade
+ * attempts promptly until that queued request either succeeds or errors. */
+let vaultUpgradeBlocked = false;
 
 export const VAULT_CONFLICT_MESSAGE = "Another AXOM tab saved a newer workspace. This tab did not overwrite it. Keep this tab open, export or copy any unsaved work, then reload AXOM and retry.";
 
@@ -48,6 +57,7 @@ export function isVaultConflictError(error: unknown): error is Error & { code?: 
 export function resetLocalVaultRuntimeForTests(): void {
   observedVaultSnapshots.clear();
   conflictedWorkspaceKeys.clear();
+  vaultUpgradeBlocked = false;
 }
 
 /** Capture the current adapter position before a write that must be durable. */
@@ -118,8 +128,110 @@ function snapshotFingerprint(value: string): string {
   return `${value.length}:${(hash >>> 0).toString(16)}`;
 }
 
+const CHUNKED_VALUE_FORMAT = "axom-local-vault-chunks";
+const CHUNKED_VALUE_VERSION = 1;
+/** Keep each IndexedDB value well below Chromium's large-value failure edge. */
+const VAULT_CHUNK_CHARACTERS = 1024 * 1024;
+
+interface ChunkedValueManifest {
+  format: typeof CHUNKED_VALUE_FORMAT;
+  version: typeof CHUNKED_VALUE_VERSION;
+  fingerprint: string;
+  length: number;
+  chunkPrefix: string;
+  chunkCount: number;
+}
+
+interface StoredValuePlan {
+  storedValue: string;
+  manifest?: ChunkedValueManifest;
+  chunks: string[];
+}
+
+function readChunkedValueManifest(value: string | null | undefined): ChunkedValueManifest | undefined {
+  if (typeof value !== "string" || value.length > 4096 || !value.includes(CHUNKED_VALUE_FORMAT)) return undefined;
+  try {
+    const parsed = JSON.parse(value) as Partial<ChunkedValueManifest>;
+    if (
+      parsed.format !== CHUNKED_VALUE_FORMAT
+      || parsed.version !== CHUNKED_VALUE_VERSION
+      || typeof parsed.fingerprint !== "string"
+      || typeof parsed.length !== "number"
+      || !Number.isSafeInteger(parsed.length)
+      || parsed.length < 0
+      || typeof parsed.chunkPrefix !== "string"
+      || !parsed.chunkPrefix.includes(":chunks:")
+      || typeof parsed.chunkCount !== "number"
+      || !Number.isSafeInteger(parsed.chunkCount)
+      || parsed.chunkCount < 1
+      || parsed.chunkCount > 100_000
+    ) return undefined;
+    return parsed as ChunkedValueManifest;
+  } catch {
+    return undefined;
+  }
+}
+
+function chunkPrefix(name: string, userId: string): string {
+  return `${name}:chunks:${snapshotFingerprint(userId || "local-workspace")}`;
+}
+
+function storedValuePlan(name: string, value: string, userId: string): StoredValuePlan {
+  if (!observesWorkspace(name) || value.length <= VAULT_CHUNK_CHARACTERS) {
+    return { storedValue: value, chunks: [] };
+  }
+  const prefix = chunkPrefix(name, userId);
+  const chunks: string[] = [];
+  for (let at = 0; at < value.length; at += VAULT_CHUNK_CHARACTERS) {
+    chunks.push(value.slice(at, at + VAULT_CHUNK_CHARACTERS));
+  }
+  const manifest: ChunkedValueManifest = {
+    format: CHUNKED_VALUE_FORMAT,
+    version: CHUNKED_VALUE_VERSION,
+    fingerprint: snapshotFingerprint(value),
+    length: value.length,
+    chunkPrefix: prefix,
+    chunkCount: chunks.length,
+  };
+  return { storedValue: JSON.stringify(manifest), manifest, chunks };
+}
+
+function validateReassembledValue(manifest: ChunkedValueManifest, chunks: readonly string[]): string {
+  if (chunks.length !== manifest.chunkCount || chunks.some(chunk => typeof chunk !== "string")) {
+    throw new Error("The local vault workspace is missing one or more storage chunks.");
+  }
+  const value = chunks.join("");
+  if (value.length !== manifest.length || snapshotFingerprint(value) !== manifest.fingerprint) {
+    throw new Error("The local vault workspace chunks failed their integrity check.");
+  }
+  return value;
+}
+
+/** Resolve one record captured from the physical IndexedDB state store.
+ * Migration backups include the store's chunk records verbatim, while their
+ * recovery consumers need the same logical string returned by this adapter. */
+export function resolveVaultSnapshotRecord(
+  records: Readonly<Record<string, string>>,
+  key: string,
+): string | undefined {
+  const stored = records[key];
+  if (typeof stored !== "string") return undefined;
+  const manifest = readChunkedValueManifest(stored);
+  if (!manifest) return stored;
+  const chunks: string[] = [];
+  for (let index = 0; index < manifest.chunkCount; index += 1) {
+    const chunk = records[`${manifest.chunkPrefix}:${index}`];
+    if (typeof chunk !== "string") {
+      throw new Error("The local vault workspace is missing one or more storage chunks.");
+    }
+    chunks.push(chunk);
+  }
+  return validateReassembledValue(manifest, chunks);
+}
+
 function workspaceFingerprint(value: string | null | undefined): string | null {
-  return typeof value === "string" ? snapshotFingerprint(value) : null;
+  if (typeof value !== "string") return null;
+  return readChunkedValueManifest(value)?.fingerprint ?? snapshotFingerprint(value);
 }
 
 type VaultExpectation = {
@@ -217,31 +329,62 @@ function newerFallbackCopy(fallbackStore: Storage | null, name: string): NewerFa
   }
 }
 
-const UPGRADE_BLOCKED_MESSAGE = "Local vault upgrade is blocked by another tab";
 /**
- * True while a vault upgrade waits on another tab. The browser queues every
- * later open request for this database behind that one without telling them,
- * so a second save would wait for ever and nothing after it would be written.
- * Failing fast keeps each save going to the fallback until the upgrade lands.
+ * Workspace JSON only needs the long-lived `state` store. Open the current
+ * database version instead of forcing a schema upgrade on every save: an
+ * older AXOM tab may legitimately keep v1/v2 open, and that must not divert a
+ * multi-megabyte workspace into localStorage while the upgrade is blocked.
+ * New databases still create every current store in `onupgradeneeded`;
+ * feature-specific boundaries request an upgrade only when their store is absent.
  */
-let upgradeBlocked = false;
-
 function openVault(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (typeof indexedDB === "undefined") {
       reject(new Error("IndexedDB is unavailable"));
       return;
     }
-    if (upgradeBlocked) {
-      reject(new Error(UPGRADE_BLOCKED_MESSAGE));
+    const req = indexedDB.open(DB_NAME);
+    let created = false;
+    req.onupgradeneeded = () => {
+      created = true;
+      ensureVaultStores(req.result);
+    };
+    req.onsuccess = () => {
+      if (!req.result.objectStoreNames.contains(STORE_NAME)) {
+        req.result.close();
+        reject(new Error("The local vault is missing its workspace store"));
+        return;
+      }
+      // A brand-new database has no competing connection, so finish at the
+      // canonical schema version. Only pre-existing databases use their
+      // current store without demanding an upgrade from older open tabs.
+      if (created && req.result.version < DB_VERSION) {
+        req.result.close();
+        openUpgradedVault().then(resolve, reject);
+        return;
+      }
+      req.result.onversionchange = () => req.result.close();
+      resolve(req.result);
+    };
+    req.onerror = () => reject(req.error ?? new Error("Unable to open local vault"));
+    req.onblocked = () => reject(new Error("Local vault access is blocked by another tab"));
+  });
+}
+
+function openUpgradedVault(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (vaultUpgradeBlocked) {
+      reject(new Error("Local vault upgrade is blocked by another tab"));
       return;
     }
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     let blocked = false;
     req.onupgradeneeded = () => ensureVaultStores(req.result);
     req.onsuccess = () => {
+      // A blocked request can succeed later after its caller already fell back.
+      // Do not leak that late database connection or resolve a settled promise.
       if (blocked) {
-        upgradeBlocked = false;
+        vaultUpgradeBlocked = false;
         req.result.close();
         return;
       }
@@ -249,13 +392,13 @@ function openVault(): Promise<IDBDatabase> {
       resolve(req.result);
     };
     req.onerror = () => {
-      if (blocked) upgradeBlocked = false;
-      reject(req.error ?? new Error("Unable to open local vault"));
+      if (blocked) vaultUpgradeBlocked = false;
+      reject(req.error ?? new Error("Unable to upgrade local vault"));
     };
     req.onblocked = () => {
       blocked = true;
-      upgradeBlocked = true;
-      reject(new Error(UPGRADE_BLOCKED_MESSAGE));
+      vaultUpgradeBlocked = true;
+      reject(new Error("Local vault upgrade is blocked by another tab"));
     };
   });
 }
@@ -266,13 +409,18 @@ function openExistingVault(): Promise<IDBDatabase> {
       reject(new Error("IndexedDB is unavailable"));
       return;
     }
-    if (upgradeBlocked) {
-      reject(new Error(UPGRADE_BLOCKED_MESSAGE));
-      return;
-    }
     const req = indexedDB.open(DB_NAME);
-    req.onupgradeneeded = () => ensureVaultStores(req.result);
+    let created = false;
+    req.onupgradeneeded = () => {
+      created = true;
+      ensureVaultStores(req.result);
+    };
     req.onsuccess = () => {
+      if (created && req.result.version < DB_VERSION) {
+        req.result.close();
+        openUpgradedVault().then(resolve, reject);
+        return;
+      }
       req.result.onversionchange = () => req.result.close();
       resolve(req.result);
     };
@@ -310,6 +458,58 @@ async function withStore<T>(
   });
 }
 
+/** Read either a legacy single-value record or an atomically stored chunk set. */
+async function readVaultRecord(
+  key: string,
+  open: () => Promise<IDBDatabase> = openExistingVault,
+): Promise<string | undefined> {
+  const db = await open();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readonly");
+    const store = tx.objectStore(STORE_NAME);
+    const primary = store.get(key);
+    let result: string | undefined;
+    let failure: Error | undefined;
+    let chunked: { manifest: ChunkedValueManifest; chunks: string[] } | undefined;
+    primary.onsuccess = () => {
+      if (typeof primary.result !== "string") return;
+      const manifest = readChunkedValueManifest(primary.result);
+      if (!manifest) {
+        result = primary.result;
+        return;
+      }
+      const chunks = new Array<string>(manifest.chunkCount);
+      chunked = { manifest, chunks };
+      for (let index = 0; index < manifest.chunkCount; index += 1) {
+        const request = store.get(`${manifest.chunkPrefix}:${index}`);
+        request.onsuccess = () => {
+          if (typeof request.result !== "string") {
+            failure ??= new Error("The local vault workspace is missing one or more storage chunks.");
+            return;
+          }
+          chunks[index] = request.result;
+        };
+        request.onerror = () => { failure ??= request.error ?? new Error("Unable to read a local vault chunk."); };
+      }
+    };
+    primary.onerror = () => { failure = primary.error ?? new Error("Unable to read the local workspace."); };
+    tx.oncomplete = () => {
+      db.close();
+      if (!failure && chunked) {
+        try { result = validateReassembledValue(chunked.manifest, chunked.chunks); }
+        catch (error) { failure = error instanceof Error ? error : new Error("Unable to rebuild the local workspace."); }
+      }
+      if (failure) reject(failure);
+      else resolve(result);
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(tx.error ?? failure ?? new Error("Local vault read failed"));
+    };
+    tx.onabort = tx.onerror;
+  });
+}
+
 /** One transaction: compare the hydrated workspace, then replace its primary,
  * active-profile pointer and per-profile copy. IndexedDB keeps the comparison
  * and writes atomic across browser tabs. */
@@ -319,14 +519,23 @@ async function writeVault(
   userId: string,
   expected?: VaultExpectation,
 ): Promise<void> {
-  const db = await openVault();
+  const plan = storedValuePlan(name, value, userId);
+  // A chunk manifest is only safe after the physical v4 upgrade succeeds.
+  // Otherwise an already-open v3 writer could replace the manifest with a
+  // legacy single value while leaving its chunks behind. Small legacy values
+  // can continue using the long-lived state store while an upgrade is blocked.
+  const db = await (plan.manifest ? openUpgradedVault() : openVault());
+  if (plan.manifest && db.version < DB_VERSION) {
+    db.close();
+    throw new Error("The local vault must finish its storage upgrade before saving this large workspace.");
+  }
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
     let conflict: VaultConflictError | null = null;
     let settled = false;
 
-    const write = (current: string | undefined) => {
+    const write = (current: string | undefined, previous: readonly (string | undefined)[]) => {
       // A missing record is a fresh/recreated vault, not a competing revision.
       // Conflicts only exist when another concrete workspace replaced the one
       // this runtime hydrated.
@@ -340,28 +549,49 @@ async function writeVault(
         tx.abort();
         return;
       }
-      store.put(value, name);
+      const currentPrefix = chunkPrefix(name, userId);
+      const nextChunkCount = plan.manifest?.chunkPrefix === currentPrefix ? plan.manifest.chunkCount : 0;
+      for (const raw of previous) {
+        const manifest = readChunkedValueManifest(raw);
+        if (!manifest || manifest.chunkPrefix !== currentPrefix) continue;
+        for (let index = nextChunkCount; index < manifest.chunkCount; index += 1) {
+          store.delete(`${manifest.chunkPrefix}:${index}`);
+        }
+      }
+      if (plan.manifest) {
+        plan.chunks.forEach((chunk, index) => store.put(chunk, `${plan.manifest!.chunkPrefix}:${index}`));
+      }
+      store.put(plan.storedValue, name);
       if (userId) {
         store.put(userId, activeUserKey(name));
-        store.put(value, scopedStateKey(name, userId));
+        store.put(plan.storedValue, scopedStateKey(name, userId));
       }
     };
 
     const primary = store.get(name);
     primary.onsuccess = () => {
-      if (typeof primary.result === "string") {
-        write(primary.result);
-        return;
-      }
-      const active = store.get(activeUserKey(name));
-      active.onsuccess = () => {
-        if (typeof active.result !== "string" || !active.result) {
-          write(undefined);
+      const primaryValue = typeof primary.result === "string" ? primary.result : undefined;
+      const userScoped = userId ? store.get(scopedStateKey(name, userId)) : undefined;
+      const finish = (userScopedValue?: string) => {
+        if (primaryValue !== undefined) {
+          write(primaryValue, [primaryValue, userScopedValue]);
           return;
         }
-        const scoped = store.get(scopedStateKey(name, active.result));
-        scoped.onsuccess = () => write(typeof scoped.result === "string" ? scoped.result : undefined);
+        const active = store.get(activeUserKey(name));
+        active.onsuccess = () => {
+          if (typeof active.result !== "string" || !active.result) {
+            write(userScopedValue, [userScopedValue]);
+            return;
+          }
+          const scoped = store.get(scopedStateKey(name, active.result));
+          scoped.onsuccess = () => {
+            const activeValue = typeof scoped.result === "string" ? scoped.result : undefined;
+            write(activeValue ?? userScopedValue, [userScopedValue, activeValue]);
+          };
+        };
       };
+      if (!userScoped) finish();
+      else userScoped.onsuccess = () => finish(typeof userScoped.result === "string" ? userScoped.result : undefined);
     };
 
     tx.oncomplete = () => {
@@ -400,15 +630,35 @@ function clearFallbackCopy(fallbackStore: Storage | null, name: string, userId: 
 }
 
 async function readVaultSnapshot(name: string): Promise<string | null> {
-  const primary = await withStore<string | undefined>("readonly", (store) => store.get(name), openExistingVault);
+  const primary = await readVaultRecord(name, openExistingVault);
   if (primary) return primary;
   const activeUser = await withStore<string | undefined>("readonly", (store) => store.get(activeUserKey(name)), openExistingVault);
   if (!activeUser) return null;
-  return await withStore<string | undefined>(
-    "readonly",
-    (store) => store.get(scopedStateKey(name, activeUser)),
-    openExistingVault,
-  ) ?? null;
+  return await readVaultRecord(scopedStateKey(name, activeUser), openExistingVault) ?? null;
+}
+
+async function removeVaultRecords(name: string, active?: string): Promise<void> {
+  const db = await openExistingVault();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    const keys = [name, ...(active ? [scopedStateKey(name, active)] : [])];
+    for (const key of keys) {
+      const request = store.get(key);
+      request.onsuccess = () => {
+        const manifest = readChunkedValueManifest(typeof request.result === "string" ? request.result : undefined);
+        if (!manifest) return;
+        for (let index = 0; index < manifest.chunkCount; index += 1) {
+          store.delete(`${manifest.chunkPrefix}:${index}`);
+        }
+      };
+      store.delete(key);
+    }
+    store.delete(activeUserKey(name));
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error ?? new Error("Unable to remove the local workspace.")); };
+    tx.onabort = tx.onerror;
+  });
 }
 
 function clearFallbackCopyIfUnchanged(
@@ -465,7 +715,7 @@ const vaultStorage: StateStorage = {
     }
 
     try {
-      const value = await withStore<string | undefined>("readonly", (store) => store.get(name), openExistingVault);
+      const value = await readVaultRecord(name, openExistingVault);
       if (value) {
         rememberVaultSnapshot(name, value);
         return value;
@@ -473,7 +723,7 @@ const vaultStorage: StateStorage = {
 
       const activeUser = await withStore<string | undefined>("readonly", (store) => store.get(activeUserKey(name)), openExistingVault);
       if (activeUser) {
-        const scoped = await withStore<string | undefined>("readonly", (store) => store.get(scopedStateKey(name, activeUser)), openExistingVault);
+        const scoped = await readVaultRecord(scopedStateKey(name, activeUser), openExistingVault);
         if (scoped) {
           rememberVaultSnapshot(name, scoped);
           return scoped;
@@ -488,7 +738,7 @@ const vaultStorage: StateStorage = {
       null;
     if (fallback) {
       try {
-        await withStore("readwrite", (store) => store.put(fallback, name));
+        await writeVault(name, fallback, persistedUserId(fallback));
       } catch {
         // localStorage still has the data; no need to interrupt app load.
       }
@@ -536,8 +786,9 @@ const vaultStorage: StateStorage = {
         markVaultWriteFailure();
         return;
       }
-      // IndexedDB can be blocked/private-mode unavailable. In that case retain
-      // the full localStorage fallback so the app stays usable and data-safe.
+      // Try the established localStorage recovery path for any workspace.
+      // Browser quotas vary, and medium multi-megabyte snapshots can still fit;
+      // the storage implementation itself is the authority on available room.
       let saved: boolean;
       let failure: unknown;
       const previousFallback = newerFallbackCopy(fallbackStore, name);
@@ -605,24 +856,43 @@ const vaultStorage: StateStorage = {
     fallback?.removeItem(activeUserKey(name));
     if (active) fallback?.removeItem(scopedStateKey(name, active));
     try {
-      await withStore("readwrite", (store) => {
-        store.delete(name);
-        store.delete(activeUserKey(name));
-        if (active) store.delete(scopedStateKey(name, active));
-        return store.get(name);
-      }, openExistingVault);
+      await removeVaultRecords(name, active);
     } catch {
       // No-op; best effort cleanup.
     }
   },
 };
 
+/** Replace a verified workspace backup even when the live chunk manifest can
+ * no longer be reconstructed. This intentionally bypasses the ordinary
+ * hydrated-snapshot conflict check; callers must validate and explicitly
+ * authorize the replacement before scheduling it. A failed IndexedDB write is
+ * reported instead of leaving a forced restore in a fallback that cannot be
+ * promoted safely later. */
+async function replaceVaultItem(name: string, value: string): Promise<void> {
+  const writeSequence = ++vaultWriteSequence;
+  const userId = persistedUserId(value);
+  try {
+    await writeVault(name, value, userId);
+    clearFallbackCopy(localFallback(), name, userId);
+    conflictedWorkspaceKeys.delete(name);
+    rememberVaultSnapshot(name, value);
+    markVaultWrite("indexeddb");
+  } catch (error) {
+    vaultWriteFailures.set(
+      writeSequence,
+      error instanceof Error ? error : new Error("AXOM could not replace the local workspace."),
+    );
+    markVaultWriteFailure();
+  }
+}
+
 // Writes are coalesced per key, newest wins: at most one IndexedDB write is in
 // flight, and a burst of saves collapses into the latest snapshot. An older
 // save can therefore never land after a newer one (the update checkpoint relies
 // on that), and a quick reload or tab close is not stuck behind a backlog of
 // stale full-workspace writes.
-type VaultOp = { kind: "set"; value: string } | { kind: "remove" };
+type VaultOp = { kind: "set" | "replace"; value: string } | { kind: "remove" };
 const pendingVaultOps = new Map<string, VaultOp>();
 let vaultDrain: Promise<void> | null = null;
 
@@ -633,6 +903,7 @@ async function drainVaultWrites(): Promise<void> {
       pendingVaultOps.delete(name);
       try {
         if (op.kind === "set") await vaultStorage.setItem(name, op.value);
+        else if (op.kind === "replace") await replaceVaultItem(name, op.value);
         else await vaultStorage.removeItem(name);
       } catch {
         // setItem records failures itself (assertVaultWrite); keep draining.
@@ -659,6 +930,11 @@ export const localVaultStorage: StateStorage = {
   setItem: (name, value) => scheduleVaultWrite(name, { kind: "set", value }),
   removeItem: (name) => scheduleVaultWrite(name, { kind: "remove" }),
 };
+
+/** Schedule an explicit verified-backup replacement after earlier writes. */
+export function replaceLocalVaultItem(name: string, value: string): Promise<void> {
+  return scheduleVaultWrite(name, { kind: "replace", value });
+}
 
 function persistedUserId(raw: string): string {
   try {

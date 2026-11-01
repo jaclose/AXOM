@@ -64,6 +64,11 @@ afterEach(() => {
 
 describe("Journal notebook foundation", () => {
   it("opens the premium notebook and turns pages with buttons without losing text", async () => {
+    // This component test has no hydrated IndexedDB subscriber. Persistence
+    // semantics are exercised below and in localVault.test; here the durable
+    // boundary is acknowledged so the page-turn behavior can be isolated.
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
     render(<JournalPage />);
     fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i }));
     expect(await screen.findByRole("heading", { name: "Today’s page" })).toBeTruthy();
@@ -218,6 +223,42 @@ describe("Journal notebook foundation", () => {
     expect(screen.getByLabelText("Free writing")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Include in journal" })).toBeNull();
     expect(screen.getByRole("heading", { name: "Your day, recorded" })).toBeTruthy();
+  });
+
+  it("keeps a manual support preview available without blocking the journal", async () => {
+    render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Support" }));
+
+    const preview = screen.getByRole("region", { name: "You do not have to carry this alone." });
+    expect(within(preview).getByText(/runs in your browser.*does not send a support alert/i)).toBeTruthy();
+    expect(within(preview).getByRole("link", { name: "Find support near me" }).getAttribute("href"))
+      .toBe("https://findahelpline.com/");
+    expect(within(preview).getByRole("link", { name: "988 in the U.S. and territories" }).getAttribute("href"))
+      .toBe("https://988lifeline.org/get-help/");
+    expect(screen.getByLabelText("Free writing")).toBeTruthy();
+
+    fireEvent.click(within(preview).getByRole("button", { name: "Keep writing" }));
+    expect(screen.queryByRole("region", { name: "You do not have to carry this alone." })).toBeNull();
+    expect(screen.getByRole("button", { name: "Support" }).getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(screen.getByRole("button", { name: "Support" }));
+    fireEvent.click(screen.getByRole("button", { name: "Leave journal" }));
+    expect(await screen.findByRole("button", { name: "Open today’s page" })).toBeTruthy();
+  });
+
+  it("opens the support preview for direct first-person safety language but not study notes", async () => {
+    render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal/i }));
+    const writing = screen.getByLabelText("Free writing");
+
+    fireEvent.change(writing, { target: { value: "I reviewed the suicide risk assessment lecture." } });
+    expect(screen.queryByRole("region", { name: "You do not have to carry this alone." })).toBeNull();
+
+    fireEvent.change(writing, { target: { value: "I do not want to be alive." } });
+    const preview = await screen.findByRole("region", { name: "You do not have to carry this alone." });
+    expect(within(preview).getByText(/noticed first-person wording.*not a diagnosis.*does not send a support alert/i)).toBeTruthy();
+    expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value).toBe("I do not want to be alive.");
   });
 
   it("reports an autosave only after the local vault confirms durability", async () => {

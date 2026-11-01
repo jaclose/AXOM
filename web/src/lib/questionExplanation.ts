@@ -40,11 +40,11 @@ export interface ExplanationCleanupResult {
 const EXPLANATION_MARKER_RE = /(?:(?:^|\n)[ \t]*(?:correct\s+feedback|feedback|answer\s+explanation|explanation|rationale|reasoning|discussion|teaching\s+point|key\s+concept|why)[ \t]*[:\-–][ \t]*|(?:^|\n)[ \t]*(?:correct\s+feedback|feedback|answer\s+explanation|explanation|rationale|reasoning|discussion|teaching\s+point|key\s+concept|why)[ \t]*(?=\n|$)|(?:^|[ \t])(?:correct\s+feedback|feedback|answer\s+explanation|explanation|rationale|discussion|teaching\s+point|key\s+concept|why)[ \t]*[:\-–][ \t]*)/i;
 const OBJECTIVE_LINE_RE = /^\s*(?:objectives?|learning\s+objectives?|this\s+question\s+addresses\s+objectives?)\s*[:\-–]/i;
 const SOURCE_LINE_RE = /^\s*(?:source|references?|citation)\s*[:\-–]/i;
-const OPTION_LINE_RE = /^\s*\(?([A-H])\)?[).:\-–]\s*(.*)$/i;
+const OPTION_LINE_RE = /^\s*\(?([A-I])\)?[).:\-–]\s*(.*)$/i;
 const ANSWER_LINE_RE = /^\s*(?:(?:the\s+)?(?:correct|right)\s+(?:answer|option|choice)|(?:correct\s+)?ans(?:wer)?|correct|key|solution)\s*(?:is)?\s*[:\-–]?\s*(.*)$/i;
 const ANSWER_KEY_HEADER_RE = /^\s*(?:answer\s*key|answers?|solutions?)\s*[:\-–]?\s*$/i;
 const NUMBERED_LINE_RE = /^\s*(?:q(?:uestion)?\s*)?\d{1,4}\s*[).:\-–]\s*\S/i;
-const STRICT_KEY_LINE_RE = /^\s*(?:q(?:uestion)?\s*)?\d{1,4}\s*[).:\-–]?\s*\(?[A-H]\)?\s*[.,;:]?\s*$/i;
+const STRICT_KEY_LINE_RE = /^\s*(?:q(?:uestion)?\s*)?\d{1,4}\s*[).:\-–]?\s*\(?[A-I]\)?\s*[.,;:]?\s*$/i;
 
 function comparable(value: string): string {
   return value
@@ -179,7 +179,7 @@ export function sanitizeExplanationCandidate(
 
     const answerLine = line.match(ANSWER_LINE_RE);
     if (answerLine) {
-      const explicitKeyPayload = /^\(?[A-H]\)?(?:\s*$|\s*[).:\-–—]\s*)/i.test(answerLine[1].trim());
+      const explicitKeyPayload = /^\(?[A-I]\)?(?:\s*$|\s*[).:\-–—]\s*)/i.test(answerLine[1].trim());
       // Inside an explicitly labelled explanation, an Answer:-prefixed prose
       // sentence is part of the authored rationale. Only a key-shaped payload
       // is structural answer metadata that should be removed.

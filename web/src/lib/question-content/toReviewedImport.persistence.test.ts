@@ -17,6 +17,7 @@ import type { ImportPackage, PackageIssue } from "./package";
 import { packageToReviewedImport, type PackageImportOptions } from "./toReviewedImport";
 import { validatePackage } from "./validate";
 import { isAssetVisible } from "./visibility";
+import { assessBank } from "./assessBank";
 
 const folder = join(process.cwd(), "..", "fixtures", "qbank", "synthetic", "multimodal-shapes");
 const SOURCE_TEXT = { rawText: "The invented source, as it was read.", pageTexts: ["The invented source,", "as it was read."] };
@@ -51,6 +52,40 @@ afterEach(async () => {
 });
 
 describe("what a package offers to the canonical import", () => {
+  it("uses actual file sizes when a source omits media byte counts", async () => {
+    const { pkg } = invented();
+    const question = pkg.questions[0];
+    question.stem = [{ type: "text", text: "Synthetic source with oversized teaching references." }];
+    question.explanation = [{ type: "text", text: "Original media sizes were not declared." }];
+    question.assets = Array.from({ length: 4 }, (_, index) => ({
+      id: `reference-${index}`, filename: `reference-${index}.png`, mimeType: "image/png",
+      role: "reference" as const, questionId: question.id,
+    }));
+    const single = { ...pkg, questions: [question] };
+    const assessed = assessBank(single, [], question.assets.map(a => ({ name: a.filename, size: 8 * 1024 * 1024 })));
+    expect(assessed.counts).toEqual({ ready: 0, "needs-review": 0, unresolved: 1 });
+    const result = await saveBank(single, assessed.issues, [], realWorkspace, { acknowledged: new Set([question.id]) });
+    expect(result.status).toBe("nothing-ready");
+    expect(useStore.getState().questions).toHaveLength(0);
+  });
+  it.each(["count", "bytes"])("holds oversized teaching media before any partial question save (%s)", async reason => {
+    const { pkg } = invented();
+    const question = pkg.questions[0];
+    question.assets = Array.from({ length: reason === "count" ? 11 : 8 }, (_, index) => ({
+      id: `reference-${index}`, filename: `reference-${index}.png`, mimeType: "image/png",
+      role: "reference" as const, questionId: question.id,
+      byteSize: reason === "bytes" ? 4 * 1024 * 1024 : 1024,
+    }));
+    question.stem = [{ type: "text", text: "Synthetic question with additional teaching pages." }];
+    question.explanation = [{ type: "text", text: "Source references exceed the durable media allowance." }];
+    const single = { ...pkg, questions: [question] };
+    const issues = validatePackage(single);
+    expect(issues).toContainEqual(expect.objectContaining({ questionId: question.id, code: "unsupported_content", severity: "error" }));
+    const result = await saveBank(single, issues, [], realWorkspace, { acknowledged: new Set([question.id]) });
+    expect(result.status).toBe("nothing-ready");
+    expect(result.held[0].readiness).toBe("unresolved");
+    expect(useStore.getState().questions).toHaveLength(0);
+  });
   it("offers only the ready questions, and says why each other one is held", () => {
     const { pkg, issues } = invented();
     const adapted = packageToReviewedImport(pkg, issues);
@@ -118,15 +153,24 @@ describe("what a package offers to the canonical import", () => {
     expect(adapted.held.find((entry) => entry.questionId === "syn-q02")).toEqual({ questionId: "syn-q02", readiness: "needs-review", reasons: ["The answer is only shown by a mark."] });
   });
 
-  it("blocks a merged 9-choice PDF and a one-choice slide even when review is acknowledged", () => {
+  it("retains all nine alternatives and an I key from a valid source question", () => {
     const { pkg, files } = invented();
-    const nineChoices = Array.from({ length: 9 }, (_, i) => ({
+    const nineChoices = Array.from({ length: 9 }, (_, i) => ({ id: `nine-${i}`, label: String.fromCharCode(65 + i), blocks: [{ type: "text" as const, text: `Distinct alternative ${i}` }] }));
+    const valid = { ...pkg, questions: [{ ...pkg.questions[0], choices: nineChoices, correctAnswer: { labels: ["I"], evidence: "printed-key" as const } }] };
+    const result = packageToReviewedImport(valid, validatePackage(valid, { assetFiles: new Set(files.map(file => file.name)) }));
+    expect(result.held).toHaveLength(0);
+    expect(result.imports[0].request.drafts[0].options).toHaveLength(9);
+    expect(result.imports[0].request.drafts[0].correctKey).toBe("I");
+  });
+  it("blocks an over-limit 10-choice PDF and a one-choice slide even when review is acknowledged", () => {
+    const { pkg, files } = invented();
+    const tenChoices = Array.from({ length: 10 }, (_, i) => ({
       id: "synthetic-option-" + i,
       label: String.fromCharCode(65+i),
       blocks: [{ type: "text" as const, text: "Synthetic alternative " + i }],
     }));
     const malformed = { ...pkg, questions: pkg.questions.map((q) =>
-      q.id === "syn-q01" ? { ...q, choices: nineChoices } :
+      q.id === "syn-q01" ? { ...q, choices: tenChoices } :
       q.id === "syn-q02" ? { ...q, choices: [q.choices[0]] } : q) };
     const result = packageToReviewedImport(malformed, validatePackage(malformed, {
       assetFiles: new Set(files.map(file=>file.name)),
@@ -134,8 +178,8 @@ describe("what a package offers to the canonical import", () => {
     const accepted = result.imports.flatMap(section => section.questionIds);
     expect(accepted).not.toContain("syn-q01");
     expect(accepted).not.toContain("syn-q02");
-    expect(result.held.find(q=>q.questionId==="syn-q01")?.reasons.join(" ")).toMatch(/2–8/);
-    expect(result.held.find(q=>q.questionId==="syn-q02")?.reasons.join(" ")).toMatch(/2–8/);
+    expect(result.held.find(q=>q.questionId==="syn-q01")?.reasons.join(" ")).toMatch(/2–9/);
+    expect(result.held.find(q=>q.questionId==="syn-q02")?.reasons.join(" ")).toMatch(/2–9/);
   });
   it("lets an advisory note travel with a ready question without marking it as reviewed by hand", () => {
     const { pkg, issues } = invented();

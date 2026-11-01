@@ -3,6 +3,7 @@ import { questionMappingStatus, type QuestionRecord } from "../../lib/questions"
 import { GhostButton } from "../ui/primitives";
 import { ICON_SIZE } from "../../lib/iconSize";
 import type { ReactNode } from "react";
+import { ChoiceTeaching } from "./ChoiceTeaching";
 
 export function QuizFeedback({
   question,
@@ -37,7 +38,8 @@ export function QuizFeedback({
   const explanation = (question.explanation ?? "").trim();
 
   return (
-    <section className="quiz-feedback" aria-live="polite" data-module-tour="qb-feedback">
+    <section className="quiz-feedback" aria-live="polite" data-module-tour="qb-feedback"
+      data-study-text="question-feedback" data-question-id={question.id}>
       <div className={`result-banner ${result}`} role="status">
         <span className="result-dot" aria-hidden="true" />
         <strong>
@@ -75,6 +77,8 @@ export function QuizFeedback({
           <p>{question.objective}</p>
         </div>
       )}
+
+      <ChoiceTeaching question={question} pickedKey={pickedKey} />
 
       {showProvenance && (
         <QuestionProvenance

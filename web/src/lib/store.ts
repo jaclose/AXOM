@@ -68,6 +68,7 @@ import {
   type SessionCapture, type SessionLink, type SessionQuickLog, type StudySession,
 } from "./sessions";
 import type { DailyCloseout } from "./closeout";
+import { withQuizPracticeLog } from "./quizPracticeProgress";
 import type { RecoveryPlan } from "./recovery";
 import type { CourseActivity } from "./course-engine/activity";
 import { normalizeQuestionAnalyses } from "./decode/normalize";
@@ -1808,6 +1809,7 @@ export const useStore = create<Store>()(
       saveQuizSession: (session) =>
         set((s) => ({
           quizSessions: [session, ...(s.quizSessions ?? []).filter((q) => q.id !== session.id)].slice(0, 500),
+          logs: withQuizPracticeLog(s.logs ?? [], session, s.activeDayKey),
         })),
       // One set() is one serialized snapshot: the block's answers and its
       // result reach the vault together, instead of one full-workspace save
@@ -1825,7 +1827,10 @@ export const useStore = create<Store>()(
                 }
               : {}),
             ...(session
-              ? { quizSessions: [session, ...(s.quizSessions ?? []).filter((q) => q.id !== session.id)].slice(0, 500) }
+              ? {
+                  quizSessions: [session, ...(s.quizSessions ?? []).filter((q) => q.id !== session.id)].slice(0, 500),
+                  logs: withQuizPracticeLog(s.logs ?? [], session, s.activeDayKey),
+                }
               : {}),
           };
         }),
@@ -2431,6 +2436,24 @@ export function migratePersistedState(persisted: unknown, fromVersion: number): 
             }
           : undefined,
       };
+    });
+  }
+  if (fromVersion < 35) {
+    // AXOM owns the learner-facing catalog. Preserve the exact saved URLs and
+    // record identities while replacing two legacy institution-branded labels
+    // with the current course-neutral catalog metadata.
+    const catalogByUrl = new Map(SGU_DRIVES.map((drive) => [
+      normalizeResourceUrl(drive.url),
+      drive,
+    ]));
+    s.resources = arrayOfRecords(s.resources).map((resource) => {
+      const catalogEntry = catalogByUrl.get(normalizeResourceUrl(String(resource.url ?? "")));
+      if (!catalogEntry) return resource;
+      const visibleMetadata = [resource.title, resource.category, resource.ratingReason, ...(Array.isArray(resource.tags) ? resource.tags : [])]
+        .filter((value): value is string => typeof value === "string")
+        .join(" ");
+      if (!/\b(?:sgu|st\.?\s*george'?s)\b/i.test(visibleMetadata)) return resource;
+      return { ...resource, ...driveResourceFields(catalogEntry) };
     });
   }
   // Wave 5 adds optional profile preferences and one additive workspace list.

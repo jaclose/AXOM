@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { STORAGE_KEYS } from "../../lib/brand";
+import { createLocalBackup, resetLocalBackupRuntimeForTests } from "../../lib/localBackup";
 import { makeSeed, SCHEMA_VERSION } from "../../lib/seed";
 import { useStore } from "../../lib/store";
 import { SettingsModal } from "./SettingsModal";
@@ -32,6 +35,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  resetLocalBackupRuntimeForTests();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -145,6 +149,34 @@ describe("Settings information architecture", () => {
     expect(screen.getByDisplayValue(`v${SCHEMA_VERSION}`)).toBeTruthy();
     expect(screen.getByText(/AI and provider settings \(optional\)/i)).toBeTruthy();
     expect(screen.queryByText(/Cloud copy/i)).toBeNull();
+  });
+
+  it("keeps hydrated markerless snapshots while adding backups discovered on a later render", async () => {
+    vi.stubGlobal("indexedDB", new IDBFactory());
+    vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+    resetLocalBackupRuntimeForTests();
+    localStorage.setItem(STORAGE_KEYS.persistedState, JSON.stringify({ state: { profile: { userId: "backup-test" } }, version: 34 }));
+    const markerWrites = vi.spyOn(storage, "setItem").mockImplementation((key, value) => {
+      if (key.startsWith(STORAGE_KEYS.localBackupPrefix)) throw new DOMException("Full", "QuotaExceededError");
+      storageValues.set(key, String(value));
+    });
+    const durableKey = await createLocalBackup(34, 8);
+    expect(durableKey).toBeTruthy();
+    expect(localStorage.getItem(durableKey!)).toBeNull();
+    markerWrites.mockRestore();
+    resetLocalBackupRuntimeForTests();
+
+    const user = userEvent.setup();
+    render(<SettingsModal onClose={() => {}} initialTab="backup" />);
+    const snapshotStatus = () => screen.getByText("Automatic snapshots").parentElement?.textContent ?? "";
+    await waitFor(() => expect(snapshotStatus()).toContain("1 · latest"));
+
+    const newerSavedAt = "2099-01-01T00:00:00.000Z";
+    localStorage.setItem(`${STORAGE_KEYS.localBackupPrefix}${newerSavedAt}`, JSON.stringify(["idb", 34, "test", "test"]));
+    await user.click(screen.getByRole("tab", { name: "Profile" }));
+    await user.click(screen.getByRole("tab", { name: "Emergency recovery" }));
+
+    expect(snapshotStatus()).toContain("2 · latest");
   });
 
   it("keeps destructive reset confirmation-gated", async () => {
