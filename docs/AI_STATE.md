@@ -19,6 +19,9 @@ The merge has not been pushed or deployed. Current branch validation and
 real Jafar/Aynaz account acceptance are pending. Hosted migrations, executive
 provisioning, private content publication and production release remain
 separate actions.
+This branch also adds the reviewed learner Question Set catalog, journal feedback,
+and a local notification inbox. See the [Ideas 11 audit](directions/03-notes/2026-11-01-IDEAS-WORKFLOW-AUDIT.md)
+for source routes and the distinction between local tests and hosted acceptance.
 
 The original `AXOM` checkout has pre-existing deleted private PDFs and
 untracked files; it remains untouched. This branch owns only requested feature
@@ -64,8 +67,11 @@ current parsing assesses 439 ready, 582 review-required, 10,968 unresolved and
 23 unreadable retained rows. Source/template/media checksums were checked outside
 Git. Prepared files are not proof of installation, browser decoding or cloud delivery.
 Supported automated folder selection did not start the live import; manual folder
-selection remains pending. No ZIP was created; partial compression suggests the
-full archive would exceed the 1 GiB import cap. Hold import while disk is critical.
+selection remained pending for the full source archive, whose compression would
+exceed the 1 GiB import cap. On 2026-11-01, a separate private template-only ZIP
+from the authoritative prepared folder installed locally: 28 templates yielded
+633/633 distinct tracker activities in 13/23 modules after reload; MI remains
+held for mapping. It contains no questions or source files and is not published.
 
 ## Implemented behavior
 
@@ -142,8 +148,8 @@ Before production acceptance: apply every pending migration (including
 through the learner UI; verify media/checksums and revocation; and record exact
 receipts. Also complete a true multi-connection privacy-lock check, Journal
 image-race and broader multi-tab coverage, QBank opener-clone recovery analysis, Safari/WebKit and
-packaged-desktop acceptance, and dependency-advisory review. The missing SSD
-sources, B4/B5 review queues and absent T4/T5 coverage remain blockers to
+packaged-desktop acceptance, and dependency-advisory review. The B4/B5 review
+queues and incomplete T4/T5 coverage remain blockers to
 complete academic-library acceptance.
 
 Inspect disk before checks; preserve services/sources, no cleanup. Shared beta
