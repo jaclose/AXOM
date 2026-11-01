@@ -15,7 +15,7 @@ try {
   });
   const started = Date.now(); const page = await context.newPage(); const errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto(baseUrl);
+  await page.goto(new URL('/?app=1', baseUrl).href);
   await page.waitForFunction(() => Boolean(window.__AXOM_DEV__));
   await page.evaluate(async () => {
     const dev = await window.__AXOM_DEV__;
@@ -23,7 +23,7 @@ try {
     dev.useStore.setState({ logs: Array.from({ length: 24 }, (_, i) => ({ id: 'optical-fixture-' + i, dayKey: `2026-09-${String(i + 1).padStart(2, '0')}`, ts: `2026-09-${String(i + 1).padStart(2, '0')}T12:00:00Z`, type: 'Study', minutes: 60, academic: true })), questions: [] });
     await dev.flushVault();
   });
-  await page.goto(baseUrl + '/#pulse?year=2026');
+  await page.goto(new URL('/?app=1#pulse?year=2026', baseUrl).href);
   await page.locator('.pulse-hero-copy[data-optical-active=true]').waitFor();
   await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; delete document.documentElement.dataset.motion; });
   await page.waitForTimeout(1200); trim = (Date.now() - started) / 1000;

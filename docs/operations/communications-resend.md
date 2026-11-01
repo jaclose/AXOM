@@ -6,6 +6,35 @@ Do not send a broadcast as a configuration test. Start with a dedicated allowlis
 recipient and disposable account. User authorization is required for external sends,
 production deployment or destructive live-account validation.
 
+## Verified test-send gate (2026-11-01)
+
+The AXOM Supabase project has the `communications_pulse` migration and an active
+`communications` Edge Function. A read-only database check found no account for the
+requested SGU test recipient, no enabled communication preferences, and no email jobs
+or provider receipts. This checkout has no local Resend key, sender identities, email
+mode or test-recipient allowlist. The connected project tools do not expose Edge Function
+secret presence, so the hosted mode and sender configuration remain unverified.
+
+Local generation and validation passed for 20 communications types in 160 visual
+variants and seven Supabase Auth/security templates. The communications browser journey
+and gallery also passed after the motion capture was updated for the current `?app=1`
+entry route. These are synthetic previews; they are not delivered email.
+
+`send-test` can enqueue only for the signed-in administrator's **own verified account**;
+it does not accept a recipient override. The worker then requires `AXOM_EMAIL_MODE=test`,
+the same address in `AXOM_EMAIL_TEST_RECIPIENTS`, a configured Resend key and verified
+sender, and consent/source data appropriate to the template. It rejects direct test
+triggers for Auth, security, export and deletion notices. Supabase Auth templates are
+sent only by their corresponding real Auth events. Do not send fake OTP, export or
+deletion notices to make a gallery look delivered.
+
+Before the requested inbox test, create or verify the intended test account through
+the normal account flow, inspect the hosted secret names and sender domain in the
+operator dashboards without copying values, set test mode and the single recipient,
+and confirm the worker schedule. Then use the Studio's allowlisted test action for
+eligible templates, inspect the actual inbox and Resend message IDs, and record which
+templates are held for missing consent or source data. No message was sent in this audit.
+
 ## 1. Review and integrate the committed branch
 
 Use `feat/axom-communications-pulse`. Inspect live ownership first. The course/QBank
