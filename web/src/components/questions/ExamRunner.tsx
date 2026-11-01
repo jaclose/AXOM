@@ -416,8 +416,10 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const [annotationTool, setAnnotationTool] = useState<AnnotationTool>(null);
   const [annotationSelection, setAnnotationSelection] = useState<{
     target: QuestionAnnotationTarget;
+    optionKey?: string;
     range: QuestionTextSelection;
   } | null>(null);
+  const suppressOptionPickRef = useRef<string | null>(null);
   const [localAnnotations, setLocalAnnotations] = useState(() => pool[index]?.annotations ?? []);
   const localAnnotationsRef = useRef(localAnnotations);
   const [annotationStatus, setAnnotationStatus] = useState<string>();
@@ -1513,11 +1515,14 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     tone: QuestionAnnotationTone = annotationTool?.kind === "highlight" ? annotationTool.tone : "yellow",
   ) {
     if (!selection) return;
-    const sourceText = selection.target === "stem" ? question.stem : question.explanation ?? "";
+    const sourceText = selection.target === "stem" ? question.stem
+      : selection.target === "option" ? question.options.find((option) => option.key === selection.optionKey)?.text ?? ""
+      : question.explanation ?? "";
     const now = new Date().toISOString();
     const result = createTextAnnotationWithIntegrity({
       id: `annotation-${crypto.randomUUID()}`,
       target: selection.target,
+      optionKey: selection.optionKey,
       sourceText,
       startOffset: selection.range.startOffset,
       endOffset: selection.range.endOffset,
@@ -1539,8 +1544,10 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     window.getSelection()?.removeAllRanges();
   }
 
-  function handleAnnotationSelection(target: QuestionAnnotationTarget, range: QuestionTextSelection | null) {
-    const selection = range ? { target, range } : null;
+  function handleAnnotationSelection(target: QuestionAnnotationTarget, range: QuestionTextSelection | null, optionKey?: string) {
+    // A text drag ends with a click on the answer button in some browsers.
+    if (target === "option" && range && optionKey) suppressOptionPickRef.current = optionKey;
+    const selection = range ? { target, optionKey, range } : null;
     setAnnotationSelection(selection);
     if (selection && annotationTool?.kind === "highlight") {
       saveAnnotation(selection, annotationTool.tone);
@@ -1656,6 +1663,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             const showCorrect = revealed && correctKey === opt.key;
             const showWrong = revealed && isPicked && Boolean(correctKey) && correctKey !== opt.key;
             const isStruck = item.struck.includes(opt.key);
+            const optionAnnotations = annotations.filter((annotation) => annotation.target === "option" && annotation.optionKey === opt.key);
             return (
               <div key={opt.key} data-study-part="choice" data-choice-key={opt.key}
                 className={`option-row ${isPicked ? "picked" : ""} ${showCorrect ? "correct" : ""} ${showWrong ? "wrong" : ""} ${isStruck ? "struck" : ""}`}>
@@ -1663,9 +1671,24 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
                   aria-label={`${opt.key}. ${opt.text}`}
                   aria-pressed={isPicked}
                   disabled={finalizing || revealed}
-                  onClick={() => act({ type: "pick", key: opt.key })}>
+                  onPointerDownCapture={() => { suppressOptionPickRef.current = null; }}
+                  onClickCapture={(event) => {
+                    if (annotationTool?.kind === "eraser" && (event.target as Element).closest("mark[data-annotation-id]")) event.preventDefault();
+                  }}
+                  onClick={(event) => {
+                    const suppress = event.defaultPrevented || window.getSelection()?.isCollapsed === false
+                      || (event.detail !== 0 && suppressOptionPickRef.current === opt.key);
+                    suppressOptionPickRef.current = null;
+                    if (!suppress) act({ type: "pick", key: opt.key });
+                  }}>
                   <span className="mono option-key">{opt.key}</span>
-                  <span className="option-text"><QuestionContent question={question} part="choice" choice={opt.key} mode={revealed ? "answered" : "question"} fallback={opt.text} /></span>
+                  <span className="option-text"><QuestionContent question={question} part="choice" choice={opt.key} mode={revealed ? "answered" : "question"}
+                    annotations={optionAnnotations} onSelection={(range) => handleAnnotationSelection("option", range, opt.key)}
+                    onDeleteAnnotation={deleteAnnotation} eraseMode={annotationTool?.kind === "eraser"} fallback={
+                    <AnnotatedQuestionText text={opt.text} annotations={optionAnnotations} inline label={`Choice ${opt.key} text`}
+                      onSelection={(range) => handleAnnotationSelection("option", range, opt.key)}
+                      onDelete={deleteAnnotation} eraseMode={annotationTool?.kind === "eraser"} />
+                  } /></span>
                 </button>
                 {/* Once revealed: a tick on the right answer, a cross on a wrong pick. Never a tick on the pick itself. */}
                 {showCorrect ? <span className="option-result ok" role="img" aria-label="Correct answer"><Check size={ICON_SIZE.emphasis} /></span>
