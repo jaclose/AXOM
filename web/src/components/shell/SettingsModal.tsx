@@ -43,8 +43,6 @@ import { AppearanceStudio } from "./AppearanceStudio";
 import {
   BackupStatusCard,
   FocusCheckInSettings,
-  LastSavedLine,
-  LocalSaveBadge,
   ProfileSection,
   RestoreHistoryCard,
 } from "./SettingsSections";
@@ -230,25 +228,25 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
   const tabIntro: Record<SettingsSection, { title: string; body: string }> = {
     profile: {
       title: "Profile",
-      body: "Your identity, academic path, current focus, and good-enough daily targets.",
+      body: "Identity, academic path, and the focus that guides your workspace.",
     },
-    account: { title: "Account & protection", body: "Optional sign-in, automatic protected versions, and safe restore controls." },
-    appearance: { title: "Appearance", body: "Make AXOM yours: light or dark, an accent palette (or your own color), and motion." },
+    account: { title: "Account & protection", body: "Know exactly where your work is saved and how to protect it." },
+    appearance: { title: "Appearance", body: "Shape the atmosphere of your workspace." },
     data: {
       title: "Data on this device",
-      body: "See where your workspace lives, whether storage is healthy, and what AXOM has saved.",
+      body: "A clear view of what is saved here and whether your device needs attention.",
     },
     backup: {
       title: "Emergency recovery",
-      body: "Export a portable copy, restore safely, and review automatic local recovery snapshots.",
+      body: "Keep a copy you control. Restore only when you need to.",
     },
     personalization: {
       title: "Personalization",
-      body: "How you study, your daily rhythm, what the dashboard shows, and your program.",
+      body: "Choose the methods and routines AXOM brings into view.",
     },
     advanced: {
       title: "Advanced",
-      body: "Technical versions, diagnostics, optional provider tools, and destructive reset controls.",
+      body: "Versions, optional integrations, and maintenance controls.",
     },
   };
   const exportedAt = lastBackupAt();
@@ -349,12 +347,12 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
     <Modal
       title="Settings"
       onClose={onClose}
-      footer={<GButton variant="primary" onClick={onClose}>Done</GButton>}
       className="settings-modal"
       bodyClassName="settings-modal-body"
     >
       <div className="settings-tabs" role="tablist" aria-label="Settings sections" aria-orientation={wideLayout ? "vertical" : "horizontal"}>
-        {SETTINGS_SECTIONS.map(({ id, label, icon: Icon }, index) => {
+        <div className="settings-rail-head" aria-hidden="true"><span>AXOM / PREFERENCES</span><p>Make room for your best work.</p></div>
+        {SETTINGS_SECTIONS.map(({ id, label, icon: Icon }) => {
           const active = tab === id;
           return (
             <button
@@ -370,18 +368,26 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
               onClick={() => setTab(id)}
               onKeyDown={(event) => onTabKeyDown(event, id)}
             >
-              <span className="settings-tab-index" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
               <Icon size={ICON_SIZE.body} aria-hidden="true" />
               <span>{label}</span>
             </button>
           );
         })}
       </div>
+      <label className="settings-mobile-picker">
+        <span>Settings section</span>
+        <select value={tab} onChange={(event) => setTab(event.target.value as SettingsSection)}>
+          {SETTINGS_SECTIONS.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+        </select>
+      </label>
 
       <div ref={contentRef} className="settings-content">
 
       <div className="settings-intro">
-        <span className="settings-intro-kicker">Your workspace / {String(SETTINGS_SECTIONS.findIndex((section) => section.id === tab) + 1).padStart(2, "0")}</span>
+        <div className="settings-intro-top">
+          <span className="settings-intro-kicker">AXOM / {tab === "backup" ? "Safety" : tab}</span>
+          <button type="button" className="settings-done" onClick={onClose}>Done</button>
+        </div>
         <h4>{tabIntro[tab].title}</h4>
         <span>{tabIntro[tab].body}</span>
       </div>
@@ -404,22 +410,12 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
 
       {tab === "data" && (
         <section role="tabpanel" id={`${tabsId}-panel-data`} aria-labelledby={`${tabsId}-tab-data`} className="backup-center">
-          <div className="backup-actions-panel premium-panel">
-            <div>
-              <div className="sync-title">Local-first workspace</div>
-              <div className="sub">
-                Your workspace lives on this device and saves as you work. If you sign in and enable account protection, AXOM can keep protected versions in your account.
-              </div>
-              <div style={{ marginTop: 8 }}><LastSavedLine /></div>
-            </div>
-            <LocalSaveBadge />
-          </div>
-          <DataHealthPanel />
+          <DataHealthPanel onOpenBackup={() => setTab("backup")} />
         </section>
       )}
       {tab === "account" && (
         <section role="tabpanel" id={`${tabsId}-panel-account`} aria-labelledby={`${tabsId}-tab-account`} className="settings-account-panel">
-          <AccountSyncPanel />
+          <AccountSyncPanel onOpenBackup={() => setTab("backup")} />
           <nav className="settings-account-links" aria-label="More account settings">
             <span>Also in AXOM</span>
             <a href="#communications" onClick={onClose}>Notifications & communications</a>
@@ -437,10 +433,6 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
 
       {tab === "backup" && (
         <section role="tabpanel" id={`${tabsId}-panel-backup`} aria-labelledby={`${tabsId}-tab-backup`} className="backup-center">
-          <div className="sub" style={{ marginBottom: 4 }}>
-            Signed-in accounts can retain protected server versions. Manual backup remains an emergency portable safety valve.
-          </div>
-
           <RecoveryStatusCard
             onExport={exportBackup}
             onChoosePortableRestore={() => fileRef.current?.click()}
@@ -457,36 +449,34 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
             onResolved={() => setMsg("Storage update completed successfully.")}
           />
 
-          <div className="backup-actions-panel">
-            <div>
-              <div className="sync-title">Portable emergency copy</div>
-              <div className="sub">Automatic local saving is primary. Export a portable copy you control, or restore or merge a saved AXOM JSON or ZIP backup when recovery is needed. Original files and large image libraries export as ZIP.</div>
+          <div className="settings-backup-export">
+            <div><span className="settings-eyebrow">Your portable safety copy</span><h5>Take your work with you.</h5>
+              <p>Download your workspace, images, and available original files as one AXOM backup. Save it somewhere you control.</p></div>
+            <GButton variant="primary" disabled={backupBusy} onClick={exportBackup}>
+              <Download size={ICON_SIZE.body} /> {backupBusy ? "Preparing backup…" : "Export complete backup"}
+            </GButton>
+          </div>
+
+          <div className="settings-backup-restore" aria-labelledby="backup-restore-heading">
+            <div className="settings-section-heading"><span className="settings-eyebrow">When recovery is needed</span><h5 id="backup-restore-heading">Restore from a backup</h5>
+              <p>Choose how the file changes this device. AXOM checks it before asking for final confirmation.</p></div>
+            <div className="settings-recovery-choice">
+              <div><b>Replace this workspace</b><span>Use the backup as your workspace on this device. Current local changes are replaced.</span></div>
+              <GButton disabled={backupBusy} onClick={() => fileRef.current?.click()}><Upload size={ICON_SIZE.body} /> Choose backup to restore</GButton>
             </div>
-            <div className="row wrap gap8">
-              <GButton size="sm" variant="primary" disabled={backupBusy} onClick={exportBackup}>
-                <Download size={ICON_SIZE.body} /> Export backup
-              </GButton>
-              <GButton size="sm" disabled={backupBusy} onClick={() => fileRef.current?.click()}>
-                <Upload size={ICON_SIZE.body} /> Import / restore
-              </GButton>
-              <GButton size="sm" disabled={backupBusy} onClick={() => mergeRef.current?.click()}>
-                <Upload size={ICON_SIZE.body} /> Merge backup
-              </GButton>
+            <div className="settings-recovery-choice">
+              <div><b>Merge into this workspace</b><span>Combine records by ID. Newer versions win; nothing is deleted.</span></div>
+              <GButton disabled={backupBusy} onClick={() => mergeRef.current?.click()}><Upload size={ICON_SIZE.body} /> Choose backup to merge</GButton>
+            </div>
               <input ref={fileRef} type="file" accept="application/json,application/zip,.json,.zip" hidden
                 onChange={(e) => e.target.files?.[0] && doImport(e.target.files[0], "replace")} />
               <input ref={mergeRef} type="file" accept="application/json,application/zip,.json,.zip" hidden
                 onChange={(e) => e.target.files?.[0] && doImport(e.target.files[0], "merge")} />
-            </div>
-            <div className="row wrap gap8">
-              <GButton size="sm" disabled={backupBusy} aria-describedby="saved-work-description" onClick={() => exportCopy("saved-work")}>
-                <Download size={ICON_SIZE.body} /> Export saved work
-              </GButton>
-              <span className="sub" id="saved-work-description">Works offline. Keeps progress and available files; uncached course content stays as download references.</span>
-            </div>
-            <div className="backup-note">
-              <ShieldCheck size={ICON_SIZE.body} />
-              <span>Replace asks for confirmation. Merge combines records by ID; newer records win and nothing is deleted.</span>
-            </div>
+          </div>
+
+          <div className="settings-backup-saved-work">
+            <div><b>Need a smaller offline copy?</b><span id="saved-work-description">Saved work keeps your progress and files already on this device. Uncached course content stays as download references.</span></div>
+            <GButton disabled={backupBusy} aria-describedby="saved-work-description" onClick={() => exportCopy("saved-work")}><Download size={ICON_SIZE.body} /> Export saved work</GButton>
           </div>
 
           <BackupStatusCard
@@ -526,14 +516,14 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
       {tab === "advanced" && (
         <section role="tabpanel" id={`${tabsId}-panel-advanced`} aria-labelledby={`${tabsId}-tab-advanced`} className="backup-center">
           <AppUpdatePanel />
-          <div className="backup-actions-panel">
-            <div className="sync-title">Technical details</div>
+          <details className="settings-advanced-disclosure">
+            <summary><span>Technical details</span><small>Versions and this device’s workspace ID</small></summary>
             <div className="settings-target-grid">
               <Field label="Schema version" value={`v${store.schemaVersion ?? SCHEMA_VERSION}`} readOnly />
               <Field label="Build version" value={APP_BUILD_LABEL} readOnly />
               <Field label="Local workspace ID" value={profile.userId} readOnly />
             </div>
-          </div>
+          </details>
 
           <details className="backup-actions-panel">
             <summary>AI and provider settings (optional)</summary>

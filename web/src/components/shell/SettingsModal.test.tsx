@@ -136,11 +136,22 @@ describe("Settings information architecture", () => {
     expect(within(accountPanel).getByRole("link", { name: "Privacy & data" }).getAttribute("href")).toBe("#privacy");
   });
 
+  it("lets a narrow-screen section picker reach every Settings area", async () => {
+    const user = userEvent.setup();
+    render(<SettingsModal onClose={() => {}} />);
+    const picker = screen.getByRole("combobox", { name: "Settings section" });
+    for (const section of ["account", "appearance", "personalization", "data", "backup", "advanced", "profile"]) {
+      await user.selectOptions(picker, section);
+      expect(screen.getByRole("tab", { name: section === "backup" ? "Emergency recovery" : new RegExp(section, "i") }).getAttribute("aria-selected")).toBe("true");
+    }
+  });
+
   it("states accurate local-first semantics without promising a cloud account", async () => {
     const user = userEvent.setup();
     render(<SettingsModal onClose={() => {}} initialTab="data" />);
-    expect(screen.getByText(/workspace lives on this device and saves as you work/i)).toBeTruthy();
-    expect(screen.getByText(/If you sign in and enable account protection/i)).toBeTruthy();
+    expect(screen.getByText("Local workspace")).toBeTruthy();
+    expect(screen.getByText(/Saved on this device|Waiting for the first save|Main vault unavailable/)).toBeTruthy();
+    expect(screen.getByText("Your saved work")).toBeTruthy();
     expect(screen.queryByText(/your account is synced/i)).toBeNull();
     expect(screen.queryByText(/workspace follows you across devices/i)).toBeNull();
 
@@ -151,12 +162,13 @@ describe("Settings information architecture", () => {
   it("presents portable backup actions once and keeps technical details in Advanced", async () => {
     const user = userEvent.setup();
     render(<SettingsModal onClose={() => {}} initialTab="backup" />);
-    expect(screen.getAllByRole("button", { name: /export backup/i })).toHaveLength(1);
-    expect(screen.getAllByRole("button", { name: /import \/ restore/i })).toHaveLength(1);
-    expect(screen.getAllByRole("button", { name: /merge backup/i })).toHaveLength(1);
-    expect(screen.getAllByText(/automatic local recovery snapshots/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: /export complete backup/i })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /choose backup to restore/i })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /choose backup to merge/i })).toHaveLength(1);
+    expect(screen.getByText("Automatic snapshots")).toBeTruthy();
 
     await user.click(screen.getByRole("tab", { name: "Advanced" }));
+    await user.click(screen.getByText("Technical details", { selector: "summary span" }));
     expect(screen.getByDisplayValue(`v${SCHEMA_VERSION}`)).toBeTruthy();
     expect(screen.getByText(/AI and provider settings \(optional\)/i)).toBeTruthy();
     expect(screen.queryByText(/Cloud copy/i)).toBeNull();
@@ -383,7 +395,7 @@ describe("Settings information architecture", () => {
     const user = userEvent.setup();
     render(<SettingsModal onClose={() => {}} initialTab="rhythm" />);
     expect((screen.getByRole("checkbox", { name: "Enable lock-in check-ins" }) as HTMLInputElement).checked).toBe(true);
-    await user.click(screen.getByRole("button", { name: "45 min" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Check-in interval" }), "45");
     await user.click(screen.getByRole("radio", { name: /Whenever AXOM is open/ }));
     await user.click(screen.getByRole("radio", { name: /Intense/ }));
     expect(useStore.getState().profile.focusCheckIn).toMatchObject({ enabled: true, intervalMinutes: 45, scope: "anytime", tone: "intense" });
@@ -405,8 +417,8 @@ describe("Settings information architecture", () => {
     render(<SettingsModal onClose={() => {}} />);
     expect((screen.getByLabelText("Display name") as HTMLInputElement).value).toBe("Jafar");
     expect(screen.getByText("Where you are")).toBeTruthy();
-    expect(screen.getByText("Local profile on this device")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "About accounts" }));
+    expect(screen.getByText(/Waiting for the first confirmed save|Saved on this device at/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "About account protection" }));
     expect(screen.getByRole("tab", { name: "Account" }).getAttribute("aria-selected")).toBe("true");
   });
 

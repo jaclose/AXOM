@@ -6,9 +6,10 @@ authority: current-state
 # AXOM current AI state
 
 2026-11-01 local candidate `codex/settings-sync-20261101` (base `1b189177`):
-Settings redesign, first-scroll lock-in sample, and typed sync failures.
-Full web suite passed (4,082; 35 skipped). Live read-only: protected #71 from
-September 30, latest `network/no answer`. No deployment or hosted upload/readback;
+Settings control overhaul, first-scroll lock-in sample, and typed sync failures.
+Full web suite passed (4,090; 35 skipped); affected tests, mocked refusal/recovery,
+four-viewport safety, types, lint and build passed. Live read-only: protected #71
+from September 30, latest `network/no answer`. No deployment or hosted upload/readback;
 see [account sync](architecture/accounts-sync-v1.md).
 
 Earlier checkpoints: 2026-10-30 candidate `5dfafae1` integrated RHPS/ESoft,

@@ -58,6 +58,12 @@ export function ProfileSection({
   return (
     <div className="profile-section">
       <div className="profile-hero">
+        <div className="profile-hero-heading">
+          <span className="settings-eyebrow">01 / Identity</span>
+          <h5>The person behind the work.</h5>
+          <p>Your name and goal appear in your workspace. Changes save on this device as you type.</p>
+        </div>
+        <div className="profile-identity-editor">
         <div className="profile-avatar-wrap">
           <button type="button" className="profile-avatar" onClick={onChangeAvatar} aria-label="Change profile photo">
             {profile.avatarDataUrl ? <img src={profile.avatarDataUrl} alt="" /> : <span>{initial}</span>}
@@ -88,28 +94,26 @@ export function ProfileSection({
               onChange={(event) => updateProfile({ tagline: event.target.value })}
             />
           </label>
-          <div className="profile-account-line">
-            <Cloud size={ICON_SIZE.microInline} aria-hidden="true" />
-            {accountUser
-              ? <span>Signed in as <b>{accountUser.email}</b></span>
-              : <span>Local profile on this device</span>}
-            <button type="button" className="account-link" onClick={onOpenAccount}>
-              {accountUser ? "Manage account" : accountPhase === "unconfigured" ? "About accounts" : "Sign in"}
-            </button>
-          </div>
+        </div>
+        </div>
+        <div className="profile-account-line">
+          <div className="profile-save-state"><LastSavedLine /></div>
+          <button type="button" className="profile-account-action" onClick={onOpenAccount}>
+            <Cloud size={ICON_SIZE.body} aria-hidden="true" />
+            <span>{accountUser ? `Manage ${accountUser.email}` : accountPhase === "unconfigured" ? "About account protection" : "Sign in to protect this workspace"}</span>
+          </button>
         </div>
       </div>
 
-      <div className="profile-card">
+      <div className="profile-card profile-path">
         <div className="profile-card-head">
           <GraduationCap size={ICON_SIZE.body} aria-hidden="true" />
-          <h4>Where you are</h4>
+          <div><span className="settings-eyebrow">02 / Academic path</span><h4>Where you are</h4></div>
         </div>
         <div className="profile-facts">
           <div className="profile-fact">
-            <span>Program</span>
-            <b>{track.label}</b>
-            <button type="button" className="account-link" onClick={onOpenProgram}>Change</button>
+            <span>Program</span><b>{track.label}</b>
+            <button type="button" className="profile-fact-action" onClick={onOpenProgram}>Change program</button>
           </div>
           <label className="profile-fact">
             <span>Current stage</span>
@@ -127,7 +131,7 @@ export function ProfileSection({
           <div className="profile-fact">
             <span>Primary focus</span>
             <b>{focus?.label ?? "Not chosen yet"}</b>
-            <button type="button" className="account-link" onClick={onOpenProgram}>{focus ? "Change" : "Choose"}</button>
+            <button type="button" className="profile-fact-action" onClick={onOpenProgram}>{focus ? "Change focus" : "Choose focus"}</button>
           </div>
         </div>
         {stage === "other" && (
@@ -351,7 +355,9 @@ export function FocusCheckInSettings() {
         <span className="settings-card-icon"><Lock size={ICON_SIZE.body} aria-hidden="true" /></span>
         <div>
           <h4 id="lockin-settings-title">“Are you locked in?” check-ins</h4>
-          <p>A quick pop-up on your current screen at the interval you choose. Answer in one tap; AXOM replies with a nudge — or how much is left.</p>
+          <p>{preferences.enabled
+            ? `On · every ${preferences.intervalMinutes} minutes ${preferences.scope === "focus" ? "during focus sessions" : "while AXOM is open"}.`
+            : "Paused. Turn this on for a short focus check-in at the interval you choose."}</p>
         </div>
         <label className="settings-switch">
           <input type="checkbox" checked={preferences.enabled} onChange={(event) => update({ enabled: event.target.checked })} />
@@ -359,21 +365,14 @@ export function FocusCheckInSettings() {
         </label>
       </div>
 
-      <div className={`lockin-body ${preferences.enabled ? "" : "muted"}`}>
+      {preferences.enabled && <div className="lockin-body">
         <div className="lockin-row">
           <span className="field-label">Every</span>
-          <div className="lockin-intervals" role="group" aria-label="Check-in interval">
-            {FOCUS_CHECKIN_INTERVALS.map((minutes) => (
-              <button
-                key={minutes}
-                type="button"
-                className={`filter-pill ${preferences.intervalMinutes === minutes ? "on" : ""}`}
-                aria-pressed={preferences.intervalMinutes === minutes}
-                onClick={() => update({ intervalMinutes: minutes })}
-              >
-                {minutes < 60 ? `${minutes} min` : `${minutes / 60} h`}
-              </button>
-            ))}
+          <div className="lockin-interval-field">
+            <select className="field" aria-label="Check-in interval" value={preferences.intervalMinutes} onChange={(event) => update({ intervalMinutes: Number(event.target.value) })}>
+              {FOCUS_CHECKIN_INTERVALS.map((minutes) => <option key={minutes} value={minutes}>{minutes < 60 ? `${minutes} minutes` : `${minutes / 60} ${minutes === 60 ? "hour" : "hours"}`}</option>)}
+            </select>
+            <small>Measured from your last check-in while AXOM is active.</small>
           </div>
         </div>
         <div className="lockin-row">
@@ -425,7 +424,7 @@ export function FocusCheckInSettings() {
             {ledger.breaks ? ` · ${ledger.breaks} break${ledger.breaks === 1 ? "" : "s"}` : ""}
           </span>
         </div>
-      </div>
+      </div>}
     </section>
   );
 }
