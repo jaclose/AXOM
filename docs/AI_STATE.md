@@ -6,18 +6,15 @@ authority: current-state
 # AXOM current AI state
 
 2026-11-01 local candidate `codex/settings-sync-20261101` (base `1b189177`):
-Settings has setup-like choices, an account save map, typed sync failures and
-first-scroll samples. Follow-up: navy AXOM Classic default, graphite Legacy,
-black Midnight Midnight; cleaner Mode/setup previews, Reports overview, WIP
-exam/Application desks, truthful Integrations/Leaderboards and route scroll reset.
-Targeted tests, integrated typecheck, lint, web build, repository checks, and
-1440/390 light/dark browser checks passed. The full web suite was interrupted
-after a 120-second timeout in the unchanged Course Tracker stress test during
-concurrent builds; that file passed alone (30/30). Prior full web suite: 4,090
-passed, 35 skipped; mocked account
-refusal/retry passed. Live read-only previously showed protected #71 from
-September 30 and latest `network/no answer`. No deployment or hosted
-upload/readback; see [account sync](architecture/accounts-sync-v1.md).
+Settings: setup-like choices, account save map, typed sync errors, first-scroll
+samples. Navy is AXOM Classic/default; graphite is Legacy; Midnight Midnight
+is black. Appearance, Reports, prep, Integrations, and Leaderboards refreshed;
+route scroll now resets. Focused tests, typecheck, lint, build, repo:check,
+and 1440/390 browser checks passed. Full suite stopped after an unchanged
+Course Tracker timeout under load; isolated 30/30 passed. Prior suite: 4,090
+pass, 35 skip. Mocked account refusal/retry passed. Live read-only saw
+protected #71 (Sep 30) and latest `network/no answer`. No deployment or
+hosted upload/readback; see [account sync](architecture/accounts-sync-v1.md).
 
 Earlier checkpoints: 2026-10-30 candidate `5dfafae1` integrated RHPS/ESoft,
 QBank, Journal and Productivity without private publication or verified hosted
