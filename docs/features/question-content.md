@@ -83,6 +83,9 @@ key and a person's review. An unchecked extraction remains `answer-reveal-slide`
 is held. Source conflicts and missing essential content still hold the question.
 Student-authored answer sources use a visible `student_source` advisory while
 remaining eligible for practice when their answer mark has been checked.
+`source_nonkey_discrepancy` keeps a documented source error visible when it
+does not change which marked choice can be scored; doubts about the key remain
+blocking `source_inconsistency` flags.
 
 **Image visibility** (`visibility.ts`, every role tested in every mode):
 
@@ -108,7 +111,7 @@ a separate exam tool, not an asset.
   a role: `question`, `stem`, `choice`, `explanation`, `answer_reveal`, `reference`,
   `source_page`; and a derivation: `embedded`, `region-render`, `page-render`, `authored`.
 - **Flags** record a problem beside the question and never change it:
-  `source_inconsistency`, `missing_explanation`, `possible_duplicate`,
+  `source_inconsistency`, `source_nonkey_discrepancy`, `missing_explanation`, `possible_duplicate`,
   `answer_reveal_asset`, `media_association_uncertain`, `table_parse_uncertain`,
   `missing_required_media`.
 - **Provenance** says how each question was made and from which file.
@@ -305,7 +308,7 @@ hold the question back, and `advisories` that do not. It follows decision 7.
   `possible_answer_marking`, `choices_incomplete`, `unsupported_content`, and a picture
   that shows the answer placed where the question would show it.
 - **Advisory:** `media_position_uncertain` (the picture is the question's; only its place
-  among the lines is unsure), `possible_duplicate`, `scope_mismatch`, `media_cropped`,
+  among the lines is unsure), `source_nonkey_discrepancy`, `possible_duplicate`, `scope_mismatch`, `media_cropped`,
   `rich_text_escaped`, `tracked_changes`, `unknown_field`, `unknown_flag`,
   `asset_reference_broken` (not needed to answer). Plain information, such as a missing
   explanation, is neither.

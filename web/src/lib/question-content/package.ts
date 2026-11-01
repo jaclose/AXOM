@@ -132,6 +132,7 @@ export interface QuestionAsset {
 
 export const QUESTION_FLAG_TYPES = [
   "source_inconsistency",
+  "source_nonkey_discrepancy",
   "missing_explanation",
   "possible_duplicate",
   "student_source",

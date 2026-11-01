@@ -16,6 +16,7 @@ export interface ValidateOptions {
 
 export const FLAG_SEVERITY: Record<QuestionFlagType, IssueSeverity> = {
   source_inconsistency: "warning",
+  source_nonkey_discrepancy: "warning",
   missing_explanation: "info",
   possible_duplicate: "warning",
   student_source: "warning",

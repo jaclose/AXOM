@@ -80,6 +80,15 @@ describe("what a package offers to the canonical import", () => {
     expect(adapted.imports[0].request.drafts[0].content).toEqual(before.questions[0]);
   });
 
+  it("files a source with no declared teaching week outside the week list", () => {
+    const { pkg, issues } = invented();
+    pkg.manifest.course.week = 0;
+    const adapted = packageToReviewedImport(pkg, issues);
+    expect(adapted.imports[0].request.scope).toEqual({ module: "EXAMPLE" });
+    expect(adapted.filing.week).toBeUndefined();
+    expect(pkg.manifest.course.week).toBe(0);
+  });
+
   it("rejects malformed, mismatched, and week-assigned reviewed filing options", () => {
     const { pkg, issues } = invented();
     expect(() => packageToReviewedImport(pkg, issues, {
@@ -105,9 +114,32 @@ describe("what a package offers to the canonical import", () => {
     expect(draft.reviewAcknowledged).toBe(true);
     expect(draft.warnings).toEqual([expect.stringContaining("slide that marks the answer")]);
     expect(draft.attachmentNames).toEqual(["syn-q03-curves.png", "syn-q03-curves-answer.png"]);
+    expect(draft.answerEvidencePage).toBe(3);
+    expect(draft.answerEvidenceSnippet).toContain("invented.pdf, page 3");
     expect(section.imageNames).toEqual(["syn-q03-curves.png", "syn-q03-curves-answer.png", "syn-q04-micrograph.png", "syn-q07-field-left.png", "syn-q07-field-right.png"]);
     expect(adapted.withheldAssets).toEqual([]);
     expect(draft.content?.assets.find((asset) => asset.role === "answer_reveal")).toBeDefined();
+  });
+
+  it("keeps answer and teaching image provenance visible in saved feedback", () => {
+    const { pkg, issues } = invented();
+    const question = pkg.questions.find((entry) => entry.id === "syn-q03")!;
+    const answerImage = question.assets.find((asset) => asset.role === "answer_reveal")!;
+    question.correctAnswer = { labels: ["B"], evidence: "source-mark-verified" };
+    question.assets.push({
+      ...answerImage,
+      id: "syn-q03-teaching",
+      role: "explanation",
+      sourcePage: 4,
+      revealOf: undefined,
+    });
+    const [section] = packageToReviewedImport(pkg, issues, { acknowledged: new Set(["syn-q03"]) }).imports;
+    const draft = section.request.drafts[section.questionIds.indexOf("syn-q03")];
+    expect(draft.answerEvidenceSnippet).toContain("Visually marked source answer: B");
+    expect(draft.answerEvidenceSnippet).toContain(answerImage.checksum);
+    expect(draft.answerEvidencePage).toBe(3);
+    expect(draft.explanationSourceSnippet).toContain("invented.pdf, page 4");
+    expect(draft.explanationSourcePage).toBe(4);
   });
 
   it("never takes a question with no key, accepted or not", () => {

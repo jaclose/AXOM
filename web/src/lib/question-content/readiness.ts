@@ -40,6 +40,7 @@ const ADVISORY: ReadonlySet<IssueCode> = new Set<IssueCode>([
   // Filing and bookkeeping that can be put right without touching the question.
   "possible_duplicate",
   "student_source",
+  "source_nonkey_discrepancy",
   "scope_mismatch",
   "unknown_field",
   "unknown_flag",

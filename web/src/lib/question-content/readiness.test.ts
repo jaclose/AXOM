@@ -46,7 +46,7 @@ describe("ready: a verified key and nothing that bears on answering it", () => {
 });
 
 describe("advisory: shown, and never a reason to hold a keyed question back", () => {
-  it.each<QuestionFlagType>(["media_position_uncertain", "possible_duplicate", "student_source"])("a %s flag", (type) => {
+  it.each<QuestionFlagType>(["media_position_uncertain", "possible_duplicate", "student_source", "source_nonkey_discrepancy"])("a %s flag", (type) => {
     expect(questionReadiness(flagged(type), [])).toEqual({ readiness: "ready", reasons: [], advisories: ["A note on this question."] });
   });
 
@@ -94,7 +94,7 @@ describe("blocking: a doubt about answering or marking the question", () => {
 
   it("holds back for a code nobody has classified, so a new kind of doubt is never waved through", () => {
     const unclassified = QUESTION_FLAG_TYPES.filter((type) => questionReadiness(flagged(type), []).readiness === "ready");
-    expect(unclassified.sort()).toEqual(["answer_reveal_asset", "media_position_uncertain", "missing_explanation", "possible_duplicate", "student_source"]);
+    expect(unclassified.sort()).toEqual(["answer_reveal_asset", "media_position_uncertain", "missing_explanation", "possible_duplicate", "source_nonkey_discrepancy", "student_source"]);
     expect(questionReadiness(question(), [own("warning", "a_code_added_next_year" as PackageIssue["code"])]).readiness).toBe("needs-review");
   });
 });
