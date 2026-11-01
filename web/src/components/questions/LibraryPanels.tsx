@@ -27,6 +27,7 @@ import {
 import { CourseBankBrowser, type BankLocation } from "./CourseBankBrowser";
 import { sortByNaturalTitle } from "../../lib/naturalSort";
 import { reviewTaskInputs } from "../../lib/courseWork";
+import { COMMUNITY_REFERENCE_TYPE } from "../../lib/academicLibrary/communityReference";
 
 const NO_QUESTIONS: QuestionRecord[] = [];
 const NO_DOCUMENTS: SourceDocument[] = [];
@@ -45,7 +46,7 @@ export function SourceLibrary({
   onGenerateFrom: (doc: SourceDocument) => void;
 }) {
   const s = useStore();
-  const documents = useMemo(() => (s.documents ?? NO_DOCUMENTS).filter(doc => !["axom-private-library-catalog", "axom-private-bank-review"].includes(doc.fileType)), [s.documents]);
+  const documents = useMemo(() => (s.documents ?? NO_DOCUMENTS).filter(doc => !["axom-private-library-catalog", "axom-private-bank-review", COMMUNITY_REFERENCE_TYPE].includes(doc.fileType)), [s.documents]);
   const [preview, setPreview] = useState<SourceDocument | null>(null);
   const [query, setQuery] = useState("");
   const [sourceLimit, setSourceLimit] = useState(SOURCE_PAGE_SIZE);

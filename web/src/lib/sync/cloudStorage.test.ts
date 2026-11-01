@@ -45,6 +45,20 @@ beforeEach(() => {
 afterEach(() => { dispose?.(); dispose = undefined; vi.unstubAllGlobals(); });
 
 describe("private cloud content and media", () => {
+  it("keeps an Unreviewed community marker beside a deferred account download", async () => {
+    const original = fixture();
+    const revisionId = "22222222-2222-4222-8222-222222222222";
+    original.documents.push({ id: `community-${revisionId}`, title: "Community review status",
+      fileName: "community-reference.json", fileType: "axom-community-reference",
+      uploadedAt: "2026-11-01T12:00:00Z", sizeBytes: 1,
+      rawText: JSON.stringify({ version: 1, accountId: "account-a", revisionId,
+        questionIds: ["q1"], pending: false }), tags: [], linkedQuestionSetIds: [], libraryOnly: true });
+    const split = await splitCloudContent(original);
+    const deferred = deferContent(split.workspace, "account-a", split.references, []);
+    expect(deferred.documents.find(document => document.id === `community-${revisionId}`)?.rawText).toBe(original.documents[1].rawText);
+    expect(deferred.deferredContent?.documents.map(document => document.id)).toEqual(["source1"]);
+  });
+
   it("opens a verified metadata checkpoint without source I/O, then downloads one selected question with its learner state", async () => {
     const original = fixture();
     const envelope = await prepareCloudSnapshot(await snapshotWorkspace(original, { accountUserId: "account-a", deviceId: "d", baseRevision: 0, reason: "manual" }));

@@ -33,6 +33,7 @@ import { AnnotatedQuestionText } from "../questions/AnnotatedQuestionText";
 import { QuizCalculator, type QuizCalculatorValue } from "../questions/QuizCalculator";
 import { AxomMark } from "../ui/BrandMark";
 import { ExplanationBody, LabValuesPanel, useExhibitUrls } from "./parts";
+import { CommunityPracticeNotice } from "../questions/CommunityPracticeNotice";
 import type { ExamBlockApi } from "./useExamBlock";
 import "../../styles/exam-examplify.css";
 
@@ -59,11 +60,13 @@ const FILTER_WORDS: Record<NavigatorFilter, string> = {
   all: "All", flagged: "Flagged", unanswered: "Unanswered", answered: "Answered", incorrect: "Incorrect", correct: "Correct",
 };
 
-export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
+export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose, unreviewedCount = 0, communityPending = false }: {
   exam: ExamBlockApi;
   title: string;
   timeLimitSeconds?: number;
   onClose?: () => void;
+  unreviewedCount?: number;
+  communityPending?: boolean;
 }) {
   const { pool, question, index, item, entries, correctKey, revealed, result, prefs, setPrefs, tool, setTool, reviewing, profile } = exam;
   const taker = useStore((state) => state.profile.name);
@@ -145,7 +148,7 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
   }
 
   return (
-    <div ref={exam.rootRef} className={`exam-sim xfy ${reviewing ? "is-review" : ""} ${toolkit ? "has-toolkit" : ""}`} role="dialog" aria-modal="true"
+    <div ref={exam.rootRef} className={`exam-sim xfy ${reviewing ? "is-review" : ""} ${toolkit ? "has-toolkit" : ""} ${unreviewedCount || communityPending ? "has-community-notice" : ""}`} role="dialog" aria-modal="true"
       aria-label="ExamSoft (Examplify) exam simulation" aria-busy={exam.finishStatus === "saving"} tabIndex={-1} style={style} onClick={anyMenu ? closeMenus : undefined}>
       {/* ------------------------------------------------------------------ top */}
       <header className="xfy-top">
@@ -198,6 +201,8 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
           </button>
         </div>
       </header>
+
+      <CommunityPracticeNotice count={unreviewedCount} pending={communityPending} simulator />
 
       {/* ----------------------------------------------------------------- body */}
       <div className="xfy-main">

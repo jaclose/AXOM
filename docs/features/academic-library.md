@@ -179,6 +179,32 @@ the starting token and reject a changed account. Catalog results are scoped by a
 and query, including pagination. Installation and enrollment recheck ownership before
 canonical store writes; interrupted work retains its local originals and retry intent.
 
+## Community uploads and promotion
+
+Any signed-in account can upload an immutable question course privately with the
+existing academic uploader. A native AXOM course folder works without making a
+ZIP; the uploader builds its course index locally and validates the package.
+Its owner may explicitly submit the current ready
+revision to Community Uploads after confirming sharing rights. The submission
+stays labeled **Unreviewed** and is separate from the approved course catalog.
+Signed-in readers can inspect its bounded plan preview and download the
+hash-checked question files; anonymous visitors cannot. Direct revision
+provenance remains private during community review. Community access alone
+cannot enroll a course in the tracker or place it in the official QBank.
+Downloaded community question IDs retain an account-scoped Unreviewed marker in
+the local vault and account snapshot. The marker is saved before content download,
+so an interrupted download leaves a warning. The Question Bank and every practice
+interface show the warning while allowing answer-ready questions to be practised.
+
+`20261101120000_academic_community_submissions.sql` records the exact submitted
+revision and rights attestation. Replacing that revision or withdrawing the
+submission immediately removes its community metadata and file access. A
+service-role-appointed member of `academic_reviewers` (JD or a designated host)
+can approve or reject only the exact current submission. Approval moves it into
+the existing shared, reviewed catalog and enables normal course enrollment;
+rejection keeps it out. The older collection-only review RPC cannot approve a
+community submission. No client-side role flag can grant review access.
+
 ## Acceptance and limits
 
 2026-10-13, Node 22.23.1, macOS, Chrome: the authorized private FTM1 pilot exercises
