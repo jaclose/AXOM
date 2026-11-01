@@ -809,10 +809,10 @@ function JournalWritingPage({
           <div className="journal-inline-leaf">
             <span className="journal-inline-overline">{preferences.title} / {prettyDate(`${day}T12:00:00`)}</span>
             <h2 ref={inlineHeadingRef} tabIndex={-1}>Your open page</h2>
-            {preferences.writingMode === "guided" && <p>{journalPurposePrompts[preferences.purpose ?? "reflect"]}</p>}
+            {promptMode !== "open" && <p>{journalPurposePrompts[promptMode]}</p>}
             <label className="journal-inline-writing">
-              <span>{preferences.writingMode === "free" ? "Write freely at your desk" : "One line to begin"}</span>
-              <textarea value={draft.freeWriting} onChange={(event) => setDraft((current) => ({ ...current, freeWriting: event.target.value }))} placeholder={preferences.writingMode === "free" ? "Write in your own words." : "One line is enough to begin."} />
+              <span>{promptMode === "open" ? "Write freely at your desk" : "One line to begin"}</span>
+              <textarea value={draft.freeWriting} onChange={(event) => setDraft((current) => ({ ...current, freeWriting: event.target.value }))} placeholder={promptMode === "open" ? "Write in your own words." : "One line is enough to begin."} />
             </label>
           </div>
           <div className="journal-inline-leaf journal-inline-leaf-right">

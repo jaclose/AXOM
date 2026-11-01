@@ -92,6 +92,23 @@ describe("Journal notebook foundation", () => {
     expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Your open page" }));
   });
 
+  it("keeps the Open page choice when returning from zoom to a guided desk", () => {
+    const profile = useStore.getState().profile;
+    useStore.setState({ profile: { ...profile, journalNotebook: {
+      ...journalNotebook.DEFAULT_JOURNAL_NOTEBOOK, writingMode: "guided", setupCompleted: true,
+    } } as typeof profile });
+    render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i }));
+    const desk = screen.getByRole("region", { name: "Write at your desk" });
+    expect(within(desk).getByText("Keep what mattered. Leave the rest unfinished.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Zoom into full journal" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open page" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to desk" }));
+    const reopenedDesk = screen.getByRole("region", { name: "Write at your desk" });
+    expect(within(reopenedDesk).queryByText("Keep what mattered. Leave the rest unfinished.")).toBeNull();
+    expect(within(reopenedDesk).getByLabelText("Write freely at your desk")).toBeTruthy();
+  });
+
   it("keeps free writing first while prompts and the day summary stay optional", () => {
     render(<JournalPage />);
     fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i }));
