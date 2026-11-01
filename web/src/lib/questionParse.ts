@@ -1065,17 +1065,21 @@ export function parseQuestionBlocks(raw: string): ParsedQuestionDraft[] {
     }
   }
 
-  const numbers = drafts
-    .filter((d) => d.questionNumber !== undefined)
-    .map((d) => `${draftSection.get(d) ?? 0}:${d.sourceLabel ?? ""}:${d.questionNumber}`);
-  if (new Set(numbers).size !== numbers.length) {
-    for (const d of drafts) {
-      d.warnings.push("Duplicate question numbers in this document — check the split.");
-      d.needsReview = true;
-      d.confidence = "low";
-      d.overallImportConfidence = Math.min(d.overallImportConfidence ?? 0.45, 0.45);
-      d.parserRuleIds = [...new Set([...(d.parserRuleIds ?? []), "conflict.duplicate-question-number"])];
-    }
+  const numberKey = (draft: ParsedQuestionDraft) =>
+    `${draftSection.get(draft) ?? 0}:${draft.sourceLabel ?? ""}:${draft.questionNumber}`;
+  const numberCounts = new Map<string, number>();
+  for (const draft of drafts) {
+    if (draft.questionNumber === undefined) continue;
+    const key = numberKey(draft);
+    numberCounts.set(key, (numberCounts.get(key) ?? 0) + 1);
+  }
+  for (const draft of drafts) {
+    if (draft.questionNumber === undefined || (numberCounts.get(numberKey(draft)) ?? 0) < 2) continue;
+    draft.warnings.push("Duplicate question numbers in this document — check the split.");
+    draft.needsReview = true;
+    draft.confidence = "low";
+    draft.overallImportConfidence = Math.min(draft.overallImportConfidence ?? 0.45, 0.45);
+    draft.parserRuleIds = [...new Set([...(draft.parserRuleIds ?? []), "conflict.duplicate-question-number"])];
   }
 
   return entries.size ? applyAnswerEntries(drafts, entries) : drafts;
