@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeSeed } from "../lib/seed";
 import { useStore } from "../lib/store";
 import { ReportsPage } from "./ReportsPage";
@@ -31,6 +31,9 @@ describe("ReportsPage", () => {
 
   it("uses honest low-data states and removes future/developer placeholders", () => {
     render(<ReportsPage />);
+    expect(screen.getByRole("heading", { name: "See your work clearly." })).toBeTruthy();
+    expect(screen.getByText("A quiet window.")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Record your first session" }).getAttribute("href")).toBe("#productivity");
     expect(screen.getByText("No targets", { selector: ".stat-value" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Today" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Trend" })).toBeTruthy();
@@ -40,6 +43,27 @@ describe("ReportsPage", () => {
     expect(screen.queryByText(/31 failed days/i)).toBeNull();
     expect(screen.queryByText("Hourly week map")).toBeNull();
     expect(screen.queryByText("Traceability")).toBeNull();
+  });
+
+  it.each([1, 2])("labels %i card-only active day(s) accurately", (count) => {
+    const today = useStore.getState().activeDayKey;
+    const dates = count === 1 ? [today] : [shiftDay(today, -1), today];
+    useStore.setState({
+      logs: dates.map((dayKey, index) => ({ id: `cards-${index}`, dayKey, ts: `${dayKey}T12:00:00.000Z`, type: "Cards", minutes: 0, cards: 12, academic: true, productive: true })),
+    });
+    render(<ReportsPage />);
+    expect(screen.getByText(String(count), { selector: ".report-overview-effort strong" })).toBeTruthy();
+    expect(screen.getByText(`active day${count === 1 ? "" : "s"} with logged work`)).toBeTruthy();
+  });
+
+  it("describes zero-net corrected records without calling them active days", () => {
+    const today = useStore.getState().activeDayKey;
+    useStore.setState({
+      logs: [{ id: "zero-correction", dayKey: today, ts: `${today}T12:00:00.000Z`, type: "Correction", minutes: 0, cards: 0, academic: true, productive: true }],
+    });
+    render(<ReportsPage />);
+    expect(screen.getByText("No net activity", { selector: ".report-overview-effort strong" })).toBeTruthy();
+    expect(screen.queryByText(/active days? with logged work/)).toBeNull();
   });
 
   it("explains a metric on explicit request and falls back to activity rhythm without targets", () => {
@@ -54,7 +78,37 @@ describe("ReportsPage", () => {
     expect(detail?.textContent).toContain("What changed");
     expect(detail?.textContent).toContain("Calculation");
     expect(detail?.textContent).toContain("Source");
-    expect(screen.getByText("Activity streak")).toBeTruthy();
+    expect(screen.getByText("Activity streak", { selector: ".stat-title" })).toBeTruthy();
+  });
+
+  it("changes the overview period without changing the underlying report", () => {
+    render(<ReportsPage />);
+    const period = screen.getByRole("group", { name: "Report period" });
+    const fourteen = within(period).getByRole("button", { name: "14 days" });
+    const thirty = within(period).getByRole("button", { name: "30 days" });
+    expect(fourteen.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(thirty);
+    expect(thirty.getAttribute("aria-pressed")).toBe("true");
+    expect(fourteen.getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByText("30 DAY VIEW")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Trend" })).toBeTruthy();
+  });
+
+  it("moves keyboard focus with in-page report jumps without changing the route", () => {
+    const scrollIntoView = vi.fn();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      render(<ReportsPage />);
+      const currentHash = window.location.hash;
+      const nav = screen.getByRole("group", { name: "Explore reports" });
+      fireEvent.click(within(nav).getByRole("button", { name: "Trend" }));
+      expect(scrollIntoView).toHaveBeenCalledOnce();
+      expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Trend" }));
+      expect(window.location.hash).toBe(currentHash);
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
   });
 
   it("charts the last seven calendar days from logs even without daily targets", () => {
@@ -66,6 +120,7 @@ describe("ReportsPage", () => {
     expect(screen.getByRole("group", { name: "Minutes for the last seven days" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: /: 1h 35m; last week 0m/ }).length).toBe(1);
     expect(screen.getByText(/Study time: 1h 35m this week/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Choose daily targets" }).getAttribute("href")).toBe("#productivity");
   });
 
   it("gives trend columns keyboard-focusable accessible names", () => {

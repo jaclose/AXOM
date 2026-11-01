@@ -17,6 +17,7 @@ import {
 import { routeForBlueprintLane } from "../../lib/blueprintRoutes";
 import type { BlueprintLaneId, BlueprintMode, BlueprintNodeStatus, BlueprintNodeType, BlueprintSource, InstalledBlueprint, InstalledBlueprintNode, SourceType } from "../../lib/types";
 import { ICON_SIZE } from "../../lib/iconSize";
+import "../../styles/exam-prep.css";
 
 const DEPTH_KEY = "noctyrium-blueprint-depth";
 const laneKey = (mode: BlueprintMode) => `noctyrium-blueprint-lane-${mode}`;
@@ -75,6 +76,12 @@ export function BlueprintWorkbench({ mode, initialLane }: { mode: BlueprintMode;
   const laneCatalog = blueprintsForLane(activeLane);
   const laneInstalls = installs.filter((i) => i.laneId === activeLane);
   const openInstall = installs.find((i) => i.id === openInstallId) ?? null;
+  const activeLaneInfo = lanes.find((lane) => lane.id === activeLane);
+  const primaryBlueprint = activeLaneInfo ? blueprintById(activeLaneInfo.blueprintId) : undefined;
+  const heroSummary = primaryBlueprint?.summary.replace(/\s+—\s+/g, ", ");
+  const primaryInstall = primaryBlueprint ? laneInstalls.find((install) => install.blueprintId === primaryBlueprint.id) : undefined;
+  const progress = primaryInstall ? installStats(primaryInstall) : null;
+  const objectiveCount = primaryBlueprint?.categories.reduce((sum, category) => sum + category.nodes.length, 0) ?? 0;
 
   function handleInstall(blueprintId: string) {
     const existing = installs.find((i) => i.blueprintId === blueprintId);
@@ -85,24 +92,50 @@ export function BlueprintWorkbench({ mode, initialLane }: { mode: BlueprintMode;
 
   return (
     <>
-      <GlassCard pad className="bp-lanebar-card" data-tour="step">
-        <div className="bp-lanebar-head">
-          <div>
-            <div className="bp-mode-kicker">{mode === "usmle" ? "USMLE Pathway" : "Pre-Health Pathway"}</div>
-            <div className="bp-mode-title">Blueprint Prep</div>
+      <section className="prep-desk" aria-labelledby="prep-desk-title" data-tour="step">
+        <div className="prep-desk-main">
+          <div className="prep-desk-topline">
+            <span>AXOM / {mode === "usmle" ? "BOARD PREP" : "PRE-HEALTH"}</span>
+            <span className="prep-desk-wip" aria-label="Work in progress">WIP</span>
           </div>
-          <Tag tone="cyan"><Layers size={ICON_SIZE.microInline} /> {installs.length} installed</Tag>
-        </div>
-        <div className="bp-lanebar">
-          {lanes.map((lane) => (
-            <button key={lane.id} type="button" className={`bp-lane-pill ${activeLane === lane.id ? "on" : ""}`}
-              onClick={() => selectLane(lane.id)}>
-              <b>{lane.label}</b>
-              <span>{lane.sub}</span>
+          <div className="prep-desk-copy" key={activeLane}>
+            <span className="prep-desk-overline">{activeLaneInfo?.sub ?? "Your exam pathway"}</span>
+            <h1 id="prep-desk-title">{activeLaneInfo?.label ?? "Exam prep"}<br /><span>with a plan.</span></h1>
+            <p>{heroSummary ?? "Choose a pathway to see its source-backed blueprint."}</p>
+          </div>
+          <div className="prep-desk-progress">
+            <span className="prep-desk-ring" style={{ background: `conic-gradient(var(--gold) ${progress?.pct ?? 0}%, var(--hairline) 0)` }} aria-hidden="true">
+              <span>{progress?.pct ?? 0}<small>%</small></span>
+            </span>
+            <div>
+              <span className="prep-desk-progress-label">{progress ? "AVERAGE MASTERY" : "READY TO BEGIN"}</span>
+              <strong>{progress ? `${progress.mastered} of ${progress.total} objectives complete` : `${objectiveCount} objectives mapped`}</strong>
+              <small>{progress ? "Progress stays with this blueprint on your device." : "Install a blueprint to track your own work."}</small>
+            </div>
+          </div>
+          <div className="prep-desk-actions">
+            <button type="button" className="prep-desk-primary-action" disabled={!primaryBlueprint}
+              onClick={() => primaryInstall ? setOpenInstallId(primaryInstall.id) : primaryBlueprint && handleInstall(primaryBlueprint.id)}>
+              {primaryInstall ? `Continue ${activeLaneInfo?.label ?? "blueprint"}` : `Start ${activeLaneInfo?.label ?? "blueprint"}`} <ArrowRight size={ICON_SIZE.body} aria-hidden="true" />
             </button>
-          ))}
+            {primaryBlueprint && <SourceBadge source={primaryBlueprint.source} />}
+          </div>
         </div>
-      </GlassCard>
+        <nav className="prep-desk-routes" aria-label={mode === "usmle" ? "USMLE prep routes" : "Pre-health prep routes"}>
+          <div className="prep-desk-routes-head"><span>YOUR PATHWAYS</span><span>{String(lanes.length).padStart(2, "0")} ROUTES</span></div>
+          <div className="prep-desk-route-grid">
+            {lanes.map((lane, index) => (
+              <button key={lane.id} type="button" className={`prep-desk-route ${activeLane === lane.id ? "on" : ""}`}
+                aria-current={activeLane === lane.id ? "page" : undefined} onClick={() => selectLane(lane.id)}>
+                <span className="prep-desk-route-number">{String(index + 1).padStart(2, "0")}</span>
+                <span className="prep-desk-route-copy"><b>{lane.label}</b><small>{lane.sub}</small></span>
+                <ArrowRight size={ICON_SIZE.body} aria-hidden="true" />
+              </button>
+            ))}
+          </div>
+          <p>Choose a lane. Your installed work stays where you left it.</p>
+        </nav>
+      </section>
 
       {openInstall
         ? <ContainerView install={openInstall} onClose={() => setOpenInstallId(null)} />
