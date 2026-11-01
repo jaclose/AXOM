@@ -399,6 +399,68 @@ it("refuses a figure whose bytes do not match its declared image type", async ()
   })).rejects.toThrow(/image content does not match/);
 });
 
+it("preserves a checked EMF source figure only on an already-held question", async () => {
+  const f = await untemplatedBankFixture();
+  const emf = new Uint8Array(48);
+  emf[0] = 1;
+  emf.set(new TextEncoder().encode(" EMF"), 40);
+  const checksum = await sha256(emf);
+  const question = f.bank.pkg.questions[0] as unknown as {
+    correctAnswer?: unknown; flags?: Array<{ type: string; message: string }>;
+    assets: Array<Record<string, unknown>>; stem: Array<Record<string, unknown>>;
+  };
+  delete question.correctAnswer;
+  question.flags = [{ type: "media_association_uncertain", message: "The source picture needs review." }];
+  question.assets.push({ id: "held-emf", filename: "held.emf", mimeType: "image/emf", byteSize: emf.length,
+    role: "question", questionId: "synthetic-q1", checksum });
+  question.stem.push({ type: "image", assetId: "held-emf", role: "question", alt: "Source figure" });
+  f.catalog.sources[0] = { ...(f.catalog.sources[0] as object), ready: 0, review: 1 };
+  f.files.set("banks/sample/assets/held.emf", emf);
+  writeFixtureCatalog(f);
+
+  const prepared = await prepareAcademicUpload(f.read, { term: "Term 5", module: "GOER", evidence: "source-metadata" });
+  expect(prepared.metadata).toMatchObject({ ready_questions: 0, review_questions: 1 });
+  expect(prepared.files.find(file => file.path === "banks/sample/assets/held.emf")).toMatchObject({
+    sha256: checksum.slice(7), mime_type: "image/emf", byte_size: emf.length,
+  });
+  const stored = JSON.parse(new TextDecoder().decode(prepared.files.find(file => file.path === "banks/sample/bank.json")!.bytes));
+  expect(stored.pkg.questions[0].correctAnswer).toBeUndefined();
+  expect(stored.issues).toContainEqual(expect.objectContaining({
+    severity: "error", code: "missing_required_media", questionId: "synthetic-q1",
+    message: expect.stringContaining("preserved, but AXOM cannot display it"),
+  }));
+  const backend = mockedStorage(prepared, await academicCollectionId("account-a", prepared.catalogId));
+  await expect(uploadAcademicCourse(backend.client, "account-a", prepared, () => {}, () => {}))
+    .resolves.toMatchObject({ status: "active" });
+});
+
+it("refuses EMF on an answer-ready question or when its header is not EMF", async () => {
+  const f = await untemplatedBankFixture();
+  const emf = new Uint8Array(48);
+  emf[0] = 1;
+  emf.set(new TextEncoder().encode(" EMF"), 40);
+  const question = f.bank.pkg.questions[0] as unknown as {
+    assets: Array<Record<string, unknown>>; stem: Array<Record<string, unknown>>;
+    flags?: Array<{ type: string; message: string }>;
+  };
+  question.flags = [{ type: "media_association_uncertain", message: "Check this picture." }];
+  question.assets.push({ id: "held-emf", filename: "held.emf", mimeType: "image/emf", role: "question",
+    questionId: "synthetic-q1", checksum: await sha256(emf) });
+  question.stem.push({ type: "image", assetId: "held-emf", role: "question", alt: "Source figure" });
+  f.files.set("banks/sample/assets/held.emf", emf);
+  writeFixtureCatalog(f);
+  await expect(prepareAcademicUpload(f.read, { term: "Term 5", module: "GOER", evidence: "source-metadata" }))
+    .rejects.toThrow(/Only an already-held question/);
+
+  delete (f.bank.pkg.questions[0] as { correctAnswer?: unknown }).correctAnswer;
+  f.catalog.sources[0] = { ...(f.catalog.sources[0] as object), ready: 0, review: 1 };
+  emf[40] = 0;
+  question.assets[0].checksum = await sha256(emf);
+  writeFixtureCatalog(f);
+  await expect(prepareAcademicUpload(f.read, { term: "Term 5", module: "GOER", evidence: "source-metadata" }))
+    .rejects.toThrow(/held EMF figure.*differs/);
+});
+
 it("rejects package-declared image size or dimensions that disagree with decoded bytes", async () => {
   stubSuccessfulBrowserDecode();
   const f = await untemplatedBankFixture();
