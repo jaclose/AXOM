@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-  DOCTORDLE_ASK_AFTER_MS, EMPTY_DOCTORDLE_LOG, doctordleCaseNumber, doctordleStreak, normalizeDoctordleLog,
+  DOCTORDLE_ASK_AFTER_MS, EMPTY_DOCTORDLE_LOG, doctordleCaseNumber, doctordleStreak, normalizeDoctordleLog, reconcileDoctordleFreeze,
   shouldAskResult, shouldRemind, useDoctordle, type DoctordleLog,
 } from "./doctordle";
 
@@ -38,6 +38,25 @@ describe("doctordleStreak", () => {
     expect(doctordleStreak(history, 441)).toBe(1);
     expect(doctordleStreak(history, 442)).toBe(0);
     expect(doctordleStreak(log({ opened: [440], skipped: [440] }), 440)).toBe(0);
+  });
+
+  it("bridges two isolated frozen cases but never two consecutive missed cases", () => {
+    expect(doctordleStreak(log({
+      results: { 436: "solved", 438: "missed", 440: "solved" }, frozenCases: [437, 439],
+    }), 440)).toBe(3);
+    expect(doctordleStreak(log({
+      results: { 436: "solved", 439: "missed" }, frozenCases: [437, 438],
+    }), 439)).toBe(1);
+  });
+
+  it("spends one freeze once after a reported case, never after a link open or longer gap", () => {
+    const first = reconcileDoctordleFreeze(log({ results: { 438: "solved" }, protectionStartedCase: 438 }), 440);
+    expect(first.frozenCase).toBe(439);
+    expect(first.log.freezesLeft).toBe(1);
+    expect(reconcileDoctordleFreeze(first.log, 440).frozenCase).toBeUndefined();
+    expect(reconcileDoctordleFreeze(first.log, 441).frozenCase).toBeUndefined();
+    expect(reconcileDoctordleFreeze(log({ opened: [438], protectionStartedCase: 438 }), 440).frozenCase).toBeUndefined();
+    expect(reconcileDoctordleFreeze(log({ results: { 437: "solved" }, protectionStartedCase: 437 }), 440).frozenCase).toBeUndefined();
   });
 });
 

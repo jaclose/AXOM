@@ -34,6 +34,10 @@ export interface DoctordleLog {
   snoozedUntil?: number;
   /** "Don't show again" on the dashboard reminder. */
   remindersOff?: boolean;
+  /** AXOM-only protection of a user-reported participation streak. */
+  protectionStartedCase?: number;
+  frozenCases?: number[];
+  freezesLeft?: number;
 }
 
 export const EMPTY_DOCTORDLE_LOG: DoctordleLog = { opened: [], results: {}, skipped: [] };
@@ -60,15 +64,48 @@ export function normalizeDoctordleLog(value: unknown): DoctordleLog {
     lastOpenedAt: time(raw.lastOpenedAt),
     snoozedUntil: time(raw.snoozedUntil),
     remindersOff: raw.remindersOff === true || undefined,
+    protectionStartedCase: Number.isInteger(raw.protectionStartedCase) ? raw.protectionStartedCase as number : undefined,
+    frozenCases: [...new Set(finiteInts(raw.frozenCases))].slice(-60),
+    freezesLeft: Number.isInteger(raw.freezesLeft) ? Math.max(0, Math.min(2, raw.freezesLeft as number)) : 2,
   };
 }
 
 /** AXOM participation streak: logged attempts ending today or yesterday, regardless of outcome. */
 export function doctordleStreak(log: DoctordleLog, today: number): number {
+  const frozen = new Set(log.frozenCases ?? []);
   let day = log.results[today] ? today : today - 1;
   let streak = 0;
-  while (log.results[day] === "solved" || log.results[day] === "missed") { streak += 1; day -= 1; }
+  let previousWasFrozen = false;
+  while (true) {
+    if (log.results[day] === "solved" || log.results[day] === "missed") {
+      streak += 1;
+      previousWasFrozen = false;
+    } else if (frozen.has(day) && !previousWasFrozen) {
+      previousWasFrozen = true;
+    }
+    else break;
+    day -= 1;
+  }
   return streak;
+}
+
+/** One case may be protected; link openings are never treated as completions. */
+export function reconcileDoctordleFreeze(log: DoctordleLog, today: number): { log: DoctordleLog; frozenCase?: number } {
+  const normalized = normalizeDoctordleLog(log);
+  const started = normalized.protectionStartedCase ?? today;
+  const yesterday = today - 1;
+  const eligible = yesterday >= started && !normalized.results[yesterday]
+    && !(normalized.frozenCases ?? []).includes(yesterday)
+    && Boolean(normalized.results[yesterday - 1]) && (normalized.freezesLeft ?? 0) > 0;
+  return {
+    log: {
+      ...normalized,
+      protectionStartedCase: started,
+      frozenCases: eligible ? [...(normalized.frozenCases ?? []), yesterday].slice(-60) : normalized.frozenCases,
+      freezesLeft: eligible ? (normalized.freezesLeft ?? 0) - 1 : normalized.freezesLeft,
+    },
+    frozenCase: eligible ? yesterday : undefined,
+  };
 }
 
 /** After "Open doctordle.org": ask once the learner is back, unless they already answered. */
@@ -99,6 +136,7 @@ interface DoctordleState {
   skipToday: (now?: number) => void;
   snooze: (ms: number, now?: number) => void;
   setRemindersOff: (off: boolean) => void;
+  protectStreak: (now?: number) => number | undefined;
 }
 
 export const useDoctordle = create<DoctordleState>((set, get) => {
@@ -126,6 +164,11 @@ export const useDoctordle = create<DoctordleState>((set, get) => {
     },
     setRemindersOff(off) {
       save({ ...get().log, remindersOff: off || undefined });
+    },
+    protectStreak(now = Date.now()) {
+      const { log, frozenCase } = reconcileDoctordleFreeze(get().log, doctordleCaseNumber(now));
+      if (JSON.stringify(log) !== JSON.stringify(get().log)) save(log);
+      return frozenCase;
     },
   };
 });

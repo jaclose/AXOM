@@ -5,6 +5,7 @@ import { useClockNow } from "../lib/clock";
 import { DOCTORDLE_URL, doctordleCaseNumber, doctordleStreak, useDoctordle } from "../lib/doctordle";
 import { ICON_SIZE } from "../lib/iconSize";
 import "../styles/ecosystem.css";
+import "../styles/study-streaks.css";
 
 export function DoctordlePage() {
   const log = useDoctordle((state) => state.log);
@@ -47,7 +48,9 @@ export function DoctordlePage() {
         <span><b>{streak > 0 && <Flame size={ICON_SIZE.body} aria-hidden="true" />}{streak}</b> in a row</span>
         <span><b>{results.length}</b> logged</span>
         <span><b>{solved}</b> got it</span>
+        <span><b><ShieldCheck size={ICON_SIZE.body} aria-hidden="true" />{log.freezesLeft ?? 2}</b> {log.freezesLeft === 1 ? "freeze" : "freezes"} left</span>
       </div>
+      <p className="study-game-freeze-note">A freeze covers one missed case automatically. Your AXOM streak counts only the attempts you report here.</p>
       <div className={`doctordle-today ${asking ? "is-asking" : ""}`}>
         {todayResult ? (
           <>

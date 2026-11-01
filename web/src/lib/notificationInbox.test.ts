@@ -21,4 +21,16 @@ describe("local notification inbox", () => {
     expect(localStorage.getItem("axom.notificationInbox.v1")).not.toContain("freeWriting");
     expect(localNoticeJournalDay({ ...catchUp, id: "journal-catch-up:private-text" })).toBeNull();
   });
+
+  it("keeps freeze notifications dated and scoped to the affected streak", () => {
+    const at = new Date("2026-11-02T12:00:00.000Z");
+    recordLocalNotice("streak:daily-word-freeze:2026-11-01", "daily-word-freeze", at);
+    recordLocalNotice("streak:daily-word-freeze:2026-11-01", "daily-word-freeze", at);
+    expect(readLocalNotices()).toHaveLength(1);
+    expect(localNoticeCopy("daily-word-freeze", "streak:daily-word-freeze:2026-11-01")).toMatchObject({
+      href: "#daily-word",
+      body: expect.stringContaining("2026-11-01"),
+    });
+    expect(localNoticeCopy("doctordle-freeze", "streak:doctordle-freeze:440").body).toContain("case #440");
+  });
 });

@@ -1,5 +1,5 @@
 /** Device-only receipts for AXOM's own learning prompts. No journal text is stored. */
-export type LocalNoticeKind = "check-in" | "closeout" | "journal-catch-up" | "journal-feedback" | "study-reminder" | "rest-reminder";
+export type LocalNoticeKind = "check-in" | "closeout" | "journal-catch-up" | "journal-feedback" | "study-reminder" | "rest-reminder" | "productivity-freeze" | "daily-word-freeze" | "doctordle-freeze";
 export interface LocalNotice {
   id: string;
   kind: LocalNoticeKind;
@@ -8,9 +8,26 @@ export interface LocalNotice {
 
 const KEY = "axom.notificationInbox.v1";
 const EVENT = "axom:notification-inbox-changed";
-const kinds = new Set<LocalNoticeKind>(["check-in", "closeout", "journal-catch-up", "journal-feedback", "study-reminder", "rest-reminder"]);
+const kinds = new Set<LocalNoticeKind>(["check-in", "closeout", "journal-catch-up", "journal-feedback", "study-reminder", "rest-reminder", "productivity-freeze", "daily-word-freeze", "doctordle-freeze"]);
 
-export function localNoticeCopy(kind: LocalNoticeKind): { title: string; body: string; href: string } {
+export function localNoticeCopy(kind: LocalNoticeKind, noticeId?: string): { title: string; body: string; href: string } {
+  const frozenDate = noticeId?.match(/^streak:(?:productivity-freeze|daily-word-freeze):(\d{4}-\d{2}-\d{2})$/)?.[1];
+  const frozenCase = noticeId?.match(/^streak:doctordle-freeze:(\d+)$/)?.[1];
+  if (kind === "productivity-freeze") return {
+    title: "Your study streak was protected",
+    body: `${frozenDate ? `A freeze covered ${frozenDate}.` : "One missed day was covered."} Return to your goals today when you can.`,
+    href: "#productivity",
+  };
+  if (kind === "daily-word-freeze") return {
+    title: "Your Daily Word streak was protected",
+    body: `${frozenDate ? `A freeze covered ${frozenDate}.` : "One missed word was covered."} Today's puzzle is ready when you are.`,
+    href: "#daily-word",
+  };
+  if (kind === "doctordle-freeze") return {
+    title: "Your Doctordle check-in streak was protected",
+    body: `${frozenCase ? `A freeze covered case #${frozenCase}.` : "One missed check-in was covered."} AXOM only counts the result you report.`,
+    href: "#doctordle",
+  };
   if (kind === "check-in") return {
     title: "Give today a direction",
     body: "Choose one intention. You can change it as the day unfolds.",

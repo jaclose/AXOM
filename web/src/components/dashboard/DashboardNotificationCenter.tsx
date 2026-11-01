@@ -245,7 +245,7 @@ export function DashboardNotificationCenter() {
             {visibleLocalNotices.length > 0 && <div className="dashboard-notifications__group-label">On this device</div>}
             {visibleLocalNotices.length > 0 && <ul className="dashboard-notifications__list dashboard-notifications__list--local" aria-label="Learning and journal prompts">
               {visibleLocalNotices.map((item) => {
-                const copy = localNoticeCopy(item.kind);
+                const copy = localNoticeCopy(item.kind, item.id);
                 const unreadItem = !localRead.has(item.id);
                 const Icon = item.kind === "journal-feedback" ? MessageSquareText : BookText;
                 return <li key={item.id} data-kind={item.kind} className={unreadItem ? "is-unread" : ""}>

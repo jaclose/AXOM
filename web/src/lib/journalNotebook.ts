@@ -8,10 +8,10 @@ export const JOURNAL_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "im
 export type JournalCoverTone = "onyx" | "forest" | "oxblood" | "navy" | "copper";
 export type JournalPaperTone = "warm" | "cream" | "white" | "linen";
 export type JournalDeskTone = "walnut" | "oak" | "ink";
-export type JournalDeskWeather = "sun" | "rain" | "night";
+export type JournalDeskWeather = "dawn" | "sun" | "overcast" | "rain" | "night";
 export type JournalLaptopTone = "silver" | "graphite" | "starlight";
 export type JournalLaptopPosition = "left" | "right";
-export type JournalHeadphones = "wired" | "airpods";
+export type JournalHeadphones = "wired" | "airpods" | "beats";
 export type JournalDrink = "tea" | "coffee" | "water";
 export type JournalWritingMode = "guided" | "free";
 export type JournalPurpose = "focus" | "reflect" | "recover";
@@ -26,6 +26,7 @@ export interface JournalNotebookPreferences {
   paperTone: JournalPaperTone;
   deskTone: JournalDeskTone;
   weather: JournalDeskWeather;
+  weatherCycle?: boolean;
   laptopTone: JournalLaptopTone;
   laptopPosition: JournalLaptopPosition;
   headphones: JournalHeadphones;
@@ -45,9 +46,10 @@ export const DEFAULT_JOURNAL_NOTEBOOK: JournalNotebookPreferences = {
   paperTone: "warm",
   deskTone: "walnut",
   weather: "sun",
+  weatherCycle: true,
   laptopTone: "graphite",
   laptopPosition: "left",
-  headphones: "wired",
+  headphones: "airpods",
   drink: "tea",
   writingMode: "free",
   purpose: "reflect",
@@ -132,10 +134,11 @@ export function normalizeJournalNotebookPreferences(value: unknown): JournalNote
     coverTone: isCoverTone(record.coverTone) && (record.coverTone !== "copper" || unlockedStyles.includes("copper")) ? record.coverTone : DEFAULT_JOURNAL_NOTEBOOK.coverTone,
     paperTone: isPaperTone(record.paperTone) && (record.paperTone !== "linen" || unlockedStyles.includes("linen")) ? record.paperTone : DEFAULT_JOURNAL_NOTEBOOK.paperTone,
     deskTone: isOneOf(record.deskTone, ["walnut", "oak", "ink"] as const) ? record.deskTone : DEFAULT_JOURNAL_NOTEBOOK.deskTone,
-    weather: isOneOf(record.weather, ["sun", "rain", "night"] as const) ? record.weather : DEFAULT_JOURNAL_NOTEBOOK.weather,
+    weather: isOneOf(record.weather, ["dawn", "sun", "overcast", "rain", "night"] as const) ? record.weather : DEFAULT_JOURNAL_NOTEBOOK.weather,
+    weatherCycle: record.weatherCycle !== false,
     laptopTone: isOneOf(record.laptopTone, ["silver", "graphite", "starlight"] as const) && (record.laptopTone !== "starlight" || unlockedStyles.includes("starlight")) ? record.laptopTone : DEFAULT_JOURNAL_NOTEBOOK.laptopTone,
     laptopPosition: isOneOf(record.laptopPosition, ["left", "right"] as const) ? record.laptopPosition : DEFAULT_JOURNAL_NOTEBOOK.laptopPosition,
-    headphones: isOneOf(record.headphones, ["wired", "airpods"] as const) ? record.headphones : DEFAULT_JOURNAL_NOTEBOOK.headphones,
+    headphones: isOneOf(record.headphones, ["wired", "airpods", "beats"] as const) ? record.headphones : DEFAULT_JOURNAL_NOTEBOOK.headphones,
     drink: isOneOf(record.drink, ["tea", "coffee", "water"] as const) ? record.drink : DEFAULT_JOURNAL_NOTEBOOK.drink,
     writingMode: isOneOf(record.writingMode, ["guided", "free"] as const) ? record.writingMode : DEFAULT_JOURNAL_NOTEBOOK.writingMode,
     purpose: isOneOf(record.purpose, ["focus", "reflect", "recover"] as const) ? record.purpose : DEFAULT_JOURNAL_NOTEBOOK.purpose,
