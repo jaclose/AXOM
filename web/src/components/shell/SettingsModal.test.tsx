@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -106,7 +106,7 @@ describe("Settings information architecture", () => {
     render(<SettingsModal onClose={() => {}} />);
 
     const tabs = screen.getAllByRole("tab");
-    expect(tabs.map((tab) => tab.textContent?.trim())).toEqual([
+    expect(tabs.map((tab) => tab.lastElementChild?.textContent?.trim())).toEqual([
       "Profile", "Account", "Appearance", "Personalization", "Data", "Emergency recovery", "Advanced",
     ]);
     for (const tab of tabs) {
@@ -123,6 +123,17 @@ describe("Settings information architecture", () => {
 
     fireEvent.keyDown(dataTab, { key: "End" });
     expect(screen.getByRole("tab", { name: "Advanced" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Advanced" }), { key: "ArrowDown" });
+    expect(screen.getByRole("tab", { name: "Profile" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("keeps account links inside the selected account panel", async () => {
+    const user = userEvent.setup();
+    render(<SettingsModal onClose={() => {}} />);
+    await user.click(screen.getByRole("tab", { name: "Account" }));
+    const accountPanel = screen.getByRole("tabpanel", { name: "Account" });
+    expect(within(accountPanel).getByRole("link", { name: "Notifications & communications" }).getAttribute("href")).toBe("#communications");
+    expect(within(accountPanel).getByRole("link", { name: "Privacy & data" }).getAttribute("href")).toBe("#privacy");
   });
 
   it("states accurate local-first semantics without promising a cloud account", async () => {
@@ -368,10 +379,10 @@ describe("Settings information architecture", () => {
     expect(screen.getByRole("tab", { name: "Personalization" }).getAttribute("aria-selected")).toBe("true");
   });
 
-  it("enables lock-in check-ins with a chosen interval, scope, and voice", async () => {
+  it("configures enabled-by-default lock-in check-ins with a chosen interval, scope, and voice", async () => {
     const user = userEvent.setup();
     render(<SettingsModal onClose={() => {}} initialTab="rhythm" />);
-    await user.click(screen.getByRole("checkbox", { name: "Enable lock-in check-ins" }));
+    expect((screen.getByRole("checkbox", { name: "Enable lock-in check-ins" }) as HTMLInputElement).checked).toBe(true);
     await user.click(screen.getByRole("button", { name: "45 min" }));
     await user.click(screen.getByRole("radio", { name: /Whenever AXOM is open/ }));
     await user.click(screen.getByRole("radio", { name: /Intense/ }));

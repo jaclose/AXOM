@@ -1,7 +1,134 @@
-/* ===========================================================================
-   Settings — calmer structure: one card per decision, sub-navigation inside
-   Personalization, a real profile header, and a readable backup status.
-   =========================================================================== */
+/* Settings is a focused workspace: navigation stays visible while the active
+   section scrolls. The same controls become a swipeable strip on phones. */
+.settings-modal.modal {
+  display: flex;
+  flex-direction: column;
+  width: min(1080px, 100%);
+  max-width: none;
+  max-height: min(900px, calc(100dvh - 48px));
+  padding: 0;
+  overflow: hidden;
+}
+.settings-modal > .spread {
+  flex: 0 0 auto;
+  min-height: 68px;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--hairline);
+}
+.settings-modal > .spread h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-xl);
+  letter-spacing: -0.025em;
+}
+.settings-modal .settings-modal-body {
+  display: grid;
+  grid-template-columns: minmax(190px, 220px) minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 0;
+  margin: 0;
+  overflow: hidden;
+}
+.settings-modal > .modal-actions {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 12px 24px;
+  border-top: 1px solid var(--hairline);
+}
+.settings-modal .modal-actions .gbtn { min-height: 40px; }
+.settings-tabs {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  min-width: 0;
+  padding: 18px 10px;
+  overflow-y: auto;
+  border-right: 1px solid var(--hairline);
+  background: var(--surface-1);
+}
+.settings-tab {
+  display: grid;
+  grid-template-columns: 23px 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 46px;
+  padding: 8px 10px;
+  color: var(--text-60);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-left: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color .2s ease, background .2s ease, border-color .2s ease;
+}
+.settings-tab svg { color: var(--text-45); }
+.settings-tab-index { color: var(--text-45); font-family: var(--font-mono); font-size: var(--fs-tiny); font-variant-numeric: tabular-nums; }
+.settings-tab:hover { color: var(--text); background: var(--neutral-hover); }
+.settings-tab.on {
+  color: var(--text);
+  font-weight: var(--fw-semibold);
+  background: var(--gold-soft);
+  border-color: var(--gold-line);
+  border-left-color: var(--gold);
+}
+.settings-tab.on svg, .settings-tab.on .settings-tab-index { color: var(--gold); }
+.settings-tab:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.settings-tab:nth-child(5) { margin-top: 10px; }
+.settings-content {
+  min-width: 0;
+  min-height: 0;
+  padding: 22px clamp(18px, 3vw, 38px) 32px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.settings-content > [role="tabpanel"] { min-width: 0; }
+.settings-intro {
+  gap: 6px;
+  margin-bottom: 22px;
+  padding: 0 0 18px;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  border-radius: 0;
+}
+.settings-intro .settings-intro-kicker {
+  color: var(--gold);
+  font-family: var(--font-mono);
+  font-size: var(--fs-tiny);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+.settings-intro h4 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.035em;
+  line-height: var(--leading-snug);
+}
+.settings-intro > span:last-child { max-width: 62ch; color: var(--text-60); font-size: var(--fs-sm); line-height: var(--leading-normal); }
+:root[data-theme="light"] .settings-modal .settings-intro { background: none; border-color: var(--hairline); }
+.settings-account-panel { display: grid; gap: 18px; }
+.settings-account-links {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--hairline);
+}
+.settings-account-links span { width: 100%; color: var(--text-45); font-size: var(--fs-tiny); font-weight: var(--fw-semibold); letter-spacing: var(--tracking-wide); text-transform: uppercase; }
+.settings-account-links a { color: var(--text-80); font-size: var(--fs-sm); text-decoration-color: var(--gold-line); text-underline-offset: 3px; }
+.settings-account-links a:hover, .settings-account-links a:focus-visible { color: var(--gold); }
+
 .settings-stack { display: grid; gap: 12px; min-width: 0; }
 .settings-subnav {
   display: grid;
@@ -243,3 +370,36 @@
 .data-health-warning { display: grid; gap: 3px; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--orange) 40%, transparent); border-radius: var(--radius-md); background: color-mix(in srgb, var(--orange) 8%, transparent); }
 .data-health-warning b { font-size: var(--fs-sm); }
 .data-health-warning span { color: var(--text-60); font-size: var(--fs-xs); line-height: var(--leading-normal); }
+
+@media (max-width: 760px) {
+  .settings-modal.modal { width: min(720px, 100%); }
+  .settings-modal .settings-modal-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .settings-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 8px 14px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: 0;
+    border-bottom: 1px solid var(--hairline);
+    scrollbar-width: thin;
+  }
+  .settings-tab { display: inline-flex; flex: 0 0 auto; gap: 7px; width: auto; min-height: 44px; padding: 8px 11px; border-left: 1px solid transparent; border-bottom: 2px solid transparent; white-space: nowrap; }
+  .settings-tab.on { border-left-color: var(--gold-line); border-bottom-color: var(--gold); }
+  .settings-tab-index { display: none; }
+  .settings-tab:nth-child(5) { margin-top: 0; }
+  .settings-content { padding: 20px 22px 30px; }
+}
+
+@media (max-width: 560px) {
+  .modal-scrim:has(.settings-modal) { padding: 0; }
+  .settings-modal.modal { width: 100%; max-height: 100dvh; height: 100dvh; border-radius: 0; }
+  .settings-modal > .spread { min-height: 60px; padding: max(12px, env(safe-area-inset-top)) 16px 12px; }
+  .settings-modal > .modal-actions { padding: 10px 16px max(10px, env(safe-area-inset-bottom)); }
+  .settings-content { padding: 18px 16px 28px; scrollbar-gutter: auto; }
+  .settings-intro { margin-bottom: 18px; padding-bottom: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-tab { transition: none; }
+}

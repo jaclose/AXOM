@@ -152,7 +152,9 @@
 .user-icon-btn.account-status[data-status="blocked"]::after { background: var(--red); }
 
 @media (max-width: 560px) {
-  .account-hero-card { flex-wrap: wrap; }
+  .account-hero-card { display: grid; grid-template-columns: 52px minmax(0, 1fr); align-items: start; gap: 8px 12px; }
+  .account-hero-copy, .account-hero-card > .tag { grid-column: 2; }
+  .account-hero-card > .tag { justify-self: start; }
   .account-auth-tabs, .account-choice-grid { grid-template-columns: 1fr; }
   .account-identity, .account-protection { grid-template-columns: 1fr; }
 }

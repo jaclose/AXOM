@@ -220,8 +220,10 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
   const localBackups = mergeLocalBackupSummaries(listLocalBackups(), hydratedLocalBackups);
   const [tab, setTab] = useState<SettingsSection>(() => normalizeSettingsTab(initialTab));
   const [personalTab, setPersonalTab] = useState<PersonalizationSubsection>(() => initialSubsection(initialTab));
+  const [wideLayout, setWideLayout] = useState(() => typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(min-width: 761px)").matches);
   const tabsId = useId();
   const tabRefs = useRef<Partial<Record<SettingsSection, HTMLButtonElement | null>>>({});
+  const contentRef = useRef<HTMLDivElement>(null);
   const [resigning, setResigning] = useState(false);
   const [viewingPromise, setViewingPromise] = useState(false);
   const promise = profile.promise;
@@ -259,11 +261,24 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
     return () => { active = false; };
   }, []);
 
+  useEffect(() => {
+    if (contentRef.current) contentRef.current.scrollTop = 0;
+  }, [tab]);
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia("(min-width: 761px)");
+    const update = () => setWideLayout(media.matches);
+    media.addEventListener("change", update);
+    update();
+    return () => media.removeEventListener("change", update);
+  }, []);
+
   function onTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, section: SettingsSection) {
     const index = SETTINGS_SECTIONS.findIndex((item) => item.id === section);
     let next: number;
-    if (event.key === "ArrowRight") next = (index + 1) % SETTINGS_SECTIONS.length;
-    else if (event.key === "ArrowLeft") next = (index - 1 + SETTINGS_SECTIONS.length) % SETTINGS_SECTIONS.length;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") next = (index + 1) % SETTINGS_SECTIONS.length;
+    else if (event.key === "ArrowLeft" || event.key === "ArrowUp") next = (index - 1 + SETTINGS_SECTIONS.length) % SETTINGS_SECTIONS.length;
     else if (event.key === "Home") next = 0;
     else if (event.key === "End") next = SETTINGS_SECTIONS.length - 1;
     else return;
@@ -332,12 +347,14 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
 
   return (
     <Modal
-      title="Your AXOM Setup"
+      title="Settings"
       onClose={onClose}
       footer={<GButton variant="primary" onClick={onClose}>Done</GButton>}
+      className="settings-modal"
+      bodyClassName="settings-modal-body"
     >
-      <div className="filter-bar settings-tabs" style={{ marginBottom: 4 }} role="tablist" aria-label="Settings sections">
-        {SETTINGS_SECTIONS.map(({ id, label, icon: Icon }) => {
+      <div className="settings-tabs" role="tablist" aria-label="Settings sections" aria-orientation={wideLayout ? "vertical" : "horizontal"}>
+        {SETTINGS_SECTIONS.map(({ id, label, icon: Icon }, index) => {
           const active = tab === id;
           return (
             <button
@@ -349,18 +366,23 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
               aria-selected={active}
               aria-controls={active ? `${tabsId}-panel-${id}` : undefined}
               tabIndex={active ? 0 : -1}
-              className={`filter-pill ${active ? "on" : ""}`}
+              className={`settings-tab ${active ? "on" : ""}`}
               onClick={() => setTab(id)}
               onKeyDown={(event) => onTabKeyDown(event, id)}
             >
-              <Icon size={ICON_SIZE.body} style={{ marginRight: 6, verticalAlign: -2 }} /> {label}
+              <span className="settings-tab-index" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
+              <Icon size={ICON_SIZE.body} aria-hidden="true" />
+              <span>{label}</span>
             </button>
           );
         })}
       </div>
 
+      <div ref={contentRef} className="settings-content">
+
       <div className="settings-intro">
-        <b>{tabIntro[tab].title}</b>
+        <span className="settings-intro-kicker">Your workspace / {String(SETTINGS_SECTIONS.findIndex((section) => section.id === tab) + 1).padStart(2, "0")}</span>
+        <h4>{tabIntro[tab].title}</h4>
         <span>{tabIntro[tab].body}</span>
       </div>
 
@@ -395,8 +417,16 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
           <DataHealthPanel />
         </section>
       )}
-      {tab === "account" && <div className="settings-card"><h3>Communications & privacy</h3><p>Choose your email categories or manage your account data.</p><div className="filter-bar"><a className="gbtn" href="#communications" onClick={onClose}>Notifications & Communications</a><a className="gbtn" href="#privacy" onClick={onClose}>Privacy & Data</a></div></div>}
-      {tab === "account" && <section role="tabpanel" id={`${tabsId}-panel-account`} aria-labelledby={`${tabsId}-tab-account`}><AccountSyncPanel /></section>}
+      {tab === "account" && (
+        <section role="tabpanel" id={`${tabsId}-panel-account`} aria-labelledby={`${tabsId}-tab-account`} className="settings-account-panel">
+          <AccountSyncPanel />
+          <nav className="settings-account-links" aria-label="More account settings">
+            <span>Also in AXOM</span>
+            <a href="#communications" onClick={onClose}>Notifications & communications</a>
+            <a href="#privacy" onClick={onClose}>Privacy & data</a>
+          </nav>
+        </section>
+      )}
 
       {tab === "appearance" && (
         <section role="tabpanel" id={`${tabsId}-panel-appearance`} aria-labelledby={`${tabsId}-tab-appearance`} className="backup-center">
@@ -543,6 +573,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
 
       {resigning && <PromiseCutscene onDone={() => setResigning(false)} />}
       {viewingPromise && promise && <SavedPromise onClose={() => setViewingPromise(false)} />}
+      </div>
     </Modal>
   );
 }
