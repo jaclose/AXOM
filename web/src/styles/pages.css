@@ -1030,7 +1030,8 @@
   .panel-head > .row { flex-wrap: wrap; row-gap: 8px; }
   .scope-select { min-width: 0; flex: 1 1 140px; max-width: 100%; }
   .tracker-item-row .grow { flex-basis: 100%; min-width: 0; }
-  .tracker-page-toolbar { align-items: flex-start; }
+  .tracker-page-toolbar { align-items: flex-start; flex-wrap: wrap; }
+  .tracker-page-toolbar > div { flex: 1 1 100%; }
   .tracker-help-entry ol { grid-template-columns: 1fr; }
   .tracker-compact-suggestion { grid-template-columns: auto minmax(0, 1fr) auto; }
 }
