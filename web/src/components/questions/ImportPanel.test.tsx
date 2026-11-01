@@ -210,6 +210,41 @@ describe("source-document-first import", () => {
     }));
   });
 
+  it("batch confirms only source-backed mappings after selected-row attestation", async () => {
+    const user = userEvent.setup();
+    const [candidate] = importFromCsv([
+      "question,a,b,c,answer",
+      '"Which cell releases histamine?","Mast cells","CD4+ T lymphocytes","B lymphocytes","A. Mast cell"',
+    ].join("\n")).drafts;
+    const second = { ...candidate, stem: "Which second cell?", questionNumber: 2, answerEvidence: "A. Mast cell" };
+    const flagged = {
+      ...candidate, stem: "Which flagged cell?", questionNumber: 3,
+      parserRuleIds: [...(candidate.parserRuleIds ?? []), "answer.source-key-flag"],
+      warnings: [...candidate.warnings, "SOURCE-KEY FLAG"],
+    };
+    render(<ImportPanel seed={{
+      drafts: [{ ...candidate, questionNumber: 1 }, second, flagged], rawText: "Original structured source",
+      title: "Bulk source review", fileName: "keys.csv", fileType: "csv",
+    }} />);
+
+    expect(screen.getByText("Review mapped answers together (2)")).toBeTruthy();
+    expect(screen.queryByRole("checkbox", { name: "Select mapped answer for question 3" })).toBeNull();
+    const confirm = screen.getByRole("button", { name: "Confirm 0 selected answers" });
+    expect(confirm).toHaveProperty("disabled", true);
+    await user.click(screen.getByRole("button", { name: "Select all eligible" }));
+    expect(screen.getByRole("button", { name: "Confirm 2 selected answers" })).toHaveProperty("disabled", true);
+    await user.click(screen.getByRole("checkbox", { name: "Attest selected mapped answers checked against the original source" }));
+    await user.click(screen.getByRole("button", { name: "Confirm 2 selected answers" }));
+    expect(screen.queryByText("Review mapped answers together (2)")).toBeNull();
+    expect(screen.getByRole("button", { name: "Finalize import" })).toHaveProperty("disabled", true);
+    await user.click(screen.getByRole("checkbox", { name: "Include question 3" }));
+    await user.click(screen.getByRole("button", { name: "Finalize import" }));
+    expect(mocked.addQuestion).toHaveBeenCalledTimes(2);
+    for (const call of mocked.addQuestion.mock.calls) {
+      expect(call[0]).toMatchObject({ extraction: { reviewed: true, parserRuleIds: expect.arrayContaining(["answer.user-reviewed-mapping"]) } });
+    }
+  });
+
   it("shows both sides of a JSON letter/text conflict without preselecting an answer", async () => {
     const user = userEvent.setup();
     const [conflict] = importFromJson(JSON.stringify([{
