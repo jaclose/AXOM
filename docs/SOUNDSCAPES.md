@@ -15,13 +15,14 @@ shared catalog entry is in `web/src/data/soundscape-recordings.json`. It plays
 through the existing audio engine, volume control, focus dock and stop timer.
 
 JD's supplied two-hour Super Focus / Flow State MP3 was converted to a full-length
-stereo AAC derivative in ignored `web/public/soundscapes/personal/`. The original
-in Movies/Music is preserved. The derivative was imported through Your sounds
-into the Jafar Chrome profile at the local `127.0.0.1:5174` origin and verified
-after reload. The local copy is backed by IndexedDB on that browser profile;
-it is not part of the account backup or cloud sync. The ignored derivative on
-the SSD is a local fallback, not a published app asset. A new Chrome profile,
-origin or clean checkout will need a separate local import.
+stereo AAC derivative at
+`/Volumes/JDabSSD/Codex-work/AXOM-private-soundscapes-2026-11-01/super-focus-flow-state-full.m4a`.
+The original in Movies/Music is preserved. The derivative was imported through
+Your sounds into the Jafar Chrome profile at the local `127.0.0.1:5174` origin
+and verified after reload. This browser copy is backed by IndexedDB, not the
+account backup or cloud sync. The private SSD derivative is outside the repo
+and Vite's public directory, so a local build cannot package it by accident.
+A new Chrome profile or origin will need a separate local import.
 
 - `presets.ts` — the six presets, the learner's 90-minute-block rotation and
   the research principles. Binaural carriers were measured with an FFT of the
