@@ -27,6 +27,17 @@ The original `AXOM` checkout has pre-existing deleted private PDFs and
 untracked files; it remains untouched. This branch owns only requested feature
 work and a directions audit. Other worktrees remain protected.
 
+Journal now has a first-open preference setup, a customizable desk scene,
+one-page writing zoom, manual and 4.4-second untouched put-down, live focus
+timer/recent verified activity on the MacBook, and a dated closeout/catch-up
+inbox flow. The old duplicate full journal below the desk is removed from the
+default experience. A page completion uses a book-close sequence; reduced
+motion uses a calm state change. See [journal scene](JOURNAL-NOTEBOOK-ARCHITECTURE.md)
+and [reminder lifecycle](DAILY-LOOP-REMINDER-LIFECYCLE.md). The supplied focus
+track is installed only in the local preview profile from a private derivative
+outside the repo; AXOM original Afterlight is bundled as app audio. Neither
+local preview nor tests establish hosted delivery or production deployment.
+
 2026-10-30 release candidate `5dfafae1` integrates RHPS/ESoft import, review,
 teaching, QBank, Journal and Productivity work onto `origin/main` `0cb5769a`.
 It preserves the current publisher and excludes the incompatible unapplied
