@@ -12,6 +12,7 @@ import * as localVault from "../lib/localVault";
 import { useAccount } from "../lib/account/accountStore";
 import { JournalPage } from "./JournalPage";
 import { useSoundscape } from "../lib/soundscapes/store";
+import { usePomodoro } from "../lib/pomodoro";
 
 // Derive dates exactly the way the app does — hard-coded calendar dates made
 // this suite expire two days after it was written (found 2026-07-15).
@@ -53,8 +54,10 @@ beforeEach(() => {
       rating: "Useful",
     }],
   });
+  useStore.setState((state) => ({ profile: { ...state.profile, journalNotebook: { ...journalNotebook.DEFAULT_JOURNAL_NOTEBOOK, setupCompleted: true } } }));
   useUi.setState({ journalDay: null, settingsRequest: null });
   useAccount.setState({ link: "unlinked", protection: "local-only", syncFailure: undefined });
+  usePomodoro.setState({ running: false, focusRunStarted: false, secondsLeft: 1500, phase: "focus" });
 });
 
 afterEach(() => {
@@ -64,7 +67,29 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+function openTodayInFullPage() {
+  fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i }));
+  fireEvent.click(screen.getByRole("button", { name: "Write full page" }));
+}
+
 describe("Journal notebook foundation", () => {
+  it("opens the MacBook for a real timer or recorded progress and closes it with no evidence", () => {
+    useStore.setState({ tracker: [], questions: [], tasks: [], sessions: [] });
+    render(<JournalPage />);
+    expect(screen.getByLabelText("Closed MacBook")).toBeTruthy();
+
+    act(() => { usePomodoro.setState({ running: true, secondsLeft: 1460, phase: "focus", targetLabel: "Renal physiology" }); });
+    expect(screen.getByLabelText("MacBook showing focus timer 24:20")).toBeTruthy();
+    expect(screen.getByText("24:20")).toBeTruthy();
+
+    act(() => { usePomodoro.setState({ running: false, focusRunStarted: false }); });
+    expect(screen.getByLabelText("Closed MacBook")).toBeTruthy();
+    const trackerItem = makeSeed().tracker[0];
+    act(() => { useStore.setState({ tracker: [{ ...trackerItem, id: "desk-progress", label: "Cardiology lecture", passEvents: [{ id: "pass-1", method: "study", at: new Date().toISOString() }] }] }); });
+    expect(screen.getByLabelText("MacBook showing recent progress: Cardiology lecture marked.")).toBeTruthy();
+    expect(screen.getByText("Cardiology lecture marked.")).toBeTruthy();
+  });
+
   it("learns first-open writing and lighting choices", () => {
     const profile = useStore.getState().profile;
     useStore.setState({ journal: [], profile: { ...profile, journalNotebook: undefined } as typeof profile });
@@ -74,25 +99,30 @@ describe("Journal notebook foundation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Find focus" }));
     fireEvent.click(within(screen.getByRole("dialog", { name: "Make this notebook yours" })).getByRole("button", { name: /Open pageStart in your own words/i }));
     fireEvent.click(screen.getByRole("button", { name: "Rain" }));
+    fireEvent.change(screen.getByLabelText("What should we call your notebook?"), { target: { value: "Rounds & Margins" } });
+    fireEvent.change(screen.getByLabelText("Offer it around"), { target: { value: "21:15" } });
     fireEvent.click(screen.getByRole("button", { name: "Begin at my desk" }));
     expect((useStore.getState().profile as typeof profile & { journalNotebook?: { purpose: string; writingMode: string; weather: string; setupCompleted: boolean } }).journalNotebook)
-      .toMatchObject({ purpose: "focus", writingMode: "free", weather: "rain", setupCompleted: true });
+      .toMatchObject({ title: "Rounds & Margins", purpose: "focus", writingMode: "free", weather: "rain", setupCompleted: true });
+    expect(useStore.getState().profile.dailyLoopReminders).toMatchObject({ closeoutEnabled: true, closeoutTime: "21:15" });
   });
 
   it("writes on the desk page and carries the same draft into full zoom", () => {
+    vi.useFakeTimers();
     render(<JournalPage />);
     fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i }));
     fireEvent.change(screen.getByLabelText("Write freely at your desk"), { target: { value: "A quiet start" } });
-    expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value).toBe("A quiet start");
-    fireEvent.click(screen.getByRole("button", { name: "Zoom into full journal" }));
-    expect(screen.getByRole("button", { name: "Back to desk" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Write full page" }));
+    expect(screen.getByRole("button", { name: "Put down on desk" })).toBeTruthy();
     expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value).toBe("A quiet start");
     expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Today’s page" }));
-    fireEvent.click(screen.getByRole("button", { name: "Back to desk" }));
+    fireEvent.click(screen.getByRole("button", { name: "Put down on desk" }));
+    act(() => { vi.advanceTimersByTime(860); });
     expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Your open page" }));
   });
 
   it("keeps the Open page choice when returning from zoom to a guided desk", () => {
+    vi.useFakeTimers();
     const profile = useStore.getState().profile;
     useStore.setState({ profile: { ...profile, journalNotebook: {
       ...journalNotebook.DEFAULT_JOURNAL_NOTEBOOK, writingMode: "guided", setupCompleted: true,
@@ -100,34 +130,76 @@ describe("Journal notebook foundation", () => {
     render(<JournalPage />);
     fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i }));
     const desk = screen.getByRole("region", { name: "Write at your desk" });
-    expect(within(desk).getByText("Keep what mattered. Leave the rest unfinished.")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Zoom into full journal" }));
+    expect(within(desk).getByText("Keep what mattered. Let the rest be unfinished.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Write full page" }));
+    fireEvent.click(screen.getByText("Writing lens: Reflect"));
     fireEvent.click(screen.getByRole("button", { name: "Open page" }));
-    fireEvent.click(screen.getByRole("button", { name: "Back to desk" }));
+    fireEvent.click(screen.getByRole("button", { name: "Put down on desk" }));
+    act(() => { vi.advanceTimersByTime(860); });
+    expect(screen.getByRole("heading", { name: "Your open page" })).toBeTruthy();
     const reopenedDesk = screen.getByRole("region", { name: "Write at your desk" });
-    expect(within(reopenedDesk).queryByText("Keep what mattered. Leave the rest unfinished.")).toBeNull();
+    expect(within(reopenedDesk).queryByText("Keep what mattered. Let the rest be unfinished.")).toBeNull();
     expect(within(reopenedDesk).getByLabelText("Write freely at your desk")).toBeTruthy();
   });
 
   it("keeps free writing first while prompts and the day summary stay optional", () => {
+    vi.useFakeTimers();
     render(<JournalPage />);
     fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i }));
-    fireEvent.click(screen.getByRole("button", { name: "Zoom into full journal" }));
+    fireEvent.click(screen.getByRole("button", { name: "Write full page" }));
 
     const fullJournal = screen.getByRole("dialog", { name: "Full journal" });
     expect(within(fullJournal).getByLabelText("Free writing")).toBeTruthy();
     expect(within(fullJournal).queryByRole("heading", { name: "Day at a glance" })).toBeNull();
+    fireEvent.click(within(fullJournal).getByText("Need a starting point?"));
     fireEvent.click(within(fullJournal).getByRole("button", { name: "Open page" }));
-    expect(within(fullJournal).queryByLabelText("What stayed with you today?")).toBeNull();
+    expect(within(fullJournal).queryByLabelText("Which moment will you remember?")).toBeNull();
     fireEvent.click(within(fullJournal).getByRole("button", { name: "Focus" }));
-    fireEvent.change(within(fullJournal).getByLabelText("Where did your attention go?"), { target: { value: "A clear hour" } });
+    fireEvent.change(within(fullJournal).getByLabelText("What held your attention today?"), { target: { value: "A clear hour" } });
     fireEvent.click(within(fullJournal).getByRole("button", { name: "Reflect" }));
-    expect((within(fullJournal).getByLabelText("What stayed with you today?") as HTMLTextAreaElement).value).toBe("A clear hour");
+    expect((within(fullJournal).getByLabelText("Which moment will you remember?") as HTMLTextAreaElement).value).toBe("A clear hour");
     fireEvent.click(within(fullJournal).getByRole("button", { name: "Show day summary" }));
     expect(within(fullJournal).getByRole("heading", { name: "Day at a glance" })).toBeTruthy();
     fireEvent.keyDown(fullJournal, { key: "Escape" });
+    act(() => { vi.advanceTimersByTime(860); });
     expect(screen.queryByRole("dialog", { name: "Full journal" })).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Your open page" }));
+  });
+
+  it("settles an untouched full page after a quiet moment, while an active writer keeps it open", () => {
+    vi.useFakeTimers();
+    render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Write full page" }));
+    expect(screen.getByRole("dialog", { name: "Full journal" })).toBeTruthy();
+
+    act(() => { vi.advanceTimersByTime(4400); });
+    expect(screen.getByRole("dialog", { name: "Full journal" }).className).toContain("is-settling");
+    act(() => { vi.advanceTimersByTime(860); });
+    expect(screen.queryByRole("dialog", { name: "Full journal" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Your open page" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Write full page" }));
+    fireEvent.focus(screen.getByLabelText("Free writing"));
+    act(() => { vi.advanceTimersByTime(6000); });
+    expect(screen.getByRole("dialog", { name: "Full journal" })).toBeTruthy();
+  });
+
+  it("returns focus and the same draft to the desk when the writer puts the page down", () => {
+    vi.useFakeTimers();
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Write full page" }));
+    const writing = screen.getByLabelText("Free writing") as HTMLTextAreaElement;
+    act(() => { writing.focus(); });
+    fireEvent.change(writing, { target: { value: "The line stays with me." } });
+    fireEvent.click(screen.getByRole("button", { name: "Put down on desk" }));
+    act(() => { vi.advanceTimersByTime(860); });
+    const deskWriting = screen.getByLabelText("Write freely at your desk") as HTMLTextAreaElement;
+    expect(deskWriting.value).toBe("The line stays with me.");
+    expect(document.activeElement).toBe(deskWriting);
   });
 
   it("opens feedback from the notification route without sending private content", () => {
@@ -169,11 +241,12 @@ describe("Journal notebook foundation", () => {
     vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
     vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
     render(<JournalPage />);
-    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i }));
+    openTodayInFullPage();
     expect(await screen.findByRole("heading", { name: "Today’s page" })).toBeTruthy();
 
+    fireEvent.click(screen.getByText("Need a starting point?"));
     fireEvent.click(screen.getByRole("button", { name: "Reflect" }));
-    const reflection = screen.getByLabelText("What stayed with you today?");
+    const reflection = screen.getByLabelText("Which moment will you remember?");
     fireEvent.change(reflection, { target: { value: "A sentence that must survive the turn." } });
     fireEvent.click(screen.getByRole("button", { name: "Previous journal page" }));
     expect(await screen.findByDisplayValue("Yesterday was grounded.")).toBeTruthy();
@@ -187,7 +260,7 @@ describe("Journal notebook foundation", () => {
   it("keeps the current page and draft open when a page-turn write cannot be confirmed", async () => {
     vi.spyOn(localVault, "flushLocalVaultWrites").mockRejectedValue(new Error("Forced durable write failure"));
     render(<JournalPage />);
-    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal/i }));
+    openTodayInFullPage();
     const writing = screen.getByLabelText("Free writing");
     fireEvent.change(writing, { target: { value: "Do not turn away from this draft" } });
 
@@ -204,9 +277,10 @@ describe("Journal notebook foundation", () => {
   it("does not close to the Library until the current draft is durable", async () => {
     vi.spyOn(localVault, "flushLocalVaultWrites").mockRejectedValue(new Error("Forced durable write failure"));
     render(<JournalPage />);
-    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal/i }));
+    openTodayInFullPage();
     fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: "Keep the notebook open" } });
-
+    fireEvent.click(screen.getByRole("button", { name: "Put down on desk" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Write full page" })).toBeTruthy(), { timeout: 1800 });
     fireEvent.click(screen.getByRole("button", { name: "Library" }));
 
     expect(await screen.findByText("Not saved on this device")).toBeTruthy();
@@ -221,7 +295,7 @@ describe("Journal notebook foundation", () => {
     vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
     vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
     render(<JournalPage />);
-    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal/i }));
+    openTodayInFullPage();
 
     const input = screen.getByLabelText("Choose a journal image");
     fireEvent.change(input, { target: { files: [new File(["axom"], "study-desk.png", { type: "image/png" })] } });
@@ -241,6 +315,7 @@ describe("Journal notebook foundation", () => {
     const flush = vi.spyOn(localVault, "flushLocalVaultWrites");
     render(<JournalPage />);
     fireEvent.click(screen.getByText("Yesterday was grounded.").closest("button")!);
+    fireEvent.click(screen.getByRole("button", { name: "Write full page" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Next journal page" }));
 
@@ -258,6 +333,7 @@ describe("Journal notebook foundation", () => {
     const assertWritesSince = vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
     render(<JournalPage />);
     fireEvent.click(screen.getByText("Yesterday was grounded.").closest("button")!);
+    fireEvent.click(screen.getByRole("button", { name: "Write full page" }));
     fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: "Yesterday remains visible until durable" } });
 
     act(() => { useUi.getState().remediateStandup(TODAY_KEY); });
@@ -267,17 +343,18 @@ describe("Journal notebook foundation", () => {
     expect(screen.queryByRole("heading", { name: "Today’s page" })).toBeNull();
 
     await act(async () => { confirmDurability(); await Promise.resolve(); });
-    expect(await screen.findByRole("dialog", { name: "New standup" })).toBeTruthy();
+    expect(await screen.findByRole("dialog", { name: "Full journal" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Today’s page" })).toBeTruthy();
     expect(useUi.getState().journalDay).toBeNull();
     expect(assertExactWrite).toHaveBeenCalledTimes(1);
     expect(assertWritesSince).toHaveBeenCalledTimes(1);
 
     fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: "Cancel must not discard this" } });
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Support" }));
+    fireEvent.click(screen.getByRole("button", { name: "Leave journal" }));
 
     expect(await screen.findByText("Not saved on this device")).toBeTruthy();
-    expect(screen.getByRole("dialog", { name: "Edit standup" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Full journal" })).toBeTruthy();
     expect(screen.getAllByDisplayValue("Cancel must not discard this")[0]).toBeTruthy();
   });
 
@@ -285,6 +362,7 @@ describe("Journal notebook foundation", () => {
     vi.spyOn(localVault, "flushLocalVaultWrites").mockRejectedValue(new Error("Forced requested-day failure"));
     render(<JournalPage />);
     fireEvent.click(screen.getByText("Yesterday was grounded.").closest("button")!);
+    fireEvent.click(screen.getByRole("button", { name: "Write full page" }));
     fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: "Keep this page and the requested day" } });
 
     act(() => { useUi.getState().remediateStandup(TODAY_KEY); });
@@ -297,11 +375,11 @@ describe("Journal notebook foundation", () => {
 
   it("supports keyboard page turns away from form controls", async () => {
     render(<JournalPage />);
-    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal/i }));
-    const notebook = await screen.findByLabelText("Journal notebook");
+    openTodayInFullPage();
+    const notebook = await screen.findByRole("dialog", { name: "Full journal" });
     fireEvent.keyDown(notebook, { key: "ArrowLeft" });
     expect(await screen.findByDisplayValue("Yesterday was grounded.")).toBeTruthy();
-    fireEvent.keyDown(screen.getByLabelText("Journal notebook"), { key: "ArrowRight" });
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Full journal" }), { key: "ArrowRight" });
     expect(await screen.findByRole("heading", { name: "Today’s page" })).toBeTruthy();
   });
 
@@ -317,17 +395,17 @@ describe("Journal notebook foundation", () => {
       dispatchEvent: vi.fn(),
     })));
     render(<JournalPage />);
-    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal/i }));
-    const notebook = await screen.findByLabelText("Journal notebook");
+    openTodayInFullPage();
+    const notebook = await screen.findByRole("dialog", { name: "Full journal" });
     expect(notebook.getAttribute("data-motion")).toBe("reduced");
     expect(screen.getByLabelText("Free writing")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Include in journal" })).toBeNull();
-    expect(screen.getByRole("heading", { name: "Your day, recorded" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Day at a glance" })).toBeNull();
   });
 
   it("keeps a manual support preview available without blocking the journal", async () => {
     render(<JournalPage />);
-    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal/i }));
+    openTodayInFullPage();
     fireEvent.click(screen.getByRole("button", { name: "Support" }));
 
     const preview = screen.getByRole("region", { name: "You do not have to carry this alone." });
@@ -349,7 +427,7 @@ describe("Journal notebook foundation", () => {
 
   it("opens the support preview for direct first-person safety language but not study notes", async () => {
     render(<JournalPage />);
-    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal/i }));
+    openTodayInFullPage();
     const writing = screen.getByLabelText("Free writing");
 
     fireEvent.change(writing, { target: { value: "I reviewed the suicide risk assessment lecture." } });
@@ -368,7 +446,7 @@ describe("Journal notebook foundation", () => {
     vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
     vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
     render(<JournalPage />);
-    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal/i }));
+    openTodayInFullPage();
     const writing = screen.getByLabelText("Free writing");
     fireEvent.change(writing, { target: { value: "Local autosave text" } });
     expect(screen.getByText("Saving to this workspace…")).toBeTruthy();
@@ -386,7 +464,7 @@ describe("Journal notebook foundation", () => {
     vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
     vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
     render(<JournalPage />);
-    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal/i }));
+    openTodayInFullPage();
     fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: "Warn until this draft is durable" } });
 
     const dirtyUnload = new Event("beforeunload", { cancelable: true }) as BeforeUnloadEvent;
@@ -408,7 +486,7 @@ describe("Journal notebook foundation", () => {
     const removeWindowListener = vi.spyOn(window, "removeEventListener");
     const removeDocumentListener = vi.spyOn(document, "removeEventListener");
     const view = render(<JournalPage />);
-    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal/i }));
+    openTodayInFullPage();
     fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: "Persist on page hide without waiting 420 ms" } });
 
     window.dispatchEvent(new Event("pagehide"));
@@ -440,7 +518,7 @@ describe("Journal notebook foundation", () => {
     const assertExactWrite = vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
     const assertWritesSince = vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
     render(<JournalPage />);
-    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal/i }));
+    openTodayInFullPage();
     fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: "A completed durable page" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Done for today" }));
@@ -448,12 +526,12 @@ describe("Journal notebook foundation", () => {
     await waitFor(() => expect(flush).toHaveBeenCalledTimes(1));
     expect(screen.getByText("Saving to this workspace…")).toBeTruthy();
     expect(screen.queryByText("Saved to this workspace")).toBeNull();
-    expect(screen.queryByText("Day logged.")).toBeNull();
+    expect(screen.queryByText("Day kept.")).toBeNull();
     expect(useStore.getState().journal.find((entry) => entry.date.startsWith(TODAY_KEY)))
       .toMatchObject({ freeWriting: "A completed durable page", notebookStatus: "complete" });
 
     await act(async () => { confirmDurability(); await Promise.resolve(); });
-    expect(screen.getByText("Day logged.")).toBeTruthy();
+    expect(screen.getByText("Day kept.")).toBeTruthy();
     expect(assertExactWrite).toHaveBeenCalledTimes(1);
     expect(assertWritesSince).toHaveBeenCalledTimes(1);
   });
@@ -461,7 +539,7 @@ describe("Journal notebook foundation", () => {
   it("does not claim or attempt completion for a blank new page", async () => {
     const flush = vi.spyOn(localVault, "flushLocalVaultWrites");
     render(<JournalPage />);
-    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal/i }));
+    openTodayInFullPage();
 
     fireEvent.click(screen.getByRole("button", { name: "Done for today" }));
 
@@ -476,7 +554,7 @@ describe("Journal notebook foundation", () => {
     vi.useFakeTimers();
     vi.spyOn(localVault, "flushLocalVaultWrites").mockRejectedValue(new Error("Forced durable write failure"));
     render(<JournalPage />);
-    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal/i }));
+    openTodayInFullPage();
     fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: "Still open in memory" } });
 
     await act(async () => { vi.advanceTimersByTime(450); await Promise.resolve(); });
@@ -494,7 +572,7 @@ describe("Journal notebook foundation", () => {
       throw conflict;
     });
     render(<JournalPage />);
-    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal/i }));
+    openTodayInFullPage();
     fireEvent.change(screen.getByLabelText("Free writing"), { target: { value: "Keep this tab's draft visible" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
@@ -511,7 +589,7 @@ describe("Journal notebook foundation", () => {
       syncFailure: { kind: "rejected", rejection: "too-large", status: 0, at: "2026-10-15T10:00:00.000Z" },
     });
     render(<JournalPage />);
-    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal/i }));
+    openTodayInFullPage();
 
     const warning = screen.getByRole("alert");
     expect(warning.textContent).toMatch(/Account protection blocked/);
@@ -544,9 +622,10 @@ describe("Journal notebook foundation", () => {
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
 
     render(<JournalPage />);
-    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal/i }));
-    expect(screen.getByText(/saved locally first in IndexedDB/i)).toBeTruthy();
-    expect(screen.getByText(/owner-private backups when the workspace fits account limits/i)).toBeTruthy();
+    openTodayInFullPage();
+    fireEvent.click(screen.getByText("How images are stored"));
+    expect(screen.getByText(/images are saved locally first and included in portable exports/i)).toBeTruthy();
+    expect(screen.getByText(/Linked account backups may include them when the workspace fits account limits/i)).toBeTruthy();
     expect(screen.queryByText(/Nothing is uploaded/i)).toBeNull();
     const input = screen.getByLabelText("Choose a journal image");
     fireEvent.change(input, { target: { files: [new File(["not an image"], "notes.txt", { type: "text/plain" })] } });
@@ -591,7 +670,7 @@ describe("Journal notebook foundation", () => {
     });
 
     render(<JournalPage />);
-    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal/i }));
+    openTodayInFullPage();
     expect(await screen.findByDisplayValue("Imported text remains intact.")).toBeTruthy();
     expect(screen.queryByAltText("unsafe.svg")).toBeNull();
     expect(screen.queryByAltText("claimed.png")).toBeNull();
@@ -600,13 +679,14 @@ describe("Journal notebook foundation", () => {
 
   it("includes the day's summary automatically, with the user's corrections and omissions", async () => {
     render(<JournalPage />);
-    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal/i }));
+    openTodayInFullPage();
+    fireEvent.click(screen.getByRole("button", { name: "Show day summary" }));
     fireEvent.click(screen.getByRole("button", { name: "Correct Focused time" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Correct Focused time" }), { target: { value: "45 min after correcting a late log" } });
     fireEvent.click(screen.getByRole("button", { name: "Hide Energy and readiness" }));
-    const recorded = screen.getByRole("region", { name: "Your day, recorded" });
-    expect(within(recorded).getByText(/Focused time: 45 min after correcting a late log/)).toBeTruthy();
-    expect(within(recorded).queryByText(/Energy and readiness/)).toBeNull();
+    const summary = screen.getByRole("complementary", { name: "Day at a glance" });
+    expect(within(summary).getByText("45 min after correcting a late log")).toBeTruthy();
+    expect(within(summary).getByRole("button", { name: "Show Energy and readiness" })).toBeTruthy();
     expect(screen.getByText(/Every visible line is included in your page automatically/)).toBeTruthy();
   });
 });

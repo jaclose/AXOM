@@ -10,9 +10,13 @@ for (const width of [1440, 768, 390]) test(`Journal saves and reloads a page at 
 
   await seedOnboarded(page);
   await page.goto("/#journal");
+  const setup = page.getByRole("dialog", { name: "Make this notebook yours" });
+  if (await setup.isVisible()) await setup.getByRole("button", { name: "Skip for now" }).click();
   await page.getByRole("button", { name: "Open today’s page", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Write at your desk" })).toBeVisible();
+  await page.getByRole("button", { name: "Write full page" }).click();
 
-  const notebook = page.getByRole("region", { name: "Journal notebook" });
+  const notebook = page.getByRole("dialog", { name: "Full journal" });
   await expect(notebook).toBeVisible();
   await expect(notebook).toHaveAttribute("data-motion", "reduced");
   const entry = `A durable synthetic journal page at ${width}px.`;
@@ -20,11 +24,14 @@ for (const width of [1440, 768, 390]) test(`Journal saves and reloads a page at 
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText("Saved to this workspace", { exact: true })).toBeVisible();
 
+  await page.getByRole("button", { name: "Put down on desk" }).click();
+  await expect(page.getByRole("button", { name: "Write full page" })).toBeVisible();
   await page.getByRole("button", { name: "Library", exact: true }).click();
   await expect(page.getByText("Recent pages", { exact: true })).toBeVisible();
   await expect(page.getByText(entry, { exact: true })).toBeVisible();
   await reloadAfterSave(page);
   await page.getByText(entry, { exact: true }).click();
+  await page.getByRole("button", { name: "Write full page" }).click();
   await expect(page.getByLabel("Free writing")).toHaveValue(entry);
 
   await page.screenshot({ path: `/tmp/axom-journal-notebook-${width}.png`, fullPage: true });

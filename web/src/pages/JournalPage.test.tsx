@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeSeed } from "../lib/seed";
 import { useStore } from "../lib/store";
 import { useUi } from "../lib/uiStore";
+import { DEFAULT_JOURNAL_NOTEBOOK } from "../lib/journalNotebook";
 import { JournalPage } from "./JournalPage";
 
 beforeEach(() => {
@@ -23,6 +24,7 @@ beforeEach(() => {
       rating: "Useful",
     }],
   });
+  useStore.setState((state) => ({ profile: { ...state.profile, journalNotebook: { ...DEFAULT_JOURNAL_NOTEBOOK, setupCompleted: true } } }));
   useUi.setState({ journalDay: "2026-07-12" });
 });
 
@@ -31,8 +33,8 @@ afterEach(cleanup);
 describe("Journal remediation routing", () => {
   it("updates an existing same-day entry instead of creating or overwriting a second entry", async () => {
     render(<JournalPage />);
-    expect(await screen.findByRole("dialog", { name: "Edit standup" })).toBeTruthy();
-    expect((screen.getByLabelText("What stayed with you today?") as HTMLTextAreaElement).value).toBe("Existing reflection");
+    expect(await screen.findByRole("dialog", { name: "Full journal" })).toBeTruthy();
+    expect((screen.getByLabelText("Which moment will you remember?") as HTMLTextAreaElement).value).toBe("Existing reflection");
 
     fireEvent.change(screen.getByLabelText("Energy"), { target: { value: "High" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));

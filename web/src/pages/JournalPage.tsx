@@ -5,7 +5,7 @@ import {
 import { createPortal } from "react-dom";
 import { ICON_SIZE } from "../lib/iconSize";
 import {
-  ArrowLeft, ArrowRight, BookOpen, CalendarClock, Check, CheckCircle2, ChevronRight,
+  ArrowLeft, ArrowRight, BookOpen, CalendarClock, CheckCircle2, ChevronRight,
   Download, HeartHandshake, ImagePlus, Lock, Palette, Pencil, Plus, Save,
   Trash2, Trophy, X,
 } from "lucide-react";
@@ -17,7 +17,9 @@ import { GButton, GhostButton, PanelHeader, Tag } from "../components/ui/primiti
 import { Field, Modal, SelectField, TextAreaField } from "../components/ui/Modal";
 import { dayKey, prettyDate } from "../lib/scoring";
 import { entryDayKey, missedStandupDays, planForDay } from "../lib/journal";
-import type { DayPlan, JournalEntry, Profile } from "../lib/types";
+import { findLiveSession, formatElapsed, sessionElapsedMs } from "../lib/sessions";
+import { formatClock, usePomodoro } from "../lib/pomodoro";
+import type { DailyLoopReminderPreferences, DayPlan, JournalEntry, Profile } from "../lib/types";
 import { announceJournalEnergyOnce } from "../lib/journalAnnouncement";
 import { selectDayAtAGlance } from "../lib/dayAtAGlance";
 import { buildDayExtraSections } from "../lib/journalExtras";
@@ -25,6 +27,7 @@ import { readListeningLog } from "../lib/soundscapes/listeningLog";
 import { readRestLog } from "../lib/rest";
 import { focusCheckInLedger } from "../lib/focusCheckIn";
 import { useReducedMotion } from "../lib/motion";
+import { normalizeDailyLoopReminderPreferences } from "../lib/dailyLoopReminders";
 import { journalReflectionNeedsSupport } from "../lib/journalSupport";
 import { unlock, useUnlocked } from "../lib/unlocks";
 import { useSoundscape } from "../lib/soundscapes/store";
@@ -64,25 +67,25 @@ type JournalPersistResult = "saved" | "no-change" | "superseded" | "aborted" | "
 
 const outcomeTone = { won: "green", partial: "orange", missed: "red" } as const;
 const journalPurposePrompts: Record<JournalPurpose, string> = {
-  focus: "A place to gather your attention. Anything belongs here.",
-  reflect: "Keep what mattered. Leave the rest unfinished.",
-  recover: "Set down what you carried. There is no right way to begin.",
+  focus: "Notice where your attention went. One true line is enough.",
+  reflect: "Keep what mattered. Let the rest be unfinished.",
+  recover: "Set down what you carried. Begin wherever you are.",
 };
 const journalPromptSets: Record<JournalPurpose, { today: string; blockers: string; tomorrow: string }> = {
   focus: {
-    today: "Where did your attention go?",
-    blockers: "What pulled it away?",
-    tomorrow: "What might protect one focused stretch?",
+    today: "What held your attention today?",
+    blockers: "Where did it drift?",
+    tomorrow: "What would make one focused stretch easier?",
   },
   reflect: {
-    today: "What stayed with you today?",
-    blockers: "What still feels unresolved?",
-    tomorrow: "What would you like to carry forward?",
+    today: "Which moment will you remember?",
+    blockers: "What can you set down tonight?",
+    tomorrow: "What deserves a place tomorrow?",
   },
   recover: {
-    today: "What felt heavy, and what helped?",
-    blockers: "What can be left here tonight?",
-    tomorrow: "What would make tomorrow kinder?",
+    today: "What asked more of you than expected?",
+    blockers: "What can stay on this page?",
+    tomorrow: "What would make tomorrow gentler?",
   },
 };
 
@@ -100,6 +103,109 @@ function clearJournalFeedbackRequest() {
   window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#${route}${params.size ? `?${params}` : ""}`);
 }
 
+interface DeskMessage {
+  label: string;
+  value: string;
+  detail: string;
+}
+
+function JournalDeskLaptop({ today }: { today: string }) {
+  const tracker = useStore((state) => state.tracker);
+  const questions = useStore((state) => state.questions);
+  const tasks = useStore((state) => state.tasks);
+  const sessions = useStore((state) => state.sessions);
+  const pomodoro = usePomodoro();
+  const liveSession = findLiveSession(sessions ?? []);
+  const runningSession = liveSession?.status === "active" ? liveSession : undefined;
+  const running = pomodoro.running || Boolean(runningSession);
+  const [now, setNow] = useState(() => Date.now());
+  const [messageIndex, setMessageIndex] = useState(0);
+
+  useEffect(() => {
+    if (!runningSession || pomodoro.running) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [runningSession, pomodoro.running]);
+
+  const messages = useMemo(() => {
+    const result: Array<DeskMessage & { at: number }> = [];
+    const recentTracker = tracker.flatMap((item) => (item.passEvents ?? []).map((event) => ({ item, at: event.at })))
+      .filter(({ at }) => Number.isFinite(Date.parse(at)) && dayKey(new Date(at)) === today)
+      .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0];
+    if (recentTracker) result.push({
+      label: "COURSE TRACKER",
+      value: `${recentTracker.item.label} marked.`,
+      detail: "That step is on the record.",
+      at: Date.parse(recentTracker.at),
+    });
+
+    const answered = questions.flatMap((question) => (question.attempts ?? [])
+      .filter((attempt) => Number.isFinite(Date.parse(attempt.at)) && dayKey(new Date(attempt.at)) === today
+        && ["correct", "incorrect", "guessed"].includes(attempt.status))
+      .map((attempt) => ({ questionId: question.id, at: attempt.at })));
+    const questionCount = new Set(answered.map((attempt) => attempt.questionId)).size;
+    if (questionCount > 0) result.push({
+      label: "QUESTION PRACTICE",
+      value: `${questionCount} question${questionCount === 1 ? "" : "s"} logged.`,
+      detail: questionCount >= 20 ? "A full stretch of practice. Good work." : "Every answer adds to the picture.",
+      at: Math.max(...answered.map((attempt) => Date.parse(attempt.at))),
+    });
+
+    const completedTask = tasks.filter((task) => task.done && task.completedAt && Number.isFinite(Date.parse(task.completedAt))
+      && dayKey(new Date(task.completedAt)) === today)
+      .sort((a, b) => Date.parse(b.completedAt ?? "") - Date.parse(a.completedAt ?? ""))[0];
+    if (completedTask) result.push({
+      label: "TASK FINISHED",
+      value: completedTask.title,
+      detail: "You made room for what comes next.",
+      at: Date.parse(completedTask.completedAt ?? ""),
+    });
+
+    const completedSession = (sessions ?? []).filter((session) => session.status === "completed" && session.endedAt
+      && Number.isFinite(Date.parse(session.endedAt)) && dayKey(new Date(session.endedAt)) === today)
+      .sort((a, b) => Date.parse(b.endedAt ?? "") - Date.parse(a.endedAt ?? ""))[0];
+    if (completedSession) result.push({
+      label: "FOCUS KEPT",
+      value: `${Math.max(1, Math.round(sessionElapsedMs(completedSession) / 60_000))} minutes logged.`,
+      detail: completedSession.title || "A study session finished today.",
+      at: Date.parse(completedSession.endedAt ?? ""),
+    });
+    return result.sort((a, b) => b.at - a.at).slice(0, 4);
+  }, [tracker, questions, tasks, sessions, today]);
+
+  useEffect(() => {
+    if (running || messages.length < 2) return;
+    const timer = window.setInterval(() => setMessageIndex((index) => index + 1), 7200);
+    return () => window.clearInterval(timer);
+  }, [running, messages.length]);
+
+  const message = messages[messageIndex % messages.length];
+  const open = running || Boolean(message);
+  const timerValue = pomodoro.running ? formatClock(pomodoro.secondsLeft)
+    : runningSession ? formatElapsed(sessionElapsedMs(runningSession, new Date(now))) : "";
+  const timerDetail = pomodoro.running
+    ? pomodoro.targetLabel || pomodoro.intention || (pomodoro.phase === "break" ? "A pause is part of the work." : "Stay with one thing.")
+    : runningSession?.title || "Focus session";
+
+  return (
+    <div role="img" className={`journal-desk-laptop${open ? " is-open" : " is-closed"}`} aria-label={running
+      ? `MacBook showing ${pomodoro.phase === "break" ? "break" : "focus"} timer ${timerValue}`
+      : message ? `MacBook showing recent progress: ${message.value}` : "Closed MacBook"}>
+      <span className="journal-desk-laptop-base" aria-hidden="true"><span className="journal-desk-laptop-keys" /><span className="journal-desk-laptop-trackpad" /></span>
+      <span className="journal-desk-laptop-lid" aria-hidden="true">
+        <span className="journal-desk-laptop-mark" />
+        <span className="journal-desk-laptop-screen">
+          <span className="journal-desk-laptop-screen-head"><i /> AXOM <span>{running ? "LIVE" : "TODAY"}</span></span>
+          <strong>{running ? timerValue : message?.value}</strong>
+          <small>{running ? timerDetail : message?.detail}</small>
+          <span className="journal-desk-laptop-screen-foot">{running ? "FOCUS IN PROGRESS" : message?.label}</span>
+        </span>
+      </span>
+      <span className="journal-desk-laptop-port" aria-hidden="true" />
+    </div>
+  );
+}
+
 export function JournalPage({ registerAppTransitionGuard }: {
   registerAppTransitionGuard?: RegisterJournalTransitionGuard;
 } = {}) {
@@ -109,7 +215,7 @@ export function JournalPage({ registerAppTransitionGuard }: {
   const reducedMotion = useReducedMotion();
   const [selectedDay, setSelectedDay] = useState(s.activeDayKey || dayKey());
   const [open, setOpen] = useState(false);
-  const [remediationMode, setRemediationMode] = useState(false);
+  const [startZoomed, setStartZoomed] = useState(false);
   const [turnDirection, setTurnDirection] = useState<TurnDirection>(null);
   const [customizing, setCustomizing] = useState(false);
   const [welcomeOpen, setWelcomeOpen] = useState(() => !(s.profile as JournalProfile).journalNotebook?.setupCompleted && s.journal.length === 0);
@@ -162,28 +268,35 @@ export function JournalPage({ registerAppTransitionGuard }: {
     void requestTransition(() => {
       setSelectedDay(requestedDay);
       setOpen(true);
-      setRemediationMode(true);
+      setStartZoomed(true);
+      const surface = document.querySelector<HTMLElement>(".surface-scroll");
+      if (surface) surface.scrollTop = 0;
     }).then((completed) => {
       requestedJournalDayRef.current = null;
       if (completed && useUi.getState().journalDay === requestedDay) clearJournalDay();
     });
   }, [journalDay, clearJournalDay, requestTransition]);
 
-  function openDay(key: string, remediation = false) {
+  function openDay(key: string, openFull = false) {
     setSelectedDay(key);
-    setRemediationMode(remediation);
+    setStartZoomed(openFull);
     setOpen(true);
+    const surface = document.querySelector<HTMLElement>(".surface-scroll");
+    if (surface) surface.scrollTop = 0;
   }
 
   function closeNotebook() {
     setOpen(false);
-    setRemediationMode(false);
+    setStartZoomed(false);
+    const surface = document.querySelector<HTMLElement>(".surface-scroll");
+    if (surface) surface.scrollTop = 0;
   }
 
   function navigate(direction: Exclude<TurnDirection, null>) {
     const next = direction === "previous" ? previousJournalDay(selectedDay) : nextJournalDay(selectedDay);
     if (next > today) return;
     setTurnDirection(direction);
+    setStartZoomed(true);
     setSelectedDay(next);
     if (!reducedMotion) window.setTimeout(() => setTurnDirection(null), 440);
   }
@@ -218,15 +331,13 @@ export function JournalPage({ registerAppTransitionGuard }: {
           today={today}
           preferences={preferences}
           direction={turnDirection}
-          remediationMode={remediationMode}
+          startZoomed={startZoomed}
           onNavigate={navigate}
           onClose={closeNotebook}
           onCompleted={(key) => {
             setOpen(false);
-            setRemediationMode(false);
-            if (key === today) {
-              setClosingDay(key);
-            }
+            setStartZoomed(false);
+            setClosingDay(key);
           }}
           registerTransitionGuard={registerTransitionGuard}
         />
@@ -234,8 +345,8 @@ export function JournalPage({ registerAppTransitionGuard }: {
 
       {closingDay && (
         <div className="journal-closeout" role="status" aria-live="polite">
-          <span className={`journal-closeout-cover cover-${preferences.coverTone}`} aria-hidden="true"><span>A</span></span>
-          <span className="journal-closeout-copy"><time dateTime={closingDay}>{prettyDate(`${closingDay}T12:00:00`)}</time><strong>Day logged.</strong></span>
+          <span className="journal-closeout-volume" aria-hidden="true"><span className="journal-closeout-paper" /><span className={`journal-closeout-cover cover-${preferences.coverTone}`}><span>A</span></span><span className="journal-closeout-ribbon" /></span>
+          <span className="journal-closeout-copy"><time dateTime={closingDay}>{prettyDate(`${closingDay}T12:00:00`)}</time><strong>{closingDay === today ? "Day kept." : "Page kept."}</strong><small>The page will be here when you return.</small></span>
         </div>
       )}
 
@@ -253,8 +364,8 @@ export function JournalPage({ registerAppTransitionGuard }: {
       )}
 
       {welcomeOpen && !feedbackOpen && (
-        <JournalWelcome initial={preferences} onComplete={(journalNotebook) => {
-          useStore.getState().updateProfile({ journalNotebook: { ...journalNotebook, setupCompleted: true } } as Partial<Profile>);
+        <JournalWelcome initial={preferences} initialReminders={normalizeDailyLoopReminderPreferences(s.profile.dailyLoopReminders)} onComplete={(journalNotebook, dailyLoopReminders) => {
+          useStore.getState().updateProfile({ journalNotebook: { ...journalNotebook, setupCompleted: true }, dailyLoopReminders } as Partial<Profile>);
           setWelcomeOpen(false);
         }} />
       )}
@@ -319,7 +430,7 @@ function NotebookLibrary({
           <path className="journal-desk-cable-desktop" d="M 112 348 C 50 392 40 355 61 311 C 71 289 83 277 97 267" />
           <path className="journal-desk-cable-mobile" d="M 98 355 C 34 362 2 297 18 205" />
         </svg>
-        <span className="journal-desk-laptop" aria-hidden="true"><span className="journal-desk-laptop-mark" /><span className="journal-desk-laptop-port" /></span>
+        <JournalDeskLaptop today={today} />
         <span className="journal-desk-headphones" aria-hidden="true" />
         <span className="journal-desk-plant" aria-hidden="true"><span /><span /><span /><span /><span /><i /></span>
         <span className="journal-desk-drink" aria-hidden="true"><span /></span>
@@ -423,13 +534,13 @@ interface JournalDraft {
 }
 
 function JournalWritingPage({
-  day, today, preferences, direction, remediationMode, onNavigate, onClose, onCompleted, registerTransitionGuard,
+  day, today, preferences, direction, startZoomed, onNavigate, onClose, onCompleted, registerTransitionGuard,
 }: {
   day: string;
   today: string;
   preferences: JournalNotebookPreferences;
   direction: TurnDirection;
-  remediationMode: boolean;
+  startZoomed: boolean;
   onNavigate: (direction: Exclude<TurnDirection, null>) => void;
   onClose: () => void;
   onCompleted: (day: string) => void;
@@ -439,12 +550,16 @@ function JournalWritingPage({
   const entry = s.journal.find((item) => entryDayKey(item) === day) as NotebookJournalEntry | undefined;
   const plan = planForDay(s.dayPlans, day);
   const reducedMotion = useReducedMotion();
-  const [zoomed, setZoomed] = useState(remediationMode);
+  const [zoomed, setZoomed] = useState(startZoomed);
+  const [settling, setSettling] = useState(false);
+  const [hasInteractedSinceOpen, setHasInteractedSinceOpen] = useState(false);
+  const [composing, setComposing] = useState(false);
   const [promptMode, setPromptMode] = useState<"open" | JournalPurpose>(() => {
     const hasEarlierPromptNotes = [entry?.today, entry?.blockers, entry?.tomorrow, ...(entry?.wins ?? []), ...(entry?.losses ?? [])]
       .some((value) => typeof value === "string" && value.trim());
     return preferences.writingMode === "free" && !hasEarlierPromptNotes ? "open" : preferences.purpose ?? "reflect";
   });
+  const [promptStep, setPromptStep] = useState(0);
   const [summaryVisible, setSummaryVisible] = useState(false);
   const [draft, setDraftState] = useState<JournalDraft>(() => draftFromEntry(entry, plan));
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "failed">(entry ? "saved" : "idle");
@@ -464,8 +579,12 @@ function JournalWritingPage({
   const persistQueueRef = useRef<Promise<void>>(Promise.resolve());
   const attachmentReadRef = useRef<Promise<void> | null>(null);
   const saveTimerRef = useRef<number | null>(null);
+  const settleTimerRef = useRef<number | null>(null);
+  const returnToDeskWritingRef = useRef(false);
   const pageHeadingRef = useRef<HTMLHeadingElement>(null);
   const inlineHeadingRef = useRef<HTMLHeadingElement>(null);
+  const inlineWritingRef = useRef<HTMLTextAreaElement>(null);
+  const zoomWritingRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const glance = selectDayAtAGlance({
@@ -508,9 +627,55 @@ function JournalWritingPage({
   ]);
   const previousSupportSignalRef = useRef(false);
 
+  const putDownPage = useCallback(() => {
+    if (!zoomed || settling) return;
+    returnToDeskWritingRef.current = document.activeElement === zoomWritingRef.current;
+    const surface = document.querySelector<HTMLElement>(".surface-scroll");
+    if (surface) surface.scrollTop = 0;
+    if (reducedMotion) {
+      setZoomed(false);
+      return;
+    }
+    setSettling(true);
+    settleTimerRef.current = window.setTimeout(() => {
+      settleTimerRef.current = null;
+      setZoomed(false);
+      setSettling(false);
+      const restoredSurface = document.querySelector<HTMLElement>(".surface-scroll");
+      if (restoredSurface) restoredSurface.scrollTop = 0;
+    }, 860);
+  }, [zoomed, settling, reducedMotion]);
+
+  function noteActivity() {
+    if (zoomed) setHasInteractedSinceOpen(true);
+    if (settleTimerRef.current !== null) {
+      window.clearTimeout(settleTimerRef.current);
+      settleTimerRef.current = null;
+      setSettling(false);
+    }
+  }
+
+  function openFullPage() {
+    setHasInteractedSinceOpen(dirtyRef.current);
+    setZoomed(true);
+  }
+
   useEffect(() => {
-    (zoomed ? pageHeadingRef : inlineHeadingRef).current?.focus({ preventScroll: true });
+    if (zoomed) pageHeadingRef.current?.focus({ preventScroll: true });
+    else if (returnToDeskWritingRef.current) inlineWritingRef.current?.focus({ preventScroll: true });
+    else inlineHeadingRef.current?.focus({ preventScroll: true });
+    returnToDeskWritingRef.current = false;
   }, [zoomed]);
+
+  useEffect(() => {
+    if (!zoomed || settling || hasInteractedSinceOpen || supportOpen || addingImage || composing) return;
+    const timer = window.setTimeout(putDownPage, 4400);
+    return () => window.clearTimeout(timer);
+  }, [zoomed, settling, hasInteractedSinceOpen, supportOpen, addingImage, composing, putDownPage]);
+
+  useEffect(() => () => {
+    if (settleTimerRef.current !== null) window.clearTimeout(settleTimerRef.current);
+  }, []);
 
   useEffect(() => {
     if (!zoomed) return;
@@ -526,7 +691,11 @@ function JournalWritingPage({
   }, [zoomed]);
 
   useEffect(() => {
-    if (supportSignal && !previousSupportSignalRef.current) setSupportOpen(true);
+    if (supportSignal && !previousSupportSignalRef.current) {
+      setSupportOpen(true);
+      setHasInteractedSinceOpen(true);
+      setZoomed(true);
+    }
     previousSupportSignalRef.current = supportSignal;
   }, [supportSignal]);
 
@@ -645,22 +814,20 @@ function JournalWritingPage({
   }, [cancelScheduledSave, persistNow]);
 
   function setDraft(update: (current: JournalDraft) => JournalDraft) {
-    setDraftState((current) => {
-      const next = update(current);
-      draftRef.current = next;
-      draftVersionRef.current += 1;
-      dirtyRef.current = true;
-      setSaveState("saving");
-      setSaveError("");
-      cancelScheduledSave();
-      if (!transitionPendingRef.current) {
-        saveTimerRef.current = window.setTimeout(() => {
-          saveTimerRef.current = null;
-          void persist();
-        }, 420);
-      }
-      return next;
-    });
+    const next = update(draftRef.current);
+    draftRef.current = next;
+    draftVersionRef.current += 1;
+    dirtyRef.current = true;
+    setDraftState(next);
+    setSaveState("saving");
+    setSaveError("");
+    cancelScheduledSave();
+    if (!transitionPendingRef.current) {
+      saveTimerRef.current = window.setTimeout(() => {
+        saveTimerRef.current = null;
+        void persist();
+      }, 420);
+    }
   }
 
   useEffect(() => {
@@ -714,7 +881,7 @@ function JournalWritingPage({
   function handleBookKeyDown(event: KeyboardEvent<HTMLElement>) {
     if (zoomed && event.key === "Escape") {
       event.preventDefault();
-      setZoomed(false);
+      putDownPage();
       return;
     }
     if (zoomed && event.key === "Tab") {
@@ -780,27 +947,40 @@ function JournalWritingPage({
   const hiddenGlance = new Set(draft.dayAtAGlance.hiddenSections ?? []);
   const hasStructuredDraft = [draft.today, draft.blockers, draft.tomorrow, ...draft.wins, ...draft.losses].some((value) => value.trim());
   const activePromptSet = journalPromptSets[promptMode === "open" ? preferences.purpose ?? "reflect" : promptMode];
+  const guidedPrompts = [
+    { key: "today", label: activePromptSet.today, value: draft.today },
+    { key: "blockers", label: activePromptSet.blockers, value: draft.blockers },
+    { key: "tomorrow", label: activePromptSet.tomorrow, value: draft.tomorrow },
+  ] as const;
+  const guidedPrompt = guidedPrompts[promptStep];
   const dialogProps = zoomed
-    ? { role: "dialog" as const, "aria-modal": true, "aria-label": remediationMode ? entry ? "Edit standup" : "New standup" : "Full journal" }
-    : remediationMode
-      ? { role: "dialog" as const, "aria-modal": false, "aria-label": entry ? "Edit standup" : "New standup" }
-      : {};
+    ? { role: "dialog" as const, "aria-modal": true, "aria-label": "Full journal" }
+    : {};
 
   const notebook = (
     <section
-      className={`journal-book-stage paper-${preferences.paperTone}${zoomed ? " is-zoomed" : ""}${direction ? ` turn-${direction}` : ""}`}
+      className={`journal-book-stage paper-${preferences.paperTone}${zoomed ? " is-zoomed" : ""}${settling ? " is-settling" : ""}${direction ? ` turn-${direction}` : ""}`}
       aria-label="Journal notebook"
       data-motion={reducedMotion ? "reduced" : "full"}
       onKeyDown={handleBookKeyDown}
+      onInputCapture={noteActivity}
+      onPointerDownCapture={noteActivity}
+      onWheelCapture={noteActivity}
+      onTouchMoveCapture={noteActivity}
+      onFocusCapture={(event) => {
+        if (zoomed && (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement)) noteActivity();
+      }}
+      onCompositionStartCapture={() => setComposing(true)}
+      onCompositionEndCapture={() => { setComposing(false); noteActivity(); }}
       {...dialogProps}
     >
-      <section className={`journal-inline-scene journal-desk desk-${preferences.deskTone} weather-${preferences.weather} laptop-${preferences.laptopTone} laptop-${preferences.laptopPosition} headphones-${preferences.headphones} drink-${preferences.drink} accent-${preferences.deskAccent ?? "none"}`} aria-label="Write at your desk">
+      <section className={`journal-inline-scene journal-desk desk-${preferences.deskTone} weather-${preferences.weather} laptop-${preferences.laptopTone} laptop-${preferences.laptopPosition} headphones-${preferences.headphones} drink-${preferences.drink} accent-${preferences.deskAccent ?? "none"}`} aria-label="Write at your desk" hidden={zoomed}>
         <span className="journal-desk-window" aria-hidden="true" />
         <svg className="journal-desk-headphone-cable" viewBox="0 0 1000 620" preserveAspectRatio="none" aria-hidden="true">
           <path className="journal-desk-cable-desktop" d="M 112 348 C 50 392 40 355 61 311 C 71 289 83 277 97 267" />
           <path className="journal-desk-cable-mobile" d="M 98 355 C 34 362 2 297 18 205" />
         </svg>
-        <span className="journal-desk-laptop" aria-hidden="true"><span className="journal-desk-laptop-mark" /><span className="journal-desk-laptop-port" /></span>
+        <JournalDeskLaptop today={today} />
         <span className="journal-desk-headphones" aria-hidden="true" />
         <span className="journal-desk-plant" aria-hidden="true"><span /><span /><span /><span /><span /><i /></span>
         <span className="journal-desk-drink" aria-hidden="true"><span /></span>
@@ -812,23 +992,25 @@ function JournalWritingPage({
             {promptMode !== "open" && <p>{journalPurposePrompts[promptMode]}</p>}
             <label className="journal-inline-writing">
               <span>{promptMode === "open" ? "Write freely at your desk" : "One line to begin"}</span>
-              <textarea value={draft.freeWriting} onChange={(event) => setDraft((current) => ({ ...current, freeWriting: event.target.value }))} placeholder={promptMode === "open" ? "Write in your own words." : "One line is enough to begin."} />
+              <textarea ref={inlineWritingRef} value={draft.freeWriting} onChange={(event) => setDraft((current) => ({ ...current, freeWriting: event.target.value }))} placeholder={promptMode === "open" ? "Write in your own words." : "One line is enough to begin."} />
             </label>
           </div>
           <div className="journal-inline-leaf journal-inline-leaf-right">
             <span className="journal-inline-overline">Private / local first</span>
             <span className="journal-inline-quote">A record you can return to.</span>
             <p>{saveState === "saving" ? "Saving…" : saveState === "saved" ? "Page saved locally" : saveState === "failed" ? "Your changes need saving" : "Ready when you are"}</p>
-            <GButton variant="primary" onClick={() => setZoomed(true)}><BookOpen size={ICON_SIZE.body} /> Zoom into full journal</GButton>
+            {saveError && <p className="journal-inline-save-error" role="alert">{saveError}</p>}
+            <GButton variant="primary" onClick={openFullPage}><BookOpen size={ICON_SIZE.body} /> Write full page</GButton>
           </div>
         </div>
       </section>
 
       {zoomed && <div className="journal-zoom-return">
-        <GButton size="sm" onClick={() => setZoomed(false)}><ArrowLeft size={ICON_SIZE.body} /> Back to desk</GButton>
+        <GButton size="sm" onClick={putDownPage}><ArrowLeft size={ICON_SIZE.body} /> Put down on desk</GButton>
         <span>{preferences.title} <i>/</i> {prettyDate(`${day}T12:00:00`)}</span>
         <GButton size="sm" aria-expanded={summaryVisible} aria-controls="journal-glance-page" onClick={() => setSummaryVisible((current) => !current)}>{summaryVisible ? "Hide day summary" : "Show day summary"}</GButton>
       </div>}
+      <div className="journal-expanded-pages" hidden={!zoomed}>
       <div className="journal-book-toolbar">
         <GButton size="sm" onClick={() => turnPage("previous")} aria-label="Previous journal page">
           <ArrowLeft size={ICON_SIZE.body} /> Previous
@@ -863,43 +1045,47 @@ function JournalWritingPage({
           <div className="journal-paper-running-head">
             <span>{preferences.title}</span><time dateTime={day}>{prettyDate(`${day}T12:00:00`)}</time>
           </div>
-          <h2 ref={pageHeadingRef} tabIndex={-1}>{day === today ? "Today’s page" : "Daily reflection"}</h2>
+          <h2 ref={pageHeadingRef} tabIndex={-1}>{day === today ? "Today’s page" : day === previousJournalDay(today) ? "Yesterday’s page" : "A page from before"}</h2>
+          {day !== today && <p className="journal-day-context">A day can be written after it ends.</p>}
           {promptMode !== "open" && <p className="journal-page-lede">{journalPurposePrompts[promptMode]}</p>}
 
           <label className="journal-writing-field journal-free-writing">
             <span>Free writing</span>
-            <textarea value={draft.freeWriting} onChange={(event) => setDraft((current) => ({ ...current, freeWriting: event.target.value }))}
+            <textarea ref={zoomWritingRef} value={draft.freeWriting} onChange={(event) => setDraft((current) => ({ ...current, freeWriting: event.target.value }))}
               placeholder="Begin anywhere." />
           </label>
 
-          <div className="journal-writing-lens" role="group" aria-label="Writing lens">
-            <span>Want a starting point?</span>
-            {(["open", "focus", "reflect", "recover"] as const).map((mode) => (
-              <button key={mode} type="button" aria-pressed={promptMode === mode} onClick={() => setPromptMode(mode)}>
-                {mode === "open" ? "Open page" : mode === "focus" ? "Focus" : mode === "reflect" ? "Reflect" : "Regroup"}
-              </button>
-            ))}
-          </div>
+          <details className="journal-writing-tools">
+            <summary>{promptMode === "open" ? "Need a starting point?" : `Writing lens: ${promptMode === "focus" ? "Focus" : promptMode === "reflect" ? "Reflect" : "Regroup"}`}</summary>
+            <div className="journal-writing-lens" role="group" aria-label="Writing lens">
+              {(["open", "focus", "reflect", "recover"] as const).map((mode) => (
+                <button key={mode} type="button" aria-pressed={promptMode === mode} onClick={() => setPromptMode(mode)}>
+                  {mode === "open" ? "Open page" : mode === "focus" ? "Focus" : mode === "reflect" ? "Reflect" : "Regroup"}
+                </button>
+              ))}
+            </div>
+          </details>
 
           {promptMode !== "open" ? (
             <section className="journal-prompt-fields" aria-label={`${promptMode} prompts`}>
-              <span className="journal-optional-note">Optional prompts · switch lenses or choose Open page at any time</span>
-              <label className="journal-writing-field compact">
-                <span>{activePromptSet.today}</span>
-                <textarea value={draft.today} onChange={(event) => setDraft((current) => ({ ...current, today: event.target.value }))} />
+              <div className="journal-guided-heading"><span>A way in, if you need one</span><span>{String(promptStep + 1).padStart(2, "0")} / 03</span></div>
+              <label className="journal-writing-field compact journal-guided-field" key={guidedPrompt.key}>
+                <span>{guidedPrompt.label}</span>
+                <textarea value={guidedPrompt.value} onChange={(event) => setDraft((current) => ({ ...current, [guidedPrompt.key]: event.target.value }))} placeholder="You can leave this blank." />
               </label>
-              <label className="journal-writing-field compact">
-                <span>{activePromptSet.blockers}</span>
-                <textarea value={draft.blockers} onChange={(event) => setDraft((current) => ({ ...current, blockers: event.target.value }))} />
-              </label>
-              <label className="journal-writing-field compact">
-                <span>{activePromptSet.tomorrow}</span>
-                <textarea value={draft.tomorrow} onChange={(event) => setDraft((current) => ({ ...current, tomorrow: event.target.value }))} />
-              </label>
-              <div className="journal-win-loss-grid">
-                <label><span>Something to keep</span><input value={draft.wins[0] ?? ""} onChange={(event) => setDraft((current) => ({ ...current, wins: [event.target.value] }))} /></label>
-                <label><span>A loose thread</span><input value={draft.losses[0] ?? ""} onChange={(event) => setDraft((current) => ({ ...current, losses: [event.target.value] }))} /></label>
-              </div>
+              <nav className="journal-guided-steps" aria-label="Optional writing prompts">
+                {guidedPrompts.map((item, index) => (
+                  <button key={item.key} type="button" aria-label={`Prompt ${index + 1}`} aria-current={promptStep === index ? "step" : undefined} onClick={() => setPromptStep(index)}>{index + 1}</button>
+                ))}
+                <button className="journal-guided-next" type="button" onClick={() => setPromptStep((step) => (step + 1) % guidedPrompts.length)}>Next thought <ArrowRight size={ICON_SIZE.body} /></button>
+              </nav>
+              <details className="journal-keep-release">
+                <summary>Keep something. Release something.</summary>
+                <div className="journal-win-loss-grid">
+                  <label><span>Something to keep</span><input value={draft.wins[0] ?? ""} onChange={(event) => setDraft((current) => ({ ...current, wins: [event.target.value] }))} /></label>
+                  <label><span>A loose thread</span><input value={draft.losses[0] ?? ""} onChange={(event) => setDraft((current) => ({ ...current, losses: [event.target.value] }))} /></label>
+                </div>
+              </details>
             </section>
           ) : hasStructuredDraft ? (
             <details className="journal-earlier-notes">
@@ -911,13 +1097,6 @@ function JournalWritingPage({
 
           {plan && <details className="journal-intention-details"><summary>Earlier intention</summary><PreviousIntention plan={plan} /></details>}
 
-          {liveGlanceText && !zoomed && (
-            <section className="journal-included-glance" aria-labelledby="included-glance-title">
-              <div><Check size={ICON_SIZE.body} /><h3 id="included-glance-title">Your day, recorded</h3><span className="journal-auto-badge">Updates automatically</span></div>
-              <pre>{liveGlanceText}</pre>
-            </section>
-          )}
-
           <section className="journal-attachments" aria-labelledby="journal-attachments-title">
             <div className="journal-section-head">
               <div><h3 id="journal-attachments-title">Images</h3><span>Optional · saved with this workspace</span></div>
@@ -927,7 +1106,7 @@ function JournalWritingPage({
               <input ref={fileInputRef} className="journal-file-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif"
                 onChange={addAttachment} aria-label="Choose a journal image" />
             </div>
-            <p className="journal-local-note">Images are saved locally first in IndexedDB and included in portable exports. If you link account protection, they may be included in owner-private backups when the workspace fits account limits; check Account for actual protection status. Maximum 3 MB each and 12 MB per page.</p>
+            <details className="journal-image-storage"><summary>How images are stored</summary><p className="journal-local-note">Images are saved locally first and included in portable exports. Linked account backups may include them when the workspace fits account limits. Maximum 3 MB each and 12 MB per page.</p></details>
             <JournalAccountProtectionWarning />
             {attachmentError && <div className="journal-attachment-error" role="alert">{attachmentError}</div>}
             {draft.attachments.length > 0 && (
@@ -962,7 +1141,6 @@ function JournalWritingPage({
               </select>
             </label>
             <GButton size="sm" onClick={exportPage}><Download size={ICON_SIZE.body} /> Export page</GButton>
-            {remediationMode && <GButton size="sm" onClick={() => { void requestDurableTransition(onClose); }}><X size={ICON_SIZE.body} /> Cancel</GButton>}
             <GButton size="sm" disabled={addingImage} onClick={() => { void persist(); }}><Save size={ICON_SIZE.body} /> Save</GButton>
             <GButton variant="primary" size="sm" disabled={addingImage} onClick={() => { void completeToday(); }}><CheckCircle2 size={ICON_SIZE.body} /> Done for today</GButton>
           </div>
@@ -970,8 +1148,8 @@ function JournalWritingPage({
 
         <aside id="journal-glance-page" className="journal-paper journal-glance-paper" aria-labelledby="journal-glance-title" hidden={zoomed && !summaryVisible}>
           <div className="journal-paper-running-head"><span>Workspace summary</span><span>Optional</span></div>
-          <h2 id="journal-glance-title">Day at a glance</h2>
-          <p>AXOM assembled this from today’s local records. Edit or ignore anything.</p>
+          <div className="journal-glance-heading"><h2 id="journal-glance-title">Day at a glance</h2><button type="button" onClick={() => setSummaryVisible(false)} aria-label="Close day summary"><X size={ICON_SIZE.body} /></button></div>
+          <p>What AXOM can see from this day. Keep, correct, or leave any line out.</p>
           <div className="journal-glance-list">
             {glanceSections.map((item) => {
               const hidden = hiddenGlance.has(item.key);
@@ -1008,6 +1186,7 @@ function JournalWritingPage({
           </div>
           <span className="journal-glance-footnote">Every visible line is included in your page automatically and saved with it. Hide a line to leave it out; corrections change only this page, never your records.</span>
         </aside>
+      </div>
       </div>
     </section>
   );
@@ -1074,17 +1253,21 @@ function JournalAccountProtectionWarning() {
   );
 }
 
-function JournalWelcome({ initial, onComplete }: {
+function JournalWelcome({ initial, initialReminders, onComplete }: {
   initial: JournalNotebookPreferences;
-  onComplete: (preferences: JournalNotebookPreferences) => void;
+  initialReminders: DailyLoopReminderPreferences;
+  onComplete: (preferences: JournalNotebookPreferences, reminders: DailyLoopReminderPreferences) => void;
 }) {
   const [draft, setDraft] = useState(initial);
+  const [closeoutEnabled, setCloseoutEnabled] = useState(initialReminders.closeoutEnabled ?? true);
+  const [closeoutTime, setCloseoutTime] = useState(initialReminders.closeoutTime ?? "20:30");
   return (
-    <Modal title="Make this notebook yours" onClose={() => onComplete(initial)} className="journal-welcome-modal" footer={<>
-      <GButton onClick={() => onComplete(initial)}>Use these defaults</GButton>
-      <GButton variant="primary" onClick={() => onComplete(draft)}>Begin at my desk</GButton>
+    <Modal title="Make this notebook yours" onClose={() => onComplete(initial, initialReminders)} className="journal-welcome-modal" footer={<>
+      <GButton onClick={() => onComplete(initial, initialReminders)}>Skip for now</GButton>
+      <GButton variant="primary" onClick={() => onComplete(draft, { ...initialReminders, closeoutEnabled, closeoutTime })}>Begin at my desk</GButton>
     </>}>
-      <p className="sub">Three choices shape your first page. Change them whenever you like. Your writing stays private in your workspace.</p>
+      <p className="sub">A few choices make this feel like your place. Change them later in Customize. Your writing stays private in your workspace.</p>
+      <Field label="What should we call your notebook?" value={draft.title} maxLength={80} onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
       <fieldset className="journal-choice-fieldset">
         <legend>Why do you come to the journal?</legend>
         <div className="journal-choice-grid three">
@@ -1115,6 +1298,14 @@ function JournalWelcome({ initial, onComplete }: {
             </button>
           ))}
         </div>
+      </fieldset>
+      <fieldset className="journal-choice-fieldset">
+        <legend>Before the day closes</legend>
+        <div className="journal-choice-grid">
+          <button type="button" aria-pressed={closeoutEnabled} onClick={() => setCloseoutEnabled(true)}><b>Offer a quiet wrap-up</b><span>Once in the evening, only if your page is still open.</span></button>
+          <button type="button" aria-pressed={!closeoutEnabled} onClick={() => setCloseoutEnabled(false)}><b>I’ll open it myself</b><span>Your pages stay available whenever you want them.</span></button>
+        </div>
+        {closeoutEnabled && <label className="journal-setup-time"><span>Offer it around</span><input name="journal-closeout-time" type="time" value={closeoutTime} onChange={(event) => setCloseoutTime(event.target.value)} /></label>}
       </fieldset>
     </Modal>
   );
