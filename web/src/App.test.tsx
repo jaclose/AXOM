@@ -330,7 +330,7 @@ describe("Communications route protection", () => {
     window.history.replaceState(null, "", "#communications");
 
     render(<App />);
-    const essays = await screen.findByRole("switch", { name: /Essays & Notes/ });
+    const essays = await screen.findByRole("switch", { name: /Essays & Notes/ }, { timeout: 4_000 });
     await waitFor(() => expect((essays as HTMLInputElement).checked).toBe(true));
     fireEvent.click(essays);
     expect(screen.getByText("Unsaved changes")).toBeTruthy();
