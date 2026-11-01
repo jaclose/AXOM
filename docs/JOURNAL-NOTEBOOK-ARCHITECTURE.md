@@ -1,8 +1,8 @@
 # Journal Notebook Architecture
 
-The Wave 5.5D working checkpoint implements the **Journal Foundation**. It
-deliberately does not implement the later **Journal Cinematic** layer; independent
-acceptance is still pending.
+Wave 5.5D established the **Journal Foundation**. The current Ideas working
+branch adds a local, reviewable cinematic desk and focused writing surface.
+This is a branch implementation, not hosted release or final visual acceptance.
 
 ## Product boundary
 
@@ -16,16 +16,28 @@ Foundation owns the dependable writing experience:
 - previous/next page navigation and lightweight CSS page transitions;
 - local export, autosave, keyboard navigation, and reduced motion.
 
-Cinematic remains a separate, later review surface:
+Cinematic is an additive review surface around that foundation:
 
-- a desk scene and notebook pickup;
-- physically animated covers or richer page physics;
-- spatial image placement;
-- optional sound or device haptics.
+- a customizable desk scene with weather and window light, a notebook pickup,
+  a real-time laptop timer, and verified recent study progress;
+- a full-page writing view with optional one-at-a-time prompts and a separately
+  opened day summary;
+- manual return to the desk, or a gentle return after about four seconds only
+  if the newly opened page has not been interacted with;
+- a completion transition that returns the closed page to the desk.
 
-Foundation uses ordinary semantic HTML and CSS transforms. It adds no WebGL,
-canvas renderer, physics package, audio, or network service. A later cinematic
-shell must wrap—never replace—the semantic form and persistence layer.
+The journal uses ordinary semantic HTML and CSS transforms, without a WebGL,
+canvas, or physics dependency. The desk is a shell around the same form and
+persistence layer. Soundscapes use their existing separate audio lifecycle;
+journal writing does not start audio or haptics by itself.
+
+The walnut desk plate at `web/public/assets/journal/walnut-desk.webp` is an
+original 1672 × 941 generated image, compressed to WebP. Its production prompt
+specified a top-down matte dark walnut tabletop, subtle natural grain, warm
+upper-left window light and a long diagonal shadow, a clear right half, and no
+objects, text, or logos. The laptop's Apple silhouette is sourced from the
+[Simple Icons Apple entry](https://simpleicons.org/?q=apple); it is used only
+on the depicted computer.
 
 ## Data model and persistence
 
