@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { SourceDocument } from "../library";
 import type { NoctyriumState } from "../types";
 import { sha256Hex } from "../checksum";
+import { SyncPushError } from "./syncFailure";
 import { readSourceOriginal, saveSourceOriginal } from "../decode/sources";
 import { readOriginalFile } from "../sourceOriginal";
 import { contentMetadata } from "./deferredContent";
@@ -31,7 +32,10 @@ export async function uploadCloudOriginals(client: SupabaseClient, userId: strin
     if (previousFile?.byteSize === identity.byteSize && previousFile.mimeType === identity.mimeType) continue;
     await ensureCurrent();
     const original = await readSourceOriginal(document.id, identity.sha256);
-    if (!original || original.size !== identity.byteSize) throw new Error("An original source file is missing on this device. Attach the exact file or restore a complete backup before protecting this version.");
+    if (!original || original.size !== identity.byteSize) throw new SyncPushError(
+      { kind: "rejected", rejection: "missing-original", status: 0 },
+      "An original source file is missing on this device. Attach the exact file or restore a complete backup before protecting this version.",
+    );
     const blob = original.slice(0, original.size, identity.mimeType);
     const path = `${userId}/${identity.sha256}`;
     let uploadFailure: unknown;
@@ -104,7 +108,10 @@ export async function repairMissingCloudOriginals(
       if (copy && copy.size === identity.byteSize) { local = document; break; }
     }
     if (!local) {
-      throw new Error("A previously protected original is missing from cloud Storage and this device. Restore the exact source from a verified backup before retrying cloud protection.");
+      throw new SyncPushError(
+        { kind: "rejected", rejection: "missing-original", status: 0 },
+        "A previously protected original is missing from cloud Storage and this device. Restore the exact source from a verified backup before retrying cloud protection.",
+      );
     }
     await uploadCloudOriginals(client, userId, { ...state, documents: [local] }, undefined, assertCurrent, resumable);
     repaired += 1;

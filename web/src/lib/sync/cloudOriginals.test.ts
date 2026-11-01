@@ -108,6 +108,15 @@ describe("immutable private original-file cloud storage", () => {
     expect(upload).toHaveBeenCalledTimes(1); // SDK got a conflict, never overwrote
   });
 
+  it("reports a missing local original before an account upload", async () => {
+    const { doc, state } = await source(new Blob(["source bytes"], { type: "application/pdf" }));
+    await deleteSourceOriginal(doc.id);
+    await expect(uploadCloudOriginals(client, "owner", state, undefined, guard)).rejects.toMatchObject({
+      failure: { kind: "rejected", rejection: "missing-original", status: 0 },
+    });
+    expect(upload).not.toHaveBeenCalled();
+  });
+
   it("retains local bytes when upload fails and retries idempotently after a lost response", async () => {
     const { doc, state } = await source(new Blob(["original"], { type: "application/pdf" }));
     upload.mockImplementationOnce(async () => ({ error: { statusCode: "503" } }));

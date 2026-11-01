@@ -348,6 +348,12 @@ describe("a refused upload (the production failure of 2026-09-30)", () => {
     expect(tooLarge).toMatch(/prepared account record exceeds its 14 MB limit/);
     expect(tooLarge).toMatch(/Remove or export large local items, then choose Protect now/);
     expect(tooLarge).toMatch(/Emergency recovery/);
+    expect(protectionDetail({ protection: "blocked", syncFailure: { kind: "rejected", rejection: "workspace-too-large", status: 0, at } })).toMatch(/safe account restore size/);
+    expect(protectionDetail({ protection: "blocked", syncFailure: { kind: "rejected", rejection: "source-too-large", status: 0, at } })).toMatch(/8 MB compressed file limit/);
+    expect(protectionDetail({ protection: "blocked", syncFailure: { kind: "rejected", rejection: "preparation-failed", status: 0, at } })).toMatch(/could not prepare this workspace/);
+    expect(protectionDetail({ protection: "blocked", syncFailure: { kind: "rejected", rejection: "missing-original", status: 0, at } })).toMatch(/Restore the exact file/);
+    expect(protectionDetail({ protection: "blocked", syncFailure: { kind: "rejected", rejection: "missing-image", status: 0, at } })).toMatch(/Restore a complete backup/);
+    expect(protectionDetail({ protection: "blocked", syncFailure: { kind: "rejected", rejection: "account-mismatch", status: 0, at } })).toMatch(/Check which account/);
     expect(protectionDetail({ protection: "blocked", syncFailure: { kind: "rejected", rejection: "refused", status: 400, at }, nextAttemptAt: soon })).toMatch(/refused this upload.*tries again by itself around/);
     expect(protectionDetail({ protection: "paused", syncFailure: { kind: "server", status: 500, at }, nextAttemptAt: soon })).toMatch(/after several tries.*checks less often.*tries again by itself around/);
     expect(protectionDetail({ protection: "retrying", syncFailure: { kind: "network", status: 0, at } })).toMatch(/could not reach your account/);
@@ -361,6 +367,7 @@ describe("a refused upload (the production failure of 2026-09-30)", () => {
     expect(failureSummary({ syncFailure: { kind: "rejected", rejection: "storage-limit", status: 500, code: "54000", at }, snapshotBytes: 9_628_115 }))
       .toMatch(/refused \(storage-limit\), HTTP 500, code 54000\. Snapshot size 9\.6 MB\./);
     expect(failureSummary({ syncFailure: { kind: "network", status: 0, at } })).toMatch(/network, no answer\./);
+    expect(failureSummary({ syncFailure: { kind: "rejected", rejection: "missing-original", status: 0, at } })).toMatch(/stopped on this device/);
     expect(failureSummary({})).toBe("");
   });
 });
