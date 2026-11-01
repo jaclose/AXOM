@@ -3,6 +3,7 @@ import { mergeStates, parseImport, toPortableState } from "./backup";
 import { makeSeed, SCHEMA_VERSION } from "./seed";
 import { createTextAnnotation } from "./questionAnnotations";
 import { buildQuizPool } from "./quiz";
+import { normalizeProfile } from "./store";
 
 describe("portable backup safety", () => {
   it("round-trips exact learner method descriptions, timing and every preference layer", () => {
@@ -453,6 +454,34 @@ describe("portable backup safety", () => {
     expect(merged.questions).toHaveLength(2);
     expect(merged.questions.find((question) => question.id === "q1")?.stem).toBe("Current stem");
     expect(merged.questions.find((question) => question.id === "q2")?.stem).toBe("New question");
+  });
+
+  it("keeps unlocks and the blueprint lane through export and import", () => {
+    const state = makeSeed();
+    state.profile.unlocks = ["again"];
+    state.profile.blueprintMode = "prehealth";
+    const parsed = parseImport(JSON.stringify({ _app: "AXOM", ...toPortableState(state) }));
+    expect(parsed.profile.unlocks).toEqual(["again"]);
+    expect(parsed.profile.blueprintMode).toBe("prehealth");
+
+    const portable = toPortableState(state) as unknown as Record<string, unknown>;
+    Object.assign(portable.profile as Record<string, unknown>, { unlocks: ["again", "again", "Not a slug", 7], blueprintMode: "other" });
+    const cleaned = parseImport(JSON.stringify({ _app: "AXOM", ...portable }));
+    expect(cleaned.profile.unlocks).toEqual(["again"]);
+    expect(cleaned.profile.blueprintMode).toBeUndefined();
+  });
+
+  it("keeps every profile field the store keeps", () => {
+    // An account pull applies the parsed state and uploads it, so a field dropped here is erased account-wide.
+    const parsed = parseImport(JSON.stringify({ _app: "AXOM", ...toPortableState(makeSeed()) }));
+    expect(Object.keys(parsed.profile).sort()).toEqual(Object.keys(normalizeProfile({})).sort());
+  });
+
+  it("merge keeps unlocks found on either side", () => {
+    const imported = makeSeed();
+    imported.profile.unlocks = ["again"];
+    expect(mergeStates(makeSeed(), imported).profile.unlocks).toEqual(["again"]);
+    expect(mergeStates(makeSeed(), makeSeed()).profile.unlocks).toBeUndefined();
   });
 
   it("merges unique attempt history for the same question instead of dropping the older side", () => {

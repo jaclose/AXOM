@@ -10,6 +10,7 @@ import { Icon, ICON_NAMES } from "../lib/icons";
 import type { HubFolder } from "../lib/types";
 import { ICON_SIZE } from "../lib/iconSize";
 import { isTauriShell as isDesktopShell } from "../lib/desktopShell";
+import { externalLinkHref } from "../lib/resourceUtils";
 
 const FOLDER_COLORS: Array<{ label: string; value: string }> = [
   { label: "Cool", value: "var(--cyan)" },
@@ -87,7 +88,7 @@ export function HubFoldersPage() {
   }
 
   function renderFolder(folder: HubFolder, index: number, list: HubFolder[]) {
-    const linkTarget = folder.link || (folder.localPath && isDesktopShell() ? fileUrl(folder.localPath) : "");
+    const linkTarget = externalLinkHref(folder.link) || (folder.localPath && isDesktopShell() ? fileUrl(folder.localPath) : "");
     return (
       <GlassCard pad hoverable key={folder.id} className={`folder-card folder-card--${view}`} style={{ "--folder-color": folder.color || "var(--cyan)" } as React.CSSProperties}>
         <div className="folder-card-top">

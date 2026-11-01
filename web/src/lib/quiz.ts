@@ -125,9 +125,7 @@ export function buildQuizPool(
     const allowedIds = new Set(filters.questionIds);
     pool = pool.filter((question) => allowedIds.has(question.id));
   }
-  if (filters.status === "unused") pool = pool.filter((q) => q.attempts.length === 0);
-  else if (filters.status === "incorrect") pool = pool.filter((q) => q.status === "incorrect" || q.status === "guessed");
-  else if (filters.status === "marked") pool = pool.filter((q) => q.marked || q.status === "flagged");
+  if (filters.status !== "all") pool = pool.filter((q) => inQuizPool(q, filters.status));
   if (filters.categories?.length) {
     const set = new Set(filters.categories.map((c) => c.toLowerCase()));
     pool = pool.filter((q) => (q.category && set.has(q.category.toLowerCase()))
@@ -159,6 +157,51 @@ export function buildQuizPool(
     ? [...pool].sort((a, b) => (a.questionNumber ?? 0) - (b.questionNumber ?? 0))
     : shuffle(pool);
   return picked.slice(0, Math.max(1, filters.count));
+}
+
+/** Whether a question belongs to a pool: unused, incorrect (or guessed), marked, or all. */
+export function inQuizPool(question: QuestionRecord, status: QuizPoolStatus): boolean {
+  if (status === "unused") return question.attempts.length === 0;
+  if (status === "incorrect") return question.status === "incorrect" || question.status === "guessed";
+  if (status === "marked") return Boolean(question.marked) || question.status === "flagged";
+  return true;
+}
+
+/** How many questions each pool offers with the rest of the setup (sources, subjects, style) unchanged. */
+export function quizPoolCounts(
+  questions: QuestionRecord[],
+  filters: QuizFilters,
+  questionSets: readonly Pick<QuestionSet, "id" | "questionIds">[] = [],
+): Record<QuizPoolStatus, number> {
+  const runnable = buildQuizPool(questions, { ...filters, status: "all", count: questions.length, ordered: true }, questionSets);
+  const count = (status: QuizPoolStatus) => runnable.filter((question) => inQuizPool(question, status)).length;
+  return { all: runnable.length, unused: count("unused"), incorrect: count("incorrect"), marked: count("marked") };
+}
+
+/**
+ * The subjects and systems in the chosen sources and pool, most questions first.
+ * Names match the block filter (a question's category or system, any case).
+ */
+export function quizSubjectCounts(
+  questions: QuestionRecord[],
+  filters: QuizFilters,
+  questionSets: readonly Pick<QuestionSet, "id" | "questionIds">[] = [],
+): Array<{ name: string; count: number }> {
+  const runnable = buildQuizPool(questions, { ...filters, categories: undefined, count: questions.length, ordered: true }, questionSets);
+  const subjects = new Map<string, { name: string; count: number }>();
+  for (const question of runnable) {
+    const names = new Map<string, string>();
+    for (const value of [question.category, question.system]) {
+      const name = value?.trim();
+      if (name && !names.has(name.toLowerCase())) names.set(name.toLowerCase(), name);
+    }
+    for (const [key, name] of names) {
+      const subject = subjects.get(key) ?? { name, count: 0 };
+      subject.count += 1;
+      subjects.set(key, subject);
+    }
+  }
+  return [...subjects.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 }
 
 /** Deterministic-enough Fisher–Yates; callers wanting stable order can sort after. */
