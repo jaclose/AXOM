@@ -48,21 +48,25 @@ export function AccountSyncPanel({ onOpenBackup }: { onOpenBackup?: () => void }
 
   return (
     <div className="account-center">
-      <AccountHero user={account.user} status={account.protection} phase={account.phase} lastProtectedAt={account.lastProtectedAt} />
+      <div className="account-stage">
+        <AccountHero user={account.user} status={account.protection} phase={account.phase} lastProtectedAt={account.lastProtectedAt} />
+        <div className="account-stage-work">
+          {account.phase === "unconfigured" && <UnconfiguredCard onOpenBackup={onOpenBackup} />}
+          {account.phase === "loading" && <div className="account-loading" role="status">Checking your account…</div>}
+          {account.phase === "signed-out" && <AuthCard />}
+          {account.phase === "recovering-password" && <PasswordRecoveryCard />}
+          {account.phase === "signed-in" && account.user && <ProtectionCard />}
+        </div>
+      </div>
 
-      {account.phase === "unconfigured" && <UnconfiguredCard onOpenBackup={onOpenBackup} />}
-      {account.phase === "loading" && <div className="account-loading" role="status">Checking your account…</div>}
-      {account.phase === "signed-out" && <AuthCard />}
-      {account.phase === "recovering-password" && <PasswordRecoveryCard />}
       {account.phase === "signed-in" && account.user && (
-        <>
-          <ProtectionCard />
+        <div className="account-management">
           <div className="account-disclosures" aria-label="Account details">
             <VersionsCard history={account.history} />
             <DevicesCard devices={account.devices} />
           </div>
           <IdentityCard user={account.user} />
-        </>
+        </div>
       )}
 
       {(account.message || account.error) && (
@@ -95,20 +99,17 @@ function AccountHero({ user, status, phase, lastProtectedAt }: {
   phase: string;
   lastProtectedAt?: string;
 }) {
-  const localName = useStore((state) => state.profile.name);
   const lastWrite = useLastVaultWrite();
   const writeFailure = useSyncExternalStore(subscribeVault, readVaultWriteFailure, () => null);
-  const initial = (user?.displayName || user?.email || localName || "A").trim().charAt(0).toUpperCase();
   const localState = writeFailure ? "failure" : lastWrite ? "saved" : "pending";
   return (
-    <div className={`account-overview status-${status} local-${localState}`}>
+    <section className={`account-overview status-${status} local-${localState}`} aria-label="Where your work is saved">
       <div className="account-overview-heading">
         <div>
-          <span className="account-eyebrow">Workspace protection</span>
-          <h5>{writeFailure ? "Local saving needs attention." : user ? "Your work, in your hands." : "Your work starts here."}</h5>
-          <p>{writeFailure ? "Keep AXOM open while you resolve the local save. Your account copy may also be behind." : user ? "Your device is your primary workspace. Your account keeps a second copy when protection is up to date." : "This device is your primary workspace. An account can keep a second copy for recovery and other devices."}</p>
+          <span className="account-eyebrow">Save map</span>
+          <h5>{writeFailure ? "Local saving needs attention." : "Where your work lives."}</h5>
+          <p>{writeFailure ? "Keep AXOM open while you resolve the local save. Your account copy may also be behind." : "Your device holds your working copy. An account can hold a second, protected version."}</p>
         </div>
-        <div className="account-hero-avatar" aria-label={user ? `Account initial ${initial}` : `Workspace initial ${initial}`}>{initial}</div>
       </div>
       <div className="account-location-track" aria-label="Where your work is saved">
         <div className="account-location" role={writeFailure ? "alert" : "status"} aria-label="Local save status">
@@ -132,7 +133,7 @@ function AccountHero({ user, status, phase, lastProtectedAt }: {
           <span className={`account-location-indicator ${status}`} aria-hidden="true" />
         </div>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -179,8 +180,8 @@ function AuthCard() {
     <section className="account-auth-layout" aria-label="Account access">
       <div className="account-auth-intro">
         <span className="account-eyebrow">Optional account</span>
-        <h5>Take your work with you.</h5>
-        <p>Create protected versions you can recover here or continue on another device.</p>
+        <h5>Make a second copy.</h5>
+        <p>Recover your work here or continue on another device.</p>
         <div className="account-auth-promise"><ShieldCheck size={ICON_SIZE.emphasis} aria-hidden="true" /><span>Your local workspace stays here until you choose to protect it.</span></div>
       </div>
       <div className="account-auth-content">
@@ -205,13 +206,13 @@ function AuthCard() {
         {mode === "create" && (
           <label>
             <span>Name on your account</span>
-            <input className="field" value={displayName} maxLength={80} autoComplete="name" onChange={(event) => setDisplayName(event.target.value)} />
+            <input className="field" name="displayName" value={displayName} maxLength={80} autoComplete="name" onChange={(event) => setDisplayName(event.target.value)} />
           </label>
         )}
         {!pendingCodeEmail && (
           <label>
             <span>Email</span>
-            <input className="field" type="email" required autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+            <input className="field" name="email" type="email" required autoComplete="email" spellCheck={false} value={email} onChange={(event) => setEmail(event.target.value)} />
           </label>
         )}
         {!pendingCodeEmail && (mode === "sign-in" || mode === "create") && (
@@ -219,6 +220,7 @@ function AuthCard() {
             <span>Password</span>
             <input
               className="field"
+              name="password"
               type="password"
               required
               minLength={mode === "create" ? PASSWORD_MIN_LENGTH : undefined}
@@ -232,12 +234,12 @@ function AuthCard() {
         {pendingCodeEmail && (
           <label>
             <span>{pendingCodeKind === "signup" ? "Confirmation code" : pendingCodeKind === "recovery" ? "Password reset code" : "Sign-in code"} sent to {pendingCodeEmail}</span>
-            <input className="field account-code" inputMode="numeric" autoComplete="one-time-code" maxLength={10} value={code} onChange={(event) => setCode(event.target.value)} />
+            <input className="field account-code" name="code" inputMode="numeric" autoComplete="one-time-code" spellCheck={false} required maxLength={10} value={code} onChange={(event) => setCode(event.target.value)} />
           </label>
         )}
         <div className="account-form-actions">
           <GButton className="account-submit" variant="primary" type="submit" disabled={busy}>
-            {pendingCodeEmail ? "Verify code" : mode === "sign-in" ? "Sign in" : mode === "create" ? "Create account" : mode === "forgot" ? "Send reset code" : "Send code"}
+            {busy ? "Working…" : pendingCodeEmail ? "Verify code" : mode === "sign-in" ? "Sign in" : mode === "create" ? "Create account" : mode === "forgot" ? "Send reset code" : "Send code"}
           </GButton>
           {!pendingCodeEmail && mode === "sign-in" && <button type="button" className="account-link" onClick={() => choose("forgot")}>Forgot password?</button>}
           {!pendingCodeEmail && mode === "forgot" && <button type="button" className="account-link" onClick={() => choose("sign-in")}>Back to sign in</button>}
@@ -262,7 +264,7 @@ function PasswordRecoveryCard() {
       <form className="account-form" onSubmit={(event) => { event.preventDefault(); void updatePassword(password); }}>
         <label>
           <span>New password</span>
-          <input className="field" type="password" autoComplete="new-password" minLength={PASSWORD_MIN_LENGTH} value={password} onChange={(event) => setPassword(event.target.value)} />
+          <input className="field" name="newPassword" type="password" required autoComplete="new-password" minLength={PASSWORD_MIN_LENGTH} value={password} onChange={(event) => setPassword(event.target.value)} />
         </label>
         <div className="account-form-actions"><GButton variant="primary" type="submit" disabled={busy}>Save password</GButton></div>
       </form>
@@ -281,7 +283,7 @@ function IdentityCard({ user }: { user: AccountUser }) {
       <div className="account-identity-main">
         {editing ? (
           <form className="account-inline-form" onSubmit={(event) => { event.preventDefault(); void updateDisplayName(name).then((ok) => ok && setEditing(false)); }}>
-            <input className="field" aria-label="Account name" value={name} maxLength={80} onChange={(event) => setName(event.target.value)} autoFocus />
+            <input className="field" aria-label="Account name" name="accountName" autoComplete="name" value={name} maxLength={80} onChange={(event) => setName(event.target.value)} autoFocus />
             <GButton size="sm" variant="primary" type="submit" disabled={busy}>Save</GButton>
             <GButton size="sm" type="button" onClick={() => { setEditing(false); setName(user.displayName); }}>Cancel</GButton>
           </form>

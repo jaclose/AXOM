@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { Modal, Field } from "../ui/Modal";
+import { AxomWordmark } from "../ui/BrandMark";
 import { GButton, Tag } from "../ui/primitives";
 import { useStore, type Store } from "../../lib/store";
 import { privateReviewMedia } from "../../lib/privateLibrary/media";
@@ -43,6 +44,7 @@ import { AppearanceStudio } from "./AppearanceStudio";
 import {
   BackupStatusCard,
   FocusCheckInSettings,
+  LastSavedLine,
   ProfileSection,
   RestoreHistoryCard,
 } from "./SettingsSections";
@@ -218,7 +220,6 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
   const localBackups = mergeLocalBackupSummaries(listLocalBackups(), hydratedLocalBackups);
   const [tab, setTab] = useState<SettingsSection>(() => normalizeSettingsTab(initialTab));
   const [personalTab, setPersonalTab] = useState<PersonalizationSubsection>(() => initialSubsection(initialTab));
-  const [wideLayout, setWideLayout] = useState(() => typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(min-width: 761px)").matches);
   const tabsId = useId();
   const tabRefs = useRef<Partial<Record<SettingsSection, HTMLButtonElement | null>>>({});
   const contentRef = useRef<HTMLDivElement>(null);
@@ -227,26 +228,26 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
   const promise = profile.promise;
   const tabIntro: Record<SettingsSection, { title: string; body: string }> = {
     profile: {
-      title: "Profile",
-      body: "Identity, academic path, and the focus that guides your workspace.",
+      title: "Find your place.",
+      body: "Choose the path and term that match your work now. AXOM will bring the right study lanes forward.",
     },
-    account: { title: "Account & protection", body: "Know exactly where your work is saved and how to protect it." },
-    appearance: { title: "Appearance", body: "Shape the atmosphere of your workspace." },
+    account: { title: "Keep your work close.", body: "See what is saved here, what is protected online, and the next action that matters." },
+    appearance: { title: "Make it feel yours.", body: "Try each atmosphere on a real piece of your workspace before choosing it." },
     data: {
-      title: "Data on this device",
-      body: "A clear view of what is saved here and whether your device needs attention.",
+      title: "Know what you have.",
+      body: "See what is on this device and whether any part of your workspace needs attention.",
     },
     backup: {
-      title: "Emergency recovery",
-      body: "Keep a copy you control. Restore only when you need to.",
+      title: "A way back, always.",
+      body: "Keep a copy you control. Choose the right recovery path if you ever need it.",
     },
     personalization: {
-      title: "Personalization",
-      body: "Choose the methods and routines AXOM brings into view.",
+      title: "Set your rhythm.",
+      body: "Choose the methods, reminders, and daily view that meet you where you are.",
     },
     advanced: {
-      title: "Advanced",
-      body: "Versions, optional integrations, and maintenance controls.",
+      title: "Under the surface.",
+      body: "Updates, optional connections, and technical details live here.",
     },
   };
   const exportedAt = lastBackupAt();
@@ -262,15 +263,6 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
   useEffect(() => {
     if (contentRef.current) contentRef.current.scrollTop = 0;
   }, [tab]);
-
-  useEffect(() => {
-    if (typeof window.matchMedia !== "function") return;
-    const media = window.matchMedia("(min-width: 761px)");
-    const update = () => setWideLayout(media.matches);
-    media.addEventListener("change", update);
-    update();
-    return () => media.removeEventListener("change", update);
-  }, []);
 
   function onTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, section: SettingsSection) {
     const index = SETTINGS_SECTIONS.findIndex((item) => item.id === section);
@@ -349,9 +341,10 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
       onClose={onClose}
       className="settings-modal"
       bodyClassName="settings-modal-body"
+      headerLead={<AxomWordmark size="sm" />}
+      footer={<><LastSavedLine /><button type="button" className="settings-finish" onClick={onClose}>Done <span aria-hidden="true">↗</span></button></>}
     >
-      <div className="settings-tabs" role="tablist" aria-label="Settings sections" aria-orientation={wideLayout ? "vertical" : "horizontal"}>
-        <div className="settings-rail-head" aria-hidden="true"><span>AXOM / PREFERENCES</span><p>Make room for your best work.</p></div>
+      <div className="settings-tabs" role="tablist" aria-label="Settings sections" aria-orientation="horizontal">
         {SETTINGS_SECTIONS.map(({ id, label, icon: Icon }) => {
           const active = tab === id;
           return (
@@ -384,13 +377,17 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
       <div ref={contentRef} className="settings-content">
 
       <div className="settings-intro">
-        <div className="settings-intro-top">
-          <span className="settings-intro-kicker">AXOM / {tab === "backup" ? "Safety" : tab}</span>
-          <button type="button" className="settings-done" onClick={onClose}>Done</button>
-        </div>
+        <span className="settings-intro-kicker">YOUR WORKSPACE / {String(SETTINGS_SECTIONS.findIndex((item) => item.id === tab) + 1).padStart(2, "0")}</span>
         <h4>{tabIntro[tab].title}</h4>
-        <span>{tabIntro[tab].body}</span>
+        <p>{tabIntro[tab].body}</p>
+        {tab === "profile" && <dl className="settings-workspace-summary">
+          <div><dt>Your path</dt><dd>{resolveTrack(profile.educationTrack).label}</dd></div>
+          <div><dt>In focus</dt><dd>{focusOption(profile.activeFocusId)?.label ?? "Choose a focus"}</dd></div>
+          <div><dt>Workspace</dt><dd>{profile.name?.trim() || "Yours, from the first step"}</dd></div>
+        </dl>}
       </div>
+
+      <div className="settings-editor">
 
       {tab === "profile" && (
         <section role="tabpanel" id={`${tabsId}-panel-profile`} aria-labelledby={`${tabsId}-tab-profile`}>
@@ -399,7 +396,6 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
             onRemoveAvatar={() => store.updateProfile({ avatarDataUrl: undefined })}
             onViewPromise={() => setViewingPromise(true)}
             onSignPromise={() => setResigning(true)}
-            onOpenProgram={() => { setPersonalTab("program"); setTab("personalization"); }}
             onOpenAccount={() => setTab("account")}
             onClose={onClose}
           />
@@ -563,6 +559,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
 
       {resigning && <PromiseCutscene onDone={() => setResigning(false)} />}
       {viewingPromise && promise && <SavedPromise onClose={() => setViewingPromise(false)} />}
+      </div>
       </div>
     </Modal>
   );

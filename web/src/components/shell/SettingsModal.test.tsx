@@ -41,6 +41,24 @@ afterEach(() => {
 });
 
 describe("Settings information architecture", () => {
+  it("uses setup path and term choices without replacing saved course structure", async () => {
+    const user = userEvent.setup();
+    const originalTerms = useStore.getState().terms.map((term) => term.id);
+    const originalCourses = useStore.getState().courses.map((course) => course.id);
+    render(<SettingsModal onClose={() => {}} />);
+
+    await user.click(screen.getByRole("radio", { name: "Term 3" }));
+    expect(useStore.getState().profile.activeFocusId).toBe("term3");
+    expect(screen.getByText(/Term 3 ·/)).toBeTruthy();
+
+    await user.click(screen.getByRole("radio", { name: "US MD" }));
+    expect(useStore.getState().profile).toMatchObject({ educationTrack: "usmd", academicStageId: "preclinical", activeFocusId: "step1" });
+    expect(useStore.getState().profile.focusSubscriptions).toContain("term3");
+    expect(useStore.getState().terms.map((term) => term.id)).toEqual(originalTerms);
+    expect(useStore.getState().courses.map((course) => course.id)).toEqual(originalCourses);
+    expect(screen.getByRole("radiogroup", { name: "What are you focused on?" })).toBeTruthy();
+  });
+
   it("edits method follow-ups without erasing other methods or kind defaults", () => {
     useStore.getState().updateProfile({ studyWorkflow: { configured: true, methods: [{ id: "noji", enabled: true, timing: "ongoing", usage: "My own recall cards" }], itemKindDefaults: { Lab: { lecturePasses: 3 } } } });
     render(<SettingsModal onClose={() => {}} />);
@@ -98,7 +116,7 @@ describe("Settings information architecture", () => {
     ]));
     expect(screen.queryByText("Suggestions from your words")).toBeNull();
     expect(screen.getByRole("button", { name: "Anki" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("status").textContent).toBe("Applied 6 suggestions.");
+    expect(document.querySelector(".study-suggestions-status")?.textContent).toBe("Applied 6 suggestions.");
   });
 
   it("uses seven accessible sections with only the active tab owning its mounted panel", async () => {
@@ -150,7 +168,7 @@ describe("Settings information architecture", () => {
     const user = userEvent.setup();
     render(<SettingsModal onClose={() => {}} initialTab="data" />);
     expect(screen.getByText("Local workspace")).toBeTruthy();
-    expect(screen.getByText(/Saved on this device|Waiting for the first save|Main vault unavailable/)).toBeTruthy();
+    expect(within(screen.getByRole("tabpanel", { name: "Data" })).getByText(/Saved on this device|Waiting for the first save|Main vault unavailable/)).toBeTruthy();
     expect(screen.getByText("Your saved work")).toBeTruthy();
     expect(screen.queryByText(/your account is synced/i)).toBeNull();
     expect(screen.queryByText(/workspace follows you across devices/i)).toBeNull();
@@ -416,8 +434,9 @@ describe("Settings information architecture", () => {
     useStore.getState().updateProfile({ name: "Jafar", tagline: "One honest block." });
     render(<SettingsModal onClose={() => {}} />);
     expect((screen.getByLabelText("Display name") as HTMLInputElement).value).toBe("Jafar");
-    expect(screen.getByText("Where you are")).toBeTruthy();
-    expect(screen.getByText(/Waiting for the first confirmed save|Saved on this device at/)).toBeTruthy();
+    const profilePanel = screen.getByRole("tabpanel", { name: "Profile" });
+    expect(within(profilePanel).getByText("Where are you now?")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toMatch(/Waiting for the first confirmed save|Saved on this device at/);
     fireEvent.click(screen.getByRole("button", { name: "About account protection" }));
     expect(screen.getByRole("tab", { name: "Account" }).getAttribute("aria-selected")).toBe("true");
   });

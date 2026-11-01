@@ -6,11 +6,14 @@ authority: current-state
 # AXOM current AI state
 
 2026-11-01 local candidate `codex/settings-sync-20261101` (base `1b189177`):
-Settings control overhaul, first-scroll lock-in sample, and typed sync failures.
-Full web suite passed (4,090; 35 skipped); affected tests, mocked refusal/recovery,
-four-viewport safety, types, lint and build passed. Live read-only: protected #71
-from September 30, latest `network/no answer`. No deployment or hosted upload/readback;
-see [account sync](architecture/accounts-sync-v1.md).
+Settings mirrors first-run setup: split stage, path/term choices that retain courses,
+account save map, and AXOM palette previews. The branch also has first-scroll
+lock-in samples and typed sync failures. This pass: 28 focused tests, three
+Chrome account tests (refusal/recovery included), types, lint, build, and
+1440/390 light/dark browser review with no new console errors or warnings.
+Prior full web suite: 4,090 passed, 35 skipped. Live read-only previously showed
+protected #71 from September 30 and latest `network/no answer`.
+No deployment or hosted upload/readback; see [account sync](architecture/accounts-sync-v1.md).
 
 Earlier checkpoints: 2026-10-30 candidate `5dfafae1` integrated RHPS/ESoft,
 QBank, Journal and Productivity without private publication or verified hosted

@@ -1,14 +1,15 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useNotificationPermission } from "../../lib/useNotificationPermission";
 import {
-  Archive, Camera, CheckCircle2, Clock3, Cloud, Download, GraduationCap, History, Lock, Play, RotateCcw,
-  ScrollText, ShieldAlert, ShieldCheck, Target,
+  Archive, BookOpen, Camera, CheckCircle2, Clock3, Cloud, Compass, Download, GraduationCap, HeartPulse, History, Lock, Play, RotateCcw,
+  ScrollText, ShieldAlert, ShieldCheck, Stethoscope, Target, Globe2,
 } from "lucide-react";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { useStore } from "../../lib/store";
 import { GButton, Tag } from "../ui/primitives";
 import { academicStagesForTrack, resolveTrack } from "../../lib/tracks";
-import { focusOption } from "../../lib/experience";
+import { PATH_OPTIONS, focusChoices, pathForTrack, type FocusChoice, type SetupPath } from "../../lib/setupPlan";
+import { ChoiceChips, ChoiceTiles } from "../ui/Choice";
 import { isoDate, prettyDate } from "../../lib/scoring";
 import type { AcademicStageId } from "../../lib/types";
 import { useAccount } from "../../lib/account/accountStore";
@@ -32,7 +33,6 @@ export function ProfileSection({
   onRemoveAvatar,
   onViewPromise,
   onSignPromise,
-  onOpenProgram,
   onOpenAccount,
   onClose,
 }: {
@@ -40,26 +40,78 @@ export function ProfileSection({
   onRemoveAvatar: () => void;
   onViewPromise: () => void;
   onSignPromise: () => void;
-  onOpenProgram: () => void;
   onOpenAccount: () => void;
   onClose: () => void;
 }) {
   const profile = useStore((state) => state.profile);
   const updateProfile = useStore((state) => state.updateProfile);
+  const applyEducationTrack = useStore((state) => state.applyEducationTrack);
   const accountPhase = useAccount((state) => state.phase);
   const accountUser = useAccount((state) => state.user);
   const track = resolveTrack(profile.educationTrack);
   const stageGroup = academicStagesForTrack(track.id);
-  const focus = focusOption(profile.activeFocusId);
   const promise = profile.promise;
   const stage = profile.academicStageId ?? stageGroup.defaultStageId;
   const initial = (profile.name || "A").trim().charAt(0).toUpperCase();
+  const path = pathForTrack(profile.educationTrack);
+  const focusChoicesForPath = focusChoices(path);
+  const selectedFocus = focusChoicesForPath.find((item) => item.focus === profile.activeFocusId && item.stage === stage)
+    ?? focusChoicesForPath.find((item) => item.focus === profile.activeFocusId)
+    ?? focusChoicesForPath[0];
+  const pathIcons = { sgu: GraduationCap, usmd: Stethoscope, do: HeartPulse, img: Globe2, premed: BookOpen, other: Compass };
+
+  function chooseFocus(choice: FocusChoice) {
+    applyEducationTrack(choice.track, {
+      focusSubscriptions: [...new Set([...(profile.focusSubscriptions ?? []), choice.focus])],
+      activeFocusId: choice.focus,
+      seedStructure: false,
+    });
+    updateProfile({ academicStageId: choice.stage, customAcademicStage: undefined });
+  }
+
+  function choosePath(nextPath: SetupPath) {
+    chooseFocus(focusChoices(nextPath)[0]);
+  }
 
   return (
     <div className="profile-section">
+      <div className="profile-card profile-path">
+        <div className="profile-card-head">
+          <GraduationCap size={ICON_SIZE.body} aria-hidden="true" />
+          <div><span className="settings-eyebrow">01 / Your path</span><h4>Where are you now?</h4></div>
+        </div>
+        <p className="profile-path-help">Your choices guide what AXOM highlights. Saved work stays put.</p>
+        <div className="profile-choice-field">
+          <span id="settings-path-label" className="setup-label">Your path</span>
+          <ChoiceTiles columns="fluid" labelledBy="settings-path-label"
+            options={PATH_OPTIONS.map((option) => ({ ...option, icon: pathIcons[option.id] }))}
+            value={path} onChange={choosePath} />
+        </div>
+        <div className="profile-choice-field setup-reveal" key={path}>
+          <span id="settings-focus-label" className="setup-label">{path === "sgu" ? "What term are you in?" : path === "other" ? "Which program?" : "What are you focused on?"}</span>
+          <ChoiceChips labelledBy="settings-focus-label" options={focusChoicesForPath} value={selectedFocus.id}
+            onChange={(id) => chooseFocus(focusChoicesForPath.find((item) => item.id === id) ?? focusChoicesForPath[0])} />
+        </div>
+        <details className="profile-stage-details">
+          <summary>More academic details</summary>
+          <label className="stack gap6"><span className="field-label">Current stage</span>
+            <select className="field" value={stage} onChange={(event) => updateProfile({
+              academicStageId: event.target.value as AcademicStageId,
+              customAcademicStage: event.target.value === "other" ? profile.customAcademicStage : undefined,
+            })}>
+              {stageGroup.options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+            </select>
+          </label>
+          {stage === "other" && <label className="stack gap6"><span className="field-label">Describe your stage</span>
+            <input className="field" value={profile.customAcademicStage ?? ""} maxLength={120}
+              onChange={(event) => updateProfile({ customAcademicStage: event.target.value })} />
+          </label>}
+        </details>
+      </div>
+
       <div className="profile-hero">
         <div className="profile-hero-heading">
-          <span className="settings-eyebrow">01 / Identity</span>
+          <span className="settings-eyebrow">02 / Identity</span>
           <h5>The person behind the work.</h5>
           <p>Your name and goal appear in your workspace. Changes save on this device as you type.</p>
         </div>
@@ -97,49 +149,11 @@ export function ProfileSection({
         </div>
         </div>
         <div className="profile-account-line">
-          <div className="profile-save-state"><LastSavedLine /></div>
           <button type="button" className="profile-account-action" onClick={onOpenAccount}>
             <Cloud size={ICON_SIZE.body} aria-hidden="true" />
             <span>{accountUser ? `Manage ${accountUser.email}` : accountPhase === "unconfigured" ? "About account protection" : "Sign in to protect this workspace"}</span>
           </button>
         </div>
-      </div>
-
-      <div className="profile-card profile-path">
-        <div className="profile-card-head">
-          <GraduationCap size={ICON_SIZE.body} aria-hidden="true" />
-          <div><span className="settings-eyebrow">02 / Academic path</span><h4>Where you are</h4></div>
-        </div>
-        <div className="profile-facts">
-          <div className="profile-fact">
-            <span>Program</span><b>{track.label}</b>
-            <button type="button" className="profile-fact-action" onClick={onOpenProgram}>Change program</button>
-          </div>
-          <label className="profile-fact">
-            <span>Current stage</span>
-            <select
-              className="field"
-              value={stage}
-              onChange={(event) => updateProfile({
-                academicStageId: event.target.value as AcademicStageId,
-                customAcademicStage: event.target.value === "other" ? profile.customAcademicStage : undefined,
-              })}
-            >
-              {stageGroup.options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-            </select>
-          </label>
-          <div className="profile-fact">
-            <span>Primary focus</span>
-            <b>{focus?.label ?? "Not chosen yet"}</b>
-            <button type="button" className="profile-fact-action" onClick={onOpenProgram}>{focus ? "Change focus" : "Choose focus"}</button>
-          </div>
-        </div>
-        {stage === "other" && (
-          <label className="profile-inline-field">
-            <span>Describe your stage (optional)</span>
-            <input className="field" value={profile.customAcademicStage ?? ""} maxLength={120} onChange={(event) => updateProfile({ customAcademicStage: event.target.value })} />
-          </label>
-        )}
       </div>
 
       <div className="profile-card profile-promise">

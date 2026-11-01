@@ -5,12 +5,13 @@ import { GhostButton } from "./primitives";
 import { ICON_SIZE } from "../../lib/iconSize";
 
 export function Modal({
-  title, onClose, children, footer, className = "", bodyClassName = "",
+  title, onClose, children, footer, headerLead, className = "", bodyClassName = "",
 }: {
   title: string;
   onClose: () => void;
   children: React.ReactNode;
   footer?: React.ReactNode;
+  headerLead?: React.ReactNode;
   className?: string;
   bodyClassName?: string;
 }) {
@@ -71,7 +72,7 @@ export function Modal({
       <div ref={dialogRef} className={`modal ${className}`} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}
         onMouseDown={(e) => e.stopPropagation()}>
         <div className="spread">
-          <h3 id={titleId}>{title}</h3>
+          {headerLead ? <div className="modal-header-branded">{headerLead}<h3 id={titleId}>{title}</h3></div> : <h3 id={titleId}>{title}</h3>}
           <GhostButton onClick={onClose} aria-label="Close"><X size={ICON_SIZE.emphasis} /></GhostButton>
         </div>
         <div className={`modal-body ${bodyClassName}`}>{children}</div>

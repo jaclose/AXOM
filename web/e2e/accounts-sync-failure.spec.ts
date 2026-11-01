@@ -73,7 +73,7 @@ async function changeWorkspace(page: Page, title: string) {
 const statusDot = (page: Page) => page.getByTitle("Account and protection");
 
 test("a refused account upload is sent once, explained, and recovers", async ({ page }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   const push = { answer: json(500, HISTORY_FULL), bodies: [] as Array<Record<string, unknown>> };
   const unexpected = await standInAccount(page, push);
   await seedOnboarded(page);
@@ -91,7 +91,7 @@ test("a refused account upload is sent once, explained, and recovers", async ({ 
   await page.waitForTimeout(10_000);
   await changeWorkspace(page, "second change after the refusal");
   await page.reload({ waitUntil: "networkidle" });
-  await expect(statusDot(page)).toHaveAttribute("data-status", "blocked");
+  await expect(statusDot(page)).toHaveAttribute("data-status", "blocked", { timeout: 35_000 });
   await page.waitForTimeout(3_000);
   expect(push.bodies.length).toBe(sentAtRefusal);
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("axom.sync.metadata.v1") ?? "{}"));

@@ -50,7 +50,7 @@ export function onRadioGroupKeyDown(event: KeyboardEvent<HTMLElement>) {
   radios[next].click();
 }
 
-/** A tiny rendered sample of the palette in the currently painted mode. */
+/** Compact palette mark for the top-bar appearance popover. */
 export function PaletteSwatch({ input, size = "md" }: { input: PaletteModeInput; size?: "sm" | "md" }) {
   return (
     <span
@@ -69,6 +69,50 @@ export function PaletteSwatch({ input, size = "md" }: { input: PaletteModeInput;
   );
 }
 
+function paletteOrbStyle(input: PaletteModeInput): CSSProperties {
+  return {
+    "--orb-hi": input.hi,
+    "--orb-accent": input.accent,
+    "--orb-lo": input.lo,
+    "--orb-deep": input.bg[0],
+  } as CSSProperties;
+}
+
+/** A miniature workspace, painted from the same palette inputs as the real app. */
+function PalettePreview({ input, mode }: { input: PaletteModeInput; mode: "light" | "dark" }) {
+  const style = {
+    "--preview-page": input.bg[1],
+    "--preview-edge": input.bg[2],
+    "--preview-surface": input.surface,
+    "--preview-accent": input.accent,
+    "--preview-ink": input.ink,
+    "--preview-hi": input.hi,
+    "--preview-lo": input.lo,
+    "--preview-cool": input.cool,
+    "--preview-text": mode === "light" ? input.structure ?? "#302b24" : "#f3f0e9",
+  } as CSSProperties;
+
+  return (
+    <span className={`palette-preview ${mode}`} style={style} aria-hidden="true">
+      <span className="palette-preview-bar">
+        <span className="palette-preview-brand"><img src={`${import.meta.env.BASE_URL}icons/axom-orb-512.png`} alt="" /> AXOM</span>
+        <span className="palette-preview-bar-mark"><i /><i /><i /></span>
+      </span>
+      <span className="palette-preview-workspace">
+        <span className="palette-preview-rail"><i className="active" /><i /><i /></span>
+        <span className="palette-preview-content">
+          <span className="palette-preview-overline">YOUR DAY <i>01 / 03</i></span>
+          <span className="palette-preview-title">Make room<br />for focus.</span>
+          <span className="palette-preview-bottom">
+            <span className="palette-preview-progress-ring"><i>64<span>%</span></i></span>
+            <span className="palette-preview-progress-copy"><b>2h 15m</b><small>Today's study</small><span className="palette-preview-meter"><i /></span></span>
+          </span>
+        </span>
+      </span>
+    </span>
+  );
+}
+
 export function AppearanceStudio() {
   const groupId = useId();
   const mode = useThemePreference();
@@ -82,6 +126,7 @@ export function AppearanceStudio() {
   }, [palette.customAccent]);
 
   const customDefinition: PaletteDefinition = customPaletteDefinition(isHexColor(customDraft) ? customDraft : DEFAULT_CUSTOM_ACCENT);
+  const customInput = resolved === "light" ? customDefinition.light : customDefinition.dark;
   const activeDefinition = palette.id === "custom"
     ? customPaletteDefinition(palette.customAccent ?? DEFAULT_CUSTOM_ACCENT)
     : PALETTES.find((definition) => definition.id === palette.id) ?? PALETTES[0];
@@ -158,6 +203,7 @@ export function AppearanceStudio() {
         <div className="palette-grid" role="radiogroup" aria-labelledby={`${groupId}-palette`} onKeyDown={onRadioGroupKeyDown}>
           {PALETTES.map((definition) => {
             const selected = palette.id === definition.id;
+            const input = resolved === "light" ? definition.light : definition.dark;
             return (
               <button
                 key={definition.id}
@@ -166,12 +212,13 @@ export function AppearanceStudio() {
                 aria-checked={selected}
                 tabIndex={selected ? 0 : -1}
                 className={`palette-card ${selected ? "on" : ""}`}
+                title={definition.description}
                 onClick={() => setPalettePreference({ id: definition.id, customAccent: palette.customAccent })}
               >
-                <PaletteSwatch input={resolved === "light" ? definition.light : definition.dark} />
+                <PalettePreview input={input} mode={resolved} />
                 <span className="palette-card-copy">
-                  <b>{definition.label}</b>
-                  <small>{definition.pairing}</small>
+                  <span className="palette-card-orb" aria-hidden="true" style={paletteOrbStyle(input)} />
+                  <span><b>{definition.label}</b><small>{definition.pairing}</small></span>
                 </span>
                 <Check className="palette-card-check" size={ICON_SIZE.body} aria-hidden="true" />
               </button>
@@ -185,10 +232,10 @@ export function AppearanceStudio() {
             className={`palette-card custom ${palette.id === "custom" ? "on" : ""}`}
             onClick={() => applyCustom(isHexColor(customDraft) ? customDraft : DEFAULT_CUSTOM_ACCENT)}
           >
-            <PaletteSwatch input={resolved === "light" ? customDefinition.light : customDefinition.dark} />
+            <PalettePreview input={customInput} mode={resolved} />
             <span className="palette-card-copy">
-              <b>Custom</b>
-              <small>Your own color</small>
+              <span className="palette-card-orb" aria-hidden="true" style={paletteOrbStyle(customInput)} />
+              <span><b>Custom</b><small>Your own color</small></span>
             </span>
             <Check className="palette-card-check" size={ICON_SIZE.body} aria-hidden="true" />
           </button>
