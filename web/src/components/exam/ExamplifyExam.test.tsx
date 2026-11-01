@@ -200,6 +200,60 @@ describe("Examplify interface", () => {
     expect(useStore.getState().questions.find((entry) => entry.id === imported.id)?.annotations).toHaveLength(1);
   });
 
+  it("highlights rich answer text without choosing it, preserves it on resume, and clears every mark", () => {
+    const choiceBlocks = [{ type: "rich_text" as const, html: "<b>Blue light</b> scatters." }];
+    const imported: QuestionRecord = {
+      ...q("choice-rich"),
+      options: [{ key: "A", text: blocksToPlainText(choiceBlocks) }, ...q("choice-rich").options.slice(1)],
+      content: {
+        id: "choice-rich", source: { filename: "reviewed.pdf", questionNumber: 1 }, stem: [],
+        choices: [{ id: "choice-rich-a", label: "A", blocks: choiceBlocks }], assets: [], provenance: { method: "pdf-import" },
+      } as QuestionRecord["content"],
+    };
+    useStore.setState({ ...makeSeed(), questions: [imported] });
+    const view = exam({ pool: [imported] });
+    fireEvent.click(screen.getByRole("button", { name: "Highlight text" }));
+    const text = screen.getByText("Blue light").firstChild!;
+    const selection = window.getSelection()!;
+    const range = document.createRange();
+    range.setStart(text, 0); range.setEnd(text, "Blue light".length);
+    selection.removeAllRanges(); selection.addRange(range);
+    fireEvent.mouseUp(text.parentElement!);
+    fireEvent.click(choice("A. Blue light scatters."));
+    expect(choice("A. Blue light scatters.").getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByText("Blue light").closest("mark")).toBeTruthy();
+    expect(useStore.getState().questions[0].annotations?.[0]).toMatchObject({ target: "option", optionKey: "A", exactText: "Blue light" });
+
+    fireEvent.click(screen.getByRole("button", { name: /Exam Controls/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Suspend Exam" }));
+    const snapshot = view.onSuspend.mock.calls[0][0];
+    view.unmount();
+    const saved = useStore.getState().questions[0];
+    exam({ pool: [saved], resume: snapshot });
+    expect(screen.getByText("Blue light").closest("mark")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Erase highlighting" }));
+    selection.removeAllRanges();
+    fireEvent.click(screen.getByText("Blue light").closest("mark")!);
+    expect(screen.getByText("Blue light").closest("mark")).toBeNull();
+    expect(choice("A. Blue light scatters.").getAttribute("aria-checked")).toBe("false");
+
+    fireEvent.click(screen.getByRole("button", { name: "Highlight text" }));
+    const stemText = screen.getByText(/Stem for choice-rich/).firstChild!;
+    const stemRange = document.createRange();
+    stemRange.setStart(stemText, 0); stemRange.setEnd(stemText, 4);
+    selection.removeAllRanges(); selection.addRange(stemRange);
+    fireEvent.mouseUp(stemText.parentElement!);
+    const optionText = screen.getByText("Blue light").firstChild!;
+    const optionRange = document.createRange();
+    optionRange.setStart(optionText, 0); optionRange.setEnd(optionText, "Blue light".length);
+    selection.removeAllRanges(); selection.addRange(optionRange);
+    fireEvent.mouseUp(optionText.parentElement!);
+    expect(useStore.getState().questions[0].annotations).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "More for this question" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Clear highlighting" }));
+    expect(useStore.getState().questions[0].annotations).toHaveLength(0);
+  });
+
   it("keeps the lab values as the exam's attachment, and says how the block works in a notice", () => {
     exam();
     fireEvent.click(screen.getByRole("button", { name: /Exam Controls/ }));

@@ -222,10 +222,17 @@ function ClassicExam({ exam, skin, mode, onClose }: {
                 <div key={option.key} data-study-part="choice" data-choice-key={option.key}
                   className={`sim-choice ${selected ? "selected" : ""} ${struck ? "struck" : ""} ${isCorrect ? "correct" : ""} ${isWrong ? "wrong" : ""}`}
                   onContextMenu={(event) => { event.preventDefault(); exam.strike(option.key); }}>
-                  <label>
-                    <input type="radio" name={`sim-${question.id}`} checked={selected} disabled={revealed || exam.finishLocked} onChange={() => exam.pick(option.key)} aria-label={`${option.key}. ${option.text}`} />
+                  <label onClickCapture={(event) => { if (exam.suppressOptionPick(option.key, event.target)) event.preventDefault(); }}>
+                    <input type="radio" name={`sim-${question.id}`} checked={selected} disabled={revealed || exam.finishLocked}
+                      onChange={(event) => { if (!exam.suppressOptionPick(option.key, event.target)) exam.pick(option.key); }}
+                      aria-label={`${option.key}. ${option.text}`} />
                     <span className="sim-choice-key">{option.key}.</span>
-                    <span className="sim-choice-text"><QuestionContent question={question} part="choice" choice={option.key} fallback={option.text} /></span>
+                    <span className="sim-choice-text"><QuestionContent question={question} part="choice" choice={option.key}
+                      annotations={exam.optionAnnotations(option.key)} onSelection={(range) => exam.onOptionSelection(option.key, range)}
+                      onDeleteAnnotation={exam.onDeleteAnnotation} eraseMode={tool === "erase"}
+                      fallback={<AnnotatedQuestionText text={option.text} annotations={exam.optionAnnotations(option.key)}
+                        label={`Answer choice ${option.key}`} inline eraseMode={tool === "erase"}
+                        onDelete={exam.onDeleteAnnotation} onSelection={(range) => exam.onOptionSelection(option.key, range)} />} /></span>
                   </label>
                   {isCorrect && <Check size={18} className="sim-choice-mark ok" aria-label="Correct answer" />}
                   {isWrong && <X size={18} className="sim-choice-mark bad" aria-label="Your answer (incorrect)" />}

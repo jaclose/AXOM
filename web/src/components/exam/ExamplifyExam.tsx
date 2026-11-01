@@ -268,7 +268,7 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
               {moreOpen && (
                 <div className="xfy-menu xfy-more-menu" role="menu">
                   <button type="button" role="menuitem" disabled={!item.struck.length || revealed} onClick={() => item.struck.forEach((key) => exam.strike(key))}>Restore struck-out choices</button>
-                  <button type="button" role="menuitem" disabled={!exam.annotations.length} onClick={() => exam.annotations.forEach((annotation) => exam.onDeleteAnnotation(annotation.id))}>Clear highlighting</button>
+                  <button type="button" role="menuitem" disabled={!exam.allAnnotations.length} onClick={exam.clearAnnotations}>Clear highlighting</button>
                 </div>
               )}
             </div>
@@ -306,9 +306,14 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
               return (
                 <div key={option.key} className={`xfy-choice ${selected ? "selected" : ""} ${struck ? "struck" : ""} ${isCorrect ? "correct" : ""} ${isWrong ? "wrong" : ""}`}>
                   <button type="button" className="xfy-choice-main" role="radio" aria-checked={selected} disabled={revealed || exam.finishLocked}
-                    aria-label={`${option.key}. ${option.text}${struck ? " (struck out)" : ""}`} onClick={() => exam.pick(option.key)}>
+                    aria-label={`${option.key}. ${option.text}${struck ? " (struck out)" : ""}`} onClick={(event) => { if (!exam.suppressOptionPick(option.key, event.target)) exam.pick(option.key); }}>
                     <b>{option.key}</b>
-                    <span><QuestionContent question={question} part="choice" choice={option.key} fallback={option.text} /></span>
+                    <span><QuestionContent question={question} part="choice" choice={option.key}
+                      annotations={exam.optionAnnotations(option.key)} onSelection={(range) => exam.onOptionSelection(option.key, range)}
+                      onDeleteAnnotation={exam.onDeleteAnnotation} eraseMode={tool === "erase"}
+                      fallback={<AnnotatedQuestionText text={option.text} annotations={exam.optionAnnotations(option.key)}
+                        label={`Answer choice ${option.key}`} inline eraseMode={tool === "erase"}
+                        onDelete={exam.onDeleteAnnotation} onSelection={(range) => exam.onOptionSelection(option.key, range)} />} /></span>
                   </button>
                   {isCorrect ? <span className="xfy-choice-side ok" role="img" aria-label="Correct answer"><Check size={18} /></span>
                     : isWrong ? <span className="xfy-choice-side bad" role="img" aria-label="Your answer (incorrect)"><X size={18} /></span>

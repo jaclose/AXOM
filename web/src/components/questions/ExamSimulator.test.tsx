@@ -155,6 +155,29 @@ describe("ExamSimulator", () => {
     expect(block.items.q1).toMatchObject({ answerKey: "A", marked: true, visited: true });
   });
 
+  it.each(["uworld", "nbme"] as const)("keeps a choice highlight through %s navigation without selecting or striking it", (skin) => {
+    render(<ExamSimulator skin={skin} mode="exam" pool={pool} onFinish={vi.fn()} onSuspend={vi.fn()} />);
+    const highlightButton = screen.getByRole("button", { name: "Highlight" });
+    if (highlightButton.getAttribute("aria-pressed") !== "true") fireEvent.click(highlightButton);
+    const text = screen.getByText("Alpha").firstChild!;
+    const selection = window.getSelection()!;
+    const range = document.createRange();
+    range.setStart(text, 0); range.setEnd(text, "Alpha".length);
+    selection.removeAllRanges(); selection.addRange(range);
+    fireEvent.mouseUp(text.parentElement!);
+    expect(useStore.getState().questions[0].annotations?.[0]).toMatchObject({ target: "option", optionKey: "A", exactText: "Alpha" });
+    fireEvent.click(screen.getByText("Alpha").closest("label")!);
+    expect((screen.getByRole("radio", { name: "A. Alpha" }) as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(screen.getByRole("button", { name: "Previous" }));
+    expect(screen.getByText("Alpha").closest("mark")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Erase" }));
+    selection.removeAllRanges();
+    fireEvent.click(screen.getByText("Alpha").closest("mark")!);
+    expect(screen.getByText("Alpha").closest("mark")).toBeNull();
+    expect((screen.getByRole("radio", { name: "A. Alpha" }) as HTMLInputElement).checked).toBe(false);
+  });
+
   it("ends the block when time runs out and warns at five minutes", () => {
     vi.useFakeTimers();
     const onFinish = vi.fn();
