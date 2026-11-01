@@ -73,6 +73,63 @@ describe("publishing a prepared library as one course per term and module", () =
     }
   });
 
+  it("holds a module's questions when its existing plan revisions disagree", async () => {
+    const { read } = await library();
+    const inventory = await readPublicationInventory(read);
+    const sections = inventory.sections.map(section => section.moduleKey === "cpr1"
+      ? { ...section, text: `@academic-term: ${section.name.startsWith("01") ? "Fall 2026" : "Spring 2026"}\n${section.text}` }
+      : section);
+    const plan = planPublication({ ...inventory, sections }, { cpr1: "Term 1" });
+    expect(plan.blocked.filter(section => section.moduleKey === "cpr1")).toHaveLength(2);
+    expect(plan.courses.some(course => course.moduleKey === "cpr1")).toBe(false);
+    expect(plan.excluded.find(source => source.name === "cpr1-imcq.pdf")?.reason).toMatch(/course plan needs attention/);
+    expect(plan.courses.some(course => course.moduleKey === "goer")).toBe(true);
+  });
+
+  it("adds an explicitly reviewed Unfiled source to its exact question-only course", async () => {
+    const fixture = await library();
+    const source = fixture.catalog.sources.find(item => item.name === "unfiled-pq.pdf")!;
+    const bankFile = source.bankFile!;
+    const bank = JSON.parse(new TextDecoder().decode(fixture.files.get(bankFile)!));
+    bank.pkg.questions[0].course = "Unfiled";
+    bank.pkg.questions[0].term = 0;
+    bank.reviewedFiling = { term: "Term 4", module: "NCRS", evidence: "human-reviewed", weekAssignment: "unassigned" };
+    source.module = "NCRS";
+    fixture.files.set(bankFile, new TextEncoder().encode(JSON.stringify(bank)));
+    fixture.files.set("catalog.json", new TextEncoder().encode(JSON.stringify(fixture.catalog)));
+
+    const inventory = await readPublicationInventory(fixture.read);
+    const plan = planPublication(inventory);
+    const ncrs = plan.courses.find(course => course.moduleKey === "ncrs")!;
+    expect(ncrs).toMatchObject({ term: "Term 4", banks: 2, ready: 2 });
+    expect(ncrs.sourceIds).toContain(source.id);
+    expect(plan.excluded.some(entry => entry.id === source.id)).toBe(false);
+    const { jobs } = publicationJobs(fixture.read, inventory, [ncrs]);
+    const upload = await jobs[0].prepare();
+    expect(upload.provenance).toMatchObject({ scopeEvidence: "human-reviewed", weekAssignment: "unassigned" });
+    expect(upload.metadata).toMatchObject({ ready_questions: 2, module: "NCRS", term: "Term 4" });
+    const storedBank = JSON.parse(new TextDecoder().decode(upload.files.find(file => file.path === bankFile)!.bytes));
+    expect(storedBank.pkg.manifest.course).toEqual({ name: "Unfiled", term: 0, week: 1 });
+    expect(storedBank.pkg.questions[0]).toMatchObject({ course: "Unfiled", term: 0 });
+  });
+
+  it("keeps a valid course in another term when one term's plan is blocked", async () => {
+    const { read } = await library();
+    const inventory = await readPublicationInventory(read);
+    const [lectures, activities] = inventory.sections.filter(section => section.moduleKey === "cpr1");
+    const sections = [...inventory.sections.filter(section => section.moduleKey !== "cpr1"),
+      { ...lectures, term: "Term 1" as const, problem: "A source line needs review." },
+      { ...activities, term: "Term 2" as const, text: activities.text.replace(/^CPR1 -/, "T2 - CPR1 -") }];
+    const term1Bank = inventory.sources.find(source => source.name === "cpr1-imcq.pdf")!;
+    const term2Bank = { ...term1Bank, id: "term2-cpr1-bank", name: "term2-cpr1.pdf", checksum: "e".repeat(64),
+      bank: { term: "Term 2" as const, module: "CPR 1", moduleKey: "cpr1", reviewedFiling: false } };
+    const plan = planPublication({ ...inventory, sections, sources: [...inventory.sources, term2Bank] });
+    expect(plan.blocked.find(section => section.moduleKey === "cpr1")?.proposedTerm).toBe("Term 1");
+    expect(plan.courses.some(course => course.term === "Term 1" && course.moduleKey === "cpr1")).toBe(false);
+    expect(plan.courses.find(course => course.term === "Term 2" && course.moduleKey === "cpr1")?.sourceIds).toContain(term2Bank.id);
+    expect(plan.excluded.find(source => source.id === term1Bank.id)?.reason).toMatch(/course plan needs attention/);
+  });
+
   it("keeps the same collection identity and content hash for a reordered library with a new version label", async () => {
     const first = await library("forward", "v1");
     const second = await library("reverse", "v2");
@@ -107,5 +164,26 @@ describe("publishing a prepared library as one course per term and module", () =
     const upload = await prepareAcademicUpload(courseLibraryReader(read, inventory, goer, { include: id => !goer.optionalSourceIds.includes(id), originals: false }));
     expect(upload.files.some(file => file.path.endsWith(".pdf"))).toBe(false);
     expect(upload.metadata.ready_questions).toBe(1);
+  });
+
+  it("keeps an unsupported bank original local while publishing its questions", async () => {
+    const fixture = await library();
+    const bank = fixture.catalog.sources.find(source => source.name === "goer-pq.pdf")!;
+    const original = bank.originalFile!;
+    bank.originalFile = original.replace(/\.pdf$/, ".pptx");
+    fixture.files.set(bank.originalFile, fixture.files.get(original)!);
+    fixture.files.set("catalog.json", new TextEncoder().encode(JSON.stringify(fixture.catalog)));
+
+    const inventory = await readPublicationInventory(fixture.read);
+    const goer = planPublication(inventory).courses.find(course => course.moduleKey === "goer")!;
+    const { jobs, notes } = publicationJobs(fixture.read, inventory, [goer]);
+    const upload = await jobs[0].prepare();
+    const catalog = JSON.parse(new TextDecoder().decode(upload.files.find(file => file.path === "catalog.json")!.bytes)) as PrivateLibraryCatalog;
+    expect(catalog.sources.find(source => source.id === bank.id)?.originalFile).toBeUndefined();
+    expect(upload.files.some(file => file.path.endsWith(".pptx"))).toBe(false);
+    expect(upload.files.some(file => file.path.endsWith(".pdf"))).toBe(true);
+    expect(upload.metadata.ready_questions).toBe(1);
+    expect(upload.provenance.sourceChecksums).toContain(bank.checksum);
+    expect(notes.keptLocal.get(goer.catalogId)).toBe(1);
   });
 });

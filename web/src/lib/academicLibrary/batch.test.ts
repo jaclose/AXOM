@@ -4,8 +4,10 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { sha256 } from "../question-content/assets";
 import { academicLibraryReader } from "./client";
 import { accountOperationClient, loadSupabase } from "../account/supabase";
-import { academicCollectionId, uploadAcademicCourse, type AcademicUpload } from "./upload";
+import { academicCollectionId, prepareAcademicUpload, uploadAcademicCourse, type AcademicUpload } from "./upload";
 import { academicReconciliationLedger, uploadAcademicBatch, verifyAcademicCourseReadback } from "./batch";
+import { planPublication, publicationJobs, readPublicationInventory } from "./publication";
+import { library } from "./publicationFixture.testing";
 
 vi.mock("../account/supabase", () => ({ accountOperationClient: vi.fn(), loadSupabase: vi.fn() }));
 vi.mock("./client", () => ({ academicLibraryReader: vi.fn() }));
@@ -31,9 +33,9 @@ webpHeader.set(Buffer.from("WEBP"), 8);
 webpHeader.set(Buffer.from("VP8X"), 12);
 
 async function fixture({ withImage = false, largeImage = false, brokenGif = false,
-  imageFormat = "png", ambiguousAnswer = false, catalogId = "fixture",
+  imageFormat = "png", ambiguousAnswer = false, heldFigureCount = 0, catalogId = "fixture",
 }: { withImage?: boolean; largeImage?: boolean; brokenGif?: boolean;
-  imageFormat?: "png" | "jpg" | "webp" | "gif"; ambiguousAnswer?: boolean; catalogId?: string } = {}) {
+  imageFormat?: "png" | "jpg" | "webp" | "gif"; ambiguousAnswer?: boolean; heldFigureCount?: number; catalogId?: string } = {}) {
   const image = brokenGif ? gif.subarray(0, 12) : largeImage ? new Uint8Array(8 * 1024 * 1024 + 1)
     : imageFormat === "gif" ? gif : imageFormat === "jpg" ? jpegHeader
     : imageFormat === "webp" ? webpHeader : png;
@@ -44,6 +46,10 @@ async function fixture({ withImage = false, largeImage = false, brokenGif = fals
     : imageFormat === "jpg" ? "image/jpeg" : imageFormat === "webp" ? "image/webp" : "image/png";
   const asset = { id: "figure", questionId: "question-1", filename,
     checksum, mimeType, byteSize: image.length, width: 1, height: 1, role: "question" };
+  const assets = Array.from({ length: heldFigureCount || Number(withImage) }, (_, index) => ({
+    ...asset, id: index ? `figure-${index + 1}` : "figure",
+    filename: index ? `figure-${index + 1}.${imageFormat}` : filename,
+  }));
   const bank = {
     pkg: {
       manifest: { schemaVersion: 1, course: { name: "Demo", term: 1, week: 1 },
@@ -52,13 +58,13 @@ async function fixture({ withImage = false, largeImage = false, brokenGif = fals
       questions: [{
         id: "question-1", source: { filename: "illustrative.pdf", questionNumber: 1 },
         stem: [{ type: "text", text: "Which label is first?" },
-          ...(withImage ? [{ type: "image", assetId: "figure", role: "question", alt: "Synthetic figure" }] : [])],
+          ...assets.map(figure => ({ type: "image", assetId: figure.id, role: "question", alt: "Synthetic figure" }))],
         choices: [
           { id: "a", label: "A", blocks: [{ type: "text", text: "Label A" }] },
           { id: "b", label: "B", blocks: [{ type: "text", text: "Label B" }] },
         ],
-        correctAnswer: { labels: ambiguousAnswer ? ["A", "B"] : ["A"], evidence: "printed-key" },
-        assets: withImage ? [asset] : [],
+        ...(heldFigureCount ? {} : { correctAnswer: { labels: ambiguousAnswer ? ["A", "B"] : ["A"], evidence: "printed-key" } }),
+        assets,
         provenance: { method: "authored", sourceChecksum: `sha256:${S}` },
       }],
     }, issues: [], sourceText: { rawText: "Synthetic, made-up teaching example." }, sourceBytes: 32, notes: [],
@@ -66,19 +72,22 @@ async function fixture({ withImage = false, largeImage = false, brokenGif = fals
   const catalog = {
     format: "axom-private-library", schemaVersion: 1, id: catalogId, version: "1", templates: [],
     sources: [{ id: "source-1", name: "illustrative.pdf", sourcePath: "illustrative.pdf", checksum: S,
-      status: "prepared", reason: "Reviewed synthetic source", ready: 1, review: 0, bankFile: "banks/demo/bank.json" }],
+      status: "prepared", reason: "Reviewed synthetic source", ready: heldFigureCount ? 0 : 1,
+      review: heldFigureCount ? 1 : 0, bankFile: "banks/demo/bank.json" }],
   };
   const data = new Map<string, { mime: string; bytes: Uint8Array }>([
     ["catalog.json", { mime: "application/json", bytes: encode(catalog) }],
     ["banks/demo/bank.json", { mime: "application/json", bytes: encode(bank) }],
-    ...(withImage ? [[`banks/demo/assets/${filename}`, { mime: mimeType, bytes: image }] as const] : []),
+    ...assets.map(figure => [`banks/demo/assets/${figure.filename}`, { mime: mimeType, bytes: image }] as const),
   ]);
   const files = await Promise.all([...data.entries()].map(async ([path, item]) => ({
     path, sha256: (await sha256(item.bytes)).slice(7), byte_size: item.bytes.length,
     mime_type: item.mime, bytes: item.bytes,
   })));
   const upload: AcademicUpload = {
-    catalogId, hash: "c".repeat(64), metadata: { ready_questions: 1, review_questions: 0 },
+    catalogId, hash: "c".repeat(64), metadata: {
+      ready_questions: heldFigureCount ? 0 : 1, review_questions: heldFigureCount ? 1 : 0,
+    },
     provenance: { sourceChecksums: [S], scopeEvidence: "human-reviewed", weekAssignment: "unassigned" },
     files, localOnlyOriginals: [], template: "",
   };
@@ -103,11 +112,13 @@ function session(
   const guard = vi.fn(async () => undefined);
   const course = {
     owned: true, current_revision_id: extras.courseCurrent ?? revision,
-    ready_questions: extras.courseReady ?? 1, review_questions: 0,
+    ready_questions: extras.courseReady ?? caseData.upload.metadata.ready_questions,
+    review_questions: caseData.upload.metadata.review_questions,
   };
   const row = {
     id: revision, status: extras.savedRevisionStatus ?? "ready",
-    collection_id: collection, content_hash: caseData.upload.hash, ready_questions: 1, review_questions: 0,
+    collection_id: collection, content_hash: caseData.upload.hash,
+    ready_questions: caseData.upload.metadata.ready_questions, review_questions: caseData.upload.metadata.review_questions,
   };
   const shared = {
     auth: { getUser: vi.fn(async () => ({ data: { user: { id: userId } }, error: null })) },
@@ -164,6 +175,90 @@ describe("authenticated source-level academic readback", () => {
     expect(shared.auth.getUser).toHaveBeenCalledOnce();
     expect(() => client.auth).toThrow(/blocks auth/);
     expect(guard).toHaveBeenCalled();
+  });
+
+  it("verifies a held source's 11 figures without claiming they are learner attachments", async () => {
+    stubSuccessfulBrowserDecode();
+    const f = await fixture({ heldFigureCount: 11 });
+    session(f);
+    const result = await verifyAcademicCourseReadback(f.upload, f.saved, owner);
+    expect(result).toMatchObject({ readyQuestions: 0, reviewQuestions: 1, verifiedFiles: 13 });
+    expect(result.sourceReceipts[0]).toMatchObject({
+      questionCount: 0, reviewCount: 1, figureReferences: 0, distinctFigureFiles: 11,
+      figureReadbackVerified: true, bankReadbackVerified: true, readyQuestionIds: [],
+    });
+  });
+
+  it("prepares and reads back an explicitly reviewed Unfiled source without changing its original scope", async () => {
+    const f = await fixture();
+    const bank = JSON.parse(new TextDecoder().decode(f.data.get("banks/demo/bank.json")!.bytes));
+    bank.pkg.manifest.course = { name: "Unfiled", term: 0, week: 0 };
+    bank.pkg.questions[0].course = "Unfiled";
+    bank.pkg.questions[0].term = 0;
+    bank.reviewedFiling = { term: "Term 5", module: "GOER", evidence: "human-reviewed", weekAssignment: "unassigned" };
+    f.data.set("banks/demo/bank.json", { mime: "application/json", bytes: encode(bank) });
+    const catalog = JSON.parse(new TextDecoder().decode(f.data.get("catalog.json")!.bytes));
+    catalog.sources[0].module = "GOER";
+    f.data.set("catalog.json", { mime: "application/json", bytes: encode(catalog) });
+    const prepared = await prepareAcademicUpload(async path => f.data.get(path)!.bytes,
+      { term: "Term 5", module: "GOER", evidence: "human-reviewed" });
+    const storedBank = JSON.parse(new TextDecoder().decode(prepared.files.find(file => file.path === "banks/demo/bank.json")!.bytes));
+    expect(storedBank.pkg.manifest.course).toEqual({ name: "Unfiled", term: 0, week: 0 });
+    expect(storedBank.pkg.questions[0]).toMatchObject({ course: "Unfiled", term: 0 });
+    expect(storedBank.reviewedFiling).toMatchObject({ term: "Term 5", module: "GOER", evidence: "human-reviewed" });
+
+    f.upload = prepared;
+    f.data.clear();
+    for (const file of prepared.files) f.data.set(file.path, { mime: file.mime_type, bytes: file.bytes });
+    f.read.files = prepared.files.map(file => ({ path: file.path, sha256: file.sha256, byte_size: file.byte_size,
+      mime_type: file.mime_type, object_path: `${collection}/${file.sha256}` }));
+    session(f);
+    const result = await verifyAcademicCourseReadback(prepared, f.saved, owner);
+    expect(result).toMatchObject({ readyQuestions: 1, reviewQuestions: 0,
+      sourceReceipts: [{ questionCount: 1, readyQuestionIds: ["question-1"], bankReadbackVerified: true }] });
+  });
+
+  it("preserves each bank's filing evidence when a reviewed Unfiled bank joins an ordinary source", async () => {
+    const input = await library();
+    const reviewedSource = input.catalog.sources.find(source => source.name === "unfiled-pq.pdf")!;
+    const ordinarySource = input.catalog.sources.find(source => source.name === "ncrs-pq.pdf")!;
+    const reviewedBank = JSON.parse(new TextDecoder().decode(input.files.get(reviewedSource.bankFile!)!));
+    reviewedBank.pkg.questions[0].course = "Unfiled";
+    reviewedBank.pkg.questions[0].term = 0;
+    reviewedBank.reviewedFiling = { term: "Term 4", module: "NCRS", evidence: "human-reviewed", weekAssignment: "unassigned" };
+    reviewedSource.module = "NCRS";
+    input.files.set(reviewedSource.bankFile!, encode(reviewedBank));
+    input.files.set("catalog.json", encode(input.catalog));
+
+    const inventory = await readPublicationInventory(input.read);
+    const course = planPublication(inventory).courses.find(item => item.term === "Term 4" && item.moduleKey === "ncrs")!;
+    expect(course.sourceIds).toEqual(expect.arrayContaining([ordinarySource.id, reviewedSource.id]));
+    const prepared = await publicationJobs(input.read, inventory, [course]).jobs[0].prepare();
+    expect(prepared.provenance.scopeEvidence).toBe("human-reviewed");
+    const stored = (path: string) => JSON.parse(new TextDecoder().decode(prepared.files.find(file => file.path === path)!.bytes));
+    const ordinaryBank = stored(ordinarySource.bankFile!);
+    const filedBank = stored(reviewedSource.bankFile!);
+    expect(ordinaryBank.reviewedFiling).toEqual({
+      term: "Term 4", module: "NCRS", evidence: "source-metadata", weekAssignment: "unassigned",
+    });
+    expect(ordinaryBank.pkg.manifest.course).toMatchObject({ name: "NCRS", term: 4 });
+    expect(filedBank.reviewedFiling).toEqual({
+      term: "Term 4", module: "NCRS", evidence: "human-reviewed", weekAssignment: "unassigned",
+    });
+    expect(filedBank.pkg.manifest.course).toMatchObject({ name: "Unfiled", term: 0 });
+    expect(filedBank.pkg.questions[0]).toMatchObject({ course: "Unfiled", term: 0 });
+
+    const cloud = await fixture();
+    cloud.upload = prepared;
+    cloud.data.clear();
+    for (const file of prepared.files) cloud.data.set(file.path, { mime: file.mime_type, bytes: file.bytes });
+    cloud.read.files = prepared.files.map(file => ({ path: file.path, sha256: file.sha256, byte_size: file.byte_size,
+      mime_type: file.mime_type, object_path: `${collection}/${file.sha256}` }));
+    session(cloud);
+    const result = await verifyAcademicCourseReadback(prepared, cloud.saved, owner);
+    expect(result).toMatchObject({ readyQuestions: 2, reviewQuestions: 0 });
+    expect(result.sourceReceipts).toHaveLength(2);
+    expect(result.sourceReceipts.every(receipt => receipt.bankReadbackVerified && receipt.ownerAuthenticated)).toBe(true);
   });
 
   it("distinguishes an oversized local-only original from a cloud-verified original", async () => {
