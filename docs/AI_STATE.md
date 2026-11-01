@@ -47,10 +47,10 @@ submissions were zero; no content was uploaded or sharing changed. PR 37/44
 branch context remains in the [library contract](features/academic-library.md)
 and `git show de00e44b:docs/AI_STATE.md`.
 
-Draft PR #47 applies JD's hash-bound MI→NMI decision to 38 sources, 31 banks,
-two plan sections and 39 activities without changing originals. Its separate
-dry run reconciled 17,559 rows and all 20 courses; the combined EMF/MI candidate
-still needs a fresh upload-free check. No content was uploaded.
+The MI→NMI change from PR #47, integrated through #59, applied JD's hash-bound
+decision to 38 sources, 31 banks, two plan sections and 39 activities without
+changing originals. The later combined upload-free check reconciled 17,559
+rows and all 20 courses. No content was uploaded.
 
 ## Ownership and protected work
 
