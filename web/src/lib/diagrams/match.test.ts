@@ -13,6 +13,7 @@ const question: QuestionRecord = {
 describe("curated AXOM diagram matching", () => {
   it("links a keyed rhinovirus answer with two distinct positive stem clues", () => {
     expect(matchAxomDiagram(question)?.id).toBe("rhinovirus-common-cold");
+    expect(matchAxomDiagram(question)?.topicTag).toBe("axom:diagram:rhinovirus");
     expect(matchAxomDiagram({ ...question, options: [{ key: "A", text: "Human rhinovirus" }, question.options[1]] })?.id).toBe("rhinovirus-common-cold");
   });
 
@@ -34,5 +35,6 @@ describe("curated AXOM diagram matching", () => {
     expect(matchAxomDiagram({ ...question, correctKey: undefined })).toBeUndefined();
     expect(matchAxomDiagram({ ...question, needsReview: true })).toBeUndefined();
     expect(matchAxomDiagram({ ...question, extraction: { confidence: "low", reviewed: false } })).toBeUndefined();
+    expect(matchAxomDiagram({ ...question, tags: ["axom:diagram:rhinovirus"], correctKey: undefined })).toBeUndefined();
   });
 });

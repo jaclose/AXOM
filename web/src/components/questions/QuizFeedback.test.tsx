@@ -41,7 +41,7 @@ describe("QuizFeedback", () => {
       correctKey: "A", correctAnswerText: "Rhinovirus",
     };
     render(<QuizFeedback question={rhinovirus} pickedKey="B" />);
-    expect(screen.getByRole("complementary", { name: "Related AXOM diagram" })).toBeTruthy();
+    expect(screen.getByRole("complementary", { name: "Related AXOM diagram" }).getAttribute("data-axom-topic-tag")).toBe("axom:diagram:rhinovirus");
     expect(screen.getByRole("link", { name: /CDC · About Rhinoviruses/ })).toHaveProperty("href", "https://www.cdc.gov/rhinoviruses/about/index.html");
     expect(screen.getByText(/does not verify the question’s answer key/)).toBeTruthy();
   });

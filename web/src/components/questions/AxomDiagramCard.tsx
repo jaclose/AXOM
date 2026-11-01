@@ -8,13 +8,14 @@ export function AxomDiagramCard({ question }: { question: QuestionRecord }) {
   if (!diagram) return null;
 
   return (
-    <aside className="axom-diagram" aria-label="Related AXOM diagram" data-diagram-id={diagram.id}>
+    <aside className="axom-diagram" aria-label="Related AXOM diagram" data-diagram-id={diagram.id} data-axom-topic-tag={diagram.topicTag}>
       <div className="axom-diagram-copy">
         <span className="axom-diagram-eyebrow">Related AXOM diagram</span>
         <h3>{diagram.title}</h3>
         <p className="axom-diagram-subtitle">{diagram.subtitle}</p>
         <p>Rhinoviruses are the most frequent cause of the common cold. Symptoms can resemble other respiratory infections.</p>
         <p className="axom-diagram-caveat">Linked to the supplied correct answer and stem clues. This diagram does not verify the question’s answer key.</p>
+        <p className="axom-diagram-tag">AXOM topic · {diagram.topicTag}</p>
         <a href={diagram.source.url} target="_blank" rel="noopener noreferrer">
           {diagram.source.title}<ExternalLink size={13} aria-hidden="true" />
         </a>
