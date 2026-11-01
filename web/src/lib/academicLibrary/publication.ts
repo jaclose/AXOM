@@ -57,7 +57,8 @@ export interface PublicationSource {
   rows?: number;
   original?: { extension: string };
   /** Term and module read from the question package itself. */
-  bank?: { term: Term; module: string; moduleKey: string; reviewedFiling: boolean; reviewedUnfiled?: boolean } | { problem: string };
+  bank?: { term: Term; module: string; moduleKey: string; reviewedFiling: boolean; reviewedUnfiled?: boolean;
+    reviewedOverride?: boolean; humanReviewed?: boolean } | { problem: string };
   duplicateOf?: string;
 }
 
@@ -155,7 +156,10 @@ export async function readPublicationInventory(
         const manifest = bank.pkg.manifest;
         const filing = bank.reviewedFiling;
         const reviewedUnfiled = Boolean(filing && hasUniformUnfiledSourceScope(manifest, bank.pkg.questions));
-        const scopes = reviewedUnfiled && filing ? [{ module: filing.module, term: reviewedTermNumber(filing.term) }] :
+        const reviewedOverride = Boolean(filing && filing.evidence === "human-reviewed"
+          && (moduleIdentity(filing.module) !== moduleIdentity(manifest.course.name)
+            || reviewedTermNumber(filing.term) !== manifest.course.term));
+        const scopes = reviewedOverride && filing ? [{ module: filing.module, term: reviewedTermNumber(filing.term) }] :
           [{ module: manifest.course.name, term: manifest.course.term }, ...bank.pkg.questions.map(question => {
           const scope = questionScope(manifest, question);
           return { module: scope.course, term: scope.term };
@@ -165,10 +169,12 @@ export async function readPublicationInventory(
         const term = `Term ${number}` as Term;
         entry.bank = keys.size !== 1 ? { problem: "Its questions span several modules or terms. Split the source before publishing." }
           : !moduleKey || moduleKey === "unfiled" || !TERMS.includes(term) ? { problem: "Its questions have no reviewed Term 1-5 and module." }
-            : filing && !reviewedUnfiled && (moduleIdentity(filing.module) !== moduleKey || filing.term !== term)
+            : filing && !reviewedOverride && (moduleIdentity(filing.module) !== moduleKey || filing.term !== term)
               ? { problem: "Its manual filing differs from its source's own module or term. Publish it on its own after review." }
-              : { term, module: reviewedUnfiled && filing ? filing.module : manifest.course.name.trim(), moduleKey,
-                reviewedFiling: Boolean(filing), ...(reviewedUnfiled ? { reviewedUnfiled: true } : {}) };
+              : { term, module: reviewedOverride && filing ? filing.module : manifest.course.name.trim(), moduleKey,
+                reviewedFiling: Boolean(filing), ...(reviewedUnfiled ? { reviewedUnfiled: true } : {}),
+                ...(reviewedOverride ? { reviewedOverride: true } : {}),
+                ...(filing?.evidence === "human-reviewed" ? { humanReviewed: true } : {}) };
       } catch {
         entry.bank = { problem: "Its question package could not be read." };
       }
@@ -278,7 +284,7 @@ export function planPublication(inventory: PublicationInventory, confirmedTerms:
         continue;
       }
       let course = courses.get(courseKey(scope.term, scope.moduleKey));
-      if (course?.sections.length && scope.reviewedFiling && !scope.reviewedUnfiled) {
+      if (course?.sections.length && scope.reviewedFiling && !scope.reviewedOverride) {
         exclude(source, "It carries a manual filing, which cannot be combined with this module's course plan.");
         continue;
       }
@@ -386,12 +392,12 @@ export function publicationJobs(read: LibraryReader, inventory: PublicationInven
           ? { term: course.term, evidence: "human-reviewed" } : undefined;
         const optional = new Set(course.optionalSourceIds);
         const byId = new Map(inventory.sources.map(source => [source.id, source]));
-        const hasReviewedUnfiled = course.sourceIds.some(id => {
+        const hasHumanReview = course.sourceIds.some(id => {
           const bank = byId.get(id)?.bank;
-          return bank && "term" in bank && bank.reviewedUnfiled;
+          return bank && "term" in bank && bank.humanReviewed;
         });
         const unscheduled = course.sections.length ? undefined
-          : { term: course.term, module: course.module, evidence: hasReviewedUnfiled ? "human-reviewed" as const : "source-metadata" as const };
+          : { term: course.term, module: course.module, evidence: hasHumanReview ? "human-reviewed" as const : "source-metadata" as const };
         const unsupported = course.sourceIds.filter(id => {
           const original = byId.get(id)?.original;
           return original && !UPLOADABLE_ORIGINALS.has(original.extension);

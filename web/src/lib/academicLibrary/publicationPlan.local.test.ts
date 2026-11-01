@@ -10,6 +10,7 @@
  *   AXOM_PUBLISH_TERMS='{"<module key>":"Term 1"}' \
  *   AXOM_PUBLISH_DECISIONS=<filing decisions .json from the unfiled source review> \
  *   AXOM_PUBLISH_PROPOSALS=<matching original review worksheet .json> \
+ *   AXOM_PUBLISH_MI_NMI_DECISION=<exact owner decision .json> \
  *   npx vitest run src/lib/academicLibrary/publicationPlan.local.test.ts --reporter=verbose
  *
  * AXOM_PUBLISH_TERMS is optional and holds terms a reviewer confirmed, keyed by
@@ -28,6 +29,7 @@ import { safeLibraryPath, type LibraryReader } from "../privateLibrary/install";
 import type { ReviewedFiling } from "../privateLibrary/types";
 import { openPublicationBrowserDecoder } from "./publicationBrowserDecoder.local";
 import { applyFilingDecisions, readFilingDecisions, readFilingProposals } from "./filingDecisions";
+import { applyMiNmiDecision, readMiNmiDecision } from "./miNmiCorrection";
 import { accountQuestions } from "./questionLedger";
 import {
   PUBLICATION_INPUT_LIMITS, planPublication, publicationJobs, readPublicationInventory, type PlannedCourse,
@@ -79,8 +81,15 @@ describe.skipIf(!root)("dry run of publishing a real prepared library (opt-in on
       ? await applyFilingDecisions(fromDisk, readFilingDecisions(JSON.parse(readFileSync(resolve(decisionsFile), "utf8"))),
         readFilingProposals(JSON.parse(readFileSync(resolve(proposalsFile!), "utf8"))))
       : undefined;
-    const read = filed?.read ?? fromDisk;
+    const correctionFile = process.env.AXOM_PUBLISH_MI_NMI_DECISION;
+    const corrected = correctionFile
+      ? await applyMiNmiDecision(fromDisk, filed?.read ?? fromDisk,
+        readMiNmiDecision(JSON.parse(readFileSync(resolve(correctionFile), "utf8"))))
+      : undefined;
+    const read = corrected?.read ?? filed?.read ?? fromDisk;
     if (filed) console.log(`filing decisions  ${filed.summary.filed} filed, ${filed.summary.keptUnfiled} kept unfiled`);
+    if (corrected) console.log(`MI to NMI  ${corrected.summary.sources} sources, ${corrected.summary.banks} question sets, `
+      + `${corrected.summary.questionRows} rows, ${corrected.summary.planSections} plan sections, ${corrected.summary.activities} activities`);
     const inventory = await readPublicationInventory(read);
     const plan = planPublication(inventory, confirmedTerms());
     // Every question row the library holds, in exactly one course or one stated reason.
@@ -117,6 +126,7 @@ describe.skipIf(!root)("dry run of publishing a real prepared library (opt-in on
     }));
     const result = {
       library: inventory.library, checkedAt: new Date().toISOString(), ...(filed ? { filingDecisions: filed.summary } : {}),
+      ...(corrected ? { miNmiCorrection: corrected.summary } : {}),
       totals: {
         courses: plan.courses.length, checked: checked.length, readyToPublish: checked.filter(course => course.ok).length,
         needAttention: checked.filter(course => !course.ok).length, needTerm: needsTerm.length,

@@ -156,6 +156,19 @@ Planning, Check and upload use that envelope; weeks remain unassigned. Kept-unfi
 undecided sources stay unchanged. The library folder is never changed, and both review
 files stay private with the library.
 
+JD's confirmed Term 5 MI to NMI correction uses a separate private
+`axom-private-mi-nmi-decision` file. Add it after the Unfiled decisions, or set
+`AXOM_PUBLISH_MI_NMI_DECISION` for the upload-free dry run. It binds the original
+catalog hash and every MI source to its original and bank hashes; an omitted or
+changed source or plan is refused. All original MI question scopes must agree on
+Term 5 with week unassigned. The publisher presents the sources under NMI through
+a human-reviewed envelope. It derives an NMI heading for each exact reviewed MI
+plan section, proving its activities, stated weeks and metadata are identical.
+The original catalog, plan text, question IDs, provenance and files on disk stay
+unchanged. The published course contains both the derived plan and its original
+text source. The decision file stays private. Other module moves need their own
+source review and cannot use this MI correction.
+
 Every question is accounted for before anything uploads. The publisher and the dry run
 count each question row the library's packages hold, unreadable rows included, and place
 each in exactly one course of the plan (ready, or awaiting review, and whether its course
