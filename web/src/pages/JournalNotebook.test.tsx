@@ -59,11 +59,69 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  window.history.replaceState(null, "", "#journal");
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
 describe("Journal notebook foundation", () => {
+  it("learns first-open writing and lighting choices", () => {
+    const profile = useStore.getState().profile;
+    useStore.setState({ journal: [], profile: { ...profile, journalNotebook: undefined } as typeof profile });
+    render(<JournalPage />);
+    expect(screen.getByRole("dialog", { name: "Make this notebook yours" })).toBeTruthy();
+    expect(within(screen.getByRole("dialog", { name: "Make this notebook yours" })).getByRole("button", { name: /Open pageStart in your own words/i }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Find focus" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Make this notebook yours" })).getByRole("button", { name: /Open pageStart in your own words/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Rain" }));
+    fireEvent.click(screen.getByRole("button", { name: "Begin at my desk" }));
+    expect((useStore.getState().profile as typeof profile & { journalNotebook?: { purpose: string; writingMode: string; weather: string; setupCompleted: boolean } }).journalNotebook)
+      .toMatchObject({ purpose: "focus", writingMode: "free", weather: "rain", setupCompleted: true });
+  });
+
+  it("writes on the desk page and carries the same draft into full zoom", () => {
+    render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i }));
+    fireEvent.change(screen.getByLabelText("Write freely at your desk"), { target: { value: "A quiet start" } });
+    expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value).toBe("A quiet start");
+    fireEvent.click(screen.getByRole("button", { name: "Zoom into full journal" }));
+    expect(screen.getByRole("button", { name: "Back to desk" })).toBeTruthy();
+    expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value).toBe("A quiet start");
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Today’s page" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to desk" }));
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Your open page" }));
+  });
+
+  it("keeps free writing first while prompts and the day summary stay optional", () => {
+    render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Zoom into full journal" }));
+
+    const fullJournal = screen.getByRole("dialog", { name: "Full journal" });
+    expect(within(fullJournal).getByLabelText("Free writing")).toBeTruthy();
+    expect(within(fullJournal).queryByRole("heading", { name: "Day at a glance" })).toBeNull();
+    fireEvent.click(within(fullJournal).getByRole("button", { name: "Open page" }));
+    expect(within(fullJournal).queryByLabelText("What stayed with you today?")).toBeNull();
+    fireEvent.click(within(fullJournal).getByRole("button", { name: "Focus" }));
+    fireEvent.change(within(fullJournal).getByLabelText("Where did your attention go?"), { target: { value: "A clear hour" } });
+    fireEvent.click(within(fullJournal).getByRole("button", { name: "Reflect" }));
+    expect((within(fullJournal).getByLabelText("What stayed with you today?") as HTMLTextAreaElement).value).toBe("A clear hour");
+    fireEvent.click(within(fullJournal).getByRole("button", { name: "Show day summary" }));
+    expect(within(fullJournal).getByRole("heading", { name: "Day at a glance" })).toBeTruthy();
+    fireEvent.keyDown(fullJournal, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Full journal" })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Your open page" }));
+  });
+
+  it("opens feedback from the notification route without sending private content", () => {
+    window.history.replaceState(null, "", "#journal?feedback=1");
+    render(<JournalPage />);
+    expect(screen.getByRole("dialog", { name: "How is the journal feeling?" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Send feedback" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    expect(window.location.hash).toBe("#journal");
+  });
+
   it("unlocks Again only after three complete iPad on/off cycles", async () => {
     const play = vi.spyOn(useSoundscape.getState(), "play").mockResolvedValue(undefined);
     render(<JournalPage />);
@@ -97,7 +155,8 @@ describe("Journal notebook foundation", () => {
     fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i }));
     expect(await screen.findByRole("heading", { name: "Today’s page" })).toBeTruthy();
 
-    const reflection = screen.getByLabelText("Today — did you do what you set out to do?");
+    fireEvent.click(screen.getByRole("button", { name: "Reflect" }));
+    const reflection = screen.getByLabelText("What stayed with you today?");
     fireEvent.change(reflection, { target: { value: "A sentence that must survive the turn." } });
     fireEvent.click(screen.getByRole("button", { name: "Previous journal page" }));
     expect(await screen.findByDisplayValue("Yesterday was grounded.")).toBeTruthy();
@@ -120,7 +179,7 @@ describe("Journal notebook foundation", () => {
     expect(await screen.findByText("Not saved on this device")).toBeTruthy();
     expect(useUi.getState().journalDay).toBeNull();
     expect(screen.getByRole("heading", { name: "Today’s page" })).toBeTruthy();
-    expect(screen.getByDisplayValue("Do not turn away from this draft")).toBeTruthy();
+    expect(screen.getAllByDisplayValue("Do not turn away from this draft")[0]).toBeTruthy();
     expect(screen.queryByDisplayValue("Yesterday was grounded.")).toBeNull();
     expect(screen.getByRole("alert").textContent).toMatch(/still open.*export.*retry Save/i);
   });
@@ -135,7 +194,7 @@ describe("Journal notebook foundation", () => {
 
     expect(await screen.findByText("Not saved on this device")).toBeTruthy();
     expect(screen.getByLabelText("Journal notebook")).toBeTruthy();
-    expect(screen.getByDisplayValue("Keep the notebook open")).toBeTruthy();
+    expect(screen.getAllByDisplayValue("Keep the notebook open")[0]).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Open today’s page/i })).toBeNull();
   });
 
@@ -187,7 +246,7 @@ describe("Journal notebook foundation", () => {
     act(() => { useUi.getState().remediateStandup(TODAY_KEY); });
     await waitFor(() => expect(flush).toHaveBeenCalledTimes(1));
     expect(useUi.getState().journalDay).toBe(TODAY_KEY);
-    expect(screen.getByDisplayValue("Yesterday remains visible until durable")).toBeTruthy();
+    expect(screen.getAllByDisplayValue("Yesterday remains visible until durable")[0]).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Today’s page" })).toBeNull();
 
     await act(async () => { confirmDurability(); await Promise.resolve(); });
@@ -202,7 +261,7 @@ describe("Journal notebook foundation", () => {
 
     expect(await screen.findByText("Not saved on this device")).toBeTruthy();
     expect(screen.getByRole("dialog", { name: "Edit standup" })).toBeTruthy();
-    expect(screen.getByDisplayValue("Cancel must not discard this")).toBeTruthy();
+    expect(screen.getAllByDisplayValue("Cancel must not discard this")[0]).toBeTruthy();
   });
 
   it("keeps a failed requested-day intent and its current draft intact", async () => {
@@ -215,7 +274,7 @@ describe("Journal notebook foundation", () => {
 
     expect(await screen.findByText("Not saved on this device")).toBeTruthy();
     expect(useUi.getState().journalDay).toBe(TODAY_KEY);
-    expect(screen.getByDisplayValue("Keep this page and the requested day")).toBeTruthy();
+    expect(screen.getAllByDisplayValue("Keep this page and the requested day")[0]).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Today’s page" })).toBeNull();
   });
 
@@ -424,7 +483,7 @@ describe("Journal notebook foundation", () => {
 
     expect(await screen.findByText("Not saved on this device")).toBeTruthy();
     expect(screen.getByRole("alert").textContent).toBe(localVault.VAULT_CONFLICT_MESSAGE);
-    expect(screen.getByDisplayValue("Keep this tab's draft visible")).toBeTruthy();
+    expect(screen.getAllByDisplayValue("Keep this tab's draft visible")[0]).toBeTruthy();
     expect(screen.queryByText("Saved to this workspace")).toBeNull();
   });
 

@@ -32,7 +32,7 @@ describe("Journal remediation routing", () => {
   it("updates an existing same-day entry instead of creating or overwriting a second entry", async () => {
     render(<JournalPage />);
     expect(await screen.findByRole("dialog", { name: "Edit standup" })).toBeTruthy();
-    expect((screen.getByLabelText("Today — did you do what you set out to do?") as HTMLTextAreaElement).value).toBe("Existing reflection");
+    expect((screen.getByLabelText("What stayed with you today?") as HTMLTextAreaElement).value).toBe("Existing reflection");
 
     fireEvent.change(screen.getByLabelText("Energy"), { target: { value: "High" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));

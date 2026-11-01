@@ -4,9 +4,12 @@ import type { DayAtAGlance } from "./dayAtAGlance";
 import {
   JOURNAL_ATTACHMENT_MAX_BYTES,
   JOURNAL_GLANCE_SECTION_KEYS,
+  JOURNAL_STYLE_COST,
   buildJournalGlanceSections,
   buildJournalMarkdown,
   createJournalAttachmentExport,
+  journalInkBalance,
+  journalInkEarned,
   nextJournalDay,
   normalizeJournalEntries,
   normalizeJournalNotebookPreferences,
@@ -104,6 +107,28 @@ describe("journal notebook data projection", () => {
       deskTone: "walnut",
       weather: "sun",
       laptopPosition: "left",
+    });
+  });
+
+  it("credits distinct completed study sessions and keeps purchased styles portable", () => {
+    const sessions = [
+      { id: "one", status: "completed" },
+      { id: "one", status: "completed" },
+      { id: "two", status: "completed" },
+      { id: "three", status: "active" },
+    ];
+    expect(journalInkEarned(sessions)).toBe(2);
+    expect(journalInkBalance(sessions, ["copper"])).toBe(0);
+    expect(JOURNAL_STYLE_COST).toBe(2);
+    expect(normalizeJournalNotebookPreferences({ coverTone: "copper", paperTone: "linen" })).toMatchObject({ coverTone: "onyx", paperTone: "warm" });
+    expect(normalizeJournalNotebookPreferences({ coverTone: "copper", paperTone: "linen", unlockedStyles: ["copper", "linen", "unsafe", "copper"] })).toMatchObject({
+      coverTone: "copper", paperTone: "linen", unlockedStyles: ["copper", "linen"],
+    });
+    expect(normalizeJournalNotebookPreferences({ laptopTone: "starlight", deskAccent: "lamp", purpose: "recover" })).toMatchObject({
+      laptopTone: "graphite", deskAccent: "none", purpose: "recover",
+    });
+    expect(normalizeJournalNotebookPreferences({ laptopTone: "starlight", deskAccent: "lamp", unlockedStyles: ["starlight", "lamp"] })).toMatchObject({
+      laptopTone: "starlight", deskAccent: "lamp",
     });
   });
 

@@ -25,8 +25,15 @@ describe("portable backup safety", () => {
       ...DEFAULT_JOURNAL_NOTEBOOK,
       title: "Clinical notebook",
       subtitle: "Daily rounds",
-      coverTone: "forest",
-      paperTone: "cream",
+      coverTone: "copper",
+      paperTone: "linen",
+      laptopTone: "starlight",
+      deskAccent: "lamp",
+      purpose: "focus",
+      writingMode: "free",
+      setupCompleted: true,
+      feedbackPrompted: false,
+      unlockedStyles: ["copper", "linen", "starlight", "lamp"],
     };
     state.journal = [{
       id: "journal-notebook-page",
