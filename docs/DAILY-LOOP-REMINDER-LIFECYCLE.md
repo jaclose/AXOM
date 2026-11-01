@@ -22,7 +22,9 @@ browser’s local calendar/time context; there is no server alarm or cloud push.
 `evaluateDailyLoopReminder` recomputes the current local day on every check. A
 morning signal is eligible only after its preferred time, before the closeout
 boundary, and while today has no saved `DayPlan`. A closeout signal is eligible
-only after its preferred time and while today has no canonical `DailyCloseout`.
+only after its preferred time and while today has neither a canonical
+`DailyCloseout` nor a Journal page marked complete. Writing a finished page
+counts as closing the day, without forcing a second quick closeout.
 
 After the evening boundary, closeout takes precedence. A late first open cannot
 show a stale morning check-in and then immediately show a closeout. Disabled,
@@ -52,6 +54,18 @@ from producing duplicate messages. The toast is optional and offers:
 The Dashboard also has a persistent in-context Daily Check-In/closeout surface.
 Opening from the toast targets the same local day through a small UI request;
 it does not create a plan or Journal entry merely by opening.
+
+At the next app opening after `08:00` local time, an active yesterday with no
+completed Journal page earns one device-only “Yesterday is still open” inbox
+notice. Activity means a saved Journal draft, a study log, a day plan, or a
+closeout. The notice contains only the date and fixed copy. Opening it selects
+that exact Journal day, even if the student returns much later. Dismiss marks
+this one invitation read and hides it; the one-time ID prevents another poll
+from recreating it. Past days remain available from the Journal itself.
+
+After the first completed Journal page, the bell also asks once for experience
+feedback. This is a local notification; journal writing is never placed in the
+inbox or sent by the reminder system.
 
 ## Device reminder ledger
 

@@ -1,6 +1,7 @@
 import { STORAGE_KEYS } from "./brand";
 import { isoDate } from "./scoring";
-import type { DailyLoopReminderPreferences } from "./types";
+import { entryDayKey } from "./journal";
+import type { DailyLoopReminderPreferences, NoctyriumState } from "./types";
 
 export type DailyLoopReminderKind = "check-in" | "closeout";
 export type DailyLoopReminderDisposition = "pending" | "shown" | "skipped";
@@ -45,6 +46,32 @@ export interface DailyLoopReminderEvaluationInput {
   metadata: DailyLoopReminderMetadata;
   checkInComplete: boolean;
   closeoutComplete: boolean;
+}
+
+/** A finished journal page closes the writing loop even without a quick closeout. */
+export function journalPageComplete(
+  journal: Pick<NoctyriumState, "journal">["journal"],
+  dayKey: string,
+): boolean {
+  return journal.some((entry) => entryDayKey(entry) === dayKey && entry.notebookStatus === "complete");
+}
+
+/** Offer only yesterday, once there is something real to return to after 08:00. */
+export function journalCatchUpDay(
+  state: Pick<NoctyriumState, "journal" | "logs" | "dayPlans" | "closeouts">,
+  now: Date = new Date(),
+): string | null {
+  if (!Number.isFinite(now.getTime()) || now.getHours() < 8) return null;
+  const yesterday = new Date(now);
+  yesterday.setHours(12, 0, 0, 0);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const key = isoDate(yesterday);
+  if (journalPageComplete(state.journal, key)) return null;
+  const active = state.journal.some((entry) => entryDayKey(entry) === key)
+    || state.logs.some((log) => log.dayKey === key && (log.minutes > 0 || log.cards > 0 || (log.quantity ?? 0) > 0))
+    || state.dayPlans.some((plan) => plan.dayKey === key)
+    || state.closeouts.some((closeout) => closeout.dayKey === key);
+  return active ? key : null;
 }
 
 type ReminderStorage = Pick<Storage, "getItem" | "setItem">;

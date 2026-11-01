@@ -41,7 +41,7 @@ import { CloseoutModal } from "../components/brief/CloseoutModal";
 import { DailyProgressVessel } from "../components/productivity/DailyProgressVessel";
 import { evaluateDailySuccess, type DailySuccessResult } from "../lib/dailySuccess";
 import { closeoutForDay } from "../lib/closeout";
-import { dailyLoopReminderLedger, normalizeDailyLoopReminderPreferences } from "../lib/dailyLoopReminders";
+import { dailyLoopReminderLedger, journalPageComplete, normalizeDailyLoopReminderPreferences } from "../lib/dailyLoopReminders";
 import {
   CURRENT_DASHBOARD_WIDGET_IDS,
   DASHBOARD_LAYOUT_PRESETS,
@@ -1198,7 +1198,7 @@ function StandupPrompt() {
   const missed = missedStandupDays(s);
   const preferences = normalizeDailyLoopReminderPreferences(s.profile.dailyLoopReminders);
   const today = s.activeDayKey;
-  const closeoutDone = Boolean(closeoutForDay(s.closeouts ?? [], today));
+  const closeoutDone = Boolean(closeoutForDay(s.closeouts ?? [], today)) || journalPageComplete(s.journal, today);
   const closeoutDue = preferences.closeoutEnabled && !closeoutDone && isAfterLocalTime(preferences.closeoutTime);
   const [showCloseout, setShowCloseout] = useState(false);
   const [dismissed, setDismissed] = useState(() => {
@@ -1232,8 +1232,8 @@ function StandupPrompt() {
           <div className="standup-prompt-head">
             <span className="standup-prompt-mark"><BookText size={ICON_SIZE.emphasis} /></span>
             <div className="grow">
-              <b>A page before the day ends</b>
-              <span>Keep what mattered, name what changed, and leave a first step for tomorrow. A short page is enough.</span>
+              <b>Before the day closes</b>
+              <span>Keep one thing, release one thing, or simply close the page. A short page is enough.</span>
             </div>
           </div>
           <div className="row wrap gap8 daily-closeout-actions">

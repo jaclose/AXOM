@@ -1,5 +1,5 @@
 /** Device-only receipts for AXOM's own learning prompts. No journal text is stored. */
-export type LocalNoticeKind = "check-in" | "closeout" | "journal-feedback" | "study-reminder" | "rest-reminder";
+export type LocalNoticeKind = "check-in" | "closeout" | "journal-catch-up" | "journal-feedback" | "study-reminder" | "rest-reminder";
 export interface LocalNotice {
   id: string;
   kind: LocalNoticeKind;
@@ -8,7 +8,7 @@ export interface LocalNotice {
 
 const KEY = "axom.notificationInbox.v1";
 const EVENT = "axom:notification-inbox-changed";
-const kinds = new Set<LocalNoticeKind>(["check-in", "closeout", "journal-feedback", "study-reminder", "rest-reminder"]);
+const kinds = new Set<LocalNoticeKind>(["check-in", "closeout", "journal-catch-up", "journal-feedback", "study-reminder", "rest-reminder"]);
 
 export function localNoticeCopy(kind: LocalNoticeKind): { title: string; body: string; href: string } {
   if (kind === "check-in") return {
@@ -17,8 +17,13 @@ export function localNoticeCopy(kind: LocalNoticeKind): { title: string; body: s
     href: "#dashboard",
   };
   if (kind === "closeout") return {
-    title: "A page before the day ends",
-    body: "Keep what mattered, note what changed, and leave a first step for tomorrow.",
+    title: "Before the day closes",
+    body: "Keep one thing, release one thing, or simply close the page.",
+    href: "#journal",
+  };
+  if (kind === "journal-catch-up") return {
+    title: "Yesterday is still open",
+    body: "Return to the page whenever you want. A day can be written after it ends.",
     href: "#journal",
   };
   if (kind === "rest-reminder") return {
@@ -36,6 +41,13 @@ export function localNoticeCopy(kind: LocalNoticeKind): { title: string; body: s
     body: "Rate the experience and tell us what to keep, improve, or add. Your writing stays private.",
     href: "#journal?feedback=1",
   };
+}
+
+/** IDs carry a date only; no journal writing or study detail is kept in notices. */
+export function localNoticeJournalDay(notice: LocalNotice): string | null {
+  if (notice.kind === "journal-catch-up") return /^journal-catch-up:(\d{4}-\d{2}-\d{2})$/.exec(notice.id)?.[1] ?? null;
+  if (notice.kind === "closeout") return /^daily-loop:(\d{4}-\d{2}-\d{2}):closeout$/.exec(notice.id)?.[1] ?? null;
+  return null;
 }
 
 export function readLocalNotices(): LocalNotice[] {

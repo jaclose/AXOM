@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CommunicationsSettings } from "../../lib/communications/client";
 import { DashboardNotificationCenter } from "./DashboardNotificationCenter";
+import { useUi } from "../../lib/uiStore";
 
 const reload = vi.fn();
 const localValues = new Map<string, string>();
@@ -90,10 +91,33 @@ describe("DashboardNotificationCenter", () => {
     render(<DashboardNotificationCenter />);
     fireEvent.click(screen.getByRole("button", { name: "Notifications, 2 items need attention" }));
 
-    expect(screen.getByRole("link", { name: /A page before the day ends/i }).getAttribute("href")).toBe("#journal");
+    expect(screen.getByRole("link", { name: /Before the day closes/i }).getAttribute("href")).toBe("#journal");
     fireEvent.click(screen.getByRole("button", { name: "Mark all read" }));
     expect(screen.getByRole("button", { name: "Notifications" })).toBeTruthy();
     expect(JSON.parse(localStorage.getItem("axom.notificationReads.v1") ?? "[]")).toContain("daily-loop:2026-10-15:closeout");
+  });
+
+  it("opens a catch-up notice at its saved day, even when today has moved on", () => {
+    memoryLocalStorage.setItem("axom.notificationInbox.v1", JSON.stringify([
+      { id: "journal-catch-up:2026-10-14", kind: "journal-catch-up", createdAt: "2026-10-15T12:00:00.000Z" },
+    ]));
+    useUi.setState({ journalDay: null });
+    render(<DashboardNotificationCenter />);
+    fireEvent.click(screen.getByRole("button", { name: "Notifications, 2 items need attention" }));
+    fireEvent.click(screen.getByRole("link", { name: /Yesterday is still open/i }));
+    expect(useUi.getState().journalDay).toBe("2026-10-14");
+    expect(window.location.hash).toBe("#journal");
+  });
+
+  it("lets the student dismiss yesterday's invitation without losing account history", () => {
+    memoryLocalStorage.setItem("axom.notificationInbox.v1", JSON.stringify([
+      { id: "journal-catch-up:2026-10-14", kind: "journal-catch-up", createdAt: "2026-10-15T12:00:00.000Z" },
+    ]));
+    render(<DashboardNotificationCenter />);
+    fireEvent.click(screen.getByRole("button", { name: "Notifications, 2 items need attention" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss yesterday reminder" }));
+    expect(screen.queryByRole("link", { name: /Yesterday is still open/i })).toBeNull();
+    expect(screen.getByText("Security notice")).toBeTruthy();
   });
 
   it("resurfaces a failed outcome after the successful outcome was read", () => {

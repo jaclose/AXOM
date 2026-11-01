@@ -4,6 +4,7 @@ import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDailyLoopReminderLedger } from "../../lib/dailyLoopReminders";
 import { markFirstRunDay } from "../../lib/firstRun";
+import { readLocalNotices } from "../../lib/notificationInbox";
 import { useStore } from "../../lib/store";
 import { REMINDER_TOAST_DURATION_MS, useToasts } from "../../lib/toast";
 import { Toaster } from "./Toaster";
@@ -41,6 +42,8 @@ beforeEach(() => {
     activeDayKey: "2026-07-13",
     dayPlans: [],
     closeouts: [],
+    journal: [],
+    logs: [],
     profile: {
       ...state.profile,
       dailyLoopReminders: {
@@ -99,11 +102,11 @@ describe("DailyLoopReminderWatcher", () => {
   it("uses the 20:30 local closeout boundary and suppresses a completed day", async () => {
     let now = localTime(20, 29);
     const first = renderWatcher(() => now);
-    expect(screen.queryByText("A page before the day ends")).toBeNull();
+    expect(screen.queryByText("Before the day closes")).toBeNull();
 
     now = localTime(20, 30);
     fireEvent(window, new Event("pageshow"));
-    expect(await screen.findByText("A page before the day ends")).toBeTruthy();
+    expect(await screen.findByText("Before the day closes")).toBeTruthy();
     first.unmount();
     useToasts.setState({ toasts: [] });
 
@@ -114,7 +117,29 @@ describe("DailyLoopReminderWatcher", () => {
       }],
     });
     renderWatcher(() => now);
-    await waitFor(() => expect(screen.queryByText("A page before the day ends")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Before the day closes")).toBeNull());
+  });
+
+  it("treats a finished journal page as the evening wrap-up", async () => {
+    useStore.setState({ journal: [{
+      id: "done", date: "2026-07-13T18:00:00.000Z", today: "One good thing", tomorrow: "",
+      blockers: "", energy: "", rating: "", notebookStatus: "complete",
+    }] });
+    renderWatcher(() => localTime(20, 30));
+    await waitFor(() => expect(screen.queryByText("Before the day closes")).toBeNull());
+    expect(readLocalNotices().some((item) => item.kind === "closeout")).toBe(false);
+  });
+
+  it("keeps one private, device-only invitation to revisit an unfinished yesterday", () => {
+    useStore.setState({ journal: [{
+      id: "draft", date: "2026-07-13T18:00:00.000Z", today: "", tomorrow: "",
+      blockers: "", energy: "", rating: "", notebookStatus: "draft", freeWriting: "Private writing",
+    }] });
+    renderWatcher(() => localTime(9, 0, 14));
+    expect(readLocalNotices().filter((item) => item.kind === "journal-catch-up")).toHaveLength(1);
+    expect(localStorage.getItem("axom.notificationInbox.v1")).not.toContain("Private writing");
+    fireEvent.focus(window);
+    expect(readLocalNotices().filter((item) => item.kind === "journal-catch-up")).toHaveLength(1);
   });
 
   it("keeps a reminder pending during quiet hours and publishes it once after quiet hours end", async () => {

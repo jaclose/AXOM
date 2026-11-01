@@ -5,7 +5,8 @@ import { useCommunications, type CommunicationsSettings } from "../../lib/commun
 import { CATEGORIES, TEMPLATE_CATEGORY } from "../../lib/communications/model";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { normalizeJournalNotebookPreferences } from "../../lib/journalNotebook";
-import { localNoticeCopy, readLocalNotices, recordLocalNotice, subscribeLocalNotices, type LocalNotice } from "../../lib/notificationInbox";
+import { localNoticeCopy, localNoticeJournalDay, readLocalNotices, recordLocalNotice, subscribeLocalNotices, type LocalNotice } from "../../lib/notificationInbox";
+import { gotoJournalDay } from "../../lib/uiStore";
 import { useStore } from "../../lib/store";
 import { GButton, GhostButton } from "../ui/primitives";
 import "../../styles/dashboard-inbox.css";
@@ -129,6 +130,7 @@ export function DashboardNotificationCenter() {
     [remote.data?.history],
   );
   const history = prioritizeHistory(outcomes, read);
+  const visibleLocalNotices = localNotices.filter((item) => item.kind !== "journal-catch-up" || !localRead.has(item.id));
   const unread = outcomes.filter((item) => !read.has(readToken(item))).length;
   const attentionUnread = outcomes.filter((item) => needsAttention(item) && !read.has(readToken(item))).length;
   const localUnread = localNotices.filter((item) => !localRead.has(item.id)).length;
@@ -240,18 +242,27 @@ export function DashboardNotificationCenter() {
             </div>
           </header>
           <div className="dashboard-notifications__body" aria-live="polite">
-            {localNotices.length > 0 && <div className="dashboard-notifications__group-label">On this device</div>}
-            {localNotices.length > 0 && <ul className="dashboard-notifications__list dashboard-notifications__list--local" aria-label="Learning and journal prompts">
-              {localNotices.map((item) => {
+            {visibleLocalNotices.length > 0 && <div className="dashboard-notifications__group-label">On this device</div>}
+            {visibleLocalNotices.length > 0 && <ul className="dashboard-notifications__list dashboard-notifications__list--local" aria-label="Learning and journal prompts">
+              {visibleLocalNotices.map((item) => {
                 const copy = localNoticeCopy(item.kind);
                 const unreadItem = !localRead.has(item.id);
                 const Icon = item.kind === "journal-feedback" ? MessageSquareText : BookText;
                 return <li key={item.id} data-kind={item.kind} className={unreadItem ? "is-unread" : ""}>
-                  <a href={copy.href} onClick={() => markLocalRead([item])}>
+                  <a href={copy.href} onClick={(event) => {
+                    markLocalRead([item]);
+                    const targetDay = localNoticeJournalDay(item);
+                    if (targetDay) {
+                      event.preventDefault();
+                      gotoJournalDay(targetDay);
+                      setOpen(false);
+                    }
+                  }}>
                     <span aria-hidden="true"><Icon size={ICON_SIZE.body} /></span>
                     <span><b>{copy.title}</b><small>{copy.body} · {relativeTime(item.createdAt)}</small>{unreadItem && <span className="sr-only"> Unread.</span>}</span>
                     {unreadItem && <i aria-hidden="true" />}
                   </a>
+                  {item.kind === "journal-catch-up" && <button type="button" className="dashboard-notifications__dismiss" aria-label="Dismiss yesterday reminder" onClick={() => markLocalRead([item])}>Dismiss</button>}
                 </li>;
               })}
             </ul>}
@@ -264,7 +275,7 @@ export function DashboardNotificationCenter() {
             {!remote.loading && userId && remote.error && (
               <div className="dashboard-notifications__state"><CircleAlert size={ICON_SIZE.display} aria-hidden="true" /><b>Inbox unavailable</b><span>{remote.error}</span><GButton size="sm" onClick={() => void remote.reload()}><RefreshCw size={ICON_SIZE.body} aria-hidden="true" /> Try again</GButton></div>
             )}
-            {!remote.loading && userId && !remote.error && !history.length && !localNotices.length && (
+            {!remote.loading && userId && !remote.error && !history.length && !visibleLocalNotices.length && (
               <div className="dashboard-notifications__state"><Bell size={ICON_SIZE.display} aria-hidden="true" /><b>Nothing needs your attention</b><span>Important account and learning communications will appear here.</span></div>
             )}
             {!remote.loading && userId && !remote.error && history.length > 0 && (
