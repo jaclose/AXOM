@@ -200,7 +200,7 @@ export function AcademicBookshelf<T extends ShelfBook>({ label, shelves: inputSh
         <BookOpen size={ICON_SIZE.display} aria-hidden="true" />
         <div>
           <h3>{availableOnly ? "This shelf is waiting for material" : "No courses match"}</h3>
-          <p>{availableOnly ? "Add a source from Import, or browse the course map without prepared content." : "Try another module or term."}</p>
+          <p>{availableOnly ? "Open Import status and source review below, then choose Install prepared folder to add course plans." : "Try another module or term."}</p>
         </div>
         <button type="button" onClick={() => { if (availableOnly) setAvailableOnly(false); else { setQuery(""); setTerm(""); } }}>
           {availableOnly ? "Browse course map" : "Clear filters"}
