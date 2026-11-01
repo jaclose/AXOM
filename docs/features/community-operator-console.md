@@ -1,6 +1,6 @@
 # Community, source-answer batch review and host console
 
-Status: **PR #30 baseline; local hardening, integration pending**. The shared baseline is `819e86eb4fdac83957bbd84b148d260f8709d2f8` on `feat/community-social-review-20261024`. Its GitHub Quality jobs passed on 2026-10-25. Further changes require new validation; this is not proof of a production release.
+Status: **local integration and extension, release pending**. PR #30's Host/Community hardening at `3684a116` was integrated into the isolated `codex/ideas-20261101` branch. A searchable Question Set Library is being added there. No hosted migrations, verified-account provisioning, private-content publication or production deployment occurred from this branch.
 
 ## Community
 
@@ -16,6 +16,14 @@ The #community page extends optional Supabase accounts without moving or auto-pu
 The social tables have restrictive RLS. Non-discoverable people are visible only to themselves and accepted friends. Friends-only posts require an accepted connection for RLS to expose them. Unfriending immediately removes that access. Reports may surface a reported post's metadata to a moderator; the unreported feed is not a host-wide surveillance view.
 
 **Question Set announcement is not source sharing.** No private question text, answers, share tokens, source PDFs or media are copied to social_posts. Link a set only through the existing explicit share/review mechanism and rights controls. A user may post a title from a private set, so the UI warns them before publishing.
+
+## Searchable learner Question Sets
+
+The separate Question Set Library lets a signed-in learner submit a saved set from its card, search approved learner sets in QBank, preview questions, like a set and import a private copy. It uses the same privacy-stripped snapshot format as unlisted shares. Attempts, notes, source files, media, analytics, original local IDs and course filing are excluded. Submission requires two explicit attestations: distribution rights and source-checked answers. A set with unresolved answer/source review or media that the snapshot cannot carry is held out of public submission.
+
+`20261101120000_question_set_library.sql` stores pending submissions apart from seven-day bearer links. Direct learner table access is denied. Account-bound RPCs project only the owner's submission status, pending reviewer metadata, or approved search results. Preview returns the snapshot only to the owner, an academic reviewer or an approved-set reader. Likes use an idempotent RPC. An academic reviewer must inspect and record a reason before approval or rejection; Host operator permission alone does not grant academic review. A contributor can withdraw a submission, removing it from search and future previews; previously imported private copies remain with their learners.
+
+This is a user-submitted library, not automatic certification of clinical correctness or source rights. Reviewers need independent source and rights evidence. The local migration and UI must pass PGlite, browser and account acceptance before it can be released. Search is available to signed-in AXOM accounts, not anonymous visitors.
 
 ## Batch answer confirmation
 
@@ -62,7 +70,7 @@ Do not paste private emails, JWTs or service keys into the public repository. Ro
 7. Check build, typecheck, lint, unit tests, QBank Playwright, Vercel preview and real-account reload. GitHub CI is not a substitute for live multi-account or migration tests.
 8. Approve integration into main and only then verify the production commit and runtime schema. No auto-publication of user material.
 
-Not in this slice: account-wide suspension, persistent user blocking, configurable capability policies beyond the existing three operator roles, billing/token/latency attribution, comment threads, full Question Set content in the feed, a publisher rights-review workflow, trusted general QBank/course-event ingestion, realtime push notifications or automatic Anki imports. Unfriend removes friends-only access but is not a block. Persistent blocking needs an auth-bound record that survives leaving and rejoining Community. Self-shared standings must never be described as verified study rankings.
+Not in this slice: account-wide suspension, persistent user blocking, configurable capability policies beyond the existing three operator roles, billing/token/latency attribution, comment threads, full Question Set content in the feed, independent source-rights verification tools, trusted general QBank/course-event ingestion, realtime push notifications or automatic Anki imports. Unfriend removes friends-only access but is not a block. Persistent blocking needs an auth-bound record that survives leaving and rejoining Community. Self-shared standings must never be described as verified study rankings.
 
 ## PR #30 integration boundary
 
