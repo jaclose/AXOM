@@ -16,6 +16,8 @@ export interface TextPart {
   pages: string[];
   /** The short line printed just above the part's first question, when there is one. */
   title?: string;
+  /** An explicit heading distinguishes a question-only copy from its answered copy. */
+  role?: "question-only" | "answer-copy";
   /** What was done with a separate answer section, when the part has one. */
   answerSectionNote?: string;
 }
@@ -33,6 +35,11 @@ const NUMBERED_ANSWER = /^\s*(\d{1,3})[.)]\s*(?:the\s+)?(?:correct\s+)?(?:answer
 const INLINE_ANSWER = /^\s*(?:the\s+)?(?:correct\s+)?(?:answer|ans)\b\s*(?:is\b)?\s*[:\-–]/i;
 const CHOICE = /^\s*\(?[A-Ia-i][.)]\s+\S/;
 const SAYS_ANSWERS = /\banswers?\b/i;
+const QUESTION_ONLY_HEADING = /^questions?\s+(?:only|without\s+answers?)\s*[:.]?$/i;
+const ANSWER_COPY_HEADING = /^(?:(?:questions?\s+)?with\s+answers?\s+(?:and|&)\s+(?:commentary|explanations?)|answers?\s+(?:and|&)\s+commentary)\s*[:.]?$/i;
+type PartRole = NonNullable<TextPart["role"]>;
+const headingRole = (text: string): PartRole | undefined =>
+  QUESTION_ONLY_HEADING.test(text.trim()) ? "question-only" : ANSWER_COPY_HEADING.test(text.trim()) ? "answer-copy" : undefined;
 
 /** A line short and plain enough to be a heading: not a choice, a numbered line, an answer or a sentence. */
 const headingLike = (text: string): boolean =>
@@ -104,13 +111,24 @@ export function splitParts(pageTexts: readonly string[]): TextPart[] {
     return number === undefined ? [] : [{ at, number }];
   });
 
-  // A part begins where the numbering goes back to 1 after at least two questions.
+  // A role change is a boundary even when each copy has only one question.
+  const roleBefore = (at: number): PartRole | undefined => {
+    for (let above = at - 1; above >= 0; above -= 1) {
+      const text = lines[above].text.trim();
+      if (text) return headingRole(text);
+    }
+    return undefined;
+  };
   const partStarts: number[] = [];
   let sinceStart = 0;
+  let currentRole: PartRole | undefined;
   for (const start of starts) {
-    if (start.number === 1 && (partStarts.length === 0 || sinceStart >= 2)) {
+    const role = roleBefore(start.at);
+    if (partStarts.length === 0 || (sinceStart > 0 && role && currentRole && role !== currentRole)
+      || (start.number === 1 && sinceStart >= 2)) {
       partStarts.push(start.at);
       sinceStart = 0;
+      currentRole = role;
     }
     sinceStart += 1;
   }
@@ -121,11 +139,16 @@ export function splitParts(pageTexts: readonly string[]): TextPart[] {
   // The line just above a later part's first question heads that part. Left with the part before
   // it, it would read as the tail of that part's last choice.
   const titles = new Map<number, string>();
+  const roles = new Map<number, PartRole>();
   for (let part = 0; part < partStarts.length; part += 1) {
     for (let above = partStarts[part] - 1; above >= 0; above -= 1) {
       const text = lines[above].text.trim();
       if (!text) continue;
-      if (headingLike(text) && !/[.?!]$/.test(text) && !SAYS_ANSWERS.test(text)) {
+      const role = headingRole(text);
+      if (role) {
+        roles.set(part, role);
+        if (part > 0) owner[above] = part;
+      } else if (headingLike(text) && !/[.?!]$/.test(text) && !SAYS_ANSWERS.test(text)) {
         titles.set(part, text);
         if (part > 0) owner[above] = part;
       }
@@ -197,12 +220,12 @@ export function splitParts(pageTexts: readonly string[]): TextPart[] {
   }
 
   // One set, nothing moved and nothing reworded: the text goes on exactly as it came.
-  if (count === 1 && rewrite.size === 0) return [{ pages: [...pageTexts], ...(notes.has(0) ? { answerSectionNote: notes.get(0)! } : {}) }];
+  if (count === 1 && rewrite.size === 0) return [{ pages: [...pageTexts], ...(roles.has(0) ? { role: roles.get(0)! } : {}), ...(notes.has(0) ? { answerSectionNote: notes.get(0)! } : {}) }];
   return Array.from({ length: count }, (_, part) => {
     const pages = pageTexts.map((_, page) =>
       lines.flatMap((line, at) => (line.page === page && owner[at] === part ? [rewrite.get(at) ?? line.text] : [])).join("\n"));
     const title = titles.get(part);
     const note = notes.get(part);
-    return { pages, ...(title ? { title } : {}), ...(note ? { answerSectionNote: note } : {}) };
+    return { pages, ...(title ? { title } : {}), ...(roles.has(part) ? { role: roles.get(part)! } : {}), ...(note ? { answerSectionNote: note } : {}) };
   });
 }

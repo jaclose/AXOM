@@ -25,6 +25,15 @@ const answer = (index: number, numbered = true) => slide(question(index, numbere
 const read = (pages: string[]) => parsePdfQuestions(pages.join("\n\n"), pages);
 
 describe("parsePdfQuestions", () => {
+  it("uses the same exact-copy rule in the running-text path", () => {
+    const bare = slide("1. Which invented gate opens the blue chamber?", "A. East gate", "B. West gate", "C. North gate");
+    const pages = [slide("Questions only", bare), slide("With Answers and Commentary", bare, "Answer: B", "Explanation: The west gate is named in the invented source.")];
+    const result = read(pages);
+    expect(result.drafts).toHaveLength(1);
+    expect(result.drafts[0]).toMatchObject({ correctKey: "B", questionSourcePage: 1, answerEvidencePage: 2, explanationSourcePage: 2 });
+    expect(result.notes.join(" ")).toMatch(/exact question-only/);
+  });
+
   it("reads a deck that prints each question twice as one question each, on its own page", () => {
     const pages = ["Cardiology review", question(0), answer(0), question(1), answer(1), question(2), answer(2)];
     // Running text reads the same deck as six questions with clashing numbers.
