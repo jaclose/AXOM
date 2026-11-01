@@ -427,7 +427,7 @@ describe("Settings information architecture", () => {
     expect(JSON.parse(localStorage.getItem("axom.palette.v1")!).id).toBe("amethyst");
     expect(JSON.stringify(useStore.getState().profile)).not.toContain("amethyst");
     await user.click(screen.getByRole("radio", { name: /AXOM Classic/ }));
-    expect(document.documentElement.dataset.palette).toBeUndefined();
+    expect(document.documentElement.dataset.palette).toBe("midnight");
   });
 
   it("shows the profile header with program facts and an account entry point", () => {

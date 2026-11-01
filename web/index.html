@@ -6,7 +6,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png" />
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#0d0d0e" />
+    <meta name="theme-color" content="#070a15" />
     <script>
       (() => {
         const key = "axom.theme"; // Keep in sync with STORAGE_KEYS.themePreference.
@@ -22,13 +22,20 @@
         root.dataset.theme = theme;
         root.dataset.themePreference = preference;
         root.style.colorScheme = theme;
-        let chrome = theme === "dark" ? "#0d0d0e" : "#f3eee3";
+        let chrome = theme === "dark" ? "#070a15" : "#f8f9fc";
+        root.dataset.palette = "midnight";
         // Accent palette (keep in sync with STORAGE_KEYS.palettePreference and
         // paletteCss() in src/lib/palette.ts). Names/values are allow-listed so
         // a tampered entry can never escape its declaration block.
         try {
           const palette = JSON.parse(localStorage.getItem("axom.palette.v1") || "null");
-          const ids = ["ivory", "amethyst", "sapphire", "midnight", "emerald", "rose", "platinum", "custom"];
+          const ids = ["ivory", "amethyst", "sapphire", "midnight", "midnight-black", "emerald", "rose", "platinum", "custom"];
+          if (palette && palette.id === "classic") {
+            delete root.dataset.palette;
+            chrome = theme === "dark" ? "#0d0d0e" : "#f3eee3";
+          } else if (palette && ids.includes(palette.id)) {
+            root.dataset.palette = palette.id;
+          }
           if (palette && ids.includes(palette.id) && palette.vars && palette.vars.dark && palette.vars.light) {
             const name = /^--[a-z0-9-]{1,40}$/;
             const value = /^[#0-9a-zA-Z(),.%\s-]{1,200}$/;
@@ -44,7 +51,7 @@
             const bg = palette.vars[theme] && palette.vars[theme]["--bg-2"];
             if (typeof bg === "string" && /^#[0-9a-f]{6}$/i.test(bg)) chrome = bg;
           }
-        } catch { /* classic gold is the safe fallback */ }
+        } catch { /* default navy remains available without storage */ }
         try {
           if (localStorage.getItem("axom.motion") === "reduce") root.dataset.motion = "reduce";
         } catch { /* motion follows the device */ }
@@ -53,8 +60,12 @@
     </script>
     <style>
       /* Before any stylesheet loads: the films' black (or the light theme's paper), never browser white. */
-      html { background: #0d0d0e; color-scheme: dark; }
-      html[data-theme="light"] { background: #f3eee3; color-scheme: light; }
+      html { background: #0d0d0e; color: #f3f0e8; color-scheme: dark; }
+      html[data-theme="light"] { background: #f3eee3; color: #211d18; color-scheme: light; }
+      html[data-palette="midnight"] { background: #070a15; }
+      html[data-palette="midnight"][data-theme="light"] { background: #f8f9fc; }
+      html[data-palette="midnight-black"] { background: #040405; }
+      html[data-palette="midnight-black"][data-theme="light"] { background: #f8f8f7; }
     </style>
     <meta name="description" content="AXOM — a private academic operating system. Courses, mastery tracking, sessions, questions, and recovery in one calm cockpit." />
     <link rel="manifest" href="./manifest.webmanifest" />

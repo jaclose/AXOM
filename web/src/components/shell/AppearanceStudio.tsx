@@ -18,8 +18,8 @@ import { CinematicSettings } from "./CinematicSettings";
 import { TimerCueSettings } from "./TimerCueSettings";
 
 const MODES: Array<{ value: ThemePreference; label: string; detail: string; icon: typeof Sun }> = [
-  { value: "light", label: "Light", detail: "Warm paper", icon: Sun },
-  { value: "dark", label: "Dark", detail: "Deep graphite", icon: Moon },
+  { value: "light", label: "Light", detail: "A clear canvas", icon: Sun },
+  { value: "dark", label: "Dark", detail: "A quieter room", icon: Moon },
   { value: "system", label: "System", detail: "Follows your device", icon: Monitor },
 ];
 
@@ -113,6 +113,26 @@ function PalettePreview({ input, mode }: { input: PaletteModeInput; mode: "light
   );
 }
 
+/** A small, legible AXOM workspace surface rather than an abstract color strip. */
+function ModePreview({ mode }: { mode: ThemePreference }) {
+  const surfaces: Array<"light" | "dark"> = mode === "system" ? ["light", "dark"] : [mode];
+  return (
+    <span className={`appearance-mode-sample ${mode}`} aria-hidden="true">
+      {surfaces.map((surface) => (
+        <span className={`mode-mini-pane ${surface}`} key={surface}>
+          <span className="mode-mini-rail"><i className="active" /><i /><i /></span>
+          <span className="mode-mini-page">
+            <span className="mode-mini-top"><b>AXOM</b><i>02 / 03</i></span>
+            <span className="mode-mini-eyebrow">TODAY / FOCUS</span>
+            <strong>Next step</strong>
+            <span className="mode-mini-meter"><i /></span>
+          </span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
 export function AppearanceStudio() {
   const groupId = useId();
   const mode = useThemePreference();
@@ -187,7 +207,7 @@ export function AppearanceStudio() {
                 onClick={() => setThemePreference(option.value)}
               >
                 <span className="appearance-choice-top"><Icon size={ICON_SIZE.emphasis} aria-hidden="true" /><Check size={ICON_SIZE.body} className="appearance-choice-check" aria-hidden="true" /></span>
-                <span className={`appearance-mode-sample ${option.value}`} aria-hidden="true"><i /><i /><i /></span>
+                <ModePreview mode={option.value} />
                 <span className="appearance-choice-copy"><b>{option.label}</b><small>{option.detail}</small></span>
               </button>
             );
