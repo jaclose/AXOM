@@ -5,6 +5,7 @@ import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
 import { isAcademicReviewer, shareAcademicCourses } from "../../lib/academicLibrary/client";
 import { uploadAcademicBatch } from "../../lib/academicLibrary/batch";
 import { applyFilingDecisions, readFilingDecisions, readFilingProposals, type FilingProposals, type FilingSummary } from "../../lib/academicLibrary/filingDecisions";
+import { applyMiNmiDecision, readMiNmiDecision, type MiNmiSummary } from "../../lib/academicLibrary/miNmiCorrection";
 import { accountQuestions, type QuestionLedger } from "../../lib/academicLibrary/questionLedger";
 import {
   PUBLICATION_INPUT_LIMITS, planPublication, publicationCatalogId, publicationJobs, readPublicationInventory,
@@ -41,9 +42,11 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
   const zipInput = useRef<HTMLInputElement>(null);
   const worksheetInput = useRef<HTMLInputElement>(null);
   const decisionsInput = useRef<HTMLInputElement>(null);
+  const correctionInput = useRef<HTMLInputElement>(null);
   const controller = useRef<AbortController>();
   /** `base` reads the library as chosen; `read` serves it with any filing decisions applied. */
-  const [library, setLibrary] = useState<{ accountId: string; name: string; base: LibraryReader; read: LibraryReader; inventory: PublicationInventory; filing?: FilingSummary }>();
+  const [library, setLibrary] = useState<{ accountId: string; name: string; base: LibraryReader; read: LibraryReader;
+    inventory: PublicationInventory; filing?: FilingSummary; corrected?: MiNmiSummary; beforeCorrection?: LibraryReader }>();
   const [worksheet, setWorksheet] = useState<{ name: string; proposals: FilingProposals }>();
   const [confirmedTerms, setConfirmedTerms] = useState<Record<string, Term>>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -121,7 +124,7 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
         ({ read, summary: filing } = await applyFilingDecisions(current.base, readFilingDecisions(parsed), worksheet.proposals));
       }
       const inventory = await readPublicationInventory(read, setProgress, abort.signal);
-      setLibrary({ ...current, read, inventory, filing });
+      setLibrary({ ...current, read, inventory, filing, corrected: undefined, beforeCorrection: undefined });
       setConfirmedTerms({});
       setSelected(new Set(planPublication(inventory).courses.filter(usefulByDefault).map(course => course.catalogId)));
       setProgress("");
@@ -129,6 +132,32 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
       setProgress("");
       setError(abort.signal.aborted ? "Reading stopped. Nothing was uploaded."
         : cause instanceof Error ? cause.message : "The filing decisions could not be applied.");
+    } finally { setBusy(undefined); if (controller.current === abort) controller.current = undefined; }
+  }
+
+  /** Compose this exact owner decision over any already-applied Unfiled filing. */
+  async function correctMi(file?: File) {
+    if (!current || busy) return;
+    const abort = new AbortController();
+    controller.current = abort;
+    setBusy("reading"); setError(""); setResults({});
+    setProgress(file ? "Checking the MI to NMI decision…" : "Removing the MI to NMI decision…");
+    try {
+      const beforeCorrection = current.beforeCorrection ?? current.read;
+      const corrected = file
+        ? await applyMiNmiDecision(current.base, beforeCorrection, readMiNmiDecision(JSON.parse(await file.text())))
+        : undefined;
+      const read = corrected?.read ?? beforeCorrection;
+      const inventory = await readPublicationInventory(read, setProgress, abort.signal);
+      setLibrary({ ...current, read, inventory, corrected: corrected?.summary,
+        beforeCorrection: corrected ? beforeCorrection : undefined });
+      setConfirmedTerms({});
+      setSelected(new Set(planPublication(inventory).courses.filter(usefulByDefault).map(course => course.catalogId)));
+      setProgress("");
+    } catch (cause) {
+      setProgress("");
+      setError(abort.signal.aborted ? "Reading stopped. Nothing was uploaded."
+        : cause instanceof Error ? cause.message : "The MI to NMI decision could not be applied.");
     } finally { setBusy(undefined); if (controller.current === abort) controller.current = undefined; }
   }
 
@@ -286,6 +315,11 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
       event.target.value = "";
       if (file) void selectWorksheet(file);
     }} />
+    <input ref={correctionInput} type="file" hidden accept=".json,application/json" aria-label="MI to NMI decision file" onChange={event => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (file) void correctMi(file);
+    }} />
     <div className="academic-publisher-actions">
       <GButton disabled={Boolean(busy)} onClick={() => folderInput.current?.click()}><FolderOpen size={ICON_SIZE.emphasis} /> Choose library folder</GButton>
       <GButton disabled={Boolean(busy)} onClick={() => zipInput.current?.click()}><FileArchive size={ICON_SIZE.emphasis} /> Choose library ZIP</GButton>
@@ -308,6 +342,17 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
           {current.filing && <GhostButton disabled={Boolean(busy)} onClick={() => void decide()}>Remove decisions</GhostButton>}
         </div>
       </div>
+      {(current.corrected || current.inventory.sources.some(source => source.moduleKey === "mi")) && <div className="academic-publisher-filing">
+        <p>{current.corrected
+          ? `${plural(current.corrected.sources, "MI source")} verified and placed under Term 5 NMI, including ${plural(current.corrected.banks, "question set")} and ${plural(current.corrected.activities, "plan activity", "plan activities")}. Original files and question scopes are unchanged.`
+          : "For this library, add the separate MI to NMI owner decision file to place every matching source under NMI."}</p>
+        <div className="academic-publisher-actions">
+          <GButton disabled={Boolean(busy)} onClick={() => correctionInput.current?.click()}>
+            <FileCheck2 size={ICON_SIZE.emphasis} /> {current.corrected ? "Replace MI to NMI decision" : "Add MI to NMI decision"}
+          </GButton>
+          {current.corrected && <GhostButton disabled={Boolean(busy)} onClick={() => void correctMi()}>Remove MI to NMI decision</GhostButton>}
+        </div>
+      </div>}
       {ledger && <QuestionCount ledger={ledger} />}
       {terms.map(term => <fieldset key={term} className="academic-publisher-term" disabled={Boolean(busy)}>
         <legend>{term}</legend>

@@ -50,11 +50,14 @@ function assertTemplateOwnsSource(
     return;
   }
   if (bank.reviewedFiling) {
+    if (bank.reviewedFiling.evidence !== "human-reviewed")
+      throw new Error("A template-backed bank's corrected source scope needs human review.");
     if (!hasUniformUnfiledSourceScope(bank.pkg.manifest, bank.pkg.questions)
-      || bank.reviewedFiling.evidence !== "human-reviewed")
-      throw new Error("A template-backed bank cannot also carry a manual reviewed filing. Split the conflicting academic scopes.");
+      && moduleIdentity(bank.pkg.manifest.course.name) === module
+      && bank.pkg.manifest.course.term === term)
+      throw new Error("A template-backed bank cannot also carry a manual reviewed filing without a changed source scope.");
     if (bank.reviewedFiling.term !== template.term || moduleIdentity(bank.reviewedFiling.module) !== module)
-      throw new Error("The Unfiled source's reviewed filing does not match its course plan.");
+      throw new Error("The source's reviewed filing does not match its course plan.");
     return;
   }
   if (moduleIdentity(bank.pkg.manifest.course.name) !== module || bank.pkg.manifest.course.term !== term)
