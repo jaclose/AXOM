@@ -107,6 +107,7 @@ a separate exam tool, not an asset.
   visible text: nothing is deleted and nothing can run.
 - **Choices** hold blocks too. Two forms, both supported: a table inside each choice, or
   one shared `choiceTable` whose `rowKeys` name the choice of each row.
+  Prepared packages preserve two to ten labeled choices when the source uses A–J.
 - **Assets** are named by id from a block. Bytes are never in the questions file. Each has
   a role: `question`, `stem`, `choice`, `explanation`, `answer_reveal`, `reference`,
   `source_page`; and a derivation: `embedded`, `region-render`, `page-render`, `authored`.

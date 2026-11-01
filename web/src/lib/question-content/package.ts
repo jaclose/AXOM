@@ -11,6 +11,8 @@ import type { AssetRole, QuestionBlock, TableBlock } from "./blocks";
 
 /** Bumped only when an older AXOM could misread a newer package. See `MIGRATIONS` in packageJson.ts. */
 export const PACKAGE_SCHEMA_VERSION = 1;
+/** Prepared questions can preserve the source's full A–J choice list. */
+export const MAX_PACKAGE_CHOICES = 10;
 
 // --- manifest ----------------------------------------------------------------
 
