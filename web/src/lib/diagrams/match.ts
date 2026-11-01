@@ -35,8 +35,9 @@ export function matchAxomDiagram(question: QuestionRecord): AxomDiagram | undefi
   const keyedOption = question.options.find((option) => option.key === question.correctKey);
   if (!keyedOption) return undefined;
   const answer = normalized(keyedOption.text);
-  const diagram = AXOM_DIAGRAMS.find((entry) => entry.answerAliases.some((alias) => normalized(alias) === answer));
-  if (!diagram) return undefined;
+  // Other registry entries must get their own reviewed clue rule and artwork.
+  const diagram = AXOM_DIAGRAMS.find((entry) => entry.id === "rhinovirus-common-cold");
+  if (!diagram || !diagram.answerAliases.some((alias) => normalized(alias) === answer)) return undefined;
 
   const found = clueGroups.filter((group) => {
     for (const match of question.stem.matchAll(group.pattern)) {
