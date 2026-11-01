@@ -83,6 +83,19 @@ describe("DashboardNotificationCenter", () => {
     );
   });
 
+  it("shows device journal prompts beside account notices and marks them read", () => {
+    memoryLocalStorage.setItem("axom.notificationInbox.v1", JSON.stringify([
+      { id: "daily-loop:2026-10-15:closeout", kind: "closeout", createdAt: "2026-10-15T20:30:00.000Z" },
+    ]));
+    render(<DashboardNotificationCenter />);
+    fireEvent.click(screen.getByRole("button", { name: "Notifications, 2 items need attention" }));
+
+    expect(screen.getByRole("link", { name: /A page before the day ends/i }).getAttribute("href")).toBe("#journal");
+    fireEvent.click(screen.getByRole("button", { name: "Mark all read" }));
+    expect(screen.getByRole("button", { name: "Notifications" })).toBeTruthy();
+    expect(JSON.parse(localStorage.getItem("axom.notificationReads.v1") ?? "[]")).toContain("daily-loop:2026-10-15:closeout");
+  });
+
   it("resurfaces a failed outcome after the successful outcome was read", () => {
     memoryLocalStorage.setItem("axom.communicationReads.v1:account-a", JSON.stringify(["delivered-1:delivered", "failed-1:delivered"]));
     render(<DashboardNotificationCenter />);
@@ -107,7 +120,7 @@ describe("DashboardNotificationCenter", () => {
     fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
 
     expect(screen.getByText("Sign in for account notices")).toBeTruthy();
-    expect(screen.getByText("Device reminders still work without an account.")).toBeTruthy();
+    expect(screen.getByText("Your journal prompts stay on this device.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
   });
 

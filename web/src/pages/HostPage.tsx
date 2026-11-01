@@ -6,6 +6,8 @@ import {
   type OperatorAccount, type OperatorDashboard,
 } from "../lib/operator/hostClient";
 import { GButton, GlassCard, PanelHeader, Tag } from "../components/ui/primitives";
+import { QuestionSetLibraryReviewQueue } from "../components/questions/QuestionSetLibraryReviewQueue";
+import { JournalFeedbackReview } from "../components/dashboard/JournalFeedbackReview";
 import "../styles/host-console.css";
 
 function date(value: string | null): string {
@@ -153,6 +155,8 @@ function HostAccountPage() {
             </div>)}</div>}
           <p className="sub">Approval is intentionally not a one-click host operation. Source provenance, rights and answer-review evidence must be validated through the academic review process first.</p>
         </GlassCard>
+        {userId && <QuestionSetLibraryReviewQueue accountId={userId} />}
+        {userId && (role === "owner" || role === "admin") && <JournalFeedbackReview accountId={userId} />}
         <GlassCard pad>
           <PanelHeader headingLevel={2} title="Reported community posts" sub="Only reported posts enter this moderation queue." />
           {dashboard.reports.length === 0 ? <p className="sub">No posts have been reported.</p> : dashboard.reports.map(report => <article key={report.post_id} className="host-report">

@@ -1232,8 +1232,8 @@ function StandupPrompt() {
           <div className="standup-prompt-head">
             <span className="standup-prompt-mark"><BookText size={ICON_SIZE.emphasis} /></span>
             <div className="grow">
-              <b>Close the loop on today?</b>
-              <span>Review your intention, activity, targets, focus sessions, questions, tasks, and energy. A short closeout is optional.</span>
+              <b>A page before the day ends</b>
+              <span>Keep what mattered, name what changed, and leave a first step for tomorrow. A short page is enough.</span>
             </div>
           </div>
           <div className="row wrap gap8 daily-closeout-actions">

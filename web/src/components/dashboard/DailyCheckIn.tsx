@@ -4,8 +4,8 @@
 // intention stays on the page, large, with its underline drawn in. Energy
 // orbs sit underneath. Logic moved unchanged from DashboardPage's WinTheDay.
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, ArrowRightCircle, BookText, Check, Circle, Trophy, X } from "lucide-react";
-import { OUTCOMES, isAfterLocalTime, wrapUpMessage } from "../../lib/dailyCheckIn";
+import { ArrowRight, ArrowRightCircle, Check, Circle, Trophy } from "lucide-react";
+import { OUTCOMES } from "../../lib/dailyCheckIn";
 import { evaluateDailySuccess } from "../../lib/dailySuccess";
 import { dailyLoopReminderLedger } from "../../lib/dailyLoopReminders";
 import { ICON_SIZE } from "../../lib/iconSize";
@@ -45,21 +45,15 @@ export function DailyCheckIn({ writing = false }: { writing?: boolean }) {
   const [promptDismissed, setPromptDismissed] = useState(() => (
     dailyLoopReminderLedger.read(today).checkIn.disposition === "skipped"
   ));
-  const [showWrapPrompt, setShowWrapPrompt] = useState(false);
   const [justSet, setJustSet] = useState(false);
 
   const openTasks = s.tasks.filter((t) => !t.done && !t.archived).slice(0, 3);
-  const reviewDue = isAfterLocalTime(s.profile.journalReviewTime ?? "20:00");
   const selectedTargets = useMemo(
     () => evaluateDailySuccess(s, today, today).requirements
       .filter((item) => item.eligible && item.status !== "unavailable")
       .map((item) => item.requirement.label),
     [s, today],
   );
-
-  useEffect(() => {
-    if (todayPlan && !todayPlan.outcome && reviewDue) setShowWrapPrompt(true);
-  }, [reviewDue, todayPlan]);
 
   useEffect(() => {
     setPromptDismissed(dailyLoopReminderLedger.read(today).checkIn.disposition === "skipped");
@@ -72,7 +66,6 @@ export function DailyCheckIn({ writing = false }: { writing?: boolean }) {
     setObstacle("");
     setCommitment(3);
     setShowContext(false);
-    setShowWrapPrompt(false);
   }, [today]);
 
   useEffect(() => {
@@ -131,17 +124,6 @@ export function DailyCheckIn({ writing = false }: { writing?: boolean }) {
 
   return (
     <GlassCard pad className="win-day daily-checkin" data-tour="intention">
-      {showWrapPrompt && todayPlan && !todayPlan.outcome && (
-        <div className="journal-wrap-popover">
-          <button className="ghost-btn" onClick={() => setShowWrapPrompt(false)} title="Dismiss"><X size={ICON_SIZE.body} /></button>
-          <div className="journal-wrap-mark"><BookText size={ICON_SIZE.emphasis} /></div>
-          <div>
-            <b>Wrap up the day</b>
-            <span>{wrapUpMessage(today)} Review “{todayPlan.intention}”, then turn it into a useful standup.</span>
-          </div>
-          <a className="gbtn sm primary" href="#journal">Open Journal</a>
-        </div>
-      )}
       {pendingPast && (
         <div className="carry-over">
           <ArrowRightCircle size={ICON_SIZE.emphasis} />
@@ -255,13 +237,6 @@ export function DailyCheckIn({ writing = false }: { writing?: boolean }) {
                 <GButton key={o.key} size="sm" variant={o.tone === "green" ? "primary" : "default"}
                   onClick={() => s.reviewDayPlan(today, o.key, note.trim() || undefined)}>{o.label}</GButton>
               ))}
-            </div>
-          )}
-          {!todayPlan.outcome && reviewDue && !showWrapPrompt && (
-            <div className="journal-follow-nudge">
-              <BookText size={ICON_SIZE.body} />
-              <span>It is past your journal follow-up time. Review today’s intention, then write the standup.</span>
-              <a className="gbtn tiny" href="#journal">Open Journal</a>
             </div>
           )}
           {todayPlan.outcome && (

@@ -68,8 +68,8 @@ describe("DailyLoopReminderWatcher", () => {
     window.addEventListener(DAILY_LOOP_REMINDER_OPEN_EVENT, opened);
     renderWatcher(() => now);
 
-    expect(await screen.findByText("Set today’s direction")).toBeTruthy();
-    expect(screen.getByText(/less than a minute.*optional/i)).toBeTruthy();
+    expect(await screen.findByText("Give today a direction")).toBeTruthy();
+    expect(screen.getByText(/Choose one intention.*day unfolds/i)).toBeTruthy();
     expect(screen.getByRole("region", { name: "Notifications" })).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(useToasts.getState().toasts.map((toast) => toast.duration)).toEqual([REMINDER_TOAST_DURATION_MS]);
@@ -85,25 +85,25 @@ describe("DailyLoopReminderWatcher", () => {
     let now = localTime(9);
     renderWatcher(() => now);
     fireEvent.click(await screen.findByRole("button", { name: "Snooze 30 min" }));
-    expect(activeToast("Set today’s direction")).toBeNull();
+    expect(activeToast("Give today a direction")).toBeNull();
 
     now = localTime(9, 29);
     fireEvent(window, new Event("pageshow"));
-    expect(activeToast("Set today’s direction")).toBeNull();
+    expect(activeToast("Give today a direction")).toBeNull();
 
     now = localTime(9, 30);
     fireEvent.focus(window);
-    expect(await screen.findByText("Set today’s direction")).toBeTruthy();
+    expect(await screen.findByText("Give today a direction")).toBeTruthy();
   });
 
   it("uses the 20:30 local closeout boundary and suppresses a completed day", async () => {
     let now = localTime(20, 29);
     const first = renderWatcher(() => now);
-    expect(screen.queryByText("Wrap up today")).toBeNull();
+    expect(screen.queryByText("A page before the day ends")).toBeNull();
 
     now = localTime(20, 30);
     fireEvent(window, new Event("pageshow"));
-    expect(await screen.findByText("Wrap up today")).toBeTruthy();
+    expect(await screen.findByText("A page before the day ends")).toBeTruthy();
     first.unmount();
     useToasts.setState({ toasts: [] });
 
@@ -114,7 +114,7 @@ describe("DailyLoopReminderWatcher", () => {
       }],
     });
     renderWatcher(() => now);
-    await waitFor(() => expect(screen.queryByText("Wrap up today")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("A page before the day ends")).toBeNull());
   });
 
   it("keeps a reminder pending during quiet hours and publishes it once after quiet hours end", async () => {
@@ -136,16 +136,16 @@ describe("DailyLoopReminderWatcher", () => {
       <Toaster />
     </>);
 
-    await waitFor(() => expect(screen.queryByText("Set today’s direction")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Give today a direction")).toBeNull());
     expect(ledger.read("2026-07-13").checkIn.disposition).toBe("pending");
 
     now = localTime(10);
     fireEvent(window, new Event("pageshow"));
-    expect(await screen.findByText("Set today’s direction")).toBeTruthy();
+    expect(await screen.findByText("Give today a direction")).toBeTruthy();
     expect(ledger.read("2026-07-13").checkIn.disposition).toBe("shown");
 
     fireEvent.focus(window);
-    expect(screen.getAllByText("Set today’s direction")).toHaveLength(1);
+    expect(screen.getAllByText("Give today a direction")).toHaveLength(1);
   });
 
   it("never uses a stale active-day cursor or yesterday's check-in as today's completion", async () => {
@@ -156,7 +156,7 @@ describe("DailyLoopReminderWatcher", () => {
       }],
     });
     renderWatcher(() => localTime(9));
-    expect(await screen.findByText("Set today’s direction")).toBeTruthy();
+    expect(await screen.findByText("Give today a direction")).toBeTruthy();
   });
 
   it("honors disabled reminders and keeps one signal through StrictMode replay", async () => {
@@ -185,7 +185,7 @@ describe("DailyLoopReminderWatcher", () => {
       <DailyLoopReminderWatcher ledger={memoryLedger()} clock={() => localTime(9)} pollIntervalMs={0} />
       <Toaster />
     </StrictMode>);
-    expect(await screen.findAllByText("Set today’s direction")).toHaveLength(1);
+    expect(await screen.findAllByText("Give today a direction")).toHaveLength(1);
     expect(screen.getAllByRole("status")).toHaveLength(1);
   });
 
@@ -193,10 +193,10 @@ describe("DailyLoopReminderWatcher", () => {
     markFirstRunDay("2026-07-13");
     renderWatcher(() => localTime(9));
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(activeToast("Set today’s direction")).toBeNull();
+    expect(activeToast("Give today a direction")).toBeNull();
     cleanup();
     renderWatcher(() => localTime(9, 0, 14));
-    expect(await screen.findByText("Set today’s direction")).toBeTruthy();
+    expect(await screen.findByText("Give today a direction")).toBeTruthy();
   });
 
   it("waits while a dialog is open instead of landing on top of it", async () => {
@@ -205,9 +205,9 @@ describe("DailyLoopReminderWatcher", () => {
     document.body.append(scrim);
     renderWatcher(() => localTime(9));
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(activeToast("Set today’s direction")).toBeNull();
+    expect(activeToast("Give today a direction")).toBeNull();
     scrim.remove();
     window.dispatchEvent(new Event("focus"));
-    expect(await screen.findByText("Set today’s direction")).toBeTruthy();
+    expect(await screen.findByText("Give today a direction")).toBeTruthy();
   });
 });

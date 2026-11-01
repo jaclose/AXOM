@@ -8,6 +8,7 @@ import {
   type DailyLoopReminderSignal,
 } from "../../lib/dailyLoopReminders";
 import { isFirstRunDay } from "../../lib/firstRun";
+import { recordLocalNotice } from "../../lib/notificationInbox";
 import { isoDate } from "../../lib/scoring";
 import { shellBusy } from "../../lib/shellBusy";
 import { useStore } from "../../lib/store";
@@ -64,6 +65,7 @@ export function DailyLoopReminderWatcher({
       // Mark before publishing so StrictMode replay and simultaneous lifecycle
       // events cannot create a second toast.
       ledger.markShown(signal.dayKey, signal.kind, now);
+      recordLocalNotice(`daily-loop:${signal.dayKey}:${signal.kind}`, signal.kind, now);
       onSignal?.(signal);
       pushToast(toastForSignal(signal, {
         open: () => {
@@ -112,10 +114,10 @@ function toastForSignal(
 ) {
   const checkIn = signal.kind === "check-in";
   return {
-    title: checkIn ? "Set today’s direction" : "Wrap up today",
+    title: checkIn ? "Give today a direction" : "A page before the day ends",
     body: checkIn
-      ? "Choose one intention for today. It takes less than a minute, and it is optional."
-      : "Review what changed and choose tomorrow’s first step. This is optional.",
+      ? "Choose one intention. You can change it as the day unfolds."
+      : "Keep what mattered, note what changed, and leave a first step for tomorrow.",
     tone: "info" as const,
     duration: REMINDER_TOAST_DURATION_MS,
     dedupe: `daily-loop:${signal.dayKey}:${signal.kind}`,

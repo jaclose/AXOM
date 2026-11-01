@@ -30,43 +30,15 @@ It preserves the current publisher and excludes the incompatible unapplied
 release-catalog experiment. Private packages remain unpublished; production
 deployment and authenticated readback are pending validation.
 
-Prior snapshot: 2026-10-20 UTC, `feat/academic-library-v1` in
-`AXOM-academic-library-v1`, HEAD `78c00e04`. This reflection batch was pushed to
-main and deployed (authenticated deployment `7203032971`); six old dates were
-dismissed in the live UI and stayed dismissed after reload. Domain contracts remain authoritative.
-
 Batch pushes: `origin/main` triggers Vercel production, local commits do not.
-After the reflection release, JD approved one additional tested
-batch: participation streaks, compact Activity Log and catalog CI fixture repair.
-That batch is `dc055a2` on `origin/main`; its deployment was not verified on 2026-10-27.
-It does not authorize migrations, private publication or subsequent releases.
 Verify deployed SHA and protected index before release claims.
-
-## Branch `jd-claude/eloquent-shannon-b2xof9` (2026-10-27, cloud)
-
-Base `dc055a2`. Adds whole-library publishing: one collection per term and module with
-every plan section, reviewer-confirmed plan terms (both uploaders), an on-device check
-before upload, plan-less question collections, reviewer approval, a curriculum-ordered
-catalog and term-grouped QBank discovery
-([contract](features/academic-library.md#one-course-per-module-and-the-library-publisher)).
-Migration `20261027120000_academic_curriculum_catalog.sql` is replayed locally only.
-`5c04e71` fixes the privacy replay test whose fixed 2026-10-23 expiry fails main's suite.
-Passed: full Vitest (28 skipped), PGlite replay, types/lint/build, a synthetic publish
-journey at 1440/390 and related catalog specs in Chromium. Not done: real-corpus publish,
-hosted migration, reviewer grant, second-account check; the private corpus and board
-were unreachable from the cloud. Next: JD reviews the draft PR, then the owner steps.
 
 ## Ownership and protected work
 
-Read the coordination board and CONVERGENCE before integration. Preserve other
-owners' checkouts and files. Local `main` has 45 protected staged additions and
-six untracked private sources; exclude all. Recheck overlaps against
-the final SHA, then fast-forward only. Compare protected staged entries, cached
-patch and working-file hashes before/after. Never switch, reset, stash or rewrite.
-
-The staged AMBOSS research, source-coverage metadata, stale handoffs, backup
-patch, generated ZIP/demo copies and simulator crawler are excluded. They need
-separate owner review; do not publish private paths or source identities.
+Read the coordination board before integration. Preserve other owners' checkouts,
+private sources and untracked work. The original checkout's current dirty state
+was inspected on 2026-11-01 and left untouched. Historical branch detail is in
+Git and the [archived handoff](archive/2026-10-25-host-baseline/AI_STATE.md.txt).
 
 Never merge `backup/pre-large-file-cleanup-2026-09-28`: it contains a 288 MB
 audio file, private assets and broad historical replacement/deletion.
@@ -84,10 +56,8 @@ ten no-questions and three unsupported. It records 994 review candidates and
 unresolved, six path-only, zero ready/cloud. Counts are not publishing approval.
 
 Twenty-two templates account for 547 activities: T1 250, T2 199, T3 98.
-T4/T5 lack authoritative denominators. Local GOER has five banks, 28 ready and
-44 review-required questions, plus 64 verified ready-question attachments.
-`/Volumes/JDabSSD` is unavailable. Its older 1,280-file scan must not replace
-B4's 1,402 unavailable dispositions. `academicReleaseComplete` remains false.
+T4/T5 lack authoritative denominators. These inventory counts are historical;
+`academicReleaseComplete` remains false until current acceptance is verified.
 
 The private October 20 delivery folder reconciles 28 templates and 655 sources;
 current parsing assesses 439 ready, 582 review-required, 10,968 unresolved and
