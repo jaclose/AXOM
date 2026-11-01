@@ -5,23 +5,18 @@ authority: current-state
 ---
 # AXOM current AI state
 
-2026-10-30 release candidate `5dfafae1` integrates RHPS/ESoft import, review,
-teaching, QBank, Journal and Productivity work onto `origin/main` `0cb5769a`.
-It preserves the current publisher and excludes the incompatible unapplied
-release-catalog experiment. Private packages remain unpublished; production
-deployment and authenticated readback are pending validation.
+2026-11-01 local candidate `codex/settings-sync-20261101` (base `1b189177`):
+Settings redesign, first-scroll lock-in sample, and typed sync failures.
+Full web suite passed (4,082; 35 skipped). Live read-only: protected #71 from
+September 30, latest `network/no answer`. No deployment or hosted upload/readback;
+see [account sync](architecture/accounts-sync-v1.md).
 
-Prior snapshot: 2026-10-20 UTC, `feat/academic-library-v1` in
-`AXOM-academic-library-v1`, HEAD `78c00e04`. This reflection batch was pushed to
-main and deployed (authenticated deployment `7203032971`); six old dates were
-dismissed in the live UI and stayed dismissed after reload. Domain contracts remain authoritative.
-
-Batch pushes: `origin/main` triggers Vercel production, local commits do not.
-After the reflection release, JD approved one additional tested
-batch: participation streaks, compact Activity Log and catalog CI fixture repair.
-That batch is `dc055a2` on `origin/main`; its deployment was not verified on 2026-10-27.
-It does not authorize migrations, private publication or subsequent releases.
-Verify deployed SHA and protected index before release claims.
+Earlier checkpoints: 2026-10-30 candidate `5dfafae1` integrated RHPS/ESoft,
+QBank, Journal and Productivity without private publication or verified hosted
+readback. The 2026-10-20 reflection release (`7203032971`) passed a live
+dismissal/reload check. JD authorized one later batch (`dc055a2`), not further
+releases. `origin/main` pushes trigger production; verify deployed SHA and
+protected index before a release claim.
 
 ## Branch `jd-claude/eloquent-shannon-b2xof9` (2026-10-27, cloud)
 
