@@ -4,6 +4,7 @@ import { GhostButton } from "../ui/primitives";
 import { ICON_SIZE } from "../../lib/iconSize";
 import type { ReactNode } from "react";
 import { ChoiceTeaching } from "./ChoiceTeaching";
+import { AxomDiagramCard } from "./AxomDiagramCard";
 
 export function QuizFeedback({
   question,
@@ -70,6 +71,8 @@ export function QuizFeedback({
           {question.content ? <div>{explanationContent ?? explanation}</div> : <p>{explanationContent ?? explanation}</p>}
         </div>
       )}
+
+      <AxomDiagramCard question={question} />
 
       {question.objective && (
         <div className="learning-objective">

@@ -33,6 +33,18 @@ const question: QuestionRecord = {
 afterEach(cleanup);
 
 describe("QuizFeedback", () => {
+  it("shows a sourced related diagram beside a revealed keyed explanation", () => {
+    const rhinovirus = {
+      ...question,
+      stem: "A patient has runny nose and sneezing.",
+      options: [{ key: "A", text: "Rhinovirus" }, { key: "B", text: "Influenza virus" }],
+      correctKey: "A", correctAnswerText: "Rhinovirus",
+    };
+    render(<QuizFeedback question={rhinovirus} pickedKey="B" />);
+    expect(screen.getByRole("complementary", { name: "Related AXOM diagram" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /CDC · About Rhinoviruses/ })).toHaveProperty("href", "https://www.cdc.gov/rhinoviruses/about/index.html");
+    expect(screen.getByText(/does not verify the question’s answer key/)).toBeTruthy();
+  });
   it("shows a short incorrect banner, distinct answers, and the stored clean explanation", () => {
     render(<QuizFeedback question={question} pickedKey="A" />);
     expect(screen.getByRole("status").textContent).toContain("Incorrect — you picked A, answer is B");
