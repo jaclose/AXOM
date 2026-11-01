@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { hasUniformUnfiledSourceScope, preparedBankImportOptions, readCatalog, readPreparedBank, safeLibraryPath, type LibraryReader } from "../privateLibrary/install";
-import { sha256 } from "../question-content/assets";
+import { readImageInfo, sha256 } from "../question-content/assets";
 import {
   assertInstallableAcademicImageBytes,
   type InstallableAcademicImage,
@@ -26,6 +26,24 @@ const MAX_PLAN_SECTIONS = 24;
 const imageMimeByExtension: Readonly<Record<string, QuestionAttachmentMimeType>> = {
   png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif",
 };
+const HELD_EMF_MIME = "image/emf";
+function assertHeldEmf(asset: QuestionAsset, bytes: Uint8Array): void {
+  if (asset.mimeType !== HELD_EMF_MIME || readImageInfo(bytes)?.mimeType !== HELD_EMF_MIME
+    || (asset.byteSize !== undefined && asset.byteSize !== bytes.length)
+    || asset.width !== undefined || asset.height !== undefined)
+    throw new Error(`The held EMF figure ${asset.filename} differs from its declared source bytes.`);
+}
+function heldEmfIssue(asset: QuestionAsset, questionId: string): PackageIssue {
+  return {
+    severity: "error", code: "missing_required_media", questionId, path: `assets[${asset.id}]`,
+    message: `The EMF source figure ${asset.filename} is preserved, but AXOM cannot display it. This question remains held until a reviewer supplies a verified viewable figure.`,
+  };
+}
+function isHeldEmfIssue(issue: PackageIssue, asset: QuestionAsset, questionId: string): boolean {
+  const expected = heldEmfIssue(asset, questionId);
+  return issue.severity === expected.severity && issue.code === expected.code
+    && issue.questionId === expected.questionId && issue.path === expected.path && issue.message === expected.message;
+}
 const originalMimeByExtension: Readonly<Record<string, string>> = {
   pdf: "application/pdf", txt: "text/plain",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -50,11 +68,14 @@ function assertTemplateOwnsSource(
     return;
   }
   if (bank.reviewedFiling) {
+    if (bank.reviewedFiling.evidence !== "human-reviewed")
+      throw new Error("A template-backed bank's corrected source scope needs human review.");
     if (!hasUniformUnfiledSourceScope(bank.pkg.manifest, bank.pkg.questions)
-      || bank.reviewedFiling.evidence !== "human-reviewed")
-      throw new Error("A template-backed bank cannot also carry a manual reviewed filing. Split the conflicting academic scopes.");
+      && moduleIdentity(bank.pkg.manifest.course.name) === module
+      && bank.pkg.manifest.course.term === term)
+      throw new Error("A template-backed bank cannot also carry a manual reviewed filing without a changed source scope.");
     if (bank.reviewedFiling.term !== template.term || moduleIdentity(bank.reviewedFiling.module) !== module)
-      throw new Error("The Unfiled source's reviewed filing does not match its course plan.");
+      throw new Error("The source's reviewed filing does not match its course plan.");
     return;
   }
   if (moduleIdentity(bank.pkg.manifest.course.name) !== module || bank.pkg.manifest.course.term !== term)
@@ -482,6 +503,7 @@ async function preflightAcademicUpload(upload: AcademicUpload): Promise<Academic
   const byPath = new Map<string, AcademicUpload["files"][number]>();
   const portablePaths = new Set<string>();
   const verifiedImages = new Map<string, VerifiedAcademicImage>();
+  const verifiedHeldEmfs = new Set<string>();
   let totalBytes = 0;
   for (const file of files) {
     if (!file || !(file.bytes instanceof Uint8Array) || typeof file.path !== "string"
@@ -513,6 +535,11 @@ async function preflightAcademicUpload(upload: AcademicUpload): Promise<Academic
       if (file.mime_type !== imageMime)
         throw new Error("An academic image's path and MIME type disagree.");
       verifiedImages.set(file.path, await assertInstallableAcademicImage(file.bytes, file.mime_type));
+    } else if (extension === "emf" && file.mime_type === HELD_EMF_MIME
+      && readImageInfo(file.bytes)?.mimeType === HELD_EMF_MIME) {
+      // Raw EMF is preserved for held-source review, never certified as a
+      // viewable learner attachment.
+      verifiedHeldEmfs.add(file.path);
     } else if (file.mime_type.startsWith("image/")) {
       throw new Error("An academic image has an unsupported or misleading file extension.");
     }
@@ -654,6 +681,18 @@ async function preflightAcademicUpload(upload: AcademicUpload): Promise<Academic
         if (!asset.checksum) throw new Error("Review image integrity before uploading this collection.");
         const path = academicAssetPath(source.bankFile, asset.filename);
         const file = byPath.get(path);
+        if (asset.filename.toLowerCase().endsWith(".emf")) {
+          if (question.correctAnswer || !question.flags?.some(flag => flag.type === "media_association_uncertain"))
+            throw new Error("Only an already-held question with uncertain EMF media can retain a raw EMF source figure.");
+          if (!file || !verifiedHeldEmfs.has(path)) throw new Error("A held EMF source figure is missing or has invalid bytes.");
+          assertHeldEmf(asset, file.bytes);
+          if (!bank.issues.some(issue => isHeldEmfIssue(issue, asset, question.id)))
+            throw new Error("A held EMF figure needs an explicit review issue in its saved bank.");
+          expectFile(path, HELD_EMF_MIME, asset.checksum);
+          verifiedAssets.push({ name: asset.filename });
+          figureSizes.set(asset.filename, file.byte_size);
+          continue;
+        }
         const image = verifiedImages.get(path);
         if (!file || !image) throw new Error("A private academic upload is missing a referenced clinical figure.");
         expectFile(path, image.mimeType, asset.checksum);
@@ -814,6 +853,17 @@ export async function prepareAcademicUpload(
         verifiedAssets.push({ name: asset.filename });
         if (!asset.checksum) throw new Error("Review image integrity before uploading this collection.");
         const path = academicAssetPath(item.bankFile, asset.filename);
+        if (asset.filename.toLowerCase().endsWith(".emf")) {
+          if (question.correctAnswer || !question.flags?.some(flag => flag.type === "media_association_uncertain"))
+            throw new Error("Only an already-held question with uncertain EMF media can retain a raw EMF source figure.");
+          const bytes = await read(safeLibraryPath(path));
+          assertHeldEmf(asset, bytes);
+          await add(path, bytes, HELD_EMF_MIME, asset.checksum);
+          figureSizes.set(asset.filename, bytes.length);
+          if (!bank.issues.some(issue => isHeldEmfIssue(issue, asset, question.id)))
+            bank.issues.push(heldEmfIssue(asset, question.id));
+          continue;
+        }
         const mime = imageMimeByExtension[asset.filename.split(".").at(-1)?.toLowerCase() ?? ""];
         if (!mime) throw new Error("Unsupported academic image type.");
         const imageBytes = await read(safeLibraryPath(path));
@@ -910,6 +960,9 @@ export async function uploadAcademicCourse(client: SupabaseClient, accountId: st
   if (error && error.code === "23514" && files.some(file => file.mime_type === "image/gif")
     && /academic_files_mime_type_check/.test(error.message ?? ""))
     throw new Error("The academic cloud backend has not enabled GIF figures yet. Your ZIP is unchanged; retry after the private academic GIF schema migration.");
+  if (error && error.code === "23514" && files.some(file => file.mime_type === HELD_EMF_MIME)
+    && /academic_files_mime_type_check/.test(error.message ?? ""))
+    throw new Error("The academic cloud backend cannot preserve held EMF source figures yet. Your package is unchanged; retry after the held-EMF migration.");
   if (error?.code === "23505" && /Academic source is already registered under another collection/.test(error.message ?? ""))
     throw new Error("This source is already registered in another private academic collection. Reopen that collection instead of creating a duplicate catalog.");
   if (error || !data?.revision_id || data.collection_id !== collection) throw new Error("Your private upload could not be registered. Keep the package and retry.");

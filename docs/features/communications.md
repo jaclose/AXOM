@@ -235,7 +235,7 @@ older provider events. Opens/clicks are not used for product state or readiness.
 
 | Template | Trigger / required source | Main action |
 | --- | --- | --- |
-| Welcome | New account profile; verified address before send | Enter AXOM |
+| Welcome | New account profile; verified address before send. Pulse-style hero Orb and three first steps (term, exam-style practice, the recorded week) | Enter AXOM |
 | Authentication | Supabase confirmation, OTP/link, recovery, invitation, email change, reauthentication | Secure Supabase-generated action |
 | Security | Supabase security notification template | Review account |
 | Daily learning | Opt-in and a recorded course/activity context | Continue course |

@@ -5,37 +5,41 @@ authority: current-state
 ---
 # AXOM current AI state
 
-2026-10-30 release candidate `5dfafae1` integrates RHPS/ESoft import, review,
-teaching, QBank, Journal and Productivity work onto `origin/main` `0cb5769a`.
-It preserves the current publisher and excludes the incompatible unapplied
-release-catalog experiment. Private packages remain unpublished; production
-deployment and authenticated readback are pending validation.
+2026-11-01 local `codex/qbank-full-integration` combines draft QBank/Anki PRs
+#34 and #43–47; it is not deployed. A real upload-free dry run with JD's
+confirmed terms and MI→NMI decision prepared 20/20 courses, with zero term or
+attention prompts: 699 answer-ready, 16,252 held. All 17,559 source rows were
+accounted for; 594 stayed local. Held EMF remains unavailable to learners.
+Community Uploads and Anki term links passed their own UI checks; combined
+typecheck, lint, build, 111 focused tests, 16 term/setup tests and 11 Chrome
+browser cases pass. DERS, BSCE3, DNPR and four Unfiled decisions need source
+review. Earlier dated claims remain in
+`git show 1b189177:docs/AI_STATE.md` and the feature contract.
 
-Prior snapshot: 2026-10-20 UTC, `feat/academic-library-v1` in
-`AXOM-academic-library-v1`, HEAD `78c00e04`. This reflection batch was pushed to
-main and deployed (authenticated deployment `7203032971`); six old dates were
-dismissed in the live UI and stayed dismissed after reload. Domain contracts remain authoritative.
+## 2026-10-28 QBank production receipt
 
-Batch pushes: `origin/main` triggers Vercel production, local commits do not.
-After the reflection release, JD approved one additional tested
-batch: participation streaks, compact Activity Log and catalog CI fixture repair.
-That batch is `dc055a2` on `origin/main`; its deployment was not verified on 2026-10-27.
-It does not authorize migrations, private publication or subsequent releases.
-Verify deployed SHA and protected index before release claims.
+CLI 2.122.0 failed on `LOCK TABLE` (25P01) at 12:35 UTC; history stayed
+30/33. CLI 2.114.0 applied versions `20261016011812`, `20261017233759`,
+`20261027120000` at 12:47:19–12:47:36 UTC with
+`db push --linked --skip-vault`. Postflight 33/33; academic RPCs verified.
+Owner reviewer grant under `service_role` verified 12:49:35–12:49:40 UTC.
+No content upload or sharing change.
 
-## Branch `jd-claude/eloquent-shannon-b2xof9` (2026-10-27, cloud)
+## 2026-11-01 QBank production receipt
 
-Base `dc055a2`. Adds whole-library publishing: one collection per term and module with
-every plan section, reviewer-confirmed plan terms (both uploaders), an on-device check
-before upload, plan-less question collections, reviewer approval, a curriculum-ordered
-catalog and term-grouped QBank discovery
-([contract](features/academic-library.md#one-course-per-module-and-the-library-publisher)).
-Migration `20261027120000_academic_curriculum_catalog.sql` is replayed locally only.
-`5c04e71` fixes the privacy replay test whose fixed 2026-10-23 expiry fails main's suite.
-Passed: full Vitest (28 skipped), PGlite replay, types/lint/build, a synthetic publish
-journey at 1440/390 and related catalog specs in Chromium. Not done: real-corpus publish,
-hosted migration, reviewer grant, second-account check; the private corpus and board
-were unreachable from the cloud. Next: JD reviews the draft PR, then the owner steps.
+CLI 2.118.0 applied `20261101120000` by 20:01 UTC and `20261101130000`
+by 20:22 UTC, each the sole pending version, with `db push --linked --skip-vault`.
+Hosted ledger, academic reviewer/catalog/community functions, JD's Auth
+reviewer row, and the private bucket/file-manifest EMF settings were verified.
+The learner still requires a viewable figure. Collections and community
+submissions were zero; no content was uploaded or sharing changed. PR 37/44
+branch context remains in the [library contract](features/academic-library.md)
+and `git show de00e44b:docs/AI_STATE.md`.
+
+Draft PR #47 applies JD's hash-bound MI→NMI decision to 38 sources, 31 banks,
+two plan sections and 39 activities without changing originals. Its separate
+dry run reconciled 17,559 rows and all 20 courses; the combined EMF/MI candidate
+still needs a fresh upload-free check. No content was uploaded.
 
 ## Ownership and protected work
 
@@ -106,22 +110,8 @@ Preserve account locks, source identity, atomic reviewed filing, attachment roll
 revocable shares and owner-only recovery. Uncertain removals retain paths;
 ambiguous cross-service work requires reconciliation, not inferred success.
 
-The last authenticated production inspection on 2026-10-15 recorded 23
-migrations through `20261013230000`. It is not a fresh production check.
-Nine later migrations remain locally tested only:
-
-- `20261014120000_workspace_originals.sql`;
-- `20261014121000_academic_revision_order.sql`;
-- `20261014122000_academic_current_review_gate.sql`;
-- `20261015133000_academic_gif_media_support.sql`;
-- `20261015225638_bound_question_share_recovery.sql`;
-- `20261015230042_enforce_academic_source_identity.sql`;
-- `20261016002404_cascade_academic_owner_deletion.sql`;
-- `20261016011812_harden_privacy_request_barrier.sql`; and
-- `20261017233759_enforce_academic_collection_classification.sql`.
-
-Draft [PR #30](https://github.com/jaclose/AXOM/pull/30) reports a 2026-10-25 audit with
-30 applied and only the last two pending; recheck the live list before any release.
+The older 2026-10-15 and PR #30 migration counts are historical; the current
+linked receipt is above. Recheck the live list before another migration.
 
 Journal transitions await confirmed writes; failures preserve drafts. Closeout
 copy is opt-in. Images export beyond the 14 MB account limit; teardown is best effort.
@@ -143,13 +133,11 @@ high, 39 moderate, three low) was not refreshed; dependency remediation is separ
 
 ## Cloud and delivery boundary
 
-Read-only production evidence dated 2026-10-15 showed 23 recorded migrations
-and zero academic collections, revisions, files, storage objects or question
-shares. No owner-authenticated production upload, reload, share recovery,
+2026-11-01 linked SQL showed zero academic collections and zero community
+submissions. No owner-authenticated production upload, reload, share recovery,
 media/checksum readback or revocation was completed.
 
-Before production acceptance: apply every pending migration (including
-`20261027120000` from the branch above) through the approved path; upload only cleared private material as its authenticated owner; reload it
+Before production acceptance: upload only cleared private material as its authenticated owner; reload it
 through the learner UI; verify media/checksums and revocation; and record exact
 receipts. Also complete a true multi-connection privacy-lock check, Journal
 image-race and broader multi-tab coverage, QBank opener-clone recovery analysis, Safari/WebKit and

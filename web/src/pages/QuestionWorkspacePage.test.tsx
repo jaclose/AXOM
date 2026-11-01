@@ -138,7 +138,7 @@ describe("QuestionWorkspacePage first use", () => {
     expect(screen.queryByText("Current mastery")).toBeNull();
     expect(screen.queryByText("Attempt accuracy")).toBeNull();
     expect(screen.queryByRole("tab", { name: /Insights/ })).toBeNull();
-    expect(within(screen.getByRole("tablist", { name: "Question Bank sections" })).getAllByRole("tab").map(tab => tab.textContent)).toEqual(["Library", "How it works", "Add material"]);
+    expect(within(screen.getByRole("tablist", { name: "Question Bank sections" })).getAllByRole("tab").map(tab => tab.textContent)).toEqual(["Library", "Community", "How it works", "Add material"]);
     expect(screen.getByLabelText("Question Bank inventory").textContent).toContain("Ready to practice0Held for review0Saved sets0");
     expect(screen.getByLabelText("How to start a practice set").textContent).toBe("1Course2Question set3Practice");
     expect(container.querySelector('[data-tour="question-bank-entry"]')).toBeTruthy();
@@ -205,6 +205,7 @@ describe("QuestionWorkspacePage first use", () => {
     render(<QuestionWorkspacePage />);
     const tabs = within(screen.getByRole("tablist", { name: "Question Bank sections" }));
     const browse = tabs.getByRole("tab", { name: "Library" });
+    const community = tabs.getByRole("tab", { name: "Community" });
     const overview = tabs.getByRole("tab", { name: "How it works" });
     const importTab = tabs.getByRole("tab", { name: "Add material" });
     expect(browse.getAttribute("aria-selected")).toBe("true");
@@ -212,7 +213,7 @@ describe("QuestionWorkspacePage first use", () => {
     expect(overview.getAttribute("tabindex")).toBe("-1");
     browse.focus();
     for (const [key, target, id] of [
-      ["{ArrowRight}", overview, "overview"], ["{ArrowRight}", importTab, "import"],
+      ["{ArrowRight}", community, "community"], ["{ArrowRight}", overview, "overview"], ["{ArrowRight}", importTab, "import"],
       ["{Home}", browse, "sets"], ["{End}", importTab, "import"],
     ] as const) {
       await user.keyboard(key);
@@ -244,7 +245,7 @@ describe("QuestionWorkspacePage first use", () => {
     render(<QuestionWorkspacePage />);
 
     const sourceTab = screen.getByRole("tab", { name: "Sources (1)" });
-    expect(within(screen.getByRole("tablist", { name: "Question Bank sections" })).getAllByRole("tab").map(item => item.textContent)).toEqual(["Library", "How it works", "Add material", "Sources (1)"]);
+    expect(within(screen.getByRole("tablist", { name: "Question Bank sections" })).getAllByRole("tab").map(item => item.textContent)).toEqual(["Library", "Community", "How it works", "Add material", "Sources (1)"]);
     expect(sourceTab.hasAttribute("aria-controls")).toBe(false);
     await user.click(sourceTab);
     expect(sourceTab.getAttribute("aria-controls")).toBe("question-bank-panel-library");
@@ -681,6 +682,25 @@ describe("QBank single-question medical-media integrity", () => {
     altText: "Essential ECG", role: "exhibit" as const,
     createdAt: "2026-10-14", updatedAt: "2026-10-14",
   };
+  it("keeps an Unreviewed warning visible while browsing and opening a community question", async () => {
+    const user = userEvent.setup();
+    const revisionId = "11111111-1111-4111-8111-111111111111";
+    const rawText = JSON.stringify({ version: 1, accountId: "owner", revisionId,
+      questionIds: ["community-direct"], pending: false });
+    useStore.setState({
+      questions: [question({ id: "community-direct", stem: "Community question" })],
+      documents: [{ id: `community-${revisionId}`, title: "Community review status",
+        fileName: "community-reference.json", fileType: "axom-community-reference",
+        uploadedAt: "2026-11-01T00:00:00.000Z", rawText, sizeBytes: rawText.length,
+        tags: [], linkedQuestionSetIds: [], libraryOnly: true }],
+    });
+    render(<QuestionWorkspacePage />);
+    await user.click(screen.getByRole("tab", { name: "Questions (1)" }));
+    expect(screen.getByText(/Unreviewed community material/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Community question" }));
+    expect(within(screen.getByRole("dialog", { name: "Question" }))
+      .getByText(/Unreviewed community material/)).toBeTruthy();
+  });
   it("does not expose a direct Check answer pathway for a figure-essential question missing its image", async () => {
     const user = userEvent.setup();
     useStore.setState({ questions: [question({

@@ -31,7 +31,8 @@ move between devices, and delete every cloud copy.
   60 s resend window, TOTP MFA on, pooler sizes) so `npx supabase config push`
   cannot silently regress it. Run `npx supabase config diff` first — it is
   read-only. `site_url` and the redirect allow-list are the only declared
-  values that still differ (see step 4 below).
+  values that still differ (see step 4 below), plus email confirmation until
+  the owner turns it off (step 3).
 - **Not verified live yet:** the end-to-end account test needs the project's
   publishable key in `web/.env.local` (see step 5). The old project
   `skksijapfqmfczjsvfiw` is inactive; nothing references it.
@@ -67,6 +68,14 @@ move between devices, and delete every cloud copy.
    **Magic Link** ← `magic_link.html`, **Reset password** ← `recovery.html`
    (subjects are in `config.toml`). The app verifies confirmation and reset
    codes in-app (`verifyOtp` types `email` / `recovery`).
+   **Sign-up needs no code** (owner decision 2026-10-28): turn **Confirm email**
+   off under Authentication → Sign In / Providers → Email, as `config.toml`
+   declares. `signUp` then returns a session and the person is signed in at
+   once. While it stays on, the app falls back to the confirmation code. The
+   account-created email is the communications welcome email, sent once that
+   service is live (`docs/operations/communications-resend.md`). Trade-off: an
+   address is no longer proven before the account exists; its real owner can
+   still take the account back with **Forgot password**.
 4. **URLs** — Authentication → URL configuration. Site URL: your production
    web origin (currently `https://axom-jacloses-projects.vercel.app/`). Keep the
    Vercel preview patterns and add `http://127.0.0.1:5173/**`,

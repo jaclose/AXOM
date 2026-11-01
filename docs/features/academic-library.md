@@ -142,6 +142,41 @@ the owner may request sharing with every signed-in account, which requires attes
 right to share; a reviewer may approve in the same step. Every new revision returns to
 review. Workspace schema stays 34; no new store or catalog is created.
 
+Filing decisions from the unfiled source review (`axom-private-filing-decisions`, schema 2)
+file prepared sources the preparer could not place. Add the matching original review
+worksheet (`axom-private-filing-proposals`, schema 1), then the decisions export in the
+publisher. The dry run requires both `AXOM_PUBLISH_PROPOSALS` and
+`AXOM_PUBLISH_DECISIONS`. The worksheet is proposal evidence, never an authorization to
+file a source: Accept must match its proposal, and Correct needs a source-evidence note.
+Each destination must be an exact current curriculum term/module pair. The catalog,
+source original and bank must match the reviewed hashes; each filed bank must have one
+uniform original Unfiled/term 0/week 0 scope. A virtual sibling bank adds a human-reviewed
+filing envelope while leaving the manifest, question scopes, IDs and provenance intact.
+Planning, Check and upload use that envelope; weeks remain unassigned. Kept-unfiled and
+undecided sources stay unchanged. The library folder is never changed, and both review
+files stay private with the library.
+
+JD's confirmed Term 5 MI to NMI correction uses a separate private
+`axom-private-mi-nmi-decision` file. Add it after the Unfiled decisions, or set
+`AXOM_PUBLISH_MI_NMI_DECISION` for the upload-free dry run. It binds the original
+catalog hash and every MI source to its original and bank hashes; an omitted or
+changed source or plan is refused. All original MI question scopes must agree on
+Term 5 with week unassigned. The publisher presents the sources under NMI through
+a human-reviewed envelope. It derives an NMI heading for each exact reviewed MI
+plan section, proving its activities, stated weeks and metadata are identical.
+The original catalog, plan text, question IDs, provenance and files on disk stay
+unchanged. The published course contains both the derived plan and its original
+text source. The decision file stays private. Other module moves need their own
+source review and cannot use this MI correction.
+
+Every question is accounted for before anything uploads. The publisher and the dry run
+count each question row the library's packages hold, unreadable rows included, and place
+each in exactly one course of the plan (ready, or awaiting review, and whether its course
+still needs a confirmed term) or in one stated reason it stays on the device. The totals
+must reconcile: a row placed twice or nowhere shows as unaccounted, and the dry run fails.
+A package whose catalog ready and held counts disagree with its own rows is named; the
+uploader refuses it until it is prepared again.
+
 Your published courses, below the publisher, reads every course the account owns from
 the catalog page by page and shows its audience and review state by term. It shares all
 private courses at once behind the same rights attestation and, for a reviewer who
@@ -163,8 +198,12 @@ Production writes need JD's explicit approval for each step. On the authorized M
    without a browser: `publicationPlan.local.test.ts` (opt-in through
    `AXOM_PUBLISH_LIBRARY_ROOT`) prepares every course as publishing would, uploads
    nothing and writes a metadata-only report to `AXOM_PUBLISH_REPORT` outside Git.
+   Add both `AXOM_PUBLISH_PROPOSALS=<worksheet.json>` and
+   `AXOM_PUBLISH_DECISIONS=<decisions.json>` to include the unfiled source review.
 4. Sign in to AXOM, open Course Library > Manage sources and custom courses > Publish a
-   prepared library, choose the prepared folder, confirm each proposed term, review
+   prepared library, choose the prepared folder, add the review worksheet and then the
+   filing decisions file if the
+   unfiled sources were reviewed, confirm each proposed term, review
    the plans and source files listed as staying on the device, then Check the selected
    courses and resolve or leave out what needs attention.
 5. Publish. Choose sharing and, as a reviewer, approval only for material you have the
@@ -178,6 +217,32 @@ Account requests reuse the recovery owner's `accountOperationClient`: requests r
 the starting token and reject a changed account. Catalog results are scoped by account
 and query, including pagination. Installation and enrollment recheck ownership before
 canonical store writes; interrupted work retains its local originals and retry intent.
+
+## Community uploads and promotion
+
+Any signed-in account can upload an immutable question course privately with the
+existing academic uploader. A native AXOM course folder works without making a
+ZIP; the uploader builds its course index locally and validates the package.
+Its owner may explicitly submit the current ready
+revision to Community Uploads after confirming sharing rights. The submission
+stays labeled **Unreviewed** and is separate from the approved course catalog.
+Signed-in readers can inspect its bounded plan preview and download the
+hash-checked question files; anonymous visitors cannot. Direct revision
+provenance remains private during community review. Community access alone
+cannot enroll a course in the tracker or place it in the official QBank.
+Downloaded community question IDs retain an account-scoped Unreviewed marker in
+the local vault and account snapshot. The marker is saved before content download,
+so an interrupted download leaves a warning. The Question Bank and every practice
+interface show the warning while allowing answer-ready questions to be practised.
+
+`20261101120000_academic_community_submissions.sql` records the exact submitted
+revision and rights attestation. Replacing that revision or withdrawing the
+submission immediately removes its community metadata and file access. A
+service-role-appointed member of `academic_reviewers` (JD or a designated host)
+can approve or reject only the exact current submission. Approval moves it into
+the existing shared, reviewed catalog and enables normal course enrollment;
+rejection keeps it out. The older collection-only review RPC cannot approve a
+community submission. No client-side role flag can grant review access.
 
 ## Acceptance and limits
 

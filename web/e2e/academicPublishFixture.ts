@@ -118,6 +118,7 @@ export async function academicPublishFixture(page: Page, options: { reviewer?: b
       const collection = collections.get(String(body().collection));
       return collection?.current_revision_id ? json(course(collection)) : json(null);
     }
+    if (path.endsWith("/rpc/academic_community_catalog")) return json([]);
     if (path.endsWith("/rpc/academic_catalog")) {
       const { search = "", term_filter = "" } = body() as { search?: string; term_filter?: string };
       return json([...collections.values()].filter(collection => collection.current_revision_id

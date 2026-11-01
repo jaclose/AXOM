@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import type { AcademicBatchJob, AcademicBatchOutcome } from "../../lib/academicLibrary/batch";
 import type { AcademicUpload } from "../../lib/academicLibrary/upload";
 import { bank, library } from "../../lib/academicLibrary/publicationFixture.testing";
+import { MI_NMI_DECISION_FORMAT } from "../../lib/academicLibrary/miNmiCorrection";
 import { sha256 } from "../../lib/question-content/assets";
 import { AcademicLibraryPublisher } from "./AcademicLibraryPublisher";
 
@@ -153,6 +154,37 @@ describe("publishing a prepared library", () => {
     expect(screen.getByText(/1 course selected to publish/)).toBeTruthy();
     expect(mocks.batch).not.toHaveBeenCalled();
     expect(mocks.share).not.toHaveBeenCalled();
+  });
+
+  it("applies and removes the exact MI to NMI decision through the publisher control", async () => {
+    const original = new TextEncoder().encode("%PDF-1.4 synthetic MI source");
+    const checksum = (await sha256(original)).slice(7);
+    const bankPath = `banks/${checksum}/bank.json`;
+    const miBank = bank("mi-pq", "MI", 5, checksum);
+    miBank.pkg.manifest.course.week = 0;
+    miBank.pkg.questions[0].week = 0;
+    fixture.files.set(`sources/${checksum}.pdf`, original);
+    fixture.files.set(bankPath, new TextEncoder().encode(JSON.stringify(miBank)));
+    fixture.catalog.sources.push({ id: `source-${checksum}`, name: "mi-pq.pdf", sourcePath: "MI/mi-pq.pdf", checksum,
+      module: "MI", status: "prepared", reason: "Synthetic test source", bankFile: bankPath,
+      originalFile: `sources/${checksum}.pdf`, ready: 1, review: 0 });
+    fixture.files.set("catalog.json", new TextEncoder().encode(JSON.stringify(fixture.catalog)));
+    const decision = { format: MI_NMI_DECISION_FORMAT, schemaVersion: 2,
+      catalogSha256: (await sha256(fixture.files.get("catalog.json")!)).slice(7),
+      fromModule: "MI", toModule: "NMI", term: "Term 5", ownerDecision: "MI belongs under NMI",
+      decidedAtUtc: "2026-11-01T00:00:00Z", sources: [{ sourceId: `source-${checksum}`, sourceChecksum: checksum,
+        bankSha256: (await sha256(fixture.files.get(bankPath)!)).slice(7) }], plans: [] };
+    const { container } = render(<AcademicLibraryPublisher onPublished={vi.fn()} />);
+    await chooseLibrary(container);
+    expect(screen.getByRole("button", { name: "Add MI to NMI decision" })).toBeTruthy();
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="MI to NMI decision file"]')!;
+    fireEvent.change(input, { target: { files: [{ text: async () => JSON.stringify(decision) }] } });
+    expect(await screen.findByText(/1 MI source verified and placed under Term 5 NMI/)).toBeTruthy();
+    expect(screen.getByText("NMI")).toBeTruthy();
+    expect(screen.queryByText("MI")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Remove MI to NMI decision" }));
+    expect(await screen.findByText("MI")).toBeTruthy();
+    expect(mocks.batch).not.toHaveBeenCalled();
   });
 
   it("explains when a bank's unsupported original stays on this device", async () => {

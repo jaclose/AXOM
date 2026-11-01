@@ -8,6 +8,7 @@ import { Field, SelectField, TextAreaField } from "../components/ui/Modal";
 import { CardVault } from "../components/anki/CardVault";
 import { CardReviewMode } from "../components/anki/CardReviewMode";
 import { AiCardGenerator } from "../components/anki/AiCardGenerator";
+import { AnkiTermLinks } from "../components/anki/AnkiTermLinks";
 import { ICON_SIZE } from "../lib/iconSize";
 
 type CardStyle = "cloze" | "qa" | "image";
@@ -30,7 +31,7 @@ const STYLE_LABEL: Record<CardStyle, string> = {
   cloze: "Cloze (facts)", qa: "Q&A (concepts)", image: "Image occlusion (diagrams)",
 };
 
-type LabTab = "vault" | "review" | "generate" | "prompt";
+type LabTab = "vault" | "review" | "term-links" | "generate" | "prompt";
 
 export function AnkiLabPage() {
   const [tab, setTab] = useState<LabTab>("vault");
@@ -44,7 +45,7 @@ export function AnkiLabPage() {
           <span className="folder-icon" style={{ color: "var(--purple)" }}><Wand2 size={ICON_SIZE.control} /></span>
           <div className="grow">
             <div style={{ fontSize: 18, fontWeight: 800 }}>Anki Lab</div>
-            <div className="sub">Persistent card vault, in-app spaced review, reviewed AI generation, and the classic prompt studio.</div>
+            <div className="sub">Review cards, organize term decks, and connect your own Anki collection.</div>
           </div>
           <Tag tone={dueCount ? "orange" : "green"}>{dueCount ? `${dueCount} due` : `${cardCount} cards`}</Tag>
         </div>
@@ -52,15 +53,17 @@ export function AnkiLabPage() {
           {([
             ["vault", "Card vault"],
             ["review", `Review${dueCount ? ` (${dueCount})` : ""}`],
+            ["term-links", "Term decks & AnKing"],
             ["generate", "AI generate"],
             ["prompt", "Prompt studio"],
           ] as Array<[LabTab, string]>).map(([id, label]) => (
-            <button key={id} className={`filter-pill ${tab === id ? "on" : ""}`} onClick={() => setTab(id)}>{label}</button>
+            <button key={id} className={`filter-pill ${tab === id ? "on" : ""}`} aria-pressed={tab === id} onClick={() => setTab(id)}>{label}</button>
           ))}
         </div>
       </GlassCard>
       {tab === "vault" && <CardVault />}
       {tab === "review" && <CardReviewMode />}
+      {tab === "term-links" && <AnkiTermLinks />}
       {tab === "generate" && <AiCardGenerator onOpenAiSettings={() => useUi.getState().requestSettings("ai")} />}
       {tab === "prompt" && <PromptStudio />}
     </>

@@ -36,6 +36,10 @@ import { requiredQuestionMedia } from "../lib/exam/mediaPreflight";
 import { SourceLibrary, QuestionSetList } from "../components/questions/LibraryPanels";
 import { BlockBuilder } from "../components/questions/BlockBuilder";
 import { QuestionBankLibrary } from "../components/questions/QuestionBankLibrary";
+import { CommunityUploads } from "../components/questions/CommunityUploads";
+import { CommunityPracticeNotice } from "../components/questions/CommunityPracticeNotice";
+import { COMMUNITY_REFERENCE_TYPE, communityReviewStatus } from "../lib/academicLibrary/communityReference";
+import { useAccount } from "../lib/account/accountStore";
 import type { BankLocation } from "../components/questions/CourseBankBrowser";
 import { BankBrowser } from "../components/questions/BankBrowser";
 import { coachWeakness, resolveActiveProvider } from "../lib/ai";
@@ -58,10 +62,11 @@ export const QUESTION_BANK_TOUR_STEPS: readonly ModuleTourStep[] = [
   { target: "qb-feedback", title: "Understand feedback", body: "After an answer, feedback separates the result, explanation, and source evidence so you can repair the question without rewriting attempts." },
 ] as const;
 
-type BankTab = "overview" | "import" | "sets" | "library" | "blocks" | "bank" | "insights";
+type BankTab = "overview" | "import" | "sets" | "community" | "library" | "blocks" | "bank" | "insights";
 
 const ALL_TABS: Array<[BankTab, string]> = [
   ["sets", "Library"],
+  ["community", "Community"],
   ["overview", "Study"],
   ["blocks", "Build"],
   ["bank", "Questions"],
@@ -72,7 +77,10 @@ const ALL_TABS: Array<[BankTab, string]> = [
 
 /** Direct question review uses the same image-evidence gate as exam blocks.
  * No alternate scoring path is permitted when a clinical figure is missing. */
-function TrustedQuestionDetail({ question, onClose }: { question: QuestionRecord; onClose: () => void }) {
+function TrustedQuestionDetail({ question, onClose, communityQuestion, communityPending }: {
+  question: QuestionRecord; onClose: () => void;
+  communityQuestion: boolean; communityPending: boolean;
+}) {
   const gate = useMediaGate();
   const ready = gate.isReady([question]);
   const phase = gate.state.phase;
@@ -82,12 +90,14 @@ function TrustedQuestionDetail({ question, onClose }: { question: QuestionRecord
     if (!ready && phase === "idle") verify([question], () => undefined);
   }, [ready, phase, verify, question]);
 
-  if (ready) return <QuestionDetailModal question={question} onClose={onClose} />;
+  const notice = <CommunityPracticeNotice count={communityQuestion ? 1 : 0} pending={communityPending} />;
+  if (ready) return <QuestionDetailModal question={question} onClose={onClose} notice={notice} />;
   const display = gate.state.phase === "idle"
     ? { phase: "checking" as const, progress: {
       total: requiredQuestionMedia(question).length, checked: 0, available: 0, blocked: 0,
     } } : gate.state;
   return <Modal title="Verify essential clinical figures" className="qb-media-recovery-modal" onClose={onClose}>
+    {notice}
     <ExamRunnerMediaNotice state={display} onRetry={() => gate.verify([question], () => undefined)} />
     <p className="sub">This question cannot record an answer until the necessary clinical image has been restored.</p>
   </Modal>;
@@ -112,6 +122,7 @@ interface RunnerLaunch {
 
 export function QuestionWorkspacePage() {
   const s = useStore();
+  const accountId = useAccount(state => state.user?.id);
   const questions = s.questions ?? NO_QUESTIONS;
   // sessionStorage has no React subscription; the setter requests a fresh read.
   const [, setHandoffVersion] = useState(0);
@@ -133,7 +144,9 @@ export function QuestionWorkspacePage() {
   }, [courseLaunch]);
   const questionSets = s.questionSets ?? NO_SETS;
   const allDocuments = s.documents ?? NO_DOCUMENTS;
-  const documents = useMemo(() => allDocuments.filter(doc => !["axom-private-library-catalog", "axom-private-bank-review"].includes(doc.fileType)), [allDocuments]);
+  const documents = useMemo(() => allDocuments.filter(doc => !["axom-private-library-catalog", "axom-private-bank-review", COMMUNITY_REFERENCE_TYPE].includes(doc.fileType)), [allDocuments]);
+  const communityStatus = useMemo(() => communityReviewStatus(allDocuments, accountId), [allDocuments, accountId]);
+  const unreviewedLocalCount = questions.filter(question => communityStatus.questionIds.has(question.id)).length;
   const privateReview = useMemo(() => summarizePrivateReviewBacklog(allDocuments), [allDocuments]);
   const [tab, setTab] = useState<BankTab>("sets");
   const [bankView, setBankView] = useState<"books" | "weeks">("books");
@@ -235,6 +248,7 @@ export function QuestionWorkspacePage() {
     if (!isFirstUse) return ALL_TABS.map(([id, label]) => [id, tabLabel(id, label, questionSets.length, documents.length, questions.length, s.quizBlocks?.length ?? 0)] as [BankTab, string]);
     const tabs: Array<[BankTab, string]> = [
       ["sets", "Library"],
+      ["community", "Community"],
       ["overview", "How it works"],
       ["import", "Add material"],
     ];
@@ -652,6 +666,7 @@ export function QuestionWorkspacePage() {
         />
       </>}
       {tab === "sets" && <>
+        <CommunityPracticeNotice count={unreviewedLocalCount} pending={communityStatus.pending} possible />
         <div className="cb-view-switch" role="group" aria-label="Question bank view">
           <button aria-pressed={bankView === "books"} onClick={() => setBankView("books")}>Courses</button>
           <button aria-pressed={bankView === "weeks"} onClick={() => setBankView("weeks")}>Weeks &amp; sets</button>
@@ -672,16 +687,20 @@ export function QuestionWorkspacePage() {
           onOpenInsights={() => setTab("insights")}
         />
       }</>}
+      {tab === "community" && <CommunityUploads onOpenLibrary={() => { setBankView("books"); setTab("sets"); }} />}
       {tab === "library" && <SourceLibrary onParseFrom={parseFrom} onGenerateFrom={generateFrom} />}
       {tab === "blocks" && <BlockBuilder onRunBlock={runBlock} onNewBlock={() => setRunner({ mode: "tutor" })} />}
 
       {tab === "bank" && (
-        <BankBrowser
-          key={bankReview.key}
-          onOpen={setOpen}
-          initialMode={bankReview.mode ?? "all"}
-          questionIds={bankReview.ids}
-        />
+        <>
+          <CommunityPracticeNotice count={unreviewedLocalCount} pending={communityStatus.pending} possible />
+          <BankBrowser
+            key={bankReview.key}
+            onOpen={setOpen}
+            initialMode={bankReview.mode ?? "all"}
+            questionIds={bankReview.ids}
+          />
+        </>
       )}
 
       {tab === "insights" && (
@@ -739,10 +758,12 @@ export function QuestionWorkspacePage() {
       )}
       </section>
 
-      {open && <TrustedQuestionDetail key={open.id} question={open} onClose={() => setOpen(null)} />}
+      {open && <TrustedQuestionDetail key={open.id} question={open} onClose={() => setOpen(null)}
+        communityQuestion={communityStatus.questionIds.has(open.id)} communityPending={communityStatus.pending} />}
       {runner && (
         <ExamRunner
           mode={runner.mode}
+          accountId={accountId}
           retakeIds={runner.retakeIds}
           presetFilters={runner.presetFilters}
           presetTimed={runner.presetTimed}

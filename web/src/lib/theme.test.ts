@@ -61,7 +61,8 @@ describe("theme preference", () => {
     expect(document.documentElement.dataset.theme).toBe("light");
     expect(document.documentElement.dataset.themePreference).toBe("light");
     expect(document.documentElement.style.colorScheme).toBe("light");
-    expect(document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.content).toContain("f3eee3");
+    // Midnight's light paper: the default palette until someone picks one.
+    expect(document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.content).toBe("#f8f9fc");
   });
 
   it("persists only the small preference and still applies when storage is blocked", () => {

@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import type { AcademicCourse } from "../../lib/academicLibrary/client";
 import { AcademicCollectionManager } from "./AcademicCollectionManager";
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), reviewer: vi.fn(), share: vi.fn(), review: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), community: vi.fn(), reviewer: vi.fn(), share: vi.fn(), review: vi.fn() }));
 vi.mock("../../lib/account/accountStore", () => ({
   useAccount: (select: (state: { user: { id: string } }) => unknown) => select({ user: { id: "owner-1" } }),
 }));
@@ -16,6 +16,9 @@ vi.mock("../../lib/academicLibrary/client", () => ({
   isAcademicReviewer: (...args: unknown[]) => mocks.reviewer(...args),
   shareAcademicCourses: (...args: unknown[]) => mocks.share(...args),
   reviewAcademicCourse: (...args: unknown[]) => mocks.review(...args),
+}));
+vi.mock("../../lib/academicLibrary/community", () => ({
+  listCommunityUploads: (...args: unknown[]) => mocks.community(...args),
 }));
 vi.mock("../ui/primitives", () => ({
   GButton: ({ children, variant: _variant, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string }) =>
@@ -32,6 +35,7 @@ const course = (n: number, patch: Partial<AcademicCourse> = {}): AcademicCourse 
 
 describe("your published courses", () => {
   beforeEach(() => {
+    mocks.community.mockResolvedValue([]);
     mocks.reviewer.mockResolvedValue(false);
     mocks.share.mockImplementation(async (ids: string[], _account: string, options: { approve: boolean }) =>
       ids.map(collectionId => ({ collectionId, shared: true, approved: options.approve })));
@@ -97,5 +101,39 @@ describe("your published courses", () => {
     render(<AcademicCollectionManager onChanged={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
     expect(await screen.findByText(/You have not published any courses yet/)).toBeTruthy();
+  });
+
+  it("routes pending community submissions away from legacy share and approval", async () => {
+    mocks.reviewer.mockResolvedValue(true);
+    mocks.list.mockResolvedValueOnce([
+      course(1), course(2, { visibility: "shared" }),
+      course(3), course(4, { visibility: "shared" }),
+    ]);
+    mocks.community.mockResolvedValueOnce([1, 2].map(n => ({
+      id: id(n), current_revision_id: id(1000 + n), submitted_at: "2026-11-01T10:00:00Z",
+    })));
+    render(<AcademicCollectionManager onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    const share = await screen.findByRole("button", { name: /Share 1 private course/ });
+    const approve = screen.getByRole("button", { name: /Approve 1 course/ });
+    expect(screen.getByText(/2 unreviewed community uploads/)).toBeTruthy();
+    expect(screen.getByText(/Question Bank → Community Uploads/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: /right to share this course material/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /I checked these courses/ }));
+    fireEvent.click(approve);
+    await waitFor(() => expect(mocks.review).toHaveBeenCalledOnce());
+    expect(mocks.review.mock.calls[0][0]).toBe(id(4));
+    fireEvent.click(share);
+    await waitFor(() => expect(mocks.share).toHaveBeenCalledOnce());
+    expect(mocks.share.mock.calls[0][0]).toEqual([id(3)]);
+  });
+
+  it("does not offer bulk actions when community status cannot be checked", async () => {
+    mocks.list.mockResolvedValueOnce([course(1)]);
+    mocks.community.mockRejectedValueOnce(new Error("Community uploads could not be loaded."));
+    render(<AcademicCollectionManager onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Community uploads could not be loaded.");
+    expect(screen.queryByRole("button", { name: /Share 1 private course/ })).toBeNull();
   });
 });

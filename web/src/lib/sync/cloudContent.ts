@@ -10,7 +10,7 @@ import { readOriginalFile } from "../sourceOriginal";
 export const CONTENT_BUCKET = "workspace-content";
 export const MAX_CONTENT_OBJECT_BYTES = 8 * 1024 * 1024;
 const QUESTION_FIELDS = ["content", "stem", "options", "correctKey", "correctAnswerText", "explanation", "choiceRationales", "analyses", "extraction", "citation"] as const;
-export const INLINE_CONTENT_TYPES = new Set(["axom-academic-reference", "axom-course-template"]);
+export const INLINE_CONTENT_TYPES = new Set(["axom-academic-reference", "axom-community-reference", "axom-course-template"]);
 const DOCUMENT_FIELDS = ["rawText", "pageTexts"] as const;
 export interface ContentReference { collection: "questions" | "documents"; id: string; hash: string; byteSize: number; expandedBytes: number; academic?: AcademicRecordReference }
 export interface ContentUpload { reference: ContentReference; content: string; canonicalText: string; canonicalHash: string }

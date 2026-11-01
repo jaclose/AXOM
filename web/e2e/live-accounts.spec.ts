@@ -95,15 +95,20 @@ test("create, confirm by code, password and code sign-in, protect, merge, restor
   await openWorkspace(page, "From device A");
   await openAccount(page);
 
-  // Create the account; confirm with the code from the confirmation email.
+  // Create the account. With email confirmation off it is signed in at once;
+  // while the project still asks for it, confirm with the emailed code.
   await panel(page).getByRole("tab", { name: "Create account" }).click();
   await panel(page).getByLabel("Email", { exact: true }).fill(email);
   await panel(page).getByLabel(/^Password/).fill(password);
   await panel(page).getByRole("button", { name: "Create account", exact: true }).click();
-  await expect(panel(page).getByText(/Confirmation code sent to/)).toBeVisible();
-  await panel(page).locator(".account-code").fill(await mintCode("signup"));
-  await panel(page).getByRole("button", { name: "Verify code" }).click();
-  await expect(panel(page).getByRole("button", { name: "Sign out" })).toBeVisible();
+  const signOut = panel(page).getByRole("button", { name: "Sign out" });
+  const codePrompt = panel(page).getByText(/Confirmation code sent to/);
+  await expect(signOut.or(codePrompt)).toBeVisible();
+  if (await codePrompt.isVisible()) {
+    await panel(page).locator(".account-code").fill(await mintCode("signup"));
+    await panel(page).getByRole("button", { name: "Verify code" }).click();
+  }
+  await expect(signOut).toBeVisible();
 
   // Password sign-in, then passwordless code sign-in.
   await panel(page).getByRole("button", { name: "Sign out" }).click();

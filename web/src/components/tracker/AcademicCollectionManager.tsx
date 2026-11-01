@@ -4,6 +4,7 @@ import { useAccount } from "../../lib/account/accountStore";
 import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
 import { isAcademicReviewer, shareAcademicCourses, type AcademicCourse } from "../../lib/academicLibrary/client";
 import { coursesByTerm } from "../../lib/academicLibrary/catalogOrder";
+import { listCommunityUploads, type CommunityCursor } from "../../lib/academicLibrary/community";
 import {
   approveAcademicCourses, listOwnedAcademicCourses, ownedCourseStatus, type OwnedCourseStatus,
 } from "../../lib/academicLibrary/ownedCourses";
@@ -20,6 +21,27 @@ const STATUS: Record<OwnedCourseStatus, { label: string; tone: "neutral" | "oran
 };
 const SUMMARY_ORDER: OwnedCourseStatus[] = ["private", "awaiting-review", "shared", "not-approved", "group"];
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
+const COMMUNITY_PAGE_SIZE = 24;
+const MAX_COMMUNITY_PAGES = 200;
+
+async function pendingCommunityIds(courses: AcademicCourse[], signal: AbortSignal): Promise<Set<string>> {
+  const candidates = new Map(courses.filter(course => course.review_status === "pending")
+    .map(course => [course.id, course.current_revision_id]));
+  const pending = new Set<string>();
+  if (!candidates.size) return pending;
+  let after: CommunityCursor | undefined;
+  for (let page = 0; page < MAX_COMMUNITY_PAGES; page++) {
+    if (signal.aborted) throw new DOMException("Loading your courses was cancelled.", "AbortError");
+    const uploads = await listCommunityUploads("", "", after);
+    for (const upload of uploads) {
+      if (candidates.get(upload.id) === upload.current_revision_id) pending.add(upload.id);
+    }
+    if (uploads.length < COMMUNITY_PAGE_SIZE || pending.size === candidates.size) return pending;
+    const last = uploads[uploads.length - 1];
+    after = { submittedAt: last.submitted_at, id: last.id };
+  }
+  throw new Error("The community review list is too large to check. Refresh your courses later.");
+}
 
 /**
  * Every course the account has published, with sharing and, for an academic
@@ -29,7 +51,7 @@ const plural = (count: number, one: string, many = `${one}s`) => `${count} ${cou
 export function AcademicCollectionManager({ onChanged }: { onChanged: () => void }) {
   const accountId = useAccount(state => state.user?.id);
   const controller = useRef<AbortController>();
-  const [loaded, setLoaded] = useState<{ accountId: string; courses: AcademicCourse[] }>();
+  const [loaded, setLoaded] = useState<{ accountId: string; courses: AcademicCourse[]; communityIds: Set<string> }>();
   const [reviewer, setReviewer] = useState(false);
   const [busy, setBusy] = useState<"loading" | "sharing" | "approving">();
   const [rights, setRights] = useState(false);
@@ -48,7 +70,8 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
   useEffect(() => () => controller.current?.abort(), []);
 
   const courses = loaded && loaded.accountId === accountId ? loaded.courses : undefined;
-  const withStatus = (status: OwnedCourseStatus) => courses?.filter(course => ownedCourseStatus(course) === status) ?? [];
+  const communityIds = loaded && loaded.accountId === accountId ? loaded.communityIds : new Set<string>();
+  const withStatus = (status: OwnedCourseStatus) => courses?.filter(course => !communityIds.has(course.id) && ownedCourseStatus(course) === status) ?? [];
   const privateCourses = withStatus("private");
   const awaiting = withStatus("awaiting-review");
   const label = (id: string) => {
@@ -76,7 +99,9 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
     setFailures({});
     try {
       const owned = await listOwnedAcademicCourses(accountId, abort.signal);
-      setLoaded({ accountId, courses: owned });
+      const pending = await pendingCommunityIds(owned, abort.signal);
+      if (abort.signal.aborted) return;
+      setLoaded({ accountId, courses: owned, communityIds: pending });
     } catch (cause) {
       if (!abort.signal.aborted) setError(cause instanceof Error ? cause.message : "Your courses could not be loaded.");
     } finally { finish(abort); }
@@ -139,6 +164,7 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
     const count = withStatus(status).length;
     return count ? [`${count} ${STATUS[status].label.toLowerCase()}`] : [];
   });
+  if (communityIds.size) counts.push(`${plural(communityIds.size, "unreviewed community upload")}`);
   const failed = Object.entries(failures);
   return <section className="academic-manager" aria-label="Your published courses" aria-busy={Boolean(busy)}>
     <div className="academic-manager-heading">
@@ -156,6 +182,7 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
     {courses && !courses.length && <p>You have not published any courses yet. Publish a prepared library above, then come back here.</p>}
     {courses && courses.length > 0 && <>
       <p className="academic-manager-summary"><b>{plural(courses.length, "course")}</b>: {counts.join(", ")}.</p>
+      {communityIds.size > 0 && <p>Review {plural(communityIds.size, "community upload")} in Question Bank → Community Uploads. Community submissions require an exact-revision review.</p>}
 
       {privateCourses.length > 0 && <fieldset className="academic-manager-step" disabled={Boolean(busy)}>
         <legend>Share private courses</legend>
@@ -191,7 +218,7 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
             return <li key={course.id}>
               <span><b>{course.module}</b>{course.title !== course.module && <small>{course.title}</small>}</span>
               <span className="academic-manager-facts">{plural(course.ready_questions, "ready question")}</span>
-              <Tag tone={status.tone}>{status.label}</Tag>
+              <Tag tone={communityIds.has(course.id) ? "orange" : status.tone}>{communityIds.has(course.id) ? "Community upload · Unreviewed" : status.label}</Tag>
             </li>;
           })}</ul>
         </div>)}
