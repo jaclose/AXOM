@@ -11,7 +11,7 @@ describe("dashboardQuickPicks", () => {
     expect(dashboardQuickPicks(["ocean", "brown-noise"], EMPTY_TASTE, "cafe")).toEqual(["ocean", "brown-noise", "cafe", "gamma-40"]);
   });
 
-  it("skips an empty Your sounds shelf", () => {
-    expect(dashboardQuickPicks(["yours"], EMPTY_TASTE, "alpha-10")).toEqual(["alpha-10", "gamma-40", "beta-20", "brown-noise"]);
+  it("keeps the AXOM original available from Your sounds", () => {
+    expect(dashboardQuickPicks(["yours"], EMPTY_TASTE, "alpha-10")).toEqual(["yours", "alpha-10", "gamma-40", "beta-20"]);
   });
 });

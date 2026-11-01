@@ -61,7 +61,9 @@ enabled.
 
 Clicking empty desk around the open book puts it down. An explicit Put book
 down control does the same; editor and other interactive controls do not
-trigger it. A dirty page passes through the same confirmed local write gate as
+trigger it. If the desk page receives no writing or other interaction, it folds
+away after 4.4 seconds; closing takes 900 ms, with an immediate reduced-motion
+version. A dirty page passes through the same confirmed local write gate as
 other journal exits, so a failed write leaves the page open.
 
 The Personalize menu stages a scene before saving it, and previews each

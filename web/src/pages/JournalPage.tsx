@@ -611,6 +611,8 @@ function JournalWritingPage({
   const reducedMotion = useReducedMotion();
   const [zoomed, setZoomed] = useState(startZoomed);
   const [settling, setSettling] = useState(false);
+  const [deskClosing, setDeskClosing] = useState(false);
+  const [deskTouched, setDeskTouched] = useState(false);
   const [hasInteractedSinceOpen, setHasInteractedSinceOpen] = useState(startZoomed || day !== today);
   const [composing, setComposing] = useState(false);
   const [promptMode, setPromptMode] = useState<"open" | JournalPurpose>(() => {
@@ -639,6 +641,7 @@ function JournalWritingPage({
   const attachmentReadRef = useRef<Promise<void> | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const settleTimerRef = useRef<number | null>(null);
+  const deskCloseTimerRef = useRef<number | null>(null);
   const returnToDeskWritingRef = useRef(false);
   const pageHeadingRef = useRef<HTMLHeadingElement>(null);
   const inlineHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -707,6 +710,7 @@ function JournalWritingPage({
 
   function noteActivity() {
     if (zoomed) setHasInteractedSinceOpen(true);
+    else setDeskTouched(true);
     if (settleTimerRef.current !== null) {
       window.clearTimeout(settleTimerRef.current);
       settleTimerRef.current = null;
@@ -734,6 +738,7 @@ function JournalWritingPage({
 
   useEffect(() => () => {
     if (settleTimerRef.current !== null) window.clearTimeout(settleTimerRef.current);
+    if (deskCloseTimerRef.current !== null) window.clearTimeout(deskCloseTimerRef.current);
   }, []);
 
   useEffect(() => {
@@ -874,6 +879,7 @@ function JournalWritingPage({
 
   function setDraft(update: (current: JournalDraft) => JournalDraft) {
     const next = update(draftRef.current);
+    setDeskTouched(true);
     draftRef.current = next;
     draftVersionRef.current += 1;
     dirtyRef.current = true;
@@ -918,10 +924,20 @@ function JournalWritingPage({
     void requestDurableTransition(() => onNavigate(nextDirection));
   }
 
-  function putBookDown() {
-    if (supportOpen || addingImage) return;
-    void requestDurableTransition(onClose);
-  }
+  const putBookDown = useCallback(() => {
+    if (supportOpen || addingImage || deskClosing) return;
+    void requestDurableTransition(() => {
+      if (reducedMotion) { onClose(); return; }
+      setDeskClosing(true);
+      deskCloseTimerRef.current = window.setTimeout(onClose, 900);
+    });
+  }, [supportOpen, addingImage, deskClosing, requestDurableTransition, reducedMotion, onClose]);
+
+  useEffect(() => {
+    if (zoomed || deskClosing || deskTouched || supportOpen || addingImage || composing) return;
+    const timer = window.setTimeout(putBookDown, 4400);
+    return () => window.clearTimeout(timer);
+  }, [zoomed, deskClosing, deskTouched, supportOpen, addingImage, composing, putBookDown]);
 
   async function completeToday() {
     cancelScheduledSave();
@@ -1032,14 +1048,14 @@ function JournalWritingPage({
       onWheelCapture={noteActivity}
       onTouchMoveCapture={noteActivity}
       onFocusCapture={(event) => {
-        if (zoomed && (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement)) noteActivity();
+        if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement) noteActivity();
       }}
       onCompositionStartCapture={() => setComposing(true)}
       onCompositionEndCapture={() => { setComposing(false); noteActivity(); }}
       {...dialogProps}
     >
       <section
-        className={`journal-inline-scene journal-desk desk-${preferences.deskTone} weather-${sceneWeather} laptop-${preferences.laptopTone} laptop-${preferences.laptopPosition} headphones-${preferences.headphones} drink-${preferences.drink} accent-${preferences.deskAccent ?? "none"}`}
+        className={`journal-inline-scene journal-desk desk-${preferences.deskTone} weather-${sceneWeather} laptop-${preferences.laptopTone} laptop-${preferences.laptopPosition} headphones-${preferences.headphones} drink-${preferences.drink} accent-${preferences.deskAccent ?? "none"}${deskClosing ? " is-closing" : ""}`}
         aria-label="Write at your desk"
         hidden={zoomed}
         onClick={(event) => {

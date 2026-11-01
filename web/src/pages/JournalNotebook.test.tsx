@@ -133,11 +133,27 @@ describe("Journal notebook foundation", () => {
     fireEvent.click(within(desk).getByLabelText("Write freely at your desk"));
     expect(screen.getByRole("region", { name: "Write at your desk" })).toBeTruthy();
     fireEvent.click(desk);
-    await waitFor(() => expect(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i })).toBeTruthy(), { timeout: 2500 });
     fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i }));
     expect((screen.getByLabelText("Write freely at your desk") as HTMLTextAreaElement).value).toBe("A useful moment.");
     fireEvent.click(screen.getByRole("button", { name: "Put book down" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i })).toBeTruthy(), { timeout: 2500 });
+  });
+
+  it("folds the idle desk book away after 4.4 seconds but stays open when writing begins", async () => {
+    vi.useFakeTimers();
+    render(<JournalPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i }));
+    act(() => { vi.advanceTimersByTime(4400); });
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByRole("region", { name: "Write at your desk" }).className).toContain("is-closing");
+    act(() => { vi.advanceTimersByTime(900); });
+    expect(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Open My AXOM Journal to today’s page/i }));
+    fireEvent.focus(screen.getByLabelText("Write freely at your desk"));
+    act(() => { vi.advanceTimersByTime(5400); });
+    expect(screen.getByRole("region", { name: "Write at your desk" })).toBeTruthy();
   });
 
   it("shows visual keepsakes and cycles the ambient desk scene", () => {
