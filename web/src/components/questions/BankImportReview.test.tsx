@@ -29,6 +29,38 @@ function bank(evidence: "printed-key" | "answer-reveal-slide"): ReviewBank {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("structured question import review", () => {
+  it("shows an answer image once when the package both places and lists it", async () => {
+    const user = userEvent.setup();
+    const sample = bank("answer-reveal-slide");
+    const question = sample.pkg.questions[0];
+    question.assets.push({ id: "source-answer", filename: "answer.png", mimeType: "image/png", role: "answer_reveal", questionId: "q1" });
+    question.explanation?.push({ type: "image", assetId: "source-answer", role: "answer_reveal" });
+    sample.files = [new File(["image placeholder"], "answer.png", { type: "image/png" })];
+    const view = render(<BankImportReview bank={sample} onBack={() => {}} />);
+    expect(view.container.querySelectorAll('[data-asset-role="answer_reveal"]')).toHaveLength(0);
+    await user.selectOptions(screen.getByLabelText("Preview mode"), "review");
+    expect(view.container.querySelectorAll('[data-asset-role="answer_reveal"]')).toHaveLength(1);
+  });
+
+  it("preselects the key a marked slide suggests, but counts it only after the reviewer confirms it", async () => {
+    const user = userEvent.setup();
+    render(<BankImportReview bank={bank("answer-reveal-slide")} onBack={() => {}} />);
+    expect(screen.getByText(/1 questions · 0 ready/)).toBeTruthy();
+    expect(screen.getByLabelText("Verified answer")).toHaveProperty("value", "B");
+    expect(screen.getByText("The original answer slide marks B. It stays a suggestion until you check the slide and confirm it.")).toBeTruthy();
+    const confirm = screen.getByRole("button", { name: "Confirm answer from source" });
+    expect(confirm.hasAttribute("disabled")).toBe(true);
+    await user.selectOptions(screen.getByLabelText("Preview mode"), "review");
+    expect(screen.getByText(/1 questions · 0 ready/)).toBeTruthy();
+    // Clearing the suggestion is respected rather than refilled.
+    await user.selectOptions(screen.getByLabelText("Verified answer"), "");
+    expect(screen.getByLabelText("Verified answer")).toHaveProperty("value", "");
+    expect(confirm.hasAttribute("disabled")).toBe(true);
+    await user.selectOptions(screen.getByLabelText("Verified answer"), "B");
+    await user.click(confirm);
+    await waitFor(() => expect(screen.getByText(/1 questions · 1 ready for import/)).toBeTruthy());
+  });
+
   it.each([undefined, 37])("shows only a declared original question number (%s)", (questionNumber) => {
     const reviewBank = bank("printed-key");
     reviewBank.pkg.questions[0].source.questionNumber = questionNumber;

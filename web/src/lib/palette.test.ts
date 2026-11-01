@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  DEFAULT_PALETTE_ID,
   PALETTES,
   applyPalettePreference,
   contrastRatio,
@@ -75,8 +76,8 @@ describe("palette catalog", () => {
 });
 
 describe("palette persistence and application", () => {
-  it("normalizes unknown input to Classic and keeps a valid custom accent", () => {
-    expect(normalizePalettePreference({ id: "neon" })).toEqual({ id: "classic" });
+  it("normalizes unknown input to the default palette and keeps a valid custom accent", () => {
+    expect(normalizePalettePreference({ id: "neon" })).toEqual({ id: "midnight" });
     expect(normalizePalettePreference({ id: "custom", customAccent: "#ABCDEF" })).toEqual({ id: "custom", customAccent: "#abcdef" });
     expect(normalizePalettePreference({ id: "custom", customAccent: "red" }).customAccent).toMatch(/^#[0-9a-f]{6}$/);
   });
@@ -101,6 +102,32 @@ describe("palette persistence and application", () => {
     expect(css).not.toContain("display: none");
     expect(css).not.toContain("--x}y");
     expect(css.split("{").length).toBe(3);
+  });
+
+  it("shows Midnight until someone picks a palette, from the very first frame", () => {
+    expect(DEFAULT_PALETTE_ID).toBe("midnight");
+    expect(readPalettePreference()).toEqual({ id: "midnight" });
+    const prePaint = /<script>([\s\S]*?axom\.palette\.v1[\s\S]*?)<\/script>/.exec(indexHtml)?.[1];
+    expect(prePaint).toBeTruthy();
+    const run = () => {
+      delete document.documentElement.dataset.palette;
+      document.getElementById("axom-palette")?.remove();
+      new Function(prePaint!)();
+    };
+    // If this fails after a palette change, copy JSON.stringify(paletteVars({ id: "midnight" })) into index.html.
+    const expected = paletteCss("midnight", paletteVars({ id: "midnight" }));
+    run();
+    expect(document.documentElement.dataset.palette).toBe("midnight");
+    expect(document.getElementById("axom-palette")?.textContent).toBe(expected);
+    storage.setItem(STORAGE_KEYS.palettePreference, "not json");
+    run();
+    expect(document.documentElement.dataset.palette).toBe("midnight");
+    // A person who chose Classic keeps it.
+    setPalettePreference({ id: "classic" });
+    run();
+    expect(document.documentElement.dataset.palette).toBeUndefined();
+    expect(document.getElementById("axom-palette")).toBeNull();
+    expect(readPalettePreference()).toEqual({ id: "classic" });
   });
 
   it("keeps the pre-paint script in sync with the palette ids and storage key", () => {

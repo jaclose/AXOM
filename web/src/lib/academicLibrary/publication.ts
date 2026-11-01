@@ -53,6 +53,8 @@ export interface PublicationSource {
   /** The catalog's own module label, when it has one. */
   moduleKey?: string;
   hasBank: boolean;
+  /** Question rows in its package, unreadable rows included, when the package could be read. */
+  rows?: number;
   original?: { extension: string };
   /** Term and module read from the question package itself. */
   bank?: { term: Term; module: string; moduleKey: string; reviewedFiling: boolean; reviewedUnfiled?: boolean } | { problem: string };
@@ -93,7 +95,7 @@ export interface PublicationPlan {
   /** Plan sections that cannot be published, with the reason. */
   blocked: Array<{ name: string; reason: string; moduleKey?: string; proposedTerm?: Term; needsTerm?: boolean }>;
   /** Sources left out of every course, with the reason. */
-  excluded: Array<{ id: string; name: string; reason: string }>;
+  excluded: Array<{ id: string; name: string; reason: string; hasBank: boolean }>;
 }
 
 /** Terms the SGU outline gives each module, used only as a proposal to confirm. */
@@ -149,6 +151,7 @@ export async function readPublicationInventory(
     if (source.bankFile) {
       try {
         const bank = readPreparedBank(JSON.parse(decode(await read(safeLibraryPath(source.bankFile)))));
+        entry.rows = bank.pkg.questions.length + (bank.unreadableQuestions ?? 0);
         const manifest = bank.pkg.manifest;
         const filing = bank.reviewedFiling;
         const reviewedUnfiled = Boolean(filing && hasUniformUnfiledSourceScope(manifest, bank.pkg.questions));
@@ -254,7 +257,7 @@ export function planPublication(inventory: PublicationInventory, confirmedTerms:
   const templateChecksums = new Set(inventory.sections.map(section => section.checksum));
   const publishedChecksums = new Set([...courses.values()].flatMap(course => course.sections.map(section => section.checksum)));
   const seen = new Set<string>();
-  const exclude = (source: PublicationSource, reason: string) => excluded.push({ id: source.id, name: source.name, reason });
+  const exclude = (source: PublicationSource, reason: string) => excluded.push({ id: source.id, name: source.name, reason, hasBank: source.hasBank });
   // Question packages first, so a module's own questions decide its course.
   const ordered = [...inventory.sources].sort((left, right) => Number(right.hasBank) - Number(left.hasBank));
   for (const source of ordered) {

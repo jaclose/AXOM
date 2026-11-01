@@ -7,7 +7,8 @@ import { STORAGE_KEYS } from "./brand";
  * mineral accent, and a faint ambient tint in the backdrop.
  *
  * AXOM Classic is the canonical brand palette and lives in theme.css, so it
- * needs no injected CSS. Every other palette is derived from a small set of
+ * needs no injected CSS. Midnight is what a device shows until someone picks a
+ * palette. Every other palette is derived from a small set of
  * hand-tuned inputs per mode and injected as one `<style>` element. The
  * pre-paint script in index.html replays the stored variables before the first
  * frame, so a palette never flashes gold on reload.
@@ -74,6 +75,8 @@ export interface StoredPalette extends PalettePreference {
 export const PALETTE_CHANGE_EVENT = "axom:palette-change";
 export const PALETTE_STYLE_ID = "axom-palette";
 export const DEFAULT_CUSTOM_ACCENT = "#7c6cf0";
+/** Shown until someone picks a palette. index.html carries its variables for the first frame. */
+export const DEFAULT_PALETTE_ID: PaletteId = "midnight";
 
 export const PALETTES: readonly PaletteDefinition[] = [
   {
@@ -523,7 +526,7 @@ function browserStorage(): PaletteStorage | undefined {
 
 export function normalizePalettePreference(value: unknown): PalettePreference {
   const record = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-  const id = isPaletteId(record.id) ? record.id : "classic";
+  const id = isPaletteId(record.id) ? record.id : DEFAULT_PALETTE_ID;
   const customAccent = isHexColor(record.customAccent) ? record.customAccent.toLowerCase() : undefined;
   return id === "custom"
     ? { id, customAccent: customAccent ?? DEFAULT_CUSTOM_ACCENT }
@@ -531,12 +534,12 @@ export function normalizePalettePreference(value: unknown): PalettePreference {
 }
 
 export function readPalettePreference(storage: Pick<Storage, "getItem"> | undefined = browserStorage()): PalettePreference {
-  if (!storage) return volatilePreference ?? { id: "classic" };
+  if (!storage) return volatilePreference ?? { id: DEFAULT_PALETTE_ID };
   try {
     const raw = storage.getItem(STORAGE_KEYS.palettePreference);
-    return raw ? normalizePalettePreference(JSON.parse(raw)) : { id: "classic" };
+    return raw ? normalizePalettePreference(JSON.parse(raw)) : { id: DEFAULT_PALETTE_ID };
   } catch {
-    return volatilePreference ?? { id: "classic" };
+    return volatilePreference ?? { id: DEFAULT_PALETTE_ID };
   }
 }
 

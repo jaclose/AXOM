@@ -109,7 +109,7 @@ describe("publishing a prepared library as one course per term and module", () =
     expect(upload.provenance).toMatchObject({ scopeEvidence: "human-reviewed", weekAssignment: "unassigned" });
     expect(upload.metadata).toMatchObject({ ready_questions: 2, module: "NCRS", term: "Term 4" });
     const storedBank = JSON.parse(new TextDecoder().decode(upload.files.find(file => file.path === bankFile)!.bytes));
-    expect(storedBank.pkg.manifest.course).toEqual({ name: "Unfiled", term: 0, week: 1 });
+    expect(storedBank.pkg.manifest.course).toEqual({ name: "Unfiled", term: 0, week: 0 });
     expect(storedBank.pkg.questions[0]).toMatchObject({ course: "Unfiled", term: 0 });
   });
 

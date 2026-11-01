@@ -1657,7 +1657,12 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           eraseMode={annotationTool?.kind === "eraser"}
           focusRef={stemRef}
           onSelection={(range) => handleAnnotationSelection("stem", range)}
-        />} />
+        />} annotate={{
+          annotations: stemAnnotations,
+          onSelection: (range) => handleAnnotationSelection("stem", range),
+          onDelete: deleteAnnotation,
+          eraseMode: annotationTool?.kind === "eraser",
+        }} />
         </div>
         <QuestionSupportingContent question={question} mode="question" />
         {!question.content && <QuestionExhibits attachments={exhibits} />}

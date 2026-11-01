@@ -8,12 +8,14 @@ const json = (value: unknown) => text(JSON.stringify(value));
 const hex = async (bytes: Uint8Array) => (await sha256(bytes)).slice(7);
 
 export function bank(id: string, module: string, term: number, sourceSha: string, questions = 1): PreparedBank {
+  const unfiled = module === "Unfiled" && term === 0;
   return {
     pkg: {
-      manifest: { schemaVersion: 1, course: { name: module, term, week: 1 }, bank: { id, title: `${module} synthetic set`, discipline: "Example" },
+      manifest: { schemaVersion: 1, course: { name: module, term, week: unfiled ? 0 : 1 }, bank: { id, title: `${module} synthetic set`, discipline: "Example" },
         source: { filename: `${id}.pdf`, sourceWeekDeclared: true }, questionsFile: "questions.json", assetsDirectory: "assets" },
       questions: Array.from({ length: questions }, (_, index) => ({
         id: `${id}-q${index + 1}`, source: { filename: `${id}.pdf`, questionNumber: index + 1 },
+        ...(unfiled ? { course: "Unfiled", term: 0, week: 0 } : {}),
         stem: [{ type: "text" as const, text: `Synthetic stem ${index + 1} for ${module}?` }],
         choices: [
           { id: "a", label: "A", blocks: [{ type: "text" as const, text: "First" }] },

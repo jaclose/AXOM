@@ -263,7 +263,11 @@ export function QuestionDetailModal({ question, onClose, notice }: {
         label="Question stem"
         onDelete={deleteAnnotation}
         onSelection={(range) => setAnnotationSelection(range ? { target: "stem", range } : null)}
-      />} />
+      />} annotate={{
+        annotations: annotations.filter((annotation) => annotation.target === "stem"),
+        onSelection: (range) => setAnnotationSelection(range ? { target: "stem", range } : null),
+        onDelete: deleteAnnotation,
+      }} />
       <QuestionSupportingContent question={question} mode="question" />
 
       <QuestionProvenance
