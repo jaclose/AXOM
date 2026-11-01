@@ -4,7 +4,7 @@ import { isWithinDailyLoopQuietHours } from "./dailyLoopReminders";
 import type { DailyLoopReminderPreferences } from "./types";
 
 /**
- * "Are you locked in?" — an optional, interval-based focus check-in.
+ * "Are you locked in?" — an interval-based focus check-in.
  *
  * Preferences live in the profile (so they follow a learner across devices
  * and backups). Delivery bookkeeping is device-only and contains timestamps
@@ -32,9 +32,9 @@ export interface FocusCheckInPreferences {
 export const FOCUS_CHECKIN_INTERVALS = [10, 15, 20, 25, 30, 45, 60, 90, 120] as const;
 
 export const DEFAULT_FOCUS_CHECKIN: Readonly<Required<FocusCheckInPreferences>> = {
-  enabled: false,
+  enabled: true,
   intervalMinutes: 30,
-  scope: "focus",
+  scope: "anytime",
   systemNotifications: false,
   respectQuietHours: true,
   tone: "coach",
@@ -45,9 +45,9 @@ export function normalizeFocusCheckInPreferences(value: unknown): Required<Focus
   const record = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
   const interval = Number(record.intervalMinutes);
   return {
-    enabled: record.enabled === true,
+    enabled: record.enabled === undefined ? DEFAULT_FOCUS_CHECKIN.enabled : record.enabled === true,
     intervalMinutes: Number.isFinite(interval) ? Math.min(240, Math.max(5, Math.round(interval))) : DEFAULT_FOCUS_CHECKIN.intervalMinutes,
-    scope: record.scope === "anytime" ? "anytime" : "focus",
+    scope: record.scope === "focus" ? "focus" : record.scope === "anytime" ? "anytime" : DEFAULT_FOCUS_CHECKIN.scope,
     systemNotifications: record.systemNotifications === true,
     respectQuietHours: record.respectQuietHours !== false,
     tone: record.tone === "gentle" || record.tone === "intense" ? record.tone : "coach",

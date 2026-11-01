@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-  COACH_GAP_MS, OVERWHELMED_ID, eligiblePageHint, markCoachShown, overwhelmedDue,
+  COACH_GAP_MS, OVERWHELMED_AFTER_SAMPLE_MS, OVERWHELMED_ID, eligiblePageHint,
+  markCoachShown, markLockInSampleClosed, markLockInSampleShown, overwhelmedDue,
   readCoachLedger, resetPageHints, writeCoachLedger, type PageHint,
 } from "./coach";
 
@@ -12,11 +13,11 @@ beforeEach(() => localStorage.clear());
 
 describe("coach ledger", () => {
   it("round-trips through localStorage and ignores junk", () => {
-    expect(readCoachLedger()).toEqual({ seen: [], lastShownAt: undefined, off: undefined });
+    expect(readCoachLedger()).toEqual({ seen: [], lastShownAt: undefined, lockInSampleShownAt: undefined, lockInSampleClosedAt: undefined, off: undefined });
     writeCoachLedger(markCoachShown({ seen: [] }, OVERWHELMED_ID, NOW));
-    expect(readCoachLedger()).toEqual({ seen: [OVERWHELMED_ID], lastShownAt: NOW, off: undefined });
+    expect(readCoachLedger()).toEqual({ seen: [OVERWHELMED_ID], lastShownAt: NOW, lockInSampleShownAt: undefined, lockInSampleClosedAt: undefined, off: undefined });
     localStorage.setItem("axom.coach.v1", "{\"seen\":[1,\"a\"],\"lastShownAt\":\"soon\"}");
-    expect(readCoachLedger()).toEqual({ seen: ["a"], lastShownAt: undefined, off: undefined });
+    expect(readCoachLedger()).toEqual({ seen: ["a"], lastShownAt: undefined, lockInSampleShownAt: undefined, lockInSampleClosedAt: undefined, off: undefined });
   });
 });
 
@@ -25,6 +26,16 @@ describe("Overwhelmed?", () => {
     expect(overwhelmedDue({ seen: [] }, NOW)).toBe(true);
     expect(overwhelmedDue(markCoachShown({ seen: [] }, OVERWHELMED_ID, NOW), NOW + COACH_GAP_MS)).toBe(false);
     expect(overwhelmedDue({ seen: [], off: true }, NOW)).toBe(false);
+  });
+
+  it("waits ten seconds after the lock-in sample closes", () => {
+    const shown = markLockInSampleShown({ seen: [] }, NOW);
+    expect(overwhelmedDue(shown, NOW + 10_000)).toBe(false);
+    const closed = markLockInSampleClosed(shown, NOW + 30_000);
+    expect(overwhelmedDue(closed, NOW + 30_000 + OVERWHELMED_AFTER_SAMPLE_MS - 1)).toBe(false);
+    expect(overwhelmedDue(closed, NOW + 30_000 + OVERWHELMED_AFTER_SAMPLE_MS)).toBe(true);
+    expect(overwhelmedDue({ ...closed, lastShownAt: NOW + 30_000 }, NOW + 30_000 + OVERWHELMED_AFTER_SAMPLE_MS)).toBe(true);
+    expect(overwhelmedDue(shown, NOW + 2 * 60_000 + OVERWHELMED_AFTER_SAMPLE_MS)).toBe(true);
   });
 });
 
@@ -52,7 +63,7 @@ describe("page hints", () => {
     const off = { ...markCoachShown(ready, "a", NOW - COACH_GAP_MS), off: true };
     expect(eligiblePageHint("tracker", off, NOW, hints)).toBeUndefined();
     const reset = resetPageHints(off);
-    expect(reset).toEqual({ seen: [OVERWHELMED_ID] });
+    expect(reset).toEqual({ seen: [OVERWHELMED_ID], lockInSampleShownAt: undefined, lockInSampleClosedAt: undefined });
     expect(eligiblePageHint("dashboard", reset, NOW, hints)?.id).toBe("a");
     expect(overwhelmedDue(reset, NOW)).toBe(false);
   });
