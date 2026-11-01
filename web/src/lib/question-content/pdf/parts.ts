@@ -36,7 +36,7 @@ const INLINE_ANSWER = /^\s*(?:the\s+)?(?:correct\s+)?(?:answer|ans)\b\s*(?:is\b)
 const CHOICE = /^\s*\(?[A-Ia-i][.)]\s+\S/;
 const SAYS_ANSWERS = /\banswers?\b/i;
 const QUESTION_ONLY_HEADING = /^questions?\s+(?:only|without\s+answers?)\s*[:.]?$/i;
-const ANSWER_COPY_HEADING = /^(?:(?:questions?\s+)?with\s+answers?\s+(?:and|&)\s+(?:commentary|explanations?)|answers?\s+(?:and|&)\s+commentary)\s*[:.]?$/i;
+const ANSWER_COPY_HEADING = /^(?:(?:questions?\s+)?with\s+answers?(?:\s+(?:and|&)\s+(?:commentary|explanations?))?|answers?\s+(?:and|&)\s+commentary)\s*[:.]?$/i;
 type PartRole = NonNullable<TextPart["role"]>;
 const headingRole = (text: string): PartRole | undefined =>
   QUESTION_ONLY_HEADING.test(text.trim()) ? "question-only" : ANSWER_COPY_HEADING.test(text.trim()) ? "answer-copy" : undefined;

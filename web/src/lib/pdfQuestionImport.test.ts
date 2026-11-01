@@ -27,11 +27,22 @@ const read = (pages: string[]) => parsePdfQuestions(pages.join("\n\n"), pages);
 describe("parsePdfQuestions", () => {
   it("uses the same exact-copy rule in the running-text path", () => {
     const bare = slide("1. Which invented gate opens the blue chamber?", "A. East gate", "B. West gate", "C. North gate");
-    const pages = [slide("Questions only", bare), slide("With Answers and Commentary", bare, "Answer: B", "Explanation: The west gate is named in the invented source.")];
+    const pages = [slide("Questions only", bare), slide("With Answers", bare, "Answer: B", "Explanation: The west gate is named in the invented source.")];
     const result = read(pages);
     expect(result.drafts).toHaveLength(1);
     expect(result.drafts[0]).toMatchObject({ correctKey: "B", questionSourcePage: 1, answerEvidencePage: 2, explanationSourcePage: 2 });
     expect(result.notes.join(" ")).toMatch(/exact question-only/);
+  });
+
+  it("leaves multiple answered candidates for one source number in review", () => {
+    const bare = slide("1. Which invented gate opens the blue chamber?", "A. East gate", "B. West gate", "C. North gate");
+    const pages = [
+      slide("Questions only", bare),
+      slide("With Answers and Commentary", bare, "Answer: B", "Explanation: The west gate is named in the invented source.", bare, "Answer: B", "Explanation: The west gate is named in the invented source."),
+    ];
+    const result = read(pages);
+    expect(result.drafts).toHaveLength(3);
+    expect(result.drafts.every((draft) => draft.needsReview)).toBe(true);
   });
 
   it("reads a deck that prints each question twice as one question each, on its own page", () => {

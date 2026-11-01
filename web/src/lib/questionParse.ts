@@ -1102,6 +1102,7 @@ function sameQuestionCopy(a: ParsedQuestionDraft, b: ParsedQuestionDraft): boole
 }
 
 function markUnpairedCopy(draft: ParsedQuestionDraft): ParsedQuestionDraft {
+  if (draft.parserRuleIds?.includes("conflict.answer-copy")) return draft;
   return {
     ...draft,
     needsReview: true,
@@ -1129,7 +1130,17 @@ export function reconcileQuestionAnswerCopies<T extends QuestionCopyDraft>(input
       && entry.draft.questionNumber === primary.draft.questionNumber ? [index] : []);
     const primaries = entries.filter((entry) => entry.role === "question-only" && entry.part === primary.part
       && entry.draft.questionNumber === primary.draft.questionNumber);
-    if (copies.length !== 1 || primaries.length !== 1) continue;
+    if (copies.length === 0) continue;
+    if (copies.length !== 1 || primaries.length !== 1) {
+      entries.forEach((entry, index) => {
+        if (entry.draft.questionNumber !== primary.draft.questionNumber) return;
+        if ((entry.part === primary.part && entry.role === "question-only")
+          || (entry.part === primary.part + 1 && entry.role === "answer-copy")) {
+          entries[index] = { ...entry, draft: markUnpairedCopy(entry.draft) };
+        }
+      });
+      continue;
+    }
     const copyAt = copies[0];
     const answered = entries[copyAt].draft;
     const exact = sameQuestionCopy(primary.draft, answered);

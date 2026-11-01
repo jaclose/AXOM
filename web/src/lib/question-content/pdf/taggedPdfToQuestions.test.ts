@@ -132,7 +132,7 @@ describe("a tagged document with one set", () => {
     const prompt = [p("1. Which invented gate opens the blue chamber?"), ...choices("East gate", "West gate", "North gate")];
     const result = taggedPdfToQuestions({ pages: [
       page(1, [p("Questions only"), ...prompt]),
-      page(2, [p("With Answers and Commentary"), ...prompt, p("Answer: B"), p("Explanation: The west gate is named in the invented source.")]),
+      page(2, [p("With Answers"), ...prompt, p("Answer: B"), p("Explanation: The west gate is named in the invented source.")]),
     ] }, DEFAULTS);
     expect(result.questions).toHaveLength(1);
     expect(result.questions[0].id).toBe("invented-bank-q01");
