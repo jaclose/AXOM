@@ -11,7 +11,7 @@ import { sha256 } from "../question-content/assets";
 import { getQuestionAttachmentBlob, putQuestionAttachmentBlob, type QuestionAttachmentBlobRecord } from "../questionAttachments";
 import { assertInstallableAcademicImageBytes, type InstallableAcademicImage } from "../academicLibrary/gifIntegrity";
 import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "../localVault";
-import { createLocalBackup, listLocalBackups } from "../localBackup";
+import { createLocalBackup, refreshLocalBackupSummaries } from "../localBackup";
 import { BUILD_INFO } from "../buildInfo";
 import { readSourceOriginal, saveSourceOriginal } from "../decode/sources";
 import { questionPracticeReadiness } from "../questionFilters";
@@ -169,7 +169,9 @@ function mergeReviewedQuestion(incoming: PackageQuestion, stored: PackageQuestio
         : incoming.explanation }
       : {}),
     ...(reviewerAnswer ? { correctAnswer: stored.correctAnswer }
-      : answerNeedsReview.length ? {}
+      // A held candidate is still source evidence. A reviewer-cleared key stays
+      // absent, but merely reimporting an untouched held bank must not erase it.
+      : answerNeedsReview.length ? (stored.correctAnswer ? { correctAnswer: stored.correctAnswer } : {})
       : incoming.correctAnswer ? { correctAnswer: incoming.correctAnswer } : {}),
     ...(flags.length ? { flags } : {}),
   };
@@ -325,7 +327,9 @@ async function install(read: LibraryReader, progress: (message: string) => void,
   progress("Protecting your current workspace…");
   await flushLocalVaultWrites();
   assertCurrent();
-  await createLocalBackup(BUILD_INFO.schemaVersion, listLocalBackups().length + 2);
+  const localBackups = await refreshLocalBackupSummaries();
+  assertCurrent();
+  await createLocalBackup(BUILD_INFO.schemaVersion, localBackups.length + 2);
   const checkpoint = getVaultWriteCheckpoint();
   for (const entry of catalog.templates) {
     const bytes = await read(entry.file);
@@ -373,6 +377,8 @@ async function install(read: LibraryReader, progress: (message: string) => void,
       report("opening question package");
       const storedReview = currentStore().documents.find(d => d.id === `private-review-${source.checksum}`);
       const incomingBank = readPreparedBank(JSON.parse(text(await read(source.bankFile))));
+      if (incomingBank.pkg.questions.some(question => question.provenance.sourceChecksum !== `sha256:${source.checksum}`))
+        throw new Error("The question package does not match its recorded source checksum. Rebuild its source bindings before installing; no questions from this bank were saved.");
       const bank = storedReview
         ? mergeStoredReview(incomingBank, JSON.parse(storedReview.rawText), `sha256:${source.checksum}`)
         : incomingBank;

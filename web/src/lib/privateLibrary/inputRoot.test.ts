@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { resolveLibraryInputRoot as resolve, safeInputPath as safe, INPUT_MAX_FILE_BYTES as MAX } from "./inputRoot";
+import { resolveLibraryInputRoot as resolve, safeInputPath as safe, INPUT_MAX_FILE_BYTES as MAX, INPUT_MAX_PDF_BYTES } from "./inputRoot";
 const entries = (...paths: string[]) => paths.map(path => ({ path, byteSize: 1 }));
 function catalog(...paths: string[]) {
   const result = resolve(entries(...paths));
@@ -25,3 +25,12 @@ test('rejects Unicode-normalization collisions', () => assert.throws(()=>resolve
 test('rejects invalid or oversized declared lengths', () => { for (const byteSize of [-1,NaN,Infinity,1.1,MAX+1]) assert.throws(()=>resolve([{path:'catalog.json',byteSize}])); });
 test('rejects too many files before reading bytes', () => assert.throws(()=>resolve(Array.from({length:30001},(_,i)=>({path:`f${i}`,byteSize:0}))),/too many/));
 test('rejects expanded total even when each file is allowed', () => assert.throws(()=>resolve(Array.from({length:17},(_,i)=>({path:`f${i}`,byteSize:MAX}))),/expanded/));
+test('accepts flat wrapped question exports without guessing between several', () => {
+  assert.deepEqual(resolve(entries('Wrapped/questions.json', 'Wrapped/assets/a.png')), { kind: 'question-export', questionsPath: 'Wrapped/questions.json' });
+  assert.throws(() => resolve(entries('a/questions.json', 'b/questions.json')), /Several/);
+});
+test('retains a large PDF original without raising the JSON or total memory limits', () => {
+  assert.equal(resolve([{ path: 'catalog.json', byteSize: 1 }, { path: 'source.pdf', byteSize: 165_401_400 }]).kind, 'catalog');
+  assert.throws(() => resolve([{ path: 'catalog.json', byteSize: 1 }, { path: 'source.pdf', byteSize: INPUT_MAX_PDF_BYTES + 1 }]), /256 MiB/);
+  assert.throws(() => resolve([{ path: 'questions.json', byteSize: MAX + 1 }]), /128 MiB/);
+});

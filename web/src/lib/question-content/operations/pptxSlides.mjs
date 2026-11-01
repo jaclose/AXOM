@@ -28,12 +28,12 @@ export function pptxSlideText(xml) {
       .map(piece => decodeXmlEntities(piece[1])).join("").trim());
   const lines = (paragraphs.length ? paragraphs : [...xml.matchAll(/<a:t\b[^>]*>([\s\S]*?)<\/a:t>/g)]
     .map(match => decodeXmlEntities(match[1]).trim())).filter(Boolean);
-  const options = lines.filter(line => /^\s*\(?[A-Ha-h]\)?[.):]\s*(?:\S|$)/.test(line)).length;
+  const options = lines.filter(line => /^\s*\(?[A-Ia-i]\)?[.):]\s*(?:\S|$)/.test(line)).length;
   if (options < 2) return lines.join("\n");
   const collected = [];
   let choice = null;
   for (const line of lines) {
-    const label = /^\s*\(?([A-Ha-h])\)?[.):]\s*(.*)$/.exec(line);
+    const label = /^\s*\(?([A-Ia-i])\)?[.):]\s*(.*)$/.exec(line);
     if (label) {
       if (choice) collected.push(choice);
       choice = label[1].toUpperCase() + ". " + label[2].trim();

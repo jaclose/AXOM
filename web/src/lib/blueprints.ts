@@ -47,22 +47,22 @@ const godFile = "Blueprint Study God File v1";
 export const BLUEPRINTS: BlueprintDefinition[] = [
   {
     id: "sgu-term-runway",
-    title: "SGU Term Runway",
-    short: "SGU",
+    title: "AXOM Term Runway",
+    short: "Terms",
     focusId: "term1",
     trackIds: ["sgu"],
     audience: "sgu",
-    summary: "Term-based SGU structure with lectures, DLAs, PQs, and board-carry-forward habits.",
+    summary: "Term-based medical structure with lectures, DLAs, PQs, and board-carry-forward habits.",
     passMeaning: "One pass means a focused cycle on a lecture, DLA, PQ set, or module repair item.",
     doneMeaning: "Lectures mature at 3-4 passes; PQs complete at 3 sets; milestones are done when the artifact exists.",
-    sourceName: godFile,
-    sourceUrl: "https://www.sgu.edu/school-of-medicine/",
+    sourceName: "AXOM term-based course map",
+    sourceUrl: "https://axom.info",
     sections: [
       {
         title: "Term structure",
-        source: "SGU track template",
+        source: "AXOM term-based course map",
         items: [
-          row("Term course shells are loaded", "Milestone", "Confirm Term 1-5 courses match your actual schedule.", "Done when Courses has your current SGU term map.", "high"),
+          row("Term course shells are loaded", "Milestone", "Confirm Term 1-5 courses match your actual schedule.", "Done when Courses has your current term map.", "high"),
           row("Module lecture/DLA/PQ import", "Milestone", "Import each module list into Course Tracker by destination path.", "Done when every active module has lecture, DLA, and PQ rows."),
           row("BSCE/CBSE carry-forward", "Review Loop", "Tag weak module concepts that recur in board-style questions.", "Done when repeat misses are retested after 48-72 hours.", "review"),
         ],
@@ -79,7 +79,7 @@ export const BLUEPRINTS: BlueprintDefinition[] = [
     ],
     resources: [
       resource("JD's Medical School Drive", "https://drive.google.com/drive/folders/19_3nrTD66v_oCIKlruFVidirdCAIe8yp", "Drives", ["Personal Core", "mine", "anki"], "Always-present personal medical-school drive."),
-      resource("SGU School of Medicine", "https://www.sgu.edu/school-of-medicine/", "Medical School / SGU", ["sgu", "official"], "Official SGU school context."),
+      resource("AXOM course workspace", "https://axom.info", "Medical School / Course", ["course", "axom"], "AXOM's term-based medical course workspace."),
     ],
   },
   {

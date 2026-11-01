@@ -1611,7 +1611,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       </div>
       <QuestionViewControls view={presentation.view} onChange={presentation.choose} notice={presentation.notice} mode={mode} />
       <main className={`tutor-workspace-shell ${activePanel ? "panel-open" : ""}`} aria-label="Tutor question workspace">
-      <section className="tutor-question-region" aria-labelledby="tutor-question-heading">
+      <section className="tutor-question-region" aria-labelledby="tutor-question-heading"
+        data-study-question data-question-id={question.id}>
       <h2 id="tutor-question-heading" className="sr-only">Question {index + 1} of {pool.length}</h2>
       <div className="tutor-question-meta">
         {timed && timeLeft !== undefined && (
@@ -1630,7 +1631,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
 
       <div className="quiz-reading" style={{ "--quiz-reading-scale": readingScale } as CSSProperties}>
         <QuestionViewFrame view={presentation.view}>
-        <div aria-label={question.content ? "Question stem" : undefined} tabIndex={question.content ? -1 : undefined} ref={question.content ? stemRef : undefined}>
+        <div aria-label={question.content ? "Question stem" : undefined} tabIndex={question.content ? -1 : undefined}
+          ref={question.content ? stemRef : undefined} data-study-part="stem">
         <QuestionContent question={question} part="stem" mode={revealed ? "answered" : "question"} fallback={
           <AnnotatedQuestionText
           text={question.stem}
@@ -1653,7 +1655,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             const showWrong = revealed && isPicked && Boolean(correctKey) && correctKey !== opt.key;
             const isStruck = item.struck.includes(opt.key);
             return (
-              <div key={opt.key}
+              <div key={opt.key} data-study-part="choice" data-choice-key={opt.key}
                 className={`option-row ${isPicked ? "picked" : ""} ${showCorrect ? "correct" : ""} ${showWrong ? "wrong" : ""} ${isStruck ? "struck" : ""}`}>
                 <button type="button" className="option-pick"
                   aria-label={`${opt.key}. ${opt.text}`}
@@ -1753,41 +1755,6 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
               s.updateQuestion(question.id, { analyses });
             }}
           />
-          {question.choiceRationales && Object.keys(question.choiceRationales).length > 0 && (() => {
-            const rationales = question.choiceRationales!;
-            const correctWhy = correctKey ? rationales[correctKey] : undefined;
-            const pickedWhy = picked && picked !== correctKey ? rationales[picked] : undefined;
-            const others = Object.entries(rationales).filter(([key]) => key !== correctKey && key !== picked);
-            return (
-              <div className="stack gap6 choice-rationales">
-                {/* Lead with what the learner most needs: why the correct answer
-                    is right, then why their own pick was wrong; the remaining
-                    distractors collapse so they never bury the key point. */}
-                {correctWhy && (
-                  <div className="rationale-lead">
-                    <b className="grade-green">Why {correctKey} is correct</b>
-                    <p>{correctWhy}</p>
-                  </div>
-                )}
-                {pickedWhy && (
-                  <div className="rationale-lead">
-                    <b className="grade-red">Why your choice ({picked}) is wrong</b>
-                    <p>{pickedWhy}</p>
-                  </div>
-                )}
-                {others.length > 0 && (
-                  <details className="rationale-others">
-                    <summary>Why the other choices are wrong</summary>
-                    <div className="stack gap6">
-                      {others.map(([key, why]) => (
-                        <div key={key} className="sub"><b>{key}:</b> {why}</div>
-                      ))}
-                    </div>
-                  </details>
-                )}
-              </div>
-            );
-          })()}
           {!isCorrect && correctKey && (
             <>
               <SelectField label="Why did this go wrong?" value={errorType}

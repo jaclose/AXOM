@@ -260,7 +260,7 @@ describe("owner-private reviewed academic ZIP batch", () => {
     expect(consent.disabled).toBe(true);
     expect(consent.checked).toBe(false);
     expect(action.disabled).toBe(true);
-    expect(container.textContent).toMatch(/current SGU catalog lists PCM 500\/PCM 501/);
+    expect(container.textContent).toMatch(/reviewed source catalog lists PCM 500\/PCM 501/);
     expect(uploadAcademicBatch).toHaveBeenCalledOnce();
   });
 

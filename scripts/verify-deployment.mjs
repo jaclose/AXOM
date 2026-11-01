@@ -33,6 +33,11 @@ export async function materializeDeployment(root, ref, target, ignoreText) {
   return files;
 }
 
+export function assertDeploymentPrivacy(files) {
+  const fixture = files.find(file => file.startsWith('fixtures/'));
+  if (fixture) throw new Error(`Deployment privacy violation: ${fixture}`);
+}
+
 function command(commandText, cwd, env) {
   console.log(`\n$ ${commandText}`);
   const result = spawnSync(commandText, { cwd, env, shell: true, stdio: 'inherit' });
@@ -40,41 +45,35 @@ function command(commandText, cwd, env) {
   if (result.status !== 0) throw new Error(`Command failed (${result.status ?? result.signal}): ${commandText}`);
 }
 
-export async function verifyDeployment(root, { ref = 'HEAD', ignoreRef, withoutGoerAllowlist = false, expectBuildFailure = false } = {}) {
+export async function verifyDeployment(root, {
+  ref = 'HEAD', ignoreRef, withFixtureProbe = false, expectPrivacyFailure = false,
+} = {}) {
   const sha = git(root, ['rev-parse', '--verify', `${ref}^{commit}`]).trim();
   let ignoreText = git(root, ['show', `${ignoreRef || sha}:.vercelignore`]);
-  if (withoutGoerAllowlist) {
-    const marker = ignoreText.indexOf('# AXOM GOER manifest allowlist');
-    if (marker < 0) throw new Error('GOER allowlist section not found');
-    ignoreText = ignoreText.slice(0, marker);
-  }
+  if (withFixtureProbe) ignoreText += '\n!/fixtures/\n!/fixtures/**\n';
   const target = mkdtempSync(join(tmpdir(), 'axom-deployment-'));
   try {
     const files = await materializeDeployment(root, sha, target, ignoreText);
     console.log(`Deployment source: ${sha}; ${files.length} filtered files; ${target}`);
+    let privacyError;
+    try {
+      assertDeploymentPrivacy(files);
+    } catch (error) {
+      privacyError = error;
+    }
+    if (expectPrivacyFailure) {
+      if (!privacyError) throw new Error('Expected fixture deployment privacy failure was not reproduced');
+      console.log(`EXPECTED FAILURE: ${privacyError.message}`);
+      return;
+    }
+    if (privacyError) throw privacyError;
     const config = JSON.parse(readFileSync(join(target, 'vercel.json'), 'utf8'));
     if (!config.installCommand || !config.buildCommand) throw new Error('Explicit Vercel install/build commands required');
     // Match remote commit metadata without relying on an enclosing local .git directory.
     const env = { ...process.env, VERCEL_GIT_COMMIT_SHA: sha };
     command(config.installCommand, target, env);
-    if (expectBuildFailure) {
-      // Exercise the real TypeScript/Vite build without the early diagnostic guard.
-      // An install error or our guard alone is not evidence of the original failure.
-      const result = spawnSync('npm', ['--prefix', 'web', 'run', 'build'], {
-        cwd: target, env, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
-        shell: process.platform === 'win32',
-      });
-      process.stdout.write(result.stdout || '');
-      process.stderr.write(result.stderr || '');
-      if (result.error) throw result.error;
-      if (result.status === 0 || !/TS2307[^\n]*fixtures\/qbank\/goer[^\n]*manifest\.json/.test(result.stdout || '')) {
-        throw new Error('Expected real TypeScript missing-GOER-manifest failure was not reproduced');
-      }
-      console.log(`EXPECTED FAILURE: original exclusion breaks the actual web build (${sha})`);
-    } else {
-      command(config.buildCommand, target, env);
-      console.log(`PASS: clean Vercel-filtered install and build (${sha})`);
-    }
+    command(config.buildCommand, target, env);
+    console.log(`PASS: clean Vercel-filtered install and build (${sha})`);
   } finally {
     // Only this run's generated scratch tree; never the source checkout or user data.
     rmSync(target, { recursive: true, force: true });
@@ -86,12 +85,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     const { values } = parseArgs({ options: {
       ref: { type: 'string', default: 'HEAD' },
       'ignore-ref': { type: 'string' },
-      'without-goer-allowlist': { type: 'boolean', default: false },
-      'expect-build-failure': { type: 'boolean', default: false },
+      'with-fixture-probe': { type: 'boolean', default: false },
+      'expect-privacy-failure': { type: 'boolean', default: false },
     } });
     await verifyDeployment(process.cwd(), {
       ref: values.ref, ignoreRef: values['ignore-ref'],
-      withoutGoerAllowlist: values['without-goer-allowlist'], expectBuildFailure: values['expect-build-failure'],
+      withFixtureProbe: values['with-fixture-probe'], expectPrivacyFailure: values['expect-privacy-failure'],
     });
   } catch (error) {
     console.error(error.message);
