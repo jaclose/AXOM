@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { sha256 } from "../question-content/assets";
 import type { PrivateLibraryCatalog } from "../privateLibrary/types";
-import { FILING_DECISIONS_FORMAT, applyFilingDecisions, readFilingDecisions } from "./filingDecisions";
+import { FILING_DECISIONS_FORMAT, FILING_PROPOSALS_FORMAT, applyFilingDecisions, readFilingDecisions, readFilingProposals } from "./filingDecisions";
 import { planPublication, readPublicationInventory } from "./publication";
 import { library } from "./publicationFixture.testing";
 import { accountQuestions } from "./questionLedger";
@@ -31,10 +31,16 @@ describe("every question in a prepared library is accounted for", () => {
     const catalog = JSON.parse(new TextDecoder().decode(fixture.files.get("catalog.json"))) as PrivateLibraryCatalog;
     const hex = async (bytes: Uint8Array) => (await sha256(bytes)).slice(7);
     const unfiled = catalog.sources.find(source => source.name === "unfiled-pq.pdf")!;
-    const decisions = readFilingDecisions({ format: FILING_DECISIONS_FORMAT, schemaVersion: 2, catalogSha256: await hex(fixture.files.get("catalog.json")!),
+    const catalogSha256 = await hex(fixture.files.get("catalog.json")!);
+    const bankSha256 = await hex(fixture.files.get(unfiled.bankFile!)!);
+    const decisions = readFilingDecisions({ format: FILING_DECISIONS_FORMAT, schemaVersion: 2, catalogSha256,
+      sourceCount: 1, exportedAtUtc: "2026-10-30T17:29:40Z",
       decisions: [{ sourceId: unfiled.id, sourceChecksum: unfiled.checksum, bankSha256: await hex(fixture.files.get(unfiled.bankFile!)!),
-        action: "correct", term: "Term 4", module: "NCRS" }] });
-    const { read } = await applyFilingDecisions(fixture.read, decisions);
+        action: "correct", term: "Term 4", module: "NCRS", note: "Source evidence reviewed.", decidedAtUtc: "2026-10-30T17:19:00Z" }] });
+    const proposals = readFilingProposals({ format: FILING_PROPOSALS_FORMAT, schemaVersion: 1, catalogSha256,
+      sources: [{ sourceId: unfiled.id, sourceChecksum: unfiled.checksum, bankFile: unfiled.bankFile,
+        originalFile: unfiled.originalFile, bankSha256, proposedTerm: "Term 1", proposedModule: "MSK" }] });
+    const { read } = await applyFilingDecisions(fixture.read, decisions, proposals);
     const inventory = await readPublicationInventory(read);
     const ledger = accountQuestions(inventory, planPublication(inventory));
     expect(ledger.total.questions).toBe(6);
@@ -55,7 +61,19 @@ describe("every question in a prepared library is accounted for", () => {
     expect(ledger.mismatched).toEqual([{ id: goer.id, name: "goer-pq.pdf", rows: 4, ready: 1, held: 2 }]);
     expect(ledger.unaccounted).toBe(0);
 
-    const twice = { ...plan, excluded: [...plan.excluded, { id: goer.id, name: goer.name, reason: "Placed again by mistake." }] };
+    const twice = { ...plan, excluded: [...plan.excluded, { id: goer.id, name: goer.name, reason: "Placed again by mistake.", hasBank: true }] };
     expect(accountQuestions(inventory, twice).unaccounted).toBe(4);
+  });
+
+  it("does not count a duplicate-linked catalog row as another copy of its bank", async () => {
+    const { read } = await library();
+    const inventory = await readPublicationInventory(read);
+    const bank = inventory.sources.find(source => source.name === "ncrs-pq.pdf")!;
+    inventory.sources.push({ ...bank, name: "ncrs duplicate.pdf", hasBank: false, bank: undefined,
+      status: "duplicate-linked", duplicateOf: bank.id, ready: 0, review: 0, rows: undefined });
+    const ledger = accountQuestions(inventory, planPublication(inventory));
+    expect(ledger.total.questions).toBe(6);
+    expect(ledger.leftOut.reduce((sum, group) => sum + group.questions, 0)).toBe(2);
+    expect(ledger.unaccounted).toBe(0);
   });
 });

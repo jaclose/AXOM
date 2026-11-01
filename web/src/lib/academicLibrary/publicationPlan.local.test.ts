@@ -2,28 +2,32 @@
 /**
  * Opt-in dry run of Publish a prepared library on a REAL prepared library, on
  * the authorized local machine. It plans every course and prepares each one
- * exactly as publishing would, but uploads nothing. Run from web/ with
+ * exactly as publishing would, including a real browser image decoder, but
+ * uploads nothing. Run from web/ with
  *
  *   AXOM_PUBLISH_LIBRARY_ROOT=<prepared folder> \
  *   AXOM_PUBLISH_REPORT=<report.json outside the repository> \
  *   AXOM_PUBLISH_TERMS='{"<module key>":"Term 1"}' \
  *   AXOM_PUBLISH_DECISIONS=<filing decisions .json from the unfiled source review> \
+ *   AXOM_PUBLISH_PROPOSALS=<matching original review worksheet .json> \
  *   npx vitest run src/lib/academicLibrary/publicationPlan.local.test.ts --reporter=verbose
  *
  * AXOM_PUBLISH_TERMS is optional and holds terms a reviewer confirmed, keyed by
  * the module keys the report lists. AXOM_PUBLISH_DECISIONS is optional and files
  * each reviewed source as decided, exactly as the publisher's "Add filing
- * decisions" does; the library folder itself is never changed. The report and console carry counts,
+ * decisions" does. AXOM_PUBLISH_PROPOSALS is required with decisions to
+ * verify Accept against the original proposal; the library folder itself is never changed. The report and console carry counts,
  * module labels, reasons and source names only, never question text, answers
  * or file bytes. It also accounts for every question row: in a course, or
  * staying on this device with its reason, and fails if any row is unaccounted. Source names can be private: keep the report out of Git.
  */
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { safeLibraryPath, type LibraryReader } from "../privateLibrary/install";
 import type { ReviewedFiling } from "../privateLibrary/types";
-import { applyFilingDecisions, readFilingDecisions } from "./filingDecisions";
+import { openPublicationBrowserDecoder } from "./publicationBrowserDecoder.local";
+import { applyFilingDecisions, readFilingDecisions, readFilingProposals } from "./filingDecisions";
 import { accountQuestions } from "./questionLedger";
 import {
   PUBLICATION_INPUT_LIMITS, planPublication, publicationJobs, readPublicationInventory, type PlannedCourse,
@@ -42,6 +46,16 @@ function confirmedTerms(): Record<string, Term> {
 }
 
 describe.skipIf(!root)("dry run of publishing a real prepared library (opt-in only)", () => {
+  let decoder: Awaited<ReturnType<typeof openPublicationBrowserDecoder>> | undefined;
+  beforeAll(async () => {
+    decoder = await openPublicationBrowserDecoder();
+    vi.stubGlobal("createImageBitmap", decoder.decode);
+  }, 120_000);
+  afterAll(async () => {
+    vi.unstubAllGlobals();
+    await decoder?.close();
+  }, 120_000);
+
   it("plans every course and prepares each one without uploading", async () => {
     const parent = realpathSync(resolve(root!));
     const fromDisk: LibraryReader = async (file: string) => {
@@ -59,8 +73,11 @@ describe.skipIf(!root)("dry run of publishing a real prepared library (opt-in on
       throw new Error("Write the dry-run report outside the repository: it can name private sources.");
 
     const decisionsFile = process.env.AXOM_PUBLISH_DECISIONS;
+    const proposalsFile = process.env.AXOM_PUBLISH_PROPOSALS;
+    if (decisionsFile && !proposalsFile) throw new Error("AXOM_PUBLISH_PROPOSALS is required with filing decisions.");
     const filed = decisionsFile
-      ? await applyFilingDecisions(fromDisk, readFilingDecisions(JSON.parse(readFileSync(resolve(decisionsFile), "utf8"))))
+      ? await applyFilingDecisions(fromDisk, readFilingDecisions(JSON.parse(readFileSync(resolve(decisionsFile), "utf8"))),
+        readFilingProposals(JSON.parse(readFileSync(resolve(proposalsFile!), "utf8"))))
       : undefined;
     const read = filed?.read ?? fromDisk;
     if (filed) console.log(`filing decisions  ${filed.summary.filed} filed, ${filed.summary.keptUnfiled} kept unfiled`);
@@ -93,6 +110,7 @@ describe.skipIf(!root)("dry run of publishing a real prepared library (opt-in on
           reason: notes.failures.get(job.key) ?? (cause instanceof Error ? cause.message : "This course could not be prepared.") });
       }
     }
+    decoder?.assertHealthy();
     const needsTerm = plan.courses.filter(course => course.termBasis === "proposed").map(course => ({
       moduleKey: course.moduleKey, module: course.module, proposedTerm: course.term, reason: course.proposalReason,
       sections: course.sections.map(section => section.name),

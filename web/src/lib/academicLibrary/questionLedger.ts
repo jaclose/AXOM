@@ -63,8 +63,11 @@ export function accountQuestions(inventory: PublicationInventory, plan: Publicat
 
   const groups = new Map<string, LedgerCount & { reason: string }>();
   for (const entry of plan.excluded) {
+    // Duplicate-linked catalog rows can reuse a bank source ID while carrying
+    // no bank of their own. They must not count the original bank a second time.
+    if (!entry.hasBank) continue;
     const source = byId.get(entry.id);
-    if (!source) continue;
+    if (!source || source.name !== entry.name) continue;
     place(entry.id);
     const group = groups.get(entry.reason) ?? { reason: entry.reason, ...empty() };
     add(group, source);

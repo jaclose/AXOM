@@ -33,6 +33,11 @@ unfiled source review and a question ledger that must reconcile before publishin
 The private library and its publish stay on JD's Mac; this cloud session cannot reach it.
 Next: JD merges PR 37, then publishes from the site and approves sharing.
 
+2026-11-01 local PR 37 replacement: `codex/qbank-filing-safety` adds exact
+worksheet/decision/hash checks and preserves source scopes. Upload-free dry run:
+113 filed, 8 kept, 21 courses, 11 prepared, 10 need confirmed terms, 0 question
+rows unaccounted. No content uploaded by this repair.
+
 ## Ownership and protected work
 
 Read the coordination board and CONVERGENCE before integration. Preserve other

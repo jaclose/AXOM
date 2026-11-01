@@ -155,6 +155,22 @@ describe("publishing a prepared library", () => {
     expect(mocks.share).not.toHaveBeenCalled();
   });
 
+  it("explains when a bank's unsupported original stays on this device", async () => {
+    const bankSource = fixture.catalog.sources.find(source => source.name === "goer-pq.pdf")!;
+    const original = bankSource.originalFile!;
+    bankSource.originalFile = original.replace(/\.pdf$/, ".pptx");
+    fixture.files.set(bankSource.originalFile, fixture.files.get(original)!);
+    fixture.files.set("catalog.json", new TextEncoder().encode(JSON.stringify(fixture.catalog)));
+
+    const { container } = render(<AcademicLibraryPublisher onPublished={vi.fn()} />);
+    await chooseLibrary(container);
+    fireEvent.click(screen.getByRole("button", { name: /Check 2 courses/ }));
+    const goer = screen.getByText("GOER").closest("article")!;
+    expect(await within(goer).findByText("Ready to publish")).toBeTruthy();
+    expect(within(goer).getByText(/1 source file will stay on this device because the file type or course size limit prevents upload/)).toBeTruthy();
+    expect(mocks.batch).not.toHaveBeenCalled();
+  });
+
   it("publishes a library of more than 100 courses in runs of 100", async () => {
     const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
     const files = new Map<string, Uint8Array>();
