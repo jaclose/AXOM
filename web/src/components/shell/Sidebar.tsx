@@ -28,6 +28,7 @@ import { dismissAnnouncement, isAnnouncementDismissed, readDismissedAnnouncement
 import { QuickThemeControl } from "./QuickThemeControl";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { protectionLabel, useAccount } from "../../lib/account/accountStore";
+import { useOperatorAccess } from "../../lib/operator/hostClient";
 
 const MOBILE_SIDEBAR_QUERY = "(max-width: 880px)";
 const PREP_FOLDER_TOGGLE_ID = "sidebar-academic-prep-toggle";
@@ -68,6 +69,7 @@ export function Sidebar({
 }) {
   const profile = useStore((s) => s.profile);
   const accountStatus = useAccount((state) => state.protection);
+  const operatorAccess = useOperatorAccess();
   const updateProfile = useStore((s) => s.updateProfile);
   const [manage, setManage] = useState(false);
   // "Overwhelmed?" -> Show me (CoachLayer) opens Customize.
@@ -130,6 +132,7 @@ export function Sidebar({
   }
 
   function Item({ id, section }: { id: string; section?: readonly string[] }) {
+    if (id === "host" && !operatorAccess) return null;
     const item = navById(id);
     if (!item) return null;
     const I = item.icon;
