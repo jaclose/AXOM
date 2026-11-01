@@ -6,7 +6,7 @@ import {
   splitAnswerKeySection, splitOptionFeedback,
 } from "./questionParse";
 import { detectImportFormat, importFromCsv, importFromJson, parseCsv } from "./questionImport";
-import { buildQuizPool, missedQuestionIds, scoreSession, scoresByCategory, type QuizSession } from "./quiz";
+import { buildQuizPool, missedQuestionIds, quizPoolCounts, quizSubjectCounts, scoreSession, scoresByCategory, type QuizSession } from "./quiz";
 import { setAccuracy, type QuestionSet } from "./library";
 import { validateQuestionRecord, type QuestionRecord } from "./questions";
 
@@ -36,6 +36,36 @@ describe("exact published question selection", () => {
       { count: 20, status: "all", setIds: ["shared-set"], questionIds: [] }, sets)).toEqual([]);
     expect(buildQuizPool([selected, unrelated],
       { count: 20, status: "all", setIds: ["shared-set"] }, sets)).toHaveLength(2);
+  });
+});
+
+describe("quiz setup counts", () => {
+  const attempt: QuestionRecord["attempts"][number] = { at: "2026-07-02T00:00:00.000Z", answerKey: "B", status: "incorrect" };
+  const fresh = makeQuestion({ id: "fresh", category: "Pathology", system: "Cardiovascular" });
+  const missed = makeQuestion({ id: "missed", category: "Cardiovascular", status: "incorrect", attempts: [attempt] });
+  const marked = makeQuestion({ id: "marked", category: "Renal", system: "renal", marked: true, attempts: [attempt] });
+  const all = [fresh, missed, marked];
+
+  it("counts each pool with the same sources and subjects the block would use", () => {
+    expect(quizPoolCounts(all, { count: 10, status: "unused" })).toEqual({ all: 3, unused: 1, incorrect: 1, marked: 1 });
+    expect(quizPoolCounts(all, { count: 10, status: "all", categories: ["renal"] })).toEqual({ all: 1, unused: 0, incorrect: 0, marked: 1 });
+    for (const status of ["all", "unused", "incorrect", "marked"] as const) {
+      expect(buildQuizPool(all, { count: 10, status, ordered: true })).toHaveLength(quizPoolCounts(all, { count: 10, status })[status]);
+    }
+  });
+
+  it("lists each subject once per question, most questions first, within the chosen pool", () => {
+    expect(quizSubjectCounts(all, { count: 10, status: "all", categories: ["Renal"] })).toEqual([
+      { name: "Cardiovascular", count: 2 }, { name: "Pathology", count: 1 }, { name: "Renal", count: 1 },
+    ]);
+    expect(quizSubjectCounts(all, { count: 10, status: "unused" })).toEqual([
+      { name: "Cardiovascular", count: 1 }, { name: "Pathology", count: 1 },
+    ]);
+  });
+
+  it("draws a block from any picked subject", () => {
+    expect(buildQuizPool(all, { count: 10, status: "all", categories: ["Renal", "pathology"], ordered: true }).map((q) => q.id))
+      .toEqual(["fresh", "marked"]);
   });
 });
 

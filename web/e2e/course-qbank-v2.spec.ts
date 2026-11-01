@@ -40,7 +40,7 @@ for (const width of [1440, 768, 390]) test(`course bank stays focused, builds ac
   await expect(picker.getByRole("status")).toHaveText("24 selected");
   await setup.getByRole("button", { name: "Done choosing" }).click();
   await setup.getByLabel("Custom question count").fill("2");
-  await setup.getByLabel("Question pool", { exact: true }).selectOption("unused");
+  await setup.getByRole("radiogroup", { name: "Question pool" }).getByRole("radio", { name: /^Unused · / }).click();
   page.once("dialog", (dialog) => void dialog.accept("Weeks 2 and 3, unused"));
   await setup.getByRole("button", { name: "Save as block" }).click();
   await page.screenshot({ path: `/tmp/axom-course-v2-setup-${width}.png` });
