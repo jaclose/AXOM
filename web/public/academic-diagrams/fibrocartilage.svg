@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 1030" role="img" aria-labelledby="title description">
+  <title id="title">Fibrocartilage tissue schematic</title>
+  <desc id="description">An original teaching schematic, not a photomicrograph. Parallel rows of chondrocytes in lacunae lie between thick collagen bundles in a matrix. The outer margin has no perichondrium. The dense bundles are rich in type I collagen, while fibrocartilage also contains type II collagen; the collagen types cannot be read from this drawing.</desc>
+  <defs>
+    <pattern id="grain" width="27" height="27" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="4" r="1" fill="#937C66" opacity=".18"/>
+      <circle cx="19" cy="16" r="1.2" fill="#8D7767" opacity=".12"/>
+    </pattern>
+    <clipPath id="tissueClip"><path d="M68 238H692V703H68Z"/></clipPath>
+    <g id="lacuna">
+      <ellipse rx="25" ry="16" fill="#DDE9E7" stroke="#547888" stroke-width="3"/>
+      <ellipse rx="12" ry="9" fill="#6A8B99"/>
+      <ellipse cx="-4" cy="-3" rx="3" ry="2" fill="#F7F6EE" opacity=".7"/>
+    </g>
+    <style>
+      text{font-family:Arial,Helvetica,sans-serif;fill:#F1ECE2}
+      .eyebrow{font-size:18px;font-weight:700;letter-spacing:3px;fill:#C8A96A}
+      .headline{font-size:39px;font-weight:700;letter-spacing:-1px}
+      .subhead{font-size:22px;fill:#D0D9DD}
+      .label{font-size:25px;font-weight:700}
+      .detail{font-size:23px;fill:#CED8DC}
+      .foot{font-size:22px;fill:#AFBEC5}
+    </style>
+  </defs>
+  <rect width="760" height="1030" rx="28" fill="#101B28"/>
+  <path d="M44 43H102" stroke="#C8A96A" stroke-width="4" stroke-linecap="round"/>
+  <text x="44" y="78" class="eyebrow">AXOM HISTOLOGY</text>
+  <text x="44" y="128" class="headline">Fibrocartilage</text>
+  <text x="44" y="165" class="subhead">Matrix and cell pattern · teaching schematic</text>
+
+  <path d="M44 216H716" stroke="#80919B" stroke-opacity=".6"/>
+  <rect x="68" y="238" width="624" height="465" fill="#DBCDB6"/>
+  <rect x="68" y="238" width="624" height="465" fill="url(#grain)"/>
+  <g clip-path="url(#tissueClip)" fill="none" stroke-linecap="round">
+    <path d="M38 269C154 252 270 286 388 266S594 255 729 275" stroke="#AC8265" stroke-width="22" opacity=".92"/>
+    <path d="M32 291C166 274 246 308 380 288S610 275 730 298" stroke="#C39C72" stroke-width="13" opacity=".9"/>
+    <path d="M28 353C144 333 276 369 399 349S602 336 724 357" stroke="#A67C60" stroke-width="23" opacity=".92"/>
+    <path d="M36 375C165 354 271 389 390 372S603 357 728 380" stroke="#C39B70" stroke-width="13" opacity=".88"/>
+    <path d="M35 436C166 419 278 450 392 433S606 419 732 441" stroke="#AA8061" stroke-width="25" opacity=".93"/>
+    <path d="M30 459C151 443 278 471 390 456S612 439 731 463" stroke="#C39C73" stroke-width="13" opacity=".86"/>
+    <path d="M35 526C149 508 270 539 394 521S606 510 733 531" stroke="#A47B61" stroke-width="24" opacity=".94"/>
+    <path d="M39 548C149 529 278 559 392 542S600 526 734 551" stroke="#C9A57B" stroke-width="12" opacity=".86"/>
+    <path d="M38 616C159 594 270 627 392 606S599 596 731 618" stroke="#AA8263" stroke-width="24" opacity=".94"/>
+    <path d="M40 637C150 618 277 648 390 630S606 619 729 641" stroke="#C6A077" stroke-width="13" opacity=".87"/>
+    <path d="M37 683C154 666 281 694 386 675S600 668 733 688" stroke="#A77E60" stroke-width="21" opacity=".93"/>
+  </g>
+  <g>
+    <use href="#lacuna" x="139" y="321" transform="rotate(-7 139 321)"/>
+    <use href="#lacuna" x="239" y="327" transform="rotate(4 239 327)"/>
+    <use href="#lacuna" x="342" y="320" transform="rotate(-5 342 320)"/>
+    <use href="#lacuna" x="446" y="323" transform="rotate(6 446 323)"/>
+    <use href="#lacuna" x="552" y="320" transform="rotate(-3 552 320)"/>
+    <use href="#lacuna" x="639" y="324" transform="rotate(3 639 324)"/>
+    <use href="#lacuna" x="114" y="408" transform="rotate(5 114 408)"/>
+    <use href="#lacuna" x="219" y="407" transform="rotate(-4 219 407)"/>
+    <use href="#lacuna" x="329" y="405" transform="rotate(4 329 405)"/>
+    <use href="#lacuna" x="437" y="406" transform="rotate(-2 437 406)"/>
+    <use href="#lacuna" x="544" y="404" transform="rotate(3 544 404)"/>
+    <use href="#lacuna" x="644" y="407" transform="rotate(-5 644 407)"/>
+    <use href="#lacuna" x="139" y="491" transform="rotate(-5 139 491)"/>
+    <use href="#lacuna" x="244" y="493" transform="rotate(6 244 493)"/>
+    <use href="#lacuna" x="345" y="489" transform="rotate(-3 345 489)"/>
+    <use href="#lacuna" x="448" y="493" transform="rotate(4 448 493)"/>
+    <use href="#lacuna" x="552" y="489" transform="rotate(-4 552 489)"/>
+    <use href="#lacuna" x="642" y="490" transform="rotate(6 642 490)"/>
+    <use href="#lacuna" x="114" y="577" transform="rotate(4 114 577)"/>
+    <use href="#lacuna" x="218" y="575" transform="rotate(-6 218 575)"/>
+    <use href="#lacuna" x="326" y="575" transform="rotate(5 326 575)"/>
+    <use href="#lacuna" x="435" y="573" transform="rotate(-2 435 573)"/>
+    <use href="#lacuna" x="545" y="575" transform="rotate(3 545 575)"/>
+    <use href="#lacuna" x="646" y="575" transform="rotate(-4 646 575)"/>
+    <use href="#lacuna" x="141" y="664" transform="rotate(-5 141 664)"/>
+    <use href="#lacuna" x="242" y="664" transform="rotate(4 242 664)"/>
+    <use href="#lacuna" x="346" y="660" transform="rotate(-4 346 660)"/>
+    <use href="#lacuna" x="448" y="664" transform="rotate(5 448 664)"/>
+    <use href="#lacuna" x="553" y="661" transform="rotate(-3 553 661)"/>
+    <use href="#lacuna" x="642" y="663" transform="rotate(4 642 663)"/>
+  </g>
+  <path d="M68 238V703H692V238" fill="none" stroke="#E4D8C5" stroke-width="3"/>
+  <path d="M585 705V733H316" fill="none" stroke="#E9CE91" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="585" cy="705" r="5" fill="#E9CE91"/>
+  <text x="44" y="745" class="label">No perichondrium</text>
+  <text x="44" y="771" class="detail">The tissue margin has no outer covering.</text>
+
+  <rect x="44" y="800" width="672" height="104" rx="14" fill="#1D2B38" stroke="#697F8B" stroke-opacity=".65"/>
+  <path d="M69 829C92 821 110 834 132 828" stroke="#C39C72" stroke-width="11" stroke-linecap="round"/>
+  <text x="153" y="836" class="label">Thick collagen bundles</text>
+  <ellipse cx="86" cy="866" rx="24" ry="15" fill="#DDE9E7" stroke="#547888" stroke-width="3"/>
+  <ellipse cx="86" cy="866" rx="11" ry="8" fill="#6A8B99"/>
+  <text x="153" y="873" class="label">Chondrocytes in lacunae</text>
+  <text x="44" y="940" class="foot">Rows lie between bundles in a matrix. Dense bundles</text>
+  <text x="44" y="964" class="foot">are type I-rich; type II collagen is also present.</text>
+  <text x="44" y="990" class="foot">Collagen types are not identified from this drawing.</text>
+  <text x="44" y="1015" class="foot">Sources: IU Med · U Michigan · ICRS · AXOM v1</text>
+</svg>
