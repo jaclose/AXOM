@@ -44,7 +44,7 @@ export const NAV = [
   { id: "questions", label: "Question Bank", subtitle: "Import Center, source library, question sets, blocks, and results", icon: HelpCircle },
   { id: "shared-set", label: "Shared Question Set", subtitle: "Preview and import an unlisted Question Set link", icon: HelpCircle },
   { id: "methods", label: "Study Methods", subtitle: "Evidence-informed technique templates with honest trade-offs", icon: BookOpenCheck },
-  { id: "soundscapes", label: "Soundscapes", subtitle: "Synthesized study sound with live visuals and an honest listening log", icon: AudioWaveform },
+  { id: "soundscapes", label: "Soundscapes", subtitle: "Study sounds, your own recordings, live visuals, and a listening log", icon: AudioWaveform },
   { id: "productivity", label: "Productivity", subtitle: "Study time, Anki cards, lecture blocks, day usefulness", icon: Calendar },
   { id: "journal", label: "Journal", subtitle: "Private pages, optional prompts, and a place to close the day", icon: BookText },
   { id: "reports", label: "Reports", subtitle: "Traceable statistics, energy, and performance vs. your goals", icon: LineChart },

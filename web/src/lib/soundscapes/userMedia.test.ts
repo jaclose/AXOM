@@ -41,8 +41,9 @@ describe("your own sounds and backgrounds", () => {
     expect(SOUNDSCAPES["alpha-10"].versions).toHaveLength(before);
   });
 
-  it("keeps an empty Your sounds shelf unplayable and files without a home on it", () => {
-    expect(isPlayable("yours")).toBe(false);
+  it("keeps the AXOM original playable and files without a home ahead of it", () => {
+    expect(isPlayable("yours")).toBe(true);
+    expect(SOUNDSCAPES.yours.versions.some((version) => version.id === "axom-afterlight")).toBe(true);
     applyUserSounds([{ id: "b2", name: "Mix", presetId: "nope", url: "blob:mix" }]);
     expect(isPlayable("yours")).toBe(true);
     expect(SOUNDSCAPES.yours.versions[0].id).toBe("user-b2");

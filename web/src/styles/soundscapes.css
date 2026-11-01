@@ -419,6 +419,12 @@
 .your-sound-play { display: grid; place-items: center; width: 36px; height: 36px; color: var(--on-accent, #16120b); background: rgb(var(--accent-rgb)); border: 0; border-radius: 999px; cursor: pointer; box-shadow: 0 6px 16px rgba(var(--accent-rgb), 0.28); }
 .your-sound.again { grid-template-columns: auto auto minmax(0, 1fr); background: linear-gradient(120deg, rgba(var(--accent-rgb), 0.16), rgba(140, 110, 255, 0.12)); border-color: rgba(var(--accent-rgb), 0.35); }
 .again-badge { display: grid; place-items: center; width: 24px; color: rgb(var(--accent-rgb)); font-size: 18px; }
+.your-sound.library-recording { grid-template-columns: auto auto minmax(0, 1fr) auto; }
+.your-sound.axom-original { position: relative; overflow: hidden; border-color: rgba(var(--accent-rgb), 0.3); background: linear-gradient(110deg, rgba(var(--accent-rgb), 0.14), var(--surface-1)); }
+.your-sound.axom-original::after { content: ""; position: absolute; inset: 0 0 0 auto; width: 38%; pointer-events: none; opacity: .48; background: repeating-radial-gradient(circle at 100% 50%, transparent 0 17px, rgba(var(--accent-rgb), .08) 18px 19px); }
+.your-sound-orb { width: 28px; height: 28px; object-fit: contain; }
+.your-sound-source { position: relative; z-index: 1; color: var(--text-45); font: 600 var(--fs-micro) var(--font-mono); letter-spacing: .12em; white-space: nowrap; }
+.library-recording .your-sound-copy small:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .your-sounds-add {
   display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 14px;
   padding: 16px 18px; border-radius: 16px; border: 1.5px dashed var(--hairline-strong, var(--hairline));
@@ -432,10 +438,15 @@
 @media (max-width: 760px) {
   .your-sounds-add { grid-template-columns: 1fr; }
   .your-sound { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+  .your-sound.library-recording { grid-template-columns: auto auto minmax(0, 1fr); }
+  .your-sound-source { display: none; }
   .your-sound-icon { display: none; }
   /* What it plays for drops to its own row instead of disappearing. */
   .your-sound-move { grid-column: 1 / -1; grid-row: 2; justify-content: space-between; }
   .your-sound-move select { flex: 1; min-width: 0; }
+}
+@media (max-width: 560px) {
+  .your-sound-copy b, .library-recording .your-sound-copy small:last-child { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; white-space: normal; }
 }
 
 /* --- Music ------------------------------------------------------------------------ */
