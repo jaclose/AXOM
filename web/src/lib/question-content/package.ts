@@ -134,6 +134,7 @@ export const QUESTION_FLAG_TYPES = [
   "source_inconsistency",
   "missing_explanation",
   "possible_duplicate",
+  "student_source",
   "answer_reveal_asset",
   "media_association_uncertain",
   "media_position_uncertain",

@@ -39,6 +39,7 @@ const ADVISORY: ReadonlySet<IssueCode> = new Set<IssueCode>([
   "rich_text_escaped",
   // Filing and bookkeeping that can be put right without touching the question.
   "possible_duplicate",
+  "student_source",
   "scope_mismatch",
   "unknown_field",
   "unknown_flag",

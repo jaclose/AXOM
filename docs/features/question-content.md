@@ -81,6 +81,8 @@ against the original answer slide. It requires an attached `answer_reveal` image
 its source file, page and SHA-256 checksum. The mark remains distinct from a printed
 key and a person's review. An unchecked extraction remains `answer-reveal-slide` and
 is held. Source conflicts and missing essential content still hold the question.
+Student-authored answer sources use a visible `student_source` advisory while
+remaining eligible for practice when their answer mark has been checked.
 
 **Image visibility** (`visibility.ts`, every role tested in every mode):
 

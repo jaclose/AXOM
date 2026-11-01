@@ -18,6 +18,7 @@ export const FLAG_SEVERITY: Record<QuestionFlagType, IssueSeverity> = {
   source_inconsistency: "warning",
   missing_explanation: "info",
   possible_duplicate: "warning",
+  student_source: "warning",
   answer_reveal_asset: "info",
   media_association_uncertain: "warning",
   media_position_uncertain: "warning",
