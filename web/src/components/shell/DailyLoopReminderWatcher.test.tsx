@@ -142,6 +142,32 @@ describe("DailyLoopReminderWatcher", () => {
     expect(readLocalNotices().filter((item) => item.kind === "journal-catch-up")).toHaveLength(1);
   });
 
+  it("respects closeout opt-out and quiet hours for next-day invitations", () => {
+    useStore.setState((state) => ({
+      journal: [{
+        id: "draft", date: "2026-07-13T18:00:00.000Z", today: "", tomorrow: "",
+        blockers: "", energy: "", rating: "", notebookStatus: "draft",
+      }],
+      profile: { ...state.profile, dailyLoopReminders: {
+        ...state.profile.dailyLoopReminders, closeoutEnabled: false,
+      } },
+    }));
+    renderWatcher(() => localTime(9, 0, 14));
+    expect(readLocalNotices().some((item) => item.kind === "journal-catch-up")).toBe(false);
+
+    cleanup();
+    useStore.setState((state) => ({ profile: { ...state.profile, dailyLoopReminders: {
+      ...state.profile.dailyLoopReminders, closeoutEnabled: true,
+      quietHoursEnabled: true, quietHoursStart: "08:00", quietHoursEnd: "10:00",
+    } } }));
+    let now = localTime(9, 0, 14);
+    renderWatcher(() => now);
+    expect(readLocalNotices().some((item) => item.kind === "journal-catch-up")).toBe(false);
+    now = localTime(10, 0, 14);
+    fireEvent.focus(window);
+    expect(readLocalNotices().filter((item) => item.kind === "journal-catch-up")).toHaveLength(1);
+  });
+
   it("keeps a reminder pending during quiet hours and publishes it once after quiet hours end", async () => {
     let now = localTime(9);
     const ledger = memoryLedger();

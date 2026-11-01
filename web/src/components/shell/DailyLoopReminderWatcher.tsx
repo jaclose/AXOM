@@ -3,6 +3,7 @@ import { closeoutForDay } from "../../lib/closeout";
 import {
   dailyLoopReminderLedger,
   evaluateDailyLoopReminder,
+  isWithinDailyLoopQuietHours,
   journalCatchUpDay,
   journalPageComplete,
   normalizeDailyLoopReminderPreferences,
@@ -56,7 +57,9 @@ export function DailyLoopReminderWatcher({
       // dashboard's own check-in; and no nudge lands over a modal, tour or the
       // Promise (the next poll or refocus tries again).
       if (isFirstRunDay(dayKey) || shellBusy()) return;
-      const catchUp = journalCatchUpDay({ journal, logs, dayPlans, closeouts }, now);
+      const catchUp = preferences.closeoutEnabled && !isWithinDailyLoopQuietHours(now, preferences)
+        ? journalCatchUpDay({ journal, logs, dayPlans, closeouts }, now)
+        : null;
       if (catchUp) recordLocalNotice(`journal-catch-up:${catchUp}`, "journal-catch-up", now);
       const evaluation = evaluateDailyLoopReminder({
         now,

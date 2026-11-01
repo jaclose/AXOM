@@ -58,7 +58,8 @@ it does not create a plan or Journal entry merely by opening.
 At the next app opening after `08:00` local time, an active yesterday with no
 completed Journal page earns one device-only “Yesterday is still open” inbox
 notice. Activity means a saved Journal draft, a study log, a day plan, or a
-closeout. The notice contains only the date and fixed copy. Opening it selects
+closeout. It respects the evening reminder opt-out and quiet hours. The notice
+contains only the date and fixed copy. Opening it selects
 that exact Journal day, even if the student returns much later. Dismiss marks
 this one invitation read and hides it; the one-time ID prevents another poll
 from recreating it. Past days remain available from the Journal itself.
