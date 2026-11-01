@@ -55,6 +55,9 @@ describe("committing a block run", () => {
     expect(state.questions.find((q) => q.id === "q-1")?.attempts).toHaveLength(1);
     expect(state.questions.find((q) => q.id === "q-2")?.status).toBe("correct");
     expect(state.questions.find((q) => q.id === "q-3")?.attempts).toHaveLength(0);
+    expect(state.logs.find((log) => log.id === "qbank-session:run-1")).toMatchObject({
+      quantity: 3, quantityKind: "questions", type: "Question Bank",
+    });
   });
 
   it("can be written again for the same run without adding attempts or sessions", () => {
@@ -68,6 +71,7 @@ describe("committing a block run", () => {
     const state = useStore.getState();
     expect(state.questions.find((q) => q.id === "q-1")?.attempts).toHaveLength(1);
     expect(state.quizSessions.filter((item) => item.id === "run-1")).toHaveLength(1);
+    expect(state.logs.filter((item) => item.id === "qbank-session:run-1")).toHaveLength(1);
   });
 
   it("keeps a tutor answer saved at check when the block's result arrives later", () => {
@@ -81,5 +85,15 @@ describe("committing a block run", () => {
     expect(saved?.attempts).toHaveLength(1);
     expect(saved?.attempts[0].errorType).toBe("knowledge-gap");
     expect(useStore.getState().quizSessions[0].endedEarly).toBe(true);
+    expect(useStore.getState().logs.find((log) => log.id === "qbank-session:run-1")).toMatchObject({
+      quantity: 1, quantityKind: "questions", note: expect.stringContaining("ended early"),
+    });
+  });
+
+  it("projects tutor-session progress when no attempts need another write", () => {
+    useStore.getState().saveQuizSession({ ...session("tutor-run", ["q-1", "q-2"]), mode: "tutor" });
+    const logs = useStore.getState().logs.filter((log) => log.id === "qbank-session:tutor-run");
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({ quantity: 2, quantityKind: "questions" });
   });
 });

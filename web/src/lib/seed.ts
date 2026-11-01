@@ -9,7 +9,7 @@ import { userIdFromName } from "./userIdentity";
 import { ACADEMIC_TEMPLATE_COURSES, ACADEMIC_TEMPLATE_TERMS, DEFAULT_FOCUS_IDS } from "./experience";
 import { normalizeResourceUrl } from "./resourceUtils";
 
-export const SCHEMA_VERSION = 34;
+export const SCHEMA_VERSION = 35;
 // Version + brand strings live in brand.ts (single source of truth for rebrand).
 export { APP_RELEASE_VERSION, APP_BUILD_LABEL, APP_VERSION_LABEL } from "./brand";
 import { APP_VERSION_LABEL, BRAND } from "./brand";
@@ -265,11 +265,11 @@ function trackerDef(
   };
 }
 
-// Curated shared drives — mostly SGU. These ship with every build so they are
-// present for all users. Paste real SGU shared-drive links here to bake them in.
+// Curated shared drives. These ship with every build so they are present for
+// all users; course-specific links stay behind the course-resources preference.
 // Permanent curated drives. `rating` (1–10) is JD's personal usefulness score;
 // `ratingReason` shows on hover. My Drive + MADCOW are 10/10. Titles/ratings on
-// the SGU Shared entries are placeholders — rename + re-rate them in-app.
+// course-specific entries use AXOM-owned, institution-neutral display labels.
 export type SeedDrive = { title: string; url: string; category: string; rating: number; ratingReason: string; tags: string[]; note?: string };
 // Exact curated permanent resources (spec v0.1.0-alpha.1). My Drive pins first
 // via resourceSortScore; MADCOW + Claudfather are 10/10. Labels here are canonical
@@ -280,11 +280,11 @@ export const SGU_DRIVES: SeedDrive[] = [
   { title: "Madcow", url: "https://accidental-scallion-328.notion.site/MADCOW-Drive-1a51388b1e708076b592e522eda64aeb?pvs=143", category: "High-Yield Drive / Notion", rating: 10, ratingReason: "Top-tier curated high-yield resource. Personally rated 10/10 for usefulness.", tags: ["madcow", "high-yield", "notion"] },
   { title: "Nana's Practice Questions", url: "https://drive.google.com/drive/folders/1qju4aorkQCH6lZ5xrfEgyzR8BUAhPe7l?usp=sharing", category: "Practice Questions", rating: 9, ratingReason: "High-utility practice question source for active recall and exam-style review.", tags: ["pq", "practice"] },
   { title: "Last Ditch PQ's and Review", url: "https://drive.google.com/drive/folders/1w2k2j-RGy6WWvYi4iXk4yye_nw_2EL6Y?usp=sharing", category: "Term Review", rating: 9, ratingReason: "Term-by-term student-made review and practice resources for close-to-exam review.", tags: ["review", "term"] },
-  { title: "SGU Materials", url: "https://drive.google.com/drive/folders/1fnL3d74y4S8ocCfOPlKzrQAAqkpDVjsS?usp=sharing", category: "SGU Materials", rating: 9, ratingReason: "Core SGU material repository for course support and reference.", tags: ["sgu", "materials"] },
+  { title: "Course Materials", url: "https://drive.google.com/drive/folders/1fnL3d74y4S8ocCfOPlKzrQAAqkpDVjsS?usp=sharing", category: "Course Library", rating: 9, ratingReason: "Core course material repository for study support and reference.", tags: ["course", "materials"] },
   { title: "Mehlman Drive", url: "https://drive.google.com/drive/folders/1YVx3-zjKlXwc63s7KSyfVrU92-nW6WEB", category: "Boards / Step Prep", rating: 9, ratingReason: "Strong board review resource, especially for focused Step-style reinforcement.", tags: ["boards", "step", "mehlman"] },
   { title: "Schedules & Anki", url: "https://drive.google.com/drive/folders/1vrL1kLb5p9RaoSjD6694ZrXOdn5T1kzJ?usp=sharing", category: "Scheduling / Anki", rating: 8, ratingReason: "Useful for planning structure and Anki workflow support.", tags: ["schedule", "anki"] },
   { title: "Mega Drive", url: "https://mega.nz/folder/QqwggaSR#K_dXqEHbtBKYAzWjT2GeLQ", category: "External Archive", rating: 8, ratingReason: "Large external archive. Useful, but should be filtered carefully.", tags: ["mega", "archive"] },
-  { title: "SGU Silly Goose Wiki", url: "https://baquino.notion.site/sillygoosewiki?v=6feec2d3e6b64760bf5d9b6e84a60fa7", category: "SGU Wiki", rating: 8, ratingReason: "Community wiki for SGU-specific orientation, workflows, and practical survival knowledge.", tags: ["wiki", "sgu", "notion"] },
+  { title: "Student Study Wiki", url: "https://baquino.notion.site/sillygoosewiki?v=6feec2d3e6b64760bf5d9b6e84a60fa7", category: "Course Wiki", rating: 8, ratingReason: "Community-maintained orientation, study workflows, and practical course guidance.", tags: ["wiki", "course", "notion"] },
   { title: "White Coat DES", url: "https://drive.google.com/drive/folders/16i6O5TbmXJ90fYshhx05QeBb5NKdzJL9", category: "Boards / Study Support", rating: 8, ratingReason: "Supplemental board and study support resource.", tags: ["boards", "study"] },
 ];
 

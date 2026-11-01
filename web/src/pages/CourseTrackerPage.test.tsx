@@ -157,8 +157,8 @@ describe("Course Tracker comprehension layout", () => {
     render(<CourseTrackerPage />);
     const workArea = screen.getByRole("region", { name: "Selected Course Tracker scope" });
     const utilities = screen.getByRole("complementary", { name: "Course Tracker utilities" });
-    expect(within(workArea).getByText("SGU Terms 1–5 · curriculum coverage")).toBeTruthy();
-    expect(within(utilities).queryByText("SGU Terms 1–5 · curriculum coverage")).toBeNull();
+    expect(within(workArea).getByText("Terms 1–5 · curriculum coverage")).toBeTruthy();
+    expect(within(utilities).queryByText("Terms 1–5 · curriculum coverage")).toBeNull();
     const anchor = document.getElementById("tracker-curriculum-coverage")!;
     const scroll = vi.fn();
     anchor.scrollIntoView = scroll;
@@ -272,7 +272,7 @@ describe("Course Tracker comprehension layout", () => {
   it("distinguishes school outline coverage from actually imported source templates", () => {
     useStore.setState({ documents: [], tracker: [] });
     render(<CourseTrackerPage />);
-    const coverage = screen.getByText("SGU Terms 1–5 · curriculum coverage").closest<HTMLElement>(".glass-card")!;
+    const coverage = screen.getByText("Terms 1–5 · curriculum coverage").closest<HTMLElement>(".glass-card")!;
     expect(within(coverage).getByText(/0\/23 modules have saved templates/)).toBeTruthy();
     expect(coverage.textContent).toContain("expected activities are unknown, not zero");
     expect(within(coverage).getByText("Term 5 coverage")).toBeTruthy();
@@ -582,7 +582,7 @@ describe("Course Tracker first use (Wave 2)", () => {
     expect(screen.getByRole("heading", { name: "Build it the way your school runs." })).toBeTruthy();
     expect(screen.queryByText("No items here")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: /Load St\. George's University MD/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Load AXOM Medical Foundations/ }));
     expect(treeNames(0)).toEqual(["Term 1", "Term 2", "Term 3", "Term 4", "Term 5", "Boards"]);
     fireEvent.click(screen.getByText("Term 1"));
     fireEvent.click(screen.getByText("BPM 500"));

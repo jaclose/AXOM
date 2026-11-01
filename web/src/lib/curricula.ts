@@ -27,7 +27,7 @@ const BOARD_MODULES = ["Content review", "Question banks", "Practice exams"];
 /** SGU MD, as JD laid it out (Ideas 3). Term 3 is split at the midterm. */
 export const SGU_CURRICULUM: CurriculumTemplate = {
   id: "sgu-md",
-  label: "St. George's University MD",
+  label: "AXOM Medical Foundations",
   terms: [
     { name: "Term 1", courses: [{ code: "BPM 500", name: "Basic Principles of Medicine I", modules: ["FTM 1", "FTM 2", "MSK", "CPR 1", "CPR 2", "BSCE 1"] }] },
     { name: "Term 2", courses: [{ code: "BPM 501", name: "Basic Principles of Medicine II", modules: ["ER", "DM", "NB1", "NB2", "NB3", "BSCE 2"] }] },

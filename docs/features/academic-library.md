@@ -142,6 +142,12 @@ the owner may request sharing with every signed-in account, which requires attes
 right to share; a reviewer may approve in the same step. Every new revision returns to
 review. Workspace schema stays 34; no new store or catalog is created.
 
+Your published courses, below the publisher, reads every course the account owns from
+the catalog page by page and shows its audience and review state by term. It shares all
+private courses at once behind the same rights attestation and, for a reviewer who
+confirms checking them, approves every course awaiting review. The server enforces both,
+so an owner who published before reviewer access existed can finish in one step.
+
 ### Owner steps to publish the full library
 
 Production writes need JD's explicit approval for each step. On the authorized Mac:
@@ -162,7 +168,8 @@ Production writes need JD's explicit approval for each step. On the authorized M
    the plans and source files listed as staying on the device, then Check the selected
    courses and resolve or leave out what needs attention.
 5. Publish. Choose sharing and, as a reviewer, approval only for material you have the
-   right to share with every account. Courses that fail keep their reason and stay
+   right to share with every account. Courses published before then can be shared and
+   approved together in Your published courses. Courses that fail keep their reason and stay
    selected; publishing again retries them and leaves verified courses unchanged.
 6. Check from a second account that the catalog lists the courses by term, a course
    opens its weekly plan and a downloaded quiz opens its exact questions.

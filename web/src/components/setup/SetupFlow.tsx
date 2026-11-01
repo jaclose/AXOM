@@ -152,7 +152,7 @@ function YouStep({ choices, update, titleId, headingRef, rerun }: Omit<StepProps
   const focusOptions = focusChoices(choices.path);
   const summary: SummaryRows = [
     ["Course Tracker", choices.path === "sgu"
-      ? `SGU Terms 1 to 5 and Boards, ${SGU_MODULE_COUNT} modules ready`
+      ? `Terms 1 to 5 and Boards, ${SGU_MODULE_COUNT} modules ready`
       : rerun ? "Your courses stay as they are" : "A clean slate you shape with your own courses"],
     ["Focus", focusOptions.find((option) => option.id === choices.focus)?.label ?? ""],
   ];

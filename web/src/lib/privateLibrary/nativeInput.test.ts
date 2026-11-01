@@ -39,13 +39,40 @@ async function first(files: Map<string, Uint8Array>) {
 }
 
 describe("local native packages without a user-authored catalog", () => {
+  it.each([true, false])("normalizes a verified bare source digest with original present: %s", async (includeOriginal) => {
+    const { files, questions, prefix } = await fixture();
+    const checksum = await sha256(source);
+    questions[0].provenance.sourceChecksum = checksum.slice(7);
+    files.set(`${prefix}questions.json`, encode({ schemaVersion: 1, bankId: manifest.bank.id, questions }));
+    if (!includeOriginal) files.delete(`${prefix}source/Example.pdf`);
+    const { bank, catalog } = await first(files);
+    expect(bank.pkg.questions[0].provenance.sourceChecksum).toBe(checksum);
+    expect(catalog.sources[0].checksum).toBe(checksum.slice(7));
+    expect(bank.pkg.questions[0].correctAnswer).toEqual(questions[0].correctAnswer);
+  });
+  it("ignores macOS packaging metadata when checking for separate exports", async () => {
+    const { files } = await fixture();
+    files.set("__MACOSX/backup/questions.json", encode([{ id: "metadata" }]));
+    expect((await first(files)).catalog.sources[0].ready).toBe(1);
+  });
+  it("honors nested question paths and a conventional trailing slash on the asset directory", async () => {
+    const { files, prefix } = await fixture();
+    files.set(`${prefix}data/questions.json`, files.get(`${prefix}questions.json`)!);
+    files.delete(`${prefix}questions.json`);
+    files.set(`${prefix}manifest.json`, encode({ ...manifest, questionsFile: "data/questions.json", assetsDirectory: "assets/" }));
+    expect((await first(files)).catalog.sources[0].ready).toBe(1);
+  });
+  it("does not silently omit a flat export beside native packages", async () => {
+    const { files } = await fixture(); files.set("Other/questions.json", encode([{ id: "unmapped" }]));
+    await expect(reader(files)).rejects.toThrow(/separate question exports/);
+  });
   it("creates a virtual catalog and preserves source content, identity and filing", async () => {
     const { files } = await fixture(), before = [...files].map(([name, bytes]) => [name, Buffer.from(bytes).toString("base64")]);
     const { catalog, bank, read } = await first(files);
     expect(catalog.format).toBe("axom-private-library");
     expect(catalog.sources).toHaveLength(1);
     expect(catalog.sources[0]).toMatchObject({ ready: 1, review: 0, module: "EXAMPLE" });
-    expect(bank.pkg.manifest).toEqual(manifest);
+    expect(bank.pkg.manifest).toEqual({ ...manifest, schemaVersion: 2 });
     expect(bank.pkg.questions[0].stem).toEqual(question("q1").stem);
     expect(await read(catalog.sources[0].originalFile)).toEqual(source);
     expect([...files].map(([name, bytes]) => [name, Buffer.from(bytes).toString("base64")])).toEqual(before);

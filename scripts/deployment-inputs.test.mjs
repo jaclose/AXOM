@@ -6,13 +6,15 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkDeploymentInputs, requiredManifests } from './deployment-inputs.mjs';
-import { materializeDeployment } from './verify-deployment.mjs';
+import { assertDeploymentPrivacy, materializeDeployment } from './verify-deployment.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ignore = readFileSync(join(repo, '.vercelignore'), 'utf8');
-const manifests = requiredManifests(repo);
+const bankRegistry = 'web/src/lib/question-content/knownBanks.ts';
+const fixtureFiles = execFileSync('git', ['-C', repo, 'ls-files', 'fixtures'], { encoding: 'utf8' })
+  .trim().split('\n').filter(Boolean);
 
-async function withDeployment(t, ignoreText = ignore) {
+async function withDeployment(t, { ignoreText = ignore, registrySource } = {}) {
   const source = mkdtempSync(join(tmpdir(), 'axom-deployment-test-source-'));
   const target = mkdtempSync(join(tmpdir(), 'axom-deployment-test-target-'));
   t.after(() => {
@@ -24,17 +26,14 @@ async function withDeployment(t, ignoreText = ignore) {
     'vercel.json', 'scripts/deployment-inputs.mjs', 'scripts/toolchain.mjs',
     'scripts/release-notes.mjs', 'scripts/release-notes.d.mts',
     'web/scripts/verify-daily-games-bundle.mjs',
-    'web/src/lib/question-content/knownBanks.ts', ...manifests,
+    bankRegistry, ...fixtureFiles,
   ];
   for (const file of files) {
     mkdirSync(dirname(join(source, file)), { recursive: true });
     copyFileSync(join(repo, file), join(source, file));
   }
+  if (registrySource !== undefined) writeFileSync(join(source, bankRegistry), registrySource);
   const excluded = [
-    'fixtures/qbank/synthetic/unrelated/manifest.json',
-    'fixtures/qbank/goer/t5/week-02/unrelated/assets/figure.svg',
-    'fixtures/qbank/goer/t5/week-02/unrelated/questions.json',
-    'fixtures/qbank/goer/t5/week-03/unrelated/manifest.json',
     'node_modules/unrelated/index.js', 'web/node_modules/unrelated/index.js',
     'web/dist/old-build.js', 'scripts/not-a-build-input.mjs',
   ];
@@ -45,56 +44,60 @@ async function withDeployment(t, ignoreText = ignore) {
   // A clean commit must not silently pick up even allowlisted local-only files.
   const git = args => execFileSync('git', ['-C', source, ...args], { stdio: 'pipe' });
   git(['init', '-q']);
-  git(['add', '--', ...files, ...excluded]);
+  git(['add', '-f', '--', ...files, ...excluded]);
   git(['-c', 'user.name=AXOM Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'Deployment fixture']);
   writeFileSync(join(source, 'web/local-only.txt'), 'not committed');
   const selected = await materializeDeployment(source, 'HEAD', target, ignoreText);
   return { source, target, selected, excluded };
 }
 
-test('targeted allowlist survives real Vercel filtering and materializes required inputs', async t => {
+test('inline registry survives real Vercel filtering while every fixture stays excluded', async t => {
   const { target, selected, excluded } = await withDeployment(t);
-  assert.deepEqual(checkDeploymentInputs(target), manifests);
-  for (const file of manifests) {
-    assert.equal(readFileSync(join(target, file), 'utf8'), readFileSync(join(repo, file), 'utf8'));
-  }
+  assert.deepEqual(requiredManifests(repo), []);
+  assert.deepEqual(checkDeploymentInputs(target), []);
+  assert.ok(selected.includes(bankRegistry));
+  assert.equal(selected.some(file => file.startsWith('fixtures/')), false);
+  assert.doesNotThrow(() => assertDeploymentPrivacy(selected));
   for (const file of [...excluded, 'web/local-only.txt']) assert.ok(!selected.includes(file), file);
 });
 
-test('original exclusion fails after filtering, despite manifests existing in source', async t => {
-  const original = ignore.slice(0, ignore.indexOf('# AXOM GOER manifest allowlist'));
-  assert.ok(original.length && original !== ignore);
-  const { source, target } = await withDeployment(t, original);
-  assert.deepEqual(checkDeploymentInputs(source), manifests);
-  assert.throws(() => checkDeploymentInputs(target), /Missing deployment input: fixtures\/qbank\/goer/);
+test('an external manifest import is discovered and fails when fixture filtering removes it', async t => {
+  const manifest = 'fixtures/qbank/goer/t5/week-02/biostats-epidemiology/manifest.json';
+  const importPath = '../../../../fixtures/qbank/goer/t5/week-02/biostats-epidemiology/manifest.json';
+  const registrySource = `import bank from "${importPath}";\nexport const knownBankManifests = [bank];\n`;
+  const { source, target, selected } = await withDeployment(t, { registrySource });
+  assert.deepEqual(requiredManifests(source), [manifest]);
+  assert.deepEqual(checkDeploymentInputs(source), [manifest]);
+  assert.ok(!selected.includes(manifest));
+  assert.throws(() => checkDeploymentInputs(target), { message: `Missing deployment input: ${manifest}` });
 });
 
-test('excluding one required manifest fails instead of silently reducing the bank', async t => {
-  const { target } = await withDeployment(t, `${ignore}\n/${manifests[0]}\n`);
-  assert.throws(() => checkDeploymentInputs(target), /Missing deployment input:.*manifest.json/);
-});
-
-test('missing deployed manifest fails with an actionable path', async t => {
+test('registry filename case mismatch fails on both case-sensitive and case-insensitive hosts', async t => {
   const { target } = await withDeployment(t);
-  rmSync(join(target, manifests[0]));
-  assert.throws(() => checkDeploymentInputs(target), { message: `Missing deployment input: ${manifests[0]}` });
-});
-
-test('filename case mismatch fails on both case-sensitive and case-insensitive hosts', async t => {
-  const { target } = await withDeployment(t);
-  const path = join(target, manifests[0]);
+  const path = join(target, bankRegistry);
   renameSync(path, `${path}.temporary`);
-  renameSync(`${path}.temporary`, join(dirname(path), 'Manifest.json'));
-  assert.throws(() => checkDeploymentInputs(target), /case mismatch:.*found Manifest.json, expected manifest.json/);
+  renameSync(`${path}.temporary`, join(dirname(path), 'KnownBanks.ts'));
+  assert.throws(() => checkDeploymentInputs(target), /case mismatch:.*found KnownBanks.ts, expected knownBanks.ts/);
 });
 
 test('a newly excluded build-time guard is detected in deployment inputs', async t => {
-  const { target } = await withDeployment(t, `${ignore}\n/scripts/deployment-inputs.mjs\n`);
+  const { target } = await withDeployment(t, { ignoreText: `${ignore}\n/scripts/deployment-inputs.mjs\n` });
   assert.throws(() => checkDeploymentInputs(target), /Missing deployment input: scripts\/deployment-inputs.mjs/);
 });
 
-test('Vercel parent exclusions must be reopened, not merely a leaf negated', async t => {
-  const { selected } = await withDeployment(t, `/*\n!/web\n!/web/**\n!/${manifests[0]}\n`);
-  assert.ok(selected.includes('web/src/lib/question-content/knownBanks.ts'));
-  assert.ok(!selected.includes(manifests[0]), 'negating a leaf cannot reopen its excluded parent');
+test('a fixture leaf negation cannot bypass the excluded parent', async t => {
+  const manifest = 'fixtures/qbank/goer/t5/week-02/biostats-epidemiology/manifest.json';
+  const { selected } = await withDeployment(t, {
+    ignoreText: `/*\n!/web\n!/web/**\n!/${manifest}\n`,
+  });
+  assert.ok(selected.includes(bankRegistry));
+  assert.ok(!selected.includes(manifest), 'negating a leaf cannot reopen its excluded parent');
+});
+
+test('fixture allowlisting is rejected as a deployment privacy violation', async t => {
+  const { selected } = await withDeployment(t, {
+    ignoreText: `${ignore}\n!/fixtures/\n!/fixtures/**\n`,
+  });
+  assert.ok(selected.some(file => file.startsWith('fixtures/')));
+  assert.throws(() => assertDeploymentPrivacy(selected), /Deployment privacy violation: fixtures\//);
 });

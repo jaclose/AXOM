@@ -236,8 +236,8 @@ interface Block {
 /** How far a label can sit from its drawing, or from a label already taken, in points. */
 const LABEL_GAP = 20;
 const LABEL_LENGTH = 40;
-const CHOICE_OR_NUMBER = /^(?:\(?[A-Ha-h][.)](?:\s|$)|\d{1,3}[.)]\s)/;
-const BARE_CHOICE_LABEL = /^\(?[A-Ha-h][.)]$/;
+const CHOICE_OR_NUMBER = /^(?:\(?[A-Ia-i][.)](?:\s|$)|\d{1,3}[.)]\s)/;
+const BARE_CHOICE_LABEL = /^\(?[A-Ia-i][.)]$/;
 
 /** A few words or numbers with no sentence to them: what is printed along an axis or beside a curve. */
 const labelLike = (text: string): boolean => {

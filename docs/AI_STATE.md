@@ -5,6 +5,12 @@ authority: current-state
 ---
 # AXOM current AI state
 
+2026-10-30 release candidate `5dfafae1` integrates RHPS/ESoft import, review,
+teaching, QBank, Journal and Productivity work onto `origin/main` `0cb5769a`.
+It preserves the current publisher and excludes the incompatible unapplied
+release-catalog experiment. Private packages remain unpublished; production
+deployment and authenticated readback are pending validation.
+
 ## 2026-10-28 QBank production receipt
 
 CLI 2.122.0 failed on `LOCK TABLE` (25P01) at 12:35 UTC; history stayed
@@ -14,7 +20,7 @@ CLI 2.122.0 failed on `LOCK TABLE` (25P01) at 12:35 UTC; history stayed
 Owner reviewer grant under `service_role` verified 12:49:35–12:49:40 UTC.
 No content upload or sharing change.
 
-Snapshot: 2026-10-20 UTC, `feat/academic-library-v1` in
+Prior snapshot: 2026-10-20 UTC, `feat/academic-library-v1` in
 `AXOM-academic-library-v1`, HEAD `78c00e04`. This reflection batch was pushed to
 main and deployed (authenticated deployment `7203032971`); six old dates were
 dismissed in the live UI and stayed dismissed after reload. Domain contracts remain authoritative.
@@ -26,19 +32,11 @@ That batch is `dc055a2` on `origin/main`; its deployment was not verified on 202
 It does not authorize migrations, private publication or subsequent releases.
 Verify deployed SHA and protected index before release claims.
 
-## Branch `jd-claude/eloquent-shannon-b2xof9` (2026-10-27, cloud)
+## 2026-10-27 publisher branch (historical)
 
-Base `dc055a2`. Adds whole-library publishing: one collection per term and module with
-every plan section, reviewer-confirmed plan terms (both uploaders), an on-device check
-before upload, plan-less question collections, reviewer approval, a curriculum-ordered
-catalog and term-grouped QBank discovery
-([contract](features/academic-library.md#one-course-per-module-and-the-library-publisher)).
-Migration `20261027120000_academic_curriculum_catalog.sql` is replayed locally only.
-`5c04e71` fixes the privacy replay test whose fixed 2026-10-23 expiry fails main's suite.
-Passed: full Vitest (28 skipped), PGlite replay, types/lint/build, a synthetic publish
-journey at 1440/390 and related catalog specs in Chromium. Not done: real-corpus publish,
-hosted migration, reviewer grant, second-account check; the private corpus and board
-were unreachable from the cloud. Next: JD reviews the draft PR, then the owner steps.
+`jd-claude/eloquent-shannon-b2xof9` reached `ee30ee4`; its publisher behavior is in
+the [academic library contract](features/academic-library.md#one-course-per-module-and-the-library-publisher).
+Its local-only status is superseded by the production receipt above.
 
 ## Ownership and protected work
 

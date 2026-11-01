@@ -7,6 +7,7 @@ import { prepareAcademicUpload } from "./upload";
 import { academicBindings, academicRecord } from "./contentReferences";
 import { installPrivateLibrary, readPreparedBank, type LibraryReader } from "../privateLibrary/install";
 import { PRIVATE_REVIEW_DOCUMENT, type PreparedBank } from "../privateLibrary/types";
+import { PACKAGE_SCHEMA_VERSION } from "../question-content/package";
 
 const encode = (value: unknown): Uint8Array => new TextEncoder().encode(JSON.stringify(value));
 
@@ -118,7 +119,12 @@ it("keeps reviewed filing in private recovery while adapter v1 refuses incompati
   expect(persistedBank.reviewedFiling).toEqual({
     term: "Term 4", module: "FTCM", evidence: "human-reviewed", weekAssignment: "unassigned",
   });
-  expect(persistedBank.pkg).toEqual(originalPackage);
+  // Recovery stores the canonical current package after accepting the legacy
+  // v1 input; optional v2 teaching remains absent and source content is exact.
+  expect(persistedBank.pkg).toEqual({
+    ...originalPackage,
+    manifest: { ...originalPackage.manifest, schemaVersion: PACKAGE_SCHEMA_VERSION },
+  });
 
   const questionReference = {
     adapterVersion: 1,
