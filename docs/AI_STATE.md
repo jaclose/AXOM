@@ -5,16 +5,16 @@ authority: current-state
 ---
 # AXOM current AI state
 
-2026-11-01 UTC: `codex/qbank-community-review` adds Community Uploads,
-folder submission, exact-revision review and durable Unreviewed practice
-warnings. It is not deployed. Chrome desktop/mobile community and week-practice
-checks, focused tests, typecheck, lint and build pass. Linked Supabase migration
-`20261101120000` was applied about 20:00 UTC; its ledger, catalog/reviewer
-functions and JD's Auth reviewer row were verified. No content was uploaded.
-Draft [PR #44](https://github.com/jaclose/AXOM/pull/44) holds the separate
-filing repair: 17,559 rows reconciled, ten terms still need decisions. MI
-belongs under NMI by owner decision; source review remains. Earlier dated
-release and deployment claims are preserved in `git show 1b189177:docs/AI_STATE.md`.
+2026-11-01 local `codex/qbank-full-integration` combines draft QBank/Anki PRs
+#34 and #43–47; it is not deployed. A real upload-free dry run with JD's
+confirmed terms and MI→NMI decision prepared 20/20 courses, with zero term or
+attention prompts: 699 answer-ready, 16,252 held. All 17,559 source rows were
+accounted for; 594 stayed local. Held EMF remains unavailable to learners.
+Community Uploads and Anki term links passed their own UI checks; combined
+typecheck, lint, build, 111 focused tests, 16 term/setup tests and 11 Chrome
+browser cases pass. DERS, BSCE3, DNPR and four Unfiled decisions need source
+review. Earlier dated claims remain in
+`git show 1b189177:docs/AI_STATE.md` and the feature contract.
 
 ## 2026-10-28 QBank production receipt
 
