@@ -41,7 +41,9 @@ export function StudyStreakMonitor({ state, result }: {
           ? "Choose a target to begin a study streak."
           : todayCounts
             ? "Today counts. Every third earned day adds a bonus AXOM Credit."
-            : `${Math.max(0, 80 - result.progress)} more points on today's bar reaches the 80% streak mark.`}</p>
+            : lane.startedOn === today && lane.creditedDays.length === 0
+              ? "Your 80% study streak starts today. Reach the mark to earn an AXOM Credit."
+              : `${Math.max(0, 80 - result.progress)} more percentage points on today's bar reaches the 80% streak mark.`}</p>
         <span><ShieldCheck size={ICON_SIZE.body} aria-hidden="true" /> {lane.freezesLeft} {lane.freezesLeft === 1 ? "freeze" : "freezes"} left</span>
       </div>
     </section>

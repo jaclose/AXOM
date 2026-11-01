@@ -40,6 +40,9 @@ shown by the daily bar. A scheduled day counts at 80% or more and earns one AXOM
 Credit. Every third earned day in a continuous streak adds one bonus credit.
 No eligible scheduled targets means no streak credit. The ledger stores dated
 receipts, so reloads and repeated events do not award the same day again.
+The reward streak starts when this ledger is first created. Older study records
+remain intact, but current target settings are not applied retroactively to
+mint credits for historical dates.
 
 Each lane begins with two one-day freezes and has no automatic refill. A freeze
 protects a single missed day following a completed day; it never increases the
