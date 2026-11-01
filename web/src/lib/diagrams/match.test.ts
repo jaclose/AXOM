@@ -8,6 +8,7 @@ const question: QuestionRecord = {
   stem: "A patient has runny nose and sneezing. Which virus is associated with this presentation?",
   options: [{ key: "A", text: "Rhinovirus" }, { key: "B", text: "Influenza virus" }],
   correctKey: "A", correctAnswerText: "Rhinovirus", status: "unseen", tags: [], attempts: [],
+  explanation: "The keyed answer is supported by the nasal symptom pattern and the source explanation, with other causes considered separately.",
   createdAt: "2026-11-01T00:00:00.000Z", updatedAt: "2026-11-01T00:00:00.000Z",
 };
 
@@ -37,6 +38,12 @@ describe("curated AXOM diagram matching", () => {
     expect(matchAxomDiagram({ ...question, needsReview: true })).toBeUndefined();
     expect(matchAxomDiagram({ ...question, extraction: { confidence: "low", reviewed: false } })).toBeUndefined();
     expect(matchAxomDiagram({ ...question, tags: ["axom:diagram:rhinovirus"], correctKey: undefined })).toBeUndefined();
+  });
+
+  it("requires a substantive question rationale; the diagram's source citation is not enough", () => {
+    expect(matchAxomDiagram({ ...question, explanation: undefined })).toBeUndefined();
+    expect(matchAxomDiagram({ ...question, explanation: "See https://www.cdc.gov/rhinoviruses/about/index.html" })).toBeUndefined();
+    expect(matchAxomDiagram({ ...question, explanation: "Correct answer." })).toBeUndefined();
   });
 });
 
@@ -72,6 +79,7 @@ describe("source-checked indexed diagram gate", () => {
       };
       expect(matchesReviewedDiagramEvidence(indexed, rule)).toBe(true);
       expect(matchesReviewedDiagramEvidence({ ...indexed, correctKey: "B" }, rule)).toBe(false);
+      expect(matchesReviewedDiagramEvidence({ ...indexed, explanation: undefined }, rule)).toBe(false);
       expect(matchesReviewedDiagramEvidence({ ...indexed, needsReview: true }, rule)).toBe(false);
       expect(matchesReviewedDiagramEvidence({ ...indexed, extraction: { confidence: "low", reviewed: false } }, rule)).toBe(false);
       expect(matchesReviewedDiagramEvidence({ ...indexed, module: "Another module" }, rule)).toBe(false);

@@ -30,7 +30,8 @@ export function AxomDiagramView({ diagram, questionId }: { diagram: AxomDiagram;
       </div>
       {diagram.illustration ? (
         <div className="axom-diagram-art axom-diagram-art--reference">
-          <img src={diagram.illustration.path} alt={diagram.illustration.alt} loading="lazy" decoding="async"
+          <img src={diagram.illustration.path} alt={diagram.illustration.alt}
+            width={diagram.illustration.width} height={diagram.illustration.height} loading="lazy" decoding="async"
             onError={() => setFailedIllustration({ questionId, diagramId: diagram.id })} />
           <a href={diagram.illustration.path} target="_blank" rel="noopener noreferrer">
             Open full diagram<ExternalLink size={13} aria-hidden="true" />

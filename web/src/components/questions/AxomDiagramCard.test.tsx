@@ -25,6 +25,8 @@ describe("AXOM diagram card", () => {
     render(<AxomDiagramCard question={question} />);
     const image = screen.getByRole("img", { name: brachial.illustration!.alt });
     expect(image.getAttribute("src")).toBe("/academic-diagrams/brachial-plexus-posterior-cord.svg");
+    expect(image.getAttribute("width")).toBe("760");
+    expect(image.getAttribute("height")).toBe("1030");
     expect(screen.getByRole("link", { name: /open full diagram/i }).getAttribute("href")).toBe(image.getAttribute("src"));
     expect(screen.getByText("AXOM topic · Clinical anatomy")).toBeTruthy();
     expect(screen.queryByText(brachial.topicTag)).toBeNull();

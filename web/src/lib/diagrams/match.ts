@@ -82,9 +82,18 @@ function questionIdShaPrefix(id: string): string {
     .slice(0, 6).map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+/** A source citation or a keyed choice alone is not a text rationale. */
+function hasSubstantiveRationale(question: QuestionRecord): boolean {
+  const explanation = (question.explanation ?? "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/\s+/g, " ").trim();
+  return explanation.length >= 35 && (explanation.match(/\p{L}{2,}/gu)?.length ?? 0) >= 6;
+}
+
 /** Pure evidence gate, also exercised with synthetic question IDs in tests. */
 export function matchesReviewedDiagramEvidence(question: QuestionRecord, rule: ReviewedDiagramRule): boolean {
-  if (questionMappingStatus(question) !== "ready" || !question.content?.id
+  if (questionMappingStatus(question) !== "ready" || !hasSubstantiveRationale(question) || !question.content?.id
     || question.content.term !== rule.term
     || normalized(question.module ?? "") !== normalized(rule.module)
     || normalized(question.topic ?? "") !== normalized(rule.topic)
@@ -100,7 +109,7 @@ export function matchesReviewedDiagramEvidence(question: QuestionRecord, rule: R
  * pathogen, and a held or uncertain key cannot display this diagram.
  */
 export function matchAxomDiagram(question: QuestionRecord): AxomDiagram | undefined {
-  if (questionMappingStatus(question) !== "ready") return undefined;
+  if (questionMappingStatus(question) !== "ready" || !hasSubstantiveRationale(question)) return undefined;
   const keyedOption = question.options.find((option) => option.key === question.correctKey);
   if (!keyedOption) return undefined;
   const answer = normalized(keyedOption.text);

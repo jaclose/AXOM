@@ -8,7 +8,7 @@ export interface AxomDiagram {
   subtitle: string;
   summary: string;
   answerAliases: readonly string[];
-  illustration?: { path: string; alt: string };
+  illustration?: { path: string; alt: string; width: number; height: number };
   source: { title: string; url: string; reviewedOn: string };
 }
 
@@ -38,6 +38,7 @@ export const AXOM_DIAGRAMS: readonly AxomDiagram[] = [
     illustration: {
       path: "/academic-diagrams/brachial-plexus-posterior-cord.svg",
       alt: "Common brachial plexus pattern: C5 to T1 form three trunks. Each posterior division joins the posterior cord, which branches to axillary and radial nerves. Anterior divisions form the other cords.",
+      width: 760, height: 1030,
     },
     source: { title: "Adult brachial plexus dissection study", url: "https://pubmed.ncbi.nlm.nih.gov/32100569/", reviewedOn: "2026-11-01" },
   },
@@ -52,6 +53,7 @@ export const AXOM_DIAGRAMS: readonly AxomDiagram[] = [
     illustration: {
       path: "/academic-diagrams/fibrocartilage.svg",
       alt: "Fibrocartilage teaching schematic with chondrocytes in lacunae arranged in rows between thick collagen bundles, and no perichondrium at the tissue margin.",
+      width: 760, height: 1030,
     },
     source: { title: "IU School of Medicine · Virtual Histology", url: "https://vmicro.iusm.iu.edu/hs_vm/docs/lab2_3.htm", reviewedOn: "2026-11-01" },
   },
@@ -66,6 +68,7 @@ export const AXOM_DIAGRAMS: readonly AxomDiagram[] = [
     illustration: {
       path: "/academic-diagrams/inguinal-region.svg",
       alt: "Posterior-view inguinal schematic showing the indirect route through the deep ring lateral to the inferior epigastric vessels, and the direct route medial to the vessels.",
+      width: 800, height: 1040,
     },
     source: { title: "Ultrasound and surgical comparison", url: "https://pmc.ncbi.nlm.nih.gov/articles/PMC9402849/", reviewedOn: "2026-11-01" },
   },
@@ -80,6 +83,7 @@ export const AXOM_DIAGRAMS: readonly AxomDiagram[] = [
     illustration: {
       path: "/academic-diagrams/neuromuscular-transmission.svg",
       alt: "Two neuromuscular-junction panels compare normal presynaptic calcium entry and acetylcholine release with reduced calcium entry and reduced release toward the muscle endplate.",
+      width: 800, height: 1160,
     },
     source: { title: "Presynaptic vesicle-release study", url: "https://pubmed.ncbi.nlm.nih.gov/25589670/", reviewedOn: "2026-11-01" },
   },
@@ -94,6 +98,7 @@ export const AXOM_DIAGRAMS: readonly AxomDiagram[] = [
     illustration: {
       path: "/academic-diagrams/posterior-abdominal-wall.svg",
       alt: "Lumbar-plexus schematic with the genitofemoral nerve emerging onto the anterior psoas surface and dividing into genital and femoral branches.",
+      width: 760, height: 1040,
     },
     source: { title: "Cadaveric lumbar plexus study", url: "https://pubmed.ncbi.nlm.nih.gov/12616150/", reviewedOn: "2026-11-01" },
   },
@@ -108,6 +113,7 @@ export const AXOM_DIAGRAMS: readonly AxomDiagram[] = [
     illustration: {
       path: "/academic-diagrams/repeat-disorders.svg",
       alt: "DMPK gene schematic placing an expanded CTG DNA repeat after the stop codon in the 3-prime untranslated region, with the corresponding CUG repeat in RNA.",
+      width: 760, height: 900,
     },
     source: { title: "DMPK CTG repeat discovery", url: "https://pubmed.ncbi.nlm.nih.gov/1310900/", reviewedOn: "2026-11-01" },
   },
