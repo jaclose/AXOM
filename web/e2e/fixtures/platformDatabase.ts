@@ -14,8 +14,13 @@ export const PLATFORM_USERS = [
 ] as const;
 const cors = { "access-control-allow-origin": "*", "access-control-allow-headers": "*", "access-control-allow-methods": "*" };
 const rpcNames = new Set(["axom_operator_role", "axom_operator_overview", "axom_operator_accounts", "axom_operator_review_queue",
-  "axom_operator_reports", "axom_operator_set_role", "axom_operator_set_ai", "axom_operator_resolve_report", "consume_ai_quota"]);
-const tables = new Set(["social_profiles", "social_connections", "social_posts", "social_reactions", "social_post_reports", "axom_operator_audit"]);
+  "axom_operator_reports", "axom_operator_set_role", "axom_operator_set_ai", "axom_operator_resolve_report", "consume_ai_quota",
+  "academic_catalog",
+  "academic_is_reviewer", "submit_question_set_library", "withdraw_question_set_library", "review_question_set_library",
+  "my_question_set_library", "pending_question_set_library", "set_question_set_library_like",
+  "list_question_set_library", "get_question_set_library"]);
+const tables = new Set(["social_profiles", "social_connections", "social_posts", "social_reactions", "social_post_reports", "axom_operator_audit",
+  "journal_experience_feedback"]);
 const identifier = (value: string) => {
   if (!/^[a-z_]+$/.test(value)) throw new Error("Unexpected fixture identifier");
   return `"${value}"`;
@@ -74,11 +79,13 @@ export async function createPlatformDatabase() {
   const rpc = async (userId: string, name: string, args: Record<string, unknown> = {}) => {
     if (!rpcNames.has(name)) throw new Error(`Unexpected fixture RPC: ${name}`);
     const keys = Object.keys(args);
-    const signature = keys.map((key, index) => `${identifier(key)} => $${index + 1}`).join(",");
-    if (["axom_operator_accounts", "axom_operator_review_queue", "axom_operator_reports"].includes(name)) {
-      return asUser(userId, `select * from public.${identifier(name)}(${signature})`, keys.map(key => args[key]));
+    const signature = keys.map((key, index) => `${identifier(key)} => $${index + 1}${key === "p_snapshot" ? "::jsonb" : ""}`).join(",");
+    const values = keys.map(key => key === "p_snapshot" ? JSON.stringify(args[key]) : args[key]);
+    if (["axom_operator_accounts", "axom_operator_review_queue", "axom_operator_reports",
+      "my_question_set_library", "pending_question_set_library", "list_question_set_library"].includes(name)) {
+      return asUser(userId, `select * from public.${identifier(name)}(${signature})`, values);
     }
-    return (await asUser<{ value: unknown }>(userId, `select public.${identifier(name)}(${signature}) as value`, keys.map(key => args[key])))[0].value;
+    return (await asUser<{ value: unknown }>(userId, `select public.${identifier(name)}(${signature}) as value`, values))[0].value;
   };
   const tableRequest = async (userId: string, table: string, request: Request) => {
     if (!tables.has(table)) throw new Error(`Unexpected fixture table: ${table}`);

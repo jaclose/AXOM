@@ -8,6 +8,27 @@ Every idea JD has given, as one tracked item. The verbatim notes sit beside this
 
 Last full review: 2026-10-01, with Wave 1.3.1 (the work order of 2026-10-01 banked as I5-16 to I5-33; Wave 1.3 is main ef3e6b5, pushed by JD).
 
+## 2026-11-01 scoped request and workflow audit
+
+[Ideas 11](IDEAS-11.md) records the new request with private identities redacted; the task record remains verbatim. [The audit and pickup note](../03-notes/2026-11-01-IDEAS-WORKFLOW-AUDIT.md) cross-checks source and contracts at the local working branch, including the Journal, course templates, ExamSoft tools, Question Set discovery, source-answer review, Host and Community. It is **not** a new full review of the older index, a live account check or a production release.
+
+| ID | Idea | Status | Where |
+| --- | --- | --- | --- |
+| I11-01 | Journal overhead desk, customization, iPad and the “Again” Easter egg | IN PROGRESS | `codex/ideas-20261101`; Journal foundation exists, desk work needs browser and audio acceptance; extends I1-25/26 |
+| I11-02 | Remove “Subscribe to sections you use; hide the rest.” | IN PROGRESS | `web/src/components/shell/Sidebar.tsx`; verify updated copy in customization mode |
+| I11-03 | Supply usable course-material templates | PARTIAL | Authoritative private source has 28 prepared templates/672 activities with valid hashes/parser; a separate local preview shows 633/633 present, 0 to add, 13/23 modules and held MI. Hosted publication and full install remain open; see audit |
+| I11-04 | Make Highlight and every supported exam tool work across all exam profiles | IN PROGRESS | ExamSoft reported broken; shared annotation/profile path and browser tool matrix need verification |
+| I11-05 | Upload Question Sets into a searchable, moderated template library | IN PROGRESS | Local PGlite 8/8 and synthetic two-account Chrome journey 1/1 pass submission, review, discovery, like, import and withdrawal; hosted migration and live-account acceptance remain open |
+| I11-06 | Confirm eligible source answers in one reviewed batch | IN PROGRESS | Local PR #30 code in `BankImportReview`; real source-page and 21-key regression acceptance pending |
+| I11-07 | Host dashboard with account roles, QBank monitoring, AI policies and executive controls | IN PROGRESS | Local PR #30 Host console; hosted migration, verified owner grant and real account readback pending |
+| I11-08 | Opt-in friends, Kudos, shared daily progress and Question Set celebration | IN PROGRESS | Local PR #30 Community; two live consenting accounts not yet exercised |
+| I11-09 | Audit ideas and workflows, record status and agent pickup notes | PARTIAL | [2026-11-01 audit](../03-notes/2026-11-01-IDEAS-WORKFLOW-AUDIT.md) covers the request and adjacent workflows; older index items still need current-branch revalidation |
+| I11-10 | Draft the attachment-only clinical simulation and study-automation addenda | NEW | Pasted Ideas 6 has role-based OSPE/OSCE/B-Line/SOAP practice, source rubrics, lecture questions, Anki scheduling, autonomous logging and mobile refinements; scope before implementation, keep private source examples out of public Git |
+| I11-11 | Complete the Journal's guided writing, missed days, self-care and reflection flows | PARTIAL | Ideas 3 and attachment; notebook foundation and local desk draft exist, but the broader guided experience and source-aware sensitive-language response need separate acceptance |
+| I11-12 | Deliver AXOM notification inbox, desktop reminders and useful deep links | PARTIAL | Ideas 3/4/9 and attachment; local inbox/reminder draft exists, packaged native and browser-controlled notification behavior need verification |
+| I11-13 | Gather optional Journal experience feedback and let Host review it | IN PROGRESS | Local feedback client/migration/review draft; private entries must stay separate, with RLS and two-account acceptance before delivery |
+| I11-14 | Redesign and safely deliver AXOM's Resend emails | PARTIAL | Ideas 2/9/10 and attachment; Communications/Pulse has local implementation receipts, but provider activation, inbox rendering and live sends remain separate gates |
+
 ## Current priority: Learning Intelligence and AXOM Decode (2026-10-04)
 
 The [doctrine](../../product/AXOM-LEARNING-INTELLIGENCE-DOCTRINE.md) governs [Ideas 1–6 reconciliation](../../product/IDEAS-RECONCILIATION-2026-10-04.md). The original [Ideas 6](IDEAS-6.md) and [Question-First Plan](../../feature-development/2026-10-04/QUESTION-FIRST-PLAN.md) remain intact as the first wedge. I6-07 onward records the 2026-10-04 doctrine/Tutor follow-up and Master Product Blueprint, not edits to the verbatim Ideas 6 file. [Decode implementation and acceptance](../../feature-development/2026-10-04/DECODE-IMPLEMENTATION.md) owns current scope. Owner: Codex in `codex/axom-decode-v1`, respecting existing shared-file contracts. This is a priority/architecture reconciliation, not a new full production audit; no new runtime item is marked shipped or verified.
@@ -143,7 +164,7 @@ The [doctrine](../../product/AXOM-LEARNING-INTELLIGENCE-DOCTRINE.md) governs [Id
 | I5-09 | Time spent is correct when you answer | VERIFIED | Wave 1.3 (f1f309d, 3a5d006): banked at submit in the simulator (read 00:00); adds up across visits in the AXOM player |
 | I5-10 | Carbon-copy Examplify / ExamSoft interface; AMBOSS deferred or removed; UWorld is good | PLANNED | feat/wave2-study-ai with Codex (his simulator); needs reference screenshots of the real interfaces |
 | I5-13 | Questions easy to navigate and use | PLANNED | feat/wave2-study-ai with Codex |
-| I5-16 | Examplify / ExamSoft fidelity is the top exam priority: layout, pane proportions, type hierarchy, choice spacing, selected state, strike-out, flagging, navigation, progress, timer placement, controls, review state, image position, modals, keyboard, responsive. Match behaviour, layout and colour; never their logo, artwork or assets | PLANNED | next branch after Wave 1.3.1; Codex owns the simulator files, so it starts with a board agreement |
+| I5-16 | Examplify / ExamSoft fidelity is the top exam priority: layout, pane proportions, type hierarchy, choice spacing, selected state, strike-out, flagging, navigation, progress, timer placement, controls, review state, image position, modals, keyboard, responsive. Match behaviour, layout and colour; never their logo, artwork or assets | IN PROGRESS | `codex/ideas-20261101` working tree addresses tool parity; full profile/browser matrix remains |
 | I5-17 | One engine, many looks: a shared question engine, then a behaviour / exam profile, then a renderer / theme / layout. Examplify is a profile over the shared engine, not a second engine | PARTIAL | on the integration line: the block engine, the profiles and the Examplify interface (d3b02d1, 2c1d610), and the AXOM player on the same engine (1c7536d). Done when that line reaches main and the UWorld and NBME looks are judged in a browser |
 | I5-18 | Question navigator: jump to any question; answered / unanswered, flagged and current at a glance; right / wrong only in review; nothing in testing that a real exam would not show | PLANNED | same branch as I5-16 |
 | I5-19 | Every exam renderer marks a wrong pick with a cross, never a tick, and shows the correct answer separately in review | PARTIAL | Wave 1.3 (f1f309d) covers the ExamSoft and UWorld item lists; an audit of every renderer is open |
@@ -169,8 +190,8 @@ The [doctrine](../../product/AXOM-LEARNING-INTELLIGENCE-DOCTRINE.md) governs [Id
 
 | ID | Idea | Status | Where |
 |---|---|---|---|
-| I1-25 | Journal desk: overhead desk, notebook centred, MacBook, headphones, plant, drink, iPad, weather shadows | PLANNED | feat/wave2-journal-library |
-| I1-26 | iPad toggled three times plays "Again" and unlocks it | PARTIAL | unlock exists; desk trigger with the journal |
+| I1-25 | Journal desk: overhead desk, notebook centred, MacBook, headphones, plant, drink, iPad, weather shadows | IN PROGRESS | `codex/ideas-20261101` working tree; browser acceptance pending |
+| I1-26 | iPad toggled three times plays "Again" and unlocks it | IN PROGRESS | `codex/ideas-20261101` working tree; playback, persistence and source/rights check pending |
 | I3-40..I3-45 | Done-for-today close, unlogged-day catch-up, first-time survey, block editor, sentiment to energy, Stoic/Expressive tone | PLANNED | feat/wave2-journal-library |
 | I3-46 | Self-care tab and weekly check-in cadence | PLANNED | feat/wave2-journal-library |
 | I3-47 | Positive phrases green, draining phrases orange/red | PLANNED | feat/wave2-journal-library |
@@ -246,7 +267,7 @@ The [doctrine](../../product/AXOM-LEARNING-INTELLIGENCE-DOCTRINE.md) governs [Id
 | I1-03 | Daily games black screen | VERIFIED | 47609d7 |
 | I3-53..I3-58 | Daily Word hints, how-to, win card, share, back link, countdowns + streak | VERIFIED | 224d44b, 3843a5f, 6fc14d9 |
 | I3-59 | "Did you get the Doctordle?" | VERIFIED | facfbd0 |
-| I3-51 | Friends leaderboard, nicknames, widget | FUTURE | needs backend + privacy model |
+| I3-51 | Friends leaderboard, nicknames, widget | PARTIAL | Local PR #30 adds opt-in profiles, friendship, Kudos and self-shared progress; dedicated widget and live two-account acceptance remain |
 
 ## Communications and Pulse (2026-10-10)
 
