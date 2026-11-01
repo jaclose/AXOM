@@ -980,7 +980,7 @@ function JournalWritingPage({
           <path className="journal-desk-cable-desktop" d="M 112 348 C 50 392 40 355 61 311 C 71 289 83 277 97 267" />
           <path className="journal-desk-cable-mobile" d="M 98 355 C 34 362 2 297 18 205" />
         </svg>
-        <JournalDeskLaptop today={today} />
+        {!zoomed && <JournalDeskLaptop today={today} />}
         <span className="journal-desk-headphones" aria-hidden="true" />
         <span className="journal-desk-plant" aria-hidden="true"><span /><span /><span /><span /><span /><i /></span>
         <span className="journal-desk-drink" aria-hidden="true"><span /></span>
@@ -1142,7 +1142,7 @@ function JournalWritingPage({
             </label>
             <GButton size="sm" onClick={exportPage}><Download size={ICON_SIZE.body} /> Export page</GButton>
             <GButton size="sm" disabled={addingImage} onClick={() => { void persist(); }}><Save size={ICON_SIZE.body} /> Save</GButton>
-            <GButton variant="primary" size="sm" disabled={addingImage} onClick={() => { void completeToday(); }}><CheckCircle2 size={ICON_SIZE.body} /> Done for today</GButton>
+            <GButton variant="primary" size="sm" disabled={addingImage} onClick={() => { void completeToday(); }}><CheckCircle2 size={ICON_SIZE.body} /> {day === today ? "Done for today" : "Keep this page"}</GButton>
           </div>
         </article>
 
