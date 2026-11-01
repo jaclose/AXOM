@@ -30,10 +30,29 @@ beforeAll(async () => {
   await db.exec(readFileSync(new URL("../../../../supabase/migrations/20261011190000_academic_library.sql", import.meta.url), "utf8"));
   await db.exec(readFileSync(new URL("../../../../supabase/migrations/20261013210000_academic_course_lookup.sql", import.meta.url), "utf8"));
   await db.exec(readFileSync(new URL("../../../../supabase/migrations/20261013220000_content_storage_boundaries.sql", import.meta.url), "utf8"));
+  await db.exec(readFileSync(new URL("../../../../supabase/migrations/20261015133000_academic_gif_media_support.sql", import.meta.url), "utf8"));
   await db.exec(readFileSync(new URL("../../../../supabase/migrations/20261015230042_enforce_academic_source_identity.sql", import.meta.url), "utf8"));
   await db.exec(readFileSync(new URL("../../../../supabase/migrations/20261017233759_enforce_academic_collection_classification.sql", import.meta.url), "utf8"));
+  await db.exec(readFileSync(new URL("../../../../supabase/migrations/20261101130000_academic_held_emf.sql", import.meta.url), "utf8"));
 }, 30_000);
 afterAll(async () => db?.close());
+
+it("keeps the academic bucket private while preserving raw held EMF source bytes", async () => {
+  const [bucket] = (await db.query<{ public: boolean; allowed_mime_types: string[] }>(
+    "select public, allowed_mime_types from storage.buckets where id='academic-content'",
+  )).rows;
+  expect(bucket.public).toBe(false);
+  expect(bucket.allowed_mime_types).toContain("image/emf");
+  const { collection_id, revision_id } = await create();
+  await db.query(
+    "insert into public.academic_files(revision_id,path,object_path,sha256,byte_size,mime_type) values($1,$2,$3,$4,$5,$6)",
+    [revision_id, "banks/sample/assets/held.emf", `${collection_id}/${"b".repeat(64)}`, "b".repeat(64), 48, "image/emf"],
+  );
+  await expect(db.query(
+    "insert into public.academic_files(revision_id,path,object_path,sha256,byte_size,mime_type) values($1,$2,$3,$4,$5,$6)",
+    [revision_id, "banks/sample/assets/not-supported.wmf", `${collection_id}/${"c".repeat(64)}`, "c".repeat(64), 48, "image/wmf"],
+  )).rejects.toThrow(/academic_files_mime_type_check/);
+});
 async function as<T>(user: string, sql: string, params: unknown[] = []) {
   await db.exec(`reset role; select set_config('request.jwt.claim.sub','${user}',false); set role authenticated;`);
   try { return (await db.query<T>(sql, params)).rows; } finally { await db.exec("reset role;"); }
