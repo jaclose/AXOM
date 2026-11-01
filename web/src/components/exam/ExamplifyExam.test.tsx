@@ -38,6 +38,7 @@ describe("Examplify interface", () => {
       ...q("rhinovirus"), stem: "A patient has runny nose and sneezing.",
       options: [{ key: "A", text: "Rhinovirus" }, { key: "B", text: "Influenza virus" }],
       correctKey: "A", correctAnswerText: "Rhinovirus",
+      explanation: "This verified test explanation stays visible after the learner checks the answer.",
     };
     exam({ mode: "tutor", pool: [tagged] });
     expect(screen.queryByRole("complementary", { name: "Related AXOM diagram" })).toBeNull();
