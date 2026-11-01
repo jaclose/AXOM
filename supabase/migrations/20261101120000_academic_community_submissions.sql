@@ -142,6 +142,8 @@ begin
     join public.academic_revisions r on r.id = c.current_revision_id and r.collection_id = c.id
     join public.academic_community_submissions s on s.collection_id = c.id and s.revision_id = r.id
     where c.id = collection and r.id = revision and r.status = 'ready' and not c.withdrawn
+      and (s.status <> 'pending' or c.review_status = 'pending')
+      and (s.status <> 'approved' or c.review_status = 'approved')
     for update of c, s;
   if prior_status is null or (prior_status <> 'pending' and not (prior_status = 'approved' and not approved)) then
     raise exception 'The submission changed. Open its current revision before reviewing.' using errcode = '40001';
