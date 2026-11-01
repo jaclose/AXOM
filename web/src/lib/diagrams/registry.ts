@@ -3,6 +3,7 @@ export interface AxomDiagram {
   id: string;
   /** AXOM-owned classification; never written into source or user-uploaded tags. */
   topicTag: `axom:diagram:${string}`;
+  topicLabel: string;
   title: string;
   subtitle: string;
   answerAliases: readonly string[];
@@ -13,6 +14,7 @@ export const AXOM_DIAGRAMS: readonly AxomDiagram[] = [
   {
     id: "rhinovirus-common-cold",
     topicTag: "axom:diagram:rhinovirus",
+    topicLabel: "Respiratory virology",
     title: "Rhinovirus",
     subtitle: "Common cold · symptom pattern",
     answerAliases: ["rhinovirus", "human rhinovirus", "rhinovirus infection", "human rhinovirus infection"],

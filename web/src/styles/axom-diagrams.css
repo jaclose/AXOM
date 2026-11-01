@@ -16,7 +16,7 @@
 .axom-diagram-subtitle { margin: 0 0 12px !important; color: var(--gold, #c8a96a) !important; font: 11px/1.4 var(--font-mono, monospace) !important; letter-spacing: .02em; }
 .axom-diagram p { max-width: 52ch; margin: 0 0 10px; color: var(--text-80, #dedad0); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .axom-diagram .axom-diagram-caveat { color: var(--text-60, #b3afa7); font-size: 11px; }
-.axom-diagram .axom-diagram-tag { margin-bottom: 0; color: var(--text-50, #99948b); font: 10px/1.5 var(--font-mono, monospace); overflow-wrap: anywhere; }
+.axom-diagram .axom-diagram-tag { margin-bottom: 0; color: var(--text-60, #b3afa7); font: 10px/1.5 var(--font-mono, monospace); overflow-wrap: anywhere; }
 .axom-diagram a { display: inline-flex; align-items: center; gap: 5px; min-height: 44px; color: var(--gold, #c8a96a); font: 11px/1.3 var(--font-mono, monospace); text-underline-offset: 3px; }
 .axom-diagram a:hover { color: var(--text, #f3f0e8); }
 .axom-diagram a:focus-visible { outline: 2px solid var(--gold, #c8a96a); outline-offset: 3px; }
