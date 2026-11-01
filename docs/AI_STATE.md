@@ -18,8 +18,10 @@ The owner-term and MI→NMI upload-free dry run prepared 20/20 available courses
 with zero term or package prompts: 699 answer-ready and 16,252 held. All 17,559
 source rows were accounted for; 594 stayed local. A separate, local-only NMI
 copy matched 82 answers to a printed key and passed a full upload-free dry run
-at 781 ready and 16,170 held; its original source and the earlier candidate
-were untouched. Redistributing that source still needs a recorded rights basis.
+at 781 technically answer-ready and 16,170 held; its original source and the
+earlier candidate were untouched. Those 82 still carry missing-explanation
+warnings, so they are not explanation-complete. Redistributing that source
+still needs a recorded rights basis.
 Among the in-course parsed rows, 15,894 lack a parsed answer key across 816
 source banks. No missing key is promoted from a parser suggestion or medical
 inference. DERS, BSCE3 and DNPR still lack validated current question packages;
