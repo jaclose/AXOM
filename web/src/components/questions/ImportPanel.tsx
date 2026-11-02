@@ -837,7 +837,7 @@ export function ImportPanel({
       <PanelHeader
         title="Import questions"
         headingLevel={2}
-        sub="Bring in structured text, inspect every consequential field, then finalize only valid reviewed questions."
+        sub="Bring in a source. Save questions with clear printed keys now; review anything uncertain."
       />
 
       <nav className="import-steps" aria-label="Question import progress">
