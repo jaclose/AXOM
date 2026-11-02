@@ -1,11 +1,17 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { ArrowUpRight, BookOpen, RefreshCw, ShieldCheck, UploadCloud } from "lucide-react";
 import { useAccount } from "../../lib/account/accountStore";
+import { useStore } from "../../lib/store";
+import { questionSetKind, type QuestionSet, type SourceDocument } from "../../lib/library";
+import { questionPracticeReadiness } from "../../lib/questionFilters";
+import type { QuestionRecord } from "../../lib/questions";
+import type { ReviewedFilingTerm } from "../../lib/privateLibrary/types";
 import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
 import { saveCommunityReference } from "../../lib/academicLibrary/communityReference";
-import { downloadAcademicCourse, isAcademicReviewer, type AcademicCourse } from "../../lib/academicLibrary/client";
+import { academicClient, downloadAcademicCourse, isAcademicReviewer, type AcademicCourse } from "../../lib/academicLibrary/client";
 import { inspectStoredRevisionExplanations, type ExplanationReviewReceipt } from "../../lib/academicLibrary/explanationReview";
-import type { AcademicUploadResult } from "../../lib/academicLibrary/upload";
+import { prepareSavedSourceUpload } from "../../lib/academicLibrary/savedSourceUpload";
+import { uploadAcademicCourse, type AcademicUpload, type AcademicUploadResult } from "../../lib/academicLibrary/upload";
 import {
   communityPreview, listCommunityUploads, reviewCommunityUpload, submitCommunityUpload,
   withdrawCommunityUpload, type CommunityPreview, type CommunityUpload,
@@ -18,13 +24,27 @@ import { ICON_SIZE } from "../../lib/iconSize";
 import "../../styles/community-uploads.css";
 
 const TERMS = ["Term 1", "Term 2", "Term 3", "Term 4", "Term 5"];
+const EMPTY_SETS: QuestionSet[] = [];
+const EMPTY_QUESTIONS: QuestionRecord[] = [];
+const EMPTY_DOCUMENTS: SourceDocument[] = [];
 type Selected = { accountId: string; collectionId: string; revisionId: string; label: string };
 type Page = { accountId: string; search: string; term: string; rows: CommunityUpload[]; more: boolean };
+type LocalSource = { document: SourceDocument; questions: QuestionRecord[]; sets: number;
+  ready: number; explained: number; revision: string };
+
+function sourceRevision(document: SourceDocument, questions: readonly QuestionRecord[]): string {
+  return JSON.stringify([document.checksum, document.fileName, document.sizeBytes,
+    document.originalFile?.sha256,
+    questions.map(question => [question.id, question.updatedAt]).sort(([left], [right]) => left.localeCompare(right))]);
+}
 
 /** Unreviewed community material is discoverable without entering the official
  * catalog. Every download still uses the normal hash-checked installer. */
 export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void }) {
   const accountId = useAccount(state => state.user?.id);
+  const questionSets = useStore(state => state.questionSets ?? EMPTY_SETS);
+  const questions = useStore(state => state.questions ?? EMPTY_QUESTIONS);
+  const documents = useStore(state => state.documents ?? EMPTY_DOCUMENTS);
   const accountEpoch = useRef(0);
   const [draftSearch, setDraftSearch] = useState("");
   const [search, setSearch] = useState("");
@@ -46,6 +66,41 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
   const [busyId, setBusyId] = useState("");
   const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
+  const [localSourceId, setLocalSourceId] = useState("");
+  const [localTerm, setLocalTerm] = useState<ReviewedFilingTerm | "">("");
+  const [localModule, setLocalModule] = useState("");
+  const [localFilingConfirmed, setLocalFilingConfirmed] = useState(false);
+  const [localRights, setLocalRights] = useState(false);
+  const [localPrepared, setLocalPrepared] = useState<{ accountId: string; sourceId: string; revision: string; upload: AcademicUpload }>();
+
+  const localSources = useMemo((): LocalSource[] => {
+    const byDocument = new Map<string, number>();
+    for (const set of questionSets) {
+      if (questionSetKind(set) !== "source" || set.sourceDocumentIds.length !== 1) continue;
+      const id = set.sourceDocumentIds[0];
+      byDocument.set(id, (byDocument.get(id) ?? 0) + 1);
+    }
+    const questionsByDocument = new Map<string, QuestionRecord[]>();
+    for (const question of questions) {
+      if (!question.sourceDocumentId) continue;
+      const members = questionsByDocument.get(question.sourceDocumentId) ?? [];
+      members.push(question);
+      questionsByDocument.set(question.sourceDocumentId, members);
+    }
+    return documents.flatMap(document => {
+      const sets = byDocument.get(document.id);
+      if (!sets || !document.checksum || !document.originalFile) return [];
+      const members = questionsByDocument.get(document.id) ?? [];
+      if (!members.length) return [];
+      return [{ document, questions: members, sets,
+        ready: members.filter(question => questionPracticeReadiness(question) === "ready").length,
+        explained: members.filter(question => Boolean(question.explanation?.trim())).length,
+        revision: sourceRevision(document, members) }];
+    });
+  }, [questionSets, questions, documents]);
+  const localSource = localSources.find(source => source.document.id === localSourceId);
+  const preparedSource = localPrepared && localPrepared.accountId === accountId && localPrepared.sourceId === localSourceId
+    && localPrepared.revision === localSource?.revision ? localPrepared : undefined;
 
   useEffect(() => {
     let current = true;
@@ -58,6 +113,8 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
     setReviewChecked(false);
     setReviewReceipt(undefined);
     setRights(false);
+    setLocalSourceId(""); setLocalTerm(""); setLocalModule("");
+    setLocalFilingConfirmed(false); setLocalRights(false); setLocalPrepared(undefined);
     setProgress(""); setError(""); setBusyId(""); setWithdrawId("");
     if (accountId) void isAcademicReviewer(accountId).then(value => { if (current) setReviewer(value); });
     return () => { current = false; };
@@ -123,6 +180,68 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
     } else {
       setProgress("A newer revision is active. Refresh your private courses before submitting it.");
     }
+  }
+
+  async function checkLocalSource() {
+    if (!accountId || !localSource || !localTerm || !localModule.trim() || !localFilingConfirmed || busyId) return;
+    const epoch = accountEpoch.current;
+    const active = () => accountEpoch.current === epoch && useAccount.getState().user?.id === accountId;
+    const scope = academicAccountScope(accountId);
+    setBusyId("local-source"); setError(""); setLocalPrepared(undefined);
+    setProgress("Checking every saved question, its source, answer, explanation and images on this device…");
+    try {
+      const upload = await prepareSavedSourceUpload(localSource.document, localSource.questions,
+        { term: localTerm, module: localModule.trim() }, scope.assertCurrent);
+      scope.assertCurrent();
+      const workspace = useStore.getState();
+      const currentDocument = (workspace.documents ?? EMPTY_DOCUMENTS).find(document => document.id === localSourceId);
+      const current = (workspace.questions ?? EMPTY_QUESTIONS).filter(question => question.sourceDocumentId === localSourceId);
+      const revision = currentDocument ? sourceRevision(currentDocument, current) : "";
+      if (revision !== localSource.revision) throw new Error("This saved set changed during checking. Check it again before sharing.");
+      if (active()) {
+        setLocalPrepared({ accountId, sourceId: localSourceId, revision, upload });
+        setProgress("Source, answers, explanations and figures checked. Confirm your sharing rights before sending this exact version.");
+      }
+    } catch (cause) {
+      if (active()) setError(cause instanceof Error ? cause.message : "This saved source could not be checked.");
+    } finally { scope.dispose(); if (active()) setBusyId(""); }
+  }
+
+  async function shareLocalSource() {
+    if (!accountId || !preparedSource || !localRights || busyId) return;
+    const epoch = accountEpoch.current;
+    const active = () => accountEpoch.current === epoch && useAccount.getState().user?.id === accountId;
+    const scope = academicAccountScope(accountId);
+    setBusyId("local-source"); setError("");
+    let savedRevision: AcademicUploadResult | undefined;
+    try {
+      setProgress("Saving this source privately and checking the stored revision…");
+      savedRevision = await uploadAcademicCourse(await academicClient(accountId), accountId,
+        preparedSource.upload, scope.assertCurrent, message => { if (active()) setProgress(message); });
+      scope.assertCurrent();
+      if (savedRevision.status !== "active") {
+        if (active()) setProgress("A newer private revision is active. Refresh your private courses before submitting it.");
+        return;
+      }
+      if (active()) {
+        setSelected({ accountId, collectionId: savedRevision.collection_id,
+          revisionId: savedRevision.revision_id, label: `${preparedSource.upload.metadata.term} · ${preparedSource.upload.metadata.module}` });
+        setRights(true);
+        setProgress("Private save verified. Submitting this exact revision as Unreviewed…");
+      }
+      await submitCommunityUpload(savedRevision.collection_id, savedRevision.revision_id, accountId, true);
+      scope.assertCurrent();
+      if (active()) {
+        setSelected(undefined); setRights(false); setLocalRights(false); setLocalPrepared(undefined);
+        setProgress("Shared in Community Uploads as Unreviewed. A host or academic reviewer must check it before official approval.");
+        setRefresh(value => value + 1);
+      }
+    } catch (cause) {
+      if (active()) {
+        setError(cause instanceof Error ? cause.message : "This saved source could not be shared.");
+        if (savedRevision?.status === "active") setProgress("The private save succeeded. Use Submit as Unreviewed below to retry community sharing.");
+      }
+    } finally { scope.dispose(); if (active()) setBusyId(""); }
   }
 
   async function submit() {
@@ -282,8 +401,64 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
 
         <aside className="community-contribute">
           <GlassCard pad><UploadCloud size={ICON_SIZE.display} aria-hidden="true" /><h3>Share a course</h3>
-            <p>Choose a course folder, save it privately, then submit that version. It stays Unreviewed until an appointed academic reviewer approves it.</p>
-            <AcademicCourseUpload onSaved={saved} />
+            <p>Share a saved source from your Question Bank. AXOM checks its questions and figures, saves a private copy, then lists it here as Unreviewed.</p>
+            <fieldset className="community-local-upload" disabled={busyId === "local-source"}>
+              <legend>Share saved questions</legend>
+              {localSources.length === 0 ? <p>No saved source with its original file is ready here yet. Import and review a PDF or Word file in Add first.</p> : <>
+                <label>Saved source
+                  <select value={localSourceId} onChange={event => {
+                    const next = localSources.find(source => source.document.id === event.target.value);
+                    setLocalSourceId(event.target.value); setLocalTerm("");
+                    setLocalModule(next?.questions[0]?.module ?? "");
+                    setLocalFilingConfirmed(false); setLocalRights(false); setLocalPrepared(undefined);
+                  }}>
+                    <option value="">Choose a source</option>
+                    {localSources.map(source => <option key={source.document.id} value={source.document.id}>
+                      {source.document.title} · {source.questions.length} questions
+                    </option>)}
+                  </select>
+                </label>
+                {localSource && <>
+                  <p role="status">This includes all {localSource.questions.length} questions from {localSource.sets} saved {localSource.sets === 1 ? "set" : "sets"} linked to this source. {localSource.ready} have reviewed answer mappings; {localSource.explained} have explanations.</p>
+                  {localSource.ready !== localSource.questions.length || localSource.explained !== localSource.questions.length
+                    ? <p className="community-local-warning">Finish the missing answer reviews and explanations in your Question Bank before sharing this source.</p> : null}
+                  <label>Term confirmed from the source
+                    <select value={localTerm} onChange={event => {
+                      setLocalTerm(event.target.value as ReviewedFilingTerm | "");
+                      setLocalFilingConfirmed(false); setLocalRights(false); setLocalPrepared(undefined);
+                    }}>
+                      <option value="">Choose the term</option>
+                      {TERMS.map(value => <option key={value} value={value}>{value}</option>)}
+                    </select>
+                  </label>
+                  <label>Module confirmed from the source
+                    <input type="text" maxLength={80} autoComplete="off" value={localModule} onChange={event => {
+                      setLocalModule(event.target.value); setLocalFilingConfirmed(false);
+                      setLocalRights(false); setLocalPrepared(undefined);
+                    }} placeholder="e.g. GOER" />
+                  </label>
+                  <label className="community-local-check"><input type="checkbox" checked={localFilingConfirmed}
+                    onChange={event => { setLocalFilingConfirmed(event.target.checked); setLocalRights(false); setLocalPrepared(undefined); }} />
+                    I checked this source's term, module, answers and explanations against the original. Its weeks will not be guessed.</label>
+                  <GButton disabled={Boolean(busyId) || !localTerm || !localModule.trim() || !localFilingConfirmed
+                    || localSource.ready !== localSource.questions.length || localSource.explained !== localSource.questions.length}
+                    onClick={() => void checkLocalSource()}>{busyId === "local-source" ? "Checking…" : "Check saved source"}</GButton>
+                  {localPrepared?.accountId === accountId && localPrepared.sourceId === localSourceId && !preparedSource
+                    && <p className="community-local-warning">These saved questions changed after the check. Check this source again before sharing.</p>}
+                  {preparedSource && <div className="community-local-ready">
+                    <Tag tone="green">Ready to share</Tag>
+                    <p>{preparedSource.upload.metadata.ready_questions} questions · {preparedSource.upload.metadata.term} · {preparedSource.upload.metadata.module}</p>
+                    <p>The original source and verified figures are included. This exact version will stay Unreviewed until a host approves it.</p>
+                    <label className="community-local-check"><input type="checkbox" checked={localRights} onChange={event => setLocalRights(event.target.checked)} />
+                      I have the right to share these questions, explanations, images and source with every signed-in AXOM account.</label>
+                    <GButton variant="primary" disabled={!localRights || Boolean(busyId)} onClick={() => void shareLocalSource()}>Save and share as Unreviewed</GButton>
+                  </div>}
+                </>}
+              </>}
+            </fieldset>
+            <details className="community-package-upload"><summary>Have an AXOM course folder or ZIP?</summary>
+              <AcademicCourseUpload onSaved={saved} />
+            </details>
             <GButton disabled={ownedBusy} onClick={() => void loadPrivate()}>{ownedBusy ? "Loading…" : "Show my private courses"}</GButton>
             {privateCourses && privateCourses.length === 0 && <p>No private courses are ready to submit.</p>}
             {privateCourses?.map(course => <button key={course.id} type="button" className="community-private-choice" onClick={() => {
