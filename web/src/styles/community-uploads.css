@@ -50,6 +50,8 @@
 .community-private-choice { display: flex; justify-content: space-between; align-items: start; gap: 10px; width: 100%; margin-top: 8px; padding: 10px; color: var(--text); background: var(--surface-2); border: 1px solid var(--hairline); border-radius: var(--radius-sm); text-align: left; cursor: pointer; }
 .community-private-choice span:last-child { color: var(--text-60); font-size: var(--fs-small); }
 .community-status, .community-error { margin: 0; padding: 12px 15px; border-radius: var(--radius-sm); background: var(--surface-1); }
+.community-feedback { display: grid; gap: 8px; margin: 12px 0; }
+.community-feedback:focus { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: 2px; }
 .community-error { border: 1px solid var(--gold-line); }
 @media (max-width: 880px) { .community-layout { grid-template-columns: minmax(0, 1fr); } .community-contribute { position: static; } }
 @media (max-width: 560px) { .community-hero { padding: 23px 18px; } .community-search > label { flex-basis: 100%; } .community-search label:nth-child(2) { flex-basis: 100%; } .community-search > button { flex: 1 1 auto; } .community-card { padding: 16px; } .community-private-choice { flex-direction: column; } }

@@ -148,6 +148,20 @@ describe("Community Uploads", () => {
     expect(mocks.download).not.toHaveBeenCalled();
   });
 
+  it("shows a card action failure on that card even when the result list is long", async () => {
+    const many = Array.from({ length: 24 }, (_, index) => ({ ...row,
+      id: `11111111-1111-4111-8111-${String(index + 1).padStart(12, "0")}`, title: `Shared course ${index + 1}` }));
+    mocks.list.mockResolvedValue(many);
+    mocks.preview.mockRejectedValueOnce(new Error("Preview could not be loaded"));
+    render(<CommunityUploads onOpenLibrary={vi.fn()} />);
+    const firstCard = (await screen.findByText("Shared course 1")).closest("article")!;
+    expect(await screen.findByText("Shared course 24")).toBeTruthy();
+    fireEvent.click(within(firstCard).getByRole("button", { name: "Preview course" }));
+    const alert = await within(firstCard).findByRole("alert");
+    expect(alert.textContent).toBe("Preview could not be loaded");
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  });
+
   it("submits only a selected private revision after an explicit rights attestation", async () => {
     mocks.list.mockResolvedValue([]);
     mocks.owned.mockResolvedValue([{ id: ids.privateCollection, current_revision_id: ids.privateRevision,
@@ -182,6 +196,8 @@ describe("Community Uploads", () => {
     await waitFor(() => expect(mocks.prepareSaved).toHaveBeenCalledWith(document, [question],
       { term: "Term 4", module: "NCRS" }, expect.any(Function)));
     const share = await screen.findByRole("button", { name: "Save and share as Unreviewed" }) as HTMLButtonElement;
+    expect(screen.getByText(/until an academic reviewer approves it/)).toBeTruthy();
+    expect(screen.queryByText(/until a host approves it/)).toBeNull();
     expect(share.disabled).toBe(true);
     fireEvent.click(screen.getByRole("checkbox", { name: /right to share these questions/ }));
     fireEvent.click(share);
@@ -261,7 +277,9 @@ describe("Community Uploads", () => {
     expect(mocks.withdraw).not.toHaveBeenCalled();
     fireEvent.click(within(card).getByRole("button", { name: "Confirm withdraw" }));
     await waitFor(() => expect(mocks.withdraw).toHaveBeenCalledWith(ids.collection, ids.revision, "owner-1"));
-    expect(await screen.findByText(/Your private course remains in your account/)).toBeTruthy();
+    const result = await screen.findByText(/Your private course remains in your account/);
+    expect(result.closest(".community-results")).toBeTruthy();
+    expect(document.activeElement).toBe(result.closest(".community-feedback"));
   });
 
   it("does not append a stale page after the term filter changes", async () => {

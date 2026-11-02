@@ -68,6 +68,9 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
   const [busyId, setBusyId] = useState("");
   const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
+  const [feedbackLocation, setFeedbackLocation] = useState("");
+  const listFeedbackRef = useRef<HTMLDivElement>(null);
+  const focusListFeedback = useRef(false);
   const [localSourceId, setLocalSourceId] = useState("");
   const [localTerm, setLocalTerm] = useState<ReviewedFilingTerm | "">("");
   const [localModule, setLocalModule] = useState("");
@@ -107,6 +110,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
   useEffect(() => {
     let current = true;
     accountEpoch.current += 1;
+    focusListFeedback.current = false;
     setReviewer(false);
     setSelected(undefined);
     setOwned(undefined);
@@ -117,10 +121,16 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
     setRights(false);
     setLocalSourceId(""); setLocalTerm(""); setLocalModule("");
     setLocalFilingConfirmed(false); setLocalRights(false); setLocalPrepared(undefined);
-    setProgress(""); setError(""); setBusyId(""); setWithdrawId("");
+    setProgress(""); setError(""); setFeedbackLocation(""); setBusyId(""); setWithdrawId("");
     if (accountId) void isAcademicReviewer(accountId).then(value => { if (current) setReviewer(value); });
     return () => { current = false; };
   }, [accountId]);
+
+  useEffect(() => {
+    if (!focusListFeedback.current || feedbackLocation !== "list" || (!progress && !error)) return;
+    listFeedbackRef.current?.focus();
+    focusListFeedback.current = false;
+  }, [feedbackLocation, progress, error]);
 
   useEffect(() => {
     let current = true;
@@ -163,7 +173,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
     if (!accountId || ownedBusy) return;
     const epoch = accountEpoch.current;
     const active = () => accountEpoch.current === epoch && useAccount.getState().user?.id === accountId;
-    setOwnedBusy(true); setError("");
+    setOwnedBusy(true); setError(""); setProgress(""); setFeedbackLocation("owned");
     try {
       const courses = await listOwnedAcademicCourses(accountId);
       if (active()) setOwned({ accountId, rows: courses });
@@ -174,6 +184,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
 
   function saved(result: AcademicUploadResult) {
     if (!accountId) return;
+    setFeedbackLocation("package"); setError("");
     setRights(false);
     if (result.status === "active") {
       setSelected({ accountId, collectionId: result.collection_id,
@@ -189,7 +200,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
     const epoch = accountEpoch.current;
     const active = () => accountEpoch.current === epoch && useAccount.getState().user?.id === accountId;
     const scope = academicAccountScope(accountId);
-    setBusyId("local-source"); setError(""); setLocalPrepared(undefined);
+    setBusyId("local-source"); setError(""); setFeedbackLocation("local"); setLocalPrepared(undefined);
     setProgress("Checking every saved question, its source, answer, explanation and images on this device…");
     try {
       const upload = await prepareSavedSourceUpload(localSource.document, localSource.questions,
@@ -205,7 +216,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
         setProgress("Source, answers, explanations and figures checked. Confirm your sharing rights before sending this exact version.");
       }
     } catch (cause) {
-      if (active()) setError(cause instanceof Error ? cause.message : "This saved source could not be checked.");
+      if (active()) { setProgress(""); setError(cause instanceof Error ? cause.message : "This saved source could not be checked."); }
     } finally { scope.dispose(); if (active()) setBusyId(""); }
   }
 
@@ -214,7 +225,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
     const epoch = accountEpoch.current;
     const active = () => accountEpoch.current === epoch && useAccount.getState().user?.id === accountId;
     const scope = academicAccountScope(accountId);
-    setBusyId("local-source"); setError("");
+    setBusyId("local-source"); setError(""); setFeedbackLocation("local");
     let savedRevision: AcademicUploadResult | undefined;
     try {
       setProgress("Saving this source privately and checking the stored revision…");
@@ -235,13 +246,14 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
       scope.assertCurrent();
       if (active()) {
         setSelected(undefined); setRights(false); setLocalRights(false); setLocalPrepared(undefined);
-        setProgress("Shared in Community Uploads as Unreviewed. A host or academic reviewer must check it before official approval.");
+        setProgress("Shared in Community Uploads as Unreviewed. An academic reviewer must check it before official approval.");
         setRefresh(value => value + 1);
       }
     } catch (cause) {
       if (active()) {
         setError(cause instanceof Error ? cause.message : "This saved source could not be shared.");
-        if (savedRevision?.status === "active") setProgress("The private save succeeded. Use Submit as Unreviewed below to retry community sharing.");
+        setProgress(savedRevision?.status === "active"
+          ? "The private save succeeded. Use Submit as Unreviewed below to retry community sharing." : "");
       }
     } finally { scope.dispose(); if (active()) setBusyId(""); }
   }
@@ -251,7 +263,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
     const epoch = accountEpoch.current;
     const active = () => accountEpoch.current === epoch && useAccount.getState().user?.id === accountId;
     const scope = academicAccountScope(accountId);
-    setBusyId(choice.collectionId); setError("");
+    setBusyId(choice.collectionId); setError(""); setProgress(""); setFeedbackLocation("submit");
     try {
       await submitCommunityUpload(choice.collectionId, choice.revisionId, accountId, rights);
       scope.assertCurrent();
@@ -270,7 +282,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
     const epoch = accountEpoch.current;
     const active = () => accountEpoch.current === epoch && useAccount.getState().user?.id === accountId;
     const scope = academicAccountScope(accountId);
-    setBusyId(row.id); setError(""); setProgress("Checking and downloading this exact revision…");
+    setBusyId(row.id); setError(""); setFeedbackLocation(row.id); setProgress("Checking and downloading this exact revision…");
     setDownloaded(undefined); setReviewChecked(false); setReviewReceipt(undefined);
     try {
       await saveCommunityReference(row.current_revision_id, accountId, undefined, scope.assertCurrent);
@@ -288,7 +300,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
         setProgress(`${result.questionIds.length} questions saved on this device. Questions still awaiting answer or source review remain held.`);
       }
     } catch (cause) {
-      if (active()) setError(cause instanceof Error ? cause.message : "This upload could not be downloaded.");
+      if (active()) { setProgress(""); setError(cause instanceof Error ? cause.message : "This upload could not be downloaded."); }
     } finally { scope.dispose(); if (active()) setBusyId(""); }
   }
 
@@ -297,7 +309,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
     const epoch = accountEpoch.current;
     const active = () => accountEpoch.current === epoch && useAccount.getState().user?.id === accountId;
     const scope = academicAccountScope(accountId);
-    setBusyId(row.id); setError("");
+    setBusyId(row.id); setError(""); setProgress(""); setFeedbackLocation(row.id);
     try {
       const value = await communityPreview(row.id, row.current_revision_id, accountId);
       scope.assertCurrent();
@@ -314,7 +326,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
     const epoch = accountEpoch.current;
     const active = () => accountEpoch.current === epoch && useAccount.getState().user?.id === accountId;
     const scope = academicAccountScope(accountId);
-    setBusyId(row.id); setError("");
+    setBusyId(row.id); setError(""); setProgress(""); setFeedbackLocation(row.id);
     try {
       await reviewCommunityUpload(row.id, row.current_revision_id, approved, accountId, reviewReceipt, reviewChecked);
       scope.assertCurrent();
@@ -322,6 +334,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
         setDownloaded(undefined); setReviewChecked(false); setReviewReceipt(undefined);
         setProgress(approved ? "Approved. This revision is now in the official course catalog."
           : "Review recorded. This upload is no longer in the unreviewed list.");
+        focusListFeedback.current = true; setFeedbackLocation("list");
         setRefresh(value => value + 1);
       }
     } catch (cause) {
@@ -335,12 +348,13 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
     const epoch = accountEpoch.current;
     const active = () => accountEpoch.current === epoch && useAccount.getState().user?.id === accountId;
     const scope = academicAccountScope(accountId);
-    setBusyId(row.id); setError("");
+    setBusyId(row.id); setError(""); setProgress(""); setFeedbackLocation(row.id);
     try {
       await withdrawCommunityUpload(row.id, row.current_revision_id, accountId);
       scope.assertCurrent();
       if (active()) {
         setWithdrawId(""); setProgress("Removed from Community Uploads. Your private course remains in your account.");
+        focusListFeedback.current = true; setFeedbackLocation("list");
         setRefresh(value => value + 1);
       }
     } catch (cause) {
@@ -350,6 +364,14 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
 
   function searchNow(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setSearch(draftSearch.trim());
+  }
+
+  function feedback(location: string) {
+    if (feedbackLocation !== location || (!progress && !error)) return null;
+    return <div className="community-feedback" ref={location === "list" ? listFeedbackRef : undefined} tabIndex={-1}>
+      {progress && <p className="community-status" role="status" aria-live="polite">{progress}</p>}
+      {error && <p className="community-error" role="alert">{error}</p>}
+    </div>;
   }
 
   return <section className="community-uploads" aria-label="Community Uploads">
@@ -370,6 +392,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
             <GButton type="submit" disabled={loading}>Search</GButton>
             <GButton type="button" disabled={loading} onClick={() => setRefresh(value => value + 1)}><RefreshCw size={ICON_SIZE.body} /> Refresh</GButton>
           </form>
+          {feedback("list")}
           {loading && !page && <p role="status">Loading community uploads…</p>}
           {listError && <p role="alert">{listError}</p>}
           {!loading && !listError && page && rows.length === 0 && <GlassCard pad><h3>No unreviewed uploads here yet</h3><p>Try another term or search, or share a prepared course below.</p></GlassCard>}
@@ -386,6 +409,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
                 {row.owned && <GButton disabled={Boolean(busyId)} onClick={() => void withdraw(row)}>{withdrawId === row.id ? "Confirm withdraw" : "Withdraw"}</GButton>}
                 {withdrawId === row.id && <GButton onClick={() => setWithdrawId("")}>Cancel</GButton>}
               </div>
+              {feedback(row.id)}
               {preview?.accountId === accountId && preview.revisionId === row.current_revision_id && <div className="community-preview">
                 <h4>Course plan preview</h4>
                 {preview.value.template_text ? <pre>{preview.value.template_text}</pre> : <p>This upload has no weekly plan. Its questions remain available by course.</p>}
@@ -452,7 +476,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
                   {preparedSource && <div className="community-local-ready">
                     <Tag tone="green">Ready to share</Tag>
                     <p>{preparedSource.upload.metadata.ready_questions} questions · {preparedSource.upload.metadata.term} · {preparedSource.upload.metadata.module}</p>
-                    <p>The original source and verified figures are included. This exact version will stay Unreviewed until a host approves it.</p>
+                    <p>The original source and verified figures are included. This exact version will stay Unreviewed until an academic reviewer approves it.</p>
                     <label className="community-local-check"><input type="checkbox" checked={localRights} onChange={event => setLocalRights(event.target.checked)} />
                       I have the right to share these questions, explanations, images and source with every signed-in AXOM account.</label>
                     <GButton variant="primary" disabled={!localRights || Boolean(busyId)} onClick={() => void shareLocalSource()}>Save and share as Unreviewed</GButton>
@@ -460,10 +484,13 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
                 </>}
               </>}
             </fieldset>
+            {feedback("local")}
             <details className="community-package-upload"><summary>Choose an AXOM course folder or ZIP</summary>
               <AcademicCourseUpload onSaved={saved} />
             </details>
+            {feedback("package")}
             <GButton disabled={ownedBusy} onClick={() => void loadPrivate()}>{ownedBusy ? "Loading…" : "Show my private courses"}</GButton>
+            {feedback("owned")}
             {privateCourses && privateCourses.length === 0 && <p>No private courses are ready to submit.</p>}
             {privateCourses?.map(course => <button key={course.id} type="button" className="community-private-choice" onClick={() => {
               setSelected({ accountId, collectionId: course.id, revisionId: course.current_revision_id,
@@ -473,11 +500,10 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
               <label><input type="checkbox" checked={rights} onChange={event => setRights(event.target.checked)} /> I have the right to share this course and its source material with every signed-in AXOM account.</label>
               <GButton variant="primary" disabled={!rights || Boolean(busyId)} onClick={() => void submit()}>Submit as Unreviewed</GButton>
             </fieldset>}
+            {feedback("submit")}
           </GlassCard>
         </aside>
       </div>
-      {progress && <p className="community-status" role="status" aria-live="polite">{progress}</p>}
-      {error && <p className="community-error" role="alert">{error}</p>}
     </>}
   </section>;
 }
