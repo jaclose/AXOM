@@ -3,9 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useStore } from "../../lib/store";
 import type { QuestionRecord } from "../../lib/questions";
+import type { QuestionSet } from "../../lib/library";
 import type { AcademicCourse } from "../../lib/academicLibrary/client";
 import { COURSE_QUIZ_LAUNCH_KEY } from "../../lib/course-engine/quizLaunch";
-import { closeWorkspace, openEmptyWorkspace } from "../../lib/question-content/persistenceHarness.testing";
+import { closeWorkspace, openEmptyWorkspace, reloadWorkspace } from "../../lib/question-content/persistenceHarness.testing";
 import { ConnectedCoursePlan } from "./ConnectedCoursePlan";
 
 const mocks = vi.hoisted(() => ({ preview: vi.fn(), download: vi.fn(), enroll: vi.fn() }));
@@ -37,6 +38,10 @@ const question = (id: string, patch: Partial<QuestionRecord> = {}): QuestionReco
   id, source: "imported", stem: `Synthetic question ${id}`, options: [{ key: "A", text: "One" }, { key: "B", text: "Two" }],
   correctKey: "A", status: "unseen", tags: [], attempts: [], createdAt: now, updatedAt: now, module: "GOER", ...patch,
 });
+const set = (id: string, questionIds: string[], scope: QuestionSet["scope"] = { module: "GOER" }): QuestionSet => ({
+  id, title: "Synthetic source set", questionIds, scope, sourceDocumentIds: [], tags: [], aiEnhanced: false,
+  parserWarnings: [], createdAt: now,
+});
 
 describe("hosted question collection without a weekly plan", () => {
   beforeEach(async () => {
@@ -46,7 +51,9 @@ describe("hosted question collection without a weekly plan", () => {
     mocks.preview.mockResolvedValue({ id: revision, collection_id: collection, template_text: "", ready_questions: 2, review_questions: 1 });
     mocks.download.mockImplementation(async () => {
       useStore.setState(state => ({ questions: [...state.questions,
-        question("q1", { week: 1 }), question("q2", { week: 2 }), question("held", { week: 3, needsReview: true })] }));
+        question("q1", { week: 1, setId: "set-1" }), question("q2", { week: 2, setId: "set-1" }),
+        question("held", { week: 3, setId: "set-1", needsReview: true })],
+      questionSets: [...state.questionSets, set("set-1", ["q1", "q2", "held"])] }));
       return { status: "complete", warnings: [], templateIds: [], documentIds: [], questionIds: ["q1", "q2", "held"], setIds: ["set-1"], bindings: { originals: [] } };
     });
   });
@@ -75,7 +82,7 @@ describe("hosted question collection without a weekly plan", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Quiz week 2" }));
     expect(JSON.parse(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY) ?? "null")).toEqual({
-      module: "GOER", term: "Term 5", week: 2, questionIds: ["q2"], setIds: [],
+      module: "GOER", term: "Term 5", week: 2, questionIds: ["q2"], setIds: ["set-1"],
     });
 
     fireEvent.click(practice);
@@ -97,6 +104,80 @@ describe("hosted question collection without a weekly plan", () => {
     fireEvent.click(screen.getByRole("button", { name: /Create Quiz/ }));
     expect(JSON.parse(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY) ?? "null")).toEqual({
       module: "GOER", term: "Term 5", questionIds: ["unassigned"], setIds: [],
+    });
+  });
+
+  it("uses a question's stated week before its set week and inherits a set week when unstated", async () => {
+    mocks.download.mockImplementationOnce(async () => {
+      useStore.setState(state => ({ questions: [...state.questions,
+        question("own-week", { week: 2, setId: "set-1" }), question("set-week", { setId: "set-2" })],
+      questionSets: [...state.questionSets, set("set-1", ["own-week"], { module: "GOER", week: 1 }),
+        set("set-2", ["set-week"], { module: "GOER", week: 2 })] }));
+      return { status: "complete", warnings: [], templateIds: [], documentIds: [],
+        questionIds: ["own-week", "set-week"], setIds: ["set-1", "set-2"], bindings: { originals: [] } };
+    });
+    render(<ConnectedCoursePlan course={course} onBack={vi.fn()} onOpen={vi.fn()} onCustomize={vi.fn()} onSharingSaved={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Download questions/ }));
+    const week2 = await screen.findByRole("button", { name: "Quiz week 2" });
+    expect(screen.queryByRole("button", { name: "Quiz week 1" })).toBeNull();
+    fireEvent.click(week2);
+    expect(JSON.parse(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY) ?? "null")).toEqual({
+      module: "GOER", term: "Term 5", week: 2, questionIds: ["own-week", "set-week"], setIds: ["set-1", "set-2"],
+    });
+  });
+
+  it("retries a missing set after reload instead of misfiling its questions", async () => {
+    render(<ConnectedCoursePlan course={course} onBack={vi.fn()} onOpen={vi.fn()} onCustomize={vi.fn()} onSharingSaved={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Download questions/ }));
+    expect(await screen.findByRole("button", { name: "Quiz week 2" })).toBeTruthy();
+    useStore.setState({ questionSets: [] });
+    await reloadWorkspace();
+    const retry = await screen.findByRole("button", { name: /Download questions/ });
+    expect(screen.queryByRole("button", { name: "Quiz week 2" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Unassigned week" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Create Quiz/ })).toBeNull();
+    mocks.download.mockImplementationOnce(async () => {
+      useStore.setState(state => ({ questionSets: [...state.questionSets, set("set-1", ["q1", "q2", "held"])] }));
+      return { status: "complete", warnings: [], templateIds: [], documentIds: [],
+        questionIds: ["q1", "q2", "held"], setIds: ["set-1"], bindings: { originals: [] } };
+    });
+    fireEvent.click(retry);
+    expect(await screen.findByRole("button", { name: "Quiz week 2" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Download questions/ })).toBeNull();
+  });
+
+  it("blocks a shared source after its question or set is refiled to another course", async () => {
+    render(<ConnectedCoursePlan course={course} onBack={vi.fn()} onOpen={vi.fn()} onCustomize={vi.fn()} onSharingSaved={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Download questions/ }));
+    expect(await screen.findByRole("button", { name: "Quiz week 2" })).toBeTruthy();
+    // A second hosted course can point to the same saved source identity.
+    const current = useStore.getState().documents.find(document => document.id === `academic-${revision}`)!;
+    const reference = JSON.parse(current.rawText) as Record<string, unknown>;
+    useStore.setState(state => ({ documents: [...state.documents, { ...current, id: "academic-other-revision",
+      rawText: JSON.stringify({ ...reference, collectionId: "other-course", revisionId: "other-revision", module: "NMI" }) }] }));
+    const refileQuestion = (patch: Partial<QuestionRecord>) => useStore.setState(state => ({ questions: state.questions.map(item =>
+      item.id === "q2" ? { ...item, ...patch } : item) }));
+    const refileSet = (scope: QuestionSet["scope"]) => useStore.setState(state => ({ questionSets: state.questionSets.map(item =>
+      item.id === "set-1" ? { ...item, scope } : item) }));
+    refileQuestion({ module: "NMI" });
+    expect((await screen.findByRole("alert")).textContent).toMatch(/saved filing no longer matches/);
+    expect(screen.queryByRole("button", { name: "Quiz week 2" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Create Quiz/ })).toBeNull();
+    refileQuestion({ module: "GOER" });
+    expect(await screen.findByRole("button", { name: "Quiz week 2" })).toBeTruthy();
+    refileSet({ module: "NMI" });
+    expect((await screen.findByRole("alert")).textContent).toMatch(/saved filing no longer matches/);
+    expect(screen.queryByRole("button", { name: "Quiz week 2" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Create Quiz/ })).toBeNull();
+    refileSet({ module: "GOER", courseId: "foreign-course" });
+    expect((await screen.findByRole("alert")).textContent).toMatch(/saved filing no longer matches/);
+    refileSet({ module: "GOER" });
+    refileQuestion({ courseId: "foreign-course" });
+    expect((await screen.findByRole("alert")).textContent).toMatch(/saved filing no longer matches/);
+    refileQuestion({ courseId: undefined });
+    fireEvent.click(await screen.findByRole("button", { name: "Quiz week 2" }));
+    expect(JSON.parse(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY) ?? "null")).toEqual({
+      module: "GOER", term: "Term 5", week: 2, questionIds: ["q2"], setIds: ["set-1"],
     });
   });
 

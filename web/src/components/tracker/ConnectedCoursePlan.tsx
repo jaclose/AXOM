@@ -21,7 +21,7 @@ import { parseWeek, questionScope } from "../../lib/course-engine/scope";
 import { splitAcademicPlanSections } from "../../lib/academicLibrary/coursePlan";
 import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
 import { AcademicSharing } from "./AcademicSharing";
-import { downloadCourseQuestions, readDownloadReference, saveDownloadReference, type DownloadReference } from "../../lib/academicLibrary/downloadReference";
+import { downloadCourseQuestions, isAcademicCourseDownloaded, readDownloadReference, saveDownloadReference, type DownloadReference } from "../../lib/academicLibrary/downloadReference";
 
 const termIdentity = (value: string): string => {
   const numbered = value.trim().match(/^(?:t|term)\s*0*(\d{1,2})$/i);
@@ -145,6 +145,9 @@ export function ConnectedCoursePlan({ course, onBack, onOpen, onCustomize, onSha
   const [retry, setRetry] = useState(0);
   const [downloading, setDownloading] = useState(false);
   const downloaded = useMemo(() => readDownloadReference(state.documents, course, accountId), [state.documents, course, accountId]);
+  // A reference can finish its durable write without another workspace-array
+  // change, so read the canonical completion gate on every render.
+  const fullyDownloaded = Boolean(accountId && isAcademicCourseDownloaded(course, accountId, state));
   // Template ids are content addresses, so equal ids mean the same saved sections.
   const cachedPlan = useMemo(() => {
     const ids = downloaded?.templateIds ?? [];
@@ -237,6 +240,7 @@ export function ConnectedCoursePlan({ course, onBack, onOpen, onCustomize, onSha
     {templates === undefined && <><GButton onClick={onBack}>All courses</GButton><p role="status">{error ? "Preview unavailable" : "Opening the weekly plan…"}</p></>}
     {error && <div role="alert"><p>{error}</p><GButton onClick={() => setRetry(value => value + 1)}>Retry preview</GButton></div>}
     {templates?.length === 0 && <ConnectedQuestionCollection course={course} downloaded={downloaded} questions={state.questions} sets={state.questionSets}
+      courses={state.courses} terms={state.terms} onDevice={fullyDownloaded}
       busy={downloading} message={message} onBack={onBack} onDownload={() => void downloadQuestions()} onSharingSaved={onSharingSaved} />}
     {templates?.length !== 0 && book && <><p className="course-connection-status" role="status">{message || (downloaded ? (downloaded.questionIds.every(id => state.questions.some(question => question.id === id)) ? "Course files downloaded on this device" : "Saved in your account. Download this course to continue on this device.") : `${course.ready_questions} reviewed questions available to download. Load Course downloads this revision for study.`)}</p>
       {downloaded && !downloaded.questionIds.every(id => state.questions.some(question => question.id === id)) && <GButton disabled={downloading} onClick={() => { setError(""); setDownloading(true); void downloadAccountContent({ questionIds: downloaded.questionIds, documentIds: downloaded.documentIds }).catch(cause => setError(cause instanceof Error ? cause.message : "Download unavailable. Retry when connected.")).finally(() => setDownloading(false)); }}>Download course to this device</GButton>}
@@ -248,13 +252,12 @@ export function ConnectedCoursePlan({ course, onBack, onOpen, onCustomize, onSha
 }
 
 /** Questions filed to a term and module whose source has no weekly plan. */
-function ConnectedQuestionCollection({ course, downloaded, questions, sets, busy, message, onBack, onDownload, onSharingSaved }: {
+function ConnectedQuestionCollection({ course, downloaded, questions, sets, courses, terms, onDevice, busy, message, onBack, onDownload, onSharingSaved }: {
   course: AcademicCourse; downloaded: DownloadReference | undefined; questions: readonly QuestionRecord[]; sets: readonly QuestionSet[];
+  courses: readonly Course[]; terms: readonly Term[]; onDevice: boolean;
   busy: boolean; message: string; onBack: () => void; onDownload: () => void; onSharingSaved: () => void;
 }) {
   const [launchError, setLaunchError] = useState("");
-  const onDevice = Boolean(downloaded?.questionIds.length)
-    && downloaded!.questionIds.every(id => questions.some(question => question.id === id));
   const scopedQuestions = useMemo(() => {
     const ids = new Set(downloaded?.questionIds ?? []);
     const setIds = new Set(downloaded?.setIds ?? []);
@@ -265,6 +268,23 @@ function ConnectedQuestionCollection({ course, downloaded, questions, sets, busy
     }));
   }, [downloaded, questions, sets]);
   const practiceIds = useMemo(() => scopedQuestions.filter(entry => entry.ready).map(entry => entry.question.id), [scopedQuestions]);
+  const scopeValid = useMemo(() => {
+    if (!onDevice || !downloaded) return false;
+    if ((downloaded.term && termIdentity(downloaded.term) !== termIdentity(course.term))
+      || (downloaded.module && canonicalModuleKey(downloaded.module) !== canonicalModuleKey(course.module))) return false;
+    const hostedOwners = courses.filter(owner => owner.code === `academic:${course.id}`);
+    if (hostedOwners.length > 1 || (hostedOwners.length === 1
+      && (termIdentity(terms.find(term => term.id === hostedOwners[0].termId)?.name ?? "") !== termIdentity(course.term)
+        || !hostedOwners[0].modules.some(module => canonicalModuleKey(module.name) === canonicalModuleKey(course.module))))) return false;
+    const ownerId = hostedOwners[0]?.id;
+    const setIds = new Set(downloaded.setIds);
+    const sourceSets = sets.filter(set => setIds.has(set.id));
+    return sourceSets.every(set => (!set.scope?.module || canonicalModuleKey(set.scope.module) === canonicalModuleKey(course.module))
+      && (!set.scope?.courseId || set.scope.courseId === ownerId))
+      && scopedQuestions.every(({ question }) => (!question.module || canonicalModuleKey(question.module) === canonicalModuleKey(course.module))
+        && (!question.courseId || question.courseId === ownerId)
+        && (!question.setId || setIds.has(question.setId)));
+  }, [onDevice, downloaded, course, courses, terms, sets, scopedQuestions]);
   const sourceWeeks = useMemo(() => {
     const groups = new Map<number | undefined, { week: number | undefined; total: number; readyIds: string[]; setIds: string[] }>();
     for (const entry of scopedQuestions) {
@@ -300,22 +320,24 @@ function ConnectedQuestionCollection({ course, downloaded, questions, sets, busy
       <div className="course-week-list">
         <div className="course-section-heading"><h2>Source weeks</h2></div>
         <p className="course-empty">This collection has no weekly plan. Week labels come from its saved question sources; questions without a stated week stay unassigned.</p>
-        {onDevice ? sourceWeeks.length ? sourceWeeks.map(group => <article className="course-week" key={group.week ?? "unassigned"}>
+        {onDevice && !scopeValid && <p role="alert">This collection's saved filing no longer matches its questions or sets. Review the filing or download the course again before practicing it.</p>}
+        {onDevice && scopeValid ? sourceWeeks.length ? sourceWeeks.map(group => <article className="course-week" key={group.week ?? "unassigned"}>
           <div className="course-week-heading"><h3>{group.week === undefined ? "Unassigned week" : `Week ${group.week}`}</h3><span>{group.total} {group.total === 1 ? "question" : "questions"}</span></div>
           <div className="course-week-practice"><span>{group.readyIds.length} ready {group.readyIds.length === 1 ? "question" : "questions"}{group.total > group.readyIds.length ? ` · ${group.total - group.readyIds.length} awaiting review` : ""}</span>
             {group.week !== undefined && group.readyIds.length > 0 && group.readyIds.length <= MAX_COURSE_QUIZ_QUESTIONS && <GButton size="sm" onClick={() => practice(group.week)}><Play size={ICON_SIZE.body} /> Quiz week {group.week}</GButton>}
           </div>
         </article>) : <p className="course-empty">No questions from this collection are on this device yet.</p>
-          : <p className="course-empty">Download the reviewed questions to see their source weeks.</p>}
+          : !onDevice && <p className="course-empty">Download the reviewed questions to see their source weeks.</p>}
         <AcademicSharing course={course} onSaved={onSharingSaved} />
       </div>
       <aside className="course-plan-actions" aria-label="Question collection actions">
         <h2>Study these questions</h2>
-        <p>{onDevice ? `${practiceIds.length} reviewed ${practiceIds.length === 1 ? "question is" : "questions are"} on this device.` : course.ready_questions < 1
+        <p>{onDevice && scopeValid ? `${practiceIds.length} reviewed ${practiceIds.length === 1 ? "question is" : "questions are"} on this device.` : onDevice
+          ? "Practice is paused until this collection's saved filing matches its questions and sets." : course.ready_questions < 1
           ? "No reviewed questions are ready to download yet." : `Download ${course.ready_questions} reviewed ${course.ready_questions === 1 ? "question" : "questions"} and their images to practice them, including offline.`}</p>
         {!onDevice && <GButton variant="primary" disabled={busy || course.ready_questions < 1} onClick={onDownload}><Download size={ICON_SIZE.emphasis} /> {busy ? "Downloading…" : "Download questions"}</GButton>}
-        {onDevice && practiceIds.length > MAX_COURSE_QUIZ_QUESTIONS && <p>This collection holds more than {MAX_COURSE_QUIZ_QUESTIONS} questions. Choose its sets in Question Bank to build a block.</p>}
-        {onDevice && practiceIds.length <= MAX_COURSE_QUIZ_QUESTIONS && <GButton variant="primary" disabled={!practiceIds.length} onClick={() => practice()}><Play size={ICON_SIZE.emphasis} /> Create Quiz</GButton>}
+        {onDevice && scopeValid && practiceIds.length > MAX_COURSE_QUIZ_QUESTIONS && <p>This collection holds more than {MAX_COURSE_QUIZ_QUESTIONS} questions. Choose its sets in Question Bank to build a block.</p>}
+        {onDevice && scopeValid && practiceIds.length <= MAX_COURSE_QUIZ_QUESTIONS && <GButton variant="primary" disabled={!practiceIds.length} onClick={() => practice()}><Play size={ICON_SIZE.emphasis} /> Create Quiz</GButton>}
         {launchError && <p role="alert">{launchError}</p>}
         <p role="status" aria-live="polite">{message}</p>
       </aside>
