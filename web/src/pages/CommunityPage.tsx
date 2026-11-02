@@ -10,6 +10,7 @@ import {
 } from "../lib/community/community";
 import { GButton, GhostButton, GlassCard, PanelHeader, Tag } from "../components/ui/primitives";
 import { operatorRole, useAccountIdentity } from "../lib/operator/hostClient";
+import { useUi } from "../lib/uiStore";
 import "../styles/community.css";
 
 type PostKind = "progress" | "question_set";
@@ -116,7 +117,8 @@ function CommunityAccountPage() {
     <GlassCard pad>
       <PanelHeader title="Community" headingLevel={2} sub="Sign in to find other AXOM learners, compare shared progress and connect." />
       <p>Accounts are optional. Your private study data remains available without signing in.</p>
-      <p className="sub">Open Account in Settings to sign in. Joining Community is a separate, optional choice.</p>
+      <p className="sub">Joining Community is a separate, optional choice after sign-in.</p>
+      <GButton onClick={() => useUi.getState().requestSettings("account")}>Open account settings</GButton>
     </GlassCard>
   </div>;
 
