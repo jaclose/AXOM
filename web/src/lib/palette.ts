@@ -1,15 +1,14 @@
 import { STORAGE_KEYS } from "./brand";
 
 /**
- * Accent palettes — a device-local personalization layer that sits on top of
- * the Light/Dark/System theme. The theme decides paper vs. graphite; the
- * palette decides the identity accent (gold, violet, sapphire…), the secondary
- * mineral accent, and a faint ambient tint in the backdrop.
+ * Accent palettes are device-local. Light/Dark/System chooses the contrast
+ * mode; each palette coordinates its accent, paper or canvas, surfaces,
+ * secondary mineral tone, and ambient tint for that mode.
  *
- * AXOM Classic is the canonical brand palette and lives in theme.css, so it
- * needs no injected CSS. Midnight is what a device shows until someone picks a
- * palette. Every other palette is derived from a small set of
- * hand-tuned inputs per mode and injected as one `<style>` element. The
+ * AXOM Legacy keeps the original graphite/gold CSS base in theme.css. The
+ * new AXOM Classic is the navy/gold palette and is the default selection.
+ * Each selected palette is derived from hand-tuned inputs per mode and
+ * injected as one `<style>` element. The
  * pre-paint script in index.html replays the stored variables before the first
  * frame, so a palette never flashes gold on reload.
  */
@@ -20,6 +19,7 @@ export type PaletteId =
   | "amethyst"
   | "sapphire"
   | "midnight"
+  | "midnight-black"
   | "emerald"
   | "rose"
   | "platinum"
@@ -80,20 +80,37 @@ export const DEFAULT_PALETTE_ID: PaletteId = "midnight";
 
 export const PALETTES: readonly PaletteDefinition[] = [
   {
-    id: "classic",
+    id: "midnight",
     label: "AXOM Classic",
-    pairing: "Gold & graphite",
-    description: "The signature muted gold on mineral graphite and warm paper.",
+    pairing: "Navy & gold",
+    description: "Deep academic navy with a warm gold edge.",
     dark: {
-      accent: "#c8a96a", ink: "#c8a96a", hi: "#f7d99a", lo: "#a8894f",
-      cool: "#aeb8c3", coolStrong: "#cbd1d7",
-      bg: ["#08080a", "#0c0c0e", "#121214"], tint: "#e6e2d6", surface: "#161619",
+      accent: "#d6b46e", ink: "#dcbc7c", hi: "#f8e0aa", lo: "#aa8a4e",
+      cool: "#96aad2", coolStrong: "#c3d0ea",
+      bg: ["#04060d", "#070a15", "#0c1222"], tint: "#5a78be", surface: "#11151f",
     },
     light: {
-      accent: "#c8a96a", ink: "#8a6429", hi: "#dcc38a", lo: "#6f4d1d",
-      cool: "#526171", coolStrong: "#354453",
-      bg: ["#eee7da", "#f7f3ec", "#e5dccd"], tint: "#c8a96a", surface: "#fffdf8",
-      paper: "#e5dbcb", structure: "#43331f",
+      accent: "#c8a45c", ink: "#7d5a1f", hi: "#e0c488", lo: "#1f2f55",
+      cool: "#34466e", coolStrong: "#22335a",
+      bg: ["#edf0f6", "#f8f9fc", "#e1e6f0"], tint: "#34466e", surface: "#fbfcfe",
+      paper: "#dce3f0", structure: "#1a243e",
+    },
+  },
+  {
+    id: "midnight-black",
+    label: "Midnight Midnight",
+    pairing: "Black & champagne",
+    description: "A true black canvas with quiet champagne highlights.",
+    dark: {
+      accent: "#d2bc90", ink: "#d5c398", hi: "#f2e5c7", lo: "#8b795b",
+      cool: "#b6b8bc", coolStrong: "#d7d9dc",
+      bg: ["#010102", "#040405", "#080809"], tint: "#121212", surface: "#0c0c0d",
+    },
+    light: {
+      accent: "#8c7652", ink: "#685336", hi: "#b7a17b", lo: "#463820",
+      cool: "#54555a", coolStrong: "#34353a",
+      bg: ["#ededed", "#f8f8f7", "#e6e6e5"], tint: "#77736b", surface: "#fdfdfb",
+      paper: "#e5e4e1", structure: "#272725",
     },
   },
   {
@@ -148,20 +165,20 @@ export const PALETTES: readonly PaletteDefinition[] = [
     },
   },
   {
-    id: "midnight",
-    label: "Midnight",
-    pairing: "Navy & gold",
-    description: "Deep navy night with warm gold — a classic academic pairing.",
+    id: "classic",
+    label: "AXOM Legacy",
+    pairing: "Gold & graphite",
+    description: "The original AXOM palette: muted gold, graphite, and warm paper.",
     dark: {
-      accent: "#d6b46e", ink: "#dcbc7c", hi: "#f8e0aa", lo: "#aa8a4e",
-      cool: "#96aad2", coolStrong: "#c3d0ea",
-      bg: ["#04060d", "#070a15", "#0c1222"], tint: "#5a78be", surface: "#11151f",
+      accent: "#c8a96a", ink: "#c8a96a", hi: "#f7d99a", lo: "#a8894f",
+      cool: "#aeb8c3", coolStrong: "#cbd1d7",
+      bg: ["#08080a", "#0c0c0e", "#121214"], tint: "#e6e2d6", surface: "#161619",
     },
     light: {
-      accent: "#c8a45c", ink: "#7d5a1f", hi: "#e0c488", lo: "#1f2f55",
-      cool: "#34466e", coolStrong: "#22335a",
-      bg: ["#edf0f6", "#f8f9fc", "#e1e6f0"], tint: "#34466e", surface: "#fbfcfe",
-      paper: "#dce3f0", structure: "#1a243e",
+      accent: "#c8a96a", ink: "#8a6429", hi: "#dcc38a", lo: "#6f4d1d",
+      cool: "#526171", coolStrong: "#354453",
+      bg: ["#eee7da", "#f7f3ec", "#e5dccd"], tint: "#c8a96a", surface: "#fffdf8",
+      paper: "#e5dbcb", structure: "#43331f",
     },
   },
   {
@@ -218,7 +235,7 @@ export const PALETTES: readonly PaletteDefinition[] = [
 ];
 
 const PALETTE_IDS = new Set<PaletteId>([
-  "classic", "ivory", "amethyst", "sapphire", "midnight", "emerald", "rose", "platinum", "custom",
+  "classic", "ivory", "amethyst", "sapphire", "midnight", "midnight-black", "emerald", "rose", "platinum", "custom",
 ]);
 const HEX = /^#[0-9a-f]{6}$/i;
 

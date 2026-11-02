@@ -18,21 +18,23 @@ const enabled = normalizeFocusCheckInPreferences({ enabled: true, intervalMinute
 const at = (hh: number, mm: number) => new Date(2026, 8, 26, hh, mm);
 
 describe("focus check-in preferences", () => {
-  it("is opt-in with safe, bounded defaults", () => {
+  it("starts enabled, preserves an explicit opt-out, and bounds settings", () => {
     expect(normalizeFocusCheckInPreferences(undefined)).toEqual(DEFAULT_FOCUS_CHECKIN);
+    expect(normalizeFocusCheckInPreferences(undefined)).toMatchObject({ enabled: true, scope: "anytime" });
+    expect(normalizeFocusCheckInPreferences({ enabled: false, scope: "focus" })).toMatchObject({ enabled: false, scope: "focus" });
     expect(normalizeFocusCheckInPreferences({ enabled: "yes" }).enabled).toBe(false);
     expect(normalizeFocusCheckInPreferences({ intervalMinutes: 1 }).intervalMinutes).toBe(5);
     expect(normalizeFocusCheckInPreferences({ intervalMinutes: 9999 }).intervalMinutes).toBe(240);
     expect(normalizeFocusCheckInPreferences({ scope: "anytime", tone: "intense" })).toMatchObject({ scope: "anytime", tone: "intense" });
-    expect(normalizeFocusCheckInPreferences({ scope: "weird", tone: "weird" })).toMatchObject({ scope: "focus", tone: "coach" });
+    expect(normalizeFocusCheckInPreferences({ scope: "weird", tone: "weird" })).toMatchObject({ scope: "anytime", tone: "coach" });
   });
 });
 
 describe("focus check-in scheduling", () => {
   it("never prompts while disabled or, in focus scope, while no sprint is running", () => {
     const ledger = emptyFocusLedger("2026-09-26");
-    expect(evaluateFocusCheckIn({ now: at(10, 0), preferences: DEFAULT_FOCUS_CHECKIN, ledger, focusActive: true }).kind).toBe("idle");
-    const idle = evaluateFocusCheckIn({ now: at(10, 0), preferences: enabled, ledger, focusActive: false });
+    expect(evaluateFocusCheckIn({ now: at(10, 0), preferences: { ...DEFAULT_FOCUS_CHECKIN, enabled: false }, ledger, focusActive: true }).kind).toBe("idle");
+    const idle = evaluateFocusCheckIn({ now: at(10, 0), preferences: { ...enabled, scope: "focus" }, ledger, focusActive: false });
     expect(idle).toMatchObject({ kind: "idle", reason: "not-focused" });
     expect(idle.ledger.armedAt).toBeUndefined();
   });

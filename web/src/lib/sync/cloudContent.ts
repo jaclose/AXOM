@@ -6,6 +6,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { canonicalJson, compressText, decompressText, sha256 } from "../compressedText";
 import type { NoctyriumState } from "../types";
 import { readOriginalFile } from "../sourceOriginal";
+import { SyncPushError } from "./syncFailure";
 
 export const CONTENT_BUCKET = "workspace-content";
 export const MAX_CONTENT_OBJECT_BYTES = 8 * 1024 * 1024;
@@ -39,7 +40,10 @@ export function projectCloudRecord(record: { id: string }, collection: ContentRe
       const text = JSON.stringify(Object.fromEntries(fields.filter(key => source[key] !== undefined).map(key => [key, source[key]])));
       const content = await compressText(text);
       const bytes = new TextEncoder().encode(content);
-      if (bytes.length > MAX_CONTENT_OBJECT_BYTES) throw new Error("A source document exceeds the compressed file limit. Split the source into smaller files before syncing.");
+      if (bytes.length > MAX_CONTENT_OBJECT_BYTES) throw new SyncPushError(
+        { kind: "rejected", rejection: "source-too-large", status: 0 },
+        "A source document exceeds the compressed file limit. Split the source into smaller files before syncing.",
+      );
       const canonicalText = canonicalJson(JSON.parse(text));
       const canonicalHash = await sha256(new TextEncoder().encode(canonicalText));
       return { canonicalText, canonicalHash, reference: { collection, id: record.id, hash: await sha256(bytes), byteSize: bytes.length, expandedBytes: new TextEncoder().encode(text).length }, content };
@@ -74,7 +78,10 @@ export async function splitCloudContent(state: NoctyriumState): Promise<{ worksp
       compact.push(copy);
     }
     const deferredRows = deferred?.[collection] ?? [];
-    if (deferredRows.some(row => compact.some(record => record.id === row.id))) throw new Error("Downloaded and deferred content overlap.");
+    if (deferredRows.some(row => compact.some(record => record.id === row.id))) throw new SyncPushError(
+      { kind: "rejected", rejection: "local-content-conflict", status: 0 },
+      "Downloaded and deferred content overlap. Keep a portable backup and review the account content before retrying.",
+    );
     Object.assign(workspace, { [collection]: [...compact, ...deferredRows].sort((a, b) => String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0) });
   }
   return { workspace, objects, references: references.sort((a, b) => `${a.collection}:${a.id}` < `${b.collection}:${b.id}` ? -1 : `${a.collection}:${a.id}` > `${b.collection}:${b.id}` ? 1 : 0) };

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { runInNewContext } from "node:vm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_PALETTE_ID,
@@ -23,6 +24,7 @@ import { STORAGE_KEYS } from "./brand";
 // jsdom rewrites import.meta.url; vitest runs from the web/ package root.
 const indexHtml = readFileSync(join(process.cwd(), "index.html"), "utf8");
 const themeCss = readFileSync(join(process.cwd(), "src/styles/theme.css"), "utf8");
+const prepaintScript = indexHtml.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? "";
 
 const values = new Map<string, string>();
 const storage = {
@@ -61,7 +63,7 @@ describe("palette catalog", () => {
     }
   });
 
-  it("defines every palette channel for AXOM Classic in theme.css", () => {
+  it("defines first-paint channels for AXOM Classic in theme.css", () => {
     const names = Object.keys(derivePaletteVars(PALETTES[0].dark, "dark"));
     for (const name of names) expect(themeCss, name).toContain(`${name}:`);
   });
@@ -76,10 +78,31 @@ describe("palette catalog", () => {
 });
 
 describe("palette persistence and application", () => {
-  it("normalizes unknown input to the default palette and keeps a valid custom accent", () => {
+  it("normalizes unknown input to AXOM Classic and keeps a valid custom accent", () => {
     expect(normalizePalettePreference({ id: "neon" })).toEqual({ id: "midnight" });
     expect(normalizePalettePreference({ id: "custom", customAccent: "#ABCDEF" })).toEqual({ id: "custom", customAccent: "#abcdef" });
     expect(normalizePalettePreference({ id: "custom", customAccent: "red" }).customAccent).toMatch(/^#[0-9a-f]{6}$/);
+  });
+
+  it("retains existing graphite and navy choices under their stored IDs", () => {
+    storage.setItem(STORAGE_KEYS.palettePreference, JSON.stringify({ version: 1, id: "classic" }));
+    expect(readPalettePreference()).toEqual({ id: "classic" });
+    expect(PALETTES.find((item) => item.id === "classic")?.label).toBe("AXOM Legacy");
+    storage.setItem(STORAGE_KEYS.palettePreference, JSON.stringify({ version: 1, id: "midnight" }));
+    expect(readPalettePreference()).toEqual({ id: "midnight" });
+    expect(PALETTES.find((item) => item.id === "midnight")?.label).toBe("AXOM Classic");
+  });
+
+  it("paints the new default before hydration while retaining an existing Legacy choice", () => {
+    expect(prepaintScript).not.toBe("");
+    runInNewContext(prepaintScript, { window, document, localStorage });
+    expect(document.documentElement.dataset.palette).toBe("midnight");
+    expect(document.querySelector('meta[name="theme-color"]')?.getAttribute("content")).toBe("#070a15");
+
+    storage.setItem(STORAGE_KEYS.palettePreference, JSON.stringify({ version: 1, id: "classic" }));
+    runInNewContext(prepaintScript, { window, document, localStorage });
+    expect(document.documentElement.dataset.palette).toBeUndefined();
+    expect(document.querySelector('meta[name="theme-color"]')?.getAttribute("content")).toBe("#0d0d0e");
   });
 
   it("applies, persists, and removes a palette without touching workspace storage", () => {
@@ -104,7 +127,7 @@ describe("palette persistence and application", () => {
     expect(css.split("{").length).toBe(3);
   });
 
-  it("shows Midnight until someone picks a palette, from the very first frame", () => {
+  it("shows AXOM Classic until someone picks a palette, from the very first frame", () => {
     expect(DEFAULT_PALETTE_ID).toBe("midnight");
     expect(readPalettePreference()).toEqual({ id: "midnight" });
     const prePaint = /<script>([\s\S]*?axom\.palette\.v1[\s\S]*?)<\/script>/.exec(indexHtml)?.[1];
@@ -122,7 +145,7 @@ describe("palette persistence and application", () => {
     storage.setItem(STORAGE_KEYS.palettePreference, "not json");
     run();
     expect(document.documentElement.dataset.palette).toBe("midnight");
-    // A person who chose Classic keeps it.
+    // A person who chose Legacy keeps it.
     setPalettePreference({ id: "classic" });
     run();
     expect(document.documentElement.dataset.palette).toBeUndefined();
@@ -135,6 +158,7 @@ describe("palette persistence and application", () => {
     for (const palette of PALETTES.filter((item) => item.id !== "classic")) expect(indexHtml).toContain(`"${palette.id}"`);
     expect(indexHtml).toContain('"custom"');
     expect(indexHtml).toContain(`"${STORAGE_KEYS.motionPreference}"`);
+    expect(indexHtml).toContain('root.dataset.palette = "midnight"');
   });
 });
 

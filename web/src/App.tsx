@@ -136,6 +136,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
   // route via the URL hash so deep-links + the standalone page work
   const [route, setRoute] = useState<string>(() => location.hash.replace("#", "") || "dashboard");
   const routeRef = useRef(route);
+  const surfaceScrollRef = useRef<HTMLDivElement>(null);
   routeRef.current = route;
   const routeTransitionGuardRef = useRef<JournalTransitionGuard | null>(null);
   const appTransitionPendingRef = useRef(false);
@@ -350,6 +351,11 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
   // First visit to a tab this session: its sections settle in (lib/presentation).
   const pageEnter = usePageEntrance(route.split("?")[0]);
 
+  useLayoutEffect(() => {
+    // The shell keeps one scroll container across routes; each page opens at its own start.
+    if (surfaceScrollRef.current) surfaceScrollRef.current.scrollTop = 0;
+  }, [route]);
+
   if (route === "design-preview" && DevDesignPreview) {
     return (
       <Suspense fallback={<div className="design-preview-boot">Preparing AXOM component preview…</div>}>
@@ -457,7 +463,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
             onRefresh={refresh}
             refreshing={refreshing}
           />
-          <div className="surface-scroll">
+          <div ref={surfaceScrollRef} className="surface-scroll">
             <div className={route === "tracker" ? "page page-tracker" : "page"} data-enter={pageEnter ? "" : undefined}>
               <RouteErrorBoundary key={routeKey} onHome={() => go("dashboard")}>
                 <Suspense fallback={<div className="route-loading" role="status" aria-live="polite">Opening your workspace…</div>}>

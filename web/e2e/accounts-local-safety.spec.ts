@@ -23,17 +23,19 @@ test("account foundation preserves local-only use and manual recovery at every l
     if (await menu.isVisible()) await menu.click();
     await page.getByTitle("Account and protection").click();
 
-    await expect(page.getByRole("tab", { name: "Account", exact: true })).toHaveAttribute("aria-selected", "true");
+    if (viewport.width <= 560) await expect(page.getByRole("combobox", { name: "Settings section" })).toHaveValue("account");
+    else await expect(page.getByRole("tab", { name: "Account", exact: true })).toHaveAttribute("aria-selected", "true");
     // Builds without cloud credentials say so; a dev server with .env.local shows sign-in instead.
     const localOnly = await page.getByText(/Accounts aren’t available in this version/).isVisible();
-    if (!localOnly) await expect(page.getByRole("tab", { name: "Sign in", exact: true })).toBeVisible();
+    if (!localOnly) await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
     // Plain language first (I1-22); the technical note sits behind a disclosure.
     await expect(page.getByText(/export, restore, or merge a portable copy/i)).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
 
-    await page.getByRole("tab", { name: "Emergency recovery" }).click();
-    await expect(page.getByRole("button", { name: /Export backup/ })).toBeVisible();
-    await expect(page.getByRole("button", { name: /Import \/ restore/ })).toBeVisible();
+    if (viewport.width <= 560) await page.getByRole("combobox", { name: "Settings section" }).selectOption("backup");
+    else await page.getByRole("tab", { name: "Emergency recovery" }).click();
+    await expect(page.getByRole("button", { name: "Export complete backup" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Choose backup to restore" })).toBeVisible();
     await page.getByRole("button", { name: "Done" }).click();
   }
 

@@ -12,8 +12,8 @@
     "productivity",
     "medical"
   ],
-  "background_color": "#0d0d0e",
-  "theme_color": "#0d0d0e",
+  "background_color": "#070a15",
+  "theme_color": "#070a15",
   "shortcuts": [
     {
       "name": "Course Tracker",

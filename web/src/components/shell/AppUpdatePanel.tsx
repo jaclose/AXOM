@@ -56,18 +56,22 @@ export function AppUpdatePanel() {
   };
   const apply = requestApplyUpdate;
   return (
-    <div className="backup-actions-panel" aria-busy={busy}>
-      <div className="sync-title">App updates</div>
-      <p className="sub">{state.desktop ? "Desktop app" : "Web app"} · v{APP_RELEASE_VERSION}</p>
-      <p role={state.phase === "error" ? "alert" : "status"}>{status[state.phase]}</p>
+    <section className="settings-update-panel" aria-busy={busy} aria-labelledby="settings-update-title">
+      <div className="settings-update-head">
+        <div><span className="settings-eyebrow">Application</span><h5 id="settings-update-title">App updates</h5></div>
+        <span className="settings-update-version">{state.desktop ? "Desktop" : "Web"} · v{APP_RELEASE_VERSION}</span>
+      </div>
+      <div className={`settings-update-state ${state.phase === "error" ? "error" : ""}`}>
+        <p role={state.phase === "error" ? "alert" : "status"}>{status[state.phase]}</p>
+        {state.lastChecked && <small>Last checked {new Date(state.lastChecked).toLocaleString()}</small>}
+      </div>
       {state.restartPending && state.phase === "error" && <p className="sub">The update is already prepared. Retry the restart below; it will save your current workspace again without reinstalling.</p>}
-      {state.lastChecked && <p className="sub">Last checked: {new Date(state.lastChecked).toLocaleString()}</p>}
       {state.phase === "downloading" && <div>
         <progress aria-label="Update download" value={state.totalBytes ? state.downloadedBytes : undefined} max={state.totalBytes ?? 1} style={{ width: "100%" }} />
         <p className="sub">{(state.downloadedBytes / 1_048_576).toFixed(1)} MB{state.totalBytes ? ` of ${(state.totalBytes / 1_048_576).toFixed(1)} MB` : " received"}</p>
       </div>}
       {state.notes && <details><summary>What’s new</summary><p style={{ whiteSpace: "pre-wrap" }}>{state.notes}</p></details>}
-      <div className="row wrap gap8">
+      <div className="settings-update-actions">
         <GButton size="sm" disabled={busy || appUpdates.hasDownloaded() || state.restartPending} onClick={() => { void appUpdates.check(true); }}><RefreshCw size={16} /> Check for updates</GButton>
         {state.desktop && state.version && !appUpdates.hasDownloaded() && <GButton size="sm" variant="primary" disabled={busy} onClick={() => { void appUpdates.download(); }}><Download size={16} /> Download update</GButton>}
         {canApply && <GButton size="sm" variant="primary" disabled={busy} onClick={apply}><ShieldCheck size={16} /> {state.desktop ? (state.restartPending ? "Save and restart" : "Install and restart") : "Save and refresh"}</GButton>}
@@ -80,8 +84,8 @@ export function AppUpdatePanel() {
           Download updates in the background (installing always waits for you)
         </label>
       )}
-      <p className="sub">Your local workspace stays on this device. Before applying an update, AXOM verifies a workspace snapshot. Portable backups in Settings also include question-image attachments.</p>
+      <p className="settings-update-note">Before applying an update, AXOM verifies a local workspace snapshot. Your work stays on this device.</p>
       <Suspense fallback={<p className="sub">Loading release notes…</p>}><ReleaseNotesHistory /></Suspense>
-    </div>
+    </section>
   );
 }

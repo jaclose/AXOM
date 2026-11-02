@@ -9,8 +9,10 @@ import { AnkiConnectPanel } from "../components/integrations/AnkiConnectPanel";
 import { ICON_SIZE } from "../lib/iconSize";
 import { buildIcs, calendarEvents, downloadIcs } from "../lib/calendarExport";
 import { useUi } from "../lib/uiStore";
+import { useAccount } from "../lib/account/accountStore";
+import "../styles/wip-experience.css";
 
-type Readiness = "ready" | "experimental" | "planned";
+type Readiness = "ready" | "experimental" | "unavailable" | "planned";
 
 interface IntegrationCard {
   id: string;
@@ -24,12 +26,15 @@ interface IntegrationCard {
 
 const READINESS: Record<Readiness, { label: string; tone: "green" | "orange" | "neutral"; blurb: string }> = {
   ready: { label: "Works today", tone: "green", blurb: "No setup, no account. Files you download stay yours." },
-  experimental: { label: "Experimental", tone: "orange", blurb: "Talks to an app on this computer. Confirm it works for you before relying on it." },
+  experimental: { label: "Experimental", tone: "orange", blurb: "Check each connection’s status before relying on it." },
+  unavailable: { label: "Unavailable in this build", tone: "neutral", blurb: "These controls need an AXOM account service. Local tools above still work." },
   planned: { label: "Planned", tone: "neutral", blurb: "Designed, not built. Each will be opt-in with clear privacy rules." },
 };
 
 export function IntegrationsPage() {
   const state = useStore();
+  const accountPhase = useAccount((account) => account.phase);
+  const accountsAvailable = accountPhase !== "unconfigured";
   const [calendarOpen, setCalendarOpen] = useState(false);
 
   const cards: IntegrationCard[] = [
@@ -52,10 +57,14 @@ export function IntegrationsPage() {
       action: { label: "Open backups", onClick: () => useUi.getState().requestSettings("backup") },
     },
     {
-      id: "account", name: "AXOM account", icon: Cloud, readiness: "experimental",
-      what: "Optional sign-in that keeps versioned cloud copies and moves your workspace between devices.",
-      leaves: "Your workspace data, only after you choose “Protect this workspace”.",
-      action: { label: "Account settings", onClick: () => useUi.getState().requestSettings("account") },
+      id: "account", name: "AXOM account", icon: Cloud, readiness: accountsAvailable ? "experimental" : "unavailable",
+      what: accountsAvailable
+        ? "Optional sign-in can keep versioned cloud copies. Check Account settings for your actual protection status."
+        : "Sign-in and cloud copies are switched off in this version. Your workspace still saves on this device.",
+      leaves: accountsAvailable ? "Your workspace data, only after you choose to protect this workspace." : "Nothing. No account connection is configured.",
+      action: accountsAvailable
+        ? { label: "Check account status", onClick: () => useUi.getState().requestSettings("account") }
+        : { label: "Open recovery options", onClick: () => useUi.getState().requestSettings("backup") },
     },
     {
       id: "ankiconnect", name: "Anki live stats (AnkiConnect)", icon: Plug, readiness: "experimental",
@@ -79,17 +88,19 @@ export function IntegrationsPage() {
           <div>
             <span className="integrations-kicker">How integrations work</span>
             <h2>AXOM brings things in. It never quietly sends your data out.</h2>
-            <p>Your workspace lives on this device. Integrations are either files you download and import yourself, a bridge to an app on this computer, or (later) an opt-in connection you can revoke.</p>
+            <p>Your workspace lives on this device. Integrations are files you download and import yourself, bridges to apps on this computer{accountsAvailable ? ", or an optional account connection you control." : ", or future opt-in connections."}</p>
           </div>
         </div>
         <ol className="integrations-steps">
           <li><b>1 · Works today</b><span>Export files (Anki, calendar, backup). No setup.</span></li>
           <li><b>2 · On this computer</b><span>Optional local bridges like AnkiConnect.</span></li>
-          <li><b>3 · Coming later</b><span>Account-based connections with explicit consent.</span></li>
+          <li><b>3 · Optional account</b><span>{accountsAvailable ? "Check its status before trusting a cloud copy." : "Unavailable here. Portable backups still work."}</span></li>
         </ol>
       </GlassCard>
 
-      {(["ready", "experimental", "planned"] as Readiness[]).map((readiness) => (
+      {(["ready", "experimental", "unavailable", "planned"] as Readiness[])
+        .filter((readiness) => cards.some((card) => card.readiness === readiness))
+        .map((readiness) => (
         <section key={readiness} className="integrations-section" aria-labelledby={`integrations-${readiness}`}>
           <div className="integrations-section-head">
             <h3 id={`integrations-${readiness}`}>{READINESS[readiness].label}</h3>
@@ -103,7 +114,7 @@ export function IntegrationsPage() {
                   <div className="integration-card-head">
                     <span className="integration-card-icon"><Icon size={ICON_SIZE.emphasis} aria-hidden="true" /></span>
                     <b>{card.name}</b>
-                    <Tag tone={READINESS[readiness].tone}>{readiness === "ready" ? <CheckCircle2 size={ICON_SIZE.microInline} /> : readiness === "planned" ? <Lock size={ICON_SIZE.microInline} /> : null} {READINESS[readiness].label}</Tag>
+                    <Tag tone={READINESS[readiness].tone}>{readiness === "ready" ? <CheckCircle2 size={ICON_SIZE.microInline} /> : readiness === "planned" || readiness === "unavailable" ? <Lock size={ICON_SIZE.microInline} /> : null} {READINESS[readiness].label}</Tag>
                   </div>
                   <p>{card.what}</p>
                   <small><b>What leaves your device:</b> {card.leaves}</small>
@@ -118,7 +129,7 @@ export function IntegrationsPage() {
             })}
           </div>
         </section>
-      ))}
+        ))}
 
       <div id="ankiconnect-setup" className="integrations-anki">
         <AnkiConnectPanel />
@@ -143,6 +154,7 @@ function CalendarExportPanel({ state }: { state: ReturnType<typeof useStore.getS
           <Download size={ICON_SIZE.body} /> Download .ics
         </GButton>
       </div>
+      {!events.length && <p className="calendar-export-next">Nothing dated is ready to export. <a href="#productivity">Add a task with a due date</a> or choose another source above.</p>}
       <p>Import it in Google Calendar (Settings → Import), Apple Calendar (File → Import), or Outlook. Re-export any time; events keep stable IDs so re-importing updates instead of duplicating in most apps.</p>
     </div>
   );

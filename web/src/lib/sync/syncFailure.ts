@@ -32,5 +32,16 @@ export function classifyPushFailure(error: { message?: string; code?: string }, 
 
 /** Anything thrown on the way to the account that is not already sorted never reached it. */
 export function failureOf(error: unknown): FailureDetails {
-  return error instanceof SyncPushError ? error.failure : { kind: "network", status: 0 };
+  if (error instanceof SyncPushError) return error.failure;
+  if (error && typeof error === "object") {
+    const candidate = error as { status?: unknown; statusCode?: unknown; code?: unknown; message?: unknown };
+    const status = Number(candidate.statusCode ?? candidate.status);
+    if (Number.isInteger(status) && status >= 400 && status <= 599) {
+      return classifyPushFailure({
+        code: typeof candidate.code === "string" ? candidate.code : undefined,
+        message: typeof candidate.message === "string" ? candidate.message : undefined,
+      }, status);
+    }
+  }
+  return { kind: "network", status: 0 };
 }

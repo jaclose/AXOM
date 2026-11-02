@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeSeed } from "../../lib/seed";
 import { useStore } from "../../lib/store";
 import { STORAGE_KEYS } from "../../lib/brand";
-import { FOCUS_CHECKIN_TEST_EVENT, FocusCheckIn, focusProgressHint } from "./FocusCheckIn";
+import { FIRST_VISIT_LOCKIN_CLOSED_EVENT, FIRST_VISIT_LOCKIN_PREVIEW_EVENT, FOCUS_CHECKIN_TEST_EVENT, FocusCheckIn, focusProgressHint } from "./FocusCheckIn";
 import { makeDailyRequirement, normalizeDailySuccessConfig } from "../../lib/dailySuccess";
 
 const values = new Map<string, string>();
@@ -139,15 +139,48 @@ describe("FocusCheckIn", () => {
   });
 
   it("previews without recording and can be turned off from the card", () => {
+    vi.useFakeTimers();
     render(<FocusCheckIn clock={clock} pollIntervalMs={0} />);
     act(() => { window.dispatchEvent(new CustomEvent(FOCUS_CHECKIN_TEST_EVENT)); });
     expect(screen.getByText(/Preview — nothing is recorded/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "I am locked out" }));
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.focusCheckIns) ?? "{}").drifted ?? 0).toBe(0);
 
+    act(() => vi.advanceTimersByTime(2_200));
+    act(() => vi.advanceTimersByTime(240));
     act(() => { window.dispatchEvent(new CustomEvent(FOCUS_CHECKIN_TEST_EVENT)); });
     fireEvent.click(screen.getByRole("button", { name: "Turn off check-ins" }));
     expect(useStore.getState().profile.focusCheckIn?.enabled).toBe(false);
+  });
+
+  it("acknowledges the first-visit sample and signals when it closes without recording", () => {
+    vi.useFakeTimers();
+    const closed = vi.fn();
+    window.addEventListener(FIRST_VISIT_LOCKIN_CLOSED_EVENT, closed);
+    render(<FocusCheckIn clock={clock} pollIntervalMs={0} />);
+    const detail = { accepted: false };
+    act(() => window.dispatchEvent(new CustomEvent(FIRST_VISIT_LOCKIN_PREVIEW_EVENT, { detail })));
+    expect(detail.accepted).toBe(true);
+    expect(screen.getByText("Are you locked in?")).toBeTruthy();
+    expect(screen.getByText(/Preview — nothing is recorded/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss check-in" }));
+    act(() => vi.advanceTimersByTime(240));
+    expect(closed).toHaveBeenCalledOnce();
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.focusCheckIns) ?? "{}").prompts ?? 0).toBe(0);
+    window.removeEventListener(FIRST_VISIT_LOCKIN_CLOSED_EVENT, closed);
+  });
+
+  it("lets Escape close the visible preview without closing a dialog beneath it", () => {
+    vi.useFakeTimers();
+    render(<FocusCheckIn clock={clock} pollIntervalMs={0} />);
+    act(() => window.dispatchEvent(new Event(FOCUS_CHECKIN_TEST_EVENT)));
+    const underlyingEscape = vi.fn();
+    window.addEventListener("keydown", underlyingEscape);
+    fireEvent.keyDown(screen.getByRole("button", { name: "Locked in" }), { key: "Escape" });
+    expect(underlyingEscape).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(240));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    window.removeEventListener("keydown", underlyingEscape);
   });
 
   it("stays silent in focus-only scope when nothing is running", () => {
@@ -156,5 +189,46 @@ describe("FocusCheckIn", () => {
     now = new Date(2026, 8, 26, 12, 0);
     act(() => { window.dispatchEvent(new Event("focus")); });
     expect(screen.queryByText("Are you locked in?")).toBeNull();
+  });
+
+  it("waits until Settings and an active text field are clear before a regular prompt", () => {
+    render(<FocusCheckIn clock={clock} pollIntervalMs={0} />);
+    const scrim = document.createElement("div");
+    scrim.className = "modal-scrim";
+    document.body.appendChild(scrim);
+    now = new Date(2026, 8, 26, 10, 16);
+    act(() => window.dispatchEvent(new Event("focus")));
+    expect(screen.queryByText("Are you locked in?")).toBeNull();
+    scrim.remove();
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+    act(() => window.dispatchEvent(new Event("focus")));
+    expect(screen.queryByText("Are you locked in?")).toBeNull();
+    input.blur();
+    act(() => window.dispatchEvent(new Event("focus")));
+    expect(screen.getByText("Are you locked in?")).toBeTruthy();
+    input.remove();
+  });
+
+  it("holds an open reply behind Settings and resumes its timeout after Settings closes", async () => {
+    vi.useFakeTimers();
+    render(<FocusCheckIn clock={clock} pollIntervalMs={0} />);
+    now = new Date(2026, 8, 26, 10, 16);
+    act(() => window.dispatchEvent(new Event("focus")));
+    fireEvent.click(screen.getByRole("button", { name: "Locked in" }));
+    const scrim = document.createElement("div");
+    scrim.className = "modal-scrim";
+    await act(async () => { document.body.appendChild(scrim); await Promise.resolve(); });
+    expect(document.querySelector(".focus-checkin")?.classList.contains("is-suspended")).toBe(true);
+    act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    act(() => vi.advanceTimersByTime(5_000));
+    expect(document.querySelector(".focus-checkin.reply")).toBeTruthy();
+    expect(document.querySelector(".focus-checkin")?.classList.contains("is-exiting")).toBe(false);
+    await act(async () => { scrim.remove(); await Promise.resolve(); });
+    expect(document.querySelector(".focus-checkin")?.classList.contains("is-suspended")).toBe(false);
+    act(() => vi.advanceTimersByTime(2_200));
+    act(() => vi.advanceTimersByTime(240));
+    expect(document.querySelector(".focus-checkin")).toBeNull();
   });
 });
