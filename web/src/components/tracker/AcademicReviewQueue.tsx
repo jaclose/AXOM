@@ -228,7 +228,7 @@ function ReviewerQueue({ accountId }: { accountId: string }) {
         return <article className="academic-review-row" key={`${submission.id}:${submission.current_revision_id}`} aria-label={submission.title}>
           <div className="academic-review-row-summary">
             <div className="academic-review-description"><h3>{submission.title}</h3><p>{submission.term} · {submission.module}</p>
-              <p>Submitted by {submission.owner_display_name}</p><p>Submitted <time dateTime={submission.submitted_at}>{new Date(submission.submitted_at).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}</time></p>
+              <p>Submitted by {submission.owner_display_name}</p><p>Review status updated <time dateTime={submission.submitted_at}>{new Date(submission.submitted_at).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}</time></p>
             </div>
             <div className="academic-review-row-actions"><Tag tone="gold">Pending</Tag><p>{submission.ready_questions} ready · {submission.review_questions} awaiting review</p>
               <GButton size="sm" data-review-preview={submission.id} aria-expanded={Boolean(active)} aria-controls={active ? previewId : undefined} disabled={deciding || downloading || inspecting} onClick={() => active ? closePreview() : void openPreview(submission)}><Eye size={ICON_SIZE.body} /> {active ? "Close preview" : "Open preview"}</GButton>

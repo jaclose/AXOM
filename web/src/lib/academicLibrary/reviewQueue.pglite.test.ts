@@ -19,6 +19,7 @@ const migrations = [
   "20261101120000_academic_community_submissions.sql",
   "20261101180000_academic_explanation_review.sql",
   "20261102170000_academic_review_queue.sql",
+  "20261102171000_reviewer_attestation_identity.sql",
 ];
 let db: PGlite;
 beforeAll(async () => {

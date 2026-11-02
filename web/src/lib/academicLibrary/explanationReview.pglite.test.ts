@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const OWNER = "11111111-1111-4111-8111-111111111111";
 const REVIEWER = "22222222-2222-4222-8222-222222222222";
 const READER = "33333333-3333-4333-8333-333333333333";
+const OTHER_REVIEWER = "44444444-4444-4444-8444-444444444444";
 const H1 = "a".repeat(64);
 const H2 = "b".repeat(64);
 const migrations = [
@@ -18,6 +19,7 @@ const migrations = [
   "20261027120000_academic_curriculum_catalog.sql",
   "20261101120000_academic_community_submissions.sql",
   "20261101180000_academic_explanation_review.sql",
+  "20261102171000_reviewer_attestation_identity.sql",
 ];
 let db: PGlite;
 
@@ -29,7 +31,7 @@ beforeAll(async () => {
     alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
     alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
     create schema auth; create table auth.users(id uuid primary key);
-    insert into auth.users values('${OWNER}'),('${REVIEWER}'),('${READER}');
+    insert into auth.users values('${OWNER}'),('${REVIEWER}'),('${READER}'),('${OTHER_REVIEWER}');
     create function auth.uid() returns uuid language sql stable as $$
       select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid
     $$;
@@ -73,6 +75,23 @@ async function attest(collection: string, rev: string, hash = H1, ready = 1, exp
 }
 
 describe("exact-revision explanation review gate", () => {
+  it("requires the approving reviewer to make their own attestation for academic and community revisions", async () => {
+    await db.query("insert into public.academic_reviewers(user_id) values($1)", [OTHER_REVIEWER]);
+    const academic = await revision();
+    await as(OWNER, "select public.academic_set_visibility($1,'shared')", [academic.collection_id]);
+    await attest(academic.collection_id, academic.revision_id);
+    await expect(as(OTHER_REVIEWER, "select public.academic_review($1,true)", [academic.collection_id]))
+      .rejects.toThrow(/Explanation review attestation required/);
+    await as(REVIEWER, "select public.academic_review($1,true)", [academic.collection_id]);
+
+    const community = await revision();
+    await as(OWNER, "select public.academic_submit_community($1,$2,true)", [community.collection_id, community.revision_id]);
+    await attest(community.collection_id, community.revision_id);
+    await expect(as(OTHER_REVIEWER, "select public.academic_community_review($1,$2,true)", [community.collection_id, community.revision_id]))
+      .rejects.toThrow(/Explanation review attestation required/);
+    await as(REVIEWER, "select public.academic_community_review($1,$2,true)", [community.collection_id, community.revision_id]);
+  });
+
   it("denies old owner approval without attestation, then binds a reviewed current revision", async () => {
     const c = await revision();
     const [privateTarget] = await as<{ value: unknown }>(REVIEWER,
