@@ -82,6 +82,11 @@ const curriculumTermKey = (name: string): string => {
 const curriculumCourseKey = (code: string): string =>
   moduleKey(code.replace(/^\s*\d{1,2}\s+(?=[a-z])/i, ""));
 
+const curriculumModuleKey = (name: string): string => {
+  const legacyBsce = name.trim().match(/^BSCE[\s_-]*(?:T(?:erm)?[\s_-]*)?([1-3])$/i);
+  return legacyBsce ? `bsce${legacyBsce[1]}` : canonicalModuleKey(name);
+};
+
 /** Add missing template shells while leaving every saved term, course, module and field intact. */
 export function mergeCurriculumMap(
   existing: { terms: Term[]; courses: Course[] }, template: CurriculumTemplate,
@@ -120,7 +125,7 @@ export function mergeCurriculumMap(
           id: id("course", [termKey, codeKey]), termId: matches[0].id,
           code: courseDef.code, name: courseDef.name, files: 0,
           modules: courseDef.modules.map(name => ({
-            id: id("module", [termKey, codeKey, canonicalModuleKey(name)]), name,
+            id: id("module", [termKey, codeKey, curriculumModuleKey(name)]), name,
           })),
         });
         added.courses += 1;
@@ -128,9 +133,9 @@ export function mergeCurriculumMap(
         continue;
       }
       const present = new Set(matchingIndexes.flatMap(index =>
-        courses[index].modules.map(module => canonicalModuleKey(module.name))));
+        courses[index].modules.map(module => curriculumModuleKey(module.name))));
       const missing = courseDef.modules.filter(name => {
-        const key = canonicalModuleKey(name);
+        const key = curriculumModuleKey(name);
         if (present.has(key)) return false;
         present.add(key);
         return true;
@@ -139,7 +144,7 @@ export function mergeCurriculumMap(
       const index = matchingIndexes[0];
       courses[index] = { ...courses[index], modules: [
         ...courses[index].modules,
-        ...missing.map(name => ({ id: id("module", [termKey, codeKey, canonicalModuleKey(name)]), name })),
+        ...missing.map(name => ({ id: id("module", [termKey, codeKey, curriculumModuleKey(name)]), name })),
       ] };
       added.modules += missing.length;
     }

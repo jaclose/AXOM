@@ -34,7 +34,7 @@ it("offers a one-click completion on an existing tracker, then writes exactly on
   const unsubscribe = useStore.subscribe(() => { writes += 1; });
   render(<SguCourseMapCompletion />);
   const prompt = screen.getByRole("region", { name: "Complete SGU course map" });
-  expect(within(prompt).getByText("4 terms · 6 courses · 28 modules to add")).toBeTruthy();
+  expect(within(prompt).getByText("4 terms · 6 courses · 27 modules to add")).toBeTruthy();
   fireEvent.click(within(prompt).getByRole("button", { name: "Complete SGU course map" }));
 
   const after = useStore.getState();
