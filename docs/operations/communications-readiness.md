@@ -58,7 +58,9 @@ audience still has zero contacts. Their provider IDs are preserved in the
 local ignored, owner-only file
 `artifacts/communications/resend-topic-ids-2026-11-02.json` for later server
 configuration. The IDs have not been set as `RESEND_TOPIC_IDS` in production,
-and no contact sync or broadcast has occurred.
+and no contact sync or broadcast has occurred. The Resend preference and success
+pages now use AXOM's Orb, Midnight colors and concise confirmation copy; both
+were visually checked and saved in the dashboard.
 
 For provider setup and real acceptance, follow the
 [Resend/Supabase runbook](communications-resend.md). Keep account deletion off
