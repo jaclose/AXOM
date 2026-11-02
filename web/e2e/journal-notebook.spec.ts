@@ -1,5 +1,27 @@
 import { expect, reloadAfterSave, seedOnboarded, test } from "./fixtures";
 
+for (const width of [1440, 390]) test(`Journal scroll stays inside the page at ${width}px`, async ({ page }) => {
+  await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.addInitScript((theme) => localStorage.setItem("axom.theme", theme), width === 390 ? "light" : "dark");
+  await seedOnboarded(page);
+  await page.goto("/#journal");
+  await page.getByRole("dialog", { name: "Make this notebook yours" })
+    .getByRole("button", { name: "Skip for now" }).click();
+
+  const shell = page.locator(".shell");
+  const pageScroll = page.locator(".surface-scroll");
+  const shelf = page.locator(".journal-library-shelf");
+
+  // Reproduce the browser focus/scrollIntoView path that shifted the whole app out of view.
+  await shell.evaluate((element) => { element.scrollTop = 300; });
+  expect(await shell.evaluate((element) => element.scrollTop)).toBe(0);
+
+  await pageScroll.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await expect(shelf).toBeInViewport();
+  expect(await shell.evaluate((element) => element.scrollTop)).toBe(0);
+});
+
 for (const width of [1440, 768, 390]) test(`Journal saves and reloads a page at ${width}px`, async ({ page }) => {
   await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
   await page.emulateMedia({ reducedMotion: "reduce" });
