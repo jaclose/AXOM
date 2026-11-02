@@ -151,7 +151,11 @@ function blockMetadata(blocks: readonly QuestionBlock[]): void {
       memberMetadata("image asset ID", block.assetId);
       memberMetadata("image alt", block.alt);
       memberMetadata("image caption", block.caption);
-    } else if (block.type === "table") memberMetadata("table image asset ID", block.sourceImageAssetId);
+    } else if (block.type === "table") {
+      memberMetadata("table image asset ID", block.sourceImageAssetId);
+      memberMetadata("table caption", block.caption);
+      for (const key of block.rowKeys ?? []) memberMetadata("table row key", key);
+    }
   }
 }
 function assertMemberMetadata(source: PrivateLibraryCatalog["sources"][number], bank: PreparedBank): void {
@@ -215,7 +219,45 @@ function assertApprovedImageBytes(asset: QuestionAsset, bytes: Uint8Array): void
     || asset.width !== undefined && asset.width !== image.width
     || asset.height !== undefined && asset.height !== image.height)
     fail("An approved figure is not the declared, supported image bytes.");
+  if (Buffer.from(bytes).includes("%PDF-")) fail("An approved figure contains PDF source bytes.");
   if (image.mimeType === "image/gif") assertCompleteAcademicGif(bytes);
+  if (image.mimeType === "image/png") {
+    if (bytes[4] !== 0x0d || bytes[5] !== 0x0a || bytes[6] !== 0x1a || bytes[7] !== 0x0a)
+      fail("An approved PNG has an invalid image signature.");
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let at = 8;
+    let first = true;
+    let hasImageData = false;
+    let ended = false;
+    while (at + 12 <= bytes.length) {
+      const length = view.getUint32(at);
+      const type = String.fromCharCode(...bytes.subarray(at + 4, at + 8));
+      const next = at + 12 + length;
+      if (next > bytes.length || first && (type !== "IHDR" || length !== 13)) break;
+      if (type === "IDAT") hasImageData = true;
+      if (type === "IEND") {
+        ended = length === 0 && next === bytes.length;
+        break;
+      }
+      first = false;
+      at = next;
+    }
+    if (!hasImageData || !ended) fail("An approved PNG has incomplete image structure or trailing bytes.");
+  }
+  if (image.mimeType === "image/jpeg" && (bytes.at(-2) !== 0xff || bytes.at(-1) !== 0xd9))
+    fail("An approved JPEG has incomplete image structure or trailing bytes.");
+  if (image.mimeType === "image/webp") {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (bytes.length < 20 || view.getUint32(4, true) + 8 !== bytes.length)
+      fail("An approved WebP has incomplete image structure or trailing bytes.");
+    let at = 12;
+    while (at + 8 <= bytes.length) {
+      const length = view.getUint32(at + 4, true);
+      at += 8 + length + (length & 1);
+      if (at > bytes.length) break;
+    }
+    if (at !== bytes.length) fail("An approved WebP has incomplete image structure or trailing bytes.");
+  }
 }
 function safeApprovedQuestion(question: PackageQuestion, row: ApprovalRecord): PackageQuestion {
   if (!substantiveExplanation(question)) fail("An approved question lacks a substantive source or reviewed AXOM explanation.");

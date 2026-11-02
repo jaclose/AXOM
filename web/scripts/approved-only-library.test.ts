@@ -22,14 +22,17 @@ afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { rec
 async function fixture(options: { image?: boolean; explanation?: string; week?: number; duplicateSource?: boolean;
   duplicateSourceSha?: boolean; privateBankPath?: boolean; privateToolPath?: boolean;
   metadataPath?: "manifest" | "question" | "asset"; metadataTitle?: string; manifestPaths?: boolean;
-  imageMetadataPath?: "stem-alt" | "choice-caption" | "explanation-caption"; disguisedPdf?: boolean } = {}) {
+  imageMetadataPath?: "stem-alt" | "choice-caption" | "explanation-caption"; disguisedPdf?: boolean;
+  wrappedPdf?: boolean; trailingImageBytes?: boolean; tableCaptionPath?: boolean } = {}) {
   const work = await mkdtemp(join(tmpdir(), "axom-approved-test-")); roots.push(work);
   const root = join(work, "prepared"); await mkdir(root);
   const original = Buffer.from("%PDF-1.4 synthetic fixture only");
   const checksum = sha(original);
   const bankFile = options.privateBankPath ? "private/operator-course/bank.json" : `banks/${checksum}/bank.json`;
   const originalFile = `sources/${checksum}.pdf`;
-  const imageBytes = options.disguisedPdf ? Buffer.from("%PDF-1.4 synthetic source disguised as PNG") : png;
+  const imageBytes = options.disguisedPdf ? Buffer.from("%PDF-1.4 synthetic source disguised as PNG")
+    : options.wrappedPdf ? Buffer.concat([png, Buffer.from("%PDF-1.4 synthetic source appended to PNG")])
+      : options.trailingImageBytes ? Buffer.concat([png, Buffer.from("synthetic trailing bytes")]) : png;
   const asset = { id: "synthetic-figure", filename: "synthetic-figure.png", mimeType: "image/png", width: 1, height: 1,
     byteSize: imageBytes.length, sourceFile: "synthetic.pdf", sourcePage: 1, role: "stem" as const, questionId: "q-ready",
     checksum: `sha256:${sha(imageBytes)}`, derivation: "embedded" as const,
@@ -40,7 +43,9 @@ async function fixture(options: { image?: boolean; explanation?: string; week?: 
     id: "q-ready", source: { filename: "synthetic.pdf", page: 1, questionNumber: 1 },
     ...(options.week ? { week: options.week } : {}),
     stem: [{ type: "text", text: "Which synthetic choice is named?" },
-      ...(options.image ? [imageBlock] : [])],
+      ...(options.image ? [imageBlock] : []),
+      ...(options.tableCaptionPath ? [{ type: "table" as const, caption: "Source [/Users/tester/private/table.csv]",
+        rows: [["Synthetic", "value"]] }] : [])],
     choices: [
       { id: "a", label: "A", blocks: [{ type: "text", text: "First synthetic choice" },
         ...(options.imageMetadataPath === "choice-caption" ? [{ type: "image" as const, assetId: asset.id,
@@ -169,6 +174,18 @@ describe("approved-only private candidate", () => {
     await expect(readdir(output)).rejects.toThrow();
   });
 
+  it("rejects a PDF appended after a valid PNG even when its checksum matches", async () => {
+    const { root, output, decisions } = await fixture({ image: true, wrappedPdf: true });
+    await expect(createApprovedOnlyLibrary(root, decisions, output)).rejects.toThrow(/contains PDF source bytes/);
+    await expect(readdir(output)).rejects.toThrow();
+  });
+
+  it("rejects trailing bytes after a PNG image container", async () => {
+    const { root, output, decisions } = await fixture({ image: true, trailingImageBytes: true });
+    await expect(createApprovedOnlyLibrary(root, decisions, output)).rejects.toThrow(/incomplete image structure or trailing bytes/);
+    await expect(readdir(output)).rejects.toThrow();
+  });
+
   it("uses content-addressed public paths even when the private bank path contains a folder name", async () => {
     const { root, output, decisions, catalog } = await fixture({ image: true, privateBankPath: true, manifestPaths: true });
     await createApprovedOnlyLibrary(root, decisions, output);
@@ -207,6 +224,12 @@ describe("approved-only private candidate", () => {
   it.each(["stem-alt", "choice-caption", "explanation-caption"] as const)("rejects local paths in %s image metadata", async imageMetadataPath => {
     const { root, output, decisions } = await fixture({ image: true, imageMetadataPath });
     await expect(createApprovedOnlyLibrary(root, decisions, output)).rejects.toThrow(/member-visible image (alt|caption)/);
+    await expect(readdir(output)).rejects.toThrow();
+  });
+
+  it("rejects a local path in a table caption", async () => {
+    const { root, output, decisions } = await fixture({ tableCaptionPath: true });
+    await expect(createApprovedOnlyLibrary(root, decisions, output)).rejects.toThrow(/member-visible table caption/);
     await expect(readdir(output)).rejects.toThrow();
   });
 
