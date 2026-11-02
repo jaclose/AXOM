@@ -141,9 +141,21 @@ function substantiveExplanation(question: PackageQuestion): boolean {
   const text = `${source} ${teaching}`.trim();
   return text.length >= 35 && (text.match(/\p{L}{2,}/gu)?.length ?? 0) >= 6;
 }
-const localPath = /file:\/\/|(?:^|[^\p{L}\p{N}._/\\])(?:\/[^\s/\\]+\/[^\s/\\]+|[a-z]:[\\/]|\\\\)/iu;
+const localPath = /file:\/\/|(?:^|[^\p{L}\p{N}._/\\])(?:\/[^\s/\\]+\/[^\s/\\]+|[a-z]:[\\/]|\\\\|(?:\.{1,2}[\\/])+[^\s/\\]+|~[\\/][^\s/\\]+)/iu;
+function visiblePathText(value: string): string {
+  return value.replace(/&#(?:x3a|58);?|&colon;|%3a/gi, ":")
+    .replace(/&#(?:x2f|47);?|&sol;|%2f/gi, "/")
+    .replace(/&#(?:x5c|92);?|&bsol;|%5c/gi, "\\");
+}
 function memberMetadata(field: string, value: string | undefined): void {
-  if (value && localPath.test(value)) fail(`A member-visible ${field} contains a local path.`);
+  if (value && localPath.test(visiblePathText(value))) fail(`A member-visible ${field} contains a local path.`);
+}
+function memberContent(field: string, value: unknown): void {
+  if (typeof value === "string") memberMetadata(field, value);
+  else if (Array.isArray(value)) value.forEach((item, index) => memberContent(`${field}[${index}]`, item));
+  else if (value && typeof value === "object") {
+    for (const [key, item] of Object.entries(value)) memberContent(`${field}.${key}`, item);
+  }
 }
 function blockMetadata(blocks: readonly QuestionBlock[]): void {
   for (const block of blocks) {
@@ -207,6 +219,9 @@ function assertMemberMetadata(source: PrivateLibraryCatalog["sources"][number], 
       memberMetadata("teaching excerpt source", excerpt.sourceId);
       memberMetadata("teaching inspection", excerpt.inspection);
     }
+    // The approved question is the member-facing payload. Inspect every nested
+    // string so new block or teaching fields cannot bypass the path gate.
+    memberContent("question", question);
   }
 }
 function assertApprovedImageBytes(asset: QuestionAsset, bytes: Uint8Array): void {

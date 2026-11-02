@@ -23,7 +23,8 @@ async function fixture(options: { image?: boolean; explanation?: string; week?: 
   duplicateSourceSha?: boolean; privateBankPath?: boolean; privateToolPath?: boolean;
   metadataPath?: "manifest" | "question" | "asset"; metadataTitle?: string; manifestPaths?: boolean;
   imageMetadataPath?: "stem-alt" | "choice-caption" | "explanation-caption"; disguisedPdf?: boolean;
-  wrappedPdf?: boolean; trailingImageBytes?: boolean; tableCaptionPath?: boolean } = {}) {
+  wrappedPdf?: boolean; trailingImageBytes?: boolean; tableCaptionPath?: boolean;
+  mutateReady?: (question: PackageQuestion) => void } = {}) {
   const work = await mkdtemp(join(tmpdir(), "axom-approved-test-")); roots.push(work);
   const root = join(work, "prepared"); await mkdir(root);
   const original = Buffer.from("%PDF-1.4 synthetic fixture only");
@@ -59,6 +60,7 @@ async function fixture(options: { image?: boolean; explanation?: string; week?: 
     assets: options.image ? [asset] : [], provenance: { method: "authored", sourceChecksum: `sha256:${checksum}`,
       notes: "PRIVATE LOCAL NOTE", ...(options.privateToolPath ? { tool: "/Users/tester/private/parser" } : {}) },
   };
+  options.mutateReady?.(question);
   const held: PackageQuestion = { ...structuredClone(question), id: "q-held", source: { filename: "synthetic.pdf", page: 2, questionNumber: 2 },
     correctAnswer: undefined, explanation: undefined, stem: [{ type: "text", text: "PRIVATE HELD STEM" }], assets: [] };
   const bank: PreparedBank = { pkg: { manifest: { schemaVersion: 1, course: { name: "FTM 1", term: 1, week: options.week ?? 0 },
@@ -122,6 +124,15 @@ async function fixture(options: { image?: boolean; explanation?: string; week?: 
   approved.reviewer = "Synthetic reviewer"; approved.reviewedAt = "2026-11-02T00:00:00.000Z";
   await writeFile(decisions, JSON.stringify(payload));
   return { work, root, bank, catalog, decisions, payload, output: join(work, "approved") };
+}
+
+function syntheticTeaching(): NonNullable<PackageQuestion["teaching"]> {
+  return { version: 1, answerLabel: "A", whyCorrect: "The invented first option matches the synthetic source.",
+    mechanism: "The synthetic mechanism follows from the invented finding.",
+    highYieldRule: "Use the reviewed source relationship for this synthetic case.",
+    distractors: [{ label: "B", option: "Second synthetic choice", explanation: "The second choice does not match." }],
+    sourceReferences: [], factCheck: { status: "SOURCE_CHECKED", humanReviewerApproved: false,
+      answerChanged: false, limitations: [], supportingExcerpts: [] } };
 }
 
 describe("approved-only private candidate", () => {
@@ -218,6 +229,45 @@ describe("approved-only private candidate", () => {
 
   it("allows a normal URL and clinical slash notation in a title", async () => {
     const { root, output, decisions } = await fixture({ metadataTitle: "AXOM https://example.org/course/module FEV1/FVC 2/3" });
+    await expect(createApprovedOnlyLibrary(root, decisions, output)).resolves.toMatchObject({ ready: 1 });
+  });
+
+  const privateContentCases: Array<[string, (question: PackageQuestion) => void]> = [
+    ["stem text", question => { question.stem[0] = { type: "text", text: "Read /private/course/stem.txt" }; }],
+    ["choice rich text", question => { question.choices[0].blocks.push({ type: "rich_text", html: "<b>See /private/course/choice.txt</b>" }); }],
+    ["encoded rich text", question => { question.choices[0].blocks.push({ type: "rich_text", html: "<b>See &#47;private&#47;course&#47;choice.txt</b>" }); }],
+    ["encoded file URL", question => { question.choices[0].blocks.push({ type: "rich_text", html: "<b>See file&#58;&#47;&#47;&#47;Users&#47;tester&#47;choice.txt</b>" }); }],
+    ["explanation callout", question => { question.explanation?.push({ type: "callout", text: "See /private/course/explanation.txt" }); }],
+    ["table header", question => { question.stem.push({ type: "table", headers: ["/private/course/header.csv"], rows: [["Synthetic"]] }); }],
+    ["table cell", question => { question.stem.push({ type: "table", rows: [["/private/course/cell.csv"]] }); }],
+    ["equation text", question => { question.stem.push({ type: "equation", latex: "\\includegraphics{/private/course/plot.png}" }); }],
+    ["teaching explanation", question => { question.teaching = { ...syntheticTeaching(), whyCorrect: "See /private/course/teaching.txt" }; }],
+    ["teaching distractor", question => { question.teaching = syntheticTeaching(); question.teaching.distractors[0].explanation = "See /private/course/distractor.txt"; }],
+    ["teaching excerpt", question => { question.teaching = syntheticTeaching(); question.teaching.factCheck.supportingExcerpts = [
+      { sourceId: "synthetic-source", pdfPage: 1, excerpt: "See /private/course/excerpt.txt" }]; }],
+  ];
+  it.each(privateContentCases)("rejects a local path in %s", async (_, mutateReady) => {
+    const { root, output, decisions } = await fixture({ mutateReady });
+    await expect(createApprovedOnlyLibrary(root, decisions, output)).rejects.toThrow(/member-visible question/);
+    await expect(readdir(output)).rejects.toThrow();
+  });
+
+  it.each([
+    "../private/file.pdf", "./private/file.pdf", "~/Documents/file.pdf",
+    "file:///Users/tester/private/file.pdf", "C:\\Private\\file.pdf", "\\\\server\\share\\file.pdf",
+  ])("rejects a local path form in question text: %s", async path => {
+    const { root, output, decisions } = await fixture({ mutateReady: question => {
+      question.stem[0] = { type: "text", text: `See ${path}` };
+    } });
+    await expect(createApprovedOnlyLibrary(root, decisions, output)).rejects.toThrow(/member-visible question/);
+    await expect(readdir(output)).rejects.toThrow();
+  });
+
+  it("allows a normal source link and clinical slash notation in question text", async () => {
+    const { root, output, decisions } = await fixture({ mutateReady: question => {
+      question.stem[0] = { type: "text", text: "Review https://example.org/source.pdf#page=4 and FEV1/FVC 2/3." };
+      question.explanation = [{ type: "text", text: "The synthetic source explains the invented first choice at https://example.org/source.pdf#page=4." }];
+    } });
     await expect(createApprovedOnlyLibrary(root, decisions, output)).resolves.toMatchObject({ ready: 1 });
   });
 
