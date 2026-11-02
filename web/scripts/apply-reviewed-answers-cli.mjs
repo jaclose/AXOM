@@ -1,5 +1,7 @@
 // Owner-only transform. Decisions and output must remain outside Git and public assets.
 import { createServer } from "vite";
+import process from "node:process";
+import console from "node:console";
 
 const [mode, ...args] = process.argv.slice(2);
 if (!(mode === "template" && (args.length === 2 || args.length === 3)
