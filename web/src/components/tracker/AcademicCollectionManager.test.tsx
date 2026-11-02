@@ -40,8 +40,8 @@ describe("your published courses", () => {
   beforeEach(() => {
     mocks.community.mockResolvedValue([]);
     mocks.reviewer.mockResolvedValue(false);
-    mocks.share.mockImplementation(async (ids: string[], _account: string, options: { approve: boolean }) =>
-      ids.map(collectionId => ({ collectionId, shared: true, approved: options.approve })));
+    mocks.share.mockImplementation(async (ids: string[]) =>
+      ids.map(collectionId => ({ collectionId, shared: true })));
     mocks.review.mockResolvedValue(undefined);
     mocks.explanations.mockImplementation(async (collectionId: string, revisionId: string) => ({
       collectionId, revisionId, contentHash: "a".repeat(64), readyQuestions: 2,
@@ -67,7 +67,7 @@ describe("your published courses", () => {
     expect(screen.getByText(/1 course is waiting for an academic reviewer/)).toBeTruthy();
   });
 
-  it("shares private courses only after the rights attestation, and a reviewer approves them in the same step", async () => {
+  it("shares private courses for review before any reviewer attestation or approval", async () => {
     mocks.reviewer.mockResolvedValue(true);
     mocks.list.mockResolvedValueOnce([course(1), course(2), course(3, { visibility: "shared", review_status: "approved" })]);
     const onChanged = vi.fn();
@@ -76,15 +76,38 @@ describe("your published courses", () => {
     const share = await screen.findByRole("button", { name: /Share 2 private courses/ });
     expect((share as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole("checkbox", { name: /right to share this course material/ }));
-    fireEvent.click(await screen.findByRole("checkbox", { name: /Approve them now/ }));
+    expect(screen.queryByRole("checkbox", { name: /Approve them now/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Check stored explanations" })).toBeNull();
+    fireEvent.click(share);
+    expect(await screen.findByText(/2 courses shared for review\. Other accounts can find them only after academic approval\./)).toBeTruthy();
+    expect(mocks.share.mock.calls.map(([ids, , options]) => [ids, Object.hasOwn(options, "approve")])).toEqual([[[id(1)], false], [[id(2)], false]]);
+    expect(mocks.review).not.toHaveBeenCalled();
+    expect(screen.getByText(/2 awaiting review, 1 shared with everyone\./)).toBeTruthy();
+    const approve = await screen.findByRole("button", { name: /Approve 2 courses/ }) as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Check stored explanations" }));
     await screen.findByText(/Explanation readback complete/);
     fireEvent.click(screen.getByRole("checkbox", { name: /I checked every stored explanation/ }));
-    fireEvent.click(share);
-    expect(await screen.findByText(/2 courses shared and approved\. Every signed-in AXOM account can now find them\./)).toBeTruthy();
-    expect(mocks.share.mock.calls.map(([ids, , options]) => [ids, options.approve])).toEqual([[[id(1)], true], [[id(2)], true]]);
+    fireEvent.click(approve);
+    expect(await screen.findByText(/2 courses approved\. Every signed-in AXOM account can now find them\./)).toBeTruthy();
+    expect(mocks.review.mock.calls.map(([collection, approved]) => [collection, approved])).toEqual([[id(1), true], [id(2), true]]);
     expect(screen.getByText(/3 shared with everyone\./)).toBeTruthy();
-    expect(onChanged).toHaveBeenCalledOnce();
+    expect(onChanged).toHaveBeenCalledTimes(2);
+  });
+
+  it("lets an owner submit for review without reviewer membership or a review call", async () => {
+    mocks.list.mockResolvedValueOnce([course(1)]);
+    render(<AcademicCollectionManager onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    const share = await screen.findByRole("button", { name: /Share 1 private course/ });
+    fireEvent.click(screen.getByRole("checkbox", { name: /right to share this course material/ }));
+    fireEvent.click(share);
+    expect(await screen.findByText(/1 course shared for review/)).toBeTruthy();
+    expect(mocks.share.mock.calls.map(([, , options]) => Object.hasOwn(options, "approve"))).toEqual([false]);
+    expect(mocks.review).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Check stored explanations" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Approve 1 course/ })).toBeNull();
+    expect(screen.getByText(/1 awaiting review/)).toBeTruthy();
   });
 
   it("approves every course awaiting review after the reviewer's check, and lists the ones that failed", async () => {

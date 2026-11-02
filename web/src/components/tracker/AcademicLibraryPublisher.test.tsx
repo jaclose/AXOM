@@ -8,7 +8,7 @@ import { MI_NMI_DECISION_FORMAT } from "../../lib/academicLibrary/miNmiCorrectio
 import { sha256 } from "../../lib/question-content/assets";
 import { AcademicLibraryPublisher } from "./AcademicLibraryPublisher";
 
-const mocks = vi.hoisted(() => ({ reviewer: vi.fn(), share: vi.fn(), batch: vi.fn(), folder: vi.fn() }));
+const mocks = vi.hoisted(() => ({ share: vi.fn(), batch: vi.fn(), folder: vi.fn() }));
 vi.mock("../../lib/account/accountStore", () => ({
   useAccount: (select: (state: { user: { id: string } }) => unknown) => select({ user: { id: "owner-1" } }),
 }));
@@ -16,7 +16,6 @@ vi.mock("../../lib/academicLibrary/accountScope", () => ({
   academicAccountScope: () => ({ key: "owner-1", assertCurrent: () => {}, dispose: () => {} }),
 }));
 vi.mock("../../lib/academicLibrary/client", () => ({
-  isAcademicReviewer: (...args: unknown[]) => mocks.reviewer(...args),
   shareAcademicCourses: (...args: unknown[]) => mocks.share(...args),
 }));
 vi.mock("../../lib/academicLibrary/batch", () => ({ uploadAcademicBatch: (...args: unknown[]) => mocks.batch(...args) }));
@@ -66,9 +65,8 @@ describe("publishing a prepared library", () => {
   beforeEach(async () => {
     fixture = await library();
     mocks.folder.mockReturnValue(fixture.read);
-    mocks.reviewer.mockResolvedValue(false);
-    mocks.share.mockImplementation(async (ids: string[], _account: string, options: { approve: boolean }) =>
-      ids.map(collectionId => ({ collectionId, shared: true, approved: options.approve })));
+    mocks.share.mockImplementation(async (ids: string[]) =>
+      ids.map(collectionId => ({ collectionId, shared: true })));
   });
   afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
@@ -101,24 +99,24 @@ describe("publishing a prepared library", () => {
       ["academic-library-t1-cpr1", "Term 1"], ["academic-library-t4-ncrs", "Term 4"], ["academic-library-t5-goer", "Term 5"],
     ]);
     expect(mocks.share).toHaveBeenCalledWith(prepared.map(upload => `collection-${upload.catalogId}`), "owner-1",
-      expect.objectContaining({ approve: false }));
+      expect.any(Object));
+    expect(mocks.share.mock.calls[0][2]).not.toHaveProperty("approve");
     expect(screen.getAllByText("Sharing awaits review")).toHaveLength(3);
     expect(onPublished).toHaveBeenCalledOnce();
     // Published courses are cleared from the selection so a retry does not redo them.
     expect(screen.getByText(/0 courses selected to publish/)).toBeTruthy();
   });
 
-  it("lets a reviewer approve the published courses for everyone", async () => {
-    mocks.reviewer.mockResolvedValue(true);
+  it("does not approve courses during publishing even when sharing is requested", async () => {
     mocks.batch.mockImplementation(simulatedBatch([]));
     const { container } = render(<AcademicLibraryPublisher onPublished={vi.fn()} />);
     await chooseLibrary(container);
-    fireEvent.click(await screen.findByRole("checkbox", { name: /Approve sharing now/ }));
-    fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed the answer rationale/ }));
+    expect(screen.queryByRole("checkbox", { name: /Approve sharing now/ })).toBeNull();
     fireEvent.click(screen.getByRole("checkbox", { name: /right to share this course material/ }));
     fireEvent.click(screen.getByRole("button", { name: /Publish 2 courses/ }));
-    await waitFor(() => expect(screen.getAllByText("Shared with everyone")).toHaveLength(2));
-    expect(mocks.share).toHaveBeenCalledWith(expect.any(Array), "owner-1", expect.objectContaining({ approve: true }));
+    await waitFor(() => expect(screen.getAllByText("Sharing awaits review")).toHaveLength(2));
+    expect(screen.queryAllByText("Shared with everyone")).toHaveLength(0);
+    expect(mocks.share.mock.calls[0][2]).not.toHaveProperty("approve");
   });
 
   it("keeps courses private when sharing is off, and explains a course that fails validation", async () => {
@@ -129,7 +127,7 @@ describe("publishing a prepared library", () => {
     const catalog = JSON.parse(new TextDecoder().decode(fixture.files.get("catalog.json")!));
     catalog.sources.find((source: { name: string }) => source.name === "goer-pq.pdf").ready = 5;
     fixture.files.set("catalog.json", new TextEncoder().encode(JSON.stringify(catalog)));
-    fireEvent.click(screen.getByRole("checkbox", { name: /Share with every signed-in AXOM account/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Submit for academic review to share/ }));
     expect(screen.queryByRole("checkbox", { name: /right to share/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Publish 2 courses/ }));
     expect(await screen.findByText(/1 course published and verified\. 1 course not published/)).toBeTruthy();
@@ -231,7 +229,7 @@ describe("publishing a prepared library", () => {
     });
     const { container } = render(<AcademicLibraryPublisher onPublished={vi.fn()} />);
     expect((await chooseLibrary(container)).textContent).toMatch(/101 courses found\. 101 courses selected to publish\./);
-    fireEvent.click(screen.getByRole("checkbox", { name: /Share with every signed-in AXOM account/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Submit for academic review to share/ }));
     fireEvent.click(screen.getByRole("button", { name: /Publish 101 courses/ }));
     expect(await screen.findByText("101 courses published and verified.")).toBeTruthy();
     expect(mocks.batch.mock.calls.map(([jobs]) => (jobs as AcademicBatchJob[]).length)).toEqual([100, 1]);

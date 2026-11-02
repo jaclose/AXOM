@@ -46,8 +46,8 @@ async function pendingCommunityIds(courses: AcademicCourse[], signal: AbortSigna
 
 /**
  * Every course the account has published, with sharing and, for an academic
- * reviewer, approval of many courses at once. The server still enforces both:
- * sharing alone keeps a course private until a reviewer approves it.
+ * reviewer, approval of many courses at once. Sharing exposes a course for
+ * review; only an approved revision enters the learner catalog.
  */
 export function AcademicCollectionManager({ onChanged }: { onChanged: () => void }) {
   const accountId = useAccount(state => state.user?.id);
@@ -56,7 +56,6 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
   const [reviewer, setReviewer] = useState(false);
   const [busy, setBusy] = useState<"loading" | "checking" | "sharing" | "approving">();
   const [rights, setRights] = useState(false);
-  const [approveOnShare, setApproveOnShare] = useState(false);
   const [checked, setChecked] = useState(false);
   const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
@@ -117,11 +116,12 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
 
   async function checkExplanations() {
     if (!accountId || !reviewer || busy) return;
-    const targets = [...privateCourses, ...awaiting];
+    const targets = awaiting;
     if (!targets.length) return;
     const scope = academicAccountScope(accountId);
     const abort = start("checking");
     setAudits({});
+    setChecked(false);
     let missing = 0;
     let unreadable = 0;
     try {
@@ -148,25 +148,24 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
     const scope = academicAccountScope(accountId);
     const abort = start("sharing");
     const ids = privateCourses.map(course => course.id);
-    const approve = approveOnShare && reviewer && checked && complete(privateCourses);
     const changes = new Map<string, Partial<AcademicCourse>>();
     const failed: Record<string, string> = {};
     try {
       for (const [index, id] of ids.entries()) {
         if (abort.signal.aborted) break;
         setProgress(`Sharing ${label(id)} · ${index + 1} of ${ids.length}`);
-        const [outcome] = await shareAcademicCourses([id], accountId, { approve, receipts: receipts(), rationaleReviewed: checked,
-          assertCurrent: scope.assertCurrent, signal: abort.signal });
+        const [outcome] = await shareAcademicCourses([id], accountId,
+          { assertCurrent: scope.assertCurrent, signal: abort.signal });
         if (!outcome) break;
-        if (outcome.shared) changes.set(id, { visibility: "shared", ...(outcome.approved ? { review_status: "approved" as const } : {}) });
+        if (outcome.shared) changes.set(id, { visibility: "shared", review_status: "pending" as const });
         if (outcome.error) failed[id] = outcome.error;
       }
       update(changes);
+      if (changes.size) setChecked(false);
       setFailures(failed);
       const shared = changes.size;
       setProgress(abort.signal.aborted ? `Sharing stopped. ${plural(shared, "course")} shared before stopping.`
-        : approve && !Object.keys(failed).length ? `${plural(shared, "course")} shared and approved. Every signed-in AXOM account can now find ${shared === 1 ? "it" : "them"}.`
-          : `${plural(shared, "course")} shared.${approve ? "" : " Shared courses stay private until an academic reviewer approves them."}`);
+        : `${plural(shared, "course")} shared for review. Other accounts can find ${shared === 1 ? "it" : "them"} only after academic approval.`);
       if (shared) onChanged();
     } catch (cause) {
       update(changes);
@@ -208,13 +207,13 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
     <div className="academic-manager-heading">
       <LibraryBig size={ICON_SIZE.control} aria-hidden="true" />
       <div><h3>Your published courses</h3>
-        <p>See every course you have published, then share or approve them together. Answers, notes and progress are never shared.</p></div>
+        <p>See every course you have published and share it for review. An academic reviewer checks the exact revision before approval. Answers, notes and progress are never shared.</p></div>
     </div>
     <div className="academic-manager-actions">
       <GButton disabled={Boolean(busy)} onClick={() => void load()}>
         <RefreshCw size={ICON_SIZE.emphasis} /> {busy === "loading" ? "Loading your courses…" : courses ? "Refresh" : "Show my courses"}
       </GButton>
-      {reviewer && courses && (privateCourses.length > 0 || awaiting.length > 0) && <GButton disabled={Boolean(busy)} onClick={() => void checkExplanations()}>
+      {reviewer && courses && awaiting.length > 0 && <GButton disabled={Boolean(busy)} onClick={() => void checkExplanations()}>
         {busy === "checking" ? "Checking explanations…" : "Check stored explanations"}
       </GButton>}
       {(busy === "checking" || busy === "sharing" || busy === "approving") && <GhostButton onClick={() => controller.current?.abort()}><Square size={ICON_SIZE.body} /> Stop</GhostButton>}
@@ -226,15 +225,11 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
       {communityIds.size > 0 && <p>Review {plural(communityIds.size, "community upload")} in Question Bank → Community Uploads. Community submissions require an exact-revision review.</p>}
 
       {privateCourses.length > 0 && <fieldset className="academic-manager-step" disabled={Boolean(busy)}>
-        <legend>Share private courses</legend>
+        <legend>Share private courses for review</legend>
         <label><input type="checkbox" checked={rights} onChange={event => setRights(event.target.checked)} />
           <span>I have the right to share this course material with every AXOM account.</span></label>
-        {reviewer && <label><input type="checkbox" checked={approveOnShare} onChange={event => setApproveOnShare(event.target.checked)} />
-          <span>Approve them now. You are an academic reviewer.</span></label>}
-        {reviewer && approveOnShare && <label><input type="checkbox" checked={checked} onChange={event => setChecked(event.target.checked)} />
-          <span>I checked every stored explanation against its source for these exact revisions.</span></label>}
-        {reviewer && approveOnShare && !complete(privateCourses) && <p>Check stored explanations first. Every ready question needs one before official approval.</p>}
-        <GButton variant="primary" disabled={Boolean(busy) || !rights || (approveOnShare && (!checked || !complete(privateCourses)))} onClick={() => void share()}>
+        <p>Other accounts cannot find these courses until an academic reviewer approves their exact revisions.</p>
+        <GButton variant="primary" disabled={Boolean(busy) || !rights} onClick={() => void share()}>
           <Share2 size={ICON_SIZE.emphasis} /> {busy === "sharing" ? "Sharing…" : `Share ${plural(privateCourses.length, "private course")}`}
         </GButton>
       </fieldset>}

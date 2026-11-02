@@ -155,35 +155,23 @@ export async function reviewAcademicCourse(collection: string, approved: boolean
     : "The review could not be saved. Refresh the course to check its status, then retry.");
 }
 
-export interface AcademicSharingOutcome { collectionId: string; shared: boolean; approved: boolean; error?: string }
+export interface AcademicSharingOutcome { collectionId: string; shared: boolean; error?: string }
 
 /**
- * Ask for every listed course to be shared with every signed-in account and,
- * for a reviewer who chose to, approve each one. Sharing alone stays private
- * until review. Each course reports its own outcome; one failure stops none.
+ * Submit each listed course for academic review. Learners cannot find it until
+ * a reviewer approves its current revision. One failure stops none.
  */
 export async function shareAcademicCourses(collectionIds: readonly string[], accountId: string,
-  options: { approve: boolean; receipts?: ReadonlyMap<string, ExplanationReviewReceipt>; rationaleReviewed?: boolean;
-    assertCurrent?: () => void; signal?: AbortSignal }): Promise<AcademicSharingOutcome[]> {
+  options: { assertCurrent?: () => void; signal?: AbortSignal }): Promise<AcademicSharingOutcome[]> {
   const client = await academicClient(accountId);
   const outcomes: AcademicSharingOutcome[] = [];
   for (const collectionId of collectionIds) {
     if (options.signal?.aborted) break;
     options.assertCurrent?.();
-    const outcome: AcademicSharingOutcome = { collectionId, shared: false, approved: false };
+    const outcome: AcademicSharingOutcome = { collectionId, shared: false };
     const shared = await client.rpc("academic_set_visibility", { collection: collectionId, visibility: "shared", group_id: null });
     if (shared.error) outcome.error = "Sharing could not be requested for this course.";
-    else {
-      outcome.shared = true;
-      if (options.approve) {
-        try {
-          await reviewAcademicCourse(collectionId, true, accountId, options.receipts?.get(collectionId), options.rationaleReviewed);
-          outcome.approved = true;
-        } catch (cause) {
-          outcome.error = cause instanceof Error ? cause.message : "Sharing was requested, but approval was not saved.";
-        }
-      }
-    }
+    else outcome.shared = true;
     outcomes.push(outcome);
   }
   return outcomes;

@@ -2,15 +2,23 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { expect, seedOnboarded, test } from "./fixtures";
-import { academicPublishFixture } from "./academicPublishFixture";
+import { academicPublishFixture, learnerCatalog } from "./academicPublishFixture";
 import { library } from "../src/lib/academicLibrary/publicationFixture.testing";
+import type { PreparedBank } from "../src/lib/privateLibrary/types";
 
 /** The synthetic prepared library, written as a folder a learner would choose. */
 async function libraryFolder() {
   const root = await mkdtemp(join(tmpdir(), "axom-publish-"));
   const folder = join(root, "prepared-library");
   const { files } = await library();
-  for (const [path, bytes] of files) {
+  for (const [path, sourceBytes] of files) {
+    let bytes = sourceBytes;
+    if (path.endsWith("/bank.json")) {
+      const prepared = JSON.parse(new TextDecoder().decode(sourceBytes)) as PreparedBank;
+      for (const question of prepared.pkg.questions)
+        question.explanation = [{ type: "text", text: "Synthetic rationale checked against the invented source." }];
+      bytes = new TextEncoder().encode(JSON.stringify(prepared));
+    }
     await mkdir(dirname(join(folder, path)), { recursive: true });
     await writeFile(join(folder, path), bytes);
   }
@@ -43,7 +51,7 @@ for (const width of [1440, 390]) test(`publishes a prepared library as one cours
     await cpr.getByRole("button", { name: "Confirm Term 1" }).click();
     await expect(publisher).toContainText("3 courses selected to publish.");
     await expect(publisher.getByRole("button", { name: "Publish 3 courses" })).toBeDisabled();
-    await publisher.getByRole("checkbox", { name: /Approve sharing now/ }).check();
+    await expect(publisher.getByRole("checkbox", { name: /Approve sharing now/ })).toHaveCount(0);
     await publisher.getByRole("checkbox", { name: /right to share this course material/ }).check();
     expect(await publisher.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     for (const theme of ["dark", "light"]) {
@@ -61,13 +69,15 @@ for (const width of [1440, 390]) test(`publishes a prepared library as one cours
 
     await publisher.getByRole("button", { name: "Publish 3 courses" }).click();
     await expect(publisher.getByText("3 courses published and verified.", { exact: true })).toBeVisible({ timeout: 90_000 });
-    await expect(publisher.getByText("Shared with everyone", { exact: true })).toHaveCount(3);
+    await expect(publisher.getByText("Sharing awaits review", { exact: true })).toHaveCount(3);
     await publisher.screenshot({ path: `/tmp/axom-publish-result-${width}.png` });
     const published = backend.collections();
     expect(published.map(entry => [entry.term, entry.module, entry.visibility, entry.review_status, entry.revision?.status]).sort()).toEqual([
-      ["Term 1", "CPR 1", "shared", "approved", "ready"], ["Term 4", "NCRS", "shared", "approved", "ready"],
-      ["Term 5", "GOER", "shared", "approved", "ready"],
+      ["Term 1", "CPR 1", "shared", "pending", "ready"], ["Term 4", "NCRS", "shared", "pending", "ready"],
+      ["Term 5", "GOER", "shared", "pending", "ready"],
     ]);
+    expect(backend.calls.filter(call => /\/rpc\/(academic_attest_explanations|academic_review)$/.test(call))).toEqual([]);
+    expect(await learnerCatalog(page)).toEqual([]);
     // Every registered file reached Storage byte-for-byte before activation.
     for (const entry of published) for (const file of entry.revision!.files)
       expect(backend.objects.get(file.object_path)?.length).toBe(file.byte_size);

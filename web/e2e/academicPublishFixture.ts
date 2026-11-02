@@ -18,6 +18,18 @@ interface Collection {
 }
 const termRank = (term: string) => Number(term.match(/^Term (\d{1,2})$/)?.[1] ?? 1000);
 const hash = (bytes: Uint8Array | string) => createHash("sha256").update(bytes).digest("hex");
+
+export async function learnerCatalog(page: Page): Promise<Array<{ id: string }>> {
+  return page.evaluate(async () => {
+    const response = await fetch("https://academic-publish.invalid/rest/v1/rpc/academic_catalog", {
+      method: "POST", headers: { authorization: "Bearer learner-fixture", "content-type": "application/json" },
+      body: JSON.stringify({ search: "", term_filter: "", after_id: null }),
+    });
+    if (!response.ok) throw new Error("The synthetic learner catalog could not be read.");
+    return response.json() as Promise<Array<{ id: string }>>;
+  });
+}
+
 interface SeedCourse {
   title: string;
   module: string;
@@ -36,6 +48,7 @@ export async function academicPublishFixture(page: Page, options: { reviewer?: b
   const collections = new Map<string, Collection>();
   const revisions = new Map<string, Revision>();
   const objects = new Map<string, Buffer>();
+  const attestations = new Map<string, { reviewerId: string; contentHash: string; readyQuestions: number }>();
   const calls: string[] = [];
   const catalogRequests: Array<{ search: string; term: string; afterId: string | null }> = [];
   const downloadAttempts: string[] = [];
@@ -74,6 +87,7 @@ export async function academicPublishFixture(page: Page, options: { reviewer?: b
     if (path === "/auth/v1/user") return json({ id: userId, aud: "authenticated", role: "authenticated", email: "owner@example.test",
       app_metadata: {}, user_metadata: {}, created_at: "2026-10-27T00:00:00Z" });
     if (path.endsWith("/rpc/academic_is_reviewer")) return json(Boolean(options.reviewer));
+    if (path.endsWith("/rpc/academic_review_queue")) return json([]);
     if (path.endsWith("/rpc/axom_operator_role")) return json(null);
     if (path.endsWith("/rpc/academic_create_revision")) {
       const input = body() as { metadata: Record<string, string | number | undefined>; template: string; files: Omit<FileRow, "object_path">[]; content_hash: string; collection: string };
@@ -146,15 +160,17 @@ export async function academicPublishFixture(page: Page, options: { reviewer?: b
     if (path.endsWith("/rpc/academic_community_catalog")) return json([]);
     if (path.endsWith("/rpc/academic_catalog")) {
       const { search = "", term_filter = "", after_id = null } = body() as { search?: string; term_filter?: string; after_id?: string | null };
+      const learner = request.headers().authorization === "Bearer learner-fixture";
       catalogRequests.push({ search, term: term_filter, afterId: after_id });
       const ordered = [...collections.values()].filter(collection => collection.current_revision_id
+        && (!learner || (collection.visibility === "shared" && collection.review_status === "approved"))
         && (!term_filter || collection.term === term_filter)
         && `${collection.title} ${collection.module}`.toLowerCase().includes(String(search).toLowerCase()))
         .sort((a, b) => termRank(a.term) - termRank(b.term) || a.module.localeCompare(b.module) || a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
       const cursorIndex = after_id === null ? -1 : ordered.findIndex(collection => collection.id === after_id);
       if (after_id !== null && cursorIndex < 0) return json([]);
       const start = cursorIndex + 1;
-      return json(ordered.slice(start, start + 24).map(course));
+      return json(ordered.slice(start, start + 24).map(collection => ({ ...course(collection), owned: !learner && (collection.owned ?? true) })));
     }
     if (path.endsWith("/rpc/academic_set_visibility")) {
       const input = body() as { collection: string; visibility: Collection["visibility"] };
@@ -163,12 +179,40 @@ export async function academicPublishFixture(page: Page, options: { reviewer?: b
       collection.visibility = input.visibility;
       return empty();
     }
+    if (path.endsWith("/rpc/academic_explanation_review_target")) {
+      const input = body() as { collection: string; revision: string };
+      const collection = collections.get(input.collection);
+      const revision = collection && current(collection);
+      return json(options.reviewer && collection?.visibility === "shared" && collection.review_status === "pending"
+        && revision?.id === input.revision && revision.status === "ready"
+        ? { collection_id: collection.id, revision_id: revision.id, content_hash: revision.content_hash,
+          ready_questions: revision.ready_questions } : null);
+    }
+    if (path.endsWith("/rpc/academic_attest_explanations")) {
+      const input = body() as { collection: string; revision: string; content_hash: string;
+        observed_ready_questions: number; observed_explained_questions: number; rationale_reviewed: boolean };
+      const collection = collections.get(input.collection);
+      const revision = collection && current(collection);
+      if (!options.reviewer || collection?.visibility !== "shared" || collection.review_status !== "pending"
+        || revision?.id !== input.revision || revision.content_hash !== input.content_hash
+        || revision.ready_questions < 1 || input.observed_ready_questions !== revision.ready_questions
+        || input.observed_explained_questions !== revision.ready_questions || input.rationale_reviewed !== true)
+        return json({ message: "Explanation review attestation required for this revision", code: "42501" }, 403);
+      attestations.set(revision.id, { reviewerId: userId, contentHash: revision.content_hash, readyQuestions: revision.ready_questions });
+      return empty();
+    }
     if (path.endsWith("/rpc/academic_review")) {
       if (!options.reviewer) return json({ message: "Reviewer access required", code: "42501" }, 403);
       const input = body() as { collection: string; approved: boolean };
       const collection = collections.get(input.collection)!;
+      const revision = current(collection)!;
+      const attestation = attestations.get(revision.id);
+      if (input.approved && (collection.visibility !== "shared" || collection.review_status !== "pending"
+        || attestation?.reviewerId !== userId || attestation.contentHash !== revision.content_hash
+        || attestation.readyQuestions !== revision.ready_questions))
+        return json({ message: "Explanation review attestation required for this revision", code: "42501" }, 403);
       collection.review_status = input.approved ? "approved" : "rejected";
-      current(collection)!.approved_at = input.approved ? new Date().toISOString() : null;
+      revision.approved_at = input.approved ? new Date().toISOString() : null;
       return empty();
     }
     if (path.endsWith("/rpc/academic_enroll") || path.endsWith("/rpc/touch_account_device")) return empty();

@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { FileArchive, FileCheck2, FolderOpen, Library, ListChecks, Square, UploadCloud } from "lucide-react";
 import { useAccount } from "../../lib/account/accountStore";
 import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
-import { isAcademicReviewer, shareAcademicCourses } from "../../lib/academicLibrary/client";
+import { shareAcademicCourses } from "../../lib/academicLibrary/client";
 import { uploadAcademicBatch } from "../../lib/academicLibrary/batch";
-import { inspectPreparedUploadExplanations, type ExplanationReviewReceipt } from "../../lib/academicLibrary/explanationReview";
+import { inspectPreparedUploadExplanations } from "../../lib/academicLibrary/explanationReview";
 import { applyFilingDecisions, readFilingDecisions, readFilingProposals, type FilingProposals, type FilingSummary } from "../../lib/academicLibrary/filingDecisions";
 import { applyMiNmiDecision, readMiNmiDecision, type MiNmiSummary } from "../../lib/academicLibrary/miNmiCorrection";
 import { accountQuestions, type QuestionLedger } from "../../lib/academicLibrary/questionLedger";
@@ -24,7 +24,7 @@ const TERMS: Term[] = ["Term 1", "Term 2", "Term 3", "Term 4", "Term 5"];
 interface KeptFiles { keptLocal?: number; overLimit?: number }
 type CourseState =
   | { state: "checked"; ready: number; review: number; missingExplanations: number; files: number; bytes: number } & KeptFiles
-  | { state: "published"; ready: number; missingExplanations: number; files: number; shared?: boolean; approved?: boolean; sharingError?: string } & KeptFiles
+  | { state: "published"; ready: number; missingExplanations: number; files: number; shared?: boolean; sharingError?: string } & KeptFiles
   | { state: "failed"; message: string; during: "check" | "publish" }
   | { state: "stopped" };
 /** uploadAcademicBatch accepts at most 100 jobs per run. */
@@ -51,22 +51,13 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
   const [worksheet, setWorksheet] = useState<{ name: string; proposals: FilingProposals }>();
   const [confirmedTerms, setConfirmedTerms] = useState<Record<string, Term>>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [reviewer, setReviewer] = useState(false);
   const [share, setShare] = useState(true);
-  const [approve, setApprove] = useState(false);
-  const [rationaleReviewed, setRationaleReviewed] = useState(false);
   const [rights, setRights] = useState(false);
   const [busy, setBusy] = useState<"reading" | "checking" | "publishing">();
   const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
   const [results, setResults] = useState<Record<string, CourseState>>({});
 
-  useEffect(() => {
-    let active = true;
-    setReviewer(false);
-    if (accountId) void isAcademicReviewer(accountId).then(value => { if (active) setReviewer(value); });
-    return () => { active = false; };
-  }, [accountId]);
   useEffect(() => () => controller.current?.abort(), []);
 
   const current = library && library.accountId === accountId ? library : undefined;
@@ -237,7 +228,6 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
     try {
       const { jobs, notes } = publicationJobs(current.read, current.inventory, courses);
       const published = new Map<string, string>();
-      const receipts = new Map<string, ExplanationReviewReceipt>();
       let blocked = false;
       for (let start = 0; start < jobs.length && !blocked && !abort.signal.aborted; start += BATCH_SIZE) {
         const report = await uploadAcademicBatch(jobs.slice(start, start + BATCH_SIZE), {
@@ -253,7 +243,6 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
             let next: CourseState;
             if (outcome.state === "verified") {
               published.set(outcome.receipt.collectionId, outcome.key);
-              receipts.set(outcome.receipt.collectionId, outcome.receipt);
               next = { state: "published", ready: outcome.receipt.readyQuestions, files: outcome.receipt.verifiedFiles,
                 missingExplanations: outcome.receipt.missingExplanations,
                 ...kept(notes.keptLocal.get(outcome.key), outcome.receipt.localOnlyOriginals.length) };
@@ -271,14 +260,13 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
       if (share && published.size && !abort.signal.aborted) {
         setProgress("Sharing the published courses…");
         const outcomes = await shareAcademicCourses([...published.keys()], accountId,
-          { approve: approve && reviewer, receipts, rationaleReviewed,
-            assertCurrent: scope.assertCurrent, signal: abort.signal });
+          { assertCurrent: scope.assertCurrent, signal: abort.signal });
         setResults(states => {
           const next = { ...states };
           for (const outcome of outcomes) {
             const key = published.get(outcome.collectionId);
             const state = key ? next[key] : undefined;
-            if (key && state?.state === "published") next[key] = { ...state, shared: outcome.shared, approved: outcome.approved,
+            if (key && state?.state === "published") next[key] = { ...state, shared: outcome.shared,
               ...(outcome.error ? { sharingError: outcome.error } : {}) };
           }
           return next;
@@ -409,22 +397,18 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
 
       <fieldset className="academic-publisher-options" disabled={Boolean(busy)}>
         <legend>After uploading</legend>
-        <label><input type="checkbox" checked={share} onChange={event => { setShare(event.target.checked); if (!event.target.checked) setApprove(false); }} />
-          <span>Share with every signed-in AXOM account</span></label>
-        {reviewer && <label><input type="checkbox" checked={approve} disabled={!share} onChange={event => setApprove(event.target.checked)} />
-          <span>Approve sharing now. You are an academic reviewer.</span></label>}
-        {reviewer && approve && <label><input type="checkbox" checked={rationaleReviewed} onChange={event => setRationaleReviewed(event.target.checked)} />
-          <span>I reviewed the answer rationale against its source for every ready question. Courses with missing explanations will stay awaiting review.</span></label>}
+        <label><input type="checkbox" checked={share} onChange={event => setShare(event.target.checked)} />
+          <span>Submit for academic review to share with every signed-in AXOM account</span></label>
         {share && <label><input type="checkbox" checked={rights} onChange={event => setRights(event.target.checked)} />
           <span>I have the right to share this course material with every AXOM account.</span></label>}
-        <p>{share && !approve ? "Shared courses stay private until an academic reviewer approves them. " : ""}Answers, notes and progress are never shared.</p>
+        <p>{share ? "Other accounts cannot find these courses until an academic reviewer checks and approves the stored revision. " : ""}Answers, notes and progress are never shared.</p>
       </fieldset>
       <p className="academic-publisher-hint">Checking reads and verifies every selected course on this device, exactly as publishing will. Nothing is uploaded until you publish.</p>
       <div className="academic-publisher-actions">
         <GButton disabled={Boolean(busy) || !chosen.length} onClick={() => void check()}>
           <ListChecks size={ICON_SIZE.emphasis} /> {busy === "checking" ? "Checking…" : `Check ${plural(chosen.length, "course")}`}
         </GButton>
-        <GButton variant="primary" disabled={Boolean(busy) || !chosen.length || (share && !rights) || (approve && !rationaleReviewed)} onClick={() => void publish()}>
+        <GButton variant="primary" disabled={Boolean(busy) || !chosen.length || (share && !rights)} onClick={() => void publish()}>
           <UploadCloud size={ICON_SIZE.emphasis} /> {busy === "publishing" ? "Publishing…" : `Publish ${plural(chosen.length, "course")}`}
         </GButton>
         {(busy === "checking" || busy === "publishing") && <GhostButton onClick={() => controller.current?.abort()}><Square size={ICON_SIZE.body} /> Stop</GhostButton>}
@@ -492,7 +476,7 @@ function CourseResult({ result }: { result: CourseState }) {
   </p>;
   return <p className="academic-publisher-result">
     <Tag tone="green">Published</Tag>
-    {result.approved ? <Tag tone="gold">Shared with everyone</Tag> : result.shared ? <Tag tone="neutral">Sharing awaits review</Tag> : null}
+    {result.shared ? <Tag tone="neutral">Sharing awaits review</Tag> : null}
     {" "}{plural(result.ready, "ready question")} and {plural(result.files, "file")} verified.
     {` ${plural(result.missingExplanations, "ready question")} without an explanation in the stored revision.`}
     {keptNote(result, false)}
