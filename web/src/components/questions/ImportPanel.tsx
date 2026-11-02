@@ -397,7 +397,10 @@ export function ImportPanel({
   async function saveApproved(modeOverride: SaveMode = saveMode, quick = false) {
     if (finalizingRef.current) return;
 
-    const approved = quick ? quickPlan.readyIndexes.map((index) => drafts[index]) : drafts.filter((draft) => draft.include);
+    const approved = quick ? quickPlan.readyIndexes.map((index) => ({
+      ...drafts[index],
+      parserRuleIds: [...new Set([...(drafts[index].parserRuleIds ?? []), "import.source-key-validated"])],
+    })) : drafts.filter((draft) => draft.include);
     const week = Number(scopeWeek);
     // Checked, shaped and written by lib/questionImportSave: the same path
     // mass import's "Accept" takes.

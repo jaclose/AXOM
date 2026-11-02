@@ -74,7 +74,7 @@ describe("source-document-first import", () => {
     await waitFor(() => expect(mocked.addQuestion).toHaveBeenCalledTimes(1));
     expect(mocked.addQuestion.mock.calls[0][0]).toMatchObject({
       stem: "Which option is correct?", correctKey: "B",
-      extraction: { reviewed: true, parserRuleIds: expect.arrayContaining(["answer.explicit-letter"]) },
+      extraction: { reviewed: true, parserRuleIds: expect.arrayContaining(["answer.explicit-letter", "import.source-key-validated"]) },
     });
     expect(mocked.addQuestionSet).toHaveBeenCalledTimes(1);
     expect(mocked.addDocument).toHaveBeenCalledTimes(1);

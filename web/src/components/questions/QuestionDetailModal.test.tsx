@@ -116,6 +116,7 @@ describe("QuestionDetailModal repair cards", () => {
         reviewed: true,
         reviewedAt: expect.any(String),
         answerDetectionConfidence: 1,
+        parserRuleIds: expect.arrayContaining(["import.user-reviewed"]),
       }),
     });
     const patch = mocked.updateQuestion.mock.calls[0][1];

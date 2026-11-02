@@ -140,6 +140,7 @@ export type ExtractionConfidence = "high" | "medium" | "low";
  */
 export interface QuestionImportDiagnostics {
   confidence: ExtractionConfidence;
+  /** Mapping confirmed for local practice. Parser rules distinguish source-key validation from a person's review; neither grants sharing rights. */
   reviewed: boolean;
   reviewedAt?: string;
   questionDetectionConfidence?: number;
