@@ -41,6 +41,30 @@ take precedence over inferred legacy lists; older source versions remain availab
 
 ## Backend boundary
 
+### Submitted course review
+
+The local Course Library shows appointed academic reviewers a paged list of
+ordinary shared, pending courses from all owners. The list contains bounded
+metadata and an owner display name, never email, owner ID, question bodies or
+learner progress. Community submissions stay in their separate exact-revision
+review flow. A reviewer opens the current plan, explicitly downloads that
+revision's hash-checked review copy to this device, then inspects answers,
+images and available source documents in Question Bank. A missing original
+must be obtained from its owner before the reviewer can truthfully attest to
+source quality. The local explanation check establishes presence only; the
+reviewer must inspect the rationale and source before checking the attestation.
+Approval stays disabled until the download, explanation check and explicit
+attestation succeed. A failed or partial download cannot enable approval.
+
+Forward migration `20261102170000_academic_review_queue.sql` adds reviewer-only
+metadata and preview RPCs plus a three-argument `academic_review` overload.
+It locks the collection, compares the exact previewed revision, then invokes
+the existing two-argument decision, which still requires the revision-bound
+explanation attestation. An upload that replaces the revision forces a fresh
+preview. The queue migration follows `20261101180000` and the frontier Host
+migrations; it remains local release preparation until applied and accepted
+against AXOM Production.
+
 The additive `20261011190000_academic_library.sql` migration defines collections,
 immutable revisions, file manifests, reviewer/group access and personal enrollments.
 Catalog pages contain at most 24 metadata records. Preview retrieves template text;
@@ -94,8 +118,8 @@ in catalog entries are replaced by source filenames. Sharing controls now live u
 owned course preview. Private, shared and membership-backed group choices call the
 existing permissioned RPC. Same-scope refresh preserves the open plan; account/query
 changes still discard prior metadata immediately. Reviewers approve or withdraw a
-course's current revision from its preview; a cross-owner review queue is not delivered
-here (draft [PR #30](https://github.com/jaclose/AXOM/pull/30) lists submissions in its operator console).
+course's current revision from its preview. The local cross-owner review queue
+above is a separate current-revision path.
 
 The forward migration `20261027120000_academic_curriculum_catalog.sql` pages
 `academic_catalog` by term number, module and title instead of collection UUID, with the
@@ -366,7 +390,7 @@ These are single-run local observations, not hosted latency or total account-siz
 
 **Still incomplete:** paged learner history, persistent offline cache usage/removal
 controls, general private-upload original-binary sync, cloud copies for academic
-originals above 50 MiB, a cross-owner review queue, publishing the remaining supplied
+originals above 50 MiB, hosted reviewer-queue acceptance, publishing the remaining supplied
 courses, hosted daily challenges and release/package acceptance. Legacy checkpoints
 still use the compatible full-source restore path.
 
