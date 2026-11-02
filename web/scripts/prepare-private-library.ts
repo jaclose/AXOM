@@ -8,6 +8,8 @@ import { loadTaggedPdf } from "../src/lib/question-content/pdf/loadTaggedPdf";
 import { readTaggedPage } from "../src/lib/question-content/pdf/taggedPdf";
 import { taggedPdfToQuestions } from "../src/lib/question-content/pdf/taggedPdfToQuestions";
 import { assertPackageSourceIdentity, scanPdfAnswerMarkProposals } from "../src/lib/question-content/pdf/answerMarkProposals";
+import { locateInlineAnswerOccurrences } from "../src/lib/question-content/pdf/inlineAnswerOccurrences";
+import { buildInlineAnswerProposals } from "../src/lib/question-content/pdf/inlineAnswerProposals";
 import { describeAssets } from "../src/lib/question-content/assets";
 import { assessBank } from "../src/lib/question-content/assessBank";
 import { docxToQuestions } from "../src/lib/question-content/docx/docxToQuestions";
@@ -41,8 +43,8 @@ const checkpoint = () => {
 };
 const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
 const previousVersion = catalog.preparerVersion ?? 1;
-// Version 6 adds outline proposals in separate receipts, preserving version-5 evidence.
-const PREPARER_VERSION = 6;
+// Version 7 adds inline-answer review receipts without changing earlier evidence or banks.
+const PREPARER_VERSION = 7;
 const sha256 = (bytes: Uint8Array | string): string => createHash("sha256").update(bytes).digest("hex");
 
 /** A separate private receipt: a mark is never copied into a scoring key. */
@@ -89,6 +91,47 @@ async function ensureAnswerMarkReceipt(entry: Entry, bankFile: string, originalF
   writeFileSync(`${receiptFile}.pending`, JSON.stringify(receipt), { mode: 0o600 });
   renameSync(`${receiptFile}.pending`, receiptFile);
 }
+
+/** Printed answer lines remain review evidence, never prepared scoring keys. */
+function ensureInlineAnswerReceipt(entry: Entry, bankFile: string, originalFile?: string): void {
+  if (entry.extension !== "pdf") return;
+  const bankBytes = readFileSync(join(out, bankFile));
+  const bankSha256 = sha256(bankBytes);
+  const bank = JSON.parse(bankBytes.toString("utf8")) as PreparedBank;
+  if (!Array.isArray(bank.pkg?.questions)) throw new Error("Prepared PDF bank is not readable for inline-answer review.");
+  assertPackageSourceIdentity(bank.pkg, entry);
+  const receiptFile = join(out, "review", "inline-answers", `${entry.sha256}-${bankSha256}.json`);
+  const occurrences = locateInlineAnswerOccurrences(bank.sourceText.pageTexts ?? []);
+  const byId = new Map(bank.pkg.questions.map(question => [question.id, question]));
+  const proposals = buildInlineAnswerProposals(bank.pkg.questions, occurrences).map(proposal => {
+    const question = byId.get(proposal.questionId), answeredCopy = byId.get(proposal.answerCopyQuestionId);
+    if (!question || !answeredCopy) throw new Error("Inline-answer proposal does not match its prepared questions.");
+    return { ...proposal, questionSha256: sha256(JSON.stringify(question)),
+      answerCopyQuestionSha256: sha256(JSON.stringify(answeredCopy)) };
+  });
+  if (proposals.length) {
+    const sourceFile = join(dirname(entry.root), entry.path);
+    const portableFile = originalFile ? join(out, originalFile) : undefined;
+    const original = readFileSync(existsSync(sourceFile) ? sourceFile : portableFile ?? sourceFile);
+    if (sha256(original) !== entry.sha256) throw new Error("Source changed since inventory; inline-answer scan stopped.");
+  }
+  const receipt = {
+    format: "axom-private-inline-answer-proposals", schemaVersion: 1,
+    sourceSha256: entry.sha256, bankSha256, questionCount: bank.pkg.questions.length,
+    locatedOccurrences: occurrences.filter(occurrence => occurrence.page > 0).length,
+    proposals,
+  };
+  if (existsSync(receiptFile)) {
+    const existing = JSON.parse(readFileSync(receiptFile, "utf8")) as unknown;
+    if (JSON.stringify(existing) !== JSON.stringify(receipt)) {
+      throw new Error("Inline-answer review receipt changed; inspect it before resuming.");
+    }
+    return;
+  }
+  mkdirSync(dirname(receiptFile), { recursive: true, mode: 0o700 });
+  writeFileSync(`${receiptFile}.pending`, JSON.stringify(receipt), { mode: 0o600 });
+  renameSync(`${receiptFile}.pending`, receiptFile);
+}
 for (const entry of inventory.entries) {
   const known = knownBankManifests.find(m => m.source.filename.toLowerCase() === entry.fileName.toLowerCase());
   const previous = catalog.sources.find(s => s.sourcePath === entry.path && s.checksum === entry.sha256 && !["failed", "missing"].includes(s.status));
@@ -101,7 +144,10 @@ for (const entry of inventory.entries) {
     if (previous && previous.status !== "missing") previous.originalFile = originalFile;
   }
   if (previous && !(previousVersion < 3 && known && !entry.duplicateOf) && !(previousVersion < 2 && entry.extension === "pdf" && previous.status === "reference/template-only" && !/Course update|Examplify UI/i.test(entry.root))) {
-    if (previous.bankFile) await ensureAnswerMarkReceipt(entry, previous.bankFile, previous.originalFile);
+    if (previous.bankFile) {
+      await ensureAnswerMarkReceipt(entry, previous.bankFile, previous.originalFile);
+      ensureInlineAnswerReceipt(entry, previous.bankFile, previous.originalFile);
+    }
     checkpoint(); continue;
   }
   const id = `source-${entry.sha256}`;
@@ -198,7 +244,10 @@ for (const entry of inventory.entries) {
   }
   catalog.sources = [...catalog.sources.filter(s => s.sourcePath !== entry.path), row];
   checkpoint();
-  if (row.bankFile) await ensureAnswerMarkReceipt(entry, row.bankFile, row.originalFile);
+  if (row.bankFile) {
+    await ensureAnswerMarkReceipt(entry, row.bankFile, row.originalFile);
+    ensureInlineAnswerReceipt(entry, row.bankFile, row.originalFile);
+  }
   console.log(`${catalog.sources.length}/${inventory.entries.length} ${row.status} ready=${row.ready} review=${row.review}`);
 }
 catalog.preparerVersion = PREPARER_VERSION;
