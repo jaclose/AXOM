@@ -9,8 +9,14 @@ import { makeSeed, SCHEMA_VERSION } from "../../lib/seed";
 import { useStore } from "../../lib/store";
 import { SettingsModal } from "./SettingsModal";
 
-const operatorMocks = vi.hoisted(() => ({ role: null as "owner" | "admin" | "moderator" | null }));
-vi.mock("../../lib/operator/hostClient", () => ({ useOperatorAccess: () => operatorMocks.role }));
+const operatorMocks = vi.hoisted(() => ({
+  role: null as "owner" | "admin" | "moderator" | null,
+  state: "denied" as "denied" | "verified" | "error",
+  retry: vi.fn(),
+}));
+vi.mock("../../lib/operator/hostClient", () => ({
+  useOperatorAccessStatus: () => ({ role: operatorMocks.role, state: operatorMocks.state, retry: operatorMocks.retry }),
+}));
 
 const storageValues = new Map<string, string>();
 const storage = {
@@ -24,6 +30,8 @@ const storage = {
 
 beforeEach(() => {
   operatorMocks.role = null;
+  operatorMocks.state = "denied";
+  operatorMocks.retry.mockReset();
   vi.stubGlobal("localStorage", storage);
   localStorage.clear();
   useStore.setState(makeSeed());
@@ -161,11 +169,24 @@ describe("Settings information architecture", () => {
 
   it("shows the Project CEO path only after a verified owner role", () => {
     operatorMocks.role = "owner";
+    operatorMocks.state = "verified";
     render(<SettingsModal onClose={() => {}} initialTab="account" />);
     const accountPanel = screen.getByRole("tabpanel", { name: "Account" });
     const hostAccess = within(accountPanel).getByLabelText("Host access");
     expect(within(hostAccess).getByText("Project CEO")).toBeTruthy();
     expect(within(hostAccess).getByRole("link", { name: "Open host dashboard" }).getAttribute("href")).toBe("#host");
+  });
+
+  it("offers a retry without revealing Host access when the role check fails", async () => {
+    operatorMocks.state = "error";
+    const user = userEvent.setup();
+    render(<SettingsModal onClose={() => {}} initialTab="account" />);
+    const panel = screen.getByRole("tabpanel", { name: "Account" });
+    expect(within(panel).getByRole("alert").textContent).toContain("Host access could not be checked");
+    expect(within(panel).queryByText("Project CEO")).toBeNull();
+    expect(within(panel).queryByRole("link", { name: "Open host dashboard" })).toBeNull();
+    await user.click(within(panel).getByRole("button", { name: "Retry Host access" }));
+    expect(operatorMocks.retry).toHaveBeenCalledOnce();
   });
 
   it("lets a narrow-screen section picker reach every Settings area", async () => {

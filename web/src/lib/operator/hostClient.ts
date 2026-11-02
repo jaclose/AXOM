@@ -100,11 +100,11 @@ export async function operatorRole(accountId: string): Promise<OperatorRole | nu
     return data as OperatorRole | null;
   });
 }
-export function useOperatorAccess() {
+export function useOperatorAccessStatus() {
   const identity = useAccountIdentity();
   const accountId = useAccount(state => state.user?.id);
   const [revision, setRevision] = useState(0);
-  const [access, setAccess] = useState<{ identity: string; role: OperatorRole | null }>();
+  const [access, setAccess] = useState<{ identity: string; revision: number; role: OperatorRole | null; failed: boolean }>();
   useEffect(() => {
     const refresh = () => setRevision(value => value + 1);
     window.addEventListener("focus", refresh);
@@ -114,12 +114,19 @@ export function useOperatorAccess() {
   useEffect(() => {
     let active = true;
     setAccess(undefined);
-    if (accountId) void operatorRole(accountId).then(role => { if (active) setAccess({ identity, role }); })
-      .catch(() => { if (active) setAccess({ identity, role: null }); });
+    if (accountId) void operatorRole(accountId).then(role => { if (active) setAccess({ identity, revision, role, failed: false }); })
+      .catch(() => { if (active) setAccess({ identity, revision, role: null, failed: true }); });
     return () => { active = false; };
   }, [identity, accountId, revision]);
-  return access?.identity === identity ? access.role : null;
+  const current = access?.identity === identity && access.revision === revision ? access : undefined;
+  const state = !accountId ? "signed-out" : !current ? "checking" : current.failed ? "error" : current.role ? "verified" : "denied";
+  return {
+    role: state === "verified" ? current?.role ?? null : null,
+    state,
+    retry: () => setRevision(value => value + 1),
+  };
 }
+export function useOperatorAccess() { return useOperatorAccessStatus().role; }
 export async function loadOperatorDashboard(accountId: string): Promise<OperatorDashboard> {
   return withClient(accountId, async client => {
   const { data: roleData, error: roleError } = await client.rpc("axom_operator_role");
