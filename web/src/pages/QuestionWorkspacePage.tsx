@@ -203,6 +203,7 @@ export function QuestionWorkspacePage() {
   const collectionMetrics = useMemo(() => questionCollectionMetrics(questions), [questions]);
   const mapping = useMemo(() => summarizeQuestionMappings(questions), [questions]);
   const runnable = runnableQuestions.length;
+  const withExplanation = runnableQuestions.filter((question) => Boolean(question.explanation?.trim())).length;
   const heldForReview = questions.length - runnable + privateReview.held;
   const unseen = runnableQuestions.filter((question) => question.attempts.length === 0).length;
   const lastSession = useMemo(() => (s.quizSessions ?? [])
@@ -418,7 +419,7 @@ export function QuestionWorkspacePage() {
               <p className="qb-lede">
                 {isFirstUse
                   ? "Start with a course collection below. Add your own material only when you need it."
-                  : "Open a course set, practice only ready questions, and keep uncertain answers in review."}
+                  : "Open a course set, practice questions with a mapped answer, and see which still need explanations."}
               </p>
             </div>
             <div className="qb-hero-actions" data-module-tour="qb-import">
@@ -431,7 +432,8 @@ export function QuestionWorkspacePage() {
             </div>
           </div>
           <dl className="qb-inventory" aria-label="Question Bank inventory">
-            <div><dt>Ready to practice</dt><dd>{runnable}</dd></div>
+            <div><dt>Answer-ready</dt><dd>{runnable}</dd></div>
+            <div><dt>Main explanation text</dt><dd>{withExplanation}</dd></div>
             <div><dt>Held for review</dt><dd>{heldForReview}</dd></div>
             <div><dt>Saved sets</dt><dd>{questionSets.length}</dd></div>
           </dl>

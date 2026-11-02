@@ -77,6 +77,34 @@ describe("QuizFeedback", () => {
     expect(screen.getByText(edited).textContent).toBe(edited);
   });
 
+  it("shows an honest explanation gap after answering and routes it to review", () => {
+    const flagMissing = vi.fn();
+    render(<QuizFeedback
+      question={{ ...question, explanation: "   " }}
+      pickedKey="A"
+      onMarkExplanationWrong={flagMissing}
+    />);
+
+    expect(screen.getByText("Explanation pending")).toBeTruthy();
+    expect(screen.getByText(/This answer has a mapped key, but no main explanation is recorded yet/)).toBeTruthy();
+    expect(screen.getByText(/The source record is below/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Explanation wrong" })).toBeNull();
+    screen.getByRole("button", { name: "Flag missing explanation" }).click();
+    expect(flagMissing).toHaveBeenCalledOnce();
+  });
+
+  it("does not imply a source record or trusted answer when neither is available", () => {
+    render(<QuizFeedback
+      question={{ ...question, explanation: undefined, correctKey: undefined, correctAnswerText: undefined }}
+      pickedKey="A"
+      showProvenance={false}
+    />);
+
+    expect(screen.getByText("No main explanation is recorded for this question yet.")).toBeTruthy();
+    expect(screen.queryByText(/source record is below/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Flag missing explanation" })).toBeNull();
+  });
+
   it("exposes repair actions through explicit callbacks", () => {
     const review = vi.fn();
     const mapping = vi.fn();
