@@ -28,11 +28,10 @@ test("persistent Daily Games, Daily Word history, and shared clock preferences p
   await page.reload({ waitUntil: "networkidle" });
   await expect(page.getByRole("gridcell", { name: /Row 1, column 1, letter F/ })).toBeVisible();
 
-  // The TopBar action opens the exact Personalization surface rather than a
-  // nested settings dialog.
+  // The TopBar action opens the shared Settings surface.
   await page.getByRole("button", { name: /Open clock/ }).click();
   await page.getByRole("button", { name: "Clock preferences" }).click();
-  const settings = page.getByRole("dialog", { name: "Your AXOM Setup" });
+  const settings = page.getByRole("dialog", { name: "Settings" });
   await expect(settings.getByRole("heading", { name: "Daily rhythm reminders" })).toBeVisible();
 
   await settings.getByRole("combobox", { name: "Hour cycle" }).selectOption("24");
