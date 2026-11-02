@@ -2,11 +2,14 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildMetadata } from "./build-metadata";
 
 const temporary: string[] = [];
-afterEach(() => { while (temporary.length) rmSync(temporary.pop()!, { recursive: true, force: true }); });
+afterEach(() => {
+  vi.unstubAllEnvs();
+  while (temporary.length) rmSync(temporary.pop()!, { recursive: true, force: true });
+});
 
 function fixture(withGit = true) {
   const repo = mkdtempSync(join(tmpdir(), "axom-build-metadata-"));
@@ -45,9 +48,29 @@ describe("build revision provenance", () => {
   });
 
   it("labels untracked source and a source ZIP as local", () => {
+    vi.stubEnv("VERCEL_GIT_COMMIT_SHA", "");
     const { web } = fixture();
     writeFileSync(join(web, "new-source.ts"), "export const extra = true;\n");
     expect(buildMetadata(web, "0.0.3-prebeta").commit).toBe("local");
     expect(buildMetadata(fixture(false).web, "0.0.3-prebeta").commit).toBe("local");
+  });
+
+  it("uses the Vercel revision for a filtered archive without .git", () => {
+    const { web } = fixture(false);
+    vi.stubEnv("VERCEL_GIT_COMMIT_SHA", "A".repeat(40));
+    expect(buildMetadata(web, "0.0.3-prebeta").commit).toBe("a".repeat(12));
+  });
+
+  it("does not trust a malformed Vercel revision", () => {
+    const { web } = fixture(false);
+    vi.stubEnv("VERCEL_GIT_COMMIT_SHA", "malformed-revision");
+    expect(buildMetadata(web, "0.0.3-prebeta").commit).toBe("local");
+  });
+
+  it("does not hide dirty checkout changes behind a Vercel revision", () => {
+    const { web } = fixture();
+    vi.stubEnv("VERCEL_GIT_COMMIT_SHA", "a".repeat(40));
+    writeFileSync(join(web, "source.ts"), "export const value = 2;\n");
+    expect(buildMetadata(web, "0.0.3-prebeta").commit).toBe("local");
   });
 });
