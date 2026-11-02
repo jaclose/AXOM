@@ -51,6 +51,15 @@ reply address, audience, campaign or delivery was configured. Recheck the copy,
 links and unsubscribe handling against the live release before publication.
 Both generators check the source manifest and refuse a stale bundle.
 
+On 2026-11-02, the ten optional Resend Topics in the
+[activation runbook](communications-resend.md) were created and checked in the
+dashboard. Each is public on the preference page and defaults to opt-out; the
+audience still has zero contacts. Their provider IDs are preserved in the
+local ignored, owner-only file
+`artifacts/communications/resend-topic-ids-2026-11-02.json` for later server
+configuration. The IDs have not been set as `RESEND_TOPIC_IDS` in production,
+and no contact sync or broadcast has occurred.
+
 For provider setup and real acceptance, follow the
 [Resend/Supabase runbook](communications-resend.md). Keep account deletion off
 until its separate retention and cleanup review is complete. The final gate is
