@@ -53,6 +53,7 @@ import { BulkCurriculumTemplateInstall } from "./CourseTrackerPage.bulkTemplates
 import { OfficialSguClinicalCatalogReview } from "./CourseTrackerPage.officialCatalog";
 import { PrivateAcademicBatchUpload } from "./CourseTrackerPage.cloudBatch";
 import { activePrimaryPaths, activePrimaryScopes, isPrimaryPath, itemsInPrimary, renamePrimaryScopes, setPrimaryUntil, togglePrimaryScope, type PrimaryTrackerScope } from "../lib/trackerFocus";
+import { externalLinkHref } from "../lib/resourceUtils";
 
 const KINDS: TrackerKind[] = ["Lecture", "DLA", "PQ", "Lab", "Reading", "Requirement", "Milestone", "Evidence", "Question Block", "Assessment", "Review Loop"];
 const TABS = ["All", "Lecture", "DLA", "PQ", "Blueprint", "Extra"] as const;
@@ -1210,6 +1211,7 @@ function BlueprintTrackerRow({ install, node }: { install: InstalledBlueprint; n
   const patch = (input: Partial<InstalledBlueprintNode>) => update(install.id, node.id, input);
   const move = (direction: -1 | 1) => moveBlueprintNode(install, node, direction, update);
   const linkedTotal = node.linkedQuestions + node.linkedAnki + node.linkedErrorLog + node.linkedAssessments;
+  const sourceHref = externalLinkHref(node.sourceUrl);
   return (
     <div className={`bp-tracker-row ${isBlueprintNodeDone(node) ? "done" : ""}`}>
       <div className="bp-tracker-row-head">
@@ -1264,7 +1266,7 @@ function BlueprintTrackerRow({ install, node }: { install: InstalledBlueprint; n
       <div className="bp-tracker-foot">
         <Tag tone={node.priority === "high" ? "orange" : node.priority === "low" ? "neutral" : "cyan"}>{node.priority} priority</Tag>
         <Tag tone={node.sourceType === "official" ? "green" : node.sourceType === "tool" ? "cyan" : "neutral"}>{node.sourceType ?? "internal"} source</Tag>
-        {node.sourceUrl && <a className="gbtn tiny" href={node.sourceUrl} target="_blank" rel="noreferrer noopener">Source <ExternalLink size={ICON_SIZE.microInline} /></a>}
+        {sourceHref && <a className="gbtn tiny" href={sourceHref} target="_blank" rel="noreferrer noopener">Source <ExternalLink size={ICON_SIZE.microInline} /></a>}
         {node.sourceVersion && <span className="sub">{node.sourceVersion}</span>}
         {node.lastVerified && <span className="sub">source audited {node.lastVerified}</span>}
       </div>

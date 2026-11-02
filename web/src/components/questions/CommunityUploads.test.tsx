@@ -11,11 +11,17 @@ const ids = {
 };
 const mocks = vi.hoisted(() => ({
   account: { id: "owner-1" as string | undefined },
+  workspace: { questionSets: [] as unknown[], questions: [] as unknown[], documents: [] as unknown[] },
   list: vi.fn(), preview: vi.fn(), submit: vi.fn(), withdraw: vi.fn(), review: vi.fn(),
   download: vi.fn(), reviewer: vi.fn(), owned: vi.fn(),
-  explanations: vi.fn(),
+  explanations: vi.fn(), prepareSaved: vi.fn(), upload: vi.fn(), academicClient: vi.fn(),
   saveReference: vi.fn(),
 }));
+vi.mock("../../lib/store", () => {
+  const useStore = (select: (value: typeof mocks.workspace) => unknown) => select(mocks.workspace);
+  useStore.getState = () => mocks.workspace;
+  return { useStore };
+});
 vi.mock("../../lib/account/accountStore", () => {
   const state = () => ({ user: mocks.account.id ? { id: mocks.account.id } : null });
   const useAccount = (select: (value: ReturnType<typeof state>) => unknown) => select(state());
@@ -37,6 +43,13 @@ vi.mock("../../lib/academicLibrary/community", () => ({
 vi.mock("../../lib/academicLibrary/client", () => ({
   isAcademicReviewer: (...args: unknown[]) => mocks.reviewer(...args),
   downloadAcademicCourse: (...args: unknown[]) => mocks.download(...args),
+  academicClient: (...args: unknown[]) => mocks.academicClient(...args),
+}));
+vi.mock("../../lib/academicLibrary/savedSourceUpload", () => ({
+  prepareSavedSourceUpload: (...args: unknown[]) => mocks.prepareSaved(...args),
+}));
+vi.mock("../../lib/academicLibrary/upload", () => ({
+  uploadAcademicCourse: (...args: unknown[]) => mocks.upload(...args),
 }));
 vi.mock("../../lib/academicLibrary/explanationReview", () => ({
   inspectStoredRevisionExplanations: (...args: unknown[]) => mocks.explanations(...args),
@@ -57,6 +70,9 @@ const row = { id: ids.collection, title: "Current course", module: "NCRS", term:
 describe("Community Uploads", () => {
   beforeEach(() => {
     mocks.account.id = "owner-1";
+    mocks.workspace.questionSets = [];
+    mocks.workspace.questions = [];
+    mocks.workspace.documents = [];
     mocks.list.mockResolvedValue([row]);
     mocks.preview.mockResolvedValue({ id: ids.revision, collection_id: ids.collection, template_text: "Week 1", ready_questions: 8, review_questions: 2 });
     mocks.submit.mockResolvedValue(undefined);
@@ -68,6 +84,9 @@ describe("Community Uploads", () => {
     mocks.explanations.mockResolvedValue({ collectionId: ids.collection, revisionId: ids.revision,
       contentHash: "a".repeat(64), readyQuestions: 8, explainedReadyQuestions: 8, missingExplanations: 0 });
     mocks.owned.mockResolvedValue([]);
+    mocks.academicClient.mockResolvedValue({});
+    mocks.upload.mockResolvedValue({ status: "active", collection_id: ids.privateCollection, revision_id: ids.privateRevision });
+    mocks.prepareSaved.mockResolvedValue({ metadata: { ready_questions: 1, term: "Term 4", module: "NCRS" } });
   });
   afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
@@ -117,6 +136,67 @@ describe("Community Uploads", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: /right to share this course/ }));
     fireEvent.click(submit);
     await waitFor(() => expect(mocks.submit).toHaveBeenCalledWith(ids.privateCollection, ids.privateRevision, "owner-1", true));
+    expect(await screen.findByText(/Submitted to Community Uploads as Unreviewed/)).toBeTruthy();
+  });
+
+  it("checks a saved source, then saves and submits its exact revision as Unreviewed", async () => {
+    const document = { id: "doc-1", title: "NCRS source", fileName: "source.pdf", fileType: "pdf",
+      checksum: "a".repeat(64), originalFile: { version: 1, sha256: "a".repeat(64), byteSize: 10, mimeType: "application/pdf" } };
+    const question = { id: "local-q1", sourceDocumentId: "doc-1", updatedAt: "2026-11-01T12:00:00Z",
+      module: "NCRS", stem: "Synthetic stem?", options: [{ key: "A", text: "One" }, { key: "B", text: "Two" }],
+      correctKey: "A", explanation: "Source explanation.", attempts: [], tags: [] };
+    mocks.workspace.documents = [document];
+    mocks.workspace.questionSets = [{ id: "set-1", title: "Saved source", kind: "source", tags: [], sourceDocumentIds: ["doc-1"] }];
+    mocks.workspace.questions = [question];
+    mocks.list.mockResolvedValue([]);
+    render(<CommunityUploads onOpenLibrary={vi.fn()} />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Saved source" }), { target: { value: "doc-1" } });
+    expect(screen.getByText(/all 1 questions from 1 saved set/)).toBeTruthy();
+    fireEvent.change(screen.getByRole("combobox", { name: "Term confirmed from the source" }), { target: { value: "Term 4" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /checked this source's term, module, answers and explanations/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Check saved source" }));
+    await waitFor(() => expect(mocks.prepareSaved).toHaveBeenCalledWith(document, [question],
+      { term: "Term 4", module: "NCRS" }, expect.any(Function)));
+    const share = await screen.findByRole("button", { name: "Save and share as Unreviewed" }) as HTMLButtonElement;
+    expect(share.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox", { name: /right to share these questions/ }));
+    fireEvent.click(share);
+    await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith({}, "owner-1", expect.objectContaining({ metadata: expect.objectContaining({ ready_questions: 1 }) }), expect.any(Function), expect.any(Function)));
+    await waitFor(() => expect(mocks.submit).toHaveBeenCalledWith(ids.privateCollection, ids.privateRevision, "owner-1", true));
+    expect(await screen.findByText(/Shared in Community Uploads as Unreviewed/)).toBeTruthy();
+  });
+
+  it("keeps an unready saved source local and explains what to repair", () => {
+    mocks.workspace.documents = [{ id: "doc-1", title: "Held source", checksum: "a".repeat(64), originalFile: {} }];
+    mocks.workspace.questionSets = [{ id: "set-1", kind: "source", tags: [], sourceDocumentIds: ["doc-1"] }];
+    mocks.workspace.questions = [{ id: "local-q1", sourceDocumentId: "doc-1", updatedAt: "now", options: [{ key: "A", text: "One" }, { key: "B", text: "Two" }],
+      explanation: "", attempts: [], tags: [] }];
+    render(<CommunityUploads onOpenLibrary={vi.fn()} />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Saved source" }), { target: { value: "doc-1" } });
+    expect(screen.getByText(/Finish the missing answer reviews and explanations/)).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Check saved source" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(mocks.prepareSaved).not.toHaveBeenCalled();
+  });
+
+  it("keeps the verified private revision available if community submission fails", async () => {
+    mocks.workspace.documents = [{ id: "doc-1", title: "Synthetic source", checksum: "a".repeat(64), originalFile: {} }];
+    mocks.workspace.questionSets = [{ id: "set-1", kind: "source", tags: [], sourceDocumentIds: ["doc-1"] }];
+    mocks.workspace.questions = [{ id: "local-q1", sourceDocumentId: "doc-1", updatedAt: "now", module: "NCRS",
+      stem: "Synthetic stem?", options: [{ key: "A", text: "One" }, { key: "B", text: "Two" }],
+      correctKey: "A", explanation: "Synthetic rationale.", attempts: [], tags: [] }];
+    mocks.submit.mockRejectedValueOnce(new Error("Connection lost"));
+    render(<CommunityUploads onOpenLibrary={vi.fn()} />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Saved source" }), { target: { value: "doc-1" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Term confirmed from the source" }), { target: { value: "Term 4" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /checked this source's term, module, answers and explanations/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Check saved source" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: /right to share these questions/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Save and share as Unreviewed" }));
+    expect(await screen.findByText("Connection lost")).toBeTruthy();
+    expect(await screen.findByText(/private save succeeded/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Submit as Unreviewed" }));
+    await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(2));
+    expect(mocks.upload).toHaveBeenCalledTimes(1);
     expect(await screen.findByText(/Submitted to Community Uploads as Unreviewed/)).toBeTruthy();
   });
 

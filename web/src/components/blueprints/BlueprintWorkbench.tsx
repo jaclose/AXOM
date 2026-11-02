@@ -17,6 +17,7 @@ import {
 import { routeForBlueprintLane } from "../../lib/blueprintRoutes";
 import type { BlueprintLaneId, BlueprintMode, BlueprintNodeStatus, BlueprintNodeType, BlueprintSource, InstalledBlueprint, InstalledBlueprintNode, SourceType } from "../../lib/types";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { externalLinkHref } from "../../lib/resourceUtils";
 import "../../styles/exam-prep.css";
 
 const DEPTH_KEY = "noctyrium-blueprint-depth";
@@ -432,6 +433,7 @@ function NodeDetail({ node, installId }: { node: InstalledBlueprintNode; install
   const patch = (p: Partial<InstalledBlueprintNode>) => update(installId, node.id, p);
   const link = (key: "linkedQuestions" | "linkedAnki" | "linkedErrorLog" | "linkedAssessments", delta: number) =>
     patch({ [key]: Math.max(0, node[key] + delta) });
+  const sourceHref = externalLinkHref(node.sourceUrl);
 
   return (
     <div className="bp-node-detail">
@@ -481,12 +483,15 @@ function NodeDetail({ node, installId }: { node: InstalledBlueprintNode; install
       </label>
 
       <div className="bp-node-foot">
-        {node.sourceUrl
-          ? <a className="bp-node-source" href={node.sourceUrl} target="_blank" rel="noreferrer noopener"><ShieldCheck size={ICON_SIZE.microInline} /> {sourceStatusText(node)} <ExternalLink size={ICON_SIZE.microInline} /></a>
+        {sourceHref
+          ? <a className="bp-node-source" href={sourceHref} target="_blank" rel="noreferrer noopener"><ShieldCheck size={ICON_SIZE.microInline} /> {sourceStatusText(node)} <ExternalLink size={ICON_SIZE.microInline} /></a>
           : <span className="bp-node-source dim"><ShieldCheck size={ICON_SIZE.microInline} /> {sourceStatusText(node)}</span>}
-        {node.resourceLinks.map((r) => (
-          <a key={r.url} className={`bp-node-source kind-${r.kind}`} href={r.url} target="_blank" rel="noreferrer noopener">{r.label} <ExternalLink size={ICON_SIZE.microInline} /></a>
-        ))}
+        {node.resourceLinks.map((r) => {
+          const href = externalLinkHref(r.url);
+          return href
+            ? <a key={r.url} className={`bp-node-source kind-${r.kind}`} href={href} target="_blank" rel="noreferrer noopener">{r.label} <ExternalLink size={ICON_SIZE.microInline} /></a>
+            : <span key={r.url} className={`bp-node-source kind-${r.kind} dim`}>{r.label}</span>;
+        })}
         {node.sourceVersion && <span className="bp-node-verified">{node.sourceVersion}</span>}
         {node.lastVerified && <span className="bp-node-verified">audited {node.lastVerified}</span>}
       </div>
@@ -509,6 +514,7 @@ function LinkStepper({ icon, label, value, onStep }: { icon: React.ReactNode; la
 
 function SourceBadge({ source, inline }: { source: BlueprintSource; inline?: boolean }) {
   const { type, name, url, verification, sourceVersion, lastVerified } = source;
+  const href = externalLinkHref(url);
   const label = verification === "verified"
     ? "user confirmed"
     : verification === "source-audited"
@@ -523,8 +529,8 @@ function SourceBadge({ source, inline }: { source: BlueprintSource; inline?: boo
   </>;
   const title = [name, sourceVersion, lastVerified ? `audited ${lastVerified}` : ""].filter(Boolean).join(" · ");
   if (inline) return <span className={`bp-source-inline kind-${type}`} title={title}>{body}</span>;
-  return url
-    ? <a className={`tag ${SOURCE_TONE[type] === "cyan" ? "" : SOURCE_TONE[type]} bp-source-tag`} href={url} target="_blank" rel="noreferrer noopener" title={title}>{body}</a>
+  return href
+    ? <a className={`tag ${SOURCE_TONE[type] === "cyan" ? "" : SOURCE_TONE[type]} bp-source-tag`} href={href} target="_blank" rel="noreferrer noopener" title={title}>{body}</a>
     : <span className={`tag ${SOURCE_TONE[type] === "cyan" ? "" : SOURCE_TONE[type]}`} title={title}>{body}</span>;
 }
 
