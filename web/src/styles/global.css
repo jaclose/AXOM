@@ -241,8 +241,6 @@ input, textarea, select { font-family: inherit; }
   border: 1px solid rgba(230, 226, 214, 0.10);
   box-shadow: var(--shadow-shell);
   overflow: hidden;
-  /* Keep clipping, but do not let focused descendants scroll the frame. */
-  overflow: clip;
 }
 /* A single faint gold hairline along the top edge — the "premium seam". */
 .shell::before {
