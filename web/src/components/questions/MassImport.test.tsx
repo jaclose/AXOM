@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { extractPdfText } from "../../lib/extractText";
 import { attachPdfFigures } from "../../lib/pdfFigures";
 import { useStore } from "../../lib/store";
+import { MAX_SOURCE_ORIGINAL_BYTES } from "../../lib/sourceOriginal";
 import { MassImport, massImportFileStatus } from "./MassImport";
 
 vi.mock("../../lib/checksum", () => ({ sha256Hex: vi.fn(async () => "sha256-test") }));
@@ -53,6 +54,53 @@ async function processReadyText(onInspect = vi.fn()) {
 }
 
 describe("Mass Import trust handoff", () => {
+  it("keeps supported files from a mixed selection and never reads rejected files", async () => {
+    const user = userEvent.setup({ applyAccept: false });
+    render(<MassImport onInspect={vi.fn()} />);
+    const supported = new File(["1. Which option is correct?\nA. Alpha\nB. Beta\nAnswer: B"], "questions.txt", { type: "text/plain" });
+    const unsupported = new File(["video bytes"], "lecture.mp4", { type: "video/mp4" });
+    const image = new File(["image bytes"], "figure.png", { type: "image/png" });
+    const oversized = new File(["pdf bytes"], "huge.pdf", { type: "application/pdf" });
+    Object.defineProperty(oversized, "size", { value: MAX_SOURCE_ORIGINAL_BYTES + 1 });
+    const readUnsupported = vi.fn(async () => new ArrayBuffer(1));
+    const readImage = vi.fn(async () => new ArrayBuffer(1));
+    const readOversized = vi.fn(async () => new ArrayBuffer(1));
+    Object.defineProperty(unsupported, "arrayBuffer", { value: readUnsupported });
+    Object.defineProperty(image, "arrayBuffer", { value: readImage });
+    Object.defineProperty(oversized, "arrayBuffer", { value: readOversized });
+
+    await user.upload(screen.getByLabelText("Choose multiple question files"), [unsupported, image, supported, oversized]);
+    expect(screen.getByRole("status").textContent).toContain("3 files were not added");
+    expect(screen.getByText("lecture.mp4")).toBeTruthy();
+    expect(screen.getByText("figure.png")).toBeTruthy();
+    expect(screen.getByText("huge.pdf")).toBeTruthy();
+    expect(screen.getAllByText(/Unsupported format/)).toHaveLength(2);
+    expect(screen.getByText(/Larger than 128 MB/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Remove questions.txt" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove lecture.mp4" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove figure.png" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove huge.pdf" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Import files" }));
+    await screen.findByRole("button", { name: "Edit questions.txt" });
+    expect(readUnsupported).not.toHaveBeenCalled();
+    expect(readImage).not.toHaveBeenCalled();
+    expect(readOversized).not.toHaveBeenCalled();
+  });
+
+  it("rejects a supported extension with an incompatible media type", async () => {
+    const user = userEvent.setup({ applyAccept: false });
+    render(<MassImport onInspect={vi.fn()} />);
+    const disguised = new File(["video bytes"], "lecture.txt", { type: "video/mp4" });
+    const readDisguised = vi.fn(async () => new ArrayBuffer(1));
+    Object.defineProperty(disguised, "arrayBuffer", { value: readDisguised });
+    await user.upload(screen.getByLabelText("Choose multiple question files"), disguised);
+    expect(screen.getByRole("status").textContent).toContain("1 file was not added");
+    expect(screen.getByText("lecture.txt")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Import files" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(readDisguised).not.toHaveBeenCalled();
+  });
+
   it("queues a batch in natural reading order, whatever order the OS hands over (I3-26)", async () => {
     const user = userEvent.setup();
     render(<MassImport onInspect={vi.fn()} />);
