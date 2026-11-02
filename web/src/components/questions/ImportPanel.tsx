@@ -251,6 +251,7 @@ export function ImportPanel({
     return { ...known, ...matches, note: [known.note,
       matches.exact ? `${matches.exact} exact question${matches.exact === 1 ? " is" : "s are"} already in your bank and left out.` : "",
       matches.repeated ? `${matches.repeated} repeated question${matches.repeated === 1 ? " is" : "s are"} in this source and left out.` : "",
+      matches.conflicting ? `${matches.conflicting} question${matches.conflicting === 1 ? " has" : "s have"} conflicting answer keys and ${matches.conflicting === 1 ? "needs" : "need"} source review.` : "",
     ].filter(Boolean).join(" ") };
   });
   const [drafts, setDrafts] = useState<ReviewDraft[]>(() => (seeded
@@ -350,13 +351,14 @@ export function ImportPanel({
     setImageFiles(images); // Avoid carrying pictures from a prior source into the next review.
     // A file imported before comes in with what it already brought left unselected.
     const known = applyPriorImport(flagImportDuplicates(parsed, s.questions ?? []), doc, settledLibrary());
-    const matches = doc?.existingDocumentId ? { drafts: known.drafts, selected: known.selected, exact: 0, repeated: 0 }
+    const matches = doc?.existingDocumentId ? { drafts: known.drafts, selected: known.selected, exact: 0, repeated: 0, conflicting: 0 }
       : markExactImportMatches(known.drafts, known.selected, s.questions ?? []);
     setDrafts(matches.drafts.map((d, index) => ({ ...d, reviewId: uid(), include: matches.selected[index], aiGenerated: ai, source })));
     setBatchWarnings([
       ...(known.note ? [known.note] : []),
       ...(matches.exact ? [`${matches.exact} exact question${matches.exact === 1 ? " is" : "s are"} already in your bank and left out.`] : []),
       ...(matches.repeated ? [`${matches.repeated} repeated question${matches.repeated === 1 ? " is" : "s are"} in this source and left out.`] : []),
+      ...(matches.conflicting ? [`${matches.conflicting} question${matches.conflicting === 1 ? " has" : "s have"} conflicting answer keys and ${matches.conflicting === 1 ? "needs" : "need"} source review.`] : []),
       ...warnings,
     ]);
     setPendingDoc(doc);
@@ -486,7 +488,7 @@ export function ImportPanel({
         ? `${questionIds.length} ${quick ? "source-backed" : "reviewed"} question${questionIds.length === 1 ? "" : "s"} saved`
         : "Source document saved for later review",
       body: quick
-        ? `${quickPlan.needsReview + quickPlan.missingImages + quickPlan.repeatedInFile} still need attention in the saved source. ${quickPlan.alreadySaved} exact match${quickPlan.alreadySaved === 1 ? " was" : "es were"} skipped.`
+        ? `${quickPlan.needsReview + quickPlan.missingImages + quickPlan.conflictingAnswers} still need attention in the saved source. ${quickPlan.repeatedInFile + quickPlan.alreadySaved} matching question${quickPlan.repeatedInFile + quickPlan.alreadySaved === 1 ? " was" : "s were"} skipped.`
         : saved.reusedDocument
           ? "AXOM reused the existing source record and linked the new reviewed set."
           : savedSetId ? "The imported set is available in Question Sets and the Question Bank." : undefined,
@@ -986,7 +988,8 @@ export function ImportPanel({
           <div id="import-finalize-status" className="sub" aria-live="polite">{finalizeStatus}</div>
           {pendingDoc && drafts.length > 0 && <p className="sub" role="status">
             One-click save: {quickPlan.readyIndexes.length} with a clear source key.
-            {` ${quickPlan.needsReview + quickPlan.missingImages + quickPlan.repeatedInFile} need attention; ${quickPlan.alreadySaved} exact matches are skipped.`}
+            {` ${quickPlan.needsReview + quickPlan.missingImages + quickPlan.conflictingAnswers} need attention; ${quickPlan.repeatedInFile + quickPlan.alreadySaved} matching questions are skipped.`}
+            {quickPlan.conflictingAnswers > 0 && ` ${quickPlan.conflictingAnswers} have conflicting or unresolved answer keys.`}
             {quickPlan.missingImages > 0 && ` ${quickPlan.missingImages} need source images before they can be saved for practice.`}
           </p>}
 
@@ -1216,6 +1219,7 @@ export function ImportPanel({
                     {(draft.parserRuleIds ?? []).includes(ALREADY_IMPORTED_RULE) && <Tag tone="cyan">Already imported</Tag>}
                     {(draft.parserRuleIds ?? []).includes("duplicate.exact-existing") && <Tag tone="cyan">Already in bank</Tag>}
                     {(draft.parserRuleIds ?? []).includes("duplicate.exact-in-file") && <Tag tone="orange">Repeated in file</Tag>}
+                    {(draft.parserRuleIds ?? []).includes("duplicate.answer-conflict") && <Tag tone="orange">Answer key differs</Tag>}
                     {draft.reviewAcknowledged && <Tag tone="cyan">Reviewed</Tag>}
                     {draft.aiGenerated && <Tag tone="purple">AI</Tag>}
                     <GhostButton aria-label={`Remove question ${draft.questionNumber ?? index + 1}`}

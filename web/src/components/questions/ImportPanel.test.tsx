@@ -81,7 +81,7 @@ describe("source-document-first import", () => {
   });
 
   it("leaves an existing exact question out and explains the match before saving", () => {
-    mocked.questions.push({ id: "existing", stem: draft.stem, options: draft.options } as QuestionRecord);
+    mocked.questions.push({ id: "existing", stem: draft.stem, options: draft.options, correctKey: "B" } as QuestionRecord);
     render(<ImportPanel seed={{
       drafts: [{ ...draft, answerEvidence: "Answer: B", parserRuleIds: ["answer.explicit-letter"] }],
       rawText: "Existing question source", title: "Existing source", fileName: "existing.txt", fileType: "text",
@@ -90,6 +90,19 @@ describe("source-document-first import", () => {
     expect(screen.getByText("Already in bank")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Save 1 ready now/ })).toBeNull();
     expect(screen.getByText(/1 exact question is already in your bank and left out/)).toBeTruthy();
+  });
+
+  it("flags matching wording with a different saved answer key for source review", () => {
+    mocked.questions.push({ id: "existing", stem: draft.stem, options: draft.options, correctKey: "A" } as QuestionRecord);
+    render(<ImportPanel seed={{
+      drafts: [{ ...draft, answerEvidence: "Answer: B", parserRuleIds: ["answer.explicit-letter"] }],
+      rawText: "Conflicting question source", title: "Key conflict", fileName: "key-conflict.txt", fileType: "text",
+    }} />);
+
+    expect(screen.getByText("Answer key differs")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Save 1 ready now/ })).toBeNull();
+    expect(screen.getByText(/1 question has conflicting answer keys and needs source review/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Finalize import" })).toHaveProperty("disabled", true);
   });
 
   it("blocks an unresolved mapping even if confidence is malformed high", () => {
@@ -159,8 +172,8 @@ describe("source-document-first import", () => {
     render(<ImportPanel seed={{
       drafts: [
         { ...draft, explanation: "Grounded rationale." },
-        { ...draft, correctKey: "A", correctAnswerText: "Alpha", confidence: "medium" },
-        { ...draft, correctKey: undefined, correctAnswerText: undefined, confidence: "low", needsReview: true },
+        { ...draft, stem: "Which choice needs review?", correctKey: "A", correctAnswerText: "Alpha", confidence: "medium" },
+        { ...draft, stem: "Which choice is unresolved?", correctKey: undefined, correctAnswerText: undefined, confidence: "low", needsReview: true },
       ],
       rawText: "Sanitized source",
       title: "Trust summary",
