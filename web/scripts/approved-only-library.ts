@@ -292,6 +292,19 @@ function verifyRecord(row: ApprovalRecord, source: PrivateLibraryCatalog["source
     || row.explanationSha256 !== hashes.explanationSha256) fail("A review decision no longer matches the exact source, bank, answer, or explanation.");
 }
 
+function canonicalBankSources(catalog: PrivateLibraryCatalog): Map<string, PrivateLibraryCatalog["sources"][number]> {
+  const byId = new Map<string, PrivateLibraryCatalog["sources"][number]>();
+  const checksums = new Set<string>();
+  for (const source of catalog.sources) {
+    if (!source.bankFile || source.duplicateOf || !["prepared", "review-required"].includes(source.status)) continue;
+    if (byId.has(source.id)) fail("Prepared library has duplicate active source IDs.");
+    if (checksums.has(source.checksum)) fail("Prepared library has duplicate active source checksums.");
+    byId.set(source.id, source);
+    checksums.add(source.checksum);
+  }
+  return byId;
+}
+
 /** Generate a metadata-only, all-pending template. A person must inspect sources before approval. */
 export async function createApprovalTemplate(preparedRoot: string, destination: string): Promise<{ records: number }> {
   const root = await privateRoot(preparedRoot);
@@ -300,8 +313,7 @@ export async function createApprovalTemplate(preparedRoot: string, destination: 
   const catalogBytes = await readFile(await inside(root, "catalog.json"));
   const catalog = readCatalog(JSON.parse(catalogBytes.toString("utf8")));
   const records: ApprovalRecord[] = [];
-  for (const source of catalog.sources) {
-    if (!source.bankFile) continue;
+  for (const source of canonicalBankSources(catalog).values()) {
     const bankBytes = await readFile(await inside(root, source.bankFile));
     const bank = readPreparedBank(JSON.parse(bankBytes.toString("utf8")));
     assertSourceIdentity(source, bank);
@@ -331,19 +343,22 @@ export async function createApprovedOnlyLibrary(preparedRoot: string, decisionsF
   const decisionBytes = await readFile(decisionsFile);
   const decisions = readDecisions(JSON.parse(decisionBytes.toString("utf8")));
   if (sha(catalogBytes) !== decisions.catalogSha256) fail("The prepared library catalog changed since review.");
+  const sourcesById = canonicalBankSources(catalog);
   const approved = decisions.records.filter(row => row.status === "approved");
   if (!approved.length) fail("No explicitly approved questions are in this review file. Nothing was written.");
   const bySource = new Map<string, ApprovalRecord[]>();
   for (const row of decisions.records) bySource.set(row.sourceId, [...(bySource.get(row.sourceId) ?? []), row]);
-  const sourcesById = new Map(catalog.sources.map(source => [source.id, source]));
-  if (sourcesById.size !== catalog.sources.length) fail("Prepared library has duplicate source IDs.");
   const output: Array<{ row: PrivateLibraryCatalog["sources"][number]; bank: PreparedBank; assets: Array<{ path: string; source: string; checksum: string }> }> = [];
   const outputBankPaths = new Set<string>();
   const approvedIds = new Set<string>();
   const approvedContent = new Set<string>();
   for (const [id, rows] of bySource) {
     const source = sourcesById.get(id);
-    if (!source?.bankFile) fail("A review decision names a source without a bank.");
+    if (!source?.bankFile) {
+      if (catalog.sources.some(item => item.id === id && (item.status === "duplicate-linked" || item.duplicateOf)))
+        fail("A review decision names a duplicate-linked source.");
+      fail("A review decision names a source without a canonical bank.");
+    }
     const bankBytes = await readFile(await inside(root, source.bankFile));
     const bankHash = sha(bankBytes);
     const bank = readPreparedBank(JSON.parse(bankBytes.toString("utf8")));

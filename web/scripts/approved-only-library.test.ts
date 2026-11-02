@@ -20,7 +20,7 @@ const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 
 async function fixture(options: { image?: boolean; explanation?: string; week?: number; duplicateSource?: boolean;
-  duplicateSourceSha?: boolean; privateBankPath?: boolean; privateToolPath?: boolean;
+  duplicateLinkedCount?: number; uniqueLinkedId?: boolean; privateBankPath?: boolean; privateToolPath?: boolean;
   metadataPath?: "manifest" | "question" | "asset"; metadataTitle?: string; manifestPaths?: boolean;
   imageMetadataPath?: "stem-alt" | "choice-caption" | "explanation-caption"; disguisedPdf?: boolean;
   wrappedPdf?: boolean; trailingImageBytes?: boolean; tableCaptionPath?: boolean;
@@ -97,18 +97,11 @@ async function fixture(options: { image?: boolean; explanation?: string; week?: 
       checksum: otherChecksum, module: "FTM 1", status: "prepared", reason: "Synthetic repeated source",
       bankFile: otherFile, originalFile: `sources/${otherChecksum}.pdf`, ready: 1, review: 0 });
   }
-  if (options.duplicateSourceSha) {
-    const otherFile = "alternate/bank.json";
-    const distinct = structuredClone(question);
-    distinct.id = "q-other-source";
-    distinct.stem = [{ type: "text", text: "Which other synthetic choice is named?" }];
-    const otherBank = structuredClone(bank);
-    otherBank.pkg.manifest.bank.id = "synthetic-bank-other";
-    otherBank.pkg.questions = [distinct];
-    await put(otherFile, JSON.stringify(otherBank));
-    catalog.sources.push({ id: `other-source-${checksum}`, name: "synthetic.pdf", sourcePath: "PRIVATE/OTHER/synthetic.pdf",
-      checksum, module: "FTM 1", status: "prepared", reason: "Synthetic same-checksum source",
-      bankFile: otherFile, originalFile, ready: 1, review: 0 });
+  for (let index = 0; index < (options.duplicateLinkedCount ?? 0); index++) {
+    catalog.sources.push({ id: options.uniqueLinkedId ? `duplicate-${index}-${checksum}` : `source-${checksum}`,
+      name: `synthetic-copy-${index}.pdf`, sourcePath: `PRIVATE/COPY-${index}/synthetic.pdf`, checksum,
+      module: "FTM 1", status: "duplicate-linked", reason: "Identical synthetic bytes",
+      duplicateOf: "PRIVATE/FOLDER/synthetic.pdf", ready: 0, review: 0 });
   }
   await put("templates/private-plan.txt", "PRIVATE PLAN");
   await put(`${dirname(bankFile)}/assets/held.png`, png);
@@ -325,6 +318,24 @@ describe("approved-only private candidate", () => {
     await expect(createApprovalTemplate(root, join(work, "new-decisions.json"))).rejects.toThrow(/different catalog source/);
   });
 
+  it.each([1, 2])("uses one canonical bank when %i same-ID duplicate-linked copies are present", async copies => {
+    const { root, output, decisions, payload, catalog } = await fixture({ duplicateLinkedCount: copies });
+    expect(catalog.sources).toHaveLength(copies + 1);
+    expect(payload.records).toHaveLength(2);
+    await expect(createApprovedOnlyLibrary(root, decisions, output)).resolves.toMatchObject({ sources: 1, ready: 1 });
+    const publicCatalog = JSON.parse(await readFile(join(output, "library", "catalog.json"), "utf8")) as PrivateLibraryCatalog;
+    expect(publicCatalog.sources).toHaveLength(1);
+  });
+
+  it("rejects a decision naming a duplicate-linked row", async () => {
+    const { root, output, decisions, payload, catalog } = await fixture({ duplicateLinkedCount: 1, uniqueLinkedId: true });
+    expect(payload.records).toHaveLength(2);
+    payload.records.push({ ...payload.records[0], sourceId: catalog.sources[1].id });
+    await writeFile(decisions, JSON.stringify(payload));
+    await expect(createApprovedOnlyLibrary(root, decisions, output)).rejects.toThrow(/duplicate-linked source/);
+    await expect(readdir(output)).rejects.toThrow();
+  });
+
   it("rejects an exact repeated appearance even when both source rows were approved", async () => {
     const { root, output, decisions, payload } = await fixture({ duplicateSource: true });
     const approved = payload.records.find(row => row.questionId === "q-ready")!;
@@ -338,16 +349,20 @@ describe("approved-only private candidate", () => {
     await expect(readdir(output)).rejects.toThrow();
   });
 
-  it("rejects two approved source rows that share one public content-addressed bank path", async () => {
-    const { root, output, decisions, payload } = await fixture({ duplicateSourceSha: true });
-    const second = payload.records.find(row => row.questionId === "q-other-source")!;
-    const approved = payload.records.find(row => row.questionId === "q-ready")!;
-    Object.assign(second, { status: approved.status, sourceChecked: approved.sourceChecked,
-      filingChecked: approved.filingChecked, clinicalChecked: approved.clinicalChecked,
-      explanationChecked: approved.explanationChecked, rightsStatus: approved.rightsStatus,
-      rightsEvidence: approved.rightsEvidence, reviewer: approved.reviewer, reviewedAt: approved.reviewedAt });
+  it.each(["ID", "checksum"])("rejects a collision between active bank source %s values", async collision => {
+    const { root, work, output, decisions, payload, catalog } = await fixture();
+    const source = catalog.sources[0];
+    catalog.sources.push({ ...source, id: collision === "ID" ? source.id : "other-active-source",
+      checksum: collision === "checksum" ? source.checksum : "e".repeat(64),
+      bankFile: "alternate/bank.json", sourcePath: "PRIVATE/OTHER/synthetic.pdf" });
+    const updatedCatalog = JSON.stringify(catalog);
+    await writeFile(join(root, "catalog.json"), updatedCatalog);
+    await expect(createApprovalTemplate(root, join(work, "collision-decisions.json")))
+      .rejects.toThrow(new RegExp(`duplicate active source ${collision === "ID" ? "IDs" : "checksums"}`));
+    payload.catalogSha256 = sha(updatedCatalog);
     await writeFile(decisions, JSON.stringify(payload));
-    await expect(createApprovedOnlyLibrary(root, decisions, output)).rejects.toThrow(/same public bank path/);
+    await expect(createApprovedOnlyLibrary(root, decisions, output))
+      .rejects.toThrow(new RegExp(`duplicate active source ${collision === "ID" ? "IDs" : "checksums"}`));
     await expect(readdir(output)).rejects.toThrow();
   });
 
