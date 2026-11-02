@@ -759,6 +759,8 @@ export function failureSummary(view: Pick<AccountState, "syncFailure" | "nextAtt
   const what = failure.kind === "rejected" ? `refused (${failure.rejection ?? "refused"})` : failure.kind;
   const answer = failure.status ? `HTTP ${failure.status}` : failure.kind === "rejected" ? "stopped on this device" : "no answer";
   const size = view.snapshotBytes ? ` Snapshot size ${(view.snapshotBytes / 1_000_000).toFixed(1)} MB.` : "";
+  const phase = failure.phase ? ` Stage: ${failure.phase}.` : "";
+  const reason = failure.reason ? ` Cause: ${failure.reason}.` : "";
   const next = view.nextAttemptAt ? ` Next automatic try ${new Date(view.nextAttemptAt).toLocaleString()}.` : "";
-  return `Last upload failed ${new Date(failure.at).toLocaleString()}: ${what}, ${answer}${failure.code ? `, code ${failure.code}` : ""}.${size}${next}`;
+  return `Last upload failed ${new Date(failure.at).toLocaleString()}: ${what}, ${answer}${failure.code ? `, code ${failure.code}` : ""}.${phase}${reason}${size}${next}`;
 }

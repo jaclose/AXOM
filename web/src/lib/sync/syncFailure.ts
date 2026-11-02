@@ -1,4 +1,4 @@
-import type { SyncFailure } from "./syncTypes";
+import type { SyncFailure, SyncUploadPhase, SyncUploadReason } from "./syncTypes";
 
 export type FailureDetails = Omit<SyncFailure, "at">;
 
@@ -17,7 +17,7 @@ export class SyncPushError extends Error {
  * refusal that arrives as HTTP 500 is still a refusal.
  */
 export function classifyPushFailure(error: { message?: string; code?: string }, status: number): FailureDetails {
-  const code = typeof error.code === "string" && error.code ? error.code : undefined;
+  const code = typeof error.code === "string" && /^(?:[A-Z0-9]{5}|PGRST[0-9]{3})$/.test(error.code) ? error.code : undefined;
   const message = error.message ?? "";
   const base = { status, ...(code ? { code } : {}) };
   if (code === "PT413" || status === 413 || /payload too large/i.test(message)) return { ...base, kind: "rejected", rejection: "too-large" };
@@ -44,4 +44,20 @@ export function failureOf(error: unknown): FailureDetails {
     }
   }
   return { kind: "network", status: 0 };
+}
+
+/** Preserve a bounded failure stage without retaining private SDK exception text. */
+export function uploadFailureAt(error: unknown, phase: SyncUploadPhase): SyncPushError {
+  const message = error instanceof Error ? error.message : "";
+  const reason: SyncUploadReason | undefined = message === "The account session was refreshed. Your local work is safe; retry the upload."
+    ? "session-refreshed"
+    : message === "The signed-in account changed. This operation was stopped."
+      ? "account-changed"
+      : error instanceof Error && error.name === "TimeoutError"
+        ? "request-timeout"
+        : undefined;
+  const failure = reason === "session-refreshed" || reason === "account-changed"
+    ? { kind: "auth" as const, status: 0 }
+    : failureOf(error);
+  return new SyncPushError({ ...failure, phase, ...(reason ? { reason } : {}) }, `Account upload stopped during ${phase}.`);
 }
