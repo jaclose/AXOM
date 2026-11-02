@@ -2,15 +2,16 @@
 
 ## 0.0.3-prebeta — 2026-11-02 (Study spaces and clearer control)
 
-- **Patch Notes**: search the release history in the app, filter to the current version, and see the exact build revision. The same changelog supplies update notes.
+- **Patch Notes**: search the release history in the app, filter to the current version, and see an exact revision for a clean build or a local-build label for uncommitted changes. The same changelog supplies update notes.
 - **Communities**: Community Uploads, the shared daily challenge, and the opt-in Study circle now share one entry. Joining, discovery, and each progress post are separate choices; private study logs and source files are not posted automatically.
 - **Simulations**: the first body-map study explores asthma and inhaled albuterol with visible sources. It shows qualitative mechanisms and possible adverse effects, not patient-specific outcomes, doses, diagnosis, or treatment advice. Human medical review is still required.
 - **Daily study**: the Journal supports open writing and a calmer return to dated pages. Earned study credits and limited one-day streak freezes make short breaks visible without rewriting study history.
 - **Question Bank**: browse hosted course weeks directly in the practice workspace and return to the course after a block. Source-answer review keeps unresolved items held, and answer-choice highlighting survives exam sessions. A reviewed saved source can be shared explicitly as an Unreviewed Community Upload; only an approved exact revision enters the official catalog. PDF answer marks remain review proposals, never automatic keys. Saved course and blueprint links open only safe web destinations.
+- **Courses and academic review**: download a complete term's reviewed questions and practice the known local subset offline. The quiz builder shows eligible pool counts across subjects. Owners submit shared courses as pending; appointed reviewers inspect the exact stored copy before approval. A fresh device keeps the account's selected blueprint lane during merge.
 - **Imports**: Mass Import skips unsupported or oversized files before reading them, explains each skip, and keeps valid files from the same selection queued.
-- **Dashboard and appearance**: a shorter Daily Check-In keeps the main action visible, while optional context and wins stay easy to open. Widget customization has clearer save and close states, more readable empty and progress cards, and the near-black palette is named Midnight.
-- **Host**: permission-checked operator tools show Project CEO access only after server readback. A failed role check offers a retry. Moderation decisions require reasons and are auditable; private posts do not appear in the report queue.
-- **Email groundwork**: branded welcome and product-update messages have HTML and plain-text local review drafts plus configuration diagnostics. This build does not establish live sending or inbox acceptance.
+- **Dashboard and appearance**: a shorter Daily Check-In keeps the main action visible, while optional context and wins stay easy to open. Widget customization has clearer save and close states, more readable empty and progress cards, and the near-black palette is named Midnight. The hosted-app shortcut opens AXOM's current domain.
+- **Host**: permission-checked operator tools show Project CEO access only after server readback. A failed role check offers a retry. Account search reaches the full directory, and moderation decisions require auditable reasons; private posts do not appear in the report queue.
+- **Email groundwork**: branded welcome and product-update messages have HTML and plain-text local review drafts, optional Topic preferences, and configuration diagnostics. A broadcast remains an unsent draft. This build does not establish live sending or inbox acceptance.
 
 Cloud-backed Communities and Host actions still need the matching hosted policy rollout and real-account acceptance before they are called ready. Private academic content is not automatically published. The simulator is a study illustration pending human medical review, not a validated clinical tool.
 

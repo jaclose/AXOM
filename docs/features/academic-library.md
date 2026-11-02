@@ -181,10 +181,12 @@ original files; its questions and figures still publish and the course reports h
 files stay on the device, as it does for originals over 50 MiB. Check prepares every
 selected course exactly as publishing does, on the device and without uploading, shows
 each reason, refuses a source claimed by two courses and unselects what needs attention.
-A course that cannot be prepared shows the validator's reason. After upload
-the owner may request sharing with every signed-in account, which requires attesting the
-right to share; a reviewer may approve in the same step. Every new revision returns to
-review. Workspace schema stays 34; no new store or catalog is created.
+A course that cannot be prepared shows the validator's reason. After upload,
+the owner may request sharing with every signed-in account after confirming the
+right to share. The course stays pending: an academic reviewer must inspect the
+exact stored revision and attest to its explanations before a separate approval.
+Every new revision returns to review. Workspace schema stays 34; no new store
+or catalog is created.
 
 Filing decisions from the unfiled source review (`axom-private-filing-decisions`, schema 2)
 file prepared sources the preparer could not place. Add the matching original review
