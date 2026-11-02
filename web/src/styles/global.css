@@ -231,6 +231,7 @@ input, textarea, select { font-family: inherit; }
   position: relative;
   flex: 1;
   display: flex;
+  min-width: 0;
   min-height: 0;
   border-radius: var(--shell-radius);
   background:
