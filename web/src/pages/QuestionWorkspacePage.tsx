@@ -1,4 +1,4 @@
-import { clearCourseQuizLaunch } from "../lib/course-engine/quizLaunch";
+import { clearCourseQuizLaunch, COURSE_QUIZ_LAUNCH_EVENT } from "../lib/course-engine/quizLaunch";
 import { inspectCourseLaunch } from "../lib/exam/courseLaunchGuard";
 // ===========================================================================
 // Question Bank — the flagship study engine. Import Center → Source Library →
@@ -131,7 +131,11 @@ export function QuestionWorkspacePage() {
   useEffect(() => {
     const refresh = () => { if (location.hash === "#questions") setHandoffVersion((version) => version + 1); };
     window.addEventListener("hashchange", refresh);
-    return () => window.removeEventListener("hashchange", refresh);
+    window.addEventListener(COURSE_QUIZ_LAUNCH_EVENT, refresh);
+    return () => {
+      window.removeEventListener("hashchange", refresh);
+      window.removeEventListener(COURSE_QUIZ_LAUNCH_EVENT, refresh);
+    };
   }, []);
   const courseHandoff = inspectCourseLaunch(questions);
   const [courseLaunch, setCourseLaunch] = useState(() => courseHandoff.state === "ready" ? courseHandoff.launch : null);
