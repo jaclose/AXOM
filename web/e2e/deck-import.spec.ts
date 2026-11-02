@@ -63,7 +63,7 @@ test("a review deck comes in as one question per slide, with only the question s
   page.on("pageerror", (error) => errors.push(error.message));
   await seedOnboarded(page);
   await page.goto("/#questions");
-  await page.getByRole("button", { name: "Add your own material", exact: true }).click();
+  await page.getByRole("tab", { name: "Add material", exact: true }).click();
   await page.getByLabel("Choose question files or a ZIP to import").setInputFiles({
     name: "FTM 1 Week 2 IMCQ 3 Key.pdf", mimeType: "application/pdf", buffer: deckPdf(DECK),
   });
@@ -94,8 +94,8 @@ test("a review deck comes in as one question per slide, with only the question s
 
   await page.getByLabel("Set title").fill("Deck with answer slides");
   await page.getByRole("button", { name: "Finalize import" }).click();
-  await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
-  await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
+  await page.getByRole("tab", { name: "Library (1)", exact: true }).click();
+  await page.getByRole("button", { name: "Weeks & sets", exact: true }).click();
 
   await reloadAfterSave(page);
   const saved = await page.evaluate(async () => {
@@ -123,8 +123,8 @@ test("a review deck comes in as one question per slide, with only the question s
   expect(saved.map((question) => (question.attachments ?? []).map((attachment) => attachment.fileName))).toEqual([["FTM-1-Week-2-IMCQ-3-Key-p2-fig1.png"], [], []]);
 
   // Before answering, the learner sees the question's picture and nothing from the answer slide.
-  await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
-  await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
+  await page.getByRole("tab", { name: "Library (1)", exact: true }).click();
+  await page.getByRole("button", { name: "Weeks & sets", exact: true }).click();
   await page.getByRole("button", { name: "Practice Deck with answer slides", exact: true }).click();
   await page.getByRole("button", { name: "Start tutor block" }).click();
   await expect(page.locator(".question-exhibit img")).toHaveCount(1);

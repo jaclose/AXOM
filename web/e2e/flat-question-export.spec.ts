@@ -103,7 +103,7 @@ for (const { width, height, theme } of [
     };
     const library = page.getByRole("region", { name: "Prepared library" });
     const buffer = await flatExportZip();
-    await page.getByText("Local collection transfer and source review", { exact: true }).click();
+    if (!await library.isVisible()) await page.getByText("Import status and source review", { exact: true }).click();
     const chooser = page.waitForEvent("filechooser");
     await library.getByRole("button", { name: "Install prepared library", exact: true }).click();
     await (await chooser).setFiles({ name: "synthetic-flat-export.zip", mimeType: "application/zip", buffer });
@@ -156,14 +156,14 @@ for (const { width, height, theme } of [
     await expect(dialog).toHaveCount(0);
     await reloadAfterSave(page);
     expect(await snapshot(page)).toEqual(installed);
-    await page.getByText("Local collection transfer and source review", { exact: true }).click();
+    if (!await library.isVisible()) await page.getByText("Import status and source review", { exact: true }).click();
     const repeatChooser = page.waitForEvent("filechooser");
     await library.getByRole("button", { name: "Update library", exact: true }).click();
     await (await repeatChooser).setFiles({ name: "synthetic-flat-export.zip", mimeType: "application/zip", buffer });
     await expect(library.getByRole("status")).toContainText("Library installed.", { timeout: 90_000 });
     expect(await snapshot(page)).toEqual(installed);
 
-    await page.locator(".qb-hero-actions").getByRole("button", { name: "Create Quiz", exact: true }).click();
+    await page.locator(".qb-hero-actions").getByRole("button", { name: "Quick practice", exact: true }).click();
     await page.getByLabel("Custom question count").fill("1");
     await page.getByRole("button", { name: "Start tutor block", exact: true }).click();
     const player = page.locator(".quiz-player-modal");

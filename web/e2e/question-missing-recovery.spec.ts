@@ -67,7 +67,7 @@ for (const width of [1440, 390]) {
       });
       await dev.flushVault();
     }, { ids: originalIds, setTitle: title });
-    await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
+    await page.getByRole("button", { name: "Weeks & sets", exact: true }).click();
     const restore = page.getByRole("button", { name: `Import missing source for ${title}`, exact: true });
     await restore.focus();
     await page.keyboard.press("Enter");
@@ -87,11 +87,11 @@ for (const width of [1440, 390]) {
     await recovery.getByText("Recovery details", { exact: true }).click();
     await recovery.getByRole("button", { name: "Cancel recovery", exact: true }).click();
     await expect(recovery).toHaveCount(0);
-    await page.getByRole("tab", { name: /Question Sets/ }).click();
+    await page.getByRole("tab", { name: /^Library/ }).click();
     await page.getByRole("button", { name: `Import missing source for ${title}`, exact: true }).click();
     await recovery.getByRole("button", { name: "Back to collection", exact: true }).click();
     await expect(page.getByRole("button", { name: `Import missing source for ${title}`, exact: true })).toBeVisible();
-    await page.getByRole("tab", { name: "Import", exact: true }).click();
+    await page.getByRole("tab", { name: "Add", exact: true }).click();
     await expect(recovery).toContainText(/2.*missing/);
 
     await page.getByLabel("Choose question files or a ZIP to import").setInputFiles({
@@ -113,7 +113,7 @@ for (const width of [1440, 390]) {
     await expect(recovery).toContainText(/1.*missing/);
     await reloadAfterSave(page);
     await waitForWorkspace(page);
-    await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
+    await page.getByRole("button", { name: "Weeks & sets", exact: true }).click();
     await page.getByRole("button", { name: `Import missing source for ${title}`, exact: true }).click();
     await expect(recovery).toContainText(/1.*missing/);
     await restoreOriginal(page, "recovery-missing-b");

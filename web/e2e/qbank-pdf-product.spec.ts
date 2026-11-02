@@ -9,7 +9,7 @@ for (const width of [1440, 390]) test(`PDF bank import, table and figure practic
   page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
   await seedOnboarded(page);
   await page.goto("/#questions");
-  await page.getByRole("button", { name: "Add your own material", exact: true }).click();
+  await page.getByRole("tab", { name: "Add material", exact: true }).click();
   const choose = () => page.getByLabel("Choose question files or a ZIP to import").setInputFiles({ name: "FTM1 Week 2 PQ.pdf", mimeType: "application/pdf", buffer: Buffer.from(inventedTwoSetPdf()) });
   await choose();
   const preview = page.getByRole("region", { name: "Source question bank preview" });
@@ -26,8 +26,9 @@ for (const width of [1440, 390]) test(`PDF bank import, table and figure practic
   await expect(preview).toContainText("3 questions saved on this device.");
   await expect(preview).toContainText("1 question still needs review");
   await preview.getByRole("button", { name: "Open imported bank" }).click();
-  await page.getByRole("tab", { name: /Question Sets/ }).click();
-  await page.getByRole("button", { name: "Bookshelf", exact: true }).click();
+  await page.getByRole("tab", { name: /^Library/ }).click();
+  const courses = page.getByRole("group", { name: "Question bank view" }).getByRole("button", { name: "Courses", exact: true });
+  await courses.click();
   const shelf = page.getByRole("region", { name: "Question bank library", exact: true });
   await shelf.getByRole("button", { name: /^FTM 1,/ }).click();
   const book = page.getByRole("dialog", { name: /FTM 1/ });
@@ -55,11 +56,11 @@ for (const width of [1440, 390]) test(`PDF bank import, table and figure practic
   expect(tableSeen && imageSeen).toBe(true);
   await page.getByRole("button", { name: "Done", exact: true }).click();
   await reloadAfterSave(page);
-  await page.getByRole("button", { name: "Bookshelf", exact: true }).click();
+  await courses.click();
   await shelf.getByRole("button", { name: /^FTM 1,/ }).click();
   await expect(book.locator(".book-fact").filter({ hasText: "Answered" })).toContainText("3");
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Add your own material", exact: true }).click();
+  await page.getByRole("tab", { name: "Add", exact: true }).click();
   await choose();
   await expect(preview).toContainText("4 questions · 3 ready", { timeout: 30000 });
   await preview.getByLabel("Bank module").fill("FTM 1");
@@ -75,7 +76,7 @@ for (const width of [1440, 390]) test(`PDF bank import, table and figure practic
 test("answer-marked slides are review-gated and stay hidden until a tutor answer is checked", async ({ page }) => {
   await seedOnboarded(page);
   await page.goto("/#questions");
-  await page.getByRole("button", { name: "Add your own material", exact: true }).click();
+  await page.getByRole("tab", { name: "Add material", exact: true }).click();
   await page.getByLabel("Choose question files or a ZIP to import").setInputFiles({ name: "FTM1 Week 2 eSoft.pdf", mimeType: "application/pdf", buffer: Buffer.from(inventedDeckPdf()) });
   const preview = page.getByRole("region", { name: "Source question bank preview" });
   await expect(preview).toContainText("3 questions · 0 ready for import · 3 need review", { timeout: 30000 });
@@ -92,8 +93,8 @@ test("answer-marked slides are review-gated and stay hidden until a tutor answer
   await expect(preview).toContainText("1 question saved on this device.");
   await preview.getByRole("button", { name: "Open imported bank" }).click();
   await reloadAfterSave(page);
-  await page.getByRole("tab", { name: /Question Sets/ }).click();
-  await page.getByRole("button", { name: "Bookshelf", exact: true }).click();
+  await page.getByRole("tab", { name: /^Library/ }).click();
+  await page.getByRole("group", { name: "Question bank view" }).getByRole("button", { name: "Courses", exact: true }).click();
   await page.getByRole("region", { name: "Question bank library", exact: true }).getByRole("button", { name: /^FTM 1,/ }).click();
   await page.getByRole("dialog", { name: /FTM 1/ }).getByRole("button", { name: "Create Quiz", exact: true }).click();
   await page.getByRole("button", { name: "Start tutor block", exact: true }).click();
@@ -108,7 +109,7 @@ test("answer-marked slides are review-gated and stay hidden until a tutor answer
 test("slide-marked answer keys can be reviewed in one attested batch without bypassing question gating", async ({ page }) => {
   await seedOnboarded(page);
   await page.goto("/#questions");
-  await page.getByRole("button", { name: "Add your own material", exact: true }).click();
+  await page.getByRole("tab", { name: "Add material", exact: true }).click();
   await page.getByLabel("Choose question files or a ZIP to import").setInputFiles({
     name: "FTM1 Review Slide Bank.pdf", mimeType: "application/pdf", buffer: Buffer.from(inventedDeckPdf()),
   });

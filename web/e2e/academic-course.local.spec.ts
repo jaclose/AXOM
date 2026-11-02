@@ -29,7 +29,9 @@ test("reviewed FTM1 plan loads selected weeks and opens its image-rich quiz", as
   if (await done.isVisible()) await done.click();
   const later = page.getByRole("button", { name: "Later", exact: true });
   if (await later.isVisible()) await later.click();
-  await page.getByText("Local collection transfer and source review", { exact: true }).click();
+  if (!await page.getByRole("region", { name: "Prepared library", exact: true }).isVisible()) {
+    await page.getByText("Import status and source review", { exact: true }).click();
+  }
   const chooser = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "Install prepared library", exact: true }).click();
   await (await chooser).setFiles(bundle!);
