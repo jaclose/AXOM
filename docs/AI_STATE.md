@@ -25,6 +25,12 @@ CLI 2.122.0 failed on `LOCK TABLE` (25P01) at 12:35 UTC; history stayed
 Owner reviewer grant under `service_role` verified 12:49:35–12:49:40 UTC.
 No content upload or sharing change.
 
+2026-11-02 settings candidate `2f950172` adds the account save map, typed sync
+errors, first-scroll samples, navy AXOM Classic/default, graphite Legacy,
+black Midnight Midnight, and refreshed Reports and WIP prep pages. Focused
+tests, typecheck, lint, build and browser checks passed; hosted cloud readback
+remains unverified. See [account sync](architecture/accounts-sync-v1.md).
+
 ## 2026-11-01 QBank production receipt
 
 CLI 2.118.0 applied `20261101120000` by 20:01 UTC and `20261101130000`

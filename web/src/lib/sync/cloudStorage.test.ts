@@ -186,6 +186,19 @@ describe("private cloud content and media", () => {
     expect(download).toHaveBeenCalledTimes(1);
   });
 
+  it("reports an absent question image as a local protection blocker", async () => {
+    const state = fixture();
+    const key = `missing-${crypto.randomUUID()}`;
+    state.questions[0].attachments = [{
+      id: key, blobKey: key, fileName: "figure.png", mimeType: "image/png", byteSize: 7,
+      altText: "Figure", createdAt: state.questions[0].createdAt, updatedAt: state.questions[0].updatedAt,
+    }];
+    await expect(uploadCloudMedia(client, "account-a", state, guard)).rejects.toMatchObject({
+      failure: { kind: "rejected", rejection: "missing-image", status: 0 },
+    });
+    expect(upload).not.toHaveBeenCalled();
+  });
+
   it("reconstructs one checksum-addressed object for two question-local references on a fresh device", async () => {
     const state = fixture();
     const blob = new Blob([new Uint8Array([137, 80, 78, 71, 4, 5, 6])], { type: "image/png" });

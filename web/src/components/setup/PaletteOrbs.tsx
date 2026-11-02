@@ -16,6 +16,7 @@ const PAIR: Record<string, { dark: string; light: string }> = {
   amethyst: { dark: "#150e22", light: "#2a1d44" },
   sapphire: { dark: "#c9d1db", light: "#dfe5ec" },
   midnight: { dark: "#22335e", light: "#22335a" },
+  "midnight-black": { dark: "#050506", light: "#343537" },
   emerald: { dark: "#0b1712", light: "#0f2a1f" },
   rose: { dark: "#2d2426", light: "#4a3a38" },
   platinum: { dark: "#0f0f12", light: "#1d2025" },

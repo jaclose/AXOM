@@ -265,11 +265,11 @@ describe("Journal route durability", () => {
       target: { value: "Persist before setup replaces the shell" },
     });
     act(() => useUi.getState().requestSettings("program"));
-    const settings = await screen.findByRole("dialog", { name: "Your AXOM Setup" });
+    const settings = await screen.findByRole("dialog", { name: "Settings" });
     fireEvent.click(within(settings).getByRole("button", { name: "Run setup again" }));
 
     await waitFor(() => expect(flush).toHaveBeenCalledTimes(1));
-    expect(screen.getByRole("dialog", { name: "Your AXOM Setup" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
     expect(screen.getByDisplayValue("Persist before setup replaces the shell")).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Who are you studying as?" })).toBeNull();
 
@@ -290,11 +290,11 @@ describe("Journal route durability", () => {
       target: { value: "Keep this draft if setup cannot begin" },
     });
     act(() => useUi.getState().requestSettings("program"));
-    const settings = await screen.findByRole("dialog", { name: "Your AXOM Setup" });
+    const settings = await screen.findByRole("dialog", { name: "Settings" });
     fireEvent.click(within(settings).getByRole("button", { name: "Run setup again" }));
 
     expect(await screen.findByText("Not saved on this device")).toBeTruthy();
-    expect(screen.getByRole("dialog", { name: "Your AXOM Setup" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
     expect(screen.getByDisplayValue("Keep this draft if setup cannot begin")).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Who are you studying as?" })).toBeNull();
     expect(useUi.getState().onboardingRequested).toBe(false);

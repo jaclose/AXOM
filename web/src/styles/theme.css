@@ -1,7 +1,8 @@
 /* ===========================================================================
-   AXOM design tokens — a private academic operating system. Identity palette
-   (brand guide 06): ink #0d0d0e, graphite #1c1c1e, bone #e6e2d6, muted gold
-   #c8a96a. Legacy variable NAMES are preserved (--cyan is the primary-accent
+   AXOM design tokens — a private academic operating system. The CSS base
+   preserves the original graphite/gold AXOM Legacy look; the navy/gold
+   AXOM Classic default is painted by the palette override below.
+   Legacy variable NAMES are preserved (--cyan is the primary-accent
    slot everywhere) so the whole app re-themes without touching component logic.
    The design intent: premium, minimal, architectural, calm under pressure.
    =========================================================================== */
@@ -198,8 +199,8 @@
 
   --sidebar-w: 250px;
 
-  /* Palette channels (Settings → Personalization → Accent palette). These are
-     the AXOM Classic values; lib/palette.ts injects the same names for every
+  /* Palette channels (Settings → Appearance → Accent palette). These are
+     the AXOM Legacy base values; lib/palette.ts injects the same names for every
      other palette, per mode. Consume them as rgba(var(--accent-rgb), a) — never
      re-introduce literal brand-gold channels in product CSS. */
   --accent-rgb: 200, 169, 106;      /* luminous accent: glows, washes, edges */
@@ -309,6 +310,63 @@
   --shadow-critical: 0 16px 36px rgba(var(--ink-rgb), 0.16), 0 0 0 1px color-mix(in srgb, var(--red) 30%, transparent);
   --shadow-gold: 0 0 0 1px rgba(138, 100, 41, 0.25), 0 10px 24px rgba(138, 100, 41, 0.1);
   --frame-gold: 0 0 0 1px rgba(138,100,41,0.45), 0 0 0 2px rgba(255,255,255,0.65), inset 0 1px 0 rgba(255,255,255,0.9);
+}
+
+/* First paint for the navy AXOM Classic default. The inline boot script sets
+   data-palette before CSS arrives; palette.ts supplies the full channel set
+   after hydration. The original gold/graphite base remains AXOM Legacy. */
+:root[data-palette="midnight"] {
+  --axom-bg: #070a15;
+  --axom-bg-soft: #0c1222;
+  --axom-gold: #d6b46e;
+  --bg-1: #04060d;
+  --bg-2: #070a15;
+  --bg-3: #0c1222;
+  --gold: #dcbc7c;
+  --cool-accent: #96aad2;
+  --cool-accent-strong: #c3d0ea;
+  --accent-rgb: 214, 180, 110;
+  --accent-ink-rgb: 220, 188, 124;
+  --accent-hi-rgb: 248, 224, 170;
+  --accent-lo-rgb: 170, 138, 78;
+  --accent-hi: #f8e0aa;
+  --accent-lo: #aa8a4e;
+  --cool-rgb: 150, 170, 210;
+  --orb-a-rgb: 150, 170, 210;
+  --orb-rgb: 214, 180, 110;
+  --tint-rgb: 90, 120, 190;
+  --paper-rgb: 12, 18, 34;
+  --shell-fill: rgba(15, 17, 26, 0.66);
+  --surface-1: rgba(25, 27, 35, 0.62);
+  --surface-2: rgba(28, 30, 39, 0.72);
+  --glass-card-fill: rgba(17, 21, 31, 0.6);
+  --ambient: 2.2;
+}
+:root[data-palette="midnight"][data-theme="light"] {
+  --axom-bg: #f8f9fc;
+  --axom-bg-soft: #e1e6f0;
+  --axom-gold: #7d5a1f;
+  --bg-1: #edf0f6;
+  --bg-2: #f8f9fc;
+  --bg-3: #e1e6f0;
+  --gold: #7d5a1f;
+  --cool-accent: #34466e;
+  --cool-accent-strong: #22335a;
+  --accent-rgb: 200, 164, 92;
+  --accent-ink-rgb: 125, 90, 31;
+  --accent-hi-rgb: 224, 196, 136;
+  --accent-lo-rgb: 31, 47, 85;
+  --accent-hi: #e0c488;
+  --accent-lo: #1f2f55;
+  --cool-rgb: 52, 70, 110;
+  --orb-a-rgb: 52, 70, 110;
+  --orb-rgb: 200, 164, 92;
+  --tint-rgb: 52, 70, 110;
+  --paper-rgb: 220, 227, 240;
+  --ink-rgb: 26, 36, 62;
+  --shell-fill: rgba(248, 249, 252, 0.72);
+  --glass-card-fill: rgba(251, 252, 254, 0.74);
+  --ambient: 1.5;
 }
 
 /* Structural surfaces that predate semantic tokens need a small, centralized

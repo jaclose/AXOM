@@ -18,6 +18,9 @@ export const COACH_RESET_EVENT = "axom:coach-reset";
 export const OVERWHELMED_ID = "overwhelmed";
 /** Visible time in the app (after the guide and the Promise) before "Overwhelmed?". */
 export const OVERWHELMED_AFTER_MS = 90_000;
+/** The first scroll starts a one-time introduction to the lock-in check-in. */
+export const FIRST_VISIT_LOCKIN_AFTER_SCROLL_MS = 60_000;
+export const OVERWHELMED_AFTER_SAMPLE_MS = 10_000;
 /** Minimum time between any two coach marks, so page-hopping never becomes a tour. */
 export const COACH_GAP_MS = 3 * 60_000;
 /** How long a page must be open, and its target visible, before its hint shows. */
@@ -29,6 +32,9 @@ export interface CoachLedger {
   seen: string[];
   /** When the last one appeared (ms since epoch). */
   lastShownAt?: number;
+  /** Device-only first-visit sequence. These are not study or account data. */
+  lockInSampleShownAt?: number;
+  lockInSampleClosedAt?: number;
   /** "No more hints" from a hint bubble; Help turns them back on. */
   off?: boolean;
 }
@@ -94,6 +100,8 @@ export function readCoachLedger(): CoachLedger {
     return {
       seen: Array.isArray(raw?.seen) ? raw.seen.filter((id): id is string => typeof id === "string") : [],
       lastShownAt: typeof raw?.lastShownAt === "number" && Number.isFinite(raw.lastShownAt) ? raw.lastShownAt : undefined,
+      lockInSampleShownAt: typeof raw?.lockInSampleShownAt === "number" && Number.isFinite(raw.lockInSampleShownAt) ? raw.lockInSampleShownAt : undefined,
+      lockInSampleClosedAt: typeof raw?.lockInSampleClosedAt === "number" && Number.isFinite(raw.lockInSampleClosedAt) ? raw.lockInSampleClosedAt : undefined,
       off: raw?.off === true || undefined,
     };
   } catch {
@@ -109,9 +117,23 @@ export function markCoachShown(ledger: CoachLedger, id: string, now: number): Co
   return { ...ledger, seen: [...new Set([...ledger.seen, id])], lastShownAt: now };
 }
 
+export function markLockInSampleShown(ledger: CoachLedger, now: number): CoachLedger {
+  return { ...ledger, lockInSampleShownAt: now };
+}
+
+export function markLockInSampleClosed(ledger: CoachLedger, now: number): CoachLedger {
+  return ledger.lockInSampleShownAt !== undefined && ledger.lockInSampleClosedAt === undefined
+    ? { ...ledger, lockInSampleClosedAt: now }
+    : ledger;
+}
+
 /** Help's "Show page hints again": page hints return; "Overwhelmed?" stays a one-off. */
 export function resetPageHints(ledger: CoachLedger): CoachLedger {
-  return { seen: ledger.seen.filter((id) => id === OVERWHELMED_ID) };
+  return {
+    seen: ledger.seen.filter((id) => id === OVERWHELMED_ID),
+    lockInSampleShownAt: ledger.lockInSampleShownAt,
+    lockInSampleClosedAt: ledger.lockInSampleClosedAt,
+  };
 }
 
 function inGap(ledger: CoachLedger, now: number): boolean {
@@ -119,7 +141,13 @@ function inGap(ledger: CoachLedger, now: number): boolean {
 }
 
 export function overwhelmedDue(ledger: CoachLedger, now: number): boolean {
-  return !ledger.off && !ledger.seen.includes(OVERWHELMED_ID) && !inGap(ledger, now);
+  if (ledger.off || ledger.seen.includes(OVERWHELMED_ID)) return false;
+  if (ledger.lockInSampleShownAt !== undefined) {
+    // A reload can interrupt the preview before its close event arrives.
+    const closedAt = ledger.lockInSampleClosedAt ?? ledger.lockInSampleShownAt + 2 * 60_000;
+    return now - closedAt >= OVERWHELMED_AFTER_SAMPLE_MS;
+  }
+  return !inGap(ledger, now);
 }
 
 /** The hint this page may show now, if any. Page hints wait for "Overwhelmed?" to have had its moment. */
