@@ -57,7 +57,7 @@ for (const width of [1440, 768, 390]) {
       await flushVault();
     });
     await page.goto("/#questions");
-    await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
+    await page.getByRole("button", { name: "Weeks & sets", exact: true }).click();
     const bank = page.getByRole("region", { name: "Course question bank", exact: true });
     await expect(bank.getByRole("heading", { name: "Week 1", exact: true })).toBeVisible();
     await expect(bank.getByText("1 with image references", { exact: true })).toBeVisible();
