@@ -12,6 +12,8 @@ import type { Session, SupabaseClient } from "@supabase/supabase-js";
  */
 let client: SupabaseClient | null | undefined;
 let loading: Promise<SupabaseClient | null> | undefined;
+const DEFAULT_ACCOUNT_REQUEST_TIMEOUT_MS = 120_000;
+const MAX_SCOPED_REQUEST_TIMEOUT_MS = 300_000;
 
 /**
  * Dev servers only: a browser test points the account client at a stand-in
@@ -123,7 +125,9 @@ export async function accountOperationClient() {
   const scoped = createClient(projectUrl()!, publicKey()!, {
     accessToken: async () => { await assertCurrent(); return session.access_token; },
     global: { fetch: (input, init) => {
-      const timeout = AbortSignal.timeout(120_000);
+      // A caller's signal can allow the final workspace RPC up to five minutes.
+      // Keep ordinary requests shorter while retaining a hard cap for all others.
+      const timeout = AbortSignal.timeout(init?.signal ? MAX_SCOPED_REQUEST_TIMEOUT_MS : DEFAULT_ACCOUNT_REQUEST_TIMEOUT_MS);
       return fetch(input, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout });
     } },
   });
