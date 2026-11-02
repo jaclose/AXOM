@@ -1,6 +1,6 @@
 [package]
 name = "axom"
-version = "0.0.2-prebeta"
+version = "0.0.3-prebeta"
 description = "AXOM desktop application"
 authors = ["AXOM"]
 license = "UNLICENSED"

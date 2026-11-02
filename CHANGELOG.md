@@ -1,5 +1,18 @@
 # AXOM Changelog
 
+## 0.0.3-prebeta — 2026-11-02 (Study spaces and clearer control)
+
+- **Patch Notes**: search the release history in the app, filter to the current version, and see the exact build revision. The same changelog supplies update notes.
+- **Communities**: Community Uploads, the shared daily challenge, and the opt-in Study circle now share one entry. Joining, discovery, and each progress post are separate choices; private study logs and source files are not posted automatically.
+- **Simulations**: the first body-map study explores asthma and inhaled albuterol with visible sources. It shows qualitative mechanisms and possible adverse effects, not patient-specific outcomes, doses, diagnosis, or treatment advice. Human medical review is still required.
+- **Daily study**: the Journal supports open writing and a calmer return to dated pages. Earned study credits and limited one-day streak freezes make short breaks visible without rewriting study history.
+- **Question Bank**: source-answer review keeps unresolved items held, and answer-choice highlighting survives exam sessions. Shared learner question sets require explicit submission and reviewer approval before discovery.
+- **Dashboard and appearance**: widget customization has clearer save and close states, more readable empty and progress cards, and the near-black palette is named Midnight.
+- **Host**: permission-checked operator tools show Project CEO access only after server readback. Moderation decisions require reasons and are auditable; private posts do not appear in the report queue.
+- **Email groundwork**: AXOM's welcome message has a branded HTML and plain-text review draft plus local configuration diagnostics. This build does not establish live sending or inbox acceptance.
+
+Cloud-backed Communities and Host actions still need the matching hosted policy rollout and real-account acceptance before they are called ready. Private academic content is not automatically published. The simulator is a study illustration pending human medical review, not a validated clinical tool.
+
 ## 0.0.2-prebeta — 2026-10-10 (Academic library, Tutor, accounts and safe updates)
 
 - **Prepared academic library**: connect a private collection once, browse available course templates and question banks, and choose what to load. The shared bookshelf has readable covers, search and term filters; course loading preserves progress and personal edits.

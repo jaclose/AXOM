@@ -3806,7 +3806,7 @@ new Set([
 var ue = {
 	name: "axom-web",
 	private: !0,
-	version: "0.0.2-prebeta",
+	version: "0.0.3-prebeta",
 	type: "module",
 	description: "AXOM — a premium, local-first medical-school command center, as a deployable web app.",
 	scripts: {
