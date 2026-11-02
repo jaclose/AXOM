@@ -219,6 +219,17 @@ export function makeSeed(): NoctyriumState {
 export function defaultProductivityTrackers(timestamp = now()): ProductivityTracker[] {
   return [
     trackerDef("tracker-study", "Study", "BookOpen", "var(--cyan)", "minutes", 240, 1680, "Academic", true, true, true, true, true, timestamp),
+    trackerDef("tracker-small-group-prep", "Small Group + Prep", "Languages", "var(--purple)", "minutes", 120, 360, "Academic", false, false, true, true, false, timestamp),
+    trackerDef("tracker-class", "Class", "GraduationCap", "var(--orange)", "minutes", 120, 600, "Academic", false, false, true, true, false, timestamp),
+    trackerDef("tracker-gym", "Gym", "Dumbbell", "var(--green)", "minutes", 45, 180, "Health", false, true, true, true, true, timestamp),
+  ];
+}
+
+// Historical templates are only field fallbacks when reading old saved trackers.
+// They must not be installed in a new workspace or re-added to a custom list.
+export function legacyProductivityTrackerDefaults(timestamp = now()): ProductivityTracker[] {
+  return [
+    trackerDef("tracker-study", "Study", "BookOpen", "var(--cyan)", "minutes", 240, 1680, "Academic", true, true, true, true, true, timestamp),
     trackerDef("tracker-coding", "Coding", "Code2", "var(--purple)", "minutes", 60, 420, "Deep Work", false, true, true, true, false, timestamp),
     trackerDef("tracker-gym", "Gym", "Dumbbell", "var(--green)", "minutes", 45, 180, "Health", false, true, true, true, true, timestamp),
     trackerDef("tracker-class", "Class", "GraduationCap", "var(--orange)", "minutes", 120, 600, "Academic", true, true, false, true, false, timestamp),

@@ -55,9 +55,10 @@ describe("tracker store wiring", () => {
 
   it("re-labels past entries when a tracker's study flag changes", () => {
     const store = useStore.getState();
-    store.logProductivity({ trackerId: "tracker-coding", minutes: 40 });
-    expect(useStore.getState().logs[0]).toMatchObject({ trackerId: "tracker-coding", academic: false });
-    store.updateProductivityTracker("tracker-coding", { contributesToAcademicStudy: true });
+    const id = store.addProductivityTracker(tracker({ name: "Coding", unitType: "minutes", dailyTarget: 60 }));
+    store.logProductivity({ trackerId: id, minutes: 40 });
+    expect(useStore.getState().logs[0]).toMatchObject({ trackerId: id, academic: false });
+    store.updateProductivityTracker(id, { contributesToAcademicStudy: true });
     expect(useStore.getState().logs[0].academic).toBe(true);
   });
 

@@ -36,7 +36,10 @@ describe("TrackerManager", () => {
   });
 
   it("archives a tracker without losing its history", () => {
-    useStore.getState().logProductivity({ trackerId: "tracker-writing", minutes: 30 });
+    const id = useStore.getState().addProductivityTracker({
+      ...makeSeed().productivityTrackers[0], name: "Writing", icon: "FileText", category: "Creative", contributesToHabitTracking: false,
+    });
+    useStore.getState().logProductivity({ trackerId: id, minutes: 30 });
     render(<TrackerManager />);
     fireEvent.click(screen.getByRole("button", { name: "Edit Writing" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: /Archive/ }));
