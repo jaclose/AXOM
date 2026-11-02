@@ -10,8 +10,8 @@ authority: current-state
 JD approved the final release. `main` was fast-forwarded to `c06ae5a6`,
 joining the committed Ideas/Journal frontier with QBank PR #81 while
 preserving the newer first-upload-error fix. Vercel deployment
-`dpl_D9C6W88yq5jD7QsbkCnh8EodW92j` is READY and serves both axom.info
-aliases at that SHA. Live first-use setup, desk, weather, open book and full
+`dpl_D9C6W88yq5jD7QsbkCnh8EodW92j` reached READY and served both axom.info
+aliases at that SHA when checked. Live first-use setup, desk, weather, open book and full
 writing view loaded without browser console errors. Radiordle and Pathordle
 remain excluded pending provider approval; no private content was published.
 
@@ -117,7 +117,7 @@ them at startup without a specific question.
 
 At `eaad98fa`, the clean combined gate passed typecheck, lint, 4,649 web
 tests (35 skipped), build, update safety, offline games and 167 browser
-journeys (14 conditional skips). On the final code tree, root API typecheck,
+journeys (14 conditional skips). On the `c06ae5a6` release tree, root API typecheck,
 88 release tests, 43 repository tests, hygiene, web typecheck/lint/build,
 update/offline checks, 200 focused unit tests and 15 relevant Chrome journeys
 passed. The broad local Vitest run was stopped under severe host load after
