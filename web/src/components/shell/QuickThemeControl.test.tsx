@@ -53,7 +53,7 @@ describe("QuickThemeControl", () => {
     const palettes = within(dialog).getByRole("radiogroup", { name: "Accent palette" });
     expect(within(palettes).getAllByRole("radio").length).toBeGreaterThanOrEqual(9);
     expect(within(palettes).getByRole("radio", { name: /AXOM Classic palette/ }).getAttribute("aria-checked")).toBe("true");
-    expect(within(palettes).getByRole("radio", { name: /Midnight Midnight palette/ }).getAttribute("aria-checked")).toBe("false");
+    expect(within(palettes).getByRole("radio", { name: /^Midnight palette/ }).getAttribute("aria-checked")).toBe("false");
     expect(document.activeElement).toBe(within(dialog).getByRole("radio", { name: /System/ }));
 
     fireEvent.click(within(dialog).getByRole("radio", { name: /Dark/ }));

@@ -98,7 +98,7 @@ export const PALETTES: readonly PaletteDefinition[] = [
   },
   {
     id: "midnight-black",
-    label: "Midnight Midnight",
+    label: "Midnight",
     pairing: "Black & champagne",
     description: "A true black canvas with quiet champagne highlights.",
     dark: {

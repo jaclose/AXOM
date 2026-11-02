@@ -65,7 +65,7 @@ const FEATURE_GUIDES: GuideEntry[] = [
     name: "Appearance & accent palettes",
     status: "Ready to test",
     lives: "Settings → Appearance (or the sun/moon button next to your name)",
-    start: "Choose Light, Dark, or System. AXOM Classic pairs navy and gold. Midnight Midnight is near-black; AXOM Legacy keeps the original graphite look. More palettes and a custom color are available.",
+    start: "Choose Light, Dark, or System. AXOM Classic pairs navy and gold. Midnight is near-black; AXOM Legacy keeps the original graphite look. More palettes and a custom color are available.",
     prerequisite: "None. Appearance is saved per device, so your laptop and phone can differ.",
     route: "dashboard",
     preview: "Every palette has a tuned light and dark version and keeps text contrast readable. Reduce motion calms lusters and transitions even if your device allows motion.",

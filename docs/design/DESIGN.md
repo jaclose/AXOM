@@ -22,7 +22,7 @@ mark reference: `AXOM_Opening_Cinematic_v1/`. This revision does not replace she
 Use tokens, not literals. Mode chooses light, dark, or the device setting. Palettes
 coordinate the accent, canvas, paper, surfaces, and mineral tones in both modes.
 AXOM Classic is the navy/gold default; AXOM Legacy preserves the original
-graphite/gold look; Midnight Midnight is the near-black option. `index.html`
+graphite/gold look; Midnight is the near-black option. `index.html`
 paints the default from the first frame (`DEFAULT_PALETTE_ID` in `lib/palette.ts`).
 
 | Group | Tokens |
