@@ -14,6 +14,11 @@
 .course-search input, .course-term-filter select { min-width: 0; background: transparent; color: var(--text); font: inherit; border: 0; padding: 10px 0; }
 .course-term-filter select { border: 1px solid var(--hairline); padding: 11px; border-radius: var(--radius-sm); background: var(--surface-1); }
 .course-collection-summary { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px 16px; margin:18px 0 26px; }
+.course-overlap-note { margin: -12px 0 24px; color: var(--text-70); font-size: 13px; line-height: 1.5; }
+.academic-upload-match { margin: 12px 0; padding: 12px 14px; border-left: 2px solid var(--gold); border-radius: 0 var(--radius-xs) var(--radius-xs) 0; background: var(--gold-soft); }
+.academic-upload-match p { margin: 0 0 8px; color: var(--text); font-size: 13px; line-height: 1.5; }
+.academic-upload-match label { display: flex; gap: 10px; align-items: start; font-size: 13px; line-height: 1.5; cursor: pointer; }
+.academic-upload-match input { width: 18px; height: 18px; flex-shrink: 0; margin: 1px 0 0; accent-color: var(--gold); }
 .course-collection-count { color: var(--text-70); font-size: 12px; margin:0; }
 .course-storage-context { display:flex; align-items:center; gap:7px; font:10px var(--font-mono); color:var(--text-70); }
 .course-storage-context::before { content:""; width:5px; height:5px; border-radius:50%; background:var(--gold); }
