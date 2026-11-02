@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { assessBank } from "../src/lib/question-content/assessBank";
 import type { PackageQuestion } from "../src/lib/question-content/package";
 import type { PreparedBank, PrivateLibraryCatalog } from "../src/lib/privateLibrary/types";
-import { createApprovedOnlyLibrary, type ApprovalDecisions } from "./approved-only-library";
+import { createApprovedOnlyLibrary, questionApprovalHashes, type ApprovalDecisions } from "./approved-only-library";
 import { applyReviewedAnswers, createReviewedAnswerTemplate, type ReviewedAnswerDecisions } from "./apply-reviewed-answers";
 
 const sha = (value: Uint8Array | string) => createHash("sha256").update(value).digest("hex");
@@ -222,6 +222,30 @@ describe("private reviewed-answer application", () => {
       .rejects.toThrow(/shareable medical citation/);
   });
 
+  it("rejects traversal, home, and encoded paths while allowing an HTTPS citation and FEV1/FVC", async () => {
+    const { root, decisionsPath, decisions, output } = await fixture();
+    let deeplyEncoded = "/Users/jd/private/source.pdf";
+    for (let pass = 0; pass < 14; pass += 1) deeplyEncoded = encodeURIComponent(deeplyEncoded);
+    const paths = ["../private/source.pdf", "~/Documents/source.pdf",
+      "file%3A%2F%2F%2FUsers%2Fjd%2Fsource.pdf",
+      "file&#58;&#47;&#47;&#47;Users&#47;jd&#47;source.pdf",
+      "%252e%252e%252fprivate%252fsource.pdf",
+      "&amp;#47;Users&amp;#47;jd&amp;#47;source.pdf",
+      "C%3A%5CUsers%5Cjd%5Csource.pdf", "&#126;&#47;Documents&#47;source.pdf", deeplyEncoded];
+    for (const path of paths) {
+      decisions.records[0].explanationText =
+        `The synthetic source rationale at ${path} identifies the second invented choice as correct.`;
+      await writeFile(decisionsPath, JSON.stringify(decisions));
+      await expect(applyReviewedAnswers(root, decisionsPath, output))
+        .rejects.toThrow(/contain no local path/);
+    }
+    decisions.records[0].explanationText =
+      "The FEV1/FVC ratio in this synthetic item supports the second choice; see https://example.org/course%2fmodule for context.";
+    await writeFile(decisionsPath, JSON.stringify(decisions));
+    await expect(applyReviewedAnswers(root, decisionsPath, output))
+      .resolves.toMatchObject({ appliedQuestions: 1, readyAdded: 1 });
+  });
+
   it("rejects a retained local path in keep and append explanations", async () => {
     const old = "The invented source rationale at /private/course/notes.pdf says the second choice is correct.";
     const { root, decisionsPath, decisions, output } = await fixture(false, false, "answer-reveal-slide", old);
@@ -244,18 +268,99 @@ describe("private reviewed-answer application", () => {
     await expect(readFile(join(output, "library", "catalog.json"))).rejects.toThrow();
   });
 
+  it("checks encoded local paths inside rich text in the resulting question", async () => {
+    const { root, bankFile, decisionsPath, decisions, output } = await fixture();
+    const bank = JSON.parse(await readFile(join(root, bankFile), "utf8")) as PreparedBank;
+    bank.pkg.questions[0].stem = [{ type: "rich_text",
+      html: "<em>Which invented option appears in &#47;Users&#47;jd&#47;source.pdf?</em>" }];
+    const bytes = JSON.stringify(bank);
+    await writeFile(join(root, bankFile), bytes);
+    decisions.records[0].bankSha256 = sha(bytes);
+    Object.assign(decisions.records[0], questionApprovalHashes(bank.pkg.questions[0]));
+    await writeFile(decisionsPath, JSON.stringify(decisions));
+    await expect(applyReviewedAnswers(root, decisionsPath, output))
+      .rejects.toThrow(/member-visible local path/);
+    await expect(readFile(join(output, "library", "catalog.json"))).rejects.toThrow();
+  });
+
   it("rejects two catalog rows that point to one bank file", async () => {
+    for (const caseVariant of [false, true]) {
+      const { root, decisionsPath, decisions, output } = await fixture();
+      const catalogPath = join(root, "catalog.json");
+      const catalog = JSON.parse(await readFile(catalogPath, "utf8")) as PrivateLibraryCatalog;
+      const bankFile = catalog.sources[0].bankFile!;
+      catalog.sources[1].bankFile = caseVariant ? bankFile.toUpperCase() : bankFile;
+      const bytes = JSON.stringify(catalog);
+      await writeFile(catalogPath, bytes);
+      decisions.catalogSha256 = sha(bytes);
+      await writeFile(decisionsPath, JSON.stringify(decisions));
+      await expect(applyReviewedAnswers(root, decisionsPath, output))
+        .rejects.toThrow(/same bank file/);
+      await expect(readFile(join(output, "library", "catalog.json"))).rejects.toThrow();
+    }
+  });
+
+  for (const aliasCount of [1, 2]) {
+    it(`applies a canonical source once with ${aliasCount} duplicate-linked marker(s)`, async () => {
+      const { work, root, bankFile, decisionsPath, decisions, output } = await fixture();
+      const catalogPath = join(root, "catalog.json");
+      const catalog = JSON.parse(await readFile(catalogPath, "utf8")) as PrivateLibraryCatalog;
+      const canonical = catalog.sources[0];
+      for (let index = 0; index < aliasCount; index++) {
+        catalog.sources.push({ ...canonical, status: "duplicate-linked", duplicateOf: canonical.id,
+          reason: "Invented duplicate marker", bankFile: undefined, originalFile: undefined,
+          ready: 0, review: 0 });
+      }
+      const bytes = JSON.stringify(catalog);
+      await writeFile(catalogPath, bytes);
+      const templatePath = join(work, `canonical-template-${aliasCount}.json`);
+      await expect(createReviewedAnswerTemplate(root, templatePath, canonical.checksum))
+        .resolves.toEqual({ records: 1 });
+      decisions.catalogSha256 = sha(bytes);
+      await writeFile(decisionsPath, JSON.stringify(decisions));
+      await expect(applyReviewedAnswers(root, decisionsPath, output))
+        .resolves.toMatchObject({ appliedQuestions: 1, appliedBanks: 1, readyAdded: 1 });
+      const updated = JSON.parse(await readFile(join(output, "library", "catalog.json"), "utf8")) as PrivateLibraryCatalog;
+      expect(updated.sources).toHaveLength(2 + aliasCount);
+      expect(updated.sources[0]).toMatchObject({ bankFile, ready: 1, review: 0 });
+      for (const alias of updated.sources.slice(2))
+        expect(alias).toMatchObject({ status: "duplicate-linked", ready: 0, review: 0 });
+    });
+  }
+
+  it("rejects a decision naming a blocked alias without its own canonical bank", async () => {
     const { root, decisionsPath, decisions, output } = await fixture();
     const catalogPath = join(root, "catalog.json");
     const catalog = JSON.parse(await readFile(catalogPath, "utf8")) as PrivateLibraryCatalog;
-    catalog.sources[1].bankFile = catalog.sources[0].bankFile;
+    catalog.sources.push({ ...catalog.sources[0], id: "invented-alias-only", status: "duplicate-linked",
+      duplicateOf: catalog.sources[0].id, bankFile: undefined, originalFile: undefined,
+      ready: 0, review: 0 });
     const bytes = JSON.stringify(catalog);
     await writeFile(catalogPath, bytes);
     decisions.catalogSha256 = sha(bytes);
+    decisions.records.push({ ...decisions.records[0], sourceId: "invented-alias-only", status: "held" });
     await writeFile(decisionsPath, JSON.stringify(decisions));
     await expect(applyReviewedAnswers(root, decisionsPath, output))
-      .rejects.toThrow(/same bank file/);
+      .rejects.toThrow(/blocked duplicate alias/);
     await expect(readFile(join(output, "library", "catalog.json"))).rejects.toThrow();
+  });
+
+  it("rejects active source ID and checksum collisions despite duplicate alias support", async () => {
+    for (const bankless of [false, true]) {
+      for (const field of ["id", "checksum"] as const) {
+        const { root, decisionsPath, decisions, output } = await fixture();
+        const catalogPath = join(root, "catalog.json");
+        const catalog = JSON.parse(await readFile(catalogPath, "utf8")) as PrivateLibraryCatalog;
+        catalog.sources[1][field] = catalog.sources[0][field];
+        if (bankless) delete catalog.sources[1].bankFile;
+        const bytes = JSON.stringify(catalog);
+        await writeFile(catalogPath, bytes);
+        decisions.catalogSha256 = sha(bytes);
+        await writeFile(decisionsPath, JSON.stringify(decisions));
+        await expect(applyReviewedAnswers(root, decisionsPath, output))
+          .rejects.toThrow(/active catalog sources/);
+      }
+    }
   });
 
   it("preserves an already printed key when a reviewer confirms the same label", async () => {

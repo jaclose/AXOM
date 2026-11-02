@@ -16,7 +16,37 @@ import { createApprovalTemplate, questionApprovalHashes } from "./approved-only-
 
 const FORMAT = "axom-reviewed-answer-decisions";
 const HEX = /^[a-f0-9]{64}$/;
-const localPath = /file:\/\/|(?:^|[^\p{L}\p{N}._/\\])(?:\/[^\s/\\]+\/[^\s/\\]+|[a-z]:[\\/]|\\\\)/iu;
+const localPath = /file:[/\\]+|(?:^|[^\p{L}\p{N}._/\\])(?:\/[^\s/\\]+\/[^\s/\\]+|[a-z]:[\\/]|\\\\|(?:\.{1,2}[\\/])+[^\s/\\]+|~[\\/][^\s/\\]+)/iu;
+const pathCharacters = new Map([[37, "%"], [38, "&"], [46, "."], [47, "/"],
+  [58, ":"], [92, "\\"], [126, "~"]]);
+const namedPathCharacters: Record<string, string> = {
+  amp: "&", period: ".", sol: "/", bsol: "\\", colon: ":", tilde: "~",
+};
+function visiblePathText(value: string): string | null {
+  let text = value;
+  for (let pass = 0; pass < 12; pass += 1) {
+    const decoded = text
+      .replace(/&#(?:x([0-9a-f]{1,6})|([0-9]{1,7}));?/gi, (match, hex: string | undefined, decimal: string | undefined) =>
+        pathCharacters.get(Number.parseInt(hex ?? decimal ?? "", hex ? 16 : 10)) ?? match)
+      .replace(/&(amp|period|sol|bsol|colon|tilde);/gi, (_match, name: string) => namedPathCharacters[name.toLowerCase()])
+      .replace(/%(25|26|2e|2f|3a|5c|7e)/gi, (match, code: string) =>
+        pathCharacters.get(Number.parseInt(code, 16)) ?? match);
+    if (decoded === text) return text;
+    text = decoded;
+  }
+  if (/%(?:25|26|2e|2f|3a|5c|7e)|&(?:amp;)*#(?:x(?:25|26|2e|2f|3a|5c|7e)|(?:37|38|46|47|58|92|126));?/i.test(text))
+    return null;
+  return text;
+}
+function hasLocalPath(value: unknown): boolean {
+  if (typeof value === "string") {
+    const visible = visiblePathText(value);
+    return visible === null || localPath.test(visible);
+  }
+  if (Array.isArray(value)) return value.some(hasLocalPath);
+  if (value && typeof value === "object") return Object.values(value).some(hasLocalPath);
+  return false;
+}
 const runFile = promisify(execFile);
 type DecisionStatus = "pending" | "held" | "approved";
 type ExplanationMode = "keep" | "replace" | "append";
@@ -57,7 +87,7 @@ export interface ReviewedAnswerDecisions {
   records: ReviewedAnswerRecord[];
 }
 
-const fail = (message: string): never => { throw new Error(message); };
+function fail(message: string): never { throw new Error(message); }
 const sha = (bytes: Uint8Array | string): string => createHash("sha256").update(bytes).digest("hex");
 
 async function fileSha(path: string): Promise<string> {
@@ -122,14 +152,29 @@ async function clonePrivateTree(root: string, library: string): Promise<void> {
   }
 }
 
-function assertUniqueBankPaths(catalog: PrivateLibraryCatalog): void {
-  const seen = new Set<string>();
+function canonicalBankSources(catalog: PrivateLibraryCatalog) {
+  const sources = new Map<string, PrivateLibraryCatalog["sources"][number]>();
+  const activeIds = new Set<string>();
+  const bankPaths = new Set<string>();
+  const checksums = new Set<string>();
+  const blockedAliasIds = new Set<string>();
   for (const source of catalog.sources) {
+    if (source.status === "duplicate-linked" || source.duplicateOf) {
+      blockedAliasIds.add(source.id);
+      continue;
+    }
+    if (activeIds.has(source.id)) fail("Two active catalog sources have the same ID.");
+    if (checksums.has(source.checksum)) fail("Two active catalog sources have the same checksum.");
+    activeIds.add(source.id);
+    checksums.add(source.checksum);
     if (!source.bankFile) continue;
     const path = safeLibraryPath(source.bankFile);
-    if (seen.has(path)) fail("Two catalog sources point to the same bank file.");
-    seen.add(path);
+    const pathKey = path.normalize("NFC").toLowerCase();
+    if (bankPaths.has(pathKey)) fail("Two catalog sources point to the same bank file.");
+    sources.set(source.id, source);
+    bankPaths.add(pathKey);
   }
+  return { sources, blockedAliasIds };
 }
 
 function substantive(text: string): boolean {
@@ -168,19 +213,19 @@ function readDecisions(value: unknown): ReviewedAnswerDecisions {
       fail("An approved answer lacks source, clinical, explanation, filing, or rights review.");
     if (!/^[A-J]$/.test(row.answerLabel))
       fail("An approved answer must name one A–J choice.");
-    if (row.answerEvidenceNote.trim().length < 8 || localPath.test(row.answerEvidenceNote)
+    if (row.answerEvidenceNote.trim().length < 8 || hasLocalPath(row.answerEvidenceNote)
       || row.answerEvidenceSourcePage !== null && row.answerEvidenceSourcePage < 1
       || row.answerEvidenceSourceLine !== null && (row.answerEvidenceSourceLine < 1
         || row.answerEvidenceSourcePage === null))
       fail("An approved answer needs inspectable source-key evidence.");
     if (row.explanationMode !== "keep") {
-      if (!substantive(row.explanationText) || localPath.test(row.explanationText))
+      if (!substantive(row.explanationText) || hasLocalPath(row.explanationText))
         fail("An approved explanation must be substantive and contain no local path.");
       if (row.explanationOrigin === "source") {
         if (!Number.isSafeInteger(row.explanationSourcePage) || (row.explanationSourcePage ?? 0) < 1)
           fail("A source rationale needs its inspected PDF page.");
       } else if (row.explanationOrigin === "axom") {
-        if (row.explanationCitation.trim().length < 8 || localPath.test(row.explanationCitation))
+        if (row.explanationCitation.trim().length < 8 || hasLocalPath(row.explanationCitation))
           fail("An AXOM explanation needs a shareable medical citation.");
       } else fail("A new explanation needs its source or AXOM origin.");
     }
@@ -271,12 +316,9 @@ function applyRecord(question: PackageQuestion, row: ReviewedAnswerRecord): Pack
   const fullExplanation = blocksToPlainText(result.explanation ?? []);
   if (!substantive(fullExplanation))
     fail("A reviewed question still lacks a substantive explanation.");
-  if (localPath.test(fullExplanation) || localPath.test(JSON.stringify(result.explanation ?? [])))
+  if (hasLocalPath(fullExplanation) || hasLocalPath(result.explanation ?? []))
     fail("A reviewed explanation still contains a local path.");
-  const memberVisible = { course: result.course, discipline: result.discipline, topic: result.topic,
-    subtopic: result.subtopic, stem: result.stem, choices: result.choices,
-    choiceTable: result.choiceTable, explanation: result.explanation, teaching: result.teaching };
-  if (localPath.test(JSON.stringify(memberVisible)))
+  if (hasLocalPath(result))
     fail("A reviewed question still contains a member-visible local path.");
   return result;
 }
@@ -298,10 +340,11 @@ export async function createReviewedAnswerTemplate(preparedRoot: string, destina
   if (sourceChecksum !== undefined && !HEX.test(sourceChecksum)) fail("Source filter must be a SHA-256 checksum.");
   const catalogBytes = await readFile(await inside(root, "catalog.json"));
   const catalog = readCatalog(JSON.parse(catalogBytes.toString("utf8")));
-  assertUniqueBankPaths(catalog);
+  const { sources } = canonicalBankSources(catalog);
   const records: ReviewedAnswerRecord[] = [];
-  for (const source of catalog.sources) {
-    if (!source.bankFile || sourceChecksum && source.checksum !== sourceChecksum) continue;
+  for (const source of sources.values()) {
+    if (sourceChecksum && source.checksum !== sourceChecksum) continue;
+    if (!source.bankFile) fail("A canonical source has no bank.");
     const bankBytes = await readFile(await inside(root, source.bankFile));
     const bank = readPreparedBank(JSON.parse(bankBytes.toString("utf8")));
     assertSourceIdentity(source, bank);
@@ -360,18 +403,21 @@ export async function applyReviewedAnswers(preparedRoot: string, decisionsFile: 
 
   const catalogBytes = await readFile(await inside(root, "catalog.json"));
   const catalog = readCatalog(JSON.parse(catalogBytes.toString("utf8")));
-  assertUniqueBankPaths(catalog);
+  const { sources, blockedAliasIds } = canonicalBankSources(catalog);
   const decisionBytes = await readFile(decisionPath);
   const decisions = readDecisions(JSON.parse(decisionBytes.toString("utf8")));
   if (sha(catalogBytes) !== decisions.catalogSha256)
     fail("The prepared catalog changed since answer review.");
   const approved = decisions.records.filter(row => row.status === "approved");
   if (!approved.length) fail("No human-approved answers were supplied. Nothing was written.");
-  const sources = new Map(catalog.sources.map(source => [source.id, source]));
-  if (sources.size !== catalog.sources.length) fail("The prepared catalog has duplicate source IDs.");
   const bySource = new Map<string, ReviewedAnswerRecord[]>();
-  for (const row of decisions.records)
+  for (const row of decisions.records) {
+    if (!sources.has(row.sourceId)) {
+      if (blockedAliasIds.has(row.sourceId)) fail("An answer decision names a blocked duplicate alias.");
+      fail("An answer decision names a source without a canonical bank.");
+    }
     bySource.set(row.sourceId, [...(bySource.get(row.sourceId) ?? []), row]);
+  }
 
   const changes: ChangedBank[] = [];
   for (const [sourceId, rows] of bySource) {
