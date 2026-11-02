@@ -5,25 +5,31 @@ authority: current-state
 ---
 # AXOM current AI state
 
-## Checkout and release boundary · 2026-11-02 04:52 UTC
+## Checkout and release boundary · 2026-11-02 05:35 UTC
 
-This handoff was updated from local frontier baseline `77dd3533` on
+This handoff was updated from local frontier baseline `33b40800` on
 `codex/axom-frontier-release-20261101`. Check `git status`, HEAD and the
 coordination board before editing. At this snapshot, remote `main` was
-`be2f40e6`; [PR #74](https://github.com/jaclose/AXOM/pull/74) and
-[PR #75](https://github.com/jaclose/AXOM/pull/75) are merged there. The
+`bfaf85c5`; [PR #74](https://github.com/jaclose/AXOM/pull/74),
+[PR #75](https://github.com/jaclose/AXOM/pull/75),
+[PR #76](https://github.com/jaclose/AXOM/pull/76), and
+[PR #78](https://github.com/jaclose/AXOM/pull/78) are merged there. The
 frontier's `0.0.3-prebeta` version and [release notes](../CHANGELOG.md) are
 **local release preparation**, with push and production held for JD's follow-up.
 No later production deployment or authenticated acceptance is established here.
 
 The last recorded web production check was PR #59 on 2026-11-01: signed-in
-Question Bank and Community Uploads loaded. The last recorded linked SQL check
-then found zero academic collections and community submissions; do not treat
-that as a fresh count. The 2026-11-02 postflight recorded four feature
-migrations (`20261101190000`–`20261101193000`) and RLS on all 11 new tables,
-without real-account acceptance. The communications migration and Edge function
-were observed active separately, but provider mode, delivery and inbox receipt
-were not verified. Dated receipts: `git show e799ed5b:docs/AI_STATE.md`,
+Question Bank and Community Uploads loaded. A 2026-11-02 read-only production
+metadata check found one private pending academic collection and zero Community
+submissions; no official academic content was published. The linked check of
+AXOM Production
+(`jofkmfwkidubxcutkwzf`) found its ledger ends at `20261101180000`. The four
+feature migrations (`20261101190000`–`20261101193000`) and forward Host privacy
+migration (`20261102160000`) are **pending in production**. An earlier
+postflight of 11 new RLS-enabled tables was on separate preview project
+`yfjqsshsaxiggcbvkvnj`; it was not production acceptance. The communications
+migration and Edge function are present in production, but provider mode,
+delivery and inbox receipt were not verified. Dated receipts: `git show e799ed5b:docs/AI_STATE.md`,
 [Host rollout gate](features/community-operator-console.md#deployment-and-verification-gates),
 and [email readiness](operations/communications-readiness.md).
 
@@ -46,10 +52,10 @@ and [email readiness](operations/communications-readiness.md).
   attestation remains required before official academic approval.
 - [Host](features/community-operator-console.md#operator-console) uses
   server-read roles, reasoned/audited moderation and a restricted report
-  queue. Its forward privacy migration `20261102160000` and verified owner
-  provisioning must be checked against the hosted ledger before the matching
-  UI can be accepted. [Communications](features/communications.md) has a
-  canonical renderer plus a branded local welcome draft and safe diagnostics;
+  queue. Its four feature migrations, forward privacy migration `20261102160000`
+  and verified owner provisioning are pending production acceptance.
+  [Communications](features/communications.md) has a canonical renderer plus
+  branded local welcome and product-update drafts and safe diagnostics;
   live Resend send, webhook, SMTP and email-client acceptance remain separate
   gates.
 
@@ -83,9 +89,9 @@ before shared edits. Historic receipts remain in Git history; do not reload
 them at startup without a specific question.
 
 The combined frontier gate through `bc685acc` passed typecheck, lint,
-repository tests, build and targeted desktop/mobile browser checks; a stale
-Dashboard selector was fixed and retested at `e7f9f867`. Later QBank merges
-and release edits need an integrated release gate before any push or deployment.
-This docs-only update passed 43 repository tests and `repo:check`.
-Next: integrate this small docs commit, verify the current tree and deployment
-preconditions, then keep the remote release held until JD's explicit follow-up.
+repository tests, build and targeted desktop/mobile browser checks. Since then,
+Node 22.23.4, dependency fixes, QBank PRs and release UI edits were integrated;
+88 release tests and targeted link/Host/Community checks pass, but a final
+combined gate is still required. Keep the remote release held until JD's
+explicit follow-up; production migrations, owner grant, live mail delivery,
+and real-account Community/Host acceptance remain separate checks.
