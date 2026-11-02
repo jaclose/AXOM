@@ -11,8 +11,8 @@ import type { AssetRole, QuestionBlock, TableBlock } from "./blocks";
 
 /** Bumped only when an older AXOM could misread a newer package. See `MIGRATIONS` in packageJson.ts. */
 export const PACKAGE_SCHEMA_VERSION = 2;
-/** Source-backed MCQs may have nine labelled alternatives; larger extractions remain held. */
-export const MAX_PACKAGE_CHOICES = 9;
+/** Prepared questions can preserve the source's full A–J choice list. */
+export const MAX_PACKAGE_CHOICES = 10;
 
 // --- manifest ----------------------------------------------------------------
 
@@ -83,13 +83,13 @@ export interface ProvenanceMetadata {
   notes?: string;
 }
 
-export const ANSWER_EVIDENCE = ["printed-key", "answer-reveal-slide", "explanation", "reviewer"] as const;
+export const ANSWER_EVIDENCE = ["printed-key", "answer-reveal-slide", "source-mark-verified", "explanation", "reviewer"] as const;
 export type AnswerEvidence = (typeof ANSWER_EVIDENCE)[number];
 
 export interface AnswerKey {
   /** One label for a single best answer; more for a multiple-select question. */
   labels: string[];
-  /** Where the key came from. A highlighted copy of a slide is evidence, not a printed key. */
+  /** Where the key came from. A checked answer mark remains distinct from a printed key or a person's review. */
   evidence?: AnswerEvidence;
 }
 
@@ -138,8 +138,10 @@ export interface QuestionAsset {
 
 export const QUESTION_FLAG_TYPES = [
   "source_inconsistency",
+  "source_nonkey_discrepancy",
   "missing_explanation",
   "possible_duplicate",
+  "student_source",
   "answer_reveal_asset",
   "media_association_uncertain",
   "media_position_uncertain",

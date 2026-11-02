@@ -19,8 +19,10 @@ export interface ValidateOptions {
 
 export const FLAG_SEVERITY: Record<QuestionFlagType, IssueSeverity> = {
   source_inconsistency: "warning",
+  source_nonkey_discrepancy: "warning",
   missing_explanation: "info",
   possible_duplicate: "warning",
+  student_source: "warning",
   answer_reveal_asset: "info",
   media_association_uncertain: "warning",
   media_position_uncertain: "warning",
@@ -116,7 +118,7 @@ function checkQuestion(pkg: ImportPackage, question: PackageQuestion, options: V
   const labels = question.choices.map((choice) => choice.label);
   if (new Set(labels).size !== labels.length) add("error", "duplicate_id", "Two choices have the same letter.", "choices");
   if (labels.length < 2) add("warning", "choices_incomplete", "The question has fewer than two answer choices.", "choices");
-  if (labels.length > MAX_PACKAGE_CHOICES) add("error", "invalid_question", `The extraction combined ${labels.length} answer choices into one question. AXOM supports at most ${MAX_PACKAGE_CHOICES} (A–I) here; check for merged stems or option spillover.`, "choices");
+  if (labels.length > MAX_PACKAGE_CHOICES) add("error", "invalid_question", `The extraction combined ${labels.length} answer choices into one question. AXOM supports at most ${MAX_PACKAGE_CHOICES} (A–J) here; check for merged stems or option spillover.`, "choices");
   const tableKeys = new Set(question.choiceTable?.rowKeys ?? []);
   for (const choice of question.choices) {
     if (!choice.blocks.length && !tableKeys.has(choice.label)) add("error", "choices_incomplete", `Choice ${choice.label} has no content.`, `choices[${choice.label}]`);

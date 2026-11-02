@@ -97,6 +97,8 @@ import type {
   ReviewedImportPersistenceResult,
   ReviewedRefilingPlan,
   ReviewedRefilingResult,
+  ReviewedSourceRefreshPlan,
+  ReviewedSourceRefreshResult,
 } from "./questionImportFinalization";
 import {
   nextSchedule, validateAnkiCard,
@@ -303,6 +305,8 @@ interface Actions {
   commitReviewedImport: (plan: ReviewedImportPersistencePlan) => Promise<ReviewedImportPersistenceResult>;
   /** Atomically persist reviewed filing changes for reused source sets. */
   commitReviewedRefiling: (plan: ReviewedRefilingPlan) => Promise<ReviewedRefilingResult>;
+  /** Atomically refresh only source-owned fields of an untouched reused set. */
+  commitReviewedSourceRefresh: (plan: ReviewedSourceRefreshPlan) => Promise<ReviewedSourceRefreshResult>;
   updateQuestion: (id: string, patch: Partial<QuestionRecord>) => void;
   removeQuestion: (id: string) => void;
   recordQuestionAttempt: (id: string, attempt: Omit<QuestionAttempt, "at">) => void;
@@ -1650,6 +1654,98 @@ export const useStore = create<Store>()(
           questionSetId: questionSet?.id,
           documentId: documentWrite?.kind === "create" ? documentWrite.document.id : documentWrite?.id,
         };
+      },
+      commitReviewedSourceRefresh: async (plan) => {
+        const failure = (message: string, rollbackFailures: string[] = []): ReviewedSourceRefreshResult => ({
+          ok: false, message, rollbackFailures,
+        });
+        const sameValue = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
+        const current = get();
+        const setBefore = (current.questionSets ?? []).find((item) => item.id === plan.setId);
+        if (!setBefore || !sameValue(setBefore, plan.expectedSet)) {
+          return failure("The reused source set changed before its audited refresh.");
+        }
+        const requestedIds = plan.questions.map((entry) => entry.expected.id);
+        if (!requestedIds.length || new Set(requestedIds).size !== requestedIds.length
+          || requestedIds.length !== setBefore.questionIds.length
+          || setBefore.questionIds.some((id) => !requestedIds.includes(id))) {
+          return failure("The reused source set no longer has exactly the audited questions.");
+        }
+        const before = new Map<string, QuestionRecord>();
+        const after = new Map<string, QuestionRecord>();
+        for (const entry of plan.questions) {
+          const prior = (current.questions ?? []).find((question) => question.id === entry.expected.id);
+          const source = entry.source.content;
+          if (!prior || !sameValue(prior, entry.expected) || prior.setId !== plan.setId
+            || !prior.content || !source
+            || prior.content.id !== source.id || prior.content.bankId !== source.bankId
+            || prior.content.provenance.sourceChecksum !== source.provenance.sourceChecksum
+            || prior.correctKey !== entry.source.correctKey) {
+            return failure(`Question "${entry.expected.id}" changed before its audited refresh.`);
+          }
+          const replacement = { ...prior, ...entry.source, updatedAt: now() };
+          const validation = validateQuestionRecord(replacement);
+          if (!validation.ok) return failure(`Question "${prior.id}" failed audited refresh validation: ${validation.errors.join(" ")}`);
+          before.set(prior.id, prior);
+          after.set(prior.id, replacement);
+        }
+        const changed = [...after].filter(([id, replacement]) => {
+          const prior = before.get(id)!;
+          return Object.keys(plan.questions.find((entry) => entry.expected.id === id)!.source)
+            .some((key) => !sameValue((prior as unknown as Record<string, unknown>)[key], (replacement as unknown as Record<string, unknown>)[key]));
+        });
+        const scopeChanged = !sameValue(setBefore.scope, plan.targetScope);
+        if (!changed.length && !scopeChanged) return { ok: true, updated: 0 };
+        const nextQuestions = (current.questions ?? []).map((question) => after.get(question.id) ?? question);
+        const nextSets = (current.questionSets ?? []).map((set) => (
+          set.id === plan.setId ? { ...set, scope: plan.targetScope } : set
+        ));
+        const writeSequence = getVaultWriteCheckpoint() + 1;
+        try {
+          await set(() => ({ questions: nextQuestions, questionSets: nextSets }));
+          assertVaultWrite(writeSequence);
+          return { ok: true, updated: changed.length };
+        } catch (error) {
+          const rollbackFailures = new Set<string>();
+          const rollbackSequence = getVaultWriteCheckpoint() + 1;
+          try {
+            await set((live) => ({
+              questions: (live.questions ?? []).map((question) => {
+                const prior = before.get(question.id);
+                const replacement = after.get(question.id);
+                if (!prior || !replacement) return question;
+                const restored = { ...question } as Record<string, unknown>;
+                const source = plan.questions.find((entry) => entry.expected.id === question.id)!.source;
+                for (const key of [...Object.keys(source), "updatedAt"]) {
+                  const liveValue = (question as unknown as Record<string, unknown>)[key];
+                  const replacementValue = (replacement as unknown as Record<string, unknown>)[key];
+                  if (!sameValue(liveValue, replacementValue)) {
+                    rollbackFailures.add(`question ${question.id}.${key}`);
+                    continue;
+                  }
+                  if (key in prior) restored[key] = (prior as unknown as Record<string, unknown>)[key];
+                  else delete restored[key];
+                }
+                return restored as unknown as QuestionRecord;
+              }),
+              questionSets: (live.questionSets ?? []).map((questionSet) => {
+                if (questionSet.id !== plan.setId) return questionSet;
+                if (!sameValue(questionSet.scope, plan.targetScope)) {
+                  rollbackFailures.add(`question set ${plan.setId}.scope`);
+                  return questionSet;
+                }
+                return { ...questionSet, scope: setBefore.scope };
+              }),
+            }));
+            assertVaultWrite(rollbackSequence);
+          } catch {
+            rollbackFailures.add("audited source refresh state");
+          }
+          return failure(
+            error instanceof Error ? error.message : "AXOM could not persist the audited source refresh.",
+            [...rollbackFailures],
+          );
+        }
       },
       commitReviewedRefiling: async (plan) => {
         const failure = (message: string, rollbackFailures: string[] = []): ReviewedRefilingResult => ({

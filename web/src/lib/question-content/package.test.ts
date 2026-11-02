@@ -41,6 +41,13 @@ describe("reading a package", () => {
     expect(parsed.package!.questions[0].stem).toEqual([{ type: "text", text: "  Two spaces lead this stem.  It ends with a tab.\t" }]);
   });
 
+  it("retains a student-source disclosure as a known flag", () => {
+    const flag = { type: "student_source", message: "The marked answer comes from a student review." };
+    const parsed = read([question({ flags: [flag] })]);
+    expect(parsed.issues).toEqual([]);
+    expect(parsed.package!.questions[0].flags).toEqual([flag]);
+  });
+
   it("refuses a package made by a newer AXOM and says why", () => {
     const parsed = read([question()], { schemaVersion: PACKAGE_SCHEMA_VERSION + 1 });
     expect(parsed.package).toBeUndefined();
