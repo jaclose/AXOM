@@ -198,6 +198,8 @@ export function mergeStates(current: NoctyriumState, imported: NoctyriumState): 
     ...current.profile, applicationResearch: [...research.values()],
     // The profile is one learner-edited record, so current wins whole rather than field-merging.
     applicationProfile: normalizeApplicationProfile(current.profile.applicationProfile) ?? normalizeApplicationProfile(imported.profile.applicationProfile),
+    // A fresh device has no lane preference yet; keep the account's selection in that case.
+    blueprintMode: normalizeBlueprintMode(current.profile.blueprintMode) ?? normalizeBlueprintMode(imported.profile.blueprintMode),
     // Unlocks follow the learner, so a merge retains those earned in either workspace.
     ...(unlocks?.length ? { unlocks } : {}),
   };

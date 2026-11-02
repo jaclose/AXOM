@@ -504,6 +504,21 @@ describe("portable backup safety", () => {
     expect(mergeStates(current, malformed).profile.unlocks).toEqual(["again"]);
   });
 
+  it("restores the account blueprint lane on a fresh device without changing its local identity", () => {
+    const current = makeSeed();
+    current.profile.name = "Local learner";
+    expect(current.profile.blueprintMode).toBeUndefined();
+    const account = makeSeed();
+    account.profile.name = "Account learner";
+    account.profile.blueprintMode = "prehealth";
+    const imported = parseImport(JSON.stringify({ _app: "AXOM", ...toPortableState(account) }));
+
+    const merged = mergeStates(current, imported);
+    expect(merged.profile.name).toBe("Local learner");
+    expect(merged.profile.blueprintMode).toBe("prehealth");
+    expect(current.profile.blueprintMode).toBeUndefined();
+  });
+
   it("merges unique attempt history for the same question instead of dropping the older side", () => {
     const current = makeSeed();
     current.questions = [{
