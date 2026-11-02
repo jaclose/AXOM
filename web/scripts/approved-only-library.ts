@@ -4,9 +4,12 @@ import { createReadStream } from "node:fs";
 import { chmod, copyFile, lstat, mkdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { assessBank } from "../src/lib/question-content/assessBank";
-import { blocksToPlainText } from "../src/lib/question-content/blocks";
-import type { PackageQuestion } from "../src/lib/question-content/package";
+import { blocksToPlainText, type QuestionBlock } from "../src/lib/question-content/blocks";
+import { readImageInfo, SHOWABLE_IMAGE_TYPES } from "../src/lib/question-content/assets";
+import type { PackageQuestion, QuestionAsset } from "../src/lib/question-content/package";
 import { hasQuestionExplanation } from "../src/lib/academicLibrary/explanationReview";
+import { assertCompleteAcademicGif, MAX_ACADEMIC_IMAGE_PIXELS } from "../src/lib/academicLibrary/gifIntegrity";
+import { MAX_QUESTION_ATTACHMENT_BYTES } from "../src/lib/questionAttachmentLimits";
 import { planPublication, readPublicationInventory } from "../src/lib/academicLibrary/publication";
 import { readCatalog, readPreparedBank, safeLibraryPath } from "../src/lib/privateLibrary/install";
 import type { PreparedBank, PrivateLibraryCatalog } from "../src/lib/privateLibrary/types";
@@ -138,9 +141,18 @@ function substantiveExplanation(question: PackageQuestion): boolean {
   const text = `${source} ${teaching}`.trim();
   return text.length >= 35 && (text.match(/\p{L}{2,}/gu)?.length ?? 0) >= 6;
 }
-const localPath = /file:\/\/|(?:^|[\s"'(=:])(?:\/[\w.-]+\/[\w.-]+|[a-z]:[\\/]|\\\\)/i;
+const localPath = /file:\/\/|(?:^|[^\p{L}\p{N}._/\\])(?:\/[^\s/\\]+\/[^\s/\\]+|[a-z]:[\\/]|\\\\)/iu;
 function memberMetadata(field: string, value: string | undefined): void {
   if (value && localPath.test(value)) fail(`A member-visible ${field} contains a local path.`);
+}
+function blockMetadata(blocks: readonly QuestionBlock[]): void {
+  for (const block of blocks) {
+    if (block.type === "image") {
+      memberMetadata("image asset ID", block.assetId);
+      memberMetadata("image alt", block.alt);
+      memberMetadata("image caption", block.caption);
+    } else if (block.type === "table") memberMetadata("table image asset ID", block.sourceImageAssetId);
+  }
 }
 function assertMemberMetadata(source: PrivateLibraryCatalog["sources"][number], bank: PreparedBank): void {
   memberMetadata("source ID", source.id);
@@ -154,6 +166,10 @@ function assertMemberMetadata(source: PrivateLibraryCatalog["sources"][number], 
     "source term": manifest.source.declaredTerm, "reviewed module": bank.reviewedFiling?.module,
   })) memberMetadata(field, value);
   for (const question of questions) {
+    blockMetadata(question.stem);
+    for (const choice of question.choices) blockMetadata(choice.blocks);
+    blockMetadata(question.explanation ?? []);
+    if (question.choiceTable) blockMetadata([question.choiceTable]);
     for (const [field, value] of Object.entries({
       "question ID": question.id, "question course": question.course, "question bank ID": question.bankId,
       "question discipline": question.discipline, "question topic": question.topic,
@@ -188,6 +204,18 @@ function assertMemberMetadata(source: PrivateLibraryCatalog["sources"][number], 
       memberMetadata("teaching inspection", excerpt.inspection);
     }
   }
+}
+function assertApprovedImageBytes(asset: QuestionAsset, bytes: Uint8Array): void {
+  if (!bytes.length || bytes.length > MAX_QUESTION_ATTACHMENT_BYTES) fail("An approved figure exceeds AXOM's per-image limit.");
+  const image = readImageInfo(bytes);
+  if (!image || image.mimeType !== asset.mimeType || !SHOWABLE_IMAGE_TYPES.has(image.mimeType)
+    || !Number.isSafeInteger(image.width) || !Number.isSafeInteger(image.height)
+    || !image.width || !image.height || image.width * image.height > MAX_ACADEMIC_IMAGE_PIXELS
+    || asset.byteSize !== undefined && asset.byteSize !== bytes.length
+    || asset.width !== undefined && asset.width !== image.width
+    || asset.height !== undefined && asset.height !== image.height)
+    fail("An approved figure is not the declared, supported image bytes.");
+  if (image.mimeType === "image/gif") assertCompleteAcademicGif(bytes);
 }
 function safeApprovedQuestion(question: PackageQuestion, row: ApprovalRecord): PackageQuestion {
   if (!substantiveExplanation(question)) fail("An approved question lacks a substantive source or reviewed AXOM explanation.");
@@ -276,8 +304,11 @@ export async function createApprovedOnlyLibrary(preparedRoot: string, decisionsF
       for (const asset of question.assets) {
         const path = `${dirname(source.bankFile)}/assets/${asset.filename}`;
         const sourceFile = await inside(root, path);
+        const sourceSize = (await stat(sourceFile)).size;
+        if (!sourceSize || sourceSize > MAX_QUESTION_ATTACHMENT_BYTES) fail("An approved figure exceeds AXOM's per-image limit.");
         if (asset.checksum !== `sha256:${await fileHash(sourceFile)}`) fail("An approved figure does not match its recorded checksum.");
-        files.push({ name: asset.filename, size: (await stat(sourceFile)).size });
+        assertApprovedImageBytes(asset, await readFile(sourceFile));
+        files.push({ name: asset.filename, size: sourceSize });
         if (assets.has(path) && assets.get(path)!.checksum !== asset.checksum) fail("Two approved figures claim different bytes at one path.");
         assets.set(path, { path: `banks/${source.checksum}/assets/${asset.filename}`, source: sourceFile, checksum: asset.checksum });
       }

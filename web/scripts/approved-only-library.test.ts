@@ -21,27 +21,35 @@ afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { rec
 
 async function fixture(options: { image?: boolean; explanation?: string; week?: number; duplicateSource?: boolean;
   duplicateSourceSha?: boolean; privateBankPath?: boolean; privateToolPath?: boolean;
-  metadataPath?: "manifest" | "question" | "asset"; manifestPaths?: boolean } = {}) {
+  metadataPath?: "manifest" | "question" | "asset"; metadataTitle?: string; manifestPaths?: boolean;
+  imageMetadataPath?: "stem-alt" | "choice-caption" | "explanation-caption"; disguisedPdf?: boolean } = {}) {
   const work = await mkdtemp(join(tmpdir(), "axom-approved-test-")); roots.push(work);
   const root = join(work, "prepared"); await mkdir(root);
   const original = Buffer.from("%PDF-1.4 synthetic fixture only");
   const checksum = sha(original);
   const bankFile = options.privateBankPath ? "private/operator-course/bank.json" : `banks/${checksum}/bank.json`;
   const originalFile = `sources/${checksum}.pdf`;
+  const imageBytes = options.disguisedPdf ? Buffer.from("%PDF-1.4 synthetic source disguised as PNG") : png;
   const asset = { id: "synthetic-figure", filename: "synthetic-figure.png", mimeType: "image/png", width: 1, height: 1,
-    byteSize: png.length, sourceFile: "synthetic.pdf", sourcePage: 1, role: "stem" as const, questionId: "q-ready",
-    checksum: `sha256:${sha(png)}`, derivation: "embedded" as const,
+    byteSize: imageBytes.length, sourceFile: "synthetic.pdf", sourcePage: 1, role: "stem" as const, questionId: "q-ready",
+    checksum: `sha256:${sha(imageBytes)}`, derivation: "embedded" as const,
     ...(options.metadataPath === "asset" ? { revealOf: "file:///Users/tester/private.png" } : {}) };
+  const imageBlock = { type: "image" as const, assetId: asset.id, role: "stem" as const,
+    ...(options.imageMetadataPath === "stem-alt" ? { alt: "Source [/Users/tester/private/figure.png]" } : {}) };
   const question: PackageQuestion = {
     id: "q-ready", source: { filename: "synthetic.pdf", page: 1, questionNumber: 1 },
     ...(options.week ? { week: options.week } : {}),
     stem: [{ type: "text", text: "Which synthetic choice is named?" },
-      ...(options.image ? [{ type: "image" as const, assetId: asset.id, role: "stem" as const }] : [])],
+      ...(options.image ? [imageBlock] : [])],
     choices: [
-      { id: "a", label: "A", blocks: [{ type: "text", text: "First synthetic choice" }] },
+      { id: "a", label: "A", blocks: [{ type: "text", text: "First synthetic choice" },
+        ...(options.imageMetadataPath === "choice-caption" ? [{ type: "image" as const, assetId: asset.id,
+          caption: "Source,/Volumes/TestDisk/private/figure.png" }] : [])] },
       { id: "b", label: "B", blocks: [{ type: "text", text: "Second synthetic choice" }] },
     ], correctAnswer: { labels: ["A"], evidence: "printed-key" },
-    explanation: options.explanation === "" ? [] : [{ type: "text", text: options.explanation ?? "The synthetic source states that the first choice is correct for this invented fixture." }],
+    explanation: options.explanation === "" ? [] : [{ type: "text", text: options.explanation ?? "The synthetic source states that the first choice is correct for this invented fixture." },
+      ...(options.imageMetadataPath === "explanation-caption" ? [{ type: "image" as const, assetId: asset.id,
+        caption: "Source;file:///Users/tester/private/figure.png" }] : [])],
     ...(options.metadataPath === "question" ? { topic: "/Users/tester/private/topic" } : {}),
     assets: options.image ? [asset] : [], provenance: { method: "authored", sourceChecksum: `sha256:${checksum}`,
       notes: "PRIVATE LOCAL NOTE", ...(options.privateToolPath ? { tool: "/Users/tester/private/parser" } : {}) },
@@ -49,7 +57,7 @@ async function fixture(options: { image?: boolean; explanation?: string; week?: 
   const held: PackageQuestion = { ...structuredClone(question), id: "q-held", source: { filename: "synthetic.pdf", page: 2, questionNumber: 2 },
     correctAnswer: undefined, explanation: undefined, stem: [{ type: "text", text: "PRIVATE HELD STEM" }], assets: [] };
   const bank: PreparedBank = { pkg: { manifest: { schemaVersion: 1, course: { name: "FTM 1", term: 1, week: options.week ?? 0 },
-    bank: { id: "synthetic-bank", title: options.metadataPath === "manifest" ? "file:///Users/tester/private/source" : "Synthetic source", discipline: "Example" },
+    bank: { id: "synthetic-bank", title: options.metadataTitle ?? (options.metadataPath === "manifest" ? "file:///Users/tester/private/source" : "Synthetic source"), discipline: "Example" },
     source: { filename: "synthetic.pdf", sourceWeekDeclared: false,
       ...(options.week ? { axomAssignedWeek: options.week } : {}) },
     questionsFile: options.manifestPaths ? "/Users/tester/private/questions.json" : "questions.json",
@@ -97,7 +105,7 @@ async function fixture(options: { image?: boolean; explanation?: string; week?: 
   }
   await put("templates/private-plan.txt", "PRIVATE PLAN");
   await put(`${dirname(bankFile)}/assets/held.png`, png);
-  if (options.image) await put(`${dirname(bankFile)}/assets/${asset.filename}`, png);
+  if (options.image) await put(`${dirname(bankFile)}/assets/${asset.filename}`, imageBytes);
   await put("catalog.json", JSON.stringify(catalog));
   const decisions = join(work, "decisions.json");
   await createApprovalTemplate(root, decisions);
@@ -155,6 +163,12 @@ describe("approved-only private candidate", () => {
     expect(sha(await readFile(join(assets, "synthetic-figure.png")))).toBe(sha(png));
   });
 
+  it("rejects a PDF renamed as an approved PNG even when its checksum matches", async () => {
+    const { root, output, decisions } = await fixture({ image: true, disguisedPdf: true });
+    await expect(createApprovedOnlyLibrary(root, decisions, output)).rejects.toThrow(/not the declared, supported image bytes/);
+    await expect(readdir(output)).rejects.toThrow();
+  });
+
   it("uses content-addressed public paths even when the private bank path contains a folder name", async () => {
     const { root, output, decisions, catalog } = await fixture({ image: true, privateBankPath: true, manifestPaths: true });
     await createApprovedOnlyLibrary(root, decisions, output);
@@ -171,6 +185,28 @@ describe("approved-only private candidate", () => {
   it.each(["manifest", "question", "asset"] as const)("rejects local paths in %s metadata", async metadataPath => {
     const { root, output, decisions } = await fixture({ image: metadataPath === "asset", metadataPath });
     await expect(createApprovedOnlyLibrary(root, decisions, output)).rejects.toThrow(/member-visible/);
+    await expect(readdir(output)).rejects.toThrow();
+  });
+
+  it.each([
+    "Source [/Users/tester/private/file.pdf]",
+    "Source,/Volumes/TestDisk/private/file.pdf",
+    "Source:/opt/private/file.pdf",
+    "Source;/tmp/private/file.pdf",
+  ])("rejects a punctuation-boundary absolute path in a title", async metadataTitle => {
+    const { root, output, decisions } = await fixture({ metadataTitle });
+    await expect(createApprovedOnlyLibrary(root, decisions, output)).rejects.toThrow(/member-visible bank title/);
+    await expect(readdir(output)).rejects.toThrow();
+  });
+
+  it("allows a normal URL and clinical slash notation in a title", async () => {
+    const { root, output, decisions } = await fixture({ metadataTitle: "AXOM https://example.org/course/module FEV1/FVC 2/3" });
+    await expect(createApprovedOnlyLibrary(root, decisions, output)).resolves.toMatchObject({ ready: 1 });
+  });
+
+  it.each(["stem-alt", "choice-caption", "explanation-caption"] as const)("rejects local paths in %s image metadata", async imageMetadataPath => {
+    const { root, output, decisions } = await fixture({ image: true, imageMetadataPath });
+    await expect(createApprovedOnlyLibrary(root, decisions, output)).rejects.toThrow(/member-visible image (alt|caption)/);
     await expect(readdir(output)).rejects.toThrow();
   });
 
