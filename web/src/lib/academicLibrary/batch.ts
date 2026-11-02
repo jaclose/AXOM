@@ -12,6 +12,7 @@ import { assessBank } from "../question-content/assessBank";
 import { sha256 } from "../question-content/assets";
 import { readCatalog, readPreparedBank } from "../privateLibrary/install";
 import { academicLibraryReader } from "./client";
+import { countReadyExplanations, type ExplanationReviewReceipt } from "./explanationReview";
 import { academicAssetPath, assertAcademicAssetMatchesBytes, assertAcademicFigureBudget, assertAcademicStoredFigureBudget, assertAcademicQuestionsInstallable, assertInstallableAcademicImage, academicCollectionId, uploadAcademicCourse, type AcademicUpload, type AcademicUploadResult } from "./upload";
 
 export interface VerifiedAcademicSource {
@@ -36,10 +37,7 @@ export interface VerifiedAcademicSource {
   ownerAuthenticated: true;
 }
 
-export interface VerifiedAcademicCourse {
-  collectionId: string;
-  revisionId: string;
-  readyQuestions: number;
+export interface VerifiedAcademicCourse extends ExplanationReviewReceipt {
   reviewQuestions: number;
   sourceReceipts: VerifiedAcademicSource[];
   verifiedFiles: number;
@@ -136,6 +134,7 @@ export async function verifyAcademicCourseReadback(
   await assertCurrent();
 
   let readyTotal = 0;
+  let explainedTotal = 0;
   let reviewTotal = 0;
   const receipts: VerifiedAcademicSource[] = [];
   const seenSources = new Set<string>();
@@ -213,6 +212,7 @@ export async function verifyAcademicCourseReadback(
     if (ready !== source.ready || review !== source.review)
       throw new Error("The owner's restored bank no longer agrees with its source review statuses.");
     assertAcademicQuestionsInstallable(bank, assessed.issues, ready, review);
+    explainedTotal += countReadyExplanations(bank.pkg.questions, assessed).explainedReadyQuestions;
     const references = readyQuestions.reduce((count, question) => count + question.assets.length, 0);
     readyTotal += ready; reviewTotal += review;
     receipts.push({
@@ -233,8 +233,10 @@ export async function verifyAcademicCourseReadback(
   }
   await assertCurrent();
   return {
-    collectionId: result.collection_id, revisionId: result.revision_id,
-    readyQuestions: readyTotal, reviewQuestions: reviewTotal, sourceReceipts: receipts,
+    collectionId: result.collection_id, revisionId: result.revision_id, contentHash: upload.hash,
+    readyQuestions: readyTotal, explainedReadyQuestions: explainedTotal,
+    missingExplanations: readyTotal - explainedTotal,
+    reviewQuestions: reviewTotal, sourceReceipts: receipts,
     verifiedFiles: reader.files.length, localOnlyOriginals: upload.localOnlyOriginals,
   };
 }

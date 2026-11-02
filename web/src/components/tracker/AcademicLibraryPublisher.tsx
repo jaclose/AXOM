@@ -4,6 +4,7 @@ import { useAccount } from "../../lib/account/accountStore";
 import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
 import { isAcademicReviewer, shareAcademicCourses } from "../../lib/academicLibrary/client";
 import { uploadAcademicBatch } from "../../lib/academicLibrary/batch";
+import { inspectPreparedUploadExplanations, type ExplanationReviewReceipt } from "../../lib/academicLibrary/explanationReview";
 import { applyFilingDecisions, readFilingDecisions, readFilingProposals, type FilingProposals, type FilingSummary } from "../../lib/academicLibrary/filingDecisions";
 import { applyMiNmiDecision, readMiNmiDecision, type MiNmiSummary } from "../../lib/academicLibrary/miNmiCorrection";
 import { accountQuestions, type QuestionLedger } from "../../lib/academicLibrary/questionLedger";
@@ -22,8 +23,8 @@ const TERMS: Term[] = ["Term 1", "Term 2", "Term 3", "Term 4", "Term 5"];
 /** Source files a course leaves on this device because of type or size limits. */
 interface KeptFiles { keptLocal?: number; overLimit?: number }
 type CourseState =
-  | { state: "checked"; ready: number; review: number; files: number; bytes: number } & KeptFiles
-  | { state: "published"; ready: number; files: number; shared?: boolean; approved?: boolean; sharingError?: string } & KeptFiles
+  | { state: "checked"; ready: number; review: number; missingExplanations: number; files: number; bytes: number } & KeptFiles
+  | { state: "published"; ready: number; missingExplanations: number; files: number; shared?: boolean; approved?: boolean; sharingError?: string } & KeptFiles
   | { state: "failed"; message: string; during: "check" | "publish" }
   | { state: "stopped" };
 /** uploadAcademicBatch accepts at most 100 jobs per run. */
@@ -53,6 +54,7 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
   const [reviewer, setReviewer] = useState(false);
   const [share, setShare] = useState(true);
   const [approve, setApprove] = useState(false);
+  const [rationaleReviewed, setRationaleReviewed] = useState(false);
   const [rights, setRights] = useState(false);
   const [busy, setBusy] = useState<"reading" | "checking" | "publishing">();
   const [progress, setProgress] = useState("");
@@ -196,7 +198,9 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
           const repeated = upload.provenance.sourceChecksums.find(sha => sources.has(sha));
           if (repeated) throw new Error(`It shares a source file with ${sources.get(repeated)}. Each source can be published in one course only.`);
           for (const sha of upload.provenance.sourceChecksums) sources.set(sha, label(course));
+          const coverage = await inspectPreparedUploadExplanations(upload);
           next = { state: "checked", ready: Number(upload.metadata.ready_questions), review: Number(upload.metadata.review_questions),
+            missingExplanations: coverage.missingExplanations,
             files: upload.files.length, bytes: upload.files.reduce((sum, file) => sum + file.byte_size, 0),
             ...kept(notes.keptLocal.get(job.key), upload.localOnlyOriginals.length) };
         } catch (cause) {
@@ -233,6 +237,7 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
     try {
       const { jobs, notes } = publicationJobs(current.read, current.inventory, courses);
       const published = new Map<string, string>();
+      const receipts = new Map<string, ExplanationReviewReceipt>();
       let blocked = false;
       for (let start = 0; start < jobs.length && !blocked && !abort.signal.aborted; start += BATCH_SIZE) {
         const report = await uploadAcademicBatch(jobs.slice(start, start + BATCH_SIZE), {
@@ -248,7 +253,9 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
             let next: CourseState;
             if (outcome.state === "verified") {
               published.set(outcome.receipt.collectionId, outcome.key);
+              receipts.set(outcome.receipt.collectionId, outcome.receipt);
               next = { state: "published", ready: outcome.receipt.readyQuestions, files: outcome.receipt.verifiedFiles,
+                missingExplanations: outcome.receipt.missingExplanations,
                 ...kept(notes.keptLocal.get(outcome.key), outcome.receipt.localOnlyOriginals.length) };
             } else if (outcome.state === "superseded") {
               next = { state: "failed", during: "publish", message: "A newer version of this course is already active in your account. Nothing was replaced." };
@@ -264,7 +271,8 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
       if (share && published.size && !abort.signal.aborted) {
         setProgress("Sharing the published courses…");
         const outcomes = await shareAcademicCourses([...published.keys()], accountId,
-          { approve: approve && reviewer, assertCurrent: scope.assertCurrent, signal: abort.signal });
+          { approve: approve && reviewer, receipts, rationaleReviewed,
+            assertCurrent: scope.assertCurrent, signal: abort.signal });
         setResults(states => {
           const next = { ...states };
           for (const outcome of outcomes) {
@@ -405,6 +413,8 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
           <span>Share with every signed-in AXOM account</span></label>
         {reviewer && <label><input type="checkbox" checked={approve} disabled={!share} onChange={event => setApprove(event.target.checked)} />
           <span>Approve sharing now. You are an academic reviewer.</span></label>}
+        {reviewer && approve && <label><input type="checkbox" checked={rationaleReviewed} onChange={event => setRationaleReviewed(event.target.checked)} />
+          <span>I reviewed the answer rationale against its source for every ready question. Courses with missing explanations will stay awaiting review.</span></label>}
         {share && <label><input type="checkbox" checked={rights} onChange={event => setRights(event.target.checked)} />
           <span>I have the right to share this course material with every AXOM account.</span></label>}
         <p>{share && !approve ? "Shared courses stay private until an academic reviewer approves them. " : ""}Answers, notes and progress are never shared.</p>
@@ -414,7 +424,7 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
         <GButton disabled={Boolean(busy) || !chosen.length} onClick={() => void check()}>
           <ListChecks size={ICON_SIZE.emphasis} /> {busy === "checking" ? "Checking…" : `Check ${plural(chosen.length, "course")}`}
         </GButton>
-        <GButton variant="primary" disabled={Boolean(busy) || !chosen.length || (share && !rights)} onClick={() => void publish()}>
+        <GButton variant="primary" disabled={Boolean(busy) || !chosen.length || (share && !rights) || (approve && !rationaleReviewed)} onClick={() => void publish()}>
           <UploadCloud size={ICON_SIZE.emphasis} /> {busy === "publishing" ? "Publishing…" : `Publish ${plural(chosen.length, "course")}`}
         </GButton>
         {(busy === "checking" || busy === "publishing") && <GhostButton onClick={() => controller.current?.abort()}><Square size={ICON_SIZE.body} /> Stop</GhostButton>}
@@ -477,12 +487,14 @@ function CourseResult({ result }: { result: CourseState }) {
   if (result.state === "checked") return <p className="academic-publisher-result">
     <Tag>Ready to publish</Tag>
     {" "}{plural(result.ready, "ready question")}{result.review ? `, ${result.review} awaiting review,` : ""} and {plural(result.files, "file")} checked ({fileSize(result.bytes)}).
+    {` ${plural(result.missingExplanations, "ready question")} without an explanation; these cannot be approved for the official catalog.`}
     {keptNote(result, true)}
   </p>;
   return <p className="academic-publisher-result">
     <Tag tone="green">Published</Tag>
     {result.approved ? <Tag tone="gold">Shared with everyone</Tag> : result.shared ? <Tag tone="neutral">Sharing awaits review</Tag> : null}
     {" "}{plural(result.ready, "ready question")} and {plural(result.files, "file")} verified.
+    {` ${plural(result.missingExplanations, "ready question")} without an explanation in the stored revision.`}
     {keptNote(result, false)}
     {result.sharingError ? ` ${result.sharingError}` : ""}
   </p>;
