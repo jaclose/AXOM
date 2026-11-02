@@ -40,8 +40,14 @@ export class SupabaseSyncTransport implements SyncTransport {
 
   async push(envelope: SnapshotEnvelope): Promise<PushResult> {
     const { client, userId, assertCurrent, resumable } = await accountOperationClient();
-    if (!envelope.accountUserId || userId !== envelope.accountUserId) throw new Error("The workspace is linked to a different account. Upload was stopped.");
-    if (envelope.payload.deferredContent && envelope.payload.deferredContent.accountId !== userId) throw new Error("Download your saved content in its original account before transferring this workspace.");
+    if (!envelope.accountUserId || userId !== envelope.accountUserId) throw new SyncPushError(
+      { kind: "rejected", rejection: "account-mismatch", status: 0 },
+      "The workspace is linked to a different account. Upload was stopped.",
+    );
+    if (envelope.payload.deferredContent && envelope.payload.deferredContent.accountId !== userId) throw new SyncPushError(
+      { kind: "rejected", rejection: "source-account-mismatch", status: 0 },
+      "Download your saved content in its original account before transferring this workspace.",
+    );
     if (!envelope.packed) envelope = await this.prepare(envelope);
     const baseline = await readSyncBaseline(userId, envelope.baseRevision);
     let previous: { media?: unknown; sources?: unknown; content?: string } | null | undefined = baseline?.packed;

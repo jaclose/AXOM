@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { PALETTE_CHANGE_EVENT, readPalettePreference, type PalettePreference } from "./palette";
+import { DEFAULT_PALETTE_ID, PALETTE_CHANGE_EVENT, readPalettePreference, type PalettePreference } from "./palette";
 import { MOTION_PREFERENCE_EVENT, readMotionPreference, type MotionPreference } from "./motionPreference";
 import { THEME_CHANGE_EVENT, type ResolvedTheme } from "./theme";
 
@@ -18,7 +18,7 @@ const subscribeTheme = subscribeTo(THEME_CHANGE_EVENT);
 // useSyncExternalStore requires a stable snapshot between changes, so the
 // palette object is cached by its serialized identity.
 let paletteCacheKey = "";
-let paletteCache: PalettePreference = { id: "classic" };
+let paletteCache: PalettePreference = { id: DEFAULT_PALETTE_ID };
 function paletteSnapshot(): PalettePreference {
   const next = readPalettePreference();
   const key = `${next.id}|${next.customAccent ?? ""}`;
@@ -30,7 +30,7 @@ function paletteSnapshot(): PalettePreference {
 }
 
 export function usePalettePreference(): PalettePreference {
-  return useSyncExternalStore(subscribePalette, paletteSnapshot, () => ({ id: "classic" }));
+  return useSyncExternalStore(subscribePalette, paletteSnapshot, () => ({ id: DEFAULT_PALETTE_ID }));
 }
 
 export function useMotionPreference(): MotionPreference {

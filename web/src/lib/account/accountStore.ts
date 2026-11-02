@@ -697,6 +697,36 @@ export function protectionDetail(view: Pick<AccountState, "protection" | "syncFa
     if (syncFailure?.rejection === "too-large") {
       return `The prepared account record exceeds its 14 MB limit, so this version is not uploading. ${saved} Remove or export large local items, then choose Protect now. Emergency recovery can still export all of it.`;
     }
+    if (syncFailure?.rejection === "workspace-too-large") {
+      return `This workspace exceeds the safe account restore size before AXOM can prepare an upload. ${saved} Keep a portable copy in Emergency recovery, then review large source files before trying again.`;
+    }
+    if (syncFailure?.rejection === "source-too-large") {
+      return `One source exceeds the account's 8 MB compressed file limit. ${saved} Keep a portable copy, then split that source into smaller files before trying again.`;
+    }
+    if (syncFailure?.rejection === "preparation-failed") {
+      return `AXOM could not prepare this workspace for account protection. ${saved} Keep a portable copy in Emergency recovery, then try again after updating AXOM.`;
+    }
+    if (syncFailure?.rejection === "missing-original") {
+      return `An original source file is missing on this device. ${saved} Restore the exact file from a complete backup before trying again.`;
+    }
+    if (syncFailure?.rejection === "missing-image") {
+      return `A question image is missing on this device. ${saved} Restore a complete backup with its images before trying again.`;
+    }
+    if (syncFailure?.rejection === "unsupported-image") {
+      return `A question image has a type or size the account cannot store. ${saved} Keep a portable copy and review the image before trying again.`;
+    }
+    if (syncFailure?.rejection === "too-many-images") {
+      return `This version contains more images than the account can protect at once. ${saved} Keep a portable copy and review the image library before trying again.`;
+    }
+    if (syncFailure?.rejection === "local-content-conflict") {
+      return `Two source copies on this device conflict, so AXOM stopped before uploading. ${saved} Keep a portable copy and review the downloaded course content before trying again.`;
+    }
+    if (syncFailure?.rejection === "account-mismatch") {
+      return `This device's workspace is linked to a different account. ${saved} Check which account you signed in to before trying again.`;
+    }
+    if (syncFailure?.rejection === "source-account-mismatch") {
+      return `Some source content belongs to a different account. ${saved} Sign in to its original account and download the content before trying again.`;
+    }
     if (syncFailure?.rejection === "storage-limit") {
       return `Your account’s version history is full, so it refused this upload and AXOM stopped repeating it. ${saved}${next}`;
     }
@@ -715,7 +745,7 @@ export function failureSummary(view: Pick<AccountState, "syncFailure" | "nextAtt
   const failure = view.syncFailure;
   if (!failure) return "";
   const what = failure.kind === "rejected" ? `refused (${failure.rejection ?? "refused"})` : failure.kind;
-  const answer = failure.status ? `HTTP ${failure.status}` : "no answer";
+  const answer = failure.status ? `HTTP ${failure.status}` : failure.kind === "rejected" ? "stopped on this device" : "no answer";
   const size = view.snapshotBytes ? ` Snapshot size ${(view.snapshotBytes / 1_000_000).toFixed(1)} MB.` : "";
   const next = view.nextAttemptAt ? ` Next automatic try ${new Date(view.nextAttemptAt).toLocaleString()}.` : "";
   return `Last upload failed ${new Date(failure.at).toLocaleString()}: ${what}, ${answer}${failure.code ? `, code ${failure.code}` : ""}.${size}${next}`;

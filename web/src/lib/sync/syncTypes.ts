@@ -25,9 +25,22 @@ export type ProtectionStatus =
 export type SyncFailureKind = "network" | "server" | "auth" | "rejected";
 
 /** What a refusal was about. */
-export type SyncRejection = "too-large" | "storage-limit" | "refused";
+export type SyncRejection =
+  | "too-large"
+  | "workspace-too-large"
+  | "storage-limit"
+  | "refused"
+  | "source-too-large"
+  | "preparation-failed"
+  | "missing-original"
+  | "missing-image"
+  | "unsupported-image"
+  | "too-many-images"
+  | "local-content-conflict"
+  | "account-mismatch"
+  | "source-account-mismatch";
 
-/** Bookkeeping about a failed upload. Codes only: never server text or content. */
+/** Bookkeeping about failed protection, including device preflight. Codes only: never server text or content. */
 export interface SyncFailure {
   kind: SyncFailureKind;
   rejection?: SyncRejection;

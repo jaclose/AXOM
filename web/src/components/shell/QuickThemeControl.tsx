@@ -14,8 +14,8 @@ const THEME_OPTIONS: Array<{
   detail: string;
   icon: typeof Sun;
 }> = [
-  { value: "light", label: "Light", detail: "Warm paper", icon: Sun },
-  { value: "dark", label: "Dark", detail: "Graphite", icon: Moon },
+  { value: "light", label: "Light", detail: "A clear canvas", icon: Sun },
+  { value: "dark", label: "Dark", detail: "A quieter room", icon: Moon },
   { value: "system", label: "System", detail: "Match device", icon: Monitor },
 ];
 
@@ -118,7 +118,7 @@ export function QuickThemeControl() {
                   role="radio"
                   aria-checked={selected}
                   tabIndex={selected ? 0 : -1}
-                  aria-label={`${definition.label} palette — ${definition.pairing}`}
+                  aria-label={`${definition.label} palette, ${definition.pairing}`}
                   title={`${definition.label} · ${definition.pairing}`}
                   className={selected ? "on" : ""}
                   onClick={() => setPalettePreference({ id: definition.id, customAccent: palette.customAccent })}

@@ -6,11 +6,15 @@ import {
   restingStatus, retryDelay, waitBeforeAutomatic,
 } from "./syncPolicy";
 import { snapshotWorkspace } from "./workspaceSnapshot";
-import type { ProtectionStatus, RevisionReason, SyncMetadata, SyncTransport } from "./syncTypes";
+import type { ProtectionStatus, RevisionReason, SnapshotEnvelope, SyncMetadata, SyncTransport } from "./syncTypes";
 
 const UPLOAD_LOCK = "axom.sync.upload";
 /** Statuses that report a problem. A new local change does not hide them. */
 const HELD: ReadonlySet<ProtectionStatus> = new Set<ProtectionStatus>(["conflict", "blocked", "paused", "retrying"]);
+/** A refusal with no HTTP response was found on this device before a revision request. */
+function needsLocalChange(meta: SyncMetadata): boolean {
+  return meta.lastError?.kind === "rejected" && meta.lastError.status === 0;
+}
 
 export interface SyncClock {
   now(): number;
@@ -67,7 +71,12 @@ export class SyncCoordinator {
     if (this.disposed) return;
     this.changeVersion += 1;
     const meta = read();
-    if (!meta.pending || !meta.pendingIdempotencyKey) {
+    if (needsLocalChange(meta)) {
+      // A real workspace edit is the only automatic reason to remeasure a
+      // locally refused snapshot; retries on reload/reconnect would repeat it.
+      write({ ...meta, pending: true, pendingIdempotencyKey: crypto.randomUUID(), attempt: 0, lastError: undefined, nextAttemptAt: undefined });
+      this.set(navigator.onLine ? "saved-locally" : "offline");
+    } else if (!meta.pending || !meta.pendingIdempotencyKey) {
       write({ ...meta, pending: true, pendingIdempotencyKey: meta.pendingIdempotencyKey ?? crypto.randomUUID() });
     }
     if (!HELD.has(this.status)) {
@@ -87,6 +96,10 @@ export class SyncCoordinator {
     const meta = read();
     if (automatic) {
       if (!meta.pending) return;
+      if (needsLocalChange(meta)) {
+        this.set("blocked");
+        return;
+      }
       // A conflict waits for an explicit decision; automatic uploads pause.
       if (meta.conflictServerRevision !== undefined) {
         this.set("conflict");
@@ -200,15 +213,24 @@ export class SyncCoordinator {
         if (this.disposed || read().accountUserId !== this.accountUserId) return;
         const changeVersion = this.changeVersion;
         const meta = read();
-        let envelope = await snapshotWorkspace(this.state(), {
-          accountUserId: meta.accountUserId,
-          deviceId: deviceId(),
-          baseRevision: meta.baseRevision,
-          idempotencyKey: meta.pendingIdempotencyKey,
-          reason,
-        });
+        let envelope: SnapshotEnvelope;
+        try {
+          envelope = await snapshotWorkspace(this.state(), {
+            accountUserId: meta.accountUserId,
+            deviceId: deviceId(),
+            baseRevision: meta.baseRevision,
+            idempotencyKey: meta.pendingIdempotencyKey,
+            reason,
+          });
+          if (this.transport.prepare) envelope = await this.transport.prepare(envelope);
+        } catch (error) {
+          if (error instanceof SyncPushError) throw error;
+          throw new SyncPushError(
+            { kind: "rejected", rejection: "preparation-failed", status: 0 },
+            "AXOM could not prepare this device's workspace for account protection.",
+          );
+        }
         if (this.disposed || read().accountUserId !== this.accountUserId) return;
-        if (this.transport.prepare) envelope = await this.transport.prepare(envelope);
         // Nothing changed since the last protected version. Only safe when this
         // key was never sent: a sent upload may have landed without its answer.
         if (automatic && changeVersion === this.changeVersion && envelope.contentHash === meta.lastHash && meta.lastProtectedAt && meta.sentIdempotencyKey !== envelope.idempotencyKey) {
@@ -272,9 +294,9 @@ export class SyncCoordinator {
     const current = read();
     const attempt = current.attempt + 1;
     const refused = failure.kind === "rejected";
-    // Measured as too large on this device and never sent. It needs no clock:
-    // the next local change measures the workspace again.
-    const neverSent = refused && failure.rejection === "too-large" && failure.status === 0;
+    // A local preflight problem cannot improve on a timer. A later local
+    // change or a learner-requested retry measures the workspace again.
+    const neverSent = refused && failure.status === 0;
     const retry = refused ? null : retryDelay(attempt, this.clock.random);
     const wait = neverSent ? 0 : refused ? BLOCKED_RECHECK_MS : retry ?? PAUSED_RECHECK_MS;
     write({
@@ -283,6 +305,7 @@ export class SyncCoordinator {
       attempt: Math.min(attempt, RETRY_STEPS_MS.length + 1),
       lastError: { ...failure, at: this.iso(0) },
       nextAttemptAt: wait > 0 ? this.iso(wait) : undefined,
+      lastPayloadBytes: neverSent && failure.rejection !== "too-large" ? undefined : current.lastPayloadBytes,
     });
     console.warn("[AXOM] Account upload failed", { ...failure, attempt, nextAttemptAt: wait > 0 ? this.iso(wait) : "after the next change" });
     this.rest(read());
@@ -292,7 +315,7 @@ export class SyncCoordinator {
   /** Arm the next automatic upload: after `minDelay`, and never before the stored wait ends. */
   private schedule(minDelay: number): void {
     this.cancel();
-    if (this.disposed) return;
+    if (this.disposed || needsLocalChange(read())) return;
     const wait = Math.max(minDelay, waitBeforeAutomatic(read(), this.clock.now()));
     this.timer = window.setTimeout(() => void this.flush(), wait);
   }

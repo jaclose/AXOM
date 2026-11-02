@@ -4,11 +4,11 @@
 // pre-migration snapshot recovery path. No silent states.
 // ===========================================================================
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { Database, HardDrive, ShieldCheck, Wrench } from "lucide-react";
+import { Database, HardDrive, ShieldAlert, ShieldCheck, Wrench } from "lucide-react";
 import { useStore } from "../../lib/store";
 import { findOrphans } from "../../lib/orphanRepair";
 import { STORAGE_KEYS } from "../../lib/brand";
-import { GhostButton, Tag } from "../ui/primitives";
+import { GButton, GhostButton, Tag } from "../ui/primitives";
 import { pushToast } from "../../lib/toast";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { subscribeVault, useLastVaultWrite } from "./SettingsSections";
@@ -30,7 +30,7 @@ async function probeIndexedDb(): Promise<boolean> {
   });
 }
 
-export function DataHealthPanel() {
+export function DataHealthPanel({ onOpenBackup }: { onOpenBackup?: () => void } = {}) {
   const s = useStore();
   const failure = useSyncExternalStore(subscribeVault, readVaultWriteFailure, () => null);
   const lastWrite = useLastVaultWrite();
@@ -88,37 +88,64 @@ export function DataHealthPanel() {
     ["Journal entries", s.journal.length],
     ["Closeouts", (s.closeouts ?? []).length],
   ];
+  const saveTone = failure ? "needs-attention" : idbOk === false ? "fallback" : lastWrite ? "saved" : "pending";
+  const saveTitle = failure ? "Your latest changes need saving"
+    : idbOk === false ? "Main vault unavailable"
+      : lastWrite ? "Saved on this device" : "Waiting for the first save";
+  const saveDescription = failure
+    ? "Keep AXOM open. Try saving again, then export a backup if the problem continues."
+    : idbOk === false
+      ? `The main vault could not open.${lastWrite?.target === "local-fallback" ? " Your last confirmed save used browser fallback storage." : " A fallback save has not been confirmed."} Export a portable backup.`
+      : lastWrite
+        ? `Last confirmed at ${new Date(lastWrite.at).toLocaleTimeString()}${lastWrite.target === "local-fallback" ? " in browser fallback storage" : ""}. Your work stays available on this device.`
+        : "AXOM will confirm this workspace as soon as the first local save finishes.";
 
   return (
-    <div className="stack" style={{ gap: 12 }}>
-      {failure && <div className="data-health-warning" role="status"><b>Your latest changes need saving</b><span>Keep this window open. Try saving again or export a backup in Emergency recovery.</span><GhostButton disabled={saving} onClick={retrySave}>{saving ? "Saving…" : "Try saving again"}</GhostButton></div>}
-      {!failure && idbOk === false && (
-        <div className="data-health-warning" role="status">
-          <b>This browser is using its backup storage</b>
-          <span>The browser could not open the main vault. Export a copy in Emergency recovery to be safe.</span>
+    <div className="data-health-panel">
+      <section className={`data-health-state ${saveTone}`} aria-labelledby="data-health-save-title" role="status">
+        <div className="data-health-state-icon" aria-hidden="true">
+          {failure || idbOk === false ? <ShieldAlert size={ICON_SIZE.display} /> : <ShieldCheck size={ICON_SIZE.display} />}
         </div>
-      )}
-
-      <div className="data-health-grid">
-        {counts.map(([label, count]) => (
-          <div key={label} className="data-health-cell">
-            <b>{count}</b>
-            <span className="sub">{label}</span>
+        <div className="data-health-state-copy">
+          <span className="data-health-eyebrow">Local workspace</span>
+          <h5 id="data-health-save-title">{saveTitle}</h5>
+          <p>{saveDescription}</p>
+        </div>
+        {(failure || idbOk === false) && (
+          <div className="data-health-state-actions">
+            {failure && <GButton variant="primary" disabled={saving} onClick={retrySave}>{saving ? "Saving…" : "Try saving again"}</GButton>}
+            {onOpenBackup && <GButton onClick={onOpenBackup}>Open Emergency recovery</GButton>}
           </div>
-        ))}
-      </div>
+        )}
+      </section>
+
+      <section className="data-health-inventory" aria-labelledby="data-health-inventory-title">
+        <div className="data-health-inventory-head">
+          <div>
+            <span className="data-health-eyebrow">On this device</span>
+            <h5 id="data-health-inventory-title">Your saved work</h5>
+          </div>
+          <span className="data-health-inventory-total">{counts.reduce((total, [, count]) => total + count, 0).toLocaleString()} records</span>
+        </div>
+        <div className="data-health-grid">
+          {counts.map(([label, count]) => (
+            <div key={label} className="data-health-cell">
+              <b>{count.toLocaleString()}</b>
+              <span>{label}</span>
+            </div>
+          ))}
+        </div>
+      </section>
 
       {orphans.totalIssues > 0 && (
-        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-          <Wrench size={ICON_SIZE.body} style={{ color: "var(--cyan)" }} />
-          <span className="sub">
-            {orphans.totalIssues} question link{orphans.totalIssues === 1 ? " needs" : "s need"} a quick repair. Repair never deletes questions or history.
-          </span>
+        <section className="data-health-repair" aria-label="Question link repair">
+          <Wrench size={ICON_SIZE.body} aria-hidden="true" />
+          <div><b>{orphans.totalIssues} question link{orphans.totalIssues === 1 ? " needs" : "s need"} repair</b><p>Repair reconnects records. It never deletes questions or history.</p></div>
           <GhostButton onClick={() => {
             const fixed = s.repairQuestionBankOrphans();
             pushToast({ title: fixed ? `Repaired ${fixed} link${fixed === 1 ? "" : "s"}` : "Nothing to repair", tone: "success" });
           }}>Repair links</GhostButton>
-        </div>
+        </section>
       )}
 
       <TechnicalDetails>

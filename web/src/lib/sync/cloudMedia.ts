@@ -5,6 +5,7 @@ import { sha256 } from "../compressedText";
 import { privateReviewMedia } from "../privateLibrary/media";
 import { getQuestionAttachmentBlob, MAX_QUESTION_ATTACHMENT_BYTES, QUESTION_ATTACHMENT_TYPES, type QuestionImageAttachment } from "../questionAttachments";
 import type { NoctyriumState } from "../types";
+import { SyncPushError } from "./syncFailure";
 
 export const MEDIA_BUCKET = "workspace-media";
 export const MAX_CLOUD_MEDIA_FILES = 20_000;
@@ -63,7 +64,10 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
   const bucket = client.storage.from(MEDIA_BUCKET);
   const shared = storedAcademicBindings(state).assets;
   const refs = workspaceMedia(state);
-  if (refs.size > MAX_CLOUD_MEDIA_FILES) throw new Error("This image library has too many files for one protected version.");
+  if (refs.size > MAX_CLOUD_MEDIA_FILES) throw new SyncPushError(
+    { kind: "rejected", rejection: "too-many-images", status: 0 },
+    "This image library has too many files for one protected version.",
+  );
   const prior = new Map(previous.map((entry) => [entry.blobKey, entry]));
   // Deferred review documents can contain image references. Keep their acknowledged
   // index until the source is downloaded; cache removal cannot delete account media.
@@ -78,8 +82,14 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
       continue;
     }
     const record = await getQuestionAttachmentBlob(blobKey);
-    if (!record || record.blob.size !== attachment.byteSize) throw new Error("Some question images are missing on this device. Restore a complete backup before protecting this version.");
-    if (record.blob.size > MAX_QUESTION_ATTACHMENT_BYTES || !QUESTION_ATTACHMENT_TYPES.includes(attachment.mimeType)) throw new Error("A question image is not supported for account storage.");
+    if (!record || record.blob.size !== attachment.byteSize) throw new SyncPushError(
+      { kind: "rejected", rejection: "missing-image", status: 0 },
+      "Some question images are missing on this device. Restore a complete backup before protecting this version.",
+    );
+    if (record.blob.size > MAX_QUESTION_ATTACHMENT_BYTES || !QUESTION_ATTACHMENT_TYPES.includes(attachment.mimeType)) throw new SyncPushError(
+      { kind: "rejected", rejection: "unsupported-image", status: 0 },
+      "A question image is not supported for account storage.",
+    );
     const hash = await sha256(new Uint8Array(await record.blob.arrayBuffer()));
     const academic = shared.find(asset => asset.sha256 === hash);
     const path = `${userId}/${hash}`;
