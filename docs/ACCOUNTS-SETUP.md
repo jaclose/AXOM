@@ -1,5 +1,11 @@
 # AXOM Accounts — setup and integration
 
+**Current production boundary (2026-11-02):** AXOM Production's linked ledger
+is applied through `20261101180000`, including the earlier account repair
+`20261001090000`. Five later Community/Host/Question Set/Journal and Host
+privacy migrations remain on the unreleased frontier branch. See
+[current AI state](AI_STATE.md) before using this dated setup guide.
+
 Accounts are optional. Without configuration AXOM is fully local, and every
 account surface says so. With configuration, a learner can sign in, protect
 their workspace as immutable server revisions, restore any recent version,
@@ -39,12 +45,11 @@ move between devices, and delete every cloud copy.
 
 ## Turning it on
 
-1. **Migrations** — applied to production through `20260928130000`.
-   **`20261001090000_prune_revision_history_within_budget.sql` is not applied
-   yet and is needed** (accounts with a large workspace cannot upload without
-   it): see `docs/release/2026-10-01-ACCOUNT-SYNC-INCIDENT.md`. It replaces one
-   function, keeps its signature and answers, and is safe to run twice. For a
-   new project: connect
+1. **Migrations** — production is applied through `20261101180000` as of the
+   dated check above. The frontier adds five ordered migrations, starting at
+   `20261101190000`; apply them only with the reviewed release and matching UI.
+   The older account incident and repair are recorded in
+   `docs/release/2026-10-01-ACCOUNT-SYNC-INCIDENT.md`. For a new project: connect
    GitHub in the Supabase dashboard (**Working directory: `.`**) or run
    `npx supabase link --project-ref <ref>` then `npx supabase db push`. Never
    apply `db/migrations/001–002` (legacy PIN backend without row-level security).
