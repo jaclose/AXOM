@@ -37,6 +37,7 @@ import {
 import { assertVaultWrite, getVaultWriteCheckpoint, localVaultStorage } from "./localVault";
 import { storeHydration } from "./storeHydration";
 import { userIdFromName } from "./userIdentity";
+import { normalizeBlueprintMode, normalizeUnlocks } from "./profileFields";
 import { ACADEMIC_TEMPLATE_COURSES, ACADEMIC_TEMPLATE_TERMS, focusOption, normalizedFocusIds } from "./experience";
 import { inferTrackFromFocus, isAcademicStageId, resolveTrack } from "./tracks";
 import type { EducationTrack } from "./tracks";
@@ -2896,7 +2897,7 @@ const ACADEMIC_PHASES = [
   "pre-med", "mcat", "preclinical", "clinical", "step1-dedicated", "step2-dedicated", "other",
 ] as const;
 
-function normalizeProfile(value: unknown): Profile {
+export function normalizeProfile(value: unknown): Profile {
   const profile = isRecord(value) ? value : {};
   const name = String(profile.name ?? "");
   const phase = ACADEMIC_PHASES.includes(profile.phase as typeof ACADEMIC_PHASES[number])
@@ -2968,8 +2969,7 @@ function normalizeProfile(value: unknown): Profile {
     energyChecks: normalizeEnergyChecks(profile.energyChecks),
     primaryTrackerScopes: normalizePrimaryScopes(profile.primaryTrackerScopes),
     // Preserve optional opt-in fields so they survive reset/migration.
-    blueprintMode: profile.blueprintMode === "usmle" || profile.blueprintMode === "prehealth"
-      ? profile.blueprintMode as Profile["blueprintMode"] : undefined,
+    blueprintMode: normalizeBlueprintMode(profile.blueprintMode),
     taskAutofillDisabled: typeof profile.taskAutofillDisabled === "boolean" ? profile.taskAutofillDisabled : undefined,
     taskTemplates: Array.isArray(profile.taskTemplates) ? profile.taskTemplates as Profile["taskTemplates"] : undefined,
     experimentalFlags: normalizeExperimentalFlags(profile.experimentalFlags),
@@ -2989,9 +2989,7 @@ function normalizeProfile(value: unknown): Profile {
     studyWorkflow: normalizeStudyWorkflow(profile.studyWorkflow),
     applicationResearch: normalizeApplicationResearch(profile.applicationResearch),
     applicationProfile: normalizeApplicationProfile(profile.applicationProfile),
-    unlocks: Array.isArray(profile.unlocks)
-      ? [...new Set(profile.unlocks.filter((value): value is string => typeof value === "string" && /^[a-z0-9-]{1,40}$/.test(value)))].slice(0, 50)
-      : undefined,
+    unlocks: normalizeUnlocks(profile.unlocks),
   };
 }
 

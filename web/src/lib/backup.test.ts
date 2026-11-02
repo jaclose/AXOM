@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { mergeStates, parseImport, toPortableState } from "./backup";
 import { makeSeed, SCHEMA_VERSION } from "./seed";
+import { normalizeProfile } from "./store";
 import { createTextAnnotation } from "./questionAnnotations";
 import { buildQuizPool } from "./quiz";
 import { DEFAULT_JOURNAL_NOTEBOOK } from "./journalNotebook";
@@ -462,6 +463,45 @@ describe("portable backup safety", () => {
     expect(merged.questions).toHaveLength(2);
     expect(merged.questions.find((question) => question.id === "q1")?.stem).toBe("Current stem");
     expect(merged.questions.find((question) => question.id === "q2")?.stem).toBe("New question");
+  });
+
+  it("keeps unlocks and the selected blueprint lane through export and import", () => {
+    const state = makeSeed();
+    state.profile.unlocks = ["again"];
+    state.profile.blueprintMode = "prehealth";
+    const parsed = parseImport(JSON.stringify({ _app: "AXOM", ...toPortableState(state) }));
+    expect(parsed.profile.unlocks).toEqual(["again"]);
+    expect(parsed.profile.blueprintMode).toBe("prehealth");
+
+    const portable = toPortableState(state) as unknown as Record<string, unknown>;
+    Object.assign(portable.profile as Record<string, unknown>, {
+      unlocks: ["again", "again", "Not a slug", 7], blueprintMode: "other",
+    });
+    const cleaned = parseImport(JSON.stringify({ _app: "AXOM", ...portable }));
+    expect(cleaned.profile.unlocks).toEqual(["again"]);
+    expect(cleaned.profile.blueprintMode).toBeUndefined();
+  });
+
+  it("keeps every profile field the store keeps during an account pull", () => {
+    const parsed = parseImport(JSON.stringify({ _app: "AXOM", ...toPortableState(makeSeed()) }));
+    expect(Object.keys(parsed.profile).sort()).toEqual(Object.keys(normalizeProfile({})).sort());
+  });
+
+  it("merges unlocks from either workspace while keeping the current blueprint lane", () => {
+    const current = makeSeed();
+    current.profile.unlocks = ["again"];
+    current.profile.blueprintMode = "usmle";
+    const imported = makeSeed();
+    imported.profile.unlocks = ["hidden-trail", "again"];
+    imported.profile.blueprintMode = "prehealth";
+    const merged = mergeStates(current, imported);
+    expect(merged.profile.unlocks).toEqual(["again", "hidden-trail"]);
+    expect(merged.profile.blueprintMode).toBe("usmle");
+    expect(mergeStates(makeSeed(), makeSeed()).profile.unlocks).toBeUndefined();
+
+    const malformed = makeSeed();
+    (malformed.profile as unknown as Record<string, unknown>).unlocks = 7;
+    expect(mergeStates(current, malformed).profile.unlocks).toEqual(["again"]);
   });
 
   it("merges unique attempt history for the same question instead of dropping the older side", () => {
