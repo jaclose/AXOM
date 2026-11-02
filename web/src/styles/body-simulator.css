@@ -505,6 +505,10 @@
   outline-offset: 3px;
 }
 
+.body-sim__stage-option:focus-visible {
+  outline-offset: -4px;
+}
+
 @media (max-width: 980px) {
   .body-sim__workbench {
     grid-template-columns: 1fr;
