@@ -113,7 +113,7 @@ test("setup keeps its choices across refresh and they stay editable in Settings"
   await page.reload({ waitUntil: "networkidle" });
   await page.getByRole("button", { name: "Open navigation menu" }).click();
   await page.getByTitle("Settings", { exact: true }).click();
-  await page.getByRole("tab", { name: "Personalization", exact: true }).click();
+  await page.getByRole("combobox", { name: "Settings section" }).selectOption("personalization");
   await expect(page.getByRole("button", { name: "Quizlet", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: "Noji", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: "Anki", exact: true })).toHaveAttribute("aria-pressed", "false");
