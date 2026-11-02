@@ -1018,8 +1018,10 @@ function WeeklyWidget({
           <div className="sub">{week.minutes} minutes · {week.cards} cards · {week.tasksDone} tasks done</div>
         </div>
         {enabledFields.has("activeDays") && <div className="weekly-score">
-          <span style={{ color: gradeColor(week.grade) }}>{gradeLabel(week.grade).replace("👑 ", "")}</span>
-          <small>week result</small>
+          <span style={{ color: week.grade ? gradeColor(week.grade) : "var(--text-60)" }}>
+            {week.grade ? gradeLabel(week.grade).replace("👑 ", "") : "No activity yet"}
+          </span>
+          <small>{week.grade ? "week result" : "no score yet"}</small>
         </div>}
       </div>}
       {enabledFields.has("trend") && <div className={`week-bars reveal-bars ${reveal.inView ? "in-view" : ""}`} ref={reveal.ref}>
@@ -1030,7 +1032,7 @@ function WeeklyWidget({
             onFocus={() => setSelectedKey(d.key)}
             onClick={() => setSelectedKey(d.key)}>
             <div className="week-bar-shell">
-              <div className="week-bar-fill" style={{ height: `${Math.max(8, d.intensity)}%`, background: gradeColor(d.grade) }} />
+              <div className="week-bar-fill" style={{ height: d.grade ? `${Math.max(8, d.intensity)}%` : "0%", background: d.grade ? gradeColor(d.grade) : "transparent" }} />
             </div>
             <span>{d.label}</span>
           </button>
@@ -1298,6 +1300,10 @@ function ProgressBar({
 }
 
 function weeklySummary(s: ReturnType<typeof useStore.getState>) {
+  // New workspaces have legacy numeric defaults but no chosen success target.
+  const hasScoringEvidence = s.logs.length > 0
+    || (s.profile.dailySuccess ? s.profile.dailySuccess.requirements.some((requirement) => requirement.enabled) : true);
+  const tasks = realTasks(s.tasks);
   const energyByDay = dailyEnergy(collectEnergySamples({
     energyChecks: s.profile.energyChecks,
     journal: s.journal,
@@ -1308,12 +1314,12 @@ function weeklySummary(s: ReturnType<typeof useStore.getState>) {
     const key = isoDate(d);
     const totals = dayTotals(s.logs, key);
     const productive = productiveTotals(s.logs, key);
-    const grade = todayGrade(totals.minutes, totals.cards, gradeTargetsFor(s.profile));
+    const grade = hasScoringEvidence ? todayGrade(totals.minutes, totals.cards, gradeTargetsFor(s.profile)) : null;
     const intensity = Math.min(100, Math.max((totals.minutes / 480) * 100, (totals.cards / 350) * 100));
     const measured = energyByDay.get(key);
     const energy = measured === undefined ? null : Math.round(measured);
-    const tasksDone = s.tasks.filter((task) => task.done && task.completedAt?.startsWith(key)).length;
-    const openTasksDue = s.tasks.filter((task) => !task.done && !task.archived && task.due?.slice(0, 10) === key).length;
+    const tasksDone = tasks.filter((task) => task.done && task.completedAt?.startsWith(key)).length;
+    const openTasksDue = tasks.filter((task) => !task.done && !task.archived && task.due?.slice(0, 10) === key).length;
     return {
       key,
       dateLabel: d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" }),
@@ -1326,7 +1332,8 @@ function weeklySummary(s: ReturnType<typeof useStore.getState>) {
       journalSummary: journalSummaryForDay(s.journal, key),
       topActivity: topActivityForDay(s.logs, key),
       strongestAction: strongestActionForDay({ logs: s.logs, dayPlans: s.dayPlans, tasksDone, key }),
-      suggestedCorrection: correctionForDay({ minutes: totals.minutes, cards: totals.cards, openTasksDue, energy }),
+      suggestedCorrection: correctionForDay({ minutes: totals.minutes, cards: totals.cards, openTasksDue, energy,
+        noStudyHistory: s.logs.length === 0 && s.dayPlans.length === 0 }),
       energy,
       grade,
       intensity,
@@ -1341,7 +1348,9 @@ function weeklySummary(s: ReturnType<typeof useStore.getState>) {
     cards,
     activeDays,
     tasksDone: days.reduce((sum, day) => sum + day.tasksDone, 0),
-    grade: todayGrade(Math.round(minutes / Math.max(activeDays, 1)), Math.round(cards / Math.max(activeDays, 1)), gradeTargetsFor(s.profile)),
+    grade: hasScoringEvidence
+      ? todayGrade(Math.round(minutes / Math.max(activeDays, 1)), Math.round(cards / Math.max(activeDays, 1)), gradeTargetsFor(s.profile))
+      : null,
   };
 }
 
@@ -1375,20 +1384,23 @@ function strongestActionForDay({
   const totals = dayTotals(logs, key);
   if (totals.cards >= 120) return "Card floor cleared";
   if (totals.minutes >= 120) return "Study block protected";
-  return "Needs one clear win";
+  return logs.length || dayPlans.length ? "Needs one clear win" : "No study logged yet";
 }
 
 function correctionForDay({
-  minutes, cards, openTasksDue, energy,
+  minutes, cards, openTasksDue, energy, noStudyHistory,
 }: {
   minutes: number;
   cards: number;
   openTasksDue: number;
   energy: number | null;
+  noStudyHistory: boolean;
 }) {
   if (energy !== null && energy < 40) return "Tomorrow: lower the load and close one small loop.";
   if (openTasksDue > 0) return "Tomorrow: clear the oldest due task before adding volume.";
-  if (minutes === 0 && cards === 0) return "Tomorrow: create signal with one 25-minute block.";
+  if (minutes === 0 && cards === 0) return noStudyHistory
+    ? "When you're ready, start with one short study block."
+    : "Tomorrow: create signal with one 25-minute block.";
   if (cards < 60) return "Tomorrow: add a small retrieval/card pass.";
   return "Tomorrow: keep the same floor and add only one precision target.";
 }

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_DASHBOARD_WIDGETS,
@@ -43,6 +43,43 @@ afterEach(() => {
 });
 
 describe("DashboardPage declutter", () => {
+  function showWeeklyWidget() {
+    useStore.getState().updateProfile({
+      hiddenDashboardWidgets: DEFAULT_DASHBOARD_WIDGETS.filter((id) => id !== "weekly"),
+    });
+  }
+
+  it("keeps a new workspace's week neutral until study or a target is recorded", () => {
+    showWeeklyWidget();
+    const { container } = render(<DashboardPage />);
+    const weekly = container.querySelector<HTMLElement>(".weekly-card")!;
+
+    expect(within(weekly).getByText("No activity yet")).toBeTruthy();
+    expect(within(weekly).getByText("No study logged yet")).toBeTruthy();
+    expect(within(weekly).getByText("When you're ready, start with one short study block.")).toBeTruthy();
+    expect(within(weekly).queryByText("Below target")).toBeNull();
+    expect(within(weekly).queryByText(/oldest due task/)).toBeNull();
+    expect([...weekly.querySelectorAll<HTMLElement>(".week-bar-fill")].every((bar) => bar.style.height === "0%"))
+      .toBe(true);
+  });
+
+  it("keeps the scored weekly result and due-task guidance for recorded work", () => {
+    showWeeklyWidget();
+    const dayKey = useStore.getState().activeDayKey;
+    useStore.setState((state) => ({
+      logs: [{ id: "real-study", dayKey, ts: `${dayKey}T12:00:00.000Z`, type: "Study", minutes: 10, cards: 0,
+        academic: true, productive: true }],
+      tasks: [...state.tasks, { id: "real-due", title: "Review renal transport", due: dayKey,
+        done: false, archived: false, created: `${dayKey}T08:00:00.000Z` }],
+    }));
+    const { container } = render(<DashboardPage />);
+    const weekly = container.querySelector<HTMLElement>(".weekly-card")!;
+
+    expect(within(weekly).getByText("Below target")).toBeTruthy();
+    expect(within(weekly).getByText("Tomorrow: clear the oldest due task before adding volume.")).toBeTruthy();
+    expect(within(weekly).queryByText("No activity yet")).toBeNull();
+  });
+
   it("leaves the daily quote to the top bar instead of duplicating it on the dashboard", () => {
     const { container } = render(<DashboardPage />);
     expect(container.querySelector(".alpha-build-copy")).toBeTruthy();

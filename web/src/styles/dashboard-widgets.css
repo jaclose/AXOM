@@ -233,6 +233,11 @@
 .dashboard-widget-grid .dashboard-widget-frame--large,
 .dashboard-widget-grid .dashboard-widget-frame--extra-large { grid-column: 1 / -1; }
 
+/* An untouched course card should not inherit a taller neighbor's empty height. */
+.dashboard-widget-grid .dashboard-widget-frame[data-widget-id="courseTracker"]:not(.is-configuring):has(.dashboard-widget-empty) {
+  align-self: start;
+}
+
 .dashboard-widget-frame__content .panel-head,
 .dashboard-widget-frame__content .panel-header { padding-right: 2.55rem; }
 
