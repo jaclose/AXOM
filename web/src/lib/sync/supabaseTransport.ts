@@ -11,7 +11,7 @@ import { uploadCloudMedia, readMediaManifest, validateWorkspaceMedia } from "./c
 import { ORIGINALS_BUCKET, repairMissingCloudOriginals, uploadCloudOriginals } from "./cloudOriginals";
 import { MAX_SNAPSHOT_BYTES } from "./syncPolicy";
 import { accountOperationClient, loadSupabase } from "../account/supabase";
-import { SyncPushError, classifyPushFailure } from "./syncFailure";
+import { SyncPushError, classifyPushFailure, uploadFailureAt } from "./syncFailure";
 import type {
   AccountDevice,
   ProtectedRevision,
@@ -64,12 +64,15 @@ export class SupabaseSyncTransport implements SyncTransport {
         previous = result.data;
       }
     }
-    await uploadCloudContent(client, userId, envelope.contentObjects ?? [], previous?.sources ? readContentReferences(previous.sources) : [], assertCurrent);
-    await uploadCloudOriginals(client, userId, envelope.payload, previous?.content, assertCurrent, resumable);
-    const media = await uploadCloudMedia(client, userId, envelope.payload, assertCurrent, previous?.media ? readMediaManifest(previous.media) : []);
+    const atPhase = async <T>(phase: "content" | "originals" | "media" | "revision" | "receipt", action: () => Promise<T>): Promise<T> => {
+      try { return await action(); } catch (error) { throw uploadFailureAt(error, phase); }
+    };
+    await atPhase("content", () => uploadCloudContent(client, userId, envelope.contentObjects ?? [], previous?.sources ? readContentReferences(previous.sources) : [], assertCurrent));
+    await atPhase("originals", () => uploadCloudOriginals(client, userId, envelope.payload, previous?.content, assertCurrent, resumable));
+    const media = await atPhase("media", () => uploadCloudMedia(client, userId, envelope.payload, assertCurrent, previous?.media ? readMediaManifest(previous.media) : []));
     const payload = { ...envelope.packed!, media };
     if (new TextEncoder().encode(JSON.stringify(payload)).length > MAX_SNAPSHOT_BYTES) throw new SyncPushError({ kind: "rejected", rejection: "too-large", status: 0 }, "This compressed workspace exceeds the account limit.");
-    await assertCurrent();
+    await atPhase("revision", assertCurrent);
     const changes = baseline && baseline.packed._axomHashFormat === payload._axomHashFormat ? workspaceDelta(baseline.packed, payload) : undefined;
     const deltaBytes = changes ? new TextEncoder().encode(JSON.stringify(changes)).length : Infinity;
     const useDelta = changes && changes.length <= 1000 && deltaBytes < Math.min(1_000_000, envelope.payloadBytes);
@@ -89,34 +92,34 @@ export class SupabaseSyncTransport implements SyncTransport {
       const signal = timeoutSignal(pushTimeout(requestBytes));
       return signal && typeof request.abortSignal === "function" ? request.abortSignal(signal) : request;
     };
-    let response = await send(Boolean(useDelta));
+    let response = await atPhase("revision", () => send(Boolean(useDelta)));
     if (useDelta && ["PT428", "PGRST202"].includes(response.error?.code ?? "")) {
       // An evicted/corrupt cache or an older backend cannot invalidate local
       // work. The same key takes the existing, fully validated snapshot path.
-      await assertCurrent();
-      response = await send(false);
+      await atPhase("revision", assertCurrent);
+      response = await atPhase("revision", () => send(false));
     }
     if (response.error?.code === "PT409" && /original source upload is incomplete/i.test(response.error.message)) {
       // An older acknowledged snapshot may reference an original subsequently
       // removed from Storage. Fast-path uploads skip unchanged source hashes;
       // only a server-confirmed missing original triggers an owner-scoped
       // metadata check and replay from a verified local original.
-      await assertCurrent();
-      const repaired = await repairMissingCloudOriginals(client, userId, envelope.payload, assertCurrent, resumable);
+      await atPhase("originals", assertCurrent);
+      const repaired = await atPhase("originals", () => repairMissingCloudOriginals(client, userId, envelope.payload, assertCurrent, resumable));
       if (!repaired) throw new Error("An original source upload is incomplete but no recoverable object was found. Keep the local source and inspect account Storage.");
-      await assertCurrent();
-      response = await send(false); // Same idempotency key; the first attempt was refused.
+      await atPhase("revision", assertCurrent);
+      response = await atPhase("revision", () => send(false)); // Same idempotency key; the first attempt was refused.
     }
     const { data, error, status } = response;
-    if (error) throw new SyncPushError(classifyPushFailure(error, status ?? 0), error.message);
-    await assertCurrent();
+    if (error) throw new SyncPushError({ ...classifyPushFailure(error, status ?? 0), phase: "revision" }, error.message);
+    await atPhase("receipt", assertCurrent);
     const result = readPushResult(data, status ?? 200);
     let verified: PushResult = result;
     if (result.status === "accepted") {
       // RPC acceptance is necessary but not sufficient for a green "cloud
       // protected" state. The owner's row must be readable with the exact
       // stored hash and revision before the local retry queue can be cleared.
-      const storedHash = await verifyCloudRevisionReceipt(client, userId, result, envelope.contentHash, assertCurrent);
+      const storedHash = await atPhase("receipt", () => verifyCloudRevisionReceipt(client, userId, result, envelope.contentHash, assertCurrent));
       verified = { ...result, contentHash: storedHash };
       await assertCurrent();
       await saveCloudMediaIndex(userId, media);

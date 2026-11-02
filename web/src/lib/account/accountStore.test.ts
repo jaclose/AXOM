@@ -427,6 +427,8 @@ describe("a refused upload (the production failure of 2026-09-30)", () => {
     expect(failureSummary({ syncFailure: { kind: "rejected", rejection: "storage-limit", status: 500, code: "54000", at }, snapshotBytes: 9_628_115 }))
       .toMatch(/refused \(storage-limit\), HTTP 500, code 54000\. Snapshot size 9\.6 MB\./);
     expect(failureSummary({ syncFailure: { kind: "network", status: 0, at } })).toMatch(/network, no answer\./);
+    expect(failureSummary({ syncFailure: { kind: "auth", status: 0, phase: "revision", reason: "session-refreshed", at } }))
+      .toMatch(/Stage: revision\. Cause: session-refreshed\./);
     expect(failureSummary({ syncFailure: { kind: "rejected", rejection: "missing-original", status: 0, at } })).toMatch(/stopped on this device/);
     expect(failureSummary({})).toBe("");
   });

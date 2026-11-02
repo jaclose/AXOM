@@ -24,6 +24,10 @@ export type ProtectionStatus =
  */
 export type SyncFailureKind = "network" | "server" | "auth" | "rejected";
 
+/** Fixed upload stages and causes safe to retain in local account diagnostics. */
+export type SyncUploadPhase = "content" | "originals" | "media" | "revision" | "receipt";
+export type SyncUploadReason = "session-refreshed" | "account-changed" | "request-timeout";
+
 /** What a refusal was about. */
 export type SyncRejection =
   | "too-large"
@@ -48,6 +52,8 @@ export interface SyncFailure {
   status: number;
   /** SQLSTATE or PostgREST code, when the account sent one. */
   code?: string;
+  phase?: SyncUploadPhase;
+  reason?: SyncUploadReason;
   at: string;
 }
 

@@ -5,6 +5,7 @@ import { makeSeed } from "../seed";
 import type { SnapshotEnvelope } from "./syncTypes";
 import { accountOperationClient } from "../account/supabase";
 import { repairMissingCloudOriginals, uploadCloudOriginals } from "./cloudOriginals";
+import { uploadCloudContent } from "./cloudContent";
 import { readSyncBaseline } from "./syncBaseline";
 import { SupabaseSyncTransport } from "./supabaseTransport";
 
@@ -71,6 +72,25 @@ function setup(fail: { code: string; message: string }, repaired: number = 1) {
 beforeEach(() => vi.clearAllMocks());
 
 describe("workspace cloud-original repair acknowledgement", () => {
+  it("records the failing upload stage without retaining private exception text", async () => {
+    const fixture = setup({ code: "PT409", message: "original source upload is incomplete" });
+    vi.mocked(uploadCloudContent).mockRejectedValueOnce({ statusCode: 500, code: "Bearer token https://private.example", message: "private source text" });
+    const error = await new SupabaseSyncTransport().push(fixture.envelope).catch(value => value);
+    expect(error).toMatchObject({ failure: { kind: "server", status: 500, phase: "content" } });
+    expect(JSON.stringify(error.failure)).not.toMatch(/private|bearer|https/);
+    expect(error.message).toBe("Account upload stopped during content.");
+    expect(fixture.rpc).not.toHaveBeenCalled();
+  });
+
+  it("identifies a refreshed account session before the revision request", async () => {
+    const fixture = setup({ code: "PT409", message: "original source upload is incomplete" });
+    fixture.assertCurrent.mockRejectedValueOnce(new Error("The account session was refreshed. Your local work is safe; retry the upload."));
+    await expect(new SupabaseSyncTransport().push(fixture.envelope)).rejects.toMatchObject({
+      failure: { kind: "auth", status: 0, phase: "revision", reason: "session-refreshed" },
+    });
+    expect(fixture.rpc).not.toHaveBeenCalled();
+  });
+
   it("recovers exactly once after missing-original PT409 and replays the same idempotency key", async () => {
     const fixture = setup({ code: "PT409", message: "original source upload is incomplete" });
     const receipt = await new SupabaseSyncTransport().push(fixture.envelope);
