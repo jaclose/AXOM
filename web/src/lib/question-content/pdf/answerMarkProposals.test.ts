@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { PackageQuestion } from "../package";
-import { buildAnswerMarkProposals, vectorCheckBoxes, type AnswerMarkPage } from "./answerMarkProposals";
+import type { ImportPackage, PackageQuestion } from "../package";
+import { assertPackageSourceIdentity, buildAnswerMarkProposals, vectorCheckBoxes, type AnswerMarkPage } from "./answerMarkProposals";
 
 const mark = { left: 15, top: 277, width: 26, height: 26 };
 const labels = [{ key: "A", x: 43, y: 255, height: 20 }, { key: "B", x: 43, y: 206, height: 20 }];
@@ -71,6 +71,34 @@ describe("private PDF answer-mark review proposals", () => {
     expect(buildAnswerMarkProposals([question()], [{ ...page(1), vectorChecks: [check] },
       { ...page(2), vectorChecks: [check] }])).toEqual([]);
   });
+
+  it("suppresses conflicting choices across two answer-reveal pages", () => {
+    const linked = question();
+    linked.assets.push({ ...linked.assets[0], id: `${linked.id}-reveal-3`, sourcePage: 3 });
+    const proposals = buildAnswerMarkProposals([linked], [page(1), page(2, [mark]),
+      page(3, [{ ...mark, top: 228 }])]);
+    expect(proposals).toHaveLength(2);
+    expect(proposals.map(proposal => proposal.answerPage)).toEqual([2, 3]);
+    expect(proposals.every(proposal => proposal.suggestedChoice === undefined
+      && proposal.reviewReason === "conflicting-reveal-pages" && proposal.conflict)).toBe(true);
+    expect(linked.correctAnswer).toBeUndefined();
+  });
+});
+
+it("rejects a stale bank or wrong source identity before reusing its receipt", () => {
+  const source = { sha256: "a".repeat(64), fileName: "synthetic.pdf" };
+  const linked = question();
+  linked.provenance.sourceChecksum = `sha256:${source.sha256}`;
+  const pkg: ImportPackage = { manifest: { schemaVersion: 2, course: { name: "Synthetic", term: 1, week: 1 },
+    bank: { id: "synthetic", title: "Synthetic", discipline: "Synthetic" }, source: { filename: source.fileName, sourceWeekDeclared: false },
+    questionsFile: "questions.json", assetsDirectory: "assets" }, questions: [linked] };
+  expect(() => assertPackageSourceIdentity(pkg, source)).not.toThrow();
+  expect(() => assertPackageSourceIdentity(pkg, { ...source, sha256: "b".repeat(64) })).toThrow(/question source identity/);
+  expect(() => assertPackageSourceIdentity(pkg, { ...source, fileName: "other.pdf" })).toThrow(/bank source filename/);
+  expect(() => assertPackageSourceIdentity({ ...pkg, questions: [{ ...linked, source: { filename: "other.pdf", page: 1 } }] }, source))
+    .toThrow(/question source identity/);
+  expect(() => assertPackageSourceIdentity({ ...pkg, questions: [{ ...linked, assets: [{ ...linked.assets[0], sourceFile: "other.pdf" }] }] }, source))
+    .toThrow(/answer-reveal asset source identity/);
 });
 
 const ops = { save: 10, restore: 11, transform: 12, fill: 22, eoFill: 23, setFillRGBColor: 59, constructPath: 91 };

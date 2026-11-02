@@ -1,9 +1,26 @@
 import type { FigureBox } from "../../pdfFigures";
-import type { PackageQuestion, QuestionAsset } from "../package";
+import type { ImportPackage, PackageQuestion, QuestionAsset } from "../package";
 import { answerBesideCheck, isVectorCheck, multiply, type ChoiceLabel, type MarkBox, type Matrix } from "./pdfAnswerMarkGeometry";
 import { marksOnAnswerPage, readTaggedPage, type TaggedPageInput } from "./taggedPdf";
 
 type PdfJs = typeof import("pdfjs-dist");
+
+/** A resumable bank may be stale even when its catalog row still matches the inventory. */
+export function assertPackageSourceIdentity(pkg: ImportPackage, source: { sha256: string; fileName: string }): void {
+  if (!/^[0-9a-f]{64}$/.test(source.sha256)) throw new Error("Inventory source checksum is invalid.");
+  if (!pkg.questions.length) throw new Error("Prepared bank has no questions for answer-mark review.");
+  const expectedChecksum = `sha256:${source.sha256}`;
+  if (pkg.manifest.source.filename !== source.fileName) throw new Error("Prepared bank source filename does not match the inventory.");
+  for (const question of pkg.questions) {
+    if (question.source.filename !== source.fileName || question.provenance.sourceChecksum !== expectedChecksum) {
+      throw new Error("Prepared question source identity does not match the inventory.");
+    }
+    if (question.assets.some(asset => asset.role === "answer_reveal"
+      && (asset.sourceFile !== source.fileName || asset.questionId !== question.id))) {
+      throw new Error("Prepared answer-reveal asset source identity does not match the inventory.");
+    }
+  }
+}
 
 export interface MarkEvidence {
   kind: "extra-tagged-figure" | "native-vector-check";
@@ -21,7 +38,7 @@ export interface AnswerMarkProposal {
   /** A visual suggestion only. It is never a scoring key. */
   suggestedChoice?: string;
   reviewRequired: true;
-  reviewReason: "visual-mark" | "conflicts-with-key" | "multiple-marks" | "unmatched-mark";
+  reviewReason: "visual-mark" | "conflicts-with-key" | "conflicting-reveal-pages" | "multiple-marks" | "unmatched-mark";
   storedAnswerLabels: string[];
   conflict: boolean;
   evidence: MarkEvidence[];
@@ -110,6 +127,21 @@ export function buildAnswerMarkProposals(questions: readonly PackageQuestion[], 
       reviewReason: conflict ? "conflicts-with-key" : groups.length > 1 ? "multiple-marks" : suggestedChoice ? "visual-mark" : "unmatched-mark",
       storedAnswerLabels, conflict,
       evidence });
+  }
+  const byQuestion = new Map<string, AnswerMarkProposal[]>();
+  for (const proposal of proposals) {
+    const group = byQuestion.get(proposal.questionId) ?? [];
+    group.push(proposal);
+    byQuestion.set(proposal.questionId, group);
+  }
+  for (const group of byQuestion.values()) {
+    const suggested = new Set(group.map(proposal => proposal.suggestedChoice).filter((choice): choice is string => Boolean(choice)));
+    if (suggested.size < 2) continue;
+    for (const proposal of group) {
+      delete proposal.suggestedChoice;
+      proposal.conflict = true;
+      proposal.reviewReason = "conflicting-reveal-pages";
+    }
   }
   return proposals;
 }

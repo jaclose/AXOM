@@ -7,7 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { loadTaggedPdf } from "../src/lib/question-content/pdf/loadTaggedPdf";
 import { readTaggedPage } from "../src/lib/question-content/pdf/taggedPdf";
 import { taggedPdfToQuestions } from "../src/lib/question-content/pdf/taggedPdfToQuestions";
-import { scanPdfAnswerMarkProposals } from "../src/lib/question-content/pdf/answerMarkProposals";
+import { assertPackageSourceIdentity, scanPdfAnswerMarkProposals } from "../src/lib/question-content/pdf/answerMarkProposals";
 import { describeAssets } from "../src/lib/question-content/assets";
 import { assessBank } from "../src/lib/question-content/assessBank";
 import { docxToQuestions } from "../src/lib/question-content/docx/docxToQuestions";
@@ -52,6 +52,7 @@ async function ensureAnswerMarkReceipt(entry: Entry, bankFile: string, originalF
   const bankSha256 = sha256(bankBytes);
   const bank = JSON.parse(bankBytes.toString("utf8")) as PreparedBank;
   if (!Array.isArray(bank.pkg?.questions)) throw new Error("Prepared PDF bank is not readable for answer-mark review.");
+  assertPackageSourceIdentity(bank.pkg, entry);
   const receiptFile = join(out, "review", "answer-marks", `${entry.sha256}-${bankSha256}.json`);
   if (existsSync(receiptFile)) {
     const receipt = JSON.parse(readFileSync(receiptFile, "utf8")) as Record<string, unknown>;
