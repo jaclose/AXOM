@@ -276,6 +276,17 @@ on the question page, decorative boxes and ambiguous marks do not suggest a key.
 These hash-bound receipts are private review evidence only: no proposal changes a
 bank answer, explanation, readiness or sharing decision.
 
+Preparation version 7 also writes separate `review/inline-answers/` receipts
+when an unlabeled PDF prints a question twice and the second appearance has
+one explicit `Answer: <letter>` line. A receipt records the two question IDs,
+source page and extracted-line positions, the printed answer position, and
+source/bank/question hashes. The pass requires the complete source and bank
+question order to match; ambiguous locations and pairs with figures or
+uncertain choices stay held. Answer lines may cross onto the next PDF page.
+The receipt contains no question text and does not alter any bank or scoring
+key. A reviewer still checks the answer, explanation, filing, and sharing
+rights before building an approved-only candidate.
+
 #### Approved-only question candidate
 
 The broad prepared library includes held questions and source originals. A source
