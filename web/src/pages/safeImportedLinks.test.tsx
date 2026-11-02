@@ -35,6 +35,10 @@ function installWithSavedLinks() {
       ...install.nodes[1], id: "unsafe-node", objective: "Unsafe source objective", sourceUrl: unsafeSource,
       resourceLinks: [],
     },
+    {
+      ...install.nodes[2], id: "malformed-node", objective: "Malformed source objective", sourceUrl: 42 as unknown as string,
+      resourceLinks: [{ label: "Malformed handout", url: { href: unsafeSource } as unknown as string, kind: "official" }],
+    },
   ];
   useStore.setState({ blueprintInstalls: [install] });
   return install;
@@ -59,6 +63,9 @@ describe("saved external links", () => {
     for (const url of [unsafeSource, "data:text/html,test", "file:///tmp/private", "vbscript:msgbox(1)", "java\tscript:alert(1)", "not a valid domain", " "]) {
       expect(externalLinkHref(url), url).toBeUndefined();
     }
+    for (const value of [null, 42, true, [], { href: unsafeSource }]) {
+      expect(externalLinkHref(value as unknown as string)).toBeUndefined();
+    }
   });
 
   it("opens a saved course web link and offers edit for an unsafe course link", () => {
@@ -69,6 +76,7 @@ describe("saved external links", () => {
       courses: [
         { id: "safe-course", termId, code: "SAFE", name: "Safe course", files: 0, modules: [], link: safeSource },
         { id: "unsafe-course", termId, code: "UNSAFE", name: "Unsafe course", files: 0, modules: [], link: unsafeSource },
+        { id: "malformed-course", termId, code: "MALFORMED", name: "Malformed course", files: 0, modules: [], link: { href: unsafeSource } as unknown as string },
       ],
     });
     const { container } = render(<CoursesPage />);
@@ -77,6 +85,8 @@ describe("saved external links", () => {
     expect(within(cards[1] as HTMLElement).queryByRole("link", { name: /Open/ })).toBeNull();
     fireEvent.click(within(cards[1] as HTMLElement).getByRole("button", { name: "Open" }));
     expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(within(cards[2] as HTMLElement).queryByRole("link", { name: /Open/ })).toBeNull();
+    expect(within(cards[2] as HTMLElement).getByRole("button", { name: "Open" })).toBeTruthy();
   });
 
   it("shows only safe blueprint source links in the Course Tracker", () => {
@@ -86,9 +96,10 @@ describe("saved external links", () => {
     fireEvent.click(within(tree).getByRole("button", { name: /Step 1/ }));
     fireEvent.click(within(tree).getByRole("button", { name: /Step 1 Master Blueprint/ }));
     const rows = container.querySelectorAll(".bp-tracker-row");
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
     expect(within(rows[0] as HTMLElement).getByRole("link", { name: /Source/ }).getAttribute("href")).toBe(safeSource);
     expect(within(rows[1] as HTMLElement).queryByRole("link", { name: /Source/ })).toBeNull();
+    expect(within(rows[2] as HTMLElement).queryByRole("link", { name: /Source/ })).toBeNull();
   });
 
   it("shows saved blueprint resources without activating unsafe links", () => {
@@ -104,5 +115,9 @@ describe("saved external links", () => {
     expect(within(rows[0] as HTMLElement).queryByRole("link", { name: /Unsafe handout/ })).toBeNull();
     fireEvent.click(within(rows[1] as HTMLElement).getByRole("button"));
     expect(within(rows[1] as HTMLElement).queryByRole("link", { name: /source audited/i })).toBeNull();
+    fireEvent.click(within(rows[2] as HTMLElement).getByRole("button"));
+    expect(within(rows[2] as HTMLElement).queryByRole("link", { name: /source audited/i })).toBeNull();
+    expect(within(rows[2] as HTMLElement).getByText("Malformed handout")).toBeTruthy();
+    expect(within(rows[2] as HTMLElement).queryByRole("link", { name: /Malformed handout/ })).toBeNull();
   });
 });

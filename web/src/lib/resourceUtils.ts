@@ -21,7 +21,8 @@ export type SourceType = (typeof SOURCE_TYPES)[number];
 
 /** Render only web URLs from stored or imported links; a bare domain gains HTTPS. */
 export function externalLinkHref(input: string | undefined): string | undefined {
-  const raw = input?.trim();
+  if (typeof input !== "string") return undefined;
+  const raw = input.trim();
   if (!raw) return undefined;
   try {
     const url = new URL(/^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`);
