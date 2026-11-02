@@ -215,6 +215,45 @@ async function refileReusedSets(
 
 type SavedSuccess = Extract<SavedReviewedImport, { ok: true }>;
 
+function untouchedSourceEvidence(question: QuestionRecord): boolean {
+  const content = question.content;
+  const extraction = question.extraction;
+  if (!content || !extraction || extraction.reviewed !== true
+    || extraction.reviewedAt !== question.sourceFile?.addedAt
+    || question.sourcePage !== content.source.page
+    || question.questionNumber !== content.source.questionNumber) return false;
+  const source = content.source;
+  const place = source.set === undefined ? "" : `set ${source.set}${source.setTitle ? ` (${source.setTitle})` : ""}`;
+  const citation = [source.filename, place,
+    ...(source.questionNumber !== undefined ? [`question ${source.questionNumber}`] : []),
+  ].filter(Boolean).join(", ");
+  const answerImage = content.assets.find((asset) => asset.role === "answer_reveal");
+  const teachingImage = content.assets.find((asset) => asset.role === "explanation");
+  const answerLabel = content.correctAnswer?.labels.join(", ");
+  const answerSnippet = answerImage && answerLabel
+    ? `${content.correctAnswer?.evidence === "source-mark-verified" ? "Visually marked source answer" : "Source answer image"}: ${answerLabel}. Original image: ${answerImage.sourceFile ?? source.filename}${answerImage.sourcePage !== undefined ? `, page ${answerImage.sourcePage}` : ""}${answerImage.checksum ? `, ${answerImage.checksum}` : ""}.`
+    : undefined;
+  const teachingSnippet = teachingImage
+    ? `Original teaching image: ${teachingImage.sourceFile ?? source.filename}${teachingImage.sourcePage !== undefined ? `, page ${teachingImage.sourcePage}` : ""}${teachingImage.checksum ? `, ${teachingImage.checksum}` : ""}.`
+    : undefined;
+  return question.citation === citation
+    && extraction.questionSourcePage === source.page
+    && extraction.answerEvidenceSnippet === answerSnippet
+    && extraction.answerEvidencePage === answerImage?.sourcePage
+    && extraction.explanationSourceSnippet === teachingSnippet
+    && extraction.explanationSourcePage === teachingImage?.sourcePage
+    && !extraction.sourceSnippet && !extraction.questionSourceSnippet
+    && !extraction.answerEvidence && !extraction.explanationSource
+    && !extraction.explanationRawCandidate && !extraction.explanationCleanupOperations?.length
+    && extraction.answerDetectionConfidence === undefined
+    && extraction.questionDetectionConfidence === undefined
+    && extraction.explanationDetectionConfidence === undefined
+    && extraction.overallImportConfidence === undefined
+    && JSON.stringify(extraction.parserRuleIds) === JSON.stringify([
+      "import.package", `import.package.${content.provenance.method}`,
+    ]);
+}
+
 function untouchedSourceQuestion(question: QuestionRecord, pkg: ImportPackage): boolean {
   if (question.status !== "unseen" || question.attempts.length || question.marked
     || question.notes?.trim() || question.annotations?.length || question.userAnswerKey
@@ -224,7 +263,8 @@ function untouchedSourceQuestion(question: QuestionRecord, pkg: ImportPackage): 
   const original = legacyQuestionFields(pkg.manifest, question.content);
   // Earlier table serialization could drop one trailing cell space. That
   // whitespace has no learner meaning; all substantive wording must match.
-  return question.stem.trimEnd() === original.stem.trimEnd()
+  return untouchedSourceEvidence(question)
+    && question.stem.trimEnd() === original.stem.trimEnd()
     && JSON.stringify(question.options) === JSON.stringify(original.options)
     && (question.explanation ?? "") === (original.explanation ?? "")
     && question.correctKey === original.correctKey;

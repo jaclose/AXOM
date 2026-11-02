@@ -9,6 +9,7 @@ import { flushLocalVaultWrites, localVaultStorage } from "../localVault";
 import { deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob } from "../questionAttachments";
 import type { ReviewedImportStore } from "../questionImportSave";
 import { useStore } from "../store";
+import type { QuestionRecord } from "../questions";
 import { saveBank } from "./bankImport";
 import { preparedBankImportOptions } from "../privateLibrary/install";
 import { parsePackage } from "./packageJson";
@@ -681,6 +682,30 @@ describe("a package through the canonical import", () => {
     useStore.getState().recordQuestionAttempt(id, { answerKey: "A", status: "incorrect", quizSessionId: "source-refresh-practice", mode: "tutor" });
     await flushLocalVaultWrites();
     const before = await workspaceOnDisk();
+    const result = await importPackage(revised, validatePackage(revised), files, { refreshEquivalentSource: true });
+    expect(result.status).toBe("failed");
+    expect(result.errors.join(" ")).toMatch(/learner edits/);
+    const after = await reloadWorkspace();
+    expect(after.questions).toEqual(before.questions);
+    expect(after.questionSets).toEqual(before.questionSets);
+  });
+
+  it.each([
+    ["answer evidence", (question: QuestionRecord) => ({ extraction: { ...question.extraction!, answerEvidenceSnippet: "Reviewer-selected answer excerpt", answerEvidencePage: 9 } })],
+    ["source page", (question: QuestionRecord) => ({ sourcePage: (question.sourcePage ?? 1) + 1,
+      extraction: { ...question.extraction!, questionSourceSnippet: "Reviewer-selected question excerpt", questionSourcePage: (question.sourcePage ?? 1) + 1 } })],
+    ["citation", (_question: QuestionRecord) => ({ citation: "Reviewer-corrected citation" })],
+    ["answer confirmation", (question: QuestionRecord) => ({ extraction: { ...question.extraction!, reviewedAt: "2026-11-02T00:00:00Z", answerDetectionConfidence: 1 } })],
+  ] as Array<[string, (question: QuestionRecord) => Partial<QuestionRecord>]>) ("preserves an unseen question with manually edited %s", async (_field, edit) => {
+    const { earlier, revised, files } = auditedEdition();
+    const first = await importPackage(earlier, validatePackage(earlier), files);
+    const id = first.sections[0].savedIds[0];
+    const question = useStore.getState().questions.find((entry) => entry.id === id)!;
+    useStore.getState().updateQuestion(id, edit(question));
+    await flushLocalVaultWrites();
+    const before = await workspaceOnDisk();
+    expect(before.questions[0].attempts).toEqual([]);
+    expect(before.questions[0].status).toBe("unseen");
     const result = await importPackage(revised, validatePackage(revised), files, { refreshEquivalentSource: true });
     expect(result.status).toBe("failed");
     expect(result.errors.join(" ")).toMatch(/learner edits/);
