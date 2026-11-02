@@ -67,8 +67,7 @@ import { ReflectionInbox } from "../components/dashboard/ReflectionInbox";
 import { DashboardNotificationCenter } from "../components/dashboard/DashboardNotificationCenter";
 import { useAccount } from "../lib/account/accountStore";
 import { deviceId } from "../lib/sync/syncMetadata";
-
-const HOSTED_ALPHA_URL = "https://noctyrium-cktjdhuhw-jacloses-projects.vercel.app/#dashboard";
+import { BRAND } from "../lib/brand";
 
 const FIXED_DASHBOARD_SURFACES = new Set<DashboardWidgetId>(["welcome", "commandBrief"]);
 const CURRENT_DASHBOARD_ID_SET = new Set<string>(CURRENT_DASHBOARD_WIDGET_IDS);
@@ -1103,11 +1102,11 @@ function LocalDataWidget({ state }: { state: ReturnType<typeof useStore.getState
             <span>Settings → Backup shows automatic local recovery snapshots and exported backup controls.</span>
           </div>
         </div>
-        <a className="local-data-item" href={HOSTED_ALPHA_URL} target="_blank" rel="noreferrer">
+        <a className="local-data-item" href={BRAND.hostedUrl} target="_blank" rel="noopener noreferrer">
           <ExternalLink size={ICON_SIZE.emphasis} />
           <div>
-            <b>Hosted Alpha</b>
-            <span>Open the hosted preview. It starts with a local-first workspace; importing a portable backup or linking owner-private account protection are separate choices.</span>
+            <b>Open AXOM online</b>
+            <span>Start with a local workspace in the hosted app. Importing a portable backup or linking account protection are separate choices.</span>
           </div>
         </a>
       </div>
