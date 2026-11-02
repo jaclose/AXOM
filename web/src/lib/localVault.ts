@@ -846,7 +846,9 @@ const vaultStorage: StateStorage = {
         } catch { /* the last successful copy remains available for recovery */ }
         vaultWriteFailures.set(
           writeSequence,
-          combinedStorageFailure(indexedDbError, failure),
+          isVaultConflictError(failure)
+            ? failure
+            : combinedStorageFailure(indexedDbError, failure),
         );
         // Ordinary saves are best-effort, so say so: this one is on no disk.
         markVaultWriteFailure();
