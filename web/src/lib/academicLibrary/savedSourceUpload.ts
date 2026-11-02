@@ -85,7 +85,7 @@ export async function prepareSavedSourceUpload(
       || sourceIds.has(content.id) || questionPracticeReadiness(saved) !== "ready"
       || !saved.explanation?.trim() || !content.explanation?.length
       || hash(content.provenance.sourceChecksum ?? "") !== sourceHash
-      || basename(content.source.filename) !== sourceName) {
+      || content.source.filename !== sourceName) {
       throw new Error(`Saved question ${index + 1} needs source, answer, explanation or duplicate review before sharing.`);
     }
     const declaredAssetIds = new Set(content.assets.map(asset => asset.id));
@@ -104,14 +104,12 @@ export async function prepareSavedSourceUpload(
   const first = sourceQuestions[0];
   const originalModule = first.course ?? module;
   const originalTerm = first.term ?? termNumber;
-  const sourceWeeks = questions.map((saved, index) => sourceQuestions[index].week ?? saved.week ?? 0);
-  const manifestWeek = sourceWeeks.every(week => week === sourceWeeks[0]) ? sourceWeeks[0] : 0;
   const bankId = first.bankId ?? `saved-${sourceHash.slice(0, 24)}`;
   const manifest: PackageManifest = {
     schemaVersion: 2,
-    course: { name: originalModule, term: originalTerm, week: manifestWeek },
+    course: { name: originalModule, term: originalTerm, week: 0 },
     bank: { id: bankId, title: `${module} saved source`, discipline: module },
-    source: { filename: sourceName, sourceWeekDeclared: false, ...(manifestWeek ? { axomAssignedWeek: manifestWeek } : {}) },
+    source: { filename: sourceName, sourceWeekDeclared: false },
     questionsFile: "questions.json", assetsDirectory: "assets",
   };
   const originalKey = moduleIdentity(originalModule);
@@ -120,12 +118,14 @@ export async function prepareSavedSourceUpload(
     const content = sourceQuestions[index];
     const scope = questionScope(manifest, content);
     const fields = legacyQuestionFields(manifest, content);
+    if (saved.sourcePage !== fields.sourcePage || saved.questionNumber !== fields.questionNumber) {
+      throw new Error(`Saved question ${index + 1} has a source page or number that differs from its verified content. Reopen its source review before sharing.`);
+    }
     const originalIsUnfiled = originalKey === "unfiled" && originalTerm === 0;
     if ((content.bankId !== undefined && content.bankId !== bankId)
       || moduleIdentity(scope.course) !== originalKey || scope.term !== originalTerm
       || (!originalIsUnfiled && (originalKey !== selectedKey || originalTerm !== termNumber))
       || (saved.module && moduleIdentity(saved.module) !== selectedKey && moduleIdentity(saved.module) !== "unfiled")
-      || (saved.week !== undefined && saved.week > 0 && scope.week !== saved.week)
       || fields.stem !== saved.stem || fields.correctKey !== saved.correctKey
       || fields.explanation !== saved.explanation
       || fields.options.length !== saved.options.length
@@ -134,7 +134,16 @@ export async function prepareSavedSourceUpload(
     }
   }
 
-  const pkg: ImportPackage = { manifest, questions: sourceQuestions };
+  // A saved course's personal schedule is not evidence for a shared week.
+  // Publish only the owner-confirmed term/module; later source-backed review
+  // can assign community weeks without changing this local workspace.
+  const sharedQuestions = sourceQuestions.map(question => ({ ...question, course: module, term: termNumber, week: 0 }));
+  const sharedManifest: PackageManifest = {
+    ...manifest,
+    course: { name: module, term: termNumber, week: 0 },
+    source: { filename: sourceName, sourceWeekDeclared: false },
+  };
+  const pkg: ImportPackage = { manifest: sharedManifest, questions: sharedQuestions };
   const declaredAssets = sourceQuestions.flatMap(question => question.assets.map(asset => ({ name: asset.filename })));
   const assessment = assessBank(pkg, [], declaredAssets);
   if (assessment.counts.ready !== sourceQuestions.length || assessment.counts["needs-review"] || assessment.counts.unresolved)
@@ -156,6 +165,14 @@ export async function prepareSavedSourceUpload(
       if (asset.questionId !== sourceQuestions[index].id || !/^[a-f0-9]{64}$/.test(hash(asset.checksum ?? ""))
         || !asset.filename || basename(asset.filename) !== asset.filename) {
         throw new Error(`Saved question ${index + 1} has a figure without exact source identity.`);
+      }
+      const questionPage = sourceQuestions[index].source.page;
+      const isQuestionFigure = ["question", "stem", "choice"].includes(asset.role);
+      if (asset.sourceFile !== sourceName
+        || (asset.sourcePage !== undefined && (!Number.isSafeInteger(asset.sourcePage) || asset.sourcePage < 1))
+        || (extension === "pdf" && asset.sourcePage === undefined)
+        || (isQuestionFigure && questionPage !== undefined && asset.sourcePage !== questionPage)) {
+        throw new Error(`Saved question ${index + 1} has a figure whose source filename or page does not match its verified source. Review the exact figure before sharing.`);
       }
       const attachment = saved.attachments?.find(item => item.assetId === asset.id);
       if (!attachment || attachment.mimeType !== asset.mimeType)

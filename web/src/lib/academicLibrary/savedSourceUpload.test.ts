@@ -46,6 +46,7 @@ async function source() {
     options: [{ key: "A", text: "First mechanism" }, { key: "B", text: "Second mechanism" }],
     correctKey: "A", explanation: "The printed key identifies the first synthetic mechanism.",
     status: "unseen", module: "CPR 1", week: 1, sourceDocumentId: document.id,
+    sourcePage: 1, questionNumber: 1,
     tags: [], attempts: [], notes: "PRIVATE LEARNER NOTE", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
   };
   return { document, question };
@@ -77,10 +78,33 @@ it("includes every question linked to one source without replacing a sibling set
   sibling.id = "local-question-2";
   sibling.content = { ...structuredClone(question.content!), id: "source-question-2",
     source: { filename: "sample.pdf", page: 2, questionNumber: 2 } };
+  sibling.sourcePage = 2;
+  sibling.questionNumber = 2;
   const upload = await prepareSavedSourceUpload(document, [question, sibling], { term: "Term 1", module: "CPR 1" });
   expect(upload.metadata.ready_questions).toBe(2);
   const bank = JSON.parse(new TextDecoder().decode(upload.files.find(file => file.path.endsWith("bank.json"))!.bytes));
   expect(bank.pkg.questions.map((item: { id: string }) => item.id)).toEqual(["source-question-1", "source-question-2"]);
+});
+
+it("keeps uniform and mixed personal weeks local while publishing every question as unassigned", async () => {
+  const { document, question } = await source();
+  const sibling = structuredClone(question);
+  sibling.id = "local-question-2";
+  sibling.content = { ...structuredClone(question.content!), id: "source-question-2", week: 3,
+    source: { filename: "sample.pdf", page: 2, questionNumber: 2 } };
+  sibling.sourcePage = 2;
+  sibling.questionNumber = 2;
+  for (const secondWeek of [1, 3]) {
+    sibling.week = secondWeek;
+    const upload = await prepareSavedSourceUpload(document, [question, sibling], { term: "Term 1", module: "CPR 1" });
+    const bank = JSON.parse(new TextDecoder().decode(upload.files.find(file => file.path.endsWith("bank.json"))!.bytes));
+    expect(bank.pkg.manifest.course.week).toBe(0);
+    expect(bank.pkg.manifest.source).not.toHaveProperty("axomAssignedWeek");
+    expect(bank.pkg.questions.map((item: { week: number }) => item.week)).toEqual([0, 0]);
+    expect(upload.provenance.weekAssignment).toBe("unassigned");
+    expect(question.week).toBe(1);
+    expect(sibling.week).toBe(secondWeek);
+  }
 });
 
 it("accepts an ordinary reviewed text-only PDF import with its exact stored original", async () => {
@@ -111,6 +135,10 @@ it("refuses a stale key, missing explanation, changed source and absent original
     .rejects.toThrow(/differs from its reviewed source/);
   await expect(prepareSavedSourceUpload(document, [{ ...question, explanation: undefined }], { term: "Term 1", module: "CPR 1" }))
     .rejects.toThrow(/answer, explanation/);
+  await expect(prepareSavedSourceUpload(document, [{ ...question, sourcePage: 7 }], { term: "Term 1", module: "CPR 1" }))
+    .rejects.toThrow(/source page or number/);
+  await expect(prepareSavedSourceUpload(document, [{ ...question, questionNumber: 7 }], { term: "Term 1", module: "CPR 1" }))
+    .rejects.toThrow(/source page or number/);
   await expect(prepareSavedSourceUpload(document, [{ ...question, sourceFile: {
     name: "other.pdf", type: "pdf", size: document.sizeBytes, addedAt: "2026-01-01T00:00:00Z",
   } }], { term: "Term 1", module: "CPR 1" })).rejects.toThrow(/source, answer/);
@@ -151,4 +179,15 @@ it("requires exact figure bytes and carries source images into the verified cour
   const upload = await prepareSavedSourceUpload(document, [question], { term: "Term 1", module: "CPR 1" });
   expect(upload.metadata.ready_questions).toBe(1);
   expect(upload.files.find(file => file.path.endsWith("figure.png"))?.sha256).toBe(imageHash.slice(7));
+  question.content!.assets[0].sourcePage = 2;
+  await expect(prepareSavedSourceUpload(document, [question], { term: "Term 1", module: "CPR 1" }))
+    .rejects.toThrow(/figure whose source filename or page/);
+  question.content!.assets[0].sourcePage = 1;
+  question.content!.assets[0].sourceFile = "/Users/private/source.pdf";
+  await expect(prepareSavedSourceUpload(document, [question], { term: "Term 1", module: "CPR 1" }))
+    .rejects.toThrow(/figure whose source filename or page/);
+  question.content!.assets[0].sourceFile = "sample.pdf";
+  question.content!.source.filename = "/Users/private/sample.pdf";
+  await expect(prepareSavedSourceUpload(document, [question], { term: "Term 1", module: "CPR 1" }))
+    .rejects.toThrow(/source, answer, explanation/);
 });
