@@ -5,9 +5,9 @@ authority: current-state
 ---
 # AXOM current AI state
 
-## Checkout and release boundary · 2026-11-02 08:25 UTC
+## Checkout and release boundary · 2026-11-02 08:51 UTC
 
-This handoff was updated from local frontier commit `759bd2c6` on
+This handoff was updated from local frontier commit `18522f50` on
 `codex/axom-frontier-release-20261101`. Check `git status`, HEAD and the
 coordination board before editing. At this snapshot, remote `main` was
 `ee1c0c2e`; [PR #74](https://github.com/jaclose/AXOM/pull/74),
@@ -50,6 +50,9 @@ and [email readiness](operations/communications-readiness.md).
   media and original uploads while preserving the first failure. The simulator is a
   source-linked study illustration awaiting human medical review, not a
   clinical tool. Radiordle and Pathordle remain held for provider approval.
+  Course-template file batches now preflight type and size before reads; pasted
+  templates have the same 2 MiB UTF-8 limit. The Host snapshot leads with
+  review and moderation work and has verified desktop/phone theme layouts.
 - [PR #74](https://github.com/jaclose/AXOM/pull/74) adds an explicit route
   from a reviewed saved source to a private revision and **Unreviewed**
   Community submission. Sharing needs rights attestation, exact source/media
@@ -107,12 +110,14 @@ contains private assets and broad replacement/deletion. Check the
 before shared edits. Historic receipts remain in Git history; do not reload
 them at startup without a specific question.
 
-At `f5774f68`, the combined web gate passed typecheck, lint, 4,565 tests
-(35 skipped), production build, update safety and offline games. The first
-complete browser sweep passed 155 journeys (14 skipped) and exposed eight
-failures: stale Settings, Daily challenge, Locked In, Question Bank and tracker
-test expectations, plus a raw Pulse clipboard error. The fixes passed 17/17
-scoped browser reruns; a clean exact-head full gate and root release checks
-are next. Keep the remote release held until JD's
-explicit follow-up; production migrations, owner grant, live mail delivery,
-and real-account Community/Host acceptance remain separate checks.
+At `f8ecdaa3`, the clean combined gate passed typecheck, lint, 4,570 web
+tests (35 skipped), production build, update safety, offline games and 163
+browser journeys (14 conditionally skipped). Root API typecheck, 88 release
+tests, 43 repository tests, repository hygiene and communications artifact
+integrity also passed. The later Host visual change passed 6 focused tests,
+typecheck, lint, build and desktop/phone browser QA in both themes; the
+course-template guard passed 12 focused tests, typecheck and lint. Run the
+combined gate again at the new exact head before release. Keep the remote
+release held until JD's explicit follow-up; production migrations, owner
+grant, live mail delivery and real-account Community/Host acceptance remain
+separate checks.
