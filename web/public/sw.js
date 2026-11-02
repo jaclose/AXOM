@@ -59,7 +59,7 @@ self.addEventListener("fetch", (event) => {
   const staticAsset = /\.(?:js|mjs|css|png|jpe?g|svg|webp|ico|woff2?|webmanifest)$/.test(url.pathname);
   if (!staticAsset) return;
   event.respondWith((async () => {
-    const hit = await caches.match(request);
+    const hit = await caches.match(request).catch(() => undefined);
     if (hit) return hit;
     const response = await fetch(request);
     // Hosts can rewrite missing JS to index.html: never cache HTML as an asset.

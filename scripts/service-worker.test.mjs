@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-function worker({ failCachePut = false, fetchResponse = async () => { throw new Error('offline'); } } = {}) {
+function worker({ failCacheMatch = false, failCachePut = false, fetchResponse = async () => { throw new Error('offline'); } } = {}) {
   const events = new Map();
   const stores = new Map();
   let activations = 0;
@@ -23,7 +23,10 @@ function worker({ failCachePut = false, fetchResponse = async () => { throw new 
         },
       };
     },
-    match: async (key) => { for (const store of stores.values()) if (store.has(absolute(key))) return store.get(absolute(key)).clone(); },
+    match: async (key) => {
+      if (failCacheMatch) throw new Error('cache read failed');
+      for (const store of stores.values()) if (store.has(absolute(key))) return store.get(absolute(key)).clone();
+    },
   };
   const context = {
     self: { location: { origin: 'https://app.test' }, clients: { matchAll: async () => [] }, addEventListener: (name, fn) => events.set(name, fn), skipWaiting: async () => { activations++; } },
@@ -85,6 +88,22 @@ test('failed cache writes do not block online navigation or stylesheet loading',
     assert.equal(await (await response).text(), expected);
     await lifetime;
   }
+});
+
+test('failed cache reads fall back to the network for application assets', async () => {
+  const app = worker({
+    failCacheMatch: true,
+    fetchResponse: async () => new Response('export const ready = true;', { headers: { 'content-type': 'text/javascript' } }),
+  });
+  let response;
+  let lifetime;
+  app.events.get('fetch')({
+    request: { url: 'https://app.test/assets/main.js', method: 'GET', mode: 'same-origin' },
+    respondWith: (value) => { response = value; },
+    waitUntil: (value) => { lifetime = value; },
+  });
+  assert.equal(await (await response).text(), 'export const ready = true;');
+  await lifetime;
 });
 
 test('activation preserves other application caches and old clients', async () => {
