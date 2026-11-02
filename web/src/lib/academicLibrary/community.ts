@@ -1,4 +1,5 @@
 import { academicClient } from "./client";
+import { attestAcademicExplanations, type ExplanationReviewReceipt } from "./explanationReview";
 
 /** Metadata for a submitted current revision. Question text and media are
  * fetched only when a signed-in reader explicitly opens the upload. */
@@ -95,8 +96,13 @@ export async function withdrawCommunityUpload(collectionId: string, revisionId: 
 /** Only a service-role appointed academic reviewer can promote or reject the
  * exact current submission; the server enforces both checks. */
 export async function reviewCommunityUpload(collectionId: string, revisionId: string,
-  approved: boolean, accountId: string): Promise<void> {
+  approved: boolean, accountId: string, receipt?: ExplanationReviewReceipt, rationaleReviewed = false): Promise<void> {
   if (!uuid(collectionId) || !uuid(revisionId)) throw new Error("The community upload identity is invalid.");
+  if (approved) {
+    if (!receipt || receipt.collectionId !== collectionId || receipt.revisionId !== revisionId)
+      throw new Error("Check this exact community revision's explanations before approval.");
+    await attestAcademicExplanations(receipt, accountId, rationaleReviewed);
+  }
   const { error } = await (await academicClient(accountId)).rpc("academic_community_review", {
     collection: collectionId, revision: revisionId, approved,
   });

@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import type { AcademicCourse } from "../../lib/academicLibrary/client";
 import { AcademicCollectionManager } from "./AcademicCollectionManager";
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), community: vi.fn(), reviewer: vi.fn(), share: vi.fn(), review: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), community: vi.fn(), reviewer: vi.fn(), share: vi.fn(), review: vi.fn(), explanations: vi.fn() }));
 vi.mock("../../lib/account/accountStore", () => ({
   useAccount: (select: (state: { user: { id: string } }) => unknown) => select({ user: { id: "owner-1" } }),
 }));
@@ -19,6 +19,9 @@ vi.mock("../../lib/academicLibrary/client", () => ({
 }));
 vi.mock("../../lib/academicLibrary/community", () => ({
   listCommunityUploads: (...args: unknown[]) => mocks.community(...args),
+}));
+vi.mock("../../lib/academicLibrary/explanationReview", () => ({
+  inspectStoredRevisionExplanations: (...args: unknown[]) => mocks.explanations(...args),
 }));
 vi.mock("../ui/primitives", () => ({
   GButton: ({ children, variant: _variant, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string }) =>
@@ -40,6 +43,10 @@ describe("your published courses", () => {
     mocks.share.mockImplementation(async (ids: string[], _account: string, options: { approve: boolean }) =>
       ids.map(collectionId => ({ collectionId, shared: true, approved: options.approve })));
     mocks.review.mockResolvedValue(undefined);
+    mocks.explanations.mockImplementation(async (collectionId: string, revisionId: string) => ({
+      collectionId, revisionId, contentHash: "a".repeat(64), readyQuestions: 2,
+      explainedReadyQuestions: 2, missingExplanations: 0,
+    }));
   });
   afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
@@ -70,6 +77,9 @@ describe("your published courses", () => {
     expect((share as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole("checkbox", { name: /right to share this course material/ }));
     fireEvent.click(await screen.findByRole("checkbox", { name: /Approve them now/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Check stored explanations" }));
+    await screen.findByText(/Explanation readback complete/);
+    fireEvent.click(screen.getByRole("checkbox", { name: /I checked every stored explanation/ }));
     fireEvent.click(share);
     expect(await screen.findByText(/2 courses shared and approved\. Every signed-in AXOM account can now find them\./)).toBeTruthy();
     expect(mocks.share.mock.calls.map(([ids, , options]) => [ids, options.approve])).toEqual([[[id(1)], true], [[id(2)], true]]);
@@ -86,6 +96,8 @@ describe("your published courses", () => {
     const group = await screen.findByRole("group", { name: /Approve courses awaiting review/ });
     const approve = within(group).getByRole("button", { name: /Approve 2 courses/ }) as HTMLButtonElement;
     expect(approve.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Check stored explanations" }));
+    await screen.findByText(/Explanation readback complete/);
     fireEvent.click(within(group).getByRole("checkbox"));
     fireEvent.click(approve);
     expect(await screen.findByText(/1 course approved\./)).toBeTruthy();
@@ -94,6 +106,21 @@ describe("your published courses", () => {
     expect(within(failures).getByText("Term 1 GOER")).toBeTruthy();
     expect(failures.textContent).toMatch(/The review could not be saved\./);
     await waitFor(() => expect(screen.getByText(/1 awaiting review, 1 shared with everyone\./)).toBeTruthy());
+  });
+
+  it("shows a missing explanation count and keeps bulk approval disabled", async () => {
+    mocks.reviewer.mockResolvedValue(true);
+    mocks.list.mockResolvedValueOnce([course(1, { visibility: "shared" })]);
+    mocks.explanations.mockResolvedValueOnce({ collectionId: id(1), revisionId: id(1001),
+      contentHash: "a".repeat(64), readyQuestions: 2, explainedReadyQuestions: 1, missingExplanations: 1 });
+    render(<AcademicCollectionManager onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Show my courses/ }));
+    const approve = await screen.findByRole("button", { name: /Approve 1 course/ }) as HTMLButtonElement;
+    fireEvent.click(screen.getByRole("button", { name: "Check stored explanations" }));
+    expect((await screen.findByRole("status")).textContent).toMatch(/1 ready question without an explanation/);
+    fireEvent.click(screen.getByRole("checkbox", { name: /I checked every stored explanation/ }));
+    expect(approve.disabled).toBe(true);
+    expect(mocks.review).not.toHaveBeenCalled();
   });
 
   it("explains an empty library", async () => {
@@ -119,7 +146,9 @@ describe("your published courses", () => {
     expect(screen.getByText(/2 unreviewed community uploads/)).toBeTruthy();
     expect(screen.getByText(/Question Bank → Community Uploads/)).toBeTruthy();
     fireEvent.click(screen.getByRole("checkbox", { name: /right to share this course material/ }));
-    fireEvent.click(screen.getByRole("checkbox", { name: /I checked these courses/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Check stored explanations" }));
+    await screen.findByText(/Explanation readback complete/);
+    fireEvent.click(screen.getByRole("checkbox", { name: /I checked every stored explanation/ }));
     fireEvent.click(approve);
     await waitFor(() => expect(mocks.review).toHaveBeenCalledOnce());
     expect(mocks.review.mock.calls[0][0]).toBe(id(4));
