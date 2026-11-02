@@ -51,6 +51,10 @@ export async function prepareSavedSourceUpload(
   const sourceQuestions: PackageQuestion[] = [];
   const localIds = new Set<string>(), sourceIds = new Set<string>();
   for (const [index, saved] of questions.entries()) {
+    const mappingRules = saved.extraction?.parserRuleIds ?? [];
+    if (mappingRules.includes("import.source-key-validated") && !mappingRules.includes("import.user-reviewed")) {
+      throw new Error(`Saved question ${index + 1} has a source-key validated mapping. Confirm its answer against the original source before submitting this course to Community.`);
+    }
     let content = saved.content;
     if (!content && saved.attachments?.length) {
       throw new Error("This saved set has images without a source-linked asset map. Use the AXOM course folder or ZIP below if you have a reviewed package, or keep this source local.");

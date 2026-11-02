@@ -129,6 +129,19 @@ it("accepts an ordinary reviewed text-only PDF import with its exact stored orig
   }] }], { term: "Term 1", module: "CPR 1" })).rejects.toThrow(/images without a source-linked asset map/);
 });
 
+it("does not label an automatic source-key check as a person's review for Community", async () => {
+  const { document, question } = await source();
+  question.content = undefined;
+  const extraction = { confidence: "high" as const, reviewed: true,
+    parserRuleIds: ["answer.explicit-letter", "import.source-key-validated"] };
+  question.extraction = extraction;
+  await expect(prepareSavedSourceUpload(document, [question], { term: "Term 1", module: "CPR 1" }))
+    .rejects.toThrow(/Confirm its answer against the original source/);
+  extraction.parserRuleIds.push("import.user-reviewed");
+  const upload = await prepareSavedSourceUpload(document, [question], { term: "Term 1", module: "CPR 1" });
+  expect(upload.metadata.ready_questions).toBe(1);
+});
+
 it("refuses a stale key, missing explanation, changed source and absent original", async () => {
   const { document, question } = await source();
   await expect(prepareSavedSourceUpload(document, [{ ...question, correctKey: "B" }], { term: "Term 1", module: "CPR 1" }))

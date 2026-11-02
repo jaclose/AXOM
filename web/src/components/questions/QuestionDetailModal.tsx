@@ -178,6 +178,7 @@ export function QuestionDetailModal({ question, onClose, notice }: {
         reviewed: true,
         reviewedAt,
         answerDetectionConfidence: 1,
+        parserRuleIds: [...new Set([...(question.extraction.parserRuleIds ?? []), "import.user-reviewed"])],
       } : undefined,
     });
     pushToast({ title: "Answer mapping confirmed", body: `${mappingKey}. ${correctOption.text}`, tone: "success" });
