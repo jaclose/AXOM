@@ -5,9 +5,9 @@ authority: current-state
 ---
 # AXOM current AI state
 
-## Checkout and release boundary · 2026-11-02 06:30 UTC
+## Checkout and release boundary · 2026-11-02 08:25 UTC
 
-This handoff was updated from local frontier commit `dfc9070a` on
+This handoff was updated from local frontier commit `759bd2c6` on
 `codex/axom-frontier-release-20261101`. Check `git status`, HEAD and the
 coordination board before editing. At this snapshot, remote `main` was
 `ee1c0c2e`; [PR #74](https://github.com/jaclose/AXOM/pull/74),
@@ -43,7 +43,11 @@ and [email readiness](operations/communications-readiness.md).
   [Patch Notes](features/patch-notes.md), the qualitative asthma
   [body simulator](features/body-simulator.md), Dashboard widget improvements,
   and the **Midnight** palette. It includes earned study credits, bounded
-  one-day streak protection, and account settings work. The simulator is a
+  one-day streak protection, and account settings work. Community now loads
+  the member's own profile independently, searches opted-in learners on the
+  server, and pages friend connections without silently dropping older ties.
+  Sync verifies a local save before reporting success and bounds content,
+  media and original uploads while preserving the first failure. The simulator is a
   source-linked study illustration awaiting human medical review, not a
   clinical tool. Radiordle and Pathordle remain held for provider approval.
 - [PR #74](https://github.com/jaclose/AXOM/pull/74) adds an explicit route
@@ -53,7 +57,9 @@ and [email readiness](operations/communications-readiness.md).
   does not prove hosted publishing. [PR #75](https://github.com/jaclose/AXOM/pull/75)
   records private PDF answer-mark **proposals for review**; visual marks do
   not change scoring keys or answer-ready status. Current-revision explanation
-  attestation remains required before official academic approval.
+  attestation remains required before official academic approval. Local ports
+  of draft PRs #79/#80 add answer-outline and inline-answer-copy receipts for
+  private review only; no bank key or readiness changes.
 - Scoped local ports from draft PRs #33, #36 and #42 add complete-term course
   downloads/practice, an ordinary shared-course reviewer queue with exact
   revision and explanation gates, eligible quiz pool counts/multiple subjects,
@@ -101,11 +107,12 @@ contains private assets and broad replacement/deletion. Check the
 before shared edits. Historic receipts remain in Git history; do not reload
 them at startup without a specific question.
 
-The combined frontier gate before the three draft ports passed 4,424 web tests,
-typecheck, lint, 88 release tests, repository tests, build and targeted
-desktop/mobile browser checks. The #33/#36/#42 ports passed focused tests,
-typecheck and scoped lint in isolated worktrees; #33 and #42 passed targeted
-browser journeys. A final combined gate, including #36's new browser path,
-is still required. Keep the remote release held until JD's
+At `f5774f68`, the combined web gate passed typecheck, lint, 4,565 tests
+(35 skipped), production build, update safety and offline games. The first
+complete browser sweep passed 155 journeys (14 skipped) and exposed eight
+failures: stale Settings, Daily challenge, Locked In, Question Bank and tracker
+test expectations, plus a raw Pulse clipboard error. The fixes passed 17/17
+scoped browser reruns; a clean exact-head full gate and root release checks
+are next. Keep the remote release held until JD's
 explicit follow-up; production migrations, owner grant, live mail delivery,
 and real-account Community/Host acceptance remain separate checks.
