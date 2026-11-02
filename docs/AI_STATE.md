@@ -89,107 +89,59 @@ rows and all 20 courses. No content was uploaded.
 ## Ownership and protected work
 
 Read the coordination board and CONVERGENCE before integration. Preserve other
-owners' checkouts and files. Local `main` has 45 protected staged additions and
-six untracked private sources; exclude all. Recheck overlaps against
-the final SHA, then fast-forward only. Compare protected staged entries, cached
-patch and working-file hashes before/after. Never switch, reset, stash or rewrite.
-
-The staged AMBOSS research, source-coverage metadata, stale handoffs, backup
-patch, generated ZIP/demo copies and simulator crawler are excluded. They need
-separate owner review; do not publish private paths or source identities.
-
-Never merge `backup/pre-large-file-cleanup-2026-09-28`: it contains a 288 MB
-audio file, private assets and broad historical replacement/deletion.
+owners' checkouts. Local `main` has 45 protected staged additions and six
+untracked private sources; exclude them and verify staged/working hashes before
+and after integration. Never switch, reset, stash or rewrite that checkout.
+Staged research, backup, generated ZIP/demo and crawler work needs separate
+owner review. Never merge `backup/pre-large-file-cleanup-2026-09-28`; it
+contains private assets, a 288 MB audio file and broad replacement/deletion.
 
 ## Academic inventory and acceptance
 
 [Academic library](features/academic-library.md) owns the implementation and
 acceptance contract. The recorded inventory has 2,733 source identities across
-4,213 hashed paths and 2,274 processing jobs. These are inventory counts, not
-verified question totals.
-
-B4 reconciles 2,090 dispositions: 1,402 unavailable, 675 review-prepared/partial,
-ten no-questions and three unsupported. It records 994 review candidates and
-12,140 unresolved; ready remains zero. B5 reconciles 41: 25 review, 11
-unresolved, six path-only, zero ready/cloud. Counts are not publishing approval.
-
-Twenty-two templates account for 547 activities: T1 250, T2 199, T3 98.
-T4/T5 lack authoritative denominators. Local GOER has five banks, 28 ready and
-44 review-required questions, plus 64 verified ready-question attachments.
-`/Volumes/JDabSSD` is unavailable. Its older 1,280-file scan must not replace
-B4's 1,402 unavailable dispositions. `academicReleaseComplete` remains false.
-
-The private October 20 delivery folder reconciles 28 templates and 655 sources;
-current parsing assesses 439 ready, 582 review-required, 10,968 unresolved and
-23 unreadable retained rows. Source/template/media checksums were checked outside
-Git. Prepared files are not proof of installation, browser decoding or cloud delivery.
-Supported automated folder selection did not start the live import; manual folder
-selection remains pending. No ZIP was created; partial compression suggests the
-full archive would exceed the 1 GiB import cap. Hold import while disk is critical.
+4,213 hashed paths and 2,274 jobs; these are not verified question totals. B4
+records 1,402 unavailable, 994 review candidates and 12,140 unresolved; B5
+records zero ready/cloud. Earlier 22 templates had 547 T1–T3 activities, with
+no authoritative T4/T5 denominator. The October 20 delivery had 28 templates,
+655 sources and 23 unreadable retained rows. Those historical scans do not
+supersede the newer 20-course dry run above or prove cloud delivery. Disk and
+the 1 GiB import cap blocked that older full archive. `academicReleaseComplete`
+remains false; see the [library contract](features/academic-library.md) for
+source and media requirements.
 
 ## Implemented behavior
 
 Course Library separates term/course maps, plans and local/account context.
-QBank distinguishes ready, review-suggested, unresolved and missing records.
-Image counts describe metadata only; no answer-bearing browsing thumbnails.
+QBank tracks ready, suggested, unresolved and missing records; image counts
+are metadata, never answer-bearing browse thumbnails. Missing-record recovery
+keeps original collection IDs, membership and scope; a new import stays
+separate, and a live presence check is not durable-save proof. See
+[Questions](features/questions.md).
 
-Missing-record recovery retains original collection IDs, membership and source
-scope. A fresh import stays separate; only exact original records satisfy the
-live presence check, which is not proof of durable save. Cancel preserves an
-unfinished import. See [Questions](features/questions.md) for the contract.
+Private installation holds invalid media used only by held questions while
+allowing verified ready siblings. Ready-image and bank-wide filename/checksum
+checks stay strict. Connected banks need exact collection/course/term/module
+receipt membership; a same-named local course is insufficient. Preserve
+account locks, source identity, reviewed filing, attachment rollback, revocable
+shares and owner-only recovery. Recheck the linked ledger before migrations.
 
-Reviewer-edited wording retains original source figures through the existing
-visibility gate. During private installation, invalid media used exclusively by
-already-held questions remains unpersisted and explicitly unresolved; verified
-ready siblings can still install. Ready-question image checks and whole-bank
-filename/checksum collision rejection remain strict. Review metadata preserves
-the declared original asset without storing invalid bytes.
-
-Hosted template receipts cannot project onto a same-named local course.
-Connected banks require exact collection/course/term/module and receipt
-membership. Vault fallback promotion compares the last observed durable base
-inside an IndexedDB transaction for workspace and auxiliary keys. Workspace
-conflicts remain latched; unsupported first-ever offline cases fail conservatively.
-
-Preserve account locks, source identity, atomic reviewed filing, attachment rollback,
-revocable shares and owner-only recovery. Uncertain removals retain paths;
-ambiguous cross-service work requires reconciliation, not inferred success.
-
-The older 2026-10-15 and PR #30 migration counts are historical; the current
-linked receipt is above. Recheck the live list before another migration.
-
-Journal transitions await confirmed writes; failures preserve drafts. Closeout
-copy is opt-in. Images export beyond the 14 MB account limit; teardown is best effort.
-
-Reflection inbox now remembers exact dismissed dates per browser/device/account,
-including across reload and day rollover. New missed dates remain eligible;
-shell reminders share suppression. Undo has a retry path and token-specific
-markers preserve concurrent newer dismissals. Journal, plans and logs are untouched.
-See [reminder lifecycle](DAILY-LOOP-REMINDER-LIFECYCLE.md).
+Journal writes preserve drafts on failure; the reflection inbox suppresses
+exact dismissed dates per device/account while allowing new missed dates and
+retrying Undo. See [reminder lifecycle](DAILY-LOOP-REMINDER-LIFECYCLE.md).
 
 ## Current validation
 
-Receipts through `dc055a2` (streaks, Activity Log, catalog fixture, reflection
-`78c00e04`, `81e1a5bb` and its follow-ups) are preserved verbatim at
-`git show dc055a2:docs/AI_STATE.md`. Hosted and real multi-connection SQL behavior
-remain unverified. Existing build warnings concern `jszip`/`webUpdates`
-static/dynamic imports and chunks over 500 kB. The GitHub advisory snapshot (56: 14
-high, 39 moderate, three low) was not refreshed; dependency remediation is separate.
+Earlier validation receipts remain at `git show dc055a2:docs/AI_STATE.md`.
+Hosted multi-connection SQL is unverified. Existing build chunk/import warnings
+and the older 56-advisory snapshot were not rechecked here.
 
 ## Cloud and delivery boundary
 
-2026-11-01 linked SQL showed zero academic collections and zero community
-submissions. No owner-authenticated production upload, reload, share recovery,
-media/checksum readback or revocation was completed.
-
-Before production acceptance: upload only cleared private material as its authenticated owner; reload it
-through the learner UI; verify media/checksums and revocation; and record exact
-receipts. Also complete a true multi-connection privacy-lock check, Journal
-image-race and broader multi-tab coverage, QBank opener-clone recovery analysis, Safari/WebKit and
-packaged-desktop acceptance, and dependency-advisory review. The missing SSD
-sources, B4/B5 review queues and absent T4/T5 coverage remain blockers to
-complete academic-library acceptance.
-
-Inspect disk before checks; preserve services/sources, no cleanup. Shared beta
-checkpoint holds chat receipts, not completed audits. Local checks are not
-production academic acceptance.
+At the 2026-11-01 linked SQL check, collections and community submissions were
+zero. No owner-authenticated production upload, learner reload, media/checksum
+readback, share recovery or revocation has been verified. Acceptance needs an
+authenticated cleared-content publish and learner check, plus privacy-lock,
+multi-tab, Safari/WebKit and packaged-desktop coverage. B4/B5 review queues
+and missing T4/T5 denominators remain open. Inspect disk before heavy checks;
+local checks do not establish hosted academic acceptance.
