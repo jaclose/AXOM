@@ -3,7 +3,7 @@
   "sources": {
     "scripts/build-communications.mjs": "0c124b5f6820a38fc27c663cc6800833674db48f77750430cc95fca696c19f0f",
     "scripts/render-communications-auth.mjs": "ce221f06ceface86001291f3c7a55049a526012805cf86a847c837a7ee7aef1f",
-    "web/package-lock.json": "3110875081ab4b8c8ceaf8d8aa46d4db7eb4dcc016adaa300a7e1b7edd2b8812",
+    "web/package-lock.json": "832bd5f3d72678e350a10e934500a51333b8e6930447328bdd3e71e29e7bc029",
     "web/src/lib/brand.ts": "0816164fed5efbed5575a23341c31ea60e55653a36df5f9307b6fd92b038a8eb",
     "web/src/lib/communications/context.ts": "59e3cd668101f80017c797452c8c86b8c08189a6e60b40485a82e45605ec9073",
     "web/src/lib/communications/email.tsx": "e837e97f404179b0420a48c6fa82def3349263a1593d3a4f84fe8721b6a061e0",
@@ -32,7 +32,7 @@
   },
   "bundle": {
     "path": "supabase/functions/communications/service.js",
-    "sha256": "557aac91048b224a0fa67421f73b46e20d03ba861bde64502f05b7d0171ae872"
+    "sha256": "17d94d4bc5db4fa314c0e28ea73d7ad1fe562b7c0a7ffe6696279ee0a3e1c4b9"
   },
   "authTemplates": {
     "supabase/templates/communications/confirmation.html": "e79c100868c837f0619bfa6cf995df5cdd4cd89b59f5434d607df3185f387ab2",

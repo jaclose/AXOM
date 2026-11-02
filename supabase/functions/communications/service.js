@@ -3842,8 +3842,8 @@ var ue = {
 		"sources:inventory": "node --experimental-strip-types ./scripts/source-inventory.ts"
 	},
 	engines: {
-		node: ">=22.23.1 <23",
-		npm: "10.9.8"
+		node: ">=22.23.4 <23",
+		npm: "10.9.9"
 	},
 	dependencies: {
 		"@noble/hashes": "^2.4.0",
@@ -3887,7 +3887,7 @@ var ue = {
 		vite: "^8.0.16",
 		vitest: "^4.1.11"
 	},
-	packageManager: "npm@10.9.8"
+	packageManager: "npm@10.9.9"
 }.version, de = {
 	productName: "AXOM",
 	tagline: "Private academic operating system",
