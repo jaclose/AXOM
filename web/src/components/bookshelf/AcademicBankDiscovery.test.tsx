@@ -51,6 +51,7 @@ const now = "2026-11-01T00:00:00.000Z";
 function reference(template: SourceDocument): SourceDocument {
   const rawText = JSON.stringify({
     collectionId: collection, revisionId: revision, accountId: "learner-1",
+    status: "complete", warnings: [],
     templateIds: [template.id], documentIds: [template.id], questionIds: ["week-1", "week-2"], setIds: ["set-1", "set-2"],
   });
   return {
