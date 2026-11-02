@@ -101,6 +101,8 @@ export function PatchNotesPage() {
         <p>Try a different phrase or show all releases.</p>
         <button type="button" onClick={() => { setQuery(""); setScope("all"); searchRef.current?.focus(); }}>Show all releases</button>
       </GlassCard>}
-    <p className="patch-notes-footnote">This history records versioned release notes. The revision above identifies the exact code in your build.</p>
+    <p className="patch-notes-footnote">{BUILD_INFO.commitSha === "local"
+      ? "This local build has no verified source revision. Release notes describe its version, not these exact files."
+      : "This history records versioned release notes. The revision above identifies the committed source used for this build."}</p>
   </main>;
 }

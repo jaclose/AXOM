@@ -10,8 +10,8 @@ AXOM's public release history comes from the repository-root `CHANGELOG.md`.
 `scripts/release-notes.mjs` parses versioned entries as plain text for the web app,
 the desktop updater, and packaged release metadata. The Patch Notes page searches
 that same record offline. Its build card shows the package version and exact build
-revision when one is available; a same-version web deployment is not presented as
-a new version.
+revision when the checkout is clean; uncommitted and source-ZIP builds are marked local. A
+same-version web deployment is not presented as a new version.
 
 Before a versioned release, add a concise `## <version> — YYYY-MM-DD (Title)` entry
 at the top of `CHANGELOG.md`. Describe only changes verified in the release candidate.
@@ -26,6 +26,6 @@ an empty search state, complete expandable notes, and an honest missing-entry st
 It uses the authentic AXOM Orb, theme tokens, keyboard-native controls and reduced
 motion handling.
 
-Integration requires registering `PatchNotesPage` at `#patch-notes` in the app router
-and adding one navigation entry. Keep the route lazy-loaded so the changelog stays
-out of the startup bundle. Verify both desktop and mobile in a browser after routing.
+`PatchNotesPage` is registered at `#patch-notes` with a navigation entry. The
+route stays lazy-loaded so the changelog remains outside the startup bundle.
+Verify desktop and mobile in a browser before releasing a changed page.
