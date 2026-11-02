@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createCloudProvider, cloudAiRemaining } from "./cloud";
-import { aiProxyCorsPolicy, buildAnthropicRequest, parseJsonLoose, readJsonRequest, textFromAnthropic, upstreamError, validateBody } from "../../../../supabase/functions/ai-proxy/core";
+import { aiProxyCorsPolicy, buildAnthropicRequest, cloudAllowance, parseJsonLoose, readJsonRequest, textFromAnthropic, upstreamError, validateBody } from "../../../../supabase/functions/ai-proxy/core";
 
 function reply(status: number, body: unknown) {
   return Promise.resolve(new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }));
@@ -32,6 +32,15 @@ describe("AXOM Cloud AI client", () => {
 });
 
 describe("ai-proxy core", () => {
+  it("fails closed on missing, malformed, unavailable or denied quota policy", () => {
+    for (const value of [null, undefined, "59", {}, [], NaN, Infinity, -2, 0.5, 1000]) {
+      expect(cloudAllowance(value)).toMatchObject({ allowed: false, status: 503 });
+    }
+    expect(cloudAllowance(59, true)).toMatchObject({ allowed: false, status: 503 });
+    expect(cloudAllowance(-1)).toMatchObject({ allowed: false, status: 429 });
+    expect(cloudAllowance(0)).toEqual({ allowed: true, remaining: 0 });
+    expect(cloudAllowance(999)).toEqual({ allowed: true, remaining: 999 });
+  });
   it("allows only explicit production origins and valid POST preflights", () => {
     const policy = aiProxyCorsPolicy({
       origin: "https://axom.app",

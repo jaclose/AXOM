@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { completeSetup, expect, test } from "./fixtures";
 import { STORAGE_KEYS } from "../src/lib/brand";
+import { SCHEMA_VERSION } from "../src/lib/seed";
 
 test("persistent Daily Games, Daily Word history, and shared clock preferences persist locally", async ({ page }) => {
   const browserErrors: string[] = [];
@@ -47,7 +48,7 @@ test("persistent Daily Games, Daily Word history, and shared clock preferences p
 
   await page.reload({ waitUntil: "networkidle" });
   const persisted = await readPersistedWorkspace(page);
-  expect(persisted.schemaVersion).toBe(34);
+  expect(persisted.schemaVersion).toBe(SCHEMA_VERSION);
   expect(persisted.profile.timeZonePreference).toEqual({ mode: "custom", customTimezone: "America/Grenada" });
   expect(persisted.profile.clockPreferences).toMatchObject({
     enabled: true,

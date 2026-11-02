@@ -30,6 +30,7 @@ import {
 import { DEFAULT_FOCUS_IDS, focusOption, normalizedFocusIds } from "./experience";
 import { isAcademicStageId, resolveTrack } from "./tracks";
 import { normalizeDailySuccessConfig } from "./dailySuccess";
+import { normalizeStudyStreaks } from "./studyStreaks";
 import { normalizePomodoroPreferences } from "./pomodoroPreferences";
 import { normalizeDailyLoopReminderPreferences } from "./dailyLoopReminders";
 import { normalizeFocusCheckInPreferences } from "./focusCheckIn";
@@ -419,6 +420,9 @@ export function parseImport(text: string): NoctyriumState {
       dailySuccess: profile.dailySuccess === undefined
         ? undefined
         : normalizeDailySuccessConfig(profile.dailySuccess),
+      studyStreaks: profile.studyStreaks === undefined
+        ? undefined
+        : normalizeStudyStreaks(profile.studyStreaks),
       hiddenActivityShortcuts: Array.isArray(profile.hiddenActivityShortcuts)
         ? [...new Set(profile.hiddenActivityShortcuts.filter((value): value is string => typeof value === "string" && Boolean(value.trim())).map((value) => value.slice(0, 240)))].slice(0, 100)
         : undefined,

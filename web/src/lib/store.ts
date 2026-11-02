@@ -54,6 +54,7 @@ interface ApplyTrackOptions {
 import { normalizeTrackerPath, trackerPathKey } from "./pathUtils";
 import { normalizeResourceUrl } from "./resourceUtils";
 import { normalizeDailySuccessConfig } from "./dailySuccess";
+import { normalizeStudyStreaks } from "./studyStreaks";
 import { normalizePomodoroPreferences } from "./pomodoroPreferences";
 import { normalizeDailyLoopReminderPreferences } from "./dailyLoopReminders";
 import { normalizeFocusCheckInPreferences } from "./focusCheckIn";
@@ -2881,6 +2882,9 @@ function normalizeProfile(value: unknown): Profile {
     dailySuccess: profile.dailySuccess === undefined
       ? undefined
       : normalizeDailySuccessConfig(profile.dailySuccess),
+    studyStreaks: profile.studyStreaks === undefined
+      ? undefined
+      : normalizeStudyStreaks(profile.studyStreaks),
     hiddenActivityShortcuts: Array.isArray(profile.hiddenActivityShortcuts)
       ? [...new Set(profile.hiddenActivityShortcuts.filter((value): value is string => typeof value === "string" && Boolean(value.trim())).map((value) => value.slice(0, 240)))].slice(0, 100)
       : undefined,

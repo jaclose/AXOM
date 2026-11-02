@@ -1,5 +1,7 @@
 // OS chrome belongs to the OS. AXOM supplies concise copy, permission-aware
 // delivery, event identity and an allowlisted destination where clicks exist.
+import { recordLocalNotice } from "./notificationInbox";
+
 export type NotifyPermission = "granted" | "denied" | "default" | "unavailable";
 export type NotificationRoute = "productivity" | "questions" | "step" | "soundscapes" | "dashboard";
 export interface NotifyOptions {
@@ -86,6 +88,8 @@ export async function notify(title: string, body?: string, options: NotifyOption
     }
     history[key] = Date.now();
     try { localStorage.setItem(HISTORY_KEY, JSON.stringify(Object.fromEntries(Object.entries(history).sort((a, b) => b[1] - a[1]).slice(0, 200)))); } catch { /* delivery remains available without storage */ }
+    const noticeId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    recordLocalNotice(`notification:${noticeId}`, options.tag === "axom-rest" ? "rest-reminder" : "study-reminder");
     return true;
   } catch { return false; }
   finally { inFlight.delete(key); }

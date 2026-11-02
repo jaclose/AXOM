@@ -525,6 +525,86 @@ describe("ExamRunner saved blocks and selection semantics", () => {
     expect(screen.getByLabelText("Highlighted text: correct")).toBeTruthy();
   });
 
+  it("highlights and erases legacy answer text without choosing the answer", async () => {
+    setStore();
+    const user = userEvent.setup();
+    render(<ExamRunner mode="tutor" retakeIds={[question.id]} onClose={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Highlight tools" }));
+    await user.click(screen.getByRole("button", { name: "Yellow persistent highlight" }));
+    const answer = screen.getByRole("button", { name: "A. Alpha" });
+    fireEvent.pointerDown(answer);
+    selectText(screen.getByLabelText("Choice A text"), 0, 5);
+    fireEvent.pointerUp(answer);
+    fireEvent.click(answer, { detail: 1 });
+
+    expect(screen.getByLabelText("Highlighted text: Alpha")).toBeTruthy();
+    expect(answer.getAttribute("aria-pressed")).toBe("false");
+    expect(mocked.updateQuestion).toHaveBeenCalledWith(question.id, {
+      annotations: [expect.objectContaining({ target: "option", optionKey: "A", exactText: "Alpha" })],
+    });
+
+    await user.click(screen.getByRole("button", { name: "Erase highlights" }));
+    await user.click(screen.getByLabelText("Highlighted text: Alpha"));
+    expect(screen.queryByLabelText("Highlighted text: Alpha")).toBeNull();
+    expect(answer.getAttribute("aria-pressed")).toBe("false");
+
+    await user.click(answer);
+    expect(answer.getAttribute("aria-pressed")).toBe("true");
+    await user.click(screen.getByRole("button", { name: "B. Beta" }));
+    answer.focus();
+    await user.keyboard("{Enter}");
+    expect(answer.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("keeps a source-rich answer highlight through navigation and reload", async () => {
+    const rich: QuestionRecord = {
+      ...question,
+      content: {
+        id: question.id,
+        source: { filename: "reviewed.pdf", questionNumber: 1 },
+        stem: [{ type: "text", text: question.stem }],
+        choices: [
+          { id: "a", label: "A", blocks: [{ type: "rich_text", html: "<b>Alpha</b>" }] },
+          { id: "b", label: "B", blocks: [{ type: "text", text: "Beta" }] },
+        ],
+        correctAnswer: { labels: ["B"], evidence: "printed-key" },
+        assets: [],
+        provenance: { method: "pdf-import" },
+      },
+    };
+    const second = { ...question, id: "question-2", stem: "Which second option is correct?" };
+    setStore();
+    mocked.store = { ...mocked.store, questions: [rich, second] };
+    mocked.updateQuestion.mockImplementation((id, patch) => {
+      if (id === rich.id) Object.assign(rich, patch);
+    });
+    const user = userEvent.setup();
+    const view = render(<ExamRunner mode="tutor" retakeIds={[rich.id, second.id]} onClose={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Highlight tools" }));
+    await user.click(screen.getByRole("button", { name: "Cyan persistent highlight" }));
+    const answer = screen.getByRole("button", { name: "A. Alpha" });
+    const richText = answer.querySelector<HTMLElement>(".qcontent-blocks");
+    expect(richText).toBeTruthy();
+    fireEvent.pointerDown(answer);
+    selectText(richText!, 0, 5);
+    fireEvent.pointerUp(answer);
+    fireEvent.click(answer, { detail: 1 });
+    expect(answer.getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByLabelText("Highlighted text: Alpha").classList.contains("tone-cyan")).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "B. Beta" }));
+    await user.click(screen.getByRole("button", { name: "Check answer" }));
+    await user.click(screen.getByRole("button", { name: "Next question" }));
+    await user.click(screen.getByRole("button", { name: "Previous" }));
+    expect(screen.getAllByLabelText("Highlighted text: Alpha")).toHaveLength(1);
+
+    view.unmount();
+    render(<ExamRunner mode="tutor" retakeIds={[rich.id, second.id]} onClose={() => {}} />);
+    expect(screen.getAllByLabelText("Highlighted text: Alpha")).toHaveLength(1);
+  });
+
   it("confirms clear-all, clears annotation mode with Escape, and restores tool focus", async () => {
     const first = createTextAnnotation({
       id: "first", target: "stem", sourceText: question.stem, startOffset: 6,

@@ -4,3 +4,4 @@ One file per agent. Write what the next session needs: decisions and why, conven
 
 - [CLAUDE-NOTES.md](CLAUDE-NOTES.md)
 - Codex keeps its notes in its worktree (`.coordination/CODEX-TO-CLAUDE.md`) and on the board; a `CODEX-NOTES.md` here is welcome.
+- [2026-11-01 ideas and workflow audit](2026-11-01-IDEAS-WORKFLOW-AUDIT.md): current request, source-backed status and pickup route.

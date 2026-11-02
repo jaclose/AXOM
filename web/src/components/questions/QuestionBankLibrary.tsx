@@ -1,5 +1,5 @@
 import { AccountContentDownloads } from "../bookshelf/AccountContentDownloads";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useStore } from "../../lib/store";
 import { CURRICULA } from "../../lib/curricula";
 import { bankSource } from "../../lib/course-engine/questionBank";
@@ -12,6 +12,7 @@ import { QuestionBankBookContent } from "../bookshelf/BookContents";
 import { knownBankManifests } from "../../lib/question-content/knownBanks";
 import { PreparedLibrary } from "../bookshelf/PreparedLibrary";
 import { AcademicBankDiscovery } from "../bookshelf/AcademicBankDiscovery";
+import { CommunityQuestionSetLibrary } from "./CommunityQuestionSetLibrary";
 
 const packages: KnownPackage[] = knownBankManifests.map((manifest) => ({ manifest, hasSource: false }));
 export function QuestionBankLibrary({ onPractice, onOpenBank, onImport, onCreate, heldForReview }: {
@@ -30,6 +31,9 @@ export function QuestionBankLibrary({ onPractice, onOpenBank, onImport, onCreate
   const ready = useMemo(() => questions.filter((question) => questionPracticeReadiness(question) === "ready").length, [questions]);
   const localBookCount = shelves.reduce((count, shelf) => count + shelf.books.filter((book) => book.count > 0).length, 0);
   const [catalogOpen, setCatalogOpen] = useState(questions.length === 0 && sets.length === 0);
+  const [communityOpen, setCommunityOpen] = useState(false);
+  const [preparedOpen, setPreparedOpen] = useState(localBookCount === 0);
+  const preparedRef = useRef<HTMLDetailsElement>(null);
 
   return <section className="qb-library-workspace" aria-labelledby="qb-library-title">
     <header className="qb-library-intro">
@@ -39,6 +43,10 @@ export function QuestionBankLibrary({ onPractice, onOpenBank, onImport, onCreate
         <p>{ready + heldForReview > 0
           ? `${ready} ready to practice · ${heldForReview} held for answer or source review.`
           : "Start with a course collection, or add material you already trust."}</p>
+        {localBookCount === 0 && <button type="button" className="qb-prepared-link" onClick={() => {
+          setPreparedOpen(true);
+          window.requestAnimationFrame(() => preparedRef.current?.scrollIntoView({ block: "nearest" }));
+        }}>Install a prepared course library</button>}
       </div>
       <ol className="qb-study-route" aria-label="How to start a practice set">
         <li><span>1</span><b>Course</b></li>
@@ -57,6 +65,13 @@ export function QuestionBankLibrary({ onPractice, onOpenBank, onImport, onCreate
       </summary>
       <AcademicBankDiscovery />
     </details>
-    <details className="cloud-local-material qb-library-maintenance"><summary>Import status and source review</summary><PreparedLibrary /></details>
+    <details className="qb-course-catalog" open={communityOpen} onToggle={event => setCommunityOpen(event.currentTarget.open)}>
+      <summary><span><b>Browse learner Question Sets</b><small>Search reviewed sets shared by other AXOM learners.</small></span></summary>
+      {communityOpen && <CommunityQuestionSetLibrary />}
+    </details>
+    <details ref={preparedRef} id="prepared-course-library" className="cloud-local-material qb-library-maintenance"
+      open={preparedOpen} onToggle={(event) => setPreparedOpen(event.currentTarget.open)}>
+      <summary>Import status and source review</summary><PreparedLibrary />
+    </details>
   </section>;
 }

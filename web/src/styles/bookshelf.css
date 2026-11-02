@@ -25,6 +25,23 @@
   font-size: 12px;
   color: var(--text-45);
 }
+.bookshelf-filter-empty {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  min-height: 130px;
+  padding: 22px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: linear-gradient(120deg, color-mix(in srgb, var(--surface-2) 90%, var(--gold) 10%), var(--surface-1));
+}
+.bookshelf-filter-empty > svg { flex: none; color: var(--gold); }
+.bookshelf-filter-empty > div { flex: 1 1 220px; min-width: 0; }
+.bookshelf-filter-empty h3 { margin: 0 0 4px; color: var(--text); font-family: var(--font-display); font-size: var(--fs-md); }
+.bookshelf-filter-empty p { margin: 0; color: var(--text-70); line-height: 1.45; }
+.bookshelf-filter-empty button { border: 1px solid var(--gold-line); border-radius: var(--radius-sm); padding: 9px 12px; color: var(--gold); background: var(--surface-2); font: inherit; cursor: pointer; }
+.bookshelf-filter-empty button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 
 /* Shelves stand side by side where there is room, like the bays of a bookcase. */
 .bookshelf-shelves {

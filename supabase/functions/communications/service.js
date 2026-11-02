@@ -168,7 +168,7 @@ function m(e, t) {
 	};
 }
 //#endregion
-//#region web/node_modules/react/cjs/react.production.min.js
+//#region ../AXOM-ideas-2026-11-01/web/node_modules/react/cjs/react.production.min.js
 var h = /* @__PURE__ */ e(((e) => {
 	var t = Symbol.for("react.element"), n = Symbol.for("react.portal"), r = Symbol.for("react.fragment"), i = Symbol.for("react.strict_mode"), a = Symbol.for("react.profiler"), o = Symbol.for("react.provider"), s = Symbol.for("react.context"), c = Symbol.for("react.forward_ref"), l = Symbol.for("react.suspense"), u = Symbol.for("react.memo"), d = Symbol.for("react.lazy"), f = Symbol.iterator;
 	function p(e) {
@@ -2299,24 +2299,24 @@ var h = /* @__PURE__ */ e(((e) => {
 	function Ft(e) {
 		e.context._currentValue = e.parentValue, e = e.parent, e !== null && Ft(e);
 	}
-	function X(e) {
+	function It(e) {
 		var t = e.parent;
-		t !== null && X(t), e.context._currentValue = e.value;
+		t !== null && It(t), e.context._currentValue = e.value;
 	}
-	function It(e, t) {
+	function X(e, t) {
 		if (e.context._currentValue = e.parentValue, e = e.parent, e === null) throw Error(n(402));
-		e.depth === t.depth ? Pt(e, t) : It(e, t);
+		e.depth === t.depth ? Pt(e, t) : X(e, t);
 	}
 	function Lt(e, t) {
 		var r = t.parent;
 		if (r === null) throw Error(n(402));
 		e.depth === r.depth ? Pt(e, r) : Lt(e, r), t.context._currentValue = t.value;
 	}
-	function Z(e) {
+	function Rt(e) {
 		var t = Nt;
-		t !== e && (t === null ? X(e) : e === null ? Ft(t) : t.depth === e.depth ? Pt(t, e) : t.depth > e.depth ? It(t, e) : Lt(t, e), Nt = e);
+		t !== e && (t === null ? It(e) : e === null ? Ft(t) : t.depth === e.depth ? Pt(t, e) : t.depth > e.depth ? X(t, e) : Lt(t, e), Nt = e);
 	}
-	var Rt = {
+	var Z = {
 		isMounted: function() {
 			return !1;
 		},
@@ -2330,14 +2330,14 @@ var h = /* @__PURE__ */ e(((e) => {
 	};
 	function zt(e, t, n, r) {
 		var i = e.state === void 0 ? null : e.state;
-		e.updater = Rt, e.props = n, e.state = i;
+		e.updater = Z, e.props = n, e.state = i;
 		var a = {
 			queue: [],
 			replace: !1
 		};
 		e._reactInternals = a;
 		var o = t.contextType;
-		if (e.context = typeof o == "object" && o ? o._currentValue : r, o = t.getDerivedStateFromProps, typeof o == "function" && (o = o(n, i), i = o == null ? i : ht({}, i, o), e.state = i), typeof t.getDerivedStateFromProps != "function" && typeof e.getSnapshotBeforeUpdate != "function" && (typeof e.UNSAFE_componentWillMount == "function" || typeof e.componentWillMount == "function")) if (t = e.state, typeof e.componentWillMount == "function" && e.componentWillMount(), typeof e.UNSAFE_componentWillMount == "function" && e.UNSAFE_componentWillMount(), t !== e.state && Rt.enqueueReplaceState(e, e.state, null), a.queue !== null && 0 < a.queue.length) if (t = a.queue, o = a.replace, a.queue = null, a.replace = !1, o && t.length === 1) e.state = t[0];
+		if (e.context = typeof o == "object" && o ? o._currentValue : r, o = t.getDerivedStateFromProps, typeof o == "function" && (o = o(n, i), i = o == null ? i : ht({}, i, o), e.state = i), typeof t.getDerivedStateFromProps != "function" && typeof e.getSnapshotBeforeUpdate != "function" && (typeof e.UNSAFE_componentWillMount == "function" || typeof e.componentWillMount == "function")) if (t = e.state, typeof e.componentWillMount == "function" && e.componentWillMount(), typeof e.UNSAFE_componentWillMount == "function" && e.UNSAFE_componentWillMount(), t !== e.state && Z.enqueueReplaceState(e, e.state, null), a.queue !== null && 0 < a.queue.length) if (t = a.queue, o = a.replace, a.queue = null, a.replace = !1, o && t.length === 1) e.state = t[0];
 		else {
 			for (a = o ? t[0] : e.state, i = !0, o = +!!o; o < t.length; o++) {
 				var s = t[o];
@@ -2748,8 +2748,8 @@ var h = /* @__PURE__ */ e(((e) => {
 			if (on(), typeof c == "object" && c && typeof c.then == "function") {
 				n = c;
 				var o = t.blockedSegment, s = bn(e, o.chunks.length, null, o.formatContext, o.lastPushedText, !0);
-				o.children.push(s), o.lastPushedText = !1, e = yn(e, t.node, t.blockedBoundary, s, t.abortSet, t.legacyContext, t.context, t.treeContext).ping, n.then(e, e), t.blockedSegment.formatContext = r, t.legacyContext = i, t.context = a, Z(a);
-			} else throw t.blockedSegment.formatContext = r, t.legacyContext = i, t.context = a, Z(a), c;
+				o.children.push(s), o.lastPushedText = !1, e = yn(e, t.node, t.blockedBoundary, s, t.abortSet, t.legacyContext, t.context, t.treeContext).ping, n.then(e, e), t.blockedSegment.formatContext = r, t.legacyContext = i, t.context = a, Rt(a);
+			} else throw t.blockedSegment.formatContext = r, t.legacyContext = i, t.context = a, Rt(a), c;
 		}
 	}
 	function kn(e) {
@@ -2789,7 +2789,7 @@ var h = /* @__PURE__ */ e(((e) => {
 				for (a = 0; a < i.length; a++) {
 					var o = i[a], s = e, c = o.blockedSegment;
 					if (c.status === 0) {
-						Z(o.context);
+						Rt(o.context);
 						try {
 							$(s, o, o.node), c.lastPushedText && c.textEmbedded && c.chunks.push(ae), o.abortSet.delete(o), c.status = 1, Mn(s, o.blockedBoundary, c);
 						} catch (e) {
@@ -2811,7 +2811,7 @@ var h = /* @__PURE__ */ e(((e) => {
 			} catch (t) {
 				xn(e, t), Sn(e, t);
 			} finally {
-				mn = r, hn.current = n, n === pn && Z(t);
+				mn = r, hn.current = n, n === pn && Rt(t);
 			}
 		}
 	}
@@ -5436,7 +5436,25 @@ async function At(e, t, n) {
 		return { notificationQueued: !1 };
 	}
 }
-async function jt(e) {
+async function jt(e, t) {
+	let n = [], r = /* @__PURE__ */ new Set(), i;
+	for (let a = 0;; a += 500) {
+		let o = await e.db.from("journal_experience_feedback").select("id,user_id,rating,liked,want_more,missing,pain_points,comment,created_at", { count: "exact" }).eq("user_id", t).order("created_at").order("id").range(a, a + 499);
+		if (o.error || !Array.isArray(o.data) || typeof o.count != "number") throw Error("journal-feedback-export-unavailable");
+		if (i === void 0 && (i = o.count), o.count !== i) throw Error("journal-feedback-export-changed");
+		for (let e of o.data) {
+			let i = e;
+			if (!i || i.user_id !== t || typeof i.id != "string" || r.has(i.id)) throw Error("journal-feedback-export-invalid");
+			r.add(i.id);
+			let a = { ...i };
+			delete a.user_id, n.push(a);
+		}
+		if (o.data.length < 500) break;
+	}
+	if (n.length !== i) throw Error("journal-feedback-export-incomplete");
+	return n;
+}
+async function Mt(e) {
 	let t = (/* @__PURE__ */ new Date()).toISOString(), n = (/* @__PURE__ */ new Date(Date.now() - 15 * 6e4)).toISOString();
 	J(await e.db.rpc("quarantine_stale_privacy_requests", { p_stale_before: n }));
 	let r = e.db.from("privacy_requests").select("*");
@@ -5457,7 +5475,7 @@ async function jt(e) {
 					e.db.from("pulse_snapshots").select("*").eq("user_id", n.user_id),
 					e.db.from("email_jobs").select("id,type,status,created_at,sent_at").eq("user_id", n.user_id),
 					e.db.from("privacy_requests").select("id,kind,status,scheduled_for,created_at").eq("user_id", n.user_id)
-				]), u = {
+				]), u = await jt(e, n.user_id), d = {
 					format: "axom-account-export",
 					version: 1,
 					generatedAt: t,
@@ -5472,29 +5490,30 @@ async function jt(e) {
 					workspaceUpdatedAt: r?.at ?? null,
 					pulse: J(s),
 					communications: J(c),
+					journalFeedback: u,
 					privacy: J(l),
 					coverage: "Account-held data only. Device-local source files, original PDFs and attachment binaries are not included. Use the local portable backup for device-owned content."
-				}, d = `${n.user_id}/${n.id}.json`, f = JSON.stringify(u);
-				if (new TextEncoder().encode(f).byteLength > 25e6) throw Error("export-too-large");
+				}, f = `${n.user_id}/${n.id}.json`, p = JSON.stringify(d);
+				if (new TextEncoder().encode(p).byteLength > 25e6) throw Error("export-too-large");
 				try {
-					J(await e.db.storage.from("communications-exports").upload(d, f, {
+					J(await e.db.storage.from("communications-exports").upload(f, p, {
 						contentType: "application/json",
 						upsert: !0
 					}));
 				} catch (t) {
-					await Ot(e, d, t, !1);
+					await Ot(e, f, t, !1);
 				}
-				let p = new Date(Date.now() + 7 * 864e5).toISOString(), m;
+				let m = new Date(Date.now() + 7 * 864e5).toISOString(), h;
 				try {
-					m = J(await e.db.rpc("finalize_privacy_export", {
+					h = J(await e.db.rpc("finalize_privacy_export", {
 						p_request_id: n.id,
-						p_object_path: d,
-						p_expires_at: p
+						p_object_path: f,
+						p_expires_at: m
 					}));
 				} catch (e) {
 					throw Error("export-deletion-reconciliation-required", { cause: e });
 				}
-				m || await Ot(e, d, /* @__PURE__ */ Error("export-barrier-lost"), !0), await e.enqueue({
+				h || await Ot(e, f, /* @__PURE__ */ Error("export-barrier-lost"), !0), await e.enqueue({
 					userId: n.user_id,
 					type: "export_ready",
 					key: `${n.id}:ready`,
@@ -5600,7 +5619,7 @@ async function jt(e) {
 }
 //#endregion
 //#region web/src/lib/communications/server/campaigns.ts
-function Mt(e) {
+function Nt(e) {
 	if (!e || typeof e.title != "string" || !e.title.trim() || e.title.length > 180 || typeof e.excerpt != "string" || e.excerpt.length > 2e3 || (e.body?.length ?? 0) > 8e4 || (e.subject?.length ?? 0) > 180 || (e.preview?.length ?? 0) > 250) throw Error("Provide a title and a concise excerpt.");
 	for (let t of [e.url, e.imageUrl].filter(Boolean)) if (new URL(t).protocol !== "https:") throw Error("Use HTTPS links.");
 	if (e.readingMinutes !== void 0 && (!Number.isInteger(e.readingMinutes) || e.readingMinutes < 1 || e.readingMinutes > 120)) throw Error("Choose a reading time from 1 to 120 minutes.");
@@ -5620,7 +5639,7 @@ function Mt(e) {
 	});
 	return e;
 }
-function Nt(e) {
+function Pt(e) {
 	if (!e || ![
 		"subscribers",
 		"selected",
@@ -5629,8 +5648,8 @@ function Nt(e) {
 	if (e.kind === "selected" && (!e.userIds?.length || e.userIds.length > 100 || e.userIds.some((e) => !/^[0-9a-f-]{36}$/i.test(e)))) throw Error("Choose 1 to 100 account IDs.");
 	if (e.kind === "course" && (!e.courseId || e.courseId.length > 100)) throw Error("Choose a canonical course ID.");
 }
-async function Pt(e, t, r, i) {
-	Nt(r);
+async function Ft(e, t, r, i) {
+	Pt(r);
 	let a = e.db.from("communication_preferences").select("user_id").eq("category", n[t]).eq("enabled", !0).order("user_id").limit(200);
 	i && (a = a.gt("user_id", i)), r.kind === "selected" && (a = a.in("user_id", r.userIds));
 	let o = (J(await a) ?? []).map((e) => e.user_id), s = [];
@@ -5648,10 +5667,10 @@ async function Pt(e, t, r, i) {
 		eligible: s
 	};
 }
-async function Ft(e) {
+async function It(e) {
 	let t = J(await e.db.from("email_campaigns").select("*").eq("status", "scheduled").lte("scheduled_for", (/* @__PURE__ */ new Date()).toISOString()).order("created_at").limit(2)), n = 0;
 	for (let r of t ?? []) {
-		let t = await Pt(e, r.type, r.audience, r.cursor ?? void 0);
+		let t = await Ft(e, r.type, r.audience, r.cursor ?? void 0);
 		for (let n of t.eligible) await e.enqueue({
 			userId: n,
 			type: r.type,
@@ -5674,7 +5693,7 @@ var X = class extends Error {
 	constructor(e, t = 400) {
 		super(e), this.status = t;
 	}
-}, It = new Set([
+}, Lt = new Set([
 	"admin",
 	"campaign-save",
 	"campaign-estimate",
@@ -5683,7 +5702,7 @@ var X = class extends Error {
 	"send-test",
 	"broadcast-export",
 	"article-publish"
-]), Lt = [
+]), Rt = [
 	"essay",
 	"product_update",
 	"research",
@@ -5696,17 +5715,17 @@ var X = class extends Error {
 		...n
 	}
 });
-function Rt(e, t) {
+function zt(e, t) {
 	return (t.AXOM_COMMUNICATIONS_ADMINS ?? "").split(",").map((e) => e.trim()).includes(e.id);
 }
-function zt(e) {
+function Bt(e) {
 	try {
 		return !!JSON.parse(atob(e.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))).amr?.some((e) => Date.now() / 1e3 - e.timestamp >= 0 && Date.now() / 1e3 - e.timestamp <= 600);
 	} catch {
 		return !1;
 	}
 }
-function Bt(e, t, r) {
+function Vt(e, t, r) {
 	let i = new bt(e, t, r);
 	return async (r) => {
 		let a = r.headers.get("origin"), o = (t.AXOM_ALLOWED_ORIGINS ?? t.AXOM_PUBLIC_URL ?? "https://axom.info").split(",").map((e) => e.trim()), s = a && o.includes(a) ? {
@@ -5765,7 +5784,7 @@ function Bt(e, t, r) {
 				let n = J(await e.rpc("acquire_communication_worker"));
 				if (!n) return Z({ busy: !0 });
 				try {
-					let t = await i.schedule(), n = await Ft(i), r = await jt(i), a = await i.work(), o = J(await e.from("communication_identity").select("user_id").eq("topics_dirty", !0).limit(20));
+					let t = await i.schedule(), n = await It(i), r = await Mt(i), a = await i.work(), o = J(await e.from("communication_identity").select("user_id").eq("topics_dirty", !0).limit(20));
 					for (let t of o ?? []) try {
 						await i.syncTopics(t.user_id);
 					} catch {
@@ -5796,7 +5815,7 @@ function Bt(e, t, r) {
 			let d = await e.auth.getUser(u);
 			if (d.error || !d.data.user) throw new X("Sign in again to continue.", 401);
 			let f = d.data.user;
-			if (It.has(l) && !Rt(f, t)) throw new X("Administrator access required.", 403);
+			if (Lt.has(l) && !zt(f, t)) throw new X("Administrator access required.", 403);
 			if (!J(await e.rpc("consume_communication_limit", {
 				p_key: `${f.id}:${l}`,
 				p_limit: l.startsWith("request-") ? 3 : 60,
@@ -5822,7 +5841,7 @@ function Bt(e, t, r) {
 					identity: r,
 					history: J(a),
 					privacy: J(o),
-					admin: Rt(f, t),
+					admin: zt(f, t),
 					deliveryMode: t.AXOM_EMAIL_MODE ?? "disabled",
 					deletionEnabled: t.AXOM_ACCOUNT_DELETION_ENABLED === "true",
 					hasProtectedCopy: !!await i.workspace(f.id)
@@ -5840,7 +5859,7 @@ function Bt(e, t, r) {
 			if (l === "export-link") return Z({ url: await i.exportLink(f.id, String(m.id)) }, 200, s);
 			if (l === "request-deletion") {
 				if (t.AXOM_ACCOUNT_DELETION_ENABLED !== "true") throw new X("Account deletion activation is pending. Your account has not been changed.", 503);
-				if (m.confirmation !== "DELETE MY ACCOUNT" || !zt(u)) throw new X("Sign in again, then type DELETE MY ACCOUNT to confirm.", 403);
+				if (m.confirmation !== "DELETE MY ACCOUNT" || !Bt(u)) throw new X("Sign in again, then type DELETE MY ACCOUNT to confirm.", 403);
 				return await kt(i, f.id, "deletion"), Z({ requested: !0 }, 200, s);
 			}
 			if (l === "cancel-deletion") return Z({
@@ -5850,7 +5869,7 @@ function Bt(e, t, r) {
 			if (l === "pulse") {
 				let e = Number(m.year);
 				if (!Number.isInteger(e) || e < 2020 || e > (/* @__PURE__ */ new Date()).getUTCFullYear()) throw new X("Choose a valid year.");
-				let t = await i.context(f.id), n = e === (/* @__PURE__ */ new Date()).getUTCFullYear() ? Vt(t.timezone) : `${e}-12-31`;
+				let t = await i.context(f.id), n = e === (/* @__PURE__ */ new Date()).getUTCFullYear() ? Ht(t.timezone) : `${e}-12-31`;
 				return Z({ snapshot: (await i.snapshot(f.id, "year", `${e}-01-01`, n, t.timezone))?.payload ?? null }, 200, s);
 			}
 			if (l === "admin") return Z({
@@ -5864,9 +5883,9 @@ function Bt(e, t, r) {
 			}, 200, s);
 			if (l === "campaign-save") {
 				let t = String(m.type);
-				if (!Lt.includes(t)) throw new X("Choose an editorial or product template.");
-				let n = Mt(m.content), r = m.audience;
-				Nt(r);
+				if (!Rt.includes(t)) throw new X("Choose an editorial or product template.");
+				let n = Nt(m.content), r = m.audience;
+				Pt(r);
 				let a = typeof m.id == "string" ? m.id : crypto.randomUUID();
 				if (m.id && Y(await e.from("email_campaigns").select("status").eq("id", a).single()).status !== "draft") throw new X("Only drafts can be edited.");
 				let o = {
@@ -5904,7 +5923,7 @@ function Bt(e, t, r) {
 				let t = Y(await e.from("email_campaigns").select("*").eq("id", String(m.id)).single());
 				if (l === "campaign-cancel") return J(await e.from("email_campaigns").update({ status: "cancelled" }).eq("id", t.id)), J(await e.from("email_jobs").update({ status: "cancelled" }).eq("campaign_id", t.id).in("status", ["queued", "scheduled"])), Z({ cancelled: !0 }, 200, s);
 				if (l === "campaign-estimate") {
-					let e = await Pt(i, t.type, t.audience);
+					let e = await Ft(i, t.type, t.audience);
 					return Z({
 						eligible: e.eligible.length,
 						more: e.scanned.length === 200
@@ -5953,7 +5972,7 @@ function Bt(e, t, r) {
 			if (l === "send-test") {
 				let e = String(m.type);
 				if (!Object.hasOwn(n, e) || e.startsWith("deletion") || e.startsWith("export") || e === "auth" || e === "security") throw new X("This template cannot be test-triggered here.");
-				let t = m.content ? Mt(m.content) : void 0;
+				let t = m.content ? Nt(m.content) : void 0;
 				return await i.enqueue({
 					userId: f.id,
 					type: e,
@@ -5973,7 +5992,7 @@ function Bt(e, t, r) {
 		}
 	};
 }
-function Vt(e) {
+function Ht(e) {
 	return new Intl.DateTimeFormat("en-CA", {
 		timeZone: e,
 		year: "numeric",
@@ -5982,4 +6001,4 @@ function Vt(e) {
 	}).format(/* @__PURE__ */ new Date());
 }
 //#endregion
-export { n as TEMPLATE_CATEGORY, Bt as createCommunicationsHandler, i as preferences, A as renderAxomEmail };
+export { n as TEMPLATE_CATEGORY, Vt as createCommunicationsHandler, i as preferences, A as renderAxomEmail };

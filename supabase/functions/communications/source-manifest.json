@@ -10,7 +10,7 @@
     "web/src/lib/communications/model.ts": "df12dc539c4f478044491d3a4a498aa50b7cf2cefd0b4ef5620c20eace895f2b",
     "web/src/lib/communications/server/campaigns.ts": "90e1728f7962b9bc7fb6dd57047a05e22abb39891f8623eddf3857d73729fbcc",
     "web/src/lib/communications/server/handler.ts": "959c308abdba76f889a68886109a6e56f41fcca0fb4e8d9fe14248dd1588d1e4",
-    "web/src/lib/communications/server/privacy.ts": "5ada0b2c380636ccee87686f9450be5c006c85a67a7545a774b55e07fb751f9a",
+    "web/src/lib/communications/server/privacy.ts": "d6516983ff30892bb0fffb01ac8fb47869a185f81bcfa697f6a33e5d32dfdd03",
     "web/src/lib/communications/server/provider.ts": "3b8d69d1c2959955e384192ed124e8fc4d05374d165f406895ea34c15dbc2535",
     "web/src/lib/communications/server/service.ts": "e94e0ecace2489f01d52b66e908238e53dc6bf0c30e4c74e22134b8ff01bf074",
     "web/src/lib/communications/snapshot.ts": "256864b7340135a748f3e51744311f6d5fa1692bd0f3b783584c998720f5d86d",
@@ -32,7 +32,7 @@
   },
   "bundle": {
     "path": "supabase/functions/communications/service.js",
-    "sha256": "ef9ff7769cf5faa35b8a0f37e255e9c81f3e78b7a90404a8984136358ed7e504"
+    "sha256": "5921b3790c0be4b6283f2e674605468a3d107f9a6c90f8205d3a5d0983d286d2"
   },
   "authTemplates": {
     "supabase/templates/communications/confirmation.html": "e79c100868c837f0619bfa6cf995df5cdd4cd89b59f5434d607df3185f387ab2",

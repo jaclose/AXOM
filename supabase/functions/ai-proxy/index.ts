@@ -9,7 +9,7 @@
 //           [AI_MODEL_FAST=claude-haiku-4-5-20251001] [AI_MODEL_QUALITY=claude-sonnet-5]
 // ===========================================================================
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { aiProxyCorsPolicy, buildAnthropicRequest, parseJsonLoose, readJsonRequest, textFromAnthropic, upstreamError, validateBody } from "./core.ts";
+import { aiProxyCorsPolicy, buildAnthropicRequest, cloudAllowance, parseJsonLoose, readJsonRequest, textFromAnthropic, upstreamError, validateBody } from "./core.ts";
 
 const MODELS = {
   fast: Deno.env.get("AI_MODEL_FAST") ?? "claude-haiku-4-5-20251001",
@@ -56,10 +56,8 @@ Deno.serve(async (req) => {
   if (!parsed.ok) return respond({ error: parsed.error }, 400);
 
   const { data: left, error: quotaError } = await supabase.rpc("consume_ai_quota");
-  if (quotaError) return respond({ error: "Could not check your Cloud AI allowance." }, 500);
-  if (typeof left === "number" && left < 0) {
-    return respond({ error: "Today's Cloud AI allowance is used up. It resets at 00:00 UTC." }, 429);
-  }
+  const allowance = cloudAllowance(left, Boolean(quotaError));
+  if (!allowance.allowed) return respond({ error: allowance.error }, allowance.status);
 
   let upstream: Response;
   try {
@@ -86,5 +84,5 @@ Deno.serve(async (req) => {
   }
   const result = parseJsonLoose(textFromAnthropic(data));
   if (result === undefined) return respond({ error: "The AI reply was not valid JSON. Try again." }, 502);
-  return respond({ result, model: data.model, remaining: left, usage: data.usage });
+  return respond({ result, model: data.model, remaining: allowance.remaining, usage: data.usage });
 });

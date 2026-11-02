@@ -5,16 +5,25 @@ authority: current-state
 ---
 # AXOM current AI state
 
-2026-11-01 local `codex/qbank-full-integration` combines draft QBank/Anki PRs
-#34 and #43–47; it is not deployed. A real upload-free dry run with JD's
-confirmed terms and MI→NMI decision prepared 20/20 courses, with zero term or
-attention prompts: 699 answer-ready, 16,252 held. All 17,559 source rows were
-accounted for; 594 stayed local. Held EMF remains unavailable to learners.
-Community Uploads and Anki term links passed their own UI checks; combined
-typecheck, lint, build, 111 focused tests, 16 term/setup tests and 11 Chrome
-browser cases pass. DERS, BSCE3, DNPR and four Unfiled decisions need source
-review. Earlier dated claims remain in
-`git show 1b189177:docs/AI_STATE.md` and the feature contract.
+## 2026-11-01 Ideas and Journal production integration
+
+The isolated `codex/ideas-prod-merge-20261101` candidate combines
+`origin/main` `cb0a456b` (QBank PR #59) with safe Ideas branch `b08d10c1`.
+The Journal includes first-open setup, a desk-framed free-writing page,
+4.4-second idle put-down, working return-to-desk control, side support,
+weather in the scene, MacBook study activity, closeout/catch-up reminders,
+and feedback. Dashboard notifications, Question Set library, streak freezes,
+Examplify highlighting, Host/Community UI and reviewed bulk answer confirmation
+are included. Radiordle and Pathordle app content is held for provider approval.
+See [journal scene](JOURNAL-NOTEBOOK-ARCHITECTURE.md),
+[daily loop](DAILY-LOOP-REMINDER-LIFECYCLE.md), and
+[Ideas 11 audit](directions/03-notes/2026-11-01-IDEAS-WORKFLOW-AUDIT.md).
+
+Production Git push, live journal readback and hosted acceptance are distinct.
+Community/operator access, owner provisioning and real account tests still
+require hosted verification; private study content remains unpublished.
+The original AXOM and local `main` worktrees contain protected unrelated
+changes and are untouched. `origin/main` pushes trigger Vercel production.
 
 ## 2026-10-28 QBank production receipt
 
@@ -43,15 +52,10 @@ still needs a fresh upload-free check. No content was uploaded.
 
 ## Ownership and protected work
 
-Read the coordination board and CONVERGENCE before integration. Preserve other
-owners' checkouts and files. Local `main` has 45 protected staged additions and
-six untracked private sources; exclude all. Recheck overlaps against
-the final SHA, then fast-forward only. Compare protected staged entries, cached
-patch and working-file hashes before/after. Never switch, reset, stash or rewrite.
-
-The staged AMBOSS research, source-coverage metadata, stale handoffs, backup
-patch, generated ZIP/demo copies and simulator crawler are excluded. They need
-separate owner review; do not publish private paths or source identities.
+Read the coordination board before integration. Preserve other owners' checkouts,
+private sources and untracked work. The original checkout's current dirty state
+was inspected on 2026-11-01 and left untouched. Historical branch detail is in
+Git and the [archived handoff](archive/2026-10-25-host-baseline/AI_STATE.md.txt).
 
 Never merge `backup/pre-large-file-cleanup-2026-09-28`: it contains a 288 MB
 audio file, private assets and broad historical replacement/deletion.
@@ -69,18 +73,19 @@ ten no-questions and three unsupported. It records 994 review candidates and
 unresolved, six path-only, zero ready/cloud. Counts are not publishing approval.
 
 Twenty-two templates account for 547 activities: T1 250, T2 199, T3 98.
-T4/T5 lack authoritative denominators. Local GOER has five banks, 28 ready and
-44 review-required questions, plus 64 verified ready-question attachments.
-`/Volumes/JDabSSD` is unavailable. Its older 1,280-file scan must not replace
-B4's 1,402 unavailable dispositions. `academicReleaseComplete` remains false.
+T4/T5 lack authoritative denominators. These inventory counts are historical;
+`academicReleaseComplete` remains false until current acceptance is verified.
 
 The private October 20 delivery folder reconciles 28 templates and 655 sources;
 current parsing assesses 439 ready, 582 review-required, 10,968 unresolved and
 23 unreadable retained rows. Source/template/media checksums were checked outside
 Git. Prepared files are not proof of installation, browser decoding or cloud delivery.
 Supported automated folder selection did not start the live import; manual folder
-selection remains pending. No ZIP was created; partial compression suggests the
-full archive would exceed the 1 GiB import cap. Hold import while disk is critical.
+selection remained pending for the full source archive, whose compression would
+exceed the 1 GiB import cap. On 2026-11-01, a separate private template-only ZIP
+from the authoritative prepared folder installed locally: 28 templates yielded
+633/633 distinct tracker activities in 13/23 modules after reload; MI remains
+held for mapping. It contains no questions or source files and is not published.
 
 ## Implemented behavior
 
@@ -141,8 +146,8 @@ Before production acceptance: upload only cleared private material as its authen
 through the learner UI; verify media/checksums and revocation; and record exact
 receipts. Also complete a true multi-connection privacy-lock check, Journal
 image-race and broader multi-tab coverage, QBank opener-clone recovery analysis, Safari/WebKit and
-packaged-desktop acceptance, and dependency-advisory review. The missing SSD
-sources, B4/B5 review queues and absent T4/T5 coverage remain blockers to
+packaged-desktop acceptance, and dependency-advisory review. The B4/B5 review
+queues and incomplete T4/T5 coverage remain blockers to
 complete academic-library acceptance.
 
 Inspect disk before checks; preserve services/sources, no cleanup. Shared beta

@@ -4,7 +4,7 @@
 // in as data (lib/bookshelf); this file only draws and moves them.
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { X } from "lucide-react";
+import { BookOpen, X } from "lucide-react";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { spineHeight, spineThickness, spineTone, type BookShelf, type ShelfBook } from "../../lib/bookshelf/model";
 import "../../styles/bookshelf.css";
@@ -196,7 +196,16 @@ export function AcademicBookshelf<T extends ShelfBook>({ label, shelves: inputSh
         <span>{books.length} {books.length === 1 ? "module" : "modules"}</span>
         <label className="collection-availability"><input type="checkbox" checked={availableOnly} onChange={event => setAvailableOnly(event.target.checked)} />Available content</label>
       </div>
-      {!books.length && <p>{availableOnly ? "No prepared content matches yet. Install your prepared library above, or clear Available content to browse the course map." : "No courses match these filters."}</p>}
+      {!books.length ? <div className="bookshelf-filter-empty" role="status">
+        <BookOpen size={ICON_SIZE.display} aria-hidden="true" />
+        <div>
+          <h3>{availableOnly ? "This shelf is waiting for material" : "No courses match"}</h3>
+          <p>{availableOnly ? "Open Import status and source review below, then choose Install prepared folder to add course plans." : "Try another module or term."}</p>
+        </div>
+        <button type="button" onClick={() => { if (availableOnly) setAvailableOnly(false); else { setQuery(""); setTerm(""); } }}>
+          {availableOnly ? "Browse course map" : "Clear filters"}
+        </button>
+      </div> : <>
       <p className="bookshelf-hint" id={`${titleId}-hint`}>Arrow keys move between books. Enter opens a book.</p>
       <div className="bookshelf-shelves" aria-hidden={phase === "open" ? "true" : undefined}>
         {shelves.map((shelf, shelfIndex) => (
@@ -248,6 +257,7 @@ export function AcademicBookshelf<T extends ShelfBook>({ label, shelves: inputSh
           </section>
         ))}
       </div>
+      </>}
       {openBook && flight && createPortal(
         <div className="open-book-layer" data-phase={phase} data-tone={openTone?.family} data-step={openTone?.step} style={flightStyle(flight)}>
           <div className="open-book-scrim" onClick={close} />

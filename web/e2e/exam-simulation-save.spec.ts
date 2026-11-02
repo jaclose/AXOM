@@ -45,6 +45,44 @@ test("a submitted Examplify block is saved as one run and survives a reload", as
   expect(errors).toEqual([]);
 });
 
+for (const profile of [
+  { name: "ExamSoft", option: /ExamSoft \(Examplify\)/, dialog: "ExamSoft (Examplify) exam simulation", highlight: "Highlight text", erase: "Erase highlighting" },
+  { name: "UWorld", option: /UWorld-style/, dialog: "UWorld-style exam simulation", highlight: "Highlight", erase: "Erase" },
+  { name: "NBME", option: /USMLE \/ NBME/, dialog: "USMLE / NBME (2026) exam simulation", highlight: "Highlight", erase: "Erase" },
+] as const) {
+  test(`${profile.name} highlights and erases a choice without answering`, async ({ page }) => {
+    const errors = collectPageErrors(page);
+    await openSeededSet(page, 2);
+    await page.getByRole("radio", { name: profile.option }).click();
+    await page.getByRole("button", { name: "Exam (feedback at the end)" }).click();
+    await page.getByRole("button", { name: /Start exam block/ }).click();
+
+    const exam = page.getByRole("dialog", { name: profile.dialog });
+    await expect(exam).toBeVisible();
+    const highlight = exam.getByRole("button", { name: profile.highlight, exact: true });
+    if (await highlight.getAttribute("aria-pressed") !== "true") await highlight.click();
+    const answerText = exam.getByText("Alpha", { exact: true });
+    const box = await answerText.boundingBox();
+    if (!box) throw new Error("Choice text is not visible.");
+    await page.mouse.move(box.x + 1, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, { steps: 10 });
+    await page.mouse.up();
+    await expect(exam.locator("mark.question-highlight")).toHaveText("Alpha");
+    await expect(exam.getByRole("radio", { name: "A. Alpha" })).not.toBeChecked();
+
+    await exam.getByRole("button", { name: "Next", exact: true }).click();
+    await exam.getByRole("button", { name: "Previous", exact: true }).click();
+    await expect(exam.locator("mark.question-highlight")).toHaveText("Alpha");
+    await exam.getByRole("button", { name: profile.erase, exact: true }).click();
+    await page.evaluate(() => window.getSelection()?.removeAllRanges());
+    await exam.locator("mark.question-highlight").click();
+    await expect(exam.locator("mark.question-highlight")).toHaveCount(0);
+    await expect(exam.getByRole("radio", { name: "A. Alpha" })).not.toBeChecked();
+    expect(errors).toEqual([]);
+  });
+}
+
 interface SavedAttempt {
   status: string;
   answerKey?: string;
@@ -97,9 +135,10 @@ async function openSeededSet(page: Page, count: number): Promise<void> {
     await dev.flushVault();
   }, count);
   await page.evaluate(() => { window.location.hash = "questions"; });
-  await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
-  await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
-  await page.getByRole("button", { name: "Practice Simulation save set", exact: true }).click();
+  await page.getByRole("region", { name: "Question bank library" }).getByRole("button", { name: /Unfiled & mixed/ }).click();
+  const book = page.getByRole("dialog", { name: /Unfiled & mixed/ });
+  await expect(book.getByRole("checkbox", { name: "Practise from Simulation save set" })).toBeChecked();
+  await book.getByRole("button", { name: "Create Quiz" }).click();
   await expect(page.getByRole("dialog", { name: "Set up a tutor block" })).toBeVisible();
 }
 
