@@ -5,9 +5,9 @@ authority: current-state
 ---
 # AXOM current AI state
 
-## Checkout and release boundary · 2026-11-02 08:51 UTC
+## Checkout and release boundary · 2026-11-02 09:22 UTC
 
-This handoff was updated from local frontier commit `18522f50` on
+This handoff was updated from local frontier commit `90cb7eca` on
 `codex/axom-frontier-release-20261101`. Check `git status`, HEAD and the
 coordination board before editing. At this snapshot, remote `main` was
 `ee1c0c2e`; [PR #74](https://github.com/jaclose/AXOM/pull/74),
@@ -92,6 +92,10 @@ AXOM explanations require subject review. The copied NBME/USMLE sample remains
 local pending written website permission; link to the original sample instead.
 The older 20-course upload-free dry run and unresolved inventory are dated
 evidence in `git show e799ed5b:docs/AI_STATE.md`, not hosted delivery.
+A newer private v7 scan accounted for 995 sources and 859 banks, with 192
+inline-answer and 613 answer-mark **review-only** proposals. No answer keys
+were promoted, readiness changed or content uploaded; a new 20-course dry
+run is pending. Source rights and human medical review remain separate.
 
 Production acceptance still needs a cleared-content owner upload, reviewer
 decision, learner reload/media and checksum readback, share withdrawal, privacy
@@ -110,14 +114,12 @@ contains private assets and broad replacement/deletion. Check the
 before shared edits. Historic receipts remain in Git history; do not reload
 them at startup without a specific question.
 
-At `f8ecdaa3`, the clean combined gate passed typecheck, lint, 4,570 web
+At `90cb7eca`, the clean combined gate passed typecheck, lint, 4,576 web
 tests (35 skipped), production build, update safety, offline games and 163
 browser journeys (14 conditionally skipped). Root API typecheck, 88 release
 tests, 43 repository tests, repository hygiene and communications artifact
-integrity also passed. The later Host visual change passed 6 focused tests,
-typecheck, lint, build and desktop/phone browser QA in both themes; the
-course-template guard passed 12 focused tests, typecheck and lint. Run the
-combined gate again at the new exact head before release. Keep the remote
-release held until JD's explicit follow-up; production migrations, owner
-grant, live mail delivery and real-account Community/Host acceptance remain
-separate checks.
+integrity also passed. Host desktop/phone QA covered both themes and reduced
+motion; the course-template export and reimport journey passed at 1440, 768
+and 390 pixels. Keep the remote release held until JD's explicit follow-up;
+seven production migrations, owner grant, live mail delivery and real-account
+Community/Host acceptance remain separate checks.
