@@ -37,6 +37,7 @@ interface SeedCourse {
   readyQuestions?: number;
   reviewQuestions?: number;
   withPlan?: boolean;
+  weeks?: readonly { week: number; readyQuestions: number; reviewQuestions?: number }[];
 }
 
 /**
@@ -232,25 +233,34 @@ export async function academicPublishFixture(page: Page, options: { reviewer?: b
     },
     corruptDownload: (collectionId: string) => { corruptDownloads.add(collectionId); },
     recoverDownload: (collectionId: string) => { corruptDownloads.delete(collectionId); },
-    seedCourse: ({ title, module, term, readyQuestions = 1, reviewQuestions = 0, withPlan = false }: SeedCourse) => {
+    seedCourse: ({ title, module, term, readyQuestions = 1, reviewQuestions = 0, withPlan = false, weeks }: SeedCourse) => {
       const collectionId = randomUUID(), revisionId = randomUUID();
-      const source = Buffer.from(`Synthetic source for ${collectionId}`), sourceHash = hash(source);
-      const prepared = bank(`term-${collectionId}`, module, term, sourceHash, readyQuestions + reviewQuestions);
-      for (const question of prepared.pkg.questions.slice(readyQuestions)) {
-        delete question.correctAnswer;
-        question.flags = [{ type: "answer_needs_review", message: "Confirm the answer against the original source." }];
-      }
-      const template = withPlan ? `T${term} - ${module} - Lectures:\nWeek 1:\nLecture 01 Synthetic course plan [Lecture]\n` : "";
+      const entries = weeks ?? [{ week: 1, readyQuestions, reviewQuestions }];
+      const preparedWeeks = entries.map(({ week, readyQuestions: ready, reviewQuestions: review = 0 }) => {
+        const source = Buffer.from(weeks ? `Synthetic source for ${collectionId} week ${week}` : `Synthetic source for ${collectionId}`);
+        const sourceHash = hash(source);
+        const prepared = bank(weeks ? `term-${collectionId}-week-${week}` : `term-${collectionId}`, module, term, sourceHash, ready + review);
+        prepared.pkg.manifest.course.week = week;
+        for (const question of prepared.pkg.questions.slice(ready)) {
+          delete question.correctAnswer;
+          question.flags = [{ type: "answer_needs_review", message: "Confirm the answer against the original source." }];
+        }
+        return { week, ready, review, sourceHash, prepared, bankFile: weeks ? `banks/week-${week}/bank.json` : "banks/course/bank.json" };
+      });
+      const readyTotal = preparedWeeks.reduce((sum, entry) => sum + entry.ready, 0);
+      const reviewTotal = preparedWeeks.reduce((sum, entry) => sum + entry.review, 0);
+      const template = withPlan ? `T${term} - ${module} - Lectures:\n${entries.map(entry => `Week ${entry.week}:\nLecture 01 Synthetic week ${entry.week} course plan [Lecture]\n`).join("")}` : "";
       const catalog: PrivateLibraryCatalog = {
         format: "axom-private-library", schemaVersion: 1, id: collectionId, version: "1", preparerVersion: 3,
         templates: withPlan ? [{ file: "templates/plan.txt", name: "Course plan.txt", checksum: hash(template) }] : [],
-        sources: [{ id: `source-${sourceHash}`, name: `${collectionId}.txt`, sourcePath: `${collectionId}.txt`, checksum: sourceHash,
-          module, status: "prepared", reason: "Synthetic reviewed source", bankFile: "banks/course/bank.json",
-          ready: readyQuestions, review: reviewQuestions }],
+        sources: preparedWeeks.map(entry => ({ id: `source-${entry.sourceHash}`, name: weeks ? `${collectionId}-week-${entry.week}.txt` : `${collectionId}.txt`,
+          sourcePath: weeks ? `${collectionId}-week-${entry.week}.txt` : `${collectionId}.txt`, checksum: entry.sourceHash,
+          module, status: "prepared" as const, reason: "Synthetic reviewed source", bankFile: entry.bankFile,
+          ready: entry.ready, review: entry.review })),
       };
       const files = [
         { path: "catalog.json", bytes: Buffer.from(JSON.stringify(catalog)), mime_type: "application/json" },
-        { path: "banks/course/bank.json", bytes: Buffer.from(JSON.stringify(prepared)), mime_type: "application/json" },
+        ...preparedWeeks.map(entry => ({ path: entry.bankFile, bytes: Buffer.from(JSON.stringify(entry.prepared)), mime_type: "application/json" })),
         ...(withPlan ? [{ path: "templates/plan.txt", bytes: Buffer.from(template), mime_type: "text/plain" }] : []),
       ].map(({ bytes, ...file }) => {
         const sha256 = hash(bytes), object_path = `${collectionId}/${sha256}`;
@@ -258,12 +268,15 @@ export async function academicPublishFixture(page: Page, options: { reviewer?: b
         return { ...file, sha256, object_path, byte_size: bytes.length };
       });
       revisions.set(revisionId, { id: revisionId, collection_id: collectionId, content_hash: hash(JSON.stringify(catalog)), status: "ready",
-        template_text: template, source_revision: "Synthetic term fixture", ready_questions: readyQuestions, review_questions: reviewQuestions,
+        template_text: template, source_revision: "Synthetic term fixture", ready_questions: readyTotal, review_questions: reviewTotal,
         approved_at: "2026-10-28T00:00:00Z", files });
       const collection: Collection = { id: collectionId, title, module, term: `Term ${term}`, academic_term: null, cohort: null,
         visibility: "shared", review_status: "approved", current_revision_id: revisionId, owned: false };
       collections.set(collectionId, collection);
-      return { ...collection, revisionId, readyQuestionIds: prepared.pkg.questions.slice(0, readyQuestions).map(question => question.id) };
+      return { ...collection, revisionId,
+        readyQuestionIds: preparedWeeks.flatMap(entry => entry.prepared.pkg.questions.slice(0, entry.ready).map(question => question.id)),
+        readyQuestionIdsByWeek: Object.fromEntries(preparedWeeks.map(entry => [entry.week,
+          entry.prepared.pkg.questions.slice(0, entry.ready).map(question => question.id)])) as Record<number, string[]> };
     },
     collections: () => [...collections.values()].map(collection => ({ ...collection, revision: current(collection) })),
   };

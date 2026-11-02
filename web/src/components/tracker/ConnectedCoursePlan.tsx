@@ -17,6 +17,7 @@ import { CoursePlan } from "./CoursePlan";
 import { GButton } from "../ui/primitives";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { launchCourseQuiz, MAX_COURSE_QUIZ_QUESTIONS } from "../../lib/course-engine/quizLaunch";
+import { parseWeek, questionScope } from "../../lib/course-engine/scope";
 import { splitAcademicPlanSections } from "../../lib/academicLibrary/coursePlan";
 import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
 import { AcademicSharing } from "./AcademicSharing";
@@ -235,7 +236,7 @@ export function ConnectedCoursePlan({ course, onBack, onOpen, onCustomize, onSha
   return <>
     {templates === undefined && <><GButton onClick={onBack}>All courses</GButton><p role="status">{error ? "Preview unavailable" : "Opening the weekly plan…"}</p></>}
     {error && <div role="alert"><p>{error}</p><GButton onClick={() => setRetry(value => value + 1)}>Retry preview</GButton></div>}
-    {templates?.length === 0 && <ConnectedQuestionCollection course={course} downloaded={downloaded} questions={state.questions}
+    {templates?.length === 0 && <ConnectedQuestionCollection course={course} downloaded={downloaded} questions={state.questions} sets={state.questionSets}
       busy={downloading} message={message} onBack={onBack} onDownload={() => void downloadQuestions()} onSharingSaved={onSharingSaved} />}
     {templates?.length !== 0 && book && <><p className="course-connection-status" role="status">{message || (downloaded ? (downloaded.questionIds.every(id => state.questions.some(question => question.id === id)) ? "Course files downloaded on this device" : "Saved in your account. Download this course to continue on this device.") : `${course.ready_questions} reviewed questions available to download. Load Course downloads this revision for study.`)}</p>
       {downloaded && !downloaded.questionIds.every(id => state.questions.some(question => question.id === id)) && <GButton disabled={downloading} onClick={() => { setError(""); setDownloading(true); void downloadAccountContent({ questionIds: downloaded.questionIds, documentIds: downloaded.documentIds }).catch(cause => setError(cause instanceof Error ? cause.message : "Download unavailable. Retry when connected.")).finally(() => setDownloading(false)); }}>Download course to this device</GButton>}
@@ -247,23 +248,43 @@ export function ConnectedCoursePlan({ course, onBack, onOpen, onCustomize, onSha
 }
 
 /** Questions filed to a term and module whose source has no weekly plan. */
-function ConnectedQuestionCollection({ course, downloaded, questions, busy, message, onBack, onDownload, onSharingSaved }: {
-  course: AcademicCourse; downloaded: DownloadReference | undefined; questions: readonly QuestionRecord[];
+function ConnectedQuestionCollection({ course, downloaded, questions, sets, busy, message, onBack, onDownload, onSharingSaved }: {
+  course: AcademicCourse; downloaded: DownloadReference | undefined; questions: readonly QuestionRecord[]; sets: readonly QuestionSet[];
   busy: boolean; message: string; onBack: () => void; onDownload: () => void; onSharingSaved: () => void;
 }) {
   const [launchError, setLaunchError] = useState("");
   const onDevice = Boolean(downloaded?.questionIds.length)
     && downloaded!.questionIds.every(id => questions.some(question => question.id === id));
-  const practiceIds = useMemo(() => {
+  const scopedQuestions = useMemo(() => {
     const ids = new Set(downloaded?.questionIds ?? []);
-    return questions.filter(question => ids.has(question.id)
-      && questionMappingStatus(question) === "ready" && question.options.length >= 2).map(question => question.id);
-  }, [downloaded, questions]);
-  function practice() {
+    const setIds = new Set(downloaded?.setIds ?? []);
+    const setsById = new Map(sets.filter(set => setIds.has(set.id)).map(set => [set.id, set]));
+    return questions.filter(question => ids.has(question.id)).map(question => ({
+      question, week: parseWeek(questionScope(question, setsById).week),
+      ready: questionMappingStatus(question) === "ready" && question.options.length >= 2,
+    }));
+  }, [downloaded, questions, sets]);
+  const practiceIds = useMemo(() => scopedQuestions.filter(entry => entry.ready).map(entry => entry.question.id), [scopedQuestions]);
+  const sourceWeeks = useMemo(() => {
+    const groups = new Map<number | undefined, { week: number | undefined; total: number; readyIds: string[]; setIds: string[] }>();
+    for (const entry of scopedQuestions) {
+      const group = groups.get(entry.week) ?? { week: entry.week, total: 0, readyIds: [], setIds: [] };
+      group.total += 1;
+      if (entry.ready) {
+        group.readyIds.push(entry.question.id);
+        if (entry.question.setId && downloaded?.setIds.includes(entry.question.setId)) group.setIds.push(entry.question.setId);
+      }
+      groups.set(entry.week, group);
+    }
+    return [...groups.values()].sort((left, right) => (left.week ?? Number.MAX_SAFE_INTEGER) - (right.week ?? Number.MAX_SAFE_INTEGER));
+  }, [scopedQuestions, downloaded]);
+  function practice(week?: number) {
     setLaunchError("");
     try {
-      launchCourseQuiz({ module: course.module, term: course.term, questionIds: practiceIds,
-        setIds: [...new Set(downloaded?.setIds ?? [])] });
+      const selected = week === undefined ? undefined : sourceWeeks.find(group => group.week === week);
+      launchCourseQuiz({ module: course.module, term: course.term, ...(week !== undefined ? { week } : {}),
+        questionIds: week === undefined ? practiceIds : selected?.readyIds ?? [],
+        setIds: [...new Set(week === undefined ? downloaded?.setIds ?? [] : selected?.setIds ?? [])] });
     } catch (cause) { setLaunchError(cause instanceof Error ? cause.message : "Practice could not be opened."); }
   }
   return <section className="course-plan" aria-label={`${course.module} question collection`}>
@@ -277,16 +298,24 @@ function ConnectedQuestionCollection({ course, downloaded, questions, busy, mess
     </div>
     <div className="course-plan-layout">
       <div className="course-week-list">
-        <div className="course-section-heading"><h2>Question sets</h2></div>
-        <p className="course-empty">This collection has no weekly plan. Its questions keep the term and module of their source, and any week the source states. Weeks the source does not state stay unassigned.</p>
+        <div className="course-section-heading"><h2>Source weeks</h2></div>
+        <p className="course-empty">This collection has no weekly plan. Week labels come from its saved question sources; questions without a stated week stay unassigned.</p>
+        {onDevice ? sourceWeeks.length ? sourceWeeks.map(group => <article className="course-week" key={group.week ?? "unassigned"}>
+          <div className="course-week-heading"><h3>{group.week === undefined ? "Unassigned week" : `Week ${group.week}`}</h3><span>{group.total} {group.total === 1 ? "question" : "questions"}</span></div>
+          <div className="course-week-practice"><span>{group.readyIds.length} ready {group.readyIds.length === 1 ? "question" : "questions"}{group.total > group.readyIds.length ? ` · ${group.total - group.readyIds.length} awaiting review` : ""}</span>
+            {group.week !== undefined && group.readyIds.length > 0 && group.readyIds.length <= MAX_COURSE_QUIZ_QUESTIONS && <GButton size="sm" onClick={() => practice(group.week)}><Play size={ICON_SIZE.body} /> Quiz week {group.week}</GButton>}
+          </div>
+        </article>) : <p className="course-empty">No questions from this collection are on this device yet.</p>
+          : <p className="course-empty">Download the reviewed questions to see their source weeks.</p>}
         <AcademicSharing course={course} onSaved={onSharingSaved} />
       </div>
       <aside className="course-plan-actions" aria-label="Question collection actions">
         <h2>Study these questions</h2>
-        <p>{onDevice ? `${practiceIds.length} reviewed ${practiceIds.length === 1 ? "question is" : "questions are"} on this device.` : `Download ${course.ready_questions} reviewed ${course.ready_questions === 1 ? "question" : "questions"} and their images to practice them, including offline.`}</p>
+        <p>{onDevice ? `${practiceIds.length} reviewed ${practiceIds.length === 1 ? "question is" : "questions are"} on this device.` : course.ready_questions < 1
+          ? "No reviewed questions are ready to download yet." : `Download ${course.ready_questions} reviewed ${course.ready_questions === 1 ? "question" : "questions"} and their images to practice them, including offline.`}</p>
         {!onDevice && <GButton variant="primary" disabled={busy || course.ready_questions < 1} onClick={onDownload}><Download size={ICON_SIZE.emphasis} /> {busy ? "Downloading…" : "Download questions"}</GButton>}
         {onDevice && practiceIds.length > MAX_COURSE_QUIZ_QUESTIONS && <p>This collection holds more than {MAX_COURSE_QUIZ_QUESTIONS} questions. Choose its sets in Question Bank to build a block.</p>}
-        {onDevice && practiceIds.length <= MAX_COURSE_QUIZ_QUESTIONS && <GButton variant="primary" disabled={!practiceIds.length} onClick={practice}><Play size={ICON_SIZE.emphasis} /> Create Quiz</GButton>}
+        {onDevice && practiceIds.length <= MAX_COURSE_QUIZ_QUESTIONS && <GButton variant="primary" disabled={!practiceIds.length} onClick={() => practice()}><Play size={ICON_SIZE.emphasis} /> Create Quiz</GButton>}
         {launchError && <p role="alert">{launchError}</p>}
         <p role="status" aria-live="polite">{message}</p>
       </aside>

@@ -45,7 +45,8 @@ describe("hosted question collection without a weekly plan", () => {
     location.hash = "";
     mocks.preview.mockResolvedValue({ id: revision, collection_id: collection, template_text: "", ready_questions: 2, review_questions: 1 });
     mocks.download.mockImplementation(async () => {
-      useStore.setState(state => ({ questions: [...state.questions, question("q1"), question("q2"), question("held", { needsReview: true })] }));
+      useStore.setState(state => ({ questions: [...state.questions,
+        question("q1", { week: 1 }), question("q2", { week: 2 }), question("held", { week: 3, needsReview: true })] }));
       return { status: "complete", warnings: [], templateIds: [], documentIds: [], questionIds: ["q1", "q2", "held"], setIds: ["set-1"], bindings: { originals: [] } };
     });
   });
@@ -66,12 +67,37 @@ describe("hosted question collection without a weekly plan", () => {
     // The durable receipt lets a reload reopen the same downloaded collection.
     await waitFor(() => expect(useStore.getState().documents.some(document => document.id === `academic-${revision}`)).toBe(true));
     expect(screen.getByText("2 reviewed questions are on this device.")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Week 1" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Week 2" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Week 3" })).toBeTruthy();
+    expect(screen.getByText("0 ready questions · 1 awaiting review")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Quiz week 3" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Quiz week 2" }));
+    expect(JSON.parse(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY) ?? "null")).toEqual({
+      module: "GOER", term: "Term 5", week: 2, questionIds: ["q2"], setIds: [],
+    });
 
     fireEvent.click(practice);
     expect(JSON.parse(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY) ?? "null")).toEqual({
       module: "GOER", term: "Term 5", questionIds: ["q1", "q2"], setIds: ["set-1"],
     });
     expect(location.hash).toBe("#questions");
+  });
+
+  it("keeps a source question without a week in an explicit unassigned group", async () => {
+    mocks.download.mockImplementationOnce(async () => {
+      useStore.setState(state => ({ questions: [...state.questions, question("unassigned")] }));
+      return { status: "complete", warnings: [], templateIds: [], documentIds: [], questionIds: ["unassigned"], setIds: [], bindings: { originals: [] } };
+    });
+    render(<ConnectedCoursePlan course={course} onBack={vi.fn()} onOpen={vi.fn()} onCustomize={vi.fn()} onSharingSaved={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Download questions/ }));
+    expect(await screen.findByRole("heading", { name: "Unassigned week" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Quiz week/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Create Quiz/ }));
+    expect(JSON.parse(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY) ?? "null")).toEqual({
+      module: "GOER", term: "Term 5", questionIds: ["unassigned"], setIds: [],
+    });
   });
 
   it("reports a failed download without claiming the questions are on this device", async () => {
