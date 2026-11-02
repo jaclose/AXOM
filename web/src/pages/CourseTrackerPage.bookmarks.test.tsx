@@ -118,6 +118,16 @@ describe("Course Tracker authorized Panopto bookmarks workflow", () => {
     expect(screen.getAllByRole("link", { name: "Recording: NB Lecture 65 - Synthetic Neuroscience" })).toHaveLength(1);
   });
 
+  it("opens a canonical recording URL without saved extra query parameters", () => {
+    useStore.setState({ resources: [{
+      id: "saved-extra-query", title: "Personal recording", url: `${URL_A}&token=private-value`,
+      created: "2026-11-02", category: "Academic videos",
+      tags: ["axom:academic-panopto", "academic:tracker:known-item"],
+    }] });
+    render(<TrackerItemBookmarkLinks itemId="known-item" />);
+    expect(screen.getByRole("link", { name: "Recording: Personal recording" }).getAttribute("href")).toBe(URL_A);
+  });
+
   it("respects an explicit keep-unassigned choice even for an obvious module prefix", async () => {
     const { container } = render(<AcademicBookmarkImporter />);
     fireEvent.click(screen.getByText("Import study video bookmarks"));

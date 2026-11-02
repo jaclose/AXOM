@@ -46,7 +46,7 @@ export function HubFoldersPage() {
   const groups = useMemo(() => [...new Set(activeFolders.map((folder) => folder.group ?? "Ungrouped"))].sort(), [activeFolders]);
   const visible = filterFolders(activeFolders, query, group, favoritesOnly);
   const favorites = visible.filter((folder) => folder.favorite);
-  const recent = [...activeFolders].filter((folder) => folder.lastOpenedAt).sort((a, b) => (b.lastOpenedAt ?? "").localeCompare(a.lastOpenedAt ?? "")).slice(0, 4);
+  const recent = [...activeFolders].filter((folder) => folder.lastOpenedAt && (externalLinkHref(folder.link) || folder.localPath)).sort((a, b) => (b.lastOpenedAt ?? "").localeCompare(a.lastOpenedAt ?? "")).slice(0, 4);
   const sections = useMemo(() => {
     const rest = visible.filter((folder) => !folder.favorite);
     const map = new Map<string, HubFolder[]>();
@@ -160,7 +160,11 @@ export function HubFoldersPage() {
           <div className="folders-recent">
             <span><Clock3 size={ICON_SIZE.microInline} aria-hidden="true" /> Recently used</span>
             {recent.map((folder) => (
-              <button type="button" key={folder.id} onClick={() => folder.link ? (markOpened(folder), window.open(folder.link, "_blank", "noopener")) : void copyPath(folder)}>
+              <button type="button" key={folder.id} onClick={() => {
+                const href = externalLinkHref(folder.link);
+                if (href) { markOpened(folder); window.open(href, "_blank", "noopener"); }
+                else if (folder.localPath) void copyPath(folder);
+              }}>
                 <Icon name={folder.icon} size={ICON_SIZE.microInline} /> {folder.name}
               </button>
             ))}
