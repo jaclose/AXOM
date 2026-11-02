@@ -71,15 +71,15 @@ test(`source teaching and saved block review survive reload at ${width}px`, asyn
 
   await seedOnboarded(page);
   await page.goto("/#questions");
-  await page.getByRole("button", { name: "Add your own material", exact: true }).click();
+  await page.getByRole("tablist", { name: "Question Bank sections" }).getByRole("tab", { name: "Add material", exact: true }).click();
   await page.getByLabel("Choose question files or a ZIP to import").setInputFiles(pdf);
   await expect(page.getByText("Review 3 parsed questions", { exact: false })).toBeVisible({ timeout: 60_000 });
   await page.getByLabel("Set title").fill("Cardiology review");
   await page.getByRole("button", { name: "Finalize import" }).click();
-  await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
-  await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
+  await page.getByRole("tablist", { name: "Question Bank sections" }).getByRole("tab", { name: "Library (1)", exact: true }).click();
+  await page.getByRole("group", { name: "Question bank view" }).getByRole("button", { name: "Weeks & sets", exact: true }).click();
   await page.getByRole("button", { name: "Practice Cardiology review", exact: true }).click();
-  await page.getByText("Advanced: order, category and timing", { exact: true }).click();
+  await page.getByText("Advanced: order, exam style and timing", { exact: true }).click();
   await page.getByText("Keep document order (instead of shuffling)").click();
   await page.getByRole("button", { name: "Start tutor block" }).click();
 

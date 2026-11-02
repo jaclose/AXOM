@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { QuestionSet } from "../../lib/library";
@@ -167,7 +167,7 @@ describe("ExamRunner saved blocks and selection semantics", () => {
     expect(screen.getByRole("button", { name: /Exam \(feedback at the end\)/i }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("region", { name: "Practice source" }).textContent).toContain("Saved set");
     expect(screen.getByRole("button", { name: "10" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByLabelText("Question pool")).toHaveProperty("value", "all");
+    expect(screen.getByRole("radio", { name: "All · 1" }).getAttribute("aria-checked")).toBe("true");
     expect(mocked.saveQuizBlock).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: /Start exam block/i }));
@@ -178,6 +178,40 @@ describe("ExamRunner saved blocks and selection semantics", () => {
     expect(updated.timed).toBe(true);
     expect(Number.isNaN(Date.parse(updated.lastRunAt ?? ""))).toBe(false);
     expect(screen.getByText(question.stem)).toBeTruthy();
+  });
+
+  it("shows eligible pool counts and saves every picked subject", async () => {
+    const attempt: QuestionAttempt = { at: "2026-07-11T00:00:00.000Z", answerKey: "A", status: "incorrect" };
+    setStore();
+    mocked.store.questions = [
+      { ...question, id: "cardio-new", category: "Pathology", system: "Cardiovascular" },
+      { ...question, id: "cardio-missed", category: "Pharmacology", system: "Cardiovascular", status: "incorrect", attempts: [attempt] },
+      { ...question, id: "renal-marked", category: "Pathology", system: "Renal", marked: true, attempts: [attempt] },
+    ];
+    vi.stubGlobal("prompt", vi.fn(() => "Renal and pharmacology"));
+    const user = userEvent.setup();
+    render(<ExamRunner mode="tutor" onClose={() => {}} />);
+
+    expect(screen.getByRole("radio", { name: "All · 3" }).getAttribute("aria-checked")).toBe("true");
+    for (const name of ["Unused · 1", "Incorrect · 1", "Marked · 1"]) expect(screen.getByRole("radio", { name })).toBeTruthy();
+    screen.getByRole("radio", { name: "All · 3" }).focus();
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("radio", { name: "Unused · 1" }).getAttribute("aria-checked")).toBe("true");
+    await user.keyboard("{Home}");
+    expect(screen.getByRole("radio", { name: "All · 3" }).getAttribute("aria-checked")).toBe("true");
+    const subjects = screen.getByRole("group", { name: "Subjects and systems" });
+    expect(within(subjects).getAllByRole("button").map((button) => button.textContent))
+      .toEqual(["Cardiovascular · 2", "Pathology · 2", "Pharmacology · 1", "Renal · 1"]);
+
+    await user.click(within(subjects).getByRole("button", { name: "Renal · 1" }));
+    await user.click(within(subjects).getByRole("button", { name: "Pharmacology · 1" }));
+    expect(screen.getByRole("radio", { name: "All · 2" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: "Unused · 0" })).toHaveProperty("disabled", true);
+    await user.click(screen.getByRole("button", { name: "All 2" }));
+    await user.click(screen.getByRole("button", { name: "Save as block" }));
+
+    expect((mocked.saveQuizBlock.mock.calls.at(-1)?.[0] as QuizBlock).filters)
+      .toMatchObject({ count: 2, status: "all", categories: ["Renal", "Pharmacology"] });
   });
 
   it("launches a snapshot set from explicit IDs in stored order without backlinks", async () => {
