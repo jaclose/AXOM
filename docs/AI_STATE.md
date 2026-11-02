@@ -94,8 +94,10 @@ The older 20-course upload-free dry run and unresolved inventory are dated
 evidence in `git show e799ed5b:docs/AI_STATE.md`, not hosted delivery.
 A newer private v7 scan accounted for 995 sources and 859 banks, with 192
 inline-answer and 613 answer-mark **review-only** proposals. No answer keys
-were promoted, readiness changed or content uploaded; a new 20-course dry
-run is pending. Source rights and human medical review remain separate.
+were promoted, readiness changed or content uploaded. A new upload-free
+20-course dry run exposed a 14-row package/ledger mismatch; the publisher
+candidate remains held while duplicate identity handling is audited. Source
+rights and human medical review remain separate.
 
 Production acceptance still needs a cleared-content owner upload, reviewer
 decision, learner reload/media and checksum readback, share withdrawal, privacy
