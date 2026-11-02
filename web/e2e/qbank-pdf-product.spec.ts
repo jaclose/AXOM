@@ -106,7 +106,7 @@ test("answer-marked slides are review-gated and stay hidden until a tutor answer
 });
 
 
-test("slide-marked answer keys can be reviewed in one attested batch without bypassing question gating", async ({ page }) => {
+test("unkeyed answer-slide marks stay held until checked against the source", async ({ page }) => {
   await seedOnboarded(page);
   await page.goto("/#questions");
   await page.getByRole("tab", { name: "Add material", exact: true }).click();
@@ -114,20 +114,20 @@ test("slide-marked answer keys can be reviewed in one attested batch without byp
     name: "FTM1 Review Slide Bank.pdf", mimeType: "application/pdf", buffer: Buffer.from(inventedDeckPdf()),
   });
   const preview = page.getByRole("region", { name: "Source question bank preview" });
-  await expect(preview).toContainText("3 questions · 0 ready for import", { timeout: 30000 });
+  await expect(preview).toContainText("3 questions · 0 ready for import · 3 need review · 0 unresolved", { timeout: 30000 });
   await preview.getByLabel("Bank module").fill("FTM 1");
   await preview.getByLabel("Bank term").fill("1");
   await preview.getByLabel("Bank week").fill("2");
-  const bulk = preview.locator(".bank-import-bulk");
-  const eligible = bulk.getByRole("checkbox", { name: /Select source answer for question/ });
-  const total = await eligible.count();
-  expect(total).toBeGreaterThan(0);
+  await expect(preview.locator(".bank-import-bulk")).toHaveCount(0);
   await expect(preview.getByRole("button", { name: "Import 0 answer-ready questions" })).toBeDisabled();
-  await bulk.getByRole("button", { name: "Select all eligible" }).click();
-  await expect(bulk.getByRole("button", { name: new RegExp("^Confirm " + total + " selected source answers?$") })).toBeDisabled();
-  await bulk.getByRole("checkbox", { name: "Attest selected answers checked against the original source" }).check();
-  await bulk.getByRole("button", { name: new RegExp("^Confirm " + total + " selected source answers?$") }).click();
-  await expect(preview.getByRole("button", { name: new RegExp("^Import " + total + " answer-ready questions?$") })).toBeEnabled();
-  await preview.getByRole("button", { name: new RegExp("^Import " + total + " answer-ready questions?$") }).click();
-  await expect(preview).toContainText(total + (total === 1 ? " question saved" : " questions saved") + " on this device.");
+  for (let index = 0; index < 3; index += 1) {
+    await expect(preview).toContainText(`Question ${index + 1} of 3`);
+    await expect(preview).toContainText("AXOM does not read that mark.");
+    await preview.getByLabel("Preview mode").selectOption("review");
+    await expect(preview.locator('[data-asset-role="answer_reveal"] img')).toBeVisible();
+    await expect(preview.getByLabel("Verified answer")).toHaveValue("");
+    await expect(preview.getByRole("button", { name: "Confirm answer from source" })).toBeDisabled();
+    if (index < 2) await preview.getByRole("button", { name: "Next question" }).click();
+  }
+  await expect(preview).toContainText("3 questions · 0 ready for import · 3 need review · 0 unresolved");
 });
