@@ -183,11 +183,27 @@ function substantiveExplanation(question: PackageQuestion): boolean {
   const text = `${source} ${teaching}`.trim();
   return text.length >= 35 && (text.match(/\p{L}{2,}/gu)?.length ?? 0) >= 6;
 }
-const localPath = /file:\/\/|(?:^|[^\p{L}\p{N}._/\\])(?:\/[^\s/\\]+\/[^\s/\\]+|[a-z]:[\\/]|\\\\|(?:\.{1,2}[\\/])+[^\s/\\]+|~[\\/][^\s/\\]+)/iu;
+const localPath = /file:[/\\]+|(?:^|[^\p{L}\p{N}._/\\])(?:\/[^\s/\\]+\/[^\s/\\]+|[a-z]:[\\/]|\\\\|(?:\.{1,2}[\\/])+[^\s/\\]+|~[\\/][^\s/\\]+)/iu;
+const pathCharacters = new Map([[37, "%"], [38, "&"], [46, "."], [47, "/"],
+  [58, ":"], [92, "\\"], [126, "~"]]);
+const namedPathCharacters: Record<string, string> = {
+  amp: "&", period: ".", sol: "/", bsol: "\\", colon: ":", tilde: "~",
+};
 function visiblePathText(value: string): string {
-  return value.replace(/&#(?:x3a|58);?|&colon;|%3a/gi, ":")
-    .replace(/&#(?:x2f|47);?|&sol;|%2f/gi, "/")
-    .replace(/&#(?:x5c|92);?|&bsol;|%5c/gi, "\\");
+  let text = value;
+  for (let pass = 0; pass < 12; pass += 1) {
+    const decoded = text
+      .replace(/&#(?:x([0-9a-f]{1,6})|([0-9]{1,7}));?/gi, (match, hex: string | undefined, decimal: string | undefined) =>
+        pathCharacters.get(Number.parseInt(hex ?? decimal ?? "", hex ? 16 : 10)) ?? match)
+      .replace(/&(amp|period|sol|bsol|colon|tilde);/gi, (_match, name: string) => namedPathCharacters[name.toLowerCase()])
+      .replace(/%(25|26|2e|2f|3a|5c|7e)/gi, (match, code: string) =>
+        pathCharacters.get(Number.parseInt(code, 16)) ?? match);
+    if (decoded === text) return text;
+    text = decoded;
+  }
+  if (/%(?:25|26|2e|2f|3a|5c|7e)|&(?:amp;)*#(?:x(?:25|26|2e|2f|3a|5c|7e)|(?:37|38|46|47|58|92|126));?/i.test(text))
+    fail("A member-visible field contains deeply encoded path characters.");
+  return text;
 }
 function memberMetadata(field: string, value: string | undefined): void {
   if (value && localPath.test(visiblePathText(value))) fail(`A member-visible ${field} contains a local path.`);

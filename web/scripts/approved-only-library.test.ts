@@ -273,6 +273,10 @@ describe("approved-only private candidate", () => {
   it.each([
     "../private/file.pdf", "./private/file.pdf", "~/Documents/file.pdf",
     "file:///Users/tester/private/file.pdf", "C:\\Private\\file.pdf", "\\\\server\\share\\file.pdf",
+    "%2e%2e%2fprivate%2ffile.pdf", "&#46;&#46;&#47;private&#47;file.pdf",
+    "%7e%2fDocuments%2ffile.pdf", "&amp;#126;&amp;#47;Documents&amp;#47;file.pdf",
+    "%252e%252e%252fprivate%252ffile.pdf", "&amp;#47;Users&amp;#47;tester&amp;#47;file.pdf",
+    "file%3a%2f%2f%2fUsers%2ftester%2ffile.pdf",
   ])("rejects a local path form in question text: %s", async path => {
     const { root, output, decisions } = await fixture({ mutateReady: question => {
       question.stem[0] = { type: "text", text: `See ${path}` };
@@ -281,9 +285,19 @@ describe("approved-only private candidate", () => {
     await expect(readdir(output)).rejects.toThrow();
   });
 
+  it("rejects deeply nested path encoding before publishing", async () => {
+    let path = "/Users/tester/private/file.pdf";
+    for (let pass = 0; pass < 14; pass += 1) path = encodeURIComponent(path);
+    const { root, output, decisions } = await fixture({ mutateReady: question => {
+      question.stem[0] = { type: "text", text: `See ${path}` };
+    } });
+    await expect(createApprovedOnlyLibrary(root, decisions, output)).rejects.toThrow(/deeply encoded path/);
+    await expect(readdir(output)).rejects.toThrow();
+  });
+
   it("allows a normal source link and clinical slash notation in question text", async () => {
     const { root, output, decisions } = await fixture({ mutateReady: question => {
-      question.stem[0] = { type: "text", text: "Review https://example.org/source.pdf#page=4 and FEV1/FVC 2/3." };
+      question.stem[0] = { type: "text", text: "Review https://example.org/source.pdf#page=4, https://example.org/course%2fmodule, and FEV1/FVC 2/3." };
       question.explanation = [{ type: "text", text: "The synthetic source explains the invented first choice at https://example.org/source.pdf#page=4." }];
     } });
     await expect(createApprovedOnlyLibrary(root, decisions, output)).resolves.toMatchObject({ ready: 1 });
