@@ -64,6 +64,21 @@ describe("BankBrowser library", () => {
     expect(screen.queryByRole("button", { name: "Renal tubule" })).toBeNull();
   });
 
+  it("filters for images in the question, not review-only source pages", async () => {
+    const image = {
+      id: "image", blobKey: "image", fileName: "source.png", mimeType: "image/png" as const,
+      byteSize: 1, altText: "", createdAt: "x", updatedAt: "x",
+    };
+    store.questions = [
+      makeQuestion({ id: "source-page", stem: "Text-only source page", attachments: [{ ...image, role: "source_page" }] }),
+      makeQuestion({ id: "prompt-image", stem: "ECG question", attachments: [{ ...image, role: "exhibit" }] }),
+    ];
+    render(<BankBrowser onOpen={vi.fn()} />);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Has question image" }));
+    expect(screen.getByRole("button", { name: "ECG question" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Text-only source page" })).toBeNull();
+  });
+
   it("debounced search matches stem text", async () => {
     const user = userEvent.setup();
     render(<BankBrowser onOpen={vi.fn()} />);
