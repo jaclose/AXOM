@@ -271,6 +271,29 @@ describe("automatic local migration backups", () => {
     expect((await readLocalBackup(key!))?.oldSchemaVersion).toBe(31);
   });
 
+  it("retains both storage failures when a safety backup cannot be saved", async () => {
+    localStorage.setItem(STORAGE_KEYS.persistedState, JSON.stringify({ state: { questions: [{ id: "unsaved" }] } }));
+    const indexedDbFailure = new DOMException("Vault write unavailable", "UnknownError");
+    const fallbackFailure = new DOMException("Browser storage limit", "QuotaExceededError");
+    vi.stubGlobal("indexedDB", { open: () => { throw indexedDbFailure; } });
+    const localWrite = vi.spyOn(storage, "setItem").mockImplementation((name, value) => {
+      if (name.startsWith(STORAGE_KEYS.localBackupPrefix)) throw fallbackFailure;
+      values.set(name, String(value));
+    });
+
+    let failure: unknown;
+    try { await createLocalBackup(34); } catch (error) { failure = error; }
+    localWrite.mockRestore();
+
+    expect(failure).toBeInstanceOf(AggregateError);
+    const combined = failure as AggregateError;
+    expect(combined.errors).toEqual([indexedDbFailure, fallbackFailure]);
+    expect(combined.message).toContain("Vault write unavailable");
+    expect(combined.message).toContain("Browser storage limit");
+    expect(combined.message).toContain("Keep this tab open and export a backup");
+    expect([...values.keys()].filter((key) => key.startsWith(STORAGE_KEYS.localBackupPrefix))).toEqual([]);
+  });
+
   it("prunes limit+2 full fallback snapshots locally without reopening unavailable IndexedDB", async () => {
     vi.stubGlobal("indexedDB", undefined);
     localStorage.setItem(STORAGE_KEYS.persistedState, JSON.stringify({ state: { questions: [{ id: "fallback" }] } }));
