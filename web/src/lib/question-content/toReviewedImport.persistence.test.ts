@@ -45,6 +45,24 @@ function twoSets(): { pkg: ImportPackage; issues: PackageIssue[]; files: File[] 
   return { pkg: split, issues: validatePackage(split, { assetFiles: new Set(files.map((file) => file.name)) }), files };
 }
 
+function auditedEdition(withNewReference = false): { earlier: ImportPackage; revised: ImportPackage; files: File[] } {
+  const { pkg, files } = invented();
+  const earlier = { ...pkg, questions: [structuredClone(pkg.questions[0])] };
+  const question = structuredClone(earlier.questions[0]);
+  question.stem = [{ type: "text", text: "An audited source corrects this incidence question's wording." }];
+  question.explanation = [{ type: "text", text: "The source's revised explanation compares incidence in the two exposed groups." }];
+  if (withNewReference) {
+    const reference = structuredClone(pkg.questions[2].assets[0]);
+    question.assets = [{ ...reference, id: "syn-q01-new-reference", questionId: question.id, role: "reference" }];
+  }
+  const revised = {
+    ...pkg,
+    manifest: { ...pkg.manifest, course: { ...pkg.manifest.course, week: 0 } },
+    questions: [question],
+  };
+  return { earlier, revised, files };
+}
+
 beforeEach(openEmptyWorkspace);
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -602,6 +620,89 @@ describe("a package through the canonical import", () => {
     await reloadWorkspace();
     expect((await importPackage(pkg, issues, files)).status).toBe("already-saved");
     expect((await workspaceOnDisk()).questions).toHaveLength(6);
+  });
+
+  it("refreshes an untouched equivalent source in place without losing learner tags or image links", async () => {
+    const { earlier, revised, files } = auditedEdition(true);
+    const first = await importPackage(earlier, validatePackage(earlier), files);
+    const id = first.sections[0].savedIds[0];
+    useStore.getState().updateQuestion(id, { tags: ["learner-tag"] });
+    await flushLocalVaultWrites();
+    const prior = (await workspaceOnDisk()).questions[0];
+    const assessed = validatePackage(revised, { assetFiles: new Set(files.map((file) => file.name)) });
+    const refreshed = await importPackage(revised, assessed, files, { refreshEquivalentSource: true });
+    expect(refreshed).toMatchObject({ status: "already-saved", errors: [], sections: [{ reused: true, refreshed: 1 }] });
+    const after = await reloadWorkspace();
+    expect(after.questions).toHaveLength(1);
+    expect(after.questionSets).toHaveLength(1);
+    expect(after.questions[0]).toMatchObject({ id, stem: "An audited source corrects this incidence question's wording.", tags: ["learner-tag"] });
+    expect(after.questions[0].week).toBeUndefined();
+    expect(after.questions[0].content).toEqual(revised.questions[0]);
+    expect(after.questions[0].explanation).toContain("source's revised explanation");
+    expect(after.questions[0].attempts).toEqual(prior.attempts);
+    expect(after.questions[0].createdAt).toBe(prior.createdAt);
+    expect(after.questionSets[0].scope).toEqual({ module: "EXAMPLE" });
+    expect(after.questions[0].attachments).toEqual(expect.arrayContaining([
+      expect.objectContaining({ assetId: "syn-q01-new-reference", role: "reference" }),
+    ]));
+  });
+
+  it("does not replace equivalent content on ordinary package reimports", async () => {
+    const { earlier, revised, files } = auditedEdition();
+    await importPackage(earlier, validatePackage(earlier), files);
+    const before = await workspaceOnDisk();
+    const result = await importPackage(revised, validatePackage(revised), files);
+    expect(result).toMatchObject({ status: "already-saved", errors: [] });
+    const after = await reloadWorkspace();
+    expect(after.questions).toEqual(before.questions);
+    expect(after.questionSets).toEqual(before.questionSets);
+  });
+
+  it("leaves an edited source and its media untouched instead of replacing it", async () => {
+    const { earlier, revised, files } = auditedEdition(true);
+    const first = await importPackage(earlier, validatePackage(earlier), files);
+    const id = first.sections[0].savedIds[0];
+    useStore.getState().updateQuestion(id, { notes: "My own interpretation" });
+    await flushLocalVaultWrites();
+    const before = await workspaceOnDisk();
+    const result = await importPackage(revised, validatePackage(revised, { assetFiles: new Set(files.map((file) => file.name)) }), files, { refreshEquivalentSource: true });
+    expect(result.status).toBe("failed");
+    expect(result.errors.join(" ")).toMatch(/learner edits/);
+    const after = await reloadWorkspace();
+    expect(after.questions).toEqual(before.questions);
+    expect(after.questionSets).toEqual(before.questionSets);
+    expect(after.questions[0].attachments).toEqual(before.questions[0].attachments);
+  });
+
+  it("does not refresh a question that has been practiced", async () => {
+    const { earlier, revised, files } = auditedEdition();
+    const first = await importPackage(earlier, validatePackage(earlier), files);
+    const id = first.sections[0].savedIds[0];
+    useStore.getState().recordQuestionAttempt(id, { answerKey: "A", status: "incorrect", quizSessionId: "source-refresh-practice", mode: "tutor" });
+    await flushLocalVaultWrites();
+    const before = await workspaceOnDisk();
+    const result = await importPackage(revised, validatePackage(revised), files, { refreshEquivalentSource: true });
+    expect(result.status).toBe("failed");
+    expect(result.errors.join(" ")).toMatch(/learner edits/);
+    const after = await reloadWorkspace();
+    expect(after.questions).toEqual(before.questions);
+    expect(after.questionSets).toEqual(before.questionSets);
+  });
+
+  it("rolls back a failed audited refresh without changing the prior source", async () => {
+    const { earlier, revised, files } = auditedEdition();
+    await importPackage(earlier, validatePackage(earlier), files);
+    const before = await workspaceOnDisk();
+    const originalSetItem = localVaultStorage.setItem.bind(localVaultStorage);
+    vi.spyOn(localVaultStorage, "setItem")
+      .mockRejectedValueOnce(new Error("Synthetic refresh write failure"))
+      .mockImplementation((name, value) => originalSetItem(name, value));
+    const result = await saveBank(revised, validatePackage(revised), files, realWorkspace, { refreshEquivalentSource: true });
+    expect(result.status).toBe("failed");
+    expect(result.errors.join(" ")).toMatch(/Synthetic refresh write failure/);
+    const after = await reloadWorkspace();
+    expect(after.questions).toEqual(before.questions);
+    expect(after.questionSets).toEqual(before.questionSets);
   });
 
   it("repairs missing image bytes on reimport without duplicating questions", async () => {

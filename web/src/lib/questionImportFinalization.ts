@@ -17,6 +17,8 @@ export interface QuestionImportPersistence {
   commitReviewedImport?(plan: ReviewedImportPersistencePlan): Awaitable<ReviewedImportPersistenceResult>;
   /** Refile reused source sets and their questions as one durable workspace snapshot. */
   commitReviewedRefiling?(plan: ReviewedRefilingPlan): Awaitable<ReviewedRefilingResult>;
+  /** Refresh one exact, untouched source set after an audited package reimport. */
+  commitReviewedSourceRefresh?(plan: ReviewedSourceRefreshPlan): Awaitable<ReviewedSourceRefreshResult>;
   addQuestion(input: unknown): Awaitable<{ ok: boolean; errors: string[]; id?: string }>;
   removeQuestion(id: string): Awaitable<void>;
   addQuestionSet(set: QuestionSet): Awaitable<void>;
@@ -79,6 +81,26 @@ export interface ReviewedRefilingPlan {
 
 export type ReviewedRefilingResult =
   | { ok: true }
+  | { ok: false; message: string; rollbackFailures: string[] };
+
+/** Source-owned fields only. Learner state and existing image links are never
+ * part of an audited reimport replacement. */
+export type ReviewedSourceRefreshFields = Pick<QuestionRecord,
+  | "content" | "stem" | "options" | "correctKey" | "correctAnswerText"
+  | "explanation" | "extraction" | "citation"
+  | "module" | "week" | "courseId"
+  | "questionNumber" | "sourcePage" | "needsReview"
+>;
+
+export interface ReviewedSourceRefreshPlan {
+  setId: string;
+  expectedSet: QuestionSet;
+  targetScope: QuestionSet["scope"];
+  questions: Array<{ expected: QuestionRecord; source: ReviewedSourceRefreshFields }>;
+}
+
+export type ReviewedSourceRefreshResult =
+  | { ok: true; updated: number }
   | { ok: false; message: string; rollbackFailures: string[] };
 
 export interface CoordinatedReviewedImportResult {

@@ -127,6 +127,16 @@ export function preparedBankImportOptions(bank: PreparedBank): PackageImportOpti
     } } : {}),
   };
 }
+/** This audited edition is the only prepared library authorized to refresh
+ * untouched equivalent source records from its earlier partial installation.
+ * V4 full catalogs fail readCatalog; its shards contain the same bank payloads. */
+export function auditedRhpsSourceRefresh(catalog: PrivateLibraryCatalog): boolean {
+  const base = "axom-rhps-reconciled-1090-source-verified-2026-11-01";
+  if (catalog.preparerVersion !== 1) return false;
+  if (catalog.id === base) return catalog.version === "2026-11-01-1090";
+  const part = /^axom-rhps-reconciled-1090-source-verified-2026-11-01-part-(0[1-8])-of-08$/.exec(catalog.id);
+  return Boolean(part && catalog.version === `2026-11-01-1090-part-${part[1]}`);
+}
 const reviewBlobKey = (checksum: string) => `private-library:${checksum}`;
 const SHA256_ID = /^sha256:[a-f0-9]{64}$/;
 function mergeReviewedTable(incoming: TableBlock, stored: TableBlock, label: string): TableBlock {
@@ -339,6 +349,7 @@ async function install(read: LibraryReader, progress: (message: string) => void,
     return { ...useStore.getState(), assertCurrent };
   };
   const catalog = readCatalog(JSON.parse(text(await read("catalog.json"))));
+  const refreshEquivalentSource = auditedRhpsSourceRefresh(catalog);
   const installedIds: LibraryInstallation = { status: "complete", warnings: [], templateIds: [], documentIds: [], questionIds: [], setIds: [] };
   progress("Protecting your current workspace…");
   await flushLocalVaultWrites();
@@ -422,7 +433,7 @@ async function install(read: LibraryReader, progress: (message: string) => void,
       report("saving reviewed questions");
       const result = await saveBank(bank.pkg, assessed.issues, files, {
         library: currentStore, store: currentStore,
-      }, preparedBankImportOptions(bank));
+      }, { ...preparedBankImportOptions(bank), ...(refreshEquivalentSource ? { refreshEquivalentSource: true } : {}) });
       const durableSections = [
         ...result.sections,
         ...result.incompleteSections.filter(section => section.savedIds.length > 0),

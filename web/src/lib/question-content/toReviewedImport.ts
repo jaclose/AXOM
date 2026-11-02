@@ -40,6 +40,8 @@ export interface PackageImportOptions {
   /** Reviewed filing layered over source-declared package scope. The package
    * and every question retain their original scope as evidence. */
   reviewedFiling?: { readonly module: string; readonly term: number };
+  /** Exact-catalog, one-time refresh of untouched source-owned fields on reuse. */
+  refreshEquivalentSource?: boolean;
 }
 
 export interface HeldQuestion {
