@@ -11,8 +11,9 @@ The safe Ideas branch `b08d10c1` joins current `main` in this release candidate.
 It adds the desk Journal, free writing, setup, return control, support, weather,
 notifications, streaks, exam highlights, shared sets, Host and Community.
 Radiordle and Pathordle remain held for provider approval. Four feature
-migrations use versions `20261101190000`–`20261101193000`; hosted acceptance
-is separate from the web push. Private academic content remains unpublished.
+migrations `20261101190000`–`20261101193000` applied to AXOM production;
+all 11 tables have RLS. The web merge is local; account acceptance is pending.
+Private academic content remains unpublished.
 Other worktrees were not changed.
 
 2026-11-02 02:12 UTC `main` is `4d6a96a9` after the QBank parser, diagram,
