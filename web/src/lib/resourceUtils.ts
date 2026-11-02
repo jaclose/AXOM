@@ -48,6 +48,18 @@ export function usableResourceHref(input: string): string | null {
   }
 }
 
+/** Render only web URLs from stored or imported links; a bare domain gains HTTPS. */
+export function externalLinkHref(input: string | undefined): string | undefined {
+  const raw = input?.trim();
+  if (!raw) return undefined;
+  try {
+    const url = new URL(/^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function hostOfResource(input: string): string {
   try {
     return new URL(normalizeResourceUrl(input)).hostname.replace(/^www\./, "");
