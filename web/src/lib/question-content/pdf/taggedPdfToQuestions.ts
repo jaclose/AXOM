@@ -16,7 +16,7 @@
 import type { DeckPage } from "../../deckPages";
 import { locateQuestionPages, placeFigures, withoutDecorations, type FigureBox, type PageLine, type QuestionPage } from "../../pdfFigures";
 import { parsePdfQuestions } from "../../pdfQuestionImport";
-import type { ParsedQuestionDraft } from "../../questionParse";
+import { reconcileQuestionAnswerCopies, type ParsedQuestionDraft, type QuestionCopyDraft } from "../../questionParse";
 import { answerKeyLines, bodyToAnchoredText, type AnchoredText, type UnplacedMedia } from "../fromDrafts";
 import type { PackageIssue, PackageQuestion } from "../package";
 import { splitParts } from "./parts";
@@ -104,6 +104,7 @@ export function taggedPdfToQuestions(input: TaggedConversionInput, defaults: Pdf
   // One parse for each set of questions. Everything after it works on all of them together.
   const parts = splitParts(pageTexts);
   const headings = new Set(pages.flatMap((page) => page.headings));
+  const parsedEntries: Array<QuestionCopyDraft & { title?: string; questionPage: QuestionPage }> = [];
   const drafts: ParsedQuestionDraft[] = [];
   const ids: string[] = [];
   const setOf: { set: number; title?: string }[] = [];
@@ -116,13 +117,9 @@ export function taggedPdfToQuestions(input: TaggedConversionInput, defaults: Pdf
     const located = locateQuestionPages(parsed.drafts, part.pages);
     const label = parts.length > 1 ? `Set ${at + 1}: ` : "";
     parsed.drafts.forEach((draft, index) => {
-      const number = String(draft.questionNumber ?? index + 1).padStart(2, "0");
-      ids.push(parts.length > 1 ? `${defaults.bankId}-s${at + 1}-q${number}` : `${defaults.bankId}-q${number}`);
       // The set's own heading files its questions, when the tags say the line is a heading.
       if (parts.length > 1 && part.title && headings.has(part.title) && !draft.topic) draft.topic = part.title;
-      drafts.push(draft);
-      setOf.push({ set: at + 1, ...(part.title ? { title: part.title } : {}) });
-      questionPages.push(located[index]);
+      parsedEntries.push({ draft, part: at, role: part.role, title: part.title, questionPage: located[index] });
     });
     notes.push(...parsed.notes.map((note) => `${label}${note}`));
     if (part.answerSectionNote) notes.push(`${label}${part.answerSectionNote}`);
@@ -132,7 +129,18 @@ export function taggedPdfToQuestions(input: TaggedConversionInput, defaults: Pdf
       deck = Boolean(parsed.deck);
     }
   });
-  if (parts.length > 1) notes.unshift(`The file holds ${parts.length} sets of questions, each numbered from 1. They were read one set at a time.`);
+  const reconciled = reconcileQuestionAnswerCopies(parsedEntries);
+  const retainedParts = [...new Set(reconciled.entries.map((entry) => entry.part))];
+  reconciled.entries.forEach((entry, index) => {
+    const set = retainedParts.indexOf(entry.part) + 1;
+    const number = String(entry.draft.questionNumber ?? index + 1).padStart(2, "0");
+    ids.push(retainedParts.length > 1 ? `${defaults.bankId}-s${set}-q${number}` : `${defaults.bankId}-q${number}`);
+    drafts.push(entry.draft);
+    setOf.push({ set, ...(entry.title ? { title: entry.title } : {}) });
+    questionPages.push(entry.questionPage);
+  });
+  if (retainedParts.length > 1) notes.unshift(`The file holds ${retainedParts.length} sets of questions, each numbered from 1. They were read one set at a time.`);
+  if (reconciled.paired) notes.push(`${reconciled.paired} exact question-only and answered ${reconciled.paired === 1 ? "copy was" : "copies were"} reconciled; the question page and answer evidence remain separate.`);
   const roleOf = new Map(deckPages.map((entry) => [entry.page, entry]));
   const isAnswerPage = (page: number): boolean => ["answer", "explanation", "answer-key"].includes(roleOf.get(page)?.kind ?? "");
 
@@ -159,7 +167,7 @@ export function taggedPdfToQuestions(input: TaggedConversionInput, defaults: Pdf
     deckPages,
   );
   const converted = pdfDraftsToQuestions({ drafts, figures, placements, questionPages, linesByPage, deckPages, media: anchored.media, ids }, defaults);
-  if (parts.length > 1) {
+  if (retainedParts.length > 1) {
     converted.questions.forEach((question, index) => {
       question.source.set = setOf[index].set;
       if (setOf[index].title) question.source.setTitle = setOf[index].title;
@@ -246,7 +254,7 @@ export function taggedPdfToQuestions(input: TaggedConversionInput, defaults: Pdf
     report: {
       pages: pages.length,
       readByPosition: pages.some((page) => page.order === "position"),
-      sets: parts.length,
+      sets: retainedParts.length,
       pageNumbersDropped,
       figureLabels,
       tables: anchored.media.filter((entry) => entry.kind === "table").length,

@@ -23,6 +23,21 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("ExamSimulator", () => {
+  it("shows the related diagram after tutor reveal while keeping the community warning", () => {
+    const tagged = {
+      ...q("rhinovirus"), stem: "A patient has runny nose and sneezing.",
+      options: [{ key: "A", text: "Rhinovirus" }, { key: "B", text: "Influenza virus" }],
+      correctKey: "A", correctAnswerText: "Rhinovirus", tags: ["axom:diagram:rhinovirus"],
+      explanation: "This verified test explanation stays visible after the learner checks the answer.",
+    };
+    render(<ExamSimulator skin="uworld" mode="tutor" pool={[tagged]} unreviewedCount={1} onFinish={vi.fn()} onSuspend={vi.fn()} />);
+    expect(screen.getByText("Unreviewed community material.")).toBeTruthy();
+    expect(screen.queryByRole("complementary", { name: "Related AXOM diagram" })).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: "B. Influenza virus" }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    expect(screen.getByRole("complementary", { name: "Related AXOM diagram" })).toBeTruthy();
+    expect(screen.getByText("Unreviewed community material.")).toBeTruthy();
+  });
   it("shows the unreviewed warning inside the full-screen exam interface", () => {
     render(<ExamSimulator skin="nbme" mode="exam" pool={pool} unreviewedCount={1}
       onFinish={vi.fn()} onSuspend={vi.fn()} />);

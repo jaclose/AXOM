@@ -33,6 +33,7 @@ import { pushToast } from "../lib/toast";
 import { ModuleTour, type ModuleTourStep } from "../components/shell/ModuleTour";
 import { cardSystemFor, type CardSystem } from "../lib/cardSystem";
 import { TrackerFirstRun } from "../components/tracker/TrackerFirstRun";
+import { SguCourseMapCompletion } from "../components/tracker/SguCourseMapCompletion";
 import { ICON_SIZE } from "../lib/iconSize";
 import { parseCourseSchedule, reconcileScheduleDuplicates, scheduleCandidatesToTracker, type ScheduleCandidate } from "../lib/courseScheduleImport";
 import { CourseLibrary } from "../components/tracker/CourseLibrary";
@@ -303,6 +304,7 @@ export function CourseTrackerPage() {
         </GButton>
       </div>
       {moduleHelpOpen && <CourseTrackerHelpEntry onClose={() => setModuleHelpOpen(false)} onStartTour={() => { setModuleHelpOpen(false); setModuleTourOpen(true); }} />}
+      <SguCourseMapCompletion />
       <div className="tracker-grid">
         <aside className="tracker-utility-column" aria-label="Course Tracker utilities">
           <GlassCard pad data-tour="import" data-module-tour="tracker-structure">

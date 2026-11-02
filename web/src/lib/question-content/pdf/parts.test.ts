@@ -24,6 +24,17 @@ const KEY = ["1. Answer: B", "The right ventricle fills the pulmonary trunk.", "
 const keysOf = (pages: string[]): (string | undefined)[] => parsePdfQuestions(pages.join("\n\n"), pages).drafts.map((draft) => draft.correctKey);
 
 describe("a file with more than one set of questions", () => {
+  it("separates one-question question-only and answered copies at explicit role headings", () => {
+    const bare = question(1, "Which invented gate opens the blue chamber?", ["East gate", "West gate", "North gate"]);
+    const pages = [["Questions only", ...bare].join("\n"), ["With Answers", ...bare, "Answer: B", "Explanation: The west gate is named in the invented source."].join("\n")];
+    const parts = splitParts(pages);
+    expect(parts).toHaveLength(2);
+    expect(parts.map((part) => part.role)).toEqual(["question-only", "answer-copy"]);
+    expect(parts[0].pages[1]).toBe("");
+    expect(parts[1].pages[0]).toBe("");
+    expect(parts[1].pages[1]).toContain("With Answers");
+  });
+
   it("leaves a file with one set exactly as it came", () => {
     const pages = [CARDIO.slice(0, 10).join("\n"), CARDIO.slice(10).join("\n")];
     expect(splitParts(pages)).toEqual([{ pages }]);
