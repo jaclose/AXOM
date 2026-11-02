@@ -5,9 +5,9 @@ authority: current-state
 ---
 # AXOM current AI state
 
-## Checkout and release boundary · 2026-11-02 11:26 UTC
+## Checkout and release boundary · 2026-11-02 11:56 UTC
 
-This handoff was updated from local frontier commit `179289e4` on
+This handoff was updated from local frontier commit `eaad98fa` on
 `codex/axom-frontier-release-20261101`. Check `git status`, HEAD and the
 coordination board before editing. At this snapshot, remote `main` was
 `ee1c0c2e`; [PR #74](https://github.com/jaclose/AXOM/pull/74),
@@ -126,7 +126,7 @@ contains private assets and broad replacement/deletion. Check the
 before shared edits. Historic receipts remain in Git history; do not reload
 them at startup without a specific question.
 
-At `179289e4`, the clean combined gate passed typecheck, lint, 4,647 web
+At `eaad98fa`, the clean combined gate passed typecheck, lint, 4,649 web
 tests (35 skipped), production build, update safety, offline games and 167
 browser journeys (14 conditionally skipped). Root API typecheck, 88 release
 tests, 43 repository tests, repository hygiene and communications artifact
