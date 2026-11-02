@@ -210,6 +210,48 @@ describe("deletion dependency safety", () => {
       .toEqual([[0, 499], [500, 999]]);
   });
 
+  it.each(["42P01", "PGRST205"])("allows an account export before the optional feedback table exists (%s)", async code => {
+    const request = { id: "11111111-1111-4111-8111-111111111111", user_id: "account-a", kind: "export", status: "requested" };
+    const { db, calls, storage } = database([
+      ok(), ok(), ok([request]), ok({ id: request.id }),
+      ok([]), ok([]), ok([]),
+      { data: null, error: { code, message: 'journal_experience_feedback is not available' } },
+      ok(true), ok([]),
+    ]);
+    const service = new CommunicationsService(db, {});
+    vi.spyOn(service, "workspace").mockResolvedValue(null);
+    vi.spyOn(service, "user").mockResolvedValue({ id: "account-a", email: "alex@example.invalid", user_metadata: {} } as unknown as User);
+    vi.spyOn(service, "preferenceRows").mockResolvedValue(preferences());
+    vi.spyOn(service, "identity").mockResolvedValue({ accent: "#c8a96a", theme: "dark", locale: "en" });
+    vi.spyOn(service, "enqueue").mockResolvedValue();
+    storage.upload.mockResolvedValue({ data: { path: `account-a/${request.id}.json` }, error: null });
+
+    expect(await processPrivacy(service)).toBe(1);
+    expect(JSON.parse(String(storage.upload.mock.calls[0][1])).journalFeedback).toEqual([]);
+    expect(calls).not.toContainEqual({
+      table: "privacy_requests", method: "update",
+      args: [{ status: "failed", failure_code: "privacy-processing-failed" }],
+    });
+  });
+
+  it.each([
+    { code: "PGRST205", message: "another_table is not available" },
+    { code: "42501", message: "journal_experience_feedback permission denied" },
+  ])("does not hide unrelated feedback query failures ($code)", async error => {
+    const { db } = database([{ data: null, error }]);
+    await expect(journalFeedbackForExport(new CommunicationsService(db, {}), "account-a"))
+      .rejects.toThrow("journal-feedback-export-unavailable");
+  });
+
+  it("fails when the feedback table disappears after the first export page", async () => {
+    const { db } = database([
+      { data: Array.from({ length: 500 }, (_, index) => ({ id: `feedback-${index}`, user_id: "account-a" })), error: null, count: 501 },
+      { data: null, error: { code: "42P01", message: 'relation "journal_experience_feedback" does not exist' } },
+    ]);
+    await expect(journalFeedbackForExport(new CommunicationsService(db, {}), "account-a"))
+      .rejects.toThrow();
+  });
+
   it("rejects a foreign feedback row even if the service-role query returns it", async () => {
     const { db } = database([{ data: [{ id: "foreign", user_id: "account-b" }], error: null, count: 1 }]);
     await expect(journalFeedbackForExport(new CommunicationsService(db, {}), "account-a"))
