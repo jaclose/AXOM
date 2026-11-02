@@ -1,9 +1,9 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { prepareAcademicUpload } from "./upload";
+import { prepareAcademicUpload, preflightAcademicUpload } from "./upload";
 import { publicationJobs, type PlannedCourse, type PublicationInventory } from "./publication";
 
-vi.mock("./upload", () => ({ prepareAcademicUpload: vi.fn() }));
+vi.mock("./upload", () => ({ prepareAcademicUpload: vi.fn(), preflightAcademicUpload: vi.fn() }));
 
 const inventory: PublicationInventory = {
   library: { format: "axom-private-library", schemaVersion: 1, id: "academic-library", version: "v1" },
@@ -20,21 +20,35 @@ const course: PlannedCourse = {
 const catalog = {
   format: "axom-private-library", schemaVersion: 1, id: "academic-library", version: "v1", templates: [],
   sources: inventory.sources.map(source => ({ id: source.id, name: source.name, sourcePath: source.name, checksum: source.checksum,
-    module: "NCRS", status: source.status, reason: "", ready: source.ready, review: 0 })),
+    module: "NCRS", status: source.status, reason: "", ready: source.ready, review: 0,
+    ...(source.hasBank ? { bankFile: `banks/${source.checksum}/bank.json` } : {}) })),
 };
 const read = vi.fn(async (path: string) => path === "catalog.json" ? new TextEncoder().encode(JSON.stringify(catalog)) : new Uint8Array());
+const prepared = (): Awaited<ReturnType<typeof prepareAcademicUpload>> => ({
+  catalogId: course.catalogId,
+  metadata: { ready_questions: course.ready, review_questions: course.review },
+  template: "",
+  provenance: { sourceChecksums: [] },
+  files: [],
+  hash: "",
+  localOnlyOriginals: [],
+});
 
 describe("publication jobs", () => {
   // A function returned from beforeEach runs as teardown, so return nothing.
-  beforeEach(() => { vi.mocked(prepareAcademicUpload).mockReset(); });
+  beforeEach(() => {
+    vi.mocked(prepareAcademicUpload).mockReset();
+    vi.mocked(preflightAcademicUpload).mockReset().mockResolvedValue([]);
+  });
 
   it("keeps optional originals on this device only when the course exceeds its size limit", async () => {
-    const upload = { catalogId: course.catalogId } as Awaited<ReturnType<typeof prepareAcademicUpload>>;
+    const upload = prepared();
     vi.mocked(prepareAcademicUpload)
       .mockRejectedValueOnce(new Error("This collection exceeds the supported upload size."))
       .mockResolvedValueOnce(upload);
     const { jobs, notes } = publicationJobs(read, inventory, [course]);
     await expect(jobs[0].prepare()).resolves.toBe(upload);
+    expect(preflightAcademicUpload).toHaveBeenCalledOnce();
     expect(notes.keptLocal.get(course.catalogId)).toBe(1);
     expect(prepareAcademicUpload).toHaveBeenNthCalledWith(1, expect.any(Function),
       { term: "Term 4", module: "NCRS", evidence: "source-metadata" }, {});
@@ -47,7 +61,7 @@ describe("publication jobs", () => {
   it("counts an unsupported bank original once when size fallback also keeps an optional file", async () => {
     const mixed: PublicationInventory = { ...inventory, sources: inventory.sources.map(source => ({ ...source,
       original: { extension: source.id === "bank" ? "pptx" : "pdf" } })) };
-    const upload = { catalogId: course.catalogId } as Awaited<ReturnType<typeof prepareAcademicUpload>>;
+    const upload = prepared();
     vi.mocked(prepareAcademicUpload)
       .mockRejectedValueOnce(new Error("This collection exceeds the supported upload size."))
       .mockResolvedValueOnce(upload);
@@ -60,7 +74,7 @@ describe("publication jobs", () => {
   it("publishes questions without any source files when the course is still too large, and explains when nothing fits", async () => {
     const bankWithOriginal: PublicationInventory = { ...inventory, sources: inventory.sources.map(source => source.id === "bank"
       ? { ...source, original: { extension: "pdf" } } : source) };
-    const upload = { catalogId: course.catalogId } as Awaited<ReturnType<typeof prepareAcademicUpload>>;
+    const upload = prepared();
     vi.mocked(prepareAcademicUpload)
       .mockRejectedValueOnce(new Error("This collection exceeds the supported upload size."))
       .mockRejectedValueOnce(new Error("A private academic upload must contain 1–1500 verified files."))

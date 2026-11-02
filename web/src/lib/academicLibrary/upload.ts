@@ -496,7 +496,7 @@ export async function academicUploadHash(
 /** Validate a replayable AcademicUpload as a closed package before any
  * registration RPC. This deliberately repeats preparation checks because a
  * caller can retain and mutate a prepared object between those two steps. */
-async function preflightAcademicUpload(upload: AcademicUpload): Promise<AcademicUpload["files"]> {
+export async function preflightAcademicUpload(upload: AcademicUpload): Promise<AcademicUpload["files"]> {
   if (!upload || !Array.isArray(upload.files) || !upload.files.length || upload.files.length > 1500)
     throw new Error("A private academic upload must contain 1–1500 verified files.");
   const files = [...upload.files].sort(compareAcademicPath);

@@ -166,6 +166,66 @@ describe("publishing a prepared library as one course per term and module", () =
     expect(upload.metadata.ready_questions).toBe(1);
   });
 
+  it.each(["before", "after", "triple"] as const)("keeps a %s duplicate-linked source out of the prepared course", async placement => {
+    const fixture = await library();
+    const original = fixture.catalog.sources.find(source => source.name === "cpr1-imcq.pdf")!;
+    const linked = (suffix: string): PrivateLibraryCatalog["sources"][number] => ({
+      id: original.id, name: `invented-linked-${suffix}.pdf`, sourcePath: `Synthetic/invented-linked-${suffix}.pdf`,
+      checksum: original.checksum, module: "CPR 1", status: "duplicate-linked", reason: "Identical source bytes",
+      duplicateOf: original.id, ready: 0, review: 0,
+    });
+    const index = fixture.catalog.sources.indexOf(original);
+    const copies = placement === "triple" ? [linked("one"), linked("two")] : [linked("one")];
+    fixture.catalog.sources.splice(index + (placement === "before" ? 0 : 1), 0, ...copies);
+    fixture.files.set("catalog.json", new TextEncoder().encode(JSON.stringify(fixture.catalog)));
+
+    const inventory = await readPublicationInventory(fixture.read);
+    const course = planPublication(inventory, { cpr1: "Term 1" }).courses.find(item => item.moduleKey === "cpr1")!;
+    expect(course.sourceIds).toEqual([original.id]);
+    const upload = await publicationJobs(fixture.read, inventory, [course]).jobs[0].prepare();
+    const catalog = JSON.parse(new TextDecoder().decode(upload.files.find(file => file.path === "catalog.json")!.bytes)) as PrivateLibraryCatalog;
+    expect(catalog.sources.map(source => source.id)).toEqual([original.id]);
+    expect(upload.provenance.sourceChecksums).toEqual([original.checksum]);
+    expect(upload.metadata).toMatchObject({ ready_questions: 2, review_questions: 0 });
+  });
+
+  it("rejects an unmarked duplicate source identity before preparing a course", async () => {
+    const fixture = await library();
+    const original = fixture.catalog.sources.find(source => source.name === "cpr1-imcq.pdf")!;
+    const duplicate = fixture.catalog.sources.find(source => source.name === "cpr1-imcq copy.pdf")!;
+    duplicate.id = original.id;
+    duplicate.status = "prepared";
+    duplicate.bankFile = original.bankFile;
+    duplicate.ready = original.ready;
+    duplicate.review = original.review;
+    delete duplicate.duplicateOf;
+    fixture.files.set("catalog.json", new TextEncoder().encode(JSON.stringify(fixture.catalog)));
+
+    const inventory = await readPublicationInventory(fixture.read);
+    const course = planPublication(inventory, { cpr1: "Term 1" }).courses.find(item => item.moduleKey === "cpr1")!;
+    await expect(publicationJobs(fixture.read, inventory, [course]).jobs[0].prepare())
+      .rejects.toThrow(/missing or duplicate source identities/);
+  });
+
+  it("rejects a planned pair with distinct identities but the same checksum", async () => {
+    const fixture = await library();
+    const inventory = await readPublicationInventory(fixture.read);
+    const original = inventory.sources.find(source => source.name === "cpr1-imcq.pdf")!;
+    const duplicate = { ...original, id: "same-bytes-another-id", name: "same-bytes.pdf" };
+    const course = planPublication(inventory, { cpr1: "Term 1" }).courses.find(item => item.moduleKey === "cpr1")!;
+    await expect(publicationJobs(fixture.read, { ...inventory, sources: [...inventory.sources, duplicate] },
+      [{ ...course, sourceIds: [...course.sourceIds, duplicate.id] }]).jobs[0].prepare())
+      .rejects.toThrow(/missing or duplicate source identities/);
+  });
+
+  it("rejects a course whose prepared question totals differ from its unique plan", async () => {
+    const fixture = await library();
+    const inventory = await readPublicationInventory(fixture.read);
+    const course = planPublication(inventory, { cpr1: "Term 1" }).courses.find(item => item.moduleKey === "cpr1")!;
+    await expect(publicationJobs(fixture.read, inventory, [{ ...course, ready: course.ready + 1 }]).jobs[0].prepare())
+      .rejects.toThrow(/question counts differ from its unique planned sources/);
+  });
+
   it("keeps an unsupported bank original local while publishing its questions", async () => {
     const fixture = await library();
     const bank = fixture.catalog.sources.find(source => source.name === "goer-pq.pdf")!;

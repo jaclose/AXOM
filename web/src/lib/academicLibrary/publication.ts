@@ -15,7 +15,7 @@ import type { LibraryInputLimits } from "../privateLibrary/inputRoot";
 import type { PrivateLibraryCatalog, ReviewedFiling } from "../privateLibrary/types";
 import { academicCoursePlan, moduleIdentity, reviewedTermNumber, type AcademicPlanTerm } from "./coursePlan";
 import { compareCourses } from "./catalogOrder";
-import { prepareAcademicUpload } from "./upload";
+import { prepareAcademicUpload, preflightAcademicUpload } from "./upload";
 import type { AcademicBatchJob } from "./batch";
 
 type Term = ReviewedFiling["term"];
@@ -342,17 +342,35 @@ export interface CourseReaderOptions {
 export function courseLibraryReader(read: LibraryReader, inventory: PublicationInventory, course: PlannedCourse,
   options: CourseReaderOptions = {}): LibraryReader {
   const include = options.include ?? (() => true);
-  const sources = inventory.sources.filter(source => course.sourceIds.includes(source.id) && include(source.id))
+  const includedIds = course.sourceIds.filter(include);
+  const ids = new Set(includedIds);
+  if (ids.size !== includedIds.length) throw new Error("The planned course contains duplicate source identities.");
+  const sources = inventory.sources.filter(source => ids.has(source.id)
+    && source.status !== "duplicate-linked" && !source.duplicateOf)
     .sort((left, right) => left.checksum.localeCompare(right.checksum));
+  if (sources.length !== includedIds.length
+    || new Set(sources.map(source => source.id)).size !== sources.length
+    || new Set(sources.map(source => source.checksum)).size !== sources.length)
+    throw new Error("The planned course has missing or duplicate source identities. Review its source filing.");
   let catalog: Uint8Array | undefined;
   return async path => {
     if (safeLibraryPath(path) !== "catalog.json") return read(path);
     if (!catalog) {
       const original = readCatalog(JSON.parse(decode(await read("catalog.json"))));
-      const rows = new Map(original.sources.map(source => [`${source.id}|${source.checksum}`, source]));
+      const rows = new Map<string, CatalogSource>();
+      const checksums = new Set<string>();
+      for (const source of original.sources) {
+        if (!ids.has(source.id) || source.status === "duplicate-linked" || source.duplicateOf) continue;
+        if (rows.has(source.id) || checksums.has(source.checksum))
+          throw new Error("The library contains duplicate source identities. Review its source filing.");
+        rows.set(source.id, source);
+        checksums.add(source.checksum);
+      }
       const selected = sources.map(source => {
-        const row = rows.get(`${source.id}|${source.checksum}`);
-        if (!row) throw new Error("The library changed while publishing. Choose it again and review the plan.");
+        const row = rows.get(source.id);
+        if (!row || row.checksum !== source.checksum || row.name !== source.name || row.status !== source.status
+          || Boolean(row.bankFile) !== source.hasBank)
+          throw new Error("The library changed while publishing. Choose it again and review the plan.");
         const extension = row.originalFile?.split(".").at(-1)?.toLowerCase() ?? "";
         return options.originals === false || (row.originalFile && !UPLOADABLE_ORIGINALS.has(extension))
           ? { ...row, originalFile: undefined } : row;
@@ -391,7 +409,8 @@ export function publicationJobs(read: LibraryReader, inventory: PublicationInven
         const planTerm: AcademicPlanTerm | undefined = course.sections.length && course.termBasis !== "plan"
           ? { term: course.term, evidence: "human-reviewed" } : undefined;
         const optional = new Set(course.optionalSourceIds);
-        const byId = new Map(inventory.sources.map(source => [source.id, source]));
+        const byId = new Map(inventory.sources.filter(source => source.status !== "duplicate-linked" && !source.duplicateOf)
+          .map(source => [source.id, source]));
         const hasHumanReview = course.sourceIds.some(id => {
           const bank = byId.get(id)?.bank;
           return bank && "term" in bank && bank.humanReviewed;
@@ -414,6 +433,9 @@ export function publicationJobs(read: LibraryReader, inventory: PublicationInven
           try {
             const upload = await prepareAcademicUpload(courseLibraryReader(read, inventory, course, stage.options),
               unscheduled, planTerm ? { planTerm } : {});
+            if (upload.metadata.ready_questions !== course.ready || upload.metadata.review_questions !== course.review)
+              throw new Error("The prepared course question counts differ from its unique planned sources. Review duplicate or changed source files.");
+            await preflightAcademicUpload(upload);
             if (stage.kept) notes.keptLocal.set(course.catalogId, stage.kept);
             return upload;
           } catch (cause) {
