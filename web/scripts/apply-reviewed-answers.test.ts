@@ -195,13 +195,13 @@ describe("private reviewed-answer application", () => {
     const { work, root, decisionsPath, decisions, output } = await fixture();
     const catalogPath = join(root, "catalog.json");
     const catalog = JSON.parse(await readFile(catalogPath, "utf8")) as PrivateLibraryCatalog;
-    catalog.sources[1].name = "wrong-source.pdf";
+    catalog.sources[1].ready = 0;
     const bytes = JSON.stringify(catalog);
     await writeFile(catalogPath, bytes);
     decisions.catalogSha256 = sha(bytes);
     await writeFile(decisionsPath, JSON.stringify(decisions));
     await expect(applyReviewedAnswers(root, decisionsPath, output))
-      .rejects.toThrow(/different catalog source/);
+      .rejects.toThrow(/inconsistent question counts/);
     expect((await readdir(work)).some(name => name.startsWith("reviewed.pending-"))).toBe(false);
     await expect(readFile(join(output, "library", "catalog.json"))).rejects.toThrow();
   });
