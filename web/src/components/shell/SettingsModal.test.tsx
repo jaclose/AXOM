@@ -9,6 +9,9 @@ import { makeSeed, SCHEMA_VERSION } from "../../lib/seed";
 import { useStore } from "../../lib/store";
 import { SettingsModal } from "./SettingsModal";
 
+const operatorMocks = vi.hoisted(() => ({ role: null as "owner" | "admin" | "moderator" | null }));
+vi.mock("../../lib/operator/hostClient", () => ({ useOperatorAccess: () => operatorMocks.role }));
+
 const storageValues = new Map<string, string>();
 const storage = {
   get length() { return storageValues.size; },
@@ -20,6 +23,7 @@ const storage = {
 };
 
 beforeEach(() => {
+  operatorMocks.role = null;
   vi.stubGlobal("localStorage", storage);
   localStorage.clear();
   useStore.setState(makeSeed());
@@ -152,6 +156,16 @@ describe("Settings information architecture", () => {
     const accountPanel = screen.getByRole("tabpanel", { name: "Account" });
     expect(within(accountPanel).getByRole("link", { name: "Notifications & communications" }).getAttribute("href")).toBe("#communications");
     expect(within(accountPanel).getByRole("link", { name: "Privacy & data" }).getAttribute("href")).toBe("#privacy");
+    expect(within(accountPanel).queryByRole("link", { name: "Open host dashboard" })).toBeNull();
+  });
+
+  it("shows the Project CEO path only after a verified owner role", () => {
+    operatorMocks.role = "owner";
+    render(<SettingsModal onClose={() => {}} initialTab="account" />);
+    const accountPanel = screen.getByRole("tabpanel", { name: "Account" });
+    const hostAccess = within(accountPanel).getByLabelText("Host access");
+    expect(within(hostAccess).getByText("Project CEO")).toBeTruthy();
+    expect(within(hostAccess).getByRole("link", { name: "Open host dashboard" }).getAttribute("href")).toBe("#host");
   });
 
   it("lets a narrow-screen section picker reach every Settings area", async () => {

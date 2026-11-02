@@ -39,6 +39,7 @@ import { requestOnboardingRerun } from "../../lib/uiStore";
 import { canonicalTimeZone, normalizeClockPreferences, normalizeTimeZonePreference, systemTimeZone } from "../../lib/clock";
 import { normalizeDailyLoopReminderPreferences } from "../../lib/dailyLoopReminders";
 import { AccountSyncPanel } from "./AccountSyncPanel";
+import { useOperatorAccess } from "../../lib/operator/hostClient";
 import { StudyWorkflowSettings } from "./StudyWorkflowSettings";
 import { AppearanceStudio } from "./AppearanceStudio";
 import {
@@ -210,6 +211,7 @@ export async function persistPortableRestore(input: {
 
 export function SettingsModal({ onClose, initialTab = "general" }: { onClose: () => void; initialTab?: SettingsTab }) {
   const store = useStore();
+  const operatorAccess = useOperatorAccess();
   const { profile } = store;
   const fileRef = useRef<HTMLInputElement>(null);
   const mergeRef = useRef<HTMLInputElement>(null);
@@ -412,6 +414,10 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
       {tab === "account" && (
         <section role="tabpanel" id={`${tabsId}-panel-account`} aria-labelledby={`${tabsId}-tab-account`} className="settings-account-panel">
           <AccountSyncPanel onOpenBackup={() => setTab("backup")} />
+          {operatorAccess && <div className="settings-host-access" aria-label="Host access">
+            <div><span>Verified AXOM role</span><strong>{operatorAccess === "owner" ? "Project CEO" : operatorAccess === "admin" ? "Administrator" : "Moderator"}</strong></div>
+            <a href="#host" onClick={onClose}>Open host dashboard</a>
+          </div>}
           <nav className="settings-account-links" aria-label="More account settings">
             <span>Also in AXOM</span>
             <a href="#communications" onClick={onClose}>Notifications & communications</a>
