@@ -5,14 +5,15 @@ authority: current-state
 ---
 # AXOM current AI state
 
-## Checkout and release boundary · 2026-11-02 05:35 UTC
+## Checkout and release boundary · 2026-11-02 06:30 UTC
 
-This handoff was updated from local frontier baseline `33b40800` on
+This handoff was updated from local frontier commit `dfc9070a` on
 `codex/axom-frontier-release-20261101`. Check `git status`, HEAD and the
 coordination board before editing. At this snapshot, remote `main` was
-`bfaf85c5`; [PR #74](https://github.com/jaclose/AXOM/pull/74),
+`ee1c0c2e`; [PR #74](https://github.com/jaclose/AXOM/pull/74),
 [PR #75](https://github.com/jaclose/AXOM/pull/75),
-[PR #76](https://github.com/jaclose/AXOM/pull/76), and
+[PR #76](https://github.com/jaclose/AXOM/pull/76),
+[PR #77](https://github.com/jaclose/AXOM/pull/77), and
 [PR #78](https://github.com/jaclose/AXOM/pull/78) are merged there. The
 frontier's `0.0.3-prebeta` version and [release notes](../CHANGELOG.md) are
 **local release preparation**, with push and production held for JD's follow-up.
@@ -25,8 +26,9 @@ metadata check found one private pending academic collection and zero Community
 submissions; no official academic content was published. The linked check of
 AXOM Production
 (`jofkmfwkidubxcutkwzf`) found its ledger ends at `20261101180000`. The four
-feature migrations (`20261101190000`–`20261101193000`) and forward Host privacy
-migration (`20261102160000`) are **pending in production**. An earlier
+feature migrations (`20261101190000`–`20261101193000`), forward Host privacy
+migration (`20261102160000`) and reviewer queue migration (`20261102170000`)
+are **pending in production**. An earlier
 postflight of 11 new RLS-enabled tables was on separate preview project
 `yfjqsshsaxiggcbvkvnj`; it was not production acceptance. The communications
 migration and Edge function are present in production, but provider mode,
@@ -51,12 +53,21 @@ and [email readiness](operations/communications-readiness.md).
   records private PDF answer-mark **proposals for review**; visual marks do
   not change scoring keys or answer-ready status. Current-revision explanation
   attestation remains required before official academic approval.
+- Scoped local ports from draft PRs #33, #36 and #42 add complete-term course
+  downloads/practice, an ordinary shared-course reviewer queue with exact
+  revision and explanation gates, eligible quiz pool counts/multiple subjects,
+  and preservation of unlocks/blueprint lane across backup merges. The
+  [academic library](features/academic-library.md) owns the review contract;
+  these ports still need the final combined gate and hosted acceptance.
 - [Host](features/community-operator-console.md#operator-console) uses
   server-read roles, reasoned/audited moderation and a restricted report
   queue. Its four feature migrations, forward privacy migration `20261102160000`
   and verified owner provisioning are pending production acceptance.
-  [Communications](features/communications.md) has a canonical renderer plus
-  branded local welcome and product-update drafts and safe diagnostics;
+  [Communications](features/communications.md) has a canonical renderer,
+  local previews, unsent Resend welcome/product-update and Broadcast drafts,
+  ten optional opt-out Topics, and a branded preference page. Their exact
+  [readiness record](operations/communications-readiness.md) distinguishes
+  remote drafts from delivery;
   live Resend send, webhook, SMTP and email-client acceptance remain separate
   gates.
 
@@ -89,10 +100,11 @@ contains private assets and broad replacement/deletion. Check the
 before shared edits. Historic receipts remain in Git history; do not reload
 them at startup without a specific question.
 
-The combined frontier gate through `bc685acc` passed typecheck, lint,
-repository tests, build and targeted desktop/mobile browser checks. Since then,
-Node 22.23.4, dependency fixes, QBank PRs and release UI edits were integrated;
-88 release tests and targeted link/Host/Community checks pass, but a final
-combined gate is still required. Keep the remote release held until JD's
+The combined frontier gate before the three draft ports passed 4,424 web tests,
+typecheck, lint, 88 release tests, repository tests, build and targeted
+desktop/mobile browser checks. The #33/#36/#42 ports passed focused tests,
+typecheck and scoped lint in isolated worktrees; #33 and #42 passed targeted
+browser journeys. A final combined gate, including #36's new browser path,
+is still required. Keep the remote release held until JD's
 explicit follow-up; production migrations, owner grant, live mail delivery,
 and real-account Community/Host acceptance remain separate checks.
