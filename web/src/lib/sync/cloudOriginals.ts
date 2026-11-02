@@ -10,6 +10,10 @@ import { RESUMABLE_CHUNK_BYTES, uploadResumableObject, type ResumableStorageConf
 
 export const ORIGINALS_BUCKET = "workspace-originals";
 export type ResumableOriginalUpload = ResumableStorageConfig;
+const ORIGINAL_UPLOAD_CONCURRENCY = 3;
+const verifiedOriginalUploads = new Map<string, Set<string>>();
+export function clearCloudOriginalUploadCache(): void { verifiedOriginalUploads.clear(); }
+const originalIdentityKey = (identity: NonNullable<ReturnType<typeof readOriginalFile>>) => `${identity.sha256}:${identity.byteSize}:${identity.mimeType}`;
 
 /** Source identity is part of the normal document metadata. Files live once per
  * account/hash, outside checkpoints, and are acknowledged before the revision. */
@@ -20,16 +24,39 @@ export async function uploadCloudOriginals(client: SupabaseClient, userId: strin
     return file ? [[file.sha256, file] as const] : [];
   }));
   const bucket = client.storage.from(ORIGINALS_BUCKET);
+  const verified = verifiedOriginalUploads.get(userId) ?? new Set<string>();
+  verifiedOriginalUploads.set(userId, verified);
   const ensureCurrent = async () => {
     if (signal?.aborted) throw new DOMException("The original upload was cancelled. The local file is unchanged.", "AbortError");
     await assertCurrent();
     if (signal?.aborted) throw new DOMException("The original upload was cancelled. The local file is unchanged.", "AbortError");
   };
+  const pending = new Map<string, { document: SourceDocument; identity: NonNullable<ReturnType<typeof readOriginalFile>> }>();
   for (const document of contentMetadata(state).documents) {
     const identity = readOriginalFile(document);
     if (!identity) continue; // Legacy text-only records make no original-file claim.
     const previousFile = known.get(identity.sha256);
     if (previousFile?.byteSize === identity.byteSize && previousFile.mimeType === identity.mimeType) continue;
+    const key = originalIdentityKey(identity);
+    if (verified.has(key)) continue;
+    if (!pending.has(key)) pending.set(key, { document, identity });
+  }
+  const entries = [...pending.values()];
+  let cursor = 0;
+  let failed = false;
+  let failure: unknown;
+  async function worker(): Promise<void> {
+    while (cursor < entries.length && !failed) {
+      const { document, identity } = entries[cursor++];
+      try {
+        await uploadOne(document, identity);
+      } catch (error) {
+        failed = true;
+        failure = error;
+      }
+    }
+  }
+  async function uploadOne(document: SourceDocument, identity: NonNullable<ReturnType<typeof readOriginalFile>>): Promise<void> {
     await ensureCurrent();
     const original = await readSourceOriginal(document.id, identity.sha256);
     if (!original || original.size !== identity.byteSize) throw new SyncPushError(
@@ -63,8 +90,12 @@ export async function uploadCloudOriginals(client: SupabaseClient, userId: strin
         || String(uploadFailure.statusCode) !== "409")) throw uploadFailure;
       throw new Error("The original-file upload could not be verified on the server. Your local copy is safe; reconnect and retry.");
     }
-    await ensureCurrent(); known.set(identity.sha256, identity);
+    await ensureCurrent();
+    verified.add(originalIdentityKey(identity));
   }
+  await Promise.all(Array.from({ length: Math.min(ORIGINAL_UPLOAD_CONCURRENCY, entries.length) }, worker));
+  if (failed) throw failure;
+  await ensureCurrent();
 }
 
 /** Repair a vanished previously acknowledged original without downloading all
@@ -113,6 +144,7 @@ export async function repairMissingCloudOriginals(
         "A previously protected original is missing from cloud Storage and this device. Restore the exact source from a verified backup before retrying cloud protection.",
       );
     }
+    verifiedOriginalUploads.get(userId)?.delete(originalIdentityKey(identity));
     await uploadCloudOriginals(client, userId, { ...state, documents: [local] }, undefined, assertCurrent, resumable);
     repaired += 1;
   }

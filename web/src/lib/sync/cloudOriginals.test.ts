@@ -6,7 +6,7 @@ import type { SourceDocument } from "../library";
 import { sha256Hex } from "../checksum";
 import { saveSourceOriginal, readSourceOriginal, deleteSourceOriginal } from "../decode/sources";
 import { readOriginalFile } from "../sourceOriginal";
-import { ORIGINALS_BUCKET, downloadCloudOriginal, repairMissingCloudOriginals, uploadCloudOriginals } from "./cloudOriginals";
+import { ORIGINALS_BUCKET, clearCloudOriginalUploadCache, downloadCloudOriginal, repairMissingCloudOriginals, uploadCloudOriginals } from "./cloudOriginals";
 import { makeSeed } from "../seed";
 
 const mock = vi.hoisted(() => ({
@@ -41,12 +41,13 @@ vi.mock("tus-js-client", () => ({
   },
 }));
 
-const upload = vi.fn(async (bucket: string, path: string, blob: Blob) => {
+const defaultUpload = async (bucket: string, path: string, blob: Blob) => {
   const key = `${bucket}/${path}`;
   if (mock.blobs.has(key)) return { error: { statusCode: "409" } };
   mock.blobs.set(key, blob);
   return { error: null };
-});
+};
+const upload = vi.fn(defaultUpload);
 const download = vi.fn(async (bucket: string, path: string) => {
   const data = mock.blobs.get(`${bucket}/${path}`) ?? null;
   return { data, error: data ? null : { statusCode: "404" } };
@@ -81,13 +82,52 @@ async function source(bytes: Blob, id = crypto.randomUUID()) {
 }
 
 beforeEach(() => {
+  clearCloudOriginalUploadCache();
   vi.stubGlobal("indexedDB", indexedDB);
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
   mock.blobs.clear(); mock.resumableUploads = 0; mock.resumed = false; mock.failTus = false; mock.pauseTus = false; mock.aborted = 0; mock.prior = [];
-  guard.mockClear(); upload.mockClear(); download.mockClear(); info.mockClear();
+  guard.mockClear(); upload.mockReset(); upload.mockImplementation(defaultUpload); download.mockClear(); info.mockClear();
 });
 
 describe("immutable private original-file cloud storage", () => {
+  it("bounds parallel original transfers and verifies every object before returning", async () => {
+    const first = await source(new Blob(["source zero"]));
+    const state = first.state;
+    for (let index = 1; index < 5; index += 1) {
+      state.documents.push((await source(new Blob([`source ${index}`]))).doc);
+    }
+    let active = 0;
+    let peak = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    upload.mockImplementation(async (bucket, path, blob) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await gate;
+      mock.blobs.set(`${bucket}/${path}`, blob);
+      active -= 1;
+      return { error: null };
+    });
+    const pending = uploadCloudOriginals(client, "owner", state, undefined, guard);
+    await vi.waitFor(() => expect(active).toBe(3));
+    release();
+    await pending;
+    expect(peak).toBe(3);
+    expect(upload).toHaveBeenCalledTimes(5);
+    expect(download).toHaveBeenCalledTimes(5);
+  });
+
+  it("reuses only account-scoped readback-verified originals across retries", async () => {
+    const { state } = await source(new Blob(["private source"]));
+    await uploadCloudOriginals(client, "owner", state, undefined, guard);
+    await uploadCloudOriginals(client, "owner", state, undefined, guard);
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(download).toHaveBeenCalledTimes(1);
+    await uploadCloudOriginals(client, "other-owner", state, undefined, guard);
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(download).toHaveBeenCalledTimes(2);
+  });
+
   it("uploads once per account/hash, verifies server bytes and skips acknowledged originals on replay", async () => {
     const { doc, state } = await source(new Blob(["exact document bytes"], { type: "application/pdf" }));
     state.documents.push({ ...doc, id: crypto.randomUUID() });
