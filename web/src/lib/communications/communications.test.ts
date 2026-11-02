@@ -93,6 +93,12 @@ describe("React email rendering", () => {
   it("escapes author text and forbids unsafe links", () => {
     const email = renderAxomEmail({ type: "essay", context, baseUrl: "https://axom.info", editorial: { title: "{{firstName}} <script>alert(1)</script>", excerpt: '"<img onerror=alert(1)>', url: "javascript:alert(1)" } }); expect(email.html).toContain("Alex &lt;script&gt;"); expect(email.html).not.toContain('href="javascript:'); expect(email.html).toContain("Manage preferences");
   });
+  it("labels a product-update masthead for the product rather than essays", () => {
+    const email = renderAxomEmail({ type: "product_update", context, baseUrl: "https://axom.info", editorial: { title: "A clearer place for the work.", excerpt: "A local release preview.", url: "https://axom.info/#patch-notes" } });
+    expect(email.html).toContain("PRODUCT UPDATES");
+    expect(email.html).not.toContain("ESSAYS &amp; IDEAS");
+    expect(email.category).toBe("product_updates");
+  });
   it("keeps report actions and text isolated from unrelated editorial/game context", () => {
     const email = renderAxomEmail({ type: "pulse", baseUrl: "https://axom.info", context: { ...context, games: [{ name: "Unrelated game", url: "https://axom.info/#daily-word", detail: "A case" }] }, editorial: { title: "Unrelated essay", subject: "Unrelated subject", excerpt: "A note", url: "https://axom.info/#essay", cta: "Read essay" } });
     expect(email.subject).toContain("AXOM Pulse"); expect(email.html).toContain("Open My Pulse");

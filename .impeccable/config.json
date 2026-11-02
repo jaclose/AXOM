@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "web/src/lib/communications/communications.test.ts"
+        ],
+        "createdAt": "2026-11-02T05:23:15.132Z",
+        "reason": "Synthetic hostile HTML fixture in a security escaping test; it is never rendered as an image."
+      }
+    ]
+  }
+}
