@@ -22,6 +22,9 @@ for (const width of [1440,390]) test(`one catalog links QBank to course weeks, i
   const plan = page.getByRole("region", { name: "GOER course plan" });
   await expect(plan).toBeVisible();
   await page.screenshot({ path: `/tmp/axom-unified-plan-${width}.png`, fullPage: true });
+  await plan.getByRole("checkbox", { name: "Week 2", exact: true }).scrollIntoViewIfNeeded();
+  expect(await plan.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.screenshot({ path: `/tmp/axom-unified-week-plan-${width}.png` });
   await plan.getByRole("button", { name: "Clear selection", exact: true }).click();
   await expect(plan.getByRole("button", { name: "Load Course", exact: true })).toBeDisabled();
   await expect(plan.getByRole("button", { name: "Create Quiz", exact: true })).toBeDisabled();

@@ -4,6 +4,7 @@ import { STORAGE_KEYS } from "../brand";
 
 /** One handoff identity and size contract for curriculum and QBank. */
 export const COURSE_QUIZ_LAUNCH_KEY = "axom.courseQuizLaunch.v1";
+export const COURSE_QUIZ_LAUNCH_EVENT = "axom:course-quiz-launch";
 export const MAX_COURSE_QUIZ_QUESTIONS = 2000;
 export interface CourseQuizLaunch {
   module: string;
@@ -39,7 +40,11 @@ export function launchCourseQuiz(selection: CourseQuizLaunch): void {
   const active = JSON.parse(localStorage.getItem(STORAGE_KEYS.quizActiveSession) ?? "null") as { poolIds?: unknown[] } | null;
   if (active?.poolIds?.length) throw new Error("Resume or finish your current quiz in Question Bank before starting another.");
   sessionStorage.setItem(COURSE_QUIZ_LAUNCH_KEY, JSON.stringify(selection));
+  const alreadyInQuestionBank = location.hash === "#questions";
   location.hash = "questions";
+  // A same-route launch does not emit hashchange, so the mounted page needs a
+  // fresh read of the exact handoff stored above.
+  if (alreadyInQuestionBank) window.dispatchEvent(new Event(COURSE_QUIZ_LAUNCH_EVENT));
 }
 
 /** Reading is pure so React's repeated initializers cannot consume the request. */
