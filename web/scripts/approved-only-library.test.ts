@@ -346,6 +346,33 @@ describe("approved-only private candidate", () => {
     expect(receipt.blockedSources).toMatchObject([{ sourceId: catalog.sources[0].id, reason: "A bank names a different catalog source file." }]);
   });
 
+  it.each(["template", "receipt"])("leaves an existing %s file intact without writing its paired file", async existing => {
+    const { root, work, catalog } = await fixture();
+    catalog.sources[0].name = "other.pdf";
+    await writeFile(join(root, "catalog.json"), JSON.stringify(catalog));
+    const template = join(work, "new-decisions.json");
+    const receipt = `${template}.blocked-sources.json`;
+    const existingFile = existing === "template" ? template : receipt;
+    const pairedFile = existing === "template" ? receipt : template;
+    await writeFile(existingFile, "existing owner file");
+    await expect(createApprovalTemplate(root, template)).rejects.toThrow(/already exists/);
+    expect(await readFile(existingFile, "utf8")).toBe("existing owner file");
+    await expect(readFile(pairedFile)).rejects.toThrow();
+  });
+
+  it("removes its own partial blocker receipt if writing fails", async () => {
+    const { root, work, catalog } = await fixture();
+    catalog.sources[0].name = "other.pdf";
+    await writeFile(join(root, "catalog.json"), JSON.stringify(catalog));
+    const template = join(work, "new-decisions.json");
+    await expect(createApprovalTemplate(root, template, { writeBlockedReceipt: async file => {
+      await file.writeFile("partial receipt");
+      throw Object.assign(new Error("synthetic disk full"), { code: "ENOSPC" });
+    } })).rejects.toThrow(/synthetic disk full/);
+    await expect(readFile(template)).rejects.toThrow();
+    await expect(readFile(`${template}.blocked-sources.json`)).rejects.toThrow();
+  });
+
   it("emits pending decisions for 857 valid banks and separately binds two source-identity blockers", async () => {
     const { root, work, bank, catalog, output } = await fixture();
     for (let index = 1; index <= 858; index++) await appendSyntheticBank(root, catalog, bank, index, index > 856);
@@ -365,11 +392,35 @@ describe("approved-only private candidate", () => {
       && !row.reviewer && !row.reviewedAt)).toBe(true);
     expect(receipt).toMatchObject({ format: "axom-approved-template-blockers", catalogSha256: sha(catalogBytes) });
     expect(receipt.blockedSources).toHaveLength(2);
+    expect(receipt.unreviewableSources).toHaveLength(0);
+    expect(receipt.totals).toMatchObject({ pendingQuestionRows: 857 * 2, identityBlockedDeclared: 4,
+      declaredBeyondRaw: 0, filteredOnReadback: 0 });
     expect(receipt.blockedSources.every((row: { sourceChecksum: string; bankSha256: string; reason: string }) =>
       /^[a-f0-9]{64}$/.test(row.sourceChecksum) && /^[a-f0-9]{64}$/.test(row.bankSha256)
       && /different catalog source/.test(row.reason))).toBe(true);
     await expect(readdir(output)).rejects.toThrow();
   }, 30_000);
+
+  it("accounts for declared unreadable rows and raw rows filtered during readback", async () => {
+    const { root, work, bank, catalog, output } = await fixture();
+    bank.pkg.questions.push({ ...structuredClone(bank.pkg.questions[0]), id: "unparsed", stem: [] });
+    bank.unreadableQuestions = 1;
+    catalog.sources[0].status = "review-required";
+    catalog.sources[0].review = 3;
+    await writeFile(join(root, catalog.sources[0].bankFile!), JSON.stringify(bank));
+    await writeFile(join(root, "catalog.json"), JSON.stringify(catalog));
+    const decisionsFile = join(work, "unreviewable-decisions.json");
+    await expect(createApprovalTemplate(root, decisionsFile)).resolves.toMatchObject({ records: 2,
+      blockedSources: 0, unreviewableRows: 2 });
+    const receipt = JSON.parse(await readFile(`${decisionsFile}.blocked-sources.json`, "utf8"));
+    expect(receipt).toMatchObject({ schemaVersion: 2, totals: { catalogDeclared: 4,
+      identityBlockedDeclared: 0, pendingQuestionRows: 2, declaredBeyondRaw: 1, filteredOnReadback: 1 },
+    unreviewableSources: [{ sourceId: catalog.sources[0].id, catalogDeclared: 4,
+      rawQuestionRows: 3, parsedQuestionRows: 2, preexistingUnreadable: 1,
+      declaredBeyondRaw: 1, filteredOnReadback: 1 }] });
+    await expect(createApprovedOnlyLibrary(root, decisionsFile, output)).rejects.toThrow(/No explicitly approved questions/);
+    await expect(readdir(output)).rejects.toThrow();
+  });
 
   it("rejects blocked-source decisions and stale catalog, decision, or blocker receipt", async () => {
     const { root, work, bank, catalog, payload, output } = await fixture();

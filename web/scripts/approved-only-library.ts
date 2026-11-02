@@ -1,7 +1,8 @@
 /** A private, fail-closed bridge from explicit owner review to a shareable candidate. */
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { chmod, copyFile, lstat, mkdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, open, readFile, realpath, rename, stat, unlink, writeFile,
+  type FileHandle } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { assessBank } from "../src/lib/question-content/assessBank";
 import { blocksToPlainText, type QuestionBlock } from "../src/lib/question-content/blocks";
@@ -58,11 +59,27 @@ interface BlockedSource {
   reason: string;
 }
 
+interface UnreviewableSource {
+  sourceId: string;
+  sourceChecksum: string;
+  bankSha256: string;
+  status: PrivateLibraryCatalog["sources"][number]["status"];
+  catalogDeclared: number;
+  rawQuestionRows: number;
+  parsedQuestionRows: number;
+  preexistingUnreadable: number;
+  declaredBeyondRaw: number;
+  filteredOnReadback: number;
+}
+
 interface BlockedSourcesReceipt {
   format: "axom-approved-template-blockers";
-  schemaVersion: 1;
+  schemaVersion: 2;
   catalogSha256: string;
   blockedSources: BlockedSource[];
+  unreviewableSources: UnreviewableSource[];
+  totals: { catalogDeclared: number; identityBlockedDeclared: number; pendingQuestionRows: number;
+    declaredBeyondRaw: number; filteredOnReadback: number };
 }
 
 function fail(message: string): never { throw new Error(message); }
@@ -332,8 +349,11 @@ function canonicalBankSources(catalog: PrivateLibraryCatalog): Map<string, Priva
 
 function readBlockedSourcesReceipt(value: unknown): BlockedSourcesReceipt {
   const receipt = value as BlockedSourcesReceipt | undefined;
-  if (!receipt || receipt.format !== "axom-approved-template-blockers" || receipt.schemaVersion !== 1
-    || !HEX.test(receipt.catalogSha256) || !Array.isArray(receipt.blockedSources) || !receipt.blockedSources.length)
+  if (!receipt || receipt.format !== "axom-approved-template-blockers" || receipt.schemaVersion !== 2
+    || !HEX.test(receipt.catalogSha256) || !Array.isArray(receipt.blockedSources)
+    || !Array.isArray(receipt.unreviewableSources)
+    || !receipt.blockedSources.length && !receipt.unreviewableSources.length
+    || !receipt.totals || !Object.values(receipt.totals).every(value => Number.isSafeInteger(value) && value >= 0))
     fail("The blocked-source receipt is invalid.");
   const seen = new Set<string>();
   for (const item of receipt.blockedSources) {
@@ -342,31 +362,92 @@ function readBlockedSourcesReceipt(value: unknown): BlockedSourcesReceipt {
       || seen.has(item.sourceId)) fail("The blocked-source receipt has an invalid source identity.");
     seen.add(item.sourceId);
   }
+  for (const item of receipt.unreviewableSources) {
+    if (!item || !item.sourceId || !HEX.test(item.sourceChecksum) || !HEX.test(item.bankSha256)
+      || ![item.catalogDeclared, item.rawQuestionRows, item.parsedQuestionRows, item.preexistingUnreadable,
+        item.declaredBeyondRaw, item.filteredOnReadback].every(value => Number.isSafeInteger(value) && value >= 0)
+      || item.catalogDeclared - item.rawQuestionRows !== item.declaredBeyondRaw
+      || item.rawQuestionRows - item.parsedQuestionRows !== item.filteredOnReadback
+      || seen.has(item.sourceId)) fail("The blocked-source receipt has invalid unreviewable counts.");
+    seen.add(item.sourceId);
+  }
+  if (receipt.totals.catalogDeclared !== receipt.totals.identityBlockedDeclared + receipt.totals.pendingQuestionRows
+    + receipt.totals.declaredBeyondRaw + receipt.totals.filteredOnReadback)
+    fail("The blocked-source receipt does not reconcile its question counts.");
+  if (receipt.totals.declaredBeyondRaw !== receipt.unreviewableSources.reduce((count, item) => count + item.declaredBeyondRaw, 0)
+    || receipt.totals.filteredOnReadback !== receipt.unreviewableSources.reduce((count, item) => count + item.filteredOnReadback, 0))
+    fail("The blocked-source receipt has inconsistent unreviewable totals.");
   return receipt;
 }
 
+async function unlinkIfSameFile(path: string, created: { dev: number; ino: number }) {
+  try {
+    const current = await lstat(path);
+    if (current.dev === created.dev && current.ino === created.ino) await unlink(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+async function writeFreshPrivateFile(path: string, contents: string,
+  writer: (file: FileHandle, value: string) => Promise<void> = (file, value) => file.writeFile(value)) {
+  const file = await open(path, "wx", 0o600);
+  const created = await file.stat();
+  try { await writer(file, contents); await file.close(); return created; }
+  catch (error) {
+    await file.close().catch(() => undefined);
+    await unlinkIfSameFile(path, created);
+    throw error;
+  }
+}
+
 /** Generate a metadata-only, all-pending template. A person must inspect sources before approval. */
-export async function createApprovalTemplate(preparedRoot: string, destination: string): Promise<{
-  records: number; blockedSources: number; blockedReceiptPath?: string }> {
+export async function createApprovalTemplate(preparedRoot: string, destination: string,
+  options: { writeBlockedReceipt?: (file: FileHandle, value: string) => Promise<void> } = {}): Promise<{
+  records: number; blockedSources: number; unreviewableRows: number; blockedReceiptPath?: string }> {
   const root = await privateRoot(preparedRoot);
   const target = await assertOutsideRepo(destination);
   if (target === root || target.startsWith(`${root}${sep}`)) fail("Review decisions must be outside the prepared library.");
+  const blockedReceiptPath = `${target}.blocked-sources.json`;
+  for (const path of [target, blockedReceiptPath]) {
+    try { await lstat(path); fail("A review template or blocker receipt already exists."); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  }
   const catalogBytes = await readFile(await inside(root, "catalog.json"));
   const catalog = readCatalog(JSON.parse(catalogBytes.toString("utf8")));
+  const sources = canonicalBankSources(catalog);
+  const active = new Set(sources.values());
+  if (catalog.sources.some(source => !active.has(source) && source.ready + source.review > 0))
+    fail("A non-bank or duplicate-linked source claims question rows. Reconcile the catalog before review.");
   const records: ApprovalRecord[] = [];
   const blockedSources: BlockedSource[] = [];
-  for (const source of canonicalBankSources(catalog).values()) {
+  const unreviewableSources: UnreviewableSource[] = [];
+  let identityBlockedDeclared = 0;
+  for (const source of sources.values()) {
     if (!source.bankFile) fail("A canonical source lacks a bank.");
     const bankBytes = await readFile(await inside(root, source.bankFile));
     const bankSha256 = sha(bankBytes);
-    const bank = readPreparedBank(JSON.parse(bankBytes.toString("utf8")));
+    const rawBank = JSON.parse(bankBytes.toString("utf8")) as PreparedBank;
+    const rawQuestionRows = rawBank.pkg?.questions?.length ?? 0;
+    const preexistingUnreadable = rawBank.unreadableQuestions ?? 0;
+    if (!Number.isSafeInteger(preexistingUnreadable) || preexistingUnreadable < 0
+      || source.ready + source.review < rawQuestionRows)
+      fail("A prepared bank has inconsistent question counts. Reconcile it before review.");
+    const bank = readPreparedBank(rawBank);
+    const parsedQuestionRows = bank.pkg.questions.length;
     try { assertSourceIdentity(source, bank); }
     catch (error) {
       if (!(error instanceof SourceIdentityMismatch)) throw error;
       blockedSources.push({ sourceId: source.id, sourceChecksum: source.checksum, bankSha256,
         catalogName: source.name, bankSourceName: bank.pkg.manifest.source.filename, reason: error.message });
+      identityBlockedDeclared += source.ready + source.review;
       continue;
     }
+    const declaredBeyondRaw = source.ready + source.review - rawQuestionRows;
+    const filteredOnReadback = rawQuestionRows - parsedQuestionRows;
+    if (declaredBeyondRaw || filteredOnReadback) unreviewableSources.push({ sourceId: source.id,
+      sourceChecksum: source.checksum, bankSha256, status: source.status,
+      catalogDeclared: source.ready + source.review, rawQuestionRows, parsedQuestionRows,
+      preexistingUnreadable, declaredBeyondRaw, filteredOnReadback });
     for (const question of bank.pkg.questions) records.push({ sourceId: source.id, sourceChecksum: source.checksum,
       bankSha256, questionId: question.id, ...questionApprovalHashes(question), status: "pending",
       sourceChecked: false, filingChecked: false, weekChecked: false, weekEvidence: "",
@@ -375,19 +456,31 @@ export async function createApprovalTemplate(preparedRoot: string, destination: 
   }
   records.sort((a, b) => a.sourceId.localeCompare(b.sourceId) || a.questionId.localeCompare(b.questionId));
   const catalogSha256 = sha(catalogBytes);
+  const totals: BlockedSourcesReceipt["totals"] = {
+    catalogDeclared: [...sources.values()].reduce((count, source) => count + source.ready + source.review, 0),
+    identityBlockedDeclared, pendingQuestionRows: records.length,
+    declaredBeyondRaw: unreviewableSources.reduce((count, source) => count + source.declaredBeyondRaw, 0),
+    filteredOnReadback: unreviewableSources.reduce((count, source) => count + source.filteredOnReadback, 0),
+  };
+  if (totals.catalogDeclared !== totals.identityBlockedDeclared + totals.pendingQuestionRows
+    + totals.declaredBeyondRaw + totals.filteredOnReadback)
+    fail("The review template did not account for every declared question row.");
   let blockedSourcesReceiptSha256: string | undefined;
-  if (blockedSources.length) {
-    const receipt: BlockedSourcesReceipt = { format: "axom-approved-template-blockers", schemaVersion: 1,
-      catalogSha256, blockedSources };
-    const receiptBytes = JSON.stringify(receipt, null, 2);
-    await writeFile(`${target}.blocked-sources.json`, receiptBytes, { flag: "wx", mode: 0o600 });
+  let receiptBytes: string | undefined;
+  if (blockedSources.length || unreviewableSources.length) {
+    const receipt: BlockedSourcesReceipt = { format: "axom-approved-template-blockers", schemaVersion: 2,
+      catalogSha256, blockedSources, unreviewableSources, totals };
+    receiptBytes = JSON.stringify(receipt, null, 2);
     blockedSourcesReceiptSha256 = sha(receiptBytes);
   }
   const value: ApprovalDecisions = { format: FORMAT, schemaVersion: 1, catalogSha256,
     ...(blockedSourcesReceiptSha256 ? { blockedSourcesReceiptSha256 } : {}), records };
-  await writeFile(target, JSON.stringify(value, null, 2), { flag: "wx", mode: 0o600 });
+  const writtenTemplate = await writeFreshPrivateFile(target, JSON.stringify(value, null, 2));
+  try { if (receiptBytes) await writeFreshPrivateFile(blockedReceiptPath, receiptBytes, options.writeBlockedReceipt); }
+  catch (error) { await unlinkIfSameFile(target, writtenTemplate); throw error; }
   return { records: records.length, blockedSources: blockedSources.length,
-    ...(blockedSources.length ? { blockedReceiptPath: `${target}.blocked-sources.json` } : {}) };
+    unreviewableRows: totals.declaredBeyondRaw + totals.filteredOnReadback,
+    ...(receiptBytes ? { blockedReceiptPath } : {}) };
 }
 
 /** Never mutates the prepared library. The output contains approved question rows only. */
@@ -418,6 +511,20 @@ export async function createApprovedOnlyLibrary(preparedRoot: string, decisionsF
       if (decisions.records.some(row => row.sourceId === item.sourceId))
         fail("A review decision names a source with unresolved source identity.");
     }
+    for (const item of receipt.unreviewableSources) {
+      const source = sourcesById.get(item.sourceId);
+      if (!source?.bankFile || source.checksum !== item.sourceChecksum || source.status !== item.status
+        || source.ready + source.review !== item.catalogDeclared)
+        fail("An unreviewable source changed since template creation.");
+      const bankBytes = await readFile(await inside(root, source.bankFile));
+      const rawBank = JSON.parse(bankBytes.toString("utf8")) as PreparedBank;
+      if (sha(bankBytes) !== item.bankSha256 || rawBank.pkg?.questions?.length !== item.rawQuestionRows
+        || (rawBank.unreadableQuestions ?? 0) !== item.preexistingUnreadable
+        || readPreparedBank(rawBank).pkg.questions.length !== item.parsedQuestionRows)
+        fail("An unreviewable bank changed since template creation.");
+    }
+    if (receipt.totals.pendingQuestionRows !== decisions.records.length)
+      fail("The review decisions no longer account for every pending question row.");
   }
   const approved = decisions.records.filter(row => row.status === "approved");
   if (!approved.length) fail("No explicitly approved questions are in this review file. Nothing was written.");
