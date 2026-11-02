@@ -25,7 +25,7 @@ const FILES = [
 
 async function openQueue(page: Page) {
   await page.goto("/#questions");
-  await page.getByRole("button", { name: "Add your own material", exact: true }).click();
+  await page.getByRole("tab", { name: /^Add(?: material)?$/ }).click();
   await page.getByRole("button", { name: "High-volume batch queue", exact: true }).click();
 }
 
