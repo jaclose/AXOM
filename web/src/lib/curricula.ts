@@ -4,6 +4,7 @@
 // in one place. Templates never carry example tracker rows: a new student's
 // tracker should show their own work, not ours.
 import type { Course, Term, TrackerItem } from "./types";
+import { canonicalModuleKey, moduleKey } from "./course-engine/vocabulary";
 
 export interface CurriculumCourse {
   code: string;
@@ -69,6 +70,85 @@ export function buildCurriculum(template: CurriculumTemplate): { terms: Term[]; 
     modules: course.modules.map((name) => ({ id: newId("module"), name })),
   })));
   return { terms, courses };
+}
+
+export interface CurriculumMergeCounts { terms: number; courses: number; modules: number }
+
+const curriculumTermKey = (name: string): string => {
+  const match = name.trim().match(/^(?:t|term)\s*0*(\d{1,2})$/i);
+  return match ? `term${Number(match[1])}` : moduleKey(name);
+};
+
+const curriculumCourseKey = (code: string): string =>
+  moduleKey(code.replace(/^\s*\d{1,2}\s+(?=[a-z])/i, ""));
+
+/** Add missing template shells while leaving every saved term, course, module and field intact. */
+export function mergeCurriculumMap(
+  existing: { terms: Term[]; courses: Course[] }, template: CurriculumTemplate,
+): { terms: Term[]; courses: Course[]; added: CurriculumMergeCounts } {
+  const terms = [...existing.terms];
+  const courses = [...existing.courses];
+  const added = { terms: 0, courses: 0, modules: 0 };
+  const ids = new Set([
+    ...terms.map(term => term.id), ...courses.map(course => course.id),
+    ...courses.flatMap(course => course.modules.map(module => module.id)),
+  ]);
+  const id = (kind: string, parts: string[]): string => {
+    const base = `${kind}-${moduleKey(template.id)}-${parts.join("-")}`;
+    let candidate = base;
+    for (let copy = 2; ids.has(candidate); copy += 1) candidate = `${base}-${copy}`;
+    ids.add(candidate);
+    return candidate;
+  };
+
+  for (const termDef of template.terms) {
+    const termKey = curriculumTermKey(termDef.name);
+    let matches = terms.filter(term => curriculumTermKey(term.name) === termKey);
+    if (!matches.length) {
+      const term = { id: id("term", [termKey]), name: termDef.name };
+      terms.push(term);
+      matches = [term];
+      added.terms += 1;
+    }
+    const termIds = new Set(matches.map(term => term.id));
+    for (const courseDef of termDef.courses) {
+      const codeKey = curriculumCourseKey(courseDef.code);
+      const matchingIndexes = courses.flatMap((course, index) =>
+        termIds.has(course.termId) && curriculumCourseKey(course.code) === codeKey ? [index] : []);
+      if (!matchingIndexes.length) {
+        courses.push({
+          id: id("course", [termKey, codeKey]), termId: matches[0].id,
+          code: courseDef.code, name: courseDef.name, files: 0,
+          modules: courseDef.modules.map(name => ({
+            id: id("module", [termKey, codeKey, canonicalModuleKey(name)]), name,
+          })),
+        });
+        added.courses += 1;
+        added.modules += courseDef.modules.length;
+        continue;
+      }
+      const present = new Set(matchingIndexes.flatMap(index =>
+        courses[index].modules.map(module => canonicalModuleKey(module.name))));
+      const missing = courseDef.modules.filter(name => {
+        const key = canonicalModuleKey(name);
+        if (present.has(key)) return false;
+        present.add(key);
+        return true;
+      });
+      if (!missing.length) continue;
+      const index = matchingIndexes[0];
+      courses[index] = { ...courses[index], modules: [
+        ...courses[index].modules,
+        ...missing.map(name => ({ id: id("module", [termKey, codeKey, canonicalModuleKey(name)]), name })),
+      ] };
+      added.modules += missing.length;
+    }
+  }
+  return {
+    terms: added.terms ? terms : existing.terms,
+    courses: added.courses || added.modules ? courses : existing.courses,
+    added,
+  };
 }
 
 /** Seed examples (label starts with "Example") make way for a real structure. */
