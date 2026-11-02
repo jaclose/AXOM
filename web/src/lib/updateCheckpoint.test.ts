@@ -93,6 +93,26 @@ describe("pre-update workspace checkpoint", () => {
     await expect(createUpdateCheckpoint(false)).rejects.toThrow("Could not verify");
   });
 
+  it("allows a web refresh after quota blocks only the extra snapshot and saved data verifies", async () => {
+    const originalSetItem = localStorage.setItem.bind(localStorage);
+    vi.spyOn(localStorage, "setItem").mockImplementation((key, value) => {
+      if (key.startsWith(STORAGE_KEYS.localBackupPrefix)) {
+        throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+      }
+      originalSetItem(key, value);
+    });
+    vi.stubGlobal("indexedDB", undefined);
+
+    await expect(createUpdateCheckpoint(false)).rejects.toMatchObject({
+      name: "RecoverySnapshotQuotaError",
+      canContinueWithoutRecoverySnapshot: true,
+    });
+    const persisted = JSON.stringify({ state: runtime.state, version: 32 });
+    expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBe(persisted);
+    await expect(createUpdateCheckpoint(false, { skipRecoverySnapshot: true })).resolves.toBe("verified-persisted-state");
+    expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBe(persisted);
+  });
+
   it("keeps a full verified fallback snapshot when IndexedDB is unavailable", async () => {
     vi.stubGlobal("indexedDB", undefined);
     const key = await createUpdateCheckpoint(false);

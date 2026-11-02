@@ -9,7 +9,7 @@ import { isChunkLoadError } from "../../lib/chunkErrors";
 export { isChunkLoadError };
 
 type Props = { children: ReactNode; onHome: () => void };
-type State = { error: Error | null; saving?: boolean; recoveryError?: string };
+type State = { error: Error | null; saving?: boolean; recoveryError?: string; canContinueWithoutRecoverySnapshot?: boolean };
 
 /**
  * Keeps a failed screen inside the shell. The sidebar, focus dock and a
@@ -23,13 +23,30 @@ export class RouteErrorBoundary extends Component<Props, State> {
     console.error("[AXOM] A screen failed to render; the shell stayed open", error, info.componentStack);
   }
   reloadSafely = async () => {
-    this.setState({ saving: true, recoveryError: undefined });
+    this.setState({ saving: true, recoveryError: undefined, canContinueWithoutRecoverySnapshot: false });
     try {
       await createUpdateCheckpoint(false);
       await activateWaitingWebUpdate();
       window.location.reload();
     } catch (error) {
-      this.setState({ saving: false, recoveryError: error instanceof Error ? error.message : "Could not save your workspace. Export a backup before reloading." });
+      this.setState({
+        saving: false,
+        recoveryError: error instanceof Error ? error.message : "Could not save your workspace. Export a backup before reloading.",
+        canContinueWithoutRecoverySnapshot: canContinueWithoutSnapshot(error),
+      });
+    }
+  };
+  reloadWithVerifiedSave = async () => {
+    this.setState({ saving: true, recoveryError: undefined, canContinueWithoutRecoverySnapshot: false });
+    try {
+      await createUpdateCheckpoint(false, { skipRecoverySnapshot: true });
+      await activateWaitingWebUpdate();
+      window.location.reload();
+    } catch (error) {
+      this.setState({
+        saving: false,
+        recoveryError: error instanceof Error ? error.message : "Could not verify your saved workspace. This window has been kept open.",
+      });
     }
   };
   render() {
@@ -47,9 +64,14 @@ export class RouteErrorBoundary extends Component<Props, State> {
           </p>
           <div className="route-error-actions">
             {stale ? (
-              <GButton variant="primary" disabled={this.state.saving} onClick={this.reloadSafely}>
-                <RefreshCw size={ICON_SIZE.body} /> {this.state.saving ? "Saving before reload…" : "Reload AXOM"}
-              </GButton>
+              <>
+                <GButton variant="primary" disabled={this.state.saving} onClick={this.reloadSafely}>
+                  <RefreshCw size={ICON_SIZE.body} /> {this.state.saving ? "Saving before reload…" : "Reload AXOM"}
+                </GButton>
+                {this.state.canContinueWithoutRecoverySnapshot && <GButton disabled={this.state.saving} onClick={this.reloadWithVerifiedSave}>
+                  <RefreshCw size={ICON_SIZE.body} /> Refresh with verified save
+                </GButton>}
+              </>
             ) : (
               <GButton variant="primary" onClick={() => this.setState({ error: null })}>
                 <RotateCcw size={ICON_SIZE.body} /> Try again
@@ -60,6 +82,7 @@ export class RouteErrorBoundary extends Component<Props, State> {
             </GButton>
           </div>
           {this.state.recoveryError && <p role="status">{this.state.recoveryError} This window has been kept open.</p>}
+          {this.state.canContinueWithoutRecoverySnapshot && <p className="sub">Your saved workspace was verified. Browser storage is full, so AXOM could not make a second recovery copy. Export a backup first, or refresh with the verified save.</p>}
           <details className="route-error-details">
             <summary>Technical details</summary>
             <pre>{String(error.message).slice(0, 1200)}</pre>
@@ -68,4 +91,10 @@ export class RouteErrorBoundary extends Component<Props, State> {
       </section>
     );
   }
+}
+
+function canContinueWithoutSnapshot(error: unknown): boolean {
+  return typeof error === "object" && error !== null
+    && "canContinueWithoutRecoverySnapshot" in error
+    && error.canContinueWithoutRecoverySnapshot === true;
 }

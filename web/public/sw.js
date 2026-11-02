@@ -12,6 +12,22 @@ function cacheResponse(event, key, response) {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.put(key, copy)).catch(() => {}));
 }
 
+async function cachedAppAsset(request) {
+  const names = (await caches.keys()).filter((name) => name.startsWith(CACHE_PREFIX));
+  for (const name of names) {
+    const cache = await caches.open(name);
+    const response = await cache.match(request);
+    if (!response) continue;
+    if (response.headers.get("content-type")?.includes("text/html")) {
+      // A host rewrite may have cached HTML at a hashed asset URL in an older shell.
+      await cache.delete(request);
+      continue;
+    }
+    return response;
+  }
+  return undefined;
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(CORE)));
   // No skipWaiting: a ready update must not interrupt an open workspace.
@@ -59,14 +75,17 @@ self.addEventListener("fetch", (event) => {
   const staticAsset = /\.(?:js|mjs|css|png|jpe?g|svg|webp|ico|woff2?|webmanifest)$/.test(url.pathname);
   if (!staticAsset) return;
   event.respondWith((async () => {
-    const hit = await caches.match(request).catch(() => undefined);
+    const hit = await cachedAppAsset(request).catch(() => undefined);
     if (hit) return hit;
-    const response = await fetch(request);
-    // Hosts can rewrite missing JS to index.html: never cache HTML as an asset.
-    if (response.ok && !response.headers.get("content-type")?.includes("text/html")) {
+    // A cache-busted no-store request escapes immutable HTML fallbacks left by a bad deployment.
+    const freshUrl = new URL(request.url);
+    freshUrl.searchParams.set("__axom_revalidate", String(Date.now()));
+    const response = await fetch(freshUrl.href, { cache: "no-store" });
+    const isHtml = response.headers.get("content-type")?.includes("text/html");
+    if (response.ok && !isHtml) {
       cacheResponse(event, request, response);
     }
-    return response;
+    return isHtml ? Response.error() : response;
   })());
 });
 

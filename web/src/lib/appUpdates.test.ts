@@ -164,6 +164,26 @@ describe("explicit app update lifecycle", () => {
     expect(deps.desktopConfigured).not.toHaveBeenCalled();
   });
 
+  it("offers web refresh without an extra snapshot only after a verified quota warning", async () => {
+    const { controller, deps, calls } = fixture(false);
+    await controller.check();
+    const quotaError = Object.assign(new Error("Browser storage is full"), {
+      canContinueWithoutRecoverySnapshot: true,
+    });
+    vi.mocked(deps.checkpoint).mockImplementationOnce(async () => {
+      calls.push("checkpoint");
+      throw quotaError;
+    });
+
+    await controller.apply();
+
+    expect(controller.getSnapshot()).toMatchObject({ phase: "error", canContinueWithoutRecoverySnapshot: true });
+    expect(deps.activateWeb).not.toHaveBeenCalled();
+    await controller.apply({ skipRecoverySnapshot: true });
+    expect(deps.checkpoint).toHaveBeenNthCalledWith(2, { skipRecoverySnapshot: true });
+    expect(calls).toEqual(["checkpoint", "checkpoint", "activate", "restart"]);
+  });
+
   it("retains the app if worker activation fails", async () => {
     const { controller, deps, calls } = fixture(false);
     await controller.check();

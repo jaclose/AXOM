@@ -9,7 +9,7 @@ import { installMotionSync } from "./lib/motionPreference";
 // Chrome fires beforeinstallprompt once, early. Capture it at boot: the only
 // importer used to be the lazy About page, so the event was usually missed.
 import "./lib/pwaInstall";
-import { installChunkRecovery, registerWebWorker } from "./lib/webUpdates";
+import { installChunkRecovery } from "./lib/webUpdates";
 import { storeHydration } from "./lib/storeHydration";
 import { startStartupIntro } from "./lib/startupIntro";
 import { endPresentation, revealApp } from "./lib/presentation";
@@ -123,5 +123,3 @@ function showStartupError(message?: string) {
 }
 
 void bootstrap().catch((error: unknown) => showStartupError(error instanceof Error ? error.message : undefined));
-
-registerWebWorker();

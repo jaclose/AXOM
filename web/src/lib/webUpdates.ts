@@ -1,24 +1,4 @@
-import { isDesktopApp } from "./appUpdates";
-
 const WORKER_PATH = "./sw.js";
-
-export function registerWebWorker(): void {
-  if (isDesktopApp() || !import.meta.env.PROD || !("serviceWorker" in navigator) || !/^https?:$/.test(location.protocol)) return;
-  const register = () => {
-    void navigator.serviceWorker.register(WORKER_PATH, { updateViaCache: "none" }).then((registration) => {
-      // Installation stages a successor; activation needs explicit consent.
-      const announce = () => {
-        if (registration.waiting) window.dispatchEvent(new Event("axom:web-update-ready"));
-      };
-      announce();
-      registration.addEventListener("updatefound", () => {
-        registration.installing?.addEventListener("statechange", announce);
-      });
-    }).catch(() => { /* Offline startup still uses the already-installed worker. */ });
-  };
-  if (document.readyState === "complete") register();
-  else window.addEventListener("load", register, { once: true });
-}
 
 /** Called only after an explicit refresh click and a verified data checkpoint. */
 export async function activateWaitingWebUpdate(): Promise<void> {
