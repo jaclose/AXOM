@@ -456,7 +456,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
                 </>}
               </>}
             </fieldset>
-            <details className="community-package-upload"><summary>Have an AXOM course folder or ZIP?</summary>
+            <details className="community-package-upload"><summary>Choose an AXOM course folder or ZIP</summary>
               <AcademicCourseUpload onSaved={saved} />
             </details>
             <GButton disabled={ownedBusy} onClick={() => void loadPrivate()}>{ownedBusy ? "Loading…" : "Show my private courses"}</GButton>
