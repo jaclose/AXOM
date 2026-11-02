@@ -5,14 +5,20 @@ authority: current-state
 ---
 # AXOM current AI state
 
+2026-11-02 02:12 UTC `main` is `4d6a96a9` after the QBank parser, diagram,
+course-map, SGU setup, explanation-state and reviewer-gate PRs listed below.
+Their branch web/native/deployment checks passed before merge; the combined
+main deployment has not been verified in this receipt.
+
 2026-11-01 PR #59 merged as `cb0a456b` at 21:33:30 UTC. The Vercel production
 deployment for that commit is ready on axom.info. The signed-in Question Bank
 and Community Uploads UI loaded in production. Local browser checks covered
 term sorting, week selection, persistence, community states and responsive
 layouts; the merged branch passed typecheck, lint, build, repository checks and
-focused tests. The hosted production project has JD's reviewer row and both
-academic RPCs, but still has zero library collections and zero community
-submissions. No course content has been uploaded or shared.
+focused tests. At the last linked SQL check on 2026-11-01, the hosted production
+project had JD's reviewer row and both academic RPCs, with zero library
+collections and zero community submissions. That is a dated observation, not
+a fresh production count. No course content has been uploaded or shared.
 
 The owner-term and MI→NMI upload-free dry run prepared 20/20 available courses
 with zero term or package prompts: 699 answer-ready and 16,252 held. All 17,559
@@ -20,14 +26,35 @@ source rows were accounted for; 594 stayed local. A separate, local-only NMI
 copy matched 82 answers to a printed key and passed a full upload-free dry run
 at 781 technically answer-ready and 16,170 held; its original source and the
 earlier candidate were untouched. Those 82 still carry missing-explanation
-warnings, so they are not explanation-complete. Redistributing that source
-still needs a recorded rights basis.
+warnings, so they are not explanation-complete. JD directed this official
+USMLE sample to appear as a link to the original NBME/USMLE sample set; the
+copied questions remain local unless written NBME website permission is
+recorded. Source rationales are preferred; separate, cited AXOM explanations
+are drafts for subject review when source rationales are missing or incomplete.
 Among the in-course parsed rows, 15,894 lack a parsed answer key across 816
 source banks. No missing key is promoted from a parser suggestion or medical
 inference. DERS, BSCE3 and DNPR still lack validated current question packages;
-four Unfiled decisions remain unresolved. Draft PRs #60–65 are not
-deployed. Earlier dated claims remain in
+four Unfiled decisions remain unresolved. Earlier dated claims remain in
 `git show 1b189177:docs/AI_STATE.md` and the feature contract.
+
+## 2026-11-02 UTC QBank code merge receipt
+
+GitHub reports these merge commits and times on `main`: #63 `bdfa6edd`
+01:54:35, #68 `05905634` 01:55:40, #60 `62672efd` 01:56:29, #65 `c55a665b`
+01:57:10, #64 `c4610a3e` 01:57:51, #67 `63e3a393` 01:58:26, and #69
+`e925ebf8` 01:59:04. The stacked #68 and #65 were retargeted to `main` after
+their base PRs merged. #68 reconciles exact answer-copy PDFs but does not
+silently promote private questions. #65 adds original post-answer diagrams;
+#67 completes the SGU map by an explicit, preserving action. The hosted
+library content count remains a separate acceptance gate. PR #42 was excluded
+from this sweep: its current head has eight commits across 17 files and
+conflicts with `main`; its scope needs separate review.
+
+PR #70 merged as `4d6a96a9` at 02:12:12 UTC after green branch
+web/native/deployment checks. It requires a current-revision reviewer
+attestation of stored explanations before official owner or community approval.
+The check confirms text presence and stored ready-figure integrity; a reviewer
+remains responsible for source and clinical accuracy.
 
 ## 2026-10-28 QBank production receipt
 
@@ -48,6 +75,11 @@ The learner still requires a viewable figure. Collections and community
 submissions were zero; no content was uploaded or sharing changed. PR 37/44
 branch context remains in the [library contract](features/academic-library.md)
 and `git show de00e44b:docs/AI_STATE.md`.
+
+At the 2026-11-02 02:12 UTC linked-ledger check, migration `20261101180000`
+appeared on both local and hosted lists. This receipt records ledger parity,
+not an authenticated reviewer-flow acceptance run. No course content upload or
+sharing change was performed with this migration.
 
 The MI→NMI change from PR #47, integrated through #59, applied JD's hash-bound
 decision to 38 sources, 31 banks, two plan sections and 39 activities without
