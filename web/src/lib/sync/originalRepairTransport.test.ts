@@ -72,6 +72,28 @@ function setup(fail: { code: string; message: string }, repaired: number = 1) {
 beforeEach(() => vi.clearAllMocks());
 
 describe("workspace cloud-original repair acknowledgement", () => {
+  it("labels account setup failures without retaining private exception text", async () => {
+    const fixture = setup({ code: "PT409", message: "original source upload is incomplete" });
+    vi.mocked(accountOperationClient).mockRejectedValueOnce({
+      statusCode: 503, code: "Bearer private-token", message: "private source https://example.invalid",
+    });
+    const error = await new SupabaseSyncTransport().push(fixture.envelope).catch(value => value);
+    expect(error).toMatchObject({ failure: { kind: "server", status: 503, phase: "preflight" } });
+    expect(JSON.stringify(error.failure)).not.toMatch(/private|bearer|https/i);
+    expect(error.message).toBe("Account upload stopped during preflight.");
+    expect(fixture.rpc).not.toHaveBeenCalled();
+  });
+
+  it("labels a failed local sync-baseline read before any upload", async () => {
+    const fixture = setup({ code: "PT409", message: "original source upload is incomplete" });
+    vi.mocked(readSyncBaseline).mockRejectedValueOnce(new Error("private source text"));
+    const error = await new SupabaseSyncTransport().push(fixture.envelope).catch(value => value);
+    expect(error).toMatchObject({ failure: { kind: "network", status: 0, phase: "preflight" } });
+    expect(JSON.stringify(error)).not.toContain("private source text");
+    expect(error.message).toBe("Account upload stopped during preflight.");
+    expect(fixture.chain.maybeSingle).not.toHaveBeenCalled();
+  });
+
   it("records the failing upload stage without retaining private exception text", async () => {
     const fixture = setup({ code: "PT409", message: "original source upload is incomplete" });
     vi.mocked(uploadCloudContent).mockRejectedValueOnce({ statusCode: 500, code: "Bearer token https://private.example", message: "private source text" });
@@ -113,8 +135,31 @@ describe("workspace cloud-original repair acknowledgement", () => {
       .mockResolvedValueOnce({ data: { id: "workspace-id" }, error: null, status: 200 })
       .mockResolvedValueOnce({ data: null, error: { code: "57014", message: "canceling statement due to statement timeout" }, status: 500 });
     await expect(new SupabaseSyncTransport().push(fixture.envelope)).rejects.toMatchObject({
-      failure: { kind: "server", status: 500, code: "57014" },
+      failure: { kind: "server", status: 500, code: "57014", phase: "preflight" },
     });
+    expect(fixture.rpc).not.toHaveBeenCalled();
+  });
+
+  it("labels a thrown first-workspace lookup without preserving its private URL", async () => {
+    const fixture = setup({ code: "PT409", message: "original source upload is incomplete" });
+    fixture.chain.maybeSingle.mockRejectedValueOnce({
+      statusCode: 503, code: "PGRST500", message: "private https://example.invalid",
+    });
+    const error = await new SupabaseSyncTransport().push(fixture.envelope).catch(value => value);
+    expect(error).toMatchObject({ failure: { kind: "server", status: 503, code: "PGRST500", phase: "preflight" } });
+    expect(JSON.stringify(error)).not.toMatch(/private|https/i);
+    expect(fixture.rpc).not.toHaveBeenCalled();
+  });
+
+  it("does not retain private account text returned by the first-workspace lookup", async () => {
+    const fixture = setup({ code: "PT409", message: "original source upload is incomplete" });
+    fixture.chain.maybeSingle.mockResolvedValueOnce({
+      data: null, error: { code: "57014", message: "private source https://example.invalid" }, status: 500,
+    });
+    const error = await new SupabaseSyncTransport().push(fixture.envelope).catch(value => value);
+    expect(error).toMatchObject({ failure: { kind: "server", status: 500, code: "57014", phase: "preflight" } });
+    expect(error.message).toBe("Account upload stopped during preflight.");
+    expect(JSON.stringify(error.failure)).not.toMatch(/private|https/i);
     expect(fixture.rpc).not.toHaveBeenCalled();
   });
 

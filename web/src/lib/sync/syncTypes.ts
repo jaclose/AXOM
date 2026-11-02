@@ -25,7 +25,7 @@ export type ProtectionStatus =
 export type SyncFailureKind = "network" | "server" | "auth" | "rejected";
 
 /** Fixed upload stages and causes safe to retain in local account diagnostics. */
-export type SyncUploadPhase = "content" | "originals" | "media" | "revision" | "receipt";
+export type SyncUploadPhase = "preflight" | "content" | "originals" | "media" | "revision" | "receipt";
 export type SyncUploadReason = "session-refreshed" | "account-changed" | "request-timeout";
 
 /** What a refusal was about. */
