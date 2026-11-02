@@ -310,6 +310,36 @@ describe("IndexedDB-first local vault", () => {
     upgraded.close();
   });
 
+  it("reports the blocked vault upgrade when the browser fallback also runs out of space", async () => {
+    const oldConnection = await openVersionThreeVault();
+    const key = STORAGE_KEYS.persistedState;
+    const base = JSON.stringify({ state: { profile: { userId: "jd" }, label: "saved" }, version: 34 });
+    const next = JSON.stringify({ state: { profile: { userId: "jd" }, rawText: "x".repeat(1_100_000) }, version: 34 });
+    await putDirect(oldConnection, key, base);
+    expect(await localVaultStorage.getItem(key)).toBe(base);
+
+    vi.stubGlobal("localStorage", {
+      ...storage,
+      setItem: (name: string, value: string) => {
+        if (name === key) throw new DOMException("Setting the workspace exceeded the quota.", "QuotaExceededError");
+        storage.setItem(name, value);
+      },
+    });
+
+    try {
+      const checkpoint = getVaultWriteCheckpoint();
+      await localVaultStorage.setItem(key, next);
+      expect(() => assertVaultWritesSince(checkpoint))
+        .toThrow(/IndexedDB save failed: Local vault upgrade is blocked by another tab/);
+      expect(() => assertVaultWritesSince(checkpoint))
+        .toThrow(/Browser fallback failed: Setting the workspace exceeded the quota/);
+      expect(await getDirect(oldConnection, key)).toBe(base);
+      expect(localStorage.getItem(key)).toBeNull();
+    } finally {
+      oldConnection.close();
+    }
+  });
+
   it("does not let a v3 writer open after a chunked primary commits behind the v4 barrier", async () => {
     const key = STORAGE_KEYS.persistedState;
     const persisted = JSON.stringify({

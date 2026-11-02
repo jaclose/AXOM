@@ -99,6 +99,19 @@ function localFallback(): Storage | null {
   }
 }
 
+function describeStorageFailure(error: unknown): string {
+  if (!(error instanceof Error)) return "unknown error";
+  const detail = error.message.replace(/\s+/g, " ").trim();
+  return (detail || error.name).slice(0, 180);
+}
+
+function combinedStorageFailure(indexedDbError: unknown, fallbackError: unknown): Error {
+  return new Error(
+    `IndexedDB save failed: ${describeStorageFailure(indexedDbError)}. Browser fallback failed: ${describeStorageFailure(fallbackError)}.`,
+    { cause: indexedDbError },
+  );
+}
+
 export function writeLocalFallback(
   fallbackStore: Storage | null,
   name: string,
@@ -833,7 +846,7 @@ const vaultStorage: StateStorage = {
         } catch { /* the last successful copy remains available for recovery */ }
         vaultWriteFailures.set(
           writeSequence,
-          failure instanceof Error ? failure : new Error("AXOM could not persist the local workspace."),
+          combinedStorageFailure(indexedDbError, failure),
         );
         // Ordinary saves are best-effort, so say so: this one is on no disk.
         markVaultWriteFailure();
