@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useAccount } from "../../lib/account/accountStore";
 import { academicClient, isAcademicReviewer, reviewAcademicCourse, type AcademicCourse } from "../../lib/academicLibrary/client";
 import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
+import { inspectStoredRevisionExplanations, type ExplanationReviewReceipt } from "../../lib/academicLibrary/explanationReview";
 import { GButton } from "../ui/primitives";
 
 /** Sharing changes access to the canonical collection, never a learner backup. */
@@ -86,15 +87,24 @@ export function AcademicSharing({ course, onSaved }: { course: AcademicCourse; o
 /** Approval applies to the course's current revision. A newer upload waits for review again. */
 function AcademicReview({ course, accountId, onSaved }: { course: AcademicCourse; accountId: string; onSaved: () => void }) {
   const [checked, setChecked] = useState(false);
+  const [receipt, setReceipt] = useState<ExplanationReviewReceipt>();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  useEffect(() => { setReceipt(undefined); setChecked(false); }, [course.current_revision_id]);
+  async function checkExplanations() {
+    if (busy) return;
+    setBusy(true); setError(""); setReceipt(undefined); setChecked(false);
+    try { setReceipt(await inspectStoredRevisionExplanations(course.id, course.current_revision_id, accountId)); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "The stored explanations could not be checked."); }
+    finally { setBusy(false); }
+  }
   async function review(approved: boolean) {
-    if (busy || (approved && !checked)) return;
+    if (busy || (approved && (!checked || !receipt || receipt.missingExplanations > 0 || receipt.readyQuestions === 0))) return;
     const scope = academicAccountScope(accountId);
     setBusy(true); setError(""); setMessage("");
     try {
-      await reviewAcademicCourse(course.id, approved, accountId);
+      await reviewAcademicCourse(course.id, approved, accountId, receipt, checked);
       scope.assertCurrent();
       setMessage(!approved ? "Approval withdrawn. Other accounts can no longer discover or download this version."
         : course.visibility === "private" ? "Approved. The course stays private until its owner chooses an audience."
@@ -106,10 +116,12 @@ function AcademicReview({ course, accountId, onSaved }: { course: AcademicCourse
   const status = course.review_status === "approved" ? "Approved" : course.review_status === "rejected" ? "Not approved" : "Waiting for review";
   return <div className="course-review" role="group" aria-label="Academic review">
     <p><b>Review status: {status}.</b> {course.visibility === "private" ? "Its owner keeps it private." : course.visibility === "group" ? "Its owner shares it with a group." : "Its owner shares it with every signed-in account."}</p>
+    <GButton disabled={busy} onClick={() => void checkExplanations()}>Check stored explanations</GButton>
+    {receipt && <p role="status">{receipt.explainedReadyQuestions} of {receipt.readyQuestions} ready questions have an explanation in this stored revision. {receipt.missingExplanations} missing. Presence does not verify the rationale against its source.</p>}
     <label className="course-review-check"><input type="checkbox" checked={checked} disabled={busy} onChange={event => setChecked(event.target.checked)} />
-      <span>I checked this course, its answers and images, and it can be shared with its audience.</span></label>
+      <span>I checked every explanation against its source for this exact revision, and reviewed its answers and images.</span></label>
     <div className="course-sharing-fields">
-      <GButton disabled={busy || !checked} onClick={() => void review(true)}>{busy ? "Saving review…" : "Approve this version"}</GButton>
+      <GButton disabled={busy || !checked || !receipt || receipt.missingExplanations > 0 || receipt.readyQuestions === 0} onClick={() => void review(true)}>{busy ? "Saving review…" : "Approve this version"}</GButton>
       <GButton disabled={busy || course.review_status === "rejected"} onClick={() => void review(false)}>Withdraw approval</GButton>
     </div>
     {message && <p role="status">{message}</p>}
