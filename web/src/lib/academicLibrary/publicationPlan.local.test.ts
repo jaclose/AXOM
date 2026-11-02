@@ -1,0 +1,157 @@
+// @vitest-environment node
+/**
+ * Opt-in dry run of Publish a prepared library on a REAL prepared library, on
+ * the authorized local machine. It plans every course and prepares each one
+ * exactly as publishing would, including a real browser image decoder, but
+ * uploads nothing. Run from web/ with
+ *
+ *   AXOM_PUBLISH_LIBRARY_ROOT=<prepared folder> \
+ *   AXOM_PUBLISH_REPORT=<report.json outside the repository> \
+ *   AXOM_PUBLISH_TERMS='{"<module key>":"Term 1"}' \
+ *   AXOM_PUBLISH_DECISIONS=<filing decisions .json from the unfiled source review> \
+ *   AXOM_PUBLISH_PROPOSALS=<matching original review worksheet .json> \
+ *   AXOM_PUBLISH_MI_NMI_DECISION=<exact owner decision .json> \
+ *   npx vitest run src/lib/academicLibrary/publicationPlan.local.test.ts --reporter=verbose
+ *
+ * AXOM_PUBLISH_TERMS is optional and holds terms a reviewer confirmed, keyed by
+ * the module keys the report lists. AXOM_PUBLISH_DECISIONS is optional and files
+ * each reviewed source as decided, exactly as the publisher's "Add filing
+ * decisions" does. AXOM_PUBLISH_PROPOSALS is required with decisions to
+ * verify Accept against the original proposal; the library folder itself is never changed. The report and console carry counts,
+ * module labels, reasons and source names only, never question text, answers
+ * or file bytes. It also accounts for every question row: in a course, or
+ * staying on this device with its reason, and fails if any row is unaccounted. Source names can be private: keep the report out of Git.
+ */
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { dirname, resolve, sep } from "node:path";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { safeLibraryPath, type LibraryReader } from "../privateLibrary/install";
+import type { ReviewedFiling } from "../privateLibrary/types";
+import { openPublicationBrowserDecoder } from "./publicationBrowserDecoder.local";
+import { applyFilingDecisions, readFilingDecisions, readFilingProposals } from "./filingDecisions";
+import { applyMiNmiDecision, readMiNmiDecision } from "./miNmiCorrection";
+import { accountQuestions } from "./questionLedger";
+import {
+  PUBLICATION_INPUT_LIMITS, planPublication, publicationJobs, readPublicationInventory, type PlannedCourse,
+} from "./publication";
+
+type Term = ReviewedFiling["term"];
+const TERMS = new Set<string>(["Term 1", "Term 2", "Term 3", "Term 4", "Term 5"]);
+const root = process.env.AXOM_PUBLISH_LIBRARY_ROOT;
+
+function confirmedTerms(): Record<string, Term> {
+  const terms = JSON.parse(process.env.AXOM_PUBLISH_TERMS || "{}") as Record<string, unknown>;
+  if (!terms || typeof terms !== "object" || Array.isArray(terms)
+    || Object.values(terms).some(term => typeof term !== "string" || !TERMS.has(term)))
+    throw new Error("AXOM_PUBLISH_TERMS must map module keys to Term 1-5.");
+  return terms as Record<string, Term>;
+}
+
+describe.skipIf(!root)("dry run of publishing a real prepared library (opt-in only)", () => {
+  let decoder: Awaited<ReturnType<typeof openPublicationBrowserDecoder>> | undefined;
+  beforeAll(async () => {
+    decoder = await openPublicationBrowserDecoder();
+    vi.stubGlobal("createImageBitmap", decoder.decode);
+  }, 120_000);
+  afterAll(async () => {
+    vi.unstubAllGlobals();
+    await decoder?.close();
+  }, 120_000);
+
+  it("plans every course and prepares each one without uploading", async () => {
+    const parent = realpathSync(resolve(root!));
+    const fromDisk: LibraryReader = async (file: string) => {
+      const path = resolve(parent, safeLibraryPath(file));
+      if (!path.startsWith(parent + sep)) throw new Error("A library path escaped the selected folder.");
+      if (!existsSync(path)) throw new Error("A file the library references is missing.");
+      const metadata = statSync(path);
+      if (!metadata.isFile() || metadata.size > PUBLICATION_INPUT_LIMITS.maxFileBytes)
+        throw new Error("A library file is not a regular file within the publishing limit.");
+      return new Uint8Array(readFileSync(path));
+    };
+    const report = process.env.AXOM_PUBLISH_REPORT && resolve(process.env.AXOM_PUBLISH_REPORT);
+    const repository = resolve(__dirname, "../../../..");
+    if (report && (report + sep).startsWith(repository + sep))
+      throw new Error("Write the dry-run report outside the repository: it can name private sources.");
+
+    const decisionsFile = process.env.AXOM_PUBLISH_DECISIONS;
+    const proposalsFile = process.env.AXOM_PUBLISH_PROPOSALS;
+    if (decisionsFile && !proposalsFile) throw new Error("AXOM_PUBLISH_PROPOSALS is required with filing decisions.");
+    const filed = decisionsFile
+      ? await applyFilingDecisions(fromDisk, readFilingDecisions(JSON.parse(readFileSync(resolve(decisionsFile), "utf8"))),
+        readFilingProposals(JSON.parse(readFileSync(resolve(proposalsFile!), "utf8"))))
+      : undefined;
+    const correctionFile = process.env.AXOM_PUBLISH_MI_NMI_DECISION;
+    const corrected = correctionFile
+      ? await applyMiNmiDecision(fromDisk, filed?.read ?? fromDisk,
+        readMiNmiDecision(JSON.parse(readFileSync(resolve(correctionFile), "utf8"))))
+      : undefined;
+    const read = corrected?.read ?? filed?.read ?? fromDisk;
+    if (filed) console.log(`filing decisions  ${filed.summary.filed} filed, ${filed.summary.keptUnfiled} kept unfiled`);
+    if (corrected) console.log(`MI to NMI  ${corrected.summary.sources} sources, ${corrected.summary.banks} question sets, `
+      + `${corrected.summary.questionRows} rows, ${corrected.summary.planSections} plan sections, ${corrected.summary.activities} activities`);
+    const inventory = await readPublicationInventory(read);
+    const plan = planPublication(inventory, confirmedTerms());
+    // Every question row the library holds, in exactly one course or one stated reason.
+    const ledger = accountQuestions(inventory, plan);
+    const ready = plan.courses.filter(course => course.termBasis !== "proposed");
+    const { jobs, notes } = publicationJobs(read, inventory, ready);
+    const sources = new Map<string, string>();
+    const label = (course: Pick<PlannedCourse, "term" | "module">) => `${course.term} ${course.module}`;
+    const checked = [];
+    for (const [index, job] of jobs.entries()) {
+      const course = ready[index];
+      const summary = { catalogId: course.catalogId, term: course.term, module: course.module, moduleKey: course.moduleKey,
+        termBasis: course.termBasis, sections: course.sections.map(section => section.name), activities: course.activities,
+        sourceCount: course.sourceIds.length };
+      try {
+        const upload = await job.prepare();
+        // Publishing refuses a source that another course in the run already holds.
+        const repeated = upload.provenance.sourceChecksums.find(sha => sources.has(sha));
+        if (repeated) throw new Error(`It shares a source file with ${sources.get(repeated)}.`);
+        for (const sha of upload.provenance.sourceChecksums) sources.set(sha, label(course));
+        checked.push({ ...summary, ok: true as const, readyQuestions: Number(upload.metadata.ready_questions),
+          reviewQuestions: Number(upload.metadata.review_questions), files: upload.files.length,
+          bytes: upload.files.reduce((sum, file) => sum + file.byte_size, 0),
+          keptLocal: notes.keptLocal.get(job.key) ?? 0, overLimit: upload.localOnlyOriginals.length });
+      } catch (cause) {
+        checked.push({ ...summary, ok: false as const,
+          reason: notes.failures.get(job.key) ?? (cause instanceof Error ? cause.message : "This course could not be prepared.") });
+      }
+    }
+    decoder?.assertHealthy();
+    const needsTerm = plan.courses.filter(course => course.termBasis === "proposed").map(course => ({
+      moduleKey: course.moduleKey, module: course.module, proposedTerm: course.term, reason: course.proposalReason,
+      sections: course.sections.map(section => section.name),
+    }));
+    const result = {
+      library: inventory.library, checkedAt: new Date().toISOString(), ...(filed ? { filingDecisions: filed.summary } : {}),
+      ...(corrected ? { miNmiCorrection: corrected.summary } : {}),
+      totals: {
+        courses: plan.courses.length, checked: checked.length, readyToPublish: checked.filter(course => course.ok).length,
+        needAttention: checked.filter(course => !course.ok).length, needTerm: needsTerm.length,
+        blockedPlanSections: plan.blocked.length, sourcesLeftOut: plan.excluded.length,
+        readyQuestions: checked.reduce((sum, course) => sum + (course.ok ? course.readyQuestions : 0), 0),
+        reviewQuestions: checked.reduce((sum, course) => sum + (course.ok ? course.reviewQuestions : 0), 0),
+      },
+      questions: ledger, courses: checked, needsTerm, blocked: plan.blocked, excluded: plan.excluded,
+    };
+    if (report) {
+      mkdirSync(dirname(report), { recursive: true });
+      writeFileSync(report, `${JSON.stringify(result, null, 2)}\n`);
+    }
+    console.log(JSON.stringify(result.totals));
+    const leftOut = ledger.leftOut.reduce((sum, group) => sum + group.questions, 0);
+    console.log(`questions  ${ledger.total.questions} in ${ledger.total.sources} question sets: ${ledger.inCourses.questions} in courses `
+      + `(${ledger.inCourses.ready} ready, ${ledger.inCourses.held} awaiting review), ${leftOut} staying on this device, ${ledger.unaccounted} unaccounted`);
+    const count = (value: number, one: string) => `${value} ${one}${value === 1 ? "" : "s"}`;
+    for (const group of ledger.leftOut) console.log(`left out  ${count(group.questions, "question")} in ${count(group.sources, "set")}: ${group.reason}`);
+    for (const source of ledger.mismatched) console.log(`counts disagree  ${source.name}: ${source.rows} rows, catalog says ${source.ready} ready and ${source.held} held`);
+    for (const course of checked) console.log(course.ok
+      ? `ready  ${label(course)}: ${course.readyQuestions} ready, ${course.reviewQuestions} awaiting review, ${course.files} files`
+      : `attention  ${label(course)}: ${course.reason}`);
+    for (const course of needsTerm) console.log(`needs term  ${course.module} (${course.moduleKey}): proposed ${course.proposedTerm}`);
+    expect(plan.courses.length + plan.blocked.length + plan.excluded.length).toBeGreaterThan(0);
+    expect(ledger.unaccounted).toBe(0);
+  }, 3_600_000);
+});

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { blockShape } from "../blocks";
-import type { ImportPackage, PackageManifest } from "../package";
+import { PACKAGE_SCHEMA_VERSION, type ImportPackage, type PackageManifest } from "../package";
 import { parsePackage, serializeManifest, serializeQuestionsFile } from "../packageJson";
 import { validatePackage } from "../validate";
 import { looksLikeMarker, readMarker, type DocxBodyElement } from "./markers";
@@ -12,7 +12,7 @@ const image = (name: string, alt?: string): DocxBodyElement => ({ kind: "image",
 const defaults = { bankId: "example-bank", sourceFilename: "questions.docx" };
 const codes = (issues: { severity: string; code: string }[]) => issues.map((issue) => `${issue.severity}:${issue.code}`);
 const manifest: PackageManifest = {
-  schemaVersion: 1, course: { name: "GOER", term: 5, week: 2 }, bank: { id: "example-bank", title: "Example bank", discipline: "Example discipline" },
+  schemaVersion: PACKAGE_SCHEMA_VERSION, course: { name: "GOER", term: 5, week: 2 }, bank: { id: "example-bank", title: "Example bank", discipline: "Example discipline" },
   source: { filename: "example-source.pdf", sourceWeekDeclared: false }, questionsFile: "questions.json", assetsDirectory: "assets/",
 };
 

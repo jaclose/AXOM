@@ -127,6 +127,18 @@ function committedAttempts(): Array<{ questionId: string; attempt: Omit<Question
 }
 
 describe("ExamRunner saved blocks and selection semantics", () => {
+  it("keeps an exact downloaded community revision visibly Unreviewed during practice", () => {
+    setStore();
+    mocked.store.documents = [{ id: "community-22222222-2222-4222-8222-222222222222",
+      fileType: "axom-community-reference", title: "Community review status", fileName: "community-reference.json",
+      uploadedAt: "2026-11-01T12:00:00Z", sizeBytes: 1, tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+      rawText: JSON.stringify({ version: 1, accountId: "owner-1", revisionId: "22222222-2222-4222-8222-222222222222",
+        questionIds: [question.id], pending: false }) }];
+    render(<ExamRunner mode="tutor" accountId="owner-1" retakeIds={[question.id]} onClose={() => {}} />);
+    expect(screen.getByText("Unreviewed community material.")).toBeTruthy();
+    expect(screen.getByText(/1 question included in this practice/)).toBeTruthy();
+  });
+
   it("restores an active question, picked answer, and position after refresh", () => {
     setStore();
     localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify({

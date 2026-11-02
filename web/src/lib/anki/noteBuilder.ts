@@ -102,6 +102,30 @@ function uniqueCaseInsensitive(values: readonly string[]): string[] {
   });
 }
 
+export interface AxomScopeTagLocation {
+  termId: string;
+  courseId?: string;
+  moduleId?: string;
+  week?: number;
+}
+
+/** Stable AXOM hierarchy; a week exists only when a tracked source names it. */
+export function axomScopeTagsFor(location: AxomScopeTagLocation, catalog: CourseCatalog): string[] {
+  const firstCourse = catalog.courses.find((course) => course.termId === location.termId);
+  if (!firstCourse?.termName) return [];
+  const tags = [`${AXOM_TAG}::${tagSlug(firstCourse.termName)}`];
+  if (!location.courseId) return tags;
+  const course = catalog.course(location.courseId);
+  if (!course || course.termId !== location.termId) return tags;
+  tags.push(`${tags[0]}::${tagSlug(courseLabel(course))}`);
+  if (!location.moduleId) return tags;
+  const module = catalog.module(location.moduleId);
+  if (!module || module.courseId !== course.id) return tags;
+  tags.push(`${tags[1]}::${tagSlug(module.name)}`);
+  if (Number.isSafeInteger(location.week) && Number(location.week) > 0) tags.push(`${tags[2]}::week-${location.week}`);
+  return tags;
+}
+
 /** AXOM plus a course/module(/lecture) tag, plus the card's own tags. */
 export function axomTagsFor(card: CardPlacement & Pick<AnkiCard, "tags">, catalog: CourseCatalog): string[] {
   const tags = [AXOM_TAG];
@@ -115,6 +139,14 @@ export function axomTagsFor(card: CardPlacement & Pick<AnkiCard, "tags">, catalo
       if (lecture) parts.push(tagSlug(lecture));
     }
     tags.push(`${AXOM_TAG}::${parts.join("::")}`);
+    const tracked = catalog.lecture(card.trackerItemId);
+    const weekMatch = tracked?.courseId === course.id && tracked.moduleId === module?.id
+      ? tracked.path.match(/(?:^|\/)Week\s+([1-9]\d*)(?=\/|$)/i) : null;
+    tags.push(...axomScopeTagsFor({
+      termId: course.termId, courseId: course.id,
+      ...(module?.courseId === course.id ? { moduleId: module.id } : {}),
+      ...(weekMatch ? { week: Number(weekMatch[1]) } : {}),
+    }, catalog));
   }
   for (const tag of card.tags ?? []) {
     const clean = sanitizeTag(tag);

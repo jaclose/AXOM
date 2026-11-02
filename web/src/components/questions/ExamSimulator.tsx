@@ -24,6 +24,7 @@ import { QuizCalculator, type QuizCalculatorValue } from "./QuizCalculator";
 import { ExamplifyExam } from "../exam/ExamplifyExam";
 import { ExplanationBody, LabValuesPanel, useExhibitUrls } from "../exam/parts";
 import { useExamBlock, type ExamBlockApi, type FinishedBlock } from "../exam/useExamBlock";
+import { CommunityPracticeNotice } from "./CommunityPracticeNotice";
 
 type Panel = "labs" | "notes" | "calculator" | "settings" | null;
 
@@ -34,6 +35,8 @@ export interface ExamSimulatorProps {
   runId?: string;
   timeLimitSeconds?: number;
   title?: string;
+  unreviewedCount?: number;
+  communityPending?: boolean;
   resume?: SuspendedBlock;
   /** A finished block to read through in the same interface: read-only, results shown. */
   review?: FinishedBlock;
@@ -54,18 +57,22 @@ export function ExamSimulator(props: ExamSimulatorProps) {
   // AXOM's page frame "fixed" is measured from the frame and the exam sat inset.
   return createPortal(
     props.skin === "examsoft"
-      ? <ExamplifyExam exam={exam} title={title} timeLimitSeconds={props.timeLimitSeconds} onClose={props.onClose} />
-      : <ClassicExam exam={exam} skin={props.skin} mode={props.mode} onClose={props.onClose} />,
+      ? <ExamplifyExam exam={exam} title={title} timeLimitSeconds={props.timeLimitSeconds} onClose={props.onClose}
+        unreviewedCount={props.unreviewedCount} communityPending={props.communityPending} />
+      : <ClassicExam exam={exam} skin={props.skin} mode={props.mode} onClose={props.onClose}
+        unreviewedCount={props.unreviewedCount} communityPending={props.communityPending} />,
     document.body,
   );
 }
 
 /** The UWorld and NBME interfaces: a navy top bar, tools on the right, the block clock in the bottom bar. */
-function ClassicExam({ exam, skin, mode, onClose }: {
+function ClassicExam({ exam, skin, mode, onClose, unreviewedCount = 0, communityPending = false }: {
   exam: ExamBlockApi;
   skin: Exclude<ExamSkin, "examsoft">;
   mode: "exam" | "tutor";
   onClose?: () => void;
+  unreviewedCount?: number;
+  communityPending?: boolean;
 }) {
   const { pool, question, index, item, counts, entries, correctKey, revealed, result, prefs, setPrefs, tool, setTool, reviewing } = exam;
   const [panel, setPanel] = useState<Panel>(null);
@@ -137,7 +144,7 @@ function ClassicExam({ exam, skin, mode, onClose }: {
   );
 
   return (
-    <div ref={exam.rootRef} className={`exam-sim skin-${skin} theme-${prefs.theme} ${reviewing ? "is-review" : ""}`} role="dialog" aria-modal="true" aria-label={`${EXAM_SKINS[skin].label} exam simulation`} aria-busy={exam.finishStatus === "saving"} tabIndex={-1} style={style}>
+    <div ref={exam.rootRef} className={`exam-sim skin-${skin} theme-${prefs.theme} ${reviewing ? "is-review" : ""} ${unreviewedCount || communityPending ? "has-community-notice" : ""}`} role="dialog" aria-modal="true" aria-label={`${EXAM_SKINS[skin].label} exam simulation`} aria-busy={exam.finishStatus === "saving"} tabIndex={-1} style={style}>
       {/* ---------------------------------------------------------------- top */}
       <header className="exam-sim-top">
         <div className="sim-top-left">
@@ -170,6 +177,8 @@ function ClassicExam({ exam, skin, mode, onClose }: {
         </div>
       </header>
 
+      <CommunityPracticeNotice count={unreviewedCount} pending={communityPending} simulator />
+
       {/* --------------------------------------------------------------- body */}
       <div className={`exam-sim-main ${panel ? "with-panel" : ""}`}>
         {skin === "uworld" && navOpen && (
@@ -193,9 +202,10 @@ function ClassicExam({ exam, skin, mode, onClose }: {
           </button>
         )}
 
-        <section className="exam-sim-item" data-exam-scroll aria-labelledby="sim-item-heading">
+        <section className="exam-sim-item" data-exam-scroll aria-labelledby="sim-item-heading"
+          data-study-question data-question-id={question.id}>
           <h2 id="sim-item-heading" className="sr-only">Item {index + 1} of {pool.length}</h2>
-          <div className={`sim-stem ${tool === "highlight" ? "tool-highlight" : ""} ${tool === "erase" ? "tool-erase" : ""}`}>
+          <div className={`sim-stem ${tool === "highlight" ? "tool-highlight" : ""} ${tool === "erase" ? "tool-erase" : ""}`} data-study-part="stem">
             <div aria-label={question.content ? "Question stem" : undefined} tabIndex={question.content ? -1 : undefined} ref={question.content ? exam.stemRef : undefined}><QuestionContent question={question} part="stem" fallback={<AnnotatedQuestionText
               text={question.stem}
               annotations={exam.annotations}
@@ -205,7 +215,7 @@ function ClassicExam({ exam, skin, mode, onClose }: {
               eraseMode={tool === "erase"}
               onDelete={exam.onDeleteAnnotation}
               onSelection={exam.onSelection}
-            />} /></div>
+            />} annotate={{ annotations: exam.annotations, onSelection: exam.onSelection, onDelete: exam.onDeleteAnnotation, eraseMode: tool === "erase" }} /></div>
           </div>
           {!question.content && (question.attachments?.length ?? 0) > 0 && <SimExhibits question={question} />}
 
@@ -217,7 +227,8 @@ function ClassicExam({ exam, skin, mode, onClose }: {
               const isCorrect = revealed && correctKey === option.key;
               const isWrong = revealed && selected && correctKey !== undefined && correctKey !== option.key;
               return (
-                <div key={option.key} className={`sim-choice ${selected ? "selected" : ""} ${struck ? "struck" : ""} ${isCorrect ? "correct" : ""} ${isWrong ? "wrong" : ""}`}
+                <div key={option.key} data-study-part="choice" data-choice-key={option.key}
+                  className={`sim-choice ${selected ? "selected" : ""} ${struck ? "struck" : ""} ${isCorrect ? "correct" : ""} ${isWrong ? "wrong" : ""}`}
                   onContextMenu={(event) => { event.preventDefault(); exam.strike(option.key); }}>
                   <label>
                     <input type="radio" name={`sim-${question.id}`} checked={selected} disabled={revealed || exam.finishLocked} onChange={() => exam.pick(option.key)} aria-label={`${option.key}. ${option.text}`} />

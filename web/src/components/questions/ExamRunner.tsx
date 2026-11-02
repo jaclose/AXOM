@@ -44,6 +44,8 @@ import {
 } from "./TutorUtilityDock";
 import type { QuizCalculatorValue } from "./QuizCalculator";
 import { ExamSimulator } from "./ExamSimulator";
+import { CommunityPracticeNotice } from "./CommunityPracticeNotice";
+import { communityReviewStatus } from "../../lib/academicLibrary/communityReference";
 import { ExamRunnerMediaNotice } from "./ExamRunnerMediaNotice";
 import {
   assertVaultWrite,
@@ -284,10 +286,12 @@ function readReadingScale(): number {
   } catch { return 1; }
 }
 
-export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, presetTimed = false, blockId, simulate = false, sessionId, onClose, onReturnToCourse }: {
+export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, presetTimed = false, blockId, simulate = false, sessionId, accountId, onClose, onReturnToCourse }: {
   mode: QuizMode;
   /** Optional stable identity for a persisted external quiz launch. */
   sessionId?: string;
+  /** Restrict downloaded community status to this signed-in account. */
+  accountId?: string;
   /** When set, skips setup and runs exactly these questions (retake missed). */
   retakeIds?: string[];
   /** Pre-fill the setup (run-from-set, saved blocks). */
@@ -304,6 +308,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
 }) {
   const s = useStore();
   const questions = s.questions ?? EMPTY_QUESTIONS;
+  const community = useMemo(() => communityReviewStatus(s.documents ?? [], accountId), [s.documents, accountId]);
   const questionsById = useMemo(() => new Map(questions.map((question) => [question.id, question])), [questions]);
   const questionSets = s.questionSets ?? [];
   const restored = useMemo(() => readActiveQuiz(), []);
@@ -347,6 +352,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       ? completeRequestedPool(requestedRetakeIds, questions) ?? []
       : []);
   const poolById = useMemo(() => new Map(pool.map((question) => [question.id, question])), [pool]);
+  const unreviewedInPool = pool.filter(question => community.questionIds.has(question.id)).length;
   const media = useMediaGate();
   // Clinical figure fingerprints depend on the pool, not on every keystroke
   // or answer selection. Avoid resurveying 1000 questions on each render.
@@ -1203,7 +1209,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   // ------------------------------------------------------------------ render
 
   if (stage === "setup") {
-    const available = buildQuizPool(questions, { ...currentFilters(), count: questions.length, ordered: true }, questionSets).length;
+    const availableQuestions = buildQuizPool(questions, { ...currentFilters(), count: questions.length, ordered: true }, questionSets);
+    const available = availableQuestions.length;
     const selectedSets = questionSets.filter((set) => setIds.includes(set.id));
     const sourceTitle = wholeBank ? "Whole question bank" : selectedSets.length === 1 ? selectedSets[0].title : `${selectedSets.length} selected sets`;
     const canStart = count <= 1000 && available > 0 && (wholeBank || selectedSets.length > 0) && Number.isInteger(count) && count > 0;
@@ -1211,6 +1218,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       footer={<><GhostButton disabled={!canStart} onClick={saveAsBlock}>Save as block</GhostButton>
         <GButton variant="primary" disabled={!canStart || media.state.phase !== "idle"} onClick={begin}><Play size={ICON_SIZE.body} /> Start {mode} block</GButton></>}>
         <ExamRunnerMediaNotice state={media.state} onRetry={retryMediaStartRef.current ?? undefined} />
+        <CommunityPracticeNotice count={availableQuestions.filter(question => community.questionIds.has(question.id)).length} pending={community.pending} possible />
         {suspended && (
           <div className="sim-suspended-banner" role="status">
             <div>
@@ -1304,6 +1312,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         skin={simRun.skin}
         mode={mode}
         pool={simRun.pool}
+        unreviewedCount={simRun.pool.filter(question => community.questionIds.has(question.id)).length}
+        communityPending={community.pending}
         runId={simRun.runId}
         timeLimitSeconds={simRun.timeLimitSeconds}
         resume={simRun.resume}
@@ -1319,6 +1329,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         skin={session.simulation.skin as ExamSkin}
         mode={session.mode}
         pool={pool}
+        unreviewedCount={unreviewedInPool}
+        communityPending={community.pending}
         review={{ answers: session.answers, startedAt: session.startedAt, elapsedSeconds: session.simulation.elapsedSeconds }}
         onFinish={() => undefined}
         onSuspend={() => undefined}
@@ -1383,6 +1395,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             <GButton variant="primary" onClick={onClose}>Done</GButton>
           </>
         }>
+        <CommunityPracticeNotice count={unreviewedInPool} pending={community.pending} />
         <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
           <Tag tone={accuracyTone(session.score?.pct ?? null)}>
             {session.score?.correct}/{session.score?.scored} correct ({session.score?.pct}%)
@@ -1606,12 +1619,14 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       }
     >
       {finalizeError && <div className="form-warning danger" role="alert"><b>Final save not confirmed.</b> {finalizeError}</div>}
+      <CommunityPracticeNotice count={unreviewedInPool} pending={community.pending} />
       <div className="quiz-progress" aria-hidden="true">
         <span className="quiz-progress-fill" style={{ width: `${Math.round(((index + (revealed ? 1 : 0)) / pool.length) * 100)}%` }} />
       </div>
       <QuestionViewControls view={presentation.view} onChange={presentation.choose} notice={presentation.notice} mode={mode} />
       <main className={`tutor-workspace-shell ${activePanel ? "panel-open" : ""}`} aria-label="Tutor question workspace">
-      <section className="tutor-question-region" aria-labelledby="tutor-question-heading">
+      <section className="tutor-question-region" aria-labelledby="tutor-question-heading"
+        data-study-question data-question-id={question.id}>
       <h2 id="tutor-question-heading" className="sr-only">Question {index + 1} of {pool.length}</h2>
       <div className="tutor-question-meta">
         {timed && timeLeft !== undefined && (
@@ -1630,7 +1645,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
 
       <div className="quiz-reading" style={{ "--quiz-reading-scale": readingScale } as CSSProperties}>
         <QuestionViewFrame view={presentation.view}>
-        <div aria-label={question.content ? "Question stem" : undefined} tabIndex={question.content ? -1 : undefined} ref={question.content ? stemRef : undefined}>
+        <div aria-label={question.content ? "Question stem" : undefined} tabIndex={question.content ? -1 : undefined}
+          ref={question.content ? stemRef : undefined} data-study-part="stem">
         <QuestionContent question={question} part="stem" mode={revealed ? "answered" : "question"} fallback={
           <AnnotatedQuestionText
           text={question.stem}
@@ -1641,7 +1657,12 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           eraseMode={annotationTool?.kind === "eraser"}
           focusRef={stemRef}
           onSelection={(range) => handleAnnotationSelection("stem", range)}
-        />} />
+        />} annotate={{
+          annotations: stemAnnotations,
+          onSelection: (range) => handleAnnotationSelection("stem", range),
+          onDelete: deleteAnnotation,
+          eraseMode: annotationTool?.kind === "eraser",
+        }} />
         </div>
         <QuestionSupportingContent question={question} mode="question" />
         {!question.content && <QuestionExhibits attachments={exhibits} />}
@@ -1653,7 +1674,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             const showWrong = revealed && isPicked && Boolean(correctKey) && correctKey !== opt.key;
             const isStruck = item.struck.includes(opt.key);
             return (
-              <div key={opt.key}
+              <div key={opt.key} data-study-part="choice" data-choice-key={opt.key}
                 className={`option-row ${isPicked ? "picked" : ""} ${showCorrect ? "correct" : ""} ${showWrong ? "wrong" : ""} ${isStruck ? "struck" : ""}`}>
                 <button type="button" className="option-pick"
                   aria-label={`${opt.key}. ${opt.text}`}
@@ -1753,41 +1774,6 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
               s.updateQuestion(question.id, { analyses });
             }}
           />
-          {question.choiceRationales && Object.keys(question.choiceRationales).length > 0 && (() => {
-            const rationales = question.choiceRationales!;
-            const correctWhy = correctKey ? rationales[correctKey] : undefined;
-            const pickedWhy = picked && picked !== correctKey ? rationales[picked] : undefined;
-            const others = Object.entries(rationales).filter(([key]) => key !== correctKey && key !== picked);
-            return (
-              <div className="stack gap6 choice-rationales">
-                {/* Lead with what the learner most needs: why the correct answer
-                    is right, then why their own pick was wrong; the remaining
-                    distractors collapse so they never bury the key point. */}
-                {correctWhy && (
-                  <div className="rationale-lead">
-                    <b className="grade-green">Why {correctKey} is correct</b>
-                    <p>{correctWhy}</p>
-                  </div>
-                )}
-                {pickedWhy && (
-                  <div className="rationale-lead">
-                    <b className="grade-red">Why your choice ({picked}) is wrong</b>
-                    <p>{pickedWhy}</p>
-                  </div>
-                )}
-                {others.length > 0 && (
-                  <details className="rationale-others">
-                    <summary>Why the other choices are wrong</summary>
-                    <div className="stack gap6">
-                      {others.map(([key, why]) => (
-                        <div key={key} className="sub"><b>{key}:</b> {why}</div>
-                      ))}
-                    </div>
-                  </details>
-                )}
-              </div>
-            );
-          })()}
           {!isCorrect && correctKey && (
             <>
               <SelectField label="Why did this go wrong?" value={errorType}

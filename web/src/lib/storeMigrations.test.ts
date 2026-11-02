@@ -149,7 +149,7 @@ describe("v26 → v27 migration", () => {
     };
     const state = { ...v26State(), schemaVersion: 31, questions: [question] };
     const result = migratePersistedState(structuredClone(state), 31);
-    expect(result.schemaVersion).toBe(34);
+    expect(result.schemaVersion).toBe(SCHEMA_VERSION);
     expect(result.questions[0].stem).toBe(question.stem);
     expect(result.questions[0].explanation).toBe(question.explanation);
     expect(result.questions[0].correctAnswerText).toBe("Beta");
@@ -174,6 +174,29 @@ describe("v26 → v27 migration", () => {
     };
     const result = migratePersistedState(structuredClone(state), 31);
     expect(result.questions[0].correctAnswerText).toBe("Legacy free-text answer");
+  });
+
+  it("relabels legacy institution-branded curated resources without changing their identity or URL", () => {
+    const state = makeSeed();
+    const original = state.resources.find((resource) => resource.title === "Course Materials")!;
+    const personal = state.resources.find((resource) => resource.title === "My Drive")!;
+    original.title = "SGU Materials";
+    original.category = "SGU Materials";
+    original.tags = ["sgu", "materials"];
+    original.ratingReason = "Core SGU material repository.";
+
+    const migrated = migratePersistedState(structuredClone(state), 34);
+    const updated = migrated.resources.find((resource) => resource.id === original.id)!;
+    expect(updated).toMatchObject({
+      id: original.id,
+      created: original.created,
+      url: original.url,
+      title: "Course Materials",
+      category: "Drives",
+      tags: ["Course Library", "course", "materials"],
+    });
+    expect(updated.ratingReason).not.toMatch(/\bSGU\b/i);
+    expect(migrated.resources.find((resource) => resource.id === personal.id)).toEqual(personal);
   });
 
   it("survives a deep-legacy (v1-era) payload without throwing", () => {
@@ -201,7 +224,7 @@ describe("v26 → v27 migration", () => {
     delete state.dailyWordPuzzles;
 
     const migrated = migratePersistedState(structuredClone(state), SCHEMA_VERSION);
-    expect(migrated.schemaVersion).toBe(34);
+    expect(migrated.schemaVersion).toBe(SCHEMA_VERSION);
     expect(migrated.profile.experimentalFlags?.dailyGames).toBe(false);
     expect(migrated.profile.timeZonePreference).toEqual({ mode: "system" });
     expect(migrated.profile.clockPreferences).toMatchObject({ enabled: true, showDigitalSeconds: false, hourCycle: "12" });
@@ -252,7 +275,7 @@ describe("v26 → v27 migration", () => {
     };
 
     const migrated = migratePersistedState(structuredClone(state), SCHEMA_VERSION);
-    expect(migrated.schemaVersion).toBe(34);
+    expect(migrated.schemaVersion).toBe(SCHEMA_VERSION);
     expect(migrated.profile.dashboardLayout).toMatchObject({
       version: 1,
       preset: "custom",
@@ -275,7 +298,7 @@ describe("v26 → v27 migration", () => {
       promptVersion: "promise-prompt-v1",
     };
     const migrated = migratePersistedState(structuredClone(state), SCHEMA_VERSION);
-    expect(migrated.schemaVersion).toBe(34);
+    expect(migrated.schemaVersion).toBe(SCHEMA_VERSION);
     expect(migrated.profile.promisePromptStatus).toEqual(state.profile.promisePromptStatus);
   });
 

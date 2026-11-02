@@ -1,13 +1,43 @@
-import biostats from "../../../../fixtures/qbank/goer/t5/week-02/biostats-epidemiology/manifest.json";
-import endocrine from "../../../../fixtures/qbank/goer/t5/week-02/endocrine-pathophysiology/manifest.json";
-import pharma from "../../../../fixtures/qbank/goer/t5/week-02/pharmacodynamics-pk/manifest.json";
 import type { PackageManifest } from "./package";
 import type { Course, Term } from "../types";
 import { inferSourceMapping } from "../course-engine/sourceMapping";
 import { vocabularyFromCourses } from "../course-engine/vocabulary";
 import { moduleAliases } from "../course-engine/templateParse";
 
-export const knownBankManifests: PackageManifest[] = [biostats, endocrine, pharma];
+// Keep source-audit fixtures outside the production graph. These projections
+// intentionally contain only fields AXOM needs to identify and file a bank.
+export const knownBankManifests: PackageManifest[] = [
+  {
+    schemaVersion: 1,
+    course: { name: "GOER", term: 5, week: 2 },
+    bank: { id: "goer-t5-w2-biostats-epidemiology", title: "Biostatistics & Epidemiology", discipline: "Biostatistics / Epidemiology" },
+    source: { filename: "Biostats+and+Epidemiology+PQ.pdf", sourceWeekDeclared: false, axomAssignedWeek: 2 },
+    questionsFile: "questions.json",
+    assetsDirectory: "assets/",
+  },
+  {
+    schemaVersion: 1,
+    course: { name: "GOER", term: 5, week: 2 },
+    bank: { id: "goer-t5-w2-endocrine-pathophysiology", title: "Endocrine Pathophysiology", discipline: "Pathophysiology", topic: "Endocrinology" },
+    source: { filename: "PRACTICE+QUE_PATHOPHYS-ENDOCRINOLOGY.pdf", sourceWeekDeclared: false, axomAssignedWeek: 2 },
+    questionsFile: "questions.json",
+    assetsDirectory: "assets/",
+  },
+  {
+    schemaVersion: 1,
+    course: { name: "GOER", term: 5, week: 2 },
+    bank: { id: "goer-t5-w2-pharmacodynamics-pk", title: "Pharmacodynamics, Pharmacokinetics & Clinical Pharmacokinetics", discipline: "Pharmacology" },
+    source: {
+      filename: "Pharmacodynamics%2C+Pharmacokinetics+and+Clinical+Pharmacokinetics+PQ.pdf",
+      declaredTitle: "PCM2 GOER Module Pharmacology",
+      declaredTerm: "Fall Term 2026",
+      sourceWeekDeclared: false,
+      axomAssignedWeek: 2,
+    },
+    questionsFile: "questions.json",
+    assetsDirectory: "assets/",
+  },
+];
 export function manifestForFile(name: string, terms: Term[], courses: Course[]): PackageManifest {
   const known = knownBankManifests.find((manifest) => manifest.source.filename.toLowerCase() === name.toLowerCase());
   if (known) return structuredClone(known);

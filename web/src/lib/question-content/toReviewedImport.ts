@@ -153,7 +153,7 @@ export function packageToReviewedImport(pkg: ImportPackage, issues: readonly Pac
       // defensible MCQ. Review acknowledgment must not bypass this shape gate.
       saveable = false;
       if (readiness === "ready") readiness = "needs-review";
-      reasons.push(`Source extraction identified ${question.choices.length} choices; this import supports 2–10 per question. Split/reparse the original instead of accepting a malformed question.`);
+      reasons.push(`Source extraction identified ${question.choices.length} choices; this import supports 2–${MAX_PACKAGE_CHOICES} per question. Split/reparse the original instead of accepting a malformed question.`);
     }
     if (fields.options.some((option) => !option.text.trim())) {
       // A choice that is only a picture has no text for the current question record to show.

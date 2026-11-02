@@ -105,7 +105,7 @@ export interface ImportMappingDiagnostic {
 }
 
 /** Lines like "A. text", "B) text", "(C) text", "d - text". */
-const OPTION_RE = /^\s*\(?\s*([A-Ha-h])\s*(?:\)\s*[.:\-–]?|[.:\-–])\s+(.*\S)\s*$/;
+const OPTION_RE = /^\s*\(?\s*([A-Ia-i])\s*(?:\)\s*[.:\-–]?|[.:\-–])\s+(.*\S)\s*$/;
 /** Feedback/explanation/objective markers that begin a NON-option content block.
  * Capturing group 1 is the marker keyword so callers can classify it. */
 const EXPLANATION_RE = /^\s*(correct\s+feedback|incorrect\s+feedback|feedback|answer\s+explanation|explanation|rationale|reasoning|discussion|teaching\s+point|key\s+concept|why)\s*(?:(?:[:\-–]\s*)|$)/i;
@@ -116,9 +116,9 @@ const EXPLANATION_RE = /^\s*(correct\s+feedback|incorrect\s+feedback|feedback|an
  * trip it. Group 1 = marker, group 2 = the feedback text after the colon. */
 const INLINE_FEEDBACK_RE = /\s+((?:correct|incorrect)\s+feedback|feedback|explanation|rationale|this\s+question\s+addresses\s+objectives?|learning\s+objectives?|objectives?|teaching\s+point|key\s+concept)\s*[:\-–]\s*(.*)$/i;
 /** "A is incorrect because…" / "C is correct — …" (choice rationales). */
-const RATIONALE_RE = /^\s*\(?([A-Ha-h])\)?[).:\-–]?\s+is\s+(in)?correct\b[.,:;\s]*(.*)$/i;
+const RATIONALE_RE = /^\s*\(?([A-Ia-i])\)?[).:\-–]?\s+is\s+(in)?correct\b[.,:;\s]*(.*)$/i;
 /** Prose-embedded answer inside explanation text. */
-const PROSE_ANSWER_RE = /\b(?:the\s+answer\s+is|correct\s+answer\s+is|correct\s+choice\s+is)\s*\(?([A-Ha-h])\)?(?![a-z])/i;
+const PROSE_ANSWER_RE = /\b(?:the\s+answer\s+is|correct\s+answer\s+is|correct\s+choice\s+is)\s*\(?([A-Ia-i])\)?(?![a-z])/i;
 /** Metadata lines: "Topic: Complement", "System: Immuno", "Source: SGU NB3", "Tags: a, b". */
 const META_RE = /^\s*(topic|system|source|category|subject|tags)\s*[:\-–]\s*(.+\S)\s*$/i;
 const OBJECTIVE_RE = /^\s*(learning\s+objectives?|objectives?|this\s+question\s+addresses\s+objectives?)\s*[:\-–]\s*(.*)$/i;
@@ -157,10 +157,10 @@ export function parseAnswerSignal(line: string): AnswerSignal | undefined {
   const match = line.match(ANSWER_PREFIX_RE);
   if (!match) return undefined;
   const payload = match[1].trim();
-  const normalizedPayload = payload.replace(/^\(\s*([A-Ha-h])\s*\)/, "($1)");
-  const punctuated = normalizedPayload.match(/^\(?([A-Ha-h])\)?\s*[.):\-–—]\s*(.*)$/);
-  const bare = normalizedPayload.match(/^\(?([A-Ha-h])\)?\s*$/);
-  const spaced = normalizedPayload.match(/^([A-Ha-h])\s+(.+)$/);
+  const normalizedPayload = payload.replace(/^\(\s*([A-Ia-i])\s*\)/, "($1)");
+  const punctuated = normalizedPayload.match(/^\(?([A-Ia-i])\)?\s*[.):\-–—]\s*(.*)$/);
+  const bare = normalizedPayload.match(/^\(?([A-Ia-i])\)?\s*$/);
+  const spaced = normalizedPayload.match(/^([A-Ia-i])\s+(.+)$/);
   const letter = punctuated ?? bare;
   if (!letter && spaced) {
     const key = spaced[1].toUpperCase();
@@ -202,7 +202,7 @@ function comparableAnswerText(value: string): string {
     .toLowerCase()
     .replace(/[‘’]/g, "'")
     .replace(/[“”]/g, '"')
-    .replace(/^\(?[a-h]\)?[).:\-–]\s*/i, "")
+    .replace(/^\(?[a-i]\)?[).:\-–]\s*/i, "")
     .replace(/\s*([+/%])\s*/g, "$1")
     .replace(/\s+/g, " ")
     .replace(/[\s.,;:!?]+$/g, "")
@@ -271,7 +271,7 @@ export function normalizeSourceText(raw: string): string {
     .replace(/\*\*([^*\n]+)\*\*/g, "$1")            // **bold** → bold
     .replace(/__([^_\n]+)__/g, "$1")
     .replace(/^\s{0,3}#{1,6}\s+/gm, "")              // Markdown headings
-    .replace(/^\s*[-+]\s+(?=\(?[A-Ha-h][).:\-–]\s+)/gm, "") // Markdown option bullets
+    .replace(/^\s*[-+]\s+(?=\(?[A-Ia-i][).:\-–]\s+)/gm, "") // Markdown option bullets
     .replace(/^[\s]*[•●▪‣◦·]\s*/gm, "")            // list bullets at line start
     .replace(/[\t\f\v]+/g, " ");
 }
@@ -288,14 +288,14 @@ const CORRECT_SUFFIX_RE = /\s*\(\s*(?:correct(?:\s+answer)?|right)\s*\)\s*$/i;
  */
 export function expandInlineOptions(line: string): string[] {
   const starts: Array<{ index: number; letter: string }> = [];
-  const re = /(?:^|\s)\(?([A-Ha-h])[).:]\s+/g;
+  const re = /(?:^|\s)\(?([A-Ia-i])[).:]\s+/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(line)) !== null) {
     starts.push({ index: m.index === 0 ? 0 : m.index + 1, letter: m[1].toUpperCase() });
   }
   if (starts.length < 3) return [line];
   const letters = starts.map((s) => s.letter).join("");
-  if (!"ABCDEFGH".startsWith(letters)) return [line];
+  if (!"ABCDEFGHI".startsWith(letters)) return [line];
   const pieces: string[] = [];
   if (starts[0].index > 0) pieces.push(line.slice(0, starts[0].index).trim());
   for (let i = 0; i < starts.length; i++) {
@@ -357,9 +357,9 @@ export function parseQuestionText(raw: string): ParsedQuestionDraft {
     // through it; remember the flag for the marker heuristic below.
     let line = rawLine;
     let lineMarked = false;
-    const lead = line.match(/^\s*[*✓✔☑]\s*(\(?[A-Ha-h][).:\-–]\s.*)$/);
+    const lead = line.match(/^\s*[*✓✔☑]\s*(\(?[A-Ia-i][).:\-–]\s.*)$/);
     if (lead) { line = lead[1]; lineMarked = true; }
-    const trail = line.match(/^(\s*\(?[A-Ha-h][).:\-–]\s.*\S)\s*[*✓✔☑]\s*$/);
+    const trail = line.match(/^(\s*\(?[A-Ia-i][).:\-–]\s.*\S)\s*[*✓✔☑]\s*$/);
     if (trail) { line = trail[1]; lineMarked = true; }
 
     // "Correct Answer from source: D" is an answer line with a note in it.
@@ -786,7 +786,7 @@ export function parseQuestionText(raw: string): ParsedQuestionDraft {
     }
   }
   // The source's own word on its key outranks anything the parser inferred.
-  const markedBySource = [...new Set((sourceMarks ?? "").toUpperCase().match(/\b[A-H]\b/g) ?? [])];
+  const markedBySource = [...new Set((sourceMarks ?? "").toUpperCase().match(/\b[A-I]\b/g) ?? [])];
   if (sourceKeyConflict || markedBySource.length > 1) {
     const marks = markedBySource.length > 1 ? `The source marks ${markedBySource.slice(0, -1).join(", ")} and ${markedBySource[markedBySource.length - 1]}` : "The source reports a conflict in its answer key";
     warnings.push(`${marks}. No answer was set: choose one after checking the source.`);
@@ -1274,7 +1274,7 @@ function markUnnumberedPreambleDraft(draft: ParsedQuestionDraft, originalBlock: 
 
 const KEY_HEADER_RE = /^\s*(answer\s*key|answers?(?:\s*(?:and|&)\s*(?:explanations?|rationales?))?|explanations?|solutions?)\s*[:\-–]?\s*$/im;
 /** Compressed pairs like "1. C", "2-B", "3) D", "Question 4: A", "5C". */
-const KEY_PAIR_RE = /(?:q(?:uestion)?\s*)?(\d{1,4})\s*[).:\-–—]?\s*\(?[ \t]*([A-Ha-h])[ \t]*\)?(?![a-z0-9])/gi;
+const KEY_PAIR_RE = /(?:q(?:uestion)?\s*)?(\d{1,4})\s*[).:\-–—]?\s*\(?[ \t]*([A-Ia-i])[ \t]*\)?(?![a-z0-9])/gi;
 /** A numbered entry start inside an answer section: "1. …", "Question 3: …". */
 const ENTRY_START_RE = /^\s*(?:q(?:uestion)?\s*)?(\d{1,4})\s*(?:[).:\-–]\s*|\s+)(?=\S)/i;
 function parseAnswerSectionContent(
@@ -1316,8 +1316,8 @@ function parseAnswerSectionContent(
   // A bare or punctuated letter is a key. A spaced phrase such as
   // "A rapid response" is answer text and is resolved only after the
   // corresponding question's options are available.
-  const punctuated = head.match(/^\(?\s*([A-Ha-h])\s*\)?\s*(?:[.,:;]|[—–-])\s*(.*)$/);
-  const bare = head.match(/^\(?\s*([A-Ha-h])\s*\)?\s*$/);
+  const punctuated = head.match(/^\(?\s*([A-Ia-i])\s*\)?\s*(?:[.,:;]|[—–-])\s*(.*)$/);
+  const bare = head.match(/^\(?\s*([A-Ia-i])\s*\)?\s*$/);
   const match = punctuated ?? bare;
   if (match) {
     const explanation = [(match[2] ?? "").trim(), ...tailLines].filter(Boolean).join("\n").trim() || undefined;
@@ -1352,7 +1352,7 @@ export function parseAnswerSections(text: string): { body: string; entries: Map<
     const candidate = text.slice(headerMatch.index + headerMatch[0].length);
     const candidateLines = candidate.split("\n");
     // A per-question "Explanation:\n..." remains question content even when
-    // a later numbered stem starts with A-H. Only a strict answer token counts
+    // a later numbered stem starts with A-I. Only a strict answer token counts
     // here; "2. A patient presents..." is a question boundary, not answer A.
     const hasNumberedAnswer = candidateLines.some((line, index) => {
       const start = line.match(ENTRY_START_RE);
@@ -1360,7 +1360,7 @@ export function parseAnswerSections(text: string): { body: string; entries: Map<
       const content = line.slice(start[0].length).trim();
       return Boolean(
         parseAnswerSignal(content)?.key
-        || content.match(/^\(?[ \t]*[A-Ha-h][ \t]*\)?(?:\s*$|\s*[.,:;—–-]\s*)/),
+        || content.match(/^\(?[ \t]*[A-Ia-i][ \t]*\)?(?:\s*$|\s*[.,:;—–-]\s*)/),
       );
     });
     const hasCompressedKey = candidateLines.some((line) => [...line.matchAll(KEY_PAIR_RE)].length > 1);
@@ -1392,7 +1392,7 @@ export function parseAnswerSections(text: string): { body: string; entries: Map<
     // number→letter pairs — a per-question "Answer: B" line is NOT a key
     // section and stays in the body for the single-question parser.
     const inline = text.match(/^\s*answers?\s*[:\-–]\s*(.+\S)\s*$/im);
-    if (inline && inline.index !== undefined && /(?:q(?:uestion)?\s*)?\d{1,4}\s*[).:\-–]?\s*\(?[A-Ha-h]\)?(?![a-z0-9])/i.test(inline[1])) {
+    if (inline && inline.index !== undefined && /(?:q(?:uestion)?\s*)?\d{1,4}\s*[).:\-–]?\s*\(?[A-Ia-i]\)?(?![a-z0-9])/i.test(inline[1])) {
       sectionText = inline[1];
       body = text.slice(0, inline.index) + text.slice(inline.index + inline[0].length);
     }
@@ -1504,7 +1504,7 @@ function parseAlignedAnswerTable(sectionText: string): Map<number, AnswerSection
 
     const letterTokens = lines[index + 1].split(/[\s|,;]+/).filter(Boolean);
     const letters = letterTokens.map((token) => token.replace(/^\(\s*|\s*\)$/g, "").replace(/[).:]$/g, "").toUpperCase());
-    if (letters.length !== numbers.length || letters.some((letter) => !/^[A-H]$/.test(letter))) continue;
+    if (letters.length !== numbers.length || letters.some((letter) => !/^[A-I]$/.test(letter))) continue;
 
     numbers.forEach((number, position) => {
       const value = number!;

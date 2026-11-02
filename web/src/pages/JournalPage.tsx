@@ -5,8 +5,8 @@ import {
 import { ICON_SIZE } from "../lib/iconSize";
 import {
   ArrowLeft, ArrowRight, BookOpen, CalendarClock, Check, CheckCircle2, ChevronRight,
-  Download, ImagePlus, ListChecks, Lock, Palette, Pencil, Plus, Save, Sparkles, Trash2,
-  Trophy, X,
+  Download, HeartHandshake, ImagePlus, ListChecks, Lock, Palette, Pencil, Plus, Save,
+  Sparkles, Trash2, Trophy, X,
 } from "lucide-react";
 import { useStore } from "../lib/store";
 import { useUi } from "../lib/uiStore";
@@ -24,6 +24,7 @@ import { readListeningLog } from "../lib/soundscapes/listeningLog";
 import { readRestLog } from "../lib/rest";
 import { focusCheckInLedger } from "../lib/focusCheckIn";
 import { useReducedMotion } from "../lib/motion";
+import { journalReflectionNeedsSupport } from "../lib/journalSupport";
 import {
   DEFAULT_JOURNAL_NOTEBOOK,
   buildJournalGlanceSections,
@@ -300,6 +301,7 @@ function JournalWritingPage({
   const [attachmentError, setAttachmentError] = useState("");
   const [addingImage, setAddingImage] = useState(false);
   const [editingGlance, setEditingGlance] = useState<JournalGlanceSectionKey | null>(null);
+  const [supportOpen, setSupportOpen] = useState(false);
   const entryIdRef = useRef(entry?.id ?? "");
   const entryDateRef = useRef(entry?.date ?? `${day}T12:00:00`);
   const draftRef = useRef(draft);
@@ -344,6 +346,20 @@ function JournalWritingPage({
   const liveGlanceText = renderJournalGlanceText(glanceSections, draft.dayAtAGlance);
   const liveGlanceRef = useRef(liveGlanceText);
   liveGlanceRef.current = liveGlanceText;
+  const supportSignal = journalReflectionNeedsSupport([
+    draft.today,
+    draft.blockers,
+    draft.tomorrow,
+    draft.freeWriting,
+    ...draft.wins,
+    ...draft.losses,
+  ]);
+  const previousSupportSignalRef = useRef(false);
+
+  useEffect(() => {
+    if (supportSignal && !previousSupportSignalRef.current) setSupportOpen(true);
+    previousSupportSignalRef.current = supportSignal;
+  }, [supportSignal]);
 
   const persistNow = useCallback(async (status?: "draft" | "complete"): Promise<JournalPersistResult> => {
     if (!mountedRef.current) return "aborted";
@@ -606,6 +622,20 @@ function JournalWritingPage({
 
       {saveError && <div className="journal-save-error" role="alert">{saveError}</div>}
 
+      <div className="journal-support-access">
+        <GhostButton aria-expanded={supportOpen} aria-controls="journal-support-preview" onClick={() => setSupportOpen((current) => !current)}>
+          <HeartHandshake size={ICON_SIZE.body} /> Support
+        </GhostButton>
+      </div>
+
+      {supportOpen && (
+        <JournalSupportPreview
+          noticedReflection={supportSignal}
+          onClose={() => setSupportOpen(false)}
+          onLeave={() => { void requestDurableTransition(onClose); }}
+        />
+      )}
+
       <div className="journal-open-book">
         <article className="journal-paper journal-writing-paper">
           <div className="journal-paper-running-head">
@@ -753,6 +783,45 @@ function JournalWritingPage({
           </div>
           <span className="journal-glance-footnote">Every visible line is included in your page automatically and saved with it. Hide a line to leave it out; corrections change only this page, never your records.</span>
         </aside>
+      </div>
+    </section>
+  );
+}
+
+function JournalSupportPreview({
+  noticedReflection, onClose, onLeave,
+}: {
+  noticedReflection: boolean;
+  onClose: () => void;
+  onLeave: () => void;
+}) {
+  return (
+    <section
+      id="journal-support-preview"
+      className="journal-support-preview"
+      aria-labelledby="journal-support-title"
+      aria-live={noticedReflection ? "polite" : "off"}
+    >
+      <div className="journal-support-copy">
+        <span className="journal-support-mark" aria-hidden="true"><HeartHandshake size={ICON_SIZE.emphasis} /></span>
+        <div>
+          <span className="journal-kicker">Support options</span>
+          <h2 id="journal-support-title">You do not have to carry this alone.</h2>
+          <p>
+            {noticedReflection
+              ? "AXOM noticed first-person wording that may be about your safety. This check is not a diagnosis and does not send a support alert."
+              : "Use these options whenever you want support. This check runs in your browser and does not send a support alert."}
+          </p>
+          <p className="journal-support-urgent">
+            If you may act now, call your local emergency number or go to the nearest emergency department. If you can, stay with someone you trust and move away from anything you could use to hurt yourself.
+          </p>
+        </div>
+      </div>
+      <div className="journal-support-actions">
+        <a href="https://findahelpline.com/" target="_blank" rel="noreferrer">Find support near me</a>
+        <a href="https://988lifeline.org/get-help/" target="_blank" rel="noreferrer">988 in the U.S. and territories</a>
+        <GButton size="sm" onClick={onClose}>Keep writing</GButton>
+        <GhostButton onClick={onLeave}>Leave journal</GhostButton>
       </div>
     </section>
   );

@@ -29,17 +29,18 @@ describe("native drawn answer marks", () => {
 });
 
 
-it.each([22, 23])("review-gates a native check proposal using paint operation %s and retains its page", async (paint) => {
-  const draft = parseQuestionBlocks("Question 1: Choose the sample option.\nA. Alpha\nB. Beta\nC. Gamma")[0];
+it.each([[22, "B"], [23, "B"], [22, "I"], [23, "I"]] as const)("review-gates a native check proposal using paint operation %s for %s and retains its page", async (paint, key) => {
+  const choices = [..."ABCDEFGHI"].map((label) => `${label}. Sample choice ${label}`).join("\n");
+  const draft = parseQuestionBlocks(`Question 1: Choose the sample option.\n${choices}`)[0];
   draft.sourcePage = 1;
   const path = tick.map((value, i) => i === 18 || i % 3 === 0 ? value : value * .26 + (i % 3 === 1 ? 15 : 197));
   const destroy = vi.fn();
   pdf.getDocument.mockReturnValue({ destroy, promise: Promise.resolve({ getPage: async () => ({
-    getTextContent: async () => ({ items: [{ str: "B.", transform: [1,0,0,1,43,206], height: 20 }] }),
+    getTextContent: async () => ({ items: [{ str: `${key}.`, transform: [1,0,0,1,43,206], height: 20 }] }),
     getOperatorList: async () => ({ fnArray: [59, 91], argsArray: [["#00c800"], [paint, [path]]] }),
   }) }) });
   await proposePdfMarkedAnswers(new ArrayBuffer(1), [draft], [{ page: 2, kind: "answer", questionPage: 1, evidence: "Repeated slide" }]);
-  expect(draft).toMatchObject({ correctKey: "B", answerEvidencePage: 2, needsReview: true, confidence: "medium", parserRuleIds: expect.arrayContaining(["answer.pdf-vector-check"]) });
+  expect(draft).toMatchObject({ correctKey: key, answerEvidencePage: 2, needsReview: true, confidence: "medium", parserRuleIds: expect.arrayContaining(["answer.pdf-vector-check"]) });
   expect(destroy).toHaveBeenCalledOnce();
   draft.correctKey = "A";
   await proposePdfMarkedAnswers(new ArrayBuffer(1), [draft], [{ page: 2, kind: "answer", questionPage: 1, evidence: "Repeated slide" }]);

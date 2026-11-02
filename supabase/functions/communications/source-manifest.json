@@ -6,7 +6,7 @@
     "web/package-lock.json": "a4f503cd45536ac364c1a2b33de09496f3c13a44828996e8bf5bf2aa5e4ecb3b",
     "web/src/lib/brand.ts": "0816164fed5efbed5575a23341c31ea60e55653a36df5f9307b6fd92b038a8eb",
     "web/src/lib/communications/context.ts": "59e3cd668101f80017c797452c8c86b8c08189a6e60b40485a82e45605ec9073",
-    "web/src/lib/communications/email.tsx": "e4f2704e27bd6de0b7fea1344eb8d1ce3801749a19e195ebca7df8b0d1fef23a",
+    "web/src/lib/communications/email.tsx": "e837e97f404179b0420a48c6fa82def3349263a1593d3a4f84fe8721b6a061e0",
     "web/src/lib/communications/model.ts": "df12dc539c4f478044491d3a4a498aa50b7cf2cefd0b4ef5620c20eace895f2b",
     "web/src/lib/communications/server/campaigns.ts": "90e1728f7962b9bc7fb6dd57047a05e22abb39891f8623eddf3857d73729fbcc",
     "web/src/lib/communications/server/handler.ts": "959c308abdba76f889a68886109a6e56f41fcca0fb4e8d9fe14248dd1588d1e4",
@@ -20,9 +20,9 @@
     "web/src/lib/learning-intelligence/attempts.ts": "7aad725357592550afcabe88b60bb66a2a4ce2abe9e7695e09b4415c1b680d98",
     "web/src/lib/learning-intelligence/patterns.ts": "96ad68a9638b45ca7a48094b7ee8b5af5c9027c57b1ec8aeae6442ec9c852b25",
     "web/src/lib/learning-intelligence/questionFeatures.ts": "a75b3a03ccdf1edb53b268a222bb629c41b057f82a9010257b62047bd8d4ec88",
-    "web/src/lib/localVault.ts": "01524620ae7877451c335711899527bb7d3ced3ce3393a72e59da1805c7e2c2c",
+    "web/src/lib/localVault.ts": "2e8dc6bb896668c05a9afeb50806afe83c559572eb78938224aef35ccc755c64",
     "web/src/lib/questionAnnotations.ts": "d697acb109debc8747b57c0efda3136a3982c16dd99be4391b0ae444b25275a4",
-    "web/src/lib/questionAttachments.ts": "391d2e6bfd9df0c15d15df63d0801c8a89c389669ea2cb4659ca23979fbcb5a3",
+    "web/src/lib/questionAttachments.ts": "621d13f9b6f8074e12683cc4b1f5c5ac05233347bb9c3e586f11d4640d132ea7",
     "web/src/lib/questions.ts": "dc002f056ad1852df89ba7e6e7e2a2d284cdb1dd73e645a4f35a90011fd17a83",
     "web/src/lib/reports.ts": "6b7521623409395c794c18bfedca8e2391dd08b1d16a156f2ed09048da8aa498",
     "web/src/lib/scoring.ts": "9799b3c92cecb5b7dc586c7e7aa1daf61a5185ec8c3a3e42028817c5cc30b55a",
@@ -32,15 +32,15 @@
   },
   "bundle": {
     "path": "supabase/functions/communications/service.js",
-    "sha256": "80f31e3afca24b0e219b91757305ce256c9fc43f3c1bad6ff5c8cf3c8091d117"
+    "sha256": "ef9ff7769cf5faa35b8a0f37e255e9c81f3e78b7a90404a8984136358ed7e504"
   },
   "authTemplates": {
-    "supabase/templates/communications/confirmation.html": "4dd18e7542a9200ce4ade0b1aa46dbc66a70ea20dd317fb3f241bef50f37a70b",
-    "supabase/templates/communications/magic_link.html": "2c65b1fef61738be95b51e92d90c819c0d603e5dc56842830c46817bd4e42b44",
-    "supabase/templates/communications/recovery.html": "a91caeeedc1512d403215d074e4f04a9868f395bb7292e2ceb07edf9b1a88df7",
-    "supabase/templates/communications/invite.html": "3aad0ee8123d7b3570486dc6c644e658965a2786912c11f18286a91c035d5b5a",
-    "supabase/templates/communications/email_change.html": "7333ece2f6bb821bc8d55004fe1042d26d40bda56be4c858da047506b5f93b6e",
-    "supabase/templates/communications/reauthentication.html": "19a6c3e9d2dea0f4c0b59e07727ab1cb4b6bb0cad1be49710fab18cc7bf89767",
-    "supabase/templates/communications/security.html": "8eda33c16f8cd8d4fed1060b683c741a5e5c6669edd2d4e6694f24b7f1703ffc"
+    "supabase/templates/communications/confirmation.html": "e79c100868c837f0619bfa6cf995df5cdd4cd89b59f5434d607df3185f387ab2",
+    "supabase/templates/communications/magic_link.html": "f8e4801fe3f939c7e188a137b777d28d8b2c2abb1c563c024e8c219dd4fee03d",
+    "supabase/templates/communications/recovery.html": "732df891c1e28f118c3183fc4106c93cc096fd767cd21087ebb5b5a1e556ed27",
+    "supabase/templates/communications/invite.html": "f41a9467a1051e9615cf13a6c3e897c4f8dec8952b849dc5b9cad7f74be67553",
+    "supabase/templates/communications/email_change.html": "96aad919eee5d7017603d5a89ecd354c5c8148b710250dc477768b9150903fe9",
+    "supabase/templates/communications/reauthentication.html": "1fdc5c8f1ffd9f449b06600f491c6baee4717ea9f6a15da9adffc5b28499a54c",
+    "supabase/templates/communications/security.html": "a208ba03fb9bbd712a2f6f798127ed9db478f0ebe891f9fbd0f93c3ad6f16560"
   }
 }

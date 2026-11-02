@@ -12,7 +12,7 @@ import { assessBank } from "../question-content/assessBank";
 import { sha256 } from "../question-content/assets";
 import { readCatalog, readPreparedBank } from "../privateLibrary/install";
 import { academicLibraryReader } from "./client";
-import { academicAssetPath, assertAcademicAssetMatchesBytes, assertAcademicFigureBudget, assertAcademicQuestionsInstallable, assertInstallableAcademicImage, academicCollectionId, uploadAcademicCourse, type AcademicUpload, type AcademicUploadResult } from "./upload";
+import { academicAssetPath, assertAcademicAssetMatchesBytes, assertAcademicFigureBudget, assertAcademicStoredFigureBudget, assertAcademicQuestionsInstallable, assertInstallableAcademicImage, academicCollectionId, uploadAcademicCourse, type AcademicUpload, type AcademicUploadResult } from "./upload";
 
 export interface VerifiedAcademicSource {
   sha256: string;
@@ -172,7 +172,7 @@ export async function verifyAcademicCourseReadback(
     const figureContent = new Map<string, string>();
     const figureImages = new Map<string, Awaited<ReturnType<typeof assertInstallableAcademicImage>>>();
     const figureSizes = new Map<string, number>();
-    assertAcademicFigureBudget(bank.pkg.questions);
+    assertAcademicStoredFigureBudget(bank.pkg.questions);
     for (const question of bank.pkg.questions) {
       if (seenQuestionIds.has(question.id)) throw new Error("Duplicate question identities across stored source collections require review.");
       seenQuestionIds.add(question.id);
@@ -203,14 +203,16 @@ export async function verifyAcademicCourseReadback(
         figures.add(path);
       }
     }
-    assertAcademicFigureBudget(bank.pkg.questions, figureSizes);
+    assertAcademicStoredFigureBudget(bank.pkg.questions, figureSizes);
     const assessed = assessBank(bank.pkg, bank.issues, availableAssets);
     const ready = assessed.counts.ready;
     const review = assessed.counts["needs-review"] + assessed.counts.unresolved + (bank.unreadableQuestions ?? 0);
+    const readyQuestions = bank.pkg.questions.filter(question => assessed.verdicts.get(question.id)?.readiness === "ready");
+    if (readyQuestions.length !== ready) throw new Error("Academic question readiness is incomplete.");
+    assertAcademicFigureBudget(readyQuestions, figureSizes);
     if (ready !== source.ready || review !== source.review)
       throw new Error("The owner's restored bank no longer agrees with its source review statuses.");
     assertAcademicQuestionsInstallable(bank, assessed.issues, ready, review);
-    const readyQuestions = bank.pkg.questions.filter(question => assessed.verdicts.get(question.id)?.readiness === "ready");
     const references = readyQuestions.reduce((count, question) => count + question.assets.length, 0);
     readyTotal += ready; reviewTotal += review;
     receipts.push({

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mergeStates, parseImport, toPortableState } from "./backup";
-import { makeSeed } from "./seed";
+import { makeSeed, SCHEMA_VERSION } from "./seed";
 import { createTextAnnotation } from "./questionAnnotations";
 import { buildQuizPool } from "./quiz";
 
@@ -18,7 +18,7 @@ describe("portable backup safety", () => {
     expect(parsed.courses[0].studyPlanOverride).toEqual({ lecturePasses: 5 });
     expect(parseImport(JSON.stringify({ _app: "AXOM", ...toPortableState(parsed) })).profile.studyWorkflow).toEqual(parsed.profile.studyWorkflow);
   });
-  it("round-trips notebook metadata, autosaved writing, and bounded local attachments on schema v32", () => {
+  it("round-trips notebook metadata, autosaved writing, and bounded local attachments on the current schema", () => {
     const state = makeSeed();
     state.profile.journalNotebook = {
       title: "Clinical notebook",
@@ -56,7 +56,7 @@ describe("portable backup safety", () => {
     }];
 
     const parsed = parseImport(JSON.stringify({ _app: "AXOM", ...toPortableState(state) }));
-    expect(parsed.schemaVersion).toBe(34);
+    expect(parsed.schemaVersion).toBe(SCHEMA_VERSION);
     expect(parsed.profile.journalNotebook).toEqual(state.profile.journalNotebook);
     expect(parsed.journal).toEqual(state.journal);
     expect(JSON.stringify(parsed.journal)).not.toContain("https://");
@@ -84,7 +84,7 @@ describe("portable backup safety", () => {
     };
 
     const parsed = parseImport(JSON.stringify({ _app: "AXOM", ...toPortableState(state) }));
-    expect(parsed.schemaVersion).toBe(34);
+    expect(parsed.schemaVersion).toBe(SCHEMA_VERSION);
     expect(parsed.profile.dashboardLayout).toMatchObject(state.profile.dashboardLayout);
     const reparsed = parseImport(JSON.stringify({ _app: "AXOM", ...toPortableState(parsed) }));
     expect(reparsed.profile.dashboardLayout).toEqual(parsed.profile.dashboardLayout);
@@ -122,7 +122,7 @@ describe("portable backup safety", () => {
       promptVersion: "promise-prompt-v1",
     };
     const parsed = parseImport(JSON.stringify({ _app: "AXOM", ...toPortableState(state) }));
-    expect(parsed.schemaVersion).toBe(34);
+    expect(parsed.schemaVersion).toBe(SCHEMA_VERSION);
     expect(parsed.profile.promisePromptStatus).toEqual(state.profile.promisePromptStatus);
   });
 
@@ -141,7 +141,7 @@ describe("portable backup safety", () => {
     expect(JSON.stringify(portable)).not.toContain("snoozedUntil");
 
     const parsed = parseImport(JSON.stringify({ _app: "AXOM", ...portable }));
-    expect(parsed.schemaVersion).toBe(34);
+    expect(parsed.schemaVersion).toBe(SCHEMA_VERSION);
     expect(parsed.profile.dailyLoopReminders).toEqual(state.profile.dailyLoopReminders);
   });
 
@@ -473,7 +473,7 @@ describe("portable backup safety", () => {
     expect(merged.questions[0].attempts.map((attempt) => attempt.answerKey)).toEqual(["A", "B"]);
   });
 
-  it("upgrades a v31 portable import to v32 without erasing answer text", () => {
+  it("upgrades a v31 portable import to the current schema without erasing answer text", () => {
     const legacy = makeSeed() as unknown as Record<string, unknown>;
     legacy.schemaVersion = 31;
     legacy.questions = [{
@@ -483,7 +483,7 @@ describe("portable backup safety", () => {
       createdAt: "2026-07-01T00:00:00.000Z", updatedAt: "2026-07-01T00:00:00.000Z",
     }];
     const parsed = parseImport(JSON.stringify(legacy));
-    expect(parsed.schemaVersion).toBe(34);
+    expect(parsed.schemaVersion).toBe(SCHEMA_VERSION);
     expect(parsed.questions[0].correctAnswerText).toBe("Legacy answer");
     expect(parsed.questions[0].extraction?.overallImportConfidence).toBe(0.65);
   });

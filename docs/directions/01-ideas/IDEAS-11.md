@@ -1,0 +1,1 @@
+what do i do on resend - i want very well designed axom branded emails to be sent like we worked on for wrapped for example - also the goal is to make axom semi if not fully autonomous and no realiance on self report - all inclusive and exlcuisve academic OS

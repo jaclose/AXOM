@@ -24,9 +24,27 @@ export function MetricRow({ value, label, color, border }: { value: string; labe
 export function CTAButton({ href, children, background, foreground }: { href: string; children: ReactNode; background: string; foreground: string }) {
   return <table className="email-cta" role="presentation" cellPadding={0} cellSpacing={0} style={{ margin: "32px 0" }}><tbody><tr><td style={{ borderRadius: 28, msoPaddingAlt: "16px 24px" } as CSSProperties}><a href={safeUrl(href)} style={{ display: "inline-block", padding: "17px 24px", color: foreground, background, boxShadow: "inset 0 1px 0 rgba(255,255,255,.28)", border: `1px solid ${background}`, borderRadius: 28, fontFamily: font, fontWeight: 700, fontSize: 13, textDecoration: "none" }}>{children} &nbsp; ↗</a></td></tr></tbody></table>;
 }
-export function AxomOrb({ src, large = false }: { src: string; large?: boolean }) {
+export function AxomOrb({ src, large = false, glow }: { src: string; large?: boolean; glow?: string }) {
   const size = large ? 184 : 48;
-  return <img src={safeUrl(src)} width={size} height={size} alt="AXOM Orb" style={{ display: "block", border: 0, margin: large ? "24px auto 30px" : 0 }} />;
+  return <img className={large ? "email-orb-hero" : undefined} src={safeUrl(src)} width={size} height={size} alt="AXOM Orb"
+    style={{ display: "block", border: 0, margin: large ? "24px auto 30px" : 0, ...(large && glow ? { borderRadius: "50%", boxShadow: `0 0 0 1px ${glow}40, 0 18px 64px ${glow}33` } : {}) }} />;
+}
+/** A new account's first three moves, in the order AXOM teaches them. */
+export const WELCOME_STEPS = [
+  { title: "Bring your term", detail: "Add your courses once. AXOM sorts every module and week." },
+  { title: "Practice like the exam", detail: "Questions in the ExamSoft, UWorld and NBME layouts, with highlights and strike-outs." },
+  { title: "Let the record build", detail: "Reports and Pulse come from what you do in AXOM, not from what you remember to log." },
+] as const;
+export function WelcomeSteps({ accent, ink, muted, line, glass, rim }: { accent: string; ink: string; muted: string; line: string; glass: string; rim: string }) {
+  return <table className="email-steps" role="presentation" width="100%" cellPadding={0} cellSpacing={0} style={{ backgroundColor: glass, border: `1px solid ${line}`, borderRadius: 16, boxShadow: `inset 0 1px 0 ${rim}`, margin: "0 0 8px" }}><tbody>
+    {WELCOME_STEPS.map((step, index) => {
+      const divider = index < WELCOME_STEPS.length - 1 ? `1px solid ${line}` : "0";
+      return <tr key={step.title}>
+        <td width="58" valign="top" style={{ padding: "21px 0 20px 18px", borderBottom: divider }}><span style={{ display: "inline-block", borderLeft: `2px solid ${accent}`, paddingLeft: 9, font: `11px ${mono}`, letterSpacing: "1px", color: ink }}>{String(index + 1).padStart(2, "0")}</span></td>
+        <td style={{ padding: "18px 18px 18px 0", borderBottom: divider }}><p style={{ margin: "0 0 4px", fontSize: 16, lineHeight: "23px", color: ink }}>{step.title}</p><p style={{ margin: 0, fontSize: 13, lineHeight: "21px", color: muted }}>{step.detail}</p></td>
+      </tr>;
+    })}
+  </tbody></table>;
 }
 export function emailContent(input: EmailInput) {
   const { type, context: c, baseUrl } = input; const name = firstName(c.displayName); const snap = c.snapshot;
@@ -89,6 +107,7 @@ export function renderAxomEmail(input: EmailInput): RenderedEmail {
   const html = "<!doctype html>" + renderToStaticMarkup(<html lang="en"><head><meta charSet="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><meta name="color-scheme" content="light dark" /><title>{content.subject}</title><style dangerouslySetInnerHTML={{ __html: `
 .email-masthead{position:relative;overflow:hidden}
 @media(prefers-reduced-motion:no-preference){.email-masthead:after{content:"";position:absolute;pointer-events:none;inset:-50% auto -50% -55%;width:40%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.16),transparent);opacity:0;animation:email-luster 2.4s cubic-bezier(.22,1,.36,1) .6s 1}@keyframes email-luster{0%{transform:translateX(-100%) rotate(17deg);opacity:0}15%{opacity:.8}100%{transform:translateX(460%) rotate(17deg);opacity:0}}}
+@media(prefers-reduced-motion:no-preference){.email-orb-hero{animation:email-orb-bloom 1.6s cubic-bezier(.22,1,.36,1) .2s 1 backwards}@keyframes email-orb-bloom{0%{transform:scale(.94);opacity:.6}100%{transform:scale(1);opacity:1}}}
 @media(max-width:600px){.email-pad{padding:28px 22px!important}.email-title{font-size:34px!important;line-height:39px!important}.email-masthead{padding:22px!important}.email-shell{border-radius:24px!important}}
 ` }} /></head>
     <body className={`email-family-${family}`} style={{ margin: 0, padding: 0, backgroundColor: bg, color: ink, fontFamily: font }}>
@@ -97,13 +116,14 @@ export function renderAxomEmail(input: EmailInput): RenderedEmail {
         <table className="email-shell" role="presentation" width="600" cellPadding={0} cellSpacing={0} style={{ width: "100%", maxWidth: 600, backgroundColor: panel, backgroundImage: `linear-gradient(145deg,${glass},${panel} 48%)`, border: `1px solid ${line}`, borderTopColor: rim, borderRadius: 32, boxShadow: `inset 0 1px 0 ${rim}, 0 24px 70px rgba(0,0,0,.12)` }}><tbody><tr><td className="email-pad" style={{ padding: "12px 12px 0" }}>
           <div className="email-masthead" style={{ padding: "28px 32px", backgroundColor: glass, backgroundImage: `linear-gradient(125deg,${accent}24,${glass} 48%,${accent}0a)`, border: `1px solid ${line}`, borderTopColor: rim, borderRadius: 22, boxShadow: `inset 0 1px 0 ${rim}` }}>
             <table role="presentation" width="100%" cellPadding={0} cellSpacing={0}><tbody><tr><td width="64"><AxomOrb src={c.orbUrl} /></td><td style={{ fontSize: 13, letterSpacing: "4px", fontWeight: 700, color: ink }}>AXOM<br /><span style={{ font: `9px ${mono}`, letterSpacing: "1px", color: muted }}>{editorial ? "ESSAYS & IDEAS" : pulse ? "YOUR PRIVATE RECORD" : showReport ? "THE WORK, RECORDED" : "A SPACE OF YOUR OWN"}</span></td><td align="right" style={{ color: muted, font: `10px ${mono}` }}>{pulse ? snapshot?.periodStart.slice(0, 4) ?? "PULSE" : "//"}</td></tr></tbody></table>
-            {pulse && <AxomOrb src={c.orbUrl} large />}
+            {(pulse || type === "welcome") && <AxomOrb src={c.orbUrl} large glow={accent} />}
           </div>
         </td></tr><tr><td className="email-pad" style={{ padding: "36px 44px 40px" }}>
           <p style={{ color: muted, font: `11px ${mono}`, letterSpacing: "2px", margin: "0 0 22px", borderLeft: `2px solid ${accent}`, paddingLeft: 12 }}>{label}</p>
           <h1 className="email-title" style={{ fontFamily: editorial ? "Georgia, Times, serif" : font, fontSize: pulse ? 46 : editorial ? 42 : 38, fontWeight: 400, letterSpacing: editorial ? "-1.2px" : "-1.7px", lineHeight: pulse ? "50px" : "46px", margin: "0 0 24px", color: ink }}>{content.title}</h1>
           <p style={{ color: muted, fontSize: editorial ? 16 : 15, lineHeight: "27px", margin: "0 0 28px" }}>{content.body}</p>
           {type === "auth" && <div id="axom-auth-code" />}
+          {type === "welcome" && <WelcomeSteps accent={accent} ink={ink} muted={muted} line={line} glass={glass} rim={rim} />}
           {showReport && <><p style={{ font: `11px ${mono}`, color: muted }}>{snapshot?.periodStart} · {snapshot?.periodEnd}</p><table role="presentation" width="100%" cellPadding={0} cellSpacing={0} style={{ backgroundColor: glass, border: `1px solid ${line}`, borderRadius: 16, boxShadow: `inset 0 1px 0 ${rim}` }}><tbody>{metrics.map(m => <MetricRow key={m.id} color={ink} border={line} label={m.label} value={m.id === "minutes" ? `${Math.round(m.value / 60 * 10) / 10}h` : `${m.value.toLocaleString("en")}${m.unit}`} />)}</tbody></table>{!metrics.length && <p style={{ color: muted, fontSize: 15, lineHeight: "24px" }}>Your record is beginning. There is not enough recorded activity for a report yet.</p>}
             {snapshot?.comparison?.accuracyDelta !== undefined && <p style={{ fontSize: 13, lineHeight: "22px", color: muted }}>Recorded accuracy {snapshot.comparison.accuracyDelta >= 0 ? "increased" : "decreased"} {Math.abs(snapshot.comparison.accuracyDelta)} percentage points versus the previous equal-length period.</p>}
             {snapshot && snapshot.systems.length > 1 && <p style={{ fontSize: 13, lineHeight: "22px", color: muted }}>Strongest recorded system: {snapshot.systems[0].name}. A direction for review: {snapshot.systems.at(-1)?.name}.</p>}
@@ -119,5 +139,5 @@ export function renderAxomEmail(input: EmailInput): RenderedEmail {
         </td></tr></tbody></table>
       </td></tr></tbody></table>
     </body></html>);
-  return { subject: content.subject, category, html, text: ["AXOM", label, content.title, content.body, ...(showReport ? plainMetrics : []), ...(type === "daily_games" ? c.games?.map(g => `${g.name}: ${g.detail}\n${safeUrl(g.url)}`) ?? [] : []), `${content.cta}: ${safeUrl(content.href)}`, ...(optional(category) ? [`Manage preferences: ${safeUrl(`${input.baseUrl}/#communications`)}`, `Unsubscribe: ${safeUrl(input.unsubscribeUrl ?? `${input.baseUrl}/#communications`)}`] : [])].join("\n\n") };
+  return { subject: content.subject, category, html, text: ["AXOM", label, content.title, content.body, ...(type === "welcome" ? WELCOME_STEPS.map((step, index) => `${index + 1}. ${step.title}: ${step.detail}`) : []), ...(showReport ? plainMetrics : []), ...(type === "daily_games" ? c.games?.map(g => `${g.name}: ${g.detail}\n${safeUrl(g.url)}`) ?? [] : []), `${content.cta}: ${safeUrl(content.href)}`, ...(optional(category) ? [`Manage preferences: ${safeUrl(`${input.baseUrl}/#communications`)}`, `Unsubscribe: ${safeUrl(input.unsubscribeUrl ?? `${input.baseUrl}/#communications`)}`] : [])].join("\n\n") };
 }

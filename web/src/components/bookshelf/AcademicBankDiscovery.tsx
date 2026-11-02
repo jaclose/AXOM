@@ -3,6 +3,7 @@ import { ArrowUpRight, BookOpen, RefreshCw } from "lucide-react";
 import { useAccount } from "../../lib/account/accountStore";
 import { useAcademicCatalog } from "../../lib/academicLibrary/useAcademicCatalog";
 import { openAcademicCourse } from "../../lib/academicLibrary/navigation";
+import { coursesByTerm } from "../../lib/academicLibrary/catalogOrder";
 import { GButton, GlassCard, PanelHeader } from "../ui/primitives";
 import "../../styles/course-library.css";
 
@@ -20,13 +21,16 @@ export function AcademicBankDiscovery() {
         {catalog.loading && <p role="status">Loading available question banks…</p>}
         {catalog.error && <p role="alert">{catalog.error}</p>}
         {!catalog.loading && !catalog.error && !catalog.courses.length && <p>No courses match this search. Your saved questions remain available below.</p>}
-        <div className="course-collection">
-          {catalog.courses.map(course => <button key={course.id} data-course-id={course.id} className="course-card" onClick={() => openAcademicCourse(course.id)} aria-label={`Open ${course.module} course and question sets`}>
-            <div className="course-card-cover"><span>{course.term}</span><strong>{course.module}</strong><BookOpen size={28} strokeWidth={1} /></div>
-            <div className="course-card-copy"><span className="course-card-context">{course.academic_term || course.term}</span><h2>{course.module}</h2><p>{course.title}</p><span className="course-card-facts">{course.ready_questions} ready {course.ready_questions === 1 ? "question" : "questions"}{course.review_questions > 0 && ` · ${course.review_questions} awaiting review`}</span><span className="course-card-state">Preview weeks and question sets</span></div>
-            <ArrowUpRight size={20} aria-hidden="true" />
-          </button>)}
-        </div>
+        {coursesByTerm(catalog.courses).map(({ term, courses }, index) => <section key={term} className="course-term-section" aria-labelledby={`bank-term-${index}`}>
+          <header className="course-term-heading"><h3 id={`bank-term-${index}`}>{term}</h3><span>{courses.length} {courses.length === 1 ? "course" : "courses"}</span></header>
+          <div className="course-collection">
+            {courses.map(course => <button key={course.id} data-course-id={course.id} className="course-card" onClick={() => openAcademicCourse(course.id)} aria-label={`Open ${course.module} course and question sets`}>
+              <div className="course-card-cover"><span>{course.term}</span><strong>{course.module}</strong><BookOpen size={28} strokeWidth={1} /></div>
+              <div className="course-card-copy"><span className="course-card-context">{course.academic_term || course.term}</span><h4>{course.module}</h4><p>{course.title}</p><span className="course-card-facts">{course.ready_questions} ready {course.ready_questions === 1 ? "question" : "questions"}{course.review_questions > 0 && ` · ${course.review_questions} awaiting review`}</span><span className="course-card-state">Preview weeks and question sets</span></div>
+              <ArrowUpRight size={20} aria-hidden="true" />
+            </button>)}
+          </div>
+        </section>)}
         {catalog.more && <GButton disabled={catalog.loading} onClick={() => void catalog.loadMore()}>Load more banks</GButton>}
       </>}
     </section>

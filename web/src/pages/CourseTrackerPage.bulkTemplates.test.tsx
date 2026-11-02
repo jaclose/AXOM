@@ -107,12 +107,12 @@ describe("Course Tracker current-sources bulk installation", () => {
   it("offers explicit empty outline setup without inventing any schedule or silently writing user data", async () => {
     useStore.setState({ documents: [] });
     render(<BulkCurriculumTemplateInstall />);
-    expect(screen.getByText("Set up SGU course outline")).toBeTruthy();
+    expect(screen.getByText("Set up AXOM course outline")).toBeTruthy();
     expect(useStore.getState().tracker).toHaveLength(0);
     expect(useStore.getState().courses).toHaveLength(0);
     // No templates means no learning activities may be installed. A structural
     // navigation shell can still be added, but only with affirmative consent.
-    fireEvent.click(screen.getByText("Set up SGU course outline"));
+    fireEvent.click(screen.getByText("Set up AXOM course outline"));
     expect(screen.getByText(/No academic activity templates are saved on this device/)).toBeTruthy();
     const inactive = screen.getByRole("button", { name: "Already represented" }) as HTMLButtonElement;
     expect(inactive.disabled).toBe(true);

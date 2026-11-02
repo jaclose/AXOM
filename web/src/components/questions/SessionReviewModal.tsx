@@ -12,6 +12,7 @@ import { QuestionExhibits } from "./QuestionExhibits";
 import { SourceTeaching } from "./SourceTeaching";
 import { QuestionReviewSlides } from "./QuestionReviewSlides";
 import { QuestionViewControls, QuestionViewFrame, useQuestionView } from "./QuestionView";
+import { ChoiceTeaching } from "./ChoiceTeaching";
 
 /** Reopens a completed run without submitting, rescoring, or creating attempts. */
 export function SessionReviewModal({ session, onClose, onPractice }: {
@@ -64,7 +65,8 @@ export function SessionReviewModal({ session, onClose, onPractice }: {
       <QuestionViewControls view={presentation.view} onChange={presentation.choose} notice={presentation.notice} mode={session.mode} />
       {!ids.length ? <p role="status">No {filter === "all" ? "saved" : filter} questions in this block. Choose another filter.</p>
         : !question ? <p role="status">This question is no longer in your library. Its saved result is retained. Restore the question from your backup to review its source.</p>
-        : <article ref={questionRef} className="session-review-question" key={question.id} aria-label="Saved question review">
+        : <article ref={questionRef} className="session-review-question" key={question.id} aria-label="Saved question review"
+          data-study-question data-question-id={question.id}>
           <div className="row wrap gap8">
             <Tag tone={answer?.correct === true ? "green" : answer?.correct === false ? "red" : "neutral"}>
               {answer?.correct === true ? "Correct when submitted" : answer?.correct === false ? "Missed when submitted" : "Unscored"}
@@ -96,11 +98,7 @@ export function SessionReviewModal({ session, onClose, onPractice }: {
               : <p className="sub">No explanation was supplied with this question. Check the source before drawing a conclusion.</p>}
             <QuestionSupportingContent question={question} mode="answered" />
           </details>
-          {question.choiceRationales && <details className="session-review-why">
-            <summary>Why the other choices differ</summary>
-            {question.options.filter((option) => question.choiceRationales?.[option.key]).map((option) =>
-              <p key={option.key}><b>{option.key}.</b> {question.choiceRationales?.[option.key]}</p>)}
-          </details>}
+          <ChoiceTeaching question={question} pickedKey={answer?.answerKey} />
           {(source || question.citation) && <p className="sub session-review-citation">{source?.title ?? question.citation}{question.sourcePage ? ` · page ${question.sourcePage}` : ""}</p>}
         </article>}
     </>}

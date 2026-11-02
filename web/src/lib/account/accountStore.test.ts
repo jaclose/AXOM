@@ -185,6 +185,14 @@ describe("account lifecycle", () => {
     expect(useAccount.getState()).toMatchObject({ phase: "signed-in", pendingCodeEmail: undefined, pendingCodeKind: undefined });
   });
 
+  it("signs a new account straight in when the project does not ask for email confirmation", async () => {
+    auth.signUp.mockResolvedValueOnce({ data: { session }, error: null } as never);
+    expect(await useAccount.getState().signUp("learner@example.com", "password123", "Learner")).toBe(true);
+    expect(auth.verifyOtp).not.toHaveBeenCalled();
+    expect(useAccount.getState()).toMatchObject({ phase: "signed-in", pendingCodeEmail: undefined, pendingCodeKind: undefined });
+    expect(useAccount.getState().message).toMatch(/^Account created\./);
+  });
+
   it("does not disclose existing-account status from signup errors", async () => {
     auth.signUp.mockResolvedValueOnce({ data: { session: null }, error: { message: "User already registered" } } as never);
 

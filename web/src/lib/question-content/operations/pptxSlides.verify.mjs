@@ -19,6 +19,9 @@ assert.match(text, /^B\. Serum potassium 3\.2$/m);
 assert.match(text, /^C\. Serum calcium 9\.0$/m);
 assert.equal(pptxSlideText(para("Only title slide")), "Only title slide");
 assert.match(pptxSlideText(para("A &amp; B; clinically &lt; 2")), /A & B; clinically < 2/);
+const nineChoices = [..."ABCDEFGHI"].map(label => `${para(`${label}.`)}${para(`Sample choice ${label}`)}`).join("");
+assert.equal(pptxSlideText(para("Choose the supplied sample.") + nineChoices),
+  ["Choose the supplied sample.", ...[..."ABCDEFGHI"].map(label => `${label}. Sample choice ${label}`)].join("\n"));
 
 const archive = new JSZip();
 archive.file("ppt/slides/slide1.xml", slide);

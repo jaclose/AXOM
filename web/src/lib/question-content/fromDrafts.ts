@@ -44,7 +44,7 @@ export interface AnchorOptions {
 }
 
 const HEADED_KEY = /^\s*(?:Q(?:uestion)?\.?\s*)?(\d{1,3})\s*[.)]?\s*$/i;
-const CHOICE_CELL = /^\s*\(?[A-Ha-h]\)?[.)]?(?:\s|$)/;
+const CHOICE_CELL = /^\s*\(?[A-Ia-i]\)?[.)]?(?:\s|$)/;
 
 /**
  * An answer key laid out as a table (question number, then the letter) is

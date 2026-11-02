@@ -437,4 +437,40 @@ describe("prepared-course ownership", () => {
     expect(() => connectedCourseBook(academicCourse(collection, revision, "GOER", "Term 2"), template)).toThrow(/catalog term and module/i);
     expect(() => connectedCourseBook(academicCourse(collection, revision, "ER", "Term 5"), template)).toThrow(/catalog term and module/i);
   });
+
+  it("binds every plan section of one hosted course, letting unstated sections take its reviewed term", async () => {
+    const lectures = await prepareCourseTemplate(
+      "ER - Lectures:\nWeek 1:\nLecture 01 Evidence [Lecture]\nWeek 2:\nLecture 02 Next [Lecture]\n",
+      "er-lectures.txt",
+    );
+    const groups = await prepareCourseTemplate(
+      "T2 - ER - Small groups:\nWeek 1:\nSG 01 Case [Small Group]\n",
+      "er-small-groups.txt",
+    );
+    const collection = "11111111-1111-4111-8111-111111111111";
+    const revision = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const reference = academicReference(lectures, collection, revision);
+    const parsed = JSON.parse(reference.rawText) as { templateIds: string[]; documentIds: string[] };
+    parsed.templateIds = [lectures.id, groups.id];
+    parsed.documentIds = [lectures.id, groups.id];
+    reference.rawText = JSON.stringify(parsed);
+    useStore.setState({ terms: [], courses: [], documents: [lectures, groups, reference], tracker: [] });
+    await vault.flushLocalVaultWrites();
+
+    const book = connectedCourseBook(academicCourse(collection, revision), [lectures, groups]);
+    expect(book.templateIds).toEqual([lectures.id, groups.id]);
+    expect(book.count).toBe(3);
+    expect(book.weeks.map(week => [week.week, week.total])).toEqual([[1, 2], [2, 1]]);
+    await expect(loadPreparedCourse(book)).resolves.toEqual({ status: "saved-on-device" });
+    const rows = useStore.getState().tracker.filter(item => item.path.includes(`academic:${collection}`));
+    expect(rows.map(item => item.path).sort()).toEqual([
+      `Term 2/academic:${collection}/ER/Week 1`, `Term 2/academic:${collection}/ER/Week 1`, `Term 2/academic:${collection}/ER/Week 2`,
+    ]);
+
+    expect(() => connectedCourseBook(academicCourse(collection, revision, "ER", "Term 3"), [lectures, groups]))
+      .toThrow(/catalog term and module/i);
+    expect(() => connectedCourseBook(academicCourse(collection, revision), [lectures, lectures]))
+      .toThrow(/exact saved template/i);
+    expect(() => connectedCourseBook(academicCourse(collection, revision), [])).toThrow(/exact saved template/i);
+  });
 });

@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { preparedBankImportOptions, readCatalog, readPreparedBank, safeLibraryPath, type LibraryReader } from "../privateLibrary/install";
-import { sha256 } from "../question-content/assets";
+import { hasUniformUnfiledSourceScope, preparedBankImportOptions, readCatalog, readPreparedBank, safeLibraryPath, type LibraryReader } from "../privateLibrary/install";
+import { readImageInfo, sha256 } from "../question-content/assets";
 import {
   assertInstallableAcademicImageBytes,
   type InstallableAcademicImage,
@@ -9,8 +9,7 @@ import { assessBank } from "../question-content/assessBank";
 import { packageToReviewedImport } from "../question-content/toReviewedImport";
 import type { PreparedBank, PrivateLibraryCatalog, ReviewedFiling } from "../privateLibrary/types";
 import { questionScope, type PackageIssue, type QuestionAsset } from "../question-content/package";
-import { parseCourseTemplate } from "../course-engine/templateParse";
-import { canonicalModuleKey } from "../course-engine/vocabulary";
+import { academicCoursePlan, moduleIdentity, reviewedTermNumber, type AcademicCoursePlan, type AcademicPlanTerm } from "./coursePlan";
 import { accountOperationClient } from "../account/supabase";
 import { RESUMABLE_CHUNK_BYTES, uploadResumableObject, type ResumableStorageConfig } from "../sync/resumableObject";
 import { MAX_QUESTION_ATTACHMENTS, MAX_QUESTION_ATTACHMENT_BYTES, MAX_QUESTION_ATTACHMENT_TOTAL_BYTES,
@@ -22,9 +21,29 @@ const basename = (name: string) => name.split(/[\\/]/).at(-1) || "source";
 const compareAcademicPath = (left: { path: string }, right: { path: string }) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0;
 // Matches academic_files.byte_size and academic-content Storage bucket limit.
 const fileLimit = 50 * 1024 * 1024;
+/** Plan sections one course may combine; real modules have two or three. */
+const MAX_PLAN_SECTIONS = 24;
 const imageMimeByExtension: Readonly<Record<string, QuestionAttachmentMimeType>> = {
   png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif",
 };
+const HELD_EMF_MIME = "image/emf";
+function assertHeldEmf(asset: QuestionAsset, bytes: Uint8Array): void {
+  if (asset.mimeType !== HELD_EMF_MIME || readImageInfo(bytes)?.mimeType !== HELD_EMF_MIME
+    || (asset.byteSize !== undefined && asset.byteSize !== bytes.length)
+    || asset.width !== undefined || asset.height !== undefined)
+    throw new Error(`The held EMF figure ${asset.filename} differs from its declared source bytes.`);
+}
+function heldEmfIssue(asset: QuestionAsset, questionId: string): PackageIssue {
+  return {
+    severity: "error", code: "missing_required_media", questionId, path: `assets[${asset.id}]`,
+    message: `The EMF source figure ${asset.filename} is preserved, but AXOM cannot display it. This question remains held until a reviewer supplies a verified viewable figure.`,
+  };
+}
+function isHeldEmfIssue(issue: PackageIssue, asset: QuestionAsset, questionId: string): boolean {
+  const expected = heldEmfIssue(asset, questionId);
+  return issue.severity === expected.severity && issue.code === expected.code
+    && issue.questionId === expected.questionId && issue.path === expected.path && issue.message === expected.message;
+}
 const originalMimeByExtension: Readonly<Record<string, string>> = {
   pdf: "application/pdf", txt: "text/plain",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -32,28 +51,11 @@ const originalMimeByExtension: Readonly<Record<string, string>> = {
 type PrivateLibrarySource = PrivateLibraryCatalog["sources"][number];
 export type VerifiedAcademicImage = InstallableAcademicImage;
 
-function reviewedTermNumber(term: string | undefined): number | undefined {
-  const match = term?.match(/^Term ([1-5])$/);
-  return match ? Number(match[1]) : undefined;
-}
-
-function moduleIdentity(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const module = value.trim();
-  if (!module || module.length > 80 || /[/\\]/.test(module)
-    || [...module].some(character => {
-      const code = character.charCodeAt(0);
-      return code <= 31 || code === 127 || code === 0x2028 || code === 0x2029;
-    })) return undefined;
-  const identity = canonicalModuleKey(module);
-  return identity || undefined;
-}
-
 /** A template is authority only for content that demonstrably shares its
  * term and module. Merely including one parseable template must not let an
  * unrelated source or question bypass manual filing review. */
 function assertTemplateOwnsSource(
-  template: ReturnType<typeof parseCourseTemplate>, source: PrivateLibrarySource, bank?: PreparedBank,
+  template: Pick<AcademicCoursePlan, "term" | "module">, source: PrivateLibrarySource, bank?: PreparedBank,
 ): void {
   const term = reviewedTermNumber(template.term);
   const module = moduleIdentity(template.module);
@@ -65,8 +67,17 @@ function assertTemplateOwnsSource(
       throw new Error("Every source without a question bank must name the module owned by the reviewed course plan.");
     return;
   }
-  if (bank.reviewedFiling)
-    throw new Error("A template-backed bank cannot also carry a manual reviewed filing. Split the conflicting academic scopes.");
+  if (bank.reviewedFiling) {
+    if (bank.reviewedFiling.evidence !== "human-reviewed")
+      throw new Error("A template-backed bank's corrected source scope needs human review.");
+    if (!hasUniformUnfiledSourceScope(bank.pkg.manifest, bank.pkg.questions)
+      && moduleIdentity(bank.pkg.manifest.course.name) === module
+      && bank.pkg.manifest.course.term === term)
+      throw new Error("A template-backed bank cannot also carry a manual reviewed filing without a changed source scope.");
+    if (bank.reviewedFiling.term !== template.term || moduleIdentity(bank.reviewedFiling.module) !== module)
+      throw new Error("The source's reviewed filing does not match its course plan.");
+    return;
+  }
   if (moduleIdentity(bank.pkg.manifest.course.name) !== module || bank.pkg.manifest.course.term !== term)
     throw new Error("A question bank's module or term does not match the reviewed course plan.");
   for (const question of bank.pkg.questions) {
@@ -100,16 +111,21 @@ export function assertAcademicAssetMatchesBytes(asset: QuestionAsset, image: Ver
     throw new Error(`The academic figure ${asset.filename} has declared MIME, byte-size or dimensions that differ from its verified bytes.`);
 }
 
-/** Match the canonical installer's case-insensitive physical filename rules
- * and the canonical learner question's per-question attachment budgets. */
-export function assertAcademicFigureBudget(
+const MAX_HELD_ACADEMIC_FIGURES = 64;
+
+/** All stored figures keep their integrity and byte budgets, including those
+ * on questions held from learner import. */
+function assertFigureBudget(
   questions: readonly { assets: readonly { filename: string; checksum?: string }[] }[],
-  sizes?: ReadonlyMap<string, number>,
+  sizes: ReadonlyMap<string, number> | undefined,
+  maxFigures: number,
 ): void {
   const filenames = new Map<string, string>();
   for (const question of questions) {
-    if (question.assets.length > MAX_QUESTION_ATTACHMENTS)
-      throw new Error("An academic question exceeds AXOM's 10-figure attachment limit.");
+    if (question.assets.length > maxFigures)
+      throw new Error(maxFigures === MAX_QUESTION_ATTACHMENTS
+        ? "An academic question exceeds AXOM's 10-figure attachment limit."
+        : "A held academic question exceeds AXOM's 64-figure source limit.");
     let questionBytes = 0;
     for (const asset of question.assets) {
       const key = asset.filename.trim().split(/[\\/]/).pop()?.normalize("NFC").toLowerCase();
@@ -128,6 +144,23 @@ export function assertAcademicFigureBudget(
       }
     }
   }
+}
+
+/** Held source questions are stored for review, not imported into learner
+ * practice. Their figures still have a bounded count and the same byte checks. */
+export function assertAcademicStoredFigureBudget(
+  questions: readonly { assets: readonly { filename: string; checksum?: string }[] }[],
+  sizes?: ReadonlyMap<string, number>,
+): void {
+  assertFigureBudget(questions, sizes, MAX_HELD_ACADEMIC_FIGURES);
+}
+
+/** Answer-ready questions must fit the canonical local attachment limit. */
+export function assertAcademicFigureBudget(
+  questions: readonly { assets: readonly { filename: string; checksum?: string }[] }[],
+  sizes?: ReadonlyMap<string, number>,
+): void {
+  assertFigureBudget(questions, sizes, MAX_QUESTION_ATTACHMENTS);
 }
 /** Readiness alone is not a promise that AXOM's canonical question importer
  * can produce a scored set. It additionally refuses multi-answer keys, bad
@@ -152,11 +185,19 @@ export interface AcademicUnscheduledScope {
   title?: string;
   evidence: ReviewedFiling["evidence"];
 }
+export interface AcademicUploadOptions {
+  /** Required when no plan section states its term; never inferred here. */
+  planTerm?: AcademicPlanTerm;
+}
 export interface AcademicUpload {
   catalogId: string;
   metadata: Record<string, string | number | undefined>;
   template: string;
-  provenance: { sourceChecksums: string[]; scopeEvidence?: AcademicUnscheduledScope["evidence"]; weekAssignment?: "unassigned" };
+  provenance: {
+    sourceChecksums: string[]; scopeEvidence?: AcademicUnscheduledScope["evidence"]; weekAssignment?: "unassigned";
+    /** Present when a reviewer confirmed the term of a plan that does not state it. */
+    planTermEvidence?: AcademicPlanTerm["evidence"];
+  };
   files: Array<{ path: string; sha256: string; byte_size: number; mime_type: string; bytes: Uint8Array }>;
   hash: string;
   /** Verified source bytes that exceed academic-content's per-file ceiling.
@@ -229,12 +270,13 @@ function snapshotAcademicUpload(value: AcademicUpload): AcademicUpload {
   };
 
   const sourceProvenance = plainRecord(upload.provenance, "Academic provenance");
-  assertKeys(sourceProvenance, ["sourceChecksums", "scopeEvidence", "weekAssignment"], ["sourceChecksums"], "Academic provenance");
+  assertKeys(sourceProvenance, ["sourceChecksums", "scopeEvidence", "weekAssignment", "planTermEvidence"], ["sourceChecksums"], "Academic provenance");
   if (!Array.isArray(sourceProvenance.sourceChecksums) || sourceProvenance.sourceChecksums.length > 10000
     || sourceProvenance.sourceChecksums.some(checksum => typeof checksum !== "string" || !/^[a-f0-9]{64}$/.test(checksum))
     || (sourceProvenance.scopeEvidence !== undefined
       && !["source-metadata", "human-reviewed"].includes(String(sourceProvenance.scopeEvidence)))
-    || (sourceProvenance.weekAssignment !== undefined && sourceProvenance.weekAssignment !== "unassigned")) {
+    || (sourceProvenance.weekAssignment !== undefined && sourceProvenance.weekAssignment !== "unassigned")
+    || (sourceProvenance.planTermEvidence !== undefined && sourceProvenance.planTermEvidence !== "human-reviewed")) {
     throw new Error("Academic provenance has an invalid source identity or filing envelope.");
   }
   const provenance: AcademicUpload["provenance"] = {
@@ -243,6 +285,7 @@ function snapshotAcademicUpload(value: AcademicUpload): AcademicUpload {
       ? { scopeEvidence: sourceProvenance.scopeEvidence as AcademicUpload["provenance"]["scopeEvidence"] }
       : {}),
     ...(own(sourceProvenance, "weekAssignment") ? { weekAssignment: "unassigned" as const } : {}),
+    ...(own(sourceProvenance, "planTermEvidence") ? { planTermEvidence: "human-reviewed" as const } : {}),
   };
 
   if (!Array.isArray(upload.files) || !upload.files.length || upload.files.length > 1500)
@@ -325,6 +368,7 @@ function hashProvenance(provenance: AcademicUpload["provenance"]): AcademicUploa
     sourceChecksums: [...provenance.sourceChecksums],
     ...(provenance.scopeEvidence !== undefined ? { scopeEvidence: provenance.scopeEvidence } : {}),
     ...(provenance.weekAssignment !== undefined ? { weekAssignment: provenance.weekAssignment } : {}),
+    ...(provenance.planTermEvidence !== undefined ? { planTermEvidence: provenance.planTermEvidence } : {}),
   };
 }
 
@@ -388,27 +432,51 @@ function assertPreparedBankEnvelopeShape(value: unknown): void {
   }
 }
 
-function assertTemplateMetadata(
-  upload: AcademicUpload, template: ReturnType<typeof parseCourseTemplate>, templateText: string,
-): void {
-  if (upload.template !== templateText
-    || upload.metadata.title !== template.module || upload.metadata.module !== template.module
-    || upload.metadata.term !== template.term
-    || upload.metadata.academic_term !== template.context?.academicTerm
-    || upload.metadata.cohort !== template.context?.cohort
-    || upload.metadata.source_revision !== template.context?.sourceRevision
-    || upload.provenance.scopeEvidence !== undefined || upload.provenance.weekAssignment !== undefined) {
+function assertTemplateMetadata(upload: AcademicUpload, plan: AcademicCoursePlan): void {
+  if (upload.template !== plan.text
+    || upload.metadata.title !== plan.module || upload.metadata.module !== plan.module
+    || upload.metadata.term !== plan.term
+    || upload.metadata.academic_term !== plan.academicTerm
+    || upload.metadata.cohort !== plan.cohort
+    || upload.metadata.source_revision !== plan.sourceRevision
+    || upload.provenance.scopeEvidence !== undefined || upload.provenance.weekAssignment !== undefined
+    || upload.provenance.planTermEvidence !== (plan.termStated ? undefined : "human-reviewed")) {
     throw new Error("The academic upload hash is not canonical for its reviewed course plan and metadata.");
   }
 }
 
-function assertReviewedFilingMetadata(upload: AcademicUpload, bank: PreparedBank): void {
+/** Each source has its own evidence. A course-level human review cannot
+ * reclassify another bank that has no matching bank-level review. */
+function sourceOnlyBankFiling(bank: PreparedBank, course: ReviewedFiling, requireStoredFiling: boolean): ReviewedFiling {
   const filing = bank.reviewedFiling;
-  if (!filing || upload.template !== "" || filing.term !== upload.metadata.term
-    || filing.module !== upload.metadata.module || filing.evidence !== upload.provenance.scopeEvidence
-    || filing.weekAssignment !== upload.provenance.weekAssignment) {
-    throw new Error("The direct upload envelope does not match its reviewed source filing.");
+  if (hasUniformUnfiledSourceScope(bank.pkg.manifest, bank.pkg.questions)) {
+    if (!filing || filing.evidence !== "human-reviewed" || course.evidence !== "human-reviewed"
+      || filing.term !== course.term || moduleIdentity(filing.module) !== moduleIdentity(course.module))
+      throw new Error("An Unfiled question bank needs its own exact human-reviewed filing before upload.");
+    return filing;
   }
+  const originalModule = moduleIdentity(bank.pkg.manifest.course.name);
+  const originalTerm = bank.pkg.manifest.course.term;
+  if (!originalModule || !Number.isInteger(originalTerm) || originalTerm < 1 || originalTerm > 5)
+    throw new Error("A question bank has an invalid original module or term.");
+  for (const question of bank.pkg.questions) {
+    const scope = questionScope(bank.pkg.manifest, question);
+    if (moduleIdentity(scope.course) !== originalModule || scope.term !== originalTerm)
+      throw new Error("A question bank has mixed or invalid original modules or terms. Split it before upload.");
+  }
+  if (requireStoredFiling && !filing)
+    throw new Error("The direct upload envelope is missing a bank's reviewed source filing.");
+  const effective = filing ?? {
+    term: `Term ${originalTerm}` as ReviewedFiling["term"], module: bank.pkg.manifest.course.name,
+    evidence: "source-metadata" as const, weekAssignment: "unassigned" as const,
+  };
+  if (effective.evidence === "source-metadata"
+    && (effective.term !== `Term ${originalTerm}` || moduleIdentity(effective.module) !== originalModule))
+    throw new Error("Source-metadata filing must agree with the package's original module and term.");
+  if (effective.term !== course.term || moduleIdentity(effective.module) !== moduleIdentity(course.module)
+    || (effective.evidence === "human-reviewed" && course.evidence !== "human-reviewed"))
+    throw new Error("A bank's reviewed filing does not match its source-only course.");
+  return effective;
 }
 
 /** The server content hash covers the exact canonical manifest as well as
@@ -435,6 +503,7 @@ async function preflightAcademicUpload(upload: AcademicUpload): Promise<Academic
   const byPath = new Map<string, AcademicUpload["files"][number]>();
   const portablePaths = new Set<string>();
   const verifiedImages = new Map<string, VerifiedAcademicImage>();
+  const verifiedHeldEmfs = new Set<string>();
   let totalBytes = 0;
   for (const file of files) {
     if (!file || !(file.bytes instanceof Uint8Array) || typeof file.path !== "string"
@@ -466,6 +535,11 @@ async function preflightAcademicUpload(upload: AcademicUpload): Promise<Academic
       if (file.mime_type !== imageMime)
         throw new Error("An academic image's path and MIME type disagree.");
       verifiedImages.set(file.path, await assertInstallableAcademicImage(file.bytes, file.mime_type));
+    } else if (extension === "emf" && file.mime_type === HELD_EMF_MIME
+      && readImageInfo(file.bytes)?.mimeType === HELD_EMF_MIME) {
+      // Raw EMF is preserved for held-source review, never certified as a
+      // viewable learner attachment.
+      verifiedHeldEmfs.add(file.path);
     } else if (file.mime_type.startsWith("image/")) {
       throw new Error("An academic image has an unsupported or misleading file extension.");
     }
@@ -488,7 +562,7 @@ async function preflightAcademicUpload(upload: AcademicUpload): Promise<Academic
   const catalog = readCatalog(catalogValue);
   if (catalog.id !== upload.catalogId)
     throw new Error("The academic catalog identity differs from the direct upload envelope.");
-  if (catalog.templates.length > 1)
+  if (catalog.templates.length > MAX_PLAN_SECTIONS)
     throw new Error("Split this library into one academic collection per reviewed course.");
   if (upload.provenance.sourceChecksums.length !== catalog.sources.length
     || upload.provenance.sourceChecksums.some((checksum, index) => checksum !== catalog.sources[index].checksum))
@@ -504,22 +578,24 @@ async function preflightAcademicUpload(upload: AcademicUpload): Promise<Academic
     sourceChecksums.add(source.checksum);
   }
 
-  const templateEntry = catalog.templates[0];
-  let plan: ReturnType<typeof parseCourseTemplate> | undefined;
-  if (templateEntry) {
-    expectFile(templateEntry.file, "text/plain", templateEntry.checksum);
-    const templateFile = byPath.get(templateEntry.file);
-    if (!templateFile) throw new Error("A private academic upload is missing its reviewed course plan.");
-    const templateText = decode(templateFile.bytes);
-    plan = parseCourseTemplate(templateText);
-    if (plan.problems.length || !reviewedTermNumber(plan.term) || !moduleIdentity(plan.module) || !plan.items.length)
-      throw new Error("Review the course plan and confirm its exact Term 1-5 and module before uploading.");
-    assertTemplateMetadata(upload, plan, templateText);
+  let plan: AcademicCoursePlan | undefined;
+  if (catalog.templates.length) {
+    const texts = catalog.templates.map(entry => {
+      expectFile(entry.file, "text/plain", entry.checksum);
+      const templateFile = byPath.get(entry.file);
+      if (!templateFile) throw new Error("A private academic upload is missing its reviewed course plan.");
+      return decode(templateFile.bytes);
+    });
+    const confirmedTerm = upload.provenance.planTermEvidence
+      ? { term: upload.metadata.term as AcademicPlanTerm["term"], evidence: upload.provenance.planTermEvidence }
+      : undefined;
+    plan = academicCoursePlan(texts, confirmedTerm);
+    assertTemplateMetadata(upload, plan);
   } else {
     if (upload.template !== "" || !reviewedTermNumber(String(upload.metadata.term))
       || !moduleIdentity(upload.metadata.module) || !catalog.sources.some(source => source.bankFile)
       || !["source-metadata", "human-reviewed"].includes(upload.provenance.scopeEvidence ?? "")
-      || upload.provenance.weekAssignment !== "unassigned"
+      || upload.provenance.weekAssignment !== "unassigned" || upload.provenance.planTermEvidence !== undefined
       || upload.metadata.academic_term !== undefined || upload.metadata.cohort !== undefined
       || upload.metadata.source_revision !== undefined) {
       throw new Error("A source-only direct upload needs one reviewed term/module filing and no invented course plan.");
@@ -556,6 +632,8 @@ async function preflightAcademicUpload(upload: AcademicUpload): Promise<Academic
     if (source.module !== undefined) {
       const identity = moduleIdentity(source.module);
       if (!identity) throw new Error("A source has an invalid or ambiguous module label.");
+      if (!plan && identity !== moduleIdentity(upload.metadata.module))
+        throw new Error("A source's catalog module does not match its source-only course.");
       if (!plan) declaredModules.add(identity);
     }
     if (source.originalFile) {
@@ -580,23 +658,17 @@ async function preflightAcademicUpload(upload: AcademicUpload): Promise<Academic
       throw new Error("A prepared academic bank contains a local or noncanonical source filename.");
     if (plan) assertTemplateOwnsSource(plan, source, bank);
     else {
-      assertReviewedFilingMetadata(upload, bank);
-      const manifestModule = moduleIdentity(bank.pkg.manifest.course.name);
-      const manifestTerm = bank.pkg.manifest.course.term;
-      if (!manifestModule || !Number.isInteger(manifestTerm) || manifestTerm < 1 || manifestTerm > 5)
-        throw new Error("A question bank has an invalid original module or term.");
-      declaredModules.add(manifestModule);
-      declaredTerms.add(manifestTerm);
-      for (const question of bank.pkg.questions) {
-        const scope = questionScope(bank.pkg.manifest, question);
-        const identity = moduleIdentity(scope.course);
-        if (!identity || !Number.isInteger(scope.term) || scope.term < 1 || scope.term > 5)
-          throw new Error("A question has an invalid or ambiguous original module or term.");
-        declaredModules.add(identity);
-        declaredTerms.add(scope.term);
-      }
+      const evidence = upload.provenance.scopeEvidence;
+      if (evidence !== "source-metadata" && evidence !== "human-reviewed")
+        throw new Error("A source-only direct upload needs verified course classification evidence.");
+      const filing = sourceOnlyBankFiling(bank, {
+        term: upload.metadata.term as ReviewedFiling["term"], module: upload.metadata.module as string,
+        evidence, weekAssignment: "unassigned",
+      }, true);
+      declaredModules.add(moduleIdentity(filing.module)!);
+      declaredTerms.add(reviewedTermNumber(filing.term)!);
     }
-    assertAcademicFigureBudget(bank.pkg.questions);
+    assertAcademicStoredFigureBudget(bank.pkg.questions);
     const verifiedAssets: { name: string }[] = [];
     const figureSizes = new Map<string, number>();
     for (const question of bank.pkg.questions) {
@@ -609,6 +681,18 @@ async function preflightAcademicUpload(upload: AcademicUpload): Promise<Academic
         if (!asset.checksum) throw new Error("Review image integrity before uploading this collection.");
         const path = academicAssetPath(source.bankFile, asset.filename);
         const file = byPath.get(path);
+        if (asset.filename.toLowerCase().endsWith(".emf")) {
+          if (question.correctAnswer || !question.flags?.some(flag => flag.type === "media_association_uncertain"))
+            throw new Error("Only an already-held question with uncertain EMF media can retain a raw EMF source figure.");
+          if (!file || !verifiedHeldEmfs.has(path)) throw new Error("A held EMF source figure is missing or has invalid bytes.");
+          assertHeldEmf(asset, file.bytes);
+          if (!bank.issues.some(issue => isHeldEmfIssue(issue, asset, question.id)))
+            throw new Error("A held EMF figure needs an explicit review issue in its saved bank.");
+          expectFile(path, HELD_EMF_MIME, asset.checksum);
+          verifiedAssets.push({ name: asset.filename });
+          figureSizes.set(asset.filename, file.byte_size);
+          continue;
+        }
         const image = verifiedImages.get(path);
         if (!file || !image) throw new Error("A private academic upload is missing a referenced clinical figure.");
         expectFile(path, image.mimeType, asset.checksum);
@@ -617,10 +701,13 @@ async function preflightAcademicUpload(upload: AcademicUpload): Promise<Academic
         figureSizes.set(asset.filename, file.byte_size);
       }
     }
-    assertAcademicFigureBudget(bank.pkg.questions, figureSizes);
+    assertAcademicStoredFigureBudget(bank.pkg.questions, figureSizes);
     const assessment = assessBank(bank.pkg, bank.issues, verifiedAssets);
     const ready = assessment.counts.ready;
     const held = assessment.counts["needs-review"] + assessment.counts.unresolved + (bank.unreadableQuestions ?? 0);
+    const readyQuestions = bank.pkg.questions.filter(question => assessment.verdicts.get(question.id)?.readiness === "ready");
+    if (readyQuestions.length !== ready) throw new Error("Academic question readiness is incomplete.");
+    assertAcademicFigureBudget(readyQuestions, figureSizes);
     if (ready !== source.ready || held !== source.review)
       throw new Error(`The prepared bank's claimed ready/review counts differ from verified answers and figures (${ready} ready; ${held} review). Reopen its review queue before private upload.`);
     assertAcademicQuestionsInstallable(bank, assessment.issues, ready, held);
@@ -653,23 +740,25 @@ async function preflightAcademicUpload(upload: AcademicUpload): Promise<Academic
 
 /** A course-specific prepared package, never a portable learner backup. Only
  * referenced content enters the upload; unrelated ZIP files are not enumerated. */
-export async function prepareAcademicUpload(read: LibraryReader, unscheduled?: AcademicUnscheduledScope): Promise<AcademicUpload> {
+export async function prepareAcademicUpload(
+  read: LibraryReader, unscheduled?: AcademicUnscheduledScope, options: AcademicUploadOptions = {},
+): Promise<AcademicUpload> {
   const source = readCatalog(JSON.parse(decode(await read("catalog.json"))));
-  if (source.templates.length > 1) throw new Error("Split this library into one academic collection per reviewed course.");
-  const templateEntry = source.templates[0];
-  let template = "";
-  let plan: ReturnType<typeof parseCourseTemplate> | undefined;
-  let templateBytes: Uint8Array | undefined;
+  if (source.templates.length > MAX_PLAN_SECTIONS) throw new Error("Split this library into one academic collection per reviewed course.");
+  // Every section of one module travels together; each keeps its exact bytes.
+  const templates: Array<{ entry: PrivateLibraryCatalog["templates"][number]; bytes: Uint8Array }> = [];
+  let plan: AcademicCoursePlan | undefined;
   let reviewedFiling: ReviewedFiling | undefined;
-  if (templateEntry) {
-    templateBytes = await read(templateEntry.file);
-    if (await sha256(templateBytes) !== `sha256:${templateEntry.checksum}`) throw new Error("The course plan failed its integrity check.");
-    template = decode(templateBytes);
-    plan = parseCourseTemplate(template);
-    if (plan.problems.length || !reviewedTermNumber(plan.term) || !moduleIdentity(plan.module) || !plan.items.length)
-      throw new Error("Review the course plan and confirm its exact Term 1-5 and module before uploading.");
+  if (source.templates.length) {
+    for (const entry of source.templates) {
+      const bytes = await read(entry.file);
+      if (await sha256(bytes) !== `sha256:${entry.checksum}`) throw new Error("The course plan failed its integrity check.");
+      templates.push({ entry, bytes });
+    }
+    plan = academicCoursePlan(templates.map(template => decode(template.bytes)), options.planTerm);
     if (unscheduled) throw new Error("A collection containing a reviewed weekly plan cannot override its course classification.");
   } else {
+    if (options.planTerm) throw new Error("A confirmed course term applies only to a reviewed course plan.");
     if (!unscheduled || !reviewedTermNumber(unscheduled.term) || !["source-metadata", "human-reviewed"].includes(unscheduled.evidence)
       || !moduleIdentity(unscheduled.module)
       || (unscheduled.title !== undefined && (!unscheduled.title.trim() || unscheduled.title.trim().length > 180)))
@@ -704,7 +793,7 @@ export async function prepareAcademicUpload(read: LibraryReader, unscheduled?: A
     files.push({ path, bytes, sha256: checksum, byte_size: bytes.length, mime_type: mime }); paths.add(path);
     if (files.length > 1500 || files.reduce((sum, file) => sum + file.byte_size, 0) > 512 * 1024 * 1024) throw new Error("This collection exceeds the supported upload size.");
   }
-  if (templateEntry && templateBytes) await add(templateEntry.file, templateBytes, "text/plain", templateEntry.checksum);
+  for (const template of templates) await add(template.entry.file, template.bytes, "text/plain", template.entry.checksum);
   const sources: PrivateLibraryCatalog["sources"] = [];
   const declaredModules = new Set<string>();
   const declaredTerms = new Set<number>();
@@ -712,6 +801,8 @@ export async function prepareAcademicUpload(read: LibraryReader, unscheduled?: A
     if (item.module !== undefined) {
       const identity = moduleIdentity(item.module);
       if (!identity) throw new Error("A source has an invalid or ambiguous module label. Correct or split the private package.");
+      if (reviewedFiling && identity !== moduleIdentity(reviewedFiling.module))
+        throw new Error("A source's catalog module does not match its source-only course.");
       if (reviewedFiling) declaredModules.add(identity);
     }
     // Remove local paths and incidental preparation diagnostics before transfer.
@@ -741,27 +832,17 @@ export async function prepareAcademicUpload(read: LibraryReader, unscheduled?: A
     }
     const parsedBank = readPreparedBank(JSON.parse(decode(await read(item.bankFile))));
     if (plan) assertTemplateOwnsSource(plan, item, parsedBank);
+    let bankFiling = parsedBank.reviewedFiling;
     if (reviewedFiling) {
-      const manifestModule = moduleIdentity(parsedBank.pkg.manifest.course.name);
-      const manifestTerm = parsedBank.pkg.manifest.course.term;
-      if (!manifestModule || !Number.isInteger(manifestTerm) || manifestTerm < 1 || manifestTerm > 5)
-        throw new Error("A question bank has an invalid original module or term. Correct its review evidence before upload.");
-      declaredModules.add(manifestModule);
-      declaredTerms.add(manifestTerm);
-      for (const question of parsedBank.pkg.questions) {
-        const scope = questionScope(parsedBank.pkg.manifest, question);
-        const identity = moduleIdentity(scope.course);
-        if (!identity || !Number.isInteger(scope.term) || scope.term < 1 || scope.term > 5)
-          throw new Error("A question has an invalid or ambiguous original module or term.");
-        declaredModules.add(identity);
-        declaredTerms.add(scope.term);
-      }
+      bankFiling = sourceOnlyBankFiling(parsedBank, reviewedFiling, false);
+      declaredModules.add(moduleIdentity(bankFiling.module)!);
+      declaredTerms.add(reviewedTermNumber(bankFiling.term)!);
     }
-    const bank: PreparedBank = reviewedFiling ? { ...parsedBank, reviewedFiling } : parsedBank;
+    const bank: PreparedBank = bankFiling ? { ...parsedBank, reviewedFiling: bankFiling } : parsedBank;
     bank.pkg.manifest.source.filename = basename(bank.pkg.manifest.source.filename);
     const verifiedAssets: { name: string }[] = [];
     const figureSizes = new Map<string, number>();
-    assertAcademicFigureBudget(bank.pkg.questions);
+    assertAcademicStoredFigureBudget(bank.pkg.questions);
     for (const question of bank.pkg.questions) {
       const questionSourceHash = question.provenance.sourceChecksum?.replace(/^sha256:/, "");
       if (!questionSourceHash || questionSourceHash !== item.checksum.replace(/^sha256:/, ""))
@@ -772,6 +853,17 @@ export async function prepareAcademicUpload(read: LibraryReader, unscheduled?: A
         verifiedAssets.push({ name: asset.filename });
         if (!asset.checksum) throw new Error("Review image integrity before uploading this collection.");
         const path = academicAssetPath(item.bankFile, asset.filename);
+        if (asset.filename.toLowerCase().endsWith(".emf")) {
+          if (question.correctAnswer || !question.flags?.some(flag => flag.type === "media_association_uncertain"))
+            throw new Error("Only an already-held question with uncertain EMF media can retain a raw EMF source figure.");
+          const bytes = await read(safeLibraryPath(path));
+          assertHeldEmf(asset, bytes);
+          await add(path, bytes, HELD_EMF_MIME, asset.checksum);
+          figureSizes.set(asset.filename, bytes.length);
+          if (!bank.issues.some(issue => isHeldEmfIssue(issue, asset, question.id)))
+            bank.issues.push(heldEmfIssue(asset, question.id));
+          continue;
+        }
         const mime = imageMimeByExtension[asset.filename.split(".").at(-1)?.toLowerCase() ?? ""];
         if (!mime) throw new Error("Unsupported academic image type.");
         const imageBytes = await read(safeLibraryPath(path));
@@ -784,13 +876,16 @@ export async function prepareAcademicUpload(read: LibraryReader, unscheduled?: A
         await add(path, imageBytes, mime, asset.checksum);
       }
     }
-    assertAcademicFigureBudget(bank.pkg.questions, figureSizes);
+    assertAcademicStoredFigureBudget(bank.pkg.questions, figureSizes);
     // Never trust ready/review totals supplied by a ZIP manifest. Recompute
     // with the same canonical assessor that gates local installation and
     // account for unreadable source rows explicitly.
     const assessment = assessBank(bank.pkg, bank.issues, verifiedAssets);
     const ready = assessment.counts.ready;
     const held = assessment.counts["needs-review"] + assessment.counts.unresolved + (bank.unreadableQuestions ?? 0);
+    const readyQuestions = bank.pkg.questions.filter(question => assessment.verdicts.get(question.id)?.readiness === "ready");
+    if (readyQuestions.length !== ready) throw new Error("Academic question readiness is incomplete.");
+    assertAcademicFigureBudget(readyQuestions, figureSizes);
     if (ready !== item.ready || held !== item.review)
       throw new Error(`The prepared bank's claimed ready/review counts differ from verified answers and figures (${ready} ready; ${held} review). Reopen its review queue before private upload.`);
     assertAcademicQuestionsInstallable(bank, assessment.issues, ready, held);
@@ -813,16 +908,18 @@ export async function prepareAcademicUpload(read: LibraryReader, unscheduled?: A
   }
   await add("catalog.json", encode({ format: source.format, schemaVersion: source.schemaVersion, id: source.id, version: source.version,
     preparerVersion: source.preparerVersion,
-    templates: templateEntry ? [{ ...templateEntry, name: basename(templateEntry.name) }] : [], sources }), "application/json");
+    templates: templates.map(({ entry }) => ({ ...entry, name: basename(entry.name) })), sources }), "application/json");
   files.sort(compareAcademicPath);
   const module = plan?.module ?? unscheduled!.module.trim();
   const term = plan?.term ?? unscheduled!.term;
-  const metadata = { title: plan?.module ?? unscheduled?.title?.trim() ?? module, module, term, academic_term: plan?.context?.academicTerm,
-    cohort: plan?.context?.cohort, source_revision: plan?.context?.sourceRevision,
+  const template = plan?.text ?? "";
+  const metadata = { title: plan?.module ?? unscheduled?.title?.trim() ?? module, module, term, academic_term: plan?.academicTerm,
+    cohort: plan?.cohort, source_revision: plan?.sourceRevision,
     ready_questions: sources.reduce((sum, item) => sum + item.ready, 0), review_questions: sources.reduce((sum, item) => sum + item.review, 0),
     local_only_originals: localOnlyOriginals.length };
   const provenance: AcademicUpload["provenance"] = { sourceChecksums: sources.map(item => item.checksum),
-    ...(unscheduled ? { scopeEvidence: unscheduled.evidence, weekAssignment: "unassigned" as const } : {}) };
+    ...(unscheduled ? { scopeEvidence: unscheduled.evidence, weekAssignment: "unassigned" as const } : {}),
+    ...(plan && !plan.termStated ? { planTermEvidence: "human-reviewed" as const } : {}) };
   const hash = await academicUploadHash({ metadata, template, provenance, files, localOnlyOriginals });
   return { catalogId: source.id, metadata, template, provenance, files, hash, localOnlyOriginals };
 }
@@ -863,6 +960,9 @@ export async function uploadAcademicCourse(client: SupabaseClient, accountId: st
   if (error && error.code === "23514" && files.some(file => file.mime_type === "image/gif")
     && /academic_files_mime_type_check/.test(error.message ?? ""))
     throw new Error("The academic cloud backend has not enabled GIF figures yet. Your ZIP is unchanged; retry after the private academic GIF schema migration.");
+  if (error && error.code === "23514" && files.some(file => file.mime_type === HELD_EMF_MIME)
+    && /academic_files_mime_type_check/.test(error.message ?? ""))
+    throw new Error("The academic cloud backend cannot preserve held EMF source figures yet. Your package is unchanged; retry after the held-EMF migration.");
   if (error?.code === "23505" && /Academic source is already registered under another collection/.test(error.message ?? ""))
     throw new Error("This source is already registered in another private academic collection. Reopen that collection instead of creating a duplicate catalog.");
   if (error || !data?.revision_id || data.collection_id !== collection) throw new Error("Your private upload could not be registered. Keep the package and retry.");

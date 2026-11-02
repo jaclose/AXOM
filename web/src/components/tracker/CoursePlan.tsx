@@ -39,7 +39,7 @@ export function CoursePlan({ book, bank, availableQuestions, onBack, onOpen, onC
     <GButton size="sm" onClick={onBack}><ArrowLeft size={ICON_SIZE.body} /> All courses</GButton>
     <div className="course-plan-heading">
       <div className="course-plan-cover" aria-hidden="true"><span>{book.term}</span><strong>{book.module}</strong><BookOpen size={40} strokeWidth={1} /></div>
-      <div><p className="course-eyebrow">{book.term}{book.academicContext?.academicTerm ? ` · ${book.academicContext.academicTerm}` : book.courseCode ? ` · ${book.courseCode}` : ""}</p><h1 tabIndex={-1}>{book.module}</h1>
+      <div><p className="course-eyebrow">{book.term}{book.academicContext?.academicTerm ? ` · ${book.academicContext.academicTerm}` : book.courseCode && !book.courseCode.startsWith("academic:") ? ` · ${book.courseCode}` : ""}</p><h1 tabIndex={-1}>{book.module}</h1>
         <p>{book.courseName || "Your weekly course plan"}</p>
         <div className="course-plan-facts"><span><b>{book.weeks.length}</b> weeks</span><span><b>{book.count}</b> activities</span>{bank
           ? <span><b>{bank.ready}</b> locally answer-ready</span>
@@ -54,7 +54,7 @@ export function CoursePlan({ book, bank, availableQuestions, onBack, onOpen, onC
         {book.weeks.map(week => {
           const ready = bank ? courseQuizSelection(bank, week.week).questionIds.length : 0;
           return <article className="course-week" key={week.week}>
-            <div className="course-week-heading"><label><input type="checkbox" checked={weeks.includes(week.week)} onChange={event => setWeeks(current => event.target.checked ? [...current, week.week] : current.filter(number => number !== week.week))} /><b>Week {week.week}</b></label><span>{week.total} activities</span></div>
+            <div className="course-week-heading"><label><input type="checkbox" checked={weeks.includes(week.week)} onChange={event => setWeeks(current => event.target.checked ? [...current, week.week] : current.filter(number => number !== week.week))} /><b>Week {week.week}</b></label><span>{week.total} {week.total === 1 ? "activity" : "activities"}</span></div>
             {book.academicContext?.weekDates[week.week] && <p className="course-week-dates">{book.academicContext.weekDates[week.week]}</p>}
             <p className="sub">{week.activities.map(activity => activity.label).join(" · ")}</p>
             <details><summary>View activities <span>{week.done} completed</span></summary><ul>{week.items.map(item => <li key={item.id}><span>{item.label}</span><small>{item.kind.replaceAll("-", " ")}</small></li>)}</ul></details>

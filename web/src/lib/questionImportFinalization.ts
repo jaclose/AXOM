@@ -35,6 +35,8 @@ export interface ReviewedQuestionInput extends Record<string, unknown> {
   correctKey?: string;
   explanation?: string;
   choiceRationales?: QuestionRecord["choiceRationales"];
+  analyses?: QuestionRecord["analyses"];
+  extraction?: QuestionRecord["extraction"];
   topic?: string;
   system?: string;
   objective?: string;
