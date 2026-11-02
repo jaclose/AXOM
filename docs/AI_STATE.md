@@ -5,9 +5,9 @@ authority: current-state
 ---
 # AXOM current AI state
 
-## Checkout and release boundary · 2026-11-02 09:22 UTC
+## Checkout and release boundary · 2026-11-02 10:55 UTC
 
-This handoff was updated from local frontier commit `90cb7eca` on
+This handoff was updated from local frontier commit `1f46c707` on
 `codex/axom-frontier-release-20261101`. Check `git status`, HEAD and the
 coordination board before editing. At this snapshot, remote `main` was
 `ee1c0c2e`; [PR #74](https://github.com/jaclose/AXOM/pull/74),
@@ -68,7 +68,9 @@ and [email readiness](operations/communications-readiness.md).
   revision and explanation gates, eligible quiz pool counts/multiple subjects,
   and preservation of unlocks/blueprint lane across backup merges. The
   [academic library](features/academic-library.md) owns the review contract;
-  these ports still need the final combined gate and hosted acceptance.
+  these ports still need the final combined gate and hosted acceptance. Week
+  practice uses downloaded membership and blocks launch when a question or
+  set was refiled outside the current course.
 - [Host](features/community-operator-console.md#operator-console) uses
   server-read roles, reasoned/audited moderation and a restricted report
   queue. Its four feature migrations, forward privacy migration `20261102160000`
@@ -94,10 +96,16 @@ The older 20-course upload-free dry run and unresolved inventory are dated
 evidence in `git show e799ed5b:docs/AI_STATE.md`, not hosted delivery.
 A newer private v7 scan accounted for 995 sources and 859 banks, with 192
 inline-answer and 613 answer-mark **review-only** proposals. No answer keys
-were promoted, readiness changed or content uploaded. A new upload-free
-20-course dry run exposed a 14-row package/ledger mismatch; the publisher
-candidate remains held while duplicate identity handling is audited. Source
-rights and human medical review remain separate.
+were promoted, readiness changed or content uploaded. The duplicate-linked
+publisher guard resolved the earlier 14-row mismatch: the 20-course
+upload-free dry run reconciles 16,965 in-course rows (782 ready, 16,183 held),
+594 Unfiled and zero unaccounted. The private approved-only template holds
+17,179 rows pending review; seven unreadable markers, 30 malformed/filtered
+rows and 343 source-binding-blocked rows remain separate. The offline
+applicator can create a separate private candidate only from exact hash-bound
+human decisions on keys, explanations, sources, filing and rights; no approvals,
+readiness changes or publication occurred. Source rights and human medical
+review remain separate.
 
 Production acceptance still needs a cleared-content owner upload, reviewer
 decision, learner reload/media and checksum readback, share withdrawal, privacy
@@ -122,6 +130,7 @@ browser journeys (14 conditionally skipped). Root API typecheck, 88 release
 tests, 43 repository tests, repository hygiene and communications artifact
 integrity also passed. Host desktop/phone QA covered both themes and reduced
 motion; the course-template export and reimport journey passed at 1440, 768
-and 390 pixels. Keep the remote release held until JD's explicit follow-up;
+and 390 pixels. Later QBank changes need a fresh combined gate. Keep the remote
+release held until JD's explicit final-commit follow-up;
 seven production migrations, owner grant, live mail delivery and real-account
 Community/Host acceptance remain separate checks.
