@@ -268,8 +268,16 @@ function applyRecord(question: PackageQuestion, row: ReviewedAnswerRecord): Pack
     if (row.explanationOrigin === "source")
       result.source.explanationSourcePage = row.explanationSourcePage!;
   }
-  if (!substantive(blocksToPlainText(result.explanation ?? [])))
+  const fullExplanation = blocksToPlainText(result.explanation ?? []);
+  if (!substantive(fullExplanation))
     fail("A reviewed question still lacks a substantive explanation.");
+  if (localPath.test(fullExplanation) || localPath.test(JSON.stringify(result.explanation ?? [])))
+    fail("A reviewed explanation still contains a local path.");
+  const memberVisible = { course: result.course, discipline: result.discipline, topic: result.topic,
+    subtopic: result.subtopic, stem: result.stem, choices: result.choices,
+    choiceTable: result.choiceTable, explanation: result.explanation, teaching: result.teaching };
+  if (localPath.test(JSON.stringify(memberVisible)))
+    fail("A reviewed question still contains a member-visible local path.");
   return result;
 }
 

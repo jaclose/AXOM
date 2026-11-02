@@ -17,7 +17,8 @@ afterEach(async () => {
 });
 
 async function fixture(existingAnswer = false, mediaUncertain = false,
-  existingEvidence: "answer-reveal-slide" | "printed-key" = "answer-reveal-slide") {
+  existingEvidence: "answer-reveal-slide" | "printed-key" = "answer-reveal-slide",
+  oldExplanation?: string, heldStem?: string) {
   const work = await mkdtemp(join(tmpdir(), "axom-reviewed-answer-test-"));
   roots.push(work);
   const root = join(work, "prepared");
@@ -33,12 +34,13 @@ async function fixture(existingAnswer = false, mediaUncertain = false,
   const held: PackageQuestion = {
     id: "invented-held-1", course: "FTM 1", term: 1, week: 1,
     source: { filename: "invented.pdf", page: 1, questionNumber: 1 },
-    stem: [{ type: "text", text: "Which invented option is the synthetic answer?" }],
+    stem: [{ type: "text", text: heldStem ?? "Which invented option is the synthetic answer?" }],
     choices: [
       { id: "invented-a", label: "A", blocks: [{ type: "text", text: "An invented first option" }] },
       { id: "invented-b", label: "B", blocks: [{ type: "text", text: "An invented second option" }] },
     ],
     ...(existingAnswer ? { correctAnswer: { labels: ["A"], evidence: existingEvidence } } : {}),
+    ...(oldExplanation ? { explanation: [{ type: "text" as const, text: oldExplanation }] } : {}),
     flags: [{ type: "answer_needs_review", message: "The invented source key needs human review." },
       ...(mediaUncertain ? [{ type: "media_association_uncertain" as const,
         message: "The required invented figure is not tied to this question." }] : [])],
@@ -216,6 +218,28 @@ describe("private reviewed-answer application", () => {
     await writeFile(decisionsPath, JSON.stringify(decisions));
     await expect(applyReviewedAnswers(root, decisionsPath, output))
       .rejects.toThrow(/shareable medical citation/);
+  });
+
+  it("rejects a retained local path in keep and append explanations", async () => {
+    const old = "The invented source rationale at /private/course/notes.pdf says the second choice is correct.";
+    const { root, decisionsPath, decisions, output } = await fixture(false, false, "answer-reveal-slide", old);
+    decisions.records[0].explanationMode = "keep";
+    await writeFile(decisionsPath, JSON.stringify(decisions));
+    await expect(applyReviewedAnswers(root, decisionsPath, output))
+      .rejects.toThrow(/still contains a local path/);
+    decisions.records[0].explanationMode = "append";
+    await writeFile(decisionsPath, JSON.stringify(decisions));
+    await expect(applyReviewedAnswers(root, decisionsPath, output))
+      .rejects.toThrow(/still contains a local path/);
+    await expect(readFile(join(output, "library", "catalog.json"))).rejects.toThrow();
+  });
+
+  it("does not mark a question ready when its existing stem exposes a local file path", async () => {
+    const { root, decisionsPath, output } = await fixture(false, false, "answer-reveal-slide", undefined,
+      "Which invented option appears in /private/course/notes.pdf for this synthetic item?");
+    await expect(applyReviewedAnswers(root, decisionsPath, output))
+      .rejects.toThrow(/member-visible local path/);
+    await expect(readFile(join(output, "library", "catalog.json"))).rejects.toThrow();
   });
 
   it("rejects two catalog rows that point to one bank file", async () => {
