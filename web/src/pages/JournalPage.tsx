@@ -108,7 +108,7 @@ function JournalWeatherControls({ weather, automatic, paused, onNext, onToggle }
   onNext: () => void;
   onToggle: () => void;
 }) {
-  return <div className="journal-weather-controls" aria-label="Desk scene weather">
+  return <div className="journal-weather-controls" role="group" aria-label={`${deskWeatherName[weather]} desk ambience. ${automatic ? (paused ? "Scene paused" : "Scenes change automatically") : "Manual scene"}`}>
     <span className="journal-weather-label"><CloudSun size={ICON_SIZE.body} /> <b>{deskWeatherName[weather]}</b><small>{automatic ? (paused ? "Paused" : "Changing scene") : "Manual scene"}</small></span>
     <button type="button" onClick={onNext} aria-label="Next desk scene" title="Next desk scene"><ArrowRight size={ICON_SIZE.body} /></button>
     {automatic && <button type="button" onClick={onToggle} aria-label={paused ? "Resume changing desk scene" : "Pause changing desk scene"} title={paused ? "Resume changing desk scene" : "Pause changing desk scene"}>{paused ? <Play size={ICON_SIZE.body} /> : <Pause size={ICON_SIZE.body} />}</button>}
@@ -690,35 +690,34 @@ function JournalWritingPage({
   const previousSupportSignalRef = useRef(false);
 
   const putDownPage = useCallback(() => {
-    if (!zoomed || settling) return;
+    if (!zoomed) return;
     returnToDeskWritingRef.current = document.activeElement === zoomWritingRef.current;
     const surface = document.querySelector<HTMLElement>(".surface-scroll");
     if (surface) surface.scrollTop = 0;
+    if (settleTimerRef.current !== null) window.clearTimeout(settleTimerRef.current);
+    setZoomed(false);
     if (reducedMotion) {
-      setZoomed(false);
+      setSettling(false);
       return;
     }
     setSettling(true);
     settleTimerRef.current = window.setTimeout(() => {
       settleTimerRef.current = null;
-      setZoomed(false);
       setSettling(false);
-      const restoredSurface = document.querySelector<HTMLElement>(".surface-scroll");
-      if (restoredSurface) restoredSurface.scrollTop = 0;
-    }, 860);
-  }, [zoomed, settling, reducedMotion]);
+    }, 760);
+  }, [zoomed, reducedMotion]);
 
   function noteActivity() {
     if (zoomed) setHasInteractedSinceOpen(true);
     else setDeskTouched(true);
-    if (settleTimerRef.current !== null) {
-      window.clearTimeout(settleTimerRef.current);
-      settleTimerRef.current = null;
-      setSettling(false);
-    }
   }
 
   function openFullPage() {
+    if (settleTimerRef.current !== null) {
+      window.clearTimeout(settleTimerRef.current);
+      settleTimerRef.current = null;
+    }
+    setSettling(false);
     setHasInteractedSinceOpen(dirtyRef.current || day !== today);
     setZoomed(true);
   }
@@ -925,19 +924,19 @@ function JournalWritingPage({
   }
 
   const putBookDown = useCallback(() => {
-    if (supportOpen || addingImage || deskClosing) return;
+    if (addingImage || deskClosing) return;
     void requestDurableTransition(() => {
       if (reducedMotion) { onClose(); return; }
       setDeskClosing(true);
       deskCloseTimerRef.current = window.setTimeout(onClose, 900);
     });
-  }, [supportOpen, addingImage, deskClosing, requestDurableTransition, reducedMotion, onClose]);
+  }, [addingImage, deskClosing, requestDurableTransition, reducedMotion, onClose]);
 
   useEffect(() => {
-    if (zoomed || deskClosing || deskTouched || supportOpen || addingImage || composing) return;
+    if (zoomed || settling || deskClosing || deskTouched || addingImage || composing) return;
     const timer = window.setTimeout(putBookDown, 4400);
     return () => window.clearTimeout(timer);
-  }, [zoomed, deskClosing, deskTouched, supportOpen, addingImage, composing, putBookDown]);
+  }, [zoomed, settling, deskClosing, deskTouched, addingImage, composing, putBookDown]);
 
   async function completeToday() {
     cancelScheduledSave();
@@ -1039,7 +1038,7 @@ function JournalWritingPage({
 
   const notebook = (
     <section
-      className={`journal-book-stage paper-${preferences.paperTone}${zoomed ? " is-zoomed" : ""}${settling ? " is-settling" : ""}${direction ? ` turn-${direction}` : ""}`}
+      className={`journal-book-stage paper-${preferences.paperTone} desk-${preferences.deskTone} weather-${sceneWeather}${zoomed ? " is-zoomed" : ""}${settling ? " is-settling" : ""}${direction ? ` turn-${direction}` : ""}`}
       aria-label="Journal notebook"
       data-motion={reducedMotion ? "reduced" : "full"}
       onKeyDown={handleBookKeyDown}
@@ -1117,19 +1116,30 @@ function JournalWritingPage({
 
       {saveError && <div className="journal-save-error" role="alert">{saveError}</div>}
 
-      <div className="journal-support-access">
-        <GhostButton aria-expanded={supportOpen} aria-controls="journal-support-preview" onClick={() => setSupportOpen((current) => !current)}>
-          <HeartHandshake size={ICON_SIZE.body} /> Support
-        </GhostButton>
-      </div>
+      <div className="journal-focus-layout">
+        <aside className={`journal-focus-rail${supportOpen ? " has-support" : ""}`} aria-label="Desk margin">
+          <div className={`journal-focus-desk journal-desk desk-${preferences.deskTone} weather-${sceneWeather} laptop-${preferences.laptopTone} laptop-${preferences.laptopPosition} drink-${preferences.drink}`}>
+            {deskWeatherSequence.map((weather) => <span key={weather} className={`journal-weather-wash wash-${weather}`} aria-hidden="true" />)}
+            <div className="journal-focus-desk-objects">
+              <JournalDeskLaptop today={today} />
+              <span className="journal-desk-drink" aria-hidden="true"><span /></span>
+            </div>
+            <JournalWeatherControls weather={sceneWeather} automatic={preferences.weatherCycle !== false} paused={weatherPaused} onNext={onNextWeather} onToggle={onToggleWeather} />
+          </div>
+          <div className="journal-support-access">
+            <GhostButton aria-expanded={supportOpen} aria-controls="journal-support-preview" onClick={() => setSupportOpen((current) => !current)}>
+              <HeartHandshake size={ICON_SIZE.body} /> Support
+            </GhostButton>
+          </div>
 
-      {supportOpen && (
-        <JournalSupportPreview
-          noticedReflection={supportSignal}
-          onClose={() => setSupportOpen(false)}
-          onLeave={() => { void requestDurableTransition(onClose); }}
-        />
-      )}
+          {supportOpen && (
+            <JournalSupportPreview
+              noticedReflection={supportSignal}
+              onClose={() => setSupportOpen(false)}
+              onLeave={() => { void requestDurableTransition(onClose); }}
+            />
+          )}
+        </aside>
 
       <div className={`journal-open-book${zoomed && !summaryVisible ? " is-writing-only" : ""}`}>
         <article className="journal-paper journal-writing-paper">
@@ -1277,6 +1287,7 @@ function JournalWritingPage({
           </div>
           <span className="journal-glance-footnote">Every visible line is included in your page automatically and saved with it. Hide a line to leave it out; corrections change only this page, never your records.</span>
         </aside>
+      </div>
       </div>
       </div>
     </section>

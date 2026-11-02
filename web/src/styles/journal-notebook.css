@@ -130,26 +130,23 @@
 .journal-weather-controls {
   position: absolute;
   z-index: 7;
-  top: 17px;
-  left: 50%;
-  transform: translateX(-50%);
+  right: 22px;
+  bottom: 21px;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 7px;
   max-width: calc(100% - 36px);
-  padding: 5px;
-  border: 1px solid rgba(248, 229, 193, .3);
-  border-radius: var(--radius-pill);
-  background: rgba(19, 22, 25, .78);
-  box-shadow: 0 12px 26px rgba(8, 7, 10, .18);
-  color: #f6edda;
-  backdrop-filter: blur(8px);
+  padding: 6px 0;
+  border-top: 1px solid rgba(247, 222, 177, .5);
+  border-bottom: 1px solid rgba(30, 22, 20, .52);
+  color: #f2dfbd;
+  text-shadow: 0 1px 2px rgba(13, 9, 8, .85), 0 -1px rgba(255, 245, 219, .17);
 }
-.journal-weather-label { display: flex; align-items: center; gap: 6px; padding: 2px 6px 2px 8px; white-space: nowrap; }
-.journal-weather-label b { font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
-.journal-weather-label small { padding-left: 6px; border-left: 1px solid rgba(248, 229, 193, .28); color: #d8cfbb; font-size: var(--fs-micro); }
-.journal-weather-controls button { display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .11); color: #f6edda; cursor: pointer; }
-.journal-weather-controls button:hover { background: rgba(255, 255, 255, .23); }
+.journal-weather-label { display: flex; align-items: center; gap: 6px; padding: 2px 4px 2px 0; white-space: nowrap; }
+.journal-weather-label b { font: 600 var(--fs-micro)/1.2 var(--font-mono); letter-spacing: .14em; text-transform: uppercase; }
+.journal-weather-label small { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.journal-weather-controls button { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid rgba(247, 222, 177, .37); border-radius: 4px; background: rgba(25, 19, 19, .17); color: #f6edda; cursor: pointer; }
+.journal-weather-controls button:hover { background: rgba(246, 222, 181, .16); }
 .journal-weather-controls button:focus-visible { outline: 2px solid #f5d99c; outline-offset: 2px; }
 .journal-desk::before,
 .journal-desk::after { position: absolute; inset: 0; content: ""; pointer-events: none; }
@@ -976,10 +973,10 @@
   .journal-page-list { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 430px) {
-  .journal-weather-controls { top: 10px; gap: 2px; padding: 4px; }
-  .journal-inline-scene .journal-weather-controls { left: 10px; transform: none; }
-  .journal-weather-label { gap: 4px; padding-inline: 5px; }
-  .journal-weather-label small { display: none; }
+  .journal-weather-controls { top: 12px; right: auto; bottom: auto; left: 12px; gap: 4px; padding: 3px 0; }
+  .journal-inline-scene .journal-weather-controls { left: 12px; }
+  .journal-weather-label { gap: 4px; padding-inline: 2px; }
+  .journal-weather-label b { display: none; }
   .journal-weather-controls button { width: 25px; height: 25px; }
   .journal-desk .journal-hardback { width: 185px; top: 42%; }
   .journal-desk-laptop { width: 178px; }
@@ -1341,17 +1338,10 @@
   pointer-events: none;
 }
 .journal-book-stage.is-zoomed .journal-open-book { animation: journalWritingArrive 780ms cubic-bezier(.22, 1, .36, 1) both; }
-.journal-book-stage.is-zoomed.is-settling .journal-open-book { animation: journalPutDown 860ms cubic-bezier(.4, 0, .2, 1) both; }
 @keyframes journalWritingArrive {
   from { opacity: .35; transform: translateY(17vh) scale(.68) rotate(-4deg); filter: blur(4px); }
   to { opacity: 1; transform: translateY(0) scale(1) rotate(0); filter: blur(0); }
 }
-@keyframes journalPutDown {
-  from { opacity: 1; transform: translateY(0) scale(1) rotate(0); filter: blur(0); }
-  to { opacity: 0; transform: translateY(23vh) scale(.53) rotate(-4deg); filter: blur(3px); }
-}
-.journal-book-stage.is-zoomed.is-settling { animation: journalBackdropLeave 860ms ease both; }
-@keyframes journalBackdropLeave { from { opacity: 1; } to { opacity: 0; } }
 .journal-book-stage.is-zoomed .journal-glance-paper {
   position: fixed;
   top: 72px;
@@ -1403,9 +1393,113 @@
 @media (prefers-reduced-motion: reduce) {
   .journal-desk-laptop.is-open .journal-desk-laptop-lid,
   .journal-book-stage.is-zoomed .journal-open-book,
-  .journal-book-stage.is-zoomed.is-settling,
-  .journal-book-stage.is-zoomed.is-settling .journal-open-book,
   .journal-book-stage.is-zoomed .journal-glance-paper { animation: none !important; }
+}
+
+/* A close writing view keeps the desk in frame, with a separate margin for support. */
+.journal-book-stage.is-zoomed {
+  --focus-weather: rgba(235, 190, 112, .05);
+  background:
+    linear-gradient(var(--focus-weather), var(--focus-weather)),
+    linear-gradient(90deg, rgba(8, 9, 10, .53), rgba(11, 10, 9, .22) 52%, rgba(8, 9, 10, .49)),
+    url('/assets/journal/walnut-desk.webp') center / cover;
+}
+.journal-book-stage.is-zoomed.desk-oak { --focus-weather: rgba(241, 207, 155, .23); }
+.journal-book-stage.is-zoomed.desk-ink { --focus-weather: rgba(26, 36, 47, .55); }
+.journal-book-stage.is-zoomed.weather-overcast { --focus-weather: rgba(89, 117, 129, .3); }
+.journal-book-stage.is-zoomed.weather-rain { --focus-weather: rgba(35, 61, 79, .4); }
+.journal-book-stage.is-zoomed.weather-night { --focus-weather: rgba(14, 23, 39, .58); }
+.journal-book-stage.is-zoomed .journal-zoom-return,
+.journal-book-stage.is-zoomed .journal-book-toolbar,
+.journal-book-stage.is-zoomed .journal-expanded-pages { width: min(1320px, 100%); max-width: 1320px; margin-inline: auto; }
+.journal-book-stage.is-zoomed .journal-zoom-return {
+  padding: 8px 12px;
+  border: 1px solid rgba(240, 229, 203, .21);
+  border-radius: var(--radius-sm);
+  background: rgba(19, 22, 23, .77);
+}
+.journal-focus-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(262px, 300px);
+  grid-template-areas: "book rail";
+  align-items: start;
+  gap: clamp(22px, 3.4vw, 50px);
+}
+.journal-focus-layout .journal-open-book { grid-area: book; min-width: 0; }
+.journal-book-stage.is-zoomed .journal-focus-layout .journal-open-book,
+.journal-book-stage.is-zoomed .journal-focus-layout .journal-open-book.is-writing-only {
+  width: 100%;
+  max-width: 920px;
+  margin: 0;
+}
+.journal-focus-rail { grid-area: rail; position: sticky; top: 78px; display: grid; gap: 12px; align-content: start; min-width: 0; }
+.journal-focus-rail.has-support { z-index: 11; }
+.journal-focus-desk {
+  position: relative;
+  height: 205px;
+  overflow: hidden;
+  border: 1px solid rgba(243, 224, 190, .19);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 18px 40px rgba(8, 7, 8, .25);
+}
+.journal-focus-desk .journal-desk-laptop { top: 9%; left: 8%; width: 205px; }
+.journal-focus-desk.laptop-right .journal-desk-laptop { left: auto; right: 8%; }
+.journal-focus-desk .journal-desk-drink { left: auto; right: 7%; bottom: 21%; width: 57px; height: 57px; border-width: 6px; }
+.journal-focus-desk.laptop-right .journal-desk-drink { left: 7%; right: auto; }
+.journal-focus-desk .journal-desk-drink::before { top: 21%; left: -18px; width: 21px; height: 27px; border-width: 6px; }
+.journal-focus-desk .journal-weather-controls { right: 11px; bottom: 9px; gap: 4px; padding-block: 4px; }
+.journal-focus-desk .journal-weather-label b { font-size: 8px; }
+.journal-focus-desk .journal-weather-controls button { width: 30px; height: 30px; }
+.journal-focus-rail.has-support .journal-focus-desk { display: none; }
+.journal-book-stage.is-zoomed .journal-focus-rail .journal-support-access { justify-content: flex-start; max-width: none; margin: 0; }
+.journal-focus-rail .journal-support-access .ghost-btn { min-height: 40px; border: 1px solid rgba(240, 229, 203, .25); border-radius: var(--radius-sm); background: rgba(19, 22, 23, .66); color: #f3e9d4; }
+.journal-book-stage.is-zoomed .journal-focus-rail .journal-support-preview {
+  display: block;
+  width: 100%;
+  max-width: none;
+  max-height: calc(100dvh - 150px);
+  margin: 0;
+  padding: 18px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: var(--radius-sm);
+  background: rgba(24, 26, 26, .96);
+}
+.journal-focus-rail .journal-support-copy { display: grid; gap: 10px; }
+.journal-focus-rail .journal-support-preview::before,
+.journal-focus-rail .journal-support-preview::after { animation: none; }
+.journal-focus-rail .journal-support-mark { width: 35px; height: 35px; }
+.journal-focus-rail .journal-support-preview h2 { font-size: clamp(19px, 1.6vw, 23px); line-height: 1.2; }
+.journal-focus-rail .journal-support-preview p { font-size: var(--fs-xs); line-height: 1.58; }
+.journal-focus-rail .journal-support-actions { grid-template-columns: minmax(0, 1fr); min-width: 0; margin-top: 15px; }
+.journal-focus-rail .journal-support-actions > * { min-height: 42px; }
+.journal-book-stage.is-zoomed .journal-focus-layout .journal-writing-paper { min-height: calc(100dvh - 170px); padding: clamp(34px, 4vw, 60px) clamp(28px, 4.6vw, 68px); }
+.journal-book-stage.is-zoomed .journal-focus-layout .journal-paper h2 { font-size: clamp(34px, 3.4vw, 45px); }
+.journal-book-stage.is-zoomed .journal-focus-layout .journal-free-writing textarea { min-height: clamp(340px, 52vh, 620px); }
+.journal-book-stage.is-settling:not(.is-zoomed) .journal-inline-book { animation: journalDeskLand 760ms cubic-bezier(.22, 1, .36, 1) both; }
+@keyframes journalDeskLand {
+  from { opacity: .52; transform: translateX(-50%) translateY(-52px) scale(1.27) rotate(-1deg); }
+  to { opacity: 1; transform: translateX(-50%) rotate(-3deg); }
+}
+@media (max-width: 900px) {
+  .journal-focus-layout { display: block; }
+  .journal-focus-rail { position: relative; top: auto; display: flex; justify-content: flex-end; min-height: 0; margin-bottom: 10px; }
+  .journal-focus-rail .journal-focus-desk { display: none; }
+  .journal-book-stage.is-zoomed .journal-focus-rail .journal-support-preview { position: fixed; top: 68px; right: 12px; z-index: 12; width: min(360px, calc(100vw - 24px)); max-height: calc(100dvh - 82px); box-shadow: var(--shadow-overlay); }
+  .journal-book-stage.is-zoomed .journal-focus-layout .journal-open-book,
+  .journal-book-stage.is-zoomed .journal-focus-layout .journal-open-book.is-writing-only { margin-inline: auto; }
+}
+@media (max-width: 520px) {
+  .journal-book-stage.is-zoomed { padding: 9px 10px 26px; }
+  .journal-book-stage.is-zoomed .journal-zoom-return { padding: 7px; }
+  .journal-book-stage.is-zoomed .journal-zoom-return .gbtn,
+  .journal-book-stage.is-zoomed .journal-focus-rail .journal-support-access .ghost-btn { min-height: 44px; }
+  .journal-book-stage.is-zoomed .journal-focus-layout .journal-writing-paper { min-height: calc(100dvh - 158px); padding: 28px 23px 35px; }
+  .journal-book-stage.is-zoomed .journal-focus-layout .journal-free-writing textarea { min-height: 49vh; }
+  .journal-inline-scene .journal-weather-controls button { width: 44px; height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .journal-book-stage.is-settling:not(.is-zoomed) .journal-inline-book { animation: none; }
 }
 
 .journal-closeout-volume {

@@ -66,6 +66,7 @@ afterEach(() => {
   window.history.replaceState(null, "", "#journal");
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 function openTodayInFullPage() {
@@ -118,8 +119,13 @@ describe("Journal notebook foundation", () => {
     expect((screen.getByLabelText("Free writing") as HTMLTextAreaElement).value).toBe("A quiet start");
     expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Today’s page" }));
     fireEvent.click(screen.getByRole("button", { name: "Put down on desk" }));
-    act(() => { vi.advanceTimersByTime(860); });
+    expect(screen.queryByRole("dialog", { name: "Full journal" })).toBeNull();
+    expect(screen.getByLabelText("Journal notebook").className).toContain("is-settling");
     expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Your open page" }));
+    fireEvent.click(screen.getByRole("button", { name: "Write full page" }));
+    expect(screen.getByRole("dialog", { name: "Full journal" }).className).not.toContain("is-settling");
+    act(() => { vi.advanceTimersByTime(760); });
+    expect(screen.getByRole("dialog", { name: "Full journal" })).toBeTruthy();
   });
 
   it("offers an explicit put-down and closes when the surrounding desk is clicked", async () => {
@@ -222,7 +228,7 @@ describe("Journal notebook foundation", () => {
     fireEvent.click(screen.getByText("Writing lens: Reflect"));
     fireEvent.click(screen.getByRole("button", { name: "Open page" }));
     fireEvent.click(screen.getByRole("button", { name: "Put down on desk" }));
-    act(() => { vi.advanceTimersByTime(860); });
+    expect(screen.queryByRole("dialog", { name: "Full journal" })).toBeNull();
     expect(screen.getByRole("heading", { name: "Your open page" })).toBeTruthy();
     const reopenedDesk = screen.getByRole("region", { name: "Write at your desk" });
     expect(within(reopenedDesk).queryByText("Keep what mattered. Let the rest be unfinished.")).toBeNull();
@@ -261,9 +267,9 @@ describe("Journal notebook foundation", () => {
     expect(screen.getByRole("dialog", { name: "Full journal" })).toBeTruthy();
 
     act(() => { vi.advanceTimersByTime(4400); });
-    expect(screen.getByRole("dialog", { name: "Full journal" }).className).toContain("is-settling");
-    act(() => { vi.advanceTimersByTime(860); });
     expect(screen.queryByRole("dialog", { name: "Full journal" })).toBeNull();
+    expect(screen.getByLabelText("Journal notebook").className).toContain("is-settling");
+    act(() => { vi.advanceTimersByTime(760); });
     expect(screen.getByRole("heading", { name: "Your open page" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Write full page" }));
@@ -292,7 +298,7 @@ describe("Journal notebook foundation", () => {
     act(() => { writing.focus(); });
     fireEvent.change(writing, { target: { value: "The line stays with me." } });
     fireEvent.click(screen.getByRole("button", { name: "Put down on desk" }));
-    act(() => { vi.advanceTimersByTime(860); });
+    expect(screen.queryByRole("dialog", { name: "Full journal" })).toBeNull();
     const deskWriting = screen.getByLabelText("Write freely at your desk") as HTMLTextAreaElement;
     expect(deskWriting.value).toBe("The line stays with me.");
     expect(document.activeElement).toBe(deskWriting);
@@ -519,6 +525,30 @@ describe("Journal notebook foundation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Support" }));
     fireEvent.click(screen.getByRole("button", { name: "Leave journal" }));
     expect(await screen.findByRole("button", { name: "Open today’s page" })).toBeTruthy();
+  });
+
+  it("puts the book down immediately with support open and keeps its writing", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(localVault, "assertVaultWrite").mockImplementation(() => undefined);
+    vi.spyOn(localVault, "assertVaultWritesSince").mockImplementation(() => undefined);
+    render(<JournalPage />);
+    openTodayInFullPage();
+    const fullJournal = screen.getByRole("dialog", { name: "Full journal" });
+    fireEvent.change(within(fullJournal).getByLabelText("Free writing"), { target: { value: "A page I can return to." } });
+    fireEvent.click(within(fullJournal).getByRole("button", { name: "Support" }));
+    expect(within(fullJournal).getByRole("region", { name: "You do not have to carry this alone." })).toBeTruthy();
+    expect(within(fullJournal).getByRole("complementary", { name: "Desk margin" })).toBeTruthy();
+
+    fireEvent.click(within(fullJournal).getByRole("button", { name: "Put down on desk" }));
+    expect(screen.queryByRole("dialog", { name: "Full journal" })).toBeNull();
+    expect((screen.getByLabelText("Write freely at your desk") as HTMLTextAreaElement).value).toBe("A page I can return to.");
+    fireEvent.pointerDown(screen.getByLabelText("Journal notebook"));
+    expect(screen.getByLabelText("Journal notebook").className).toContain("is-settling");
+    act(() => { vi.advanceTimersByTime(760); });
+    expect(screen.getByLabelText("Journal notebook").className).not.toContain("is-settling");
+    vi.useRealTimers();
+    fireEvent.click(screen.getByRole("button", { name: "Put book down" }));
+    expect(await screen.findByRole("button", { name: /Open My AXOM Journal to today’s page/i })).toBeTruthy();
   });
 
   it("opens the support preview for direct first-person safety language but not study notes", async () => {

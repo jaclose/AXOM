@@ -26,6 +26,23 @@ Cinematic is an additive review surface around that foundation:
   if the newly opened page has not been interacted with;
 - a completion transition that returns the closed page to the desk.
 
+The full-page camera remains over the walnut tabletop. Writing takes the
+left portion of a 1320 px frame; a narrow desk margin on the right holds a
+small live laptop and engraved ambience controls. When Support is open, that
+margin becomes a contained support card beside the writing page, with its
+links and Keep writing/Leave journal actions intact. On narrow screens the
+same card becomes a dismissible side drawer so the writing page keeps its
+usable width. The day summary remains separately opened.
+
+Put down on desk changes the visible mode immediately, preserves the draft,
+and returns keyboard focus to the desk page or its editor. A 760 ms transform
+then settles the inline book onto the desk; pointer and writing activity
+cannot cancel that committed return. Reduced motion switches modes without
+the landing transform. The automatic untouched-page return uses the same
+path. It pauses while Support is open or the writer is interacting. Returning
+from the camera view does not leave the editor or bypass any later durable
+write gate on page navigation or closing the journal.
+
 The journal uses ordinary semantic HTML and CSS transforms, without a WebGL,
 canvas, or physics dependency. The desk is a shell around the same form and
 persistence layer. Soundscapes use their existing separate audio lifecycle;
@@ -58,6 +75,9 @@ the user is writing or in full-page focus, or when reduced motion is requested.
 The desk also has manual next-scene and pause/resume controls. The saved
 preference records only the starting scene and whether automatic cycling is
 enabled.
+The weather name and controls sit on the scene as an engraved desk detail,
+without a floating weather pill. The miniature desk margin repeats the
+current ambience state and controls while the full page is open.
 
 Clicking empty desk around the open book puts it down. An explicit Put book
 down control does the same; editor and other interactive controls do not
