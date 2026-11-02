@@ -50,13 +50,14 @@ it("loads only a bounded preview for the selected community revision", async () 
   await expect(communityPreview(id, revision, "reader")).rejects.toThrow(/unavailable/);
 });
 
-it("binds withdrawal and reviewer action to the selected revision", async () => {
+it("requires an explanation receipt for approval and binds withdrawal and rejection to the selected revision", async () => {
   vi.mocked(academicClient).mockResolvedValue({ rpc } as never);
   rpc.mockResolvedValue({ error: null });
   await withdrawCommunityUpload(id, revision, "owner");
-  await reviewCommunityUpload(id, revision, true, "reviewer");
+  await expect(reviewCommunityUpload(id, revision, true, "reviewer")).rejects.toThrow(/exact community revision's explanations/);
+  await reviewCommunityUpload(id, revision, false, "reviewer");
   expect(rpc).toHaveBeenNthCalledWith(1, "academic_community_withdraw", { collection: id, revision });
-  expect(rpc).toHaveBeenNthCalledWith(2, "academic_community_review", { collection: id, revision, approved: true });
+  expect(rpc).toHaveBeenNthCalledWith(2, "academic_community_review", { collection: id, revision, approved: false });
   await expect(reviewCommunityUpload(id, "changed", true, "reviewer")).rejects.toThrow(/identity is invalid/);
   expect(rpc).toHaveBeenCalledTimes(2);
 });

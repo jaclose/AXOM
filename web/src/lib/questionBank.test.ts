@@ -442,15 +442,29 @@ describe("structured answer parsing and import diagnostics", () => {
     expect(drafts[0].parserRuleIds).toContain("answer.trailing-section");
   });
 
-  it("keeps duplicate question numbers separate but flags every affected draft", () => {
+  it("flags only the drafts whose question numbers collide", () => {
     const drafts = parseQuestionBlocks([
       "1. First stem?", "A. one", "B. two", "C. three", "Answer: A", "",
-      "1. Second stem?", "A. one", "B. two", "C. three", "Answer: B",
+      "1. Second stem?", "A. one", "B. two", "C. three", "Answer: B", "",
+      "2. Unique stem?", "A. one", "B. two", "C. three", "Answer: C",
+    ].join("\n"));
+    expect(drafts).toHaveLength(3);
+    expect(drafts.map((draft) => draft.questionNumber)).toEqual([1, 1, 2]);
+    expect(drafts.slice(0, 2).every((draft) => draft.parserRuleIds?.includes("conflict.duplicate-question-number"))).toBe(true);
+    expect(drafts.slice(0, 2).every((draft) => draft.needsReview)).toBe(true);
+    expect(drafts[2].parserRuleIds).not.toContain("conflict.duplicate-question-number");
+    expect(drafts[2].warnings.some((warning) => /duplicate question numbers/i.test(warning))).toBe(false);
+  });
+
+  it("keeps reused numbers in distinct source sections available for review", () => {
+    const drafts = parseQuestionBlocks([
+      "Source: First set", "Questions: 1–1", "1. First stem?", "A. one", "B. two", "Answer: A", "",
+      "Source: Second set", "Questions: 1–1", "1. Second stem?", "A. one", "B. two", "Answer: B",
     ].join("\n"));
     expect(drafts).toHaveLength(2);
     expect(drafts.map((draft) => draft.questionNumber)).toEqual([1, 1]);
-    expect(drafts.every((draft) => draft.warnings.some((warning) => /duplicate question numbers/i.test(warning)))).toBe(true);
-    expect(drafts.every((draft) => draft.needsReview)).toBe(true);
+    expect(drafts.map((draft) => draft.sourceLabel)).toEqual(["First set", "Second set"]);
+    expect(drafts.every((draft) => !draft.parserRuleIds?.includes("conflict.duplicate-question-number"))).toBe(true);
   });
 
   it("retains malformed bare-number prefixes as separate review candidates", () => {

@@ -41,7 +41,9 @@ function simulatedBatch(prepared: AcademicUpload[]) {
         const upload = await job.prepare();
         prepared.push(upload);
         outcome = { key: job.key, state: "verified", receipt: { collectionId: `collection-${job.key}`, revisionId: `revision-${job.key}`,
-          readyQuestions: Number(upload.metadata.ready_questions), reviewQuestions: Number(upload.metadata.review_questions),
+          contentHash: upload.hash, readyQuestions: Number(upload.metadata.ready_questions),
+          explainedReadyQuestions: Number(upload.metadata.ready_questions), missingExplanations: 0,
+          reviewQuestions: Number(upload.metadata.review_questions),
           sourceReceipts: [], verifiedFiles: upload.files.length, localOnlyOriginals: [] } };
       } catch {
         outcome = { key: job.key, state: "failed", category: "validation", message: "Private academic upload/readback was not completed." };
@@ -112,6 +114,7 @@ describe("publishing a prepared library", () => {
     const { container } = render(<AcademicLibraryPublisher onPublished={vi.fn()} />);
     await chooseLibrary(container);
     fireEvent.click(await screen.findByRole("checkbox", { name: /Approve sharing now/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed the answer rationale/ }));
     fireEvent.click(screen.getByRole("checkbox", { name: /right to share this course material/ }));
     fireEvent.click(screen.getByRole("button", { name: /Publish 2 courses/ }));
     await waitFor(() => expect(screen.getAllByText("Shared with everyone")).toHaveLength(2));
@@ -221,7 +224,9 @@ describe("publishing a prepared library", () => {
     // Only the run boundaries matter here; preparation is covered above.
     mocks.batch.mockImplementation(async (jobs: AcademicBatchJob[], options: { onOutcome?: (outcome: AcademicBatchOutcome) => void }) => {
       for (const job of jobs) options.onOutcome?.({ key: job.key, state: "verified", receipt: { collectionId: `collection-${job.key}`,
-        revisionId: `revision-${job.key}`, readyQuestions: 1, reviewQuestions: 0, sourceReceipts: [], verifiedFiles: 3, localOnlyOriginals: [] } });
+        revisionId: `revision-${job.key}`, contentHash: "a".repeat(64), readyQuestions: 1,
+        explainedReadyQuestions: 1, missingExplanations: 0,
+        reviewQuestions: 0, sourceReceipts: [], verifiedFiles: 3, localOnlyOriginals: [] } });
       return { expected: jobs.length, verified: jobs.length, authBlocked: 0 };
     });
     const { container } = render(<AcademicLibraryPublisher onPublished={vi.fn()} />);

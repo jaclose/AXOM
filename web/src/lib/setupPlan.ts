@@ -11,7 +11,7 @@ import { adaptLegacyDashboardLayout, applyDashboardLayoutPreset } from "./dashbo
 import { focusOption } from "./experience";
 import { resolveTrack } from "./tracks";
 import type { PracticeTiming, StudyMethodPreference, StudyWorkflowPreferences } from "./studyPreferences";
-import { buildCurriculum, SGU_CURRICULUM, withoutExampleRows, type CurriculumTemplate } from "./curricula";
+import { buildCurriculum, mergeCurriculumMap, SGU_CURRICULUM, withoutExampleRows, type CurriculumMergeCounts, type CurriculumTemplate } from "./curricula";
 import { useStore } from "./store";
 import { localDateKey } from "./dailyRollover";
 
@@ -231,10 +231,17 @@ export function applySetup(choices: SetupChoices, mode: "first-run" | "rerun"): 
   useStore.setState({ terms: built.terms, courses: built.courses, tracker: withoutExampleRows(state.tracker) });
 }
 
-/** Adds a school's term and module map beside whatever the student already has (Course Tracker's first-use card). */
-export function installCurriculum(template: CurriculumTemplate): void {
-  const built = buildCurriculum(template);
-  useStore.setState((state) => ({ terms: [...state.terms, ...built.terms], courses: [...state.courses, ...built.courses] }));
+/** One explicit, repeat-safe addition to the learner's existing Course Tracker. */
+export function completeCurriculumMap(template: CurriculumTemplate): CurriculumMergeCounts {
+  let added: CurriculumMergeCounts = { terms: 0, courses: 0, modules: 0 };
+  useStore.setState((state) => {
+    const merged = mergeCurriculumMap({ terms: state.terms, courses: state.courses }, template);
+    added = merged.added;
+    return added.terms || added.courses || added.modules
+      ? { terms: merged.terms, courses: merged.courses }
+      : state;
+  });
+  return added;
 }
 
 // --- Draft (survives a refresh mid-setup) ----------------------------------

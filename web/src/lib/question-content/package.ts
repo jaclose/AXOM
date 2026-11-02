@@ -57,6 +57,10 @@ export interface SourceMetadata {
   filename: string;
   page?: number;
   pageEnd?: number;
+  /** Page with the printed answer evidence, when distinct from the question page. */
+  answerEvidencePage?: number;
+  /** Page with the source-authored explanation, when located independently. */
+  explanationSourcePage?: number;
   /** The source's own number for the question. */
   questionNumber?: number;
   /** Which set of the file it is in, counted from 1, when the file holds several sets each numbered from 1. */

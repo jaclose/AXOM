@@ -6,6 +6,7 @@ import { academicLibraryReader } from "./client";
 import { accountOperationClient, loadSupabase } from "../account/supabase";
 import { academicCollectionId, prepareAcademicUpload, uploadAcademicCourse, type AcademicUpload } from "./upload";
 import { academicReconciliationLedger, uploadAcademicBatch, verifyAcademicCourseReadback } from "./batch";
+import { inspectPreparedUploadExplanations, inspectStoredRevisionExplanations } from "./explanationReview";
 import { planPublication, publicationJobs, readPublicationInventory } from "./publication";
 import { library } from "./publicationFixture.testing";
 
@@ -33,9 +34,10 @@ webpHeader.set(Buffer.from("WEBP"), 8);
 webpHeader.set(Buffer.from("VP8X"), 12);
 
 async function fixture({ withImage = false, largeImage = false, brokenGif = false,
-  imageFormat = "png", ambiguousAnswer = false, heldFigureCount = 0, catalogId = "fixture",
+  imageFormat = "png", ambiguousAnswer = false, heldFigureCount = 0, catalogId = "fixture", withExplanation = false,
 }: { withImage?: boolean; largeImage?: boolean; brokenGif?: boolean;
-  imageFormat?: "png" | "jpg" | "webp" | "gif"; ambiguousAnswer?: boolean; heldFigureCount?: number; catalogId?: string } = {}) {
+  imageFormat?: "png" | "jpg" | "webp" | "gif"; ambiguousAnswer?: boolean; heldFigureCount?: number; catalogId?: string;
+  withExplanation?: boolean } = {}) {
   const image = brokenGif ? gif.subarray(0, 12) : largeImage ? new Uint8Array(8 * 1024 * 1024 + 1)
     : imageFormat === "gif" ? gif : imageFormat === "jpg" ? jpegHeader
     : imageFormat === "webp" ? webpHeader : png;
@@ -64,6 +66,7 @@ async function fixture({ withImage = false, largeImage = false, brokenGif = fals
           { id: "b", label: "B", blocks: [{ type: "text", text: "Label B" }] },
         ],
         ...(heldFigureCount ? {} : { correctAnswer: { labels: ambiguousAnswer ? ["A", "B"] : ["A"], evidence: "printed-key" } }),
+        ...(withExplanation ? { explanation: [{ type: "text", text: "The synthetic source explains why A is correct." }] } : {}),
         assets,
         provenance: { method: "authored", sourceChecksum: `sha256:${S}` },
       }],
@@ -175,6 +178,33 @@ describe("authenticated source-level academic readback", () => {
     expect(shared.auth.getUser).toHaveBeenCalledOnce();
     expect(() => client.auth).toThrow(/blocks auth/);
     expect(guard).toHaveBeenCalled();
+  });
+
+  it("counts explanations at preparation and authenticated readback without changing local answer readiness", async () => {
+    for (const withExplanation of [false, true]) {
+      const f = await fixture({ withExplanation });
+      session(f);
+      const prepared = await inspectPreparedUploadExplanations(f.upload);
+      const stored = await verifyAcademicCourseReadback(f.upload, f.saved, owner);
+      const expectedMissing = withExplanation ? 0 : 1;
+      expect(prepared).toMatchObject({ readyQuestions: 1, missingExplanations: expectedMissing });
+      expect(stored).toMatchObject({ readyQuestions: 1, missingExplanations: expectedMissing,
+        explainedReadyQuestions: 1 - expectedMissing, contentHash: f.upload.hash });
+    }
+  });
+
+  it("refuses explanation attestation when a ready question's stored figure bytes are missing or corrupted", async () => {
+    for (const missing of [false, true]) {
+      const f = await fixture({ withImage: true, withExplanation: true });
+      const { client } = session(f);
+      vi.mocked(client.rpc).mockResolvedValueOnce({ data: {
+        collection_id: collection, revision_id: revision, content_hash: f.upload.hash, ready_questions: 1,
+      }, error: null } as never);
+      if (missing) f.data.delete("banks/demo/assets/figure.png");
+      else f.data.set("banks/demo/assets/figure.png", { mime: "image/png", bytes: new Uint8Array([1, 2, 3]) });
+      await expect(inspectStoredRevisionExplanations(collection, revision, owner))
+        .rejects.toThrow(missing ? /Missing server asset/ : /stored figure failed byte-level readback/);
+    }
   });
 
   it("verifies a held source's 11 figures without claiming they are learner attachments", async () => {

@@ -4,6 +4,7 @@ import { useAccount } from "../../lib/account/accountStore";
 import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
 import { saveCommunityReference } from "../../lib/academicLibrary/communityReference";
 import { downloadAcademicCourse, isAcademicReviewer, type AcademicCourse } from "../../lib/academicLibrary/client";
+import { inspectStoredRevisionExplanations, type ExplanationReviewReceipt } from "../../lib/academicLibrary/explanationReview";
 import type { AcademicUploadResult } from "../../lib/academicLibrary/upload";
 import {
   communityPreview, listCommunityUploads, reviewCommunityUpload, submitCommunityUpload,
@@ -40,6 +41,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
   const [downloaded, setDownloaded] = useState<{ accountId: string; revisionId: string }>();
   const [preview, setPreview] = useState<{ accountId: string; revisionId: string; value: CommunityPreview }>();
   const [reviewChecked, setReviewChecked] = useState(false);
+  const [reviewReceipt, setReviewReceipt] = useState<ExplanationReviewReceipt>();
   const [withdrawId, setWithdrawId] = useState("");
   const [busyId, setBusyId] = useState("");
   const [progress, setProgress] = useState("");
@@ -54,6 +56,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
     setDownloaded(undefined);
     setPreview(undefined);
     setReviewChecked(false);
+    setReviewReceipt(undefined);
     setRights(false);
     setProgress(""); setError(""); setBusyId(""); setWithdrawId("");
     if (accountId) void isAcademicReviewer(accountId).then(value => { if (current) setReviewer(value); });
@@ -147,14 +150,20 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
     const active = () => accountEpoch.current === epoch && useAccount.getState().user?.id === accountId;
     const scope = academicAccountScope(accountId);
     setBusyId(row.id); setError(""); setProgress("Checking and downloading this exact revision…");
-    setDownloaded(undefined); setReviewChecked(false);
+    setDownloaded(undefined); setReviewChecked(false); setReviewReceipt(undefined);
     try {
       await saveCommunityReference(row.current_revision_id, accountId, undefined, scope.assertCurrent);
       const result = await downloadAcademicCourse(row.current_revision_id, message => { if (active()) setProgress(message); }, scope);
       scope.assertCurrent();
       await saveCommunityReference(row.current_revision_id, accountId, result.questionIds, scope.assertCurrent);
+      let receipt: ExplanationReviewReceipt | undefined;
+      if (reviewer) {
+        try { receipt = await inspectStoredRevisionExplanations(row.id, row.current_revision_id, accountId); }
+        catch (cause) { if (active()) setError(cause instanceof Error ? cause.message : "Explanation readback failed."); }
+      }
       if (active()) {
         setDownloaded({ accountId, revisionId: row.current_revision_id });
+        setReviewReceipt(receipt);
         setProgress(`${result.questionIds.length} questions saved on this device. Questions still awaiting answer or source review remain held.`);
       }
     } catch (cause) {
@@ -178,17 +187,18 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
   }
 
   async function review(row: CommunityUpload, approved: boolean) {
-    if (!accountId || !reviewer || !reviewChecked || downloaded?.accountId !== accountId
+    if (!accountId || !reviewer || !reviewChecked || (approved && (!reviewReceipt || reviewReceipt.missingExplanations > 0 || reviewReceipt.readyQuestions === 0))
+      || downloaded?.accountId !== accountId
       || downloaded.revisionId !== row.current_revision_id || busyId) return;
     const epoch = accountEpoch.current;
     const active = () => accountEpoch.current === epoch && useAccount.getState().user?.id === accountId;
     const scope = academicAccountScope(accountId);
     setBusyId(row.id); setError("");
     try {
-      await reviewCommunityUpload(row.id, row.current_revision_id, approved, accountId);
+      await reviewCommunityUpload(row.id, row.current_revision_id, approved, accountId, reviewReceipt, reviewChecked);
       scope.assertCurrent();
       if (active()) {
-        setDownloaded(undefined); setReviewChecked(false);
+        setDownloaded(undefined); setReviewChecked(false); setReviewReceipt(undefined);
         setProgress(approved ? "Approved. This revision is now in the official course catalog."
           : "Review recorded. This upload is no longer in the unreviewed list.");
         setRefresh(value => value + 1);
@@ -258,8 +268,10 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
                 {preview.value.template_text ? <pre>{preview.value.template_text}</pre> : <p>This upload has no weekly plan. Its questions remain available by course.</p>}
               </div>}
               {reviewer && downloaded?.accountId === accountId && downloaded.revisionId === row.current_revision_id && <div className="community-review">
-                <label><input type="checkbox" checked={reviewChecked} onChange={event => setReviewChecked(event.target.checked)} /> I inspected this exact revision, its answers, sources and figures.</label>
-                <div className="community-actions"><GButton variant="primary" disabled={!reviewChecked || Boolean(busyId)} onClick={() => void review(row, true)}><ShieldCheck size={ICON_SIZE.body} /> Approve for official catalog</GButton>
+                {reviewReceipt && <p role="status">{reviewReceipt.explainedReadyQuestions} of {reviewReceipt.readyQuestions} ready questions have an explanation in this stored revision. {reviewReceipt.missingExplanations} missing. Review the rationale against its source.</p>}
+                {!reviewReceipt && <p>Explanation readback is required before official approval. Download this revision again to retry.</p>}
+                <label><input type="checkbox" checked={reviewChecked} onChange={event => setReviewChecked(event.target.checked)} /> I inspected this exact revision, its answers, sources, figures and explanation quality.</label>
+                <div className="community-actions"><GButton variant="primary" disabled={!reviewChecked || !reviewReceipt || reviewReceipt.missingExplanations > 0 || reviewReceipt.readyQuestions === 0 || Boolean(busyId)} onClick={() => void review(row, true)}><ShieldCheck size={ICON_SIZE.body} /> Approve for official catalog</GButton>
                   <GButton disabled={!reviewChecked || Boolean(busyId)} onClick={() => void review(row, false)}>Reject</GButton></div>
               </div>}
               <TechnicalDetails label="Revision details"><p>Revision {row.current_revision_id}</p><p>Submitted {new Date(row.submitted_at).toLocaleString()}</p></TechnicalDetails>
@@ -271,7 +283,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
         <aside className="community-contribute">
           <GlassCard pad><UploadCloud size={ICON_SIZE.display} aria-hidden="true" /><h3>Share a course</h3>
             <p>Choose a course folder, save it privately, then submit that version. It stays Unreviewed until an appointed academic reviewer approves it.</p>
-            <details><summary>Choose an AXOM course folder or ZIP</summary><AcademicCourseUpload onSaved={saved} /></details>
+            <AcademicCourseUpload onSaved={saved} />
             <GButton disabled={ownedBusy} onClick={() => void loadPrivate()}>{ownedBusy ? "Loading…" : "Show my private courses"}</GButton>
             {privateCourses && privateCourses.length === 0 && <p>No private courses are ready to submit.</p>}
             {privateCourses?.map(course => <button key={course.id} type="button" className="community-private-choice" onClick={() => {

@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   account: { id: "owner-1" as string | undefined },
   list: vi.fn(), preview: vi.fn(), submit: vi.fn(), withdraw: vi.fn(), review: vi.fn(),
   download: vi.fn(), reviewer: vi.fn(), owned: vi.fn(),
+  explanations: vi.fn(),
   saveReference: vi.fn(),
 }));
 vi.mock("../../lib/account/accountStore", () => {
@@ -36,6 +37,9 @@ vi.mock("../../lib/academicLibrary/community", () => ({
 vi.mock("../../lib/academicLibrary/client", () => ({
   isAcademicReviewer: (...args: unknown[]) => mocks.reviewer(...args),
   downloadAcademicCourse: (...args: unknown[]) => mocks.download(...args),
+}));
+vi.mock("../../lib/academicLibrary/explanationReview", () => ({
+  inspectStoredRevisionExplanations: (...args: unknown[]) => mocks.explanations(...args),
 }));
 vi.mock("../../lib/academicLibrary/communityReference", () => ({
   saveCommunityReference: (...args: unknown[]) => mocks.saveReference(...args),
@@ -61,6 +65,8 @@ describe("Community Uploads", () => {
     mocks.download.mockResolvedValue({ questionIds: ["q1", "q2"] });
     mocks.saveReference.mockResolvedValue(undefined);
     mocks.reviewer.mockResolvedValue(false);
+    mocks.explanations.mockResolvedValue({ collectionId: ids.collection, revisionId: ids.revision,
+      contentHash: "a".repeat(64), readyQuestions: 8, explainedReadyQuestions: 8, missingExplanations: 0 });
     mocks.owned.mockResolvedValue([]);
   });
   afterEach(() => { cleanup(); vi.clearAllMocks(); });
@@ -122,9 +128,25 @@ describe("Community Uploads", () => {
     fireEvent.click(within(card).getByRole("button", { name: "Download to practice" }));
     const approve = await within(card).findByRole("button", { name: /Approve for official catalog/ }) as HTMLButtonElement;
     expect(approve.disabled).toBe(true);
+    expect(await within(card).findByText(/8 of 8 ready questions have an explanation/)).toBeTruthy();
     fireEvent.click(within(card).getByRole("checkbox", { name: /inspected this exact revision/ }));
     fireEvent.click(approve);
-    await waitFor(() => expect(mocks.review).toHaveBeenCalledWith(ids.collection, ids.revision, true, "owner-1"));
+    await waitFor(() => expect(mocks.review).toHaveBeenCalledWith(ids.collection, ids.revision, true, "owner-1",
+      expect.objectContaining({ missingExplanations: 0 }), true));
+  });
+
+  it("keeps missing-explanation community questions practiceable but blocks official approval", async () => {
+    mocks.reviewer.mockResolvedValue(true);
+    mocks.explanations.mockResolvedValue({ collectionId: ids.collection, revisionId: ids.revision,
+      contentHash: "a".repeat(64), readyQuestions: 8, explainedReadyQuestions: 7, missingExplanations: 1 });
+    render(<CommunityUploads onOpenLibrary={vi.fn()} />);
+    const card = (await screen.findByText("NCRS")).closest("article")!;
+    fireEvent.click(within(card).getByRole("button", { name: "Download to practice" }));
+    expect(await within(card).findByText(/7 of 8 ready questions have an explanation/)).toBeTruthy();
+    expect(within(card).getByRole("button", { name: /Open saved questions/ })).toBeTruthy();
+    fireEvent.click(within(card).getByRole("checkbox", { name: /inspected this exact revision/ }));
+    expect((within(card).getByRole("button", { name: /Approve for official catalog/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(mocks.review).not.toHaveBeenCalled();
   });
 
   it("requires an owner to confirm withdrawal and preserves the private course", async () => {

@@ -6,7 +6,7 @@ import type { QuestionSet } from "../library";
 import { readManifest } from "../question-content/packageJson";
 import type { QuestionRecord } from "../questions";
 import type { Course, Term, TrackerItem } from "../types";
-import { buildCourseBooks, courseBookId } from "./courseBooks";
+import { buildCourseBooks, courseBookId, partitionCourseMap } from "./courseBooks";
 import { applyCourseLoad, planCourseLoad } from "./loadCourse";
 import { SPINE_SCALE, buildShelves, spineHeight, spineThickness } from "./model";
 import { buildQuestionBankBooks, practiceSelection, type KnownPackage } from "./questionBankBooks";
@@ -97,6 +97,33 @@ describe("course books", () => {
     expect(spineThickness(book("DM").count)).toBeGreaterThan(spineThickness(book("NB1").count));
     expect(book("ER")).not.toHaveProperty("thickness");
   });
+});
+
+it("separates the 29 SGU and Boards modules from five saved legacy shells without changing either", () => {
+  const { terms, courses: built } = buildCurriculum(SGU_CURRICULUM);
+  const legacy = new Map([
+    ["BPM 500", ["BSCE T1"]],
+    ["BPM 501", ["BSCE T2"]],
+    ["PPM 500", ["FTCM (pending)", "BSCE T4"]],
+    ["PPM 501", ["CBSE"]],
+  ]);
+  const courses = built.map(course => ({ ...course, modules: [
+    ...course.modules,
+    ...(legacy.get(course.code) ?? []).map(name => ({ id: `legacy-${name}`, name })),
+  ] }));
+  const before = JSON.stringify(courses);
+  const books = buildCourseBooks({ terms, courses, tracker: [], curricula: [SGU_CURRICULUM] });
+  const { canonical, otherLocal } = partitionCourseMap(books, [SGU_CURRICULUM]);
+
+  expect(books).toHaveLength(34);
+  expect(canonical).toHaveLength(29);
+  expect(canonical.filter(book => book.term.startsWith("Term ")).map(book => book.term)
+    .reduce<Record<string, number>>((counts, term) => ({ ...counts, [term]: (counts[term] ?? 0) + 1 }), {}))
+    .toEqual({ "Term 1": 6, "Term 2": 6, "Term 3": 2, "Term 4": 5, "Term 5": 4 });
+  expect(otherLocal.map(book => book.module)).toEqual(["BSCE T1", "BSCE T2", "FTCM (pending)", "BSCE T4", "CBSE"]);
+  expect([...canonical, ...otherLocal]).toHaveLength(books.length);
+  expect(JSON.stringify(courses)).toBe(before);
+  expect(otherLocal.every(book => book.origin === "workspace" && Boolean(book.courseId && book.moduleId))).toBe(true);
 });
 
 describe("loading a course book", () => {

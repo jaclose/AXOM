@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 900" role="img" aria-labelledby="title description">
+  <title id="title">DMPK CTG repeat expansion in myotonic dystrophy type 1</title>
+  <desc id="description">An original single-gene schematic for myotonic dystrophy type 1. On the DMPK DNA coding strand, an expanded CTG repeat lies in the 3-prime untranslated region downstream of the stop codon. The repeat is transcribed as CUG in DMPK messenger RNA. The diagram does not specify repeat counts, symptom severity, or downstream molecular mechanisms.</desc>
+  <defs>
+    <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse"><path d="M28 0H0V28" fill="none" stroke="#8799A3" stroke-opacity=".08"/></pattern>
+    <style>
+      text{font-family:Arial,Helvetica,sans-serif;fill:#F2ECE2}
+      .eyebrow{font-size:18px;font-weight:700;letter-spacing:3px;fill:#C8A96A}
+      .headline{font-size:39px;font-weight:700;letter-spacing:-1px}
+      .subhead{font-size:22px;fill:#CED8DE}
+      .stage{font-size:22px;font-weight:700;letter-spacing:1px;fill:#D4E1E7}
+      .segment{font-size:23px;font-weight:700;text-anchor:middle}
+      .repeat{font-size:26px;font-weight:700;text-anchor:middle}
+      .annotation{font-size:22px;fill:#D5E0E4}
+      .foot{font-size:21px;fill:#BDCBD1}
+    </style>
+  </defs>
+  <rect width="760" height="900" rx="28" fill="#101B28"/>
+  <rect width="760" height="900" rx="28" fill="url(#grid)"/>
+  <path d="M44 43H102" stroke="#C8A96A" stroke-width="4" stroke-linecap="round"/>
+  <text x="44" y="78" class="eyebrow">AXOM GENETICS</text>
+  <text x="44" y="129" class="headline">DMPK repeat in DM1</text>
+  <text x="44" y="165" class="subhead">The mutation sits after the stop codon</text>
+
+  <rect x="44" y="212" width="672" height="500" rx="18" fill="#182B39" stroke="#617C8B" stroke-width="2"/>
+  <text x="68" y="258" class="stage">DNA · DMPK coding strand</text>
+  <g stroke-width="2">
+    <rect x="68" y="285" width="276" height="118" rx="13" fill="#274153" stroke="#89A5B3"/>
+    <rect x="350" y="285" width="105" height="118" rx="13" fill="#274153" stroke="#89A5B3"/>
+    <rect x="461" y="285" width="231" height="118" rx="13" fill="#4C3E2D" stroke="#E6C477"/>
+  </g>
+  <text x="206" y="352" class="segment">Coding sequence</text>
+  <text x="402" y="337" class="segment">Stop</text>
+  <text x="402" y="369" class="segment">codon</text>
+  <text x="576" y="327" class="segment">3′ UTR</text>
+  <path d="M486 349H666" stroke="#E6C477" stroke-width="4" stroke-linecap="round"/>
+  <text x="576" y="383" class="repeat">CTG expansion</text>
+
+  <path d="M576 403V482" stroke="#E6C477" stroke-width="4" stroke-linecap="round"/>
+  <path d="M566 470L576 483L586 470" fill="none" stroke="#E6C477" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="68" y="457" class="annotation">Transcription</text>
+  <text x="68" y="520" class="stage">RNA · DMPK transcript</text>
+  <g stroke-width="2">
+    <rect x="68" y="543" width="276" height="118" rx="13" fill="#274153" stroke="#89A5B3"/>
+    <rect x="350" y="543" width="105" height="118" rx="13" fill="#274153" stroke="#89A5B3"/>
+    <rect x="461" y="543" width="231" height="118" rx="13" fill="#4C3E2D" stroke="#E6C477"/>
+  </g>
+  <text x="206" y="610" class="segment">Coding sequence</text>
+  <text x="402" y="595" class="segment">Stop</text>
+  <text x="402" y="627" class="segment">codon</text>
+  <text x="576" y="585" class="segment">3′ UTR</text>
+  <path d="M486 607H666" stroke="#E6C477" stroke-width="4" stroke-linecap="round"/>
+  <text x="576" y="642" class="repeat">CUG repeat</text>
+
+  <text x="44" y="758" class="annotation">Location: 3′ untranslated region of DMPK.</text>
+  <text x="44" y="789" class="annotation">This locus diagram does not predict symptoms.</text>
+  <path d="M44 819H716" stroke="#7F909A" stroke-opacity=".6"/>
+  <text x="44" y="848" class="foot">DM1 only · no repeat count or severity scale</text>
+  <text x="44" y="876" class="foot">Sources: PMID 1310900 · NIH MedlinePlus · AXOM v1</text>
+</svg>
