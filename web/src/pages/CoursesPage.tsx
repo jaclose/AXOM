@@ -6,6 +6,7 @@ import { Modal, Field, SelectField } from "../components/ui/Modal";
 import type { Course } from "../lib/types";
 import { ICON_SIZE } from "../lib/iconSize";
 import type { StudyMethodId } from "../lib/studyPreferences";
+import { externalLinkHref } from "../lib/resourceUtils";
 
 export function CoursesPage() {
   const s = useStore();
@@ -36,28 +37,31 @@ export function CoursesPage() {
             </div>
 
             <div className="grid grid-courses">
-              {courses.map((c) => (
-                <GlassCard key={c.id} pad hoverable className="course-card">
-                  <div className="card-hover-tools">
-                    <GhostButton title="Edit" onClick={() => setEditing(c)}><Pencil size={ICON_SIZE.body} /></GhostButton>
-                    <GhostButton className="danger" title="Delete"
-                      onClick={() => {
-                        if (!confirm(`Delete ${c.code}? This removes the course shell. You can also clear its tracker rows in the next prompt.`)) return;
-                        if (confirm(`Also delete tracker rows under ${term.name}/${c.code}?`)) s.removeTrackerScope(`${term.name}/${c.code}`);
-                        s.removeCourse(c.id);
-                      }}><Trash2 size={ICON_SIZE.body} /></GhostButton>
-                  </div>
-                  <Tag>{term.name}</Tag>
-                  <div className="cc-code">{c.code}</div>
-                  {c.name && <div className="cc-name">{c.name}</div>}
-                  <div className="cc-files">{c.files} files · {c.modules.length} modules</div>
-                  <div className="cc-actions">
-                    {c.link
-                      ? <a className="gbtn sm" href={c.link} target="_blank" rel="noreferrer">Open <ExternalLink size={ICON_SIZE.body} /></a>
-                      : <GButton size="sm" onClick={() => setEditing(c)}>Open</GButton>}
-                  </div>
-                </GlassCard>
-              ))}
+              {courses.map((c) => {
+                const href = externalLinkHref(c.link);
+                return (
+                  <GlassCard key={c.id} pad hoverable className="course-card">
+                    <div className="card-hover-tools">
+                      <GhostButton title="Edit" onClick={() => setEditing(c)}><Pencil size={ICON_SIZE.body} /></GhostButton>
+                      <GhostButton className="danger" title="Delete"
+                        onClick={() => {
+                          if (!confirm(`Delete ${c.code}? This removes the course shell. You can also clear its tracker rows in the next prompt.`)) return;
+                          if (confirm(`Also delete tracker rows under ${term.name}/${c.code}?`)) s.removeTrackerScope(`${term.name}/${c.code}`);
+                          s.removeCourse(c.id);
+                        }}><Trash2 size={ICON_SIZE.body} /></GhostButton>
+                    </div>
+                    <Tag>{term.name}</Tag>
+                    <div className="cc-code">{c.code}</div>
+                    {c.name && <div className="cc-name">{c.name}</div>}
+                    <div className="cc-files">{c.files} files · {c.modules.length} modules</div>
+                    <div className="cc-actions">
+                      {href
+                        ? <a className="gbtn sm" href={href} target="_blank" rel="noreferrer noopener">Open <ExternalLink size={ICON_SIZE.body} /></a>
+                        : <GButton size="sm" onClick={() => setEditing(c)}>Open</GButton>}
+                    </div>
+                  </GlassCard>
+                );
+              })}
               <div className="add-tile" onClick={() => setEditing("new")}>
                 <Plus size={ICON_SIZE.emphasis} /> Add course
               </div>
