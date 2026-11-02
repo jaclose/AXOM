@@ -46,7 +46,7 @@ test("real pointer selections extend into, out of and across persisted highlight
     const { useStore } = await (window as DevWindow).__AXOM_DEV__!;
     useStore.getState().addQuestion({ stem, options: [{ key: "A", text: "First" }, { key: "B", text: "Second" }], correctKey: "A" });
   }, text);
-  await page.getByRole("tab", { name: /^Bank/ }).click();
+  await page.getByRole("tab", { name: /^Questions \(1\)$/ }).click();
   await page.getByRole("button", { name: text, exact: true }).click();
   await dragText(page, 6, 12);
   await expect(page.locator("mark.question-highlight")).toHaveText(["middle"]);
@@ -59,14 +59,14 @@ test("real pointer selections extend into, out of and across persisted highlight
   const marked = await page.locator("mark.question-highlight").textContent();
   await page.screenshot({ path: info.outputPath("highlight-merged.png") });
   await reloadAfterSave(page);
-  await page.getByRole("tab", { name: /^Bank/ }).click();
+  await page.getByRole("tab", { name: /^Questions \(1\)$/ }).click();
   await page.getByRole("button", { name: text, exact: true }).click();
   await expect(page.locator("mark.question-highlight")).toHaveText([marked!]);
   await page.locator("mark.question-highlight").focus();
   await page.keyboard.press("Delete");
   await expect(page.locator("mark.question-highlight")).toHaveCount(0);
   await reloadAfterSave(page);
-  await page.getByRole("tab", { name: /^Bank/ }).click();
+  await page.getByRole("tab", { name: /^Questions \(1\)$/ }).click();
   await page.getByRole("button", { name: text, exact: true }).click();
   await expect(page.locator("mark.question-highlight")).toHaveCount(0);
 });

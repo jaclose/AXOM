@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { QuestionRecord } from "../../lib/questions";
+import { blocksToPlainText } from "../../lib/question-content/blocks";
 import { makeSeed } from "../../lib/seed";
 import { useStore } from "../../lib/store";
 import { ExamSimulator } from "../questions/ExamSimulator";
@@ -170,6 +171,100 @@ describe("Examplify interface", () => {
     fireEvent.click(within(kit).getByRole("tab", { name: "Calculators" }));
     fireEvent.click(within(kit).getByRole("button", { name: "Close Toolkit" }));
     expect(screen.queryByRole("complementary", { name: "Tool Kit" })).toBeNull();
+  });
+
+  it("highlights imported rich text and table cells, then erases the saved mark", () => {
+    const stem = [
+      { type: "rich_text" as const, html: "A <b>low sodium</b> level is found." },
+      { type: "table" as const, headers: ["Measure", "Result"], rows: [["Sodium", "124 mmol/L"]] },
+    ];
+    const imported: QuestionRecord = {
+      ...q("source-rich"), stem: blocksToPlainText(stem),
+      content: {
+        id: "source-rich", source: { filename: "reviewed.pdf", questionNumber: 1 }, stem,
+        choices: [], assets: [], provenance: { method: "pdf-import" },
+      } as QuestionRecord["content"],
+    };
+    useStore.setState({ ...makeSeed(), questions: [imported] });
+    exam({ pool: [imported] });
+    fireEvent.click(screen.getByRole("button", { name: "Highlight text" }));
+
+    const low = screen.getByText("low sodium").firstChild!;
+    const selection = window.getSelection()!;
+    const range = document.createRange();
+    range.setStart(low, 0); range.setEnd(low, "low sodium".length);
+    selection.removeAllRanges(); selection.addRange(range);
+    fireEvent.mouseUp(low.parentElement!);
+    expect(screen.getByText("low sodium").closest("mark")?.className).toContain("tone-yellow");
+    expect(useStore.getState().questions.find((entry) => entry.id === imported.id)?.annotations).toHaveLength(1);
+
+    const result = screen.getByText("124 mmol/L").firstChild!;
+    const cellRange = document.createRange();
+    cellRange.setStart(result, 0); cellRange.setEnd(result, "124 mmol/L".length);
+    selection.removeAllRanges(); selection.addRange(cellRange);
+    fireEvent.mouseUp(result.parentElement!);
+    expect(screen.getByText("124 mmol/L").closest("mark")).toBeTruthy();
+    expect(useStore.getState().questions.find((entry) => entry.id === imported.id)?.annotations).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Erase highlighting" }));
+    selection.removeAllRanges();
+    fireEvent.click(screen.getByText("low sodium").closest("mark")!);
+    expect(screen.getByText("low sodium").closest("mark")).toBeNull();
+    expect(useStore.getState().questions.find((entry) => entry.id === imported.id)?.annotations).toHaveLength(1);
+  });
+
+  it("highlights rich answer text without choosing it, preserves it on resume, and clears every mark", () => {
+    const choiceBlocks = [{ type: "rich_text" as const, html: "<b>Blue light</b> scatters." }];
+    const imported: QuestionRecord = {
+      ...q("choice-rich"),
+      options: [{ key: "A", text: blocksToPlainText(choiceBlocks) }, ...q("choice-rich").options.slice(1)],
+      content: {
+        id: "choice-rich", source: { filename: "reviewed.pdf", questionNumber: 1 }, stem: [],
+        choices: [{ id: "choice-rich-a", label: "A", blocks: choiceBlocks }], assets: [], provenance: { method: "pdf-import" },
+      } as QuestionRecord["content"],
+    };
+    useStore.setState({ ...makeSeed(), questions: [imported] });
+    const view = exam({ pool: [imported] });
+    fireEvent.click(screen.getByRole("button", { name: "Highlight text" }));
+    const text = screen.getByText("Blue light").firstChild!;
+    const selection = window.getSelection()!;
+    const range = document.createRange();
+    range.setStart(text, 0); range.setEnd(text, "Blue light".length);
+    selection.removeAllRanges(); selection.addRange(range);
+    fireEvent.mouseUp(text.parentElement!);
+    fireEvent.click(choice("A. Blue light scatters."));
+    expect(choice("A. Blue light scatters.").getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByText("Blue light").closest("mark")).toBeTruthy();
+    expect(useStore.getState().questions[0].annotations?.[0]).toMatchObject({ target: "option", optionKey: "A", exactText: "Blue light" });
+
+    fireEvent.click(screen.getByRole("button", { name: /Exam Controls/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Suspend Exam" }));
+    const snapshot = view.onSuspend.mock.calls[0][0];
+    view.unmount();
+    const saved = useStore.getState().questions[0];
+    exam({ pool: [saved], resume: snapshot });
+    expect(screen.getByText("Blue light").closest("mark")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Erase highlighting" }));
+    selection.removeAllRanges();
+    fireEvent.click(screen.getByText("Blue light").closest("mark")!);
+    expect(screen.getByText("Blue light").closest("mark")).toBeNull();
+    expect(choice("A. Blue light scatters.").getAttribute("aria-checked")).toBe("false");
+
+    fireEvent.click(screen.getByRole("button", { name: "Highlight text" }));
+    const stemText = screen.getByText(/Stem for choice-rich/).firstChild!;
+    const stemRange = document.createRange();
+    stemRange.setStart(stemText, 0); stemRange.setEnd(stemText, 4);
+    selection.removeAllRanges(); selection.addRange(stemRange);
+    fireEvent.mouseUp(stemText.parentElement!);
+    const optionText = screen.getByText("Blue light").firstChild!;
+    const optionRange = document.createRange();
+    optionRange.setStart(optionText, 0); optionRange.setEnd(optionText, "Blue light".length);
+    selection.removeAllRanges(); selection.addRange(optionRange);
+    fireEvent.mouseUp(optionText.parentElement!);
+    expect(useStore.getState().questions[0].annotations).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "More for this question" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Clear highlighting" }));
+    expect(useStore.getState().questions[0].annotations).toHaveLength(0);
   });
 
   it("keeps the lab values as the exam's attachment, and says how the block works in a notice", () => {

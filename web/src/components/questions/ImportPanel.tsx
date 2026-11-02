@@ -71,6 +71,38 @@ type PendingDocument = ImportSourceFile;
 const EXAM_TYPES = Object.keys(EXAM_TYPE_LABEL) as QuestionExamType[];
 const uid = () => crypto.randomUUID();
 
+function reviewedAnswerPatch(draft: ReviewDraft, key: string | undefined): Partial<ReviewDraft> {
+  const answerScore = key ? 1 : 0;
+  const overall = (draft.questionDetectionConfidence ?? 0) * 0.4
+    + answerScore * 0.4
+    + (draft.explanationDetectionConfidence ?? 0) * 0.2;
+  return {
+    correctKey: key,
+    correctAnswerText: key ? draft.options.find((option) => option.key === key)?.text : undefined,
+    answerDetectionConfidence: answerScore,
+    overallImportConfidence: overall,
+    needsReview: !key || (draft.questionDetectionConfidence ?? 0) < 0.75 || undefined,
+    confidence: overall >= 0.85 && key ? "high" : overall >= 0.6 ? "medium" : "low",
+    parserRuleIds: key
+      ? [...new Set([...(draft.parserRuleIds ?? []), "answer.user-reviewed-mapping"])]
+      : draft.parserRuleIds,
+    reviewAcknowledged: false,
+  };
+}
+
+function canBatchConfirmMappedAnswer(draft: ReviewDraft, level: ReturnType<typeof evaluateImportDraft>, hasSource: boolean): boolean {
+  const rules = draft.parserRuleIds ?? [];
+  if (!hasSource || !draft.include || draft.aiGenerated || !draft.correctKey || !draft.answerEvidence?.trim()
+    || level.level !== "Needs Review" || !level.isValid
+    || !draft.options.some((option) => option.key === draft.correctKey && option.text.trim())
+    || !rules.some((rule) => rule.startsWith("answer.explicit-letter"))
+    || rules.some((rule) => rule.startsWith("conflict.") || rule.startsWith("ai.")
+      || rule === "answer.source-key-flag" || rule === "import.source-text-edited")
+    || draft.warnings.some((warning) => /SOURCE-KEY (?:FLAG|CONFLICT)/i.test(warning))) return false;
+  const projected = evaluateImportDraft({ ...draft, ...reviewedAnswerPatch(draft, draft.correctKey) });
+  return projected.level === "High" && projected.isValid;
+}
+
 /** Seed the Import Center from elsewhere: a reference doc (AI tab) or a set of
  * already-parsed drafts to review (Mass Import "Inspect"). */
 export interface ImportSeed {
@@ -247,6 +279,8 @@ export function ImportPanel({
   const [examType, setExamType] = useState<QuestionExamType | "">("");
   const [difficulty, setDifficulty] = useState<QuestionDifficulty | "">("");
   const [aiBusyDraft, setAiBusyDraft] = useState<number | null>(null);
+  const [bulkAnswerIds, setBulkAnswerIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [bulkAnswerAttestation, setBulkAnswerAttestation] = useState("");
   const [finalizing, setFinalizing] = useState(false);
   const [activeBatchQueueId, setActiveBatchQueueId] = useState<string | undefined>(seed?.batchQueueId);
   const [finalizedBatchQueueId, setFinalizedBatchQueueId] = useState<string | undefined>();
@@ -648,22 +682,7 @@ export function ImportPanel({
   }
 
   function confirmDraftAnswer(index: number, draft: ReviewDraft, key: string | undefined) {
-    const answerScore = key ? 1 : 0;
-    const overall = (draft.questionDetectionConfidence ?? 0) * 0.4
-      + answerScore * 0.4
-      + (draft.explanationDetectionConfidence ?? 0) * 0.2;
-    updateDraft(index, {
-      correctKey: key,
-      correctAnswerText: key ? draft.options.find((option) => option.key === key)?.text : undefined,
-      answerDetectionConfidence: answerScore,
-      overallImportConfidence: overall,
-      needsReview: !key || (draft.questionDetectionConfidence ?? 0) < 0.75 || undefined,
-      confidence: overall >= 0.85 && key ? "high" : overall >= 0.6 ? "medium" : "low",
-      parserRuleIds: key
-        ? [...new Set([...(draft.parserRuleIds ?? []), "answer.user-reviewed-mapping"])]
-        : draft.parserRuleIds,
-      reviewAcknowledged: false,
-    });
+    updateDraft(index, reviewedAnswerPatch(draft, key));
   }
 
   async function assistDraftMapping(index: number) {
@@ -739,6 +758,17 @@ export function ImportPanel({
       draft.include ? includedById.get(draft.reviewId) ?? evaluations[index] : evaluations[index]
     ));
   }, [drafts, evaluations, includedDrafts, includedEvaluations]);
+  const bulkAnswerCandidates = drafts.filter((draft, index) => canBatchConfirmMappedAnswer(draft, displayedEvaluations[index], Boolean(sourceText.trim())));
+  const selectedBulkAnswers = bulkAnswerCandidates.filter((draft) => bulkAnswerIds.has(draft.reviewId));
+  const bulkAnswerSignature = JSON.stringify(selectedBulkAnswers.map((draft) => [draft.reviewId, draft.correctKey, draft.answerEvidence, draft.stem, draft.options]));
+  function confirmSelectedAnswers() {
+    if (!selectedBulkAnswers.length || bulkAnswerAttestation !== bulkAnswerSignature) return;
+    const selected = new Set(selectedBulkAnswers.map((draft) => draft.reviewId));
+    setDrafts((current) => current.map((draft) => selected.has(draft.reviewId) && draft.correctKey
+      ? { ...draft, ...reviewedAnswerPatch(draft, draft.correctKey) } : draft));
+    setBulkAnswerIds(new Set());
+    setBulkAnswerAttestation("");
+  }
   const includedCount = includedDrafts.length;
   const imageMatches = matchNamedImages(namedImages(includedDrafts), imageFiles);
   const matchedImageKeys = new Set(imageMatches.filter((match) => match.file).map((match) => imageReferenceKey(match.name)));
@@ -969,6 +999,36 @@ export function ImportPanel({
               </div>
             </section>
           )}
+
+          {bulkAnswerCandidates.length > 0 && <details className="import-summary import-bulk-answer-review" open>
+            <summary>Review mapped answers together ({bulkAnswerCandidates.length})</summary>
+            <p className="sub">These answer letters are printed in the source but need a human check because their accompanying text did not exactly match a choice. Conflicts, flagged source keys, AI suggestions and other review holds stay separate.</p>
+            <div className="row wrap gap8">
+              <GhostButton onClick={() => { setBulkAnswerIds(new Set(bulkAnswerCandidates.map((draft) => draft.reviewId))); setBulkAnswerAttestation(""); }}>Select all eligible</GhostButton>
+              <GhostButton onClick={() => { setBulkAnswerIds(new Set()); setBulkAnswerAttestation(""); }}>Clear selection</GhostButton>
+              <span className="sub">{selectedBulkAnswers.length} selected</span>
+            </div>
+            <div className="import-bulk-answer-scroll">
+              <table className="import-bulk-answer-table">
+                <thead><tr><th scope="col">Review</th><th scope="col">Question</th><th scope="col">Mapped answer</th><th scope="col">Source evidence</th></tr></thead>
+                <tbody>{bulkAnswerCandidates.map((draft) => <tr key={draft.reviewId}>
+                  <td><input type="checkbox" checked={bulkAnswerIds.has(draft.reviewId)} aria-label={`Select mapped answer for question ${draft.questionNumber ?? drafts.indexOf(draft) + 1}`}
+                    onChange={(event) => { setBulkAnswerIds((current) => { const next = new Set(current); if (event.target.checked) next.add(draft.reviewId); else next.delete(draft.reviewId); return next; }); setBulkAnswerAttestation(""); }} /></td>
+                  <td>Question {draft.questionNumber ?? drafts.indexOf(draft) + 1}</td>
+                  <td><b>{draft.correctKey}</b> · {draft.options.find((option) => option.key === draft.correctKey)?.text}</td>
+                  <td>{draft.answerEvidence}</td>
+                </tr>)}</tbody>
+              </table>
+            </div>
+            <label className="import-bulk-answer-attestation">
+              <input type="checkbox" checked={selectedBulkAnswers.length > 0 && bulkAnswerAttestation === bulkAnswerSignature}
+                onChange={(event) => setBulkAnswerAttestation(event.target.checked ? bulkAnswerSignature : "")}
+                aria-label="Attest selected mapped answers checked against the original source" />
+              <span>I checked each selected answer against the original source. AXOM will keep the source evidence with every question.</span>
+            </label>
+            <GButton disabled={!selectedBulkAnswers.length || bulkAnswerAttestation !== bulkAnswerSignature}
+              onClick={confirmSelectedAnswers}>Confirm {selectedBulkAnswers.length} selected answer{selectedBulkAnswers.length === 1 ? "" : "s"}</GButton>
+          </details>}
 
           {(imageMatches.length > 0 || imageFiles.length > 0) && (
             <section className="import-images" aria-labelledby="import-images-title">

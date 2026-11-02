@@ -95,14 +95,14 @@ describe("your sounds: rename and what a sound plays for", () => {
     expect(assignUserSound(added!.id, "yours")).toBeNull();
   });
 
-  it("never leaves the player on a shelf that just emptied", async () => {
+  it("preserves the AXOM original when the last personal file moves away", async () => {
     const added = await useUserMedia.getState().add(mp3("Only.mp3"), "sound", "yours");
     useSoundscape.setState({ status: "idle", presetId: null, lastPresetId: "yours", versions: { yours: userVersionId(added!.id) } });
     assignUserSound(added!.id, "alpha-10");
-    expect(SOUNDSCAPES.yours.versions).toEqual([]);
-    expect(useSoundscape.getState().lastPresetId).not.toBe("yours");
-    // An empty preset still answers with a harmless placeholder, never undefined.
-    expect(versionOf(SOUNDSCAPES.yours).label).toBe("Nothing here yet");
+    expect(SOUNDSCAPES.yours.versions.map((version) => version.id)).toEqual(["axom-afterlight"]);
+    expect(useSoundscape.getState().lastPresetId).toBe("yours");
+    // An actually empty preset still answers with a harmless placeholder.
+    expect(versionOf({ ...SOUNDSCAPES.yours, versions: [] }).label).toBe("Nothing here yet");
     expect(lookFor(SOUNDSCAPES.yours).visual).toBe(SOUNDSCAPES.yours.visual);
   });
 

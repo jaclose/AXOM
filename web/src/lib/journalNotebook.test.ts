@@ -4,9 +4,12 @@ import type { DayAtAGlance } from "./dayAtAGlance";
 import {
   JOURNAL_ATTACHMENT_MAX_BYTES,
   JOURNAL_GLANCE_SECTION_KEYS,
+  JOURNAL_STYLE_COST,
   buildJournalGlanceSections,
   buildJournalMarkdown,
   createJournalAttachmentExport,
+  journalInkBalance,
+  journalInkEarned,
   nextJournalDay,
   normalizeJournalEntries,
   normalizeJournalNotebookPreferences,
@@ -88,16 +91,44 @@ describe("journal notebook data projection", () => {
     expect(nextJournalDay("2026-12-31")).toBe("2027-01-01");
   });
 
-  it("normalizes customizable cover metadata without technical or unsafe values", () => {
+  it("normalizes notebook and desk preferences without unsafe values", () => {
     expect(normalizeJournalNotebookPreferences({
       title: "  Residency journal  ",
       subtitle: "Daily review",
       coverTone: "forest",
       paperTone: "cream",
-    })).toMatchObject({ title: "Residency journal", coverTone: "forest", paperTone: "cream" });
-    expect(normalizeJournalNotebookPreferences({ coverTone: "script", paperTone: "remote" })).toMatchObject({
+      deskTone: "oak",
+      weather: "rain",
+      laptopPosition: "right",
+    })).toMatchObject({ title: "Residency journal", coverTone: "forest", paperTone: "cream", deskTone: "oak", weather: "rain", laptopPosition: "right" });
+    expect(normalizeJournalNotebookPreferences({ coverTone: "script", paperTone: "remote", deskTone: "../../wood", weather: "storm", laptopPosition: "offscreen" })).toMatchObject({
       coverTone: "onyx",
       paperTone: "warm",
+      deskTone: "walnut",
+      weather: "sun",
+      laptopPosition: "left",
+    });
+  });
+
+  it("credits distinct completed study sessions and keeps purchased styles portable", () => {
+    const sessions = [
+      { id: "one", status: "completed" },
+      { id: "one", status: "completed" },
+      { id: "two", status: "completed" },
+      { id: "three", status: "active" },
+    ];
+    expect(journalInkEarned(sessions)).toBe(2);
+    expect(journalInkBalance(sessions, ["copper"])).toBe(0);
+    expect(JOURNAL_STYLE_COST).toBe(2);
+    expect(normalizeJournalNotebookPreferences({ coverTone: "copper", paperTone: "linen" })).toMatchObject({ coverTone: "onyx", paperTone: "warm" });
+    expect(normalizeJournalNotebookPreferences({ coverTone: "copper", paperTone: "linen", unlockedStyles: ["copper", "linen", "unsafe", "copper"] })).toMatchObject({
+      coverTone: "copper", paperTone: "linen", unlockedStyles: ["copper", "linen"],
+    });
+    expect(normalizeJournalNotebookPreferences({ laptopTone: "starlight", deskAccent: "lamp", purpose: "recover" })).toMatchObject({
+      laptopTone: "graphite", deskAccent: "none", purpose: "recover",
+    });
+    expect(normalizeJournalNotebookPreferences({ laptopTone: "starlight", deskAccent: "lamp", unlockedStyles: ["starlight", "lamp"] })).toMatchObject({
+      laptopTone: "starlight", deskAccent: "lamp",
     });
   });
 

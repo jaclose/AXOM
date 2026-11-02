@@ -2,8 +2,8 @@
 // and, for Daily Word, the current streak. Bundle-light on purpose: it imports
 // the shell-safe stats selector, never the game or its dictionary.
 import { Flame } from "lucide-react";
-import { useClockNow } from "../../lib/clock";
-import { deriveDailyWordStatsFromNormalizedHistory } from "../../lib/dailyWordStats";
+import { resolveTimeZone, useClockNow } from "../../lib/clock";
+import { dailyWordProtectedStreak, dateKeyInTimeZone } from "../../lib/studyStreaks";
 import { doctordleCaseNumber, doctordleStreak, useDoctordle } from "../../lib/doctordle";
 import { useStore } from "../../lib/store";
 
@@ -39,10 +39,11 @@ export function DailyGameNavMeta({ id }: { id: string }) {
 function GameMeta({ game }: { game: "daily-word" | "doctordle" }) {
   const now = useClockNow("minute");
   const puzzles = useStore((state) => state.dailyWordPuzzles);
+  const profile = useStore((state) => state.profile);
   const doctordleLog = useDoctordle((state) => state.log);
   // Doctordle's AXOM streak counts logged attempts, whether solved or missed.
   const streak = game === "daily-word"
-    ? deriveDailyWordStatsFromNormalizedHistory(puzzles).currentStreak
+    ? dailyWordProtectedStreak(puzzles, profile.studyStreaks?.dailyWord.frozenDays ?? [], dateKeyInTimeZone(now, resolveTimeZone(profile.timeZonePreference)))
     : doctordleStreak(doctordleLog, doctordleCaseNumber(now.getTime()));
   const left = compactCountdown(game === "daily-word" ? msUntilLocalMidnight(now) : msUntilDoctordle(now));
   const title = `${game === "daily-word" ? "New word" : "New case"} in ${left}${streak ? ` · ${streak}-day streak` : ""}`;

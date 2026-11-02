@@ -1,1 +1,11 @@
-[]
+[
+  {
+    "preset": "yours",
+    "id": "axom-afterlight",
+    "label": "Afterlight",
+    "description": "An AXOM original: a slow four-chord study room with a small bell melody. Composed and synthesized for AXOM, with no borrowed samples.",
+    "src": "soundscapes/axom-original/afterlight.m4a",
+    "gain": 1,
+    "source": "AXOM original"
+  }
+]

@@ -41,7 +41,7 @@ import { CloseoutModal } from "../components/brief/CloseoutModal";
 import { DailyProgressVessel } from "../components/productivity/DailyProgressVessel";
 import { evaluateDailySuccess, type DailySuccessResult } from "../lib/dailySuccess";
 import { closeoutForDay } from "../lib/closeout";
-import { dailyLoopReminderLedger, normalizeDailyLoopReminderPreferences } from "../lib/dailyLoopReminders";
+import { dailyLoopReminderLedger, journalPageComplete, normalizeDailyLoopReminderPreferences } from "../lib/dailyLoopReminders";
 import {
   CURRENT_DASHBOARD_WIDGET_IDS,
   DASHBOARD_LAYOUT_PRESETS,
@@ -61,6 +61,8 @@ import {
 import { Modal } from "../components/ui/Modal";
 import { dueQuestions, questionMappingStatus, summarizeQuestionMappings } from "../lib/questions";
 import { deriveDailyWordStatsFromNormalizedHistory } from "../lib/dailyWordStats";
+import { resolveTimeZone, useClockNow } from "../lib/clock";
+import { dailyWordProtectedStreak, dateKeyInTimeZone } from "../lib/studyStreaks";
 import { ReflectionInbox } from "../components/dashboard/ReflectionInbox";
 import { DashboardNotificationCenter } from "../components/dashboard/DashboardNotificationCenter";
 import { useAccount } from "../lib/account/accountStore";
@@ -634,7 +636,7 @@ function renderDashboardWidget(context: DashboardWidgetRenderContext) {
   if (widgetId === "activity") return <ActivityDashboardWidget activeDayKey={activeDayKey} week={week} enabledFields={enabledFields} />;
   if (widgetId === "journal") return <JournalDashboardWidget activeDayKey={activeDayKey} enabledFields={enabledFields} />;
   if (widgetId === "streak") return <ConsistencyDashboardWidget state={state} enabledFields={enabledFields} />;
-  if (widgetId === "dailyWord") return <DailyWordDashboardWidget activeDayKey={activeDayKey} enabledFields={enabledFields} />;
+  if (widgetId === "dailyWord") return <DailyWordDashboardWidget enabledFields={enabledFields} />;
   if (widgetId === "localData") return <LocalDataWidget state={state} />;
   if (widgetId === "premedHours") return <PremedHoursWidget />;
   return null;
@@ -912,24 +914,26 @@ function ConsistencyDashboardWidget({
 }
 
 function DailyWordDashboardWidget({
-  activeDayKey,
   enabledFields,
 }: {
-  activeDayKey: string;
   enabledFields: Set<string>;
 }) {
   // Daily Games is on for everyone (commit 3ae726e removed the opt-in); the
   // old flag has no setter left, so gating on it stranded this widget.
   const puzzles = useStore((s) => s.dailyWordPuzzles);
+  const profile = useStore((s) => s.profile);
+  const now = useClockNow("minute");
   const stats = deriveDailyWordStatsFromNormalizedHistory(puzzles);
-  const today = puzzles.find((puzzle) => puzzle.puzzleDate === activeDayKey);
+  const wordToday = dateKeyInTimeZone(now, resolveTimeZone(profile.timeZonePreference));
+  const protectedStreak = dailyWordProtectedStreak(puzzles, profile.studyStreaks?.dailyWord.frozenDays ?? [], wordToday);
+  const today = puzzles.find((puzzle) => puzzle.puzzleDate === wordToday);
   return (
     <GlassCard pad className="dashboard-core-widget daily-word-widget">
       <PanelHeader title="Daily Word" sub="Deterministic, local, and offline after first load"
         action={<a className="gbtn sm primary" href="#daily-word"><Gamepad2 size={ICON_SIZE.body} /> {today?.completed ? "Review" : "Play"}</a>} />
       <div className="dashboard-widget-focal"><b>{today?.completed ? (today.won ? "Won" : "Complete") : today ? `${today.guesses.length}/6` : "Ready"}</b><span>today's puzzle</span></div>
       <div className="dashboard-widget-metrics">
-        {enabledFields.has("streak") && <span><b>{stats.currentStreak}</b> streak</span>}
+        {enabledFields.has("streak") && <span><b>{protectedStreak}</b> streak</span>}
         {enabledFields.has("distribution") && <span><b>{stats.wins}/{stats.gamesPlayed}</b> wins</span>}
       </div>
     </GlassCard>
@@ -1198,7 +1202,7 @@ function StandupPrompt() {
   const missed = missedStandupDays(s);
   const preferences = normalizeDailyLoopReminderPreferences(s.profile.dailyLoopReminders);
   const today = s.activeDayKey;
-  const closeoutDone = Boolean(closeoutForDay(s.closeouts ?? [], today));
+  const closeoutDone = Boolean(closeoutForDay(s.closeouts ?? [], today)) || journalPageComplete(s.journal, today);
   const closeoutDue = preferences.closeoutEnabled && !closeoutDone && isAfterLocalTime(preferences.closeoutTime);
   const [showCloseout, setShowCloseout] = useState(false);
   const [dismissed, setDismissed] = useState(() => {
@@ -1232,8 +1236,8 @@ function StandupPrompt() {
           <div className="standup-prompt-head">
             <span className="standup-prompt-mark"><BookText size={ICON_SIZE.emphasis} /></span>
             <div className="grow">
-              <b>Close the loop on today?</b>
-              <span>Review your intention, activity, targets, focus sessions, questions, tasks, and energy. A short closeout is optional.</span>
+              <b>Before the day closes</b>
+              <span>Keep one thing, release one thing, or simply close the page. A short page is enough.</span>
             </div>
           </div>
           <div className="row wrap gap8 daily-closeout-actions">

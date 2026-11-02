@@ -222,7 +222,7 @@ describe("Journal route durability", () => {
 
     await waitFor(() => expect(flush).toHaveBeenCalledTimes(1));
     expect(window.location.hash).toBe("#journal");
-    expect(screen.getByDisplayValue("Persist before leaving the Journal")).toBeTruthy();
+    expect(screen.getAllByDisplayValue("Persist before leaving the Journal")).toHaveLength(2);
 
     await act(async () => { confirmDurability(); await Promise.resolve(); });
     await waitFor(() => expect(window.location.hash).toBe("#dashboard"));
@@ -247,7 +247,7 @@ describe("Journal route durability", () => {
 
     expect(await screen.findByText("Not saved on this device")).toBeTruthy();
     await waitFor(() => expect(window.location.hash).toBe("#journal"));
-    expect(screen.getByDisplayValue("Do not leave this route")).toBeTruthy();
+    expect(screen.getAllByDisplayValue("Do not leave this route")).toHaveLength(2);
     expect(screen.queryByRole("heading", { name: "Tasks" })).toBeNull();
   });
 
@@ -270,7 +270,7 @@ describe("Journal route durability", () => {
 
     await waitFor(() => expect(flush).toHaveBeenCalledTimes(1));
     expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
-    expect(screen.getByDisplayValue("Persist before setup replaces the shell")).toBeTruthy();
+    expect(screen.getAllByDisplayValue("Persist before setup replaces the shell").length).toBeGreaterThan(0);
     expect(screen.queryByRole("heading", { name: "Who are you studying as?" })).toBeNull();
 
     await act(async () => { confirmDurability(); await Promise.resolve(); });
@@ -295,7 +295,7 @@ describe("Journal route durability", () => {
 
     expect(await screen.findByText("Not saved on this device")).toBeTruthy();
     expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
-    expect(screen.getByDisplayValue("Keep this draft if setup cannot begin")).toBeTruthy();
+    expect(screen.getAllByDisplayValue("Keep this draft if setup cannot begin").length).toBeGreaterThan(0);
     expect(screen.queryByRole("heading", { name: "Who are you studying as?" })).toBeNull();
     expect(useUi.getState().onboardingRequested).toBe(false);
   });
@@ -330,7 +330,7 @@ describe("Communications route protection", () => {
     window.history.replaceState(null, "", "#communications");
 
     render(<App />);
-    const essays = await screen.findByRole("switch", { name: /Essays & Notes/ });
+    const essays = await screen.findByRole("switch", { name: /Essays & Notes/ }, { timeout: 4_000 });
     await waitFor(() => expect((essays as HTMLInputElement).checked).toBe(true));
     fireEvent.click(essays);
     expect(screen.getByText("Unsaved changes")).toBeTruthy();

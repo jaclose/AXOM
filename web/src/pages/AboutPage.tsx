@@ -22,7 +22,7 @@ const READY: Feature[] = [
   { name: "Productivity & Reports", detail: "Fast activity logging, optional targets (habits can count too), focus timer, and weekly/monthly trends that follow real calendar days, with plain-language explanations on demand." },
   { name: "Course Tracker", detail: "Course/module structure with a breadcrumb and subsection picker, collapsible sections, imports, pass and yield tracking, and next-move suggestions." },
   { name: "Leaderboards", detail: "Race your past self: this week vs your typical and best weeks, with what it takes to set a new record. No invented competitors." },
-  { name: "Journal", detail: "Daily standups, missed-standup detection + remediation, and locked previous-intention reflection." },
+  { name: "Journal", detail: "Private pages for free writing, optional prompts, and a local-first record of the day." },
   { name: "Local data & recovery", detail: "Device-local workspace, exact last-saved time, automatic snapshots, portable backups, and a restore history of every restore, merge, and reset." },
   { name: "Integrations that work today", detail: "Anki card export, calendar (.ics) export of tasks/exams/intentions, and portable JSON backups. No accounts required." },
   { name: "AXOM Daily Word", detail: "Optional local-first five-letter puzzle with a versioned SCOWL-derived dictionary, persisted history, private result sharing, and offline reopening after one successful online load." },
