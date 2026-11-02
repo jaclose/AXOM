@@ -40,6 +40,8 @@ export interface PackageImportOptions {
   /** Reviewed filing layered over source-declared package scope. The package
    * and every question retain their original scope as evidence. */
   reviewedFiling?: { readonly module: string; readonly term: number };
+  /** Exact-catalog, one-time refresh of untouched source-owned fields on reuse. */
+  refreshEquivalentSource?: boolean;
 }
 
 export interface HeldQuestion {
@@ -126,8 +128,10 @@ function checkedReviewedFiling(value: PackageImportOptions["reviewedFiling"]): {
 export function packageToReviewedImport(pkg: ImportPackage, issues: readonly PackageIssue[], options: PackageImportOptions = {}): PackageReviewedImport {
   const { manifest } = pkg;
   const reviewedFiling = checkedReviewedFiling(options.reviewedFiling);
+  // A source with week 0 is unassigned; preserve that raw value in content, not in the learner's week list.
   const filing: { module: string; term: number; week?: number } = reviewedFiling
-    ?? { module: manifest.course.name, term: manifest.course.term, week: manifest.course.week };
+    ?? { module: manifest.course.name, term: manifest.course.term,
+      ...(manifest.course.week > 0 ? { week: manifest.course.week } : {}) };
   const held: HeldQuestion[] = [];
   const withheldAssets: WithheldAsset[] = [];
   const going: { question: PackageQuestion; advisories: string[]; accepted: string[] }[] = [];
@@ -193,6 +197,16 @@ export function packageToReviewedImport(pkg: ImportPackage, issues: readonly Pac
         ...(place ? [place] : []),
         ...(question.source.questionNumber !== undefined ? [`question ${question.source.questionNumber}`] : []),
       ].join(", ");
+      const answerImage = shown.find((asset) => asset.role === "answer_reveal");
+      const teachingImage = shown.find((asset) => asset.role === "explanation");
+      const answerEvidence = question.correctAnswer?.evidence;
+      const answerLabel = question.correctAnswer?.labels.join(", ");
+      const answerEvidenceSnippet = answerImage && answerLabel
+        ? `${answerEvidence === "source-mark-verified" ? "Visually marked source answer" : "Source answer image"}: ${answerLabel}. Original image: ${answerImage.sourceFile ?? question.source.filename}${answerImage.sourcePage !== undefined ? `, page ${answerImage.sourcePage}` : ""}${answerImage.checksum ? `, ${answerImage.checksum}` : ""}.`
+        : undefined;
+      const explanationSourceSnippet = teachingImage
+        ? `Original teaching image: ${teachingImage.sourceFile ?? question.source.filename}${teachingImage.sourcePage !== undefined ? `, page ${teachingImage.sourcePage}` : ""}${teachingImage.checksum ? `, ${teachingImage.checksum}` : ""}.`
+        : undefined;
       return {
         stem: fields.stem,
         content: question,
@@ -203,6 +217,8 @@ export function packageToReviewedImport(pkg: ImportPackage, issues: readonly Pac
         // The source's own number, as it is. A set never borrows numbers from another set.
         ...(question.source.questionNumber !== undefined ? { questionNumber: question.source.questionNumber } : {}),
         ...(fields.sourcePage !== undefined ? { sourcePage: fields.sourcePage, questionSourcePage: fields.sourcePage } : {}),
+        ...(answerEvidenceSnippet ? { answerEvidenceSnippet, answerEvidencePage: answerImage?.sourcePage } : {}),
+        ...(explanationSourceSnippet ? { explanationSourceSnippet, explanationSourcePage: teachingImage?.sourcePage } : {}),
         sourceLabel: where,
         ...(shown.length ? { attachmentNames: shown.map((asset) => asset.filename) } : {}),
         parserRuleIds: ["import.package", `import.package.${question.provenance.method}`],

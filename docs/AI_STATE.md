@@ -7,7 +7,7 @@ authority: current-state
 
 ## 2026-11-01 Ideas and Journal integration
 
-The safe Ideas branch `b08d10c1` joins `main` through `cb773974`.
+The safe Ideas branch `b08d10c1` joins current `main` in this release candidate.
 It adds the desk Journal, free writing, setup, return control, support, weather,
 notifications, streaks, exam highlights, shared sets, Host and Community.
 Radiordle and Pathordle remain held for provider approval. Four feature

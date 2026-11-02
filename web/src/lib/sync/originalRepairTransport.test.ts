@@ -42,7 +42,9 @@ function setup(fail: { code: string; message: string }, repaired: number = 1) {
   });
   const chain = {
     select: vi.fn(), neq: vi.fn(), order: vi.fn(), limit: vi.fn(), eq: vi.fn(),
-    maybeSingle: vi.fn(async () => ({ data: { media: [], sources: [], content: "{\\\"documents\\\":[]}" }, error: null })),
+    maybeSingle: vi.fn()
+      .mockResolvedValueOnce({ data: { id: "workspace-id" }, error: null, status: 200 })
+      .mockResolvedValue({ data: { media: [], sources: [], content: "{\\\"documents\\\":[]}" }, error: null, status: 200 }),
     single: vi.fn(async () => ({ data: { id: "recovered-id", revision: 1, content_hash: digest, reason: "automatic" }, error: null, status: 200 })),
   };
   for (const method of ["select", "neq", "order", "limit", "eq"] as const) chain[method].mockReturnValue(chain);
@@ -63,7 +65,7 @@ function setup(fail: { code: string; message: string }, repaired: number = 1) {
     deviceId: "22222222-2222-4222-8222-222222222222", baseRevision: 0,
     idempotencyKey: "33333333-3333-4333-8333-333333333333", reason: "automatic",
   };
-  return { client, rpc, requests, assertCurrent, envelope };
+  return { client, chain, rpc, requests, assertCurrent, envelope };
 }
 
 beforeEach(() => vi.clearAllMocks());
@@ -79,8 +81,21 @@ describe("workspace cloud-original repair acknowledgement", () => {
     expect(fixture.requests).toHaveLength(2);
     expect(fixture.requests.map(item => item.name)).toEqual(["push_workspace_revision_v2", "push_workspace_revision_v2"]);
     expect(fixture.requests[0].args.p_idempotency_key).toBe(fixture.requests[1].args.p_idempotency_key);
+    expect(fixture.chain.eq).toHaveBeenCalledWith("user_id", owner);
+    expect(fixture.chain.eq).toHaveBeenCalledWith("workspace_id", "workspace-id");
     expect(fixture.assertCurrent).toHaveBeenCalled();
     expect(uploadCloudOriginals).toHaveBeenCalledOnce();
+  });
+
+  it("reports a timed-out history read as a server failure before uploading", async () => {
+    const fixture = setup({ code: "PT409", message: "original source upload is incomplete" });
+    fixture.chain.maybeSingle.mockReset()
+      .mockResolvedValueOnce({ data: { id: "workspace-id" }, error: null, status: 200 })
+      .mockResolvedValueOnce({ data: null, error: { code: "57014", message: "canceling statement due to statement timeout" }, status: 500 });
+    await expect(new SupabaseSyncTransport().push(fixture.envelope)).rejects.toMatchObject({
+      failure: { kind: "server", status: 500, code: "57014" },
+    });
+    expect(fixture.rpc).not.toHaveBeenCalled();
   });
 
   it("recovers after a delta-form retry is refused, switching to one full replay without changing the idempotency key", async () => {
