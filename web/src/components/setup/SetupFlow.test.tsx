@@ -23,6 +23,16 @@ const next = () => fireEvent.click(screen.getByRole("button", { name: "Continue"
 const tool = (name: string) => screen.getByRole("button", { name: new RegExp(`^${name}`) });
 
 describe("SetupFlow", () => {
+  it("offers the other hosted workspace without leaving or changing apex work", () => {
+    vi.stubGlobal("location", { hostname: "axom.info" });
+    render(<SetupFlow mode="first-run" />);
+    const link = screen.getByRole("link", { name: /Open www\.axom\.info/ });
+    expect(link.getAttribute("href")).toBe("https://www.axom.info/?app=1");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(screen.getByText(/Work stored here does not move/)).toBeTruthy();
+  });
+
   it("walks three screens, starting in the name field, and builds SGU with Anki by default", () => {
     const onComplete = vi.fn();
     render(<SetupFlow mode="first-run" onComplete={onComplete} />);

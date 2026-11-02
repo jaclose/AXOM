@@ -6,6 +6,7 @@ import {
   Paintbrush, BookOpen, LayoutGrid, GraduationCap, Globe2,
 } from "lucide-react";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { otherWorkspaceUrl } from "../../lib/otherWorkspace";
 import { Modal, Field } from "../ui/Modal";
 import { AxomWordmark } from "../ui/BrandMark";
 import { GButton, Tag } from "../ui/primitives";
@@ -213,6 +214,7 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
   const store = useStore();
   const operatorAccess = useOperatorAccessStatus();
   const { profile } = store;
+  const otherWorkspace = otherWorkspaceUrl(location.hostname);
   const fileRef = useRef<HTMLInputElement>(null);
   const mergeRef = useRef<HTMLInputElement>(null);
   const avatarRef = useRef<HTMLInputElement>(null);
@@ -414,6 +416,10 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
       {tab === "account" && (
         <section role="tabpanel" id={`${tabsId}-panel-account`} aria-labelledby={`${tabsId}-tab-account`} className="settings-account-panel">
           <AccountSyncPanel onOpenBackup={() => setTab("backup")} />
+          {otherWorkspace && <aside className="settings-other-workspace" aria-label="Other AXOM address">
+            <div><b>Looking for work on the other AXOM address?</b><p>Browser work is stored separately at each address. This workspace stays here.</p></div>
+            <a href={otherWorkspace} target="_blank" rel="noopener noreferrer">Open www.axom.info</a>
+          </aside>}
           {operatorAccess.role && <div className="settings-host-access" aria-label="Host access">
             <div><span>Verified AXOM role</span><strong>{operatorAccess.role === "owner" ? "Project CEO" : operatorAccess.role === "admin" ? "Administrator" : "Moderator"}</strong></div>
             <a href="#host" onClick={onClose}>Open host dashboard</a>

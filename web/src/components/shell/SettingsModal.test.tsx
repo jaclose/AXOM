@@ -53,6 +53,18 @@ afterEach(() => {
 });
 
 describe("Settings information architecture", () => {
+  it("offers the other hosted workspace from apex account settings only", () => {
+    vi.stubGlobal("location", { hostname: "axom.info" });
+    const { unmount } = render(<SettingsModal onClose={() => {}} initialTab="account" />);
+    const link = screen.getByRole("link", { name: "Open www.axom.info" });
+    expect(link.getAttribute("href")).toBe("https://www.axom.info/?app=1");
+    expect(link.getAttribute("target")).toBe("_blank");
+    unmount();
+    vi.stubGlobal("location", { hostname: "www.axom.info" });
+    render(<SettingsModal onClose={() => {}} initialTab="account" />);
+    expect(screen.queryByRole("link", { name: "Open www.axom.info" })).toBeNull();
+  });
+
   it("uses setup path and term choices without replacing saved course structure", async () => {
     const user = userEvent.setup();
     const originalTerms = useStore.getState().terms.map((term) => term.id);

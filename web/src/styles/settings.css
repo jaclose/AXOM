@@ -135,6 +135,12 @@
 .settings-account-links span { width: 100%; color: var(--text-45); font-size: var(--fs-tiny); font-weight: var(--fw-semibold); letter-spacing: var(--tracking-wide); text-transform: uppercase; }
 .settings-account-links a { color: var(--text-80); font-size: var(--fs-sm); text-decoration-color: var(--gold-line); text-underline-offset: 3px; }
 .settings-account-links a:hover, .settings-account-links a:focus-visible { color: var(--gold); }
+.settings-other-workspace { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px 20px; padding: 16px 18px; border: 1px solid var(--gold-line); border-radius: var(--radius-md); background: var(--surface-1); }
+.settings-other-workspace div { display: grid; gap: 4px; }
+.settings-other-workspace b { color: var(--text); font-size: var(--fs-sm); }
+.settings-other-workspace p { margin: 0; color: var(--text-60); font-size: var(--fs-sm); line-height: 1.45; }
+.settings-other-workspace a { color: var(--gold); font-size: var(--fs-sm); font-weight: var(--fw-semibold); text-underline-offset: 3px; }
+.settings-other-workspace a:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
 
 .settings-stack { display: grid; gap: 12px; min-width: 0; }
 .settings-subnav {
