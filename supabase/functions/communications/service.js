@@ -168,7 +168,7 @@ function m(e, t) {
 	};
 }
 //#endregion
-//#region ../AXOM-ideas-2026-11-01/web/node_modules/react/cjs/react.production.min.js
+//#region web/node_modules/react/cjs/react.production.min.js
 var h = /* @__PURE__ */ e(((e) => {
 	var t = Symbol.for("react.element"), n = Symbol.for("react.portal"), r = Symbol.for("react.fragment"), i = Symbol.for("react.strict_mode"), a = Symbol.for("react.profiler"), o = Symbol.for("react.provider"), s = Symbol.for("react.context"), c = Symbol.for("react.forward_ref"), l = Symbol.for("react.suspense"), u = Symbol.for("react.memo"), d = Symbol.for("react.lazy"), f = Symbol.iterator;
 	function p(e) {

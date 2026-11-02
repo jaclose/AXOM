@@ -32,7 +32,7 @@
   },
   "bundle": {
     "path": "supabase/functions/communications/service.js",
-    "sha256": "5921b3790c0be4b6283f2e674605468a3d107f9a6c90f8205d3a5d0983d286d2"
+    "sha256": "79731a1986ff7a03f75a4a64a6020c25732b2cbdbdbf422e42ef2c470aa71024"
   },
   "authTemplates": {
     "supabase/templates/communications/confirmation.html": "e79c100868c837f0619bfa6cf995df5cdd4cd89b59f5434d607df3185f387ab2",
