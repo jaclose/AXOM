@@ -161,6 +161,29 @@ describe("communications server boundaries", () => {
       .rejects.toThrow("export-storage-index-invalid");
     expect(db.storage.from).not.toHaveBeenCalled();
   });
+  it("sends each saved topic choice in Resend's required object body", async () => {
+    const { db, calls } = database();
+    const service = new CommunicationsService(db, {
+      AXOM_EMAIL_MODE: "live", RESEND_API_KEY: "synthetic-test-key",
+      RESEND_TOPIC_IDS: JSON.stringify({ product_updates: "topic-product", marketing: "topic-marketing" }),
+    });
+    vi.spyOn(service, "preferenceRows").mockResolvedValue(preferences().map(preference => ({
+      ...preference, enabled: preference.category === "product_updates",
+    })));
+    vi.spyOn(service, "identity").mockResolvedValue({
+      accent: "#c8a96a", theme: "dark", locale: "en", contact_id: "contact-a", updated_at: "2026-11-02T00:00:00Z",
+    });
+    const request = vi.spyOn(service.provider, "request").mockResolvedValue({});
+
+    await service.syncTopics("account-a");
+
+    expect(request).toHaveBeenNthCalledWith(1, "/contacts/contact-a", "PATCH", { unsubscribed: false });
+    expect(request).toHaveBeenNthCalledWith(2, "/contacts/contact-a/topics", "PATCH", { topics: [
+      { id: "topic-product", subscription: "opt_in" },
+      { id: "topic-marketing", subscription: "opt_out" },
+    ] });
+    expect(calls).toContainEqual({ table: "communication_identity", method: "update", args: [{ topics_dirty: false, topics_error: null }] });
+  });
   it("rejects unknown personalization and non-HTTPS editorial links before saving", () => {
     expect(() => validateEditorial({ title: "{{secret}}", excerpt: "A note", url: "https://axom.info" })).toThrow("Unsupported template variable");
     expect(() => validateEditorial({ title: "A note", excerpt: "A note", url: "javascript:alert(1)" })).toThrow("HTTPS");

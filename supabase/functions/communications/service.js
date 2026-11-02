@@ -5216,7 +5216,7 @@ var xt = class {
 				topics: a
 			})).id, J(await this.db.from("communication_identity").update({ contact_id: o }).eq("user_id", e));
 		}
-		await this.provider.request(`/contacts/${o}`, "PATCH", { unsubscribed: !n.some((e) => e.enabled) }), a.length && await this.provider.request(`/contacts/${o}/topics`, "PATCH", a), J(await this.db.from("communication_identity").update({
+		await this.provider.request(`/contacts/${o}`, "PATCH", { unsubscribed: !n.some((e) => e.enabled) }), a.length && await this.provider.request(`/contacts/${o}/topics`, "PATCH", { topics: a }), J(await this.db.from("communication_identity").update({
 			topics_dirty: !1,
 			topics_error: null
 		}).eq("user_id", e).eq("updated_at", r.updated_at ?? ""));
