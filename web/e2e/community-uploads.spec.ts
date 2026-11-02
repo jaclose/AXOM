@@ -36,6 +36,7 @@ for (const width of [1440, 390]) test(`community uploads stay separate, filter b
   const card = community.getByRole("article").filter({ hasText: "Community NCRS review" });
   await card.getByRole("button", { name: "Preview course" }).click();
   await expect(card.getByText("Synthetic review [Lecture]", { exact: false })).toBeVisible();
+  await community.getByText("Choose an AXOM course folder or ZIP").click();
   await expect(community.getByRole("button", { name: "Choose AXOM folder" })).toBeVisible();
   await expect(community.getByRole("button", { name: "Choose ZIP" })).toBeVisible();
   for (const theme of ["dark", "light"]) {

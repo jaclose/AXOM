@@ -58,6 +58,7 @@ export async function academicPublishFixture(page: Page, options: { reviewer?: b
     if (path === "/auth/v1/user") return json({ id: userId, aud: "authenticated", role: "authenticated", email: "owner@example.test",
       app_metadata: {}, user_metadata: {}, created_at: "2026-10-27T00:00:00Z" });
     if (path.endsWith("/rpc/academic_is_reviewer")) return json(Boolean(options.reviewer));
+    if (path.endsWith("/rpc/axom_operator_role")) return json(null);
     if (path.endsWith("/rpc/academic_create_revision")) {
       const input = body() as { metadata: Record<string, string | number | undefined>; template: string; files: Omit<FileRow, "object_path">[]; content_hash: string; collection: string };
       let collection = collections.get(input.collection);
