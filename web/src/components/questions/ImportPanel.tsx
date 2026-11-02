@@ -241,13 +241,14 @@ export function ImportPanel({
   // Read once: what the seed's file already brought in, if it was imported before.
   const [seeded] = useState(() => {
     if (!seed?.drafts) return undefined;
+    const settledQuestions = settledLibrary().questions;
     const known = applyPriorImport(
-        flagImportDuplicates(preserveUserReviewedMappings(seed.drafts, s.questions ?? [], seed.sourceDocumentId), s.questions ?? []),
+        flagImportDuplicates(preserveUserReviewedMappings(seed.drafts, settledQuestions, seed.sourceDocumentId), settledQuestions),
         seed.rawText != null ? { checksum: seed.checksum, fileName: seed.fileName ?? "import", existingDocumentId: seed.sourceDocumentId } : null,
         settledLibrary(),
       );
     if (seed.sourceDocumentId) return known;
-    const matches = markExactImportMatches(known.drafts, known.selected, s.questions ?? []);
+    const matches = markExactImportMatches(known.drafts, known.selected, settledQuestions);
     return { ...known, ...matches, note: [known.note,
       matches.exact ? `${matches.exact} exact question${matches.exact === 1 ? " is" : "s are"} already in your bank and left out.` : "",
       matches.repeated ? `${matches.repeated} repeated question${matches.repeated === 1 ? " is" : "s are"} in this source and left out.` : "",
@@ -350,9 +351,10 @@ export function ImportPanel({
     // path as images the learner adds by hand.
     setImageFiles(images); // Avoid carrying pictures from a prior source into the next review.
     // A file imported before comes in with what it already brought left unselected.
-    const known = applyPriorImport(flagImportDuplicates(parsed, s.questions ?? []), doc, settledLibrary());
+    const settled = settledLibrary();
+    const known = applyPriorImport(flagImportDuplicates(parsed, settled.questions), doc, settled);
     const matches = doc?.existingDocumentId ? { drafts: known.drafts, selected: known.selected, exact: 0, repeated: 0, conflicting: 0 }
-      : markExactImportMatches(known.drafts, known.selected, s.questions ?? []);
+      : markExactImportMatches(known.drafts, known.selected, settled.questions);
     setDrafts(matches.drafts.map((d, index) => ({ ...d, reviewId: uid(), include: matches.selected[index], aiGenerated: ai, source })));
     setBatchWarnings([
       ...(known.note ? [known.note] : []),
