@@ -37,12 +37,14 @@ The #host page has server-authorized roles, never front-end-only permissions:
 
 | Role | Capabilities |
 | --- | --- |
-| Owner | Directory, role assignments, AI permission and daily quota policies, moderation, aggregate QBank/AI monitoring, audit history |
+| Project CEO (`owner` in the database) | Directory, role assignments, AI permission and daily quota policies, moderation, aggregate QBank/AI monitoring, audit history |
 | Administrator | Directory and metrics, shared QBank review metadata, report moderation |
 | Moderator | Submitted shared QBank metadata and reported post moderation |
 | Normal learner | No operator data or permission writes |
 
-Owner/administrator access does not bypass private workspace snapshot policies. Operators cannot approve Question Banks by unchecked bulk actions. Only intentionally shared QBank metadata is included in review monitoring.
+Project CEO/administrator access does not bypass private workspace snapshot policies. Operators cannot approve Question Banks by unchecked bulk actions. The Host queue is restricted to the current, ready revision in an explicit pending `academic_community_submissions` record; group visibility alone never puts a collection in this queue. The visible Project CEO badge appears only after the authenticated account's `axom_operator_role` readback reports `owner`. The database permits one owner row, provisioned for JD only after immutable Auth ID verification.
+
+Post reports exclude private posts from the moderation queue. A post changed back to Private drops from the queue immediately; resolving it is denied while private. Every dismissal or removal requires an 8–500 character audit reason. The previous two-argument resolution RPC is removed by the forward migration so old clients fail closed.
 
 The AI quota function defaults to 60 requests/day and honors a server-maintained per-user enabled flag and daily_limit override. Only the owner can change those overrides through the audited RPC, with a required reason. No upstream model keys or stored prompts are displayed. The existing gateway rejects missing, malformed, failed and denied quota responses before a provider call. New social writes and operator mutations honor the existing account privacy/deletion barrier.
 
@@ -62,9 +64,9 @@ Do not paste private emails, JWTs or service keys into the public repository. Ro
 ## Deployment and verification gates
 
 1. Check the current integration/coordination state and protected local work. The remote Mac was offline during this branch's creation, so no local files or uncommitted material were read, replaced, staged or reset.
-2. On 2026-11-02 UTC, CLI 2.118.0 applied `20261101190000_community_social.sql`, `20261101191000_operator_console.sql`, `20261101192000_question_set_library.sql`, and `20261101193000_journal_experience_feedback.sql` to AXOM production after a dry run listed exactly these four, no seeds or roles. A read-only postflight found all four ledger rows, all 11 feature tables, RLS on all 11, and 22 policies. This does not establish real-account or operator acceptance. The older `20261101120000` and `20261101130000` versions belong to separate academic migrations.
+2. On 2026-11-02 UTC, CLI 2.118.0 applied `20261101190000_community_social.sql`, `20261101191000_operator_console.sql`, `20261101192000_question_set_library.sql`, and `20261101193000_journal_experience_feedback.sql` to AXOM production after a dry run listed exactly these four, no seeds or roles. A read-only postflight found all four ledger rows, all 11 feature tables, RLS on all 11, and 22 policies. This does not establish real-account or operator acceptance. The older `20261101120000` and `20261101130000` versions belong to separate academic migrations. The new `20261102160000_operator_privacy_audit_hardening.sql` is a **pending forward migration**; do not edit or replay the four already-applied migrations. Before applying it, inspect existing owner rows and resolve any duplicate trusted grants; the migration deliberately stops if more than one exists. Apply it before the matching Host UI, because the old moderation RPC is removed.
 3. Run PGlite/Postgres RLS tests with at least three distinct JWT identities, plus anonymous access. Attempt spoofed sender IDs, reverse friend requests, self-requests, forged role assignment, social post updates to another owner, friendship reassignments, denied AI quota edits and access after unfriend.
-4. Verify privileged RPCs return 42501 for users with no role, and that one owner can alter only supported operational state. Inspect function privileges and run the Supabase security advisor.
+4. Verify privileged RPCs return 42501 for users with no role, that the unsubmitted group collection is absent from Host monitoring, and that private posts disappear from report moderation. Verify a second owner is rejected and report decisions store a reason. Inspect function privileges and run the Supabase security advisor.
 5. Test Community on two authorized opt-in accounts and a signed-out device: friend discovery, acceptance, friends-only RLS, public feed, report, like/unlike, post delete, hide, withdrawal and account switch. Validate mobile 390 px, desktop 1440 px, dark/light and reduced motion.
 6. Verify slide-only PDF import both with and without answer-reveal images. Check source page navigation and correct import counts after reviewing 21 keys in one action; ensure ambiguous, unkeyed and structurally broken questions remain held.
 7. Check build, typecheck, lint, unit tests, QBank Playwright, Vercel preview and real-account reload. GitHub CI is not a substitute for live multi-account or migration tests.

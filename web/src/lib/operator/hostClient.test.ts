@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { accountOperationClient } from "../account/supabase";
-import { operatorRole, setOperatorAI, validOperatorDashboard } from "./hostClient";
+import { operatorRole, resolveReport, setOperatorAI, validOperatorDashboard } from "./hostClient";
 import { publishCommunityPost, setDiscoverable } from "../community/community";
 
 const fixture = vi.hoisted(() => {
@@ -54,6 +54,15 @@ describe("account-bound Host and Community requests", () => {
   it("requires an audit reason before sending an AI policy change", async () => {
     await expect(setOperatorAI("account-a", "target", false, 0, "")).rejects.toThrow(/reason/i);
     expect(accountOperationClient).not.toHaveBeenCalled();
+  });
+  it("requires and trims a moderation audit reason", async () => {
+    await expect(resolveReport("account-a", "post", "dismiss", "short")).rejects.toThrow(/reason/i);
+    expect(accountOperationClient).not.toHaveBeenCalled();
+    rpc.mockResolvedValue({ data: null, error: null });
+    await resolveReport("account-a", "post", "dismiss", "  Documented false report  ");
+    expect(rpc).toHaveBeenCalledWith("axom_operator_resolve_report", {
+      target: "post", resolution: "dismiss", reason: "Documented false report",
+    });
   });
   it("does not report Community mutation success to a different account", async () => {
     const response = deferred<{ data: null; error: null }>();

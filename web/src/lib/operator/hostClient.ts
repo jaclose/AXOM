@@ -166,9 +166,10 @@ export async function setOperatorAI(accountId: string, target: string, enabled: 
   if (error) throw new Error("AI permissions could not be changed.");
   });
 }
-export async function resolveReport(accountId: string, postId: string, resolution: "dismiss" | "remove"): Promise<void> {
+export async function resolveReport(accountId: string, postId: string, resolution: "dismiss" | "remove", reason: string): Promise<void> {
+  checkReason(reason);
   return withClient(accountId, async client => {
-  const { error } = await client.rpc("axom_operator_resolve_report", { target: postId, resolution });
+  const { error } = await client.rpc("axom_operator_resolve_report", { target: postId, resolution, reason: reason.trim() });
   if (error) throw new Error("The report could not be resolved.");
   });
 }

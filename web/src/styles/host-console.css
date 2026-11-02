@@ -39,6 +39,7 @@
 .host-report { padding: 14px 0; border-top: 1px solid var(--hairline); display: grid; gap: 10px; }
 .host-report b { font-size: 13px; }
 .host-report p { margin: 0; }
+.host-report label small { color: var(--text-70); font-weight: 400; line-height: 1.5; }
 .host-audit { display: grid; gap: 5px; padding: 12px 0; border-top: 1px solid var(--hairline); }
 .host-audit b { font-size: 12px; }
 .host-audit small { overflow-wrap: anywhere; color: var(--text-70); font-size: 11px; }

@@ -31,6 +31,7 @@ function HostAccountPage() {
   const [roleDrafts, setRoleDrafts] = useState<Record<string, "admin" | "moderator" | "member">>({});
   const [aiDrafts, setAiDrafts] = useState<Record<string, { enabled: boolean; limit: string }>>({});
   const [reasons, setReasons] = useState<Record<string, string>>({});
+  const [reportReasons, setReportReasons] = useState<Record<string, string>>({});
   useEffect(() => {
     let alive = true;
     setDashboard(undefined);
@@ -41,6 +42,15 @@ function HostAccountPage() {
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [userId, refresh]);
+  useEffect(() => {
+    const recheck = () => setRefresh(value => value + 1);
+    window.addEventListener("focus", recheck);
+    window.addEventListener("axom:operator-access-changed", recheck);
+    return () => {
+      window.removeEventListener("focus", recheck);
+      window.removeEventListener("axom:operator-access-changed", recheck);
+    };
+  }, []);
   const role = dashboard?.role;
   const owner = role === "owner";
   const accounts = useMemo(() => (dashboard?.accounts ?? []).filter(account =>
@@ -64,7 +74,7 @@ function HostAccountPage() {
         <select value={roleDrafts[account.user_id] ?? account.role ?? "member"}
           disabled={!owner || account.role === "owner" || busy}
           onChange={e => setRoleDrafts(current => ({...current,[account.user_id]:e.target.value as "admin" | "moderator" | "member"}))}>
-          {account.role === "owner" && <option value="owner">Executive owner</option>}
+          {account.role === "owner" && <option value="owner">Project CEO</option>}
           <option value="member">Member</option><option value="moderator">Moderator</option><option value="admin">Administrator</option>
         </select>
       </label>
@@ -103,11 +113,11 @@ function HostAccountPage() {
         <h2>Host dashboard</h2>
         <p>Server-enforced permissions, responsible moderation and traceable operational controls.</p>
       </div>
-      {role && <Tag tone="gold">{role === "owner" ? "Executive owner" : role === "admin" ? "Administrator" : "Moderator"}</Tag>}
+      {role && <Tag tone="gold">{role === "owner" ? "Project CEO" : role === "admin" ? "Administrator" : "Moderator"}</Tag>}
     </section>
     <div className="row wrap gap8">
       <GButton size="sm" disabled={loading || busy} onClick={() => setRefresh(n => n + 1)}><RefreshCw size={15}/> Refresh</GButton>
-      <a className="ghost-btn" href="#community">Community</a>
+      <a className="ghost-btn" href="#communities">Communities</a>
       <a className="ghost-btn" href="#questions">Question Bank</a>
     </div>
     {loading && <p role="status">Checking operator access…</p>}
@@ -139,18 +149,18 @@ function HostAccountPage() {
           <div className="host-accounts">{accounts.map(account => <article key={account.user_id} className="host-account">
             <div className="host-account-head"><div><b>{account.display_name ?? account.email ?? "Account"}</b>
               <small>{account.email ?? "No email"} · Joined {date(account.created_at)} · Last login {date(account.last_sign_in_at)}</small></div>
-              {account.role && <Tag tone={account.role === "owner" ? "gold" : "neutral"}>{account.role}</Tag>}</div>
+              {account.role && <Tag tone={account.role === "owner" ? "gold" : "neutral"}>{account.role === "owner" ? "Project CEO" : account.role}</Tag>}</div>
             <p className="sub">AI requests today: {account.ai_used_today} of {account.ai_daily_limit}</p>
             {controlFor(account)}
           </article>)}</div>
           {accounts.length === 0 && <p className="sub">No matching accounts in this page of the directory.</p>}
-          <p className="sub">Up to 100 recent accounts are listed. Executive permissions are bound to account IDs, not editable names.</p>
+          <p className="sub">Up to 100 recent accounts are listed. Project CEO access is bound to a verified account ID, never an editable name.</p>
         </GlassCard>}
         <GlassCard pad>
-          <PanelHeader headingLevel={2} title="Submitted QBank review" sub="Non-private collections intentionally submitted for sharing. Pending review never implies approval." />
-          {dashboard.queue.length === 0 ? <p className="sub">No shared Question Banks await review.</p> :
+          <PanelHeader headingLevel={2} title="Submitted QBank review" sub="Revision-bound collections intentionally submitted for sharing. Pending review never implies approval." />
+          {dashboard.queue.length === 0 ? <p className="sub">No submitted Question Banks await review.</p> :
             <div className="host-queue">{dashboard.queue.map(item => <div className="host-queue-row" key={item.collection_id}>
-              <div><b>{item.title}</b><small>{item.module} · {item.term} · {item.visibility} · {date(item.updated_at)}</small></div>
+              <div><b>{item.title}</b><small>{item.module} · {item.term} · submitted for review · {date(item.updated_at)}</small></div>
               <div><Tag tone="orange">Pending</Tag><small>{item.ready_questions} candidate-ready · {item.review_questions} review</small></div>
             </div>)}</div>}
           <p className="sub">Approval is intentionally not a one-click host operation. Source provenance, rights and answer-review evidence must be validated through the academic review process first.</p>
@@ -163,11 +173,17 @@ function HostAccountPage() {
             <b>@{report.author_handle} · {report.post_kind}</b>
             <p>{report.reports} reports · {report.reason}</p>
             {report.note && <p className="sub">{report.note}</p>}
-            <div className="row wrap gap8"><GButton size="sm" disabled={busy}
-              onClick={() => void change(() => resolveReport(userId!, report.post_id, "dismiss"), "Report dismissed and audited.")}>Dismiss report</GButton>
-              <GButton size="sm" variant="danger" disabled={busy} onClick={() => {
+            <label>Reason for resolving @{report.author_handle}'s report
+              <textarea value={reportReasons[report.post_id] ?? ""} minLength={8} maxLength={500} rows={2} disabled={busy}
+                onChange={event => setReportReasons(current => ({ ...current, [report.post_id]: event.target.value }))}
+                placeholder="Record the evidence for this moderation decision." />
+              <small>8 to 500 characters, saved in the audit history.</small>
+            </label>
+            <div className="row wrap gap8"><GButton size="sm" disabled={busy || (reportReasons[report.post_id] ?? "").trim().length < 8}
+              onClick={() => void change(() => resolveReport(userId!, report.post_id, "dismiss", reportReasons[report.post_id] ?? ""), "Report dismissed and audited.")}>Dismiss report</GButton>
+              <GButton size="sm" variant="danger" disabled={busy || (reportReasons[report.post_id] ?? "").trim().length < 8} onClick={() => {
                 if (window.confirm("Remove this reported post? The author’s private workspace stays untouched."))
-                  void change(() => resolveReport(userId!, report.post_id, "remove"), "Reported post removed and audited.");
+                  void change(() => resolveReport(userId!, report.post_id, "remove", reportReasons[report.post_id] ?? ""), "Reported post removed and audited.");
               }}>Remove post</GButton>
             </div>
           </article>)}
@@ -176,7 +192,7 @@ function HostAccountPage() {
       <aside className="stack">
         <GlassCard pad>
           <PanelHeader headingLevel={2} title="Permissions model" sub="Least privilege enforced in Postgres." />
-          <div className="host-role"><Crown size={17}/><b>Executive owner</b><small>Account roles, AI limits, reports, operational data and audit history.</small></div>
+          <div className="host-role"><Crown size={17}/><b>Project CEO</b><small>Account roles, AI limits, reports, operational data and audit history.</small></div>
           <div className="host-role"><ShieldCheck size={17}/><b>Administrator</b><small>Account directory, aggregate usage and review queues. No role escalation.</small></div>
           <div className="host-role"><Users size={17}/><b>Moderator</b><small>Submitted bank metadata and reported community posts only.</small></div>
           <p className="sub">No operator role grants unrestricted access to individual private source files, notes, questions or saved progress.</p>
