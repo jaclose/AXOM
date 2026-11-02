@@ -96,6 +96,27 @@ describe("authenticated academic upload — unassigned weeks", () => {
     expect(uploadAcademicCourse).toHaveBeenCalledOnce();
   });
 
+  it("flags a matching course before saving another private package", async () => {
+    vi.mocked(readCatalog).mockReturnValueOnce({
+      format: "axom-private-library", schemaVersion: 1, id: "planned", version: "v1",
+      templates: [{ file: "plan.txt", name: "course", checksum: "b".repeat(64) }], sources: [],
+    });
+    const { container } = render(<AcademicCourseUpload onSaved={vi.fn()} existingCourses={[{
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", title: "NCRS", module: "NCRS", term: "Term 4",
+      visibility: "private", review_status: "pending", current_revision_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      owned: true, ready_questions: 5, review_questions: 0,
+    }]} />);
+    chooseZip(container);
+    const match = await screen.findByRole("group", { name: "Existing course match" });
+    expect(within(match).getByText(/already listed/)).toBeTruthy();
+    const save = screen.getByRole("button", { name: "Save private collection" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    fireEvent.click(within(match).getByRole("checkbox"));
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+    await waitFor(() => expect(uploadAcademicCourse).toHaveBeenCalledOnce());
+  });
+
   it("keeps a package with a reviewed weekly plan on its established path", async () => {
     vi.mocked(readCatalog).mockReturnValueOnce({
       format: "axom-private-library", schemaVersion: 1, id: "planned", version: "v1",

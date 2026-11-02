@@ -14,6 +14,7 @@ for (const width of [1440, 768, 390]) {
     await page.getByRole("button", { name: "Course map", exact: true }).click();
     const library = page.locator(".course-library-page");
     await expect(library.getByRole("heading", { name: "Term 1", exact: true })).toBeVisible();
+    await expect.poll(() => page.locator(".shell").evaluate(element => element.scrollTop)).toBe(0);
     await expect(library.getByRole("status")).toContainText("in the course map");
     await expect(library.getByText("On this device", { exact: true })).toBeVisible();
     for (const theme of ["dark", "light"]) {

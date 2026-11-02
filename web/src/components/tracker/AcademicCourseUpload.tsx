@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { useAccount } from "../../lib/account/accountStore";
-import { academicClient } from "../../lib/academicLibrary/client";
+import { academicClient, type AcademicCourse } from "../../lib/academicLibrary/client";
+import type { CourseBook } from "../../lib/bookshelf/courseBooks";
 import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
 import { AcademicPlanTermRequiredError } from "../../lib/academicLibrary/coursePlan";
 import {
@@ -9,6 +10,7 @@ import {
 } from "../../lib/academicLibrary/upload";
 import { folderLibraryReader, readCatalog, zipLibraryReader, type LibraryReader } from "../../lib/privateLibrary/install";
 import { GButton } from "../ui/primitives";
+import { sameCourseLabel } from "./courseLabelMatch";
 
 const TERMS: AcademicUnscheduledScope["term"][] = ["Term 1", "Term 2", "Term 3", "Term 4", "Term 5"];
 /** A package that needs a reviewer's classification before it can be prepared. */
@@ -16,7 +18,11 @@ type Candidate = { accountId: string; reader: LibraryReader; filename: string }
   & ({ kind: "unscheduled" } | { kind: "plan-term"; module: string });
 
 /** Private academic uploads are never published by selecting this control. */
-export function AcademicCourseUpload({ onSaved }: { onSaved: (result: AcademicUploadResult) => void }) {
+export function AcademicCourseUpload({ onSaved, existingCourses = [], localCourses = [] }: {
+  onSaved: (result: AcademicUploadResult) => void;
+  existingCourses?: readonly AcademicCourse[];
+  localCourses?: readonly CourseBook[];
+}) {
   const accountId = useAccount(state => state.user?.id);
   const input = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
@@ -28,14 +34,20 @@ export function AcademicCourseUpload({ onSaved }: { onSaved: (result: AcademicUp
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [confirmedMatch, setConfirmedMatch] = useState(false);
   const upload = prepared && prepared.accountId === accountId ? prepared.upload : undefined;
   const candidate = pending && pending.accountId === accountId ? pending : undefined;
+  const label = upload && typeof upload.metadata.term === "string" && typeof upload.metadata.module === "string"
+    ? { term: upload.metadata.term, module: upload.metadata.module } : undefined;
+  const accountMatches = label ? existingCourses.filter(course => sameCourseLabel(label, course)) : [];
+  const localMatches = label ? localCourses.filter(course => course.origin === "workspace" && sameCourseLabel(label, course)) : [];
+  const hasMatch = accountMatches.length > 0 || localMatches.length > 0;
 
   async function select(file: File | File[]) {
     if (!accountId) return;
     const scope = academicAccountScope(accountId);
     setBusy(true); setError(""); setPrepared(undefined); setPending(undefined);
-    setChosenTerm(""); setModule(""); setConfirmed(false);
+    setChosenTerm(""); setModule(""); setConfirmed(false); setConfirmedMatch(false);
     setMessage("Checking the private academic package…");
     try {
       const reader = Array.isArray(file) ? folderLibraryReader(file) : await zipLibraryReader(file);
@@ -82,7 +94,7 @@ export function AcademicCourseUpload({ onSaved }: { onSaved: (result: AcademicUp
         })
         : await prepareAcademicUpload(candidate.reader, undefined, { planTerm: { term: chosenTerm, evidence: "human-reviewed" } });
       scope.assertCurrent();
-      setPrepared({ accountId, upload }); setPending(undefined); setMessage("");
+      setPrepared({ accountId, upload }); setPending(undefined); setMessage(""); setConfirmedMatch(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The classification could not be verified.");
       setMessage("");
@@ -90,7 +102,7 @@ export function AcademicCourseUpload({ onSaved }: { onSaved: (result: AcademicUp
   }
 
   async function save() {
-    if (!upload || !accountId) return;
+    if (!upload || !accountId || (hasMatch && !confirmedMatch)) return;
     const scope = academicAccountScope(accountId);
     setBusy(true); setError("");
     try {
@@ -165,7 +177,11 @@ export function AcademicCourseUpload({ onSaved }: { onSaved: (result: AcademicUp
         {upload.provenance.planTermEvidence ? " · Term you confirmed" : ""}
         { ` · ${(upload.files.reduce((sum, file) => sum + file.byte_size, 0) / 1024 / 1024).toFixed(2)} MiB` }
       </p>
-      <GButton disabled={busy} onClick={() => void save()}>{busy ? "Saving privately…" : "Save private collection"}</GButton>
+      {hasMatch && <div className="academic-upload-match" role="group" aria-label="Existing course match">
+        <p><strong>{upload.metadata.module} in {upload.metadata.term} is already listed.</strong> {accountMatches.length ? "An account collection has this label. " : ""}{localMatches.length ? "A course is in My Courses. " : ""}Saving the same package updates its collection; a different package may create a separate private course. Your existing progress is kept.</p>
+        <label><input type="checkbox" checked={confirmedMatch} onChange={event => setConfirmedMatch(event.target.checked)} /> I reviewed this match and want to save this package.</label>
+      </div>}
+      <GButton disabled={busy || (hasMatch && !confirmedMatch)} onClick={() => void save()}>{busy ? "Saving privately…" : "Save private collection"}</GButton>
     </div>}
     <p role="status">{message}</p>{error && <p role="alert">{error}</p>}
   </section>;
