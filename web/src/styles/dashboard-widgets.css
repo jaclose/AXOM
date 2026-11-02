@@ -37,18 +37,24 @@
   inset-block-start: .65rem;
   inset-inline-end: .65rem;
   display: inline-grid;
+  grid-auto-flow: column;
+  align-items: center;
+  justify-content: center;
   place-items: center;
-  inline-size: 2.75rem;
+  min-inline-size: 2.75rem;
   block-size: 2.75rem;
-  padding: 0;
+  gap: .45rem;
+  padding: 0 .8rem;
   border: 1px solid var(--glass-card-border);
   border-radius: var(--radius-pill);
   color: var(--text-60);
   background: color-mix(in srgb, var(--surface-2) 86%, transparent);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, .12);
+  box-shadow: var(--shadow-card);
   cursor: pointer;
   transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease, transform 150ms ease;
 }
+
+.dashboard-widget-frame__settings-trigger span { display: none; font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
 
 .dashboard-widget-frame__settings-trigger:hover {
   color: var(--text);
@@ -68,11 +74,16 @@
   border: 1px solid var(--glass-card-border);
   border-radius: var(--card-radius);
   color: var(--text);
-  background:
-    linear-gradient(145deg, color-mix(in srgb, var(--surface-2) 96%, var(--gold-soft)), var(--surface-1));
+  background: var(--surface-1);
   box-shadow: var(--shadow-card);
   animation: dashboard-widget-settings-in 160ms ease-out both;
 }
+
+.dashboard-widget-frame__settings-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding-block-end: .9rem; border-bottom: 1px solid var(--hairline); }
+.dashboard-widget-frame__eyebrow { display: block; margin-block-end: .35rem; color: var(--gold); font: var(--fw-semibold) var(--fs-micro) var(--font-mono); letter-spacing: var(--tracking-wider); text-transform: uppercase; }
+.dashboard-widget-frame__close { display: grid; flex: none; place-items: center; inline-size: 2.75rem; block-size: 2.75rem; border: 1px solid var(--hairline); border-radius: var(--radius-pill); color: var(--text-60); background: var(--surface-2); cursor: pointer; }
+.dashboard-widget-frame__close:hover { color: var(--text); border-color: var(--gold-line); }
+.dashboard-widget-frame__close:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 
 .dashboard-widget-frame__settings-head h3,
 .dashboard-widget-frame__settings-head p {
@@ -135,6 +146,9 @@
   background: var(--gold-soft);
 }
 
+.dashboard-widget-frame__size-options label:focus-within,
+.dashboard-widget-frame__field-options label:focus-within { outline: 2px solid var(--gold); outline-offset: 2px; }
+
 .dashboard-widget-frame__size-options input,
 .dashboard-widget-frame__field-options input {
   flex: 0 0 auto;
@@ -162,14 +176,22 @@
 
 .dashboard-widget-frame__actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: .5rem;
   margin-block-start: 1rem;
+  padding-block-start: .75rem;
+  border-top: 1px solid var(--hairline);
 }
+
+.dashboard-widget-frame__actions [role="status"] { flex: 1 1 12rem; color: var(--text-60); font-size: var(--fs-xs); }
 
 .dashboard-widget-frame__actions .gbtn {
   min-block-size: 2.75rem;
 }
+
+.dashboard-widget-frame__actions .gbtn:disabled { opacity: .55; cursor: not-allowed; }
 
 @keyframes dashboard-widget-settings-in {
   from { opacity: 0; transform: translateY(.3rem) scale(.995); }
@@ -259,7 +281,7 @@
 }
 
 .dashboard-widget-metrics > span {
-  min-height: 29px;
+  min-height: 32px;
   display: inline-flex;
   gap: 4px;
   align-items: center;
@@ -268,7 +290,7 @@
   border-radius: var(--radius-pill);
   color: var(--text-60);
   background: var(--surface-1);
-  font-size: var(--fs-tiny);
+  font-size: var(--fs-xs);
 }
 
 .dashboard-widget-metrics > span b { color: var(--text-80); }
@@ -287,14 +309,15 @@
   gap: 5px 10px;
   align-content: center;
   padding: 15px;
-  border: 1px dashed var(--hairline);
+  border: 1px solid var(--hairline);
+  border-inline-start: 2px solid var(--gold-line);
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--surface-1) 84%, transparent);
 }
 
 .dashboard-widget-empty svg { grid-row: span 2; color: var(--gold); }
 .dashboard-widget-empty b { font-size: var(--fs-sm); }
-.dashboard-widget-empty span { color: var(--text-60); font-size: var(--fs-xs); line-height: var(--leading-normal); }
+.dashboard-widget-empty span { color: var(--text-70); font-size: var(--fs-xs); line-height: var(--leading-normal); }
 
 .dashboard-widget-list-row {
   display: grid;
@@ -396,12 +419,17 @@
 /* The customize gear sits in the top-right corner of every widget. Reserve
    that corner in each widget's header row so right-aligned actions (e.g.
    "Open check-in") never slide under it. */
-.dashboard-widget-frame__content :is(.panel-head, .daily-checkin-collapsed, .standup-prompt-head) {
+.dashboard-widget-frame__content :is(.panel-head, .panel-header, .daily-checkin-collapsed, .standup-prompt-head) {
   padding-inline-end: 3rem;
 }
 .dashboard-widget-frame__content .panel-head > :last-child:not(:first-child),
 .dashboard-widget-frame__content .daily-checkin-collapsed > :last-child:not(:first-child) {
   flex-shrink: 0;
+}
+
+@container (min-width: 34rem) {
+  .dashboard-widget-frame__settings-trigger span { display: inline; }
+  .dashboard-widget-frame__content :is(.panel-head, .panel-header, .daily-checkin-collapsed, .standup-prompt-head) { padding-inline-end: 7.5rem; }
 }
 
 /* Course Tracker widget — primary focus rows */

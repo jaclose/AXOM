@@ -1,4 +1,4 @@
-import { Settings2 } from "lucide-react";
+import { Settings2, X } from "lucide-react";
 import {
   useId,
   useLayoutEffect,
@@ -97,6 +97,9 @@ export function DashboardWidgetFrame({
   const [draftFields, setDraftFields] = useState<Record<string, boolean>>(() => fieldState(fields));
   const [draftOptions, setDraftOptions] = useState<Record<string, boolean>>(() => fieldState(options));
   const sizeOptions = SIZE_OPTIONS.filter((option) => allowedSizes.includes(option.value));
+  const hasChanges = draftSize !== size
+    || fields.some((field) => draftFields[field.id] !== field.checked)
+    || options.some((option) => draftOptions[option.id] !== option.checked);
 
   useLayoutEffect(() => {
     if (editing) {
@@ -168,6 +171,7 @@ export function DashboardWidgetFrame({
           onClick={openSettings}
         >
           <Settings2 aria-hidden="true" size={ICON_SIZE.emphasis} />
+          <span>Customize</span>
         </button>
         <div className="dashboard-widget-frame__content">{children}</div>
       </div>
@@ -183,9 +187,18 @@ export function DashboardWidgetFrame({
       >
         <div className="dashboard-widget-frame__settings-head">
           <div>
+            <span className="dashboard-widget-frame__eyebrow">Dashboard / widget</span>
             <h3 id={headingId}>Customize {title}</h3>
             {settingsDescription && <p>{settingsDescription}</p>}
           </div>
+          <button
+            className="dashboard-widget-frame__close"
+            type="button"
+            aria-label={`Close ${title} settings`}
+            onClick={closeSettings}
+          >
+            <X aria-hidden="true" size={ICON_SIZE.emphasis} />
+          </button>
         </div>
 
         <fieldset className="dashboard-widget-frame__control-group">
@@ -259,8 +272,9 @@ export function DashboardWidgetFrame({
         )}
 
         <div className="dashboard-widget-frame__actions">
+          <span role="status">{hasChanges ? "Changes ready to save" : "No changes yet"}</span>
           <button className="gbtn" type="button" onClick={closeSettings}>Cancel</button>
-          <button className="gbtn primary" type="button" onClick={saveSettings}>Save</button>
+          <button className="gbtn primary" type="button" onClick={saveSettings} disabled={!hasChanges}>Save changes</button>
         </div>
       </div>
     </article>

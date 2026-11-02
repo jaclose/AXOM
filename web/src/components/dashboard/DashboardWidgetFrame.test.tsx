@@ -55,17 +55,20 @@ describe("DashboardWidgetFrame", () => {
     const trigger = screen.getByRole("button", { name: "Customize Focus timer" });
     await user.click(trigger);
     const panel = screen.getByRole("region", { name: "Customize Focus timer" });
+    const close = within(panel).getByRole("button", { name: "Close Focus timer settings" });
     const small = within(panel).getByRole("radio", { name: /Small/ });
-    const save = within(panel).getByRole("button", { name: "Save" });
+    const save = within(panel).getByRole("button", { name: "Save changes" });
 
-    expect(document.activeElement).toBe(small);
+    expect(document.activeElement).toBe(close);
+    expect(save.hasAttribute("disabled")).toBe(true);
+    await user.click(small);
+    expect(save.hasAttribute("disabled")).toBe(false);
     save.focus();
     await user.tab();
-    expect(document.activeElement).toBe(small);
+    expect(document.activeElement).toBe(close);
     await user.tab({ shift: true });
     expect(document.activeElement).toBe(save);
 
-    await user.click(small);
     fireEvent.keyDown(panel, { key: "Escape" });
     expect(screen.queryByRole("region", { name: "Customize Focus timer" })).toBeNull();
     expect(document.activeElement).toBe(trigger);
@@ -82,7 +85,8 @@ describe("DashboardWidgetFrame", () => {
     await user.click(trigger);
     await user.click(screen.getByRole("radio", { name: /Large/ }));
     await user.click(screen.getByRole("checkbox", { name: "Recent sessions" }));
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(screen.getByRole("status").textContent).toBe("Changes ready to save");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(onSave).toHaveBeenCalledWith({
@@ -96,5 +100,16 @@ describe("DashboardWidgetFrame", () => {
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(document.activeElement).toBe(trigger);
+  });
+
+  it("offers a visible top exit without persisting unchanged settings", async () => {
+    const user = userEvent.setup();
+    const onSave = renderFrame();
+    await user.click(screen.getByRole("button", { name: "Customize Focus timer" }));
+    expect(screen.getByRole("status").textContent).toBe("No changes yet");
+    expect((screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Close Focus timer settings" }));
+    expect(screen.queryByRole("region", { name: "Customize Focus timer" })).toBeNull();
+    expect(onSave).not.toHaveBeenCalled();
   });
 });

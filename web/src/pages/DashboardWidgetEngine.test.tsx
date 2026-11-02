@@ -109,7 +109,7 @@ describe("Dashboard widget engine", () => {
     const panel = screen.getByRole("region", { name: "Customize Tasks" });
     await user.click(within(panel).getByRole("radio", { name: /Large/ }));
     await user.click(within(panel).getByRole("checkbox", { name: "Completed" }));
-    await user.click(within(panel).getByRole("button", { name: "Save" }));
+    await user.click(within(panel).getByRole("button", { name: "Save changes" }));
 
     expect(useStore.getState().profile.dashboardLayout?.widgets.tasks).toMatchObject({
       size: "large",
@@ -128,14 +128,14 @@ describe("Dashboard widget engine", () => {
 
     await user.click(screen.getByRole("button", { name: "Customize Tasks" }));
     await user.click(screen.getByRole("radio", { name: /Extra large/ }));
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
     expect(screen.getByText(/no more than three extra-large widgets/i)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Keep recommended layout" }));
     expect(useStore.getState().profile.dashboardLayout?.widgets.tasks.size).toBe("medium");
 
     await user.click(screen.getByRole("button", { name: "Customize Tasks" }));
     await user.click(screen.getByRole("radio", { name: /Extra large/ }));
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
     await user.click(screen.getByRole("button", { name: "Add anyway" }));
     expect(useStore.getState().profile.dashboardLayout?.widgets.tasks.size).toBe("extra-large");
 
@@ -145,7 +145,7 @@ describe("Dashboard widget engine", () => {
     useStore.getState().updateProfile({ dashboardLayout: reset });
     await user.click(screen.getByRole("button", { name: "Customize Tasks" }));
     await user.click(screen.getByRole("radio", { name: /Extra large/ }));
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
     await user.click(screen.getByRole("button", { name: "Do not ask again" }));
     expect(useStore.getState().profile.dashboardLayout).toMatchObject({
       dismissedExtraLargeRecommendation: true,
