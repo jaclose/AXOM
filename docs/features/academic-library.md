@@ -213,6 +213,39 @@ Production writes need JD's explicit approval for each step. On the authorized M
 6. Check from a second account that the catalog lists the courses by term, a course
    opens its weekly plan and a downloaded quiz opens its exact questions.
 
+#### Approved-only question candidate
+
+The broad prepared library includes held questions and source originals. A source
+counted as technically answer-ready is not automatically medically reviewed or
+cleared for redistribution. Before sharing an approved subset, use a separate
+private output outside every repository. From `web/`:
+
+```sh
+node scripts/approved-only-library-cli.mjs template <prepared-root> <private-decisions.json>
+node scripts/approved-only-library-cli.mjs build <prepared-root> <private-decisions.json> <new-private-output>
+```
+
+The template contains IDs and exact catalog, bank, question, answer and explanation
+hashes, but no question text. Every row starts Pending. A subject reviewer must
+inspect the original source and explanation, then explicitly record approval,
+clinical/source/filing/explanation checks, reviewer and time, and redistribution
+evidence. Week review notes may be recorded in `weekEvidence`, but every shared
+question and bank week stays unassigned in this first approved-only candidate.
+Pending or held rows are excluded. The build refuses stale hashes, missing rights or
+review evidence, unresolved answers, missing explanations and unsafe full-page
+figures. The new output contains a `library/` folder with only approved questions
+and their checked figures, and a sibling `private-receipt.json`. Select only the
+`library/` folder in AXOM or pass only that folder to the AXOM ZIP packager. Raw
+source text, original PDFs, unrelated assets and course templates are absent.
+Run the upload-free publication dry run on `library/` before choosing it in the
+publisher; its question-only
+courses have no weekly activity plan until separately reviewed templates are added.
+
+The 17-question `axom-private-inline-rationale-decisions` export checks the original
+unanswered questions and currently contains no approvals. It cannot be used as this
+build's decision file. Apply any approved source answer and rationale in a separately
+verified private candidate first, then create a new hash-bound review template.
+
 Account requests reuse the recovery owner's `accountOperationClient`: requests retain
 the starting token and reject a changed account. Catalog results are scoped by account
 and query, including pagination. Installation and enrollment recheck ownership before

@@ -1,0 +1,188 @@
+// @vitest-environment node
+import { createHash } from "node:crypto";
+import { execFile as execFileCallback } from "node:child_process";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { promisify } from "node:util";
+import JSZip from "jszip";
+import { afterEach, describe, expect, it } from "vitest";
+import { inspectPreparedUploadExplanations } from "../src/lib/academicLibrary/explanationReview";
+import { planPublication, publicationJobs, readPublicationInventory } from "../src/lib/academicLibrary/publication";
+import type { PackageQuestion } from "../src/lib/question-content/package";
+import type { PreparedBank, PrivateLibraryCatalog } from "../src/lib/privateLibrary/types";
+import { createApprovalTemplate, createApprovedOnlyLibrary, type ApprovalDecisions } from "./approved-only-library";
+
+const sha = (value: Uint8Array | string) => createHash("sha256").update(value).digest("hex");
+const execFile = promisify(execFileCallback);
+const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j7WQAAAAASUVORK5CYII=", "base64");
+const roots: string[] = [];
+afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
+
+async function fixture(options: { image?: boolean; explanation?: string; week?: number } = {}) {
+  const work = await mkdtemp(join(tmpdir(), "axom-approved-test-")); roots.push(work);
+  const root = join(work, "prepared"); await mkdir(root);
+  const original = Buffer.from("%PDF-1.4 synthetic fixture only");
+  const checksum = sha(original);
+  const bankFile = `banks/${checksum}/bank.json`;
+  const originalFile = `sources/${checksum}.pdf`;
+  const asset = { id: "synthetic-figure", filename: "synthetic-figure.png", mimeType: "image/png", width: 1, height: 1,
+    byteSize: png.length, sourceFile: "synthetic.pdf", sourcePage: 1, role: "stem" as const, questionId: "q-ready",
+    checksum: `sha256:${sha(png)}`, derivation: "embedded" as const };
+  const question: PackageQuestion = {
+    id: "q-ready", source: { filename: "synthetic.pdf", page: 1, questionNumber: 1 },
+    ...(options.week ? { week: options.week } : {}),
+    stem: [{ type: "text", text: "Which synthetic choice is named?" },
+      ...(options.image ? [{ type: "image" as const, assetId: asset.id, role: "stem" as const }] : [])],
+    choices: [
+      { id: "a", label: "A", blocks: [{ type: "text", text: "First synthetic choice" }] },
+      { id: "b", label: "B", blocks: [{ type: "text", text: "Second synthetic choice" }] },
+    ], correctAnswer: { labels: ["A"], evidence: "printed-key" },
+    explanation: options.explanation === "" ? [] : [{ type: "text", text: options.explanation ?? "The synthetic source states that the first choice is correct for this invented fixture." }],
+    assets: options.image ? [asset] : [], provenance: { method: "authored", sourceChecksum: `sha256:${checksum}`,
+      notes: "PRIVATE LOCAL NOTE" },
+  };
+  const held: PackageQuestion = { ...structuredClone(question), id: "q-held", source: { filename: "synthetic.pdf", page: 2, questionNumber: 2 },
+    correctAnswer: undefined, explanation: undefined, stem: [{ type: "text", text: "PRIVATE HELD STEM" }], assets: [] };
+  const bank: PreparedBank = { pkg: { manifest: { schemaVersion: 1, course: { name: "FTM 1", term: 1, week: options.week ?? 0 },
+    bank: { id: "synthetic-bank", title: "Synthetic source", discipline: "Example" },
+    source: { filename: "synthetic.pdf", sourceWeekDeclared: false,
+      ...(options.week ? { axomAssignedWeek: options.week } : {}) }, questionsFile: "questions.json", assetsDirectory: "assets" },
+    questions: [question, held] }, issues: [], sourceText: { rawText: "PRIVATE RAW TEXT", pageTexts: ["PRIVATE PAGE TEXT"] },
+    sourceBytes: original.length, notes: ["PRIVATE BANK NOTE"] };
+  const catalog: PrivateLibraryCatalog = { format: "axom-private-library", schemaVersion: 1, id: "synthetic-library", version: "synthetic-v1",
+    templates: [{ file: "templates/private-plan.txt", name: "private-plan.txt", checksum: sha("PRIVATE PLAN") }],
+    sources: [{ id: `source-${checksum}`, name: "synthetic.pdf", sourcePath: "PRIVATE/FOLDER/synthetic.pdf", checksum,
+      module: "FTM 1", status: "prepared", reason: "Synthetic", bankFile, originalFile, ready: 1, review: 1 }] };
+  async function put(path: string, bytes: Uint8Array | string) {
+    const file = join(root, path); await mkdir(dirname(file), { recursive: true }); await writeFile(file, bytes);
+  }
+  await put(originalFile, original); await put(bankFile, JSON.stringify(bank));
+  await put("templates/private-plan.txt", "PRIVATE PLAN");
+  await put(`banks/${checksum}/assets/held.png`, png);
+  if (options.image) await put(`banks/${checksum}/assets/${asset.filename}`, png);
+  await put("catalog.json", JSON.stringify(catalog));
+  const decisions = join(work, "decisions.json");
+  await createApprovalTemplate(root, decisions);
+  const payload = JSON.parse(await readFile(decisions, "utf8")) as ApprovalDecisions;
+  const approved = payload.records.find(row => row.questionId === "q-ready")!;
+  approved.status = "approved"; approved.sourceChecked = true; approved.filingChecked = true; approved.clinicalChecked = true;
+  approved.explanationChecked = true; approved.assetContentChecked = options.image ?? false;
+  approved.rightsStatus = "cleared"; approved.rightsEvidence = "Synthetic fixture owned for this test";
+  approved.reviewer = "Synthetic reviewer"; approved.reviewedAt = "2026-11-02T00:00:00.000Z";
+  await writeFile(decisions, JSON.stringify(payload));
+  return { work, root, bank, catalog, decisions, payload, output: join(work, "approved") };
+}
+
+describe("approved-only private candidate", () => {
+  it("exports only explicit approval and passes the existing publisher without raw source content", async () => {
+    const { root, output, decisions } = await fixture();
+    expect(await createApprovedOnlyLibrary(root, decisions, output)).toMatchObject({ sources: 1, ready: 1, held: 0 });
+    const library = join(output, "library");
+    const catalog = JSON.parse(await readFile(join(library, "catalog.json"), "utf8")) as PrivateLibraryCatalog;
+    expect(catalog.templates).toEqual([]);
+    expect(catalog.sources[0]).toMatchObject({ ready: 1, review: 0 });
+    expect(catalog.sources[0].originalFile).toBeUndefined();
+    expect(catalog.sources[0].sourcePath).not.toContain("PRIVATE");
+    const bank = JSON.parse(await readFile(join(library, catalog.sources[0].bankFile!), "utf8")) as PreparedBank;
+    expect(bank.pkg.questions.map(question => question.id)).toEqual(["q-ready"]);
+    expect(bank.sourceText).toEqual({ rawText: "" });
+    expect(bank.notes).toEqual([]);
+    expect(bank.pkg.questions[0].provenance.notes).toBeUndefined();
+    expect(await readdir(join(library, "banks", catalog.sources[0].checksum))).toEqual(["bank.json"]);
+    expect((await readFile(join(library, catalog.sources[0].bankFile!), "utf8"))).not.toMatch(/PRIVATE|q-held/);
+    const receipt = await readFile(join(output, "private-receipt.json"), "utf8");
+    expect(JSON.parse(receipt)).toMatchObject({ approvedQuestions: 1, heldQuestionsIncluded: 0 });
+    expect(receipt).not.toMatch(/PRIVATE|synthetic stem|sourcePath/);
+    const read = async (path: string) => new Uint8Array(await readFile(join(library, path)));
+    const inventory = await readPublicationInventory(read);
+    const plan = planPublication(inventory);
+    expect(plan.courses).toHaveLength(1);
+    expect(plan.courses[0]).toMatchObject({ term: "Term 1", module: "FTM 1", ready: 1, review: 0 });
+    const { jobs } = publicationJobs(read, inventory, plan.courses);
+    const upload = await jobs[0].prepare();
+    expect(await inspectPreparedUploadExplanations(upload)).toEqual({ readyQuestions: 1, explainedReadyQuestions: 1, missingExplanations: 0 });
+    expect(upload.files.some(file => file.path.includes("receipt"))).toBe(false);
+    const archive = join(output, "..", "approved.zip");
+    await execFile(process.execPath, [resolve(process.cwd(), "scripts/package-private-library.mjs"), library, archive]);
+    const zip = await JSZip.loadAsync(await readFile(archive));
+    expect(Object.keys(zip.files)).not.toContain("private-receipt.json");
+  });
+
+  it("copies only checked embedded figures and excludes unrelated asset files", async () => {
+    const { root, output, decisions, catalog } = await fixture({ image: true });
+    await createApprovedOnlyLibrary(root, decisions, output);
+    const assets = join(output, "library", "banks", catalog.sources[0].checksum, "assets");
+    expect(await readdir(assets)).toEqual(["synthetic-figure.png"]);
+    expect(sha(await readFile(join(assets, "synthetic-figure.png")))).toBe(sha(png));
+  });
+
+  it("rejects stale answers and missing review evidence before writing output", async () => {
+    const { root, output, decisions, payload } = await fixture();
+    const approved = payload.records.find(row => row.questionId === "q-ready")!;
+    const originalAnswerSha = approved.answerSha256;
+    approved.answerSha256 = "0".repeat(64);
+    await writeFile(decisions, JSON.stringify(payload));
+    await expect(createApprovedOnlyLibrary(root, decisions, output)).rejects.toThrow(/no longer matches/);
+    approved.answerSha256 = originalAnswerSha;
+    approved.rightsStatus = "pending";
+    await writeFile(decisions, JSON.stringify(payload));
+    await expect(createApprovedOnlyLibrary(root, decisions, output)).rejects.toThrow(/lacks source, clinical, explanation, or rights/);
+    await expect(readdir(output)).rejects.toThrow();
+  });
+
+  it("rejects a question without a substantive explanation", async () => {
+    const { root, output, decisions } = await fixture({ explanation: "" });
+    await expect(createApprovedOnlyLibrary(root, decisions, output)).rejects.toThrow(/substantive/);
+  });
+
+  it("unassigns positive source and question weeks while retaining review notes privately", async () => {
+    const { root, output, decisions, payload, catalog } = await fixture({ week: 3 });
+    const approved = payload.records.find(row => row.questionId === "q-ready")!;
+    approved.weekChecked = true; approved.weekEvidence = "Synthetic source page labels week three";
+    await writeFile(decisions, JSON.stringify(payload));
+    await createApprovedOnlyLibrary(root, decisions, output);
+    const bank = JSON.parse(await readFile(join(output, "library", catalog.sources[0].bankFile!), "utf8")) as PreparedBank;
+    expect(bank.pkg.manifest.course.week).toBe(0);
+    expect(bank.pkg.manifest.source.axomAssignedWeek).toBeUndefined();
+    expect(bank.pkg.manifest.source.sourceWeekDeclared).toBe(false);
+    expect(bank.pkg.questions[0].week).toBe(0);
+    expect((await readFile(join(output, "library", catalog.sources[0].bankFile!), "utf8"))).not.toContain(approved.weekEvidence);
+    const receipt = await readFile(join(output, "private-receipt.json"), "utf8");
+    expect(receipt).toContain(approved.weekEvidence);
+  });
+
+  it("rejects a mismatched catalog source name before creating review decisions", async () => {
+    const { root, work, catalog } = await fixture();
+    catalog.sources[0].name = "other.pdf";
+    await writeFile(join(root, "catalog.json"), JSON.stringify(catalog));
+    await expect(createApprovalTemplate(root, join(work, "new-decisions.json"))).rejects.toThrow(/different catalog source/);
+  });
+
+  it("keeps the final candidate absent when the private receipt write fails", async () => {
+    const { root, output, decisions } = await fixture();
+    await expect(createApprovedOnlyLibrary(root, decisions, output, {
+      writePrivateReceipt: async () => { throw new Error("synthetic receipt failure"); },
+    })).rejects.toThrow(/synthetic receipt failure/);
+    await expect(readdir(output)).rejects.toThrow();
+  });
+
+  it("does not publish a candidate if a receipt writer silently writes nothing", async () => {
+    const { root, output, decisions } = await fixture();
+    await expect(createApprovedOnlyLibrary(root, decisions, output, {
+      writePrivateReceipt: async () => {},
+    })).rejects.toThrow();
+    await expect(readdir(output)).rejects.toThrow();
+  });
+
+  it("rejects the original unanswered 17-question review format explicitly", async () => {
+    const { root, output, decisions } = await fixture();
+    await writeFile(decisions, JSON.stringify({ format: "axom-private-inline-rationale-decisions", schemaVersion: 1, records: [] }));
+    await expect(createApprovedOnlyLibrary(root, decisions, output)).rejects.toThrow(/original unanswered questions/);
+  });
+
+  it("refuses a private output inside the repository", async () => {
+    const { root, decisions } = await fixture();
+    await expect(createApprovedOnlyLibrary(root, decisions, join(process.cwd(), "private-output"))).rejects.toThrow(/outside every repository/);
+  });
+});
