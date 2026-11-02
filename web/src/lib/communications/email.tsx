@@ -9,6 +9,15 @@ export const TEMPLATE_DEPENDENCIES: Record<EmailType, readonly string[]> = {
   exam_reminder: ["exam"], inactivity: ["course"], essay: ["editorial"], product_update: ["editorial"], research: ["editorial"], marketing: ["editorial"],
   pulse: ["snapshot"], export_requested: [], export_ready: ["actionUrl"], deletion_requested: [], deletion_scheduled: ["date"], deletion_cancelled: [], deletion_completed: [],
 };
+export function defaultEditorialCta(type: EmailType): string {
+  const labels: Partial<Record<EmailType, string>> = {
+    essay: "Read essay",
+    product_update: "See what’s new",
+    research: "Read the note",
+    marketing: "Explore AXOM",
+  };
+  return labels[type] ?? "Open AXOM";
+}
 export function templateReady(input: EmailInput): boolean {
   return TEMPLATE_DEPENDENCIES[input.type].every(key => {
     if (key === "snapshot") return Boolean(input.context.snapshot);
@@ -76,7 +85,7 @@ export function emailContent(input: EmailInput) {
   if (type === "weekly_report" || type === "monthly_report") { cta = type === "weekly_report" ? "View full report" : "View monthly analysis"; href = `${baseUrl}/#reports`; }
   if (type === "pulse") { cta = "Open My Pulse"; href = `${baseUrl}/pulse/${snap?.periodStart.slice(0, 4) ?? new Date().getUTCFullYear()}`; }
   if (["daily_learning", "inactivity", "exam_reminder"].includes(type)) { cta = type === "exam_reminder" ? "Open Exam Plan" : "Continue your course"; href = `${baseUrl}/#${type === "exam_reminder" ? c.exam?.route ?? "step" : "tracker"}`; }
-  if (input.editorial) { cta = input.editorial.cta || "Read essay"; href = input.editorial.url; }
+  if (input.editorial) { cta = input.editorial.cta || defaultEditorialCta(type); href = input.editorial.url; }
   if (type.startsWith("deletion") || type.startsWith("export")) { cta = type === "export_ready" ? "Get my private download" : "Open Privacy & Data"; href = input.actionUrl ?? `${baseUrl}/#privacy`; }
   const subject = input.editorial?.subject || (type === "weekly_report" && question ? `${name === "there" ? "You" : name}, ${question.value.toLocaleString("en")} questions this week.` : type === "pulse" ? `${name === "there" ? "Your" : `${name}, your`} AXOM Pulse is ready.` : titleMap[type]);
   return { title: titleMap[type], body: bodyMap[type], cta, href, subject };
@@ -131,7 +140,7 @@ export function renderAxomEmail(input: EmailInput): RenderedEmail {
             {type === "monthly_report" && snapshot?.trend.length ? <table role="presentation" width="100%" style={{ marginTop: 26 }}><tbody>{snapshot.trend.slice(-8).map(point => <tr key={point.label}><td style={{ color: muted, fontSize: 11 }}>{point.label}</td><td style={{ padding: "6px 0" }}><table role="presentation" width={`${point.accuracy ?? 0}%`} bgcolor={accent}><tbody><tr><td height="5" /></tr></tbody></table></td><td align="right" style={{ fontSize: 12 }}>{point.accuracy === null ? "No score" : `${point.accuracy}%`}</td></tr>)}</tbody></table> : null}
           </>}
           {type === "daily_games" && c.games?.map(game => <div key={game.name} style={{ borderTop: `1px solid ${line}`, padding: "20px 0" }}><h2 style={{ fontSize: 20, fontWeight: 400 }}>{game.name}</h2><p style={{ color: muted, fontSize: 13 }}>{game.detail}</p><a href={safeUrl(game.url)} style={{ color: ink, fontSize: 13 }}>Open {game.name} ↗</a></div>)}
-          {input.editorial?.imageUrl && <img src={safeUrl(input.editorial.imageUrl)} alt="Essay illustration" width="504" height="252" style={{ width: "100%", height: "auto", display: "block" }} />}
+          {input.editorial?.imageUrl && <img src={safeUrl(input.editorial.imageUrl)} alt="" width="504" height="252" style={{ width: "100%", height: "auto", display: "block" }} />}
           {input.editorial?.readingMinutes && <p style={{ font: `11px ${mono}`, color: muted }}>{input.editorial.readingMinutes} MIN READ · JAFAR FROM AXOM</p>}
           {type !== "deletion_completed" && <CTAButton href={content.href} background={ink} foreground={panel}>{content.cta}</CTAButton>}
           {showReport && <p style={{ fontSize: 11, lineHeight: "18px", color: muted }}>{snapshot?.source === "protected-copy" ? `Protected copy: ${snapshot.sourceUpdatedAt ?? "date unavailable"}. Device-only changes are not included. ` : ""}Statistics describe recorded activity, including repeat answers. Open the report for sources and denominators.</p>}
