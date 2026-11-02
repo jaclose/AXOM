@@ -131,8 +131,10 @@ export async function uploadCloudMedia(client: SupabaseClient, userId: string, s
         if (!academic) await ensureUploaded(hash, record.blob, attachment.mimeType);
         ordered[index] = { ...(academic ? { academic } : {}), blobKey, hash, byteSize: record.blob.size, updatedAt: attachment.updatedAt };
       } catch (error) {
-        failed = true;
-        failure = error;
+        if (!failed) {
+          failed = true;
+          failure = error;
+        }
       }
     }
   }

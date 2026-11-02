@@ -157,6 +157,23 @@ describe("immutable private original-file cloud storage", () => {
     expect(upload).not.toHaveBeenCalled();
   });
 
+  it("reports the first failed original after a second in-flight transfer fails", async () => {
+    const { doc, state } = await source(new Blob(["first original"], { type: "application/pdf" }));
+    state.documents.push((await source(new Blob(["second original"], { type: "application/pdf" }))).doc);
+    let releaseLater!: () => void;
+    const later = new Promise<void>(resolve => { releaseLater = resolve; });
+    upload.mockImplementation(async (_bucket, path) => {
+      if (path === `owner/${doc.checksum}`) return { error: { statusCode: "503" } };
+      await later;
+      return { error: { statusCode: "502" } };
+    });
+    const pending = uploadCloudOriginals(client, "owner", state, undefined, guard);
+    await vi.waitFor(() => expect(upload).toHaveBeenCalledTimes(2));
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    releaseLater();
+    await expect(pending).rejects.toMatchObject({ statusCode: "503" });
+  });
+
   it("retains local bytes when upload fails and retries idempotently after a lost response", async () => {
     const { doc, state } = await source(new Blob(["original"], { type: "application/pdf" }));
     upload.mockImplementationOnce(async () => ({ error: { statusCode: "503" } }));

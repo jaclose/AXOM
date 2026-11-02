@@ -99,4 +99,20 @@ describe("bounded account image uploads", () => {
     await uploadCloudMedia(client, "owner", state, guard);
     expect(upload).toHaveBeenCalledTimes(2);
   });
+
+  it("reports the first failed upload after a second in-flight upload fails", async () => {
+    const { state, hashes } = await fixture(2);
+    let releaseLater!: () => void;
+    const later = new Promise<void>(resolve => { releaseLater = resolve; });
+    upload.mockImplementation(async path => {
+      if (path === `owner/${hashes[0]}`) return { error: { statusCode: "503" } };
+      await later;
+      return { error: { statusCode: "502" } };
+    });
+    const pending = uploadCloudMedia(client, "owner", state, guard);
+    await vi.waitFor(() => expect(upload).toHaveBeenCalledTimes(2));
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    releaseLater();
+    await expect(pending).rejects.toMatchObject({ statusCode: "503" });
+  });
 });

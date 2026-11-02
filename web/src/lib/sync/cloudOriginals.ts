@@ -51,8 +51,10 @@ export async function uploadCloudOriginals(client: SupabaseClient, userId: strin
       try {
         await uploadOne(document, identity);
       } catch (error) {
-        failed = true;
-        failure = error;
+        if (!failed) {
+          failed = true;
+          failure = error;
+        }
       }
     }
   }
