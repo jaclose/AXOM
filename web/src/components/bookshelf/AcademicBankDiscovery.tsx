@@ -22,11 +22,12 @@ export function AcademicBankDiscovery() {
   const course = selectedCourse
     ? catalog.courses.find(entry => entry.id === selectedCourse.id) ?? selectedCourse
     : undefined;
+  const selectedCourseId = course?.id;
   useEffect(() => { setSelected(undefined); }, [accountId]);
   useEffect(() => {
-    if (course) { detail.current?.focus(); hadSelection.current = true; }
+    if (selectedCourseId) { detail.current?.focus(); hadSelection.current = true; }
     else if (hadSelection.current) { search.current?.focus(); hadSelection.current = false; }
-  }, [course?.id]);
+  }, [selectedCourseId]);
   return <GlassCard pad>
     <section className="academic-bank-discovery" aria-label="Available question banks">
       <PanelHeader headingLevel={2} title="Study by course" sub="Preview the weekly plan, load the weeks you need, and open their reviewed question sets."
