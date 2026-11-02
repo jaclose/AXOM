@@ -51,6 +51,10 @@ test("Locked In survives route changes and reload, with explicit goal and timer 
   }
   await page.getByRole("button", { name: /locked in/i }).click();
   await navigate(page, "soundscapes");
+  const soundscapeOpener = page.getByRole("dialog", { name: "What are you into?" });
+  await expect(soundscapeOpener).toBeVisible();
+  await expect(page.locator(".focus-checkin")).toHaveClass(/is-suspended/);
+  await soundscapeOpener.getByRole("button", { name: "Skip for now" }).click();
   await expect(page.locator(".focus-checkin")).toHaveCount(0);
   await page.evaluate(async () => { const dev = await (window as DevWindow).__AXOM_DEV__!; dev.usePomodoro.getState().start(); window.dispatchEvent(new Event("axom:focus-checkin-preview")); });
   await expect(page.locator(".focus-checkin")).toContainText(/left in this focus session/);
