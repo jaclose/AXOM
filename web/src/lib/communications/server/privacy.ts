@@ -274,6 +274,11 @@ export async function journalFeedbackForExport(service: CommunicationsService, u
     const result = await service.db.from("journal_experience_feedback")
       .select("id,user_id,rating,liked,want_more,missing,pain_points,comment,created_at", { count: "exact" })
       .eq("user_id", userId).order("created_at").order("id").range(start, start + 499);
+    // Account exports predate this optional table. During a staged rollout,
+    // PostgREST reports an absent table through either Postgres or its schema cache.
+    if (start === 0 && result.error
+      && ["42P01", "PGRST205"].includes(result.error.code ?? "")
+      && result.error.message.includes("journal_experience_feedback")) return [];
     if (result.error || !Array.isArray(result.data) || typeof result.count !== "number")
       throw new Error("journal-feedback-export-unavailable");
     if (expected === undefined) expected = result.count;

@@ -5456,6 +5456,7 @@ async function Nt(e, t) {
 	let n = [], r = /* @__PURE__ */ new Set(), i;
 	for (let a = 0;; a += 500) {
 		let o = await e.db.from("journal_experience_feedback").select("id,user_id,rating,liked,want_more,missing,pain_points,comment,created_at", { count: "exact" }).eq("user_id", t).order("created_at").order("id").range(a, a + 499);
+		if (a === 0 && o.error && ["42P01", "PGRST205"].includes(o.error.code ?? "") && o.error.message.includes("journal_experience_feedback")) return [];
 		if (o.error || !Array.isArray(o.data) || typeof o.count != "number") throw Error("journal-feedback-export-unavailable");
 		if (i === void 0 && (i = o.count), o.count !== i) throw Error("journal-feedback-export-changed");
 		for (let e of o.data) {
