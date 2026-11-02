@@ -49,6 +49,12 @@ an in-progress release. A matching [Resend product-update template draft](https:
 was imported and visually checked on 2026-11-02. It remains a draft: no sender,
 reply address, audience, campaign or delivery was configured. Recheck the copy,
 links and unsubscribe handling against the live release before publication.
+An [unsent Resend Broadcast draft](https://resend.com/broadcasts/e5b79bf2-953c-48f8-be9c-a9d717b42ed2/editor)
+now uses the same design, All Contacts with the opt-out **Product updates** Topic,
+and the [Resend per-contact unsubscribe placeholder](https://resend.com/features/broadcasts).
+The imported link was checked in a fresh editor tab. Sender and reply addresses
+remain unset, the audience has zero contacts, and no test or live email was sent.
+Its source file is `artifacts/communications/product-update-0.0.3-prebeta/product-update-resend-broadcast.html`.
 Both generators check the source manifest and refuse a stale bundle.
 
 On 2026-11-02, the ten optional Resend Topics in the
@@ -58,7 +64,7 @@ audience still has zero contacts. Their provider IDs are preserved in the
 local ignored, owner-only file
 `artifacts/communications/resend-topic-ids-2026-11-02.json` for later server
 configuration. The IDs have not been set as `RESEND_TOPIC_IDS` in production,
-and no contact sync or broadcast has occurred. The Resend preference and success
+and no contact sync or broadcast delivery has occurred. The Resend preference and success
 pages now use AXOM's Orb, Midnight colors and concise confirmation copy; both
 were visually checked and saved in the dashboard.
 

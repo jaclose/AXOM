@@ -56,11 +56,20 @@ export async function renderProductUpdateDraft() {
     }
     plainText ??= rendered.text;
     await writeFile(new URL(`product-update-${theme}.html`, output), rendered.html.replaceAll(orbUrl, 'orb.png'));
-    if (theme === 'dark') await writeFile(new URL('product-update-resend-draft.html', output), rendered.html);
+    if (theme === 'dark') {
+      await writeFile(new URL('product-update-resend-draft.html', output), rendered.html);
+      const unsubscribeLink = '<a href="https://axom.info/#communications" style="color:#b2afa8">Unsubscribe</a>';
+      if (rendered.html.split(unsubscribeLink).length !== 2) {
+        throw new Error('The broadcast unsubscribe link changed; review the renderer before exporting.');
+      }
+      await writeFile(new URL('product-update-resend-broadcast.html', output),
+        rendered.html.replace(unsubscribeLink,
+          '<a href="{{{RESEND_UNSUBSCRIBE_URL}}}" style="color:#b2afa8">Unsubscribe</a>'));
+    }
   }
   await writeFile(new URL('product-update.txt', output), `${plainText}\n`);
   await writeFile(new URL('index.html', output), reviewPage);
-  await writeFile(new URL('README.md', output), `# AXOM product-update email draft\n\nLocal visual review only. No email was sent and no audience or campaign was created. This copy describes an in-progress pre-beta; review against the shipped release before any publication.\n\nSubject: ${editorial.subject}\nPreview: ${editorial.preview}\n\nOpen \`index.html\` for dark and light views. \`product-update.txt\` is the renderer's plain-text alternative. \`product-update-resend-draft.html\` retains hosted images and links for a later Resend draft. All email HTML comes from the canonical \`renderAxomEmail\` generated bundle, SHA-256 \`${bundleHash}\`. Local review copies use a local Orb image. Re-run \`node scripts/render-product-update-draft.mjs\` after changing release notes or the renderer. Before sending, verify the release is live, links, consent, unsubscribe handling, provider configuration, and inbox rendering.\n`);
+  await writeFile(new URL('README.md', output), `# AXOM product-update email draft\n\nLocal visual review only. No email was sent. This copy describes an in-progress pre-beta; review against the shipped release before any publication.\n\nSubject: ${editorial.subject}\nPreview: ${editorial.preview}\n\nOpen \`index.html\` for dark and light views. \`product-update.txt\` is the renderer's plain-text alternative. \`product-update-resend-draft.html\` retains hosted images and AXOM links for a reusable Resend template. \`product-update-resend-broadcast.html\` replaces only the Unsubscribe target with Resend's per-contact \`{{{RESEND_UNSUBSCRIBE_URL}}}\` placeholder for a Broadcast. All email HTML comes from the canonical \`renderAxomEmail\` generated bundle, SHA-256 \`${bundleHash}\`. Local review copies use a local Orb image. Re-run \`node scripts/render-product-update-draft.mjs\` after changing release notes or the renderer. Before sending, verify the release is live, links, consent, unsubscribe handling, provider configuration, and inbox rendering.\n`);
   return { path: fileURLToPath(output), subject: editorial.subject, bundleHash };
 }
 
