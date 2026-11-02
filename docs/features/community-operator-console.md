@@ -1,6 +1,6 @@
 # Community, source-answer batch review and host console
 
-Status: **local integration and extension, release pending**. PR #30's Host/Community hardening at `3684a116` was integrated into the isolated `codex/ideas-20261101` branch. A searchable Question Set Library is being added there. No hosted migrations, verified-account provisioning, private-content publication or production deployment occurred from this branch.
+Status (2026-11-02): **local UI release pending**. PR #30's Host/Community work was integrated through Ideas. The four feature migrations `20261101190000`–`20261101193000` were applied to the hosted project, but the Host forward privacy migration `20261102160000` is still unapplied and no verified owner role is provisioned. The searchable Question Set Library is in the local release candidate. No private content was published, and real-account Community/Host acceptance remains open. See [current AI state](../AI_STATE.md) for the dated release boundary.
 
 ## Community
 
@@ -23,7 +23,7 @@ The separate Question Set Library lets a signed-in learner submit a saved set fr
 
 `20261101192000_question_set_library.sql` stores pending submissions apart from seven-day bearer links. Direct learner table access is denied. Account-bound RPCs project only the owner's submission status, pending reviewer metadata, or approved search results. Preview returns the snapshot only to the owner, an academic reviewer or an approved-set reader. Likes use an idempotent RPC. An academic reviewer must inspect and record a reason before approval or rejection; Host operator permission alone does not grant academic review. A contributor can withdraw a submission, removing it from search and future previews; previously imported private copies remain with their learners.
 
-This is a user-submitted library, not automatic certification of clinical correctness or source rights. Reviewers need independent source and rights evidence. The local migration and UI must pass PGlite, browser and account acceptance before it can be released. Search is available to signed-in AXOM accounts, not anonymous visitors.
+This is a user-submitted library, not automatic certification of clinical correctness or source rights. Reviewers need independent source and rights evidence. Local PGlite and synthetic browser checks passed; real-account acceptance remains open. Search is for signed-in AXOM accounts, not anonymous visitors.
 
 ## Batch answer confirmation
 
