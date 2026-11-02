@@ -25,7 +25,7 @@ for (const width of [1440, 390]) test(`the product bookshelf loads activities an
 
   // Use canonical import actions: no parallel bank or attempt store.
   await page.goto("/#questions");
-  await page.getByRole("button", { name: "Add your own material", exact: true }).click();
+  await page.getByRole("tab", { name: "Add material", exact: true }).click();
   await page.getByLabel("Import source type", { exact: true }).getByRole("button", { name: "Paste text", exact: true }).click();
   await page.getByLabel("Structured question text").fill("Question 1: Which sample label is Beta?\nA. Alpha\nB. Beta\nC. Gamma\nAnswer: B\nExplanation: Beta is the requested label.");
   await page.getByRole("button", { name: "Parse and review", exact: true }).click();
@@ -35,9 +35,8 @@ for (const width of [1440, 390]) test(`the product bookshelf loads activities an
   const review = page.getByLabel("I reviewed this question", { exact: true });
   if (await review.isVisible()) await review.check();
   await page.getByRole("button", { name: "Finalize import" }).click();
-  await page.getByRole("tab", { name: /Question Sets/ }).click();
-  await page.getByRole("button", { name: "Bookshelf", exact: true }).click();
   const shelf = page.getByRole("region", { name: "Question bank library", exact: true });
+  await expect(shelf).toBeVisible();
   for (const theme of ["dark", "light"]) {
     await page.locator("html").evaluate((root, value) => root.setAttribute("data-theme", value), theme);
     await shelf.scrollIntoViewIfNeeded();
@@ -55,7 +54,7 @@ for (const width of [1440, 390]) test(`the product bookshelf loads activities an
   await page.getByRole("button", { name: "Finish block", exact: true }).click();
   await page.getByRole("button", { name: "Done", exact: true }).click();
   await reloadAfterSave(page);
-  await page.getByRole("button", { name: "Bookshelf", exact: true }).click();
+  await expect(shelf).toBeVisible();
   await shelf.getByRole("button", { name: /^FTM 1,/ }).click();
   await expect(bank.locator(".book-fact").filter({ hasText: "Answered" })).toContainText("1");
   await page.keyboard.press("Escape");
