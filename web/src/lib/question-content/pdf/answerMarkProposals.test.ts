@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ImportPackage, PackageQuestion } from "../package";
-import { assertPackageSourceIdentity, buildAnswerMarkProposals, vectorCheckBoxes, type AnswerMarkPage } from "./answerMarkProposals";
+import { assertPackageSourceIdentity, buildAnswerMarkProposals, vectorCheckBoxes, vectorOutlineBoxes, type AnswerMarkPage } from "./answerMarkProposals";
 
 const mark = { left: 15, top: 277, width: 26, height: 26 };
 const labels = [{ key: "A", x: 43, y: 255, height: 20 }, { key: "B", x: 43, y: 206, height: 20 }];
 const page = (number: number, figures = [] as typeof mark[]): AnswerMarkPage =>
-  ({ page: number, height: 500, figures, labels, vectorChecks: [] });
+  ({ page: number, height: 500, figures, labels, vectorChecks: [], outlines: [] });
 const question = (id = "source-q1", answerPage = 2): PackageQuestion => ({
   id, source: { filename: "synthetic.pdf", page: 1 }, stem: [{ type: "text", text: "Which invented gate opens?" }],
   choices: ["A", "B"].map(label => ({ id: `${id}-${label}`, label, blocks: [{ type: "text", text: `Gate ${label}` }] })),
@@ -101,12 +101,53 @@ it("rejects a stale bank or wrong source identity before reusing its receipt", (
     .toThrow(/answer-reveal asset source identity/);
 });
 
-const ops = { save: 10, restore: 11, transform: 12, fill: 22, eoFill: 23, setFillRGBColor: 59, constructPath: 91 };
+const ops = { save: 10, restore: 11, transform: 12, stroke: 20, fill: 22, eoFill: 23,
+  setStrokeRGBColor: 58, setFillRGBColor: 59, constructPath: 91 };
 const tick = [0, 15, 61, 1, 0, 30.5, 1, 40, 0, 1, 100, 82.6, 1, 100, 100, 1, 35, 30.5, 4];
+const outlinedChoice = [0, 80, 200, 1, 280, 200, 1, 280, 230, 1, 80, 230, 4];
+const roundedChoice = [0, 0, 0, 2, 0, 4, 4, 8, 8, 8, 1, 192, 8,
+  2, 196, 8, 200, 4, 200, 0, 1, 200, -24, 2, 200, -28, 196, -32, 192, -32,
+  1, 8, -32, 2, 4, -32, 0, -28, 0, -24, 4];
 
 it("proposes only the strict green vector tick, preserving its bounds", () => {
   const accepted = vectorCheckBoxes({ fnArray: [59, 91], argsArray: [["#00c800"], [22, [tick]]] }, ops);
   expect(accepted).toEqual([{ left: 0, bottom: 0, right: 100, top: 100 }]);
   expect(vectorCheckBoxes({ fnArray: [59, 91], argsArray: [["#00c800"], [22, [[0,0,0,1,1,0,1,1,1,4]]]] }, ops)).toEqual([]);
   expect(vectorCheckBoxes({ fnArray: [59, 91], argsArray: [["#c80000"], [22, [tick]]] }, ops)).toEqual([]);
+});
+
+it("finds colored rectangular and transformed rounded choice outlines as review evidence", () => {
+  expect(vectorOutlineBoxes({ fnArray: [58, 91], argsArray: [["#0070c0"], [20, [outlinedChoice]]] }, ops))
+    .toEqual([{ left: 80, bottom: 200, right: 280, top: 230 }]);
+  expect(vectorOutlineBoxes({ fnArray: [10, 12, 58, 91, 11], argsArray: [[], [1, 0, 0, 1, 84, 164],
+    ["#800080"], [20, [roundedChoice]], []] }, ops))
+    .toEqual([{ left: 84, bottom: 132, right: 284, top: 172 }]);
+  expect(vectorOutlineBoxes({ fnArray: [58, 91], argsArray: [["#042433"], [20, [outlinedChoice]]] }, ops))
+    .toHaveLength(1);
+  expect(vectorOutlineBoxes({ fnArray: [58, 91], argsArray: [["#0070c0"], [22, [outlinedChoice]]] }, ops)).toEqual([]);
+});
+
+it("suggests only an answer-page outline with one same-row choice, never scoring it", () => {
+  const original = question();
+  const outline = { left: 80, bottom: 200, right: 280, top: 230 };
+  const proposal = buildAnswerMarkProposals([original], [page(1), { ...page(2), outlines: [outline] }])[0];
+  expect(proposal).toMatchObject({ suggestedChoice: "B", reviewRequired: true, reviewReason: "visual-mark",
+    evidence: [{ kind: "native-choice-outline", adjacentChoice: "B" }] });
+  expect(original.correctAnswer).toBeUndefined();
+  expect(buildAnswerMarkProposals([original], [{ ...page(1), outlines: [outline] },
+    { ...page(2), outlines: [outline] }])).toEqual([]);
+});
+
+it("suppresses decorative, elliptical and ambiguous outlines", () => {
+  const outline = { left: 80, bottom: 200, right: 280, top: 230 };
+  const decorative = { left: 80, bottom: 300, right: 280, top: 330 };
+  expect(buildAnswerMarkProposals([question()], [page(1), { ...page(2), outlines: [decorative] }])).toEqual([]);
+  const ambiguous = buildAnswerMarkProposals([question()], [page(1), { ...page(2), outlines: [outline,
+    { left: 80, bottom: 250, right: 280, top: 280 }] }])[0];
+  expect(ambiguous).toMatchObject({ reviewReason: "multiple-marks", reviewRequired: true });
+  expect(ambiguous.suggestedChoice).toBeUndefined();
+  const ellipse = [0, 80, 200, 2, 80, 230, 280, 230, 280, 215,
+    2, 280, 200, 80, 200, 80, 215, 4];
+  expect(vectorOutlineBoxes({ fnArray: [58, 91], argsArray: [["#0070c0"], [20, [ellipse]]] }, ops)).toEqual([]);
+  expect(vectorOutlineBoxes({ fnArray: [91], argsArray: [[20, [outlinedChoice]]] }, ops)).toEqual([]);
 });

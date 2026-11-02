@@ -41,8 +41,8 @@ const checkpoint = () => {
 };
 const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
 const previousVersion = catalog.preparerVersion ?? 1;
-// Version 5 adds review receipts to existing version-4 libraries without reparsing their banks.
-const PREPARER_VERSION = 5;
+// Version 6 adds outline proposals in separate receipts, preserving version-5 evidence.
+const PREPARER_VERSION = 6;
 const sha256 = (bytes: Uint8Array | string): string => createHash("sha256").update(bytes).digest("hex");
 
 /** A separate private receipt: a mark is never copied into a scoring key. */
@@ -53,10 +53,10 @@ async function ensureAnswerMarkReceipt(entry: Entry, bankFile: string, originalF
   const bank = JSON.parse(bankBytes.toString("utf8")) as PreparedBank;
   if (!Array.isArray(bank.pkg?.questions)) throw new Error("Prepared PDF bank is not readable for answer-mark review.");
   assertPackageSourceIdentity(bank.pkg, entry);
-  const receiptFile = join(out, "review", "answer-marks", `${entry.sha256}-${bankSha256}.json`);
+  const receiptFile = join(out, "review", "answer-marks-v2", `${entry.sha256}-${bankSha256}.json`);
   if (existsSync(receiptFile)) {
     const receipt = JSON.parse(readFileSync(receiptFile, "utf8")) as Record<string, unknown>;
-    if (receipt.format !== "axom-private-answer-mark-proposals" || receipt.schemaVersion !== 1
+    if (receipt.format !== "axom-private-answer-mark-proposals" || receipt.schemaVersion !== 2
       || receipt.sourceSha256 !== entry.sha256 || receipt.bankSha256 !== bankSha256
       || receipt.questionCount !== bank.pkg.questions.length || !Array.isArray(receipt.proposals)) {
       throw new Error("Answer-mark review receipt changed; inspect it before resuming.");
@@ -81,7 +81,7 @@ async function ensureAnswerMarkReceipt(entry: Entry, bankFile: string, originalF
     return { ...proposal, questionSha256: sha256(JSON.stringify(question)) };
   });
   const receipt = {
-    format: "axom-private-answer-mark-proposals", schemaVersion: 1, sourceSha256: entry.sha256,
+    format: "axom-private-answer-mark-proposals", schemaVersion: 2, sourceSha256: entry.sha256,
     bankSha256, questionCount: bank.pkg.questions.length, pairedAnswerPages,
     proposals: reviewed,
   };
