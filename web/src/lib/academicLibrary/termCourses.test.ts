@@ -106,6 +106,15 @@ describe("downloaded term practice", () => {
       { id: "local", code: "BPM", name: "Module 3", termId: "term", files: 0, modules: [] }];
     expect(termQuizSelection("Term 1", "account", state, [course(1), { ...course(3), current_revision_id: "different" }]).questionIds).toEqual(["catalog", "owner"]);
   });
+  it("keeps a known term's local practice available while an unrelated legacy receipt needs an offline catalog", () => {
+    const state = workspace([
+      receipt(1, ["known-term"], { term: "Term 5" }),
+      receipt(2, ["older-unknown"], { term: undefined }),
+    ], [question("known-term"), question("older-unknown")]);
+    expect(termQuizNeedsCatalog("account", state)).toBe(true);
+    expect(termQuizSelection("Term 5", "account", state).questionIds).toEqual(["known-term"]);
+    expect(termQuizSelection("Term 1", "account", state).questionIds).toEqual([]);
+  });
   it("excludes a receipt whose saved term conflicts with exact catalog metadata", () => {
     const state = workspace([receipt(1, ["q-1"])], [question("q-1")]);
     expect(termQuizSelection("Term 1", "account", state, [course(1, "Term 2")]).questionIds).toEqual([]);

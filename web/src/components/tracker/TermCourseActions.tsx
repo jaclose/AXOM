@@ -32,7 +32,9 @@ export function TermCourseActions({ term, accountId, courses, disabled, onBusyCh
   }, [term, accountId, needsCatalog, catalogRetry]);
   const practiceCatalog = legacyCatalog ?? courses;
   const selection = termQuizSelection(term, accountId, workspace, practiceCatalog);
-  const practicePending = needsCatalog && !legacyCatalog;
+  // A failed lookup must not hide questions whose downloaded receipt already
+  // identifies this term. Unknown older receipts stay out of the selection.
+  const practicePending = needsCatalog && !legacyCatalog && !catalogError;
   const [busy, setBusy] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [message, setMessage] = useState("");
@@ -107,7 +109,11 @@ export function TermCourseActions({ term, accountId, courses, disabled, onBusyCh
     <p className="course-term-hint">{selection.questionIds.length} answer-ready {selection.questionIds.length === 1 ? "question" : "questions"} on this device. Downloads keep your weekly plan unchanged.</p>
     {disabled && !busy && <p role="status">Another course download is running. You can download this term when it finishes.</p>}
     {practicePending && !catalogError && <p role="status">Reading saved course details for term practice…</p>}
-    {catalogError && <div role="alert"><p>{catalogError}</p><GButton size="sm" onClick={() => setCatalogRetry(value => value + 1)}>Retry term practice</GButton></div>}
+    {catalogError && <div role="alert"><p>{catalogError}</p>
+      <p>{selection.questionIds.length
+        ? `You can practice the answer-ready questions already identified as ${term} on this device. Older downloads without a saved term are excluded until their course details can be checked.`
+        : `Older downloads without a saved term cannot be included until their course details can be checked.`}</p>
+      <GButton size="sm" onClick={() => setCatalogRetry(value => value + 1)}>Retry term practice</GButton></div>}
     {overLimit && <p>Term practice supports up to {MAX_COURSE_QUIZ_QUESTIONS} questions. Choose a smaller set in Question Bank.</p>}
     <p className="course-term-progress" role="status" aria-live="polite">{message}{stopping ? " Finishing the current course before stopping." : ""}</p>
     {error && <p role="alert">{error}</p>}

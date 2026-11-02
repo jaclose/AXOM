@@ -121,6 +121,10 @@ describe("term course actions", () => {
     mount();
     expect(screen.getByRole("button", { name: "Practice Term 5" }).hasAttribute("disabled")).toBe(true);
     await screen.findByText("Saved course details are offline.");
+    expect(screen.getByRole("button", { name: "Practice Term 5" }).hasAttribute("disabled")).toBe(false);
+    expect(screen.getByRole("alert").textContent).toContain("Older downloads without a saved term are excluded");
+    fireEvent.click(screen.getByRole("button", { name: "Practice Term 5" }));
+    expect(mocks.launch).toHaveBeenCalledWith({ module: "Term 5", term: "Term 5", questionIds: ["ready-question"], setIds: ["ready-set"] });
     fireEvent.click(screen.getByRole("button", { name: "Retry term practice" }));
     await act(async () => {});
     expect(screen.getByRole("button", { name: "Practice Term 5" }).hasAttribute("disabled")).toBe(false);
