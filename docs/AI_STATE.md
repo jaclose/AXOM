@@ -16,7 +16,8 @@ coordination board before editing. At this snapshot, remote `main` was
 [PR #78](https://github.com/jaclose/AXOM/pull/78) are merged there. The
 frontier's `0.0.3-prebeta` version and [release notes](../CHANGELOG.md) are
 **local release preparation**, with push and production held for JD's follow-up.
-No later production deployment or authenticated acceptance is established here.
+This handoff does not establish deployment or authenticated acceptance of the
+frontier-only features.
 
 The last recorded web production check was PR #59 on 2026-11-01: signed-in
 Question Bank and Community Uploads loaded. A 2026-11-02 read-only production
