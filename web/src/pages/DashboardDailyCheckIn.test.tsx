@@ -168,7 +168,7 @@ describe("Dashboard Daily Check-In", () => {
     const option = screen.getByRole("checkbox", { name: /A short note after an energy check/ }) as HTMLInputElement;
     expect(option.checked).toBe(false);
     fireEvent.click(option);
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     expect(useStore.getState().profile.dashboardLayout?.widgets.winDay?.preferences).toMatchObject({ writing: true });
 
     fireEvent.click(screen.getByRole("button", { name: "Log energy: Low" }));
