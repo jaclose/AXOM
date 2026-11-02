@@ -119,6 +119,31 @@ async function fixture(options: { image?: boolean; explanation?: string; week?: 
   return { work, root, bank, catalog, decisions, payload, output: join(work, "approved") };
 }
 
+async function appendSyntheticBank(root: string, catalog: PrivateLibraryCatalog, template: PreparedBank,
+  index: number, blocked: boolean) {
+  const original = Buffer.from(JSON.stringify({ syntheticSource: index }));
+  const checksum = sha(original);
+  const sourceName = `synthetic-${index}.json`;
+  const catalogName = blocked ? `review-${index}.json` : sourceName;
+  const originalFile = `sources/${checksum}.json`;
+  const bankFile = `banks/${checksum}/bank.json`;
+  const bank = structuredClone(template);
+  bank.pkg.manifest.bank.id = `synthetic-bank-${index}`;
+  bank.pkg.manifest.source.filename = sourceName;
+  for (const question of bank.pkg.questions) {
+    question.source.filename = sourceName;
+    question.provenance.sourceChecksum = `sha256:${checksum}`;
+  }
+  catalog.sources.push({ id: `source-${checksum}`, name: catalogName, sourcePath: `PRIVATE/SYNTHETIC/${catalogName}`,
+    checksum, module: "FTM 1", status: "prepared", reason: "Synthetic source binding fixture",
+    bankFile, originalFile, ready: 1, review: 1 });
+  for (const [path, bytes] of [[originalFile, original], [bankFile, Buffer.from(JSON.stringify(bank))]] as const) {
+    const file = join(root, path);
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, bytes);
+  }
+}
+
 function syntheticTeaching(): NonNullable<PackageQuestion["teaching"]> {
   return { version: 1, answerLabel: "A", whyCorrect: "The invented first option matches the synthetic source.",
     mechanism: "The synthetic mechanism follows from the invented finding.",
@@ -311,11 +336,71 @@ describe("approved-only private candidate", () => {
     expect(receipt).toContain(approved.weekEvidence);
   });
 
-  it("rejects a mismatched catalog source name before creating review decisions", async () => {
+  it("records a mismatched catalog source name in a private blocker receipt", async () => {
     const { root, work, catalog } = await fixture();
     catalog.sources[0].name = "other.pdf";
     await writeFile(join(root, "catalog.json"), JSON.stringify(catalog));
-    await expect(createApprovalTemplate(root, join(work, "new-decisions.json"))).rejects.toThrow(/different catalog source/);
+    const decisions = join(work, "new-decisions.json");
+    await expect(createApprovalTemplate(root, decisions)).resolves.toMatchObject({ records: 0, blockedSources: 1 });
+    const receipt = JSON.parse(await readFile(`${decisions}.blocked-sources.json`, "utf8"));
+    expect(receipt.blockedSources).toMatchObject([{ sourceId: catalog.sources[0].id, reason: "A bank names a different catalog source file." }]);
+  });
+
+  it("emits pending decisions for 857 valid banks and separately binds two source-identity blockers", async () => {
+    const { root, work, bank, catalog, output } = await fixture();
+    for (let index = 1; index <= 858; index++) await appendSyntheticBank(root, catalog, bank, index, index > 856);
+    const catalogBytes = JSON.stringify(catalog);
+    await writeFile(join(root, "catalog.json"), catalogBytes);
+    const decisionsFile = join(work, "partial-decisions.json");
+    await expect(createApprovalTemplate(root, decisionsFile)).resolves.toMatchObject({ records: 857 * 2, blockedSources: 2 });
+    const decisions = JSON.parse(await readFile(decisionsFile, "utf8")) as ApprovalDecisions;
+    const receiptBytes = await readFile(`${decisionsFile}.blocked-sources.json`);
+    const receipt = JSON.parse(receiptBytes.toString("utf8"));
+    expect(decisions.catalogSha256).toBe(sha(catalogBytes));
+    expect(decisions.blockedSourcesReceiptSha256).toBe(sha(receiptBytes));
+    expect(decisions.records).toHaveLength(857 * 2);
+    expect(decisions.records.every(row => row.status === "pending" && row.rightsStatus === "pending"
+      && !row.sourceChecked && !row.filingChecked && !row.weekChecked && !row.clinicalChecked
+      && !row.explanationChecked && !row.assetContentChecked && !row.weekEvidence && !row.rightsEvidence
+      && !row.reviewer && !row.reviewedAt)).toBe(true);
+    expect(receipt).toMatchObject({ format: "axom-approved-template-blockers", catalogSha256: sha(catalogBytes) });
+    expect(receipt.blockedSources).toHaveLength(2);
+    expect(receipt.blockedSources.every((row: { sourceChecksum: string; bankSha256: string; reason: string }) =>
+      /^[a-f0-9]{64}$/.test(row.sourceChecksum) && /^[a-f0-9]{64}$/.test(row.bankSha256)
+      && /different catalog source/.test(row.reason))).toBe(true);
+    await expect(readdir(output)).rejects.toThrow();
+  }, 30_000);
+
+  it("rejects blocked-source decisions and stale catalog, decision, or blocker receipt", async () => {
+    const { root, work, bank, catalog, payload, output } = await fixture();
+    await appendSyntheticBank(root, catalog, bank, 1, true);
+    await appendSyntheticBank(root, catalog, bank, 2, true);
+    const catalogBytes = JSON.stringify(catalog);
+    await writeFile(join(root, "catalog.json"), catalogBytes);
+    const decisionsFile = join(work, "partial-decisions.json");
+    await createApprovalTemplate(root, decisionsFile);
+    const decisions = JSON.parse(await readFile(decisionsFile, "utf8")) as ApprovalDecisions;
+    const receiptFile = `${decisionsFile}.blocked-sources.json`;
+    const receiptBytes = await readFile(receiptFile);
+    decisions.records.push({ ...decisions.records[0], sourceId: catalog.sources[1].id });
+    await writeFile(decisionsFile, JSON.stringify(decisions));
+    await expect(createApprovedOnlyLibrary(root, decisionsFile, output)).rejects.toThrow(/unresolved source identity/);
+    decisions.records.pop();
+    catalog.version = "changed-catalog";
+    await writeFile(join(root, "catalog.json"), JSON.stringify(catalog));
+    await writeFile(decisionsFile, JSON.stringify(decisions));
+    await expect(createApprovedOnlyLibrary(root, decisionsFile, output)).rejects.toThrow(/catalog changed since review/);
+    catalog.version = "synthetic-v1";
+    await writeFile(join(root, "catalog.json"), catalogBytes);
+    const approved = payload.records.find(row => row.questionId === "q-ready")!;
+    Object.assign(decisions.records.find(row => row.questionId === "q-ready")!, approved, { answerSha256: "0".repeat(64) });
+    await writeFile(decisionsFile, JSON.stringify(decisions));
+    await expect(createApprovedOnlyLibrary(root, decisionsFile, output)).rejects.toThrow(/no longer matches/);
+    decisions.records.find(row => row.questionId === "q-ready")!.answerSha256 = approved.answerSha256;
+    await writeFile(decisionsFile, JSON.stringify(decisions));
+    await writeFile(receiptFile, `${receiptBytes.toString("utf8")} `);
+    await expect(createApprovedOnlyLibrary(root, decisionsFile, output)).rejects.toThrow(/blocked-source receipt changed/);
+    await expect(readdir(output)).rejects.toThrow();
   });
 
   it.each([1, 2])("uses one canonical bank when %i same-ID duplicate-linked copies are present", async copies => {

@@ -45,7 +45,24 @@ export interface ApprovalDecisions {
   format: typeof FORMAT;
   schemaVersion: 1;
   catalogSha256: string;
+  blockedSourcesReceiptSha256?: string;
   records: ApprovalRecord[];
+}
+
+interface BlockedSource {
+  sourceId: string;
+  sourceChecksum: string;
+  bankSha256: string;
+  catalogName: string;
+  bankSourceName: string;
+  reason: string;
+}
+
+interface BlockedSourcesReceipt {
+  format: "axom-approved-template-blockers";
+  schemaVersion: 1;
+  catalogSha256: string;
+  blockedSources: BlockedSource[];
 }
 
 function fail(message: string): never { throw new Error(message); }
@@ -106,6 +123,8 @@ function readDecisions(value: unknown): ApprovalDecisions {
     fail("The 17-question offline review export binds original unanswered questions. Apply its source answers in a separately verified private candidate before creating approval decisions.");
   if (!file || file.format !== FORMAT || file.schemaVersion !== 1 || !HEX.test(file.catalogSha256) || !Array.isArray(file.records))
     fail("This is not an AXOM approved-question decision file.");
+  if (file.blockedSourcesReceiptSha256 !== undefined && !HEX.test(file.blockedSourcesReceiptSha256))
+    fail("The blocked-source receipt fingerprint is invalid.");
   const seen = new Set<string>();
   for (const row of file.records) {
     if (!row || ![row.sourceId, row.questionId, row.reviewer, row.rightsEvidence, row.weekEvidence].every(v => typeof v === "string")
@@ -123,14 +142,20 @@ function readDecisions(value: unknown): ApprovalDecisions {
   }
   return file;
 }
+class SourceIdentityMismatch extends Error {}
+function sourceIdentityFail(message: string): never { throw new SourceIdentityMismatch(message); }
+function sourceName(name: string): string {
+  try { return safeName(name); }
+  catch (error) { sourceIdentityFail((error as Error).message); }
+}
 function assertSourceIdentity(source: PrivateLibraryCatalog["sources"][number], bank: PreparedBank) {
-  if (safeName(bank.pkg.manifest.source.filename) !== safeName(source.name)) fail("A bank names a different catalog source file.");
+  if (sourceName(bank.pkg.manifest.source.filename) !== sourceName(source.name)) sourceIdentityFail("A bank names a different catalog source file.");
   for (const question of bank.pkg.questions) {
-    if (question.provenance.sourceChecksum !== `sha256:${source.checksum}`) fail("A question does not match its catalog source checksum.");
-    if (safeName(question.source.filename) !== bank.pkg.manifest.source.filename) fail("A question names a different source file.");
+    if (question.provenance.sourceChecksum !== `sha256:${source.checksum}`) sourceIdentityFail("A question does not match its catalog source checksum.");
+    if (sourceName(question.source.filename) !== bank.pkg.manifest.source.filename) sourceIdentityFail("A question names a different source file.");
     for (const asset of question.assets) {
-      safeName(asset.filename);
-      if (asset.sourceFile && safeName(asset.sourceFile) !== bank.pkg.manifest.source.filename) fail("A figure names a different source file.");
+      sourceName(asset.filename);
+      if (asset.sourceFile && sourceName(asset.sourceFile) !== bank.pkg.manifest.source.filename) sourceIdentityFail("A figure names a different source file.");
     }
   }
 }
@@ -305,28 +330,64 @@ function canonicalBankSources(catalog: PrivateLibraryCatalog): Map<string, Priva
   return byId;
 }
 
+function readBlockedSourcesReceipt(value: unknown): BlockedSourcesReceipt {
+  const receipt = value as BlockedSourcesReceipt | undefined;
+  if (!receipt || receipt.format !== "axom-approved-template-blockers" || receipt.schemaVersion !== 1
+    || !HEX.test(receipt.catalogSha256) || !Array.isArray(receipt.blockedSources) || !receipt.blockedSources.length)
+    fail("The blocked-source receipt is invalid.");
+  const seen = new Set<string>();
+  for (const item of receipt.blockedSources) {
+    if (!item || ![item.sourceId, item.catalogName, item.bankSourceName, item.reason].every(value => typeof value === "string" && value.length > 0)
+      || ![item.sourceChecksum, item.bankSha256].every(value => typeof value === "string" && HEX.test(value))
+      || seen.has(item.sourceId)) fail("The blocked-source receipt has an invalid source identity.");
+    seen.add(item.sourceId);
+  }
+  return receipt;
+}
+
 /** Generate a metadata-only, all-pending template. A person must inspect sources before approval. */
-export async function createApprovalTemplate(preparedRoot: string, destination: string): Promise<{ records: number }> {
+export async function createApprovalTemplate(preparedRoot: string, destination: string): Promise<{
+  records: number; blockedSources: number; blockedReceiptPath?: string }> {
   const root = await privateRoot(preparedRoot);
   const target = await assertOutsideRepo(destination);
   if (target === root || target.startsWith(`${root}${sep}`)) fail("Review decisions must be outside the prepared library.");
   const catalogBytes = await readFile(await inside(root, "catalog.json"));
   const catalog = readCatalog(JSON.parse(catalogBytes.toString("utf8")));
   const records: ApprovalRecord[] = [];
+  const blockedSources: BlockedSource[] = [];
   for (const source of canonicalBankSources(catalog).values()) {
+    if (!source.bankFile) fail("A canonical source lacks a bank.");
     const bankBytes = await readFile(await inside(root, source.bankFile));
+    const bankSha256 = sha(bankBytes);
     const bank = readPreparedBank(JSON.parse(bankBytes.toString("utf8")));
-    assertSourceIdentity(source, bank);
+    try { assertSourceIdentity(source, bank); }
+    catch (error) {
+      if (!(error instanceof SourceIdentityMismatch)) throw error;
+      blockedSources.push({ sourceId: source.id, sourceChecksum: source.checksum, bankSha256,
+        catalogName: source.name, bankSourceName: bank.pkg.manifest.source.filename, reason: error.message });
+      continue;
+    }
     for (const question of bank.pkg.questions) records.push({ sourceId: source.id, sourceChecksum: source.checksum,
-      bankSha256: sha(bankBytes), questionId: question.id, ...questionApprovalHashes(question), status: "pending",
+      bankSha256, questionId: question.id, ...questionApprovalHashes(question), status: "pending",
       sourceChecked: false, filingChecked: false, weekChecked: false, weekEvidence: "",
       clinicalChecked: false, explanationChecked: false, assetContentChecked: false,
       rightsStatus: "pending", rightsEvidence: "", reviewer: "", reviewedAt: "" });
   }
   records.sort((a, b) => a.sourceId.localeCompare(b.sourceId) || a.questionId.localeCompare(b.questionId));
-  const value: ApprovalDecisions = { format: FORMAT, schemaVersion: 1, catalogSha256: sha(catalogBytes), records };
+  const catalogSha256 = sha(catalogBytes);
+  let blockedSourcesReceiptSha256: string | undefined;
+  if (blockedSources.length) {
+    const receipt: BlockedSourcesReceipt = { format: "axom-approved-template-blockers", schemaVersion: 1,
+      catalogSha256, blockedSources };
+    const receiptBytes = JSON.stringify(receipt, null, 2);
+    await writeFile(`${target}.blocked-sources.json`, receiptBytes, { flag: "wx", mode: 0o600 });
+    blockedSourcesReceiptSha256 = sha(receiptBytes);
+  }
+  const value: ApprovalDecisions = { format: FORMAT, schemaVersion: 1, catalogSha256,
+    ...(blockedSourcesReceiptSha256 ? { blockedSourcesReceiptSha256 } : {}), records };
   await writeFile(target, JSON.stringify(value, null, 2), { flag: "wx", mode: 0o600 });
-  return { records: records.length };
+  return { records: records.length, blockedSources: blockedSources.length,
+    ...(blockedSources.length ? { blockedReceiptPath: `${target}.blocked-sources.json` } : {}) };
 }
 
 /** Never mutates the prepared library. The output contains approved question rows only. */
@@ -344,6 +405,20 @@ export async function createApprovedOnlyLibrary(preparedRoot: string, decisionsF
   const decisions = readDecisions(JSON.parse(decisionBytes.toString("utf8")));
   if (sha(catalogBytes) !== decisions.catalogSha256) fail("The prepared library catalog changed since review.");
   const sourcesById = canonicalBankSources(catalog);
+  if (decisions.blockedSourcesReceiptSha256) {
+    const receiptBytes = await readFile(`${decisionsFile}.blocked-sources.json`);
+    if (sha(receiptBytes) !== decisions.blockedSourcesReceiptSha256) fail("The blocked-source receipt changed since template creation.");
+    const receipt = readBlockedSourcesReceipt(JSON.parse(receiptBytes.toString("utf8")));
+    if (receipt.catalogSha256 !== decisions.catalogSha256) fail("The blocked-source receipt names a different catalog.");
+    for (const item of receipt.blockedSources) {
+      const source = sourcesById.get(item.sourceId);
+      if (!source?.bankFile || source.checksum !== item.sourceChecksum
+        || sha(await readFile(await inside(root, source.bankFile))) !== item.bankSha256)
+        fail("A blocked source changed since template creation.");
+      if (decisions.records.some(row => row.sourceId === item.sourceId))
+        fail("A review decision names a source with unresolved source identity.");
+    }
+  }
   const approved = decisions.records.filter(row => row.status === "approved");
   if (!approved.length) fail("No explicitly approved questions are in this review file. Nothing was written.");
   const bySource = new Map<string, ApprovalRecord[]>();
