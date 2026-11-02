@@ -15,6 +15,11 @@ builds the web app and serves `web/dist`. `.vercelignore` intentionally limits u
 shared release-note scripts and the AI proxy core are included for builds/tests.
 Root `api/` compatibility rewrites still exist; account/data name-login handlers return
 410. They are not the account provisioning path.
+The SPA fallback excludes `/assets/`. If a deployment no longer contains a hashed
+JavaScript or CSS file, the request must fail as a 404 instead of serving HTML under
+an asset URL. Asset responses use Vercel's revalidation default rather than a
+one-year browser cache rule, so a transient missing-file response cannot stay
+cached as an immutable app file.
 
 `npm run release:doctor` checks local release prerequisites. `npm run release:web`
 creates the web package; `npm run release` runs the native release path as documented.

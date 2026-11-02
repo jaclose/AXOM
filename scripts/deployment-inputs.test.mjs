@@ -14,6 +14,23 @@ const bankRegistry = 'web/src/lib/question-content/knownBanks.ts';
 const fixtureFiles = execFileSync('git', ['-C', repo, 'ls-files', 'fixtures'], { encoding: 'utf8' })
   .trim().split('\n').filter(Boolean);
 
+test('SPA fallback leaves missing assets as non-immutable 404s', () => {
+  const config = JSON.parse(readFileSync(join(repo, 'vercel.json'), 'utf8'));
+  const fallback = config.rewrites.at(-1);
+  assert.equal(fallback.destination, '/index.html');
+  const matchesFallback = new RegExp(`^${fallback.source}$`);
+  for (const path of ['/', '/journal', '/course-library/term-4']) {
+    assert.equal(matchesFallback.test(path), true, `${path} remains an app route`);
+  }
+  for (const path of ['/assets', '/assets/', '/assets/missing.js', '/assets/missing.css']) {
+    assert.equal(matchesFallback.test(path), false, `${path} must not serve index.html`);
+  }
+  assert.equal(config.headers.some(({ source }) => source.startsWith('/assets/')), false,
+    'a missing asset must not inherit an immutable cache header');
+  assert.equal(config.headers.find(({ source }) => source === '/version.json')?.headers[0]?.value, 'no-store');
+  assert.equal(config.headers.find(({ source }) => source === '/sw.js')?.headers[0]?.value, 'no-cache');
+});
+
 async function withDeployment(t, { ignoreText = ignore, registrySource } = {}) {
   const source = mkdtempSync(join(tmpdir(), 'axom-deployment-test-source-'));
   const target = mkdtempSync(join(tmpdir(), 'axom-deployment-test-target-'));

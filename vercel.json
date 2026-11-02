@@ -7,8 +7,7 @@
   "headers": [
     { "source": "/version.json", "headers": [{ "key": "Cache-Control", "value": "no-store" }] },
     { "source": "/sw.js", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
-    { "source": "/index.html", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
-    { "source": "/assets/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }] }
+    { "source": "/index.html", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }
   ],
   "redirects": [{ "source": "/pulse/:year", "destination": "/#pulse?year=:year", "permanent": false }],
   "rewrites": [
@@ -23,6 +22,6 @@
     { "source": "/api/data/:userId", "destination": "/api/data?userId=:userId" },
     { "source": "/api/ai/:feature", "destination": "/api/ai?feature=:feature" },
     { "source": "/api/(.*)", "destination": "/api/$1" },
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/((?!assets(?:/|$)).*)", "destination": "/index.html" }
   ]
 }
