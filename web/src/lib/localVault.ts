@@ -546,6 +546,7 @@ async function writeVault(
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
     let conflict: VaultConflictError | null = null;
+    let chunkWriteFailure: Error | null = null;
     let settled = false;
 
     const write = (current: string | undefined, previous: readonly (string | undefined)[]) => {
@@ -572,7 +573,20 @@ async function writeVault(
         }
       }
       if (plan.manifest) {
-        plan.chunks.forEach((chunk, index) => store.put(chunk, `${plan.manifest!.chunkPrefix}:${index}`));
+        // Preserve unchanged chunks so a small edit does not rewrite megabytes.
+        plan.chunks.forEach((chunk, index) => {
+          const key = `${plan.manifest!.chunkPrefix}:${index}`;
+          const existing = store.get(key);
+          existing.onsuccess = () => {
+            if (existing.result === chunk) return;
+            try {
+              store.put(chunk, key);
+            } catch (error) {
+              chunkWriteFailure = error instanceof Error ? error : new Error(String(error));
+              tx.abort();
+            }
+          };
+        });
       }
       store.put(plan.storedValue, name);
       if (userId) {
@@ -615,12 +629,12 @@ async function writeVault(
     tx.onerror = () => {
       if (conflict || settled) return;
       db.close();
-      reject(tx.error ?? new Error("Local vault transaction failed"));
+      reject(chunkWriteFailure ?? tx.error ?? new Error("Local vault transaction failed"));
       settled = true;
     };
     tx.onabort = () => {
       db.close();
-      if (!settled) reject(conflict ?? tx.error ?? new Error("Local vault transaction failed"));
+      if (!settled) reject(conflict ?? chunkWriteFailure ?? tx.error ?? new Error("Local vault transaction failed"));
       settled = true;
     };
   });

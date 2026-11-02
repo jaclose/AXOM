@@ -20,7 +20,7 @@ import { instantiateBlueprint, duplicateInstall, reconcileBlueprint } from "./bl
 import {
   APP_VERSION_LABEL, DEFAULT_CLOCK_PREFERENCES, DEFAULT_DASHBOARD_WIDGETS, DEFAULT_HIDDEN_DASHBOARD_WIDGETS,
   DEFAULT_TIME_ZONE_PREFERENCE, STORED_DASHBOARD_WIDGET_IDS,
-  defaultProductivityTrackers,
+  defaultProductivityTrackers, legacyProductivityTrackerDefaults,
   driveResourceFields, makeSeed, SCHEMA_VERSION, SGU_DRIVES,
 } from "./seed";
 import { dayKey, isoDate } from "./scoring";
@@ -2702,11 +2702,16 @@ function matchProductivityTracker(trackers: ProductivityTracker[] = [], type: st
 function normalizeProductivityTrackers(value: unknown): ProductivityTracker[] {
   const timestamp = new Date().toISOString();
   const defaults = defaultProductivityTrackers(timestamp);
-  const byName = new Map(defaults.map((tracker) => [cleanText(tracker.name), tracker]));
+  if (!Array.isArray(value)) return defaults;
+  // An existing list, even an empty one, is the learner's choice. Older
+  // templates only fill missing fields on records that are already present.
+  const references = new Map([...defaults, ...legacyProductivityTrackerDefaults(timestamp)]
+    .map((tracker) => [cleanText(tracker.name), tracker]));
+  const byName = new Map<string, ProductivityTracker>();
   for (const record of arrayOfRecords(value)) {
     const name = String(record.name ?? "").trim();
     if (!name) continue;
-    const base = byName.get(cleanText(name));
+    const base = byName.get(cleanText(name)) ?? references.get(cleanText(name));
     byName.set(cleanText(name), {
       ...(base ?? defaults[0]),
       id: typeof record.id === "string" && record.id ? record.id : base?.id ?? uid(),
