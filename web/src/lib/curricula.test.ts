@@ -20,7 +20,7 @@ describe("complete SGU course map", () => {
     const source = existing();
     const before = JSON.stringify(source);
     const first = mergeCurriculumMap(source, SGU_CURRICULUM);
-    expect(first.added).toEqual({ terms: 4, courses: 6, modules: 28 });
+    expect(first.added).toEqual({ terms: 4, courses: 6, modules: 27 });
     expect(first.terms).toHaveLength(6);
     expect(first.courses).toHaveLength(8);
     expect(first.terms[0]).toBe(source.terms[0]);
@@ -28,7 +28,8 @@ describe("complete SGU course map", () => {
     expect(first.courses[0]).toMatchObject({ id: "saved-bpm500", termId: "saved-t1", code: "01 BPM-500",
       name: "My edited course", files: 7, link: "https://example.test/syllabus" });
     expect(first.courses[0].modules.slice(0, 2)).toEqual(source.courses[0].modules);
-    expect(first.courses[0].modules).toHaveLength(7);
+    expect(first.courses[0].modules).toHaveLength(6);
+    expect(first.courses[0].modules.some(module => module.name === "BSCE 1")).toBe(false);
     expect(JSON.stringify(source)).toBe(before);
 
     const replay = mergeCurriculumMap({ terms: first.terms, courses: first.courses }, SGU_CURRICULUM);
@@ -46,5 +47,20 @@ describe("complete SGU course map", () => {
     expect(result.courses.find(course => course.id === "saved-bpm500")?.termId).toBe("saved-t2");
     expect(result.courses.filter(course => course.termId === "saved-t1" && course.code === "BPM 500")).toHaveLength(1);
     expect(result.added.courses).toBe(7);
+  });
+
+  it("preserves legacy BSCE T2 as the Term 2 module without adding a duplicate", () => {
+    const source = existing();
+    const legacy = { id: "saved-bsce-t2", name: "BSCE T2" };
+    source.courses.push({ id: "saved-bpm501", termId: "saved-t2", code: "BPM 501",
+      name: "My Term 2", files: 0, modules: [legacy] });
+
+    const result = mergeCurriculumMap(source, SGU_CURRICULUM);
+    const course = result.courses.find(entry => entry.id === "saved-bpm501")!;
+    expect(course.modules[0]).toBe(legacy);
+    expect(course.modules.map(module => module.name)).not.toContain("BSCE 2");
+    expect(course.modules).toHaveLength(6);
+    expect(mergeCurriculumMap({ terms: result.terms, courses: result.courses }, SGU_CURRICULUM).added)
+      .toEqual({ terms: 0, courses: 0, modules: 0 });
   });
 });
