@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { BarChart3, CircleAlert, Crown, RefreshCw, ShieldCheck, ShieldX, Users, Zap } from "lucide-react";
 import { useAccount } from "../lib/account/accountStore";
 import {
-  loadOperatorDashboard, resolveReport, setOperatorAI, setOperatorRole, useAccountIdentity,
+  loadOperatorDashboard, resolveReport, searchOperatorAccounts, setOperatorAI, setOperatorRole, useAccountIdentity,
   type OperatorAccount, type OperatorDashboard,
 } from "../lib/operator/hostClient";
 import { GButton, GlassCard, PanelHeader, Tag } from "../components/ui/primitives";
@@ -13,6 +13,13 @@ import "../styles/host-console.css";
 function date(value: string | null): string {
   return value ? new Date(value).toLocaleDateString() : "Never";
 }
+
+type AccountSearchState = {
+  query: string;
+  status: "loading" | "ready" | "error";
+  accounts: OperatorAccount[];
+  message?: string;
+};
 
 export function HostPage() {
   const identity = useAccountIdentity();
@@ -28,6 +35,8 @@ function HostAccountPage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [search, setSearch] = useState("");
+  const [accountSearch, setAccountSearch] = useState<AccountSearchState>();
+  const [searchRetry, setSearchRetry] = useState(0);
   const [roleDrafts, setRoleDrafts] = useState<Record<string, "admin" | "moderator" | "member">>({});
   const [aiDrafts, setAiDrafts] = useState<Record<string, { enabled: boolean; limit: string }>>({});
   const [reasons, setReasons] = useState<Record<string, string>>({});
@@ -53,9 +62,25 @@ function HostAccountPage() {
   }, []);
   const role = dashboard?.role;
   const owner = role === "owner";
-  const accounts = useMemo(() => (dashboard?.accounts ?? []).filter(account =>
-    [account.email,account.display_name,account.user_id].some(text => text?.toLowerCase().includes(search.toLowerCase()))
-  ), [dashboard,search]);
+  const canManageAccounts = owner || role === "admin";
+  const normalizedSearch = search.trim();
+  useEffect(() => {
+    if (!userId || !canManageAccounts || loading || !normalizedSearch) {
+      setAccountSearch(undefined);
+      return;
+    }
+    let active = true;
+    setAccountSearch({ query: normalizedSearch, status: "loading", accounts: [] });
+    const timer = window.setTimeout(() => {
+      void searchOperatorAccounts(userId, normalizedSearch)
+        .then(accounts => { if (active) setAccountSearch({ query: normalizedSearch, status: "ready", accounts }); })
+        .catch(cause => { if (active) setAccountSearch({ query: normalizedSearch, status: "error", accounts: [],
+          message: cause instanceof Error ? cause.message : "Account search is unavailable. Retry when connected." }); });
+    }, 250);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [userId, canManageAccounts, loading, normalizedSearch, refresh, searchRetry]);
+  const activeSearch = accountSearch?.query === normalizedSearch ? accountSearch : undefined;
+  const accounts = normalizedSearch ? activeSearch?.status === "ready" ? activeSearch.accounts : [] : dashboard?.accounts ?? [];
   async function change(fn: () => Promise<void>, success: string) {
     if (busy) return;
     setBusy(true); setError(""); setMessage("");
@@ -144,8 +169,11 @@ function HostAccountPage() {
         </div>
         {(role === "owner" || role === "admin") && <GlassCard pad>
           <PanelHeader headingLevel={2} title="Accounts & AI" sub="Changes are checked on the server. Operators cannot inspect private learner workspaces." />
-          <label className="host-search">Find account<input value={search} onChange={e => setSearch(e.target.value)}
+          <label className="host-search">Find account<input type="search" maxLength={100} value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search name or email" /></label>
+          {normalizedSearch && (!activeSearch || activeSearch.status === "loading") && <p role="status">Searching all accounts…</p>}
+          {activeSearch?.status === "error" && <div role="alert" className="host-warning"><p>{activeSearch.message}</p>
+            <GButton size="sm" onClick={() => setSearchRetry(value => value + 1)}>Retry search</GButton></div>}
           <div className="host-accounts">{accounts.map(account => <article key={account.user_id} className="host-account">
             <div className="host-account-head"><div><b>{account.display_name ?? account.email ?? "Account"}</b>
               <small>{account.email ?? "No email"} · Joined {date(account.created_at)} · Last login {date(account.last_sign_in_at)}</small></div>
@@ -153,8 +181,9 @@ function HostAccountPage() {
             <p className="sub">AI requests today: {account.ai_used_today} of {account.ai_daily_limit}</p>
             {controlFor(account)}
           </article>)}</div>
-          {accounts.length === 0 && <p className="sub">No matching accounts in this page of the directory.</p>}
-          <p className="sub">Up to 100 recent accounts are listed. Project CEO access is bound to a verified account ID, never an editable name.</p>
+          {activeSearch?.status === "ready" && accounts.length === 0 && <p className="sub">No accounts match that name or email.</p>}
+          {!normalizedSearch && accounts.length === 0 && <p className="sub">No accounts to show.</p>}
+          <p className="sub">Recent view shows up to 100 accounts. Search by name or email across the full directory. Project CEO access is bound to a verified account ID, never an editable name.</p>
         </GlassCard>}
         <GlassCard pad>
           <PanelHeader headingLevel={2} title="Submitted QBank review" sub="Revision-bound collections intentionally submitted for sharing. Pending review never implies approval." />

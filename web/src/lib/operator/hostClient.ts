@@ -77,6 +77,10 @@ const count = (value: unknown) => typeof value === "number" && Number.isSafeInte
 const nullableCount = (value: unknown) => value === null || count(value);
 const roleValue = (value: unknown) => value === "owner" || value === "admin" || value === "moderator";
 const bounded = (value: unknown, max: number, check: (item: unknown) => boolean) => Array.isArray(value) && value.length <= max && value.every(check);
+const validOperatorAccounts = (value: unknown): value is OperatorAccount[] =>
+  bounded(value, 100, item => row(item) && text(item.user_id) && nullableText(item.email) && nullableText(item.display_name)
+    && (item.role === null || roleValue(item.role)) && text(item.created_at) && nullableText(item.last_sign_in_at)
+    && typeof item.ai_enabled === "boolean" && count(item.ai_daily_limit) && count(item.ai_used_today));
 
 export function validOperatorDashboard(value: unknown): value is OperatorDashboard {
   if (!row(value) || !(value.role === null || roleValue(value.role))) return false;
@@ -84,9 +88,7 @@ export function validOperatorDashboard(value: unknown): value is OperatorDashboa
   const overview = value.overview;
   return row(overview) && overview.role === value.role && nullableCount(overview.registered_accounts) && nullableCount(overview.ai_requests_7d)
     && [overview.shared_profiles, overview.shared_posts, overview.reports_pending, overview.academic_review_pending, overview.academic_approved].every(count)
-    && bounded(value.accounts, 100, item => row(item) && text(item.user_id) && nullableText(item.email) && nullableText(item.display_name)
-      && (item.role === null || roleValue(item.role)) && text(item.created_at) && nullableText(item.last_sign_in_at)
-      && typeof item.ai_enabled === "boolean" && count(item.ai_daily_limit) && count(item.ai_used_today))
+    && validOperatorAccounts(value.accounts)
     && bounded(value.queue, 100, item => row(item) && [item.collection_id, item.title, item.module, item.term, item.owner_id, item.visibility, item.updated_at].every(text) && count(item.ready_questions) && count(item.review_questions))
     && bounded(value.reports, 100, item => row(item) && [item.post_id, item.author_handle, item.post_kind, item.reason, item.note, item.latest_at].every(text) && count(item.reports))
     && bounded(value.audit, 30, item => row(item) && text(item.id) && nullableText(item.actor_id) && text(item.action) && nullableText(item.target_id) && row(item.metadata) && text(item.created_at));
@@ -154,6 +156,17 @@ export async function loadOperatorDashboard(accountId: string): Promise<Operator
   };
   if (!validOperatorDashboard(result)) throw new Error("The host console returned incomplete data. Refresh before continuing.");
   return result;
+  });
+}
+export async function searchOperatorAccounts(accountId: string, query: string): Promise<OperatorAccount[]> {
+  const term = query.trim();
+  if (!term) return [];
+  if (term.length > 100) throw new Error("Search must be 100 characters or fewer.");
+  return withClient(accountId, async client => {
+    const { data, error } = await client.rpc("axom_operator_accounts", { query_text: term });
+    if (error) throw new Error("Account search is unavailable. Retry when connected.");
+    if (!validOperatorAccounts(data)) throw new Error("The host directory returned invalid account data.");
+    return data;
   });
 }
 const checkReason = (reason: string) => { if (reason.trim().length < 8 || reason.trim().length > 500) throw new Error("Record a reason of 8 to 500 characters."); };

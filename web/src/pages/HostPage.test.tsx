@@ -2,7 +2,7 @@
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadOperatorDashboard, resolveReport, type OperatorDashboard } from "../lib/operator/hostClient";
+import { loadOperatorDashboard, resolveReport, searchOperatorAccounts, type OperatorAccount, type OperatorDashboard } from "../lib/operator/hostClient";
 import { HostPage } from "./HostPage";
 
 vi.mock("../lib/account/accountStore", () => ({
@@ -11,6 +11,7 @@ vi.mock("../lib/account/accountStore", () => ({
 vi.mock("../lib/operator/hostClient", () => ({
   useAccountIdentity: () => "verified-account",
   loadOperatorDashboard: vi.fn(),
+  searchOperatorAccounts: vi.fn(),
   resolveReport: vi.fn(),
   setOperatorAI: vi.fn(),
   setOperatorRole: vi.fn(),
@@ -33,6 +34,18 @@ const dashboard = (role: "owner" | "moderator"): OperatorDashboard => ({
   }],
 });
 
+const account = (id: string, name: string): OperatorAccount => ({
+  user_id: id, email: `${id}@example.invalid`, display_name: name, role: null,
+  created_at: "2026-11-01T00:00:00Z", last_sign_in_at: null,
+  ai_enabled: true, ai_daily_limit: 60, ai_used_today: 0,
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(resolveReport).mockResolvedValue(undefined);
@@ -40,6 +53,54 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("Host page authorization and moderation", () => {
+  it("finds an older account through server search and restores the recent view when cleared", async () => {
+    const user = userEvent.setup();
+    const older = deferred<OperatorAccount[]>();
+    const recentAccounts = Array.from({ length: 100 }, (_, index) =>
+      account(`recent-${index}`, index === 0 ? "Recent student" : `Recent student ${index}`));
+    vi.mocked(loadOperatorDashboard).mockResolvedValue({ ...dashboard("owner"), accounts: recentAccounts });
+    vi.mocked(searchOperatorAccounts).mockReturnValue(older.promise);
+    render(<HostPage />);
+    const input = await screen.findByRole("searchbox", { name: "Find account" });
+    expect(screen.getByText("Recent student")).toBeTruthy();
+    await user.type(input, "older");
+    expect(screen.getByRole("status", { name: "" }).textContent).toContain("Searching all accounts");
+    await waitFor(() => expect(searchOperatorAccounts).toHaveBeenCalledWith("verified-account", "older"));
+    await act(async () => { older.resolve([account("older", "Older student")]); });
+    expect(screen.getByText("Older student")).toBeTruthy();
+    expect(screen.queryByText("Recent student")).toBeNull();
+    await user.clear(input);
+    expect(screen.getByText("Recent student")).toBeTruthy();
+  });
+
+  it("ignores a stale search response and offers retry for a failed current query", async () => {
+    const user = userEvent.setup();
+    const first = deferred<OperatorAccount[]>();
+    vi.mocked(loadOperatorDashboard).mockResolvedValue(dashboard("owner"));
+    vi.mocked(searchOperatorAccounts).mockImplementation((_id, query) => query === "first" ? first.promise : Promise.reject(new Error("Connection lost")));
+    render(<HostPage />);
+    const input = await screen.findByRole("searchbox", { name: "Find account" });
+    await user.type(input, "first");
+    await waitFor(() => expect(searchOperatorAccounts).toHaveBeenCalledWith("verified-account", "first"));
+    await user.clear(input);
+    await user.type(input, "second");
+    await act(async () => { first.resolve([account("first", "Stale result")]); });
+    expect(screen.queryByText("Stale result")).toBeNull();
+    expect((await screen.findByRole("alert")).textContent).toContain("Connection lost");
+    await user.click(screen.getByRole("button", { name: "Retry search" }));
+    await waitFor(() => expect(searchOperatorAccounts).toHaveBeenCalledTimes(3));
+  });
+
+  it("shows a clear empty state after a full-directory search finds no account", async () => {
+    const user = userEvent.setup();
+    vi.mocked(loadOperatorDashboard).mockResolvedValue({ ...dashboard("owner"), accounts: [account("recent", "Recent student")] });
+    vi.mocked(searchOperatorAccounts).mockResolvedValue([]);
+    render(<HostPage />);
+    await user.type(await screen.findByRole("searchbox", { name: "Find account" }), "missing");
+    expect(await screen.findByText("No accounts match that name or email.")).toBeTruthy();
+    expect(screen.queryByText("Recent student")).toBeNull();
+  });
+
   it("shows the Project CEO badge only after the role readback succeeds", async () => {
     let respond!: (value: OperatorDashboard) => void;
     vi.mocked(loadOperatorDashboard).mockReturnValue(new Promise(resolve => { respond = resolve; }));

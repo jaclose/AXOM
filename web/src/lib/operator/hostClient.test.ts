@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { accountOperationClient } from "../account/supabase";
-import { operatorRole, resolveReport, setOperatorAI, validOperatorDashboard } from "./hostClient";
+import { operatorRole, resolveReport, searchOperatorAccounts, setOperatorAI, validOperatorDashboard } from "./hostClient";
 import { publishCommunityPost, setDiscoverable } from "../community/community";
 
 const fixture = vi.hoisted(() => {
@@ -31,6 +31,27 @@ function deferred<T>() {
 }
 
 describe("account-bound Host and Community requests", () => {
+  it("searches the full server directory and rejects results after account identity changes", async () => {
+    const response = deferred<{ data: unknown[]; error: null }>();
+    rpc.mockReturnValue(response.promise);
+    const request = searchOperatorAccounts("account-a", "  older  ");
+    const rejected = expect(request).rejects.toThrow(/account changed/i);
+    await vi.waitFor(() => expect(rpc).toHaveBeenCalledWith("axom_operator_accounts", { query_text: "older" }));
+    fixture.change("account-b"); fixture.change("account-a");
+    response.resolve({ data: [], error: null });
+    await rejected;
+  });
+
+  it("validates account search results before displaying them", async () => {
+    const older = { user_id: "older", email: "older@example.invalid", display_name: "Older student", role: null,
+      created_at: "2026-09-01T00:00:00Z", last_sign_in_at: null, ai_enabled: true, ai_daily_limit: 60, ai_used_today: 0 };
+    rpc.mockResolvedValueOnce({ data: [older], error: null });
+    await expect(searchOperatorAccounts("account-a", " older ")).resolves.toEqual([older]);
+    expect(rpc).toHaveBeenCalledWith("axom_operator_accounts", { query_text: "older" });
+    rpc.mockResolvedValueOnce({ data: [{ user_id: "older" }], error: null });
+    await expect(searchOperatorAccounts("account-a", "older")).rejects.toThrow(/invalid account data/);
+  });
+
   it("rejects a delayed role response after switching away and back", async () => {
     const response = deferred<{ data: string; error: null }>();
     rpc.mockReturnValue(response.promise);
