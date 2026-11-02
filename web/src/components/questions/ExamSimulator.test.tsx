@@ -28,6 +28,7 @@ describe("ExamSimulator", () => {
       ...q("rhinovirus"), stem: "A patient has runny nose and sneezing.",
       options: [{ key: "A", text: "Rhinovirus" }, { key: "B", text: "Influenza virus" }],
       correctKey: "A", correctAnswerText: "Rhinovirus", tags: ["axom:diagram:rhinovirus"],
+      explanation: "This verified test explanation stays visible after the learner checks the answer.",
     };
     render(<ExamSimulator skin="uworld" mode="tutor" pool={[tagged]} unreviewedCount={1} onFinish={vi.fn()} onSuspend={vi.fn()} />);
     expect(screen.getByText("Unreviewed community material.")).toBeTruthy();

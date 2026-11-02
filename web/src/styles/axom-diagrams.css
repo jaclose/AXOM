@@ -21,7 +21,10 @@
 .axom-diagram a:hover { color: var(--text, #f3f0e8); }
 .axom-diagram a:focus-visible { outline: 2px solid var(--gold, #c8a96a); outline-offset: 3px; }
 .axom-diagram-art { min-width: 0; aspect-ratio: 480 / 330; }
-.axom-diagram-art svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.axom-diagram-art > svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.axom-diagram-art--reference { display: grid; justify-items: center; gap: 4px; aspect-ratio: auto; }
+.axom-diagram-art--reference img { display: block; width: min(100%, 460px); height: auto; max-height: 620px; object-fit: contain; border-radius: var(--radius-sm, 10px); }
+.axom-diagram-art--reference a { justify-self: end; }
 .diagram-orbit { fill: none; stroke: var(--gold-line, rgba(200,169,106,.34)); stroke-width: 1; stroke-dasharray: 2 6; }
 .diagram-orbit-inner { stroke-dasharray: none; opacity: .5; }
 .diagram-connector { fill: none; stroke: var(--gold-line, rgba(200,169,106,.34)); stroke-width: 1.2; }

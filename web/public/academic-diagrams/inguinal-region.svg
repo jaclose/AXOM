@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1040" role="img" aria-labelledby="title description">
+  <title id="title">Inguinal hernia routes and inferior epigastric vessels</title>
+  <desc id="description">Original posterior-view teaching schematic. An indirect route begins at the deep inguinal ring lateral to the inferior epigastric vessels and follows the inguinal canal toward the superficial ring. A direct route pushes through the posterior wall medial to the vessels. The paths are schematic, and an individual hernia does not necessarily traverse the whole canal.</desc>
+  <metadata>AXOM original teaching diagram, version 1. Sources: https://pmc.ncbi.nlm.nih.gov/articles/PMC9402849/ and https://pmc.ncbi.nlm.nih.gov/articles/PMC3160575/</metadata>
+  <defs>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#8ea4b5" stroke-opacity=".07"/></pattern>
+    <marker id="indirectArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="10" markerHeight="10" orient="auto"><path d="M0 0L10 5 0 10Z" fill="#e4bd74"/></marker>
+    <marker id="directArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="10" markerHeight="10" orient="auto"><path d="M0 0L10 5 0 10Z" fill="#80a9b6"/></marker>
+  </defs>
+  <style>
+    .eyebrow{font:700 19px/1.2 system-ui,sans-serif;letter-spacing:3px;fill:#d7b46f}
+    .headline{font:700 48px/1.1 system-ui,sans-serif;letter-spacing:-1.5px;fill:#f5f2ea}
+    .subhead{font:23px/1.4 system-ui,sans-serif;fill:#c7d0d7}
+    .stage{font:700 20px/1.2 system-ui,sans-serif;letter-spacing:2px;fill:#c7d0d7}
+    .label{font:700 25px/1.3 system-ui,sans-serif;fill:#f5f2ea}
+    .detail{font:21px/1.35 system-ui,sans-serif;fill:#c7d0d7}
+    .route{font:700 24px/1.25 system-ui,sans-serif}
+    .foot{font:20px/1.35 system-ui,sans-serif;fill:#c7d0d7}
+    .source{font:18px/1.35 system-ui,sans-serif;fill:#aebec9}
+  </style>
+  <rect width="800" height="1040" rx="32" fill="#0e1b2a"/>
+  <rect width="800" height="1040" rx="32" fill="url(#grid)"/>
+  <path d="M46 43h65" stroke="#d7b46f" stroke-width="5" stroke-linecap="round"/>
+  <text x="46" y="78" class="eyebrow">AXOM ANATOMY</text>
+  <text x="46" y="132" class="headline">Inguinal region</text>
+  <text x="46" y="168" class="subhead">Two routes · one vessel landmark</text>
+
+  <rect x="46" y="193" width="708" height="68" rx="12" fill="#1d3344" stroke="#638397" stroke-width="1.5"/>
+  <text x="68" y="225" class="stage">POSTERIOR VIEW</text>
+  <text x="68" y="248" class="detail">MEDIAL</text>
+  <path d="M218 240h380" stroke="#d7b46f" stroke-width="2.5" marker-end="url(#indirectArrow)"/>
+  <text x="618" y="248" class="detail">LATERAL</text>
+
+  <rect x="46" y="282" width="708" height="620" rx="18" fill="#182b3b" stroke="#496579" stroke-width="1.5"/>
+  <path d="M424 307v335" stroke="#7198a8" stroke-width="3" stroke-dasharray="7 8" opacity=".65"/>
+  <path d="M438 335c-5 84-10 165-11 228" fill="none" stroke="#eaa5a0" stroke-width="10" stroke-linecap="round"/>
+  <path d="M451 338c-4 84-7 161-7 225" fill="none" stroke="#7ab3cd" stroke-width="7" stroke-linecap="round"/>
+  <path d="M481 330h185" fill="none" stroke="#829aac" stroke-width="2"/>
+  <text x="486" y="360" class="label">Inferior epigastric</text>
+  <text x="486" y="390" class="detail">vessels</text>
+
+  <path d="M555 476C538 550 431 659 279 758" fill="none" stroke="#405466" stroke-width="75" stroke-linecap="round"/>
+  <path d="M555 476C538 550 431 659 279 758" fill="none" stroke="#7692a1" stroke-width="2" stroke-linecap="round"/>
+  <text x="465" y="728" class="detail" transform="rotate(-30 465 728)">INGUINAL CANAL</text>
+  <circle cx="555" cy="476" r="36" fill="#2b3b48" stroke="#e4bd74" stroke-width="4"/>
+  <circle cx="279" cy="758" r="36" fill="#2b3b48" stroke="#b3c9d2" stroke-width="4"/>
+  <path d="M583 455l69-43" fill="none" stroke="#d7b46f" stroke-width="2"/>
+  <text x="516" y="431" class="label">Deep ring</text>
+  <path d="M250 786l-115 60" fill="none" stroke="#b3c9d2" stroke-width="2"/>
+  <text x="69" y="862" class="label">Superficial ring</text>
+
+  <path d="M553 482C532 559 427 656 299 742" fill="none" stroke="#e4bd74" stroke-width="8" stroke-linecap="round" marker-end="url(#indirectArrow)"/>
+  <text x="490" y="550" class="route" fill="#e4bd74">INDIRECT</text>
+  <text x="490" y="580" class="detail">lateral to vessels</text>
+
+  <rect x="112" y="356" width="245" height="220" rx="14" fill="#274052" fill-opacity=".58" stroke="#80a9b6" stroke-width="2" stroke-dasharray="9 8"/>
+  <text x="133" y="392" class="stage">POSTERIOR WALL</text>
+  <path d="M228 435c2 46 21 77 68 113" fill="none" stroke="#80a9b6" stroke-width="8" stroke-linecap="round" stroke-dasharray="13 10" marker-end="url(#directArrow)"/>
+  <text x="133" y="608" class="route" fill="#9fc0cc">DIRECT</text>
+  <text x="133" y="638" class="detail">medial to vessels</text>
+
+  <path d="M46 931h708" stroke="#5e788a" stroke-width="1"/>
+  <text x="46" y="963" class="foot">Indirect enters the deep ring. Direct passes through the posterior wall.</text>
+  <text x="46" y="990" class="foot">Schematic routes; the extent of a hernia varies.</text>
+  <text x="46" y="1016" class="source">Sources: Gök et al. 2022 · IEHS guidelines · AXOM original v1</text>
+</svg>
