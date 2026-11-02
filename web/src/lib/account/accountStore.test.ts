@@ -82,6 +82,17 @@ const { useAccount, validateEmail, validatePassword, resetAccountInitForTests, p
 const { useStore } = await import("../store");
 const { makeSeed } = await import("../seed");
 
+async function watchUploadCacheClears() {
+  const [content, media, originals] = await Promise.all([
+    import("../sync/cloudContent"), import("../sync/cloudMedia"), import("../sync/cloudOriginals"),
+  ]);
+  return [
+    vi.spyOn(content, "clearCloudContentCache"),
+    vi.spyOn(media, "clearCloudMediaUploadCache"),
+    vi.spyOn(originals, "clearCloudOriginalUploadCache"),
+  ];
+}
+
 beforeEach(() => {
   vi.stubGlobal("indexedDB", indexedDB);
   vi.stubGlobal("IDBKeyRange", IDBKeyRange);
@@ -213,9 +224,15 @@ describe("account lifecycle", () => {
   it("signs out and keeps the local workspace", async () => {
     await useAccount.getState().signIn("learner@example.com", "password123");
     const courses = useStore.getState().courses;
-    await useAccount.getState().signOut();
-    expect(useAccount.getState()).toMatchObject({ phase: "signed-out", user: null, link: "unlinked", protection: "local-only" });
-    expect(useStore.getState().courses).toBe(courses);
+    const clears = await watchUploadCacheClears();
+    try {
+      await useAccount.getState().signOut();
+      expect(useAccount.getState()).toMatchObject({ phase: "signed-out", user: null, link: "unlinked", protection: "local-only" });
+      expect(useStore.getState().courses).toBe(courses);
+      for (const clear of clears) expect(clear).toHaveBeenCalledOnce();
+    } finally {
+      for (const clear of clears) clear.mockRestore();
+    }
   });
 
   it("keeps the signed-in state when the auth service rejects sign-out", async () => {
@@ -240,6 +257,19 @@ describe("account lifecycle", () => {
     expect(useAccount.getState().history).toHaveLength(1);
     expect(useAccount.getState().message).not.toMatch(/Every server copy was deleted/);
     expect(useAccount.getState().error).toBeTruthy();
+  });
+
+  it("forgets verified uploads after deleting every cloud copy", async () => {
+    await useAccount.getState().signIn("learner@example.com", "password123");
+    rpc.mockResolvedValue({ data: null, error: null });
+    const clears = await watchUploadCacheClears();
+    try {
+      await useAccount.getState().deleteCloudData();
+      expect(useAccount.getState().message).toMatch(/Every server copy was deleted/);
+      for (const clear of clears) expect(clear).toHaveBeenCalledOnce();
+    } finally {
+      for (const clear of clears) clear.mockRestore();
+    }
   });
 
   it("turns service errors into calm, specific guidance", async () => {
@@ -284,6 +314,28 @@ describe("account session consistency (Ideas 4: Profile and Account agree; sign-
     await flush();
     emit("SIGNED_OUT", null);
     expect(useAccount.getState()).toMatchObject({ phase: "signed-out", user: null });
+  });
+
+  it("keeps upload confirmations on token refresh and drops them on owner change", async () => {
+    let emit: (event: string, value: unknown) => void = () => undefined;
+    auth.onAuthStateChange.mockImplementationOnce(((callback: (event: string, value: unknown) => void) => {
+      emit = callback;
+      callback("INITIAL_SESSION", session);
+      return { data: { subscription: { unsubscribe: vi.fn() } } };
+    }) as never);
+    useAccount.getState().init();
+    await flush();
+    const clears = await watchUploadCacheClears();
+    try {
+      emit("TOKEN_REFRESHED", { ...session, access_token: "refreshed" });
+      for (const clear of clears) expect(clear).not.toHaveBeenCalled();
+      emit("SIGNED_IN", { ...session, user: { ...session.user, id: "user-2" } });
+      for (const clear of clears) expect(clear).toHaveBeenCalledOnce();
+      emit("SIGNED_OUT", null);
+      for (const clear of clears) expect(clear).toHaveBeenCalledTimes(2);
+    } finally {
+      for (const clear of clears) clear.mockRestore();
+    }
   });
 
   it("keeps a signed-in user signed in when the account service fails to load", async () => {

@@ -7,6 +7,9 @@ import { authRedirectUrl, cloudConfigured, loadSupabase, readStoredSession } fro
 import { SyncCoordinator } from "../sync/syncCoordinator";
 import { SupabaseSyncTransport } from "../sync/supabaseTransport";
 import { clearAccountSync, deviceId, read, write } from "../sync/syncMetadata";
+import { clearCloudContentCache } from "../sync/cloudContent";
+import { clearCloudMediaUploadCache } from "../sync/cloudMedia";
+import { clearCloudOriginalUploadCache } from "../sync/cloudOriginals";
 import { restingStatus } from "../sync/syncPolicy";
 import type { AccountDevice, ProtectionStatus, RevisionSummary, SyncFailure } from "../sync/syncTypes";
 import { useStore } from "../store";
@@ -200,6 +203,12 @@ async function client(): Promise<SupabaseClient> {
 }
 
 export const useAccount = create<AccountState>((set, get) => {
+  function clearAccountUploadCaches() {
+    clearCloudContentCache();
+    clearCloudMediaUploadCache();
+    clearCloudOriginalUploadCache();
+  }
+
   async function guarded<T>(label: string, run: () => Promise<T>): Promise<T | undefined> {
     set({ busy: true, error: "", message: label });
     try {
@@ -216,6 +225,7 @@ export const useAccount = create<AccountState>((set, get) => {
     const next = sessionState(session);
     // Keep a display name the profile table already supplied for this user.
     const current = get().user;
+    if (current?.id !== next.user?.id) clearAccountUploadCaches();
     if (next.user && current?.id === next.user.id && current.displayName && !session?.user?.user_metadata?.display_name) {
       next.user = { ...next.user, displayName: current.displayName };
     }
@@ -435,6 +445,7 @@ export const useAccount = create<AccountState>((set, get) => {
         return true;
       });
       if (!signedOut) return;
+      clearAccountUploadCaches();
       clearAccountSync();
       set({
         phase: cloudConfigured() ? "signed-out" : "unconfigured",
@@ -646,6 +657,7 @@ export const useAccount = create<AccountState>((set, get) => {
       const deleted = await guarded("Deleting cloud copies…", async () => {
         await transport.deleteCloudData();
         coordinator?.dispose();
+        clearAccountUploadCaches();
         clearAccountSync();
         return true;
       });
