@@ -11,8 +11,9 @@
 // question for every question slide. Anything else falls back to running text.
 // ===========================================================================
 import { readSlideDeck, type DeckPage, type SlideDeck } from "./deckPages";
-import { parseQuestionBlocks, type ParsedQuestionDraft } from "./questionParse";
+import { parseQuestionBlocks, reconcileQuestionAnswerCopies, type ParsedQuestionDraft, type QuestionCopyDraft } from "./questionParse";
 import { assignDraftProvenancePages } from "./questionProvenance";
+import { splitParts } from "./question-content/pdf/parts";
 
 export interface PdfQuestions {
   drafts: ParsedQuestionDraft[];
@@ -47,6 +48,16 @@ function readFromSlides(deck: SlideDeck): { drafts: ParsedQuestionDraft[]; keyAp
 }
 
 export function parsePdfQuestions(text: string, pages: string[]): PdfQuestions {
+  const parts = splitParts(pages);
+  if (parts.some((part) => part.role === "question-only") && parts.some((part) => part.role === "answer-copy")) {
+    const entries: QuestionCopyDraft[] = parts.flatMap((part, at) => readAsText(part.pages.join("\n\n"), part.pages)
+      .map((draft) => ({ draft, part: at, role: part.role })));
+    const reconciled = reconcileQuestionAnswerCopies(entries);
+    return {
+      drafts: reconciled.entries.map((entry) => entry.draft),
+      notes: reconciled.paired ? [`${reconciled.paired} exact question-only and answered ${reconciled.paired === 1 ? "copy was" : "copies were"} reconciled; the question page and answer evidence remain separate.`] : [],
+    };
+  }
   const deck = readSlideDeck(pages);
   if (!deck) return { drafts: readAsText(text, pages), notes: [] };
 
