@@ -38,12 +38,14 @@ and confirm the worker schedule. Then use the Studio's allowlisted test action f
 eligible templates, inspect the actual inbox and Resend message IDs, and record which
 templates are held for missing consent or source data. No message was sent in this audit.
 
-## 1. Review and integrate the committed branch
+## 1. Review the integrated communications source
 
-Use `feat/axom-communications-pulse`. Inspect live ownership first. The course/QBank
-worktree has active media-lifecycle work in Settings; merge only this branch's small
-account-tab entries without replacing that work. App route/title changes also require
-normal integration review. No database migration was applied during this implementation.
+Communications source is already in the frontier release. The older
+`feat/axom-communications-pulse` branch instructions are historical; use the
+current tree and [release boundary](../AI_STATE.md) for review. The
+`communications_pulse` migration and Edge Function exist in AXOM Production,
+but sender mode, secrets, scheduling, consent and inbox delivery still need
+live acceptance. Review the current source manifest before a function deploy.
 
 Install using the repository lockfiles in a fresh checkout with Node 22.23.4, then:
 

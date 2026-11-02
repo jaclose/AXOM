@@ -74,9 +74,9 @@ Do not paste private emails, JWTs or service keys into the public repository. Ro
 
 Not in this slice: account-wide suspension, persistent user blocking, configurable capability policies beyond the existing three operator roles, billing/token/latency attribution, comment threads, full Question Set content in the feed, independent source-rights verification tools, trusted general QBank/course-event ingestion, realtime push notifications or automatic Anki imports. Unfriend removes friends-only access but is not a block. Persistent blocking needs an auth-bound record that survives leaving and rejoining Community. Self-shared standings must never be described as verified study rankings.
 
-## PR #30 integration boundary
+## Historical PR #30 integration boundary
 
-`codex/pr30-host-hardening-20261025` is the isolated hardening branch. An earlier `codex/host-community-20261025` draft is preserved locally and superseded; its parallel tables/RPCs are excluded. The existing two pending PR migrations are amended before first deployment, keeping the four-file pending inventory. Role and AI policy RPCs now require `reason`; ship their matching clients together. Account-bound clients discard results after any account switch, including a switch away and back. No QBank parsing, learner persistence or course contract is changed by this hardening.
+The PR #30 hardening branch was an earlier integration stage. Its parallel Host draft tables/RPCs were excluded. The current frontier production gate is the **five** ordered migrations listed above, including the forward privacy hardening file. Role and AI policy RPCs require `reason`; ship their matching clients together. Account-bound clients discard results after any account switch, including a switch away and back. No QBank parsing, learner persistence or course contract is changed by this hardening.
 
 Validation receipts and integration decisions belong in [PR #30](https://github.com/jaclose/AXOM/pull/30). Merge requires passing CI and database security checks for the exact candidate. Production migration, verified-account provisioning and deployment remain separate approval boundaries. Recovery before application is simply withholding this unreleased migration/client bundle; after application, use a reviewed forward migration and provider recovery procedures, never drop learner tables as a rollback.
 

@@ -4,7 +4,7 @@ tags:
   - axom/communications
 authority: canonical
 ---
-# Communications readiness and welcome draft
+# Communications readiness and email drafts
 
 AXOM's communications pipeline already renders the welcome email, optional reports,
 editorials and account notices. The local audit below checks configuration shape;
@@ -31,6 +31,7 @@ function:
 
 ```sh
 node scripts/render-welcome-draft.mjs
+node scripts/render-product-update-draft.mjs
 ```
 
 Open `artifacts/communications/welcome-draft/index.html` for dark and light
@@ -41,7 +42,11 @@ replace only the hosted Orb URL with a relative image so they open offline.
 for import into a Resend draft. The live server renderer personalizes the actual
 message separately.
 They are draft assets, not sent messages or email-client acceptance evidence.
-The generator checks the source manifest and refuses to render a stale bundle.
+The product-update draft is at
+`artifacts/communications/product-update-0.0.3-prebeta/index.html`, with dark
+and light views, plain text and a hosted-image Resend draft file. It describes
+an in-progress release and is not an audience, campaign or delivered email.
+Both generators check the source manifest and refuse a stale bundle.
 
 For provider setup and real acceptance, follow the
 [Resend/Supabase runbook](communications-resend.md). Keep account deletion off

@@ -81,8 +81,9 @@ move between devices, and delete every cloud copy.
    service is live (`docs/operations/communications-resend.md`). Trade-off: an
    address is no longer proven before the account exists; its real owner can
    still take the account back with **Forgot password**.
-4. **URLs** — Authentication → URL configuration. Site URL: your production
-   web origin (currently `https://axom-jacloses-projects.vercel.app/`). Keep the
+4. **URLs** — Authentication → URL configuration. Check the current production
+   Site URL and redirect allow-list against `https://axom.info` and the live
+   dashboard before changing them. Keep the
    Vercel preview patterns and add `http://127.0.0.1:5173/**`,
    `http://localhost:5173/**`, `http://127.0.0.1:5187/**`,
    `http://localhost:5187/**` for local development. Mirror the final list in
@@ -110,13 +111,16 @@ move between devices, and delete every cloud copy.
 
    With a full-access `RESEND_API_KEY` it confirms the sender domain is
    verified.
-7. **Verify live** — `cd web && AXOM_LIVE_EMAIL=<fresh address> SUPABASE_SECRET_KEY=<secret key> npm run test:accounts:live`.
-   The secret key stays in that one shell command; the test uses it only to
-   mint the same one-time codes the emails carry and to delete its throwaway
-   user afterwards. It covers: create account → confirm by code → password
+7. **Verify live** — after explicit authorization for two real emails and
+   disposable-account cleanup, load `AXOM_LIVE_EMAIL` and
+   `SUPABASE_SECRET_KEY` from a protected environment file or trusted secret
+   manager, then run `npm run test:accounts:live` from `web/`. Never place the
+   secret on a command line or in shell history. The test uses it to mint the
+   same one-time codes the emails carry and to delete only the verified
+   throwaway user afterwards. It covers: create account → confirm by code → password
    sign-in → code sign-in → protect → second device conflict → **Merge both** →
-   restore → devices → delete cloud copies. It sends two real emails, so
-   don't loop it on the built-in mailer.
+   restore → devices → delete cloud copies. It sends two real emails; keep
+   the recipient allowlisted and inspect the cleanup receipt.
 
 ## Desktop (Tauri) packaging
 
