@@ -247,6 +247,8 @@ export function draftsToQuestions(drafts: readonly ParsedQuestionDraft[], anchor
       source: {
         filename: defaults.sourceFilename,
         ...(page !== undefined ? { page } : {}),
+        ...(draft.answerEvidencePage !== undefined ? { answerEvidencePage: draft.answerEvidencePage } : {}),
+        ...(draft.explanationSourcePage !== undefined ? { explanationSourcePage: draft.explanationSourcePage } : {}),
         ...(draft.questionNumber !== undefined ? { questionNumber: draft.questionNumber } : {}),
       },
       stem,
