@@ -13,7 +13,7 @@ import type { PreparedBank, PrivateLibraryCatalog } from "../src/lib/privateLibr
 
 const FORMAT = "axom-approved-question-decisions";
 const HEX = /^[a-f0-9]{64}$/;
-const unsafeName = /[\\/]|^\.{1,2}$|^[a-zA-Z]:|\u0000/;
+const unsafeName = /[\\/]|^\.{1,2}$|^[a-zA-Z]:/;
 type Status = "pending" | "held" | "approved";
 
 export interface ApprovalRecord {
@@ -62,7 +62,7 @@ export function questionApprovalHashes(question: PackageQuestion) {
 }
 
 function safeName(name: string): string {
-  if (!name || unsafeName.test(name) || basename(name) !== name) fail("A source or figure name contains a local path.");
+  if (!name || unsafeName.test(name) || name.includes("\0") || basename(name) !== name) fail("A source or figure name contains a local path.");
   return name;
 }
 async function assertOutsideRepo(path: string): Promise<string> {
