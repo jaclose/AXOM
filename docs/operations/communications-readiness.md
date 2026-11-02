@@ -45,7 +45,10 @@ They are draft assets, not sent messages or email-client acceptance evidence.
 The product-update draft is at
 `artifacts/communications/product-update-0.0.3-prebeta/index.html`, with dark
 and light views, plain text and a hosted-image Resend draft file. It describes
-an in-progress release and is not an audience, campaign or delivered email.
+an in-progress release. A matching [Resend product-update template draft](https://resend.com/templates/38931a1a-ec16-450f-aa49-3b61a10f3385/editor)
+was imported and visually checked on 2026-11-02. It remains a draft: no sender,
+reply address, audience, campaign or delivery was configured. Recheck the copy,
+links and unsubscribe handling against the live release before publication.
 Both generators check the source manifest and refuse a stale bundle.
 
 For provider setup and real acceptance, follow the
