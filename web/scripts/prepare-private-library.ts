@@ -7,6 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { loadTaggedPdf } from "../src/lib/question-content/pdf/loadTaggedPdf";
 import { readTaggedPage } from "../src/lib/question-content/pdf/taggedPdf";
 import { taggedPdfToQuestions } from "../src/lib/question-content/pdf/taggedPdfToQuestions";
+import { scanPdfAnswerMarkProposals } from "../src/lib/question-content/pdf/answerMarkProposals";
 import { describeAssets } from "../src/lib/question-content/assets";
 import { assessBank } from "../src/lib/question-content/assessBank";
 import { docxToQuestions } from "../src/lib/question-content/docx/docxToQuestions";
@@ -40,6 +41,53 @@ const checkpoint = () => {
 };
 const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
 const previousVersion = catalog.preparerVersion ?? 1;
+// Version 5 adds review receipts to existing version-4 libraries without reparsing their banks.
+const PREPARER_VERSION = 5;
+const sha256 = (bytes: Uint8Array | string): string => createHash("sha256").update(bytes).digest("hex");
+
+/** A separate private receipt: a mark is never copied into a scoring key. */
+async function ensureAnswerMarkReceipt(entry: Entry, bankFile: string, originalFile?: string): Promise<void> {
+  if (entry.extension !== "pdf") return;
+  const bankBytes = readFileSync(join(out, bankFile));
+  const bankSha256 = sha256(bankBytes);
+  const bank = JSON.parse(bankBytes.toString("utf8")) as PreparedBank;
+  if (!Array.isArray(bank.pkg?.questions)) throw new Error("Prepared PDF bank is not readable for answer-mark review.");
+  const receiptFile = join(out, "review", "answer-marks", `${entry.sha256}-${bankSha256}.json`);
+  if (existsSync(receiptFile)) {
+    const receipt = JSON.parse(readFileSync(receiptFile, "utf8")) as Record<string, unknown>;
+    if (receipt.format !== "axom-private-answer-mark-proposals" || receipt.schemaVersion !== 1
+      || receipt.sourceSha256 !== entry.sha256 || receipt.bankSha256 !== bankSha256
+      || receipt.questionCount !== bank.pkg.questions.length || !Array.isArray(receipt.proposals)) {
+      throw new Error("Answer-mark review receipt changed; inspect it before resuming.");
+    }
+    return;
+  }
+  const pairedAnswerPages = new Set(bank.pkg.questions.flatMap(question => question.source.page
+    ? question.assets.filter(asset => asset.role === "answer_reveal" && asset.sourcePage).map(asset => asset.sourcePage)
+    : [])).size;
+  const sourceFile = join(dirname(entry.root), entry.path);
+  const portableFile = originalFile ? join(out, originalFile) : undefined;
+  const original = pairedAnswerPages ? readFileSync(existsSync(sourceFile) ? sourceFile : portableFile ?? sourceFile) : undefined;
+  if (original && sha256(original) !== entry.sha256) throw new Error("Source changed since inventory; answer-mark scan stopped.");
+  const proposals = original
+    ? await scanPdfAnswerMarkProposals(pdfjs as unknown as typeof import("pdfjs-dist"), new Uint8Array(original),
+      (await loadTaggedPdf(pdfjs as unknown as typeof import("pdfjs-dist"), new Uint8Array(original))).pages, bank.pkg.questions)
+    : [];
+  const byId = new Map(bank.pkg.questions.map(question => [question.id, question]));
+  const reviewed = proposals.map(proposal => {
+    const question = byId.get(proposal.questionId);
+    if (!question) throw new Error("Answer-mark proposal does not match its prepared question.");
+    return { ...proposal, questionSha256: sha256(JSON.stringify(question)) };
+  });
+  const receipt = {
+    format: "axom-private-answer-mark-proposals", schemaVersion: 1, sourceSha256: entry.sha256,
+    bankSha256, questionCount: bank.pkg.questions.length, pairedAnswerPages,
+    proposals: reviewed,
+  };
+  mkdirSync(dirname(receiptFile), { recursive: true, mode: 0o700 });
+  writeFileSync(`${receiptFile}.pending`, JSON.stringify(receipt), { mode: 0o600 });
+  renameSync(`${receiptFile}.pending`, receiptFile);
+}
 for (const entry of inventory.entries) {
   const known = knownBankManifests.find(m => m.source.filename.toLowerCase() === entry.fileName.toLowerCase());
   const previous = catalog.sources.find(s => s.sourcePath === entry.path && s.checksum === entry.sha256 && !["failed", "missing"].includes(s.status));
@@ -51,7 +99,10 @@ for (const entry of inventory.entries) {
     if (!existsSync(join(out, originalFile))) copyFileSync(sourcePath, join(out, originalFile));
     if (previous && previous.status !== "missing") previous.originalFile = originalFile;
   }
-  if (previous && !(previousVersion < 3 && known && !entry.duplicateOf) && !(previousVersion < 2 && entry.extension === "pdf" && previous.status === "reference/template-only" && !/Course update|Examplify UI/i.test(entry.root))) { checkpoint(); continue; }
+  if (previous && !(previousVersion < 3 && known && !entry.duplicateOf) && !(previousVersion < 2 && entry.extension === "pdf" && previous.status === "reference/template-only" && !/Course update|Examplify UI/i.test(entry.root))) {
+    if (previous.bankFile) await ensureAnswerMarkReceipt(entry, previous.bankFile, previous.originalFile);
+    checkpoint(); continue;
+  }
   const id = `source-${entry.sha256}`;
   const row: PrivateLibraryCatalog["sources"][number] = { id, name: entry.fileName, sourcePath: entry.path, checksum: entry.sha256,
     module: entry.mapping.module?.value, status: "failed", reason: "Not processed", ready: 0, review: 0,
@@ -146,7 +197,8 @@ for (const entry of inventory.entries) {
   }
   catalog.sources = [...catalog.sources.filter(s => s.sourcePath !== entry.path), row];
   checkpoint();
+  if (row.bankFile) await ensureAnswerMarkReceipt(entry, row.bankFile, row.originalFile);
   console.log(`${catalog.sources.length}/${inventory.entries.length} ${row.status} ready=${row.ready} review=${row.review}`);
 }
-catalog.preparerVersion = 3;
+catalog.preparerVersion = PREPARER_VERSION;
 checkpoint();
