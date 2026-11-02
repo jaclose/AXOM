@@ -19,6 +19,10 @@ const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value
 const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 const basename = (name: string) => name.split(/[\\/]/).at(-1) || "source";
 const compareAcademicPath = (left: { path: string }, right: { path: string }) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0;
+// Import boundaries can return bytes from another JavaScript realm;
+// instanceof rejects those genuine byte arrays.
+const isUint8Bytes = (value: unknown): value is Uint8Array =>
+  ArrayBuffer.isView(value) && Object.prototype.toString.call(value) === "[object Uint8Array]";
 // Matches academic_files.byte_size and academic-content Storage bucket limit.
 const fileLimit = 50 * 1024 * 1024;
 /** Plan sections one course may combine; real modules have two or three. */
@@ -297,7 +301,7 @@ function snapshotAcademicUpload(value: AcademicUpload): AcademicUpload {
       ["path", "sha256", "byte_size", "mime_type", "bytes"], `Academic file ${index + 1}`);
     if (typeof file.path !== "string" || file.path.length > 1024 || /^[a-z]:/i.test(file.path)
       || [...file.path].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)
-      || !(file.bytes instanceof Uint8Array) || !Number.isSafeInteger(file.byte_size)
+      || !isUint8Bytes(file.bytes) || !Number.isSafeInteger(file.byte_size)
       || Number(file.byte_size) < 1 || Number(file.byte_size) > fileLimit
       || Number(file.byte_size) !== file.bytes.length || typeof file.sha256 !== "string"
       || !/^[a-f0-9]{64}$/.test(file.sha256) || typeof file.mime_type !== "string" || !file.mime_type) {
@@ -506,7 +510,7 @@ export async function preflightAcademicUpload(upload: AcademicUpload): Promise<A
   const verifiedHeldEmfs = new Set<string>();
   let totalBytes = 0;
   for (const file of files) {
-    if (!file || !(file.bytes instanceof Uint8Array) || typeof file.path !== "string"
+    if (!file || !isUint8Bytes(file.bytes) || typeof file.path !== "string"
       || file.path.length > 1024 || /^[a-z]:/i.test(file.path)
       || [...file.path].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127))
       throw new Error("An academic upload contains an unsafe file path or byte payload.");

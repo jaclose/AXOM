@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { runInNewContext } from "node:vm";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sha256 } from "../question-content/assets";
-import { academicAssetPath, assertAcademicFigureBudget, assertAcademicStoredFigureBudget, academicCollectionId, academicUploadHash, prepareAcademicUpload, uploadAcademicCourse, type AcademicUpload } from "./upload";
+import { academicAssetPath, assertAcademicFigureBudget, assertAcademicStoredFigureBudget, academicCollectionId, academicUploadHash, prepareAcademicUpload, preflightAcademicUpload, uploadAcademicCourse, type AcademicUpload } from "./upload";
 import { planPublication, publicationJobs, readPublicationInventory } from "./publication";
 import { library } from "./publicationFixture.testing";
 
@@ -723,6 +724,25 @@ it("rejects unsafe, duplicate, oversized or noncanonical direct replay manifests
     .rejects.toThrow(/upload hash.*canonical/i);
   expect(backend.rpc).not.toHaveBeenCalled();
   expect(backend.bucket.upload).not.toHaveBeenCalled();
+});
+
+it("accepts genuine bytes from another realm while rejecting other view types", async () => {
+  const original = await prepareAcademicUpload((await fixture()).read);
+  const catalog = original.files.find(file => file.path === "catalog.json")!;
+  const crossRealm = runInNewContext("Uint8Array.from(bytes)", { bytes: [...catalog.bytes] }) as Uint8Array;
+  expect(crossRealm instanceof Uint8Array).toBe(false);
+  const replay = { ...original, files: original.files.map(file =>
+    file === catalog ? { ...file, bytes: crossRealm } : file) };
+  await expect(preflightAcademicUpload(replay)).resolves.toHaveLength(original.files.length);
+  const backend = mockedStorage(replay, await academicCollectionId("account-a", replay.catalogId));
+  await expect(uploadAcademicCourse(backend.client, "account-a", replay, () => {}, () => {}))
+    .resolves.toMatchObject({ status: "active" });
+
+  for (const bytes of [new Uint8ClampedArray(catalog.bytes), new DataView(catalog.bytes.buffer), [...catalog.bytes]]) {
+    const wrongView = { ...original, files: original.files.map(file =>
+      file === catalog ? { ...file, bytes: bytes as unknown as Uint8Array } : file) };
+    await expect(preflightAcademicUpload(wrongView)).rejects.toThrow(/unsafe file path or byte payload/);
+  }
 });
 
 it("rejects duplicate source SHA claims before creating a cloud revision", async () => {
