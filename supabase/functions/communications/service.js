@@ -3886,7 +3886,7 @@ var ue = {
 	tagline: "Private academic operating system",
 	productKind: "private academic operating system",
 	channel: "pre-beta",
-	hostedUrl: "https://noctyrium-cktjdhuhw-jacloses-projects.vercel.app/#dashboard",
+	hostedUrl: "https://www.axom.info/#dashboard",
 	changelogRoute: "about"
 }, F = {
 	vaultDb: "noctyrium-local-vault",
