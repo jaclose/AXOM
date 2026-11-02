@@ -124,7 +124,7 @@ describe("Question Bank hosted course discovery", () => {
     expect(new URL(location.href).searchParams.get("course")).toBe(`remote:${collection}`);
   });
 
-  it("loads only the selected week, preserving the exact revision", async () => {
+  it("loads only Week 2 after clearing the default selection, preserving the exact revision", async () => {
     mocks.download.mockImplementation(async () => {
       const template = await prepareCourseTemplate(planText, "ftm1-course-plan.txt");
       useStore.setState(state => ({ documents: [...state.documents, template] }));
@@ -132,13 +132,14 @@ describe("Question Bank hosted course discovery", () => {
     });
     render(<AcademicBankDiscovery />);
     fireEvent.click(screen.getByRole("button", { name: /Preview FTM 1 course and weekly question sets/ }));
-    fireEvent.click(await screen.findByRole("checkbox", { name: "Week 2" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Clear selection" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Week 2" }));
     fireEvent.click(screen.getByRole("button", { name: "Load Course" }));
 
-    await waitFor(() => expect(mocks.enroll).toHaveBeenCalledWith(course, [1], "learner-1"));
+    await waitFor(() => expect(mocks.enroll).toHaveBeenCalledWith(course, [2], "learner-1"));
     expect(mocks.download).toHaveBeenCalledWith(revision, expect.any(Function), expect.objectContaining({ key: "learner-1" }));
-    expect(useStore.getState().tracker.map(row => row.path)).toEqual(expect.arrayContaining([expect.stringContaining("Week 1")]));
-    expect(useStore.getState().tracker.some(row => row.path.includes("Week 2"))).toBe(false);
+    expect(useStore.getState().tracker.map(row => row.path)).toEqual(expect.arrayContaining([expect.stringContaining("Week 2")]));
+    expect(useStore.getState().tracker.some(row => row.path.includes("Week 1"))).toBe(false);
   });
 
   it("starts a week quiz from the saved exact revision without mixing another week", async () => {

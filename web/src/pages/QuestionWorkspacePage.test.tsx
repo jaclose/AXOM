@@ -9,6 +9,7 @@ import type { QuizSession } from "../lib/quiz";
 import { useStore } from "../lib/store";
 import { QuestionWorkspacePage } from "./QuestionWorkspacePage";
 import { STORAGE_KEYS } from "../lib/brand";
+import { launchCourseQuiz } from "../lib/course-engine/quizLaunch";
 import { PRIVATE_REVIEW_DOCUMENT, type PreparedBank } from "../lib/privateLibrary/types";
 
 const localValues = new Map<string, string>();
@@ -449,6 +450,39 @@ describe("QuestionWorkspacePage Course Tracker handoff", () => {
     await user.click(screen.getByRole("button", { name: "Return to Course Tracker" }));
     expect(window.location.hash).toBe("#tracker");
     expect(screen.queryByText("Verified course question")).toBeNull();
+    sessionStorage.clear();
+  });
+
+  it("starts another exact week after closing a same-route course quiz", async () => {
+    sessionStorage.clear();
+    history.replaceState(null, "", "#questions");
+    vi.stubGlobal("confirm", () => true);
+    useStore.setState({
+      questions: [question({ id: "week-2", stem: "Week 2 only" }), question({ id: "week-3", stem: "Week 3 only" })],
+      questionSets: [
+        { ...set("set-week-2", "Week 2 set", "week-2", "2026-10-14T10:00:00.000Z"), scope: { module: "Neuro", week: 2 } },
+        { ...set("set-week-3", "Week 3 set", "week-3", "2026-10-14T10:00:00.000Z"), scope: { module: "Neuro", week: 3 } },
+      ],
+    });
+    const user = userEvent.setup();
+    render(<QuestionWorkspacePage />);
+
+    act(() => launchCourseQuiz({ module: "Neuro", term: "Term 4", week: 2, questionIds: ["week-2"], setIds: ["set-week-2"] }));
+    expect(await screen.findByText("Week 2 only")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "A. Alpha" }));
+    await user.click(screen.getByRole("button", { name: "Check answer" }));
+    await user.click(screen.getByRole("button", { name: "Finish block" }));
+    expect(await screen.findByRole("heading", { name: "Block results" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Return to Course Tracker" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(screen.queryByText("Week 2 only")).toBeNull());
+    expect(location.hash).toBe("#questions");
+
+    act(() => launchCourseQuiz({ module: "Neuro", term: "Term 4", week: 3, questionIds: ["week-3"], setIds: ["set-week-3"] }));
+    expect(await screen.findByText("Week 3 only")).toBeTruthy();
+    expect(screen.queryByText("Week 2 only")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Exit block" }));
+    history.replaceState(null, "", "/");
     sessionStorage.clear();
   });
 });

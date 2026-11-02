@@ -126,15 +126,18 @@ export function QuestionWorkspacePage() {
   const questions = s.questions ?? NO_QUESTIONS;
   // sessionStorage has no React subscription; the setter requests a fresh read.
   const [, setHandoffVersion] = useState(0);
+  const sameRouteCourseLaunch = useRef(false);
   // Some app shells retain mounted pages across route switches. Refresh the
   // handoff when Course Tracker navigates back without changing question data.
   useEffect(() => {
     const refresh = () => { if (location.hash === "#questions") setHandoffVersion((version) => version + 1); };
-    window.addEventListener("hashchange", refresh);
-    window.addEventListener(COURSE_QUIZ_LAUNCH_EVENT, refresh);
+    const fromRoute = () => { sameRouteCourseLaunch.current = false; refresh(); };
+    const fromQuestionBank = () => { sameRouteCourseLaunch.current = true; refresh(); };
+    window.addEventListener("hashchange", fromRoute);
+    window.addEventListener(COURSE_QUIZ_LAUNCH_EVENT, fromQuestionBank);
     return () => {
-      window.removeEventListener("hashchange", refresh);
-      window.removeEventListener(COURSE_QUIZ_LAUNCH_EVENT, refresh);
+      window.removeEventListener("hashchange", fromRoute);
+      window.removeEventListener(COURSE_QUIZ_LAUNCH_EVENT, fromQuestionBank);
     };
   }, []);
   const courseHandoff = inspectCourseLaunch(questions);
@@ -182,7 +185,7 @@ export function QuestionWorkspacePage() {
     if (courseLaunch || runner || courseHandoff.state !== "ready") return;
     const verified = courseHandoff.launch;
     setCourseLaunch(verified);
-    setRunner({ mode: "tutor", retakeIds: verified.questionIds, presetFilters: { setIds: verified.setIds }, fromCourse: true });
+    setRunner({ mode: "tutor", retakeIds: verified.questionIds, presetFilters: { setIds: verified.setIds }, fromCourse: !sameRouteCourseLaunch.current });
   }, [courseLaunch, runner, courseHandoff]);
 
   function cancelPendingCourseLaunch() {
@@ -776,7 +779,7 @@ export function QuestionWorkspacePage() {
           blockId={runner.blockId}
           simulate={runner.simulate}
           onReturnToCourse={runner.fromCourse ? returnToCourseTracker : undefined}
-          onClose={() => { setRunner(null); setSuspendedSim(readSuspendedBlock()); }}
+          onClose={() => { setRunner(null); setCourseLaunch(null); setSuspendedSim(readSuspendedBlock()); }}
         />
       )}
       {moduleTourOpen && (
