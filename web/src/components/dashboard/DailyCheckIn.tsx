@@ -1,8 +1,8 @@
 // The Daily Check-In (JD, Ideas 4): open by default and in the setup style.
-// One intention in the big underlined field, up to three wins, context behind
-// a disclosure. Setting it plays a short "Intention set" moment, then the
-// intention stays on the page, large, with its underline drawn in. Energy
-// orbs sit underneath. Logic moved unchanged from DashboardPage's WinTheDay.
+// One intention in the big underlined field, with optional wins and context
+// behind disclosures. Setting it plays a short "Intention set" moment, then
+// the intention stays on the page, large, with its underline drawn in. Energy
+// orbs stay close to the form. Logic moved unchanged from DashboardPage's WinTheDay.
 import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, ArrowRightCircle, Check, Circle, Trophy } from "lucide-react";
 import { OUTCOMES } from "../../lib/dailyCheckIn";
@@ -35,6 +35,7 @@ export function DailyCheckIn({ writing = false }: { writing?: boolean }) {
 
   const [intention, setIntention] = useState("");
   const [wins, setWins] = useState("");
+  const [showWins, setShowWins] = useState(false);
   const [note, setNote] = useState("");
   const [expectedMinutes, setExpectedMinutes] = useState("");
   const [personalNote, setPersonalNote] = useState("");
@@ -46,6 +47,7 @@ export function DailyCheckIn({ writing = false }: { writing?: boolean }) {
     dailyLoopReminderLedger.read(today).checkIn.disposition === "skipped"
   ));
   const [justSet, setJustSet] = useState(false);
+  const winCount = wins.split("\n").filter((win) => win.trim()).length;
 
   const openTasks = s.tasks.filter((t) => !t.done && !t.archived).slice(0, 3);
   const selectedTargets = useMemo(
@@ -59,6 +61,7 @@ export function DailyCheckIn({ writing = false }: { writing?: boolean }) {
     setPromptDismissed(dailyLoopReminderLedger.read(today).checkIn.disposition === "skipped");
     setIntention("");
     setWins("");
+    setShowWins(false);
     setNote("");
     setExpectedMinutes("");
     setPersonalNote("");
@@ -114,6 +117,7 @@ export function DailyCheckIn({ writing = false }: { writing?: boolean }) {
     if (!todayPlan) return;
     setIntention(todayPlan.intention);
     setWins(todayPlan.wins.join("\n"));
+    setShowWins(todayPlan.wins.length > 0);
     s.setDayPlan(today, "", []);
   }
 
@@ -158,23 +162,28 @@ export function DailyCheckIn({ writing = false }: { writing?: boolean }) {
             <span>Primary intention</span>
             <input value={intention} maxLength={160} placeholder="e.g. Finish the renal review before lunch" onChange={(e) => setIntention(e.target.value)} />
           </label>
-          <label className="setup-inline-field">
-            <span>One to three win conditions (optional)</span>
-            <textarea rows={2} placeholder="One per line" value={wins} onChange={(e) => setWins(e.target.value)} />
-          </label>
-          <details className="setup-more daily-checkin-context" open={showContext} onToggle={(event) => setShowContext(event.currentTarget.open)}>
-            <summary>Add context (optional)</summary>
-            <div className="daily-checkin-context-grid">
-              <label className="setup-inline-field"><span>Expected study block</span><input type="number" min="0" inputMode="numeric" placeholder="minutes" value={expectedMinutes} onChange={(event) => setExpectedMinutes(event.target.value)} /></label>
-              <label className="setup-inline-field"><span>Priority course or topic</span><input value={priority} onChange={(event) => setPriority(event.target.value)} /></label>
-              <label className="setup-inline-field"><span>Anticipated obstacle</span><input value={obstacle} onChange={(event) => setObstacle(event.target.value)} /></label>
-              <label className="setup-inline-field"><span>Personal note</span><input value={personalNote} onChange={(event) => setPersonalNote(event.target.value)} /></label>
-              <div className="setup-followup">
-                <span className="setup-label">Commitment level</span>
-                <ChoiceSegment label="Commitment level" options={COMMITMENT.map((level) => ({ value: level, label: level }))} value={commitment} onChange={setCommitment} />
+          <div className="daily-checkin-options">
+            <details className="setup-more daily-checkin-wins" open={showWins} onToggle={(event) => setShowWins(event.currentTarget.open)}>
+              <summary>Win conditions <span>{winCount ? `${Math.min(winCount, 3)} added` : "Optional"}</span></summary>
+              <label className="setup-inline-field">
+                <span>One to three win conditions (optional)</span>
+                <textarea rows={2} placeholder="One per line" value={wins} onChange={(e) => setWins(e.target.value)} />
+              </label>
+            </details>
+            <details className="setup-more daily-checkin-context" open={showContext} onToggle={(event) => setShowContext(event.currentTarget.open)}>
+              <summary>Add context (optional)</summary>
+              <div className="daily-checkin-context-grid">
+                <label className="setup-inline-field"><span>Expected study block</span><input type="number" min="0" inputMode="numeric" placeholder="minutes" value={expectedMinutes} onChange={(event) => setExpectedMinutes(event.target.value)} /></label>
+                <label className="setup-inline-field"><span>Priority course or topic</span><input value={priority} onChange={(event) => setPriority(event.target.value)} /></label>
+                <label className="setup-inline-field"><span>Anticipated obstacle</span><input value={obstacle} onChange={(event) => setObstacle(event.target.value)} /></label>
+                <label className="setup-inline-field"><span>Personal note</span><input value={personalNote} onChange={(event) => setPersonalNote(event.target.value)} /></label>
+                <div className="setup-followup">
+                  <span className="setup-label">Commitment level</span>
+                  <ChoiceSegment label="Commitment level" options={COMMITMENT.map((level) => ({ value: level, label: level }))} value={commitment} onChange={setCommitment} />
+                </div>
               </div>
-            </div>
-          </details>
+            </details>
+          </div>
           <div className="daily-checkin-actions">
             <button type="submit" className="setup-next" disabled={!intention.trim()}>
               <span>Set today’s focus</span>

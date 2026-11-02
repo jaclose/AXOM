@@ -444,7 +444,93 @@
 
 .dashboard-targets-empty { gap: 6px 12px; }
 .dashboard-targets-empty .gbtn { grid-column: 2; justify-self: start; margin-top: 6px; }
-.daily-checkin-energy { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hairline); }
+
+/* The first check-in reads as one quiet instrument: direction first, optional
+   detail next, energy alongside it when there is room. */
+.dashboard-widget-frame .daily-checkin {
+  border-color: var(--gold-line);
+  background:
+    radial-gradient(circle at 96% 4%, color-mix(in srgb, var(--gold-soft) 42%, transparent), transparent 45%),
+    var(--glass-card-fill);
+}
+.dashboard-widget-frame .daily-checkin-form { gap: 14px; }
+.dashboard-widget-frame .daily-checkin-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+.dashboard-widget-frame .daily-checkin-options > details {
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+}
+.dashboard-widget-frame .daily-checkin-options > details:focus-within { border-color: var(--gold-line); }
+.dashboard-widget-frame .daily-checkin-options > details > summary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  gap: 8px;
+  padding: 9px 13px;
+  color: var(--text-70);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  line-height: 1.3;
+}
+.dashboard-widget-frame .daily-checkin-options > details > summary:hover { color: var(--text); }
+.dashboard-widget-frame .daily-checkin-options > details > summary:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+  border-radius: var(--radius-md);
+}
+.dashboard-widget-frame .daily-checkin-wins > summary > span {
+  margin-inline-start: auto;
+  color: var(--text-70);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+}
+.dashboard-widget-frame .daily-checkin-wins[open] > .setup-inline-field { padding: 1px 13px 13px; }
+.dashboard-widget-frame .daily-checkin-wins textarea { min-height: 76px; }
+.dashboard-widget-frame .daily-checkin-context[open] > .daily-checkin-context-grid { padding: 1px 13px 13px; }
+.dashboard-widget-frame .daily-checkin-energy {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hairline);
+}
+
+@container (min-width: 60rem) {
+  .dashboard-widget-frame .daily-checkin:has(.daily-checkin-form) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(17rem, .4fr);
+    align-items: start;
+    gap: 20px;
+  }
+  .dashboard-widget-frame .daily-checkin:has(.daily-checkin-form) > .carry-over { grid-column: 1 / -1; }
+  .dashboard-widget-frame .daily-checkin:has(.daily-checkin-form) > .daily-checkin-energy {
+    margin: 0;
+    padding: 6px 0 6px 20px;
+    border-top: 0;
+    border-inline-start: 1px solid var(--hairline);
+  }
+  .dashboard-widget-frame .daily-checkin-intention input { font-size: clamp(1.2rem, .95rem + .8vw, 1.5rem); }
+}
+
+@media (max-width: 560px) {
+  .dashboard-widget-frame .daily-checkin { padding: 18px; }
+  .dashboard-widget-frame .daily-checkin-form { gap: 12px; }
+  .dashboard-widget-frame .daily-checkin-options { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .dashboard-widget-frame .daily-checkin-intention input { font-size: 1.2rem; }
+  .dashboard-widget-frame .daily-checkin-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .dashboard-widget-frame .daily-checkin-actions .setup-next { grid-column: 1 / -1; justify-content: space-between; }
+  .dashboard-widget-frame .daily-checkin-actions > button:not(.setup-next) { min-height: 42px; }
+}
 
 /* Soundscape widget: sits beside the focus timer (JD, Ideas 1) ------------ */
 .soundscape-widget {
