@@ -16,6 +16,7 @@ test('exports portable welcome HTML and text from the canonical renderer', async
     const light = await readFile(new URL('welcome-light.html', output), 'utf8');
     const text = await readFile(new URL('welcome.txt', output), 'utf8');
     const index = await readFile(new URL('index.html', output), 'utf8');
+    const resendDraft = await readFile(new URL('welcome-resend-draft.html', output), 'utf8');
     for (const html of [dark, light]) {
       assert.match(html, /Alex/);
       assert.match(html, /alt="AXOM Orb"/);
@@ -25,6 +26,8 @@ test('exports portable welcome HTML and text from the canonical renderer', async
     }
     assert.match(text, /Enter AXOM/);
     assert.match(index, /LOCAL DRAFT · NO EMAIL SENT/);
+    assert.match(resendDraft, /https:\/\/axom\.info\/icons\/axom-orb-512\.png/);
+    assert.doesNotMatch(resendDraft, /Alex|src="orb\.png"/);
     assert.ok((await readFile(new URL('orb.png', output))).length > 1000);
   } finally {
     await rm(directory, { recursive: true, force: true });

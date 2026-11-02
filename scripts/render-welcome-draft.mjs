@@ -43,9 +43,15 @@ export async function renderWelcomeDraft(output = defaultOutput) {
     plainText ??= rendered.text;
     await writeFile(new URL(`welcome-${theme}.html`, output), rendered.html.replaceAll(orbUrl, 'orb.png'));
   }
+  const resendDraft = renderAxomEmail({
+    type: 'welcome',
+    context: { displayName: 'there', accent: '#c8a96a', theme: 'dark', locale: 'en', timezone: 'America/Grenada', orbUrl },
+    baseUrl: 'https://axom.info',
+  });
+  await writeFile(new URL('welcome-resend-draft.html', output), resendDraft.html);
   await writeFile(new URL('welcome.txt', output), `${plainText}\n`);
   await writeFile(new URL('index.html', output), reviewPage);
-  await writeFile(new URL('README.md', output), `# AXOM welcome email draft\n\nLocal visual review only. No email was sent. Alex Morgan is fictional.\n\nSubject: ${subject}\n\nOpen \`index.html\` for dark and light views. \`welcome.txt\` is the plain-text alternative. Both HTML emails come from the canonical \`renderAxomEmail\` renderer in the generated communications bundle; its SHA-256 was \`${bundleHash}\`. The local Orb file replaces the hosted image URL only in these review copies. Re-run \`node scripts/render-welcome-draft.mjs\` after any renderer change. Inbox acceptance remains separate.\n`);
+  await writeFile(new URL('README.md', output), `# AXOM welcome email draft\n\nLocal visual review only. No email was sent. Alex Morgan is fictional.\n\nSubject: ${subject}\n\nOpen \`index.html\` for dark and light views. \`welcome.txt\` is the plain-text alternative. \`welcome-resend-draft.html\` is the generic, hosted-Orb version for the Resend draft editor; its greeting is not personalized. All HTML comes from the canonical \`renderAxomEmail\` renderer in the generated communications bundle; its SHA-256 was \`${bundleHash}\`. The local Orb file replaces the hosted image URL only in the review copies. Re-run \`node scripts/render-welcome-draft.mjs\` after any renderer change. Inbox acceptance remains separate.\n`);
   return { path: fileURLToPath(output), subject, bundleHash };
 }
 

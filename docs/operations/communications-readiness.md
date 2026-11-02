@@ -37,6 +37,9 @@ Open `artifacts/communications/welcome-draft/index.html` for dark and light
 views. The folder also contains raw email HTML, the plain-text alternative and
 the authentic Orb image. Alex Morgan is a fictional fixture. The review copies
 replace only the hosted Orb URL with a relative image so they open offline.
+`welcome-resend-draft.html` keeps the hosted Orb URL and uses a generic greeting
+for import into a Resend draft. The live server renderer personalizes the actual
+message separately.
 They are draft assets, not sent messages or email-client acceptance evidence.
 The generator checks the source manifest and refuses to render a stale bundle.
 

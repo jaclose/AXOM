@@ -55,3 +55,5 @@ Check the registry and do not create parallel question-attempt or assignment sto
 [Communications](communications.md) owns email consent, shared templates, queues,
 editorial publishing, privacy requests and the canonical Pulse snapshot/web experience.
 Provider activation is routed to the [Resend runbook](../operations/communications-resend.md).
+Local configuration checks and the welcome draft are in
+[Communications readiness](../operations/communications-readiness.md).
