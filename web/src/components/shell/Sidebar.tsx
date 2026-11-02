@@ -29,6 +29,7 @@ import { QuickThemeControl } from "./QuickThemeControl";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { protectionLabel, useAccount } from "../../lib/account/accountStore";
 import { useOperatorAccess } from "../../lib/operator/hostClient";
+import { APP_VERSION_LABEL } from "../../lib/brand";
 
 const MOBILE_SIDEBAR_QUERY = "(max-width: 880px)";
 const PREP_FOLDER_TOGGLE_ID = "sidebar-academic-prep-toggle";
@@ -225,7 +226,7 @@ export function Sidebar({
         aria-hidden={hiddenOffscreen || undefined}
         tabIndex={-1}
       >
-        <button type="button" className="server-header" onClick={() => onOpenSettings("profile")} title={`Profile & settings · ${profile.versionLabel}`}>
+        <button type="button" className="server-header" onClick={() => onOpenSettings("profile")} title={`Profile & settings · ${APP_VERSION_LABEL}`}>
           <AxomBrandLockup
             className="server-brand"
             layout="horizontal"
@@ -386,7 +387,7 @@ export function Sidebar({
               </span>
               <span className="user-meta">
                 <span className="user-name">{profile.name || "You"}</span>
-                <span className="user-status">{manage ? "Tap sections to subscribe / hide" : profile.tagline}</span>
+                <span className="user-status">{profile.tagline}</span>
               </span>
             </button>
             <div className="user-actions">

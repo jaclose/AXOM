@@ -15,6 +15,7 @@ import { SCHEMA_VERSION } from "../lib/seed";
 import { ICON_SIZE } from "../lib/iconSize";
 import { COACH_RESET_EVENT, readCoachLedger, resetPageHints, writeCoachLedger } from "../lib/coach";
 import { pushToast } from "../lib/toast";
+import { APP_VERSION_LABEL } from "../lib/brand";
 
 const FEEDBACK_EMAIL = "jafardabbagh@gmail.com";
 
@@ -345,7 +346,6 @@ function statusClass(status: GuideStatus): string {
 }
 
 export function FeedbackForm() {
-  const s = useStore();
   const [type, setType] = useState<FeedbackKind>("Bug");
   const [area, setArea] = useState("Dashboard");
   const [message, setMessage] = useState("");
@@ -356,7 +356,7 @@ export function FeedbackForm() {
     message,
     area,
     contact,
-    appVersion: s.profile.versionLabel,
+    appVersion: APP_VERSION_LABEL,
     schemaVersion: SCHEMA_VERSION,
     route: typeof location === "undefined" ? "help" : location.hash,
     userAgent: typeof navigator === "undefined" ? "" : navigator.userAgent,

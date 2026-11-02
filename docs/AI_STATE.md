@@ -5,40 +5,29 @@ authority: current-state
 ---
 # AXOM current AI state
 
-## Checkout and release boundary · 2026-11-02 11:56 UTC
+## Checkout and release boundary · 2026-11-02 12:41 UTC
 
-This handoff was updated from local frontier commit `eaad98fa` on
-`codex/axom-frontier-release-20261101`. Check `git status`, HEAD and the
-coordination board before editing. At this snapshot, remote `main` was
-`ee1c0c2e`; [PR #74](https://github.com/jaclose/AXOM/pull/74),
-[PR #75](https://github.com/jaclose/AXOM/pull/75),
-[PR #76](https://github.com/jaclose/AXOM/pull/76),
-[PR #77](https://github.com/jaclose/AXOM/pull/77), and
-[PR #78](https://github.com/jaclose/AXOM/pull/78) are merged there. The
-frontier's `0.0.3-prebeta` version and [release notes](../CHANGELOG.md) are
-**local release preparation**, with push and production held for JD's follow-up.
-This handoff does not establish deployment or authenticated acceptance of the
-frontier-only features.
+JD approved the final release. `main` was fast-forwarded to `c06ae5a6`,
+joining the committed Ideas/Journal frontier with QBank PR #81 while
+preserving the newer first-upload-error fix. Vercel deployment
+`dpl_D9C6W88yq5jD7QsbkCnh8EodW92j` is READY and serves both axom.info
+aliases at that SHA. Live first-use setup, desk, weather, open book and full
+writing view loaded without browser console errors. Radiordle and Pathordle
+remain excluded pending provider approval; no private content was published.
 
-The last recorded web production check was PR #59 on 2026-11-01: signed-in
-Question Bank and Community Uploads loaded. A 2026-11-02 read-only production
-metadata check found one private pending academic collection and zero Community
-submissions; no official academic content was published. The last direct check of
-AXOM Production
-(`jofkmfwkidubxcutkwzf`) found its ledger ends at `20261101180000`. The four
-feature migrations (`20261101190000`–`20261101193000`), forward Host privacy
-migration (`20261102160000`), reviewer queue migration (`20261102170000`)
-and reviewer-attestation identity migration (`20261102171000`)
-were **pending in production at that check**. Production connector access was
-denied on 2026-11-02; verify its ledger before applying any of the seven.
-Preview `yfjqsshsaxiggcbvkvnj` has four feature migrations applied and three
-November 2 migrations pending; it is not production acceptance. The communications
-migration and Edge function are present in production, but provider mode,
-delivery and inbox receipt were not verified. Dated receipts: `git show e799ed5b:docs/AI_STATE.md`,
+AXOM Production (`jofkmfwkidubxcutkwzf`) applied the seven ordered
+`20261101190000`–`20261102171000` release migrations. Read-only SQL confirmed
+all seven ledger rows, all 11 feature tables with RLS, and one audited owner
+role for JD's separately verified immutable Auth ID. Preview
+`yfjqsshsaxiggcbvkvnj` remains a separate project. This is schema and
+deployment proof, not real-account Community, Host or academic publication
+acceptance. The communications function and templates exist, but live send,
+webhook, SMTP and inbox receipt remain unverified. Dated predecessor receipts:
+`git show e799ed5b:docs/AI_STATE.md`,
 [Host rollout gate](features/community-operator-console.md#deployment-and-verification-gates),
 and [email readiness](operations/communications-readiness.md).
 
-## What is integrated locally
+## What this release contains
 
 - The frontier joins Ideas/Journal with [Communities](features/communities.md),
   [Patch Notes](features/patch-notes.md), the qualitative asthma
@@ -74,8 +63,8 @@ and [email readiness](operations/communications-readiness.md).
   set was refiled outside the current course.
 - [Host](features/community-operator-console.md#operator-console) uses
   server-read roles, reasoned/audited moderation and a restricted report
-  queue. Its four feature migrations, forward privacy migration `20261102160000`
-  and verified owner provisioning are pending production acceptance.
+  queue. Its migrations and verified owner grant are on production; signed-in
+  operator journeys still need real-account acceptance.
   [Communications](features/communications.md) has a canonical renderer,
   local previews, unsent Resend welcome/product-update and Broadcast drafts,
   ten optional opt-out Topics, and a branded preference page. Their exact
@@ -127,12 +116,12 @@ before shared edits. Historic receipts remain in Git history; do not reload
 them at startup without a specific question.
 
 At `eaad98fa`, the clean combined gate passed typecheck, lint, 4,649 web
-tests (35 skipped), production build, update safety, offline games and 167
-browser journeys (14 conditionally skipped). Root API typecheck, 88 release
-tests, 43 repository tests, repository hygiene and communications artifact
-integrity also passed. Host desktop/phone QA covered both themes and reduced
-motion; the course-template export and reimport journey passed at 1440, 768
-and 390 pixels. Keep the remote
-release held until JD's explicit final-commit follow-up;
-production migration status, owner grant, live mail delivery and real-account
-Community/Host acceptance remain separate checks.
+tests (35 skipped), build, update safety, offline games and 167 browser
+journeys (14 conditional skips). On the final code tree, root API typecheck,
+88 release tests, 43 repository tests, hygiene, web typecheck/lint/build,
+update/offline checks, 200 focused unit tests and 15 relevant Chrome journeys
+passed. The broad local Vitest run was stopped under severe host load after
+four timing failures; all four files passed serially (88 tests). GitHub
+Quality run 41445654894 passed for `c06ae5a6`.
+Live mail delivery, private-content rights, and real-account Community/Host
+and academic acceptance remain separate gates.
