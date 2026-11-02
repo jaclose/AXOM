@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { ArrowUpRight, History, Search, X } from "lucide-react";
 import { GlassCard, Tag } from "../components/ui/primitives";
 import { BUILD_INFO } from "../lib/buildInfo";
@@ -48,6 +48,7 @@ function ReleaseEntry({ release, current }: { release: ReleaseNote; current: boo
 export function PatchNotesPage() {
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<PatchNotesScope>("all");
+  const searchRef = useRef<HTMLInputElement>(null);
   const releases = useMemo(
     () => visibleReleaseNotes(RELEASE_HISTORY, query, scope, APP_RELEASE_VERSION),
     [query, scope],
@@ -80,12 +81,12 @@ export function PatchNotesPage() {
         <button type="button" aria-pressed={scope === "all"} onClick={() => setScope("all")}>All releases</button>
         <button type="button" aria-pressed={scope === "current"} onClick={() => setScope("current")}>This version</button>
       </div>
-      <label className="patch-notes-search">
+      <div className="patch-notes-search">
         <Search size={ICON_SIZE.body} aria-hidden="true" />
-        <span className="sr-only">Search patch notes</span>
-        <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search changes or versions" />
-        {query && <button type="button" onClick={() => setQuery("")} aria-label="Clear search"><X size={ICON_SIZE.body} aria-hidden="true" /></button>}
-      </label>
+        <label className="sr-only" htmlFor="patch-notes-search">Search patch notes</label>
+        <input ref={searchRef} id="patch-notes-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search changes or versions" />
+        {query && <button type="button" onClick={() => { setQuery(""); searchRef.current?.focus(); }} aria-label="Clear search"><X size={ICON_SIZE.body} aria-hidden="true" /></button>}
+      </div>
     </div>
 
     <p className="patch-notes-count" aria-live="polite">
@@ -98,7 +99,7 @@ export function PatchNotesPage() {
       : <GlassCard pad className="patch-notes-empty">
         <h2>No matching notes</h2>
         <p>Try a different phrase or show all releases.</p>
-        <button type="button" onClick={() => { setQuery(""); setScope("all"); }}>Show all releases</button>
+        <button type="button" onClick={() => { setQuery(""); setScope("all"); searchRef.current?.focus(); }}>Show all releases</button>
       </GlassCard>}
     <p className="patch-notes-footnote">This history records versioned release notes. The revision above identifies the exact code in your build.</p>
   </main>;

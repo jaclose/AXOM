@@ -104,6 +104,8 @@ export function BodySimulatorPage() {
   const [region, setRegion] = useState<BodyRegion>("airways");
   const observation = REGION_OBSERVATIONS[stage][region];
   const evidence = sourcesFor(observation);
+  const stageLabel = SIMULATION_STAGES.find((option) => option.id === stage)?.label ?? stage;
+  const regionLabel = BODY_REGIONS.find((option) => option.id === region)?.label ?? region;
 
   function reset() {
     setStage("asthma");
@@ -168,7 +170,8 @@ export function BodySimulatorPage() {
               </button>
             ))}
           </div>
-          <article className="body-sim__observation" aria-live="polite" aria-atomic="true">
+          <p className="sr-only" role="status">Viewing {stageLabel}, {regionLabel}: {observation.heading}</p>
+          <article className="body-sim__observation">
             <div className="body-sim__observation-meta">
               <span>{observation.label}</span>
               <span>{region.toUpperCase()}</span>

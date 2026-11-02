@@ -25,6 +25,7 @@ describe("BodySimulatorPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Inspect heart" }));
     expect(screen.getByRole("heading", { name: "Heart rhythm matters" })).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe("Viewing Inhaled albuterol, Heart: Heart rhythm matters");
     expect(screen.getByText(/Possible does not mean expected/)).toBeTruthy();
     expect(screen.getByRole("link", { name: /MedlinePlus: Albuterol oral inhalation/ }).getAttribute("href"))
       .toBe("https://medlineplus.gov/druginfo/meds/a682145.html");

@@ -19,11 +19,11 @@ export function CommunitiesPage() {
   const accountPhase = useAccount((state) => state.phase);
   const accountId = useAccount((state) => state.user?.id);
 
-  return <div className="communities-page">
+  return <main className="communities-page" aria-labelledby="communities-title">
     <header className="communities-masthead">
       <div className="communities-masthead-copy">
         <span className="communities-kicker"><UsersRound size={ICON_SIZE.body} aria-hidden="true" /> AXOM / COMMUNITIES</span>
-        <h1>Shared study, with provenance.</h1>
+        <h1 id="communities-title">Shared study, with provenance.</h1>
         <p>Explore learner-contributed courses, join a daily challenge, and connect with people you choose. Review status is visible before you practice.</p>
         <div className="communities-index" aria-label="Community spaces">
           <span><b>01</b> Course exchange</span>
@@ -82,5 +82,5 @@ export function CommunitiesPage() {
       <div><h2>Share with care.</h2><p>Contribute only material you have permission to distribute. Community uploads remain marked Unreviewed until an academic reviewer approves that exact revision.</p></div>
       <a href="#help">Community feedback <ArrowUpRight size={ICON_SIZE.body} aria-hidden="true" /></a>
     </aside>
-  </div>;
+  </main>;
 }

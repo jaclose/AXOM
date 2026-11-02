@@ -34,6 +34,7 @@ describe("CommunitiesPage", () => {
     const user = userEvent.setup();
     render(<CommunitiesPage />);
 
+    expect(screen.getByRole("main", { name: "Shared study, with provenance." })).toBeTruthy();
     expect(screen.getByRole("heading", { level: 1, name: "Shared study, with provenance." })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Open saved questions" }));
     expect(window.location.hash).toBe("#questions");

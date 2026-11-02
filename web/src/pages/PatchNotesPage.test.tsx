@@ -21,10 +21,18 @@ describe("PatchNotesPage", () => {
     expect(screen.getByRole("button", { name: "This version" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByText("1 release in this view")).toBeTruthy();
 
-    await user.type(screen.getByRole("searchbox", { name: "Search patch notes" }), "no-matching-release-term");
+    await user.type(screen.getByRole("searchbox", { name: /^Search patch notes$/ }), "no-matching-release-term");
     expect(screen.getByRole("heading", { name: "No matching notes" })).toBeTruthy();
+    expect(screen.getByRole("searchbox", { name: /^Search patch notes$/ })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Show all releases" }));
     expect(screen.getByRole("button", { name: "All releases" }).getAttribute("aria-pressed")).toBe("true");
-    expect((screen.getByRole("searchbox", { name: "Search patch notes" }) as HTMLInputElement).value).toBe("");
+    const search = screen.getByRole("searchbox", { name: /^Search patch notes$/ }) as HTMLInputElement;
+    expect(search.value).toBe("");
+    expect(document.activeElement).toBe(search);
+
+    await user.type(search, "Tutor");
+    await user.click(screen.getByRole("button", { name: "Clear search" }));
+    expect(search.value).toBe("");
+    expect(document.activeElement).toBe(search);
   });
 });

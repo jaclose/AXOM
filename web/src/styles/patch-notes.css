@@ -17,10 +17,10 @@
 .patch-notes-scope button { min-height: 40px; padding: 7px 16px; border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--text-70); cursor: pointer; }
 .patch-notes-scope button[aria-pressed="true"] { background: color-mix(in srgb, var(--gold) 15%, var(--surface-1)); color: var(--text); }
 .patch-notes-search { display: flex; align-items: center; gap: 8px; min-width: min(100%, 280px); min-height: 48px; padding: 0 13px; border: 1px solid var(--hairline); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-60); }
-.patch-notes-search:focus-within { border-color: var(--gold); }
+.patch-notes-search:focus-within { border-color: var(--gold); box-shadow: 0 0 0 2px color-mix(in srgb, var(--gold) 35%, transparent); }
 .patch-notes-search input { flex: 1; width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; }
 .patch-notes-search input::placeholder { color: var(--text-50); }
-.patch-notes-search button { display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text-70); cursor: pointer; }
+.patch-notes-search button { display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text-70); cursor: pointer; }
 .patch-notes-count { margin: 0; color: var(--text-60); font: var(--fw-medium) var(--fs-xs) var(--font-mono); }
 .patch-notes-timeline { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
 .patch-notes-entry { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 15px; }
