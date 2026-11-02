@@ -5,160 +5,87 @@ authority: current-state
 ---
 # AXOM current AI state
 
-## 2026-11-01 Ideas and Journal integration
+## Checkout and release boundary · 2026-11-02 04:52 UTC
 
-The safe Ideas branch `b08d10c1` joins current `main` in this release candidate.
-It adds the desk Journal, free writing, setup, return control, support, weather,
-notifications, streaks, exam highlights, shared sets, Host and Community.
-Radiordle and Pathordle remain held for provider approval. Four feature
-migrations `20261101190000`–`20261101193000` applied to AXOM production;
-all 11 tables have RLS. The web merge is local; account acceptance is pending.
-Private academic content remains unpublished.
-Other worktrees were not changed.
+This handoff was updated from local frontier baseline `77dd3533` on
+`codex/axom-frontier-release-20261101`. Check `git status`, HEAD and the
+coordination board before editing. At this snapshot, remote `main` was
+`be2f40e6`; [PR #74](https://github.com/jaclose/AXOM/pull/74) and
+[PR #75](https://github.com/jaclose/AXOM/pull/75) are merged there. The
+frontier's `0.0.3-prebeta` version and [release notes](../CHANGELOG.md) are
+**local release preparation**, with push and production held for JD's follow-up.
+No later production deployment or authenticated acceptance is established here.
 
-2026-11-02 02:12 UTC `main` is `4d6a96a9` after the QBank parser, diagram,
-course-map, SGU setup, explanation-state and reviewer-gate PRs listed below.
-Their branch web/native/deployment checks passed before merge; the combined
-main deployment has not been verified in this receipt.
+The last recorded web production check was PR #59 on 2026-11-01: signed-in
+Question Bank and Community Uploads loaded. The last recorded linked SQL check
+then found zero academic collections and community submissions; do not treat
+that as a fresh count. The 2026-11-02 postflight recorded four feature
+migrations (`20261101190000`–`20261101193000`) and RLS on all 11 new tables,
+without real-account acceptance. The communications migration and Edge function
+were observed active separately, but provider mode, delivery and inbox receipt
+were not verified. Dated receipts: `git show e799ed5b:docs/AI_STATE.md`,
+[Host rollout gate](features/community-operator-console.md#deployment-and-verification-gates),
+and [email readiness](operations/communications-readiness.md).
 
-2026-11-01 PR #59 merged as `cb0a456b` at 21:33:30 UTC. The Vercel production
-deployment for that commit is ready on axom.info. The signed-in Question Bank
-and Community Uploads UI loaded in production. Local browser checks covered
-term sorting, week selection, persistence, community states and responsive
-layouts; the merged branch passed typecheck, lint, build, repository checks and
-focused tests. At the last linked SQL check on 2026-11-01, the hosted production
-project had JD's reviewer row and both academic RPCs, with zero library
-collections and zero community submissions. That is a dated observation, not
-a fresh production count. No course content has been uploaded or shared.
+## What is integrated locally
 
-The owner-term and MI→NMI upload-free dry run prepared 20/20 available courses
-with zero term or package prompts: 699 answer-ready and 16,252 held. All 17,559
-source rows were accounted for; 594 stayed local. A separate, local-only NMI
-copy matched 82 answers to a printed key and passed a full upload-free dry run
-at 781 technically answer-ready and 16,170 held; its original source and the
-earlier candidate were untouched. Those 82 still carry missing-explanation
-warnings, so they are not explanation-complete. JD directed this official
-USMLE sample to appear as a link to the original NBME/USMLE sample set; the
-copied questions remain local unless written NBME website permission is
-recorded. Source rationales are preferred; separate, cited AXOM explanations
-are drafts for subject review when source rationales are missing or incomplete.
-Among the in-course parsed rows, 15,894 lack a parsed answer key across 816
-source banks. No missing key is promoted from a parser suggestion or medical
-inference. DERS, BSCE3 and DNPR still lack validated current question packages;
-four Unfiled decisions remain unresolved. Earlier dated claims remain in
-`git show 1b189177:docs/AI_STATE.md` and the feature contract.
+- The frontier joins Ideas/Journal with [Communities](features/communities.md),
+  [Patch Notes](features/patch-notes.md), the qualitative asthma
+  [body simulator](features/body-simulator.md), Dashboard widget improvements,
+  and the **Midnight** palette. It includes earned study credits, bounded
+  one-day streak protection, and account settings work. The simulator is a
+  source-linked study illustration awaiting human medical review, not a
+  clinical tool. Radiordle and Pathordle remain held for provider approval.
+- [PR #74](https://github.com/jaclose/AXOM/pull/74) adds an explicit route
+  from a reviewed saved source to a private revision and **Unreviewed**
+  Community submission. Sharing needs rights attestation, exact source/media
+  checks and later academic reviewer approval. A synthetic account journey
+  does not prove hosted publishing. [PR #75](https://github.com/jaclose/AXOM/pull/75)
+  records private PDF answer-mark **proposals for review**; visual marks do
+  not change scoring keys or answer-ready status. Current-revision explanation
+  attestation remains required before official academic approval.
+- [Host](features/community-operator-console.md#operator-console) uses
+  server-read roles, reasoned/audited moderation and a restricted report
+  queue. Its forward privacy migration `20261102160000` and verified owner
+  provisioning must be checked against the hosted ledger before the matching
+  UI can be accepted. [Communications](features/communications.md) has a
+  canonical renderer plus a branded local welcome draft and safe diagnostics;
+  live Resend send, webhook, SMTP and email-client acceptance remain separate
+  gates.
 
-## 2026-11-02 UTC QBank code merge receipt
+## Protected content and acceptance
 
-GitHub reports these merge commits and times on `main`: #63 `bdfa6edd`
-01:54:35, #68 `05905634` 01:55:40, #60 `62672efd` 01:56:29, #65 `c55a665b`
-01:57:10, #64 `c4610a3e` 01:57:51, #67 `63e3a393` 01:58:26, and #69
-`e925ebf8` 01:59:04. The stacked #68 and #65 were retargeted to `main` after
-their base PRs merged. #68 reconciles exact answer-copy PDFs but does not
-silently promote private questions. #65 adds original post-answer diagrams;
-#67 completes the SGU map by an explicit, preserving action. The hosted
-library content count remains a separate acceptance gate. PR #42 was excluded
-from this sweep: its current head has eight commits across 17 files and
-conflicts with `main`; its scope needs separate review.
+[Academic library](features/academic-library.md) and
+[Questions](features/questions.md) own source identity, media, filing, import
+and reviewer rules. Private RHPS/ESoft/cumulative packages and held questions
+remain unpublished. Missing keys are never inferred from parser suggestions,
+answer marks or medical reasoning. Source rationales are preferred; separate
+AXOM explanations require subject review. The copied NBME/USMLE sample remains
+local pending written website permission; link to the original sample instead.
+The older 20-course upload-free dry run and unresolved inventory are dated
+evidence in `git show e799ed5b:docs/AI_STATE.md`, not hosted delivery.
 
-PR #70 merged as `4d6a96a9` at 02:12:12 UTC after green branch
-web/native/deployment checks. It requires a current-revision reviewer
-attestation of stored explanations before official owner or community approval.
-The check confirms text presence and stored ready-figure integrity; a reviewer
-remains responsible for source and clinical accuracy.
+Production acceptance still needs a cleared-content owner upload, reviewer
+decision, learner reload/media and checksum readback, share withdrawal, privacy
+and multi-device checks. Cloud-backed Community and Host need matching hosted
+policies plus real-account checks. No private content, clinical accuracy or
+source rights are approved by a passing code suite.
 
-## 2026-10-28 QBank production receipt
+## Work protection and next action
 
-CLI 2.122.0 failed on `LOCK TABLE` (25P01) at 12:35 UTC; history stayed
-30/33. CLI 2.114.0 applied versions `20261016011812`, `20261017233759`,
-`20261027120000` at 12:47:19–12:47:36 UTC with
-`db push --linked --skip-vault`. Postflight 33/33; academic RPCs verified.
-Owner reviewer grant under `service_role` verified 12:49:35–12:49:40 UTC.
-No content upload or sharing change.
+The original checkout and other worktrees contain independent owner material;
+preserve their staged, untracked and ignored files. Do not reset, stash, clean
+or bulk-merge them. In particular, `backup/pre-large-file-cleanup-2026-09-28`
+contains private assets and broad replacement/deletion. Check the
+`/Users/jd/Developer/AXOM-coordination/BOARD.md` ownership notes and
+[maintenance registry](operations/repository-audit.md#maintenance-registry)
+before shared edits. Historic receipts remain in Git history; do not reload
+them at startup without a specific question.
 
-2026-11-02 settings candidate `2f950172` adds the account save map, typed sync
-errors, first-scroll samples, navy AXOM Classic/default, graphite Legacy,
-black Midnight Midnight, and refreshed Reports and WIP prep pages. Focused
-tests, typecheck, lint, build and browser checks passed; hosted cloud readback
-remains unverified. See [account sync](architecture/accounts-sync-v1.md).
-
-## 2026-11-01 QBank production receipt
-
-CLI 2.118.0 applied `20261101120000` by 20:01 UTC and `20261101130000`
-by 20:22 UTC, each the sole pending version, with `db push --linked --skip-vault`.
-Hosted ledger, academic reviewer/catalog/community functions, JD's Auth
-reviewer row, and the private bucket/file-manifest EMF settings were verified.
-The learner still requires a viewable figure. Collections and community
-submissions were zero; no content was uploaded or sharing changed. PR 37/44
-branch context remains in the [library contract](features/academic-library.md)
-and `git show de00e44b:docs/AI_STATE.md`.
-
-At the 2026-11-02 02:12 UTC linked-ledger check, migration `20261101180000`
-appeared on both local and hosted lists. This receipt records ledger parity,
-not an authenticated reviewer-flow acceptance run. No course content upload or
-sharing change was performed with this migration.
-
-The MI→NMI change from PR #47, integrated through #59, applied JD's hash-bound
-decision to 38 sources, 31 banks, two plan sections and 39 activities without
-changing originals. The later combined upload-free check reconciled 17,559
-rows and all 20 courses. No content was uploaded.
-
-## Ownership and protected work
-
-Read the coordination board and CONVERGENCE before integration. Preserve other
-owners' checkouts. Local `main` has 45 protected staged additions and six
-untracked private sources; exclude them and verify staged/working hashes before
-and after integration. Never switch, reset, stash or rewrite that checkout.
-Staged research, backup, generated ZIP/demo and crawler work needs separate
-owner review. Never merge `backup/pre-large-file-cleanup-2026-09-28`; it
-contains private assets, a 288 MB audio file and broad replacement/deletion.
-
-## Academic inventory and acceptance
-
-[Academic library](features/academic-library.md) owns the implementation and
-acceptance contract. The recorded inventory has 2,733 source identities across
-4,213 hashed paths and 2,274 jobs; these are not verified question totals. B4
-records 1,402 unavailable, 994 review candidates and 12,140 unresolved; B5
-records zero ready/cloud. Earlier 22 templates had 547 T1–T3 activities, with
-no authoritative T4/T5 denominator. The October 20 delivery had 28 templates,
-655 sources and 23 unreadable retained rows. Those historical scans do not
-supersede the newer 20-course dry run above or prove cloud delivery. Disk and
-the 1 GiB import cap blocked that older full archive. `academicReleaseComplete`
-remains false; see the [library contract](features/academic-library.md) for
-source and media requirements.
-
-## Implemented behavior
-
-Course Library separates term/course maps, plans and local/account context.
-QBank tracks ready, suggested, unresolved and missing records; image counts
-are metadata, never answer-bearing browse thumbnails. Missing-record recovery
-keeps original collection IDs, membership and scope; a new import stays
-separate, and a live presence check is not durable-save proof. See
-[Questions](features/questions.md).
-
-Private installation holds invalid media used only by held questions while
-allowing verified ready siblings. Ready-image and bank-wide filename/checksum
-checks stay strict. Connected banks need exact collection/course/term/module
-receipt membership; a same-named local course is insufficient. Preserve
-account locks, source identity, reviewed filing, attachment rollback, revocable
-shares and owner-only recovery. Recheck the linked ledger before migrations.
-
-Journal writes preserve drafts on failure; the reflection inbox suppresses
-exact dismissed dates per device/account while allowing new missed dates and
-retrying Undo. See [reminder lifecycle](DAILY-LOOP-REMINDER-LIFECYCLE.md).
-
-## Current validation
-
-Earlier validation receipts remain at `git show dc055a2:docs/AI_STATE.md`.
-Hosted multi-connection SQL is unverified. Existing build chunk/import warnings
-and the older 56-advisory snapshot were not rechecked here.
-
-## Cloud and delivery boundary
-
-At the 2026-11-01 linked SQL check, collections and community submissions were
-zero. No owner-authenticated production upload, learner reload, media/checksum
-readback, share recovery or revocation has been verified. Acceptance needs an
-authenticated cleared-content publish and learner check, plus privacy-lock,
-multi-tab, Safari/WebKit and packaged-desktop coverage. B4/B5 review queues
-and missing T4/T5 denominators remain open. Inspect disk before heavy checks;
-local checks do not establish hosted academic acceptance.
+The combined frontier gate through `bc685acc` passed typecheck, lint,
+repository tests, build and targeted desktop/mobile browser checks; a stale
+Dashboard selector was fixed and retested at `e7f9f867`. Later QBank merges
+and release edits need an integrated release gate before any push or deployment.
+This docs-only update passed 43 repository tests and `repo:check`.
+Next: integrate this small docs commit, verify the current tree and deployment
+preconditions, then keep the remote release held until JD's explicit follow-up.
