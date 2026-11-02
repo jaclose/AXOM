@@ -18,6 +18,9 @@ vi.mock("../components/questions/CommunityUploads", () => ({
 vi.mock("../components/tracker/SharedDailyLeaderboard", () => ({
   SharedDailyLeaderboard: () => <div>Shared daily challenge loaded</div>,
 }));
+vi.mock("./CommunityPage", () => ({
+  CommunityPage: () => <div>Study circle loaded</div>,
+}));
 
 beforeEach(() => {
   account = { phase: "unconfigured", user: null };
@@ -55,5 +58,14 @@ describe("CommunitiesPage", () => {
     account = { phase: "signed-in", user: { id: "learner-1" } };
     rerender(<CommunitiesPage />);
     expect(await screen.findByText("Shared daily challenge loaded")).toBeTruthy();
+  });
+
+  it("opens the opt-in social space from Communities", async () => {
+    const user = userEvent.setup();
+    render(<CommunitiesPage />);
+
+    await user.click(screen.getByRole("button", { name: /Study circle/i }));
+    expect(await screen.findByText("Study circle loaded")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Study circle" })).toBeTruthy();
   });
 });

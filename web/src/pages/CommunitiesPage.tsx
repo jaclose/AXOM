@@ -9,8 +9,10 @@ import "../styles/communities.css";
 
 const SharedDailyLeaderboard = lazy(() => import("../components/tracker/SharedDailyLeaderboard")
   .then((module) => ({ default: module.SharedDailyLeaderboard })));
+const CommunityPage = lazy(() => import("./CommunityPage")
+  .then((module) => ({ default: module.CommunityPage })));
 
-type CommunitySpace = "courses" | "challenge";
+type CommunitySpace = "courses" | "challenge" | "circle";
 
 export function CommunitiesPage() {
   const [space, setSpace] = useState<CommunitySpace>("courses");
@@ -22,10 +24,11 @@ export function CommunitiesPage() {
       <div className="communities-masthead-copy">
         <span className="communities-kicker"><UsersRound size={ICON_SIZE.body} aria-hidden="true" /> AXOM / COMMUNITIES</span>
         <h1>Shared study, with provenance.</h1>
-        <p>Explore learner-contributed courses and a daily challenge built from approved questions. Review status is visible before you practice.</p>
+        <p>Explore learner-contributed courses, join a daily challenge, and connect with people you choose. Review status is visible before you practice.</p>
         <div className="communities-index" aria-label="Community spaces">
           <span><b>01</b> Course exchange</span>
           <span><b>02</b> Daily challenge</span>
+          <span><b>03</b> Study circle</span>
         </div>
       </div>
       <div className="communities-orb" aria-hidden="true">
@@ -46,10 +49,17 @@ export function CommunitiesPage() {
         <Trophy size={ICON_SIZE.emphasis} aria-hidden="true" />
         <span><b>Daily challenge</b><small>Answer together, keep your notes private</small></span>
       </button>
+      <button type="button" className={space === "circle" ? "is-active" : ""}
+        aria-pressed={space === "circle"} aria-controls="communities-content"
+        onClick={() => setSpace("circle")}>
+        <UsersRound size={ICON_SIZE.emphasis} aria-hidden="true" />
+        <span><b>Study circle</b><small>Friends and optional progress sharing</small></span>
+      </button>
     </div>
 
-    <section id="communities-content" className="communities-content" aria-label={space === "courses" ? "Course exchange" : "Daily challenge"}>
-      {space === "courses" ? <CommunityUploads onOpenLibrary={() => { location.hash = "questions"; }} /> : <>
+    <section id="communities-content" className="communities-content" aria-label={space === "courses" ? "Course exchange" : space === "challenge" ? "Daily challenge" : "Study circle"}>
+      {space === "courses" ? <CommunityUploads onOpenLibrary={() => { location.hash = "questions"; }} /> : space === "circle" ?
+        <Suspense fallback={<p role="status">Opening your study circle…</p>}><CommunityPage /></Suspense> : <>
         <div className="communities-section-heading">
           <div><span className="communities-kicker">APPROVED QUESTION REVISION</span><h2>One day. One shared field.</h2>
             <p>Join under an alias, answer independently, and compare only verified results. Your answers and notes stay private.</p></div>

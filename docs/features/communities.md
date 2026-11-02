@@ -6,10 +6,11 @@ authority: canonical
 ---
 # Communities
 
-`CommunitiesPage` brings two existing account-based study spaces into one entry:
-Community Uploads and the shared daily challenge. It adds no new publication
-route, score rule, consent model, or medical content. The route and sidebar entry
-are owned by the app shell integration.
+`CommunitiesPage` brings three study spaces into one sidebar entry: Community
+Uploads, the shared daily challenge, and the opt-in social circle. It adds no
+publication route, score rule, consent model, or medical content. The older
+`#community` route remains available for existing links; new navigation opens
+the Study circle space inside `#communities`.
 
 The course exchange reuses `CommunityUploads`. Members can browse, preview,
 download, contribute, and withdraw exact course revisions through the existing
@@ -24,6 +25,10 @@ only when the member chooses that space; an unconfigured build offers personal
 Question Bank practice, while a signed-out member can open account settings.
 Participation uses a chosen alias and server-verified answers. The page does not
 create a public profile or expose private answers, notes, or personal study logs.
+
+The Study circle lazily opens `CommunityPage` for account discovery, friendships,
+explicitly shared progress, reactions and reporting. Joining and discoverability
+are separate choices; private study logs do not enter the social feed by default.
 
 The page uses the actual AXOM Orb, palette tokens, a short optional entrance,
 and a static reduced-motion state. `#help` remains the route for community feedback.
