@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SourceDocument } from "../../lib/library";
 import type { ParsedQuestionDraft } from "../../lib/questionParse";
+import type { QuestionRecord } from "../../lib/questions";
 import { ImportPanel, parseStoredDocument, preserveUserReviewedMappings } from "./ImportPanel";
 import { importFromCsv, importFromJson } from "../../lib/questionImport";
 import { pushToast } from "../../lib/toast";
@@ -20,6 +21,7 @@ const mocked = vi.hoisted(() => ({
   updateDocument: vi.fn(),
   updateQuestion: vi.fn(),
   documents: [] as SourceDocument[],
+  questions: [] as QuestionRecord[],
 }));
 
 vi.mock("../../lib/store", () => ({ useStore: () => mocked }));
@@ -46,6 +48,7 @@ const draft: ParsedQuestionDraft = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocked.documents.splice(0);
+  mocked.questions.splice(0);
   mocked.addQuestion.mockReturnValue({ ok: true, errors: [], id: "question-1" });
 });
 afterEach(() => {
@@ -54,6 +57,41 @@ afterEach(() => {
 });
 
 describe("source-document-first import", () => {
+  it("saves a source-keyed question in one click while leaving the uncertain one unscored", async () => {
+    const user = userEvent.setup();
+    render(<ImportPanel seed={{
+      drafts: [
+        { ...draft, answerEvidence: "Answer: B", parserRuleIds: ["answer.explicit-letter"], questionNumber: 1 },
+        { ...draft, stem: "Which answer is unresolved?", correctKey: undefined, correctAnswerText: undefined,
+          questionNumber: 2, confidence: "low", needsReview: true },
+      ],
+      rawText: "1. Which option is correct? A. Alpha B. Beta Answer: B\n2. Which answer is unresolved? A. Alpha B. Beta",
+      title: "Mixed source", fileName: "mixed.txt", fileType: "text",
+    }} />);
+
+    expect(screen.getByRole("button", { name: "Finalize import" })).toHaveProperty("disabled", true);
+    await user.click(screen.getByRole("button", { name: "Save 1 ready now" }));
+    await waitFor(() => expect(mocked.addQuestion).toHaveBeenCalledTimes(1));
+    expect(mocked.addQuestion.mock.calls[0][0]).toMatchObject({
+      stem: "Which option is correct?", correctKey: "B",
+      extraction: { reviewed: true, parserRuleIds: expect.arrayContaining(["answer.explicit-letter"]) },
+    });
+    expect(mocked.addQuestionSet).toHaveBeenCalledTimes(1);
+    expect(mocked.addDocument).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves an existing exact question out and explains the match before saving", () => {
+    mocked.questions.push({ id: "existing", stem: draft.stem, options: draft.options } as QuestionRecord);
+    render(<ImportPanel seed={{
+      drafts: [{ ...draft, answerEvidence: "Answer: B", parserRuleIds: ["answer.explicit-letter"] }],
+      rawText: "Existing question source", title: "Existing source", fileName: "existing.txt", fileType: "text",
+    }} />);
+
+    expect(screen.getByText("Already in bank")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Save 1 ready now/ })).toBeNull();
+    expect(screen.getByText(/1 exact question is already in your bank and left out/)).toBeTruthy();
+  });
+
   it("blocks an unresolved mapping even if confidence is malformed high", () => {
     render(<ImportPanel seed={{
       drafts: [{ ...draft, correctKey: undefined, correctAnswerText: undefined }],

@@ -3,7 +3,7 @@ import { manifestForFile } from "../../lib/question-content/knownBanks";
 // ===========================================================================
 // Import Center (question-bank rehaul, layers 1–2). Upload PDF/DOCX/TXT/MD/
 // CSV/JSON or paste text → extract → parse (stems, choices, answer keys,
-// numbering, pages) → MANDATORY review screen with per-question editing →
+// numbering, pages) → one-click source-backed save or detailed review →
 // choose how to save: library document only, question set, or both — with
 // optional review-gated AI enhancement (digest, pitfalls, review targets).
 // Scanned PDFs with no text layer are stored as source records and say so
@@ -48,6 +48,7 @@ import { courseForScope } from "../../lib/course-engine/questionBank";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { MassImport } from "./MassImport";
 import { flagImportDuplicates } from "../../lib/questionDuplicates";
+import { markExactImportMatches, planQuickImport } from "../../lib/questionImportQuick";
 import { imageNameKey, imageReferenceKey, matchNamedImages, namedImages } from "../../lib/questionImportImages";
 import type { RawSelection } from "../../lib/privateLibrary/rawAcademicInput";
 
@@ -238,13 +239,20 @@ export function ImportPanel({
   // save is still being written, the store may hold records that get rolled back.
   const settledLibrary = () => (hasReviewedImportInFlight() ? { questions: [], questionSets: [], documents: [] } : library());
   // Read once: what the seed's file already brought in, if it was imported before.
-  const [seeded] = useState(() => (seed?.drafts
-    ? applyPriorImport(
+  const [seeded] = useState(() => {
+    if (!seed?.drafts) return undefined;
+    const known = applyPriorImport(
         flagImportDuplicates(preserveUserReviewedMappings(seed.drafts, s.questions ?? [], seed.sourceDocumentId), s.questions ?? []),
         seed.rawText != null ? { checksum: seed.checksum, fileName: seed.fileName ?? "import", existingDocumentId: seed.sourceDocumentId } : null,
         settledLibrary(),
-      )
-    : undefined));
+      );
+    if (seed.sourceDocumentId) return known;
+    const matches = markExactImportMatches(known.drafts, known.selected, s.questions ?? []);
+    return { ...known, ...matches, note: [known.note,
+      matches.exact ? `${matches.exact} exact question${matches.exact === 1 ? " is" : "s are"} already in your bank and left out.` : "",
+      matches.repeated ? `${matches.repeated} repeated question${matches.repeated === 1 ? " is" : "s are"} in this source and left out.` : "",
+    ].filter(Boolean).join(" ") };
+  });
   const [drafts, setDrafts] = useState<ReviewDraft[]>(() => (seeded
     ? seeded.drafts.map((d, index) => ({ ...d, reviewId: uid(), include: seeded.selected[index], source: seed?.source ?? "imported" }))
     : []));
@@ -342,8 +350,15 @@ export function ImportPanel({
     setImageFiles(images); // Avoid carrying pictures from a prior source into the next review.
     // A file imported before comes in with what it already brought left unselected.
     const known = applyPriorImport(flagImportDuplicates(parsed, s.questions ?? []), doc, settledLibrary());
-    setDrafts(known.drafts.map((d, index) => ({ ...d, reviewId: uid(), include: known.selected[index], aiGenerated: ai, source })));
-    setBatchWarnings(known.note ? [known.note, ...warnings] : warnings);
+    const matches = doc?.existingDocumentId ? { drafts: known.drafts, selected: known.selected, exact: 0, repeated: 0 }
+      : markExactImportMatches(known.drafts, known.selected, s.questions ?? []);
+    setDrafts(matches.drafts.map((d, index) => ({ ...d, reviewId: uid(), include: matches.selected[index], aiGenerated: ai, source })));
+    setBatchWarnings([
+      ...(known.note ? [known.note] : []),
+      ...(matches.exact ? [`${matches.exact} exact question${matches.exact === 1 ? " is" : "s are"} already in your bank and left out.`] : []),
+      ...(matches.repeated ? [`${matches.repeated} repeated question${matches.repeated === 1 ? " is" : "s are"} in this source and left out.`] : []),
+      ...warnings,
+    ]);
     setPendingDoc(doc);
     setSourceType(source);
     if (doc) setSourceText(doc.rawText);
@@ -377,10 +392,10 @@ export function ImportPanel({
     }
   }
 
-  async function saveApproved(modeOverride: SaveMode = saveMode) {
+  async function saveApproved(modeOverride: SaveMode = saveMode, quick = false) {
     if (finalizingRef.current) return;
 
-    const approved = drafts.filter((draft) => draft.include);
+    const approved = quick ? quickPlan.readyIndexes.map((index) => drafts[index]) : drafts.filter((draft) => draft.include);
     const week = Number(scopeWeek);
     // Checked, shaped and written by lib/questionImportSave: the same path
     // mass import's "Accept" takes.
@@ -468,11 +483,13 @@ export function ImportPanel({
     }
     if (mountedRef.current) pushToast({
       title: savedSetId
-        ? `${questionIds.length} reviewed question${questionIds.length === 1 ? "" : "s"} finalized`
+        ? `${questionIds.length} ${quick ? "source-backed" : "reviewed"} question${questionIds.length === 1 ? "" : "s"} saved`
         : "Source document saved for later review",
-      body: saved.reusedDocument
-        ? "AXOM reused the existing source record and linked the new reviewed set."
-        : savedSetId ? "The imported set is available in Question Sets and the Question Bank." : undefined,
+      body: quick
+        ? `${quickPlan.needsReview + quickPlan.missingImages + quickPlan.repeatedInFile} still need attention in the saved source. ${quickPlan.alreadySaved} exact match${quickPlan.alreadySaved === 1 ? " was" : "es were"} skipped.`
+        : saved.reusedDocument
+          ? "AXOM reused the existing source record and linked the new reviewed set."
+          : savedSetId ? "The imported set is available in Question Sets and the Question Bank." : undefined,
       tone: "success",
     });
 
@@ -762,6 +779,8 @@ export function ImportPanel({
       draft.include ? includedById.get(draft.reviewId) ?? evaluations[index] : evaluations[index]
     ));
   }, [drafts, evaluations, includedDrafts, includedEvaluations]);
+  const quickPlan = useMemo(() => planQuickImport(drafts, displayedEvaluations, s.questions ?? [], imageFiles),
+    [drafts, displayedEvaluations, s.questions, imageFiles]);
   const bulkAnswerCandidates = drafts.filter((draft, index) => canBatchConfirmMappedAnswer(draft, displayedEvaluations[index], Boolean(sourceText.trim())));
   const selectedBulkAnswers = bulkAnswerCandidates.filter((draft) => bulkAnswerIds.has(draft.reviewId));
   const bulkAnswerSignature = JSON.stringify(selectedBulkAnswers.map((draft) => [draft.reviewId, draft.correctKey, draft.answerEvidence, draft.stem, draft.options]));
@@ -953,6 +972,10 @@ export function ImportPanel({
               {pendingDoc && drafts.length > 0 && (
                 <GhostButton disabled={finalizing} onClick={() => void saveApproved("doc")}>Keep source for later</GhostButton>
               )}
+              {pendingDoc && quickPlan.readyIndexes.length > 0 && <GButton id="import-quick-button"
+                disabled={finalizing} onClick={() => void saveApproved("both", true)}>
+                Save {quickPlan.readyIndexes.length} ready now
+              </GButton>}
               <GButton id="import-finalize-button" variant="primary" disabled={finalizeDisabled}
                 aria-describedby="import-finalize-status" onClick={() => void saveApproved()}>
                 {finalizing ? <RefreshCw size={ICON_SIZE.body} className="spin" /> : <Save size={ICON_SIZE.body} />}
@@ -961,6 +984,11 @@ export function ImportPanel({
             </div>
           </div>
           <div id="import-finalize-status" className="sub" aria-live="polite">{finalizeStatus}</div>
+          {pendingDoc && drafts.length > 0 && <p className="sub" role="status">
+            One-click save: {quickPlan.readyIndexes.length} with a clear source key.
+            {` ${quickPlan.needsReview + quickPlan.missingImages + quickPlan.repeatedInFile} need attention; ${quickPlan.alreadySaved} exact matches are skipped.`}
+            {quickPlan.missingImages > 0 && ` ${quickPlan.missingImages} need source images before they can be saved for practice.`}
+          </p>}
 
           {batchWarnings.length > 0 && (
             <ul className="intake-warnings">{batchWarnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
@@ -1186,6 +1214,8 @@ export function ImportPanel({
                     </button>
                     <Tag tone={tone}>{evaluation.level}</Tag>
                     {(draft.parserRuleIds ?? []).includes(ALREADY_IMPORTED_RULE) && <Tag tone="cyan">Already imported</Tag>}
+                    {(draft.parserRuleIds ?? []).includes("duplicate.exact-existing") && <Tag tone="cyan">Already in bank</Tag>}
+                    {(draft.parserRuleIds ?? []).includes("duplicate.exact-in-file") && <Tag tone="orange">Repeated in file</Tag>}
                     {draft.reviewAcknowledged && <Tag tone="cyan">Reviewed</Tag>}
                     {draft.aiGenerated && <Tag tone="purple">AI</Tag>}
                     <GhostButton aria-label={`Remove question ${draft.questionNumber ?? index + 1}`}
