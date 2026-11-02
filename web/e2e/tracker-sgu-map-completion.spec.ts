@@ -30,6 +30,8 @@ for (const width of [1440, 390]) test(`existing tracker completes SGU map at ${w
   });
   await reloadAfterSave(page);
   await page.goto("/#tracker");
+  const prompt = page.getByRole("region", { name: "Complete SGU course map" });
+  await expect(prompt.getByText("4 terms · 6 courses · 27 modules to add")).toBeVisible();
   const before = await page.evaluate(async () => {
     const dev = await (window as unknown as {
       __AXOM_DEV__: Promise<{ useStore: { getState: () => { terms: unknown[]; courses: unknown[]; tracker: unknown[] } } }>;
@@ -40,8 +42,6 @@ for (const width of [1440, 390]) test(`existing tracker completes SGU map at ${w
   expect(before.terms).toBe(2);
   expect(before.courses).toBe(2);
 
-  const prompt = page.getByRole("region", { name: "Complete SGU course map" });
-  await expect(prompt.getByText("4 terms · 6 courses · 28 modules to add")).toBeVisible();
   for (const theme of ["dark", "light"]) {
     await page.locator("html").evaluate((root, value) => root.setAttribute("data-theme", value), theme);
     await prompt.scrollIntoViewIfNeeded();
@@ -54,17 +54,29 @@ for (const width of [1440, 390]) test(`existing tracker completes SGU map at ${w
   await expect(prompt).toHaveCount(0);
   const after = await page.evaluate(async () => {
     const dev = await (window as unknown as {
-      __AXOM_DEV__: Promise<{ useStore: { getState: () => { terms: { id: string }[]; courses: { id: string; modules: unknown[] }[]; tracker: unknown[] } } }>;
+      __AXOM_DEV__: Promise<{ useStore: { getState: () => { terms: { id: string }[]; courses: { id: string; name: string; files: number; modules: unknown[] }[]; tracker: unknown[] } } }>;
     }).__AXOM_DEV__;
     const { terms, courses, tracker } = dev.useStore.getState();
     return { terms: terms.length, courses: courses.length, modules: courses.reduce((sum, course) => sum + course.modules.length, 0),
-      ids: courses.map(course => course.id), tracker: JSON.stringify(tracker) };
+      saved: courses.filter(course => ["saved-bpm500", "saved-local"].includes(course.id))
+        .map(({ id, name, files }) => ({ id, name, files })), tracker: JSON.stringify(tracker) };
   });
-  expect(after).toMatchObject({ terms: 6, courses: 8, modules: 31 });
-  expect(after.ids).toEqual(expect.arrayContaining(["saved-bpm500", "saved-local"]));
+  expect(after).toMatchObject({ terms: 6, courses: 8, modules: 30 });
+  expect(after.saved).toEqual([
+    { id: "saved-bpm500", name: "My edited BPM", files: 4 },
+    { id: "saved-local", name: "My local course", files: 1 },
+  ]);
   expect(after.tracker).toBe(before.tracker);
   await reloadAfterSave(page);
   await expect(page.getByRole("region", { name: "Complete SGU course map" })).toHaveCount(0);
+  await expect.poll(async () => page.evaluate(async () => {
+    const dev = await (window as unknown as {
+      __AXOM_DEV__: Promise<{ useStore: { getState: () => { courses: { id: string; name: string; files: number }[]; tracker: unknown[] } } }>;
+    }).__AXOM_DEV__;
+    const { courses, tracker } = dev.useStore.getState();
+    return { saved: courses.filter(course => ["saved-bpm500", "saved-local"].includes(course.id))
+      .map(({ id, name, files }) => ({ id, name, files })), tracker: JSON.stringify(tracker) };
+  })).toEqual({ saved: after.saved, tracker: before.tracker });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect(issues).toEqual([]);
 });
