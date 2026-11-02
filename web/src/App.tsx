@@ -83,6 +83,7 @@ const LazyStudyMethodsPage = lazy(() => import("./pages/StudyMethodsPage").then(
 const LazySoundscapesPage = lazy(() => import("./pages/SoundscapesPage").then((module) => ({ default: module.SoundscapesPage })));
 const LazyCommunitiesPage = lazy(() => import("./pages/CommunitiesPage").then((module) => ({ default: module.CommunitiesPage })));
 const LazyPatchNotesPage = lazy(() => import("./pages/PatchNotesPage").then((module) => ({ default: module.PatchNotesPage })));
+const LazyBodySimulatorPage = lazy(() => import("./pages/BodySimulatorPage").then((module) => ({ default: module.BodySimulatorPage })));
 
 const LazyCommunicationsPage = lazy(() => import("./pages/CommunicationsPage").then(m => ({ default: m.CommunicationsPage })));
 const LazyPrivacyPage = lazy(() => import("./pages/PrivacyPage").then(m => ({ default: m.PrivacyPage })));
@@ -102,6 +103,7 @@ const PAGES: Record<string, () => JSX.Element> = {
   questions: () => <LazyQuestionWorkspacePage />,
   communities: () => <LazyCommunitiesPage />,
   "patch-notes": () => <LazyPatchNotesPage />,
+  simulations: () => <LazyBodySimulatorPage />,
   methods: () => <LazyStudyMethodsPage />,
   soundscapes: () => <LazySoundscapesPage />,
   anki: () => <LazyAnkiLabPage />,

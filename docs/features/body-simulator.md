@@ -12,8 +12,8 @@ heart and hands. The heart and hands show possible adverse effects, not outcomes
 predicted for an individual. It has no dose, clock, severity score, patient record,
 or inferred risk. This is a mechanism study surface, not diagnosis or treatment.
 
-The app's `#simulations` route and sidebar entry are integrated separately. The
-page implementation is `web/src/pages/BodySimulatorPage.tsx`; its typed evidence
+The app opens this study from the Simulations sidebar entry and `#simulations`
+route. The page implementation is `web/src/pages/BodySimulatorPage.tsx`; its typed evidence
 and observation data are in `web/src/lib/simulator/asthmaScenario.ts`. A new
 scenario should arrive with a claim-to-source audit and clinical review before it
 is called complete. A stylized original SVG is used for orientation; it is not

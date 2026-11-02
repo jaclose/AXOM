@@ -4,7 +4,7 @@ import type { ExperimentalFlags } from "../../lib/types";
 import {
   LayoutGrid, BookOpen, BadgeCheck, Brain, LineChart, Calendar, ListChecks,
   BookText, Share2, Library, Folder, Link, Wand2, LifeBuoy, ClipboardCheck, Trophy, Compass, Info, CalendarCheck,
-  HelpCircle, BookOpenCheck, WholeWord, Stethoscope, Gamepad2, Blocks, AudioWaveform, UsersRound,
+  HelpCircle, BookOpenCheck, WholeWord, Stethoscope, Gamepad2, Blocks, AudioWaveform, UsersRound, Activity,
 } from "lucide-react";
 
 export interface NavItem {
@@ -41,6 +41,7 @@ export const NAV = [
   { id: "courses", label: "Courses", subtitle: "Term-based course map with module-level folders", icon: BookOpen },
   { id: "tracker", label: "Course Tracker", subtitle: "Lecture, DLA, and PQ completion map", icon: BadgeCheck },
   { id: "questions", label: "Question Bank", subtitle: "Import Center, source library, question sets, blocks, and results", icon: HelpCircle },
+  { id: "simulations", label: "Simulations", subtitle: "Explore body mechanisms; first study: asthma and albuterol", icon: Activity },
   { id: "communities", label: "Communities", subtitle: "Shared courses and daily challenges with review status", icon: UsersRound },
   { id: "shared-set", label: "Shared Question Set", subtitle: "Preview and import an unlisted Question Set link", icon: HelpCircle },
   { id: "methods", label: "Study Methods", subtitle: "Evidence-informed technique templates with honest trade-offs", icon: BookOpenCheck },
@@ -87,6 +88,7 @@ export type NavItemId = (typeof NAV)[number]["id"];
 export const MODULE_STATUS_BY_NAV_ID = {
   questions: { status: "new", announcementId: "question-bank-entry-v1" },
   communities: { status: "new", announcementId: "communities-entry-v1" },
+  simulations: { status: "wip" },
   methods: { status: "new", announcementId: "study-methods-library-v1" },
   "daily-word": { status: "new", announcementId: "daily-word-launch-v1" },
   "daily-games": { status: "new", announcementId: "daily-games-hub-v1" },
@@ -117,7 +119,7 @@ export const navById = (id: string): NavItem | undefined => NAV.find((n) => n.id
 
 // Sidebar order (Alpha 2). Tools is a collapsible folder.
 export const SIDEBAR_TODAY = ["dashboard"] as const;
-export const SIDEBAR_LEARN = ["courses", "tracker", "questions", "communities", "anki"] as const;
+export const SIDEBAR_LEARN = ["courses", "tracker", "questions", "simulations", "communities", "anki"] as const;
 export const SIDEBAR_REVIEW = ["productivity", "journal", "reports"] as const;
 export const SIDEBAR_TOP = [...SIDEBAR_TODAY, ...SIDEBAR_LEARN, ...SIDEBAR_REVIEW];
 export const SIDEBAR_PREP = ["step", "premed", "appchecker"];
