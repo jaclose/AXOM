@@ -107,6 +107,30 @@ describe("hosted question collection without a weekly plan", () => {
     });
   });
 
+  it("blocks a refiled source question even when its download has no sets", async () => {
+    mocks.download.mockImplementationOnce(async () => {
+      useStore.setState(state => ({ questions: [...state.questions, question("no-set", { week: 2 })] }));
+      return { status: "complete", warnings: [], templateIds: [], documentIds: [],
+        questionIds: ["no-set"], setIds: [], bindings: { originals: [] } };
+    });
+    render(<ConnectedCoursePlan course={course} onBack={vi.fn()} onOpen={vi.fn()} onCustomize={vi.fn()} onSharingSaved={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Download questions/ }));
+    expect(await screen.findByRole("button", { name: "Quiz week 2" })).toBeTruthy();
+    const refile = (patch: Partial<QuestionRecord>) => useStore.setState(state => ({ questions: state.questions.map(item =>
+      item.id === "no-set" ? { ...item, ...patch } : item) }));
+    refile({ module: "NMI" });
+    expect((await screen.findByRole("alert")).textContent).toMatch(/saved filing no longer matches/);
+    expect(screen.queryByRole("button", { name: "Quiz week 2" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Create Quiz/ })).toBeNull();
+    refile({ module: "GOER", courseId: "foreign-course" });
+    expect((await screen.findByRole("alert")).textContent).toMatch(/saved filing no longer matches/);
+    refile({ courseId: undefined });
+    fireEvent.click(await screen.findByRole("button", { name: "Quiz week 2" }));
+    expect(JSON.parse(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY) ?? "null")).toEqual({
+      module: "GOER", term: "Term 5", week: 2, questionIds: ["no-set"], setIds: [],
+    });
+  });
+
   it("uses a question's stated week before its set week and inherits a set week when unstated", async () => {
     mocks.download.mockImplementationOnce(async () => {
       useStore.setState(state => ({ questions: [...state.questions,

@@ -279,11 +279,12 @@ function ConnectedQuestionCollection({ course, downloaded, questions, sets, cour
     const ownerId = hostedOwners[0]?.id;
     const setIds = new Set(downloaded.setIds);
     const sourceSets = sets.filter(set => setIds.has(set.id));
-    return sourceSets.every(set => (!set.scope?.module || canonicalModuleKey(set.scope.module) === canonicalModuleKey(course.module))
-      && (!set.scope?.courseId || set.scope.courseId === ownerId))
-      && scopedQuestions.every(({ question }) => (!question.module || canonicalModuleKey(question.module) === canonicalModuleKey(course.module))
-        && (!question.courseId || question.courseId === ownerId)
-        && (!question.setId || setIds.has(question.setId)));
+    const setsMatch = sourceSets.every(set => (!set.scope?.module || canonicalModuleKey(set.scope.module) === canonicalModuleKey(course.module))
+      && (!set.scope?.courseId || set.scope.courseId === ownerId));
+    const questionsMatch = scopedQuestions.every(({ question }) => (!question.module || canonicalModuleKey(question.module) === canonicalModuleKey(course.module))
+      && (!question.courseId || question.courseId === ownerId)
+      && (!question.setId || setIds.has(question.setId)));
+    return setsMatch && questionsMatch;
   }, [onDevice, downloaded, course, courses, terms, sets, scopedQuestions]);
   const sourceWeeks = useMemo(() => {
     const groups = new Map<number | undefined, { week: number | undefined; total: number; readyIds: string[]; setIds: string[] }>();
