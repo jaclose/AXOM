@@ -137,6 +137,7 @@ test("Host and Community persist across two synthetic accounts with real SQL aut
     await expect(other.getByText("Report sent to moderators.", { exact: true })).toBeVisible();
     await page.goto(`${baseURL}/#host`);
     await expect(page.getByRole("button", { name: "Dismiss report", exact: true })).toBeVisible();
+    await page.getByRole("textbox", { name: /^Reason for resolving @/ }).fill("Synthetic acceptance: reviewed the reported study update.");
     await page.getByRole("button", { name: "Dismiss report", exact: true }).click();
     await expect(page.getByText("Report dismissed and audited.", { exact: true })).toBeVisible();
 
@@ -175,6 +176,8 @@ test("Host and Community persist across two synthetic accounts with real SQL aut
 
     // Removal immediately closes friends-only post and reaction reads on the database.
     await other.getByRole("button", { name: "Friends · remove", exact: true }).click();
+    await expect(other.getByText("Friend removed.", { exact: true })).toBeVisible();
+    await expect.poll(() => database.asUser(member.id, "select status from public.social_connections")).toEqual([]);
     await other.reload();
     await expect(sharedPost).toHaveCount(0);
     expect(await database.asUser(member.id, "select id from public.social_posts where user_id=$1", [owner.id])).toEqual([]);

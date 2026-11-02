@@ -96,8 +96,9 @@ export async function createPlatformDatabase() {
     const selection = fields === "*" ? "*" : fields.split(",").map(identifier).join(",");
     const predicates: string[] = [];
     for (const [column, value] of url.searchParams.entries()) {
-      if (["select", "order", "limit", "on_conflict"].includes(column)) continue;
+      if (["select", "order", "limit", "offset", "on_conflict"].includes(column)) continue;
       if (value.startsWith("eq.")) predicates.push(`${identifier(column)} = ${bind(value.slice(3))}`);
+      else if (value.startsWith("ilike.")) predicates.push(`${identifier(column)} ilike ${bind(value.slice(6))}`);
       else if (value.startsWith("in.(") && value.endsWith(")")) {
         const members = value.slice(4, -1).split(",");
         if (members.length > 2000) throw new Error("Oversized fixture filter");
@@ -113,7 +114,9 @@ export async function createPlatformDatabase() {
       });
       const limit = Math.min(2000, Math.max(1, Number(url.searchParams.get("limit") ?? 2000)));
       if (!Number.isInteger(limit)) throw new Error("Invalid fixture limit");
-      sql = `select ${selection} from public.${identifier(table)}${where}${order.length ? ` order by ${order.join(",")}` : ""} limit ${limit}`;
+      const offset = Number(url.searchParams.get("offset") ?? 0);
+      if (!Number.isSafeInteger(offset) || offset < 0 || offset > 10000) throw new Error("Invalid fixture offset");
+      sql = `select ${selection} from public.${identifier(table)}${where}${order.length ? ` order by ${order.join(",")}` : ""} limit ${limit} offset ${offset}`;
     } else if (request.method() === "DELETE") {
       sql = `delete from public.${identifier(table)}${where} returning ${selection}`;
     } else {

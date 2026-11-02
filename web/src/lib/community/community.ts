@@ -35,10 +35,16 @@ export interface CommunitySnapshot {
   connections: CommunityConnection[];
   posts: CommunityPost[];
   reactions: CommunityReaction[];
+  directoryError?: string;
+  connectionsError?: string;
 }
 
 const HANDLE = /^[a-z0-9][a-z0-9_]{2,29}$/;
 const errorMessage = "The community could not be reached. Your local work has not changed.";
+const profileFields = "user_id,handle,display_name,bio,discoverable";
+const connectionFields = "id,requester_id,addressee_id,status";
+const connectionPageSize = 150;
+const maxConnections = 1000;
 
 async function withClient<T>(accountId: string, run: (client: SupabaseClient) => Promise<T>): Promise<T> {
   const guard = academicAccountScope(accountId);
@@ -62,25 +68,87 @@ const count = (value: unknown) => typeof value === "number" && Number.isSafeInte
 const bounded = (value: unknown, max: number, check: (item: unknown) => boolean) => Array.isArray(value) && value.length <= max && value.every(check);
 export function validCommunitySnapshot(value: unknown): value is CommunitySnapshot {
   return row(value)
-    && bounded(value.profiles, 100, item => row(item) && [item.user_id, item.handle, item.display_name, item.bio].every(text) && typeof item.discoverable === "boolean")
-    && bounded(value.connections, 150, item => row(item) && [item.id, item.requester_id, item.addressee_id].every(text) && ["pending", "accepted"].includes(String(item.status)))
+    && bounded(value.profiles, maxConnections + 101, item => row(item) && [item.user_id, item.handle, item.display_name, item.bio].every(text) && typeof item.discoverable === "boolean")
+    && bounded(value.connections, maxConnections, item => row(item) && [item.id, item.requester_id, item.addressee_id].every(text) && ["pending", "accepted"].includes(String(item.status)))
     && bounded(value.posts, 100, item => row(item) && [item.id, item.user_id, item.caption, item.created_at].every(text)
       && ["progress", "question_set"].includes(String(item.kind)) && ["private", "friends", "community"].includes(String(item.visibility))
       && (item.activity_day === null || text(item.activity_day)) && (item.set_title === null || text(item.set_title))
       && count(item.minutes) && count(item.cards) && count(item.questions))
-    && bounded(value.reactions, 2000, item => row(item) && text(item.post_id) && text(item.user_id));
+    && bounded(value.reactions, 2000, item => row(item) && text(item.post_id) && text(item.user_id))
+    && (value.directoryError === undefined || text(value.directoryError))
+    && (value.connectionsError === undefined || text(value.connectionsError));
+}
+
+async function loadConnections(client: SupabaseClient): Promise<CommunityConnection[]> {
+  const all: CommunityConnection[] = [];
+  for (let offset = 0; offset <= maxConnections; offset += connectionPageSize) {
+    const { data, error } = await client.from("social_connections").select(connectionFields)
+      .order("created_at", { ascending: false }).order("id", { ascending: false })
+      .range(offset, offset + connectionPageSize - 1);
+    if (error || !Array.isArray(data)) throw new Error("Friend connections could not be loaded. Refresh before managing friends.");
+    all.push(...data as CommunityConnection[]);
+    if (all.length > maxConnections) throw new Error("Your friend list is too large to show safely. Contact AXOM support before managing friends.");
+    if (data.length < connectionPageSize) return all;
+  }
+  throw new Error("Your friend list is too large to show safely. Contact AXOM support before managing friends.");
+}
+
+async function loadConnectedProfiles(client: SupabaseClient, connections: CommunityConnection[], accountId: string): Promise<CommunityProfile[]> {
+  const ids = [...new Set(connections.flatMap(connection => [connection.requester_id, connection.addressee_id]))]
+    .filter(id => id !== accountId);
+  const profiles: CommunityProfile[] = [];
+  for (let offset = 0; offset < ids.length; offset += 100) {
+    const { data, error } = await client.from("social_profiles").select(profileFields).in("user_id", ids.slice(offset, offset + 100)).limit(100);
+    if (error || !Array.isArray(data)) throw new Error("Friend profiles could not be loaded. Refresh before managing friends.");
+    profiles.push(...data as CommunityProfile[]);
+  }
+  return profiles;
+}
+
+/** Search only opt-in profiles. RLS remains the final visibility boundary. */
+export async function searchCommunityProfiles(accountId: string, query: string): Promise<CommunityProfile[]> {
+  const term = query.trim().slice(0, 80);
+  if (term.length < 2) return [];
+  const escaped = term.replace(/[\\%_]/g, character => `\\${character}`);
+  return withClient(accountId, async client => {
+    const [handles, names] = await Promise.all([
+      client.from("social_profiles").select(profileFields).eq("discoverable", true).ilike("handle", `%${escaped}%`).order("handle").limit(25),
+      client.from("social_profiles").select(profileFields).eq("discoverable", true).ilike("display_name", `%${escaped}%`).order("handle").limit(25),
+    ]);
+    if (handles.error || names.error || !Array.isArray(handles.data) || !Array.isArray(names.data)) throw new Error("Learner search is unavailable. Retry when connected.");
+    const found = [...new Map([...handles.data, ...names.data].map(profile => [profile.user_id, profile as CommunityProfile])).values()]
+      .filter(profile => profile.discoverable && profile.user_id !== accountId).sort((a, b) => a.handle.localeCompare(b.handle));
+    if (!bounded(found, 50, item => row(item) && [item.user_id, item.handle, item.display_name, item.bio].every(text) && typeof item.discoverable === "boolean"))
+      throw new Error("Learner search returned incomplete data. Retry search.");
+    return found;
+  });
 }
 
 /** RLS returns only discoverable people, existing friends and posts visible to the viewer.
  * Personal journals, source files and stored workspaces are never fetched here. */
 export async function loadCommunity(accountId: string): Promise<CommunitySnapshot> {
   return withClient(accountId, async client => {
-  const [profiles, connections, posts] = await Promise.all([
-    client.from("social_profiles").select("user_id,handle,display_name,bio,discoverable").order("handle").limit(100),
-    client.from("social_connections").select("id,requester_id,addressee_id,status").order("created_at", { ascending: false }).limit(150),
+  const [ownProfile, directory, posts] = await Promise.all([
+    client.from("social_profiles").select(profileFields).eq("user_id", accountId).limit(1),
+    client.from("social_profiles").select(profileFields).order("handle").limit(100),
     client.from("social_posts").select("id,user_id,kind,visibility,activity_day,minutes,cards,questions,set_title,caption,created_at").order("created_at", { ascending: false }).limit(100),
   ]);
-  if (profiles.error || connections.error || posts.error) throw new Error(errorMessage);
+  if (ownProfile.error || !Array.isArray(ownProfile.data) || posts.error) throw new Error(errorMessage);
+  let connections: CommunityConnection[] = [];
+  let connectionsError: string | undefined;
+  try {
+    connections = await loadConnections(client);
+  } catch (cause) {
+    connectionsError = cause instanceof Error ? cause.message : "Friend connections could not be loaded. Refresh before managing friends.";
+  }
+  let connectedProfiles: CommunityProfile[] = [];
+  if (!connectionsError) {
+    try { connectedProfiles = await loadConnectedProfiles(client, connections, accountId); }
+    catch (cause) {
+      connectionsError = cause instanceof Error ? cause.message : "Friend profiles could not be loaded. Refresh before managing friends.";
+      connections = [];
+    }
+  }
   const postRows = posts.data ?? [];
   if (!Array.isArray(postRows) || postRows.some(item => !row(item) || !text(item.id))) throw new Error("Community returned incomplete activity. Refresh before continuing.");
   let reactions: CommunityReaction[] = [];
@@ -90,10 +158,13 @@ export async function loadCommunity(accountId: string): Promise<CommunitySnapsho
     reactions = (response.data ?? []) as CommunityReaction[];
   }
   const snapshot = {
-    profiles: (profiles.data ?? []) as CommunityProfile[],
-    connections: (connections.data ?? []) as CommunityConnection[],
+    profiles: [...new Map([...(directory.error || !Array.isArray(directory.data) ? [] : directory.data), ...connectedProfiles, ...ownProfile.data]
+      .map(profile => [profile.user_id, profile as CommunityProfile])).values()],
+    connections,
     posts: postRows as CommunityPost[],
     reactions,
+    directoryError: directory.error || !Array.isArray(directory.data) ? "The learner directory could not be loaded. Search or refresh when connected." : undefined,
+    connectionsError,
   };
   if (!validCommunitySnapshot(snapshot)) throw new Error("Community returned incomplete data. Refresh before continuing.");
   return snapshot;
@@ -105,11 +176,11 @@ export async function joinCommunity(accountId: string, handle: string, displayNa
   if (!HANDLE.test(normalized)) throw new Error("Choose a handle of 3 to 30 lowercase letters, digits or underscores.");
   if (!displayName.trim() || displayName.trim().length > 80 || bio.length > 240) throw new Error("Check your name and bio.");
   return withClient(accountId, async client => {
-  const { error } = await client.from("social_profiles").upsert({
+  const { error } = await client.from("social_profiles").insert({
     user_id: accountId, handle: normalized, display_name: displayName.trim(), bio: bio.trim(),
     discoverable, updated_at: new Date().toISOString(),
-  }, { onConflict: "user_id" });
-  if (error) throw new Error(error.code === "23505" ? "This handle is taken. Choose another." : errorMessage);
+  });
+  if (error) throw new Error(error.code === "23505" ? "That handle is taken or your profile already exists. Refresh Community before trying again." : errorMessage);
   });
 }
 

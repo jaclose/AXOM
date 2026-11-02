@@ -5,7 +5,7 @@ import { useStore } from "../lib/store";
 import { isoDate } from "../lib/scoring";
 import {
   acceptFriend, dayProgress, deleteCommunityPost, joinCommunity, leaveCommunity, loadCommunity,
-  publishCommunityPost, reportCommunityPost, removeFriend, requestFriend, setDiscoverable, setReaction, sharedWeeklyStandings,
+  publishCommunityPost, reportCommunityPost, removeFriend, requestFriend, searchCommunityProfiles, setDiscoverable, setReaction, sharedWeeklyStandings,
   type CommunityConnection, type CommunityProfile, type CommunitySnapshot,
 } from "../lib/community/community";
 import { GButton, GhostButton, GlassCard, PanelHeader, Tag } from "../components/ui/primitives";
@@ -15,6 +15,7 @@ import "../styles/community.css";
 
 type PostKind = "progress" | "question_set";
 type Audience = "private" | "friends" | "community";
+type PeopleSearch = { query: string; status: "loading" | "ready" | "error"; profiles: CommunityProfile[]; message?: string };
 function otherPerson(friendship: CommunityConnection, me: string) {
   return friendship.requester_id === me ? friendship.addressee_id : friendship.requester_id;
 }
@@ -49,6 +50,8 @@ function CommunityAccountPage() {
   const [caption, setCaption] = useState("");
   const [setTitle, setSetTitle] = useState("");
   const [peopleSearch, setPeopleSearch] = useState("");
+  const [peopleSearchState, setPeopleSearchState] = useState<PeopleSearch>();
+  const [peopleSearchRetry, setPeopleSearchRetry] = useState(0);
   const [hostAvailable, setHostAvailable] = useState(false);
   const [reportPostId, setReportPostId] = useState<string | null>(null);
   const [deletePostId, setDeletePostId] = useState<string | null>(null);
@@ -76,13 +79,39 @@ function CommunityAccountPage() {
     return () => { active = false; };
   }, [accountId]);
   const mine = data?.profiles.find(p => p.user_id === accountId);
+  const mineId = mine?.user_id;
+  const normalizedPeopleSearch = peopleSearch.trim();
+  useEffect(() => {
+    if (!accountId || !mineId || normalizedPeopleSearch.length < 2) {
+      setPeopleSearchState(undefined);
+      return;
+    }
+    let active = true;
+    setPeopleSearchState({ query: normalizedPeopleSearch, status: "loading", profiles: [] });
+    const timer = window.setTimeout(() => {
+      void searchCommunityProfiles(accountId, normalizedPeopleSearch)
+        .then(profiles => { if (active) setPeopleSearchState({ query: normalizedPeopleSearch, status: "ready", profiles }); })
+        .catch(cause => { if (active) setPeopleSearchState({ query: normalizedPeopleSearch, status: "error", profiles: [],
+          message: cause instanceof Error ? cause.message : "Learner search is unavailable. Retry when connected." }); });
+    }, 250);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [accountId, mineId, normalizedPeopleSearch, peopleSearchRetry, refreshId]);
   const profiles = useMemo(() => new Map(data?.profiles.map(p => [p.user_id, p]) ?? []), [data]);
   const relationships = useMemo(() => data?.connections ?? [], [data?.connections]);
   const friendIds = useMemo(() => new Set(relationships.filter(c => c.status === "accepted" && accountId).map(c => otherPerson(c, accountId!))), [relationships, accountId]);
+  const connectedIds = useMemo(() => new Set(relationships.map(c => otherPerson(c, accountId ?? ""))), [relationships, accountId]);
   const incoming = relationships.filter(c => c.status === "pending" && c.addressee_id === accountId);
   const outgoing = relationships.filter(c => c.status === "pending" && c.requester_id === accountId);
-  const people = (data?.profiles ?? []).filter(p => p.user_id !== accountId && (p.discoverable || friendIds.has(p.user_id))
-    && [p.display_name, p.handle].some(value => value.toLowerCase().includes(peopleSearch.trim().toLowerCase())));
+  const activePeopleSearch = peopleSearchState?.query === normalizedPeopleSearch ? peopleSearchState : undefined;
+  const knownSearchMatches = normalizedPeopleSearch.length >= 2 ? (data?.profiles ?? []).filter(profile =>
+    connectedIds.has(profile.user_id) && [profile.display_name, profile.handle].some(value =>
+      value.toLowerCase().includes(normalizedPeopleSearch.toLowerCase()))) : [];
+  const peopleMatches = normalizedPeopleSearch.length >= 2
+    ? [...new Map([...knownSearchMatches, ...(activePeopleSearch?.status === "ready" ? activePeopleSearch.profiles : [])]
+      .map(profile => [profile.user_id, profile])).values()]
+    : (data?.profiles ?? []).filter(p => p.user_id !== accountId && (p.discoverable || friendIds.has(p.user_id)))
+      .sort((a, b) => Number(friendIds.has(b.user_id)) - Number(friendIds.has(a.user_id)) || a.handle.localeCompare(b.handle));
+  const people = peopleMatches.slice(0, 50);
   const progress = useMemo(() => dayProgress(logs, day), [logs, day]);
   const rankings = useMemo(() => sharedWeeklyStandings(
     (data?.posts ?? []).filter(post => post.user_id === accountId || friendIds.has(post.user_id)), today
@@ -130,7 +159,7 @@ function CommunityAccountPage() {
         <p>Find your people. Share only what you choose. Make progress worth celebrating.</p>
       </div>
       <div className="community-signal" aria-label="Shared community stats">
-        <span><strong>{friendIds.size}</strong> Friends</span>
+        <span><strong>{data?.connectionsError ? "—" : friendIds.size}</strong> Friends</span>
         <span><strong>{socialPosts.length}</strong> Visible posts</span>
       </div>
     </section>
@@ -141,6 +170,8 @@ function CommunityAccountPage() {
     </div>
     {loading && <p role="status">Loading shared activity…</p>}
     {error && <div role="alert" className="community-error"><p>{error}</p><GButton size="sm" disabled={loading || busy} onClick={() => setRefreshId(value => value + 1)}>Retry Community</GButton></div>}
+    {data?.directoryError && <div role="alert" className="community-error"><p>{data.directoryError}</p><GButton size="sm" disabled={loading || busy} onClick={() => setRefreshId(value => value + 1)}>Retry directory</GButton></div>}
+    {data?.connectionsError && <div role="alert" className="community-error"><p>{data.connectionsError} Your profile and privacy controls remain available.</p><GButton size="sm" disabled={loading || busy} onClick={() => setRefreshId(value => value + 1)}>Retry friends</GButton></div>}
     {message && <p role="status" className="sub">{message}</p>}
     {!loading && !data && !error && <p className="sub">Unable to load Community right now.</p>}
 
@@ -252,8 +283,9 @@ function CommunityAccountPage() {
           <GlassCard pad>
             <PanelHeader headingLevel={2} title="Friends leaderboard" sub="Last 7 days, shared activity only." />
             <div className="community-ranking">
-              {rankings.length === 0 && <p className="sub">Share a study day to appear. Scores never expose private logs.</p>}
-              {rankings.map((rank, idx) => <div key={rank.userId} className="community-rank">
+              {data.connectionsError ? <p className="sub">Friend standings are unavailable until your connections load.</p>
+                : rankings.length === 0 && <p className="sub">Share a study day to appear. Scores never expose private logs.</p>}
+              {!data.connectionsError && rankings.map((rank, idx) => <div key={rank.userId} className="community-rank">
                 <div><span className="community-rank-number">{idx + 1}</span><b>{rank.userId === accountId ? "You" : person(rank.userId)}</b><strong>{Math.round(rank.minutes / 6) / 10} h</strong></div>
                 <div className="community-rank-track"><i style={{ width: (rank.minutes / maxMinutes) * 100 + "%" }} /></div>
                 <small>{rank.days} days shared · {rank.cards} cards · {rank.questions} questions</small>
@@ -263,9 +295,12 @@ function CommunityAccountPage() {
             <a className="ghost-btn" href="#leaderboards">Open Daily Challenges</a>
           </GlassCard>
           <GlassCard pad>
-            <PanelHeader headingLevel={2} title="Find friends" sub="Searchable accounts that chose to join Community." />
-            <label className="community-search">Find someone<input value={peopleSearch} onChange={e => setPeopleSearch(e.target.value)} placeholder="Name or handle" /></label>
-            {incoming.length > 0 && <div className="community-invites"><h3>Requests for you</h3>
+            <PanelHeader headingLevel={2} title="Find friends" sub="Discoverable learners and friends you already know." />
+            <label className="community-search">Find someone<input type="search" value={peopleSearch} onChange={e => setPeopleSearch(e.target.value)} maxLength={80} placeholder="Name or handle" /></label>
+            {normalizedPeopleSearch.length === 1 && <p className="sub">Enter one more character to search all discoverable learners.</p>}
+            {normalizedPeopleSearch.length >= 2 && activePeopleSearch?.status === "loading" && <p role="status" className="sub">Searching discoverable learners…</p>}
+            {normalizedPeopleSearch.length >= 2 && activePeopleSearch?.status === "error" && <div role="alert" className="community-error"><p>{activePeopleSearch.message}</p><GButton size="sm" onClick={() => setPeopleSearchRetry(value => value + 1)}>Retry search</GButton></div>}
+            {incoming.length > 0 && !data.connectionsError && <div className="community-invites"><h3>Requests for you</h3>
               {incoming.map(connection => <div key={connection.id} className="community-person">
                 <span className="community-avatar">{initials(person(connection.requester_id))}</span>
                 <span className="grow"><b>{person(connection.requester_id)}</b><small>Wants to connect</small></span>
@@ -273,18 +308,22 @@ function CommunityAccountPage() {
                 <GhostButton disabled={busy} onClick={() => void act(() => removeFriend(accountId, connection.id), "Request declined.")}>Decline</GhostButton>
               </div>)}
             </div>}
-            {people.length === 0 ? <p className="sub">No other discoverable learners yet. Once your friend opts in, you can connect here.</p>
-            : <div className="community-people">{people.map((profile: CommunityProfile) => {
+            {!data.connectionsError && !data.directoryError && normalizedPeopleSearch.length < 2 && people.length > 0 && <p className="sub">Showing up to 50 learners. Search by name or handle to find more.</p>}
+            {normalizedPeopleSearch.length < 2 && !data.connectionsError && people.length === 0 && <p className="sub">No other discoverable learners yet. Once someone opts in, you can connect here.</p>}
+            {normalizedPeopleSearch.length >= 2 && activePeopleSearch?.status === "ready" && people.length === 0 && <p className="sub">No discoverable learners or existing friends match this search.</p>}
+            {normalizedPeopleSearch.length >= 2 && peopleMatches.length > 50 && <p className="sub">Showing the first 50 matches. Narrow your search to find someone specific.</p>}
+            {people.length > 0 && <div className="community-people">{people.map((profile: CommunityProfile) => {
               const relation = related(profile.user_id);
               return <div key={profile.user_id} className="community-person">
                 <span className="community-avatar">{initials(profile.display_name)}</span>
                 <span className="grow"><b>{profile.display_name}</b><small>@{profile.handle}</small></span>
-                {relation?.status === "accepted" ? <GhostButton disabled={busy} onClick={() => void act(() => removeFriend(accountId, relation.id), "Friend removed.")}><Users size={14} /> Friends · remove</GhostButton>
+                {data.connectionsError ? <span className="sub">Friend controls unavailable</span>
+                  : relation?.status === "accepted" ? <GhostButton disabled={busy} onClick={() => void act(() => removeFriend(accountId, relation.id), "Friend removed.")}><Users size={14} /> Friends · remove</GhostButton>
                   : relation ? <span className="sub">{relation.requester_id === accountId ? "Request sent" : "Awaiting your response"}</span>
                   : <GButton size="sm" disabled={busy} onClick={() => void act(() => requestFriend(accountId, profile.user_id), "Friend request sent.")}><UserPlus size={14} /> Add</GButton>}
               </div>;
             })}</div>}
-            {outgoing.length > 0 && <div className="community-invites"><h3>Requests you sent</h3>{outgoing.map(connection => <div className="community-person" key={connection.id}><span className="grow"><b>{person(connection.addressee_id)}</b><small>Waiting for acceptance</small></span><GhostButton disabled={busy} onClick={() => void act(() => removeFriend(accountId, connection.id), "Friend request cancelled.")}>Cancel request</GhostButton></div>)}</div>}
+            {outgoing.length > 0 && !data.connectionsError && <div className="community-invites"><h3>Requests you sent</h3>{outgoing.map(connection => <div className="community-person" key={connection.id}><span className="grow"><b>{person(connection.addressee_id)}</b><small>Waiting for acceptance</small></span><GhostButton disabled={busy} onClick={() => void act(() => removeFriend(accountId, connection.id), "Friend request cancelled.")}>Cancel request</GhostButton></div>)}</div>}
           </GlassCard>
           <GlassCard pad className="community-privacy">
             <PanelHeader headingLevel={2} title="Your privacy" sub="Control whether your profile appears in discovery." />
