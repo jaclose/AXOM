@@ -1,12 +1,14 @@
 import { addLocalDays, localDateKey, previousLocalDateKey } from "./dailyRollover";
 import { isCalendarDateKey } from "./dailyWordCalendar";
 import { JOURNAL_STYLE_COST, journalInkEarned } from "./journalNotebook";
+import { advanceRefill, safeFreezeCount, safeRefillProgress } from "./streakFreeze";
 import type { DailyWordPuzzleState, NoctyriumState } from "./types";
+
+export { STARTER_STREAK_FREEZES, FREEZE_REFILL_EARNED_DAYS } from "./streakFreeze";
 
 export const STUDY_CURRENCY_NAME = "AXOM Credits";
 export const STUDY_CURRENCY_SHORT = "AC";
 export const PRODUCTIVITY_STREAK_THRESHOLD = 80;
-export const STARTER_STREAK_FREEZES = 2;
 
 export interface ProductivityStreakLedger {
   startedOn: string;
@@ -14,12 +16,15 @@ export interface ProductivityStreakLedger {
   bonusDays: string[];
   frozenDays: string[];
   freezesLeft: number;
+  refillProgress: number;
 }
 
 export interface DailyWordStreakLedger {
   startedOn: string;
   frozenDays: string[];
   freezesLeft: number;
+  refillProgress: number;
+  lastRewardedDay?: string;
 }
 
 export interface StudyStreaks {
@@ -48,11 +53,14 @@ export function normalizeStudyStreaks(value: unknown, today = localDateKey()): S
       bonusDays: dateList(productivity.bonusDays).filter((day) => creditedDays.includes(day)),
       frozenDays,
       freezesLeft: safeFreezeCount(productivity.freezesLeft),
+      refillProgress: safeRefillProgress(productivity.refillProgress),
     },
     dailyWord: {
       startedOn: wordStart,
       frozenDays: dateList(dailyWord.frozenDays).filter((day) => day >= wordStart),
       freezesLeft: safeFreezeCount(dailyWord.freezesLeft),
+      refillProgress: safeRefillProgress(dailyWord.refillProgress),
+      lastRewardedDay: isCalendarDateKey(dailyWord.lastRewardedDay) ? dailyWord.lastRewardedDay : undefined,
     },
   };
 }
@@ -84,7 +92,7 @@ export function reconcileProductivityStreak(
   if (yesterday >= lane.startedOn && reachedProductivityGoal(yesterdayBar) && !lane.creditedDays.includes(yesterday)) {
     lane.creditedDays.push(yesterday);
     lane.creditedDays.sort();
-    recordMilestone(lane, yesterday);
+    recordEarnedProductivityDay(lane, yesterday);
   }
   if (yesterday >= lane.startedOn && !lane.creditedDays.includes(yesterday)
     && !lane.frozenDays.includes(yesterday) && lane.creditedDays.includes(beforeYesterday)
@@ -96,7 +104,7 @@ export function reconcileProductivityStreak(
   if (reachedProductivityGoal(todayBar) && !lane.creditedDays.includes(today)) {
     lane.creditedDays.push(today);
     lane.creditedDays.sort();
-    recordMilestone(lane, today);
+    recordEarnedProductivityDay(lane, today);
     creditedToday = true;
   }
   return { ledger, creditedToday, frozenDay };
@@ -113,6 +121,11 @@ export function reconcileDailyWordStreak(
   const yesterday = previousLocalDateKey(today);
   const beforeYesterday = previousLocalDateKey(yesterday);
   let frozenDay: string | undefined;
+  // A saved puzzle may be restored before this watcher runs. Replay only dates
+  // newer than the persisted receipt, and settle them before today's freeze.
+  for (const day of [...completed].filter((day) => isCalendarDateKey(day) && day >= lane.startedOn && day <= yesterday).sort()) {
+    creditCompletedWordDay(lane, completed, day);
+  }
   if (yesterday >= lane.startedOn && !completed.has(yesterday)
     && !lane.frozenDays.includes(yesterday) && completed.has(beforeYesterday)
     && lane.freezesLeft > 0) {
@@ -120,7 +133,19 @@ export function reconcileDailyWordStreak(
     lane.freezesLeft -= 1;
     frozenDay = yesterday;
   }
+  if (completed.has(today)) creditCompletedWordDay(lane, completed, today);
   return { ledger, frozenDay };
+}
+
+function creditCompletedWordDay(lane: DailyWordStreakLedger, completed: Set<string>, day: string) {
+  if (lane.lastRewardedDay && lane.lastRewardedDay >= day) return;
+  const previous = previousLocalDateKey(day);
+  const carried = (completed.has(previous) || lane.frozenDays.includes(previous))
+    && protectedCalendarStreak([...completed], lane.frozenDays, previous) > 0;
+  const refill = advanceRefill(lane.freezesLeft, carried ? lane.refillProgress : 0);
+  lane.freezesLeft = refill.freezesLeft;
+  lane.refillProgress = refill.progress;
+  lane.lastRewardedDay = day;
 }
 
 export function protectedCalendarStreak(
@@ -173,9 +198,12 @@ export function dateKeyInTimeZone(now: Date, zone: string): string {
   return key;
 }
 
-function recordMilestone(lane: ProductivityStreakLedger, day: string) {
+function recordEarnedProductivityDay(lane: ProductivityStreakLedger, day: string) {
   const streak = protectedCalendarStreak(lane.creditedDays, lane.frozenDays, day);
   if (streak > 0 && streak % 3 === 0 && !lane.bonusDays.includes(day)) lane.bonusDays.push(day);
+  const refill = advanceRefill(lane.freezesLeft, streak > 1 ? lane.refillProgress : 0);
+  lane.freezesLeft = refill.freezesLeft;
+  lane.refillProgress = refill.progress;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -184,10 +212,4 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function dateList(value: unknown): string[] {
   return Array.isArray(value) ? [...new Set(value.filter(isCalendarDateKey))].sort().slice(-730) : [];
-}
-
-function safeFreezeCount(value: unknown): number {
-  return typeof value === "number" && Number.isInteger(value)
-    ? Math.max(0, Math.min(STARTER_STREAK_FREEZES, value))
-    : STARTER_STREAK_FREEZES;
 }

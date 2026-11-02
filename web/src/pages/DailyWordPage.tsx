@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { ArrowLeft, BarChart3, Check, CircleDot, Clock3, Copy, Delete, Flame, HelpCircle, Lightbulb, Minus, ShieldCheck } from "lucide-react";
 import { GlassCard, GButton } from "../components/ui/primitives";
+import { StreakFreezeMeter } from "../components/productivity/StreakFreezeMeter";
 import { Modal } from "../components/ui/Modal";
 import { DailyWordDemo } from "../components/games/DailyWordDemo";
 import {
@@ -128,6 +129,7 @@ export function DailyWordPage() {
   const stats = useMemo(() => deriveDailyWordStats(history), [history]);
   const protectedStreak = dailyWordProtectedStreak(history, profile.studyStreaks?.dailyWord.frozenDays ?? [], dateKeyInTimeZone(now, timeZone));
   const freezesLeft = profile.studyStreaks?.dailyWord.freezesLeft ?? 2;
+  const refillProgress = profile.studyStreaks?.dailyWord.refillProgress ?? 0;
   const nextPuzzleCountdown = useMemo(
     () => puzzle?.completed ? formatCountdown(millisecondsUntilNextCalendarDate(now, puzzle.timezone)) : "",
     [now, puzzle?.completed, puzzle?.timezone],
@@ -319,8 +321,8 @@ export function DailyWordPage() {
       </div>
       <div className="study-game-streak-strip" aria-label="Daily Word streak protection">
         <span><Flame size={ICON_SIZE.body} aria-hidden="true" /> <b>{protectedStreak}</b> day streak</span>
-        <span><ShieldCheck size={ICON_SIZE.body} aria-hidden="true" /> <b>{freezesLeft}</b> {freezesLeft === 1 ? "freeze" : "freezes"} left</span>
-        <small>A freeze covers one missed day automatically. It does not add to your streak.</small>
+        <StreakFreezeMeter available={freezesLeft} progress={refillProgress} label="Daily Word" />
+        <small>A freeze covers one missed day, without adding a streak day.</small>
       </div>
       {/* The top bar already shows the title; keep the page heading for assistive tech. */}
       <header className="sr-only">

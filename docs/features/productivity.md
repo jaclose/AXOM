@@ -44,17 +44,19 @@ The reward streak starts when this ledger is first created. Older study records
 remain intact, but current target settings are not applied retroactively to
 mint credits for historical dates.
 
-Each lane begins with two one-day freezes and has no automatic refill. A freeze
-protects a single missed day following a completed day; it never increases the
-streak count or earns credits. Two consecutive missed days end the streak.
-The remaining counts are shown in Productivity, Daily Word, and Doctordle.
+Each lane begins with two one-day freezes. Every two newly earned days in an
+unbroken participation streak restore one spent freeze, capped at two. A
+protected missed day carries the streak but does not advance the refill meter
+or earn credits. Protection covers only a single missed day after a reported or
+completed day; a second consecutive missed day ends the streak. Counts and
+refill progress appear in Productivity, Daily Word, and Doctordle.
 When protection is used, a dated notification links back to that lane.
 
 Daily Word counts completed puzzles in its selected calendar time zone. Its
 page, dashboard widget, and navigation rail use the same protected streak
 selector. Doctordle has its own 05:00 UTC case boundary and its AXOM streak
-uses only results the learner reports in AXOM. Opening the external game
-never counts as a result. Doctordle freeze data stays in its local log.
+uses only results the learner reports in AXOM. Opening the external site never
+counts as a result. Its freeze data stays in its device-local log.
 
 Existing journal unlocks and completed study session earnings remain spendable.
 New completed sessions also earn credits once per unique session ID, alongside

@@ -1,4 +1,4 @@
-import { Flame, ShieldCheck, Sparkles } from "lucide-react";
+import { Flame, Sparkles } from "lucide-react";
 import { addLocalDays } from "../../lib/dailyRollover";
 import type { DailySuccessResult } from "../../lib/dailySuccess";
 import { ICON_SIZE } from "../../lib/iconSize";
@@ -10,6 +10,7 @@ import {
 } from "../../lib/studyStreaks";
 import type { NoctyriumState } from "../../lib/types";
 import "../../styles/study-streaks.css";
+import { StreakFreezeMeter } from "./StreakFreezeMeter";
 
 export function StudyStreakMonitor({ state, result }: {
   state: NoctyriumState;
@@ -44,7 +45,7 @@ export function StudyStreakMonitor({ state, result }: {
             : lane.startedOn === today && lane.creditedDays.length === 0
               ? "Your 80% study streak starts today. Reach the mark to earn an AXOM Credit."
               : `${Math.max(0, 80 - result.progress)} more percentage points on today's bar reaches the 80% streak mark.`}</p>
-        <span><ShieldCheck size={ICON_SIZE.body} aria-hidden="true" /> {lane.freezesLeft} {lane.freezesLeft === 1 ? "freeze" : "freezes"} left</span>
+        <StreakFreezeMeter available={lane.freezesLeft} progress={lane.refillProgress} label="Study streak" />
       </div>
     </section>
   );

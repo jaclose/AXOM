@@ -34,7 +34,7 @@ describe("Doctordle external boundary", () => {
     expect(screen.getByText(/Every logged attempt counts toward your AXOM streak/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Missed it" }));
     expect(container.querySelector(".doctordle-stats")?.textContent).toContain("3 in a row3 logged1 got it");
-    expect(container.querySelector(".doctordle-stats")?.textContent).toContain("2 freezes left");
+    expect(screen.getByLabelText(/Doctordle: 2 of 2 freezes ready/i).textContent).toContain("2/2 freezes");
     expect(useDoctordle.getState().log.results[440]).toBe("missed");
     fireEvent.click(screen.getByRole("button", { name: "Change to got it" }));
     expect(container.querySelector(".doctordle-stats")?.textContent).toContain("3 in a row3 logged2 got it");

@@ -19,7 +19,16 @@
 .study-streak-monitor__day.is-today { box-shadow: inset 0 0 0 1px var(--gold); }
 .study-streak-monitor__foot { display: flex; align-items: center; justify-content: space-between; gap: 14px; color: var(--text-60); font-size: var(--fs-small); }
 .study-streak-monitor__foot p { margin: 0; }
-.study-streak-monitor__foot span { flex: none; display: inline-flex; align-items: center; gap: 5px; }
+.study-streak-monitor__foot .streak-freeze-meter { flex: none; }
+.streak-freeze-meter { display: inline-flex; align-items: center; gap: 9px; min-width: max-content; padding: 6px 9px; border: 1px solid var(--hairline); border-radius: var(--radius-md); background: var(--surface-1); color: var(--text-70); }
+.streak-freeze-meter__shields { display: inline-flex; gap: 2px; color: var(--text-30); }
+.streak-freeze-meter__shields svg.is-ready { color: var(--gold); fill-opacity: .3; }
+.streak-freeze-meter__copy { display: grid; gap: 2px; line-height: 1.1; }
+.streak-freeze-meter__copy b { color: var(--text); font: 600 var(--fs-small)/1.2 var(--font-ui); }
+.streak-freeze-meter__copy small { color: var(--text-60); font: 500 var(--fs-micro)/1.2 var(--font-ui); }
+.streak-freeze-meter__progress { display: inline-flex; align-self: stretch; align-items: center; gap: 3px; margin-left: 2px; }
+.streak-freeze-meter__progress i { width: 5px; height: 5px; border-radius: 50%; background: var(--hairline); }
+.streak-freeze-meter__progress i.is-earned { background: var(--gold); }
 .streak-freeze-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border: 1px solid var(--hairline); border-radius: var(--radius-pill); color: var(--text-70); font: 600 var(--fs-small)/1.2 var(--font-ui); }
 .study-game-streak-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 7px 14px; padding: 9px 12px; border: 1px solid var(--hairline); border-radius: var(--radius-md); color: var(--text-70); background: var(--surface-1); font-size: var(--fs-small); }
 .study-game-streak-strip > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
@@ -27,9 +36,8 @@
 .study-game-streak-strip b { color: var(--text); font-variant-numeric: tabular-nums; }
 .study-game-streak-strip small { color: var(--text-60); line-height: 1.35; }
 .study-game-freeze-note { margin: -4px 0 0; color: var(--text-60); font-size: var(--fs-small); line-height: 1.4; }
-.doctordle-stats:has(> span:nth-child(4)) { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 @media (max-width: 560px) {
   .study-streak-monitor { padding: 15px; }
   .study-streak-monitor__foot { align-items: flex-start; flex-direction: column; gap: 8px; }
-  .doctordle-stats:has(> span:nth-child(4)) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .streak-freeze-meter { min-width: 0; }
 }

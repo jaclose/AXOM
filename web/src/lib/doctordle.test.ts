@@ -58,6 +58,17 @@ describe("doctordleStreak", () => {
     expect(reconcileDoctordleFreeze(log({ opened: [438], protectionStartedCase: 438 }), 440).frozenCase).toBeUndefined();
     expect(reconcileDoctordleFreeze(log({ results: { 437: "solved" }, protectionStartedCase: 437 }), 440).frozenCase).toBeUndefined();
   });
+
+  it("refills one spent freeze after two new reported cases and never on a changed result", () => {
+    useDoctordle.setState({ log: log({ results: { 438: "solved" }, protectionStartedCase: 438, freezesLeft: 1, refillProgress: 0, lastRewardedCase: 438 }) });
+    useDoctordle.getState().recordResult("missed", Date.parse("2026-09-28T16:00:00Z"));
+    expect(useDoctordle.getState().log).toMatchObject({ freezesLeft: 1, refillProgress: 1, lastRewardedCase: 439 });
+    useDoctordle.getState().recordResult("solved", NOON);
+    const earned = useDoctordle.getState().log;
+    expect(earned).toMatchObject({ freezesLeft: 2, refillProgress: 0, lastRewardedCase: 440 });
+    useDoctordle.getState().recordResult("missed", NOON);
+    expect(useDoctordle.getState().log).toMatchObject({ freezesLeft: 2, refillProgress: 0, lastRewardedCase: 440 });
+  });
 });
 
 describe("asking how it went", () => {

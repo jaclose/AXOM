@@ -67,6 +67,30 @@ describe("study streak rewards", () => {
     expect(late.ledger.productivity.freezesLeft).toBe(2);
   });
 
+  it("refills one spent study freeze after two new earned streak days, once", () => {
+    let ledger = normalizeStudyStreaks(undefined, "2026-07-10");
+    ledger.productivity.freezesLeft = 1;
+    ledger = reconcileProductivityStreak(ledger, "2026-07-10", { eligibleCount: 1, progress: 80 }, emptyBar).ledger;
+    expect(ledger.productivity).toMatchObject({ freezesLeft: 1, refillProgress: 1 });
+    ledger = reconcileProductivityStreak(ledger, "2026-07-11", { eligibleCount: 1, progress: 80 }, { eligibleCount: 1, progress: 80 }).ledger;
+    expect(ledger.productivity).toMatchObject({ freezesLeft: 2, refillProgress: 0 });
+    const repeated = reconcileProductivityStreak(ledger, "2026-07-11", { eligibleCount: 1, progress: 80 }, { eligibleCount: 1, progress: 80 });
+    expect(repeated.ledger).toEqual(ledger);
+    expect(studyCreditsBalance({ profile: { studyStreaks: ledger }, sessions: [] } as unknown as Pick<NoctyriumState, "profile" | "sessions">)).toBe(2);
+  });
+
+  it("does not count a frozen day as refill progress, but lets later earned days refill", () => {
+    let ledger = normalizeStudyStreaks(undefined, "2026-07-10");
+    ledger.productivity.creditedDays = ["2026-07-10"];
+    ledger.productivity.freezesLeft = 1;
+    ledger = reconcileProductivityStreak(ledger, DAY, emptyBar, emptyBar).ledger;
+    expect(ledger.productivity).toMatchObject({ frozenDays: ["2026-07-11"], freezesLeft: 0, refillProgress: 0 });
+    ledger = reconcileProductivityStreak(ledger, DAY, { eligibleCount: 1, progress: 90 }, emptyBar).ledger;
+    expect(ledger.productivity).toMatchObject({ freezesLeft: 0, refillProgress: 1 });
+    ledger = reconcileProductivityStreak(ledger, "2026-07-13", { eligibleCount: 1, progress: 80 }, { eligibleCount: 1, progress: 90 }).ledger;
+    expect(ledger.productivity).toMatchObject({ freezesLeft: 1, refillProgress: 0 });
+  });
+
   it("separates the selected Daily Word zone from the device calendar", () => {
     const instant = new Date("2026-11-02T01:00:00.000Z");
     expect(dateKeyInTimeZone(instant, "America/Grenada")).toBe("2026-11-01");
@@ -98,12 +122,42 @@ describe("study streak rewards", () => {
     expect(next.ledger.dailyWord.freezesLeft).toBe(1);
     const second = reconcileDailyWordStreak(repeated.ledger, "2026-07-14", ["2026-07-10", DAY]);
     expect(second.frozenDay).toBe("2026-07-13");
-    expect(second.ledger.dailyWord.freezesLeft).toBe(0);
+    expect(second.ledger.dailyWord.freezesLeft).toBe(1);
     expect(dailyWordProtectedStreak([
       { completed: true, puzzleDate: "2026-07-10" },
       { completed: true, puzzleDate: DAY },
       { completed: true, puzzleDate: "2026-07-14" },
     ], second.ledger.dailyWord.frozenDays, "2026-07-14")).toBe(3);
+  });
+
+  it("refills Daily Word after two new completed days, without re-awarding a replay", () => {
+    let ledger = normalizeStudyStreaks(undefined, "2026-07-10");
+    ledger.dailyWord.freezesLeft = 1;
+    ledger = reconcileDailyWordStreak(ledger, "2026-07-10", ["2026-07-10"]).ledger;
+    expect(ledger.dailyWord).toMatchObject({ freezesLeft: 1, refillProgress: 1, lastRewardedDay: "2026-07-10" });
+    ledger = reconcileDailyWordStreak(ledger, "2026-07-11", ["2026-07-10", "2026-07-11"]).ledger;
+    expect(ledger.dailyWord).toMatchObject({ freezesLeft: 2, refillProgress: 0, lastRewardedDay: "2026-07-11" });
+    expect(reconcileDailyWordStreak(ledger, "2026-07-11", ["2026-07-10", "2026-07-11"]).ledger).toEqual(ledger);
+  });
+
+  it("settles a saved Daily Word completion after reopening on the next date", () => {
+    let ledger = normalizeStudyStreaks(undefined, "2026-07-10");
+    ledger.dailyWord.freezesLeft = 1;
+    ledger = reconcileDailyWordStreak(ledger, "2026-07-10", ["2026-07-10"]).ledger;
+    const reopened = reconcileDailyWordStreak(ledger, "2026-07-12", ["2026-07-10", "2026-07-11"]);
+    expect(reopened.frozenDay).toBeUndefined();
+    expect(reopened.ledger.dailyWord).toMatchObject({ freezesLeft: 2, refillProgress: 0, lastRewardedDay: "2026-07-11" });
+    const restored = normalizeStudyStreaks(JSON.parse(JSON.stringify(reopened.ledger)), "2026-07-12");
+    expect(reconcileDailyWordStreak(restored, "2026-07-12", ["2026-07-10", "2026-07-11"]).ledger).toEqual(restored);
+  });
+
+  it("credits a pending Daily Word completion before debiting the next missed day", () => {
+    let ledger = normalizeStudyStreaks(undefined, "2026-07-10");
+    ledger.dailyWord.freezesLeft = 1;
+    ledger = reconcileDailyWordStreak(ledger, "2026-07-10", ["2026-07-10"]).ledger;
+    const reopened = reconcileDailyWordStreak(ledger, "2026-07-13", ["2026-07-10", "2026-07-11"]);
+    expect(reopened.frozenDay).toBe("2026-07-12");
+    expect(reopened.ledger.dailyWord).toMatchObject({ freezesLeft: 1, refillProgress: 0, lastRewardedDay: "2026-07-11", frozenDays: ["2026-07-12"] });
   });
 
   it("preserves completed-session credits and earns once for a new unique session", () => {

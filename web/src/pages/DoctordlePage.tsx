@@ -1,5 +1,6 @@
 import { ArrowLeft, ArrowUpRight, Flame, Globe2, Heart, ShieldCheck } from "lucide-react";
 import { GlassCard, Tag } from "../components/ui/primitives";
+import { StreakFreezeMeter } from "../components/productivity/StreakFreezeMeter";
 import { compactCountdown, msUntilDoctordle } from "../components/shell/DailyGameNavMeta";
 import { useClockNow } from "../lib/clock";
 import { DOCTORDLE_URL, doctordleCaseNumber, doctordleStreak, useDoctordle } from "../lib/doctordle";
@@ -48,9 +49,9 @@ export function DoctordlePage() {
         <span><b>{streak > 0 && <Flame size={ICON_SIZE.body} aria-hidden="true" />}{streak}</b> in a row</span>
         <span><b>{results.length}</b> logged</span>
         <span><b>{solved}</b> got it</span>
-        <span><b><ShieldCheck size={ICON_SIZE.body} aria-hidden="true" />{log.freezesLeft ?? 2}</b> {log.freezesLeft === 1 ? "freeze" : "freezes"} left</span>
       </div>
-      <p className="study-game-freeze-note">A freeze covers one missed case automatically. Your AXOM streak counts only the attempts you report here.</p>
+      <StreakFreezeMeter available={log.freezesLeft ?? 2} progress={log.refillProgress ?? 0} label="Doctordle" />
+      <p className="study-game-freeze-note">A freeze covers one missed case. Two reported days in your streak refill one.</p>
       <div className={`doctordle-today ${asking ? "is-asking" : ""}`}>
         {todayResult ? (
           <>

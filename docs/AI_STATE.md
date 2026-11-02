@@ -5,18 +5,17 @@ authority: current-state
 ---
 # AXOM current AI state
 
-## 2026-11-01 Ideas, Journal, QBank and Community working branch
+## 2026-11-01 Ideas, Journal, QBank and Community feature branch
 
-Isolated worktree `/Volumes/JDabSSD/Codex-work/AXOM-ideas-2026-11-01` on
-`codex/ideas-20261101` started at `origin/main` `1b189177`. The tested draft
-Host/Community implementation from `codex/pr30-host-hardening-20261025`
-(`3684a116`) is integrated locally for further work. It includes opted-in
-account discovery, connections, daily progress posts and Kudos, a capability
-gated operator console, AI entitlements and quota enforcement, local SQL
-security replay, and focused browser tests. See
+Worktree `/Volumes/JDabSSD/Codex-work/AXOM-ideas-safe-2026-11-01` on
+`codex/ideas-safe-20261101` forks local `95344bf6`. Journal fixes and freeze
+refills are included; Radiordle/Pathordle app code awaits provider approval.
+The Host/Community draft `3684a116` is integrated locally: opted-in account
+discovery, connections, progress posts and Kudos, gated operator console,
+AI quotas, local SQL replay and browser tests. See
 [Community/operator contract](features/community-operator-console.md).
-The merge has not been pushed or deployed. Current branch validation and
-real Jafar/Aynaz account acceptance are pending. Hosted migrations, executive
+No main merge or deployment has occurred. Hosted validation and real
+Jafar/Aynaz account acceptance are pending. Hosted migrations, executive
 provisioning, private content publication and production release remain
 separate actions.
 This branch also adds the reviewed learner Question Set catalog, journal feedback,
@@ -27,9 +26,9 @@ The original `AXOM` checkout has pre-existing deleted private PDFs and
 untracked files; it remains untouched. This branch owns only requested feature
 work and a directions audit. Other worktrees remain protected.
 
-Journal now has first-open setup, a weatherlit desk, one ruled writing page,
-manual/4.4-second untouched put-down, MacBook timer/activity, and dated
-closeout/catch-up notices. Completion closes the book; reduced motion is
+Journal has first-open setup, an ambient desk, ruled page, 4.4-second idle
+put-down, MacBook timer/activity, desk-framed writing with side support, and
+dated closeout/catch-up notices. Completion folds the book; reduced motion is
 supported. See [scene](JOURNAL-NOTEBOOK-ARCHITECTURE.md) and
 [loop](DAILY-LOOP-REMINDER-LIFECYCLE.md). Supplied focus audio is a private
 local-preview import outside Git; AXOM original Afterlight is bundled. Hosted

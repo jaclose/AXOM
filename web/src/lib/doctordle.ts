@@ -4,6 +4,7 @@
 // doctordle.org, so everything here is what the learner tells us, kept on
 // this device next to the other game courtesies (never synced, never shared).
 import { create } from "zustand";
+import { advanceRefill, safeFreezeCount, safeRefillProgress } from "./streakFreeze";
 
 const KEY = "axom.doctordle.v1";
 export const DOCTORDLE_URL = "https://doctordle.org/";
@@ -38,6 +39,8 @@ export interface DoctordleLog {
   protectionStartedCase?: number;
   frozenCases?: number[];
   freezesLeft?: number;
+  refillProgress?: number;
+  lastRewardedCase?: number;
 }
 
 export const EMPTY_DOCTORDLE_LOG: DoctordleLog = { opened: [], results: {}, skipped: [] };
@@ -66,7 +69,9 @@ export function normalizeDoctordleLog(value: unknown): DoctordleLog {
     remindersOff: raw.remindersOff === true || undefined,
     protectionStartedCase: Number.isInteger(raw.protectionStartedCase) ? raw.protectionStartedCase as number : undefined,
     frozenCases: [...new Set(finiteInts(raw.frozenCases))].slice(-60),
-    freezesLeft: Number.isInteger(raw.freezesLeft) ? Math.max(0, Math.min(2, raw.freezesLeft as number)) : 2,
+    freezesLeft: safeFreezeCount(raw.freezesLeft),
+    refillProgress: safeRefillProgress(raw.refillProgress),
+    lastRewardedCase: Number.isInteger(raw.lastRewardedCase) ? raw.lastRewardedCase as number : undefined,
   };
 }
 
@@ -89,7 +94,7 @@ export function doctordleStreak(log: DoctordleLog, today: number): number {
   return streak;
 }
 
-/** One case may be protected; link openings are never treated as completions. */
+/** One case may be protected; only reported attempts advance the refill meter. */
 export function reconcileDoctordleFreeze(log: DoctordleLog, today: number): { log: DoctordleLog; frozenCase?: number } {
   const normalized = normalizeDoctordleLog(log);
   const started = normalized.protectionStartedCase ?? today;
@@ -97,15 +102,23 @@ export function reconcileDoctordleFreeze(log: DoctordleLog, today: number): { lo
   const eligible = yesterday >= started && !normalized.results[yesterday]
     && !(normalized.frozenCases ?? []).includes(yesterday)
     && Boolean(normalized.results[yesterday - 1]) && (normalized.freezesLeft ?? 0) > 0;
-  return {
-    log: {
-      ...normalized,
-      protectionStartedCase: started,
-      frozenCases: eligible ? [...(normalized.frozenCases ?? []), yesterday].slice(-60) : normalized.frozenCases,
-      freezesLeft: eligible ? (normalized.freezesLeft ?? 0) - 1 : normalized.freezesLeft,
-    },
-    frozenCase: eligible ? yesterday : undefined,
+  const next: DoctordleLog = {
+    ...normalized,
+    protectionStartedCase: started,
+    frozenCases: eligible ? [...(normalized.frozenCases ?? []), yesterday].slice(-60) : normalized.frozenCases,
+    freezesLeft: eligible ? (normalized.freezesLeft ?? 0) - 1 : normalized.freezesLeft,
   };
+  return { log: rewardReportedCase(next, today), frozenCase: eligible ? yesterday : undefined };
+}
+
+function rewardReportedCase(log: DoctordleLog, today: number): DoctordleLog {
+  const next = normalizeDoctordleLog(log);
+  if (!next.results[today] || (next.lastRewardedCase !== undefined && next.lastRewardedCase >= today)) return next;
+  const yesterday = today - 1;
+  const carried = (Boolean(next.results[yesterday]) || Boolean(next.frozenCases?.includes(yesterday)))
+    && doctordleStreak(next, yesterday) > 0;
+  const refill = advanceRefill(next.freezesLeft ?? 0, carried ? next.refillProgress ?? 0 : 0);
+  return { ...next, freezesLeft: refill.freezesLeft, refillProgress: refill.progress, lastRewardedCase: today };
 }
 
 /** After "Open doctordle.org": ask once the learner is back, unless they already answered. */
@@ -153,7 +166,8 @@ export const useDoctordle = create<DoctordleState>((set, get) => {
     recordResult(result, now = Date.now()) {
       const { log } = get();
       const today = doctordleCaseNumber(now);
-      save({ ...log, results: { ...log.results, [today]: result }, skipped: log.skipped.filter((n) => n !== today), snoozedUntil: undefined });
+      const next = { ...log, results: { ...log.results, [today]: result }, skipped: log.skipped.filter((n) => n !== today), snoozedUntil: undefined };
+      save(rewardReportedCase(next, today));
     },
     skipToday(now = Date.now()) {
       const { log } = get();
