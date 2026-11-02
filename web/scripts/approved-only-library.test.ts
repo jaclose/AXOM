@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { createHash } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -19,16 +19,19 @@ const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 
-async function fixture(options: { image?: boolean; explanation?: string; week?: number; duplicateSource?: boolean } = {}) {
+async function fixture(options: { image?: boolean; explanation?: string; week?: number; duplicateSource?: boolean;
+  duplicateSourceSha?: boolean; privateBankPath?: boolean; privateToolPath?: boolean;
+  metadataPath?: "manifest" | "question" | "asset"; manifestPaths?: boolean } = {}) {
   const work = await mkdtemp(join(tmpdir(), "axom-approved-test-")); roots.push(work);
   const root = join(work, "prepared"); await mkdir(root);
   const original = Buffer.from("%PDF-1.4 synthetic fixture only");
   const checksum = sha(original);
-  const bankFile = `banks/${checksum}/bank.json`;
+  const bankFile = options.privateBankPath ? "private/operator-course/bank.json" : `banks/${checksum}/bank.json`;
   const originalFile = `sources/${checksum}.pdf`;
   const asset = { id: "synthetic-figure", filename: "synthetic-figure.png", mimeType: "image/png", width: 1, height: 1,
     byteSize: png.length, sourceFile: "synthetic.pdf", sourcePage: 1, role: "stem" as const, questionId: "q-ready",
-    checksum: `sha256:${sha(png)}`, derivation: "embedded" as const };
+    checksum: `sha256:${sha(png)}`, derivation: "embedded" as const,
+    ...(options.metadataPath === "asset" ? { revealOf: "file:///Users/tester/private.png" } : {}) };
   const question: PackageQuestion = {
     id: "q-ready", source: { filename: "synthetic.pdf", page: 1, questionNumber: 1 },
     ...(options.week ? { week: options.week } : {}),
@@ -39,15 +42,18 @@ async function fixture(options: { image?: boolean; explanation?: string; week?: 
       { id: "b", label: "B", blocks: [{ type: "text", text: "Second synthetic choice" }] },
     ], correctAnswer: { labels: ["A"], evidence: "printed-key" },
     explanation: options.explanation === "" ? [] : [{ type: "text", text: options.explanation ?? "The synthetic source states that the first choice is correct for this invented fixture." }],
+    ...(options.metadataPath === "question" ? { topic: "/Users/tester/private/topic" } : {}),
     assets: options.image ? [asset] : [], provenance: { method: "authored", sourceChecksum: `sha256:${checksum}`,
-      notes: "PRIVATE LOCAL NOTE" },
+      notes: "PRIVATE LOCAL NOTE", ...(options.privateToolPath ? { tool: "/Users/tester/private/parser" } : {}) },
   };
   const held: PackageQuestion = { ...structuredClone(question), id: "q-held", source: { filename: "synthetic.pdf", page: 2, questionNumber: 2 },
     correctAnswer: undefined, explanation: undefined, stem: [{ type: "text", text: "PRIVATE HELD STEM" }], assets: [] };
   const bank: PreparedBank = { pkg: { manifest: { schemaVersion: 1, course: { name: "FTM 1", term: 1, week: options.week ?? 0 },
-    bank: { id: "synthetic-bank", title: "Synthetic source", discipline: "Example" },
+    bank: { id: "synthetic-bank", title: options.metadataPath === "manifest" ? "file:///Users/tester/private/source" : "Synthetic source", discipline: "Example" },
     source: { filename: "synthetic.pdf", sourceWeekDeclared: false,
-      ...(options.week ? { axomAssignedWeek: options.week } : {}) }, questionsFile: "questions.json", assetsDirectory: "assets" },
+      ...(options.week ? { axomAssignedWeek: options.week } : {}) },
+    questionsFile: options.manifestPaths ? "/Users/tester/private/questions.json" : "questions.json",
+    assetsDirectory: options.manifestPaths ? "file:///Users/tester/private/assets" : "assets" },
     questions: [question, held] }, issues: [], sourceText: { rawText: "PRIVATE RAW TEXT", pageTexts: ["PRIVATE PAGE TEXT"] },
     sourceBytes: original.length, notes: ["PRIVATE BANK NOTE"] };
   const catalog: PrivateLibraryCatalog = { format: "axom-private-library", schemaVersion: 1, id: "synthetic-library", version: "synthetic-v1",
@@ -76,9 +82,22 @@ async function fixture(options: { image?: boolean; explanation?: string; week?: 
       checksum: otherChecksum, module: "FTM 1", status: "prepared", reason: "Synthetic repeated source",
       bankFile: otherFile, originalFile: `sources/${otherChecksum}.pdf`, ready: 1, review: 0 });
   }
+  if (options.duplicateSourceSha) {
+    const otherFile = "alternate/bank.json";
+    const distinct = structuredClone(question);
+    distinct.id = "q-other-source";
+    distinct.stem = [{ type: "text", text: "Which other synthetic choice is named?" }];
+    const otherBank = structuredClone(bank);
+    otherBank.pkg.manifest.bank.id = "synthetic-bank-other";
+    otherBank.pkg.questions = [distinct];
+    await put(otherFile, JSON.stringify(otherBank));
+    catalog.sources.push({ id: `other-source-${checksum}`, name: "synthetic.pdf", sourcePath: "PRIVATE/OTHER/synthetic.pdf",
+      checksum, module: "FTM 1", status: "prepared", reason: "Synthetic same-checksum source",
+      bankFile: otherFile, originalFile, ready: 1, review: 0 });
+  }
   await put("templates/private-plan.txt", "PRIVATE PLAN");
-  await put(`banks/${checksum}/assets/held.png`, png);
-  if (options.image) await put(`banks/${checksum}/assets/${asset.filename}`, png);
+  await put(`${dirname(bankFile)}/assets/held.png`, png);
+  if (options.image) await put(`${dirname(bankFile)}/assets/${asset.filename}`, png);
   await put("catalog.json", JSON.stringify(catalog));
   const decisions = join(work, "decisions.json");
   await createApprovalTemplate(root, decisions);
@@ -94,7 +113,7 @@ async function fixture(options: { image?: boolean; explanation?: string; week?: 
 
 describe("approved-only private candidate", () => {
   it("exports only explicit approval and passes the existing publisher without raw source content", async () => {
-    const { root, output, decisions } = await fixture();
+    const { root, output, decisions } = await fixture({ privateToolPath: true });
     expect(await createApprovedOnlyLibrary(root, decisions, output)).toMatchObject({ sources: 1, ready: 1, held: 0 });
     const library = join(output, "library");
     const catalog = JSON.parse(await readFile(join(library, "catalog.json"), "utf8")) as PrivateLibraryCatalog;
@@ -107,8 +126,9 @@ describe("approved-only private candidate", () => {
     expect(bank.sourceText).toEqual({ rawText: "" });
     expect(bank.notes).toEqual([]);
     expect(bank.pkg.questions[0].provenance.notes).toBeUndefined();
+    expect(bank.pkg.questions[0].provenance.tool).toBeUndefined();
     expect(await readdir(join(library, "banks", catalog.sources[0].checksum))).toEqual(["bank.json"]);
-    expect((await readFile(join(library, catalog.sources[0].bankFile!), "utf8"))).not.toMatch(/PRIVATE|q-held/);
+    expect((await readFile(join(library, catalog.sources[0].bankFile!), "utf8"))).not.toMatch(/PRIVATE|q-held|\/Users\/tester/);
     const receipt = await readFile(join(output, "private-receipt.json"), "utf8");
     expect(JSON.parse(receipt)).toMatchObject({ approvedQuestions: 1, heldQuestionsIncluded: 0 });
     expect(receipt).not.toMatch(/PRIVATE|synthetic stem|sourcePath/);
@@ -133,6 +153,25 @@ describe("approved-only private candidate", () => {
     const assets = join(output, "library", "banks", catalog.sources[0].checksum, "assets");
     expect(await readdir(assets)).toEqual(["synthetic-figure.png"]);
     expect(sha(await readFile(join(assets, "synthetic-figure.png")))).toBe(sha(png));
+  });
+
+  it("uses content-addressed public paths even when the private bank path contains a folder name", async () => {
+    const { root, output, decisions, catalog } = await fixture({ image: true, privateBankPath: true, manifestPaths: true });
+    await createApprovedOnlyLibrary(root, decisions, output);
+    const publicCatalog = JSON.parse(await readFile(join(output, "library", "catalog.json"), "utf8")) as PrivateLibraryCatalog;
+    expect(publicCatalog.sources[0].bankFile).toBe(`banks/${catalog.sources[0].checksum}/bank.json`);
+    expect(await readdir(join(output, "library", "banks", catalog.sources[0].checksum, "assets"))).toEqual(["synthetic-figure.png"]);
+    expect((await readFile(join(output, "library", "catalog.json"), "utf8"))).not.toContain("operator-course");
+    const publicBank = JSON.parse(await readFile(join(output, "library", publicCatalog.sources[0].bankFile!), "utf8")) as PreparedBank;
+    expect(publicBank.pkg.manifest.questionsFile).toBe("questions.json");
+    expect(publicBank.pkg.manifest.assetsDirectory).toBe("assets");
+    expect(JSON.stringify(publicBank)).not.toContain("/Users/tester/private");
+  });
+
+  it.each(["manifest", "question", "asset"] as const)("rejects local paths in %s metadata", async metadataPath => {
+    const { root, output, decisions } = await fixture({ image: metadataPath === "asset", metadataPath });
+    await expect(createApprovedOnlyLibrary(root, decisions, output)).rejects.toThrow(/member-visible/);
+    await expect(readdir(output)).rejects.toThrow();
   });
 
   it("rejects stale answers and missing review evidence before writing output", async () => {
@@ -190,6 +229,19 @@ describe("approved-only private candidate", () => {
     await expect(readdir(output)).rejects.toThrow();
   });
 
+  it("rejects two approved source rows that share one public content-addressed bank path", async () => {
+    const { root, output, decisions, payload } = await fixture({ duplicateSourceSha: true });
+    const second = payload.records.find(row => row.questionId === "q-other-source")!;
+    const approved = payload.records.find(row => row.questionId === "q-ready")!;
+    Object.assign(second, { status: approved.status, sourceChecked: approved.sourceChecked,
+      filingChecked: approved.filingChecked, clinicalChecked: approved.clinicalChecked,
+      explanationChecked: approved.explanationChecked, rightsStatus: approved.rightsStatus,
+      rightsEvidence: approved.rightsEvidence, reviewer: approved.reviewer, reviewedAt: approved.reviewedAt });
+    await writeFile(decisions, JSON.stringify(payload));
+    await expect(createApprovedOnlyLibrary(root, decisions, output)).rejects.toThrow(/same public bank path/);
+    await expect(readdir(output)).rejects.toThrow();
+  });
+
   it("keeps the final candidate absent when the private receipt write fails", async () => {
     const { root, output, decisions } = await fixture();
     await expect(createApprovedOnlyLibrary(root, decisions, output, {
@@ -215,5 +267,14 @@ describe("approved-only private candidate", () => {
   it("refuses a private output inside the repository", async () => {
     const { root, decisions } = await fixture();
     await expect(createApprovedOnlyLibrary(root, decisions, join(process.cwd(), "private-output"))).rejects.toThrow(/outside every repository/);
+  });
+
+  it("resolves a destination symlink before checking overlap with the prepared library", async () => {
+    const { work, root, decisions } = await fixture();
+    const alias = join(work, "library-alias");
+    await symlink(root, alias);
+    await expect(createApprovalTemplate(root, join(alias, "new-decisions.json"))).rejects.toThrow(/outside the prepared library/);
+    await expect(createApprovedOnlyLibrary(root, decisions, join(alias, "approved"))).rejects.toThrow(/separate from the prepared library/);
+    await expect(readdir(join(root, "approved"))).rejects.toThrow();
   });
 });

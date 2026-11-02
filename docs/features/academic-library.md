@@ -233,7 +233,9 @@ evidence. Week review notes may be recorded in `weekEvidence`, but every shared
 question and bank week stays unassigned in this first approved-only candidate.
 Pending or held rows are excluded. The build refuses stale hashes, missing rights or
 review evidence, unresolved answers, repeated question appearances, missing
-explanations and unsafe full-page figures. The new output contains a `library/`
+explanations, local paths in shared metadata and unsafe full-page figures. Shared
+bank paths use `banks/<source-sha>/bank.json` even when the private input has a
+different folder name. The new output contains a `library/`
 folder with only approved questions
 and their checked figures, and a sibling `private-receipt.json`. Select only the
 `library/` folder in AXOM or pass only that folder to the AXOM ZIP packager. Raw

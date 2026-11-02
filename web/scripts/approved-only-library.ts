@@ -66,8 +66,9 @@ function safeName(name: string): string {
   return name;
 }
 async function assertOutsideRepo(path: string): Promise<string> {
-  const target = resolve(path);
-  let parent = await realpath(dirname(target));
+  const requested = resolve(path);
+  const target = join(await realpath(dirname(requested)), basename(requested));
+  let parent = dirname(target);
   while (true) {
     try { await lstat(join(parent, ".git")); fail("Private review output must be outside every repository."); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
@@ -137,6 +138,57 @@ function substantiveExplanation(question: PackageQuestion): boolean {
   const text = `${source} ${teaching}`.trim();
   return text.length >= 35 && (text.match(/\p{L}{2,}/gu)?.length ?? 0) >= 6;
 }
+const localPath = /file:\/\/|(?:^|[\s"'(=:])(?:\/[\w.-]+\/[\w.-]+|[a-z]:[\\/]|\\\\)/i;
+function memberMetadata(field: string, value: string | undefined): void {
+  if (value && localPath.test(value)) fail(`A member-visible ${field} contains a local path.`);
+}
+function assertMemberMetadata(source: PrivateLibraryCatalog["sources"][number], bank: PreparedBank): void {
+  memberMetadata("source ID", source.id);
+  memberMetadata("module", source.module);
+  const { manifest, questions } = bank.pkg;
+  memberMetadata("course name", manifest.course.name);
+  for (const [field, value] of Object.entries({
+    "bank ID": manifest.bank.id, "bank title": manifest.bank.title,
+    "bank discipline": manifest.bank.discipline, "bank topic": manifest.bank.topic,
+    "source institution": manifest.source.institution, "source title": manifest.source.declaredTitle,
+    "source term": manifest.source.declaredTerm, "reviewed module": bank.reviewedFiling?.module,
+  })) memberMetadata(field, value);
+  for (const question of questions) {
+    for (const [field, value] of Object.entries({
+      "question ID": question.id, "question course": question.course, "question bank ID": question.bankId,
+      "question discipline": question.discipline, "question topic": question.topic,
+      "question subtopic": question.subtopic, "source set title": question.source.setTitle,
+      "question creation time": question.provenance.createdAt,
+      "teaching concept": question.teaching?.concept, "teaching reviewer": question.teaching?.factCheck.checkedBy,
+      "teaching review time": question.teaching?.factCheck.checkedOn,
+      "teaching answer source": question.teaching?.factCheck.answerKeyEvidence?.sourceId,
+      "teaching answer method": question.teaching?.factCheck.answerKeyEvidence?.method,
+      "teaching printed answer": question.teaching?.factCheck.answerKeyEvidence?.printedAnswer,
+      "teaching answer label": question.teaching?.answerLabel,
+    })) memberMetadata(field, value);
+    for (const choice of question.choices) {
+      memberMetadata("choice ID", choice.id);
+      memberMetadata("choice label", choice.label);
+    }
+    for (const asset of question.assets) {
+      memberMetadata("figure ID", asset.id);
+      memberMetadata("figure type", asset.mimeType);
+      memberMetadata("figure question ID", asset.questionId);
+      memberMetadata("figure reference", asset.revealOf);
+    }
+    for (const limitation of question.teaching?.factCheck.limitations ?? []) memberMetadata("teaching limitation", limitation);
+    for (const distractor of question.teaching?.distractors ?? []) memberMetadata("teaching distractor label", distractor.label);
+    for (const reference of question.teaching?.sourceReferences ?? []) {
+      memberMetadata("teaching source ID", reference.sourceId);
+      memberMetadata("teaching source purpose", reference.purpose);
+      memberMetadata("teaching document ID", reference.documentId);
+    }
+    for (const excerpt of question.teaching?.factCheck.supportingExcerpts ?? []) {
+      memberMetadata("teaching excerpt source", excerpt.sourceId);
+      memberMetadata("teaching inspection", excerpt.inspection);
+    }
+  }
+}
 function safeApprovedQuestion(question: PackageQuestion, row: ApprovalRecord): PackageQuestion {
   if (!substantiveExplanation(question)) fail("An approved question lacks a substantive source or reviewed AXOM explanation.");
   if (question.assets.length && !row.assetContentChecked) fail("A question with figures lacks asset-content review.");
@@ -145,6 +197,7 @@ function safeApprovedQuestion(question: PackageQuestion, row: ApprovalRecord): P
   const clean = structuredClone(question);
   delete clean.flags;
   delete clean.provenance.notes;
+  delete clean.provenance.tool;
   return clean;
 }
 function verifyRecord(row: ApprovalRecord, source: PrivateLibraryCatalog["sources"][number], bankHash: string, question: PackageQuestion) {
@@ -200,6 +253,7 @@ export async function createApprovedOnlyLibrary(preparedRoot: string, decisionsF
   const sourcesById = new Map(catalog.sources.map(source => [source.id, source]));
   if (sourcesById.size !== catalog.sources.length) fail("Prepared library has duplicate source IDs.");
   const output: Array<{ row: PrivateLibraryCatalog["sources"][number]; bank: PreparedBank; assets: Array<{ path: string; source: string; checksum: string }> }> = [];
+  const outputBankPaths = new Set<string>();
   const approvedIds = new Set<string>();
   const approvedContent = new Set<string>();
   for (const [id, rows] of bySource) {
@@ -225,7 +279,7 @@ export async function createApprovedOnlyLibrary(preparedRoot: string, decisionsF
         if (asset.checksum !== `sha256:${await fileHash(sourceFile)}`) fail("An approved figure does not match its recorded checksum.");
         files.push({ name: asset.filename, size: (await stat(sourceFile)).size });
         if (assets.has(path) && assets.get(path)!.checksum !== asset.checksum) fail("Two approved figures claim different bytes at one path.");
-        assets.set(path, { path, source: sourceFile, checksum: asset.checksum });
+        assets.set(path, { path: `banks/${source.checksum}/assets/${asset.filename}`, source: sourceFile, checksum: asset.checksum });
       }
       const cleanQuestion = safeApprovedQuestion(question, review);
       const contentHash = hashValue({ stem: cleanQuestion.stem,
@@ -240,24 +294,30 @@ export async function createApprovedOnlyLibrary(preparedRoot: string, decisionsF
     if (!selected.length) continue;
     if (!source.originalFile || await fileHash(await inside(root, source.originalFile)) !== source.checksum)
       fail("An approved source original is missing or has changed.");
-    const original = assessBank(bank.pkg, bank.issues, files);
-    if (selected.some(question => original.verdicts.get(question.id)?.readiness !== "ready"))
-      fail("An approved question is held or unresolved in the original prepared bank.");
     const manifest = structuredClone(bank.pkg.manifest);
     manifest.course.week = 0;
     manifest.source.sourceWeekDeclared = false;
     delete manifest.source.axomAssignedWeek;
+    manifest.questionsFile = "questions.json";
+    manifest.assetsDirectory = "assets";
     for (const question of selected) question.week = 0;
     const slim: PreparedBank = { pkg: { manifest, questions: selected }, issues: [], sourceText: { rawText: "" },
       sourceBytes: 0, notes: [], ...(bank.reviewedFiling ? { reviewedFiling: bank.reviewedFiling } : {}) };
+    assertMemberMetadata(source, slim);
+    const original = assessBank(bank.pkg, bank.issues, files);
+    if (selected.some(question => original.verdicts.get(question.id)?.readiness !== "ready"))
+      fail("An approved question is held or unresolved in the original prepared bank.");
     const assessed = assessBank(slim.pkg, [], files);
     if (assessed.counts.ready !== selected.length || assessed.counts["needs-review"] || assessed.counts.unresolved)
       fail("An approved subset did not remain answer-ready after removing held material.");
     const checked = readPreparedBank(JSON.parse(JSON.stringify(slim)));
     if (checked.pkg.questions.length !== selected.length) fail("Approved bank failed package readback.");
+    const outputBankPath = `banks/${source.checksum}/bank.json`;
+    if (outputBankPaths.has(outputBankPath)) fail("Two approved sources would write the same public bank path.");
+    outputBankPaths.add(outputBankPath);
     output.push({ row: { id: source.id, name: safeName(source.name), sourcePath: `approved/${source.checksum}`,
       checksum: source.checksum, ...(source.module ? { module: source.module } : {}), status: "prepared",
-      reason: "Explicitly reviewed question subset. Original source retained privately.", bankFile: source.bankFile,
+      reason: "Explicitly reviewed question subset. Original source retained privately.", bankFile: outputBankPath,
       ready: selected.length, review: 0 }, bank: slim, assets: [...assets.values()] });
   }
   if (!output.length) fail("No reviewed questions could be included. Nothing was written.");
