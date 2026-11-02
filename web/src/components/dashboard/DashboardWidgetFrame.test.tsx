@@ -11,7 +11,7 @@ function renderFrame(onSave = vi.fn()) {
     <DashboardWidgetFrame
       widgetId="focus"
       title="Focus timer"
-      size="medium"
+      size="small"
       fields={[
         { id: "intention", label: "Intention", checked: true },
         { id: "history", label: "Recent sessions", checked: false },
@@ -28,13 +28,13 @@ describe("DashboardWidgetFrame", () => {
   it("provides a stable size contract and exposes only one side at a time", async () => {
     const user = userEvent.setup();
     const { container } = render(
-      <DashboardWidgetFrame widgetId="focus" title="Focus timer" size="extra-large" onSave={vi.fn()}>
+      <DashboardWidgetFrame widgetId="focus" title="Focus timer" size="large" onSave={vi.fn()}>
         <div>Timer content</div>
       </DashboardWidgetFrame>,
     );
     const frame = container.querySelector(".dashboard-widget-frame")!;
-    expect(frame.classList.contains("dashboard-widget-frame--extra-large")).toBe(true);
-    expect(frame.getAttribute("data-widget-size")).toBe("extra-large");
+    expect(frame.classList.contains("dashboard-widget-frame--large")).toBe(true);
+    expect(frame.getAttribute("data-widget-size")).toBe("large");
     expect(screen.getByText("Timer content")).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Customize Focus timer" })).toBeNull();
 
@@ -46,6 +46,7 @@ describe("DashboardWidgetFrame", () => {
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("Timer content").closest(".dashboard-widget-frame__front")?.hasAttribute("hidden")).toBe(true);
     expect(screen.getByRole("region", { name: "Customize Focus timer" })).toBeTruthy();
+    expect(screen.getAllByRole("radio").map((radio) => (radio as HTMLInputElement).value)).toEqual(["small", "large"]);
     expect(document.querySelectorAll(".dashboard-widget-frame__front:not([hidden]), .dashboard-widget-frame__settings:not([hidden])")).toHaveLength(1);
   });
 
@@ -56,12 +57,12 @@ describe("DashboardWidgetFrame", () => {
     await user.click(trigger);
     const panel = screen.getByRole("region", { name: "Customize Focus timer" });
     const close = within(panel).getByRole("button", { name: "Close Focus timer settings" });
-    const small = within(panel).getByRole("radio", { name: /Small/ });
+    const large = within(panel).getByRole("radio", { name: /Large/ });
     const save = within(panel).getByRole("button", { name: "Save changes" });
 
     expect(document.activeElement).toBe(close);
     expect(save.hasAttribute("disabled")).toBe(true);
-    await user.click(small);
+    await user.click(large);
     expect(save.hasAttribute("disabled")).toBe(false);
     save.focus();
     await user.tab();
@@ -75,7 +76,7 @@ describe("DashboardWidgetFrame", () => {
     expect(onSave).not.toHaveBeenCalled();
 
     await user.click(trigger);
-    expect((screen.getByRole("radio", { name: /Medium/ }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole("radio", { name: /Small/ }) as HTMLInputElement).checked).toBe(true);
   });
 
   it("saves size and field changes together and Cancel never leaks drafts", async () => {
@@ -96,7 +97,7 @@ describe("DashboardWidgetFrame", () => {
     expect(document.activeElement).toBe(trigger);
 
     await user.click(trigger);
-    await user.click(screen.getByRole("radio", { name: /Small/ }));
+    await user.click(screen.getByRole("radio", { name: /Large/ }));
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(document.activeElement).toBe(trigger);

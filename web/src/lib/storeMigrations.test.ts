@@ -283,8 +283,8 @@ describe("v26 → v27 migration", () => {
       hiddenWidgetIds: ["future-widget"],
       futureLayoutField: { safe: true },
       widgets: {
-        todayScore: { size: "extra-large", enabledFields: ["progress"] },
-        "future-widget": { size: "medium", enabledFields: ["future-field"], futurePreference: true },
+        todayScore: { size: "large", enabledFields: ["progress"] },
+        "future-widget": { size: "small", enabledFields: ["future-field"], futurePreference: true },
       },
     });
     expect(migratePersistedState(structuredClone(migrated), SCHEMA_VERSION)).toEqual(migrated);

@@ -50,7 +50,6 @@ import {
   dashboardWidgetCatalogItem,
   dashboardWidgetOptions,
   defaultDashboardWidgetPreferences,
-  extraLargeWidgetRecommendation,
   normalizeDashboardLayoutPreferences,
   upgradeDashboardLayout,
 } from "../lib/dashboardWidgets";
@@ -58,7 +57,6 @@ import {
   DashboardWidgetFrame,
   type DashboardWidgetFrameSettings,
 } from "../components/dashboard/DashboardWidgetFrame";
-import { Modal } from "../components/ui/Modal";
 import { dueQuestions, questionMappingStatus, summarizeQuestionMappings } from "../lib/questions";
 import { deriveDailyWordStatsFromNormalizedHistory } from "../lib/dailyWordStats";
 import { resolveTimeZone, useClockNow } from "../lib/clock";
@@ -76,7 +74,6 @@ export function DashboardPage() {
   const s = useStore();
   const [editDashboard, setEditDashboard] = useState(false);
   const luster = useLuster();
-  const [pendingExtraLargeLayout, setPendingExtraLargeLayout] = useState<DashboardLayoutPreferences | null>(null);
   const dailyProgress = useMemo(() => evaluateDailySuccess(s, s.activeDayKey, s.activeDayKey), [s]);
   const week = weeklySummary(s);
   const readiness = useMemo(() => calculateReadiness({
@@ -141,11 +138,6 @@ export function DashboardPage() {
       },
       updatedAt: new Date().toISOString(),
     };
-    const recommendation = extraLargeWidgetRecommendation(next);
-    if (current.size !== "extra-large" && settings.size === "extra-large" && recommendation.shouldShow) {
-      setPendingExtraLargeLayout(next);
-      return;
-    }
     saveLayout(next);
   }
 
@@ -215,27 +207,6 @@ export function DashboardPage() {
         {visibleWidgetIds.map(renderWidget)}
       </section>
 
-      {pendingExtraLargeLayout && (
-        <Modal
-          title="Keep the dashboard readable?"
-          onClose={() => setPendingExtraLargeLayout(null)}
-          footer={(
-            <>
-              <GButton onClick={() => setPendingExtraLargeLayout(null)}>Keep recommended layout</GButton>
-              <GButton variant="primary" onClick={() => {
-                saveLayout(pendingExtraLargeLayout);
-                setPendingExtraLargeLayout(null);
-              }}>Add anyway</GButton>
-              <GhostButton onClick={() => {
-                saveLayout({ ...pendingExtraLargeLayout, dismissedExtraLargeRecommendation: true });
-                setPendingExtraLargeLayout(null);
-              }}>Do not ask again</GhostButton>
-            </>
-          )}
-        >
-          <p>AXOM usually recommends no more than three extra-large widgets to keep the dashboard readable. Continue anyway?</p>
-        </Modal>
-      )}
     </>
   );
 }
@@ -591,7 +562,7 @@ function sameStringList(value: unknown, expected: readonly string[]) {
 }
 
 function preferencesSizeLabel(size: DashboardWidgetSize) {
-  return size === "extra-large" ? "Extra large" : `${size.slice(0, 1).toUpperCase()}${size.slice(1)}`;
+  return size === "small" ? "Small" : "Large";
 }
 
 const WIDGET_FIELDS_IMPLEMENTED = new Set<DashboardWidgetId>([
