@@ -139,7 +139,7 @@ describe("QuestionWorkspacePage first use", () => {
     expect(screen.queryByText("Attempt accuracy")).toBeNull();
     expect(screen.queryByRole("tab", { name: /Insights/ })).toBeNull();
     expect(within(screen.getByRole("tablist", { name: "Question Bank sections" })).getAllByRole("tab").map(tab => tab.textContent)).toEqual(["Library", "Community", "How it works", "Add material"]);
-    expect(screen.getByLabelText("Question Bank inventory").textContent).toContain("Ready to practice0Held for review0Saved sets0");
+    expect(screen.getByLabelText("Question Bank inventory").textContent).toContain("Answer-ready0Main explanation text0Held for review0Saved sets0");
     expect(screen.getByLabelText("How to start a practice set").textContent).toBe("1Course2Question set3Practice");
     expect(container.querySelector('[data-tour="question-bank-entry"]')).toBeTruthy();
 
@@ -279,7 +279,7 @@ describe("QuestionWorkspacePage returning state", () => {
         extraction: { confidence: "medium", reviewed: false },
         attempts: [{ at: "2026-07-10T13:00:00+02:00", answerKey: "A", status: "correct" }],
       }),
-      question({ id: "stable", stem: "Stable ready question", setId: "stable-set" }),
+      question({ id: "stable", stem: "Stable ready question", setId: "stable-set", explanation: "The source supports Alpha." }),
     ];
     useStore.setState({
       questions,
@@ -300,7 +300,7 @@ describe("QuestionWorkspacePage returning state", () => {
     render(<QuestionWorkspacePage />);
 
     expect(screen.getByLabelText("Question Bank inventory").textContent)
-      .toContain("Ready to practice1Held for review2Saved sets0");
+      .toContain("Answer-ready1Main explanation text0Held for review2Saved sets0");
     expect(screen.getByText("1 ready to practice · 2 held for answer or source review.")).toBeTruthy();
   });
 
@@ -324,7 +324,7 @@ describe("QuestionWorkspacePage returning state", () => {
     expect(within(performance).getByText("Attempt accuracy")).toBeTruthy();
     expect(within(performance).getByText("Questions attempted")).toBeTruthy();
     expect(within(performance).getByText("Total attempts")).toBeTruthy();
-    expect(screen.getByLabelText("Question Bank inventory").textContent).toContain("Ready to practice1Held for review2Saved sets3");
+    expect(screen.getByLabelText("Question Bank inventory").textContent).toContain("Answer-ready1Main explanation text1Held for review2Saved sets3");
     expect(container.querySelector('[data-tour="question-bank-entry"]')).toBeTruthy();
 
     await user.click(within(mappingRegion).getByRole("button", { name: "Review issues" }));
