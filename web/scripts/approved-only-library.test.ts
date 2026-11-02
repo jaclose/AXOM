@@ -19,7 +19,7 @@ const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 
-async function fixture(options: { image?: boolean; explanation?: string; week?: number } = {}) {
+async function fixture(options: { image?: boolean; explanation?: string; week?: number; duplicateSource?: boolean } = {}) {
   const work = await mkdtemp(join(tmpdir(), "axom-approved-test-")); roots.push(work);
   const root = join(work, "prepared"); await mkdir(root);
   const original = Buffer.from("%PDF-1.4 synthetic fixture only");
@@ -58,6 +58,24 @@ async function fixture(options: { image?: boolean; explanation?: string; week?: 
     const file = join(root, path); await mkdir(dirname(file), { recursive: true }); await writeFile(file, bytes);
   }
   await put(originalFile, original); await put(bankFile, JSON.stringify(bank));
+  if (options.duplicateSource) {
+    const otherOriginal = Buffer.from("%PDF-1.4 second synthetic fixture");
+    const otherChecksum = sha(otherOriginal);
+    const otherFile = `banks/${otherChecksum}/bank.json`;
+    const repeated = structuredClone(question);
+    repeated.id = "q-repeated-appearance";
+    repeated.source = { filename: "synthetic-two.pdf", page: 1, questionNumber: 1 };
+    repeated.provenance.sourceChecksum = `sha256:${otherChecksum}`;
+    const otherBank = structuredClone(bank);
+    otherBank.pkg.manifest.bank.id = "synthetic-bank-two";
+    otherBank.pkg.manifest.source.filename = "synthetic-two.pdf";
+    otherBank.pkg.questions = [repeated];
+    await put(`sources/${otherChecksum}.pdf`, otherOriginal);
+    await put(otherFile, JSON.stringify(otherBank));
+    catalog.sources.push({ id: `source-${otherChecksum}`, name: "synthetic-two.pdf", sourcePath: "PRIVATE/OTHER/synthetic-two.pdf",
+      checksum: otherChecksum, module: "FTM 1", status: "prepared", reason: "Synthetic repeated source",
+      bankFile: otherFile, originalFile: `sources/${otherChecksum}.pdf`, ready: 1, review: 0 });
+  }
   await put("templates/private-plan.txt", "PRIVATE PLAN");
   await put(`banks/${checksum}/assets/held.png`, png);
   if (options.image) await put(`banks/${checksum}/assets/${asset.filename}`, png);
@@ -157,6 +175,19 @@ describe("approved-only private candidate", () => {
     catalog.sources[0].name = "other.pdf";
     await writeFile(join(root, "catalog.json"), JSON.stringify(catalog));
     await expect(createApprovalTemplate(root, join(work, "new-decisions.json"))).rejects.toThrow(/different catalog source/);
+  });
+
+  it("rejects an exact repeated appearance even when both source rows were approved", async () => {
+    const { root, output, decisions, payload } = await fixture({ duplicateSource: true });
+    const approved = payload.records.find(row => row.questionId === "q-ready")!;
+    const repeated = payload.records.find(row => row.questionId === "q-repeated-appearance")!;
+    Object.assign(repeated, { status: approved.status, sourceChecked: approved.sourceChecked,
+      filingChecked: approved.filingChecked, clinicalChecked: approved.clinicalChecked,
+      explanationChecked: approved.explanationChecked, rightsStatus: approved.rightsStatus,
+      rightsEvidence: approved.rightsEvidence, reviewer: approved.reviewer, reviewedAt: approved.reviewedAt });
+    await writeFile(decisions, JSON.stringify(payload));
+    await expect(createApprovedOnlyLibrary(root, decisions, output)).rejects.toThrow(/repeated across source banks/);
+    await expect(readdir(output)).rejects.toThrow();
   });
 
   it("keeps the final candidate absent when the private receipt write fails", async () => {

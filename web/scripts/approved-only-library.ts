@@ -200,6 +200,8 @@ export async function createApprovedOnlyLibrary(preparedRoot: string, decisionsF
   const sourcesById = new Map(catalog.sources.map(source => [source.id, source]));
   if (sourcesById.size !== catalog.sources.length) fail("Prepared library has duplicate source IDs.");
   const output: Array<{ row: PrivateLibraryCatalog["sources"][number]; bank: PreparedBank; assets: Array<{ path: string; source: string; checksum: string }> }> = [];
+  const approvedIds = new Set<string>();
+  const approvedContent = new Set<string>();
   for (const [id, rows] of bySource) {
     const source = sourcesById.get(id);
     if (!source?.bankFile) fail("A review decision names a source without a bank.");
@@ -225,7 +227,15 @@ export async function createApprovedOnlyLibrary(preparedRoot: string, decisionsF
         if (assets.has(path) && assets.get(path)!.checksum !== asset.checksum) fail("Two approved figures claim different bytes at one path.");
         assets.set(path, { path, source: sourceFile, checksum: asset.checksum });
       }
-      selected.push(safeApprovedQuestion(question, review));
+      const cleanQuestion = safeApprovedQuestion(question, review);
+      const contentHash = hashValue({ stem: cleanQuestion.stem,
+        choices: cleanQuestion.choices.map(choice => ({ label: choice.label, blocks: choice.blocks })),
+        choiceTable: cleanQuestion.choiceTable ?? null });
+      if (approvedIds.has(cleanQuestion.id) || approvedContent.has(contentHash))
+        fail("An approved question is repeated across source banks. Review the repeated appearance before publishing.");
+      approvedIds.add(cleanQuestion.id);
+      approvedContent.add(contentHash);
+      selected.push(cleanQuestion);
     }
     if (!selected.length) continue;
     if (!source.originalFile || await fileHash(await inside(root, source.originalFile)) !== source.checksum)
