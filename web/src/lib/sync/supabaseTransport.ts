@@ -19,6 +19,7 @@ import type {
   RevisionSummary,
   SnapshotEnvelope,
   SyncTransport,
+  SyncUploadPhase,
 } from "./syncTypes";
 
 const REVISION_COLUMNS = "id,revision,schema_version,content_hash,snapshot_payload,reason,created_at";
@@ -39,7 +40,10 @@ export class SupabaseSyncTransport implements SyncTransport {
   prepare = prepareCloudSnapshot;
 
   async push(envelope: SnapshotEnvelope): Promise<PushResult> {
-    const { client, userId, assertCurrent, resumable } = await accountOperationClient();
+    const atPhase = async <T>(phase: SyncUploadPhase, action: () => PromiseLike<T>): Promise<T> => {
+      try { return await action(); } catch (error) { throw uploadFailureAt(error, phase); }
+    };
+    const { client, userId, assertCurrent, resumable } = await atPhase("preflight", accountOperationClient);
     if (!envelope.accountUserId || userId !== envelope.accountUserId) throw new SyncPushError(
       { kind: "rejected", rejection: "account-mismatch", status: 0 },
       "The workspace is linked to a different account. Upload was stopped.",
@@ -49,24 +53,28 @@ export class SupabaseSyncTransport implements SyncTransport {
       "Download your saved content in its original account before transferring this workspace.",
     );
     if (!envelope.packed) envelope = await this.prepare(envelope);
-    const baseline = await readSyncBaseline(userId, envelope.baseRevision);
+    const baseline = await atPhase("preflight", () => readSyncBaseline(userId, envelope.baseRevision));
     let previous: { media?: unknown; sources?: unknown; content?: string } | null | undefined = baseline?.packed;
     if (!previous) {
       // The history index is scoped by workspace. A cross-workspace sort with
       // JSON projections can time out before PostgREST returns the newest row.
-      const workspace = await client.from("workspaces").select("id").eq("user_id", userId).maybeSingle();
-      if (workspace.error) throw new SyncPushError(classifyPushFailure(workspace.error, workspace.status ?? 0), workspace.error.message);
-      if (workspace.data?.id) {
-        const result = await client.from("workspace_revisions")
+      const workspace = await atPhase("preflight", () => client.from("workspaces").select("id").eq("user_id", userId).maybeSingle());
+      if (workspace.error) throw new SyncPushError(
+        { ...classifyPushFailure(workspace.error, workspace.status ?? 0), phase: "preflight" },
+        "Account upload stopped during preflight.",
+      );
+      const workspaceId = workspace.data?.id;
+      if (workspaceId) {
+        const result = await atPhase("preflight", () => client.from("workspace_revisions")
           .select("media:snapshot_payload->media,sources:snapshot_payload->sources,content:snapshot_payload->>content")
-          .eq("workspace_id", workspace.data.id).neq("reason", "conflict").order("revision", { ascending: false }).limit(1).maybeSingle();
-        if (result.error) throw new SyncPushError(classifyPushFailure(result.error, result.status ?? 0), result.error.message);
+          .eq("workspace_id", workspaceId).neq("reason", "conflict").order("revision", { ascending: false }).limit(1).maybeSingle());
+        if (result.error) throw new SyncPushError(
+          { ...classifyPushFailure(result.error, result.status ?? 0), phase: "preflight" },
+          "Account upload stopped during preflight.",
+        );
         previous = result.data;
       }
     }
-    const atPhase = async <T>(phase: "content" | "originals" | "media" | "revision" | "receipt", action: () => Promise<T>): Promise<T> => {
-      try { return await action(); } catch (error) { throw uploadFailureAt(error, phase); }
-    };
     await atPhase("content", () => uploadCloudContent(client, userId, envelope.contentObjects ?? [], previous?.sources ? readContentReferences(previous.sources) : [], assertCurrent));
     await atPhase("originals", () => uploadCloudOriginals(client, userId, envelope.payload, previous?.content, assertCurrent, resumable));
     const media = await atPhase("media", () => uploadCloudMedia(client, userId, envelope.payload, assertCurrent, previous?.media ? readMediaManifest(previous.media) : []));
