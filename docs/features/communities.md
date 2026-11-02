@@ -29,6 +29,14 @@ create a public profile or expose private answers, notes, or personal study logs
 The Study circle lazily opens `CommunityPage` for account discovery, friendships,
 explicitly shared progress, reactions and reporting. Joining and discoverability
 are separate choices; private study logs do not enter the social feed by default.
+The member's own profile is fetched by account identity, separately from the
+bounded directory, so a large member list cannot return an existing member to
+the Join screen. Joining creates a profile only once; later edits use explicit
+profile controls. A two-character search queries opt-in profiles on the server,
+while existing connections remain visible to their members under the database's
+access rules. Connection pages load completely up to the stated service limit;
+an outage or limit shows an error and pauses friend controls without hiding the
+member's own profile or privacy settings.
 
 The page uses the actual AXOM Orb, palette tokens, a short optional entrance,
 and a static reduced-motion state. `#help` remains the route for community feedback.

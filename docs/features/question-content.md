@@ -17,7 +17,8 @@ attachment asset IDs and roles retain every image, including restricted answer s
 Tutor, exam layouts and question detail use the shared renderer and visibility rules.
 The three private GOER PDFs were exercised in the actual app: 32 verified questions,
 three sets, nine stem tables and three figures survived reload; 15 keys remained held.
-Source files and browser artifacts stay outside Git. DOCX and batch UI wiring remain next.
+Source files and browser artifacts stay outside Git. Recheck later parser and
+batch-review claims against the current adapter before using them as release evidence.
 
 | Responsibility | Files |
 | --- | --- |
@@ -273,6 +274,14 @@ left out. No table is guessed from positions.
 - **An answer slide** is kept whole as an `answer_reveal` picture of the page. Which choice
   a drawn mark points at is not read here: that is Codex's `pdfMarkedAnswers.ts`. A
   question whose only key is a mark has no key and says why.
+
+The current tagged-PDF import path keeps a choice marked only by a drawn vector
+shape in review. Its bulk confirmation list requires a uniquely matched,
+source-backed single-choice candidate that would otherwise become ready; it
+cannot make an unrecognized drawing into a key. The synthetic three-question
+slide deck has zero bulk candidates and all three questions remain held for
+manual source review. This is a verified limit of that import path, not approval
+to infer the marked choices.
 
 `taggedPdfToQuestions` returns the questions, the issues, what has to be drawn from the
 PDF for each picture (`renders`: a page, and a box for a region), what could not be tied

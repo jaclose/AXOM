@@ -65,6 +65,12 @@ preview. The queue migration follows `20261101180000` and the frontier Host
 migrations; it remains local release preparation until applied and accepted
 against AXOM Production.
 
+Forward migration `20261102171000_reviewer_attestation_identity.sql` follows
+the queue. It requires the approving reviewer to be the same account that
+attested to the current revision, for both ordinary and Community decisions.
+Apply both migrations in order and verify the two-reviewer denial case before
+calling the review flow live.
+
 The additive `20261011190000_academic_library.sql` migration defines collections,
 immutable revisions, file manifests, reviewer/group access and personal enrollments.
 Catalog pages contain at most 24 metadata records. Preview retrieves template text;

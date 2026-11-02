@@ -27,8 +27,9 @@ submissions; no official academic content was published. The linked check of
 AXOM Production
 (`jofkmfwkidubxcutkwzf`) found its ledger ends at `20261101180000`. The four
 feature migrations (`20261101190000`–`20261101193000`), forward Host privacy
-migration (`20261102160000`) and reviewer queue migration (`20261102170000`)
-are **pending in production**. An earlier
+migration (`20261102160000`), reviewer queue migration (`20261102170000`)
+and reviewer-attestation identity migration (`20261102171000`)
+are **pending in production**. Apply all seven in timestamp order. An earlier
 postflight of 11 new RLS-enabled tables was on separate preview project
 `yfjqsshsaxiggcbvkvnj`; it was not production acceptance. The communications
 migration and Edge function are present in production, but provider mode,
