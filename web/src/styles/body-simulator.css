@@ -1,0 +1,587 @@
+.body-sim {
+  --sim-line: var(--hairline);
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 8px 0 56px;
+  color: var(--text);
+}
+
+.body-sim__hero {
+  max-width: 750px;
+  padding: 24px 0 28px;
+}
+
+.body-sim__eyebrow,
+.body-sim__section-index,
+.body-sim__map-head,
+.body-sim__airway-heading,
+.body-sim__observation-meta,
+.body-sim__footer > span {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.body-sim__eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--text-60);
+}
+
+.body-sim__hero h1 {
+  margin: 18px 0 10px;
+  font-family: var(--font-display);
+  font-size: clamp(38px, 5vw, 64px);
+  font-weight: 600;
+  letter-spacing: -0.065em;
+  line-height: 1.04;
+}
+
+.body-sim__hero p {
+  max-width: 62ch;
+  margin: 0;
+  color: var(--text-70);
+  font-size: clamp(14px, 1.25vw, 16px);
+  line-height: 1.6;
+}
+
+.body-sim__stage-section {
+  border-top: 1px solid var(--sim-line);
+}
+
+.body-sim__stage-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 20px;
+  padding: 24px 0 19px;
+}
+
+.body-sim__stage-heading .gbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.body-sim__section-index {
+  color: var(--gold);
+}
+
+.body-sim__stage-heading h2 {
+  margin: 7px 0 0;
+  font-family: var(--font-display);
+  font-size: clamp(19px, 2.1vw, 26px);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+}
+
+.body-sim__stage-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--sim-line);
+  border-radius: var(--radius-lg);
+  background: var(--sim-line);
+}
+
+.body-sim__stage-option {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  min-height: 112px;
+  padding: 18px 20px;
+  border: 0;
+  background: var(--surface-1);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: background 240ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.body-sim__stage-option:hover {
+  background: var(--surface-2);
+}
+
+.body-sim__stage-option.is-active {
+  background: color-mix(in srgb, var(--surface-1) 82%, var(--gold) 18%);
+  box-shadow: inset 0 2px 0 var(--gold);
+}
+
+.body-sim__stage-number {
+  color: var(--gold);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.body-sim__stage-label {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.body-sim__stage-cue {
+  max-width: 38ch;
+  color: var(--text-60);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.body-sim__workbench {
+  display: grid;
+  grid-template-columns: minmax(290px, .86fr) minmax(350px, 1.14fr);
+  gap: 20px;
+  margin-top: 20px;
+}
+
+.body-sim__map-panel,
+.body-sim__airway-figure,
+.body-sim__observation {
+  margin: 0;
+  border: 1px solid var(--sim-line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+
+.body-sim__map-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 630px;
+  padding: 18px 20px 20px;
+  overflow: hidden;
+}
+
+.body-sim__map-head,
+.body-sim__airway-heading,
+.body-sim__observation-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-50);
+}
+
+.body-sim__body-map {
+  position: relative;
+  width: min(100%, 330px);
+  aspect-ratio: 320 / 530;
+  margin: 12px auto 0;
+}
+
+.body-sim__body-map svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.body-sim__grid-line,
+.body-sim__grid-ring,
+.body-sim__measure {
+  fill: none;
+  stroke: var(--hairline-soft);
+  stroke-width: 1;
+}
+
+.body-sim__grid-ring {
+  stroke-dasharray: 2 6;
+}
+
+.body-sim__silhouette {
+  fill: color-mix(in srgb, var(--surface-2) 92%, var(--gold) 8%);
+  stroke: var(--text-30);
+  stroke-width: 1.2;
+}
+
+.body-sim__neck {
+  fill: none;
+  stroke: var(--text-30);
+  stroke-width: 1.2;
+}
+
+.body-sim__anatomy-line {
+  fill: none;
+  stroke: var(--text-30);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.body-sim__lung {
+  fill: rgba(var(--accent-rgb), .16);
+  stroke: rgba(var(--accent-rgb), .6);
+  stroke-width: 1.5;
+  transition: fill 400ms cubic-bezier(.22, 1, .36, 1), stroke 400ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.body-sim__body-map[data-stage="asthma"] .body-sim__lung {
+  fill: color-mix(in srgb, var(--red) 22%, transparent);
+  stroke: var(--red);
+}
+
+.body-sim__body-map[data-stage="albuterol"] .body-sim__lung {
+  fill: rgba(var(--accent-rgb), .24);
+  stroke: var(--gold);
+}
+
+.body-sim__heart {
+  fill: var(--surface-2);
+  stroke: var(--text-50);
+  stroke-width: 1.5;
+}
+
+.body-sim__hand-ring {
+  fill: none;
+  stroke: var(--text-30);
+  stroke-width: 1.5;
+}
+
+.body-sim__pin {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid var(--gold-line);
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--gold);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+  transition: box-shadow 240ms cubic-bezier(.22, 1, .36, 1), background 240ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.body-sim__pin:hover,
+.body-sim__pin.is-selected {
+  background: var(--surface-1);
+  box-shadow: 0 0 0 5px rgba(var(--accent-rgb), .15), 0 0 0 1px var(--gold);
+}
+
+.body-sim__pin--airways { left: 41%; top: 34%; }
+.body-sim__pin--heart { left: 57%; top: 40%; }
+.body-sim__pin--hands { left: 75%; top: 51%; }
+
+.body-sim__map-panel figcaption {
+  max-width: 40ch;
+  margin: auto auto 0;
+  padding-top: 10px;
+  color: var(--text-50);
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.body-sim__reading-column {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.body-sim__airway-figure {
+  padding: 18px 20px 16px;
+  overflow: hidden;
+}
+
+.body-sim__airway-figure svg {
+  display: block;
+  width: min(100%, 240px);
+  height: 192px;
+  margin: 0 auto;
+}
+
+.body-sim__airway-outer {
+  fill: rgba(var(--accent-rgb), .05);
+  stroke: var(--text-30);
+  stroke-width: 1;
+}
+
+.body-sim__airway-muscle {
+  fill: rgba(var(--accent-rgb), .18);
+  stroke: var(--gold-line);
+  stroke-width: 1;
+}
+
+.body-sim__airway-lining {
+  fill: var(--surface-2);
+  stroke: var(--text-30);
+  stroke-width: 1;
+}
+
+.body-sim__airway-lumen {
+  fill: var(--cool-accent);
+  opacity: .68;
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scale(1);
+  transition: transform 520ms cubic-bezier(.22, 1, .36, 1), opacity 520ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.body-sim__airway-figure[data-stage="asthma"] .body-sim__airway-lumen {
+  transform: scale(.46);
+  opacity: .42;
+}
+
+.body-sim__airway-figure[data-stage="albuterol"] .body-sim__airway-lumen {
+  transform: scale(.8);
+}
+
+.body-sim__airway-axis {
+  fill: none;
+  stroke: var(--text-30);
+  stroke-dasharray: 2 5;
+  stroke-width: .7;
+  pointer-events: none;
+}
+
+.body-sim__airway-legend {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  color: var(--text-60);
+  font-size: 11px;
+}
+
+.body-sim__airway-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.body-sim__airway-legend i {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.body-sim__legend-muscle { background: rgba(var(--accent-rgb), .4); }
+.body-sim__legend-lining { background: var(--text-30); }
+.body-sim__legend-lumen { background: var(--cool-accent); }
+
+.body-sim__airway-figure p {
+  max-width: 50ch;
+  margin: 12px auto 0;
+  color: var(--text-50);
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.body-sim__region-group {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.body-sim__region-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+  min-height: 66px;
+  padding: 10px 12px;
+  border: 1px solid var(--sim-line);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.body-sim__region-option.is-active {
+  border-color: var(--gold-line);
+  background: color-mix(in srgb, var(--surface-1) 88%, var(--gold) 12%);
+}
+
+.body-sim__region-option span {
+  color: var(--gold);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.body-sim__region-option strong {
+  font-size: 13px;
+}
+
+.body-sim__observation {
+  flex: 1;
+  padding: 20px;
+}
+
+.body-sim__observation h3 {
+  max-width: 30ch;
+  margin: 15px 0 9px;
+  font-family: var(--font-display);
+  font-size: clamp(22px, 2.2vw, 29px);
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  line-height: 1.2;
+}
+
+.body-sim__observation p {
+  max-width: 61ch;
+  margin: 0;
+  color: var(--text-80);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.body-sim__boundary {
+  max-width: 61ch;
+  margin-top: 17px;
+  padding-left: 13px;
+  border-left: 2px solid var(--gold);
+  color: var(--text-60);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.body-sim__sources {
+  margin-top: 19px;
+  padding-top: 15px;
+  border-top: 1px solid var(--sim-line);
+}
+
+.body-sim__sources > span {
+  color: var(--text-50);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.body-sim__sources ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.body-sim__sources a {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--gold);
+  font-size: 12px;
+  text-decoration: underline;
+  text-decoration-color: var(--gold-line);
+  text-underline-offset: 3px;
+}
+
+.body-sim__footer {
+  display: flex;
+  gap: 22px;
+  align-items: baseline;
+  margin-top: 25px;
+  padding-top: 18px;
+  border-top: 1px solid var(--sim-line);
+  color: var(--text-50);
+}
+
+.body-sim__footer > span {
+  flex: 0 0 auto;
+  color: var(--gold);
+}
+
+.body-sim__footer p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.body-sim button:focus-visible,
+.body-sim a:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
+}
+
+@media (max-width: 980px) {
+  .body-sim__workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .body-sim__map-panel {
+    min-height: 0;
+  }
+
+  .body-sim__body-map {
+    width: min(100%, 300px);
+  }
+}
+
+@media (max-width: 560px) {
+  .body-sim {
+    padding-bottom: 34px;
+  }
+
+  .body-sim__hero {
+    padding: 12px 0 24px;
+  }
+
+  .body-sim__hero h1 {
+    font-size: 38px;
+  }
+
+  .body-sim__stage-heading {
+    align-items: flex-start;
+  }
+
+  .body-sim__stage-heading h2 {
+    max-width: 16ch;
+    font-size: 20px;
+  }
+
+  .body-sim__stage-option {
+    gap: 4px;
+    min-height: 84px;
+    padding: 12px 9px;
+  }
+
+  .body-sim__stage-label {
+    font-size: 12px;
+    line-height: 1.24;
+  }
+
+  .body-sim__stage-cue {
+    display: none;
+  }
+
+  .body-sim__workbench {
+    gap: 12px;
+    margin-top: 12px;
+  }
+
+  .body-sim__map-panel,
+  .body-sim__airway-figure,
+  .body-sim__observation {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .body-sim__footer {
+    display: block;
+  }
+
+  .body-sim__footer p {
+    margin-top: 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .body-sim__stage-option,
+  .body-sim__lung,
+  .body-sim__pin,
+  .body-sim__airway-lumen {
+    transition: none;
+  }
+}
