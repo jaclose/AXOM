@@ -33,6 +33,18 @@ const number = (name: string | RegExp) => within(rail()).getByRole("button", { n
 const choice = (name: string) => screen.getByRole("radio", { name });
 
 describe("Examplify interface", () => {
+  it("shows the diagram only after tutor answer check", () => {
+    const tagged = {
+      ...q("rhinovirus"), stem: "A patient has runny nose and sneezing.",
+      options: [{ key: "A", text: "Rhinovirus" }, { key: "B", text: "Influenza virus" }],
+      correctKey: "A", correctAnswerText: "Rhinovirus",
+    };
+    exam({ mode: "tutor", pool: [tagged] });
+    expect(screen.queryByRole("complementary", { name: "Related AXOM diagram" })).toBeNull();
+    fireEvent.click(choice("B. Influenza virus"));
+    fireEvent.click(screen.getByRole("button", { name: "Check answer" }));
+    expect(screen.getByRole("complementary", { name: "Related AXOM diagram" })).toBeTruthy();
+  });
   it("lays out the exam screen: controls, tool kit, the number rail, the question, Previous and Next", () => {
     exam({ timeLimitSeconds: 1800 });
     const dialog = screen.getByRole("dialog", { name: "ExamSoft (Examplify) exam simulation" });
