@@ -505,7 +505,7 @@
   outline-offset: 3px;
 }
 
-.body-sim__stage-option:focus-visible {
+.body-sim button.body-sim__stage-option:focus-visible {
   outline-offset: -4px;
 }
 
