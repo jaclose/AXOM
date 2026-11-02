@@ -62,6 +62,7 @@ function HostAccountPage() {
   }, []);
   const role = dashboard?.role;
   const owner = role === "owner";
+  const attentionCount = (dashboard?.overview?.academic_review_pending ?? 0) + (dashboard?.overview?.reports_pending ?? 0);
   const canManageAccounts = owner || role === "admin";
   const normalizedSearch = search.trim();
   useEffect(() => {
@@ -134,16 +135,18 @@ function HostAccountPage() {
   }
   return <main className="host-page stack" aria-labelledby="host-page-title">
     <section className="host-banner">
-      <div><span className="host-eyebrow"><ShieldCheck size={17} /> AXOM OPERATOR CONSOLE</span>
+      <div><span className="host-eyebrow"><ShieldCheck size={17} aria-hidden="true" /> AXOM OPERATOR CONSOLE</span>
         <h1 id="host-page-title">Host dashboard</h1>
         <p>Server-enforced permissions, responsible moderation and traceable operational controls.</p>
       </div>
       {role && <Tag tone="gold">{role === "owner" ? "Project CEO" : role === "admin" ? "Administrator" : "Moderator"}</Tag>}
     </section>
-    <div className="row wrap gap8">
-      <GButton size="sm" disabled={loading || busy} onClick={() => setRefresh(n => n + 1)}><RefreshCw size={15}/> Refresh</GButton>
-      <a className="ghost-btn" href="#communities">Communities</a>
-      <a className="ghost-btn" href="#questions">Question Bank</a>
+    <div className="host-toolbar">
+      <GButton size="sm" disabled={loading || busy} onClick={() => setRefresh(n => n + 1)}><RefreshCw size={15} aria-hidden="true"/> Refresh</GButton>
+      <nav className="host-quick-nav" aria-label="Host sections">
+        <a className="ghost-btn" href="#communities">Communities</a>
+        <a className="ghost-btn" href="#questions">Question Bank</a>
+      </nav>
     </div>
     {loading && <p role="status">Checking operator access…</p>}
     {error && <div role="alert" className="host-warning"><p>{error}</p><GButton size="sm" disabled={loading || busy} onClick={() => setRefresh(n => n + 1)}>Retry Host</GButton></div>}
@@ -155,18 +158,38 @@ function HostAccountPage() {
     </GlassCard>}
     {dashboard?.overview && <div className="host-layout">
       <div className="stack">
-        <div className="host-stats">
-          {([
-            ["Registered accounts", dashboard.overview.registered_accounts, Users],
-            ["Community profiles", dashboard.overview.shared_profiles, Users],
-            ["Review submissions", dashboard.overview.academic_review_pending, CircleAlert],
-            ["Moderation reports", dashboard.overview.reports_pending, ShieldX],
-            ["AI requests, 7 days", dashboard.overview.ai_requests_7d, Zap],
-            ["Approved shared collections", dashboard.overview.academic_approved, BarChart3],
-          ] as const).map(([label, value, Icon]) => <GlassCard key={label} pad className="host-metric">
-            <Icon size={18} aria-hidden="true" /><b>{value ?? "Restricted"}</b><span>{label}</span>
-          </GlassCard>)}
-        </div>
+        <GlassCard pad className="host-overview">
+          <div className="host-overview-intro">
+            <div><span className="host-overview-eyebrow">CURRENT SNAPSHOT</span>
+              <h2 id="host-overview-title">Attention queue</h2></div>
+            <p>{attentionCount === 0
+              ? "Review and moderation queues are clear."
+              : `${attentionCount} ${attentionCount === 1 ? "item" : "items"} in review and moderation queues.`}</p>
+          </div>
+          <div className="host-priority-metrics" data-has-attention={attentionCount > 0} aria-labelledby="host-overview-title">
+            <div className="host-priority-metric">
+              <span className="host-priority-icon"><CircleAlert size={18} aria-hidden="true" /></span>
+              <strong>{dashboard.overview.academic_review_pending}</strong>
+              <span>Review submissions</span>
+            </div>
+            <div className="host-priority-metric">
+              <span className="host-priority-icon"><ShieldX size={18} aria-hidden="true" /></span>
+              <strong>{dashboard.overview.reports_pending}</strong>
+              <span>Moderation reports</span>
+            </div>
+          </div>
+          <dl className="host-platform-metrics" aria-label="Platform totals">
+            {([
+              ["Registered accounts", dashboard.overview.registered_accounts, Users],
+              ["Community profiles", dashboard.overview.shared_profiles, Users],
+              ["AI requests, 7 days", dashboard.overview.ai_requests_7d, Zap],
+              ["Approved shared collections", dashboard.overview.academic_approved, BarChart3],
+            ] as const).map(([label, value, Icon]) => <div key={label}>
+              <dt><Icon size={15} aria-hidden="true" />{label}</dt>
+              <dd data-restricted={value === null}>{value ?? "Restricted"}</dd>
+            </div>)}
+          </dl>
+        </GlassCard>
         {(role === "owner" || role === "admin") && <GlassCard pad>
           <PanelHeader headingLevel={2} title="Accounts & AI" sub="Changes are checked on the server. Operators cannot inspect private learner workspaces." />
           <label className="host-search">Find account<input type="search" maxLength={100} value={search} onChange={e => setSearch(e.target.value)}
@@ -221,9 +244,9 @@ function HostAccountPage() {
       <aside className="stack">
         <GlassCard pad>
           <PanelHeader headingLevel={2} title="Permissions model" sub="Least privilege enforced in Postgres." />
-          <div className="host-role"><Crown size={17}/><b>Project CEO</b><small>Account roles, AI limits, reports, operational data and audit history.</small></div>
-          <div className="host-role"><ShieldCheck size={17}/><b>Administrator</b><small>Account directory, aggregate usage and review queues. No role escalation.</small></div>
-          <div className="host-role"><Users size={17}/><b>Moderator</b><small>Submitted bank metadata and reported community posts only.</small></div>
+          <div className="host-role" data-current={owner}><Crown size={17} aria-hidden="true"/><div><b>Project CEO</b><small>Account roles, AI limits, reports, operational data and audit history.</small></div></div>
+          <div className="host-role" data-current={role === "admin"}><ShieldCheck size={17} aria-hidden="true"/><div><b>Administrator</b><small>Account directory, aggregate usage and review queues. No role escalation.</small></div></div>
+          <div className="host-role" data-current={role === "moderator"}><Users size={17} aria-hidden="true"/><div><b>Moderator</b><small>Submitted bank metadata and reported community posts only.</small></div></div>
           <p className="sub">No operator role grants unrestricted access to individual private source files, notes, questions or saved progress.</p>
         </GlassCard>
         {owner && <GlassCard pad>

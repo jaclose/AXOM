@@ -112,6 +112,24 @@ describe("Host page authorization and moderation", () => {
     expect(within(banner as HTMLElement).queryByText("Project CEO")).toBeNull();
     await act(async () => { respond(dashboard("owner")); });
     await waitFor(() => expect(within(banner as HTMLElement).getByText("Project CEO")).toBeTruthy());
+    expect(screen.getByText("1 item in review and moderation queues.")).toBeTruthy();
+  });
+
+  it("keeps every overview count visible while separating the attention queue", async () => {
+    const moderator = dashboard("moderator");
+    vi.mocked(loadOperatorDashboard).mockResolvedValue({
+      ...moderator,
+      overview: { ...moderator.overview!, academic_review_pending: 2, shared_profiles: 4 },
+    });
+    render(<HostPage />);
+    expect(await screen.findByRole("heading", { name: "Attention queue", level: 2 })).toBeTruthy();
+    expect(screen.getByText("3 items in review and moderation queues.")).toBeTruthy();
+    const overview = document.querySelector(".host-overview");
+    expect(overview).not.toBeNull();
+    for (const label of ["Review submissions", "Moderation reports", "Registered accounts", "Community profiles", "AI requests, 7 days", "Approved shared collections"]) {
+      expect(within(overview as HTMLElement).getByText(label)).toBeTruthy();
+    }
+    expect(within(overview as HTMLElement).getAllByText("Restricted")).toHaveLength(2);
   });
 
   it("requires a reason before a moderator can dismiss a reported post", async () => {
