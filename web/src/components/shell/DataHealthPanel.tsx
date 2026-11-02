@@ -13,7 +13,7 @@ import { pushToast } from "../../lib/toast";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { subscribeVault, useLastVaultWrite } from "./SettingsSections";
 import { readVaultWriteFailure } from "../../lib/vaultActivity";
-import { localVaultStorage, flushLocalVaultWrites } from "../../lib/localVault";
+import { assertVaultWritesSince, getVaultWriteCheckpoint, localVaultStorage, flushLocalVaultWrites } from "../../lib/localVault";
 import { toPortableState } from "../../lib/backup";
 import { TechnicalDetails } from "./TechnicalDetails";
 
@@ -38,11 +38,15 @@ export function DataHealthPanel({ onOpenBackup }: { onOpenBackup?: () => void } 
   async function retrySave() {
     setSaving(true);
     try {
+      const checkpoint = getVaultWriteCheckpoint();
       await flushLocalVaultWrites();
       const state = useStore.getState();
       const options = useStore.persist.getOptions();
       const value = JSON.stringify({ state: options.partialize ? options.partialize(state) : state, version: options.version });
       await localVaultStorage.setItem(STORAGE_KEYS.persistedState, value);
+      if (getVaultWriteCheckpoint() <= checkpoint) throw new Error("Saving is still unavailable. Export a backup while this window is open.");
+      assertVaultWritesSince(checkpoint);
+      if (readVaultWriteFailure()) throw new Error("Saving is still unavailable. Export a backup while this window is open.");
       if (await localVaultStorage.getItem(STORAGE_KEYS.persistedState) !== value) throw new Error("Saving is still unavailable. Export a backup while this window is open.");
       pushToast({ title: "Workspace saved", tone: "success" });
     } catch (error) {
