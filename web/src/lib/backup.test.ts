@@ -85,8 +85,8 @@ describe("portable backup safety", () => {
       hiddenWidgetIds: ["future-hidden"],
       widgets: {
         welcome: { size: "large", enabledFields: ["date", "quote"] },
-        todayScore: { size: "extra-large", enabledFields: [], preferences: { style: "rings" } },
-        "future-widget": { size: "medium", enabledFields: ["future-field"], futurePreference: { safe: true } },
+        todayScore: { size: "large", enabledFields: [], preferences: { style: "rings" } },
+        "future-widget": { size: "small", enabledFields: ["future-field"], futurePreference: { safe: true } },
       },
       dismissedExtraLargeRecommendation: true,
       updatedAt: "2026-07-13T12:00:00.000Z",

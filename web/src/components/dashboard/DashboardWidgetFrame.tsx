@@ -10,7 +10,7 @@ import {
 import "../../styles/dashboard-widgets.css";
 import { ICON_SIZE } from "../../lib/iconSize";
 
-export type DashboardWidgetFrameSize = "small" | "medium" | "large" | "extra-large";
+export type DashboardWidgetFrameSize = "small" | "large";
 
 export type DashboardWidgetField = {
   id: string;
@@ -53,10 +53,8 @@ const SIZE_OPTIONS: ReadonlyArray<{
   label: string;
   description: string;
 }> = [
-  { value: "small", label: "Small", description: "A compact glance." },
-  { value: "medium", label: "Medium", description: "The standard view." },
-  { value: "large", label: "Large", description: "More detail and context." },
-  { value: "extra-large", label: "Extra large", description: "The fullest view." },
+  { value: "small", label: "Small", description: "Compact, half-width on desktop." },
+  { value: "large", label: "Large", description: "Full-width with more detail." },
 ];
 
 function fieldState(fields: readonly { id: string; checked: boolean }[]) {

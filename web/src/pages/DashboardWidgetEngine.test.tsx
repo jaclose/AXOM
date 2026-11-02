@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { applyDashboardLayoutPreset, adaptLegacyDashboardLayout } from "../lib/dashboardWidgets";
+import { applyDashboardLayoutPreset, adaptLegacyDashboardLayout, normalizeDashboardLayoutPreferences } from "../lib/dashboardWidgets";
 import { makeSeed } from "../lib/seed";
 import { useStore } from "../lib/store";
 import { DashboardPage } from "./DashboardPage";
@@ -117,40 +117,24 @@ describe("Dashboard widget engine", () => {
     });
   });
 
-  it("warns on a fourth extra-large widget but never hard-blocks the override", async () => {
+  it("shows only Small and Large after loading a legacy Medium widget", async () => {
     const user = userEvent.setup();
     const layout = structuredClone(useStore.getState().profile.dashboardLayout!);
-    for (const id of ["welcome", "commandBrief", "todayScore"]) layout.widgets[id].size = "extra-large";
-    layout.widgets.tasks.size = "medium";
-    layout.hiddenWidgetIds = layout.hiddenWidgetIds.filter((id) => !["welcome", "commandBrief", "todayScore", "tasks"].includes(id));
-    useStore.getState().updateProfile({ dashboardLayout: layout });
+    const migrated = normalizeDashboardLayoutPreferences({
+      ...layout,
+      hiddenWidgetIds: layout.hiddenWidgetIds.filter((id) => id !== "tasks"),
+      widgets: { ...layout.widgets, tasks: { ...layout.widgets.tasks, size: "medium" } },
+    })!;
+    useStore.getState().updateProfile({ dashboardLayout: migrated });
     render(<DashboardPage />);
 
     await user.click(screen.getByRole("button", { name: "Customize Tasks" }));
-    await user.click(screen.getByRole("radio", { name: /Extra large/ }));
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
-    expect(screen.getByText(/no more than three extra-large widgets/i)).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Keep recommended layout" }));
-    expect(useStore.getState().profile.dashboardLayout?.widgets.tasks.size).toBe("medium");
-
-    await user.click(screen.getByRole("button", { name: "Customize Tasks" }));
-    await user.click(screen.getByRole("radio", { name: /Extra large/ }));
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
-    await user.click(screen.getByRole("button", { name: "Add anyway" }));
-    expect(useStore.getState().profile.dashboardLayout?.widgets.tasks.size).toBe("extra-large");
-
-    const reset = structuredClone(useStore.getState().profile.dashboardLayout!);
-    reset.widgets.tasks.size = "medium";
-    reset.dismissedExtraLargeRecommendation = false;
-    useStore.getState().updateProfile({ dashboardLayout: reset });
-    await user.click(screen.getByRole("button", { name: "Customize Tasks" }));
-    await user.click(screen.getByRole("radio", { name: /Extra large/ }));
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
-    await user.click(screen.getByRole("button", { name: "Do not ask again" }));
-    expect(useStore.getState().profile.dashboardLayout).toMatchObject({
-      dismissedExtraLargeRecommendation: true,
-      widgets: { tasks: { size: "extra-large" } },
-    });
+    const panel = screen.getByRole("region", { name: "Customize Tasks" });
+    expect(within(panel).getAllByRole("radio").map((radio) => (radio as HTMLInputElement).value)).toEqual(["small", "large"]);
+    expect((within(panel).getByRole("radio", { name: /Small/ }) as HTMLInputElement).checked).toBe(true);
+    await user.click(within(panel).getByRole("radio", { name: /Large/ }));
+    await user.click(within(panel).getByRole("button", { name: "Save changes" }));
+    expect(useStore.getState().profile.dashboardLayout?.widgets.tasks.size).toBe("large");
   });
 
   it("applies a dashboard preset without mutating tasks, questions, logs, or journal", () => {

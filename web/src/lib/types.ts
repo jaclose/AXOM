@@ -618,7 +618,7 @@ export type DashboardWidgetId =
   | "resourceFocus"
   | "boardBlueprint";
 
-export type DashboardWidgetSize = "small" | "medium" | "large" | "extra-large";
+export type DashboardWidgetSize = "small" | "large";
 
 export type DashboardLayoutPresetId = "focused" | "study-heavy" | "wellbeing-balanced" | "custom";
 
