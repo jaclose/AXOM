@@ -33,3 +33,55 @@ export function answerBesideCheck(box: MarkBox, labels: readonly ChoiceLabel[]):
   });
   return candidates.length === 1 ? candidates[0].key : undefined;
 }
+
+/** An answer-page outline can surround a choice while its letter sits just to the left. */
+export function answerInsideOutline(box: MarkBox, labels: readonly ChoiceLabel[]): string | undefined {
+  const height = box.top - box.bottom;
+  if (height < 16 || height > 65 || box.right - box.left < 60) return undefined;
+  const candidates = labels.filter(label => label.x >= box.left - height * 4
+    && label.x <= box.left + height * 2
+    && label.y >= box.bottom - 3 && label.y <= box.top + 3);
+  return candidates.length === 1 ? candidates[0].key : undefined;
+}
+
+/** PDF.js constructPath uses 0=move, 1=line, 2=cubic curve, 4=close. */
+export function choiceOutlineBox(path: ArrayLike<number>, matrix: Matrix): MarkBox | undefined {
+  if (path.length < 13 || path[0] !== 0 || path[path.length - 1] !== 4
+    || !matrix.every(Number.isFinite) || Math.abs(matrix[1]) > .01 || Math.abs(matrix[2]) > .01) return undefined;
+  const points: Array<[number, number]> = [];
+  const lines: Array<[[number, number], [number, number]]> = [];
+  let cursor: [number, number] | undefined;
+  for (let i = 0; i < path.length;) {
+    const code = path[i++];
+    if (code === 4) {
+      if (i !== path.length || points.length < 4) return undefined;
+      break;
+    }
+    const count = code === 0 || code === 1 ? 2 : code === 2 ? 6 : 0;
+    if (!count || i + count > path.length - 1 || (code === 0 && points.length)) return undefined;
+    const coordinates = Array.from({ length: count }, (_, n) => path[i + n]);
+    if (!coordinates.every(Number.isFinite)) return undefined;
+    const end: [number, number] = [coordinates[count - 2], coordinates[count - 1]];
+    if (code === 1 && cursor) lines.push([cursor, end]);
+    if (code === 2) {
+      points.push([coordinates[0], coordinates[1]], [coordinates[2], coordinates[3]]);
+    }
+    points.push(end);
+    cursor = end;
+    i += count;
+  }
+  if (points.length > 32 || lines.length < 2) return undefined;
+  const mapped = points.map(([x, y]): [number, number] => [matrix[0] * x + matrix[4], matrix[3] * y + matrix[5]]);
+  const left = Math.min(...mapped.map(point => point[0])), right = Math.max(...mapped.map(point => point[0]));
+  const bottom = Math.min(...mapped.map(point => point[1])), top = Math.max(...mapped.map(point => point[1]));
+  const width = right - left, height = top - bottom;
+  if (width < 60 || width > 360 || height < 16 || height > 65 || width / height < 2.2 || width / height > 20) return undefined;
+  const tolerance = Math.max(2, height * .08);
+  if (![left, right, bottom, top].every((edge, n) => mapped.some(point =>
+    Math.abs(point[n < 2 ? 0 : 1] - edge) <= tolerance))) return undefined;
+  const horizontal = lines.some(([a, b]) => Math.abs(a[1] - b[1]) * Math.abs(matrix[3]) <= tolerance
+    && Math.abs(a[0] - b[0]) * Math.abs(matrix[0]) >= width * .4);
+  const vertical = lines.some(([a, b]) => Math.abs(a[0] - b[0]) * Math.abs(matrix[0]) <= tolerance
+    && Math.abs(a[1] - b[1]) * Math.abs(matrix[3]) >= height * .4);
+  return horizontal && vertical ? { left, bottom, right, top } : undefined;
+}

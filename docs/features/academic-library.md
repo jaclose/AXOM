@@ -257,6 +257,17 @@ Production writes need JD's explicit approval for each step. On the authorized M
 6. Check from a second account that the catalog lists the courses by term, a course
    opens its weekly plan and a downloaded quiz opens its exact questions.
 
+#### Private PDF answer-mark review
+
+Preparation version 6 can resume a version-5 private library without reparsing its
+question banks. It writes new `review/answer-marks-v2/` receipts alongside the
+version-5 `review/answer-marks/` receipts, so earlier evidence remains available.
+The new pass also proposes a choice when an answer page alone contains a stroked
+choice-sized outline with exactly one matching label on that line. Outlines already
+on the question page, decorative boxes and ambiguous marks do not suggest a key.
+These hash-bound receipts are private review evidence only: no proposal changes a
+bank answer, explanation, readiness or sharing decision.
+
 #### Approved-only question candidate
 
 The broad prepared library includes held questions and source originals. A source

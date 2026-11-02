@@ -1,6 +1,6 @@
 import type { FigureBox } from "../../pdfFigures";
 import type { ImportPackage, PackageQuestion, QuestionAsset } from "../package";
-import { answerBesideCheck, isVectorCheck, multiply, type ChoiceLabel, type MarkBox, type Matrix } from "./pdfAnswerMarkGeometry";
+import { answerBesideCheck, answerInsideOutline, choiceOutlineBox, isVectorCheck, multiply, type ChoiceLabel, type MarkBox, type Matrix } from "./pdfAnswerMarkGeometry";
 import { marksOnAnswerPage, readTaggedPage, type TaggedPageInput } from "./taggedPdf";
 
 type PdfJs = typeof import("pdfjs-dist");
@@ -23,7 +23,7 @@ export function assertPackageSourceIdentity(pkg: ImportPackage, source: { sha256
 }
 
 export interface MarkEvidence {
-  kind: "extra-tagged-figure" | "native-vector-check";
+  kind: "extra-tagged-figure" | "native-vector-check" | "native-choice-outline";
   /** Page units from the top left. No source text is copied into a receipt. */
   box: FigureBox;
   adjacentChoice?: string;
@@ -50,6 +50,7 @@ export interface AnswerMarkPage {
   figures: readonly FigureBox[];
   labels: readonly ChoiceLabel[];
   vectorChecks: readonly MarkBox[];
+  outlines: readonly MarkBox[];
 }
 
 interface Pair { question: PackageQuestion; questionPage: number; answerPage: number; asset: QuestionAsset }
@@ -110,6 +111,12 @@ export function buildAnswerMarkProposals(questions: readonly PackageQuestion[], 
       const adjacentChoice = answerBesideCheck(check, labels);
       evidence.push({ kind: "native-vector-check", box, ...(adjacentChoice ? { adjacentChoice } : {}) });
     }
+    for (const outline of answerPage.outlines) {
+      const box = topLeft(outline, answerPage.height);
+      if (questionPage.outlines.some(original => samePhysicalMark(box, topLeft(original, questionPage.height)))) continue;
+      const adjacentChoice = answerInsideOutline(outline, labels);
+      if (adjacentChoice) evidence.push({ kind: "native-choice-outline", box, adjacentChoice });
+    }
     if (!evidence.length) continue;
     const groups: MarkEvidence[][] = [];
     for (const mark of evidence) {
@@ -147,6 +154,7 @@ export function buildAnswerMarkProposals(questions: readonly PackageQuestion[], 
 }
 
 type OperatorCodes = Pick<PdfJs["OPS"], "save" | "restore" | "transform" | "setFillRGBColor" | "constructPath" | "fill" | "eoFill">;
+type OutlineOperatorCodes = Pick<PdfJs["OPS"], "save" | "restore" | "transform" | "setStrokeRGBColor" | "constructPath" | "stroke">;
 type OperatorList = { fnArray: readonly number[]; argsArray: readonly unknown[] };
 
 /** Mirrors the browser's strict native tick check without changing a question. */
@@ -177,6 +185,29 @@ export function vectorCheckBoxes(operators: OperatorList, ops: OperatorCodes): M
   return checks;
 }
 
+/** Answer-only colored outlines are evidence to review, never scoring keys. */
+export function vectorOutlineBoxes(operators: OperatorList, ops: OutlineOperatorCodes): MarkBox[] {
+  const stack: Array<{ matrix: Matrix; color: string }> = [];
+  let matrix: Matrix = [1, 0, 0, 1, 0, 0], color = "";
+  const outlines: MarkBox[] = [];
+  for (let i = 0; i < operators.fnArray.length; i += 1) {
+    const op = operators.fnArray[i], args = operators.argsArray[i];
+    if (op === ops.save) stack.push({ matrix, color });
+    else if (op === ops.restore) { const saved = stack.pop(); if (saved) { matrix = saved.matrix; color = saved.color; } }
+    else if (op === ops.transform && Array.isArray(args) && args.length === 6
+      && args.every(value => typeof value === "number" && Number.isFinite(value))) matrix = multiply(matrix, args as Matrix);
+    else if (op === ops.setStrokeRGBColor && Array.isArray(args)) color = String(args[0]);
+    else if (op === ops.constructPath && /^#[0-9a-f]{6}$/i.test(color) && Array.isArray(args)
+      && args[0] === ops.stroke) {
+      const paths = args[1] as ArrayLike<ArrayLike<number>> | undefined;
+      const path = paths?.[0];
+      const box = paths?.length === 1 && path ? choiceOutlineBox(path, matrix) : undefined;
+      if (box) outlines.push(box);
+    }
+  }
+  return outlines;
+}
+
 function pageLabels(page: TaggedPageInput): ChoiceLabel[] {
   return page.items.flatMap((item): ChoiceLabel[] => {
     const key = item.str?.match(/^\s*([A-J])[.)](?:\s|$)/i)?.[1]?.toUpperCase();
@@ -192,7 +223,7 @@ export async function scanPdfAnswerMarkProposals(pdfjs: PdfJs, bytes: Uint8Array
   if (!pairs.length) return [];
   const neededPages = new Set(pairs.flatMap(pair => [pair.questionPage, pair.answerPage]));
   const pages: AnswerMarkPage[] = rawPages.filter(page => neededPages.has(page.page)).map(page => ({ page: page.page, height: page.height,
-    figures: readTaggedPage(page).figures, labels: pageLabels(page), vectorChecks: [] }));
+    figures: readTaggedPage(page).figures, labels: pageLabels(page), vectorChecks: [], outlines: [] }));
   const byPage = new Map(pages.map(page => [page.page, page]));
   const pairedPages = [...new Set(pairs.flatMap(pair => [pair.questionPage, pair.answerPage]))].filter(page => byPage.has(page));
   if (pairedPages.length) {
@@ -203,6 +234,7 @@ export async function scanPdfAnswerMarkProposals(pdfjs: PdfJs, bytes: Uint8Array
         const page = await doc.getPage(number);
         const operators = await page.getOperatorList();
         byPage.get(number)!.vectorChecks = vectorCheckBoxes(operators, pdfjs.OPS);
+        byPage.get(number)!.outlines = vectorOutlineBoxes(operators, pdfjs.OPS);
       }
       await doc.cleanup();
     } finally { await task.destroy(); }
