@@ -4,6 +4,7 @@ import { useAccount } from "../../lib/account/accountStore";
 import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
 import { isAcademicReviewer, shareAcademicCourses, type AcademicCourse } from "../../lib/academicLibrary/client";
 import { coursesByTerm } from "../../lib/academicLibrary/catalogOrder";
+import { inspectStoredRevisionExplanations, type ExplanationReviewReceipt } from "../../lib/academicLibrary/explanationReview";
 import { listCommunityUploads, type CommunityCursor } from "../../lib/academicLibrary/community";
 import {
   approveAcademicCourses, listOwnedAcademicCourses, ownedCourseStatus, type OwnedCourseStatus,
@@ -53,13 +54,14 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
   const controller = useRef<AbortController>();
   const [loaded, setLoaded] = useState<{ accountId: string; courses: AcademicCourse[]; communityIds: Set<string> }>();
   const [reviewer, setReviewer] = useState(false);
-  const [busy, setBusy] = useState<"loading" | "sharing" | "approving">();
+  const [busy, setBusy] = useState<"loading" | "checking" | "sharing" | "approving">();
   const [rights, setRights] = useState(false);
   const [approveOnShare, setApproveOnShare] = useState(false);
   const [checked, setChecked] = useState(false);
   const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
   const [failures, setFailures] = useState<Record<string, string>>({});
+  const [audits, setAudits] = useState<Record<string, { receipt?: ExplanationReviewReceipt; error?: string }>>({});
 
   useEffect(() => {
     let active = true;
@@ -74,6 +76,11 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
   const withStatus = (status: OwnedCourseStatus) => courses?.filter(course => !communityIds.has(course.id) && ownedCourseStatus(course) === status) ?? [];
   const privateCourses = withStatus("private");
   const awaiting = withStatus("awaiting-review");
+  const complete = (entries: AcademicCourse[]) => entries.every(course => {
+    const receipt = audits[course.id]?.receipt;
+    return receipt?.revisionId === course.current_revision_id && receipt.readyQuestions > 0 && receipt.missingExplanations === 0;
+  });
+  const receipts = () => new Map(Object.entries(audits).flatMap(([id, audit]) => audit.receipt ? [[id, audit.receipt] as const] : []));
   const label = (id: string) => {
     const course = courses?.find(entry => entry.id === id);
     return course ? `${course.term} ${course.module}` : "A course";
@@ -82,7 +89,7 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
     ...current, courses: current.courses.map(course => changes.has(course.id) ? { ...course, ...changes.get(course.id) } : course),
   });
 
-  function start(kind: "loading" | "sharing" | "approving") {
+  function start(kind: "loading" | "checking" | "sharing" | "approving") {
     const abort = new AbortController();
     controller.current = abort;
     setBusy(kind); setError(""); setProgress("");
@@ -97,6 +104,7 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
     if (!accountId || busy) return;
     const abort = start("loading");
     setFailures({});
+    setAudits({});
     try {
       const owned = await listOwnedAcademicCourses(accountId, abort.signal);
       const pending = await pendingCommunityIds(owned, abort.signal);
@@ -107,19 +115,48 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
     } finally { finish(abort); }
   }
 
+  async function checkExplanations() {
+    if (!accountId || !reviewer || busy) return;
+    const targets = [...privateCourses, ...awaiting];
+    if (!targets.length) return;
+    const scope = academicAccountScope(accountId);
+    const abort = start("checking");
+    setAudits({});
+    let missing = 0;
+    let unreadable = 0;
+    try {
+      for (const [index, course] of targets.entries()) {
+        if (abort.signal.aborted) break;
+        setProgress(`Checking explanations in ${label(course.id)} · ${index + 1} of ${targets.length}`);
+        try {
+          const receipt = await inspectStoredRevisionExplanations(course.id, course.current_revision_id, accountId);
+          await scope.assertCurrent();
+          missing += receipt.missingExplanations;
+          setAudits(current => ({ ...current, [course.id]: { receipt } }));
+        } catch (cause) {
+          unreadable += 1;
+          setAudits(current => ({ ...current, [course.id]: { error: cause instanceof Error ? cause.message : "Readback failed." } }));
+        }
+      }
+      setProgress(abort.signal.aborted ? "Explanation check stopped. No approvals were made."
+        : `Explanation readback complete: ${plural(missing, "ready question")} without an explanation${unreadable ? `; ${plural(unreadable, "course")} could not be read` : ""}. Review each rationale against its source before attesting.`);
+    } finally { scope.dispose(); finish(abort); }
+  }
+
   async function share() {
     if (!accountId || busy || !rights || !privateCourses.length) return;
     const scope = academicAccountScope(accountId);
     const abort = start("sharing");
     const ids = privateCourses.map(course => course.id);
-    const approve = approveOnShare && reviewer;
+    const approve = approveOnShare && reviewer && checked && complete(privateCourses);
     const changes = new Map<string, Partial<AcademicCourse>>();
     const failed: Record<string, string> = {};
     try {
       for (const [index, id] of ids.entries()) {
         if (abort.signal.aborted) break;
         setProgress(`Sharing ${label(id)} · ${index + 1} of ${ids.length}`);
-        const [outcome] = await shareAcademicCourses([id], accountId, { approve, assertCurrent: scope.assertCurrent, signal: abort.signal });
+        const [outcome] = await shareAcademicCourses([id], accountId, { approve, receipts: receipts(), rationaleReviewed: checked,
+          assertCurrent: scope.assertCurrent, signal: abort.signal });
         if (!outcome) break;
         if (outcome.shared) changes.set(id, { visibility: "shared", ...(outcome.approved ? { review_status: "approved" as const } : {}) });
         if (outcome.error) failed[id] = outcome.error;
@@ -138,13 +175,14 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
   }
 
   async function approveAll() {
-    if (!accountId || busy || !reviewer || !checked || !awaiting.length) return;
+    if (!accountId || busy || !reviewer || !checked || !awaiting.length || !complete(awaiting)) return;
     const scope = academicAccountScope(accountId);
     const abort = start("approving");
     const ids = awaiting.map(course => course.id);
     try {
       setProgress(`Approving ${label(ids[0])} · 1 of ${ids.length}`);
       const outcomes = await approveAcademicCourses(ids, accountId, {
+        receipts: receipts(), rationaleReviewed: checked,
         assertCurrent: scope.assertCurrent, signal: abort.signal,
         onProgress: done => { if (done < ids.length) setProgress(`Approving ${label(ids[done])} · ${done + 1} of ${ids.length}`); },
       });
@@ -176,7 +214,10 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
       <GButton disabled={Boolean(busy)} onClick={() => void load()}>
         <RefreshCw size={ICON_SIZE.emphasis} /> {busy === "loading" ? "Loading your courses…" : courses ? "Refresh" : "Show my courses"}
       </GButton>
-      {(busy === "sharing" || busy === "approving") && <GhostButton onClick={() => controller.current?.abort()}><Square size={ICON_SIZE.body} /> Stop</GhostButton>}
+      {reviewer && courses && (privateCourses.length > 0 || awaiting.length > 0) && <GButton disabled={Boolean(busy)} onClick={() => void checkExplanations()}>
+        {busy === "checking" ? "Checking explanations…" : "Check stored explanations"}
+      </GButton>}
+      {(busy === "checking" || busy === "sharing" || busy === "approving") && <GhostButton onClick={() => controller.current?.abort()}><Square size={ICON_SIZE.body} /> Stop</GhostButton>}
     </div>
 
     {courses && !courses.length && <p>You have not published any courses yet. Publish a prepared library above, then come back here.</p>}
@@ -190,7 +231,10 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
           <span>I have the right to share this course material with every AXOM account.</span></label>
         {reviewer && <label><input type="checkbox" checked={approveOnShare} onChange={event => setApproveOnShare(event.target.checked)} />
           <span>Approve them now. You are an academic reviewer.</span></label>}
-        <GButton variant="primary" disabled={Boolean(busy) || !rights} onClick={() => void share()}>
+        {reviewer && approveOnShare && <label><input type="checkbox" checked={checked} onChange={event => setChecked(event.target.checked)} />
+          <span>I checked every stored explanation against its source for these exact revisions.</span></label>}
+        {reviewer && approveOnShare && !complete(privateCourses) && <p>Check stored explanations first. Every ready question needs one before official approval.</p>}
+        <GButton variant="primary" disabled={Boolean(busy) || !rights || (approveOnShare && (!checked || !complete(privateCourses)))} onClick={() => void share()}>
           <Share2 size={ICON_SIZE.emphasis} /> {busy === "sharing" ? "Sharing…" : `Share ${plural(privateCourses.length, "private course")}`}
         </GButton>
       </fieldset>}
@@ -198,8 +242,9 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
       {awaiting.length > 0 && (reviewer ? <fieldset className="academic-manager-step" disabled={Boolean(busy)}>
         <legend>Approve courses awaiting review</legend>
         <label><input type="checkbox" checked={checked} onChange={event => setChecked(event.target.checked)} />
-          <span>I checked these courses, their answers and images, and they can be shared with every signed-in account.</span></label>
-        <GButton variant="primary" disabled={Boolean(busy) || !checked} onClick={() => void approveAll()}>
+          <span>I checked every stored explanation against its source for these exact revisions, as well as their answers and images.</span></label>
+        {!complete(awaiting) && <p>Check stored explanations first. Every ready question needs one before official approval.</p>}
+        <GButton variant="primary" disabled={Boolean(busy) || !checked || !complete(awaiting)} onClick={() => void approveAll()}>
           <BadgeCheck size={ICON_SIZE.emphasis} /> {busy === "approving" ? "Approving…" : `Approve ${plural(awaiting.length, "course")}`}
         </GButton>
       </fieldset> : <p>{plural(awaiting.length, "course")} {awaiting.length === 1 ? "is" : "are"} waiting for an academic reviewer. Other accounts can find {awaiting.length === 1 ? "it" : "them"} once approved.</p>)}
@@ -218,6 +263,8 @@ export function AcademicCollectionManager({ onChanged }: { onChanged: () => void
             return <li key={course.id}>
               <span><b>{course.module}</b>{course.title !== course.module && <small>{course.title}</small>}</span>
               <span className="academic-manager-facts">{plural(course.ready_questions, "ready question")}</span>
+              {audits[course.id]?.receipt && <span className="academic-manager-facts">{plural(audits[course.id].receipt!.missingExplanations, "ready question")} without an explanation</span>}
+              {audits[course.id]?.error && <span className="academic-manager-facts" role="alert">{audits[course.id].error}</span>}
               <Tag tone={communityIds.has(course.id) ? "orange" : status.tone}>{communityIds.has(course.id) ? "Community upload · Unreviewed" : status.label}</Tag>
             </li>;
           })}</ul>
