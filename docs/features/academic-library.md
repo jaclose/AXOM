@@ -11,6 +11,23 @@ tracker reconciliation and preserves completed work, notes, personal labels and 
 Quiz navigation passes an exact set of canonical local question IDs to the existing
 question workspace. An empty scope cannot expand into all questions.
 
+### Download and practice a term
+
+Signed-in learners can download a term from its Course Library section. The action
+reads every 24-course catalog page with an empty search, then downloads courses one
+at a time through the single-course installer and durable account reference. Complete
+on-device courses are skipped. Stop finishes the current course; another run resumes
+from saved receipts. Each failed course retains its reason and can be retried without
+repeating successful downloads. No weeks are enrolled and no tracker rows are loaded.
+
+Practice Term selects the union of the account's downloaded question receipts for
+that term, including courses beyond the visible catalog page. It includes only current
+answer-ready questions on the device and uses the existing quiz handoff, active-quiz
+guard and 2,000-question limit. New receipts retain term and module for offline practice;
+older receipts use exact hosted-course ownership or a complete metadata catalog lookup.
+An incomplete legacy lookup blocks practice with a retry, rather than shortening the
+question pool. Account changes stop pending work. No workspace schema change is needed.
+
 QBank discovery uses this same paginated account catalog and opens this same weekly
 plan. The permission-checked `academic_course` lookup resolves an exact deep link
 independently of the first 24 catalog rows. A refresh failure preserves visible
@@ -61,8 +78,9 @@ The revision RPC compares all four fields under the existing owner row lock, tre
 nulls explicitly, before reserving source checksums or returning a matching content
 hash. A mismatch fails without creating a revision or changing reservations; it does
 not silently reclassify the collection. Matching classification still permits a new
-source revision or an idempotent retry. This migration is locally tested only, not
-applied to a hosted database.
+source revision or an idempotent retry. A read-only 2026-11-02 check confirmed
+AXOM Production's migration ledger includes this migration; the ledger alone does
+not establish a successful learner upload.
 
 The current upload control accepts one prepared course with its reviewed plan sections or
 an explicitly confirmed term and module for unscheduled content, at most 1,500 files /
@@ -87,7 +105,9 @@ by the SGU outline's module order and QBank's Study by course groups them by ter
 (`catalogOrder.ts`). The same migration adds `academic_is_reviewer()`, a self-check the
 app asks once per account and session before offering review controls; reviewer
 membership stays a service-role decision and `academic_review()` still enforces it.
-This migration is locally replayed only, not applied to a hosted database.
+A read-only 2026-11-02 check confirmed AXOM Production's migration ledger includes
+this migration. The term download controls in this release still need hosted
+learner acceptance after deployment.
 
 ## One course per module and the library publisher
 

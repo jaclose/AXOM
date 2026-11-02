@@ -1,4 +1,3 @@
-import type { AcademicBindings } from "../../lib/academicLibrary/contentReferences";
 import { downloadAccountContent } from "../../lib/sync/contentDownloads";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, BookOpen, Download, Play } from "lucide-react";
@@ -12,10 +11,8 @@ import { canonicalCourseOwnerUniverse, withPreparedCourses, loadPreparedCourse }
 import { buildQuestionBankBooks, type QuestionBankBook } from "../../lib/bookshelf/questionBankBooks";
 import { courseBookId, type CourseBook } from "../../lib/bookshelf/courseBooks";
 import type { QuestionSet, SourceDocument } from "../../lib/library";
-import type { LibraryInstallation } from "../../lib/privateLibrary/install";
 import { questionMappingStatus, type QuestionRecord } from "../../lib/questions";
 import type { Course, Term, TrackerItem } from "../../lib/types";
-import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "../../lib/localVault";
 import { CoursePlan } from "./CoursePlan";
 import { GButton } from "../ui/primitives";
 import { ICON_SIZE } from "../../lib/iconSize";
@@ -23,37 +20,7 @@ import { launchCourseQuiz, MAX_COURSE_QUIZ_QUESTIONS } from "../../lib/course-en
 import { splitAcademicPlanSections } from "../../lib/academicLibrary/coursePlan";
 import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
 import { AcademicSharing } from "./AcademicSharing";
-
-const REFERENCE_TYPE = "axom-academic-reference";
-interface DownloadReference extends LibraryInstallation {
-  collectionId: string;
-  revisionId: string;
-  accountId: string;
-  pendingWeeks?: number[];
-  bindings?: AcademicBindings;
-}
-function reference(documents: SourceDocument[], course: AcademicCourse, accountId?: string): DownloadReference | undefined {
-  const revision = course.current_revision_id;
-  const doc = documents.find(doc => doc.fileType === REFERENCE_TYPE && doc.id === `academic-${revision}`);
-  if (!doc) return;
-  try {
-    const value = JSON.parse(doc.rawText) as DownloadReference;
-    if (!value || value.accountId !== accountId || value.revisionId !== revision || value.collectionId !== course.id
-      || ![value.templateIds, value.documentIds, value.questionIds, value.setIds].every(ids => Array.isArray(ids) && ids.every(id => typeof id === "string" && id.length > 0))
-      || [value.templateIds, value.documentIds, value.questionIds, value.setIds].some(ids => new Set(ids).size !== ids.length)
-      || (value.pendingWeeks && (!Array.isArray(value.pendingWeeks) || value.pendingWeeks.some(week => !Number.isInteger(week) || week < 1 || week > 60)))) return;
-    return value;
-  } catch { return; }
-}
-async function saveReference(value: DownloadReference, assertCurrent: () => void) {
-  assertCurrent();
-  const checkpoint = getVaultWriteCheckpoint();
-  const rawText = JSON.stringify(value);
-  useStore.getState().addDocument({ id: `academic-${value.revisionId}`, fileType: REFERENCE_TYPE, title: "Downloaded course reference",
-    fileName: "course-reference.json", uploadedAt: new Date().toISOString(), rawText, sizeBytes: new TextEncoder().encode(rawText).length,
-    tags: [], linkedQuestionSetIds: value.setIds, libraryOnly: true });
-  await flushLocalVaultWrites(); assertVaultWritesSince(checkpoint);
-}
+import { downloadCourseQuestions, readDownloadReference, saveDownloadReference, type DownloadReference } from "../../lib/academicLibrary/downloadReference";
 
 const termIdentity = (value: string): string => {
   const numbered = value.trim().match(/^(?:t|term)\s*0*(\d{1,2})$/i);
@@ -176,7 +143,7 @@ export function ConnectedCoursePlan({ course, onBack, onOpen, onCustomize, onSha
   const [message, setMessage] = useState("");
   const [retry, setRetry] = useState(0);
   const [downloading, setDownloading] = useState(false);
-  const downloaded = useMemo(() => reference(state.documents, course, accountId), [state.documents, course, accountId]);
+  const downloaded = useMemo(() => readDownloadReference(state.documents, course, accountId), [state.documents, course, accountId]);
   // Template ids are content addresses, so equal ids mean the same saved sections.
   const cachedPlan = useMemo(() => {
     const ids = downloaded?.templateIds ?? [];
@@ -237,16 +204,17 @@ export function ConnectedCoursePlan({ course, onBack, onOpen, onCustomize, onSha
       if (!saved?.bindings?.originals || !saved.questionIds.every(id => useStore.getState().questions.some(question => question.id === id))) {
         const ids = await downloadAcademicCourse(course.current_revision_id, setMessage, scope);
         scope.assertCurrent();
-        saved = { ...ids, collectionId: course.id, revisionId: course.current_revision_id, accountId };
+        saved = { ...ids, collectionId: course.id, revisionId: course.current_revision_id, accountId, term: course.term, module: course.module };
       }
+      saved = { ...saved, term: course.term, module: course.module };
       // Persist intent before the network call. A failed acknowledgement leaves
       // an explicit retry available and never removes the downloaded source.
-      await saveReference({ ...saved, pendingWeeks: weeks }, scope.assertCurrent);
+      await saveDownloadReference({ ...saved, pendingWeeks: weeks }, scope.assertCurrent);
       const outcome = await loadPreparedCourse(book, weeks, scope.assertCurrent);
       if (outcome.status === "failed") return outcome;
       scope.assertCurrent();
       await enrollAcademicCourse(course, weeks, accountId);
-      await saveReference({ ...saved, pendingWeeks: undefined }, scope.assertCurrent);
+      await saveDownloadReference({ ...saved, pendingWeeks: undefined }, scope.assertCurrent);
       setMessage("Course downloaded and enrollment saved to your account.");
       return outcome;
     } catch (cause) { return { status: "failed" as const, message: cause instanceof Error ? cause.message : "The course could not be loaded. Retry when connected." }; }
@@ -257,26 +225,13 @@ export function ConnectedCoursePlan({ course, onBack, onOpen, onCustomize, onSha
   async function downloadQuestions() {
     if (downloading) return;
     setError(""); setDownloading(true);
-    const scope = academicAccountScope(accountId ?? "");
     try {
-      scope.assertCurrent();
-      if (!accountId) throw new Error("Sign in again before downloading these questions.");
-      let saved = downloaded;
-      if (saved && useStore.getState().deferredContent) {
-        setMessage("Downloading these questions and your saved progress…");
-        await downloadAccountContent({ questionIds: saved.questionIds, documentIds: saved.documentIds });
-        scope.assertCurrent();
-      }
-      if (!saved?.bindings?.originals || !saved.questionIds.every(id => useStore.getState().questions.some(question => question.id === id))) {
-        const ids = await downloadAcademicCourse(course.current_revision_id, setMessage, scope);
-        scope.assertCurrent();
-        saved = { ...ids, collectionId: course.id, revisionId: course.current_revision_id, accountId };
-        await saveReference(saved, scope.assertCurrent);
-      }
+      await downloadCourseQuestions(course, accountId ?? "", setMessage);
       setMessage("Questions downloaded to this device.");
     } catch (cause) { setMessage(""); setError(cause instanceof Error ? cause.message : "The questions could not be downloaded. Retry when connected."); }
-    finally { scope.dispose(); setDownloading(false); }
+    finally { setDownloading(false); }
   }
+
   return <>
     {templates === undefined && <><GButton onClick={onBack}>All courses</GButton><p role="status">{error ? "Preview unavailable" : "Opening the weekly plan…"}</p></>}
     {error && <div role="alert"><p>{error}</p><GButton onClick={() => setRetry(value => value + 1)}>Retry preview</GButton></div>}
