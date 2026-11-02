@@ -21,6 +21,7 @@ import { EXAM_SKINS, formatClock, reviewIndices, type ExamItemState, type ExamSi
 import type { NavigatorEntry } from "../../lib/exam/engine";
 import { AnnotatedQuestionText } from "./AnnotatedQuestionText";
 import { QuizCalculator, type QuizCalculatorValue } from "./QuizCalculator";
+import "../../styles/exam-sim.css";
 import { ExamplifyExam } from "../exam/ExamplifyExam";
 import { ExplanationBody, LabValuesPanel, useExhibitUrls } from "../exam/parts";
 import { useExamBlock, type ExamBlockApi, type FinishedBlock } from "../exam/useExamBlock";
