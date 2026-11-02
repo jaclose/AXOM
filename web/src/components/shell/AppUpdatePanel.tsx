@@ -23,7 +23,14 @@ export function requestApplyUpdate(): void {
   const live = findLiveSession(useStore.getState().sessions ?? []);
   const nextStep = state.desktop ? (state.restartPending ? "restart to finish the installed update" : "install the update and restart") : "refresh to the new web build";
   const prompt = `${live ? "You have an open study session. " : ""}Finish any unsaved edits first. AXOM will save a workspace recovery snapshot, then ${nextStep}. Continue?`;
-  if (window.confirm(prompt)) void appUpdates.apply();
+  if (window.confirm(prompt)) void appUpdates.apply().then(() => {
+    if (appUpdates.getSnapshot().phase === "error") window.dispatchEvent(new Event("axom:open-update-panel"));
+  });
+}
+
+export function requestApplyUpdateWithVerifiedSave(): void {
+  const prompt = "AXOM saved and verified your latest workspace, but browser storage could not hold an extra recovery copy. Refresh now using the verified saved workspace? Export a backup first if you want a separate copy.";
+  if (window.confirm(prompt)) void appUpdates.apply({ skipRecoverySnapshot: true });
 }
 
 function useAutoDownload(): boolean {
@@ -48,13 +55,14 @@ export function AppUpdatePanel() {
     available: `Version ${state.version} is available.`,
     downloading: "Downloading and verifying the update…",
     ready: "Download verified. Install when you’re ready to restart.",
-    preparing: "Saving your workspace and verifying a recovery snapshot…",
+    preparing: "Saving your workspace and preparing the update…",
     installing: "Installing the update. Keep AXOM open until it restarts.",
     restarting: "Update ready. Restarting AXOM…",
     disabled: state.error ?? "Updates are unavailable for this build.",
     error: state.error ?? "The update could not finish. Try again later.",
   };
   const apply = requestApplyUpdate;
+  const canContinueWithVerifiedSave = state.canContinueWithoutRecoverySnapshot && !state.desktop;
   return (
     <section className="settings-update-panel" aria-busy={busy} aria-labelledby="settings-update-title">
       <div className="settings-update-head">
@@ -66,6 +74,7 @@ export function AppUpdatePanel() {
         {state.lastChecked && <small>Last checked {new Date(state.lastChecked).toLocaleString()}</small>}
       </div>
       {state.restartPending && state.phase === "error" && <p className="sub">The update is already prepared. Retry the restart below; it will save your current workspace again without reinstalling.</p>}
+      {canContinueWithVerifiedSave && <p className="sub">Your saved workspace was verified. The browser could not make a second recovery copy because storage is full. Export a backup first, or refresh with the verified save.</p>}
       {state.phase === "downloading" && <div>
         <progress aria-label="Update download" value={state.totalBytes ? state.downloadedBytes : undefined} max={state.totalBytes ?? 1} style={{ width: "100%" }} />
         <p className="sub">{(state.downloadedBytes / 1_048_576).toFixed(1)} MB{state.totalBytes ? ` of ${(state.totalBytes / 1_048_576).toFixed(1)} MB` : " received"}</p>
@@ -75,6 +84,7 @@ export function AppUpdatePanel() {
         <GButton size="sm" disabled={busy || appUpdates.hasDownloaded() || state.restartPending} onClick={() => { void appUpdates.check(true); }}><RefreshCw size={16} /> Check for updates</GButton>
         {state.desktop && state.version && !appUpdates.hasDownloaded() && <GButton size="sm" variant="primary" disabled={busy} onClick={() => { void appUpdates.download(); }}><Download size={16} /> Download update</GButton>}
         {canApply && <GButton size="sm" variant="primary" disabled={busy} onClick={apply}><ShieldCheck size={16} /> {state.desktop ? (state.restartPending ? "Save and restart" : "Install and restart") : "Save and refresh"}</GButton>}
+        {canContinueWithVerifiedSave && <GButton size="sm" variant="primary" disabled={busy} onClick={requestApplyUpdateWithVerifiedSave}><ShieldCheck size={16} /> Refresh with verified save</GButton>}
         {state.version && !busy && <GButton size="sm" onClick={() => appUpdates.defer()}>Remind me next time</GButton>}
       </div>
       {state.deferred && <p className="sub">Reminder deferred for this app session. You can still update here.</p>}
@@ -84,7 +94,7 @@ export function AppUpdatePanel() {
           Download updates in the background (installing always waits for you)
         </label>
       )}
-      <p className="settings-update-note">Before applying an update, AXOM verifies a local workspace snapshot. Your work stays on this device.</p>
+      <p className="settings-update-note">AXOM saves and verifies your workspace before an update. If storage is full, you can choose whether to refresh without an extra recovery copy.</p>
       <Suspense fallback={<p className="sub">Loading release notes…</p>}><ReleaseNotesHistory /></Suspense>
     </section>
   );

@@ -5,27 +5,23 @@ authority: current-state
 ---
 # AXOM current AI state
 
-## Checkout and release boundary · 2026-11-02 12:41 UTC
+## Checkout and release boundary · 2026-11-02 14:55 UTC
 
-JD approved the final release. `main` was fast-forwarded to `c06ae5a6`,
-joining the committed Ideas/Journal frontier with QBank PR #81 while
-preserving the newer first-upload-error fix. Vercel deployment
-`dpl_D9C6W88yq5jD7QsbkCnh8EodW92j` reached READY and served both axom.info
-aliases at that SHA when checked. Live first-use setup, desk, weather, open book and full
-writing view loaded without browser console errors. Radiordle and Pathordle
-remain excluded pending provider approval; no private content was published.
+Remote `main` is `b1d3bea5` after PR #91, which makes missing static assets return
+404 instead of the SPA HTML fallback and removes the blanket immutable asset
+header. Cache-busted version checks for both `axom.info` and `www.axom.info`
+return the same `b1d3bea5` production build. Apex points directly to Production
+without redirecting to `www`, preserving the browser origin that owns local
+workspace storage.
 
-AXOM Production (`jofkmfwkidubxcutkwzf`) applied the seven ordered
-`20261101190000`–`20261102171000` release migrations. Read-only SQL confirmed
-all seven ledger rows, all 11 feature tables with RLS, and one audited owner
-role for JD's separately verified immutable Auth ID. Preview
-`yfjqsshsaxiggcbvkvnj` remains a separate project. This is schema and
-deployment proof, not real-account Community, Host or academic publication
-acceptance. The communications function and templates exist, but live send,
-webhook, SMTP and inbox receipt remain unverified. Dated predecessor receipts:
-`git show e799ed5b:docs/AI_STATE.md`,
-[Host rollout gate](features/community-operator-console.md#deployment-and-verification-gates),
-and [email readiness](operations/communications-readiness.md).
+The isolated hotfix checkout `codex/axom-startup-fresh-update-20261102` is
+based on that main commit. It moves web-worker registration ahead of shell
+imports, retries missing assets with a cache-busted request, and offers an
+explicit verified-save refresh if browser quota blocks only the extra recovery
+copy. The focused update, checkpoint and route-boundary tests pass 30/30;
+typecheck and lint pass. The first full web test run exposed one mock-export
+mismatch; after fixing it, focused coverage passed. Full build and hosted CI
+remain pending before merge. No user browser storage was cleared or rewritten.
 
 ## What this release contains
 

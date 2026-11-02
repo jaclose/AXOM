@@ -23,6 +23,7 @@ export function UpdateAvailableWatcher() {
     const check = () => { if (document.visibilityState !== "hidden") void appUpdates.check(); };
     const online = () => { appUpdates.retryConnection(); check(); };
     const manual = () => { setOpen(true); void appUpdates.check(true); };
+    const openAfterApplyError = () => setOpen(true);
     const chunkError = () => {
       pushToast({
         title: "This screen could not finish loading",
@@ -37,6 +38,7 @@ export function UpdateAvailableWatcher() {
     window.addEventListener("axom:web-update-ready", check);
     window.addEventListener("axom:chunk-load-error", chunkError);
     window.addEventListener("axom:check-for-updates", manual);
+    window.addEventListener("axom:open-update-panel", openAfterApplyError);
     document.addEventListener("visibilitychange", check);
     let disposed = false;
     let unlisten: (() => void) | undefined;
@@ -53,6 +55,7 @@ export function UpdateAvailableWatcher() {
       window.removeEventListener("axom:web-update-ready", check);
       window.removeEventListener("axom:chunk-load-error", chunkError);
       window.removeEventListener("axom:check-for-updates", manual);
+      window.removeEventListener("axom:open-update-panel", openAfterApplyError);
       document.removeEventListener("visibilitychange", check);
     };
   }, []);
