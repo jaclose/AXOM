@@ -399,8 +399,19 @@ export async function applyReviewedAnswers(preparedRoot: string, decisionsFile: 
       const question = bank.pkg.questions[index];
       verifyRecord(row, source, oldSha256, question);
       if (row.status !== "approved") continue;
-      if (source.name.toLowerCase().endsWith(".pdf") && row.answerEvidenceSourcePage === null)
-        fail("A reviewed PDF answer needs its inspected source page.");
+      if (source.name.toLowerCase().endsWith(".pdf")) {
+        if (row.answerEvidenceSourcePage === null)
+          fail("A reviewed PDF answer needs its inspected source page.");
+        const pages = bank.sourceText.pageTexts;
+        if (pages !== undefined) {
+          const page = pages[row.answerEvidenceSourcePage - 1];
+          if (typeof page !== "string")
+            fail("A reviewed PDF answer page is outside the extracted source pages.");
+          if (row.answerEvidenceSourceLine !== null
+            && row.answerEvidenceSourceLine > page.split(/\r?\n/).length)
+            fail("A reviewed PDF answer line is outside the extracted source page.");
+        }
+      }
       if (!sourceVerified) {
         if (!source.originalFile
           || await fileSha(await inside(root, source.originalFile)) !== source.checksum)

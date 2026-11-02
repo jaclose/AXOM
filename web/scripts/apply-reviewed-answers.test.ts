@@ -61,7 +61,9 @@ async function fixture(existingAnswer = false, mediaUncertain = false,
     questionsFile: "questions.json", assetsDirectory: "assets",
   });
   const bank: PreparedBank = { pkg: { manifest: manifest("invented.pdf", 1, "invented-bank"), questions: [held] },
-    issues: [], sourceText: { rawText: "Invented private source text" }, sourceBytes: original.length, notes: [] };
+    issues: [], sourceText: { rawText: "Invented private source text",
+      pageTexts: ["first line\nsecond line\nthird line\nfourth line\nfifth line"] },
+    sourceBytes: original.length, notes: [] };
   const otherBank: PreparedBank = { pkg: { manifest: manifest("unrelated.pdf", 2, "unrelated-bank"), questions: [ready] },
     issues: [], sourceText: { rawText: "Unrelated private source text" }, sourceBytes: otherOriginal.length, notes: [] };
   bank.issues = assessBank(bank.pkg, [], []).issues;
@@ -277,6 +279,21 @@ describe("private reviewed-answer application", () => {
     await writeFile(decisionsPath, JSON.stringify(decisions));
     await expect(applyReviewedAnswers(root, decisionsPath, output))
       .rejects.toThrow(/inspectable source-key evidence/);
+  });
+
+  it("checks PDF evidence page and line bounds when extracted page text exists", async () => {
+    const { root, decisionsPath, decisions, output } = await fixture();
+    decisions.records[0].answerEvidenceSourcePage = 2;
+    decisions.records[0].answerEvidenceSourceLine = null;
+    await writeFile(decisionsPath, JSON.stringify(decisions));
+    await expect(applyReviewedAnswers(root, decisionsPath, output))
+      .rejects.toThrow(/outside the extracted source pages/);
+    decisions.records[0].answerEvidenceSourcePage = 1;
+    decisions.records[0].answerEvidenceSourceLine = 6;
+    await writeFile(decisionsPath, JSON.stringify(decisions));
+    await expect(applyReviewedAnswers(root, decisionsPath, output))
+      .rejects.toThrow(/outside the extracted source page/);
+    await expect(readFile(join(output, "library", "catalog.json"))).rejects.toThrow();
   });
 
   it("rejects a conflicting stored key and incomplete source or rights review", async () => {
