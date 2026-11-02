@@ -557,7 +557,11 @@ export function ImportPanel({
   }
 
   function focusAfterReviewUpdate(...elementIds: Array<string | undefined>) {
+    const focusedBefore = document.activeElement;
     const restore = () => {
+      // A delayed frame must not take focus from a field the learner moved to.
+      const focused = document.activeElement;
+      if (focused && focused !== document.body && focused !== focusedBefore) return;
       for (const id of elementIds) {
         if (!id) continue;
         const element = document.getElementById(id);

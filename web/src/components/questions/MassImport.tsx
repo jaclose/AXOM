@@ -200,14 +200,7 @@ export function MassImport({
     fileMap.delete(id);
     ownedFileIds.current.delete(id);
     setQueue((current) => current.filter((file) => file.id !== id));
-    const restoreFocus = () => {
-      const target = document.getElementById(
-        focusFile ? `mass-import-remove-${focusFile.id}` : "mass-import-add-files",
-      );
-      if (target instanceof HTMLElement) target.focus();
-    };
-    if (typeof requestAnimationFrame === "function") requestAnimationFrame(restoreFocus);
-    else setTimeout(restoreFocus, 0);
+    focusAfterQueueUpdate(focusFile ? `mass-import-remove-${focusFile.id}` : "mass-import-add-files");
   }
 
   async function processOne(id: string) {
@@ -565,6 +558,9 @@ export function MassImport({
 
 function focusAfterQueueUpdate(elementId: string) {
   const restore = () => {
+    // Queue updates remove the focused control. Leave a field reached since then alone.
+    const focused = document.activeElement;
+    if (focused && focused !== document.body) return;
     const target = document.getElementById(elementId);
     if (target instanceof HTMLElement) target.focus();
   };
