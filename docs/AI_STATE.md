@@ -8,7 +8,8 @@ authority: current-state
 ## 2026-11-01 Ideas and Journal production integration
 
 The isolated `codex/ideas-prod-merge-20261101` candidate combines
-`origin/main` `cb0a456b` (QBank PR #59) with safe Ideas branch `b08d10c1`.
+`origin/main` through `4d6a96a9` (QBank PR #70) with safe Ideas branch
+`b08d10c1`.
 The Journal includes first-open setup, a desk-framed free-writing page,
 4.4-second idle put-down, working return-to-desk control, side support,
 weather in the scene, MacBook study activity, closeout/catch-up reminders,
@@ -21,7 +22,10 @@ See [journal scene](JOURNAL-NOTEBOOK-ARCHITECTURE.md),
 
 Production Git push, live journal readback and hosted acceptance are distinct.
 Community/operator access, owner provisioning and real account tests still
-require hosted verification; private study content remains unpublished.
+require hosted verification. Four feature migrations have unique versions
+`20261101190000`–`20261101193000` after the QBank migration sequence and
+must be applied before their cloud flows work. Private study content remains
+unpublished.
 The original AXOM and local `main` worktrees contain protected unrelated
 changes and are untouched. `origin/main` pushes trigger Vercel production.
 

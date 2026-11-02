@@ -607,6 +607,8 @@ function readQuestion(value: unknown, index: number, issues: PackageIssue[]): Pa
     filename,
     ...optional("page", integer(sourceRaw.page)),
     ...optional("pageEnd", integer(sourceRaw.pageEnd)),
+    ...optional("answerEvidencePage", integer(sourceRaw.answerEvidencePage)),
+    ...optional("explanationSourcePage", integer(sourceRaw.explanationSourcePage)),
     ...optional("questionNumber", integer(sourceRaw.questionNumber)),
     ...optional("set", integer(sourceRaw.set)),
     ...optional("setTitle", filled(sourceRaw.setTitle)),
@@ -677,6 +679,7 @@ function writeQuestion(question: PackageQuestion): Json {
     discipline: question.discipline, topic: question.topic, subtopic: question.subtopic,
     source: compact({
       filename: question.source.filename, page: question.source.page, pageEnd: question.source.pageEnd,
+      answerEvidencePage: question.source.answerEvidencePage, explanationSourcePage: question.source.explanationSourcePage,
       questionNumber: question.source.questionNumber,
       set: question.source.set, setTitle: question.source.setTitle,
     }),

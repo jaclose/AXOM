@@ -352,6 +352,9 @@
 /* Cleaner explanation reading (Q2a): a comfortable measure keeps long
    explanations from running edge to edge. */
 .feedback-explanation p, .learning-objective p { max-width: 68ch; }
+.feedback-explanation-missing { border-color: var(--hairline); background: var(--surface-1); }
+.feedback-explanation-missing .field-label { color: var(--text-60); }
+.feedback-explanation-missing .ghost-btn { margin-top: 10px; }
 .learning-objective { border-left: 2px solid var(--gold); }
 /* Post-submit rationale emphasis (Q2a): correct + your-wrong-pick lead;
    remaining distractors collapse. */
@@ -1244,8 +1247,8 @@ ul.template-note { padding-left: 26px; }
 .qb-practice-header .qb-cta.primary { min-height: 46px; }
 .qb-inventory {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  max-width: 640px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  max-width: 840px;
   margin: 0;
   border-block: 1px solid rgba(230, 226, 214, .08);
 }
@@ -1357,13 +1360,18 @@ ul.template-note { padding-left: 26px; }
   .qb-study-route { justify-content: flex-start; }
 }
 
+@media (max-width: 560px) {
+  .qb-inventory { max-width: none; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .qb-inventory > div:nth-child(3) { border-left: 0; border-top: 1px solid var(--hairline); }
+  .qb-inventory > div:nth-child(4) { border-top: 1px solid var(--hairline); }
+}
+
 @media (max-width: 440px) {
   .qb-practice-header .qb-hero-inner { padding: 18px 16px 15px; }
   .qb-practice-header .qb-hero-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
   .qb-practice-header .qb-hero-actions .qb-cta { width: auto; min-width: 0; padding-inline: 14px; }
   .qb-practice-header .qb-hero-actions .qb-cta.primary { width: 100%; }
   .qb-practice-header .qb-hero-actions .qb-course-return { grid-column: 1 / -1; }
-  .qb-inventory { max-width: none; }
   .qb-inventory > div { display: flex; flex-direction: column-reverse; align-items: flex-start; gap: 4px; padding: 10px; }
   .qb-inventory > div:first-child { padding-left: 0; }
   .qb-inventory dd { font-size: var(--fs-lg); }

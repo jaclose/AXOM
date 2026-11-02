@@ -1,5 +1,6 @@
 import { academicAccountScope } from "./accountScope";
 import { listAcademicCourses, reviewAcademicCourse, type AcademicCourse } from "./client";
+import type { ExplanationReviewReceipt } from "./explanationReview";
 
 /** academic_catalog returns at most 24 courses per page. */
 const PAGE_SIZE = 24;
@@ -37,13 +38,14 @@ export interface AcademicApprovalOutcome { collectionId: string; approved: boole
 
 /** Approve each course's current revision in turn. One failure stops none; a changed account stops all. */
 export async function approveAcademicCourses(collectionIds: readonly string[], accountId: string,
-  options: { assertCurrent?: () => void; signal?: AbortSignal; onProgress?: (done: number) => void } = {}): Promise<AcademicApprovalOutcome[]> {
+  options: { receipts?: ReadonlyMap<string, ExplanationReviewReceipt>; rationaleReviewed?: boolean;
+    assertCurrent?: () => void; signal?: AbortSignal; onProgress?: (done: number) => void } = {}): Promise<AcademicApprovalOutcome[]> {
   const outcomes: AcademicApprovalOutcome[] = [];
   for (const collectionId of collectionIds) {
     if (options.signal?.aborted) break;
     options.assertCurrent?.();
     try {
-      await reviewAcademicCourse(collectionId, true, accountId);
+      await reviewAcademicCourse(collectionId, true, accountId, options.receipts?.get(collectionId), options.rationaleReviewed);
       outcomes.push({ collectionId, approved: true });
     } catch (cause) {
       outcomes.push({ collectionId, approved: false, error: cause instanceof Error ? cause.message : "The approval was not saved." });

@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 1030" role="img" aria-labelledby="title description">
+  <title id="title">Brachial plexus: posterior cord pathway</title>
+  <desc id="description">A schematic common pattern. C5 and C6 form the upper trunk, C7 the middle trunk, and C8 and T1 the lower trunk. The posterior division of each trunk joins the posterior cord, which gives rise to the axillary and radial nerves. Anterior divisions form the lateral and medial cords. Branching can vary.</desc>
+  <defs>
+    <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
+      <path d="M30 0H0V30" fill="none" stroke="#718395" stroke-opacity=".08" stroke-width="1"/>
+    </pattern>
+    <linearGradient id="panel" x2="0" y2="1">
+      <stop stop-color="#1C2A39"/>
+      <stop offset="1" stop-color="#15212E"/>
+    </linearGradient>
+    <style>
+      text{font-family:Arial,Helvetica,sans-serif;fill:#F1ECE2}
+      .eyebrow{font-size:18px;font-weight:700;letter-spacing:3px;fill:#C8A96A}
+      .headline{font-size:39px;font-weight:700;letter-spacing:-1px}
+      .subhead{font-size:22px;fill:#CED8DF}
+      .stage{font-size:17px;font-weight:700;letter-spacing:2px;fill:#AEBFC9}
+      .node{font-size:26px;font-weight:700;text-anchor:middle}
+      .small{font-size:19px;fill:#D2DFE6;text-anchor:middle}
+      .note{font-size:22px;fill:#C9D4DA}
+      .source{font-size:22px;fill:#AEBFC9}
+    </style>
+  </defs>
+  <rect width="760" height="1030" rx="28" fill="#101B28"/>
+  <rect width="760" height="1030" rx="28" fill="url(#grid)"/>
+  <path d="M44 43H102" stroke="#C8A96A" stroke-width="4" stroke-linecap="round"/>
+  <text x="44" y="79" class="eyebrow">AXOM ANATOMY</text>
+  <text x="44" y="129" class="headline">Brachial plexus</text>
+  <text x="44" y="165" class="subhead">Posterior cord pathway</text>
+
+  <text x="44" y="214" class="stage">VENTRAL RAMI</text>
+  <g fill="url(#panel)" stroke="#738B9C" stroke-width="2">
+    <rect x="45" y="231" width="190" height="62" rx="12"/>
+    <rect x="285" y="231" width="190" height="62" rx="12"/>
+    <rect x="525" y="231" width="190" height="62" rx="12"/>
+  </g>
+  <text x="140" y="271" class="node">C5 · C6</text>
+  <text x="380" y="271" class="node">C7</text>
+  <text x="620" y="271" class="node">C8 · T1</text>
+
+  <path d="M140 293V347M380 293V347M620 293V347" stroke="#8EA4B3" stroke-width="3"/>
+  <text x="44" y="335" class="stage">TRUNKS</text>
+  <g fill="#1F3444" stroke="#8EA4B3" stroke-width="2">
+    <rect x="45" y="347" width="190" height="62" rx="12"/>
+    <rect x="285" y="347" width="190" height="62" rx="12"/>
+    <rect x="525" y="347" width="190" height="62" rx="12"/>
+  </g>
+  <text x="140" y="387" class="node">Upper</text>
+  <text x="380" y="387" class="node">Middle</text>
+  <text x="620" y="387" class="node">Lower</text>
+
+  <path d="M140 409V459M140 459H102V478M140 459H198V478M380 409V459M380 459H342V478M380 459H438V478M620 409V459M620 459H582V478M620 459H678V478" fill="none" stroke="#8EA4B3" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="#1E3441" stroke="#7D9CAD" stroke-width="2">
+    <rect x="67" y="478" width="70" height="58" rx="12"/>
+    <rect x="307" y="478" width="70" height="58" rx="12"/>
+    <rect x="547" y="478" width="70" height="58" rx="12"/>
+  </g>
+  <g fill="#483C2D" stroke="#E4C785" stroke-width="3">
+    <rect x="163" y="478" width="70" height="58" rx="12"/>
+    <rect x="403" y="478" width="70" height="58" rx="12"/>
+    <rect x="643" y="478" width="70" height="58" rx="12"/>
+  </g>
+  <text x="102" y="516" class="node">A</text>
+  <text x="198" y="516" class="node">P</text>
+  <text x="342" y="516" class="node">A</text>
+  <text x="438" y="516" class="node">P</text>
+  <text x="582" y="516" class="node">A</text>
+  <text x="678" y="516" class="node">P</text>
+  <path d="M102 536V617Q102 632 141 666M342 536V589Q342 607 288 620L141 666M582 536V617Q582 632 618 666" fill="none" stroke="#7E9BAC" stroke-opacity=".8" stroke-width="4" stroke-linecap="round"/>
+  <path d="M198 536V584Q198 607 247 628L380 666M438 536V605Q438 629 380 666M678 536V574Q678 601 620 619L380 666" fill="none" stroke="#E6C477" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="198" cy="537" r="5" fill="#E6C477"/>
+  <circle cx="438" cy="537" r="5" fill="#E6C477"/>
+  <circle cx="678" cy="537" r="5" fill="#E6C477"/>
+  <g fill="#1E3441" stroke="#7E9BAC" stroke-width="2">
+    <rect x="42" y="666" width="198" height="72" rx="13"/>
+    <rect x="519" y="666" width="198" height="72" rx="13"/>
+  </g>
+  <rect x="276" y="666" width="208" height="72" rx="13" fill="#54452D" stroke="#E6C477" stroke-width="3"/>
+  <text x="141" y="710" class="node">Lateral cord</text>
+  <text x="380" y="710" class="node">Posterior cord</text>
+  <text x="618" y="710" class="node">Medial cord</text>
+
+  <path d="M380 738V777M380 777H230V797M380 777H530V797" fill="none" stroke="#E6C477" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="380" cy="777" r="6" fill="#E6C477"/>
+  <g fill="#433A2D" stroke="#E6C477" stroke-width="2">
+    <rect x="125" y="797" width="210" height="67" rx="13"/>
+    <rect x="425" y="797" width="210" height="67" rx="13"/>
+  </g>
+  <text x="230" y="839" class="node">Axillary nerve</text>
+  <text x="530" y="839" class="node">Radial nerve</text>
+
+  <path d="M44 894H716" stroke="#7B8B95" stroke-opacity=".55"/>
+  <text x="44" y="924" class="note">A anterior division · P posterior division</text>
+  <text x="44" y="952" class="note">Common pattern. Collateral branches omitted; origins vary.</text>
+  <text x="44" y="979" class="source">Studies: PMID 32100569 · 25969826</text>
+  <text x="44" y="1004" class="source">AXOM original teaching diagram · v1</text>
+</svg>

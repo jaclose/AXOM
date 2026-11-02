@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import type { AcademicCourse } from "../../lib/academicLibrary/client";
 import { AcademicSharing } from "./AcademicSharing";
 
-const mocks = vi.hoisted(() => ({ reviewer: vi.fn(), review: vi.fn(), rpc: vi.fn() }));
+const mocks = vi.hoisted(() => ({ reviewer: vi.fn(), review: vi.fn(), rpc: vi.fn(), explanations: vi.fn() }));
 vi.mock("../../lib/account/accountStore", () => ({
   useAccount: (select: (state: { user: { id: string } }) => unknown) => select({ user: { id: "reviewer-1" } }),
 }));
@@ -19,6 +19,9 @@ vi.mock("../../lib/academicLibrary/client", () => ({
     from: () => ({ select: () => ({ order: () => ({ limit: async () => ({ data: [], error: null }) }) }) }),
   }),
 }));
+vi.mock("../../lib/academicLibrary/explanationReview", () => ({
+  inspectStoredRevisionExplanations: (...args: unknown[]) => mocks.explanations(...args),
+}));
 vi.mock("../ui/primitives", () => ({
   GButton: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => <button type="button" {...props}>{children}</button>,
 }));
@@ -30,7 +33,11 @@ const course = (patch: Partial<AcademicCourse> = {}): AcademicCourse => ({
 });
 
 describe("academic review controls", () => {
-  beforeEach(() => { mocks.review.mockResolvedValue(undefined); mocks.rpc.mockResolvedValue({ error: null }); });
+  beforeEach(() => {
+    mocks.review.mockResolvedValue(undefined); mocks.rpc.mockResolvedValue({ error: null });
+    mocks.explanations.mockResolvedValue({ collectionId: course().id, revisionId: course().current_revision_id,
+      contentHash: "a".repeat(64), readyQuestions: 3, explainedReadyQuestions: 3, missingExplanations: 0 });
+  });
   afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
   it("lets a reviewer approve another owner's shared course only after an explicit check", async () => {
@@ -42,9 +49,12 @@ describe("academic review controls", () => {
     expect(screen.getByText(/Review status: Waiting for review\./)).toBeTruthy();
     const approve = screen.getByRole("button", { name: "Approve this version" });
     expect((approve as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByRole("checkbox", { name: /I checked this course/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Check stored explanations" }));
+    expect(await screen.findByText(/3 of 3 ready questions have an explanation/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: /I checked every explanation/ }));
     fireEvent.click(approve);
-    await waitFor(() => expect(mocks.review).toHaveBeenCalledWith(course().id, true, "reviewer-1"));
+    await waitFor(() => expect(mocks.review).toHaveBeenCalledWith(course().id, true, "reviewer-1",
+      expect.objectContaining({ missingExplanations: 0 }), true));
     expect(await screen.findByText(/Every signed-in AXOM account can now find this course\./)).toBeTruthy();
     expect(onSaved).toHaveBeenCalledOnce();
   });
@@ -55,7 +65,7 @@ describe("academic review controls", () => {
     render(<AcademicSharing course={course({ review_status: "approved" })} onSaved={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "Withdraw approval" }));
     expect((await screen.findByRole("alert")).textContent).toMatch(/Only an academic reviewer/);
-    expect(mocks.review).toHaveBeenCalledWith(course().id, false, "reviewer-1");
+    expect(mocks.review).toHaveBeenCalledWith(course().id, false, "reviewer-1", undefined, false);
   });
 
   it("shows owners their sharing settings and hides review from non-reviewers", async () => {

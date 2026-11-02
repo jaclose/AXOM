@@ -1,4 +1,22 @@
-/* Course Tracker first use (components/tracker/TrackerFirstRun.tsx). */
+/* Course Tracker setup and first use. */
+.tracker-sgu-map-setup {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  padding: 18px 22px;
+  border: 1px solid var(--glass-card-border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+.tracker-sgu-map-setup > div { display: grid; gap: 5px; min-width: 0; }
+.tracker-sgu-map-eyebrow { color: var(--text-60); font: 500 10px var(--font-mono); letter-spacing: .1em; text-transform: uppercase; }
+.tracker-sgu-map-setup h2 { margin: 0; font: 500 18px/1.3 var(--font-display); }
+.tracker-sgu-map-setup p { margin: 0; color: var(--text-70); font-size: var(--fs-xs); line-height: 1.5; }
+.tracker-sgu-map-count { color: var(--text-60); font: 11px var(--font-mono); }
+@media (max-width: 560px) { .tracker-sgu-map-setup .gbtn { width: 100%; justify-content: center; } }
+
 .tracker-first-run {
   --tfr-ease: cubic-bezier(.22, 1, .36, 1);
   display: grid;

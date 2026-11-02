@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 1040" role="img" aria-labelledby="title description">
+  <title id="title">Genitofemoral nerve on the anterior psoas major</title>
+  <desc id="description">An original anterior-view relationship schematic of the posterior abdominal wall. L1 and L2 contributions form the genitofemoral nerve, which emerges onto the anterior surface of psoas major. Its genital branch enters the inguinal region and carries motor fibers to the cremaster in males; its femoral branch supplies a variable area of upper anterior-thigh skin. The femoral branch of the genitofemoral nerve is distinct from the separate femoral nerve. Branching and sensory territory vary.</desc>
+  <defs>
+    <pattern id="grain" width="30" height="30" patternUnits="userSpaceOnUse"><path d="M30 0H0V30" fill="none" stroke="#839AAA" stroke-opacity=".08"/></pattern>
+    <pattern id="fiber" width="22" height="24" patternUnits="userSpaceOnUse"><path d="M2 24C10 14 12 8 17 0" fill="none" stroke="#9BB0AF" stroke-opacity=".2" stroke-width="3"/></pattern>
+    <style>
+      text{font-family:Arial,Helvetica,sans-serif;fill:#F1ECE2}
+      .eyebrow{font-size:18px;font-weight:700;letter-spacing:3px;fill:#C8A96A}
+      .headline{font-size:39px;font-weight:700;letter-spacing:-1px}
+      .subhead{font-size:22px;fill:#D0DADE}
+      .stage{font-size:19px;font-weight:700;letter-spacing:2px;fill:#AFC2CA}
+      .label{font-size:27px;font-weight:700}
+      .detail{font-size:22px;fill:#D4DEE2}
+      .foot{font-size:21px;fill:#B9C9CF}
+    </style>
+  </defs>
+  <rect width="760" height="1040" rx="28" fill="#101B28"/>
+  <rect width="760" height="1040" rx="28" fill="url(#grain)"/>
+  <path d="M44 43H102" stroke="#C8A96A" stroke-width="4" stroke-linecap="round"/>
+  <text x="44" y="78" class="eyebrow">AXOM ANATOMY</text>
+  <text x="44" y="129" class="headline">Genitofemoral nerve</text>
+  <text x="44" y="166" class="subhead">Course by psoas major · common pattern</text>
+
+  <rect x="44" y="211" width="672" height="501" rx="19" fill="#182A38" stroke="#5B7484" stroke-width="2"/>
+  <text x="68" y="249" class="stage">ANTERIOR VIEW · SIMPLIFIED</text>
+  <g fill="#263947" stroke="#8FA6B3" stroke-width="2">
+    <rect x="67" y="284" width="103" height="56" rx="11"/>
+    <rect x="67" y="356" width="103" height="56" rx="11"/>
+  </g>
+  <text x="100" y="321" class="label">L1</text>
+  <text x="100" y="393" class="label">L2</text>
+  <path d="M170 312C248 312 284 328 374 364M170 384C243 384 284 370 374 364" fill="none" stroke="#8CA6B1" stroke-width="4" stroke-dasharray="8 8" stroke-linecap="round"/>
+  <text x="69" y="456" class="detail">Lumbar plexus</text>
+  <text x="69" y="483" class="detail">contributions</text>
+
+  <path d="M345 254C302 267 286 312 297 372C311 441 296 484 308 548C318 603 339 667 380 698H478C504 643 489 586 502 518C516 451 493 398 505 337C512 291 476 259 435 254Z" fill="#456070" stroke="#79939C" stroke-width="3"/>
+  <path d="M345 254C302 267 286 312 297 372C311 441 296 484 308 548C318 603 339 667 380 698H478C504 643 489 586 502 518C516 451 493 398 505 337C512 291 476 259 435 254Z" fill="url(#fiber)"/>
+  <text x="320" y="557" class="label">Psoas</text>
+  <text x="320" y="590" class="label">major</text>
+
+  <path d="M374 364C391 371 405 390 405 417C405 461 422 493 422 539V587" fill="none" stroke="#E7C579" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="374" cy="364" r="8" fill="#F0D99C" stroke="#6F592E" stroke-width="2"/>
+  <path d="M382 362H480" fill="none" stroke="#E7C579" stroke-width="3" stroke-linecap="round"/>
+  <text x="500" y="355" class="detail">Emerges onto</text>
+  <text x="500" y="384" class="detail">anterior surface</text>
+  <text x="450" y="536" class="detail">Genitofemoral</text>
+  <text x="450" y="562" class="detail">trunk (L1–L2)</text>
+
+  <path d="M422 587C414 633 341 663 213 712M422 587C438 626 502 664 595 712" fill="none" stroke="#E7C579" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="422" cy="587" r="8" fill="#F0D99C"/>
+  <path d="M213 712V733M595 712V733" stroke="#E7C579" stroke-width="5" stroke-linecap="round"/>
+
+  <g fill="#3B352E" stroke="#E7C579" stroke-width="2">
+    <rect x="44" y="733" width="322" height="155" rx="16"/>
+    <rect x="394" y="733" width="322" height="155" rx="16"/>
+  </g>
+  <text x="68" y="776" class="label">Genital branch</text>
+  <text x="68" y="809" class="detail">Enters inguinal region</text>
+  <text x="68" y="839" class="detail">Cremaster motor fibers</text>
+  <text x="68" y="866" class="detail">in males</text>
+  <text x="418" y="776" class="label">Femoral branch</text>
+  <text x="418" y="809" class="detail">Upper anterior-thigh</text>
+  <text x="418" y="839" class="detail">skin sensation</text>
+  <text x="418" y="866" class="detail">Variable territory</text>
+
+  <path d="M44 915H716" stroke="#7B8E99" stroke-opacity=".6"/>
+  <text x="44" y="945" class="foot">Femoral branch ≠ separate femoral nerve.</text>
+  <text x="44" y="973" class="foot">Branching and sensory fields vary; schematic only.</text>
+  <text x="44" y="1001" class="foot">Studies: PMID 12616150 · 30592097 · 12182238</text>
+  <text x="44" y="1027" class="foot">AXOM original teaching diagram · v1</text>
+</svg>
