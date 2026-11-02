@@ -107,10 +107,10 @@ function HostAccountPage() {
       </label>}
     </div>;
   }
-  return <div className="host-page stack">
+  return <main className="host-page stack" aria-labelledby="host-page-title">
     <section className="host-banner">
       <div><span className="host-eyebrow"><ShieldCheck size={17} /> AXOM OPERATOR CONSOLE</span>
-        <h2>Host dashboard</h2>
+        <h1 id="host-page-title">Host dashboard</h1>
         <p>Server-enforced permissions, responsible moderation and traceable operational controls.</p>
       </div>
       {role && <Tag tone="gold">{role === "owner" ? "Project CEO" : role === "admin" ? "Administrator" : "Moderator"}</Tag>}
@@ -208,5 +208,5 @@ function HostAccountPage() {
         </GlassCard>}
       </aside>
     </div>}
-  </div>;
+  </main>;
 }

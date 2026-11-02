@@ -4,7 +4,7 @@
 .host-page label { display: grid; gap: 6px; font-size: 12px; min-width: 0; }
 .host-page .sub { color: var(--text-70); line-height: 1.6; font-size: 12px; }
 .host-banner { display: flex; align-items: center; justify-content: space-between; gap: 25px; flex-wrap: wrap; border-radius: var(--radius-xl); padding: clamp(20px,4vw,36px); border: 1px solid var(--glass-card-border); background: linear-gradient(125deg,var(--surface-2),rgba(var(--accent-rgb),.09),var(--glass-card-fill)); }
-.host-banner h2 { font-size: clamp(25px,4vw,37px); font-family: var(--font-display); margin: 8px 0; }
+.host-banner h1 { font-size: clamp(25px,4vw,37px); font-family: var(--font-display); margin: 8px 0; }
 .host-banner p { color: var(--text-70); max-width: 60ch; margin: 0; }
 .host-eyebrow { display: inline-flex; align-items: center; gap: 9px; font-size: 11px; letter-spacing: .14em; color: var(--gold); font-weight: 700; }
 .host-layout { display: grid; grid-template-columns: minmax(0,1.7fr) minmax(285px,.8fr); align-items: start; gap: 18px; }

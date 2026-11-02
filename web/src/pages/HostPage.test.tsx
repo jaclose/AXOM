@@ -44,6 +44,8 @@ describe("Host page authorization and moderation", () => {
     let respond!: (value: OperatorDashboard) => void;
     vi.mocked(loadOperatorDashboard).mockReturnValue(new Promise(resolve => { respond = resolve; }));
     render(<HostPage />);
+    expect(screen.getByRole("main", { name: "Host dashboard" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Host dashboard", level: 1 })).toBeTruthy();
     const banner = document.querySelector(".host-banner");
     expect(banner).not.toBeNull();
     expect(within(banner as HTMLElement).queryByText("Project CEO")).toBeNull();

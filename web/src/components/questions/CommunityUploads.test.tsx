@@ -10,7 +10,8 @@ const ids = {
   privateRevision: "44444444-4444-4444-8444-444444444444",
 };
 const mocks = vi.hoisted(() => ({
-  account: { id: "owner-1" as string | undefined },
+  account: { id: "owner-1" as string | undefined, phase: "signed-in" as "signed-in" | "signed-out" | "loading" | "unconfigured" },
+  openSettings: vi.fn(),
   workspace: { questionSets: [] as unknown[], questions: [] as unknown[], documents: [] as unknown[] },
   list: vi.fn(), preview: vi.fn(), submit: vi.fn(), withdraw: vi.fn(), review: vi.fn(),
   download: vi.fn(), reviewer: vi.fn(), owned: vi.fn(),
@@ -23,11 +24,12 @@ vi.mock("../../lib/store", () => {
   return { useStore };
 });
 vi.mock("../../lib/account/accountStore", () => {
-  const state = () => ({ user: mocks.account.id ? { id: mocks.account.id } : null });
+  const state = () => ({ user: mocks.account.id ? { id: mocks.account.id } : null, phase: mocks.account.phase });
   const useAccount = (select: (value: ReturnType<typeof state>) => unknown) => select(state());
   useAccount.getState = state;
   return { useAccount };
 });
+vi.mock("../../lib/uiStore", () => ({ useUi: { getState: () => ({ requestSettings: mocks.openSettings }) } }));
 vi.mock("../../lib/academicLibrary/accountScope", () => ({
   academicAccountScope: (id: string) => ({ key: id,
     assertCurrent: () => { if (mocks.account.id !== id) throw new Error("The account changed."); }, dispose: () => {},
@@ -70,6 +72,7 @@ const row = { id: ids.collection, title: "Current course", module: "NCRS", term:
 describe("Community Uploads", () => {
   beforeEach(() => {
     mocks.account.id = "owner-1";
+    mocks.account.phase = "signed-in";
     mocks.workspace.questionSets = [];
     mocks.workspace.questions = [];
     mocks.workspace.documents = [];
@@ -92,8 +95,29 @@ describe("Community Uploads", () => {
 
   it("requires sign-in and keeps unreviewed courses outside the official catalog", () => {
     mocks.account.id = undefined;
+    mocks.account.phase = "signed-out";
     render(<CommunityUploads onOpenLibrary={vi.fn()} />);
     expect(screen.getByText("Sign in to browse and contribute")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open account settings" }));
+    expect(mocks.openSettings).toHaveBeenCalledWith("account");
+    expect(mocks.list).not.toHaveBeenCalled();
+  });
+
+  it("offers personal practice when the account service is unavailable", () => {
+    mocks.account.id = undefined;
+    mocks.account.phase = "unconfigured";
+    render(<CommunityUploads onOpenLibrary={vi.fn()} />);
+    expect(screen.getByText("Course exchange is unavailable here")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open Question Bank" }).getAttribute("href")).toBe("#questions");
+    expect(screen.queryByRole("button", { name: "Open account settings" })).toBeNull();
+    expect(mocks.list).not.toHaveBeenCalled();
+  });
+
+  it("shows a calm account check before sign-in status resolves", () => {
+    mocks.account.id = undefined;
+    mocks.account.phase = "loading";
+    render(<CommunityUploads onOpenLibrary={vi.fn()} />);
+    expect(screen.getByRole("status").textContent).toContain("Checking your account");
     expect(mocks.list).not.toHaveBeenCalled();
   });
 

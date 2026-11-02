@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { ArrowUpRight, BookOpen, RefreshCw, ShieldCheck, UploadCloud } from "lucide-react";
 import { useAccount } from "../../lib/account/accountStore";
+import { useUi } from "../../lib/uiStore";
 import { useStore } from "../../lib/store";
 import { questionSetKind, type QuestionSet, type SourceDocument } from "../../lib/library";
 import { questionPracticeReadiness } from "../../lib/questionFilters";
@@ -42,6 +43,7 @@ function sourceRevision(document: SourceDocument, questions: readonly QuestionRe
  * catalog. Every download still uses the normal hash-checked installer. */
 export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void }) {
   const accountId = useAccount(state => state.user?.id);
+  const accountPhase = useAccount(state => state.phase);
   const questionSets = useStore(state => state.questionSets ?? EMPTY_SETS);
   const questions = useStore(state => state.questions ?? EMPTY_QUESTIONS);
   const documents = useStore(state => state.documents ?? EMPTY_DOCUMENTS);
@@ -357,7 +359,9 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
       <p>Explore courses shared by AXOM members. Practice answer-ready questions with an Unreviewed warning. An academic reviewer must approve a course before it enters the official Question Bank.</p>
     </header>
 
-    {!accountId ? <GlassCard pad><h3>Sign in to browse and contribute</h3><p>Community uploads are available to signed-in AXOM accounts.</p></GlassCard> : <>
+    {!accountId ? accountPhase === "loading" ? <GlassCard pad><p role="status">Checking your account…</p></GlassCard>
+      : accountPhase === "unconfigured" ? <GlassCard pad><h3>Course exchange is unavailable here</h3><p>This build has no account service. Your personal practice is still available in Question Bank.</p><a className="gbtn sm" href="#questions">Open Question Bank <ArrowUpRight size={ICON_SIZE.body} aria-hidden="true" /></a></GlassCard>
+      : <GlassCard pad><h3>Sign in to browse and contribute</h3><p>Community uploads are available to signed-in AXOM accounts.</p><GButton onClick={() => useUi.getState().requestSettings("account")}>Open account settings</GButton></GlassCard> : <>
       <div className="community-layout">
         <div className="community-results">
           <form className="community-search" onSubmit={searchNow}>
