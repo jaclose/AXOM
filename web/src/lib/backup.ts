@@ -30,6 +30,7 @@ import {
 import { DEFAULT_FOCUS_IDS, focusOption, normalizedFocusIds } from "./experience";
 import { isAcademicStageId, resolveTrack } from "./tracks";
 import { normalizeDailySuccessConfig } from "./dailySuccess";
+import { normalizeStudyStreaks } from "./studyStreaks";
 import { normalizePomodoroPreferences } from "./pomodoroPreferences";
 import { normalizeDailyLoopReminderPreferences } from "./dailyLoopReminders";
 import { normalizeFocusCheckInPreferences } from "./focusCheckIn";
@@ -37,6 +38,7 @@ import { normalizeDashboardLayoutPreferences } from "./dashboardWidgets";
 import { normalizeJournalEntries, normalizeJournalNotebookPreferences } from "./journalNotebook";
 import { normalizeApplicationResearch } from "./applicationResearch";
 import { normalizeApplicationProfile } from "./applicationProfile";
+import { normalizeBlueprintMode, normalizeUnlocks } from "./profileFields";
 import { normalizeStudyWorkflow } from "./studyPreferences";
 
 const DATA_KEYS = [
@@ -188,10 +190,18 @@ export function mergeStates(current: NoctyriumState, imported: NoctyriumState): 
   // decisions (including deliberately unchecked facts) for an existing school.
   const research = new Map(normalizeApplicationResearch(imported.profile.applicationResearch).map(entry => [entry.schoolId, entry]));
   for (const entry of normalizeApplicationResearch(current.profile.applicationResearch)) research.set(entry.schoolId, entry);
+  const unlocks = normalizeUnlocks([
+    ...(normalizeUnlocks(current.profile.unlocks) ?? []),
+    ...(normalizeUnlocks(imported.profile.unlocks) ?? []),
+  ]);
   merged.profile = {
     ...current.profile, applicationResearch: [...research.values()],
     // The profile is one learner-edited record, so current wins whole rather than field-merging.
     applicationProfile: normalizeApplicationProfile(current.profile.applicationProfile) ?? normalizeApplicationProfile(imported.profile.applicationProfile),
+    // A fresh device has no lane preference yet; keep the account's selection in that case.
+    blueprintMode: normalizeBlueprintMode(current.profile.blueprintMode) ?? normalizeBlueprintMode(imported.profile.blueprintMode),
+    // Unlocks follow the learner, so a merge retains those earned in either workspace.
+    ...(unlocks?.length ? { unlocks } : {}),
   };
   return merged as unknown as NoctyriumState;
 }
@@ -411,6 +421,7 @@ export function parseImport(text: string): NoctyriumState {
       energyChecks: normalizeEnergyChecks(profile.energyChecks),
       primaryTrackerScopes: normalizePrimaryScopes(profile.primaryTrackerScopes),
       // Preserve newer opt-in settings across export/import.
+      blueprintMode: normalizeBlueprintMode(profile.blueprintMode),
       taskAutofillDisabled: typeof profile.taskAutofillDisabled === "boolean" ? profile.taskAutofillDisabled : undefined,
       taskTemplates: Array.isArray(profile.taskTemplates) ? profile.taskTemplates as NoctyriumState["profile"]["taskTemplates"] : undefined,
       experimentalFlags: normalizeExperimentalFlags(profile.experimentalFlags),
@@ -419,6 +430,9 @@ export function parseImport(text: string): NoctyriumState {
       dailySuccess: profile.dailySuccess === undefined
         ? undefined
         : normalizeDailySuccessConfig(profile.dailySuccess),
+      studyStreaks: profile.studyStreaks === undefined
+        ? undefined
+        : normalizeStudyStreaks(profile.studyStreaks),
       hiddenActivityShortcuts: Array.isArray(profile.hiddenActivityShortcuts)
         ? [...new Set(profile.hiddenActivityShortcuts.filter((value): value is string => typeof value === "string" && Boolean(value.trim())).map((value) => value.slice(0, 240)))].slice(0, 100)
         : undefined,
@@ -428,6 +442,7 @@ export function parseImport(text: string): NoctyriumState {
       studyWorkflow: normalizeStudyWorkflow(profile.studyWorkflow),
       applicationResearch: normalizeApplicationResearch(profile.applicationResearch),
       applicationProfile: normalizeApplicationProfile(profile.applicationProfile),
+      unlocks: normalizeUnlocks(profile.unlocks),
     },
     terms: data.terms ?? [],
     courses: data.courses ?? [],

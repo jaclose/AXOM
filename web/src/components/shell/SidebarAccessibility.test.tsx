@@ -8,6 +8,8 @@ import App from "../../App";
 import { useStore } from "../../lib/store";
 import { STORAGE_KEYS } from "../../lib/brand";
 import { PROMISE_PROMPT_VERSION } from "../../lib/promisePrompt";
+import { useOperatorAccess } from "../../lib/operator/hostClient";
+vi.mock("../../lib/operator/hostClient", () => ({ useOperatorAccess: vi.fn(() => null) }));
 import {
   DAILY_GAMES_FOLDER,
   getNavAnnouncementId,
@@ -26,6 +28,7 @@ const memoryLocalStorage: Storage = {
 };
 
 beforeEach(() => {
+  vi.mocked(useOperatorAccess).mockReturnValue(null);
   vi.stubGlobal("localStorage", memoryLocalStorage);
   localStorage.clear();
   window.location.hash = "#dashboard";
@@ -80,6 +83,17 @@ afterEach(() => {
 });
 
 describe("mobile sidebar accessibility", () => {
+  it("shows Host only with server-confirmed operator access and removes it on revocation", () => {
+    const props = { active: "dashboard", onSelect: vi.fn(), onOpenSettings: vi.fn(), onClose: vi.fn(), collapsed: true };
+    const { rerender } = render(<Sidebar {...props} />);
+    expect(screen.queryByRole("button", { name: "Host" })).toBeNull();
+    vi.mocked(useOperatorAccess).mockReturnValue("owner");
+    rerender(<Sidebar {...props} />);
+    expect(screen.getByRole("button", { name: "Host" })).toBeTruthy();
+    vi.mocked(useOperatorAccess).mockReturnValue(null);
+    rerender(<Sidebar {...props} />);
+    expect(screen.queryByRole("button", { name: "Host" })).toBeNull();
+  });
   it("makes the offscreen drawer inert, then exposes and focuses it when opened", () => {
     const onClose = vi.fn();
     const props = {

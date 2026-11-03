@@ -1,5 +1,5 @@
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import { ClipboardCheck, ExternalLink, GraduationCap, Hospital, RefreshCw, School, Search, ShieldCheck } from "lucide-react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowRight, ClipboardCheck, ExternalLink, GraduationCap, Hospital, RefreshCw, School, Search, ShieldCheck } from "lucide-react";
 import { GlassCard, GButton, PanelHeader, Tag } from "../components/ui/primitives";
 import { ApplicationProfilePanel } from "../components/applications/ApplicationProfilePanel";
 import { ResidencyExplorer } from "../components/applications/ResidencyExplorer";
@@ -17,6 +17,7 @@ import {
   type ApplicationSchoolDataset,
   type SchoolVerificationStatus,
 } from "../lib/applicationSchools";
+import "../styles/exam-prep.css";
 
 const DATASET_URL = "./application-schools.json";
 const STATUS: Record<SchoolVerificationStatus, { label: string; tone: "green" | "orange" | "neutral" | "cyan" }> = {
@@ -58,6 +59,7 @@ export function ApplicationCheckerPage() {
   const [program, setProgram] = useState("all");
   const [checkFilter, setCheckFilter] = useState<EligibilityStatus | "all">("all");
   const [sort, setSort] = useState<SortKey>("name");
+  const pathwaysRef = useRef<HTMLDivElement>(null);
   // Medical students look ahead to residency (JD, Ideas 1); other tracks start
   // on schools. A pathway the learner picked is remembered on this device.
   const [pathway, setPathwayState] = useState<Pathway>(() => (
@@ -144,21 +146,39 @@ export function ApplicationCheckerPage() {
   function clearFilters() {
     setQuery(""); setStatus("all"); setProgram("all"); setSavedOnly(false); setCapturedOnly(false); setCheckFilter("all");
   }
+  function focusPathways() {
+    const target = pathwaysRef.current;
+    if (!target) return;
+    target.scrollIntoView({ behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ? "auto" : "smooth", block: "start" });
+    target.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')?.focus({ preventScroll: true });
+  }
 
   return (
     <div className="application-page">
-      <GlassCard pad>
-        <div className="row gap12" style={{ alignItems: "center" }}>
-          <span className="folder-icon" style={{ color: "var(--cyan)" }}><ClipboardCheck size={ICON_SIZE.control} /></span>
-          <div className="grow">
-            <div style={{ fontSize: 18, fontWeight: 800 }}>Application Checker</div>
-            <div className="sub">Explore sourced school requirements without turning missing information into advice.</div>
+      <section className="prep-desk application-desk" aria-labelledby="application-desk-title">
+        <div className="prep-desk-main">
+          <div className="prep-desk-topline"><span>AXOM / APPLICATION DESK</span><span className="prep-desk-wip" aria-label="Work in progress">WIP</span></div>
+          <div className="prep-desk-copy">
+            <span className="prep-desk-overline">School research, with its limits visible</span>
+            <h1 id="application-desk-title">Know what<br /><span>needs checking.</span></h1>
+            <p>Compare what AXOM has captured with your profile. Missing information stays unknown.</p>
           </div>
-          <Tag tone="cyan">Research workspace</Tag>
+          <button type="button" className="prep-desk-primary-action" onClick={focusPathways}>
+            Explore pathways <ArrowRight size={ICON_SIZE.body} aria-hidden="true" />
+          </button>
         </div>
-      </GlassCard>
+        <div className="application-desk-status">
+          <div className="prep-desk-routes-head"><span>RESEARCH STATUS</span><ClipboardCheck size={ICON_SIZE.body} aria-hidden="true" /></div>
+          <dl>
+            <div><dt>School records</dt><dd>{state.kind === "ready" ? schools.length.toLocaleString() : state.kind === "loading" ? "Loading" : "Unavailable"}</dd></div>
+            <div><dt>Your profile</dt><dd>{hasProfile ? "Added" : "Not added"}</dd></div>
+            <div><dt>Saved schools</dt><dd>{savedIds.size}</dd></div>
+          </dl>
+          <p>Research is a starting point. Confirm each school’s current policy before acting.</p>
+        </div>
+      </section>
 
-      <PathwaySwitch pathway={pathway} onChange={setPathway} medicalCount={schools.length} />
+      <div ref={pathwaysRef}><PathwaySwitch pathway={pathway} onChange={setPathway} medicalCount={schools.length} /></div>
 
       {pathway === "residency" ? <ResidencyExplorer empty={<PathwayNotCollected pathway="residency" />} />
         : pathway === "undergraduate" ? <PathwayNotCollected pathway="undergraduate" /> : <>

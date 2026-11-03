@@ -6,6 +6,28 @@ const CACHE = CACHE_PREFIX + BUILD_ID;
 const PRECACHE = []; // __AXOM_PRECACHE__
 const CORE = [...new Set(["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", ...PRECACHE])];
 
+function cacheResponse(event, key, response) {
+  const copy = response.clone();
+  // A failed cache write must not turn a successful network response into a failed request.
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.put(key, copy)).catch(() => {}));
+}
+
+async function cachedAppAsset(request) {
+  const names = (await caches.keys()).filter((name) => name.startsWith(CACHE_PREFIX));
+  for (const name of names) {
+    const cache = await caches.open(name);
+    const response = await cache.match(request);
+    if (!response) continue;
+    if (response.headers.get("content-type")?.includes("text/html")) {
+      // A host rewrite may have cached HTML at a hashed asset URL in an older shell.
+      await cache.delete(request);
+      continue;
+    }
+    return response;
+  }
+  return undefined;
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(CORE)));
   // No skipWaiting: a ready update must not interrupt an open workspace.
@@ -39,13 +61,12 @@ self.addEventListener("fetch", (event) => {
       try {
         const response = await fetch(request, { cache: "no-store" });
         if (response.ok && response.headers.get("content-type")?.includes("text/html")) {
-          const cache = await caches.open(CACHE);
-          await cache.put("./index.html", response.clone());
+          cacheResponse(event, "./index.html", response);
           return response;
         }
-        return (await (await caches.open(CACHE)).match("./index.html")) || response;
+        return (await caches.open(CACHE).then((cache) => cache.match("./index.html")).catch(() => undefined)) || response;
       } catch {
-        return (await (await caches.open(CACHE)).match("./index.html")) || Response.error();
+        return (await caches.open(CACHE).then((cache) => cache.match("./index.html")).catch(() => undefined)) || Response.error();
       }
     })());
     return;
@@ -54,15 +75,17 @@ self.addEventListener("fetch", (event) => {
   const staticAsset = /\.(?:js|mjs|css|png|jpe?g|svg|webp|ico|woff2?|webmanifest)$/.test(url.pathname);
   if (!staticAsset) return;
   event.respondWith((async () => {
-    const hit = await caches.match(request);
+    const hit = await cachedAppAsset(request).catch(() => undefined);
     if (hit) return hit;
-    const response = await fetch(request);
-    // Hosts can rewrite missing JS to index.html: never cache HTML as an asset.
-    if (response.ok && !response.headers.get("content-type")?.includes("text/html")) {
-      const cache = await caches.open(CACHE);
-      await cache.put(request, response.clone());
+    // A cache-busted no-store request escapes immutable HTML fallbacks left by a bad deployment.
+    const freshUrl = new URL(request.url);
+    freshUrl.searchParams.set("__axom_revalidate", String(Date.now()));
+    const response = await fetch(freshUrl.href, { cache: "no-store" });
+    const isHtml = response.headers.get("content-type")?.includes("text/html");
+    if (response.ok && !isHtml) {
+      cacheResponse(event, request, response);
     }
-    return response;
+    return isHtml ? Response.error() : response;
   })());
 });
 

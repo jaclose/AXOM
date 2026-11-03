@@ -11,7 +11,8 @@ test("Question Bank first use stays focused, themed, responsive, and route-scrol
   await expect(page.getByRole("heading", { level: 1, name: "Question Bank" })).toBeVisible();
   await expect(primary).toBeVisible();
   await expect(primary).toBeDisabled();
-  await expect(page.getByRole("tablist", { name: "Question Bank sections" }).getByRole("tab")).toHaveCount(3);
+  await expect(page.getByRole("tablist", { name: "Question Bank sections" }).getByRole("tab"))
+    .toHaveText(["Library", "Community", "How it works", "Add material"]);
   await expect(page.getByText("Current mastery", { exact: true })).toHaveCount(0);
 
   for (const theme of ["light", "dark"] as const) {

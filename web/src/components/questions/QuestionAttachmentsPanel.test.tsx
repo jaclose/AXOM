@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { File as NodeFile } from "node:buffer";
 import { indexedDB as fakeIndexedDb, IDBKeyRange } from "fake-indexeddb";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -143,5 +144,39 @@ describe("QuestionAttachmentsPanel", () => {
     const attachment = metadata({ id: "attachment-lost" });
     render(<QuestionAttachmentsPanel questionId="q1" attachments={[attachment]} onChange={vi.fn()} />);
     await waitFor(() => expect(screen.getByRole("img", { name: /is unavailable/ })).toBeTruthy());
+  });
+
+  it("requires a preview and explicit confirmation before restoring a missing blob under its existing key", async () => {
+    vi.stubGlobal("createImageBitmap", vi.fn(async () => ({ width: 1536, height: 946, close: vi.fn() })));
+    const attachment = metadata({ id: "attachment-lost", fileName: "figure.png", byteSize: PNG_BYTES.byteLength,
+      width: 1536, height: 946 });
+    const original = new NodeFile([PNG_BYTES], "figure.png", { type: "image/png" }) as unknown as File;
+    const onChange = vi.fn();
+    render(<QuestionAttachmentsPanel questionId="q1" attachments={[attachment]} onChange={onChange} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Restore figure.png" })).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Restore figure.png" }));
+    fireEvent.change(screen.getByLabelText("Choose original for figure.png"), { target: { files: [original] } });
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Restore missing image" })).toBeTruthy());
+    expect(screen.getByText(/cannot prove this is the same original image/)).toBeTruthy();
+    expect(await listQuestionAttachmentBlobKeys()).toEqual([]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Restore this image" }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain('Restored "figure.png"'));
+    expect(await listQuestionAttachmentBlobKeys()).toEqual([attachment.blobKey]);
+    expect((await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true }))?.questionId).toBe("q1");
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("rejects a mismatched replacement before showing a confirmation dialog", async () => {
+    vi.stubGlobal("createImageBitmap", vi.fn(async () => ({ width: 1536, height: 946, close: vi.fn() })));
+    const attachment = metadata({ id: "attachment-lost", fileName: "figure.png", byteSize: PNG_BYTES.byteLength });
+    render(<QuestionAttachmentsPanel questionId="q1" attachments={[attachment]} onChange={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Restore figure.png" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Restore figure.png" }));
+    fireEvent.change(screen.getByLabelText("Choose original for figure.png"), { target: { files: [pngFile("wrong.png")] } });
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("original file named"));
+    expect(screen.queryByRole("dialog", { name: "Restore missing image" })).toBeNull();
+    expect(await listQuestionAttachmentBlobKeys()).toEqual([]);
   });
 });

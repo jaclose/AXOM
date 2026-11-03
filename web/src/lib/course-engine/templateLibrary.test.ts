@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { makeSeed } from "../seed";
 import { parseImport, toPortableState } from "../backup";
-import { courseTemplateVersions, prepareCourseTemplate, savedCourseTemplates } from "./templateLibrary";
+import { MAX_COURSE_TEMPLATE_BYTES, courseTemplateVersions, prepareCourseTemplate, savedCourseTemplates } from "./templateLibrary";
 import { parseCourseTemplate, planCourseTemplate, reconcileCourseTemplate } from "./templateParse";
 
 const TEMPLATE = "DEMO - Lectures:\nWeek 1:\nLecture 01 First topic [Lecture]\nWeek 2:\nLecture 02 Second topic [Lecture]";
@@ -66,5 +66,11 @@ describe("saved course template versions", () => {
     await expect(prepareCourseTemplate("A schedule without activities", "schedule.txt")).rejects.toThrow("no course activities");
     const doc = await prepareCourseTemplate(TEMPLATE, "template.txt");
     expect(savedCourseTemplates([{ ...doc, fileType: "txt" }, { ...doc, rawText: "unreadable" }])).toEqual([]);
+  });
+
+  it("checks UTF-8 bytes before parsing an oversized pasted template", async () => {
+    const overLimit = `DEMO - Lectures:\n${"é".repeat(Math.floor(MAX_COURSE_TEMPLATE_BYTES / 2) + 1)}`;
+    expect(overLimit.length).toBeLessThan(MAX_COURSE_TEMPLATE_BYTES);
+    await expect(prepareCourseTemplate(overLimit, "Pasted template.txt")).rejects.toThrow("Pasted template.txt: template exceeds 2 MiB");
   });
 });

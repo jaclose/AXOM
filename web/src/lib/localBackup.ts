@@ -129,11 +129,17 @@ export async function createLocalBackup(
     }
     if (!indexedDbStored) throw new Error("AXOM could not allocate a unique local backup key.");
     runtimeBackupSummaries.set(key, toSummary(key, snapshot));
-  } catch {
+  } catch (indexedDbError) {
     // Private browsing and storage policies can disable IndexedDB. Keep a full
     // localStorage fallback in that case rather than losing the safety copy.
-    if (!storage) throw new Error("No browser storage is available for the migration backup.");
-    storage.setItem(key, serialized);
+    if (!storage) {
+      throw backupStorageError(indexedDbError, new Error("Browser fallback storage is unavailable."));
+    }
+    try {
+      storage.setItem(key, serialized);
+    } catch (fallbackError) {
+      throw backupStorageError(indexedDbError, fallbackError);
+    }
     runtimeBackupSummaries.set(key, toSummary(key, snapshot));
     // Do not immediately retry IndexedDB from pruning. A blocked upgrade stays
     // queued until the older tab closes, so another open here could hang after
@@ -150,6 +156,17 @@ export async function createLocalBackup(
   storeBackupMarker(storage, key, snapshot, serialized.length);
   await pruneLocalBackups(backupLimit);
   return key;
+}
+
+function backupStorageError(indexedDbError: unknown, fallbackError: unknown): AggregateError {
+  const detail = (error: unknown): string => {
+    if (!(error instanceof Error)) return "Unknown error";
+    return `${error.name}: ${error.message}`.slice(0, 160);
+  };
+  return new AggregateError(
+    [indexedDbError, fallbackError],
+    `AXOM could not save a safety backup. IndexedDB: ${detail(indexedDbError)}; browser fallback: ${detail(fallbackError)}. Keep this tab open and export a backup before reloading.`,
+  );
 }
 
 export function listLocalBackups(): LocalBackupSummary[] {

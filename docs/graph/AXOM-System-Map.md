@@ -21,6 +21,10 @@ not feature specifications or an agent preload list. [Graph guide](README.md).
 | Import, review and practice questions | [Questions](../features/questions.md) |
 | Course Tracker and schedule import | [Course routes](../features/README.md#course-tracker-and-import) |
 | Question analysis and Course Engine | [Course Engine contract](../features/course-engine.md) |
+| Communities, reviewed sharing and Host moderation | [Communities](../features/communities.md), [operator boundary](../features/community-operator-console.md#operator-console) |
+| Mechanism study and clinical review boundary | [Body simulator](../features/body-simulator.md) |
+| Release history and update copy | [Patch Notes](../features/patch-notes.md) |
+| Email consent, draft and delivery gates | [Communications](../features/communications.md), [readiness](../operations/communications-readiness.md) |
 | Settings and Decode boundary | [Settings/analysis routes](../features/README.md#settings-and-analysis) |
 | Focus timing and study credit | [Productivity](../features/productivity.md) |
 | Persistent audio, scenes and device media | [Soundscapes and media](../features/soundscapes.md) |

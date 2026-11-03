@@ -13,7 +13,7 @@ test("private bank installer resolves its final phase and surfaces actionable fa
   await seedOnboarded(page);
   await page.goto("/#questions");
   const panel = page.getByRole("region", { name: "Prepared library", exact: true });
-  if (!await panel.isVisible()) await page.getByText("Local collection transfer and source review", { exact: true }).click();
+  if (!await panel.isVisible()) await page.getByText("Import status and source review", { exact: true }).click();
   const chooser = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "Install prepared folder", exact: true }).click();
   await (await chooser).setFiles(process.env.AXOM_PRIVATE_LIBRARY_DIR!);

@@ -99,6 +99,19 @@ function localFallback(): Storage | null {
   }
 }
 
+function describeStorageFailure(error: unknown): string {
+  if (!(error instanceof Error)) return "unknown error";
+  const detail = error.message.replace(/\s+/g, " ").trim();
+  return (detail || error.name).slice(0, 180);
+}
+
+function combinedStorageFailure(indexedDbError: unknown, fallbackError: unknown): Error {
+  return new Error(
+    `IndexedDB save failed: ${describeStorageFailure(indexedDbError)}. Browser fallback failed: ${describeStorageFailure(fallbackError)}.`,
+    { cause: indexedDbError },
+  );
+}
+
 export function writeLocalFallback(
   fallbackStore: Storage | null,
   name: string,
@@ -533,6 +546,7 @@ async function writeVault(
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
     let conflict: VaultConflictError | null = null;
+    let chunkWriteFailure: Error | null = null;
     let settled = false;
 
     const write = (current: string | undefined, previous: readonly (string | undefined)[]) => {
@@ -559,7 +573,20 @@ async function writeVault(
         }
       }
       if (plan.manifest) {
-        plan.chunks.forEach((chunk, index) => store.put(chunk, `${plan.manifest!.chunkPrefix}:${index}`));
+        // Preserve unchanged chunks so a small edit does not rewrite megabytes.
+        plan.chunks.forEach((chunk, index) => {
+          const key = `${plan.manifest!.chunkPrefix}:${index}`;
+          const existing = store.get(key);
+          existing.onsuccess = () => {
+            if (existing.result === chunk) return;
+            try {
+              store.put(chunk, key);
+            } catch (error) {
+              chunkWriteFailure = error instanceof Error ? error : new Error(String(error));
+              tx.abort();
+            }
+          };
+        });
       }
       store.put(plan.storedValue, name);
       if (userId) {
@@ -602,12 +629,12 @@ async function writeVault(
     tx.onerror = () => {
       if (conflict || settled) return;
       db.close();
-      reject(tx.error ?? new Error("Local vault transaction failed"));
+      reject(chunkWriteFailure ?? tx.error ?? new Error("Local vault transaction failed"));
       settled = true;
     };
     tx.onabort = () => {
       db.close();
-      if (!settled) reject(conflict ?? tx.error ?? new Error("Local vault transaction failed"));
+      if (!settled) reject(conflict ?? chunkWriteFailure ?? tx.error ?? new Error("Local vault transaction failed"));
       settled = true;
     };
   });
@@ -833,7 +860,9 @@ const vaultStorage: StateStorage = {
         } catch { /* the last successful copy remains available for recovery */ }
         vaultWriteFailures.set(
           writeSequence,
-          failure instanceof Error ? failure : new Error("AXOM could not persist the local workspace."),
+          isVaultConflictError(failure)
+            ? failure
+            : combinedStorageFailure(indexedDbError, failure),
         );
         // Ordinary saves are best-effort, so say so: this one is on no disk.
         markVaultWriteFailure();

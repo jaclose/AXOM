@@ -22,7 +22,7 @@ for (const width of [1440, 768, 390]) test(`course bank stays focused, builds ac
     await flushVault();
   });
   await page.goto("/#questions");
-  await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
+  await page.getByRole("button", { name: "Weeks & sets", exact: true }).click();
   const bank = page.getByRole("region", { name: "Course question bank" });
   await expect(bank.getByRole("heading", { name: "Week 1", exact: true })).toBeVisible();
   await expect(bank.locator(".cb-set-row")).toHaveCount(12);
@@ -40,7 +40,7 @@ for (const width of [1440, 768, 390]) test(`course bank stays focused, builds ac
   await expect(picker.getByRole("status")).toHaveText("24 selected");
   await setup.getByRole("button", { name: "Done choosing" }).click();
   await setup.getByLabel("Custom question count").fill("2");
-  await setup.getByLabel("Question pool", { exact: true }).selectOption("unused");
+  await setup.getByRole("radiogroup", { name: "Question pool" }).getByRole("radio", { name: /^Unused · / }).click();
   page.once("dialog", (dialog) => void dialog.accept("Weeks 2 and 3, unused"));
   await setup.getByRole("button", { name: "Save as block" }).click();
   await page.screenshot({ path: `/tmp/axom-course-v2-setup-${width}.png` });
@@ -63,7 +63,7 @@ for (const width of [1440, 768, 390]) test(`course bank stays focused, builds ac
   expect(result.answered).toHaveLength(2);
   expect(result.answered.every((week) => week === 2 || week === 3)).toBe(true);
   expect(result.block?.filters.setIds).toHaveLength(24);
-  await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
+  await page.getByRole("button", { name: "Weeks & sets", exact: true }).click();
   await bank.getByLabel("Search question sets").fill("IMCQ practice 60");
   await expect(bank.locator(".cb-set-row")).toHaveCount(1);
   await bank.getByLabel("Search question sets").fill("");

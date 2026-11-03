@@ -61,9 +61,12 @@ for (const width of [1440, 768, 390]) {
     const download = page.waitForEvent("download");
     await dialog.getByRole("button", { name: "Export FTM 1 · Lectures" }).click();
     const exported = await download;
-    expect(await readFile((await exported.path())!, "utf8")).toBe(ORIGINAL);
+    const exportedBytes = await readFile((await exported.path())!);
+    expect(exportedBytes.toString("utf8")).toBe(ORIGINAL);
     // Loading the exported file deduplicates; the newer stored version remains available.
-    await dialog.getByLabel("Choose course template files").setInputFiles((await exported.path())!);
+    await dialog.getByLabel("Choose course template files").setInputFiles({
+      name: exported.suggestedFilename(), mimeType: "text/plain", buffer: exportedBytes,
+    });
     await expect(preview).toContainText("2 new, 1 already in your tracker");
     await dialog.getByText("Browse saved templates", { exact: true }).click();
     await version.selectOption({ label: "Version 2 · Latest import · Sample-course.txt" });

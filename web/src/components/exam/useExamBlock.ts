@@ -103,9 +103,14 @@ export interface ExamBlockApi {
   setPrefs: (patch: Partial<ExamSimPrefs>) => void;
   tool: AnnotationTool;
   setTool: (tool: AnnotationTool | ((current: AnnotationTool) => AnnotationTool)) => void;
+  allAnnotations: QuestionTextAnnotation[];
   annotations: QuestionTextAnnotation[];
+  optionAnnotations: (key: string) => QuestionTextAnnotation[];
   onSelection: (range: { startOffset: number; endOffset: number } | null) => void;
+  onOptionSelection: (key: string, range: { startOffset: number; endOffset: number } | null) => void;
   onDeleteAnnotation: (annotationId: string) => void;
+  clearAnnotations: () => void;
+  suppressOptionPick: (key: string, target: EventTarget | null) => boolean;
 
   /** Keys every interface shares (move, flag, choose, strike, tutor submit). True when the key was used. */
   handleKey: (event: KeyboardEvent) => boolean;
@@ -144,6 +149,7 @@ export function useExamBlock({ skin, mode, pool, runId, timeLimitSeconds, resume
   const mounted = useRef(true);
   const rootRef = useRef<HTMLDivElement>(null);
   const stemRef = useRef<HTMLDivElement | null>(null);
+  const optionSelectionGuard = useRef<string | null>(null);
 
   const reviewing = block.phase === "review";
   const index = block.index;
@@ -291,7 +297,9 @@ export function useExamBlock({ skin, mode, pool, runId, timeLimitSeconds, resume
   }, [interactionLocked, item.marked, question, reviewing, updateQuestion]);
 
   // --- highlighting (persists on the question, like the rest of AXOM) -----------
-  const annotations = useMemo(() => (question ? (annotationsById[question.id] ?? []).filter((annotation) => annotation.target === "stem") : []), [annotationsById, question]);
+  const allAnnotations = useMemo(() => (question ? annotationsById[question.id] ?? [] : []), [annotationsById, question]);
+  const annotations = useMemo(() => allAnnotations.filter((annotation) => annotation.target === "stem"), [allAnnotations]);
+  const optionAnnotations = useCallback((key: string) => allAnnotations.filter((annotation) => annotation.target === "option" && annotation.optionKey === key), [allAnnotations]);
   const onSelection = useCallback((range: { startOffset: number; endOffset: number } | null) => {
     if (!question || !range || tool !== "highlight" || reviewing || interactionLocked()) return;
     const created = createTextAnnotationWithIntegrity({
@@ -309,12 +317,40 @@ export function useExamBlock({ skin, mode, pool, runId, timeLimitSeconds, resume
     updateQuestion(question.id, { annotations: created.annotations });
     window.getSelection()?.removeAllRanges();
   }, [annotationsById, interactionLocked, prefs.highlightColor, question, reviewing, tool, updateQuestion]);
+  const onOptionSelection = useCallback((key: string, range: { startOffset: number; endOffset: number } | null) => {
+    if (!question || !range || tool !== "highlight" || reviewing || interactionLocked()) return;
+    const option = question.options.find((entry) => entry.key === key);
+    if (!option) return;
+    // A drag inside a label or answer button must not also submit that choice.
+    optionSelectionGuard.current = key;
+    window.setTimeout(() => { optionSelectionGuard.current = null; window.getSelection()?.removeAllRanges(); }, 0);
+    const created = createTextAnnotationWithIntegrity({
+      id: `annotation-${crypto.randomUUID()}`,
+      target: "option", optionKey: key, sourceText: option.text,
+      startOffset: range.startOffset, endOffset: range.endOffset,
+      tone: prefs.highlightColor, now: new Date().toISOString(),
+      existingAnnotations: annotationsById[question.id] ?? [],
+    });
+    if (created.status !== "created") return;
+    setAnnotationsById((current) => ({ ...current, [question.id]: created.annotations }));
+    updateQuestion(question.id, { annotations: created.annotations });
+  }, [annotationsById, interactionLocked, prefs.highlightColor, question, reviewing, tool, updateQuestion]);
   const onDeleteAnnotation = useCallback((annotationId: string) => {
     if (!question || reviewing || interactionLocked()) return;
     const remaining = removeTextAnnotationById(annotationsById[question.id] ?? [], annotationId);
     setAnnotationsById((current) => ({ ...current, [question.id]: remaining }));
     updateQuestion(question.id, { annotations: remaining });
   }, [annotationsById, interactionLocked, question, reviewing, updateQuestion]);
+  const clearAnnotations = useCallback(() => {
+    if (!question || reviewing || interactionLocked()) return;
+    setAnnotationsById((current) => ({ ...current, [question.id]: [] }));
+    updateQuestion(question.id, { annotations: [] });
+  }, [interactionLocked, question, reviewing, updateQuestion]);
+  const suppressOptionPick = useCallback((key: string, target: EventTarget | null) => {
+    const selected = optionSelectionGuard.current === key;
+    return selected || (tool === "highlight" && window.getSelection()?.isCollapsed === false)
+      || (tool === "erase" && target instanceof Element && Boolean(target.closest("mark.question-highlight")));
+  }, [tool]);
 
   const handleKey = useCallback((event: KeyboardEvent): boolean => {
     if (interactionLocked()) return false;
@@ -348,7 +384,8 @@ export function useExamBlock({ skin, mode, pool, runId, timeLimitSeconds, resume
     go, next, previous, pick, strike, mark, reveal, setNotes,
     confirmEnd, setConfirmEnd, itemReview, setItemReview, requestEnd, finish, suspend,
     finishLocked, finishStatus, finishError,
-    prefs, setPrefs, tool, setTool, annotations, onSelection, onDeleteAnnotation,
+    prefs, setPrefs, tool, setTool, allAnnotations, annotations, optionAnnotations,
+    onSelection, onOptionSelection, onDeleteAnnotation, clearAnnotations, suppressOptionPick,
     handleKey, rootRef, stemRef,
   };
 }

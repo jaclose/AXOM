@@ -9,6 +9,7 @@ import type { QuizSession } from "../lib/quiz";
 import { useStore } from "../lib/store";
 import { QuestionWorkspacePage } from "./QuestionWorkspacePage";
 import { STORAGE_KEYS } from "../lib/brand";
+import { launchCourseQuiz } from "../lib/course-engine/quizLaunch";
 import { PRIVATE_REVIEW_DOCUMENT, type PreparedBank } from "../lib/privateLibrary/types";
 
 const localValues = new Map<string, string>();
@@ -138,8 +139,8 @@ describe("QuestionWorkspacePage first use", () => {
     expect(screen.queryByText("Current mastery")).toBeNull();
     expect(screen.queryByText("Attempt accuracy")).toBeNull();
     expect(screen.queryByRole("tab", { name: /Insights/ })).toBeNull();
-    expect(within(screen.getByRole("tablist", { name: "Question Bank sections" })).getAllByRole("tab").map(tab => tab.textContent)).toEqual(["Library", "How it works", "Add material"]);
-    expect(screen.getByLabelText("Question Bank inventory").textContent).toContain("Ready to practice0Held for review0Saved sets0");
+    expect(within(screen.getByRole("tablist", { name: "Question Bank sections" })).getAllByRole("tab").map(tab => tab.textContent)).toEqual(["Library", "Community", "How it works", "Add material"]);
+    expect(screen.getByLabelText("Question Bank inventory").textContent).toContain("Answer-ready0Main explanation text0Held for review0Saved sets0");
     expect(screen.getByLabelText("How to start a practice set").textContent).toBe("1Course2Question set3Practice");
     expect(container.querySelector('[data-tour="question-bank-entry"]')).toBeTruthy();
 
@@ -205,6 +206,7 @@ describe("QuestionWorkspacePage first use", () => {
     render(<QuestionWorkspacePage />);
     const tabs = within(screen.getByRole("tablist", { name: "Question Bank sections" }));
     const browse = tabs.getByRole("tab", { name: "Library" });
+    const community = tabs.getByRole("tab", { name: "Community" });
     const overview = tabs.getByRole("tab", { name: "How it works" });
     const importTab = tabs.getByRole("tab", { name: "Add material" });
     expect(browse.getAttribute("aria-selected")).toBe("true");
@@ -212,7 +214,7 @@ describe("QuestionWorkspacePage first use", () => {
     expect(overview.getAttribute("tabindex")).toBe("-1");
     browse.focus();
     for (const [key, target, id] of [
-      ["{ArrowRight}", overview, "overview"], ["{ArrowRight}", importTab, "import"],
+      ["{ArrowRight}", community, "community"], ["{ArrowRight}", overview, "overview"], ["{ArrowRight}", importTab, "import"],
       ["{Home}", browse, "sets"], ["{End}", importTab, "import"],
     ] as const) {
       await user.keyboard(key);
@@ -244,7 +246,7 @@ describe("QuestionWorkspacePage first use", () => {
     render(<QuestionWorkspacePage />);
 
     const sourceTab = screen.getByRole("tab", { name: "Sources (1)" });
-    expect(within(screen.getByRole("tablist", { name: "Question Bank sections" })).getAllByRole("tab").map(item => item.textContent)).toEqual(["Library", "How it works", "Add material", "Sources (1)"]);
+    expect(within(screen.getByRole("tablist", { name: "Question Bank sections" })).getAllByRole("tab").map(item => item.textContent)).toEqual(["Library", "Community", "How it works", "Add material", "Sources (1)"]);
     expect(sourceTab.hasAttribute("aria-controls")).toBe(false);
     await user.click(sourceTab);
     expect(sourceTab.getAttribute("aria-controls")).toBe("question-bank-panel-library");
@@ -278,7 +280,7 @@ describe("QuestionWorkspacePage returning state", () => {
         extraction: { confidence: "medium", reviewed: false },
         attempts: [{ at: "2026-07-10T13:00:00+02:00", answerKey: "A", status: "correct" }],
       }),
-      question({ id: "stable", stem: "Stable ready question", setId: "stable-set" }),
+      question({ id: "stable", stem: "Stable ready question", setId: "stable-set", explanation: "The source supports Alpha." }),
     ];
     useStore.setState({
       questions,
@@ -299,7 +301,7 @@ describe("QuestionWorkspacePage returning state", () => {
     render(<QuestionWorkspacePage />);
 
     expect(screen.getByLabelText("Question Bank inventory").textContent)
-      .toContain("Ready to practice1Held for review2Saved sets0");
+      .toContain("Answer-ready1Main explanation text0Held for review2Saved sets0");
     expect(screen.getByText("1 ready to practice · 2 held for answer or source review.")).toBeTruthy();
   });
 
@@ -323,7 +325,7 @@ describe("QuestionWorkspacePage returning state", () => {
     expect(within(performance).getByText("Attempt accuracy")).toBeTruthy();
     expect(within(performance).getByText("Questions attempted")).toBeTruthy();
     expect(within(performance).getByText("Total attempts")).toBeTruthy();
-    expect(screen.getByLabelText("Question Bank inventory").textContent).toContain("Ready to practice1Held for review2Saved sets3");
+    expect(screen.getByLabelText("Question Bank inventory").textContent).toContain("Answer-ready1Main explanation text1Held for review2Saved sets3");
     expect(container.querySelector('[data-tour="question-bank-entry"]')).toBeTruthy();
 
     await user.click(within(mappingRegion).getByRole("button", { name: "Review issues" }));
@@ -448,6 +450,39 @@ describe("QuestionWorkspacePage Course Tracker handoff", () => {
     await user.click(screen.getByRole("button", { name: "Return to Course Tracker" }));
     expect(window.location.hash).toBe("#tracker");
     expect(screen.queryByText("Verified course question")).toBeNull();
+    sessionStorage.clear();
+  });
+
+  it("starts another exact week after closing a same-route course quiz", async () => {
+    sessionStorage.clear();
+    history.replaceState(null, "", "#questions");
+    vi.stubGlobal("confirm", () => true);
+    useStore.setState({
+      questions: [question({ id: "week-2", stem: "Week 2 only" }), question({ id: "week-3", stem: "Week 3 only" })],
+      questionSets: [
+        { ...set("set-week-2", "Week 2 set", "week-2", "2026-10-14T10:00:00.000Z"), scope: { module: "Neuro", week: 2 } },
+        { ...set("set-week-3", "Week 3 set", "week-3", "2026-10-14T10:00:00.000Z"), scope: { module: "Neuro", week: 3 } },
+      ],
+    });
+    const user = userEvent.setup();
+    render(<QuestionWorkspacePage />);
+
+    act(() => launchCourseQuiz({ module: "Neuro", term: "Term 4", week: 2, questionIds: ["week-2"], setIds: ["set-week-2"] }));
+    expect(await screen.findByText("Week 2 only")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "A. Alpha" }));
+    await user.click(screen.getByRole("button", { name: "Check answer" }));
+    await user.click(screen.getByRole("button", { name: "Finish block" }));
+    expect(await screen.findByRole("heading", { name: "Block results" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Return to Course Tracker" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(screen.queryByText("Week 2 only")).toBeNull());
+    expect(location.hash).toBe("#questions");
+
+    act(() => launchCourseQuiz({ module: "Neuro", term: "Term 4", week: 3, questionIds: ["week-3"], setIds: ["set-week-3"] }));
+    expect(await screen.findByText("Week 3 only")).toBeTruthy();
+    expect(screen.queryByText("Week 2 only")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Exit block" }));
+    history.replaceState(null, "", "/");
     sessionStorage.clear();
   });
 });
@@ -681,6 +716,25 @@ describe("QBank single-question medical-media integrity", () => {
     altText: "Essential ECG", role: "exhibit" as const,
     createdAt: "2026-10-14", updatedAt: "2026-10-14",
   };
+  it("keeps an Unreviewed warning visible while browsing and opening a community question", async () => {
+    const user = userEvent.setup();
+    const revisionId = "11111111-1111-4111-8111-111111111111";
+    const rawText = JSON.stringify({ version: 1, accountId: "owner", revisionId,
+      questionIds: ["community-direct"], pending: false });
+    useStore.setState({
+      questions: [question({ id: "community-direct", stem: "Community question" })],
+      documents: [{ id: `community-${revisionId}`, title: "Community review status",
+        fileName: "community-reference.json", fileType: "axom-community-reference",
+        uploadedAt: "2026-11-01T00:00:00.000Z", rawText, sizeBytes: rawText.length,
+        tags: [], linkedQuestionSetIds: [], libraryOnly: true }],
+    });
+    render(<QuestionWorkspacePage />);
+    await user.click(screen.getByRole("tab", { name: "Questions (1)" }));
+    expect(screen.getByText(/Unreviewed community material/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Community question" }));
+    expect(within(screen.getByRole("dialog", { name: "Question" }))
+      .getByText(/Unreviewed community material/)).toBeTruthy();
+  });
   it("does not expose a direct Check answer pathway for a figure-essential question missing its image", async () => {
     const user = userEvent.setup();
     useStore.setState({ questions: [question({

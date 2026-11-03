@@ -2,8 +2,27 @@
 
 ## Synthesis (`web/src/lib/soundscapes/`)
 
-Everything is generated on the device with Web Audio. Nothing is downloaded,
-loops never seam, and no copyrighted recordings ship with the app.
+The frequency and ambient presets are generated on the device with Web Audio.
+The Your sounds shelf also offers AXOM's original Afterlight recording and any
+personal recordings added on this Mac. Personal files are never committed or
+uploaded to the account. No user-provided recording is added to the public catalog.
+
+Afterlight is a two-minute original four-chord composition with bell notes,
+generated deterministically by `scripts/generate-axom-afterlight.mjs` from
+sine oscillators and seeded noise. It uses no samples. The compressed stereo
+file lives at `web/public/soundscapes/axom-original/afterlight.m4a`, and its
+shared catalog entry is in `web/src/data/soundscape-recordings.json`. It plays
+through the existing audio engine, volume control, focus dock and stop timer.
+
+JD's supplied two-hour Super Focus / Flow State MP3 was converted to a full-length
+stereo AAC derivative at
+`/Volumes/JDabSSD/Codex-work/AXOM-private-soundscapes-2026-11-01/super-focus-flow-state-full.m4a`.
+The original in Movies/Music is preserved. The derivative was imported through
+Your sounds into the Jafar Chrome profile at the local `127.0.0.1:5174` origin
+and verified after reload. This browser copy is backed by IndexedDB, not the
+account backup or cloud sync. The private SSD derivative is outside the repo
+and Vite's public directory, so a local build cannot package it by accident.
+A new Chrome profile or origin will need a separate local import.
 
 - `presets.ts` — the six presets, the learner's 90-minute-block rotation and
   the research principles. Binaural carriers were measured with an FFT of the

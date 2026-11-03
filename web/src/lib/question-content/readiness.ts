@@ -39,6 +39,8 @@ const ADVISORY: ReadonlySet<IssueCode> = new Set<IssueCode>([
   "rich_text_escaped",
   // Filing and bookkeeping that can be put right without touching the question.
   "possible_duplicate",
+  "student_source",
+  "source_nonkey_discrepancy",
   "scope_mismatch",
   "unknown_field",
   "unknown_flag",
@@ -48,11 +50,12 @@ const ADVISORY: ReadonlySet<IssueCode> = new Set<IssueCode>([
   "asset_reference_broken",
 ]);
 
-/** Where a key may come from and count as verified. A key worked out from a marked slide or from the wording of an explanation is not. */
+/** A printed key or a person's review is scored without an accompanying answer image. */
 const VERIFIED_EVIDENCE: ReadonlySet<AnswerEvidence> = new Set<AnswerEvidence>(["printed-key", "reviewer"]);
 
 const UNVERIFIED_KEY: Record<string, string> = {
   "answer-reveal-slide": "The key was read from a slide that marks the answer, not from a printed key. Check it against the slide.",
+  "source-mark-verified": "The verified source mark is missing its answer image, page, or checksum.",
   explanation: "The key was worked out from the wording of the explanation, not from a printed key. Check it against the source.",
   none: "The package does not say where the key came from. Check it against the source.",
 };
@@ -94,9 +97,16 @@ export function questionReadiness(question: PackageQuestion, issues: readonly Pa
   }
 
   const evidence = question.correctAnswer.evidence;
+  const checkedSourceMark = evidence === "source-mark-verified" && (question.assets ?? []).some((asset) =>
+    asset.role === "answer_reveal" &&
+    asset.questionId === question.id &&
+    Boolean(asset.sourceFile) &&
+    Number.isInteger(asset.sourcePage) && (asset.sourcePage ?? 0) > 0 &&
+    /^sha256:[0-9a-f]{64}$/i.test(asset.checksum ?? ""),
+  );
   const reasons = [
     ...keyDoubt.map((entry) => entry.message),
-    ...(evidence && VERIFIED_EVIDENCE.has(evidence) ? [] : [UNVERIFIED_KEY[evidence ?? "none"]]),
+    ...(checkedSourceMark || (evidence && VERIFIED_EVIDENCE.has(evidence)) ? [] : [UNVERIFIED_KEY[evidence ?? "none"]]),
     ...blocking,
   ];
   return reasons.length ? { readiness: "needs-review", reasons, advisories } : { readiness: "ready", reasons: [], advisories };

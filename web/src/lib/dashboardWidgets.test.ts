@@ -5,10 +5,8 @@ import {
   DASHBOARD_WIDGET_CATALOG,
   adaptLegacyDashboardLayout,
   applyDashboardLayoutPreset,
-  countExtraLargeWidgets,
   dashboardWidgetCatalogItem,
   dashboardWidgetOptions,
-  extraLargeWidgetRecommendation,
   mergeDashboardLayoutPreferences,
   normalizeDashboardLayoutPreferences,
   upgradeDashboardLayout,
@@ -28,6 +26,10 @@ describe("dashboard widget layout model", () => {
     ]));
     expect(CURRENT_DASHBOARD_WIDGET_IDS).not.toContain("aiActions");
     expect(dashboardWidgetCatalogItem("future-widget")).toMatchObject({ id: "future-widget", unavailable: true });
+    for (const item of DASHBOARD_WIDGET_CATALOG) {
+      expect(item.supportedSizes).toEqual(["small", "large"]);
+      expect(["small", "large"]).toContain(item.defaultSize);
+    }
   });
 
   it("adapts legacy order and visibility without deleting unknown IDs", () => {
@@ -39,7 +41,7 @@ describe("dashboard widget layout model", () => {
     expect(layout.preset).toBe("custom");
     expect(layout.order).toEqual(["todayScore", "future-widget"]);
     expect(layout.hiddenWidgetIds).toEqual(["future-widget", "aiActions"]);
-    expect(layout.widgets["future-widget"]).toMatchObject({ size: "medium", enabledFields: [] });
+    expect(layout.widgets["future-widget"]).toMatchObject({ size: "small", enabledFields: [] });
     expect(layout.updatedAt).toBe("2026-07-13T12:00:00.000Z");
   });
 
@@ -70,13 +72,13 @@ describe("dashboard widget layout model", () => {
     expect(layout.preset).toBe("custom");
     expect(layout.futureLayoutOption).toEqual({ density: "calm" });
     expect(layout.widgets.readiness).toMatchObject({
-      size: "small",
+      size: "large",
       enabledFields: [],
       preferences: { colorMode: "quiet" },
       futureWidgetOption: "preserve-me",
     });
     expect(layout.widgets["future-widget"]).toMatchObject({
-      size: "extra-large",
+      size: "large",
       enabledFields: ["alpha", "future-field"],
       preferences: { nested: { safe: true } },
     });
@@ -139,32 +141,27 @@ describe("dashboard widget layout model", () => {
       enabledFields: ["progress"],
       preferences: { imported: true, current: true, shared: "current" },
     });
-    expect(merged.widgets["future-widget"]).toMatchObject({ size: "extra-large", futureOnly: 1 });
+    expect(merged.widgets["future-widget"]).toMatchObject({ size: "large", futureOnly: 1 });
     expect(merged).toMatchObject({ currentOnly: "kept", importedOnly: "filled" });
   });
 
-  it("counts only visible extra-large widgets and exposes a dismissible soft recommendation", () => {
+  it("maps legacy Medium and Extra large sizes without changing a saved layout's other choices", () => {
     const layout = normalizeDashboardLayoutPreferences({
       version: 1,
       preset: "custom",
-      order: ["welcome", "commandBrief", "questionBank", "journal"],
-      hiddenWidgetIds: [],
+      order: ["questionBank", "journal", "future-widget"],
+      hiddenWidgetIds: ["journal"],
       widgets: {
-        welcome: { size: "extra-large" },
-        commandBrief: { size: "extra-large" },
-        questionBank: { size: "extra-large" },
-        journal: { size: "extra-large" },
+        questionBank: { size: "medium", enabledFields: ["due"], preferences: { marker: "kept" } },
+        journal: { size: "extra-large", enabledFields: ["latest"] },
+        "future-widget": { size: "medium", enabledFields: ["future-field"] },
       },
     })!;
-    expect(countExtraLargeWidgets(layout)).toBe(4);
-    expect(extraLargeWidgetRecommendation(layout)).toEqual({
-      count: 4,
-      limit: 3,
-      exceedsRecommendation: true,
-      dismissed: false,
-      shouldShow: true,
-    });
-    expect(extraLargeWidgetRecommendation({ ...layout, dismissedExtraLargeRecommendation: true }).shouldShow).toBe(false);
+    expect(layout.order).toEqual(["questionBank", "journal", "future-widget"]);
+    expect(layout.hiddenWidgetIds).toEqual(["journal"]);
+    expect(layout.widgets.questionBank).toMatchObject({ size: "small", enabledFields: ["due"], preferences: { marker: "kept" } });
+    expect(layout.widgets.journal).toMatchObject({ size: "large", enabledFields: ["latest"] });
+    expect(layout.widgets["future-widget"]).toMatchObject({ size: "small", enabledFields: ["future-field"] });
   });
 });
 

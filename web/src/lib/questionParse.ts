@@ -1065,20 +1065,127 @@ export function parseQuestionBlocks(raw: string): ParsedQuestionDraft[] {
     }
   }
 
-  const numbers = drafts
-    .filter((d) => d.questionNumber !== undefined)
-    .map((d) => `${draftSection.get(d) ?? 0}:${d.sourceLabel ?? ""}:${d.questionNumber}`);
-  if (new Set(numbers).size !== numbers.length) {
-    for (const d of drafts) {
-      d.warnings.push("Duplicate question numbers in this document — check the split.");
-      d.needsReview = true;
-      d.confidence = "low";
-      d.overallImportConfidence = Math.min(d.overallImportConfidence ?? 0.45, 0.45);
-      d.parserRuleIds = [...new Set([...(d.parserRuleIds ?? []), "conflict.duplicate-question-number"])];
-    }
+  const numberKey = (draft: ParsedQuestionDraft) =>
+    `${draftSection.get(draft) ?? 0}:${draft.sourceLabel ?? ""}:${draft.questionNumber}`;
+  const numberCounts = new Map<string, number>();
+  for (const draft of drafts) {
+    if (draft.questionNumber === undefined) continue;
+    const key = numberKey(draft);
+    numberCounts.set(key, (numberCounts.get(key) ?? 0) + 1);
+  }
+  for (const draft of drafts) {
+    if (draft.questionNumber === undefined || (numberCounts.get(numberKey(draft)) ?? 0) < 2) continue;
+    draft.warnings.push("Duplicate question numbers in this document — check the split.");
+    draft.needsReview = true;
+    draft.confidence = "low";
+    draft.overallImportConfidence = Math.min(draft.overallImportConfidence ?? 0.45, 0.45);
+    draft.parserRuleIds = [...new Set([...(draft.parserRuleIds ?? []), "conflict.duplicate-question-number"])];
   }
 
   return entries.size ? applyAnswerEntries(drafts, entries) : drafts;
+}
+
+export interface QuestionCopyDraft {
+  draft: ParsedQuestionDraft;
+  part: number;
+  role?: "question-only" | "answer-copy";
+}
+
+const copyText = (value: string): string => value.normalize("NFKC").replace(/\s+/g, " ").trim();
+
+function sameQuestionCopy(a: ParsedQuestionDraft, b: ParsedQuestionDraft): boolean {
+  return a.questionNumber === b.questionNumber
+    && copyText(a.stem) === copyText(b.stem)
+    && a.options.length >= 2
+    && a.options.length === b.options.length
+    && a.options.every((option, at) => option.key === b.options[at].key && copyText(option.text) === copyText(b.options[at].text));
+}
+
+function markUnpairedCopy(draft: ParsedQuestionDraft): ParsedQuestionDraft {
+  if (draft.parserRuleIds?.includes("conflict.answer-copy")) return draft;
+  return {
+    ...draft,
+    needsReview: true,
+    confidence: "low",
+    overallImportConfidence: Math.min(draft.overallImportConfidence ?? 0.45, 0.45),
+    warnings: [...draft.warnings, "Question-only and answered copies differ or have conflicting keys. Check both against the source."],
+    parserRuleIds: [...new Set([...(draft.parserRuleIds ?? []), "conflict.answer-copy"])],
+  };
+}
+
+const missingCopyAnswer = (warning: string): boolean => /^No correct answer was reliably detected\b/.test(warning);
+const copyBoundaryWarning = (warning: string): boolean =>
+  /^Numbered question-like content touched an explanation without a clear separator\b/.test(warning)
+  || /^This question began inside an explanation without a clear separator\b/.test(warning);
+
+/** Pair only adjacent, explicitly labelled sections with one exact full question on each side. */
+export function reconcileQuestionAnswerCopies<T extends QuestionCopyDraft>(input: readonly T[]): { entries: T[]; paired: number } {
+  const entries = input.map((entry) => ({ ...entry, draft: entry.draft }));
+  const removed = new Set<number>();
+  let paired = 0;
+  for (let at = 0; at < entries.length; at += 1) {
+    const primary = entries[at];
+    if (primary.role !== "question-only") continue;
+    const copies = entries.flatMap((entry, index) => entry.role === "answer-copy" && entry.part === primary.part + 1
+      && entry.draft.questionNumber === primary.draft.questionNumber ? [index] : []);
+    const primaries = entries.filter((entry) => entry.role === "question-only" && entry.part === primary.part
+      && entry.draft.questionNumber === primary.draft.questionNumber);
+    if (copies.length === 0) continue;
+    if (copies.length !== 1 || primaries.length !== 1) {
+      entries.forEach((entry, index) => {
+        if (entry.draft.questionNumber !== primary.draft.questionNumber) return;
+        if ((entry.part === primary.part && entry.role === "question-only")
+          || (entry.part === primary.part + 1 && entry.role === "answer-copy")) {
+          entries[index] = { ...entry, draft: markUnpairedCopy(entry.draft) };
+        }
+      });
+      continue;
+    }
+    const copyAt = copies[0];
+    const answered = entries[copyAt].draft;
+    const exact = sameQuestionCopy(primary.draft, answered);
+    const printedKey = Boolean(answered.correctKey && answered.answerEvidence
+      && answered.parserRuleIds?.some((rule) => /^answer\.(?:explicit|trailing)/.test(rule)));
+    const nonconflicting = !primary.draft.correctKey || primary.draft.correctKey === answered.correctKey;
+    const primaryReview = Boolean(primary.draft.needsReview && !primary.draft.warnings.length)
+      || primary.draft.warnings.some((warning) => !missingCopyAnswer(warning));
+    const answeredReview = Boolean(answered.needsReview && !answered.warnings.length)
+      || answered.warnings.some((warning) => !copyBoundaryWarning(warning));
+    if (!exact || !nonconflicting || !printedKey || !answered.explanation || answeredReview
+      || primary.draft.attachmentNames?.length || answered.attachmentNames?.length) {
+      entries[at] = { ...primary, draft: markUnpairedCopy(primary.draft) };
+      entries[copyAt] = { ...entries[copyAt], draft: markUnpairedCopy(answered) };
+      continue;
+    }
+    entries[at] = {
+      ...primary,
+      draft: {
+        ...primary.draft,
+        correctKey: answered.correctKey,
+        correctAnswerText: answered.correctAnswerText,
+        answerEvidence: answered.answerEvidence,
+        answerEvidenceSnippet: answered.answerEvidenceSnippet,
+        answerEvidencePage: answered.answerEvidencePage,
+        explanation: answered.explanation,
+        explanationSource: answered.explanationSource,
+        explanationSourceSnippet: answered.explanationSourceSnippet,
+        explanationSourcePage: answered.explanationSourcePage,
+        explanationRawCandidate: answered.explanationRawCandidate,
+        explanationCleanupOperations: answered.explanationCleanupOperations,
+        choiceRationales: answered.choiceRationales,
+        needsReview: primaryReview || undefined,
+        answerDetectionConfidence: answered.answerDetectionConfidence,
+        explanationDetectionConfidence: answered.explanationDetectionConfidence,
+        overallImportConfidence: primaryReview ? primary.draft.overallImportConfidence : answered.overallImportConfidence,
+        confidence: primaryReview ? primary.draft.confidence : answered.confidence,
+        warnings: [...primary.draft.warnings.filter((warning) => !missingCopyAnswer(warning)), ...answered.warnings.filter((warning) => !copyBoundaryWarning(warning))],
+        parserRuleIds: [...new Set([...(primary.draft.parserRuleIds ?? []), ...(answered.parserRuleIds ?? []), "answer.exact-section-copy", ...(answered.warnings.some(copyBoundaryWarning) ? ["question.boundary-crosschecked-copy"] : [])])],
+      },
+    };
+    removed.add(copyAt);
+    paired += 1;
+  }
+  return { entries: entries.filter((_, index) => !removed.has(index)), paired };
 }
 
 /**

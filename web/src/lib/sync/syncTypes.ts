@@ -24,10 +24,27 @@ export type ProtectionStatus =
  */
 export type SyncFailureKind = "network" | "server" | "auth" | "rejected";
 
-/** What a refusal was about. */
-export type SyncRejection = "too-large" | "storage-limit" | "refused";
+/** Fixed upload stages and causes safe to retain in local account diagnostics. */
+export type SyncUploadPhase = "preflight" | "content" | "originals" | "media" | "revision" | "receipt";
+export type SyncUploadReason = "session-refreshed" | "account-changed" | "request-timeout";
 
-/** Bookkeeping about a failed upload. Codes only: never server text or content. */
+/** What a refusal was about. */
+export type SyncRejection =
+  | "too-large"
+  | "workspace-too-large"
+  | "storage-limit"
+  | "refused"
+  | "source-too-large"
+  | "preparation-failed"
+  | "missing-original"
+  | "missing-image"
+  | "unsupported-image"
+  | "too-many-images"
+  | "local-content-conflict"
+  | "account-mismatch"
+  | "source-account-mismatch";
+
+/** Bookkeeping about failed protection, including device preflight. Codes only: never server text or content. */
 export interface SyncFailure {
   kind: SyncFailureKind;
   rejection?: SyncRejection;
@@ -35,6 +52,8 @@ export interface SyncFailure {
   status: number;
   /** SQLSTATE or PostgREST code, when the account sent one. */
   code?: string;
+  phase?: SyncUploadPhase;
+  reason?: SyncUploadReason;
   at: string;
 }
 

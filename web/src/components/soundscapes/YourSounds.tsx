@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Check, FileAudio, Music2, Pause, Pencil, Play, Plus, Trash2, Upload } from "lucide-react";
 import { ICON_SIZE } from "../../lib/iconSize";
-import { SOUNDSCAPES, FREQUENCY_ORDER, AMBIENT_ORDER, type SoundscapeId } from "../../lib/soundscapes/presets";
+import { SOUNDSCAPES, FREQUENCY_ORDER, AMBIENT_ORDER, type SoundscapeId, type SoundscapeVersion } from "../../lib/soundscapes/presets";
 import { useSoundscape } from "../../lib/soundscapes/store";
 import { useUserMedia, type UserMediaMeta } from "../../lib/soundscapes/userMedia";
 import { assignUserSound, homeOf, renameUserSound, syncUserSoundCatalog, userVersionId } from "../../lib/soundscapes/userSounds";
@@ -22,6 +22,7 @@ function sizeLabel(bytes: number): string {
 /** Your own files (kept on this device) and anything you've unlocked. */
 export function YourSounds() {
   const items = useUserMedia((state) => state.items).filter((item) => item.kind === "sound");
+  const libraryRecordings = SOUNDSCAPES.yours.versions.filter((version): version is Extract<SoundscapeVersion, { src: string }> => "src" in version && !version.userFile);
   const error = useUserMedia((state) => state.error);
   const add = useUserMedia((state) => state.add);
   const againUnlocked = useUnlocked("again");
@@ -50,10 +51,11 @@ export function YourSounds() {
     <section className="soundscape-section" aria-labelledby="yours-title">
       <div className="soundscape-section-head">
         <div><span className="soundscape-kicker"><Music2 size={ICON_SIZE.body} aria-hidden="true" /> Yours</span><h2 id="yours-title">Your sounds</h2></div>
-        <p>Add a track you own (a focus mix, a recording, a playlist export). It stays on this device, plays from the dock and follows your Pomodoro like any other sound.</p>
+        <p>Play an AXOM original or add a track you own. Your imports stay on this device and follow your focus timer.</p>
       </div>
       <div className="your-sounds">
         {againUnlocked && <AgainCard />}
+        {libraryRecordings.map((version) => <LibraryRecordingRow key={version.id} version={version} />)}
         {items.map((item) => <YourSoundRow key={item.id} item={item} />)}
         <div
           className={`your-sounds-add ${dragging ? "dragging" : ""}`}
@@ -88,6 +90,24 @@ export function YourSounds() {
         {error && <p className="soundscape-warning" role="alert">{error}</p>}
       </div>
     </section>
+  );
+}
+
+function LibraryRecordingRow({ version }: { version: Extract<SoundscapeVersion, { src: string }> }) {
+  const original = version.id === "axom-afterlight";
+  return (
+    <div className={`your-sound library-recording ${original ? "axom-original" : "personal-recording"}`}>
+      <PlayToggle presetId="yours" versionId={version.id} label={version.label} />
+      {original
+        ? <img className="your-sound-orb" src={`${import.meta.env.BASE_URL}icons/axom-orb-512.png`} alt="" width="28" height="28" />
+        : <FileAudio size={ICON_SIZE.emphasis} aria-hidden="true" className="your-sound-icon" />}
+      <div className="your-sound-copy">
+        <b>{original ? `AXOM Original · ${version.label}` : version.label}</b>
+        <small>{original ? "Composed for AXOM · no borrowed samples" : "Your local recording · kept on this Mac"}</small>
+        <small>{version.description}</small>
+      </div>
+      <span className="your-sound-source">{original ? "ORIGINAL 01" : "LOCAL FILE"}</span>
+    </div>
   );
 }
 

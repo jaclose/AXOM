@@ -1,10 +1,12 @@
 import { ArrowLeft, ArrowUpRight, Flame, Globe2, Heart, ShieldCheck } from "lucide-react";
 import { GlassCard, Tag } from "../components/ui/primitives";
+import { StreakFreezeMeter } from "../components/productivity/StreakFreezeMeter";
 import { compactCountdown, msUntilDoctordle } from "../components/shell/DailyGameNavMeta";
 import { useClockNow } from "../lib/clock";
 import { DOCTORDLE_URL, doctordleCaseNumber, doctordleStreak, useDoctordle } from "../lib/doctordle";
 import { ICON_SIZE } from "../lib/iconSize";
 import "../styles/ecosystem.css";
+import "../styles/study-streaks.css";
 
 export function DoctordlePage() {
   const log = useDoctordle((state) => state.log);
@@ -48,6 +50,8 @@ export function DoctordlePage() {
         <span><b>{results.length}</b> logged</span>
         <span><b>{solved}</b> got it</span>
       </div>
+      <StreakFreezeMeter available={log.freezesLeft ?? 2} progress={log.refillProgress ?? 0} label="Doctordle" />
+      <p className="study-game-freeze-note">A freeze covers one missed case. Two reported days in your streak refill one.</p>
       <div className={`doctordle-today ${asking ? "is-asking" : ""}`}>
         {todayResult ? (
           <>

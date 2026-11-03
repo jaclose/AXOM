@@ -20,3 +20,15 @@ export function localEmailContext(state: NoctyriumState, type: EmailType, theme:
   };
 }
 export function downloadBlob(blob: Blob, filename: string) { const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(url), 10000); }
+
+/** Clipboard permissions vary by browser and context. A denied write is an
+ * unavailable sharing option, while the downloaded image remains usable. */
+export async function copyImageBlob(blob: Blob): Promise<boolean> {
+  if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") return false;
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+    return true;
+  } catch {
+    return false;
+  }
+}

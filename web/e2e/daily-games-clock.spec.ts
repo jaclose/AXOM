@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { completeSetup, expect, test } from "./fixtures";
 import { STORAGE_KEYS } from "../src/lib/brand";
+import { SCHEMA_VERSION } from "../src/lib/seed";
 
 test("persistent Daily Games, Daily Word history, and shared clock preferences persist locally", async ({ page }) => {
   const browserErrors: string[] = [];
@@ -27,11 +28,10 @@ test("persistent Daily Games, Daily Word history, and shared clock preferences p
   await page.reload({ waitUntil: "networkidle" });
   await expect(page.getByRole("gridcell", { name: /Row 1, column 1, letter F/ })).toBeVisible();
 
-  // The TopBar action opens the exact Personalization surface rather than a
-  // nested settings dialog.
+  // The TopBar action opens the shared Settings surface.
   await page.getByRole("button", { name: /Open clock/ }).click();
   await page.getByRole("button", { name: "Clock preferences" }).click();
-  const settings = page.getByRole("dialog", { name: "Your AXOM Setup" });
+  const settings = page.getByRole("dialog", { name: "Settings" });
   await expect(settings.getByRole("heading", { name: "Daily rhythm reminders" })).toBeVisible();
 
   await settings.getByRole("combobox", { name: "Hour cycle" }).selectOption("24");
@@ -47,7 +47,7 @@ test("persistent Daily Games, Daily Word history, and shared clock preferences p
 
   await page.reload({ waitUntil: "networkidle" });
   const persisted = await readPersistedWorkspace(page);
-  expect(persisted.schemaVersion).toBe(34);
+  expect(persisted.schemaVersion).toBe(SCHEMA_VERSION);
   expect(persisted.profile.timeZonePreference).toEqual({ mode: "custom", customTimezone: "America/Grenada" });
   expect(persisted.profile.clockPreferences).toMatchObject({
     enabled: true,

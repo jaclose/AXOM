@@ -9,6 +9,7 @@ import { GlassCard, GButton, PanelHeader, Tag } from "../components/ui/primitive
 import { Pomodoro } from "../components/productivity/Pomodoro";
 import { ActivityLabelInput } from "../components/productivity/ActivityLabelInput";
 import { DailyProgressVessel } from "../components/productivity/DailyProgressVessel";
+import { StudyStreakMonitor } from "../components/productivity/StudyStreakMonitor";
 import { DailyRequirementsEditor } from "../components/productivity/DailyRequirementsEditor";
 import { TrackerManager } from "../components/productivity/TrackerManager";
 import { useInView } from "../lib/useInView";
@@ -119,6 +120,7 @@ export function ProductivityPage() {
             </div>
           ) : <div className="row wrap gap6"><GButton size="sm" onClick={() => setPickedDay(null)}>Back to today</GButton><GButton size="sm" onClick={() => setModuleTourOpen(true)} aria-label="Open Productivity help tour"><HelpCircle size={ICON_SIZE.body} /> Help</GButton></div>} />
         <DailyProgressVessel result={dailyProgress} />
+        {isActive && <StudyStreakMonitor state={s} result={dailyProgress} />}
 
         {isActive ? (
           <>

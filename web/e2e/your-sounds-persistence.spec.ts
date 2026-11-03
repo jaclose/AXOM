@@ -53,12 +53,18 @@ test("a renamed and reassigned sound of your own keeps both across a reload", as
   await seedOnboarded(page);
   await openSoundscapes(page);
 
+  const original = page.locator(".your-sound.axom-original");
+  await expect(original).toContainText("AXOM Original · Afterlight");
+  await original.getByRole("button", { name: "Play Afterlight" }).click();
+  await expect.poll(async () => (await player(page)).presetId).toBe("yours");
+  await expect.poll(async () => (await player(page)).status).toBe("playing");
+
   // The learner has played 40 Hz Gamma before, so a pick is already saved for it.
   await page.locator(".frequency-card").getByRole("button", { name: "Play 40 Hz Gamma" }).click();
   await expect.poll(async () => (await player(page)).pick).toBe("clean");
 
   await page.locator(".your-sounds-add input[type=file]").setInputFiles({ name: "recording 0142.wav", mimeType: "audio/wav", buffer: toneWav() });
-  const row = page.locator(".your-sound").first();
+  const row = page.locator(".your-sound:not(.library-recording):not(.again)").first();
   await expect(row.locator(".your-sound-copy b")).toHaveText("recording 0142");
 
   // Rename: Enter saves, clicking away saves, Escape cancels.
@@ -83,7 +89,7 @@ test("a renamed and reassigned sound of your own keeps both across a reload", as
 
   await reloadAfterSave(page);
   await openSoundscapes(page);
-  const after = page.locator(".your-sound").first();
+  const after = page.locator(".your-sound:not(.library-recording):not(.again)").first();
   await expect(after.locator(".your-sound-copy b")).toHaveText("Alpha focus");
   await expect(after.locator(".your-sound-copy small")).toContainText("Plays for 40 Hz Gamma");
   await expect(after.locator("select")).toHaveValue("gamma-40");

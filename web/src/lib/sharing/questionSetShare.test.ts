@@ -156,7 +156,7 @@ describe("Question Set share boundary", () => {
     });
     expect(result.set).toMatchObject({
       sourceDocumentIds: [],
-      parserWarnings: ["Imported from an unlisted Question Set link."],
+      parserWarnings: ["Imported from a shared Question Set."],
       importProvenance: { version: 1, shareId: SHARE_ID, contentDigest: DIGEST },
     });
     expect(result.set).not.toHaveProperty("scope");

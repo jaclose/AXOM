@@ -5,10 +5,14 @@ import { sha256 } from "../compressedText";
 import { privateReviewMedia } from "../privateLibrary/media";
 import { getQuestionAttachmentBlob, MAX_QUESTION_ATTACHMENT_BYTES, QUESTION_ATTACHMENT_TYPES, type QuestionImageAttachment } from "../questionAttachments";
 import type { NoctyriumState } from "../types";
+import { SyncPushError } from "./syncFailure";
 
 export const MEDIA_BUCKET = "workspace-media";
 export const MAX_CLOUD_MEDIA_FILES = 20_000;
 export const MAX_CLOUD_MEDIA_BYTES = 2 * 1024 * 1024 * 1024;
+const MEDIA_UPLOAD_CONCURRENCY = 6;
+const confirmedMediaUploads = new Map<string, Set<string>>();
+export function clearCloudMediaUploadCache(): void { confirmedMediaUploads.clear(); }
 export interface CloudMediaReference {
   academic?: AcademicAssetReference;
   blobKey: string;
@@ -62,42 +66,82 @@ export function validateWorkspaceMedia(state: NoctyriumState, value: unknown): C
 export async function uploadCloudMedia(client: SupabaseClient, userId: string, state: NoctyriumState, assertCurrent: () => Promise<void>, previous: CloudMediaReference[] = []): Promise<CloudMediaReference[]> {
   const bucket = client.storage.from(MEDIA_BUCKET);
   const shared = storedAcademicBindings(state).assets;
+  const academicByHash = new Map<string, AcademicAssetReference>();
+  for (const asset of shared) if (!academicByHash.has(asset.sha256)) academicByHash.set(asset.sha256, asset);
   const refs = workspaceMedia(state);
-  if (refs.size > MAX_CLOUD_MEDIA_FILES) throw new Error("This image library has too many files for one protected version.");
+  if (refs.size > MAX_CLOUD_MEDIA_FILES) throw new SyncPushError(
+    { kind: "rejected", rejection: "too-many-images", status: 0 },
+    "This image library has too many files for one protected version.",
+  );
   const prior = new Map(previous.map((entry) => [entry.blobKey, entry]));
   // Deferred review documents can contain image references. Keep their acknowledged
   // index until the source is downloaded; cache removal cannot delete account media.
   const manifest: CloudMediaReference[] = [...(state.deferredContent?.media ?? []).filter(entry => !refs.has(entry.blobKey))];
-  const uploaded = new Set<string>();
-  for (const [blobKey, { attachment }] of refs) {
-    await assertCurrent();
-    const known = prior.get(blobKey);
-    if (known && known.byteSize === attachment.byteSize && known.updatedAt === attachment.updatedAt) {
-      const academic = shared.find(asset => asset.sha256 === known.hash);
-      manifest.push(academic ? { ...known, academic } : known);
-      continue;
+  const entries = [...refs];
+  const ordered = new Array<CloudMediaReference>(entries.length);
+  const confirmed = confirmedMediaUploads.get(userId) ?? new Set<string>();
+  confirmedMediaUploads.set(userId, confirmed);
+  const inFlight = new Map<string, Promise<void>>();
+  let cursor = 0;
+  let failed = false;
+  let failure: unknown;
+  async function ensureUploaded(hash: string, blob: Blob, mimeType: string): Promise<void> {
+    if (confirmed.has(hash)) return;
+    let work = inFlight.get(hash);
+    if (!work) {
+      work = (async () => {
+        await assertCurrent();
+        const { error } = await bucket.upload(`${userId}/${hash}`, blob, { contentType: mimeType, upsert: false, cacheControl: "31536000" });
+        if (error) {
+          if (!('statusCode' in error) || String(error.statusCode) !== "409") throw error;
+          // A duplicate name alone cannot establish that the immutable object has these bytes.
+          const existing = await bucket.download(`${userId}/${hash}`);
+          if (existing.error || !existing.data || await sha256(new Uint8Array(await existing.data.arrayBuffer())) !== hash) throw new Error("An account image could not be verified. The workspace has not been marked protected.");
+        }
+        await assertCurrent();
+        confirmed.add(hash);
+      })().finally(() => inFlight.delete(hash));
+      inFlight.set(hash, work);
     }
-    const record = await getQuestionAttachmentBlob(blobKey);
-    if (!record || record.blob.size !== attachment.byteSize) throw new Error("Some question images are missing on this device. Restore a complete backup before protecting this version.");
-    if (record.blob.size > MAX_QUESTION_ATTACHMENT_BYTES || !QUESTION_ATTACHMENT_TYPES.includes(attachment.mimeType)) throw new Error("A question image is not supported for account storage.");
-    const hash = await sha256(new Uint8Array(await record.blob.arrayBuffer()));
-    const academic = shared.find(asset => asset.sha256 === hash);
-    const path = `${userId}/${hash}`;
-    if (!academic && !uploaded.has(hash)) {
-      const { error } = await bucket.upload(path, record.blob, { contentType: attachment.mimeType, upsert: false, cacheControl: "31536000" });
-      if (error) {
-        if (!('statusCode' in error) || String(error.statusCode) !== "409") throw error;
-        // A duplicate name alone is insufficient: verify the bytes before
-        // allowing a revision to call that object protected.
-        const existing = await bucket.download(path);
-        if (existing.error || !existing.data || await sha256(new Uint8Array(await existing.data.arrayBuffer())) !== hash) throw new Error("An account image could not be verified. The workspace has not been marked protected.");
-      }
-      uploaded.add(hash);
-    }
-    manifest.push({ ...(academic ? { academic } : {}), blobKey, hash, byteSize: record.blob.size, updatedAt: attachment.updatedAt });
+    await work;
   }
+  async function worker(): Promise<void> {
+    while (cursor < entries.length && !failed) {
+      const index = cursor++;
+      const [blobKey, { attachment }] = entries[index];
+      try {
+        await assertCurrent();
+        const known = prior.get(blobKey);
+        if (known && known.byteSize === attachment.byteSize && known.updatedAt === attachment.updatedAt) {
+          const academic = academicByHash.get(known.hash);
+          ordered[index] = academic ? { ...known, academic } : known;
+          continue;
+        }
+        const record = await getQuestionAttachmentBlob(blobKey);
+        if (!record || record.blob.size !== attachment.byteSize) throw new SyncPushError(
+          { kind: "rejected", rejection: "missing-image", status: 0 },
+          "Some question images are missing on this device. Restore a complete backup before protecting this version.",
+        );
+        if (record.blob.size > MAX_QUESTION_ATTACHMENT_BYTES || !QUESTION_ATTACHMENT_TYPES.includes(attachment.mimeType)) throw new SyncPushError(
+          { kind: "rejected", rejection: "unsupported-image", status: 0 },
+          "A question image is not supported for account storage.",
+        );
+        const hash = await sha256(new Uint8Array(await record.blob.arrayBuffer()));
+        const academic = academicByHash.get(hash);
+        if (!academic) await ensureUploaded(hash, record.blob, attachment.mimeType);
+        ordered[index] = { ...(academic ? { academic } : {}), blobKey, hash, byteSize: record.blob.size, updatedAt: attachment.updatedAt };
+      } catch (error) {
+        if (!failed) {
+          failed = true;
+          failure = error;
+        }
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(MEDIA_UPLOAD_CONCURRENCY, entries.length) }, worker));
+  if (failed) throw failure;
   await assertCurrent();
-  return readMediaManifest(manifest);
+  return readMediaManifest([...manifest, ...ordered]);
 }
 
 

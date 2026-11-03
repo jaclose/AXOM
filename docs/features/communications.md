@@ -235,7 +235,7 @@ older provider events. Opens/clicks are not used for product state or readiness.
 
 | Template | Trigger / required source | Main action |
 | --- | --- | --- |
-| Welcome | New account profile; verified address before send | Enter AXOM |
+| Welcome | New account profile; verified address before send. Pulse-style hero Orb and three first steps (term, exam-style practice, the recorded week) | Enter AXOM |
 | Authentication | Supabase confirmation, OTP/link, recovery, invitation, email change, reauthentication | Secure Supabase-generated action |
 | Security | Supabase security notification template | Review account |
 | Daily learning | Opt-in and a recorded course/activity context | Continue course |
@@ -310,7 +310,9 @@ in this checkout. Selected IDs and course membership provide bounded existing-da
 
 Exports: requested → processing → ready or failed. The private JSON contains account-held
 profile metadata, latest protected workspace, consent/presentation, Pulse records,
-communications history and request history. Device-only source/attachment binaries are
+communications history, the account's submitted journal experience feedback and request
+history. Feedback is retrieved by owner ID and checked again before export; another
+account's feedback cannot enter the file. Device-only source/attachment binaries are
 outside that account export; the existing local backup preserves supported local media.
 Privacy reads the portable backup's actual result. If attachment bytes are unavailable,
 it reports the number of missing images next to the download action and carries that

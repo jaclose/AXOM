@@ -16,7 +16,7 @@ const courses: Course[] = [
   { id: "c-other", termId: "t1", code: "", name: "Anatomy \"Lab\" *", files: 0, modules: [{ id: "m-bsce1", name: "BSCE" }] },
 ];
 const tracker: TrackerItem[] = [
-  { id: "l-emotions", path: "T2/NB3/Lectures", label: "NB 58 Emotions", kind: "Lecture", passes: 0, ankiPasses: 0, yield: "none", updated: "" },
+  { id: "l-emotions", path: "T2/NB3/Week 2", label: "NB 58 Emotions", kind: "Lecture", passes: 0, ankiPasses: 0, yield: "none", updated: "" },
   { id: "l-full", path: "Term 1/BPM 500/MSK/Lectures", label: "Rotator cuff", kind: "Lecture", passes: 0, ankiPasses: 1, yield: "none", updated: "" },
   { id: "l-ambiguous", path: "BSCE/Cases", label: "Case 1", kind: "Lecture", passes: 0, ankiPasses: 0, yield: "none", updated: "" },
   { id: "l-term", path: "Term 2/BSCE/Cases", label: "Case 2", kind: "Lecture", passes: 0, ankiPasses: 0, yield: "none", updated: "" },
@@ -96,7 +96,9 @@ describe("note builder", () => {
 
   it("tags notes with AXOM, a course/module slug, and the card's own tags", () => {
     expect(axomTagsFor({ courseId: "c501", moduleId: "m-nb3", trackerItemId: "l-emotions", tags: ["high yield", "Renal", "renal", "leech", "a\"b"] }, catalog))
-      .toEqual(["AXOM", "AXOM::bpm-501::nb3::nb-58-emotions", "high_yield", "Renal", "ab"]);
+      .toEqual(["AXOM", "AXOM::bpm-501::nb3::nb-58-emotions", "AXOM::term-2", "AXOM::term-2::bpm-501", "AXOM::term-2::bpm-501::nb3", "AXOM::term-2::bpm-501::nb3::week-2", "high_yield", "Renal", "ab"]);
+    expect(axomTagsFor({ courseId: "c501", moduleId: "m-nb3", tags: [] }, catalog))
+      .not.toContain("AXOM::term-2::bpm-501::nb3::week-2");
     expect(axomTagsFor({ tags: [] }, catalog)).toEqual(["AXOM"]);
     expect(tagSlug("Émotions & Sleep")).toBe("emotions-and-sleep");
     expect(sanitizeTag(" ::a b:: ")).toBe("a_b");

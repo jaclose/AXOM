@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-label="Red over-ear headphones">
+  <defs>
+    <linearGradient id="shell" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#e15e62"/><stop offset=".52" stop-color="#9f273b"/><stop offset="1" stop-color="#4c1829"/></linearGradient>
+    <linearGradient id="pad" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#3c2930"/><stop offset="1" stop-color="#14181c"/></linearGradient>
+    <filter id="shadow" x="-.3" y="-.2" width="1.6" height="1.6"><feGaussianBlur stdDeviation="4"/></filter>
+  </defs>
+  <ellipse cx="81" cy="137" rx="67" ry="13" fill="#080b11" opacity=".38" filter="url(#shadow)"/>
+  <path d="M30 113C17 81 21 38 53 23c19-9 43-9 61 0 31 15 37 58 24 90" fill="none" stroke="#14191d" stroke-width="19" stroke-linecap="round"/>
+  <path d="M30 113C17 81 21 38 53 23c19-9 43-9 61 0 31 15 37 58 24 90" fill="none" stroke="url(#shell)" stroke-width="13" stroke-linecap="round"/>
+  <path d="M41 62C43 42 55 30 75 29" fill="none" stroke="#f29b8b" stroke-width="2" stroke-linecap="round" opacity=".58"/>
+  <path d="M120 61c-4-20-15-29-30-32" fill="none" stroke="#f29b8b" stroke-width="2" stroke-linecap="round" opacity=".36"/>
+  <g transform="rotate(-13 34 120)">
+    <rect x="13" y="94" width="43" height="52" rx="16" fill="#191b20"/>
+    <rect x="17" y="96" width="35" height="48" rx="14" fill="url(#shell)" stroke="#e17a76" stroke-width="1.5"/>
+    <ellipse cx="35" cy="120" rx="11" ry="17" fill="url(#pad)" stroke="#682537" stroke-width="2"/>
+    <path d="M23 105c4-5 8-7 14-7" fill="none" stroke="#f6a195" stroke-width="2" opacity=".55"/>
+  </g>
+  <g transform="rotate(13 126 120)">
+    <rect x="104" y="94" width="43" height="52" rx="16" fill="#191b20"/>
+    <rect x="108" y="96" width="35" height="48" rx="14" fill="url(#shell)" stroke="#e17a76" stroke-width="1.5"/>
+    <ellipse cx="126" cy="120" rx="11" ry="17" fill="url(#pad)" stroke="#682537" stroke-width="2"/>
+    <path d="M114 105c4-5 8-7 14-7" fill="none" stroke="#f6a195" stroke-width="2" opacity=".55"/>
+  </g>
+</svg>

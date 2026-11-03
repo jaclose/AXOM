@@ -137,6 +137,11 @@
   outline: none;
 }
 .setup-copy p { margin: 0; max-width: 34ch; color: var(--text-60); font-size: var(--fs-md); line-height: var(--leading-relaxed, 1.6); }
+.setup-other-workspace { display: grid; gap: 5px; padding: 12px 14px; border: 1px solid rgba(var(--accent-rgb), .28); border-radius: 14px; background: rgba(var(--accent-rgb), .05); }
+.setup-other-workspace span { color: var(--text); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
+.setup-other-workspace a { display: inline-flex; align-items: center; gap: 5px; width: fit-content; color: rgb(var(--accent-rgb)); font-size: var(--fs-sm); font-weight: var(--fw-semibold); text-underline-offset: 3px; }
+.setup-other-workspace a:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: 3px; }
+.setup-other-workspace small { color: var(--text-60); font-size: var(--fs-xs); line-height: 1.4; }
 
 .setup-preview {
   display: grid;
@@ -217,7 +222,7 @@
 /* Tiles: a choice you can see. */
 
 /* Palette orbs. */
-.palette-orbs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px 10px; }
+.palette-orbs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 10px; }
 .palette-orb-choice {
   --px: 0;
   --py: 0;
@@ -374,7 +379,7 @@
   .setup-copy { gap: 10px; }
   .setup-copy h1 { font-size: 2rem; }
   .setup-copy p { font-size: var(--fs-base); }
-  .palette-orbs { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 4px; }
+  .palette-orbs { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 4px; }
   .palette-orb { width: 50px; height: 50px; }
   .palette-orb-label small { display: none; }
   .setup-row { grid-template-columns: 1fr; gap: 8px; }

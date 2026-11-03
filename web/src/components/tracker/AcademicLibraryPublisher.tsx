@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileArchive, FolderOpen, Library, ListChecks, Square, UploadCloud } from "lucide-react";
+import { FileArchive, FileCheck2, FolderOpen, Library, ListChecks, Square, UploadCloud } from "lucide-react";
 import { useAccount } from "../../lib/account/accountStore";
 import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
-import { isAcademicReviewer, shareAcademicCourses } from "../../lib/academicLibrary/client";
+import { shareAcademicCourses } from "../../lib/academicLibrary/client";
 import { uploadAcademicBatch } from "../../lib/academicLibrary/batch";
+import { inspectPreparedUploadExplanations } from "../../lib/academicLibrary/explanationReview";
+import { applyFilingDecisions, readFilingDecisions, readFilingProposals, type FilingProposals, type FilingSummary } from "../../lib/academicLibrary/filingDecisions";
+import { applyMiNmiDecision, readMiNmiDecision, type MiNmiSummary } from "../../lib/academicLibrary/miNmiCorrection";
+import { accountQuestions, type QuestionLedger } from "../../lib/academicLibrary/questionLedger";
 import {
   PUBLICATION_INPUT_LIMITS, planPublication, publicationCatalogId, publicationJobs, readPublicationInventory,
   type PlannedCourse, type PublicationInventory,
@@ -16,11 +20,11 @@ import { GButton, GhostButton, Tag } from "../ui/primitives";
 
 type Term = ReviewedFiling["term"];
 const TERMS: Term[] = ["Term 1", "Term 2", "Term 3", "Term 4", "Term 5"];
-/** Source files a course leaves on this device: to fit its size limit, or because each is over 50 MB. */
+/** Source files a course leaves on this device because of type or size limits. */
 interface KeptFiles { keptLocal?: number; overLimit?: number }
 type CourseState =
-  | { state: "checked"; ready: number; review: number; files: number; bytes: number } & KeptFiles
-  | { state: "published"; ready: number; files: number; shared?: boolean; approved?: boolean; sharingError?: string } & KeptFiles
+  | { state: "checked"; ready: number; review: number; missingExplanations: number; files: number; bytes: number } & KeptFiles
+  | { state: "published"; ready: number; missingExplanations: number; files: number; shared?: boolean; sharingError?: string } & KeptFiles
   | { state: "failed"; message: string; during: "check" | "publish" }
   | { state: "stopped" };
 /** uploadAcademicBatch accepts at most 100 jobs per run. */
@@ -37,29 +41,28 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
   const accountId = useAccount(state => state.user?.id);
   const folderInput = useRef<HTMLInputElement>(null);
   const zipInput = useRef<HTMLInputElement>(null);
+  const worksheetInput = useRef<HTMLInputElement>(null);
+  const decisionsInput = useRef<HTMLInputElement>(null);
+  const correctionInput = useRef<HTMLInputElement>(null);
   const controller = useRef<AbortController>();
-  const [library, setLibrary] = useState<{ accountId: string; name: string; read: LibraryReader; inventory: PublicationInventory }>();
+  /** `base` reads the library as chosen; `read` serves it with any filing decisions applied. */
+  const [library, setLibrary] = useState<{ accountId: string; name: string; base: LibraryReader; read: LibraryReader;
+    inventory: PublicationInventory; filing?: FilingSummary; corrected?: MiNmiSummary; beforeCorrection?: LibraryReader }>();
+  const [worksheet, setWorksheet] = useState<{ name: string; proposals: FilingProposals }>();
   const [confirmedTerms, setConfirmedTerms] = useState<Record<string, Term>>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [reviewer, setReviewer] = useState(false);
   const [share, setShare] = useState(true);
-  const [approve, setApprove] = useState(false);
   const [rights, setRights] = useState(false);
   const [busy, setBusy] = useState<"reading" | "checking" | "publishing">();
   const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
   const [results, setResults] = useState<Record<string, CourseState>>({});
 
-  useEffect(() => {
-    let active = true;
-    setReviewer(false);
-    if (accountId) void isAcademicReviewer(accountId).then(value => { if (active) setReviewer(value); });
-    return () => { active = false; };
-  }, [accountId]);
   useEffect(() => () => controller.current?.abort(), []);
 
   const current = library && library.accountId === accountId ? library : undefined;
   const plan = useMemo(() => current ? planPublication(current.inventory, confirmedTerms) : undefined, [current, confirmedTerms]);
+  const ledger = useMemo(() => current && plan ? accountQuestions(current.inventory, plan) : undefined, [current, plan]);
   const chosen = plan?.courses.filter(course => selected.has(course.catalogId) && course.termBasis !== "proposed") ?? [];
   const terms = [...new Set(plan?.courses.map(course => course.term) ?? [])];
 
@@ -68,13 +71,13 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
     const scope = academicAccountScope(accountId);
     const abort = new AbortController();
     controller.current = abort;
-    setBusy("reading"); setError(""); setResults({}); setLibrary(undefined); setConfirmedTerms({});
+    setBusy("reading"); setError(""); setResults({}); setLibrary(undefined); setWorksheet(undefined); setConfirmedTerms({});
     setProgress("Reading the library…");
     try {
       const read = await reader();
       const inventory = await readPublicationInventory(read, setProgress, abort.signal);
       scope.assertCurrent();
-      setLibrary({ accountId, name, read, inventory });
+      setLibrary({ accountId, name, base: read, read, inventory });
       setSelected(new Set(planPublication(inventory).courses.filter(usefulByDefault).map(course => course.catalogId)));
       setProgress("");
     } catch (cause) {
@@ -82,6 +85,73 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
       setError(abort.signal.aborted ? "Reading stopped. Nothing was uploaded."
         : cause instanceof Error ? cause.message : "The library could not be read.");
     } finally { scope.dispose(); setBusy(undefined); if (controller.current === abort) controller.current = undefined; }
+  }
+
+  async function selectWorksheet(file: File) {
+    if (!current || busy || current.filing) return;
+    setError("");
+    try {
+      const proposals = readFilingProposals(JSON.parse(await file.text()));
+      setWorksheet({ name: file.name, proposals });
+    } catch (cause) {
+      setWorksheet(undefined);
+      setError(cause instanceof Error ? cause.message : "The review worksheet could not be read.");
+    }
+  }
+
+  /** Apply decisions only with their matching worksheet; remove them with no file. */
+  async function decide(file?: File) {
+    if (!current || busy) return;
+    const abort = new AbortController();
+    controller.current = abort;
+    setBusy("reading"); setError(""); setResults({});
+    setProgress(file ? "Applying filing decisions…" : "Removing filing decisions…");
+    try {
+      let read = current.base;
+      let filing: FilingSummary | undefined;
+      if (file) {
+        if (!worksheet) throw new Error("Add the matching unfiled source review worksheet first.");
+        let parsed: unknown;
+        try { parsed = JSON.parse(await file.text()); }
+        catch (cause) { throw new Error("This file is not a filing decisions export. Export the decisions again from the review page.", { cause }); }
+        ({ read, summary: filing } = await applyFilingDecisions(current.base, readFilingDecisions(parsed), worksheet.proposals));
+      }
+      const inventory = await readPublicationInventory(read, setProgress, abort.signal);
+      setLibrary({ ...current, read, inventory, filing, corrected: undefined, beforeCorrection: undefined });
+      setConfirmedTerms({});
+      setSelected(new Set(planPublication(inventory).courses.filter(usefulByDefault).map(course => course.catalogId)));
+      setProgress("");
+    } catch (cause) {
+      setProgress("");
+      setError(abort.signal.aborted ? "Reading stopped. Nothing was uploaded."
+        : cause instanceof Error ? cause.message : "The filing decisions could not be applied.");
+    } finally { setBusy(undefined); if (controller.current === abort) controller.current = undefined; }
+  }
+
+  /** Compose this exact owner decision over any already-applied Unfiled filing. */
+  async function correctMi(file?: File) {
+    if (!current || busy) return;
+    const abort = new AbortController();
+    controller.current = abort;
+    setBusy("reading"); setError(""); setResults({});
+    setProgress(file ? "Checking the MI to NMI decision…" : "Removing the MI to NMI decision…");
+    try {
+      const beforeCorrection = current.beforeCorrection ?? current.read;
+      const corrected = file
+        ? await applyMiNmiDecision(current.base, beforeCorrection, readMiNmiDecision(JSON.parse(await file.text())))
+        : undefined;
+      const read = corrected?.read ?? beforeCorrection;
+      const inventory = await readPublicationInventory(read, setProgress, abort.signal);
+      setLibrary({ ...current, read, inventory, corrected: corrected?.summary,
+        beforeCorrection: corrected ? beforeCorrection : undefined });
+      setConfirmedTerms({});
+      setSelected(new Set(planPublication(inventory).courses.filter(usefulByDefault).map(course => course.catalogId)));
+      setProgress("");
+    } catch (cause) {
+      setProgress("");
+      setError(abort.signal.aborted ? "Reading stopped. Nothing was uploaded."
+        : cause instanceof Error ? cause.message : "The MI to NMI decision could not be applied.");
+    } finally { setBusy(undefined); if (controller.current === abort) controller.current = undefined; }
   }
 
   function confirmTerm(moduleKey: string, term: Term, previous?: string) {
@@ -119,7 +189,9 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
           const repeated = upload.provenance.sourceChecksums.find(sha => sources.has(sha));
           if (repeated) throw new Error(`It shares a source file with ${sources.get(repeated)}. Each source can be published in one course only.`);
           for (const sha of upload.provenance.sourceChecksums) sources.set(sha, label(course));
+          const coverage = await inspectPreparedUploadExplanations(upload);
           next = { state: "checked", ready: Number(upload.metadata.ready_questions), review: Number(upload.metadata.review_questions),
+            missingExplanations: coverage.missingExplanations,
             files: upload.files.length, bytes: upload.files.reduce((sum, file) => sum + file.byte_size, 0),
             ...kept(notes.keptLocal.get(job.key), upload.localOnlyOriginals.length) };
         } catch (cause) {
@@ -172,6 +244,7 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
             if (outcome.state === "verified") {
               published.set(outcome.receipt.collectionId, outcome.key);
               next = { state: "published", ready: outcome.receipt.readyQuestions, files: outcome.receipt.verifiedFiles,
+                missingExplanations: outcome.receipt.missingExplanations,
                 ...kept(notes.keptLocal.get(outcome.key), outcome.receipt.localOnlyOriginals.length) };
             } else if (outcome.state === "superseded") {
               next = { state: "failed", during: "publish", message: "A newer version of this course is already active in your account. Nothing was replaced." };
@@ -187,13 +260,13 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
       if (share && published.size && !abort.signal.aborted) {
         setProgress("Sharing the published courses…");
         const outcomes = await shareAcademicCourses([...published.keys()], accountId,
-          { approve: approve && reviewer, assertCurrent: scope.assertCurrent, signal: abort.signal });
+          { assertCurrent: scope.assertCurrent, signal: abort.signal });
         setResults(states => {
           const next = { ...states };
           for (const outcome of outcomes) {
             const key = published.get(outcome.collectionId);
             const state = key ? next[key] : undefined;
-            if (key && state?.state === "published") next[key] = { ...state, shared: outcome.shared, approved: outcome.approved,
+            if (key && state?.state === "published") next[key] = { ...state, shared: outcome.shared,
               ...(outcome.error ? { sharingError: outcome.error } : {}) };
           }
           return next;
@@ -228,6 +301,21 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
       event.target.value = "";
       if (file) void open(file.name, () => zipLibraryReader(file));
     }} />
+    <input ref={decisionsInput} type="file" hidden accept=".json,application/json" aria-label="Filing decisions file" onChange={event => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (file) void decide(file);
+    }} />
+    <input ref={worksheetInput} type="file" hidden accept=".json,application/json" aria-label="Unfiled review worksheet" onChange={event => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (file) void selectWorksheet(file);
+    }} />
+    <input ref={correctionInput} type="file" hidden accept=".json,application/json" aria-label="MI to NMI decision file" onChange={event => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (file) void correctMi(file);
+    }} />
     <div className="academic-publisher-actions">
       <GButton disabled={Boolean(busy)} onClick={() => folderInput.current?.click()}><FolderOpen size={ICON_SIZE.emphasis} /> Choose library folder</GButton>
       <GButton disabled={Boolean(busy)} onClick={() => zipInput.current?.click()}><FileArchive size={ICON_SIZE.emphasis} /> Choose library ZIP</GButton>
@@ -236,6 +324,32 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
 
     {plan && current && <div className="academic-publisher-plan">
       <p className="academic-publisher-summary"><b>{current.name}</b>: {plural(plan.courses.length, "course")} found. {plural(chosen.length, "course")} selected to publish.</p>
+      <div className="academic-publisher-filing">
+        <p>{current.filing
+          ? `${plural(current.filing.filed, "source")} filed as you decided${current.filing.keptUnfiled ? `, ${current.filing.keptUnfiled} kept unfiled` : ""}. The library on this device is unchanged.`
+          : "Reviewed the unfiled sources? Add the original review worksheet, then your decisions export. AXOM verifies the exact source files before filing."}</p>
+        <div className="academic-publisher-actions">
+          <GButton disabled={Boolean(busy) || Boolean(current.filing)} onClick={() => worksheetInput.current?.click()}>
+            <FileCheck2 size={ICON_SIZE.emphasis} /> {worksheet ? `Worksheet: ${worksheet.name}` : "Add review worksheet"}
+          </GButton>
+          <GButton disabled={Boolean(busy) || !worksheet} onClick={() => decisionsInput.current?.click()}>
+            <FileCheck2 size={ICON_SIZE.emphasis} /> {current.filing ? "Use another decisions file" : "Add filing decisions"}
+          </GButton>
+          {current.filing && <GhostButton disabled={Boolean(busy)} onClick={() => void decide()}>Remove decisions</GhostButton>}
+        </div>
+      </div>
+      {(current.corrected || current.inventory.sources.some(source => source.moduleKey === "mi")) && <div className="academic-publisher-filing">
+        <p>{current.corrected
+          ? `${plural(current.corrected.sources, "MI source")} verified and placed under Term 5 NMI, including ${plural(current.corrected.banks, "question set")} and ${plural(current.corrected.activities, "plan activity", "plan activities")}. Original files and question scopes are unchanged.`
+          : "For this library, add the separate MI to NMI owner decision file to place every matching source under NMI."}</p>
+        <div className="academic-publisher-actions">
+          <GButton disabled={Boolean(busy)} onClick={() => correctionInput.current?.click()}>
+            <FileCheck2 size={ICON_SIZE.emphasis} /> {current.corrected ? "Replace MI to NMI decision" : "Add MI to NMI decision"}
+          </GButton>
+          {current.corrected && <GhostButton disabled={Boolean(busy)} onClick={() => void correctMi()}>Remove MI to NMI decision</GhostButton>}
+        </div>
+      </div>}
+      {ledger && <QuestionCount ledger={ledger} />}
       {terms.map(term => <fieldset key={term} className="academic-publisher-term" disabled={Boolean(busy)}>
         <legend>{term}</legend>
         {plan.courses.filter(course => course.term === term).map(course => {
@@ -283,13 +397,11 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
 
       <fieldset className="academic-publisher-options" disabled={Boolean(busy)}>
         <legend>After uploading</legend>
-        <label><input type="checkbox" checked={share} onChange={event => { setShare(event.target.checked); if (!event.target.checked) setApprove(false); }} />
-          <span>Share with every signed-in AXOM account</span></label>
-        {reviewer && <label><input type="checkbox" checked={approve} disabled={!share} onChange={event => setApprove(event.target.checked)} />
-          <span>Approve sharing now. You are an academic reviewer.</span></label>}
+        <label><input type="checkbox" checked={share} onChange={event => setShare(event.target.checked)} />
+          <span>Submit for academic review to share with every signed-in AXOM account</span></label>
         {share && <label><input type="checkbox" checked={rights} onChange={event => setRights(event.target.checked)} />
           <span>I have the right to share this course material with every AXOM account.</span></label>}
-        <p>{share && !approve ? "Shared courses stay private until an academic reviewer approves them. " : ""}Answers, notes and progress are never shared.</p>
+        <p>{share ? "Other accounts cannot find these courses until an academic reviewer checks and approves the stored revision. " : ""}Answers, notes and progress are never shared.</p>
       </fieldset>
       <p className="academic-publisher-hint">Checking reads and verifies every selected course on this device, exactly as publishing will. Nothing is uploaded until you publish.</p>
       <div className="academic-publisher-actions">
@@ -311,6 +423,25 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
   </section>;
 }
 
+/** Every question the library holds, counted once: in a course, or staying on this device with its reason. */
+function QuestionCount({ ledger }: { ledger: QuestionLedger }) {
+  const leftOut = ledger.leftOut.reduce((sum, group) => sum + group.questions, 0);
+  const waiting = ledger.courses.filter(course => !course.publishable).reduce((sum, course) => sum + course.questions, 0);
+  return <div className="academic-publisher-ledger">
+    <p><b>{plural(ledger.total.questions, "question")}</b> in {plural(ledger.total.sources, "question set")}: {ledger.inCourses.questions} in courses
+      ({ledger.inCourses.ready} ready, {ledger.inCourses.held} awaiting review){waiting ? `, ${waiting} of them waiting for a confirmed term` : ""}, and {leftOut} staying on this device.</p>
+    <p role={ledger.unaccounted ? "alert" : undefined}>{ledger.unaccounted
+      ? `${plural(ledger.unaccounted, "question")} could not be placed. Do not publish this library; choose it again or prepare it again.`
+      : "Every question is counted once."}</p>
+    {ledger.mismatched.length > 0 && <p role="alert">{plural(ledger.mismatched.length, "question set")} {ledger.mismatched.length === 1 ? "disagrees" : "disagree"} with
+      {" "}{ledger.mismatched.length === 1 ? "its" : "their"} catalog counts and cannot be published until prepared again: {ledger.mismatched.map(entry => entry.name).join(", ")}.</p>}
+    {ledger.leftOut.length > 0 && <details className="academic-publisher-notes">
+      <summary>Why {plural(leftOut, "question stays", "questions stay")} on this device</summary>
+      <ul>{ledger.leftOut.map(group => <li key={group.reason}><b>{plural(group.questions, "question")} in {plural(group.sources, "set")}</b>: {group.reason}</li>)}</ul>
+    </details>}
+  </div>;
+}
+
 function ConfirmTerm({ course, label: name, onConfirm }: { course?: PlannedCourse; label?: string; onConfirm: (term: Term) => void }) {
   const [term, setTerm] = useState<Term | "">(course?.term ?? "");
   return <div className="academic-publisher-term-choice">
@@ -330,7 +461,7 @@ function kept(keptLocal: number | undefined, overLimit: number): KeptFiles {
 
 function keptNote({ keptLocal, overLimit }: KeptFiles, future: boolean) {
   const stay = (count: number) => future ? "will stay" : count === 1 ? "stays" : "stay";
-  return `${keptLocal ? ` ${plural(keptLocal, "source file")} ${stay(keptLocal)} on this device to fit the course size limit.` : ""}${
+  return `${keptLocal ? ` ${plural(keptLocal, "source file")} ${stay(keptLocal)} on this device because the file type or course size limit prevents upload.` : ""}${
     overLimit ? ` ${plural(overLimit, "source file")} over 50 MB ${stay(overLimit)} on this device.` : ""}`;
 }
 
@@ -340,12 +471,14 @@ function CourseResult({ result }: { result: CourseState }) {
   if (result.state === "checked") return <p className="academic-publisher-result">
     <Tag>Ready to publish</Tag>
     {" "}{plural(result.ready, "ready question")}{result.review ? `, ${result.review} awaiting review,` : ""} and {plural(result.files, "file")} checked ({fileSize(result.bytes)}).
+    {` ${plural(result.missingExplanations, "ready question")} without an explanation; these cannot be approved for the official catalog.`}
     {keptNote(result, true)}
   </p>;
   return <p className="academic-publisher-result">
     <Tag tone="green">Published</Tag>
-    {result.approved ? <Tag tone="gold">Shared with everyone</Tag> : result.shared ? <Tag tone="neutral">Sharing awaits review</Tag> : null}
+    {result.shared ? <Tag tone="neutral">Sharing awaits review</Tag> : null}
     {" "}{plural(result.ready, "ready question")} and {plural(result.files, "file")} verified.
+    {` ${plural(result.missingExplanations, "ready question")} without an explanation in the stored revision.`}
     {keptNote(result, false)}
     {result.sharingError ? ` ${result.sharingError}` : ""}
   </p>;

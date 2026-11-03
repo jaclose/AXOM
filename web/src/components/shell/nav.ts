@@ -4,7 +4,7 @@ import type { ExperimentalFlags } from "../../lib/types";
 import {
   LayoutGrid, BookOpen, BadgeCheck, Brain, LineChart, Calendar, ListChecks,
   BookText, Share2, Library, Folder, Link, Wand2, LifeBuoy, ClipboardCheck, Trophy, Compass, Info, CalendarCheck,
-  HelpCircle, BookOpenCheck, WholeWord, Stethoscope, Gamepad2, Blocks, AudioWaveform,
+  HelpCircle, Users, UsersRound, Activity, BookOpenCheck, WholeWord, Stethoscope, Gamepad2, Blocks, AudioWaveform, ShieldCheck,
 } from "lucide-react";
 
 export interface NavItem {
@@ -37,15 +37,18 @@ export const MODULE_STATUS_META = {
 // All routable pages, keyed for lookup. Order here is not the sidebar order
 // (that lives in the SIDEBAR_* groups below).
 export const NAV = [
+  { id: "host", label: "Host", subtitle: "Account permissions and platform operations", icon: ShieldCheck },
   { id: "dashboard", label: "Dashboard", subtitle: "Your command center at a glance", icon: LayoutGrid },
   { id: "courses", label: "Courses", subtitle: "Term-based course map with module-level folders", icon: BookOpen },
   { id: "tracker", label: "Course Tracker", subtitle: "Lecture, DLA, and PQ completion map", icon: BadgeCheck },
   { id: "questions", label: "Question Bank", subtitle: "Import Center, source library, question sets, blocks, and results", icon: HelpCircle },
+  { id: "simulations", label: "Simulations", subtitle: "Explore body mechanisms; first study: asthma and albuterol", icon: Activity },
+  { id: "communities", label: "Communities", subtitle: "Shared courses and daily challenges with review status", icon: UsersRound },
   { id: "shared-set", label: "Shared Question Set", subtitle: "Preview and import an unlisted Question Set link", icon: HelpCircle },
   { id: "methods", label: "Study Methods", subtitle: "Evidence-informed technique templates with honest trade-offs", icon: BookOpenCheck },
-  { id: "soundscapes", label: "Soundscapes", subtitle: "Synthesized study sound with live visuals and an honest listening log", icon: AudioWaveform },
+  { id: "soundscapes", label: "Soundscapes", subtitle: "Study sounds, your own recordings, live visuals, and a listening log", icon: AudioWaveform },
   { id: "productivity", label: "Productivity", subtitle: "Study time, Anki cards, lecture blocks, day usefulness", icon: Calendar },
-  { id: "journal", label: "Journal", subtitle: "Daily standups, intention follow-up, blockers, and tomorrow's plan", icon: BookText },
+  { id: "journal", label: "Journal", subtitle: "Private pages, optional prompts, and a place to close the day", icon: BookText },
   { id: "reports", label: "Reports", subtitle: "Traceable statistics, energy, and performance vs. your goals", icon: LineChart },
   { id: "daily-games", label: "Daily Games", subtitle: "Short daily puzzles, status, and verified destinations", icon: Gamepad2 },
   { id: "daily-word", label: "Daily Word", subtitle: "A daily five-letter word puzzle.", icon: WholeWord },
@@ -67,7 +70,9 @@ export const NAV = [
   { id: "habits", label: "Habit Tracker", subtitle: "Calm, recovery-friendly habit tracking (experimental)", icon: CalendarCheck },
   { id: "anki", label: "Anki Lab", subtitle: "Turn lectures, DLAs & slides into Anki cards", icon: Wand2 },
   { id: "prompts", label: "Prompt Library", subtitle: "Reusable AI prompts for study workflows", icon: Library },
+  { id: "patch-notes", label: "Patch Notes", subtitle: "A searchable record of AXOM releases", icon: BookText },
   { id: "integrations", label: "Integrations", subtitle: "Connect Anki, calendar, drives, and more", icon: Share2 },
+  { id: "community", label: "Community", subtitle: "Friends, shared study updates and weekly standings", icon: Users },
   { id: "leaderboards", label: "Leaderboards", subtitle: "Daily challenges and personal study history", icon: Trophy },
   { id: "activity", label: "Activity History", subtitle: "Full local study ledger with filters and export", icon: Calendar },
   // After Tools
@@ -84,6 +89,8 @@ export type NavItemId = (typeof NAV)[number]["id"];
 // re-declared by each rendering mode or page.
 export const MODULE_STATUS_BY_NAV_ID = {
   questions: { status: "new", announcementId: "question-bank-entry-v1" },
+  communities: { status: "new", announcementId: "communities-entry-v1" },
+  simulations: { status: "wip" },
   methods: { status: "new", announcementId: "study-methods-library-v1" },
   "daily-word": { status: "new", announcementId: "daily-word-launch-v1" },
   "daily-games": { status: "new", announcementId: "daily-games-hub-v1" },
@@ -96,6 +103,7 @@ export const MODULE_STATUS_BY_NAV_ID = {
   integrations: { status: "wip" },
   appchecker: { status: "wip" },
   leaderboards: { status: "wip" },
+  community: { status: "new", announcementId: "community-optin-v1" },
 } as const satisfies Partial<Record<NavItemId, ModuleStatusAssignment>>;
 
 export function getNavModuleStatusAssignment(id: string): ModuleStatusAssignment | undefined {
@@ -114,15 +122,15 @@ export const navById = (id: string): NavItem | undefined => NAV.find((n) => n.id
 
 // Sidebar order (Alpha 2). Tools is a collapsible folder.
 export const SIDEBAR_TODAY = ["dashboard"] as const;
-export const SIDEBAR_LEARN = ["courses", "tracker", "questions", "anki"] as const;
+export const SIDEBAR_LEARN = ["courses", "tracker", "questions", "simulations", "communities", "anki"] as const;
 export const SIDEBAR_REVIEW = ["productivity", "journal", "reports"] as const;
 export const SIDEBAR_TOP = [...SIDEBAR_TODAY, ...SIDEBAR_LEARN, ...SIDEBAR_REVIEW];
 export const SIDEBAR_PREP = ["step", "premed", "appchecker"];
 // Tools are the daily-use tools, Soundscapes first (JD, Ideas 1 + 3). Rarely
 // used modules live in Misc and start hidden (lib/navLayout.ts).
 export const SIDEBAR_TOOLS = ["soundscapes", "habits", "resources", "integrations", "leaderboards"];
-export const SIDEBAR_MISC = ["tasks", "methods", "prompts", "folders"];
-export const SIDEBAR_BOTTOM = ["building"];
+export const SIDEBAR_MISC = ["tasks", "methods", "prompts", "patch-notes", "folders"];
+export const SIDEBAR_BOTTOM = ["host", "building"];
 // Dashboard can't be hidden; everything else is subscribe/unsubscribe-able.
 export const SIDEBAR_LOCKED = new Set(["dashboard"]);
 

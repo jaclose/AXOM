@@ -310,6 +310,36 @@ describe("IndexedDB-first local vault", () => {
     upgraded.close();
   });
 
+  it("reports the blocked vault upgrade when the browser fallback also runs out of space", async () => {
+    const oldConnection = await openVersionThreeVault();
+    const key = STORAGE_KEYS.persistedState;
+    const base = JSON.stringify({ state: { profile: { userId: "jd" }, label: "saved" }, version: 34 });
+    const next = JSON.stringify({ state: { profile: { userId: "jd" }, rawText: "x".repeat(1_100_000) }, version: 34 });
+    await putDirect(oldConnection, key, base);
+    expect(await localVaultStorage.getItem(key)).toBe(base);
+
+    vi.stubGlobal("localStorage", {
+      ...storage,
+      setItem: (name: string, value: string) => {
+        if (name === key) throw new DOMException("Setting the workspace exceeded the quota.", "QuotaExceededError");
+        storage.setItem(name, value);
+      },
+    });
+
+    try {
+      const checkpoint = getVaultWriteCheckpoint();
+      await localVaultStorage.setItem(key, next);
+      expect(() => assertVaultWritesSince(checkpoint))
+        .toThrow(/IndexedDB save failed: Local vault upgrade is blocked by another tab/);
+      expect(() => assertVaultWritesSince(checkpoint))
+        .toThrow(/Browser fallback failed: Setting the workspace exceeded the quota/);
+      expect(await getDirect(oldConnection, key)).toBe(base);
+      expect(localStorage.getItem(key)).toBeNull();
+    } finally {
+      oldConnection.close();
+    }
+  });
+
   it("does not let a v3 writer open after a chunked primary commits behind the v4 barrier", async () => {
     const key = STORAGE_KEYS.persistedState;
     const persisted = JSON.stringify({
@@ -399,6 +429,81 @@ describe("IndexedDB-first local vault", () => {
     vi.resetModules();
     const freshRuntime = await import("./localVault");
     expect(await freshRuntime.localVaultStorage.getItem(key)).toBe(persisted);
+  });
+
+  it("rewrites only changed chunks and reads the complete edit in a fresh runtime", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const snapshot = (label: string) => JSON.stringify({
+      state: { profile: { userId: "jd" }, label, rawText: "s".repeat(2_200_000) },
+      version: 34,
+    });
+    await localVaultStorage.setItem(key, snapshot("A"));
+    await flushLocalVaultWrites();
+
+    const db = await openCurrentVault();
+    const manifest = JSON.parse((await getDirect(db, key))!) as { chunkPrefix: string; chunkCount: number };
+    expect(manifest.chunkCount).toBeGreaterThan(2);
+    db.close();
+
+    const put = vi.spyOn(IDBObjectStore.prototype, "put");
+    await localVaultStorage.setItem(key, snapshot("B"));
+    await flushLocalVaultWrites();
+    const chunkKeys = put.mock.calls.map(([, storedKey]) => storedKey)
+      .filter((storedKey): storedKey is string => typeof storedKey === "string" && storedKey.startsWith(manifest.chunkPrefix));
+    expect(chunkKeys).toEqual([`${manifest.chunkPrefix}:0`]);
+    put.mockRestore();
+
+    vi.resetModules();
+    const freshRuntime = await import("./localVault");
+    expect(await freshRuntime.localVaultStorage.getItem(key)).toBe(snapshot("B"));
+  });
+
+  it("keeps the old manifest and chunks when a changed chunk cannot be written", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const snapshot = (label: string) => JSON.stringify({
+      state: { profile: { userId: "jd" }, label, rawText: "s".repeat(2_200_000) },
+      version: 34,
+    });
+    await localVaultStorage.setItem(key, snapshot("A"));
+    await flushLocalVaultWrites();
+
+    const db = await openCurrentVault();
+    const beforeManifest = (await getDirect(db, key))!;
+    const manifest = JSON.parse(beforeManifest) as { chunkPrefix: string; chunkCount: number };
+    const beforeChunks = await Promise.all(Array.from({ length: manifest.chunkCount }, (_, index) =>
+      getDirect(db, `${manifest.chunkPrefix}:${index}`)));
+    db.close();
+
+    const originalPut = IDBObjectStore.prototype.put;
+    const put = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, value, storedKey) {
+      if (storedKey === `${manifest.chunkPrefix}:0`) {
+        throw new DOMException("The changed chunk exceeded storage quota.", "QuotaExceededError");
+      }
+      return originalPut.call(this, value, storedKey);
+    });
+    const originalSetItem = storage.setItem;
+    vi.stubGlobal("localStorage", {
+      ...storage,
+      setItem: (name: string, value: string) => {
+        if (name === key) throw new DOMException("The fallback exceeded storage quota.", "QuotaExceededError");
+        originalSetItem(name, value);
+      },
+    });
+
+    const checkpoint = getVaultWriteCheckpoint();
+    await localVaultStorage.setItem(key, snapshot("B"));
+    await flushLocalVaultWrites();
+    expect(() => assertVaultWritesSince(checkpoint)).toThrow(/changed chunk exceeded storage quota/i);
+    put.mockRestore();
+    vi.stubGlobal("localStorage", storage);
+
+    const after = await openCurrentVault();
+    expect(await getDirect(after, key)).toBe(beforeManifest);
+    for (let index = 0; index < manifest.chunkCount; index += 1) {
+      expect(await getDirect(after, `${manifest.chunkPrefix}:${index}`)).toBe(beforeChunks[index]);
+    }
+    after.close();
+    expect(await localVaultStorage.getItem(key)).toBe(snapshot("A"));
   });
 });
 

@@ -128,6 +128,57 @@ describe("a tagged document with two sets, a table and figures", () => {
 });
 
 describe("a tagged document with one set", () => {
+  it("pairs an exact answered copy and preserves independent question, answer and explanation pages", () => {
+    const prompt = [p("1. Which invented gate opens the blue chamber?"), ...choices("East gate", "West gate", "North gate")];
+    const result = taggedPdfToQuestions({ pages: [
+      page(1, [p("Questions only"), ...prompt]),
+      page(2, [p("With Answers"), ...prompt, p("Answer: B"), p("Explanation: The west gate is named in the invented source.")]),
+    ] }, DEFAULTS);
+    expect(result.questions).toHaveLength(1);
+    expect(result.questions[0].id).toBe("invented-bank-q01");
+    expect(result.questions[0].correctAnswer?.labels).toEqual(["B"]);
+    expect(result.questions[0].source).toMatchObject({ page: 1, answerEvidencePage: 2, explanationSourcePage: 2 });
+    expect(result.report.sets).toBe(1);
+    expect(result.notes.join(" ")).toMatch(/exact question-only/);
+  });
+
+  it("pairs repeated source numbers across two explicit two-question sections without duplicate ids", () => {
+    const first = [p("1. Which invented gate opens the blue chamber?"), ...choices("East gate", "West gate", "North gate")];
+    const second = [p("2. Which invented key opens the red chamber?"), ...choices("Round key", "Square key", "Triangular key")];
+    const result = taggedPdfToQuestions({ pages: [
+      page(1, [p("Questions only"), ...first, ...second]),
+      page(2, [p("With Answers and Commentary"), ...first, p("Answer: B"), p("Explanation: The west gate is named in the invented source."), ...second, p("Answer: C"), p("Explanation: The triangular key is named in the invented source.")]),
+    ] }, DEFAULTS);
+    expect(result.questions.map((question) => question.id)).toEqual(["invented-bank-q01", "invented-bank-q02"]);
+    expect(result.questions.map((question) => question.correctAnswer?.labels)).toEqual([["B"], ["C"]]);
+    expect(result.questions.map((question) => question.source.page)).toEqual([1, 1]);
+    expect(result.questions.map((question) => question.source.explanationSourcePage)).toEqual([2, 2]);
+  });
+
+  it("keeps a near copy and conflicting printed keys separate for review", () => {
+    const prompt = [p("1. Which invented gate opens the blue chamber?"), ...choices("East gate", "West gate", "North gate")];
+    const near = taggedPdfToQuestions({ pages: [
+      page(1, [p("Questions only"), ...prompt]),
+      page(2, [p("With Answers and Commentary"), p("1. Which invented gate opens the green chamber?"), ...choices("East gate", "West gate", "North gate"), p("Answer: B"), p("Explanation: The west gate is named in the invented source.")]),
+    ] }, DEFAULTS);
+    expect(near.questions).toHaveLength(2);
+    expect(near.questions.every((question) => question.flags?.some((flag) => flag.type === "answer_needs_review") || !question.correctAnswer)).toBe(true);
+
+    const changedChoice = taggedPdfToQuestions({ pages: [
+      page(1, [p("Questions only"), ...prompt]),
+      page(2, [p("With Answers and Commentary"), p("1. Which invented gate opens the blue chamber?"), ...choices("East gate", "West gate", "South gate"), p("Answer: B"), p("Explanation: The west gate is named in the invented source.")]),
+    ] }, DEFAULTS);
+    expect(changedChoice.questions).toHaveLength(2);
+    expect(changedChoice.questions.every((question) => !question.correctAnswer)).toBe(true);
+
+    const conflicting = taggedPdfToQuestions({ pages: [
+      page(1, [p("Questions only"), ...prompt, p("Answer: A")]),
+      page(2, [p("With Answers and Commentary"), ...prompt, p("Answer: B"), p("Explanation: The west gate is named in the invented source.")]),
+    ] }, DEFAULTS);
+    expect(conflicting.questions).toHaveLength(2);
+    expect(conflicting.questions.every((question) => !question.correctAnswer)).toBe(true);
+  });
+
   it("reads an answer key set out as a table as the key, not as a table of a question", () => {
     const result = taggedPdfToQuestions({ pages: [
       page(1, [

@@ -11,11 +11,11 @@ import { BookOpenCheck, Check, ChevronLeft, Flag, ListPlus, Play, WandSparkles, 
 import { useStore } from "../../lib/store";
 import { STORAGE_KEYS } from "../../lib/brand";
 import {
-  buildQuizPool, missedQuestionIds, scoreSession,
-  type QuizAnswer, type QuizFilters, type QuizMode, type QuizSession,
+  buildQuizPool, missedQuestionIds, quizPoolCounts, quizSubjectCounts, scoreSession,
+  type QuizAnswer, type QuizFilters, type QuizMode, type QuizPoolStatus, type QuizSession,
 } from "../../lib/quiz";
 import {
-  ANSWER_CERTAINTY_LABEL, ERROR_TYPE_LABEL, EXAM_TYPE_LABEL, QUESTION_CATEGORIES,
+  ANSWER_CERTAINTY_LABEL, ERROR_TYPE_LABEL, EXAM_TYPE_LABEL,
   type AnswerCertainty, type QuestionAttempt, type QuestionErrorType, type QuestionExamType, type QuestionRecord,
 } from "../../lib/questions";
 import { newSchedule } from "../../lib/ankiCards";
@@ -44,6 +44,8 @@ import {
 } from "./TutorUtilityDock";
 import type { QuizCalculatorValue } from "./QuizCalculator";
 import { ExamSimulator } from "./ExamSimulator";
+import { CommunityPracticeNotice } from "./CommunityPracticeNotice";
+import { communityReviewStatus } from "../../lib/academicLibrary/communityReference";
 import { ExamRunnerMediaNotice } from "./ExamRunnerMediaNotice";
 import {
   assertVaultWrite,
@@ -62,6 +64,7 @@ import { blockFromPlayerSnapshot, certaintiesFromPlayerSnapshot, checkedFromPlay
 
 const ERROR_TYPES = Object.keys(ERROR_TYPE_LABEL) as QuestionErrorType[];
 const EXAM_TYPES = Object.keys(EXAM_TYPE_LABEL) as QuestionExamType[];
+const QUIZ_POOL_CHOICES: Array<[QuizPoolStatus, string]> = [["all", "All"], ["unused", "Unused"], ["incorrect", "Incorrect"], ["marked", "Marked"]];
 const CERTAINTY_LEVELS = Object.keys(ANSWER_CERTAINTY_LABEL) as AnswerCertainty[];
 const EMPTY_QUESTIONS: QuestionRecord[] = [];
 
@@ -284,10 +287,12 @@ function readReadingScale(): number {
   } catch { return 1; }
 }
 
-export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, presetTimed = false, blockId, simulate = false, sessionId, onClose, onReturnToCourse }: {
+export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, presetTimed = false, blockId, simulate = false, sessionId, accountId, onClose, onReturnToCourse }: {
   mode: QuizMode;
   /** Optional stable identity for a persisted external quiz launch. */
   sessionId?: string;
+  /** Restrict downloaded community status to this signed-in account. */
+  accountId?: string;
   /** When set, skips setup and runs exactly these questions (retake missed). */
   retakeIds?: string[];
   /** Pre-fill the setup (run-from-set, saved blocks). */
@@ -304,6 +309,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
 }) {
   const s = useStore();
   const questions = s.questions ?? EMPTY_QUESTIONS;
+  const community = useMemo(() => communityReviewStatus(s.documents ?? [], accountId), [s.documents, accountId]);
   const questionsById = useMemo(() => new Map(questions.map((question) => [question.id, question])), [questions]);
   const questionSets = s.questionSets ?? [];
   const restored = useMemo(() => readActiveQuiz(), []);
@@ -321,7 +327,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   // --- setup state
   const [count, setCount] = useState(presetFilters?.count ?? (simulate ? 20 : 10));
   const [status, setStatus] = useState<QuizFilters["status"]>(presetFilters?.status ?? "all");
-  const [category, setCategory] = useState(presetFilters?.categories?.[0] ?? "");
+  const [categories, setCategories] = useState<string[]>(presetFilters?.categories ?? []);
+  const [showAllSubjects, setShowAllSubjects] = useState(false);
   const [examType, setExamType] = useState<QuestionExamType | "">(presetFilters?.examTypes?.[0] ?? "");
   const [choosingSources, setChoosingSources] = useState(false);
   const [wholeBank, setWholeBank] = useState(!presetFilters?.setIds?.length);
@@ -347,6 +354,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       ? completeRequestedPool(requestedRetakeIds, questions) ?? []
       : []);
   const poolById = useMemo(() => new Map(pool.map((question) => [question.id, question])), [pool]);
+  const unreviewedInPool = pool.filter(question => community.questionIds.has(question.id)).length;
   const media = useMediaGate();
   // Clinical figure fingerprints depend on the pool, not on every keystroke
   // or answer selection. Avoid resurveying 1000 questions on each render.
@@ -416,8 +424,10 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const [annotationTool, setAnnotationTool] = useState<AnnotationTool>(null);
   const [annotationSelection, setAnnotationSelection] = useState<{
     target: QuestionAnnotationTarget;
+    optionKey?: string;
     range: QuestionTextSelection;
   } | null>(null);
+  const suppressOptionPickRef = useRef<string | null>(null);
   const [localAnnotations, setLocalAnnotations] = useState(() => pool[index]?.annotations ?? []);
   const localAnnotationsRef = useRef(localAnnotations);
   const [annotationStatus, setAnnotationStatus] = useState<string>();
@@ -442,7 +452,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     try { return localStorage.getItem(STORAGE_KEYS.quizTutorTips) !== "dismissed"; } catch { return true; }
   });
   const stemRef = useRef<HTMLDivElement>(null);
-  const setupSignature = JSON.stringify({ mode, examInterface, count, status, category, examType,
+  const setupSignature = JSON.stringify({ mode, examInterface, count, status, categories, examType,
     setIds, questionIds, ordered, timed, presetId, wholeBank });
   const setupSignatureRef = useRef(setupSignature);
   setupSignatureRef.current = setupSignature;
@@ -550,7 +560,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
 
   useEffect(() => {
     if (stage !== "running" || pool.length === 0 || restorePending || retakePending || !mediaReady) return;
-    const filters: QuizFilters = { count, status, categories: category ? [category] : undefined, examTypes: examType ? [examType] : undefined, setIds: setIds.length ? setIds : undefined, questionIds, ordered: ordered || undefined };
+    const filters: QuizFilters = { count, status, categories: categories.length ? categories : undefined, examTypes: examType ? [examType] : undefined, setIds: setIds.length ? setIds : undefined, questionIds, ordered: ordered || undefined };
     // The snapshot keeps the shape it had before the engine: answered or flagged questions, and the pick on screen.
     const at = Date.now();
     // Unvisited/unanswered questions are not in the sparse resume payload.
@@ -564,7 +574,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     const snapshot: ActiveQuizSnapshot = { mode, poolIds: pool.map((item) => item.id), index, answers, picked, revealed, startedAt, timed, filters, runId, certainty };
     recoveryAvailableRef.current = writeActiveQuiz(snapshot);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [block, category, certainties, checked, count, examType, mode, ordered, pool, restorePending, retakePending, mediaReady, runId, setIds, questionIds, stage, startedAt, status, timed]);
+  }, [block, categories, certainties, checked, count, examType, mode, ordered, pool, restorePending, retakePending, mediaReady, runId, setIds, questionIds, stage, startedAt, status, timed]);
 
   // The resume snapshot is written synchronously; the workspace save is not. If
   // the page closed between "Check answer" and that save, the snapshot knows an
@@ -695,7 +705,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     return {
       count,
       status,
-      categories: category ? [category] : undefined,
+      categories: categories.length ? categories : undefined,
       examTypes: examType ? [examType] : undefined,
       setIds: setIds.length ? setIds : undefined,
       questionIds,
@@ -1203,7 +1213,16 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   // ------------------------------------------------------------------ render
 
   if (stage === "setup") {
-    const available = buildQuizPool(questions, { ...currentFilters(), count: questions.length, ordered: true }, questionSets).length;
+    const availableQuestions = buildQuizPool(questions, { ...currentFilters(), count: questions.length, ordered: true }, questionSets);
+    const available = availableQuestions.length;
+    const poolCounts = quizPoolCounts(questions, currentFilters(), questionSets);
+    const fullCount = Math.min(available, 1000);
+    const subjects = quizSubjectCounts(questions, currentFilters(), questionSets);
+    const picked = (name: string) => categories.some((value) => value.toLowerCase() === name.toLowerCase());
+    // Keep a saved block's missing subject visible so the learner can remove it.
+    const subjectChoices = [...subjects, ...categories.filter((name) => !subjects.some((subject) => subject.name.toLowerCase() === name.toLowerCase()))
+      .map((name) => ({ name, count: 0 }))];
+    const shownSubjects = showAllSubjects ? subjectChoices : subjectChoices.filter((subject, position) => position < 12 || picked(subject.name));
     const selectedSets = questionSets.filter((set) => setIds.includes(set.id));
     const sourceTitle = wholeBank ? "Whole question bank" : selectedSets.length === 1 ? selectedSets[0].title : `${selectedSets.length} selected sets`;
     const canStart = count <= 1000 && available > 0 && (wholeBank || selectedSets.length > 0) && Number.isInteger(count) && count > 0;
@@ -1211,6 +1230,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       footer={<><GhostButton disabled={!canStart} onClick={saveAsBlock}>Save as block</GhostButton>
         <GButton variant="primary" disabled={!canStart || media.state.phase !== "idle"} onClick={begin}><Play size={ICON_SIZE.body} /> Start {mode} block</GButton></>}>
         <ExamRunnerMediaNotice state={media.state} onRetry={retryMediaStartRef.current ?? undefined} />
+        <CommunityPracticeNotice count={availableQuestions.filter(question => community.questionIds.has(question.id)).length} pending={community.pending} possible />
         {suspended && (
           <div className="sim-suspended-banner" role="status">
             <div>
@@ -1266,18 +1286,53 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         <div className="stack gap6"><span className="field-label">How many questions?</span>
           <div className="block-count-row" role="group" aria-label="Question count">
             {[10, 20, 40].map((value) => <button type="button" key={value} className={`filter-pill ${count === value ? "on" : ""}`} aria-pressed={count === value} onClick={() => setCount(value)}>{value}</button>)}
+            {fullCount > 0 && ![10, 20, 40].includes(fullCount) && (
+              <button type="button" className={`filter-pill ${count === fullCount ? "on" : ""}`} aria-pressed={count === fullCount} onClick={() => setCount(fullCount)}>
+                {available > 1000 ? "Max" : "All"} {fullCount.toLocaleString()}
+              </button>
+            )}
             <label className="row gap6"><span className="sub">Custom</span><input className="field" aria-label="Custom question count" type="number" min="1" max="1000" value={count} onChange={(event) => setCount(Number(event.target.value))} /></label>
           </div>
         </div>
-        <SelectField label="Question pool" value={status} onChange={(event) => setStatus(event.target.value as QuizFilters["status"])}>
-          <option value="all">All questions</option><option value="unused">Unused only</option><option value="incorrect">Incorrect only</option><option value="marked">Marked only</option>
-        </SelectField>
-        <details className="block-advanced"><summary>Advanced: order, category and timing</summary><div className="stack gap12">
+        <div className="stack gap6"><span className="field-label">Question pool</span>
+          <div className="row" style={{ flexWrap: "wrap", gap: 6 }} role="radiogroup" aria-label="Question pool"
+            onKeyDown={(event) => {
+              const direction = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
+              if (!direction && event.key !== "Home" && event.key !== "End") return;
+              event.preventDefault();
+              const choices = QUIZ_POOL_CHOICES.filter(([value]) => value === "all" || value === status || poolCounts[value] > 0);
+              const current = choices.findIndex(([value]) => value === status);
+              const next = event.key === "Home" ? 0 : event.key === "End" ? choices.length - 1 : (current + direction + choices.length) % choices.length;
+              setStatus(choices[next][0]);
+              const buttons = event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]:not(:disabled)');
+              buttons[next]?.focus();
+            }}>
+            {QUIZ_POOL_CHOICES.map(([value, label]) => (
+              <button type="button" key={value} role="radio" aria-checked={status === value} tabIndex={status === value ? 0 : -1} className={`filter-pill ${status === value ? "on" : ""}`}
+                disabled={value !== "all" && value !== status && poolCounts[value] === 0} onClick={() => setStatus(value)}>
+                {label} · {poolCounts[value].toLocaleString()}
+              </button>
+            ))}
+          </div>
+        </div>
+        {subjectChoices.length > 0 && (
+          <div className="stack gap6"><span className="field-label">Subjects and systems</span>
+            <div className="row" style={{ flexWrap: "wrap", gap: 6 }} role="group" aria-label="Subjects and systems">
+              {shownSubjects.map((subject) => (
+                <button type="button" key={subject.name} className={`filter-pill ${picked(subject.name) ? "on" : ""}`} aria-pressed={picked(subject.name)}
+                  onClick={() => setCategories((current) => current.some((value) => value.toLowerCase() === subject.name.toLowerCase())
+                    ? current.filter((value) => value.toLowerCase() !== subject.name.toLowerCase())
+                    : [...current, subject.name])}>
+                  {subject.name} · {subject.count.toLocaleString()}
+                </button>
+              ))}
+              {subjectChoices.length > shownSubjects.length && <GhostButton onClick={() => setShowAllSubjects(true)}>Show all {subjectChoices.length}</GhostButton>}
+            </div>
+            <span className="sub">{categories.length ? "Questions come from any picked subject." : "Every subject is included. Pick some to narrow the block."}</span>
+          </div>
+        )}
+        <details className="block-advanced"><summary>Advanced: order, exam style and timing</summary><div className="stack gap12">
         <div className="grid grid-2">
-          <SelectField label="Category" value={category} onChange={(e) => setCategory(e.target.value)}>
-            <option value="">Any</option>
-            {QUESTION_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-          </SelectField>
           <SelectField label="Exam style" value={examType} onChange={(e) => setExamType(e.target.value as QuestionExamType | "")}>
             <option value="">Any</option>
             {EXAM_TYPES.map((t) => <option key={t} value={t}>{EXAM_TYPE_LABEL[t]}</option>)}
@@ -1304,6 +1359,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         skin={simRun.skin}
         mode={mode}
         pool={simRun.pool}
+        unreviewedCount={simRun.pool.filter(question => community.questionIds.has(question.id)).length}
+        communityPending={community.pending}
         runId={simRun.runId}
         timeLimitSeconds={simRun.timeLimitSeconds}
         resume={simRun.resume}
@@ -1319,6 +1376,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         skin={session.simulation.skin as ExamSkin}
         mode={session.mode}
         pool={pool}
+        unreviewedCount={unreviewedInPool}
+        communityPending={community.pending}
         review={{ answers: session.answers, startedAt: session.startedAt, elapsedSeconds: session.simulation.elapsedSeconds }}
         onFinish={() => undefined}
         onSuspend={() => undefined}
@@ -1383,6 +1442,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             <GButton variant="primary" onClick={onClose}>Done</GButton>
           </>
         }>
+        <CommunityPracticeNotice count={unreviewedInPool} pending={community.pending} />
         <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
           <Tag tone={accuracyTone(session.score?.pct ?? null)}>
             {session.score?.correct}/{session.score?.scored} correct ({session.score?.pct}%)
@@ -1513,11 +1573,14 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     tone: QuestionAnnotationTone = annotationTool?.kind === "highlight" ? annotationTool.tone : "yellow",
   ) {
     if (!selection) return;
-    const sourceText = selection.target === "stem" ? question.stem : question.explanation ?? "";
+    const sourceText = selection.target === "stem" ? question.stem
+      : selection.target === "option" ? question.options.find((option) => option.key === selection.optionKey)?.text ?? ""
+      : question.explanation ?? "";
     const now = new Date().toISOString();
     const result = createTextAnnotationWithIntegrity({
       id: `annotation-${crypto.randomUUID()}`,
       target: selection.target,
+      optionKey: selection.optionKey,
       sourceText,
       startOffset: selection.range.startOffset,
       endOffset: selection.range.endOffset,
@@ -1539,8 +1602,10 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     window.getSelection()?.removeAllRanges();
   }
 
-  function handleAnnotationSelection(target: QuestionAnnotationTarget, range: QuestionTextSelection | null) {
-    const selection = range ? { target, range } : null;
+  function handleAnnotationSelection(target: QuestionAnnotationTarget, range: QuestionTextSelection | null, optionKey?: string) {
+    // A text drag ends with a click on the answer button in some browsers.
+    if (target === "option" && range && optionKey) suppressOptionPickRef.current = optionKey;
+    const selection = range ? { target, optionKey, range } : null;
     setAnnotationSelection(selection);
     if (selection && annotationTool?.kind === "highlight") {
       saveAnnotation(selection, annotationTool.tone);
@@ -1606,6 +1671,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       }
     >
       {finalizeError && <div className="form-warning danger" role="alert"><b>Final save not confirmed.</b> {finalizeError}</div>}
+      <CommunityPracticeNotice count={unreviewedInPool} pending={community.pending} />
       <div className="quiz-progress" aria-hidden="true">
         <span className="quiz-progress-fill" style={{ width: `${Math.round(((index + (revealed ? 1 : 0)) / pool.length) * 100)}%` }} />
       </div>
@@ -1633,7 +1699,9 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         <QuestionViewFrame view={presentation.view}>
         <div aria-label={question.content ? "Question stem" : undefined} tabIndex={question.content ? -1 : undefined}
           ref={question.content ? stemRef : undefined} data-study-part="stem">
-        <QuestionContent question={question} part="stem" mode={revealed ? "answered" : "question"} fallback={
+        <QuestionContent question={question} part="stem" mode={revealed ? "answered" : "question"}
+          annotations={stemAnnotations} onSelection={(range) => handleAnnotationSelection("stem", range)}
+          onDeleteAnnotation={deleteAnnotation} eraseMode={annotationTool?.kind === "eraser"} fallback={
           <AnnotatedQuestionText
           text={question.stem}
           annotations={stemAnnotations}
@@ -1643,7 +1711,12 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           eraseMode={annotationTool?.kind === "eraser"}
           focusRef={stemRef}
           onSelection={(range) => handleAnnotationSelection("stem", range)}
-        />} />
+        />} annotate={{
+          annotations: stemAnnotations,
+          onSelection: (range) => handleAnnotationSelection("stem", range),
+          onDelete: deleteAnnotation,
+          eraseMode: annotationTool?.kind === "eraser",
+        }} />
         </div>
         <QuestionSupportingContent question={question} mode="question" />
         {!question.content && <QuestionExhibits attachments={exhibits} />}
@@ -1654,6 +1727,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             const showCorrect = revealed && correctKey === opt.key;
             const showWrong = revealed && isPicked && Boolean(correctKey) && correctKey !== opt.key;
             const isStruck = item.struck.includes(opt.key);
+            const optionAnnotations = annotations.filter((annotation) => annotation.target === "option" && annotation.optionKey === opt.key);
             return (
               <div key={opt.key} data-study-part="choice" data-choice-key={opt.key}
                 className={`option-row ${isPicked ? "picked" : ""} ${showCorrect ? "correct" : ""} ${showWrong ? "wrong" : ""} ${isStruck ? "struck" : ""}`}>
@@ -1661,9 +1735,24 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
                   aria-label={`${opt.key}. ${opt.text}`}
                   aria-pressed={isPicked}
                   disabled={finalizing || revealed}
-                  onClick={() => act({ type: "pick", key: opt.key })}>
+                  onPointerDownCapture={() => { suppressOptionPickRef.current = null; }}
+                  onClickCapture={(event) => {
+                    if (annotationTool?.kind === "eraser" && (event.target as Element).closest("mark[data-annotation-id]")) event.preventDefault();
+                  }}
+                  onClick={(event) => {
+                    const suppress = event.defaultPrevented || window.getSelection()?.isCollapsed === false
+                      || (event.detail !== 0 && suppressOptionPickRef.current === opt.key);
+                    suppressOptionPickRef.current = null;
+                    if (!suppress) act({ type: "pick", key: opt.key });
+                  }}>
                   <span className="mono option-key">{opt.key}</span>
-                  <span className="option-text"><QuestionContent question={question} part="choice" choice={opt.key} mode={revealed ? "answered" : "question"} fallback={opt.text} /></span>
+                  <span className="option-text"><QuestionContent question={question} part="choice" choice={opt.key} mode={revealed ? "answered" : "question"}
+                    annotations={optionAnnotations} onSelection={(range) => handleAnnotationSelection("option", range, opt.key)}
+                    onDeleteAnnotation={deleteAnnotation} eraseMode={annotationTool?.kind === "eraser"} fallback={
+                    <AnnotatedQuestionText text={opt.text} annotations={optionAnnotations} inline label={`Choice ${opt.key} text`}
+                      onSelection={(range) => handleAnnotationSelection("option", range, opt.key)}
+                      onDelete={deleteAnnotation} eraseMode={annotationTool?.kind === "eraser"} />
+                  } /></span>
                 </button>
                 {/* Once revealed: a tick on the right answer, a cross on a wrong pick. Never a tick on the pick itself. */}
                 {showCorrect ? <span className="option-result ok" role="img" aria-label="Correct answer"><Check size={ICON_SIZE.emphasis} /></span>
@@ -1710,7 +1799,9 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
             onMarkExplanationWrong={() => flagExtractionIssue("explanation")}
             onMarkAnswerWrong={() => flagExtractionIssue("answer")}
             onEditMapping={() => setEditingMapping((value) => !value)}
-            explanationContent={question.explanation ? (<QuestionContent question={question} part="explanation" mode="answered" fallback={
+            explanationContent={question.explanation ? (<QuestionContent question={question} part="explanation" mode="answered"
+              annotations={explanationAnnotations} onSelection={(range) => handleAnnotationSelection("explanation", range)}
+              onDeleteAnnotation={deleteAnnotation} eraseMode={annotationTool?.kind === "eraser"} fallback={
               <AnnotatedQuestionText
                 text={question.explanation.trim()}
                 annotations={explanationAnnotations}

@@ -4,7 +4,7 @@ import { Blob as NativeBlob, File as NativeFile } from "node:buffer";
 import { useStore } from "../store";
 import { closeWorkspace, openEmptyWorkspace, reloadWorkspace } from "../question-content/persistenceHarness.testing";
 import { sha256 } from "../question-content/assets";
-import { bankFiles, folderLibraryReader, installPrivateLibrary, mergeStoredReview, readCatalog, readPreparedBank, safeLibraryPath } from "./install";
+import { auditedRhpsSourceRefresh, bankFiles, folderLibraryReader, installPrivateLibrary, mergeStoredReview, readCatalog, readPreparedBank, safeLibraryPath } from "./install";
 import { PRIVATE_LIBRARY_DOCUMENT, PRIVATE_LIBRARY_FORMAT, PRIVATE_REVIEW_DOCUMENT, type PreparedBank, type PrivateLibraryCatalog } from "./types";
 import { privateReviewMedia } from "./media";
 import { collectQuestionAttachmentPayloads, deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, listQuestionAttachmentBlobKeys, restoreQuestionAttachmentPayloads, runQuestionAttachmentMaintenance } from "../questionAttachments";
@@ -17,6 +17,16 @@ import { STORAGE_KEYS } from "../brand";
 import { createLocalBackup, refreshLocalBackupSummaries, resetLocalBackupRuntimeForTests } from "../localBackup";
 
 const encode = (value: unknown) => new TextEncoder().encode(typeof value === "string" ? value : JSON.stringify(value));
+
+it("enables source refresh only for the audited RHPS 1090 catalog edition", async () => {
+  const { catalog } = await bundle();
+  const base = "axom-rhps-reconciled-1090-source-verified-2026-11-01";
+  expect(auditedRhpsSourceRefresh(catalog)).toBe(false);
+  expect(auditedRhpsSourceRefresh({ ...catalog, id: base, version: "2026-11-01-1090", preparerVersion: 1 })).toBe(true);
+  expect(auditedRhpsSourceRefresh({ ...catalog, id: `${base}-part-03-of-08`, version: "2026-11-01-1090-part-03", preparerVersion: 1 })).toBe(true);
+  expect(auditedRhpsSourceRefresh({ ...catalog, id: `${base}-part-03-of-08`, version: "2026-11-01-1090-part-04", preparerVersion: 1 })).toBe(false);
+  expect(auditedRhpsSourceRefresh({ ...catalog, id: base, version: "2026-11-01-1090", preparerVersion: 2 })).toBe(false);
+});
 async function bundle() {
   const template = encode("T5 - GOER - Lectures:\nWeek 1:\nLecture 01 Example topic [Lecture]");
   const checksum = (await sha256(template)).slice(7);
@@ -252,6 +262,27 @@ describe("prepared private library installation", () => {
     expect(() => readPreparedBank({ ...mixed, reviewedFiling: {
       term: "Term 5", module: "GOER", evidence: "human-reviewed", weekAssignment: "unassigned",
     } })).toThrow("cannot collapse several original modules or terms");
+  });
+  it("keeps one Unfiled source scope intact behind an explicit human-reviewed filing", async () => {
+    const b = await bundle();
+    const original = JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)) as PreparedBank;
+    original.pkg.manifest.course = { name: "Unfiled", term: 0, week: 0 };
+    original.pkg.questions[0].course = "Unfiled";
+    original.pkg.questions[0].term = 0;
+    const filing = { term: "Term 4", module: "NCRS", evidence: "human-reviewed", weekAssignment: "unassigned" } as const;
+    const accepted = readPreparedBank({ ...original, reviewedFiling: filing });
+    expect(accepted.reviewedFiling).toEqual(filing);
+    expect(accepted.pkg.manifest.course).toEqual({ name: "Unfiled", term: 0, week: 0 });
+    expect(accepted.pkg.questions[0]).toMatchObject({ course: "Unfiled", term: 0 });
+    expect(() => readPreparedBank({ ...original, reviewedFiling: { ...filing, evidence: "source-metadata" } }))
+      .toThrow(/explicit human review/);
+
+    const mixed = structuredClone(original);
+    mixed.pkg.questions[0].term = 1;
+    expect(() => readPreparedBank({ ...mixed, reviewedFiling: filing })).toThrow(/invalid original module or term/);
+    const invalid = structuredClone(original);
+    invalid.pkg.manifest.course.name = "NCRS";
+    expect(() => readPreparedBank({ ...invalid, reviewedFiling: filing })).toThrow(/invalid original module or term/);
   });
   it("preserves only reviewer-editable content while adopting corrected source metadata", async () => {
     const b = await bundle();

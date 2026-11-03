@@ -7,7 +7,7 @@ import { useStore } from "../lib/store";
 import { useAccount } from "../lib/account/accountStore";
 import { buildPulse } from "../lib/communications/snapshot";
 import { communicationsRequest } from "../lib/communications/client";
-import { currentPresentation, downloadBlob } from "../lib/communications/presentation";
+import { copyImageBlob, currentPresentation, downloadBlob } from "../lib/communications/presentation";
 import { localClock, type PulseData } from "../lib/communications/model";
 import "../styles/communications.css";
 
@@ -62,7 +62,28 @@ export function PulsePage() {
   useEffect(() => { let cancelled = false; setRemote(null); if (!userId) { setLoading(false); return; } setLoading(true); communicationsRequest<{ snapshot: PulseData | null }>("pulse", { year }).then(result => { if (!cancelled) setRemote(result.snapshot); }).catch(() => { if (!cancelled) setMessage("Showing this device’s record. The account snapshot could not be reached."); }).finally(() => { if (!cancelled) setLoading(false); }); return () => { cancelled = true; }; }, [userId, year]);
   const snapshot = remote ?? local; const root = useOpticalMotion<HTMLElement>(snapshot); const metrics = snapshot.metrics; const scoredTrend = snapshot.trend.filter(point => point.accuracy !== null); const improved = snapshot.systems.filter(s => (s.delta ?? 0) > 0).sort((a, b) => (b.delta ?? 0) - (a.delta ?? 0))[0];
   useEffect(() => { const observer = new IntersectionObserver(entries => entries.forEach(entry => { if (entry.isIntersecting) { entry.target.classList.add("is-visible"); observer.unobserve(entry.target); } }), { threshold: 0.08 }); root.current?.querySelectorAll(".pulse-reveal").forEach(el => observer.observe(el)); return () => observer.disconnect(); }, [snapshot, root]);
-  const exportImage = async (action: "download" | "copy" | "share") => { setBusy(true); try { const blob = await pulseCard(snapshot, includeName); if (action === "copy") { if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") throw new Error("Copy image is unavailable. Download the card instead."); await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]); setMessage("Share card copied. Nothing has been published."); } else if (action === "share") { const file = new File([blob], `axom-pulse-${year}.png`, { type: "image/png" }); if (navigator.canShare?.({ files: [file] })) await navigator.share({ title: `AXOM Pulse ${year}`, files: [file] }); else { downloadBlob(blob, file.name); setMessage("Card downloaded. Share it whenever you choose."); } } else { downloadBlob(blob, `axom-pulse-${year}.png`); setMessage("Share card downloaded. Nothing has been published."); } } catch (error) { setMessage(error instanceof Error ? error.message : "The card could not be exported."); } finally { setBusy(false); } };
+  const exportImage = async (action: "download" | "copy" | "share") => {
+    setBusy(true);
+    try {
+      const blob = await pulseCard(snapshot, includeName);
+      if (action === "copy") {
+        setMessage(await copyImageBlob(blob)
+          ? "Share card copied. Nothing has been published."
+          : "Copy image is unavailable. Download the card instead.");
+      } else if (action === "share") {
+        const file = new File([blob], `axom-pulse-${year}.png`, { type: "image/png" });
+        if (navigator.canShare?.({ files: [file] })) await navigator.share({ title: `AXOM Pulse ${year}`, files: [file] });
+        else { downloadBlob(blob, file.name); setMessage("Card downloaded. Share it whenever you choose."); }
+      } else {
+        downloadBlob(blob, `axom-pulse-${year}.png`);
+        setMessage("Share card downloaded. Nothing has been published.");
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "The card could not be exported.");
+    } finally {
+      setBusy(false);
+    }
+  };
   return <main className="pulse-page" data-optical-paused={motionPaused || reducedMotion} ref={root} style={{ "--pulse-accent": snapshot.accent } as CSSProperties}>
     <header className="pulse-top"><a href="/#communications"><ArrowLeft size={16} /> Back to AXOM</a><CommunicationsBrand label={`PULSE // ${year}`} /><div className="pulse-top-actions"><span>{snapshot.source === "device" ? "THIS DEVICE" : "YOUR PRIVATE RECORD"}</span><button type="button" disabled={reducedMotion} onClick={() => setMotionPaused(paused => !paused)}>{motionPaused || reducedMotion ? <Play size={12} aria-hidden="true" /> : <Pause size={12} aria-hidden="true" />}{reducedMotion ? "Motion reduced" : motionPaused ? "Resume motion" : "Pause motion"}</button></div></header>
     <section className="pulse-hero"><div className="pulse-hero-copy pulse-glass" data-optical=""><p className="comms-kicker">YOUR YEAR IN MEDICINE, MEASURED.</p><h1>{snapshot.displayName === "Learner" ? "This" : `${snapshot.displayName.split(" ")[0]}, this`}<br />was your year<span>.</span></h1><p className="pulse-lede">The hours nobody saw.<br />The answers that became understanding.<br />A record that belongs to you.</p><button className="pulse-start" onClick={() => document.getElementById("pulse-record")?.scrollIntoView({ behavior: prefersReducedMotion() ? "instant" : "smooth" })}>Read your record <ArrowDown size={16} /></button></div><div className="pulse-orbit" data-optical="" aria-hidden="true"><div className="pulse-ring-outer" /><div className="pulse-ring-inner" /><div className="pulse-orb-lens"><img src="/icons/axom-orb-512.png" width="360" height="360" alt="" /></div><span className="pulse-coordinate">{year}<br />RECORDED / PERSONAL</span></div><div className="pulse-period"><span>{snapshot.periodStart} → {snapshot.periodEnd}</span><span>01 / THE RECORD</span></div></section>

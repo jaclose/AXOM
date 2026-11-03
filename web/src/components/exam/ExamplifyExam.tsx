@@ -33,6 +33,7 @@ import { AnnotatedQuestionText } from "../questions/AnnotatedQuestionText";
 import { QuizCalculator, type QuizCalculatorValue } from "../questions/QuizCalculator";
 import { AxomMark } from "../ui/BrandMark";
 import { ExplanationBody, LabValuesPanel, useExhibitUrls } from "./parts";
+import { CommunityPracticeNotice } from "../questions/CommunityPracticeNotice";
 import type { ExamBlockApi } from "./useExamBlock";
 import "../../styles/exam-examplify.css";
 
@@ -59,11 +60,13 @@ const FILTER_WORDS: Record<NavigatorFilter, string> = {
   all: "All", flagged: "Flagged", unanswered: "Unanswered", answered: "Answered", incorrect: "Incorrect", correct: "Correct",
 };
 
-export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
+export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose, unreviewedCount = 0, communityPending = false }: {
   exam: ExamBlockApi;
   title: string;
   timeLimitSeconds?: number;
   onClose?: () => void;
+  unreviewedCount?: number;
+  communityPending?: boolean;
 }) {
   const { pool, question, index, item, entries, correctKey, revealed, result, prefs, setPrefs, tool, setTool, reviewing, profile } = exam;
   const taker = useStore((state) => state.profile.name);
@@ -145,7 +148,7 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
   }
 
   return (
-    <div ref={exam.rootRef} className={`exam-sim xfy ${reviewing ? "is-review" : ""} ${toolkit ? "has-toolkit" : ""}`} role="dialog" aria-modal="true"
+    <div ref={exam.rootRef} className={`exam-sim xfy ${reviewing ? "is-review" : ""} ${toolkit ? "has-toolkit" : ""} ${unreviewedCount || communityPending ? "has-community-notice" : ""}`} role="dialog" aria-modal="true"
       aria-label="ExamSoft (Examplify) exam simulation" aria-busy={exam.finishStatus === "saving"} tabIndex={-1} style={style} onClick={anyMenu ? closeMenus : undefined}>
       {/* ------------------------------------------------------------------ top */}
       <header className="xfy-top">
@@ -176,9 +179,9 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
             </div>
           )}
           <div className="xfy-menu-wrap">
-            <button type="button" className="xfy-controls" aria-haspopup="menu" aria-expanded={controlsOpen}
+            <button type="button" className="xfy-controls" aria-label="Exam Controls" aria-haspopup="menu" aria-expanded={controlsOpen}
               onClick={(event) => { event.stopPropagation(); setControlsOpen((open) => !open); setFilterOpen(false); setMoreOpen(false); }}>
-              Exam Controls <ChevronDown size={15} aria-hidden="true" />
+              <span className="xfy-wide-only">Exam </span>Controls <ChevronDown size={15} aria-hidden="true" />
             </button>
             {controlsOpen && (
               <div className="xfy-menu xfy-controls-menu" role="menu" aria-label="Exam controls">
@@ -198,6 +201,8 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
           </button>
         </div>
       </header>
+
+      <CommunityPracticeNotice count={unreviewedCount} pending={communityPending} simulator />
 
       {/* ----------------------------------------------------------------- body */}
       <div className="xfy-main">
@@ -268,7 +273,7 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
               {moreOpen && (
                 <div className="xfy-menu xfy-more-menu" role="menu">
                   <button type="button" role="menuitem" disabled={!item.struck.length || revealed} onClick={() => item.struck.forEach((key) => exam.strike(key))}>Restore struck-out choices</button>
-                  <button type="button" role="menuitem" disabled={!exam.annotations.length} onClick={() => exam.annotations.forEach((annotation) => exam.onDeleteAnnotation(annotation.id))}>Clear highlighting</button>
+                  <button type="button" role="menuitem" disabled={!exam.allAnnotations.length} onClick={exam.clearAnnotations}>Clear highlighting</button>
                 </div>
               )}
             </div>
@@ -276,7 +281,8 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
 
           {!collapsed && (
             <div className={`xfy-stem ${tool === "highlight" ? "tool-highlight" : ""} ${tool === "erase" ? "tool-erase" : ""}`}>
-              <div aria-label={question.content ? "Question stem" : undefined} tabIndex={question.content ? -1 : undefined} ref={question.content ? exam.stemRef : undefined}><QuestionContent question={question} part="stem" fallback={<AnnotatedQuestionText
+              <div aria-label={question.content ? "Question stem" : undefined} tabIndex={question.content ? -1 : undefined} ref={question.content ? exam.stemRef : undefined}><QuestionContent question={question} part="stem"
+                annotations={exam.annotations} onSelection={exam.onSelection} onDeleteAnnotation={exam.onDeleteAnnotation} eraseMode={tool === "erase"} fallback={<AnnotatedQuestionText
                 text={question.stem}
                 annotations={exam.annotations}
                 className="xfy-stem-text"
@@ -285,7 +291,7 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
                 eraseMode={tool === "erase"}
                 onDelete={exam.onDeleteAnnotation}
                 onSelection={exam.onSelection}
-              />} /></div>
+              />} annotate={{ annotations: exam.annotations, onSelection: exam.onSelection, onDelete: exam.onDeleteAnnotation, eraseMode: tool === "erase" }} /></div>
             </div>
           )}
           {!question.content && (question.attachments?.length ?? 0) > 0 && <Exhibits question={question} opened={attachment} onOpen={setAttachment} />}
@@ -305,9 +311,14 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose }: {
               return (
                 <div key={option.key} className={`xfy-choice ${selected ? "selected" : ""} ${struck ? "struck" : ""} ${isCorrect ? "correct" : ""} ${isWrong ? "wrong" : ""}`}>
                   <button type="button" className="xfy-choice-main" role="radio" aria-checked={selected} disabled={revealed || exam.finishLocked}
-                    aria-label={`${option.key}. ${option.text}${struck ? " (struck out)" : ""}`} onClick={() => exam.pick(option.key)}>
+                    aria-label={`${option.key}. ${option.text}${struck ? " (struck out)" : ""}`} onClick={(event) => { if (!exam.suppressOptionPick(option.key, event.target)) exam.pick(option.key); }}>
                     <b>{option.key}</b>
-                    <span><QuestionContent question={question} part="choice" choice={option.key} fallback={option.text} /></span>
+                    <span><QuestionContent question={question} part="choice" choice={option.key}
+                      annotations={exam.optionAnnotations(option.key)} onSelection={(range) => exam.onOptionSelection(option.key, range)}
+                      onDeleteAnnotation={exam.onDeleteAnnotation} eraseMode={tool === "erase"}
+                      fallback={<AnnotatedQuestionText text={option.text} annotations={exam.optionAnnotations(option.key)}
+                        label={`Answer choice ${option.key}`} inline eraseMode={tool === "erase"}
+                        onDelete={exam.onDeleteAnnotation} onSelection={(range) => exam.onOptionSelection(option.key, range)} />} /></span>
                   </button>
                   {isCorrect ? <span className="xfy-choice-side ok" role="img" aria-label="Correct answer"><Check size={18} /></span>
                     : isWrong ? <span className="xfy-choice-side bad" role="img" aria-label="Your answer (incorrect)"><X size={18} /></span>

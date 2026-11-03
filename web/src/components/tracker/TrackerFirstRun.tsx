@@ -6,7 +6,7 @@ import type { CSSProperties } from "react";
 import { BookOpen, CalendarRange, Eye, ListPlus, type LucideIcon } from "lucide-react";
 import { CURRICULA } from "../../lib/curricula";
 import type { CardSystem } from "../../lib/cardSystem";
-import { installCurriculum } from "../../lib/setupPlan";
+import { completeCurriculumMap } from "../../lib/setupPlan";
 import { ankiColor, PASS_COLOR } from "../../lib/tracker";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { pushToast } from "../../lib/toast";
@@ -53,7 +53,7 @@ export function TrackerFirstRun({ hasCourses, cards, onAction }: {
           Following a published curriculum?{" "}
           {CURRICULA.map((template) => (
             <button key={template.id} type="button" onClick={() => {
-              installCurriculum(template);
+              completeCurriculumMap(template);
               pushToast({ tone: "success", title: `${template.label} added`, body: "Your terms and modules are in the tree. Add lectures to each module as you go." });
             }}>
               Load {template.label}

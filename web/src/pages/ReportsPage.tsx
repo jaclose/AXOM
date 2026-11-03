@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Flame, Target, Activity, CalendarCheck, Layers, ListChecks, Download, BatteryCharging, Gauge, AlertTriangle, HelpCircle } from "lucide-react";
+import { Flame, Target, Activity, CalendarCheck, Layers, ListChecks, Download, BatteryCharging, Gauge, AlertTriangle, HelpCircle, ArrowUpRight } from "lucide-react";
 import { useStore } from "../lib/store";
 import { GlassCard, GButton, PanelHeader, Tag } from "../components/ui/primitives";
 import { dayTotals, todayGrade, gradeColor, gradeLabel, gradeLegend, prettyDate } from "../lib/scoring";
@@ -52,6 +52,8 @@ export function ReportsPage() {
   const [range, setRange] = useState<number>(14);
   const [trendMetric, setTrendMetric] = useState<ReportTrendMetric>("minutes");
   const [selectedTrendDay, setSelectedTrendDay] = useState<string | null>(null);
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportMessage, setExportMessage] = useState("");
   const track = resolveTrack(s.profile.educationTrack);
   const minTarget = s.profile.dailyMinuteTarget || 240;
   const cardTarget = s.profile.dailyCardTarget || 120;
@@ -144,6 +146,41 @@ export function ReportsPage() {
   const performancePreliminary = performance.preliminary || reportSummary.activeDates.length < 5;
   const openTasks = s.tasks.filter((task) => !task.archived && !task.done);
   const overdueOpenTasks = openTasks.filter((task) => task.due && task.due.slice(0, 10) < s.activeDayKey);
+  const studyMetric = reportSummary.metrics.study;
+  const overviewActiveDays = Number(studyMetric.value);
+  const overviewEffort = !studyMetric.sourceRecordIds.length ? "A quiet window." : studyMetric.numerator > 0 ? formatMetric(studyMetric.numerator, "minutes") : overviewActiveDays > 0 ? studyMetric.value : "No net activity";
+  const overviewEffortLabel = !studyMetric.sourceRecordIds.length ? "No activity logged in this period" : studyMetric.numerator > 0 ? "recorded study time" : overviewActiveDays > 0 ? `active day${overviewActiveDays === 1 ? "" : "s"} with logged work` : "recorded in this period";
+  const overviewConsistency = hasTargets ? reportSummary.metrics.consistency : activityRhythm.consistency;
+  const overviewStreak = hasTargets ? reportSummary.metrics.streak : activityRhythm.streak;
+  const nextMove = overdueOpenTasks.length
+    ? { label: "Review overdue work", detail: `${overdueOpenTasks.length} task${overdueOpenTasks.length === 1 ? "" : "s"} need a decision.`, inReport: false }
+    : !studyMetric.sourceRecordIds.length
+      ? { label: "Record your first session", detail: "One real activity starts the picture.", inReport: false }
+      : !hasTargets
+        ? { label: "Choose daily targets", detail: "Make the consistency view reflect your own goals.", inReport: false }
+        : { label: "Read your weekly trend", detail: "Look for a pattern across real days.", inReport: true };
+
+  function jumpToReportSection(id: "report-current-title" | "report-trend-title" | "report-system-title") {
+    const heading = document.getElementById(id);
+    heading?.scrollIntoView({
+      behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      block: "start",
+    });
+    heading?.focus({ preventScroll: true });
+  }
+
+  async function exportWorkspace() {
+    setExportBusy(true);
+    setExportMessage("Preparing your workspace backup on this device…");
+    try {
+      await exportStateWithAttachments(s);
+      setExportMessage("Workspace backup downloaded. This includes your saved work, not just the report on screen.");
+    } catch (error) {
+      setExportMessage(`Backup was not downloaded. ${error instanceof Error ? error.message : "Check storage and try again."}`);
+    } finally {
+      setExportBusy(false);
+    }
+  }
   const todayMetric: ReportMetric = {
     id: "daily-success",
     label: "Today’s success",
@@ -233,22 +270,55 @@ export function ReportsPage() {
 
   return (
     <>
-      <GlassCard pad>
-        <PanelHeader title="Reports" sub={`Traceable record for ${track.label}. Every number is computed from your local study log, tracker, and tasks.`}
-          action={
-            <div className="row gap8">
-              <div className="filter-bar" style={{ margin: 0 }}>
-                {RANGES.map((r) => (
-                  <button type="button" key={r} className={`filter-pill ${range === r ? "on" : ""}`} onClick={() => setRange(r)}>{r}d</button>
-                ))}
-              </div>
-              <GButton size="sm" onClick={() => void exportStateWithAttachments(s)}><Download size={ICON_SIZE.body} /> Export</GButton>
-              <GButton size="sm" onClick={() => setTourOpen(true)} aria-label="Open Reports help tour"><HelpCircle size={ICON_SIZE.body} /> Help</GButton>
-            </div>} />
-      </GlassCard>
+      <section className="report-overview" aria-labelledby="report-page-title">
+        <div className="report-overview-head">
+          <div>
+            <span className="report-overview-kicker">AXOM / REPORTS <span>{String(range).padStart(2, "0")} DAY VIEW</span></span>
+            <h1 id="report-page-title">See your work clearly.</h1>
+            <p>A traceable reading of your {track.label} work, drawn from what you saved on this device.</p>
+          </div>
+          <div className="report-overview-actions">
+            <div className="report-range" role="group" aria-label="Report period">
+              {RANGES.map((r) => (
+                <button type="button" key={r} aria-pressed={range === r} className={range === r ? "on" : ""} onClick={() => setRange(r)}>{r} days</button>
+              ))}
+            </div>
+            <GButton size="sm" disabled={exportBusy} onClick={() => void exportWorkspace()}><Download size={ICON_SIZE.body} /> {exportBusy ? "Preparing…" : "Export backup"}</GButton>
+            <GButton size="sm" onClick={() => setTourOpen(true)} aria-label="Open Reports help tour"><HelpCircle size={ICON_SIZE.body} /> Help</GButton>
+          </div>
+        </div>
+        <div className="report-overview-body">
+          <div className="report-overview-effort">
+            <span className="report-overview-label">01 / IN THIS WINDOW</span>
+            <strong>{overviewEffort}</strong>
+            <span>{overviewEffortLabel}</span>
+            <p>{studyMetric.interpretation}</p>
+          </div>
+          <dl className="report-overview-figures">
+            <div><dt>Days observed</dt><dd>{reportSummary.observedDates.length}<span> / {range}</span></dd></div>
+            <div><dt>{overviewConsistency.label}</dt><dd>{overviewConsistency.value}</dd></div>
+            <div><dt>{overviewStreak.label}</dt><dd>{overviewStreak.value}</dd></div>
+          </dl>
+        </div>
+        <div className="report-overview-foot">
+          <div className="report-next-move">
+            <span className="report-overview-label">NEXT MOVE</span>
+            {nextMove.inReport
+              ? <button type="button" onClick={() => jumpToReportSection("report-trend-title")}>{nextMove.label}<ArrowUpRight size={ICON_SIZE.body} aria-hidden="true" /></button>
+              : <a href="#productivity">{nextMove.label}<ArrowUpRight size={ICON_SIZE.body} aria-hidden="true" /></a>}
+            <small>{nextMove.detail}</small>
+          </div>
+          <div className="report-jump-nav" role="group" aria-label="Explore reports">
+            <button type="button" onClick={() => jumpToReportSection("report-current-title")}>Today</button>
+            <button type="button" onClick={() => jumpToReportSection("report-trend-title")}>Trend</button>
+            <button type="button" onClick={() => jumpToReportSection("report-system-title")}>Study system</button>
+          </div>
+        </div>
+        {exportMessage && <p className="report-export-message" role="status">{exportMessage}</p>}
+      </section>
 
       <section className="report-section" aria-labelledby="report-current-title" data-module-tour="reports-today">
-        <div className="report-section-heading"><div><span>Current state</span><h2 id="report-current-title">Today</h2></div><p>The signals that can help you decide what to do next.</p></div>
+        <div className="report-section-heading"><div><span>Current state</span><h2 id="report-current-title" tabIndex={-1}>Today</h2></div><p>The signals that can help you decide what to do next.</p></div>
         <div className="grid grid-stats report-card-grid">
           <ReportInsightCard icon={<Target size={ICON_SIZE.emphasis} />} metric={todayMetric} />
           <ReportInsightCard icon={<BatteryCharging size={ICON_SIZE.emphasis} />} metric={capacityMetric} />
@@ -264,7 +334,7 @@ export function ReportsPage() {
       </section>
 
       <section className="report-section" aria-labelledby="report-trend-title" data-module-tour="reports-trend">
-        <div className="report-section-heading"><div><span>Pattern over time</span><h2 id="report-trend-title">Trend</h2></div><p>Only scheduled, tracked dates enter requirement comparisons.</p></div>
+        <div className="report-section-heading"><div><span>Pattern over time</span><h2 id="report-trend-title" tabIndex={-1}>Trend</h2></div><p>Only scheduled, tracked dates enter requirement comparisons.</p></div>
         <div className="grid grid-stats report-card-grid report-card-grid-two">
           <ReportInsightCard icon={<CalendarCheck size={ICON_SIZE.emphasis} />} metric={hasTargets ? reportSummary.metrics.consistency : activityRhythm.consistency} insight={hasTargets ? trendInsight : { change: weekSummary?.interpretation }} />
           <ReportInsightCard icon={<Flame size={ICON_SIZE.emphasis} />} metric={hasTargets ? reportSummary.metrics.streak : activityRhythm.streak} insight={hasTargets ? trendInsight : { change: weekSummary?.interpretation }} />
@@ -340,7 +410,7 @@ export function ReportsPage() {
       </section>
 
       <section className="report-section" aria-labelledby="report-system-title">
-        <div className="report-section-heading"><div><span>Learning system</span><h2 id="report-system-title">Study system</h2></div><p>Course progress, question practice, and the work you record.</p></div>
+        <div className="report-section-heading"><div><span>Learning system</span><h2 id="report-system-title" tabIndex={-1}>Study system</h2></div><p>Course progress, question practice, and the work you record.</p></div>
         <div className="grid grid-stats report-card-grid">
           <ReportInsightCard icon={<Layers size={ICON_SIZE.emphasis} />} metric={reportSummary.metrics["tracker-mastery"]} />
           <ReportInsightCard icon={<Activity size={ICON_SIZE.emphasis} />} metric={questionMetric} />

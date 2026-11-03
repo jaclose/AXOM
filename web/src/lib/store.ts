@@ -20,7 +20,7 @@ import { instantiateBlueprint, duplicateInstall, reconcileBlueprint } from "./bl
 import {
   APP_VERSION_LABEL, DEFAULT_CLOCK_PREFERENCES, DEFAULT_DASHBOARD_WIDGETS, DEFAULT_HIDDEN_DASHBOARD_WIDGETS,
   DEFAULT_TIME_ZONE_PREFERENCE, STORED_DASHBOARD_WIDGET_IDS,
-  defaultProductivityTrackers,
+  defaultProductivityTrackers, legacyProductivityTrackerDefaults,
   driveResourceFields, makeSeed, SCHEMA_VERSION, SGU_DRIVES,
 } from "./seed";
 import { dayKey, isoDate } from "./scoring";
@@ -37,6 +37,7 @@ import {
 import { assertVaultWrite, getVaultWriteCheckpoint, localVaultStorage } from "./localVault";
 import { storeHydration } from "./storeHydration";
 import { userIdFromName } from "./userIdentity";
+import { normalizeBlueprintMode, normalizeUnlocks } from "./profileFields";
 import { ACADEMIC_TEMPLATE_COURSES, ACADEMIC_TEMPLATE_TERMS, focusOption, normalizedFocusIds } from "./experience";
 import { inferTrackFromFocus, isAcademicStageId, resolveTrack } from "./tracks";
 import type { EducationTrack } from "./tracks";
@@ -54,6 +55,7 @@ interface ApplyTrackOptions {
 import { normalizeTrackerPath, trackerPathKey } from "./pathUtils";
 import { normalizeResourceUrl } from "./resourceUtils";
 import { normalizeDailySuccessConfig } from "./dailySuccess";
+import { normalizeStudyStreaks } from "./studyStreaks";
 import { normalizePomodoroPreferences } from "./pomodoroPreferences";
 import { normalizeDailyLoopReminderPreferences } from "./dailyLoopReminders";
 import { normalizeFocusCheckInPreferences } from "./focusCheckIn";
@@ -97,6 +99,8 @@ import type {
   ReviewedImportPersistenceResult,
   ReviewedRefilingPlan,
   ReviewedRefilingResult,
+  ReviewedSourceRefreshPlan,
+  ReviewedSourceRefreshResult,
 } from "./questionImportFinalization";
 import {
   nextSchedule, validateAnkiCard,
@@ -303,6 +307,8 @@ interface Actions {
   commitReviewedImport: (plan: ReviewedImportPersistencePlan) => Promise<ReviewedImportPersistenceResult>;
   /** Atomically persist reviewed filing changes for reused source sets. */
   commitReviewedRefiling: (plan: ReviewedRefilingPlan) => Promise<ReviewedRefilingResult>;
+  /** Atomically refresh only source-owned fields of an untouched reused set. */
+  commitReviewedSourceRefresh: (plan: ReviewedSourceRefreshPlan) => Promise<ReviewedSourceRefreshResult>;
   updateQuestion: (id: string, patch: Partial<QuestionRecord>) => void;
   removeQuestion: (id: string) => void;
   recordQuestionAttempt: (id: string, attempt: Omit<QuestionAttempt, "at">) => void;
@@ -1651,6 +1657,98 @@ export const useStore = create<Store>()(
           documentId: documentWrite?.kind === "create" ? documentWrite.document.id : documentWrite?.id,
         };
       },
+      commitReviewedSourceRefresh: async (plan) => {
+        const failure = (message: string, rollbackFailures: string[] = []): ReviewedSourceRefreshResult => ({
+          ok: false, message, rollbackFailures,
+        });
+        const sameValue = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
+        const current = get();
+        const setBefore = (current.questionSets ?? []).find((item) => item.id === plan.setId);
+        if (!setBefore || !sameValue(setBefore, plan.expectedSet)) {
+          return failure("The reused source set changed before its audited refresh.");
+        }
+        const requestedIds = plan.questions.map((entry) => entry.expected.id);
+        if (!requestedIds.length || new Set(requestedIds).size !== requestedIds.length
+          || requestedIds.length !== setBefore.questionIds.length
+          || setBefore.questionIds.some((id) => !requestedIds.includes(id))) {
+          return failure("The reused source set no longer has exactly the audited questions.");
+        }
+        const before = new Map<string, QuestionRecord>();
+        const after = new Map<string, QuestionRecord>();
+        for (const entry of plan.questions) {
+          const prior = (current.questions ?? []).find((question) => question.id === entry.expected.id);
+          const source = entry.source.content;
+          if (!prior || !sameValue(prior, entry.expected) || prior.setId !== plan.setId
+            || !prior.content || !source
+            || prior.content.id !== source.id || prior.content.bankId !== source.bankId
+            || prior.content.provenance.sourceChecksum !== source.provenance.sourceChecksum
+            || prior.correctKey !== entry.source.correctKey) {
+            return failure(`Question "${entry.expected.id}" changed before its audited refresh.`);
+          }
+          const replacement = { ...prior, ...entry.source, updatedAt: now() };
+          const validation = validateQuestionRecord(replacement);
+          if (!validation.ok) return failure(`Question "${prior.id}" failed audited refresh validation: ${validation.errors.join(" ")}`);
+          before.set(prior.id, prior);
+          after.set(prior.id, replacement);
+        }
+        const changed = [...after].filter(([id, replacement]) => {
+          const prior = before.get(id)!;
+          return Object.keys(plan.questions.find((entry) => entry.expected.id === id)!.source)
+            .some((key) => !sameValue((prior as unknown as Record<string, unknown>)[key], (replacement as unknown as Record<string, unknown>)[key]));
+        });
+        const scopeChanged = !sameValue(setBefore.scope, plan.targetScope);
+        if (!changed.length && !scopeChanged) return { ok: true, updated: 0 };
+        const nextQuestions = (current.questions ?? []).map((question) => after.get(question.id) ?? question);
+        const nextSets = (current.questionSets ?? []).map((set) => (
+          set.id === plan.setId ? { ...set, scope: plan.targetScope } : set
+        ));
+        const writeSequence = getVaultWriteCheckpoint() + 1;
+        try {
+          await set(() => ({ questions: nextQuestions, questionSets: nextSets }));
+          assertVaultWrite(writeSequence);
+          return { ok: true, updated: changed.length };
+        } catch (error) {
+          const rollbackFailures = new Set<string>();
+          const rollbackSequence = getVaultWriteCheckpoint() + 1;
+          try {
+            await set((live) => ({
+              questions: (live.questions ?? []).map((question) => {
+                const prior = before.get(question.id);
+                const replacement = after.get(question.id);
+                if (!prior || !replacement) return question;
+                const restored = { ...question } as Record<string, unknown>;
+                const source = plan.questions.find((entry) => entry.expected.id === question.id)!.source;
+                for (const key of [...Object.keys(source), "updatedAt"]) {
+                  const liveValue = (question as unknown as Record<string, unknown>)[key];
+                  const replacementValue = (replacement as unknown as Record<string, unknown>)[key];
+                  if (!sameValue(liveValue, replacementValue)) {
+                    rollbackFailures.add(`question ${question.id}.${key}`);
+                    continue;
+                  }
+                  if (key in prior) restored[key] = (prior as unknown as Record<string, unknown>)[key];
+                  else delete restored[key];
+                }
+                return restored as unknown as QuestionRecord;
+              }),
+              questionSets: (live.questionSets ?? []).map((questionSet) => {
+                if (questionSet.id !== plan.setId) return questionSet;
+                if (!sameValue(questionSet.scope, plan.targetScope)) {
+                  rollbackFailures.add(`question set ${plan.setId}.scope`);
+                  return questionSet;
+                }
+                return { ...questionSet, scope: setBefore.scope };
+              }),
+            }));
+            assertVaultWrite(rollbackSequence);
+          } catch {
+            rollbackFailures.add("audited source refresh state");
+          }
+          return failure(
+            error instanceof Error ? error.message : "AXOM could not persist the audited source refresh.",
+            [...rollbackFailures],
+          );
+        }
+      },
       commitReviewedRefiling: async (plan) => {
         const failure = (message: string, rollbackFailures: string[] = []): ReviewedRefilingResult => ({
           ok: false,
@@ -2604,11 +2702,16 @@ function matchProductivityTracker(trackers: ProductivityTracker[] = [], type: st
 function normalizeProductivityTrackers(value: unknown): ProductivityTracker[] {
   const timestamp = new Date().toISOString();
   const defaults = defaultProductivityTrackers(timestamp);
-  const byName = new Map(defaults.map((tracker) => [cleanText(tracker.name), tracker]));
+  if (!Array.isArray(value)) return defaults;
+  // An existing list, even an empty one, is the learner's choice. Older
+  // templates only fill missing fields on records that are already present.
+  const references = new Map([...defaults, ...legacyProductivityTrackerDefaults(timestamp)]
+    .map((tracker) => [cleanText(tracker.name), tracker]));
+  const byName = new Map<string, ProductivityTracker>();
   for (const record of arrayOfRecords(value)) {
     const name = String(record.name ?? "").trim();
     if (!name) continue;
-    const base = byName.get(cleanText(name));
+    const base = byName.get(cleanText(name)) ?? references.get(cleanText(name));
     byName.set(cleanText(name), {
       ...(base ?? defaults[0]),
       id: typeof record.id === "string" && record.id ? record.id : base?.id ?? uid(),
@@ -2799,7 +2902,7 @@ const ACADEMIC_PHASES = [
   "pre-med", "mcat", "preclinical", "clinical", "step1-dedicated", "step2-dedicated", "other",
 ] as const;
 
-function normalizeProfile(value: unknown): Profile {
+export function normalizeProfile(value: unknown): Profile {
   const profile = isRecord(value) ? value : {};
   const name = String(profile.name ?? "");
   const phase = ACADEMIC_PHASES.includes(profile.phase as typeof ACADEMIC_PHASES[number])
@@ -2871,8 +2974,7 @@ function normalizeProfile(value: unknown): Profile {
     energyChecks: normalizeEnergyChecks(profile.energyChecks),
     primaryTrackerScopes: normalizePrimaryScopes(profile.primaryTrackerScopes),
     // Preserve optional opt-in fields so they survive reset/migration.
-    blueprintMode: profile.blueprintMode === "usmle" || profile.blueprintMode === "prehealth"
-      ? profile.blueprintMode as Profile["blueprintMode"] : undefined,
+    blueprintMode: normalizeBlueprintMode(profile.blueprintMode),
     taskAutofillDisabled: typeof profile.taskAutofillDisabled === "boolean" ? profile.taskAutofillDisabled : undefined,
     taskTemplates: Array.isArray(profile.taskTemplates) ? profile.taskTemplates as Profile["taskTemplates"] : undefined,
     experimentalFlags: normalizeExperimentalFlags(profile.experimentalFlags),
@@ -2881,6 +2983,9 @@ function normalizeProfile(value: unknown): Profile {
     dailySuccess: profile.dailySuccess === undefined
       ? undefined
       : normalizeDailySuccessConfig(profile.dailySuccess),
+    studyStreaks: profile.studyStreaks === undefined
+      ? undefined
+      : normalizeStudyStreaks(profile.studyStreaks),
     hiddenActivityShortcuts: Array.isArray(profile.hiddenActivityShortcuts)
       ? [...new Set(profile.hiddenActivityShortcuts.filter((value): value is string => typeof value === "string" && Boolean(value.trim())).map((value) => value.slice(0, 240)))].slice(0, 100)
       : undefined,
@@ -2889,9 +2994,7 @@ function normalizeProfile(value: unknown): Profile {
     studyWorkflow: normalizeStudyWorkflow(profile.studyWorkflow),
     applicationResearch: normalizeApplicationResearch(profile.applicationResearch),
     applicationProfile: normalizeApplicationProfile(profile.applicationProfile),
-    unlocks: Array.isArray(profile.unlocks)
-      ? [...new Set(profile.unlocks.filter((value): value is string => typeof value === "string" && /^[a-z0-9-]{1,40}$/.test(value)))].slice(0, 50)
-      : undefined,
+    unlocks: normalizeUnlocks(profile.unlocks),
   };
 }
 

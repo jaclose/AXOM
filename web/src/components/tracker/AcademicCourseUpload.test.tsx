@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { AcademicCourseUpload } from "./AcademicCourseUpload";
 import { AcademicPlanTermRequiredError } from "../../lib/academicLibrary/coursePlan";
-import { readCatalog, zipLibraryReader } from "../../lib/privateLibrary/install";
+import { folderLibraryReader, readCatalog, zipLibraryReader } from "../../lib/privateLibrary/install";
 import { prepareAcademicUpload, uploadAcademicCourse } from "../../lib/academicLibrary/upload";
 
 vi.mock("../../lib/account/accountStore", () => ({
@@ -18,6 +18,7 @@ vi.mock("../../lib/academicLibrary/client", () => ({
 vi.mock("../../lib/privateLibrary/install", () => ({
   readCatalog: vi.fn(),
   zipLibraryReader: vi.fn(),
+  folderLibraryReader: vi.fn(),
 }));
 vi.mock("../../lib/academicLibrary/upload", () => ({
   prepareAcademicUpload: vi.fn(),
@@ -48,6 +49,7 @@ describe("authenticated academic upload — unassigned weeks", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.mocked(zipLibraryReader).mockResolvedValue(reader);
+    vi.mocked(folderLibraryReader).mockReturnValue(reader);
     vi.mocked(readCatalog).mockReturnValue({
       format: "axom-private-library", schemaVersion: 1, id: "private-banks", version: "v1",
       templates: [], sources: [{ id: "s", name: "NCRS", sourcePath: "NCRS",
@@ -94,6 +96,27 @@ describe("authenticated academic upload — unassigned weeks", () => {
     expect(uploadAcademicCourse).toHaveBeenCalledOnce();
   });
 
+  it("flags a matching course before saving another private package", async () => {
+    vi.mocked(readCatalog).mockReturnValueOnce({
+      format: "axom-private-library", schemaVersion: 1, id: "planned", version: "v1",
+      templates: [{ file: "plan.txt", name: "course", checksum: "b".repeat(64) }], sources: [],
+    });
+    const { container } = render(<AcademicCourseUpload onSaved={vi.fn()} existingCourses={[{
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", title: "NCRS", module: "NCRS", term: "Term 4",
+      visibility: "private", review_status: "pending", current_revision_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      owned: true, ready_questions: 5, review_questions: 0,
+    }]} />);
+    chooseZip(container);
+    const match = await screen.findByRole("group", { name: "Existing course match" });
+    expect(within(match).getByText(/already listed/)).toBeTruthy();
+    const save = screen.getByRole("button", { name: "Save private collection" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    fireEvent.click(within(match).getByRole("checkbox"));
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+    await waitFor(() => expect(uploadAcademicCourse).toHaveBeenCalledOnce());
+  });
+
   it("keeps a package with a reviewed weekly plan on its established path", async () => {
     vi.mocked(readCatalog).mockReturnValueOnce({
       format: "axom-private-library", schemaVersion: 1, id: "planned", version: "v1",
@@ -103,6 +126,18 @@ describe("authenticated academic upload — unassigned weeks", () => {
     chooseZip(container);
     await waitFor(() => expect(prepareAcademicUpload).toHaveBeenCalledWith(reader));
     expect(screen.queryByRole("group", { name: "Confirm unscheduled course classification" })).toBeNull();
+  });
+
+  it("accepts a prepared course folder without requiring a ZIP", async () => {
+    vi.mocked(readCatalog).mockReturnValueOnce({
+      format: "axom-private-library", schemaVersion: 1, id: "planned", version: "v1",
+      templates: [{ file: "plan.txt", name: "course", checksum: "b".repeat(64) }], sources: [],
+    });
+    render(<AcademicCourseUpload onSaved={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("AXOM course folder"), { target: { files: [new File(["{}"], "catalog.json")] } });
+    await waitFor(() => expect(folderLibraryReader).toHaveBeenCalledOnce());
+    expect(zipLibraryReader).not.toHaveBeenCalled();
+    expect(prepareAcademicUpload).toHaveBeenCalledWith(reader);
   });
 
   it("asks a reviewer for the term of a weekly plan that does not name it, and never guesses one", async () => {

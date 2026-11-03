@@ -1,12 +1,30 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { resolve, relative } from "node:path";
 import { loadEnv, type Plugin } from "vite";
 import { formatReleaseNotes, parseReleaseNotes, requireReleaseNotes } from "../../scripts/release-notes.mjs";
 
 export function buildMetadata(root: string, version: string) {
   let commit = "local";
-  try { commit = execFileSync("git", ["rev-parse", "--short=12", "HEAD"], { cwd: root, encoding: "utf8" }).trim(); } catch { /* source ZIP */ }
+  let matchedCheckout = false;
+  try {
+    const repoRoot = execFileSync("git", ["rev-parse", "--show-toplevel"],
+      { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    if (realpathSync(resolve(repoRoot, "web")) === realpathSync(root)) {
+      matchedCheckout = true;
+      // The changelog and release scripts live above web/, so inspect the
+      // whole checkout before claiming a commit identifies these bytes.
+      const changes = execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=normal"],
+        { cwd: repoRoot, encoding: "utf8" }).trim();
+      if (!changes) commit = execFileSync("git", ["rev-parse", "--short=12", "HEAD"],
+        { cwd: repoRoot, encoding: "utf8" }).trim() || "local";
+    }
+  } catch { /* source ZIP */ }
+  // Vercel builds from a filtered source archive without .git. Its deployment
+  // commit still identifies the archived bytes; never override a dirty checkout.
+  if (!matchedCheckout && /^[a-f0-9]{40}$/i.test(process.env.VERCEL_GIT_COMMIT_SHA ?? "")) {
+    commit = process.env.VERCEL_GIT_COMMIT_SHA!.slice(0, 12).toLowerCase();
+  }
   const builtAt = new Date().toISOString();
   const buildId = process.env.AXOM_BUILD_ID || `${commit}-${builtAt.replace(/[^0-9]/g, "")}`;
   if (!/^[a-zA-Z0-9._-]{1,160}$/.test(buildId)) throw new Error("AXOM_BUILD_ID must be 1–160 safe identifier characters.");

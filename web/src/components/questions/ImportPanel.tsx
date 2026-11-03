@@ -3,7 +3,7 @@ import { manifestForFile } from "../../lib/question-content/knownBanks";
 // ===========================================================================
 // Import Center (question-bank rehaul, layers 1–2). Upload PDF/DOCX/TXT/MD/
 // CSV/JSON or paste text → extract → parse (stems, choices, answer keys,
-// numbering, pages) → MANDATORY review screen with per-question editing →
+// numbering, pages) → one-click source-backed save or detailed review →
 // choose how to save: library document only, question set, or both — with
 // optional review-gated AI enhancement (digest, pitfalls, review targets).
 // Scanned PDFs with no text layer are stored as source records and say so
@@ -48,6 +48,7 @@ import { courseForScope } from "../../lib/course-engine/questionBank";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { MassImport } from "./MassImport";
 import { flagImportDuplicates } from "../../lib/questionDuplicates";
+import { markExactImportMatches, planQuickImport } from "../../lib/questionImportQuick";
 import { imageNameKey, imageReferenceKey, matchNamedImages, namedImages } from "../../lib/questionImportImages";
 import type { RawSelection } from "../../lib/privateLibrary/rawAcademicInput";
 
@@ -70,6 +71,38 @@ type PendingDocument = ImportSourceFile;
 
 const EXAM_TYPES = Object.keys(EXAM_TYPE_LABEL) as QuestionExamType[];
 const uid = () => crypto.randomUUID();
+
+function reviewedAnswerPatch(draft: ReviewDraft, key: string | undefined): Partial<ReviewDraft> {
+  const answerScore = key ? 1 : 0;
+  const overall = (draft.questionDetectionConfidence ?? 0) * 0.4
+    + answerScore * 0.4
+    + (draft.explanationDetectionConfidence ?? 0) * 0.2;
+  return {
+    correctKey: key,
+    correctAnswerText: key ? draft.options.find((option) => option.key === key)?.text : undefined,
+    answerDetectionConfidence: answerScore,
+    overallImportConfidence: overall,
+    needsReview: !key || (draft.questionDetectionConfidence ?? 0) < 0.75 || undefined,
+    confidence: overall >= 0.85 && key ? "high" : overall >= 0.6 ? "medium" : "low",
+    parserRuleIds: key
+      ? [...new Set([...(draft.parserRuleIds ?? []), "answer.user-reviewed-mapping"])]
+      : draft.parserRuleIds,
+    reviewAcknowledged: false,
+  };
+}
+
+function canBatchConfirmMappedAnswer(draft: ReviewDraft, level: ReturnType<typeof evaluateImportDraft>, hasSource: boolean): boolean {
+  const rules = draft.parserRuleIds ?? [];
+  if (!hasSource || !draft.include || draft.aiGenerated || !draft.correctKey || !draft.answerEvidence?.trim()
+    || level.level !== "Needs Review" || !level.isValid
+    || !draft.options.some((option) => option.key === draft.correctKey && option.text.trim())
+    || !rules.some((rule) => rule.startsWith("answer.explicit-letter"))
+    || rules.some((rule) => rule.startsWith("conflict.") || rule.startsWith("ai.")
+      || rule === "answer.source-key-flag" || rule === "import.source-text-edited")
+    || draft.warnings.some((warning) => /SOURCE-KEY (?:FLAG|CONFLICT)/i.test(warning))) return false;
+  const projected = evaluateImportDraft({ ...draft, ...reviewedAnswerPatch(draft, draft.correctKey) });
+  return projected.level === "High" && projected.isValid;
+}
 
 /** Seed the Import Center from elsewhere: a reference doc (AI tab) or a set of
  * already-parsed drafts to review (Mass Import "Inspect"). */
@@ -206,13 +239,22 @@ export function ImportPanel({
   // save is still being written, the store may hold records that get rolled back.
   const settledLibrary = () => (hasReviewedImportInFlight() ? { questions: [], questionSets: [], documents: [] } : library());
   // Read once: what the seed's file already brought in, if it was imported before.
-  const [seeded] = useState(() => (seed?.drafts
-    ? applyPriorImport(
-        flagImportDuplicates(preserveUserReviewedMappings(seed.drafts, s.questions ?? [], seed.sourceDocumentId), s.questions ?? []),
+  const [seeded] = useState(() => {
+    if (!seed?.drafts) return undefined;
+    const settledQuestions = settledLibrary().questions;
+    const known = applyPriorImport(
+        flagImportDuplicates(preserveUserReviewedMappings(seed.drafts, settledQuestions, seed.sourceDocumentId), settledQuestions),
         seed.rawText != null ? { checksum: seed.checksum, fileName: seed.fileName ?? "import", existingDocumentId: seed.sourceDocumentId } : null,
         settledLibrary(),
-      )
-    : undefined));
+      );
+    if (seed.sourceDocumentId) return known;
+    const matches = markExactImportMatches(known.drafts, known.selected, settledQuestions);
+    return { ...known, ...matches, note: [known.note,
+      matches.exact ? `${matches.exact} exact question${matches.exact === 1 ? " is" : "s are"} already in your bank and left out.` : "",
+      matches.repeated ? `${matches.repeated} repeated question${matches.repeated === 1 ? " is" : "s are"} in this source and left out.` : "",
+      matches.conflicting ? `${matches.conflicting} question${matches.conflicting === 1 ? " has" : "s have"} conflicting answer keys and ${matches.conflicting === 1 ? "needs" : "need"} source review.` : "",
+    ].filter(Boolean).join(" ") };
+  });
   const [drafts, setDrafts] = useState<ReviewDraft[]>(() => (seeded
     ? seeded.drafts.map((d, index) => ({ ...d, reviewId: uid(), include: seeded.selected[index], source: seed?.source ?? "imported" }))
     : []));
@@ -247,6 +289,8 @@ export function ImportPanel({
   const [examType, setExamType] = useState<QuestionExamType | "">("");
   const [difficulty, setDifficulty] = useState<QuestionDifficulty | "">("");
   const [aiBusyDraft, setAiBusyDraft] = useState<number | null>(null);
+  const [bulkAnswerIds, setBulkAnswerIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [bulkAnswerAttestation, setBulkAnswerAttestation] = useState("");
   const [finalizing, setFinalizing] = useState(false);
   const [activeBatchQueueId, setActiveBatchQueueId] = useState<string | undefined>(seed?.batchQueueId);
   const [finalizedBatchQueueId, setFinalizedBatchQueueId] = useState<string | undefined>();
@@ -307,9 +351,18 @@ export function ImportPanel({
     // path as images the learner adds by hand.
     setImageFiles(images); // Avoid carrying pictures from a prior source into the next review.
     // A file imported before comes in with what it already brought left unselected.
-    const known = applyPriorImport(flagImportDuplicates(parsed, s.questions ?? []), doc, settledLibrary());
-    setDrafts(known.drafts.map((d, index) => ({ ...d, reviewId: uid(), include: known.selected[index], aiGenerated: ai, source })));
-    setBatchWarnings(known.note ? [known.note, ...warnings] : warnings);
+    const settled = settledLibrary();
+    const known = applyPriorImport(flagImportDuplicates(parsed, settled.questions), doc, settled);
+    const matches = doc?.existingDocumentId ? { drafts: known.drafts, selected: known.selected, exact: 0, repeated: 0, conflicting: 0 }
+      : markExactImportMatches(known.drafts, known.selected, settled.questions);
+    setDrafts(matches.drafts.map((d, index) => ({ ...d, reviewId: uid(), include: matches.selected[index], aiGenerated: ai, source })));
+    setBatchWarnings([
+      ...(known.note ? [known.note] : []),
+      ...(matches.exact ? [`${matches.exact} exact question${matches.exact === 1 ? " is" : "s are"} already in your bank and left out.`] : []),
+      ...(matches.repeated ? [`${matches.repeated} repeated question${matches.repeated === 1 ? " is" : "s are"} in this source and left out.`] : []),
+      ...(matches.conflicting ? [`${matches.conflicting} question${matches.conflicting === 1 ? " has" : "s have"} conflicting answer keys and ${matches.conflicting === 1 ? "needs" : "need"} source review.`] : []),
+      ...warnings,
+    ]);
     setPendingDoc(doc);
     setSourceType(source);
     if (doc) setSourceText(doc.rawText);
@@ -343,10 +396,13 @@ export function ImportPanel({
     }
   }
 
-  async function saveApproved(modeOverride: SaveMode = saveMode) {
+  async function saveApproved(modeOverride: SaveMode = saveMode, quick = false) {
     if (finalizingRef.current) return;
 
-    const approved = drafts.filter((draft) => draft.include);
+    const approved = quick ? quickPlan.readyIndexes.map((index) => ({
+      ...drafts[index],
+      parserRuleIds: [...new Set([...(drafts[index].parserRuleIds ?? []), "import.source-key-validated"])],
+    })) : drafts.filter((draft) => draft.include);
     const week = Number(scopeWeek);
     // Checked, shaped and written by lib/questionImportSave: the same path
     // mass import's "Accept" takes.
@@ -434,11 +490,13 @@ export function ImportPanel({
     }
     if (mountedRef.current) pushToast({
       title: savedSetId
-        ? `${questionIds.length} reviewed question${questionIds.length === 1 ? "" : "s"} finalized`
+        ? `${questionIds.length} ${quick ? "source-backed" : "reviewed"} question${questionIds.length === 1 ? "" : "s"} saved`
         : "Source document saved for later review",
-      body: saved.reusedDocument
-        ? "AXOM reused the existing source record and linked the new reviewed set."
-        : savedSetId ? "The imported set is available in Question Sets and the Question Bank." : undefined,
+      body: quick
+        ? `${quickPlan.needsReview + quickPlan.missingImages + quickPlan.conflictingAnswers} still need attention in the saved source. ${quickPlan.repeatedInFile + quickPlan.alreadySaved} matching question${quickPlan.repeatedInFile + quickPlan.alreadySaved === 1 ? " was" : "s were"} skipped.`
+        : saved.reusedDocument
+          ? "AXOM reused the existing source record and linked the new reviewed set."
+          : savedSetId ? "The imported set is available in Question Sets and the Question Bank." : undefined,
       tone: "success",
     });
 
@@ -525,8 +583,7 @@ export function ImportPanel({
   function focusAfterReviewUpdate(...elementIds: Array<string | undefined>) {
     const focusedBefore = document.activeElement;
     const restore = () => {
-      // This runs a frame after the update. If the learner has gone to another
-      // field by then, taking focus back would send their typing into a question.
+      // A delayed frame must not take focus from a field the learner moved to.
       const focused = document.activeElement;
       if (focused && focused !== document.body && focused !== focusedBefore) return;
       for (const id of elementIds) {
@@ -653,22 +710,7 @@ export function ImportPanel({
   }
 
   function confirmDraftAnswer(index: number, draft: ReviewDraft, key: string | undefined) {
-    const answerScore = key ? 1 : 0;
-    const overall = (draft.questionDetectionConfidence ?? 0) * 0.4
-      + answerScore * 0.4
-      + (draft.explanationDetectionConfidence ?? 0) * 0.2;
-    updateDraft(index, {
-      correctKey: key,
-      correctAnswerText: key ? draft.options.find((option) => option.key === key)?.text : undefined,
-      answerDetectionConfidence: answerScore,
-      overallImportConfidence: overall,
-      needsReview: !key || (draft.questionDetectionConfidence ?? 0) < 0.75 || undefined,
-      confidence: overall >= 0.85 && key ? "high" : overall >= 0.6 ? "medium" : "low",
-      parserRuleIds: key
-        ? [...new Set([...(draft.parserRuleIds ?? []), "answer.user-reviewed-mapping"])]
-        : draft.parserRuleIds,
-      reviewAcknowledged: false,
-    });
+    updateDraft(index, reviewedAnswerPatch(draft, key));
   }
 
   async function assistDraftMapping(index: number) {
@@ -744,6 +786,19 @@ export function ImportPanel({
       draft.include ? includedById.get(draft.reviewId) ?? evaluations[index] : evaluations[index]
     ));
   }, [drafts, evaluations, includedDrafts, includedEvaluations]);
+  const quickPlan = useMemo(() => planQuickImport(drafts, displayedEvaluations, s.questions ?? [], imageFiles),
+    [drafts, displayedEvaluations, s.questions, imageFiles]);
+  const bulkAnswerCandidates = drafts.filter((draft, index) => canBatchConfirmMappedAnswer(draft, displayedEvaluations[index], Boolean(sourceText.trim())));
+  const selectedBulkAnswers = bulkAnswerCandidates.filter((draft) => bulkAnswerIds.has(draft.reviewId));
+  const bulkAnswerSignature = JSON.stringify(selectedBulkAnswers.map((draft) => [draft.reviewId, draft.correctKey, draft.answerEvidence, draft.stem, draft.options]));
+  function confirmSelectedAnswers() {
+    if (!selectedBulkAnswers.length || bulkAnswerAttestation !== bulkAnswerSignature) return;
+    const selected = new Set(selectedBulkAnswers.map((draft) => draft.reviewId));
+    setDrafts((current) => current.map((draft) => selected.has(draft.reviewId) && draft.correctKey
+      ? { ...draft, ...reviewedAnswerPatch(draft, draft.correctKey) } : draft));
+    setBulkAnswerIds(new Set());
+    setBulkAnswerAttestation("");
+  }
   const includedCount = includedDrafts.length;
   const imageMatches = matchNamedImages(namedImages(includedDrafts), imageFiles);
   const matchedImageKeys = new Set(imageMatches.filter((match) => match.file).map((match) => imageReferenceKey(match.name)));
@@ -782,7 +837,7 @@ export function ImportPanel({
       <PanelHeader
         title="Import questions"
         headingLevel={2}
-        sub="Bring in structured text, inspect every consequential field, then finalize only valid reviewed questions."
+        sub="Bring in a source. Save questions with clear printed keys now; review anything uncertain."
       />
 
       <nav className="import-steps" aria-label="Question import progress">
@@ -924,6 +979,10 @@ export function ImportPanel({
               {pendingDoc && drafts.length > 0 && (
                 <GhostButton disabled={finalizing} onClick={() => void saveApproved("doc")}>Keep source for later</GhostButton>
               )}
+              {pendingDoc && quickPlan.readyIndexes.length > 0 && <GButton id="import-quick-button"
+                disabled={finalizing} onClick={() => void saveApproved("both", true)}>
+                Save {quickPlan.readyIndexes.length} ready now
+              </GButton>}
               <GButton id="import-finalize-button" variant="primary" disabled={finalizeDisabled}
                 aria-describedby="import-finalize-status" onClick={() => void saveApproved()}>
                 {finalizing ? <RefreshCw size={ICON_SIZE.body} className="spin" /> : <Save size={ICON_SIZE.body} />}
@@ -932,6 +991,12 @@ export function ImportPanel({
             </div>
           </div>
           <div id="import-finalize-status" className="sub" aria-live="polite">{finalizeStatus}</div>
+          {pendingDoc && drafts.length > 0 && <p className="sub" role="status">
+            One-click save: {quickPlan.readyIndexes.length} with a clear source key.
+            {` ${quickPlan.needsReview + quickPlan.missingImages + quickPlan.conflictingAnswers} need attention; ${quickPlan.repeatedInFile + quickPlan.alreadySaved} matching questions are skipped.`}
+            {quickPlan.conflictingAnswers > 0 && ` ${quickPlan.conflictingAnswers} have conflicting or unresolved answer keys.`}
+            {quickPlan.missingImages > 0 && ` ${quickPlan.missingImages} need source images before they can be saved for practice.`}
+          </p>}
 
           {batchWarnings.length > 0 && (
             <ul className="intake-warnings">{batchWarnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
@@ -974,6 +1039,36 @@ export function ImportPanel({
               </div>
             </section>
           )}
+
+          {bulkAnswerCandidates.length > 0 && <details className="import-summary import-bulk-answer-review" open>
+            <summary>Review mapped answers together ({bulkAnswerCandidates.length})</summary>
+            <p className="sub">These answer letters are printed in the source but need a human check because their accompanying text did not exactly match a choice. Conflicts, flagged source keys, AI suggestions and other review holds stay separate.</p>
+            <div className="row wrap gap8">
+              <GhostButton onClick={() => { setBulkAnswerIds(new Set(bulkAnswerCandidates.map((draft) => draft.reviewId))); setBulkAnswerAttestation(""); }}>Select all eligible</GhostButton>
+              <GhostButton onClick={() => { setBulkAnswerIds(new Set()); setBulkAnswerAttestation(""); }}>Clear selection</GhostButton>
+              <span className="sub">{selectedBulkAnswers.length} selected</span>
+            </div>
+            <div className="import-bulk-answer-scroll">
+              <table className="import-bulk-answer-table">
+                <thead><tr><th scope="col">Review</th><th scope="col">Question</th><th scope="col">Mapped answer</th><th scope="col">Source evidence</th></tr></thead>
+                <tbody>{bulkAnswerCandidates.map((draft) => <tr key={draft.reviewId}>
+                  <td><input type="checkbox" checked={bulkAnswerIds.has(draft.reviewId)} aria-label={`Select mapped answer for question ${draft.questionNumber ?? drafts.indexOf(draft) + 1}`}
+                    onChange={(event) => { setBulkAnswerIds((current) => { const next = new Set(current); if (event.target.checked) next.add(draft.reviewId); else next.delete(draft.reviewId); return next; }); setBulkAnswerAttestation(""); }} /></td>
+                  <td>Question {draft.questionNumber ?? drafts.indexOf(draft) + 1}</td>
+                  <td><b>{draft.correctKey}</b> · {draft.options.find((option) => option.key === draft.correctKey)?.text}</td>
+                  <td>{draft.answerEvidence}</td>
+                </tr>)}</tbody>
+              </table>
+            </div>
+            <label className="import-bulk-answer-attestation">
+              <input type="checkbox" checked={selectedBulkAnswers.length > 0 && bulkAnswerAttestation === bulkAnswerSignature}
+                onChange={(event) => setBulkAnswerAttestation(event.target.checked ? bulkAnswerSignature : "")}
+                aria-label="Attest selected mapped answers checked against the original source" />
+              <span>I checked each selected answer against the original source. AXOM will keep the source evidence with every question.</span>
+            </label>
+            <GButton disabled={!selectedBulkAnswers.length || bulkAnswerAttestation !== bulkAnswerSignature}
+              onClick={confirmSelectedAnswers}>Confirm {selectedBulkAnswers.length} selected answer{selectedBulkAnswers.length === 1 ? "" : "s"}</GButton>
+          </details>}
 
           {(imageMatches.length > 0 || imageFiles.length > 0) && (
             <section className="import-images" aria-labelledby="import-images-title">
@@ -1127,6 +1222,9 @@ export function ImportPanel({
                     </button>
                     <Tag tone={tone}>{evaluation.level}</Tag>
                     {(draft.parserRuleIds ?? []).includes(ALREADY_IMPORTED_RULE) && <Tag tone="cyan">Already imported</Tag>}
+                    {(draft.parserRuleIds ?? []).includes("duplicate.exact-existing") && <Tag tone="cyan">Already in bank</Tag>}
+                    {(draft.parserRuleIds ?? []).includes("duplicate.exact-in-file") && <Tag tone="orange">Repeated in file</Tag>}
+                    {(draft.parserRuleIds ?? []).includes("duplicate.answer-conflict") && <Tag tone="orange">Answer key differs</Tag>}
                     {draft.reviewAcknowledged && <Tag tone="cyan">Reviewed</Tag>}
                     {draft.aiGenerated && <Tag tone="purple">AI</Tag>}
                     <GhostButton aria-label={`Remove question ${draft.questionNumber ?? index + 1}`}

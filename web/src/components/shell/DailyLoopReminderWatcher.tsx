@@ -3,11 +3,15 @@ import { closeoutForDay } from "../../lib/closeout";
 import {
   dailyLoopReminderLedger,
   evaluateDailyLoopReminder,
+  isWithinDailyLoopQuietHours,
+  journalCatchUpDay,
+  journalPageComplete,
   normalizeDailyLoopReminderPreferences,
   type DailyLoopReminderLedger,
   type DailyLoopReminderSignal,
 } from "../../lib/dailyLoopReminders";
 import { isFirstRunDay } from "../../lib/firstRun";
+import { recordLocalNotice } from "../../lib/notificationInbox";
 import { isoDate } from "../../lib/scoring";
 import { shellBusy } from "../../lib/shellBusy";
 import { useStore } from "../../lib/store";
@@ -41,6 +45,8 @@ export function DailyLoopReminderWatcher({
   const reminderPreferences = useStore((state) => state.profile.dailyLoopReminders);
   const dayPlans = useStore((state) => state.dayPlans);
   const closeouts = useStore((state) => state.closeouts);
+  const journal = useStore((state) => state.journal);
+  const logs = useStore((state) => state.logs);
 
   useEffect(() => {
     function reconcile() {
@@ -51,12 +57,16 @@ export function DailyLoopReminderWatcher({
       // dashboard's own check-in; and no nudge lands over a modal, tour or the
       // Promise (the next poll or refocus tries again).
       if (isFirstRunDay(dayKey) || shellBusy()) return;
+      const catchUp = preferences.closeoutEnabled && !isWithinDailyLoopQuietHours(now, preferences)
+        ? journalCatchUpDay({ journal, logs, dayPlans, closeouts }, now)
+        : null;
+      if (catchUp) recordLocalNotice(`journal-catch-up:${catchUp}`, "journal-catch-up", now);
       const evaluation = evaluateDailyLoopReminder({
         now,
         preferences,
         metadata: ledger.read(dayKey),
         checkInComplete: dayPlans.some((plan) => plan.dayKey === dayKey),
-        closeoutComplete: Boolean(closeoutForDay(closeouts ?? [], dayKey)),
+        closeoutComplete: Boolean(closeoutForDay(closeouts ?? [], dayKey)) || journalPageComplete(journal, dayKey),
       });
       const signal = evaluation.signal;
       if (!signal) return;
@@ -64,6 +74,7 @@ export function DailyLoopReminderWatcher({
       // Mark before publishing so StrictMode replay and simultaneous lifecycle
       // events cannot create a second toast.
       ledger.markShown(signal.dayKey, signal.kind, now);
+      recordLocalNotice(`daily-loop:${signal.dayKey}:${signal.kind}`, signal.kind, now);
       onSignal?.(signal);
       pushToast(toastForSignal(signal, {
         open: () => {
@@ -93,7 +104,7 @@ export function DailyLoopReminderWatcher({
       window.removeEventListener("pageshow", reconcile);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [clock, closeouts, dayPlans, ledger, onOpen, onSignal, pollIntervalMs, reminderPreferences]);
+  }, [clock, closeouts, dayPlans, journal, ledger, logs, onOpen, onSignal, pollIntervalMs, reminderPreferences]);
 
   return null;
 }
@@ -112,10 +123,10 @@ function toastForSignal(
 ) {
   const checkIn = signal.kind === "check-in";
   return {
-    title: checkIn ? "Set today’s direction" : "Wrap up today",
+    title: checkIn ? "Give today a direction" : "Before the day closes",
     body: checkIn
-      ? "Choose one intention for today. It takes less than a minute, and it is optional."
-      : "Review what changed and choose tomorrow’s first step. This is optional.",
+      ? "Choose one intention. You can change it as the day unfolds."
+      : "Keep one thing, release one thing, or simply close the page.",
     tone: "info" as const,
     duration: REMINDER_TOAST_DURATION_MS,
     dedupe: `daily-loop:${signal.dayKey}:${signal.kind}`,

@@ -352,6 +352,9 @@
 /* Cleaner explanation reading (Q2a): a comfortable measure keeps long
    explanations from running edge to edge. */
 .feedback-explanation p, .learning-objective p { max-width: 68ch; }
+.feedback-explanation-missing { border-color: var(--hairline); background: var(--surface-1); }
+.feedback-explanation-missing .field-label { color: var(--text-60); }
+.feedback-explanation-missing .ghost-btn { margin-top: 10px; }
 .learning-objective { border-left: 2px solid var(--gold); }
 /* Post-submit rationale emphasis (Q2a): correct + your-wrong-pick lead;
    remaining distractors collapse. */
@@ -439,6 +442,19 @@
 }
 .question-import-diagnostics summary { cursor: pointer; color: var(--text-60); font-size: var(--fs-sm); }
 .question-import-diagnostics[open] summary { margin-bottom: 8px; }
+.import-bulk-answer-review { grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.import-bulk-answer-review > summary { cursor: pointer; font-weight: 650; color: var(--text); }
+.import-bulk-answer-review > summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+.import-bulk-answer-review > .sub { color: var(--text-70); }
+.import-bulk-answer-review > .row .ghost-btn { color: var(--text-80); }
+.import-bulk-answer-scroll { min-width: 0; max-height: 340px; overflow: auto; border: 1px solid var(--hairline); border-radius: var(--radius-sm); }
+.import-bulk-answer-table { width: 100%; min-width: 540px; border-collapse: collapse; font-size: var(--fs-sm); }
+.import-bulk-answer-table th, .import-bulk-answer-table td { padding: 9px 10px; border-bottom: 1px solid var(--hairline); text-align: left; vertical-align: top; }
+.import-bulk-answer-table th { position: sticky; top: 0; background: var(--surface-2); color: var(--text-80); }
+.import-bulk-answer-table td:last-child { max-width: 320px; overflow-wrap: anywhere; }
+.import-bulk-answer-table input { accent-color: var(--gold); }
+.import-bulk-answer-attestation { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: start; gap: 8px; line-height: 1.45; cursor: pointer; }
+.import-bulk-answer-attestation input { margin: 3px 0 0; accent-color: var(--gold); }
 .question-import-flow { max-width: 1180px; margin-inline: auto; }
 .import-steps {
   display: grid;
@@ -829,12 +845,28 @@
   color: var(--bone);
 }
 .question-attachment-lightbox p { margin: 0; max-width: 70ch; text-align: center; }
+.question-attachment-restore-card {
+  width: min(100%, 640px); max-height: min(90vh, 800px); overflow-y: auto;
+  display: grid; gap: 12px; padding: 20px;
+  border: 1px solid var(--hairline); border-radius: var(--radius-lg);
+  background: var(--surface-1); color: var(--text); box-shadow: var(--shadow-overlay);
+}
+.question-attachment-restore-card .question-attachment-lightbox-head { justify-content: space-between; color: var(--text); }
+.question-attachment-restore-card h3 { margin: 0; font-family: var(--font-display); font-size: var(--fs-lg); }
+.question-attachment-restore-card p { max-width: none; text-align: left; }
+.question-attachment-restore-card img { width: 100%; max-height: min(40vh, 360px); object-fit: contain; }
+.question-attachment-restore-file { overflow-wrap: anywhere; font-weight: var(--fw-semibold); }
+.question-attachment-restore-error { color: var(--red); }
+.question-attachment-restore-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 :root[data-theme="light"] .question-attachment-thumb { background: rgba(var(--ink-rgb), 0.08); }
 :root[data-theme="light"] .question-attachment-lightbox { background: rgba(40, 34, 24, 0.8); }
 :root[data-theme="light"] .question-attachment-lightbox-head { color: #fff; }
+:root[data-theme="light"] .question-attachment-restore-card .question-attachment-lightbox-head { color: var(--text); }
 @media (max-width: 520px) {
   .question-attachment { flex-wrap: wrap; }
   .question-attachment-meta { min-width: 60%; }
+  .question-attachment-restore-card { padding: 16px; }
+  .question-attachment-restore-actions > * { flex: 1 1 auto; }
 }
 
 /* ===========================================================================
@@ -1231,8 +1263,8 @@ ul.template-note { padding-left: 26px; }
 .qb-practice-header .qb-cta.primary { min-height: 46px; }
 .qb-inventory {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  max-width: 640px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  max-width: 840px;
   margin: 0;
   border-block: 1px solid rgba(230, 226, 214, .08);
 }
@@ -1279,6 +1311,9 @@ ul.template-note { padding-left: 26px; }
   text-wrap: balance;
 }
 .qb-library-intro p { max-width: 64ch; margin: 0; color: var(--text-60); font-size: var(--fs-sm); line-height: 1.55; }
+.qb-prepared-link { display: inline-flex; width: fit-content; margin-top: 9px; padding: 0; border: 0; color: var(--gold); background: none; font: var(--fw-semibold) var(--fs-sm)/1.4 var(--font-ui); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.qb-prepared-link:hover { color: var(--text); }
+.qb-prepared-link:focus-visible { outline: 2px solid var(--gold); outline-offset: 4px; }
 .qb-study-route {
   display: flex;
   align-items: center;
@@ -1341,13 +1376,18 @@ ul.template-note { padding-left: 26px; }
   .qb-study-route { justify-content: flex-start; }
 }
 
+@media (max-width: 560px) {
+  .qb-inventory { max-width: none; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .qb-inventory > div:nth-child(3) { border-left: 0; border-top: 1px solid var(--hairline); }
+  .qb-inventory > div:nth-child(4) { border-top: 1px solid var(--hairline); }
+}
+
 @media (max-width: 440px) {
   .qb-practice-header .qb-hero-inner { padding: 18px 16px 15px; }
   .qb-practice-header .qb-hero-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
   .qb-practice-header .qb-hero-actions .qb-cta { width: auto; min-width: 0; padding-inline: 14px; }
   .qb-practice-header .qb-hero-actions .qb-cta.primary { width: 100%; }
   .qb-practice-header .qb-hero-actions .qb-course-return { grid-column: 1 / -1; }
-  .qb-inventory { max-width: none; }
   .qb-inventory > div { display: flex; flex-direction: column-reverse; align-items: flex-start; gap: 4px; padding: 10px; }
   .qb-inventory > div:first-child { padding-left: 0; }
   .qb-inventory dd { font-size: var(--fs-lg); }

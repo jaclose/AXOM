@@ -41,7 +41,7 @@ import { CloseoutModal } from "../components/brief/CloseoutModal";
 import { DailyProgressVessel } from "../components/productivity/DailyProgressVessel";
 import { evaluateDailySuccess, type DailySuccessResult } from "../lib/dailySuccess";
 import { closeoutForDay } from "../lib/closeout";
-import { dailyLoopReminderLedger, normalizeDailyLoopReminderPreferences } from "../lib/dailyLoopReminders";
+import { dailyLoopReminderLedger, journalPageComplete, normalizeDailyLoopReminderPreferences } from "../lib/dailyLoopReminders";
 import {
   CURRENT_DASHBOARD_WIDGET_IDS,
   DASHBOARD_LAYOUT_PRESETS,
@@ -50,7 +50,6 @@ import {
   dashboardWidgetCatalogItem,
   dashboardWidgetOptions,
   defaultDashboardWidgetPreferences,
-  extraLargeWidgetRecommendation,
   normalizeDashboardLayoutPreferences,
   upgradeDashboardLayout,
 } from "../lib/dashboardWidgets";
@@ -58,15 +57,15 @@ import {
   DashboardWidgetFrame,
   type DashboardWidgetFrameSettings,
 } from "../components/dashboard/DashboardWidgetFrame";
-import { Modal } from "../components/ui/Modal";
 import { dueQuestions, questionMappingStatus, summarizeQuestionMappings } from "../lib/questions";
 import { deriveDailyWordStatsFromNormalizedHistory } from "../lib/dailyWordStats";
+import { resolveTimeZone, useClockNow } from "../lib/clock";
+import { dailyWordProtectedStreak, dateKeyInTimeZone } from "../lib/studyStreaks";
 import { ReflectionInbox } from "../components/dashboard/ReflectionInbox";
 import { DashboardNotificationCenter } from "../components/dashboard/DashboardNotificationCenter";
 import { useAccount } from "../lib/account/accountStore";
 import { deviceId } from "../lib/sync/syncMetadata";
-
-const HOSTED_ALPHA_URL = "https://noctyrium-cktjdhuhw-jacloses-projects.vercel.app/#dashboard";
+import { BRAND } from "../lib/brand";
 
 const FIXED_DASHBOARD_SURFACES = new Set<DashboardWidgetId>(["welcome", "commandBrief"]);
 const CURRENT_DASHBOARD_ID_SET = new Set<string>(CURRENT_DASHBOARD_WIDGET_IDS);
@@ -75,7 +74,6 @@ export function DashboardPage() {
   const s = useStore();
   const [editDashboard, setEditDashboard] = useState(false);
   const luster = useLuster();
-  const [pendingExtraLargeLayout, setPendingExtraLargeLayout] = useState<DashboardLayoutPreferences | null>(null);
   const dailyProgress = useMemo(() => evaluateDailySuccess(s, s.activeDayKey, s.activeDayKey), [s]);
   const week = weeklySummary(s);
   const readiness = useMemo(() => calculateReadiness({
@@ -140,11 +138,6 @@ export function DashboardPage() {
       },
       updatedAt: new Date().toISOString(),
     };
-    const recommendation = extraLargeWidgetRecommendation(next);
-    if (current.size !== "extra-large" && settings.size === "extra-large" && recommendation.shouldShow) {
-      setPendingExtraLargeLayout(next);
-      return;
-    }
     saveLayout(next);
   }
 
@@ -214,27 +207,6 @@ export function DashboardPage() {
         {visibleWidgetIds.map(renderWidget)}
       </section>
 
-      {pendingExtraLargeLayout && (
-        <Modal
-          title="Keep the dashboard readable?"
-          onClose={() => setPendingExtraLargeLayout(null)}
-          footer={(
-            <>
-              <GButton onClick={() => setPendingExtraLargeLayout(null)}>Keep recommended layout</GButton>
-              <GButton variant="primary" onClick={() => {
-                saveLayout(pendingExtraLargeLayout);
-                setPendingExtraLargeLayout(null);
-              }}>Add anyway</GButton>
-              <GhostButton onClick={() => {
-                saveLayout({ ...pendingExtraLargeLayout, dismissedExtraLargeRecommendation: true });
-                setPendingExtraLargeLayout(null);
-              }}>Do not ask again</GhostButton>
-            </>
-          )}
-        >
-          <p>AXOM usually recommends no more than three extra-large widgets to keep the dashboard readable. Continue anyway?</p>
-        </Modal>
-      )}
     </>
   );
 }
@@ -590,7 +562,7 @@ function sameStringList(value: unknown, expected: readonly string[]) {
 }
 
 function preferencesSizeLabel(size: DashboardWidgetSize) {
-  return size === "extra-large" ? "Extra large" : `${size.slice(0, 1).toUpperCase()}${size.slice(1)}`;
+  return size === "small" ? "Small" : "Large";
 }
 
 const WIDGET_FIELDS_IMPLEMENTED = new Set<DashboardWidgetId>([
@@ -634,7 +606,7 @@ function renderDashboardWidget(context: DashboardWidgetRenderContext) {
   if (widgetId === "activity") return <ActivityDashboardWidget activeDayKey={activeDayKey} week={week} enabledFields={enabledFields} />;
   if (widgetId === "journal") return <JournalDashboardWidget activeDayKey={activeDayKey} enabledFields={enabledFields} />;
   if (widgetId === "streak") return <ConsistencyDashboardWidget state={state} enabledFields={enabledFields} />;
-  if (widgetId === "dailyWord") return <DailyWordDashboardWidget activeDayKey={activeDayKey} enabledFields={enabledFields} />;
+  if (widgetId === "dailyWord") return <DailyWordDashboardWidget enabledFields={enabledFields} />;
   if (widgetId === "localData") return <LocalDataWidget state={state} />;
   if (widgetId === "premedHours") return <PremedHoursWidget />;
   return null;
@@ -912,24 +884,26 @@ function ConsistencyDashboardWidget({
 }
 
 function DailyWordDashboardWidget({
-  activeDayKey,
   enabledFields,
 }: {
-  activeDayKey: string;
   enabledFields: Set<string>;
 }) {
   // Daily Games is on for everyone (commit 3ae726e removed the opt-in); the
   // old flag has no setter left, so gating on it stranded this widget.
   const puzzles = useStore((s) => s.dailyWordPuzzles);
+  const profile = useStore((s) => s.profile);
+  const now = useClockNow("minute");
   const stats = deriveDailyWordStatsFromNormalizedHistory(puzzles);
-  const today = puzzles.find((puzzle) => puzzle.puzzleDate === activeDayKey);
+  const wordToday = dateKeyInTimeZone(now, resolveTimeZone(profile.timeZonePreference));
+  const protectedStreak = dailyWordProtectedStreak(puzzles, profile.studyStreaks?.dailyWord.frozenDays ?? [], wordToday);
+  const today = puzzles.find((puzzle) => puzzle.puzzleDate === wordToday);
   return (
     <GlassCard pad className="dashboard-core-widget daily-word-widget">
       <PanelHeader title="Daily Word" sub="Deterministic, local, and offline after first load"
         action={<a className="gbtn sm primary" href="#daily-word"><Gamepad2 size={ICON_SIZE.body} /> {today?.completed ? "Review" : "Play"}</a>} />
       <div className="dashboard-widget-focal"><b>{today?.completed ? (today.won ? "Won" : "Complete") : today ? `${today.guesses.length}/6` : "Ready"}</b><span>today's puzzle</span></div>
       <div className="dashboard-widget-metrics">
-        {enabledFields.has("streak") && <span><b>{stats.currentStreak}</b> streak</span>}
+        {enabledFields.has("streak") && <span><b>{protectedStreak}</b> streak</span>}
         {enabledFields.has("distribution") && <span><b>{stats.wins}/{stats.gamesPlayed}</b> wins</span>}
       </div>
     </GlassCard>
@@ -1015,8 +989,10 @@ function WeeklyWidget({
           <div className="sub">{week.minutes} minutes · {week.cards} cards · {week.tasksDone} tasks done</div>
         </div>
         {enabledFields.has("activeDays") && <div className="weekly-score">
-          <span style={{ color: gradeColor(week.grade) }}>{gradeLabel(week.grade).replace("👑 ", "")}</span>
-          <small>week result</small>
+          <span style={{ color: week.grade ? gradeColor(week.grade) : "var(--text-60)" }}>
+            {week.grade ? gradeLabel(week.grade).replace("👑 ", "") : "No activity yet"}
+          </span>
+          <small>{week.grade ? "week result" : "no score yet"}</small>
         </div>}
       </div>}
       {enabledFields.has("trend") && <div className={`week-bars reveal-bars ${reveal.inView ? "in-view" : ""}`} ref={reveal.ref}>
@@ -1027,7 +1003,7 @@ function WeeklyWidget({
             onFocus={() => setSelectedKey(d.key)}
             onClick={() => setSelectedKey(d.key)}>
             <div className="week-bar-shell">
-              <div className="week-bar-fill" style={{ height: `${Math.max(8, d.intensity)}%`, background: gradeColor(d.grade) }} />
+              <div className="week-bar-fill" style={{ height: d.grade ? `${Math.max(8, d.intensity)}%` : "0%", background: d.grade ? gradeColor(d.grade) : "transparent" }} />
             </div>
             <span>{d.label}</span>
           </button>
@@ -1099,11 +1075,11 @@ function LocalDataWidget({ state }: { state: ReturnType<typeof useStore.getState
             <span>Settings → Backup shows automatic local recovery snapshots and exported backup controls.</span>
           </div>
         </div>
-        <a className="local-data-item" href={HOSTED_ALPHA_URL} target="_blank" rel="noreferrer">
+        <a className="local-data-item" href={BRAND.hostedUrl} target="_blank" rel="noopener noreferrer">
           <ExternalLink size={ICON_SIZE.emphasis} />
           <div>
-            <b>Hosted Alpha</b>
-            <span>Open the hosted preview. It starts with a local-first workspace; importing a portable backup or linking owner-private account protection are separate choices.</span>
+            <b>Open AXOM online</b>
+            <span>Start with a local workspace in the hosted app. Importing a portable backup or linking account protection are separate choices.</span>
           </div>
         </a>
       </div>
@@ -1198,7 +1174,7 @@ function StandupPrompt() {
   const missed = missedStandupDays(s);
   const preferences = normalizeDailyLoopReminderPreferences(s.profile.dailyLoopReminders);
   const today = s.activeDayKey;
-  const closeoutDone = Boolean(closeoutForDay(s.closeouts ?? [], today));
+  const closeoutDone = Boolean(closeoutForDay(s.closeouts ?? [], today)) || journalPageComplete(s.journal, today);
   const closeoutDue = preferences.closeoutEnabled && !closeoutDone && isAfterLocalTime(preferences.closeoutTime);
   const [showCloseout, setShowCloseout] = useState(false);
   const [dismissed, setDismissed] = useState(() => {
@@ -1232,8 +1208,8 @@ function StandupPrompt() {
           <div className="standup-prompt-head">
             <span className="standup-prompt-mark"><BookText size={ICON_SIZE.emphasis} /></span>
             <div className="grow">
-              <b>Close the loop on today?</b>
-              <span>Review your intention, activity, targets, focus sessions, questions, tasks, and energy. A short closeout is optional.</span>
+              <b>Before the day closes</b>
+              <span>Keep one thing, release one thing, or simply close the page. A short page is enough.</span>
             </div>
           </div>
           <div className="row wrap gap8 daily-closeout-actions">
@@ -1295,6 +1271,10 @@ function ProgressBar({
 }
 
 function weeklySummary(s: ReturnType<typeof useStore.getState>) {
+  // New workspaces have legacy numeric defaults but no chosen success target.
+  const hasScoringEvidence = s.logs.length > 0
+    || (s.profile.dailySuccess ? s.profile.dailySuccess.requirements.some((requirement) => requirement.enabled) : true);
+  const tasks = realTasks(s.tasks);
   const energyByDay = dailyEnergy(collectEnergySamples({
     energyChecks: s.profile.energyChecks,
     journal: s.journal,
@@ -1305,12 +1285,12 @@ function weeklySummary(s: ReturnType<typeof useStore.getState>) {
     const key = isoDate(d);
     const totals = dayTotals(s.logs, key);
     const productive = productiveTotals(s.logs, key);
-    const grade = todayGrade(totals.minutes, totals.cards, gradeTargetsFor(s.profile));
+    const grade = hasScoringEvidence ? todayGrade(totals.minutes, totals.cards, gradeTargetsFor(s.profile)) : null;
     const intensity = Math.min(100, Math.max((totals.minutes / 480) * 100, (totals.cards / 350) * 100));
     const measured = energyByDay.get(key);
     const energy = measured === undefined ? null : Math.round(measured);
-    const tasksDone = s.tasks.filter((task) => task.done && task.completedAt?.startsWith(key)).length;
-    const openTasksDue = s.tasks.filter((task) => !task.done && !task.archived && task.due?.slice(0, 10) === key).length;
+    const tasksDone = tasks.filter((task) => task.done && task.completedAt?.startsWith(key)).length;
+    const openTasksDue = tasks.filter((task) => !task.done && !task.archived && task.due?.slice(0, 10) === key).length;
     return {
       key,
       dateLabel: d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" }),
@@ -1323,7 +1303,8 @@ function weeklySummary(s: ReturnType<typeof useStore.getState>) {
       journalSummary: journalSummaryForDay(s.journal, key),
       topActivity: topActivityForDay(s.logs, key),
       strongestAction: strongestActionForDay({ logs: s.logs, dayPlans: s.dayPlans, tasksDone, key }),
-      suggestedCorrection: correctionForDay({ minutes: totals.minutes, cards: totals.cards, openTasksDue, energy }),
+      suggestedCorrection: correctionForDay({ minutes: totals.minutes, cards: totals.cards, openTasksDue, energy,
+        noStudyHistory: s.logs.length === 0 && s.dayPlans.length === 0 }),
       energy,
       grade,
       intensity,
@@ -1338,7 +1319,9 @@ function weeklySummary(s: ReturnType<typeof useStore.getState>) {
     cards,
     activeDays,
     tasksDone: days.reduce((sum, day) => sum + day.tasksDone, 0),
-    grade: todayGrade(Math.round(minutes / Math.max(activeDays, 1)), Math.round(cards / Math.max(activeDays, 1)), gradeTargetsFor(s.profile)),
+    grade: hasScoringEvidence
+      ? todayGrade(Math.round(minutes / Math.max(activeDays, 1)), Math.round(cards / Math.max(activeDays, 1)), gradeTargetsFor(s.profile))
+      : null,
   };
 }
 
@@ -1372,20 +1355,23 @@ function strongestActionForDay({
   const totals = dayTotals(logs, key);
   if (totals.cards >= 120) return "Card floor cleared";
   if (totals.minutes >= 120) return "Study block protected";
-  return "Needs one clear win";
+  return logs.length || dayPlans.length ? "Needs one clear win" : "No study logged yet";
 }
 
 function correctionForDay({
-  minutes, cards, openTasksDue, energy,
+  minutes, cards, openTasksDue, energy, noStudyHistory,
 }: {
   minutes: number;
   cards: number;
   openTasksDue: number;
   energy: number | null;
+  noStudyHistory: boolean;
 }) {
   if (energy !== null && energy < 40) return "Tomorrow: lower the load and close one small loop.";
   if (openTasksDue > 0) return "Tomorrow: clear the oldest due task before adding volume.";
-  if (minutes === 0 && cards === 0) return "Tomorrow: create signal with one 25-minute block.";
+  if (minutes === 0 && cards === 0) return noStudyHistory
+    ? "When you're ready, start with one short study block."
+    : "Tomorrow: create signal with one 25-minute block.";
   if (cards < 60) return "Tomorrow: add a small retrieval/card pass.";
   return "Tomorrow: keep the same floor and add only one precision target.";
 }

@@ -48,7 +48,7 @@ test("a figure in a question PDF is cut out, attached to its question and shown 
   page.on("pageerror", (error) => errors.push(error.message));
   await seedOnboarded(page);
   await page.goto("/#questions");
-  await page.getByRole("button", { name: "Add your own material", exact: true }).click();
+  await page.getByRole("tab", { name: "Add material", exact: true }).click();
   await page.getByLabel("Choose question files or a ZIP to import").setInputFiles({
     name: "FTM 1 Week 2 IMCQ 1.pdf", mimeType: "application/pdf", buffer: questionPdfWithFigure(),
   });
@@ -63,8 +63,8 @@ test("a figure in a question PDF is cut out, attached to its question and shown 
 
   await page.getByLabel("Set title").fill("PDF with a figure");
   await page.getByRole("button", { name: "Finalize import" }).click();
-  await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
-  await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
+  await page.getByRole("tab", { name: "Library (1)", exact: true }).click();
+  await page.getByRole("button", { name: "Weeks & sets", exact: true }).click();
 
   await reloadAfterSave(page);
   const saved = await page.evaluate(async () => {
@@ -78,8 +78,8 @@ test("a figure in a question PDF is cut out, attached to its question and shown 
     expect.objectContaining({ fileName: "FTM-1-Week-2-IMCQ-1-p1-fig1.png", role: "exhibit", mimeType: "image/png" }),
   ]);
 
-  await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
-  await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
+  await page.getByRole("tab", { name: "Library (1)", exact: true }).click();
+  await page.getByRole("button", { name: "Weeks & sets", exact: true }).click();
   await page.getByRole("button", { name: "Practice PDF with a figure", exact: true }).click();
   await page.getByRole("button", { name: "Start tutor block" }).click();
   const exhibit = page.locator(".question-exhibit img");

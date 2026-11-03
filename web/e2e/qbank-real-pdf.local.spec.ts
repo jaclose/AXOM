@@ -12,7 +12,7 @@ test("three private PDFs through the actual QBank, with uncertain keys excluded 
   await seedOnboarded(page);
   await page.goto("/#questions");
   for (const manifest of knownBankManifests) {
-    await page.getByRole("button", { name: "Add your own material", exact: true }).click();
+    await page.getByRole("tab", { name: /^Add( material)?$/ }).click();
     const another = page.getByRole("button", { name: "Choose another file" });
     if (await another.isVisible()) await another.click();
     await page.getByLabel("Choose question files or a ZIP to import").setInputFiles(join(sourceFolder!, manifest.source.filename));

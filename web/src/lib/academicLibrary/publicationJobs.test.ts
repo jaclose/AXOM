@@ -1,9 +1,9 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { prepareAcademicUpload } from "./upload";
+import { prepareAcademicUpload, preflightAcademicUpload } from "./upload";
 import { publicationJobs, type PlannedCourse, type PublicationInventory } from "./publication";
 
-vi.mock("./upload", () => ({ prepareAcademicUpload: vi.fn() }));
+vi.mock("./upload", () => ({ prepareAcademicUpload: vi.fn(), preflightAcademicUpload: vi.fn() }));
 
 const inventory: PublicationInventory = {
   library: { format: "axom-private-library", schemaVersion: 1, id: "academic-library", version: "v1" },
@@ -20,21 +20,35 @@ const course: PlannedCourse = {
 const catalog = {
   format: "axom-private-library", schemaVersion: 1, id: "academic-library", version: "v1", templates: [],
   sources: inventory.sources.map(source => ({ id: source.id, name: source.name, sourcePath: source.name, checksum: source.checksum,
-    module: "NCRS", status: source.status, reason: "", ready: source.ready, review: 0 })),
+    module: "NCRS", status: source.status, reason: "", ready: source.ready, review: 0,
+    ...(source.hasBank ? { bankFile: `banks/${source.checksum}/bank.json` } : {}) })),
 };
 const read = vi.fn(async (path: string) => path === "catalog.json" ? new TextEncoder().encode(JSON.stringify(catalog)) : new Uint8Array());
+const prepared = (): Awaited<ReturnType<typeof prepareAcademicUpload>> => ({
+  catalogId: course.catalogId,
+  metadata: { ready_questions: course.ready, review_questions: course.review },
+  template: "",
+  provenance: { sourceChecksums: [] },
+  files: [],
+  hash: "",
+  localOnlyOriginals: [],
+});
 
 describe("publication jobs", () => {
   // A function returned from beforeEach runs as teardown, so return nothing.
-  beforeEach(() => { vi.mocked(prepareAcademicUpload).mockReset(); });
+  beforeEach(() => {
+    vi.mocked(prepareAcademicUpload).mockReset();
+    vi.mocked(preflightAcademicUpload).mockReset().mockResolvedValue([]);
+  });
 
   it("keeps optional originals on this device only when the course exceeds its size limit", async () => {
-    const upload = { catalogId: course.catalogId } as Awaited<ReturnType<typeof prepareAcademicUpload>>;
+    const upload = prepared();
     vi.mocked(prepareAcademicUpload)
       .mockRejectedValueOnce(new Error("This collection exceeds the supported upload size."))
       .mockResolvedValueOnce(upload);
     const { jobs, notes } = publicationJobs(read, inventory, [course]);
     await expect(jobs[0].prepare()).resolves.toBe(upload);
+    expect(preflightAcademicUpload).toHaveBeenCalledOnce();
     expect(notes.keptLocal.get(course.catalogId)).toBe(1);
     expect(prepareAcademicUpload).toHaveBeenNthCalledWith(1, expect.any(Function),
       { term: "Term 4", module: "NCRS", evidence: "source-metadata" }, {});
@@ -44,10 +58,60 @@ describe("publication jobs", () => {
     expect(await sourcesIn(1)).toEqual(["bank"]);
   });
 
+  it("retries a preflight size rejection without dropping ready or held questions", async () => {
+    const heldInventory: PublicationInventory = { ...inventory, sources: inventory.sources.map(source => source.id === "bank"
+      ? { ...source, review: 2 } : source) };
+    const heldCourse: PlannedCourse = { ...course, review: 2 };
+    const heldCatalog = { ...catalog, sources: catalog.sources.map(source => source.id === "bank"
+      ? { ...source, review: 2 } : source) };
+    const heldRead = async (path: string) => path === "catalog.json"
+      ? new TextEncoder().encode(JSON.stringify(heldCatalog)) : new Uint8Array();
+    vi.mocked(prepareAcademicUpload).mockImplementation(async reader => {
+      const bytes = await reader("catalog.json");
+      const selected = JSON.parse(new TextDecoder().decode(bytes)) as typeof catalog;
+      return {
+        ...prepared(),
+        metadata: {
+          ready_questions: selected.sources.reduce((total, source) => total + source.ready, 0),
+          review_questions: selected.sources.reduce((total, source) => total + source.review, 0),
+        },
+        provenance: { sourceChecksums: selected.sources.map(source => source.checksum) },
+        files: [{ path: "catalog.json", bytes, sha256: "synthetic", byte_size: bytes.byteLength, mime_type: "application/json" }],
+      };
+    });
+    vi.mocked(preflightAcademicUpload).mockRejectedValueOnce(new Error("This collection exceeds the supported upload size."));
+
+    const { jobs, notes } = publicationJobs(heldRead, heldInventory, [heldCourse]);
+    const finalUpload = await jobs[0].prepare();
+    expect(prepareAcademicUpload).toHaveBeenCalledTimes(2);
+    expect(preflightAcademicUpload).toHaveBeenCalledTimes(2);
+    const selectedIds = (call: number) => (JSON.parse(new TextDecoder().decode(
+      vi.mocked(preflightAcademicUpload).mock.calls[call][0].files[0].bytes)) as typeof catalog).sources.map(source => source.id);
+    expect(selectedIds(0)).toEqual(["bank", "slides"]);
+    expect(selectedIds(1)).toEqual(["bank"]);
+    expect(finalUpload).toBe(vi.mocked(preflightAcademicUpload).mock.calls[1][0]);
+    expect(finalUpload.metadata).toMatchObject({ ready_questions: 3, review_questions: 2 });
+    expect(finalUpload.provenance.sourceChecksums).toEqual(["a".repeat(64)]);
+    expect(notes.keptLocal.get(course.catalogId)).toBe(1);
+  });
+
+  it("counts an unsupported bank original once when size fallback also keeps an optional file", async () => {
+    const mixed: PublicationInventory = { ...inventory, sources: inventory.sources.map(source => ({ ...source,
+      original: { extension: source.id === "bank" ? "pptx" : "pdf" } })) };
+    const upload = prepared();
+    vi.mocked(prepareAcademicUpload)
+      .mockRejectedValueOnce(new Error("This collection exceeds the supported upload size."))
+      .mockResolvedValueOnce(upload);
+    const { jobs, notes } = publicationJobs(read, mixed, [course]);
+    await expect(jobs[0].prepare()).resolves.toBe(upload);
+    expect(prepareAcademicUpload).toHaveBeenCalledTimes(2);
+    expect(notes.keptLocal.get(course.catalogId)).toBe(2);
+  });
+
   it("publishes questions without any source files when the course is still too large, and explains when nothing fits", async () => {
     const bankWithOriginal: PublicationInventory = { ...inventory, sources: inventory.sources.map(source => source.id === "bank"
       ? { ...source, original: { extension: "pdf" } } : source) };
-    const upload = { catalogId: course.catalogId } as Awaited<ReturnType<typeof prepareAcademicUpload>>;
+    const upload = prepared();
     vi.mocked(prepareAcademicUpload)
       .mockRejectedValueOnce(new Error("This collection exceeds the supported upload size."))
       .mockRejectedValueOnce(new Error("A private academic upload must contain 1–1500 verified files."))

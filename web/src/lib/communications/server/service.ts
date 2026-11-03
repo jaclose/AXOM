@@ -159,7 +159,7 @@ export class CommunicationsService {
       checked(await this.db.from("communication_identity").update({ contact_id: contactId }).eq("user_id", id));
     }
     await this.provider.request(`/contacts/${contactId}`, "PATCH", { unsubscribed: !prefs.some(p => p.enabled) });
-    if (topics.length) await this.provider.request(`/contacts/${contactId}/topics`, "PATCH", topics);
+    if (topics.length) await this.provider.request(`/contacts/${contactId}/topics`, "PATCH", { topics });
     // A newer user change must stay dirty and be synchronized on the next worker pass.
     checked(await this.db.from("communication_identity").update({ topics_dirty: false, topics_error: null }).eq("user_id", id).eq("updated_at", identity.updated_at ?? ""));
   }

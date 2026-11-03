@@ -41,6 +41,13 @@ describe("reading a package", () => {
     expect(parsed.package!.questions[0].stem).toEqual([{ type: "text", text: "  Two spaces lead this stem.  It ends with a tab.\t" }]);
   });
 
+  it("retains a student-source disclosure as a known flag", () => {
+    const flag = { type: "student_source", message: "The marked answer comes from a student review." };
+    const parsed = read([question({ flags: [flag] })]);
+    expect(parsed.issues).toEqual([]);
+    expect(parsed.package!.questions[0].flags).toEqual([flag]);
+  });
+
   it("refuses a package made by a newer AXOM and says why", () => {
     const parsed = read([question()], { schemaVersion: PACKAGE_SCHEMA_VERSION + 1 });
     expect(parsed.package).toBeUndefined();
@@ -142,7 +149,7 @@ describe("writing a package", () => {
       id: "ex-q02",
       week: 4,
       subtopic: "Order",
-      source: { filename: "invented.pdf", page: 5, pageEnd: 6, questionNumber: 2, set: 2, setTitle: "Renal physiology" },
+      source: { filename: "invented.pdf", page: 5, pageEnd: 6, answerEvidencePage: 7, explanationSourcePage: 8, questionNumber: 2, set: 2, setTitle: "Renal physiology" },
       stem: [
         { type: "text", text: "Before the table." },
         { type: "table", caption: "Panel", headers: ["", "Seen", "Not seen"], rowHeaders: true, rows: [["Exposed", "12", "0.50"], ["Unexposed", "↑↑", "±"]], sourceImageAssetId: "ex-q02-img-2" },

@@ -5,14 +5,38 @@ export const JOURNAL_ATTACHMENT_MAX_BYTES = 3 * 1024 * 1024;
 export const JOURNAL_ATTACHMENT_TOTAL_BYTES = 12 * 1024 * 1024;
 export const JOURNAL_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
 
-export type JournalCoverTone = "onyx" | "forest" | "oxblood" | "navy";
-export type JournalPaperTone = "warm" | "cream" | "white";
+export type JournalCoverTone = "onyx" | "forest" | "oxblood" | "navy" | "copper";
+export type JournalPaperTone = "warm" | "cream" | "white" | "linen";
+export type JournalDeskTone = "walnut" | "oak" | "ink";
+export type JournalDeskWeather = "dawn" | "sun" | "overcast" | "rain" | "night";
+export type JournalLaptopTone = "silver" | "graphite" | "starlight";
+export type JournalLaptopPosition = "left" | "right";
+export type JournalHeadphones = "wired" | "airpods" | "beats";
+export type JournalDrink = "tea" | "coffee" | "water";
+export type JournalWritingMode = "guided" | "free";
+export type JournalPurpose = "focus" | "reflect" | "recover";
+export type JournalDeskAccent = "none" | "lamp";
+export type JournalPremiumStyle = "copper" | "linen" | "starlight" | "lamp";
+export const JOURNAL_STYLE_COST = 2;
 
 export interface JournalNotebookPreferences {
   title: string;
   subtitle: string;
   coverTone: JournalCoverTone;
   paperTone: JournalPaperTone;
+  deskTone: JournalDeskTone;
+  weather: JournalDeskWeather;
+  weatherCycle?: boolean;
+  laptopTone: JournalLaptopTone;
+  laptopPosition: JournalLaptopPosition;
+  headphones: JournalHeadphones;
+  drink: JournalDrink;
+  writingMode?: JournalWritingMode;
+  purpose?: JournalPurpose;
+  deskAccent?: JournalDeskAccent;
+  setupCompleted?: boolean;
+  feedbackPrompted?: boolean;
+  unlockedStyles?: JournalPremiumStyle[];
 }
 
 export const DEFAULT_JOURNAL_NOTEBOOK: JournalNotebookPreferences = {
@@ -20,7 +44,26 @@ export const DEFAULT_JOURNAL_NOTEBOOK: JournalNotebookPreferences = {
   subtitle: "Daily pages",
   coverTone: "onyx",
   paperTone: "warm",
+  deskTone: "walnut",
+  weather: "sun",
+  weatherCycle: true,
+  laptopTone: "graphite",
+  laptopPosition: "left",
+  headphones: "airpods",
+  drink: "tea",
+  writingMode: "free",
+  purpose: "reflect",
+  deskAccent: "none",
+  unlockedStyles: [],
 };
+
+export function journalInkEarned(sessions: Array<{ id: string; status: string }>): number {
+  return new Set(sessions.filter((session) => session.status === "completed").map((session) => session.id)).size;
+}
+
+export function journalInkBalance(sessions: Array<{ id: string; status: string }>, unlocked: JournalPremiumStyle[]): number {
+  return Math.max(0, journalInkEarned(sessions) - unlocked.length * JOURNAL_STYLE_COST);
+}
 
 export interface JournalImageAttachment {
   id: string;
@@ -82,11 +125,27 @@ export type JournalImageValidation = { ok: true } | { ok: false; message: string
 
 export function normalizeJournalNotebookPreferences(value: unknown): JournalNotebookPreferences {
   const record = isRecord(value) ? value : {};
+  const unlockedStyles = Array.isArray(record.unlockedStyles)
+    ? [...new Set(record.unlockedStyles.filter((style): style is JournalPremiumStyle => style === "copper" || style === "linen" || style === "starlight" || style === "lamp"))]
+    : [];
   return {
     title: cleanText(record.title, DEFAULT_JOURNAL_NOTEBOOK.title, 80),
     subtitle: cleanText(record.subtitle, DEFAULT_JOURNAL_NOTEBOOK.subtitle, 120),
-    coverTone: isCoverTone(record.coverTone) ? record.coverTone : DEFAULT_JOURNAL_NOTEBOOK.coverTone,
-    paperTone: isPaperTone(record.paperTone) ? record.paperTone : DEFAULT_JOURNAL_NOTEBOOK.paperTone,
+    coverTone: isCoverTone(record.coverTone) && (record.coverTone !== "copper" || unlockedStyles.includes("copper")) ? record.coverTone : DEFAULT_JOURNAL_NOTEBOOK.coverTone,
+    paperTone: isPaperTone(record.paperTone) && (record.paperTone !== "linen" || unlockedStyles.includes("linen")) ? record.paperTone : DEFAULT_JOURNAL_NOTEBOOK.paperTone,
+    deskTone: isOneOf(record.deskTone, ["walnut", "oak", "ink"] as const) ? record.deskTone : DEFAULT_JOURNAL_NOTEBOOK.deskTone,
+    weather: isOneOf(record.weather, ["dawn", "sun", "overcast", "rain", "night"] as const) ? record.weather : DEFAULT_JOURNAL_NOTEBOOK.weather,
+    weatherCycle: record.weatherCycle !== false,
+    laptopTone: isOneOf(record.laptopTone, ["silver", "graphite", "starlight"] as const) && (record.laptopTone !== "starlight" || unlockedStyles.includes("starlight")) ? record.laptopTone : DEFAULT_JOURNAL_NOTEBOOK.laptopTone,
+    laptopPosition: isOneOf(record.laptopPosition, ["left", "right"] as const) ? record.laptopPosition : DEFAULT_JOURNAL_NOTEBOOK.laptopPosition,
+    headphones: isOneOf(record.headphones, ["wired", "airpods", "beats"] as const) ? record.headphones : DEFAULT_JOURNAL_NOTEBOOK.headphones,
+    drink: isOneOf(record.drink, ["tea", "coffee", "water"] as const) ? record.drink : DEFAULT_JOURNAL_NOTEBOOK.drink,
+    writingMode: isOneOf(record.writingMode, ["guided", "free"] as const) ? record.writingMode : DEFAULT_JOURNAL_NOTEBOOK.writingMode,
+    purpose: isOneOf(record.purpose, ["focus", "reflect", "recover"] as const) ? record.purpose : DEFAULT_JOURNAL_NOTEBOOK.purpose,
+    deskAccent: record.deskAccent === "lamp" && unlockedStyles.includes("lamp") ? "lamp" : "none",
+    setupCompleted: record.setupCompleted === true,
+    feedbackPrompted: record.feedbackPrompted === true,
+    unlockedStyles,
   };
 }
 
@@ -314,11 +373,15 @@ function cleanText(value: unknown, fallback: string, max: number): string {
 }
 
 function isCoverTone(value: unknown): value is JournalCoverTone {
-  return value === "onyx" || value === "forest" || value === "oxblood" || value === "navy";
+  return value === "onyx" || value === "forest" || value === "oxblood" || value === "navy" || value === "copper";
 }
 
 function isPaperTone(value: unknown): value is JournalPaperTone {
-  return value === "warm" || value === "cream" || value === "white";
+  return value === "warm" || value === "cream" || value === "white" || value === "linen";
+}
+
+function isOneOf<const T extends readonly string[]>(value: unknown, options: T): value is T[number] {
+  return options.some((option) => option === value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

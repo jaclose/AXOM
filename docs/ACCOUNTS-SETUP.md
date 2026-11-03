@@ -1,5 +1,11 @@
 # AXOM Accounts — setup and integration
 
+**Current production boundary (2026-11-02):** AXOM Production's linked ledger
+is applied through `20261101180000`, including the earlier account repair
+`20261001090000`. Five later Community/Host/Question Set/Journal and Host
+privacy migrations remain on the unreleased frontier branch. See
+[current AI state](AI_STATE.md) before using this dated setup guide.
+
 Accounts are optional. Without configuration AXOM is fully local, and every
 account surface says so. With configuration, a learner can sign in, protect
 their workspace as immutable server revisions, restore any recent version,
@@ -31,19 +37,19 @@ move between devices, and delete every cloud copy.
   60 s resend window, TOTP MFA on, pooler sizes) so `npx supabase config push`
   cannot silently regress it. Run `npx supabase config diff` first — it is
   read-only. `site_url` and the redirect allow-list are the only declared
-  values that still differ (see step 4 below).
+  values that still differ (see step 4 below), plus email confirmation until
+  the owner turns it off (step 3).
 - **Not verified live yet:** the end-to-end account test needs the project's
   publishable key in `web/.env.local` (see step 5). The old project
   `skksijapfqmfczjsvfiw` is inactive; nothing references it.
 
 ## Turning it on
 
-1. **Migrations** — applied to production through `20260928130000`.
-   **`20261001090000_prune_revision_history_within_budget.sql` is not applied
-   yet and is needed** (accounts with a large workspace cannot upload without
-   it): see `docs/release/2026-10-01-ACCOUNT-SYNC-INCIDENT.md`. It replaces one
-   function, keeps its signature and answers, and is safe to run twice. For a
-   new project: connect
+1. **Migrations** — production is applied through `20261101180000` as of the
+   dated check above. The frontier adds five ordered migrations, starting at
+   `20261101190000`; apply them only with the reviewed release and matching UI.
+   The older account incident and repair are recorded in
+   `docs/release/2026-10-01-ACCOUNT-SYNC-INCIDENT.md`. For a new project: connect
    GitHub in the Supabase dashboard (**Working directory: `.`**) or run
    `npx supabase link --project-ref <ref>` then `npx supabase db push`. Never
    apply `db/migrations/001–002` (legacy PIN backend without row-level security).
@@ -67,8 +73,17 @@ move between devices, and delete every cloud copy.
    **Magic Link** ← `magic_link.html`, **Reset password** ← `recovery.html`
    (subjects are in `config.toml`). The app verifies confirmation and reset
    codes in-app (`verifyOtp` types `email` / `recovery`).
-4. **URLs** — Authentication → URL configuration. Site URL: your production
-   web origin (currently `https://axom-jacloses-projects.vercel.app/`). Keep the
+   **Sign-up needs no code** (owner decision 2026-10-28): turn **Confirm email**
+   off under Authentication → Sign In / Providers → Email, as `config.toml`
+   declares. `signUp` then returns a session and the person is signed in at
+   once. While it stays on, the app falls back to the confirmation code. The
+   account-created email is the communications welcome email, sent once that
+   service is live (`docs/operations/communications-resend.md`). Trade-off: an
+   address is no longer proven before the account exists; its real owner can
+   still take the account back with **Forgot password**.
+4. **URLs** — Authentication → URL configuration. Check the current production
+   Site URL and redirect allow-list against `https://axom.info` and the live
+   dashboard before changing them. Keep the
    Vercel preview patterns and add `http://127.0.0.1:5173/**`,
    `http://localhost:5173/**`, `http://127.0.0.1:5187/**`,
    `http://localhost:5187/**` for local development. Mirror the final list in
@@ -96,13 +111,16 @@ move between devices, and delete every cloud copy.
 
    With a full-access `RESEND_API_KEY` it confirms the sender domain is
    verified.
-7. **Verify live** — `cd web && AXOM_LIVE_EMAIL=<fresh address> SUPABASE_SECRET_KEY=<secret key> npm run test:accounts:live`.
-   The secret key stays in that one shell command; the test uses it only to
-   mint the same one-time codes the emails carry and to delete its throwaway
-   user afterwards. It covers: create account → confirm by code → password
+7. **Verify live** — after explicit authorization for two real emails and
+   disposable-account cleanup, load `AXOM_LIVE_EMAIL` and
+   `SUPABASE_SECRET_KEY` from a protected environment file or trusted secret
+   manager, then run `npm run test:accounts:live` from `web/`. Never place the
+   secret on a command line or in shell history. The test uses it to mint the
+   same one-time codes the emails carry and to delete only the verified
+   throwaway user afterwards. It covers: create account → confirm by code → password
    sign-in → code sign-in → protect → second device conflict → **Merge both** →
-   restore → devices → delete cloud copies. It sends two real emails, so
-   don't loop it on the built-in mailer.
+   restore → devices → delete cloud copies. It sends two real emails; keep
+   the recipient allowlisted and inspect the cleanup receipt.
 
 ## Desktop (Tauri) packaging
 

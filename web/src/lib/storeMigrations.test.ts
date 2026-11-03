@@ -283,8 +283,8 @@ describe("v26 → v27 migration", () => {
       hiddenWidgetIds: ["future-widget"],
       futureLayoutField: { safe: true },
       widgets: {
-        todayScore: { size: "extra-large", enabledFields: ["progress"] },
-        "future-widget": { size: "medium", enabledFields: ["future-field"], futurePreference: true },
+        todayScore: { size: "large", enabledFields: ["progress"] },
+        "future-widget": { size: "small", enabledFields: ["future-field"], futurePreference: true },
       },
     });
     expect(migratePersistedState(structuredClone(migrated), SCHEMA_VERSION)).toEqual(migrated);
@@ -329,5 +329,45 @@ describe("v26 → v27 migration", () => {
     expect(migrated.dailyWordPuzzles).toHaveLength(1);
     expect(migrated.dailyWordPuzzles[0]).toMatchObject({ completed: true, guesses: ["APPLE", "BERRY"] });
     expect(migrated.tasks).toEqual(beforeTasks);
+  });
+
+  it("starts a new workspace with the four requested visible trackers", () => {
+    const trackers = makeSeed().productivityTrackers;
+    expect(trackers.map(({ name, category, dailyTarget, weeklyTarget, visible }) => ({ name, category, dailyTarget, weeklyTarget, visible }))).toEqual([
+      { name: "Study", category: "Academic", dailyTarget: 240, weeklyTarget: 1680, visible: true },
+      { name: "Small Group + Prep", category: "Academic", dailyTarget: 120, weeklyTarget: 360, visible: true },
+      { name: "Class", category: "Academic", dailyTarget: 120, weeklyTarget: 600, visible: true },
+      { name: "Gym", category: "Health", dailyTarget: 45, weeklyTarget: 180, visible: true },
+    ]);
+    expect(new Set(trackers.map(({ id }) => id)).size).toBe(4);
+    expect(trackers.filter(({ name }) => name === "Small Group + Prep" || name === "Class"))
+      .toEqual([expect.objectContaining({ contributesToAcademicStudy: false, contributesToTotalProductiveTime: false }),
+        expect.objectContaining({ contributesToAcademicStudy: false, contributesToTotalProductiveTime: false })]);
+  });
+
+  it("does not add defaults to an existing custom or explicitly empty tracker list", () => {
+    const saved = makeSeed();
+    const renamed = {
+      ...saved.productivityTrackers[1],
+      id: "tracker-coding",
+      name: "Small Group + Prep",
+      visible: false,
+      archived: true,
+    };
+    saved.productivityTrackers = [renamed];
+    const migrated = migratePersistedState(structuredClone(saved), 23);
+    expect(migrated.productivityTrackers).toEqual([renamed]);
+    expect(migratePersistedState(structuredClone(migrated), SCHEMA_VERSION).productivityTrackers).toEqual([renamed]);
+
+    const empty = makeSeed();
+    empty.productivityTrackers = [];
+    expect(migratePersistedState(structuredClone(empty), 23).productivityTrackers).toEqual([]);
+  });
+
+  it("installs defaults only when old tracker data is absent", () => {
+    const saved = makeSeed();
+    delete (saved as Partial<typeof saved>).productivityTrackers;
+    const migrated = migratePersistedState(structuredClone(saved), 23);
+    expect(migrated.productivityTrackers.map(({ name }) => name)).toEqual(["Study", "Small Group + Prep", "Class", "Gym"]);
   });
 });

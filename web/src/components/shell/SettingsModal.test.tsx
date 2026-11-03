@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +8,15 @@ import { createLocalBackup, resetLocalBackupRuntimeForTests } from "../../lib/lo
 import { makeSeed, SCHEMA_VERSION } from "../../lib/seed";
 import { useStore } from "../../lib/store";
 import { SettingsModal } from "./SettingsModal";
+
+const operatorMocks = vi.hoisted(() => ({
+  role: null as "owner" | "admin" | "moderator" | null,
+  state: "denied" as "denied" | "verified" | "error",
+  retry: vi.fn(),
+}));
+vi.mock("../../lib/operator/hostClient", () => ({
+  useOperatorAccessStatus: () => ({ role: operatorMocks.role, state: operatorMocks.state, retry: operatorMocks.retry }),
+}));
 
 const storageValues = new Map<string, string>();
 const storage = {
@@ -20,6 +29,9 @@ const storage = {
 };
 
 beforeEach(() => {
+  operatorMocks.role = null;
+  operatorMocks.state = "denied";
+  operatorMocks.retry.mockReset();
   vi.stubGlobal("localStorage", storage);
   localStorage.clear();
   useStore.setState(makeSeed());
@@ -41,6 +53,36 @@ afterEach(() => {
 });
 
 describe("Settings information architecture", () => {
+  it("offers the other hosted workspace from apex account settings only", () => {
+    vi.stubGlobal("location", { hostname: "axom.info" });
+    const { unmount } = render(<SettingsModal onClose={() => {}} initialTab="account" />);
+    const link = screen.getByRole("link", { name: "Open www.axom.info" });
+    expect(link.getAttribute("href")).toBe("https://www.axom.info/?app=1");
+    expect(link.getAttribute("target")).toBe("_blank");
+    unmount();
+    vi.stubGlobal("location", { hostname: "www.axom.info" });
+    render(<SettingsModal onClose={() => {}} initialTab="account" />);
+    expect(screen.queryByRole("link", { name: "Open www.axom.info" })).toBeNull();
+  });
+
+  it("uses setup path and term choices without replacing saved course structure", async () => {
+    const user = userEvent.setup();
+    const originalTerms = useStore.getState().terms.map((term) => term.id);
+    const originalCourses = useStore.getState().courses.map((course) => course.id);
+    render(<SettingsModal onClose={() => {}} />);
+
+    await user.click(screen.getByRole("radio", { name: "Term 3" }));
+    expect(useStore.getState().profile.activeFocusId).toBe("term3");
+    expect(screen.getByText(/Term 3 ·/)).toBeTruthy();
+
+    await user.click(screen.getByRole("radio", { name: "US MD" }));
+    expect(useStore.getState().profile).toMatchObject({ educationTrack: "usmd", academicStageId: "preclinical", activeFocusId: "step1" });
+    expect(useStore.getState().profile.focusSubscriptions).toContain("term3");
+    expect(useStore.getState().terms.map((term) => term.id)).toEqual(originalTerms);
+    expect(useStore.getState().courses.map((course) => course.id)).toEqual(originalCourses);
+    expect(screen.getByRole("radiogroup", { name: "What are you focused on?" })).toBeTruthy();
+  });
+
   it("edits method follow-ups without erasing other methods or kind defaults", () => {
     useStore.getState().updateProfile({ studyWorkflow: { configured: true, methods: [{ id: "noji", enabled: true, timing: "ongoing", usage: "My own recall cards" }], itemKindDefaults: { Lab: { lecturePasses: 3 } } } });
     render(<SettingsModal onClose={() => {}} />);
@@ -98,7 +140,7 @@ describe("Settings information architecture", () => {
     ]));
     expect(screen.queryByText("Suggestions from your words")).toBeNull();
     expect(screen.getByRole("button", { name: "Anki" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("status").textContent).toBe("Applied 6 suggestions.");
+    expect(document.querySelector(".study-suggestions-status")?.textContent).toBe("Applied 6 suggestions.");
   });
 
   it("uses seven accessible sections with only the active tab owning its mounted panel", async () => {
@@ -106,7 +148,7 @@ describe("Settings information architecture", () => {
     render(<SettingsModal onClose={() => {}} />);
 
     const tabs = screen.getAllByRole("tab");
-    expect(tabs.map((tab) => tab.textContent?.trim())).toEqual([
+    expect(tabs.map((tab) => tab.lastElementChild?.textContent?.trim())).toEqual([
       "Profile", "Account", "Appearance", "Personalization", "Data", "Emergency recovery", "Advanced",
     ]);
     for (const tab of tabs) {
@@ -123,13 +165,58 @@ describe("Settings information architecture", () => {
 
     fireEvent.keyDown(dataTab, { key: "End" });
     expect(screen.getByRole("tab", { name: "Advanced" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Advanced" }), { key: "ArrowDown" });
+    expect(screen.getByRole("tab", { name: "Profile" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("keeps account links inside the selected account panel", async () => {
+    const user = userEvent.setup();
+    render(<SettingsModal onClose={() => {}} />);
+    await user.click(screen.getByRole("tab", { name: "Account" }));
+    const accountPanel = screen.getByRole("tabpanel", { name: "Account" });
+    expect(within(accountPanel).getByRole("link", { name: "Notifications & communications" }).getAttribute("href")).toBe("#communications");
+    expect(within(accountPanel).getByRole("link", { name: "Privacy & data" }).getAttribute("href")).toBe("#privacy");
+    expect(within(accountPanel).queryByRole("link", { name: "Open host dashboard" })).toBeNull();
+  });
+
+  it("shows the Project CEO path only after a verified owner role", () => {
+    operatorMocks.role = "owner";
+    operatorMocks.state = "verified";
+    render(<SettingsModal onClose={() => {}} initialTab="account" />);
+    const accountPanel = screen.getByRole("tabpanel", { name: "Account" });
+    const hostAccess = within(accountPanel).getByLabelText("Host access");
+    expect(within(hostAccess).getByText("Project CEO")).toBeTruthy();
+    expect(within(hostAccess).getByRole("link", { name: "Open host dashboard" }).getAttribute("href")).toBe("#host");
+  });
+
+  it("offers a retry without revealing Host access when the role check fails", async () => {
+    operatorMocks.state = "error";
+    const user = userEvent.setup();
+    render(<SettingsModal onClose={() => {}} initialTab="account" />);
+    const panel = screen.getByRole("tabpanel", { name: "Account" });
+    expect(within(panel).getByRole("alert").textContent).toContain("Host access could not be checked");
+    expect(within(panel).queryByText("Project CEO")).toBeNull();
+    expect(within(panel).queryByRole("link", { name: "Open host dashboard" })).toBeNull();
+    await user.click(within(panel).getByRole("button", { name: "Retry Host access" }));
+    expect(operatorMocks.retry).toHaveBeenCalledOnce();
+  });
+
+  it("lets a narrow-screen section picker reach every Settings area", async () => {
+    const user = userEvent.setup();
+    render(<SettingsModal onClose={() => {}} />);
+    const picker = screen.getByRole("combobox", { name: "Settings section" });
+    for (const section of ["account", "appearance", "personalization", "data", "backup", "advanced", "profile"]) {
+      await user.selectOptions(picker, section);
+      expect(screen.getByRole("tab", { name: section === "backup" ? "Emergency recovery" : new RegExp(section, "i") }).getAttribute("aria-selected")).toBe("true");
+    }
   });
 
   it("states accurate local-first semantics without promising a cloud account", async () => {
     const user = userEvent.setup();
     render(<SettingsModal onClose={() => {}} initialTab="data" />);
-    expect(screen.getByText(/workspace lives on this device and saves as you work/i)).toBeTruthy();
-    expect(screen.getByText(/If you sign in and enable account protection/i)).toBeTruthy();
+    expect(screen.getByText("Local workspace")).toBeTruthy();
+    expect(within(screen.getByRole("tabpanel", { name: "Data" })).getByText(/Saved on this device|Waiting for the first save|Main vault unavailable/)).toBeTruthy();
+    expect(screen.getByText("Your saved work")).toBeTruthy();
     expect(screen.queryByText(/your account is synced/i)).toBeNull();
     expect(screen.queryByText(/workspace follows you across devices/i)).toBeNull();
 
@@ -140,12 +227,13 @@ describe("Settings information architecture", () => {
   it("presents portable backup actions once and keeps technical details in Advanced", async () => {
     const user = userEvent.setup();
     render(<SettingsModal onClose={() => {}} initialTab="backup" />);
-    expect(screen.getAllByRole("button", { name: /export backup/i })).toHaveLength(1);
-    expect(screen.getAllByRole("button", { name: /import \/ restore/i })).toHaveLength(1);
-    expect(screen.getAllByRole("button", { name: /merge backup/i })).toHaveLength(1);
-    expect(screen.getAllByText(/automatic local recovery snapshots/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: /export complete backup/i })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /choose backup to restore/i })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /choose backup to merge/i })).toHaveLength(1);
+    expect(screen.getByText("Automatic snapshots")).toBeTruthy();
 
     await user.click(screen.getByRole("tab", { name: "Advanced" }));
+    await user.click(screen.getByText("Technical details", { selector: "summary span" }));
     expect(screen.getByDisplayValue(`v${SCHEMA_VERSION}`)).toBeTruthy();
     expect(screen.getByText(/AI and provider settings \(optional\)/i)).toBeTruthy();
     expect(screen.queryByText(/Cloud copy/i)).toBeNull();
@@ -368,11 +456,11 @@ describe("Settings information architecture", () => {
     expect(screen.getByRole("tab", { name: "Personalization" }).getAttribute("aria-selected")).toBe("true");
   });
 
-  it("enables lock-in check-ins with a chosen interval, scope, and voice", async () => {
+  it("configures enabled-by-default lock-in check-ins with a chosen interval, scope, and voice", async () => {
     const user = userEvent.setup();
     render(<SettingsModal onClose={() => {}} initialTab="rhythm" />);
-    await user.click(screen.getByRole("checkbox", { name: "Enable lock-in check-ins" }));
-    await user.click(screen.getByRole("button", { name: "45 min" }));
+    expect((screen.getByRole("checkbox", { name: "Enable lock-in check-ins" }) as HTMLInputElement).checked).toBe(true);
+    await user.selectOptions(screen.getByRole("combobox", { name: "Check-in interval" }), "45");
     await user.click(screen.getByRole("radio", { name: /Whenever AXOM is open/ }));
     await user.click(screen.getByRole("radio", { name: /Intense/ }));
     expect(useStore.getState().profile.focusCheckIn).toMatchObject({ enabled: true, intervalMinutes: 45, scope: "anytime", tone: "intense" });
@@ -386,16 +474,17 @@ describe("Settings information architecture", () => {
     expect(JSON.parse(localStorage.getItem("axom.palette.v1")!).id).toBe("amethyst");
     expect(JSON.stringify(useStore.getState().profile)).not.toContain("amethyst");
     await user.click(screen.getByRole("radio", { name: /AXOM Classic/ }));
-    expect(document.documentElement.dataset.palette).toBeUndefined();
+    expect(document.documentElement.dataset.palette).toBe("midnight");
   });
 
   it("shows the profile header with program facts and an account entry point", () => {
     useStore.getState().updateProfile({ name: "Jafar", tagline: "One honest block." });
     render(<SettingsModal onClose={() => {}} />);
     expect((screen.getByLabelText("Display name") as HTMLInputElement).value).toBe("Jafar");
-    expect(screen.getByText("Where you are")).toBeTruthy();
-    expect(screen.getByText("Local profile on this device")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "About accounts" }));
+    const profilePanel = screen.getByRole("tabpanel", { name: "Profile" });
+    expect(within(profilePanel).getByText("Where are you now?")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toMatch(/Waiting for the first confirmed save|Saved on this device at/);
+    fireEvent.click(screen.getByRole("button", { name: "About account protection" }));
     expect(screen.getByRole("tab", { name: "Account" }).getAttribute("aria-selected")).toBe("true");
   });
 

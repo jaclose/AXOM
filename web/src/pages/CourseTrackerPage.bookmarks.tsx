@@ -189,7 +189,7 @@ export function TrackerBookmarkLinks({ scope }: { scope: string }) {
       const trackerId = resource.tags.find((tag) => tag.startsWith("academic:tracker:"))?.slice("academic:tracker:".length);
       const associated = tracker.find((item) => item.id === trackerId);
       return <li key={resource.id}>
-        <a href={resource.url} target="_blank" rel="noopener noreferrer">{resource.title}</a>
+        <a href={canonicalPanoptoVideoUrl(resource.url)} target="_blank" rel="noopener noreferrer">{resource.title}</a>
         {associated && <small> · Linked by you to {associated.label}</small>}
       </li>;
     })}</ul>
@@ -207,7 +207,7 @@ export function TrackerItemBookmarkLinks({ itemId }: { itemId: string }) {
   if (!links.length) return null;
   return <div className="tracker-item-bookmark-links" aria-label="Linked study recordings">
     {links.slice(0, 3).map((resource) =>
-      <a key={resource.id} href={resource.url} target="_blank" rel="noopener noreferrer">
+      <a key={resource.id} href={canonicalPanoptoVideoUrl(resource.url)} target="_blank" rel="noopener noreferrer">
         Recording: {resource.title}
       </a>)}
     {links.length > 3 && <small>+{links.length - 3} more linked recordings</small>}

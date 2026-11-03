@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import { execFileSync, spawnSync, spawn } from 'node:child_process';
 import { createWriteStream, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -73,6 +74,8 @@ export async function verifyDeployment(root, {
     const env = { ...process.env, VERCEL_GIT_COMMIT_SHA: sha };
     command(config.installCommand, target, env);
     command(config.buildCommand, target, env);
+    const metadata = JSON.parse(readFileSync(join(target, 'web/dist/version.json'), 'utf8'));
+    assert.equal(metadata.commit, sha.slice(0, 12), 'filtered deployment must display its exact source revision');
     console.log(`PASS: clean Vercel-filtered install and build (${sha})`);
   } finally {
     // Only this run's generated scratch tree; never the source checkout or user data.

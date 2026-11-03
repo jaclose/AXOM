@@ -16,6 +16,7 @@ Start a session with [AGENTS](../AGENTS.md) and [AI_STATE](AI_STATE.md).
 | Local setup, scripts, environment | [Development](operations/development.md) |
 | Narrow checks, full gate, CI coverage | [Testing](operations/testing.md) |
 | Web/native releases, updates, account setup | [Deployment](operations/deployment.md) |
+| Email configuration and test-draft checks | [Communications readiness](operations/communications-readiness.md) |
 | Known failure patterns | [Troubleshooting](operations/troubleshooting.md) |
 | Durable engineering decisions | [Decision index](decisions/README.md) |
 | User idea ID, branch plan, progress | [Directions router](directions/README.md) |

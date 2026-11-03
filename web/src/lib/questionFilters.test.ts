@@ -4,6 +4,8 @@ import {
   normalizeSavedQuestionFilters,
 } from "./questionFilters";
 import type { QuestionRecord } from "./questions";
+import type { QuestionImageAttachment } from "./questionAttachments";
+import type { QuestionAsset, PackageQuestion } from "./question-content/package";
 
 function q(patch: Partial<QuestionRecord> & { id: string }): QuestionRecord {
   return {
@@ -12,12 +14,27 @@ function q(patch: Partial<QuestionRecord> & { id: string }): QuestionRecord {
   };
 }
 
+function attachment(role?: QuestionImageAttachment["role"], assetId?: string): QuestionImageAttachment {
+  return {
+    id: "image", fileName: "source.png", mimeType: "image/png", byteSize: 1,
+    altText: "", createdAt: "x", updatedAt: "x", blobKey: "image", role, assetId,
+  };
+}
+
+function content(id: string, role: QuestionAsset["role"]): PackageQuestion {
+  return {
+    id, source: { filename: "source.pdf", page: 1 }, stem: [{ type: "text", text: "Stem" }],
+    choices: [], assets: [{ id: "image", filename: "source.png", mimeType: "image/png", role, questionId: id }],
+    provenance: { method: "authored" },
+  };
+}
+
 const NOW = Date.parse("2026-07-18T12:00:00.000Z");
 
 const bank: QuestionRecord[] = [
   q({ id: "1", stem: "Cardiac output question", tags: ["cardiology", "high-yield"], difficulty: "hard", status: "incorrect", attempts: [{ status: "incorrect", at: "x" } as never], marked: true }),
   q({ id: "2", stem: "Renal tubule", tags: ["renal"], difficulty: "easy", status: "correct", attempts: [{ status: "correct", at: "x" } as never], reviewDueAt: "2026-07-17T00:00:00.000Z", notes: "review this" }),
-  q({ id: "3", stem: "Ethics scenario", tags: ["ethics", "high-yield"], difficulty: "medium", status: "unseen", attempts: [], attachments: [{ id: "a", fileName: "f.png", mimeType: "image/png", byteSize: 1, altText: "", createdAt: "x", updatedAt: "x", blobKey: "a" }] }),
+  q({ id: "3", stem: "Ethics scenario", tags: ["ethics", "high-yield"], difficulty: "medium", status: "unseen", attempts: [], attachments: [attachment("exhibit")] }),
   q({ id: "4", stem: "Micro basics", tags: ["microbiology"], status: "unseen", attempts: [], source: "manual" }),
   q({ id: "5", stem: "Other", explanation: "Loop diuretics block NKCC", objective: "Manage pulmonary edema", bank: "BPM week 7", status: "unseen" }),
 ];
@@ -50,6 +67,19 @@ describe("applyQuestionFilter", () => {
     expect(applyQuestionFilter(bank, { reviewDue: true }, NOW).map((x) => x.id)).toEqual(["2"]);
     expect(applyQuestionFilter(bank, { hasAttachment: true }, NOW).map((x) => x.id)).toEqual(["3"]);
     expect(applyQuestionFilter(bank, { hasNotes: true }, NOW).map((x) => x.id)).toEqual(["2"]);
+  });
+  it("requires a prompt image, not a source page, answer slide, note, or missing media", () => {
+    const records = [
+      q({ id: "prompt", content: content("prompt", "stem"), attachments: [attachment("stem", "image")] }),
+      q({ id: "source-page", content: content("source-page", "source_page"), attachments: [attachment("source_page", "image")] }),
+      q({ id: "answer-slide", content: content("answer-slide", "answer_reveal"), attachments: [attachment("answer_reveal", "image")] }),
+      q({ id: "mismatched", content: content("mismatched", "source_page"), attachments: [attachment("stem", "image")] }),
+      q({ id: "note", attachments: [attachment()] }),
+      q({ id: "legacy-exhibit", attachments: [attachment("exhibit")] }),
+      q({ id: "missing-media", content: content("missing-media", "choice") }),
+    ];
+    expect(applyQuestionFilter(records, { hasAttachment: true }, NOW).map((record) => record.id))
+      .toEqual(["prompt", "legacy-exhibit"]);
   });
   it("source facet", () => {
     expect(applyQuestionFilter(bank, { sources: ["manual"] }, NOW).map((x) => x.id)).toEqual(["4"]);

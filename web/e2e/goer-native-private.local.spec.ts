@@ -18,7 +18,7 @@ test("five canonical GOER sources install private ready questions and figures, s
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   const library = page.getByRole("region", { name: "Prepared library", exact: true });
-  const sourceLink = page.getByText("Local collection transfer and source review", { exact: true });
+  const sourceLink = page.getByText("Import status and source review", { exact: true });
   if (!await library.isVisible()) await sourceLink.click();
 
   const install = async (button: string) => {

@@ -13,6 +13,7 @@ export interface UpdateState {
   downloadedBytes: number;
   totalBytes?: number;
   error?: string;
+  canContinueWithoutRecoverySnapshot?: boolean;
   deferred: boolean;
   /** Installation/activation succeeded; retry only the checkpoint and restart. */
   restartPending: boolean;
@@ -37,11 +38,14 @@ export interface UpdateDependencies {
   desktopConfigured: () => Promise<boolean>;
   checkNative: () => Promise<NativeUpdate | null>;
   checkWeb: () => Promise<WebVersion | null>;
-  checkpoint: () => Promise<unknown>;
+  checkpoint: (options?: UpdateApplyOptions) => Promise<unknown>;
   activateWeb: () => Promise<void>;
   restart: () => Promise<void>;
   readDeferred: () => string | null;
   writeDeferred: (value: string) => void;
+}
+export interface UpdateApplyOptions {
+  skipRecoverySnapshot?: boolean;
 }
 
 /** Explicit lifecycle shared by Settings, automatic notices, and native menus.
@@ -60,7 +64,11 @@ export function createUpdateController(deps: UpdateDependencies) {
   const run = (job: () => Promise<void>) => {
     if (operation) return operation;
     operation = job().catch((error: unknown) => {
-      update({ phase: "error", error: error instanceof Error ? error.message : "The update could not finish. Please try again." });
+      update({
+        phase: "error",
+        error: error instanceof Error ? error.message : "The update could not finish. Please try again.",
+        canContinueWithoutRecoverySnapshot: !deps.desktop && hasVerifiedSaveWithoutSnapshot(error),
+      });
     }).finally(() => { operation = null; });
     return operation;
   };
@@ -88,7 +96,7 @@ export function createUpdateController(deps: UpdateDependencies) {
         const previous = candidate;
         candidate = null;
         update({
-          phase: "checking", error: undefined, version: undefined, buildId: undefined,
+          phase: "checking", error: undefined, canContinueWithoutRecoverySnapshot: false, version: undefined, buildId: undefined,
           notes: undefined, downloadedBytes: 0, totalBytes: undefined, deferred: false,
         });
         if (previous) await previous.close().catch(() => undefined);
@@ -126,12 +134,15 @@ export function createUpdateController(deps: UpdateDependencies) {
         update({ phase: "ready" });
       });
     },
-    apply() {
+    apply(options: UpdateApplyOptions = {}) {
       return run(async () => {
+        if (options.skipRecoverySnapshot && (deps.desktop || !state.canContinueWithoutRecoverySnapshot)) {
+          throw new Error("The update cannot continue without a verified recovery snapshot.");
+        }
         if (deps.desktop && !state.restartPending && (!candidate || !downloaded)) throw new Error("Download the update before installing it.");
         if (!deps.desktop && !state.version) throw new Error("Check for a web update before refreshing.");
-        update({ phase: "preparing", error: undefined });
-        await deps.checkpoint();
+        update({ phase: "preparing", error: undefined, canContinueWithoutRecoverySnapshot: false });
+        await deps.checkpoint(options);
         if (!state.restartPending) {
           if (deps.desktop) {
             update({ phase: "installing" });
@@ -152,6 +163,12 @@ export function createUpdateController(deps: UpdateDependencies) {
     },
     hasDownloaded: () => downloaded,
   };
+}
+
+function hasVerifiedSaveWithoutSnapshot(error: unknown): boolean {
+  return typeof error === "object" && error !== null
+    && "canContinueWithoutRecoverySnapshot" in error
+    && error.canContinueWithoutRecoverySnapshot === true;
 }
 
 export function isDesktopApp(): boolean {
@@ -203,7 +220,7 @@ export const appUpdates = createUpdateController({
     };
     return isDifferentWebBuild(parsed) ? parsed : null;
   },
-  checkpoint: async () => (await import("./updateCheckpoint")).createUpdateCheckpoint(isDesktopApp()),
+  checkpoint: async (options) => (await import("./updateCheckpoint")).createUpdateCheckpoint(isDesktopApp(), options),
   activateWeb: async () => (await import("./webUpdates")).activateWaitingWebUpdate(),
   restart: async () => {
     if (isDesktopApp()) await (await import("@tauri-apps/plugin-process")).relaunch();

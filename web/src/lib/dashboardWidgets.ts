@@ -41,9 +41,7 @@ export interface DashboardLayoutPreset {
   sizes: Readonly<Partial<Record<DashboardWidgetId, DashboardWidgetSize>>>;
 }
 
-const ALL_SIZES = ["small", "medium", "large", "extra-large"] as const;
-const COMPACT_SIZES = ["small", "medium", "large"] as const;
-const STANDARD_SIZES = ["medium", "large", "extra-large"] as const;
+const ALL_SIZES = ["small", "large"] as const;
 
 function fields(...values: Array<string | readonly [string, string]>): DashboardWidgetFieldDefinition[] {
   return values.map((value) => {
@@ -58,35 +56,35 @@ function fields(...values: Array<string | readonly [string, string]>): Dashboard
  * returning removed UI to the dashboard.
  */
 export const DASHBOARD_WIDGET_CATALOG: readonly DashboardWidgetCatalogItem[] = [
-  { id: "welcome", label: "Welcome", description: "Date, welcome state, and daily quote.", defaultSize: "large", supportedSizes: STANDARD_SIZES, fields: fields("date", "state", "quote") },
-  { id: "commandBrief", label: "Up next", description: "One suggested next step from your real work, with a smaller option.", defaultSize: "large", supportedSizes: STANDARD_SIZES, fields: fields("currentState", "nextAction", "why", "effort", "success", "alternate") },
-  { id: "questionBank", label: "Question Bank", description: "Trusted review work and mapping health.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("due", "accuracy", "needsReview", "recent") },
-  { id: "courseTracker", label: "Course Tracker", description: "Progress, weak areas, and untouched items.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("progress", "untouched", "weak", "suggestion") },
-  { id: "tasks", label: "Tasks", description: "Due, overdue, and completed work.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("due", "overdue", "completed") },
-  { id: "readiness", label: "Energy & capacity", description: "How much today can hold, from your own energy checks and recent load.", defaultSize: "small", supportedSizes: COMPACT_SIZES, fields: fields(["score", "Capacity"], ["energy", "One-tap energy check"], ["contributors", "Reasons"]) },
-  { id: "activity", label: "Activity", description: "Today, recent work, and activity distribution.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("today", "weekly", "recent", "distribution") },
-  { id: "journal", label: "Journal", description: "Latest reflection and unfinished loops.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("latest", "energy", "unfinished") },
-  { id: "streak", label: "Consistency", description: "Current and best eligible-day streaks.", defaultSize: "small", supportedSizes: COMPACT_SIZES, fields: fields("current", "best", "eligibleDays") },
-  { id: "dailyWord", label: "Daily Word", description: "Local puzzle state, streak, and next puzzle.", defaultSize: "small", supportedSizes: COMPACT_SIZES, fields: fields("board", "streak", "countdown", "distribution") },
+  { id: "welcome", label: "Welcome", description: "Date, welcome state, and daily quote.", defaultSize: "large", supportedSizes: ALL_SIZES, fields: fields("date", "state", "quote") },
+  { id: "commandBrief", label: "Up next", description: "One suggested next step from your real work, with a smaller option.", defaultSize: "large", supportedSizes: ALL_SIZES, fields: fields("currentState", "nextAction", "why", "effort", "success", "alternate") },
+  { id: "questionBank", label: "Question Bank", description: "Trusted review work and mapping health.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields("due", "accuracy", "needsReview", "recent") },
+  { id: "courseTracker", label: "Course Tracker", description: "Progress, weak areas, and untouched items.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields("progress", "untouched", "weak", "suggestion") },
+  { id: "tasks", label: "Tasks", description: "Due, overdue, and completed work.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields("due", "overdue", "completed") },
+  { id: "readiness", label: "Energy & capacity", description: "How much today can hold, from your own energy checks and recent load.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields(["score", "Capacity"], ["energy", "One-tap energy check"], ["contributors", "Reasons"]) },
+  { id: "activity", label: "Activity", description: "Today, recent work, and activity distribution.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields("today", "weekly", "recent", "distribution") },
+  { id: "journal", label: "Journal", description: "Latest reflection and unfinished loops.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields("latest", "energy", "unfinished") },
+  { id: "streak", label: "Consistency", description: "Current and best eligible-day streaks.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields("current", "best", "eligibleDays") },
+  { id: "dailyWord", label: "Daily Word", description: "Local puzzle state, streak, and next puzzle.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields("board", "streak", "countdown", "distribution") },
   {
     id: "winDay", label: "Daily Check-In", description: "Set direction and close the daily loop.", defaultSize: "large", supportedSizes: ALL_SIZES, fields: fields("intention", "winConditions", "closeout"),
     options: [{ id: "writing", label: "A short note after an energy check", description: "A question that fits how you feel, kept with the check.", defaultOn: false }],
   },
-  { id: "todayScore", label: "Today's targets", description: "Scheduled target progress and provenance.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("progress", "targets", "sources") },
-  { id: "examCountdown", label: "Exam countdown", description: "Exam date, phase, and daily question target.", defaultSize: "small", supportedSizes: COMPACT_SIZES, fields: fields("days", "phase", "questionTarget") },
-  { id: "pomodoro", label: "Focus timer", description: "Current focus session and timer controls.", defaultSize: "small", supportedSizes: COMPACT_SIZES, fields: fields("timer", "intention", "sessions") },
-  { id: "soundscapes", label: "Soundscape", description: "Play, pause, and switch your study sound next to the timer.", defaultSize: "small", supportedSizes: COMPACT_SIZES, fields: fields(["quickPicks", "Quick picks"], ["followTimer", "Follow my Pomodoro"]) },
-  { id: "weekly", label: "Weekly overview", description: "Seven-day effort and active-day rhythm.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("minutes", "activeDays", "trend") },
-  { id: "suggested", label: "Suggested moves", description: "Merged into Up next; retained for old layouts.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("actions", "reasons", "effort"), storageOnly: true },
-  { id: "schedule", label: "Schedule", description: "Legacy calendar widget retained for old layouts.", defaultSize: "large", supportedSizes: STANDARD_SIZES, fields: fields("calendar", "tasks", "activity"), storageOnly: true },
-  { id: "termMap", label: "Term map", description: "Merged into Course Tracker; retained for old layouts.", defaultSize: "large", supportedSizes: STANDARD_SIZES, fields: fields("terms", "courses", "progress"), storageOnly: true },
-  { id: "localData", label: "Local data", description: "Workspace and backup health.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("status", "backup", "storage") },
-  { id: "latestStandup", label: "Latest standup", description: "Merged into Journal; retained for old layouts.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("date", "summary", "energy"), storageOnly: true },
-  { id: "productivityTrend", label: "Productivity trend", description: "Merged into Activity; retained for old layouts.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("trend", "contributors", "comparison"), storageOnly: true },
-  { id: "premedHours", label: "Pre-Med hours", description: "Clinical, service, and research hours.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("clinical", "service", "research") },
-  { id: "resourceFocus", label: "Resource focus", description: "Legacy resource widget retained for old layouts.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("pinned", "recent", "status"), storageOnly: true },
-  { id: "boardBlueprint", label: "Blueprint pulse", description: "Merged into Course Tracker; retained for old layouts.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: fields("lane", "progress", "priority"), storageOnly: true },
-  { id: "aiActions", label: "Legacy AI actions", description: "Removed widget metadata retained for old backups.", defaultSize: "medium", supportedSizes: ALL_SIZES, fields: [], storageOnly: true },
+  { id: "todayScore", label: "Today's targets", description: "Scheduled target progress and provenance.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields("progress", "targets", "sources") },
+  { id: "examCountdown", label: "Exam countdown", description: "Exam date, phase, and daily question target.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields("days", "phase", "questionTarget") },
+  { id: "pomodoro", label: "Focus timer", description: "Current focus session and timer controls.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields("timer", "intention", "sessions") },
+  { id: "soundscapes", label: "Soundscape", description: "Play, pause, and switch your study sound next to the timer.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields(["quickPicks", "Quick picks"], ["followTimer", "Follow my Pomodoro"]) },
+  { id: "weekly", label: "Weekly overview", description: "Seven-day effort and active-day rhythm.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields("minutes", "activeDays", "trend") },
+  { id: "suggested", label: "Suggested moves", description: "Merged into Up next; retained for old layouts.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields("actions", "reasons", "effort"), storageOnly: true },
+  { id: "schedule", label: "Schedule", description: "Legacy calendar widget retained for old layouts.", defaultSize: "large", supportedSizes: ALL_SIZES, fields: fields("calendar", "tasks", "activity"), storageOnly: true },
+  { id: "termMap", label: "Term map", description: "Merged into Course Tracker; retained for old layouts.", defaultSize: "large", supportedSizes: ALL_SIZES, fields: fields("terms", "courses", "progress"), storageOnly: true },
+  { id: "localData", label: "Local data", description: "Workspace and backup health.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields("status", "backup", "storage") },
+  { id: "latestStandup", label: "Latest standup", description: "Merged into Journal; retained for old layouts.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields("date", "summary", "energy"), storageOnly: true },
+  { id: "productivityTrend", label: "Productivity trend", description: "Merged into Activity; retained for old layouts.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields("trend", "contributors", "comparison"), storageOnly: true },
+  { id: "premedHours", label: "Pre-Med hours", description: "Clinical, service, and research hours.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields("clinical", "service", "research") },
+  { id: "resourceFocus", label: "Resource focus", description: "Legacy resource widget retained for old layouts.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields("pinned", "recent", "status"), storageOnly: true },
+  { id: "boardBlueprint", label: "Blueprint pulse", description: "Merged into Course Tracker; retained for old layouts.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: fields("lane", "progress", "priority"), storageOnly: true },
+  { id: "aiActions", label: "Legacy AI actions", description: "Removed widget metadata retained for old backups.", defaultSize: "small", supportedSizes: ALL_SIZES, fields: [], storageOnly: true },
 ] as const;
 
 export const DASHBOARD_WIDGET_CATALOG_IDS = DASHBOARD_WIDGET_CATALOG.map((item) => item.id);
@@ -133,7 +131,7 @@ export const DASHBOARD_LAYOUT_PRESETS: readonly DashboardLayoutPreset[] = [
     description: "Direction, focus timer and sound, targets, and core study work.",
     order: FOCUSED_ORDER,
     hiddenWidgetIds: hiddenExcept(new Set(["welcome", "commandBrief", "winDay", "pomodoro", "soundscapes", "todayScore", "questionBank", "courseTracker", "weekly"])),
-    sizes: { welcome: "large", commandBrief: "large", winDay: "large", pomodoro: "small", soundscapes: "small", todayScore: "medium", questionBank: "medium", courseTracker: "medium", weekly: "medium" },
+    sizes: { welcome: "large", commandBrief: "large", winDay: "large", pomodoro: "small", soundscapes: "small", todayScore: "small", questionBank: "small", courseTracker: "small", weekly: "small" },
   },
   {
     id: "study-heavy",
@@ -141,7 +139,7 @@ export const DASHBOARD_LAYOUT_PRESETS: readonly DashboardLayoutPreset[] = [
     description: "More course, question, task, and trend detail.",
     order: FOCUSED_ORDER,
     hiddenWidgetIds: hiddenExcept(STUDY_HEAVY_VISIBLE),
-    sizes: { welcome: "medium", commandBrief: "large", courseTracker: "large", questionBank: "large", tasks: "medium", pomodoro: "small", soundscapes: "small" },
+    sizes: { welcome: "small", commandBrief: "large", courseTracker: "large", questionBank: "large", tasks: "small", pomodoro: "small", soundscapes: "small" },
   },
   {
     id: "wellbeing-balanced",
@@ -149,7 +147,7 @@ export const DASHBOARD_LAYOUT_PRESETS: readonly DashboardLayoutPreset[] = [
     description: "Daily direction, readiness, reflection, and sustainable rhythm.",
     order: FOCUSED_ORDER,
     hiddenWidgetIds: hiddenExcept(WELLBEING_VISIBLE),
-    sizes: { welcome: "large", commandBrief: "large", winDay: "large", readiness: "small", activity: "medium", journal: "large", weekly: "medium", pomodoro: "small", soundscapes: "small" },
+    sizes: { welcome: "large", commandBrief: "large", winDay: "large", readiness: "small", activity: "small", journal: "large", weekly: "small", pomodoro: "small", soundscapes: "small" },
   },
   {
     id: "custom",
@@ -163,9 +161,6 @@ export const DASHBOARD_LAYOUT_PRESETS: readonly DashboardLayoutPreset[] = [
 
 const PRESET_BY_ID = new Map(DASHBOARD_LAYOUT_PRESETS.map((preset) => [preset.id, preset]));
 
-/** Three XL widgets are supported without a warning; the fourth is a soft prompt. */
-export const RECOMMENDED_EXTRA_LARGE_WIDGET_LIMIT = 3;
-
 export function dashboardWidgetCatalogItem(id: string): DashboardWidgetCatalogItem & { unavailable?: boolean } {
   const known = CATALOG_BY_ID.get(id);
   if (known) return known;
@@ -173,7 +168,7 @@ export function dashboardWidgetCatalogItem(id: string): DashboardWidgetCatalogIt
     id: id as DashboardWidgetId,
     label: titleFromId(id || "Unknown widget"),
     description: "This widget was saved by another AXOM version.",
-    defaultSize: "medium",
+    defaultSize: "small",
     supportedSizes: ALL_SIZES,
     fields: [],
     unavailable: true,
@@ -304,7 +299,6 @@ export function applyDashboardLayoutPreset(
     order: preset.order,
     hiddenWidgetIds: preset.hiddenWidgetIds,
     widgets,
-    dismissedExtraLargeRecommendation: false,
     defaultsRevision: DASHBOARD_DEFAULTS_REVISION,
     updatedAt,
   })!;
@@ -337,32 +331,13 @@ export function upgradeDashboardLayout(layout: DashboardLayoutPreferences): Dash
   return { ...layout, order, hiddenWidgetIds: [...hidden], widgets, defaultsRevision: DASHBOARD_DEFAULTS_REVISION };
 }
 
-export function countExtraLargeWidgets(value: unknown): number {
-  const layout = normalizeDashboardLayoutPreferences(value);
-  if (!layout) return 0;
-  const hidden = new Set(layout.hiddenWidgetIds);
-  return layout.order.filter((id) => !hidden.has(id) && layout.widgets[id]?.size === "extra-large").length;
-}
-
-export function extraLargeWidgetRecommendation(value: unknown, limit = RECOMMENDED_EXTRA_LARGE_WIDGET_LIMIT) {
-  const layout = normalizeDashboardLayoutPreferences(value);
-  const count = countExtraLargeWidgets(layout);
-  const safeLimit = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : RECOMMENDED_EXTRA_LARGE_WIDGET_LIMIT;
-  return {
-    count,
-    limit: safeLimit,
-    exceedsRecommendation: count > safeLimit,
-    dismissed: layout?.dismissedExtraLargeRecommendation === true,
-    shouldShow: count > safeLimit && layout?.dismissedExtraLargeRecommendation !== true,
-  };
-}
-
 function normalizeWidgetPreferences(id: string, value: unknown): DashboardWidgetPreferences {
   const record = isRecord(value) ? value : {};
   const preserved = sanitizeRecord(record);
   const item = dashboardWidgetCatalogItem(id);
-  const size = isDashboardWidgetSize(record.size) && item.supportedSizes.includes(record.size)
-    ? record.size
+  const savedSize = normalizeDashboardWidgetSize(record.size);
+  const size = savedSize && item.supportedSizes.includes(savedSize)
+    ? savedSize
     : item.defaultSize;
   const enabledFields = Array.isArray(record.enabledFields)
     ? normalizeStringList(record.enabledFields, 100)
@@ -416,8 +391,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isDashboardWidgetSize(value: unknown): value is DashboardWidgetSize {
-  return value === "small" || value === "medium" || value === "large" || value === "extra-large";
+function normalizeDashboardWidgetSize(value: unknown): DashboardWidgetSize | undefined {
+  if (value === "small" || value === "medium") return "small";
+  if (value === "large" || value === "extra-large") return "large";
+  return undefined;
 }
 
 function isDashboardLayoutPreset(value: unknown): value is DashboardLayoutPresetId {
