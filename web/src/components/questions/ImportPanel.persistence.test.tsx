@@ -302,13 +302,18 @@ describe("Import Center persistence invariant", () => {
     const user = userEvent.setup();
     const rawText = "1. Pasted retry-safe question?\nA. Alpha\nB. Beta\nAnswer: B\nExplanation: Stable rationale.";
 
-    const finalizePaste = async () => {
+    const finalizePaste = async (repeat = false) => {
       const view = render(<ImportPanel initialTab="paste" />);
       await user.type(screen.getByLabelText("Structured question text"), rawText);
       await user.click(screen.getByRole("button", { name: "Parse and review" }));
       const title = screen.getByLabelText("Set title");
       await user.clear(title);
       await user.type(title, "Retry-safe paste");
+      if (repeat) {
+        expect(screen.getByText(/1 exact question is already in your bank and left out/)).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Finalize import" })).toHaveProperty("disabled", true);
+        return view;
+      }
       await user.click(screen.getByRole("button", { name: "Finalize import" }));
       await waitFor(() => expect(screen.queryByRole("button", { name: "Finalize import" })).toBeNull());
       return view;
@@ -316,7 +321,7 @@ describe("Import Center persistence invariant", () => {
 
     const first = await finalizePaste();
     first.unmount();
-    await finalizePaste();
+    await finalizePaste(true);
 
     const state = useStore.getState();
     expect(state.questions.filter((question) => question.bank === "Retry-safe paste")).toHaveLength(1);
@@ -332,9 +337,14 @@ describe("Import Center persistence invariant", () => {
       fileName: "questions-only.txt", fileType: "text", checksum: "questions-only-checksum",
     };
 
-    const finalizeQuestionsOnly = async () => {
+    const finalizeQuestionsOnly = async (repeat = false) => {
       const view = render(<ImportPanel seed={seed} />);
       await user.click(screen.getByRole("button", { name: "Questions" }));
+      if (repeat) {
+        expect(screen.getByText(/1 exact question is already in your bank and left out/)).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Finalize import" })).toHaveProperty("disabled", true);
+        return view;
+      }
       await user.click(screen.getByRole("button", { name: "Finalize import" }));
       await waitFor(() => expect(screen.queryByRole("button", { name: "Finalize import" })).toBeNull());
       return view;
@@ -342,7 +352,7 @@ describe("Import Center persistence invariant", () => {
 
     const first = await finalizeQuestionsOnly();
     first.unmount();
-    await finalizeQuestionsOnly();
+    await finalizeQuestionsOnly(true);
 
     const state = useStore.getState();
     expect(state.questions.filter((question) => question.bank === "Retry-safe questions only")).toHaveLength(1);

@@ -83,7 +83,7 @@ export function officialSguClinicalCourseEvidence(
         moduleMapping: matches.length === 1 ? "exact" as const : "review-required" as const,
       };
     });
-    if (cumulative !== definition.totalWeeks) throw new Error("SGU catalog outline durations do not conserve the published total.");
+    if (cumulative !== definition.totalWeeks) throw new Error("Published catalog outline durations do not conserve the reviewed total.");
     const codeMatches = appOutlineCourseCodes.length === 1
       && courseKey(appOutlineCourseCodes[0]) === courseKey(definition.officialCourseCode);
     return {

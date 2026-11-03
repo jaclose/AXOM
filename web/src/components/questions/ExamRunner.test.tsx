@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { QuestionSet } from "../../lib/library";
@@ -127,6 +127,18 @@ function committedAttempts(): Array<{ questionId: string; attempt: Omit<Question
 }
 
 describe("ExamRunner saved blocks and selection semantics", () => {
+  it("keeps an exact downloaded community revision visibly Unreviewed during practice", () => {
+    setStore();
+    mocked.store.documents = [{ id: "community-22222222-2222-4222-8222-222222222222",
+      fileType: "axom-community-reference", title: "Community review status", fileName: "community-reference.json",
+      uploadedAt: "2026-11-01T12:00:00Z", sizeBytes: 1, tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+      rawText: JSON.stringify({ version: 1, accountId: "owner-1", revisionId: "22222222-2222-4222-8222-222222222222",
+        questionIds: [question.id], pending: false }) }];
+    render(<ExamRunner mode="tutor" accountId="owner-1" retakeIds={[question.id]} onClose={() => {}} />);
+    expect(screen.getByText("Unreviewed community material.")).toBeTruthy();
+    expect(screen.getByText(/1 question included in this practice/)).toBeTruthy();
+  });
+
   it("restores an active question, picked answer, and position after refresh", () => {
     setStore();
     localStorage.setItem(STORAGE_KEYS.quizActiveSession, JSON.stringify({
@@ -155,7 +167,7 @@ describe("ExamRunner saved blocks and selection semantics", () => {
     expect(screen.getByRole("button", { name: /Exam \(feedback at the end\)/i }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("region", { name: "Practice source" }).textContent).toContain("Saved set");
     expect(screen.getByRole("button", { name: "10" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByLabelText("Question pool")).toHaveProperty("value", "all");
+    expect(screen.getByRole("radio", { name: "All · 1" }).getAttribute("aria-checked")).toBe("true");
     expect(mocked.saveQuizBlock).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: /Start exam block/i }));
@@ -166,6 +178,40 @@ describe("ExamRunner saved blocks and selection semantics", () => {
     expect(updated.timed).toBe(true);
     expect(Number.isNaN(Date.parse(updated.lastRunAt ?? ""))).toBe(false);
     expect(screen.getByText(question.stem)).toBeTruthy();
+  });
+
+  it("shows eligible pool counts and saves every picked subject", async () => {
+    const attempt: QuestionAttempt = { at: "2026-07-11T00:00:00.000Z", answerKey: "A", status: "incorrect" };
+    setStore();
+    mocked.store.questions = [
+      { ...question, id: "cardio-new", category: "Pathology", system: "Cardiovascular" },
+      { ...question, id: "cardio-missed", category: "Pharmacology", system: "Cardiovascular", status: "incorrect", attempts: [attempt] },
+      { ...question, id: "renal-marked", category: "Pathology", system: "Renal", marked: true, attempts: [attempt] },
+    ];
+    vi.stubGlobal("prompt", vi.fn(() => "Renal and pharmacology"));
+    const user = userEvent.setup();
+    render(<ExamRunner mode="tutor" onClose={() => {}} />);
+
+    expect(screen.getByRole("radio", { name: "All · 3" }).getAttribute("aria-checked")).toBe("true");
+    for (const name of ["Unused · 1", "Incorrect · 1", "Marked · 1"]) expect(screen.getByRole("radio", { name })).toBeTruthy();
+    screen.getByRole("radio", { name: "All · 3" }).focus();
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("radio", { name: "Unused · 1" }).getAttribute("aria-checked")).toBe("true");
+    await user.keyboard("{Home}");
+    expect(screen.getByRole("radio", { name: "All · 3" }).getAttribute("aria-checked")).toBe("true");
+    const subjects = screen.getByRole("group", { name: "Subjects and systems" });
+    expect(within(subjects).getAllByRole("button").map((button) => button.textContent))
+      .toEqual(["Cardiovascular · 2", "Pathology · 2", "Pharmacology · 1", "Renal · 1"]);
+
+    await user.click(within(subjects).getByRole("button", { name: "Renal · 1" }));
+    await user.click(within(subjects).getByRole("button", { name: "Pharmacology · 1" }));
+    expect(screen.getByRole("radio", { name: "All · 2" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: "Unused · 0" })).toHaveProperty("disabled", true);
+    await user.click(screen.getByRole("button", { name: "All 2" }));
+    await user.click(screen.getByRole("button", { name: "Save as block" }));
+
+    expect((mocked.saveQuizBlock.mock.calls.at(-1)?.[0] as QuizBlock).filters)
+      .toMatchObject({ count: 2, status: "all", categories: ["Renal", "Pharmacology"] });
   });
 
   it("launches a snapshot set from explicit IDs in stored order without backlinks", async () => {
@@ -511,6 +557,86 @@ describe("ExamRunner saved blocks and selection semantics", () => {
     await user.click(screen.getByLabelText("Highlighted text: option"));
     expect(screen.queryByLabelText("Highlighted text: option")).toBeNull();
     expect(screen.getByLabelText("Highlighted text: correct")).toBeTruthy();
+  });
+
+  it("highlights and erases legacy answer text without choosing the answer", async () => {
+    setStore();
+    const user = userEvent.setup();
+    render(<ExamRunner mode="tutor" retakeIds={[question.id]} onClose={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Highlight tools" }));
+    await user.click(screen.getByRole("button", { name: "Yellow persistent highlight" }));
+    const answer = screen.getByRole("button", { name: "A. Alpha" });
+    fireEvent.pointerDown(answer);
+    selectText(screen.getByLabelText("Choice A text"), 0, 5);
+    fireEvent.pointerUp(answer);
+    fireEvent.click(answer, { detail: 1 });
+
+    expect(screen.getByLabelText("Highlighted text: Alpha")).toBeTruthy();
+    expect(answer.getAttribute("aria-pressed")).toBe("false");
+    expect(mocked.updateQuestion).toHaveBeenCalledWith(question.id, {
+      annotations: [expect.objectContaining({ target: "option", optionKey: "A", exactText: "Alpha" })],
+    });
+
+    await user.click(screen.getByRole("button", { name: "Erase highlights" }));
+    await user.click(screen.getByLabelText("Highlighted text: Alpha"));
+    expect(screen.queryByLabelText("Highlighted text: Alpha")).toBeNull();
+    expect(answer.getAttribute("aria-pressed")).toBe("false");
+
+    await user.click(answer);
+    expect(answer.getAttribute("aria-pressed")).toBe("true");
+    await user.click(screen.getByRole("button", { name: "B. Beta" }));
+    answer.focus();
+    await user.keyboard("{Enter}");
+    expect(answer.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("keeps a source-rich answer highlight through navigation and reload", async () => {
+    const rich: QuestionRecord = {
+      ...question,
+      content: {
+        id: question.id,
+        source: { filename: "reviewed.pdf", questionNumber: 1 },
+        stem: [{ type: "text", text: question.stem }],
+        choices: [
+          { id: "a", label: "A", blocks: [{ type: "rich_text", html: "<b>Alpha</b>" }] },
+          { id: "b", label: "B", blocks: [{ type: "text", text: "Beta" }] },
+        ],
+        correctAnswer: { labels: ["B"], evidence: "printed-key" },
+        assets: [],
+        provenance: { method: "pdf-import" },
+      },
+    };
+    const second = { ...question, id: "question-2", stem: "Which second option is correct?" };
+    setStore();
+    mocked.store = { ...mocked.store, questions: [rich, second] };
+    mocked.updateQuestion.mockImplementation((id, patch) => {
+      if (id === rich.id) Object.assign(rich, patch);
+    });
+    const user = userEvent.setup();
+    const view = render(<ExamRunner mode="tutor" retakeIds={[rich.id, second.id]} onClose={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Highlight tools" }));
+    await user.click(screen.getByRole("button", { name: "Cyan persistent highlight" }));
+    const answer = screen.getByRole("button", { name: "A. Alpha" });
+    const richText = answer.querySelector<HTMLElement>(".qcontent-blocks");
+    expect(richText).toBeTruthy();
+    fireEvent.pointerDown(answer);
+    selectText(richText!, 0, 5);
+    fireEvent.pointerUp(answer);
+    fireEvent.click(answer, { detail: 1 });
+    expect(answer.getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByLabelText("Highlighted text: Alpha").classList.contains("tone-cyan")).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "B. Beta" }));
+    await user.click(screen.getByRole("button", { name: "Check answer" }));
+    await user.click(screen.getByRole("button", { name: "Next question" }));
+    await user.click(screen.getByRole("button", { name: "Previous" }));
+    expect(screen.getAllByLabelText("Highlighted text: Alpha")).toHaveLength(1);
+
+    view.unmount();
+    render(<ExamRunner mode="tutor" retakeIds={[rich.id, second.id]} onClose={() => {}} />);
+    expect(screen.getAllByLabelText("Highlighted text: Alpha")).toHaveLength(1);
   });
 
   it("confirms clear-all, clears annotation mode with Escape, and restores tool focus", async () => {

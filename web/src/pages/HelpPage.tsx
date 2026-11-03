@@ -15,6 +15,7 @@ import { SCHEMA_VERSION } from "../lib/seed";
 import { ICON_SIZE } from "../lib/iconSize";
 import { COACH_RESET_EVENT, readCoachLedger, resetPageHints, writeCoachLedger } from "../lib/coach";
 import { pushToast } from "../lib/toast";
+import { APP_VERSION_LABEL } from "../lib/brand";
 
 const FEEDBACK_EMAIL = "jafardabbagh@gmail.com";
 
@@ -65,7 +66,7 @@ const FEATURE_GUIDES: GuideEntry[] = [
     name: "Appearance & accent palettes",
     status: "Ready to test",
     lives: "Settings → Appearance (or the sun/moon button next to your name)",
-    start: "Pick Light, Dark, or System, then an accent palette — Gold & graphite, Gold & white, Purple & black, Blue & silver, Navy & gold, Emerald, Rosé, Platinum — or any custom color.",
+    start: "Choose Light, Dark, or System. AXOM Classic pairs navy and gold. Midnight is near-black; AXOM Legacy keeps the original graphite look. More palettes and a custom color are available.",
     prerequisite: "None. Appearance is saved per device, so your laptop and phone can differ.",
     route: "dashboard",
     preview: "Every palette has a tuned light and dark version and keeps text contrast readable. Reduce motion calms lusters and transitions even if your device allows motion.",
@@ -345,7 +346,6 @@ function statusClass(status: GuideStatus): string {
 }
 
 export function FeedbackForm() {
-  const s = useStore();
   const [type, setType] = useState<FeedbackKind>("Bug");
   const [area, setArea] = useState("Dashboard");
   const [message, setMessage] = useState("");
@@ -356,7 +356,7 @@ export function FeedbackForm() {
     message,
     area,
     contact,
-    appVersion: s.profile.versionLabel,
+    appVersion: APP_VERSION_LABEL,
     schemaVersion: SCHEMA_VERSION,
     route: typeof location === "undefined" ? "help" : location.hash,
     userAgent: typeof navigator === "undefined" ? "" : navigator.userAgent,

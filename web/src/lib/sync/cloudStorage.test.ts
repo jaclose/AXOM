@@ -45,6 +45,20 @@ beforeEach(() => {
 afterEach(() => { dispose?.(); dispose = undefined; vi.unstubAllGlobals(); });
 
 describe("private cloud content and media", () => {
+  it("keeps an Unreviewed community marker beside a deferred account download", async () => {
+    const original = fixture();
+    const revisionId = "22222222-2222-4222-8222-222222222222";
+    original.documents.push({ id: `community-${revisionId}`, title: "Community review status",
+      fileName: "community-reference.json", fileType: "axom-community-reference",
+      uploadedAt: "2026-11-01T12:00:00Z", sizeBytes: 1,
+      rawText: JSON.stringify({ version: 1, accountId: "account-a", revisionId,
+        questionIds: ["q1"], pending: false }), tags: [], linkedQuestionSetIds: [], libraryOnly: true });
+    const split = await splitCloudContent(original);
+    const deferred = deferContent(split.workspace, "account-a", split.references, []);
+    expect(deferred.documents.find(document => document.id === `community-${revisionId}`)?.rawText).toBe(original.documents[1].rawText);
+    expect(deferred.deferredContent?.documents.map(document => document.id)).toEqual(["source1"]);
+  });
+
   it("opens a verified metadata checkpoint without source I/O, then downloads one selected question with its learner state", async () => {
     const original = fixture();
     const envelope = await prepareCloudSnapshot(await snapshotWorkspace(original, { accountUserId: "account-a", deviceId: "d", baseRevision: 0, reason: "manual" }));
@@ -170,6 +184,19 @@ describe("private cloud content and media", () => {
     dispose(); dispose = undefined;
     expect(await (await getQuestionAttachmentBlob(restoredKey))!.blob.arrayBuffer()).toEqual(await blob.arrayBuffer());
     expect(download).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports an absent question image as a local protection blocker", async () => {
+    const state = fixture();
+    const key = `missing-${crypto.randomUUID()}`;
+    state.questions[0].attachments = [{
+      id: key, blobKey: key, fileName: "figure.png", mimeType: "image/png", byteSize: 7,
+      altText: "Figure", createdAt: state.questions[0].createdAt, updatedAt: state.questions[0].updatedAt,
+    }];
+    await expect(uploadCloudMedia(client, "account-a", state, guard)).rejects.toMatchObject({
+      failure: { kind: "rejected", rejection: "missing-image", status: 0 },
+    });
+    expect(upload).not.toHaveBeenCalled();
   });
 
   it("reconstructs one checksum-addressed object for two question-local references on a fresh device", async () => {

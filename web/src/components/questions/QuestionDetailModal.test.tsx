@@ -57,6 +57,19 @@ afterEach(() => {
 });
 
 describe("QuestionDetailModal repair cards", () => {
+  it("reveals a related diagram only after checking a keyed question", async () => {
+    const user = userEvent.setup();
+    render(<QuestionDetailModal question={{
+      ...question,
+      stem: "A patient has runny nose and sneezing.",
+      options: [{ key: "A", text: "Rhinovirus" }, { key: "B", text: "Influenza virus" }],
+      correctKey: "A", correctAnswerText: "Rhinovirus",
+    }} onClose={() => {}} />);
+    expect(screen.queryByRole("complementary", { name: "Related AXOM diagram" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "BInfluenza virus" }));
+    await user.click(screen.getByRole("button", { name: "Check answer" }));
+    expect(screen.getByRole("complementary", { name: "Related AXOM diagram" })).toBeTruthy();
+  });
   it("preserves a manually edited answer-line-shaped explanation verbatim", async () => {
     const user = userEvent.setup();
     render(<QuestionDetailModal question={question} onClose={() => {}} />);
@@ -103,6 +116,7 @@ describe("QuestionDetailModal repair cards", () => {
         reviewed: true,
         reviewedAt: expect.any(String),
         answerDetectionConfidence: 1,
+        parserRuleIds: expect.arrayContaining(["import.user-reviewed"]),
       }),
     });
     const patch = mocked.updateQuestion.mock.calls[0][1];

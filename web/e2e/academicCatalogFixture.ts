@@ -48,6 +48,8 @@ export async function academicCatalogFixture(page: Page) {
     if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers });
     requests.push(path);
     const json = (value: unknown, status = 200) => route.fulfill({ status, headers, json: value });
+    // The catalog learner has no operator privileges in the shared app shell.
+    if (request.method() === "POST" && path === "/rest/v1/rpc/axom_operator_role") return json(null);
     // Onboarding briefly mounts the dashboard's account notification inbox.
     if (request.method() === "POST" && path === "/functions/v1/communications" && url.searchParams.get("action") === "settings") return json({
       preferences: [], identity: { accent: "cyan", theme: "dark" }, history: [], privacy: [],

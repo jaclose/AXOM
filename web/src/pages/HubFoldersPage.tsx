@@ -10,6 +10,7 @@ import { Icon, ICON_NAMES } from "../lib/icons";
 import type { HubFolder } from "../lib/types";
 import { ICON_SIZE } from "../lib/iconSize";
 import { isTauriShell as isDesktopShell } from "../lib/desktopShell";
+import { externalLinkHref } from "../lib/resourceUtils";
 
 const FOLDER_COLORS: Array<{ label: string; value: string }> = [
   { label: "Cool", value: "var(--cyan)" },
@@ -45,7 +46,7 @@ export function HubFoldersPage() {
   const groups = useMemo(() => [...new Set(activeFolders.map((folder) => folder.group ?? "Ungrouped"))].sort(), [activeFolders]);
   const visible = filterFolders(activeFolders, query, group, favoritesOnly);
   const favorites = visible.filter((folder) => folder.favorite);
-  const recent = [...activeFolders].filter((folder) => folder.lastOpenedAt).sort((a, b) => (b.lastOpenedAt ?? "").localeCompare(a.lastOpenedAt ?? "")).slice(0, 4);
+  const recent = [...activeFolders].filter((folder) => folder.lastOpenedAt && (externalLinkHref(folder.link) || folder.localPath)).sort((a, b) => (b.lastOpenedAt ?? "").localeCompare(a.lastOpenedAt ?? "")).slice(0, 4);
   const sections = useMemo(() => {
     const rest = visible.filter((folder) => !folder.favorite);
     const map = new Map<string, HubFolder[]>();
@@ -87,7 +88,7 @@ export function HubFoldersPage() {
   }
 
   function renderFolder(folder: HubFolder, index: number, list: HubFolder[]) {
-    const linkTarget = folder.link || (folder.localPath && isDesktopShell() ? fileUrl(folder.localPath) : "");
+    const linkTarget = externalLinkHref(folder.link) || (folder.localPath && isDesktopShell() ? fileUrl(folder.localPath) : "");
     return (
       <GlassCard pad hoverable key={folder.id} className={`folder-card folder-card--${view}`} style={{ "--folder-color": folder.color || "var(--cyan)" } as React.CSSProperties}>
         <div className="folder-card-top">
@@ -159,7 +160,11 @@ export function HubFoldersPage() {
           <div className="folders-recent">
             <span><Clock3 size={ICON_SIZE.microInline} aria-hidden="true" /> Recently used</span>
             {recent.map((folder) => (
-              <button type="button" key={folder.id} onClick={() => folder.link ? (markOpened(folder), window.open(folder.link, "_blank", "noopener")) : void copyPath(folder)}>
+              <button type="button" key={folder.id} onClick={() => {
+                const href = externalLinkHref(folder.link);
+                if (href) { markOpened(folder); window.open(href, "_blank", "noopener"); }
+                else if (folder.localPath) void copyPath(folder);
+              }}>
                 <Icon name={folder.icon} size={ICON_SIZE.microInline} /> {folder.name}
               </button>
             ))}

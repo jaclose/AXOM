@@ -1,14 +1,19 @@
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Bell, CheckCheck, CircleAlert, LoaderCircle, Mail, RefreshCw, X } from "lucide-react";
+import { Bell, BookText, CheckCheck, CircleAlert, LoaderCircle, Mail, MessageSquareText, RefreshCw, X } from "lucide-react";
 import { useAccount } from "../../lib/account/accountStore";
 import { useCommunications, type CommunicationsSettings } from "../../lib/communications/client";
 import { CATEGORIES, TEMPLATE_CATEGORY } from "../../lib/communications/model";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { normalizeJournalNotebookPreferences } from "../../lib/journalNotebook";
+import { localNoticeCopy, localNoticeJournalDay, readLocalNotices, recordLocalNotice, subscribeLocalNotices, type LocalNotice } from "../../lib/notificationInbox";
+import { gotoJournalDay } from "../../lib/uiStore";
+import { useStore } from "../../lib/store";
 import { GButton, GhostButton } from "../ui/primitives";
 import "../../styles/dashboard-inbox.css";
 
 type CommunicationRecord = CommunicationsSettings["history"][number];
 const READ_KEY = "axom.communicationReads.v1";
+const LOCAL_READ_KEY = "axom.notificationReads.v1";
 const VISIBLE_STATUSES = new Set(["sent", "delivered", "failed", "bounced", "complained", "suppressed"]);
 const ATTENTION_TYPES = new Set([
   "security",
@@ -36,6 +41,18 @@ function writeIds(userId: string, ids: Set<string>) {
   } catch {
     // Read markers are optional device courtesy state, never account data.
   }
+}
+
+function readLocalIds(): Set<string> {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(LOCAL_READ_KEY) ?? "[]");
+    return new Set(Array.isArray(value) ? value.filter((id): id is string => typeof id === "string").slice(-100) : []);
+  } catch { return new Set(); }
+}
+
+function writeLocalIds(ids: Set<string>) {
+  try { localStorage.setItem(LOCAL_READ_KEY, JSON.stringify([...ids].slice(-100))); }
+  catch { /* Device-only read markers are optional. */ }
 }
 
 function readToken(item: CommunicationRecord): string {
@@ -95,10 +112,15 @@ function relativeTime(value: string): string {
 
 export function DashboardNotificationCenter() {
   const userId = useAccount((state) => state.user?.id ?? "");
+  const journal = useStore((state) => state.journal);
+  const notebook = useStore((state) => state.profile.journalNotebook);
+  const updateProfile = useStore((state) => state.updateProfile);
   const remote = useCommunications();
   const [open, setOpen] = useState(false);
   const [mobilePanelTop, setMobilePanelTop] = useState(0);
   const [read, setRead] = useState<Set<string>>(() => userId ? readIds(userId) : new Set());
+  const [localNotices, setLocalNotices] = useState<LocalNotice[]>(readLocalNotices);
+  const [localRead, setLocalRead] = useState<Set<string>>(readLocalIds);
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLElement>(null);
@@ -108,8 +130,24 @@ export function DashboardNotificationCenter() {
     [remote.data?.history],
   );
   const history = prioritizeHistory(outcomes, read);
+  const visibleLocalNotices = localNotices.filter((item) => item.kind !== "journal-catch-up" || !localRead.has(item.id));
   const unread = outcomes.filter((item) => !read.has(readToken(item))).length;
   const attentionUnread = outcomes.filter((item) => needsAttention(item) && !read.has(readToken(item))).length;
+  const localUnread = localNotices.filter((item) => !localRead.has(item.id)).length;
+  const badgeCount = attentionUnread + localUnread;
+
+  useEffect(() => subscribeLocalNotices(() => {
+    setLocalNotices(readLocalNotices());
+    setLocalRead(readLocalIds());
+  }), []);
+
+  useEffect(() => {
+    if (!journal.some((entry) => entry.notebookStatus === "complete")) return;
+    const preferences = normalizeJournalNotebookPreferences(notebook);
+    if (preferences.feedbackPrompted) return;
+    recordLocalNotice("journal-feedback:first-page", "journal-feedback");
+    updateProfile({ journalNotebook: { ...preferences, feedbackPrompted: true } });
+  }, [journal, notebook, updateProfile]);
 
   useEffect(() => {
     setRead(userId ? readIds(userId) : new Set());
@@ -161,21 +199,28 @@ export function DashboardNotificationCenter() {
     setRead(next);
   }
 
+  function markLocalRead(items: LocalNotice[]) {
+    const next = new Set(localRead);
+    items.forEach((item) => next.add(item.id));
+    writeLocalIds(next);
+    setLocalRead(next);
+  }
+
   return (
     <div className="dashboard-notifications" ref={rootRef}>
       <button
         ref={buttonRef}
         type="button"
         className="ghost-btn icon-only dashboard-notifications__trigger"
-        aria-label={attentionUnread ? `Notifications, ${attentionUnread} ${attentionUnread === 1 ? "item needs" : "items need"} attention` : "Notifications"}
+        aria-label={badgeCount ? `Notifications, ${badgeCount} ${badgeCount === 1 ? "item needs" : "items need"} attention` : "Notifications"}
         title="Notifications"
         aria-expanded={open}
         aria-controls={panelId}
         aria-haspopup="dialog"
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => { setLocalNotices(readLocalNotices()); setOpen((value) => !value); }}
       >
         <Bell size={ICON_SIZE.emphasis} aria-hidden="true" />
-        {attentionUnread > 0 && <span className="dashboard-notifications__badge" aria-hidden="true">{attentionUnread > 9 ? "9+" : attentionUnread}</span>}
+        {badgeCount > 0 && <span className="dashboard-notifications__badge" aria-hidden="true">{badgeCount > 9 ? "9+" : badgeCount}</span>}
       </button>
       {open && (
         <section
@@ -190,27 +235,51 @@ export function DashboardNotificationCenter() {
           <header>
             <div><span>Inbox</span><h2>Notifications</h2></div>
             <div className="dashboard-notifications__header-actions">
-              {unread > 0 && <GhostButton onClick={() => markRead(outcomes)}><CheckCheck size={ICON_SIZE.body} aria-hidden="true" /> Mark all read</GhostButton>}
+              {unread + localUnread > 0 && <GhostButton onClick={() => { markRead(outcomes); markLocalRead(localNotices); }}><CheckCheck size={ICON_SIZE.body} aria-hidden="true" /> Mark all read</GhostButton>}
               <GhostButton className="dashboard-notifications__close" aria-label="Close notifications" onClick={() => { setOpen(false); buttonRef.current?.focus(); }}>
                 <X size={ICON_SIZE.body} aria-hidden="true" />
               </GhostButton>
             </div>
           </header>
           <div className="dashboard-notifications__body" aria-live="polite">
+            {visibleLocalNotices.length > 0 && <div className="dashboard-notifications__group-label">On this device</div>}
+            {visibleLocalNotices.length > 0 && <ul className="dashboard-notifications__list dashboard-notifications__list--local" aria-label="Learning and journal prompts">
+              {visibleLocalNotices.map((item) => {
+                const copy = localNoticeCopy(item.kind, item.id);
+                const unreadItem = !localRead.has(item.id);
+                const Icon = item.kind === "journal-feedback" ? MessageSquareText : BookText;
+                return <li key={item.id} data-kind={item.kind} className={unreadItem ? "is-unread" : ""}>
+                  <a href={copy.href} onClick={(event) => {
+                    markLocalRead([item]);
+                    const targetDay = localNoticeJournalDay(item);
+                    if (targetDay) {
+                      event.preventDefault();
+                      gotoJournalDay(targetDay);
+                      setOpen(false);
+                    }
+                  }}>
+                    <span aria-hidden="true"><Icon size={ICON_SIZE.body} /></span>
+                    <span><b>{copy.title}</b><small>{copy.body} · {relativeTime(item.createdAt)}</small>{unreadItem && <span className="sr-only"> Unread.</span>}</span>
+                    {unreadItem && <i aria-hidden="true" />}
+                  </a>
+                  {item.kind === "journal-catch-up" && <button type="button" className="dashboard-notifications__dismiss" aria-label="Dismiss yesterday reminder" onClick={() => markLocalRead([item])}>Dismiss</button>}
+                </li>;
+              })}
+            </ul>}
             {remote.loading && (
               <div className="dashboard-notifications__state" role="status"><LoaderCircle className="is-spinning" size={ICON_SIZE.display} aria-hidden="true" /><b>Checking your inbox</b><span>This will only take a moment.</span></div>
             )}
             {!remote.loading && !userId && (
-              <div className="dashboard-notifications__state"><Bell size={ICON_SIZE.display} aria-hidden="true" /><b>Sign in for account notices</b><span>Device reminders still work without an account.</span></div>
+              <div className="dashboard-notifications__state"><Bell size={ICON_SIZE.display} aria-hidden="true" /><b>Sign in for account notices</b><span>Your journal prompts stay on this device.</span></div>
             )}
             {!remote.loading && userId && remote.error && (
               <div className="dashboard-notifications__state"><CircleAlert size={ICON_SIZE.display} aria-hidden="true" /><b>Inbox unavailable</b><span>{remote.error}</span><GButton size="sm" onClick={() => void remote.reload()}><RefreshCw size={ICON_SIZE.body} aria-hidden="true" /> Try again</GButton></div>
             )}
-            {!remote.loading && userId && !remote.error && !history.length && (
+            {!remote.loading && userId && !remote.error && !history.length && !visibleLocalNotices.length && (
               <div className="dashboard-notifications__state"><Bell size={ICON_SIZE.display} aria-hidden="true" /><b>Nothing needs your attention</b><span>Important account and learning communications will appear here.</span></div>
             )}
             {!remote.loading && userId && !remote.error && history.length > 0 && (
-              <ul className="dashboard-notifications__list">
+              <><div className="dashboard-notifications__group-label">Account email</div><ul className="dashboard-notifications__list">
                 {history.map((item) => {
                   const unreadItem = !read.has(readToken(item));
                   const attentionItem = needsAttention(item);
@@ -224,10 +293,10 @@ export function DashboardNotificationCenter() {
                     </li>
                   );
                 })}
-              </ul>
+              </ul></>
             )}
           </div>
-          <footer><a href="#communications" onClick={() => markRead(outcomes)}>Open communications <span aria-hidden="true">→</span></a></footer>
+          <footer><a href="#communications" onClick={() => markRead(outcomes)}>Email preferences and history <span aria-hidden="true">→</span></a></footer>
         </section>
       )}
     </div>

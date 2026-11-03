@@ -1,8 +1,8 @@
 # Journal Notebook Architecture
 
-The Wave 5.5D working checkpoint implements the **Journal Foundation**. It
-deliberately does not implement the later **Journal Cinematic** layer; independent
-acceptance is still pending.
+Wave 5.5D established the **Journal Foundation**. The current Ideas working
+branch adds a local, reviewable cinematic desk and focused writing surface.
+This is a branch implementation, not hosted release or final visual acceptance.
 
 ## Product boundary
 
@@ -16,16 +16,83 @@ Foundation owns the dependable writing experience:
 - previous/next page navigation and lightweight CSS page transitions;
 - local export, autosave, keyboard navigation, and reduced motion.
 
-Cinematic remains a separate, later review surface:
+Cinematic is an additive review surface around that foundation:
 
-- a desk scene and notebook pickup;
-- physically animated covers or richer page physics;
-- spatial image placement;
-- optional sound or device haptics.
+- a customizable desk scene with weather and window light, a notebook pickup,
+  a real-time laptop timer, and verified recent study progress;
+- a full-page writing view with optional one-at-a-time prompts and a separately
+  opened day summary;
+- manual return to the desk, or a gentle return after about four seconds only
+  if the newly opened page has not been interacted with;
+- a completion transition that returns the closed page to the desk.
 
-Foundation uses ordinary semantic HTML and CSS transforms. It adds no WebGL,
-canvas renderer, physics package, audio, or network service. A later cinematic
-shell must wrap—never replace—the semantic form and persistence layer.
+The full-page camera remains over the walnut tabletop. Writing takes the
+left portion of a 1320 px frame; a narrow desk margin on the right holds a
+small live laptop and engraved ambience controls. When Support is open, that
+margin becomes a contained support card beside the writing page, with its
+links and Keep writing/Leave journal actions intact. On narrow screens the
+same card becomes a dismissible side drawer so the writing page keeps its
+usable width. The day summary remains separately opened.
+
+Put down on desk changes the visible mode immediately, preserves the draft,
+and returns keyboard focus to the desk page or its editor. A 760 ms transform
+then settles the inline book onto the desk; pointer and writing activity
+cannot cancel that committed return. Reduced motion switches modes without
+the landing transform. The automatic untouched-page return uses the same
+path. It pauses while Support is open or the writer is interacting. Returning
+from the camera view does not leave the editor or bypass any later durable
+write gate on page navigation or closing the journal.
+
+The journal uses ordinary semantic HTML and CSS transforms, without a WebGL,
+canvas, or physics dependency. The desk is a shell around the same form and
+persistence layer. Soundscapes use their existing separate audio lifecycle;
+journal writing does not start audio or haptics by itself.
+
+The walnut desk plate at `web/public/assets/journal/walnut-desk.webp` is an
+original 1672 × 941 generated image, compressed to WebP. Its production prompt
+specified a top-down matte dark walnut tabletop, subtle natural grain, warm
+upper-left window light and a long diagonal shadow, a clear right half, and no
+objects, text, or logos. The laptop's Apple silhouette is sourced from the
+[Simple Icons Apple entry](https://simpleicons.org/?q=apple); it is used only
+on the depicted computer.
+
+The four keepsake preview images in `web/public/assets/journal/previews/` are
+original hand-authored SVG illustrations of the actual cover, paper, laptop,
+and lamp variants. They are embedded only in the personalization cards; the
+adjacent live desk preview renders the user's staged selection. No third-party
+product photography is used. AirPods use a CSS silhouette; the red over-ear
+headphones use an original hand-authored SVG at
+`web/public/assets/journal/over-ear-headphones.svg`. The miniature MacBook
+reuses the same Apple mark as the full desk. No Beats logo is embedded.
+
+## Desk personalization and ambience
+
+The scene has five authored lighting presets: first light, late sun, cloud
+cover, rain, and night. They describe desk ambience, not live local weather.
+Automatic mode changes the displayed scene on an idle interval without writing
+to the profile on each change. It pauses while the document is hidden, while
+the user is writing or in full-page focus, or when reduced motion is requested.
+The desk also has manual next-scene and pause/resume controls. The saved
+preference records only the starting scene and whether automatic cycling is
+enabled.
+The weather name and controls sit on the scene as an engraved desk detail,
+without a floating weather pill. The miniature desk margin repeats the
+current ambience state and controls while the full page is open.
+
+Clicking empty desk around the open book puts it down. An explicit Put book
+down control does the same; editor and other interactive controls do not
+trigger it. If the desk page receives no writing or other interaction, it folds
+away after 4.4 seconds; closing takes 900 ms, with an immediate reduced-motion
+version. A dirty page passes through the same confirmed local write gate as
+other journal exits, so a failed write leaves the page open.
+
+The Personalize menu stages a scene before saving it, and previews each
+keepsake before unlock. AXOM Credits are the visible name for the existing
+earned currency. The balance selector includes completed study sessions and
+credited productivity days, subtracting saved keepsake ownership. A staged
+purchase is discarded on Cancel and charged only after Save; historical
+unlocks stay owned. New notebooks start with AirPods, while previously saved
+wired headphones remain selected.
 
 ## Data model and persistence
 

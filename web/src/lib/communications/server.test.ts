@@ -4,6 +4,7 @@ import { CommunicationsService, type EmailJob } from "./server/service";
 import { createCommunicationsHandler } from "./server/handler";
 import {
   cancelDeletion,
+  journalFeedbackForExport,
   processPrivacy,
   removeOwnedAcademicStorage,
   removeOwnedAccountStorage,
@@ -160,6 +161,29 @@ describe("communications server boundaries", () => {
       .rejects.toThrow("export-storage-index-invalid");
     expect(db.storage.from).not.toHaveBeenCalled();
   });
+  it("sends each saved topic choice in Resend's required object body", async () => {
+    const { db, calls } = database();
+    const service = new CommunicationsService(db, {
+      AXOM_EMAIL_MODE: "live", RESEND_API_KEY: "synthetic-test-key",
+      RESEND_TOPIC_IDS: JSON.stringify({ product_updates: "topic-product", marketing: "topic-marketing" }),
+    });
+    vi.spyOn(service, "preferenceRows").mockResolvedValue(preferences().map(preference => ({
+      ...preference, enabled: preference.category === "product_updates",
+    })));
+    vi.spyOn(service, "identity").mockResolvedValue({
+      accent: "#c8a96a", theme: "dark", locale: "en", contact_id: "contact-a", updated_at: "2026-11-02T00:00:00Z",
+    });
+    const request = vi.spyOn(service.provider, "request").mockResolvedValue({});
+
+    await service.syncTopics("account-a");
+
+    expect(request).toHaveBeenNthCalledWith(1, "/contacts/contact-a", "PATCH", { unsubscribed: false });
+    expect(request).toHaveBeenNthCalledWith(2, "/contacts/contact-a/topics", "PATCH", { topics: [
+      { id: "topic-product", subscription: "opt_in" },
+      { id: "topic-marketing", subscription: "opt_out" },
+    ] });
+    expect(calls).toContainEqual({ table: "communication_identity", method: "update", args: [{ topics_dirty: false, topics_error: null }] });
+  });
   it("rejects unknown personalization and non-HTTPS editorial links before saving", () => {
     expect(() => validateEditorial({ title: "{{secret}}", excerpt: "A note", url: "https://axom.info" })).toThrow("Unsupported template variable");
     expect(() => validateEditorial({ title: "A note", excerpt: "A note", url: "javascript:alert(1)" })).toThrow("HTTPS");
@@ -168,6 +192,72 @@ describe("communications server boundaries", () => {
 
 
 describe("deletion dependency safety", () => {
+  it("exports every page of only the owner's journal feedback", async () => {
+    const feedback = Array.from({ length: 501 }, (_, index) => ({
+      id: `feedback-${index}`, user_id: "account-a", rating: 4, liked: "Writing flow",
+      want_more: "", missing: "", pain_points: "", comment: "", created_at: "2026-11-01T00:00:00Z",
+    }));
+    const { db, calls } = database([
+      { data: feedback.slice(0, 500), error: null, count: 501 },
+      { data: feedback.slice(500), error: null, count: 501 },
+    ]);
+    const rows = await journalFeedbackForExport(new CommunicationsService(db, {}), "account-a");
+    expect(rows).toHaveLength(501);
+    expect(rows[0]).not.toHaveProperty("user_id");
+    expect(calls.filter(call => call.table === "journal_experience_feedback" && call.method === "eq"))
+      .toEqual(Array.from({ length: 2 }, () => ({ table: "journal_experience_feedback", method: "eq", args: ["user_id", "account-a"] })));
+    expect(calls.filter(call => call.table === "journal_experience_feedback" && call.method === "range").map(call => call.args))
+      .toEqual([[0, 499], [500, 999]]);
+  });
+
+  it.each(["42P01", "PGRST205"])("allows an account export before the optional feedback table exists (%s)", async code => {
+    const request = { id: "11111111-1111-4111-8111-111111111111", user_id: "account-a", kind: "export", status: "requested" };
+    const { db, calls, storage } = database([
+      ok(), ok(), ok([request]), ok({ id: request.id }),
+      ok([]), ok([]), ok([]),
+      { data: null, error: { code, message: 'journal_experience_feedback is not available' } },
+      ok(true), ok([]),
+    ]);
+    const service = new CommunicationsService(db, {});
+    vi.spyOn(service, "workspace").mockResolvedValue(null);
+    vi.spyOn(service, "user").mockResolvedValue({ id: "account-a", email: "alex@example.invalid", user_metadata: {} } as unknown as User);
+    vi.spyOn(service, "preferenceRows").mockResolvedValue(preferences());
+    vi.spyOn(service, "identity").mockResolvedValue({ accent: "#c8a96a", theme: "dark", locale: "en" });
+    vi.spyOn(service, "enqueue").mockResolvedValue();
+    storage.upload.mockResolvedValue({ data: { path: `account-a/${request.id}.json` }, error: null });
+
+    expect(await processPrivacy(service)).toBe(1);
+    expect(JSON.parse(String(storage.upload.mock.calls[0][1])).journalFeedback).toEqual([]);
+    expect(calls).not.toContainEqual({
+      table: "privacy_requests", method: "update",
+      args: [{ status: "failed", failure_code: "privacy-processing-failed" }],
+    });
+  });
+
+  it.each([
+    { code: "PGRST205", message: "another_table is not available" },
+    { code: "42501", message: "journal_experience_feedback permission denied" },
+  ])("does not hide unrelated feedback query failures ($code)", async error => {
+    const { db } = database([{ data: null, error }]);
+    await expect(journalFeedbackForExport(new CommunicationsService(db, {}), "account-a"))
+      .rejects.toThrow("journal-feedback-export-unavailable");
+  });
+
+  it("fails when the feedback table disappears after the first export page", async () => {
+    const { db } = database([
+      { data: Array.from({ length: 500 }, (_, index) => ({ id: `feedback-${index}`, user_id: "account-a" })), error: null, count: 501 },
+      { data: null, error: { code: "42P01", message: 'relation "journal_experience_feedback" does not exist' } },
+    ]);
+    await expect(journalFeedbackForExport(new CommunicationsService(db, {}), "account-a"))
+      .rejects.toThrow();
+  });
+
+  it("rejects a foreign feedback row even if the service-role query returns it", async () => {
+    const { db } = database([{ data: [{ id: "foreign", user_id: "account-b" }], error: null, count: 1 }]);
+    await expect(journalFeedbackForExport(new CommunicationsService(db, {}), "account-a"))
+      .rejects.toThrow("journal-feedback-export-invalid");
+  });
+
   it("keeps Auth intact when a linked provider contact cannot be removed without its credential", async () => {
     const { db, calls, storage } = database([
       ok(), ok(), ok([{ id: "delete-a", user_id: "account-a", kind: "deletion", status: "scheduled", scheduled_for: "2000-01-01" }]),
@@ -187,9 +277,11 @@ describe("deletion dependency safety", () => {
     { scenario: "cleanup cannot be confirmed", removalError: { message: "unavailable" }, failureCode: "export-deletion-reconciliation-required" },
   ])("does not publish an export after its atomic barrier is lost when $scenario", async ({ removalError, failureCode }) => {
     const request = { id: "11111111-1111-4111-8111-111111111111", user_id: "account-a", kind: "export", status: "requested" };
+    const feedback = { id: "feedback-a", user_id: "account-a", rating: 5, liked: "Private pages", want_more: "", missing: "", pain_points: "", comment: "", created_at: "2026-11-01T00:00:00Z" };
     const { db, calls, storage } = database([
       ok(), ok(), ok([request]), ok({ id: request.id }),
       ok([]), ok([]), ok([]),
+      { data: [feedback], error: null, count: 1 },
       ok(false), ok(),
       ok([]), ok([]), ok(), ok(), ok(),
     ]);
@@ -206,6 +298,10 @@ describe("deletion dependency safety", () => {
     await expect(processPrivacy(service)).resolves.toBe(0);
 
     expect(storage.upload).toHaveBeenCalledOnce();
+    const exportedFeedback = JSON.parse(String(storage.upload.mock.calls[0][1])).journalFeedback;
+    expect(exportedFeedback).toHaveLength(1);
+    expect(exportedFeedback[0]).toMatchObject({ id: feedback.id, rating: 5, liked: "Private pages" });
+    expect(exportedFeedback[0]).not.toHaveProperty("user_id");
     expect(storage.remove).toHaveBeenCalledWith([`account-a/${request.id}.json`]);
     expect(enqueue).not.toHaveBeenCalled();
     expect(calls).toContainEqual({
@@ -220,6 +316,7 @@ describe("deletion dependency safety", () => {
     const { db, calls, storage } = database([
       ok(), ok(), ok([request]), ok({ id: request.id }),
       ok([]), ok([]), ok([]),
+      { data: [], error: null, count: 0 },
       { data: null, error: { message: "finalization response lost" } }, ok(),
       ok([]), ok([]), ok(), ok(), ok(),
     ]);
@@ -249,6 +346,7 @@ describe("deletion dependency safety", () => {
     const { db, calls, storage } = database([
       ok(), ok(), ok([request]), ok({ id: request.id }),
       ok([]), ok([]), ok([]),
+      { data: [], error: null, count: 0 },
       ok(),
       ok([]), ok([]), ok(), ok(), ok(),
     ]);

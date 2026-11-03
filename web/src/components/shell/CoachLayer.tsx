@@ -1,19 +1,22 @@
-// Runs the coach marks (lib/coach.ts): "Overwhelmed?" once, after the guide
-// and the Promise, then at most one first-visit hint per page. It waits for
+// Runs the coach marks (lib/coach.ts): a first-scroll lock-in sample, then
+// "Overwhelmed?", then at most one first-visit hint per page. It waits for
 // every other first-run layer, any dialog, a running focus sprint and an
 // active text field, so it never talks over the learner.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  COACH_RESET_EVENT, CUSTOMIZE_SIDEBAR_EVENT, HINT_DWELL_MS, HINT_PAGE_SETTLE_MS, OVERWHELMED_AFTER_MS, OVERWHELMED_ID,
-  eligiblePageHint, markCoachShown, overwhelmedDue, readCoachLedger, writeCoachLedger,
+  COACH_RESET_EVENT, CUSTOMIZE_SIDEBAR_EVENT, FIRST_VISIT_LOCKIN_AFTER_SCROLL_MS, HINT_DWELL_MS, HINT_PAGE_SETTLE_MS,
+  OVERWHELMED_AFTER_MS, OVERWHELMED_AFTER_SAMPLE_MS, OVERWHELMED_ID,
+  eligiblePageHint, markCoachShown, markLockInSampleClosed, markLockInSampleShown, overwhelmedDue, readCoachLedger, writeCoachLedger,
   type CoachLedger, type PageHint,
 } from "../../lib/coach";
+import { normalizeFocusCheckInPreferences } from "../../lib/focusCheckIn";
 import { readGuideOffer } from "../../lib/guideOffer";
 import { shellBusy } from "../../lib/shellBusy";
 import { usePomodoro } from "../../lib/pomodoro";
 import { useStore } from "../../lib/store";
 import { CoachMark, type CoachDismissReason } from "./CoachMark";
+import { FIRST_VISIT_LOCKIN_CLOSED_EVENT, FIRST_VISIT_LOCKIN_PREVIEW_EVENT } from "./FocusCheckIn";
 
 
 function onScreen(element: Element): boolean {
@@ -26,12 +29,17 @@ type Active = { kind: "overwhelmed" } | { kind: "hint"; hint: PageHint; target: 
 export function CoachLayer({ route, suspended }: { route: string; suspended: boolean }) {
   const onboarded = useStore((s) => s.profile.onboarded);
   const tourDone = useStore((s) => s.profile.tourDone);
+  const focusCheckIn = useStore((s) => s.profile.focusCheckIn);
   const [ledger, setLedger] = useState<CoachLedger>(readCoachLedger);
   const [active, setActive] = useState<Active | null>(null);
   const elapsedRef = useRef(0);
   const routeEnteredRef = useRef(Date.now());
   const shownOnRouteRef = useRef(false);
+  const firstScrollStartedRef = useRef(false);
+  const firstScrollRemainingRef = useRef(FIRST_VISIT_LOCKIN_AFTER_SCROLL_MS);
+  const firstScrollActiveAtRef = useRef<number | null>(null);
   const ready = Boolean(onboarded && tourDone) && !suspended;
+  const sampleEnabled = normalizeFocusCheckInPreferences(focusCheckIn).enabled;
 
   const commit = useCallback((next: CoachLedger) => { writeCoachLedger(next); setLedger(next); }, []);
 
@@ -46,18 +54,110 @@ export function CoachLayer({ route, suspended }: { route: string; suspended: boo
     shownOnRouteRef.current = false;
   }, [route]);
 
-  // "Overwhelmed?": 90 s of unobstructed, visible time after everything else settles.
+  // The sample is a one-time introduction. The clock starts with the first
+  // page scroll, not with loading or a tour. Hidden and busy time does not count.
   useEffect(() => {
-    if (!ready || active || !overwhelmedDue(ledger, Date.now())) return;
+    if (!ready || !sampleEnabled || ledger.lockInSampleShownAt !== undefined || ledger.off) return;
+    const scroller = document.querySelector(".surface-scroll");
+    if (!scroller) return;
+    let timer: number | undefined;
+    let disposed = false;
+    let lastScrollTop = scroller.scrollTop;
+    const pauseClock = () => {
+      if (firstScrollActiveAtRef.current === null) return;
+      firstScrollRemainingRef.current = Math.max(0, firstScrollRemainingRef.current - (Date.now() - firstScrollActiveAtRef.current));
+      firstScrollActiveAtRef.current = null;
+    };
+    const reconcile = () => {
+      if (disposed || !firstScrollStartedRef.current) return;
+      const current = readCoachLedger();
+      if (current.lockInSampleShownAt !== undefined || current.off) { commit(current); return; }
+      pauseClock();
+      if (timer !== undefined) window.clearTimeout(timer);
+      if (document.visibilityState !== "visible" || readGuideOffer() === "pending" || usePomodoro.getState().running || shellBusy()) return;
+      if (firstScrollRemainingRef.current > 0) {
+        firstScrollActiveAtRef.current = Date.now();
+        timer = window.setTimeout(reconcile, firstScrollRemainingRef.current);
+        return;
+      }
+      const detail = { accepted: false };
+      window.dispatchEvent(new CustomEvent(FIRST_VISIT_LOCKIN_PREVIEW_EVENT, { detail }));
+      if (!detail.accepted) { timer = window.setTimeout(reconcile, 250); return; }
+      commit(markLockInSampleShown(current, Date.now()));
+    };
+    const onScroll = () => {
+      const nextScrollTop = scroller.scrollTop;
+      if (Math.abs(nextScrollTop - lastScrollTop) < 1) return;
+      lastScrollTop = nextScrollTop;
+      if (firstScrollStartedRef.current || readGuideOffer() === "pending") return;
+      firstScrollStartedRef.current = true;
+      reconcile();
+    };
+    // Hydration may finish after the learner's first scroll. The visible
+    // scroll position is enough to start the clock once this layer is ready.
+    if (scroller.scrollTop > 0) firstScrollStartedRef.current = true;
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    const observer = typeof MutationObserver === "undefined" ? undefined : new MutationObserver(reconcile);
+    observer?.observe(document.body, { childList: true, subtree: true });
+    document.addEventListener("visibilitychange", reconcile);
+    document.addEventListener("focusin", reconcile);
+    const onFocusOut = () => queueMicrotask(reconcile);
+    document.addEventListener("focusout", onFocusOut);
+    if (firstScrollStartedRef.current) reconcile();
+    return () => {
+      pauseClock();
+      disposed = true;
+      scroller.removeEventListener("scroll", onScroll);
+      observer?.disconnect();
+      document.removeEventListener("visibilitychange", reconcile);
+      document.removeEventListener("focusin", reconcile);
+      document.removeEventListener("focusout", onFocusOut);
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [ready, sampleEnabled, ledger.lockInSampleShownAt, ledger.off, commit]);
+
+  useEffect(() => {
+    const onClosed = () => commit(markLockInSampleClosed(readCoachLedger(), Date.now()));
+    window.addEventListener(FIRST_VISIT_LOCKIN_CLOSED_EVENT, onClosed);
+    return () => window.removeEventListener(FIRST_VISIT_LOCKIN_CLOSED_EVENT, onClosed);
+  }, [commit]);
+
+  // For new visitors, Overwhelmed follows the sample. An existing opt-out
+  // retains the old quiet 90-second coach introduction.
+  useEffect(() => {
+    if (!ready || active || ledger.off || ledger.seen.includes(OVERWHELMED_ID)) return;
+    if (sampleEnabled && ledger.lockInSampleShownAt === undefined) return;
+    if (ledger.lockInSampleShownAt !== undefined) {
+      let timer: number | undefined;
+      const attempt = () => {
+        const current = readCoachLedger();
+        if (current.off || current.seen.includes(OVERWHELMED_ID)) { setLedger(current); return; }
+        if (!overwhelmedDue(current, Date.now())) {
+          const dueAt = (current.lockInSampleClosedAt ?? (current.lockInSampleShownAt ?? Date.now()) + 2 * 60_000) + OVERWHELMED_AFTER_SAMPLE_MS;
+          timer = window.setTimeout(attempt, Math.max(250, dueAt - Date.now()));
+          return;
+        }
+        if (document.visibilityState !== "visible" || readGuideOffer() === "pending" || usePomodoro.getState().running || shellBusy()) {
+          timer = window.setTimeout(attempt, 250);
+          return;
+        }
+        commit(markCoachShown(current, OVERWHELMED_ID, Date.now()));
+        setActive({ kind: "overwhelmed" });
+      };
+      attempt();
+      return () => { if (timer !== undefined) window.clearTimeout(timer); };
+    }
     const tick = window.setInterval(() => {
       if (document.visibilityState !== "visible" || readGuideOffer() === "pending" || usePomodoro.getState().running || shellBusy()) return;
       elapsedRef.current += 1_000;
       if (elapsedRef.current < OVERWHELMED_AFTER_MS) return;
-      commit(markCoachShown(readCoachLedger(), OVERWHELMED_ID, Date.now()));
+      const current = readCoachLedger();
+      if (!overwhelmedDue(current, Date.now())) { setLedger(current); return; }
+      commit(markCoachShown(current, OVERWHELMED_ID, Date.now()));
       setActive({ kind: "overwhelmed" });
     }, 1_000);
     return () => window.clearInterval(tick);
-  }, [ready, active, ledger, commit]);
+  }, [ready, active, ledger, commit, sampleEnabled]);
 
   // One first-visit hint per page, once its target has been on screen a moment.
   useEffect(() => {

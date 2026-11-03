@@ -838,7 +838,7 @@ const PREMED_MODULES = [
   "Financial Planning and Fee Assistance Module",
   "Gap Year / Post-Bacc / SMP Strategy Engine",
   "International and Caribbean Pathways",
-  "SGU Undergraduate and Pathway Track",
+  "International and Caribbean Pathway Track",
   "Compliance, Documentation, and Verification Vault",
   "Risk Alerts and Recovery Plans",
   "Semester-by-Semester Roadmap",
@@ -1951,7 +1951,7 @@ export const BLUEPRINTS: BlueprintCatalogEntry[] = [
         ...nodes(PREMED_MODULES, "planner", ["premed-module", "install"], SRC.godFile, "high"),
       ]),
       cat("Academic Map", "Identity, pathway intent, term-by-term plan.", [
-        n("Pathway intent (MD/DO/Texas/Canada/Caribbean/SGU/MD-PhD…)", "tracker", { tags: ["academic"] }),
+        n("Pathway intent (MD/DO/Texas/Canada/Caribbean/international/MD-PhD…)", "tracker", { tags: ["academic"] }),
         n("Term-by-term course plan", "planner", { tags: ["academic"] }),
       ]),
       cat("Degree Audit", "Separate degree, gen-ed, major, and prereqs.", [
@@ -2028,7 +2028,7 @@ export const BLUEPRINTS: BlueprintCatalogEntry[] = [
       cat("School Intelligence Data Fields", "Every policy-sensitive school field needs a source, date, and confidence state.", [
         ...nodes(PREMED_SCHOOL_FIELDS, "tracker", ["application", "school-list", "source-governance"], SRC.godFile, "high"),
       ]),
-      cat("Application Cycle Center", "AMCAS/AACOMAS/TMDSAS + SGU/international.", [
+      cat("Application Cycle Center", "AMCAS/AACOMAS/TMDSAS plus international pathways.", [
         n("Primary application checklist", "task", { priority: "high", source: SRC.amcas, tags: ["cycle-phase"] }),
       ]),
       cat("Application System Objects", "Separate workflows for application services so the app does not flatten AMCAS/AACOMAS/TMDSAS/OMSAS into one checklist.", [
@@ -2049,8 +2049,8 @@ export const BLUEPRINTS: BlueprintCatalogEntry[] = [
       cat("Gap Year / Reapplication", "Strategy if applicable.", [
         n("Gap-year / reapplication plan", "planner", { tags: ["cycle-phase"] }),
       ]),
-      cat("International and SGU Pathways", "Caribbean/international specifics.", [
-        n("International / SGU pathway notes (source-cited)", "content", { tags: ["policy"] }),
+      cat("International and Caribbean Pathways", "Caribbean and international specifics.", [
+        n("International pathway notes (source-cited)", "content", { tags: ["policy"] }),
       ]),
       cat("Wellness and Burnout Safeguards", "Protect the human running the cycle.", [
         n("Wellness + workload safeguards", "task", { tags: ["wellness"] }),

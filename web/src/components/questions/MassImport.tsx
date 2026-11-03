@@ -36,6 +36,7 @@ import { evaluateImportCandidate, type CandidateEvaluation } from "../../lib/mas
 import { prepareReviewedImport, saveReviewedImport } from "../../lib/questionImportSave";
 import { skipImport, skippedImport, unskipImport } from "../../lib/importSkips";
 import { pushToast } from "../../lib/toast";
+import { MAX_SOURCE_ORIGINAL_BYTES } from "../../lib/sourceOriginal";
 
 
 type FileStatus = "queued" | "extracting" | "parsing" | "ready" | "needs-review" | "accepting" | "accepted" | "skipped" | "answer-source" | "no-text" | "error";
@@ -66,6 +67,7 @@ const reviewable = (status: FileStatus) => status === "ready" || status === "nee
 
 const uid = () => crypto.randomUUID();
 const CONCURRENCY = 3;
+const SUPPORTED_FORMATS = "PDF, DOCX, TXT, Markdown, CSV, or JSON";
 
 export function massImportFileStatus(drafts: readonly ParsedQuestionDraft[]): "error" | "needs-review" | "ready" {
   if (drafts.length === 0) return "error";
@@ -80,6 +82,7 @@ export function MassImport({
   finalizedQueueId?: string;
 }) {
   const [queue, setQueue] = useState<QueuedFile[]>([]);
+  const [rejected, setRejected] = useState<{ name: string; reason: string }[]>([]);
   const [processing, setProcessing] = useState(false);
   const [accepting, setAccepting] = useState(false);
   const acceptingRef = useRef(false);
@@ -150,27 +153,36 @@ export function MassImport({
   }, [finalizedQueueId]);
 
   function enqueue(files: FileList) {
-    const added: QueuedFile[] = Array.from(files).map((f) => ({
+    const accepted: { file: File; kind: MassImportFileKind }[] = [];
+    const skipped: { name: string; reason: string }[] = [];
+    for (const file of Array.from(files)) {
+      const kind = fileKind(file);
+      if (!kind) skipped.push({ name: file.name, reason: `Unsupported format. Use ${SUPPORTED_FORMATS}.` });
+      else if (file.size > MAX_SOURCE_ORIGINAL_BYTES) skipped.push({ name: file.name, reason: "Larger than 128 MB. Choose a smaller file." });
+      else accepted.push({ file, kind });
+    }
+    setRejected(skipped);
+    const added: QueuedFile[] = accepted.map(({ file, kind }) => ({
       id: uid(),
-      fileName: f.name,
-      fileType: fileKind(f),
-      sizeBytes: f.size,
+      fileName: file.name,
+      fileType: kind,
+      sizeBytes: file.size,
       status: "queued",
       rawText: "",
       drafts: [],
       warnings: [],
       answerKeyDetected: false,
-      source: sourceKind(f),
+      source: kind === "pdf" ? "pdf" : "imported",
     }));
     // Keep the File objects alongside the queue rows for processing.
     added.forEach((row, i) => {
-      fileMap.set(row.id, files[i]);
+      fileMap.set(row.id, accepted[i].file);
       ownedFileIds.current.add(row.id);
     });
     // I3-26: batches arrive in whatever order the OS hands them over, and
     // workers finish out of order. Keep the queue in natural reading order
     // ("Lecture 2" before "Lecture 10", "Week 9 IMCQ 1" before "IMCQ 2").
-    setQueue((q) => [...q, ...added].sort((a, b) => naturalCollator.compare(a.fileName, b.fileName)));
+    if (added.length) setQueue((q) => [...q, ...added].sort((a, b) => naturalCollator.compare(a.fileName, b.fileName)));
   }
 
   async function processAll() {
@@ -200,14 +212,7 @@ export function MassImport({
     fileMap.delete(id);
     ownedFileIds.current.delete(id);
     setQueue((current) => current.filter((file) => file.id !== id));
-    const restoreFocus = () => {
-      const target = document.getElementById(
-        focusFile ? `mass-import-remove-${focusFile.id}` : "mass-import-add-files",
-      );
-      if (target instanceof HTMLElement) target.focus();
-    };
-    if (typeof requestAnimationFrame === "function") requestAnimationFrame(restoreFocus);
-    else setTimeout(restoreFocus, 0);
+    focusAfterQueueUpdate(focusFile ? `mass-import-remove-${focusFile.id}` : "mass-import-add-files");
   }
 
   async function processOne(id: string) {
@@ -216,6 +221,8 @@ export function MassImport({
     patch(id, { status: "extracting" });
     try {
       const kind = fileKind(file);
+      if (!kind) throw new Error(`Unsupported format. Use ${SUPPORTED_FORMATS}.`);
+      if (file.size > MAX_SOURCE_ORIGINAL_BYTES) throw new Error("Larger than 128 MB. Choose a smaller file.");
       let rawText = "";
       let pageTexts: string[] | undefined;
       let checksum: string | undefined;
@@ -428,7 +435,7 @@ export function MassImport({
     <GlassCard>
       <PanelHeader
         title="Import"
-        sub="Add one file or several. AXOM reads each one, says what it found and where it belongs, and lets you accept a file that needs no decisions or edit it first."
+        sub="Add one file or several (PDF, DOCX, TXT, Markdown, CSV, or JSON; up to 128 MB each). AXOM reads each one, says what it found and where it belongs, and lets you accept a file that needs no decisions or edit it first."
         action={
           <div className="row">
             <input
@@ -452,6 +459,11 @@ export function MassImport({
           </div>
         }
       />
+
+      {rejected.length > 0 && <div role="status" aria-live="polite">
+        <p>{rejected.length} file{rejected.length === 1 ? " was" : "s were"} not added. {queue.length > 0 ? "Valid files remain in the queue." : "Choose a supported file to continue."}</p>
+        <ul className="intake-warnings">{rejected.map((file, index) => <li key={`${file.name}-${index}`}><b>{file.name}</b>: {file.reason}</li>)}</ul>
+      </div>}
 
       {queue.length === 0 ? (
         <EmptyState icon={<FileUp size={ICON_SIZE.emphasis} />} title="No files queued" hint="Add several PDFs or documents at once. Each is read and summarized before you accept or edit it." />
@@ -565,6 +577,9 @@ export function MassImport({
 
 function focusAfterQueueUpdate(elementId: string) {
   const restore = () => {
+    // Queue updates remove the focused control. Leave a field reached since then alone.
+    const focused = document.activeElement;
+    if (focused && focused !== document.body) return;
     const target = document.getElementById(elementId);
     if (target instanceof HTMLElement) target.focus();
   };
@@ -576,19 +591,27 @@ function focusAfterQueueUpdate(elementId: string) {
 // module map keyed by the queue row id (cleared when a row is removed).
 const fileMap = new Map<string, File>();
 
-function fileKind(file: File): string {
-  const n = file.name.toLowerCase();
-  if (n.endsWith(".pdf") || file.type === "application/pdf") return "pdf";
-  if (n.endsWith(".docx")) return "docx";
-  if (n.endsWith(".csv")) return "csv";
-  if (n.endsWith(".json")) return "json";
-  return "text";
-}
-function sourceKind(file: File): QuestionSource {
-  const k = fileKind(file);
-  return k === "pdf" ? "pdf" : "imported";
-}
+type MassImportFileKind = "pdf" | "docx" | "csv" | "json" | "text";
+const MIME_BY_KIND: Record<MassImportFileKind, readonly string[]> = {
+  pdf: ["application/pdf", "application/x-pdf"],
+  docx: ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+  csv: ["text/csv", "text/plain", "application/vnd.ms-excel"],
+  json: ["application/json", "text/json", "text/plain"],
+  text: ["text/plain", "text/markdown"],
+};
 
+function fileKind(file: File): MassImportFileKind | undefined {
+  const n = file.name.toLowerCase();
+  const kind = n.endsWith(".pdf") ? "pdf"
+    : n.endsWith(".docx") ? "docx"
+    : n.endsWith(".csv") ? "csv"
+    : n.endsWith(".json") ? "json"
+    : [".txt", ".md", ".markdown"].some((extension) => n.endsWith(extension)) ? "text"
+    : undefined;
+  const mime = file.type.toLowerCase();
+  if (!kind || (mime && mime !== "application/octet-stream" && !MIME_BY_KIND[kind].includes(mime))) return undefined;
+  return kind;
+}
 /** A tick only for a file that is saved or can be accepted as it is. */
 function StatusIcon({ status, evaluation }: { status: FileStatus; evaluation?: CandidateEvaluation }) {
   if (status === "accepted" || evaluation?.valid) return <CheckCircle2 size={ICON_SIZE.emphasis} style={{ color: "var(--grade-green)" }} />;

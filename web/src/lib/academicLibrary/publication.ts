@@ -10,12 +10,12 @@ import { parseCourseTemplate } from "../course-engine/templateParse";
 import { SGU_CURRICULUM } from "../curricula";
 import { questionScope } from "../question-content/package";
 import { sha256 } from "../question-content/assets";
-import { readCatalog, readPreparedBank, safeLibraryPath, type LibraryReader } from "../privateLibrary/install";
+import { hasUniformUnfiledSourceScope, readCatalog, readPreparedBank, safeLibraryPath, type LibraryReader } from "../privateLibrary/install";
 import type { LibraryInputLimits } from "../privateLibrary/inputRoot";
 import type { PrivateLibraryCatalog, ReviewedFiling } from "../privateLibrary/types";
 import { academicCoursePlan, moduleIdentity, reviewedTermNumber, type AcademicPlanTerm } from "./coursePlan";
 import { compareCourses } from "./catalogOrder";
-import { prepareAcademicUpload } from "./upload";
+import { prepareAcademicUpload, preflightAcademicUpload } from "./upload";
 import type { AcademicBatchJob } from "./batch";
 
 type Term = ReviewedFiling["term"];
@@ -53,9 +53,12 @@ export interface PublicationSource {
   /** The catalog's own module label, when it has one. */
   moduleKey?: string;
   hasBank: boolean;
+  /** Question rows in its package, unreadable rows included, when the package could be read. */
+  rows?: number;
   original?: { extension: string };
   /** Term and module read from the question package itself. */
-  bank?: { term: Term; module: string; moduleKey: string; reviewedFiling: boolean } | { problem: string };
+  bank?: { term: Term; module: string; moduleKey: string; reviewedFiling: boolean; reviewedUnfiled?: boolean;
+    reviewedOverride?: boolean; humanReviewed?: boolean } | { problem: string };
   duplicateOf?: string;
 }
 
@@ -93,7 +96,7 @@ export interface PublicationPlan {
   /** Plan sections that cannot be published, with the reason. */
   blocked: Array<{ name: string; reason: string; moduleKey?: string; proposedTerm?: Term; needsTerm?: boolean }>;
   /** Sources left out of every course, with the reason. */
-  excluded: Array<{ id: string; name: string; reason: string }>;
+  excluded: Array<{ id: string; name: string; reason: string; hasBank: boolean }>;
 }
 
 /** Terms the SGU outline gives each module, used only as a proposal to confirm. */
@@ -149,20 +152,29 @@ export async function readPublicationInventory(
     if (source.bankFile) {
       try {
         const bank = readPreparedBank(JSON.parse(decode(await read(safeLibraryPath(source.bankFile)))));
+        entry.rows = bank.pkg.questions.length + (bank.unreadableQuestions ?? 0);
         const manifest = bank.pkg.manifest;
-        const scopes = [{ module: manifest.course.name, term: manifest.course.term }, ...bank.pkg.questions.map(question => {
+        const filing = bank.reviewedFiling;
+        const reviewedUnfiled = Boolean(filing && hasUniformUnfiledSourceScope(manifest, bank.pkg.questions));
+        const reviewedOverride = Boolean(filing && filing.evidence === "human-reviewed"
+          && (moduleIdentity(filing.module) !== moduleIdentity(manifest.course.name)
+            || reviewedTermNumber(filing.term) !== manifest.course.term));
+        const scopes = reviewedOverride && filing ? [{ module: filing.module, term: reviewedTermNumber(filing.term) }] :
+          [{ module: manifest.course.name, term: manifest.course.term }, ...bank.pkg.questions.map(question => {
           const scope = questionScope(manifest, question);
           return { module: scope.course, term: scope.term };
         })];
         const keys = new Set(scopes.map(scope => `${moduleIdentity(scope.module) ?? ""}|${scope.term ?? ""}`));
         const [moduleKey, number] = [...keys][0].split("|");
         const term = `Term ${number}` as Term;
-        const filing = bank.reviewedFiling;
         entry.bank = keys.size !== 1 ? { problem: "Its questions span several modules or terms. Split the source before publishing." }
           : !moduleKey || moduleKey === "unfiled" || !TERMS.includes(term) ? { problem: "Its questions have no reviewed Term 1-5 and module." }
-            : filing && (moduleIdentity(filing.module) !== moduleKey || filing.term !== term)
+            : filing && !reviewedOverride && (moduleIdentity(filing.module) !== moduleKey || filing.term !== term)
               ? { problem: "Its manual filing differs from its source's own module or term. Publish it on its own after review." }
-              : { term, module: manifest.course.name.trim(), moduleKey, reviewedFiling: Boolean(filing) };
+              : { term, module: reviewedOverride && filing ? filing.module : manifest.course.name.trim(), moduleKey,
+                reviewedFiling: Boolean(filing), ...(reviewedUnfiled ? { reviewedUnfiled: true } : {}),
+                ...(reviewedOverride ? { reviewedOverride: true } : {}),
+                ...(filing?.evidence === "human-reviewed" ? { humanReviewed: true } : {}) };
       } catch {
         entry.bank = { problem: "Its question package could not be read." };
       }
@@ -195,7 +207,9 @@ export function planPublication(inventory: PublicationInventory, confirmedTerms:
   };
 
   const usable = inventory.sections.filter(section => {
-    if (section.problem) blocked.push({ name: section.name, reason: section.problem });
+    if (section.problem) blocked.push({ name: section.name, reason: section.problem,
+      ...(section.moduleKey ? { moduleKey: section.moduleKey } : {}),
+      ...(section.term && TERMS.includes(section.term) ? { proposedTerm: section.term } : {}) });
     return !section.problem;
   });
   const byModule = new Map<string, PublicationSection[]>();
@@ -233,10 +247,23 @@ export function planPublication(inventory: PublicationInventory, confirmedTerms:
     }
   }
 
+  // A rejected plan revision cannot quietly become a question-only course in its term.
+  const blockedModules = new Set<string>();
+  const blockedCourses = new Set<string>();
+  const blockedSourceModules = new Set<string>();
+  for (const section of blocked) {
+    if (!section.moduleKey) continue;
+    blockedSourceModules.add(section.moduleKey);
+    if (section.proposedTerm) blockedCourses.add(courseKey(section.proposedTerm, section.moduleKey));
+    else blockedModules.add(section.moduleKey);
+  }
+  const blockedCourse = (term: Term, moduleKey: string) => blockedModules.has(moduleKey) || blockedCourses.has(courseKey(term, moduleKey));
+  for (const [key, course] of courses) if (blockedCourse(course.term, course.moduleKey)) courses.delete(key);
+
   const templateChecksums = new Set(inventory.sections.map(section => section.checksum));
   const publishedChecksums = new Set([...courses.values()].flatMap(course => course.sections.map(section => section.checksum)));
   const seen = new Set<string>();
-  const exclude = (source: PublicationSource, reason: string) => excluded.push({ id: source.id, name: source.name, reason });
+  const exclude = (source: PublicationSource, reason: string) => excluded.push({ id: source.id, name: source.name, reason, hasBank: source.hasBank });
   // Question packages first, so a module's own questions decide its course.
   const ordered = [...inventory.sources].sort((left, right) => Number(right.hasBank) - Number(left.hasBank));
   for (const source of ordered) {
@@ -252,8 +279,12 @@ export function planPublication(inventory: PublicationInventory, confirmedTerms:
         exclude(source, "Its catalog module and its question package disagree. Review its filing.");
         continue;
       }
+      if (blockedCourse(scope.term, scope.moduleKey)) {
+        exclude(source, "Its course plan needs attention before its questions can be published.");
+        continue;
+      }
       let course = courses.get(courseKey(scope.term, scope.moduleKey));
-      if (course?.sections.length && scope.reviewedFiling) {
+      if (course?.sections.length && scope.reviewedFiling && !scope.reviewedOverride) {
         exclude(source, "It carries a manual filing, which cannot be combined with this module's course plan.");
         continue;
       }
@@ -283,6 +314,10 @@ export function planPublication(inventory: PublicationInventory, confirmedTerms:
       exclude(source, "No module is recorded for this source, so AXOM cannot place it in a course.");
       continue;
     }
+    if (blockedSourceModules.has(source.moduleKey)) {
+      exclude(source, "Its course plan needs attention before this file can be published.");
+      continue;
+    }
     const matches = [...courses.values()].filter(course => course.moduleKey === source.moduleKey);
     if (matches.length !== 1) {
       exclude(source, matches.length ? "Its module appears in several terms, so its course is unknown."
@@ -307,19 +342,42 @@ export interface CourseReaderOptions {
 export function courseLibraryReader(read: LibraryReader, inventory: PublicationInventory, course: PlannedCourse,
   options: CourseReaderOptions = {}): LibraryReader {
   const include = options.include ?? (() => true);
-  const sources = inventory.sources.filter(source => course.sourceIds.includes(source.id) && include(source.id))
+  const includedIds = course.sourceIds.filter(include);
+  const ids = new Set(includedIds);
+  if (ids.size !== includedIds.length) throw new Error("The planned course contains duplicate source identities.");
+  const sources = inventory.sources.filter(source => ids.has(source.id)
+    && source.status !== "duplicate-linked" && !source.duplicateOf)
     .sort((left, right) => left.checksum.localeCompare(right.checksum));
+  if (sources.length !== includedIds.length
+    || new Set(sources.map(source => source.id)).size !== sources.length
+    || new Set(sources.map(source => source.checksum)).size !== sources.length)
+    throw new Error("The planned course has missing or duplicate source identities. Review its source filing.");
   let catalog: Uint8Array | undefined;
   return async path => {
     if (safeLibraryPath(path) !== "catalog.json") return read(path);
     if (!catalog) {
       const original = readCatalog(JSON.parse(decode(await read("catalog.json"))));
-      const rows = new Map(original.sources.map(source => [`${source.id}|${source.checksum}`, source]));
-      const selected = sources.map(source => rows.get(`${source.id}|${source.checksum}`));
-      if (selected.some(row => !row)) throw new Error("The library changed while publishing. Choose it again and review the plan.");
+      const rows = new Map<string, CatalogSource>();
+      const checksums = new Set<string>();
+      for (const source of original.sources) {
+        if (!ids.has(source.id) || source.status === "duplicate-linked" || source.duplicateOf) continue;
+        if (rows.has(source.id) || checksums.has(source.checksum))
+          throw new Error("The library contains duplicate source identities. Review its source filing.");
+        rows.set(source.id, source);
+        checksums.add(source.checksum);
+      }
+      const selected = sources.map(source => {
+        const row = rows.get(source.id);
+        if (!row || row.checksum !== source.checksum || row.name !== source.name || row.status !== source.status
+          || Boolean(row.bankFile) !== source.hasBank)
+          throw new Error("The library changed while publishing. Choose it again and review the plan.");
+        const extension = row.originalFile?.split(".").at(-1)?.toLowerCase() ?? "";
+        return options.originals === false || (row.originalFile && !UPLOADABLE_ORIGINALS.has(extension))
+          ? { ...row, originalFile: undefined } : row;
+      });
       catalog = encode({ ...inventory.library, id: course.catalogId,
         templates: course.sections.map(section => ({ file: section.file, name: section.name, checksum: section.checksum })),
-        sources: options.originals === false ? selected.map(row => ({ ...row, originalFile: undefined })) : selected });
+        sources: selected });
     }
     return catalog.slice();
   };
@@ -350,19 +408,34 @@ export function publicationJobs(read: LibraryReader, inventory: PublicationInven
         if (course.termBasis === "proposed") throw new Error("Confirm this course's term before publishing it.");
         const planTerm: AcademicPlanTerm | undefined = course.sections.length && course.termBasis !== "plan"
           ? { term: course.term, evidence: "human-reviewed" } : undefined;
-        const unscheduled = course.sections.length ? undefined
-          : { term: course.term, module: course.module, evidence: "source-metadata" as const };
         const optional = new Set(course.optionalSourceIds);
-        const withOriginals = course.sourceIds.filter(id => !optional.has(id)
-          && inventory.sources.some(source => source.id === id && source.original)).length;
-        const stages: Array<{ options: CourseReaderOptions; kept: number }> = [{ options: {}, kept: 0 }];
-        if (optional.size) stages.push({ options: { include: id => !optional.has(id) }, kept: optional.size });
-        if (withOriginals) stages.push({ options: { include: id => !optional.has(id), originals: false }, kept: optional.size + withOriginals });
+        const byId = new Map(inventory.sources.filter(source => source.status !== "duplicate-linked" && !source.duplicateOf)
+          .map(source => [source.id, source]));
+        const hasHumanReview = course.sourceIds.some(id => {
+          const bank = byId.get(id)?.bank;
+          return bank && "term" in bank && bank.humanReviewed;
+        });
+        const unscheduled = course.sections.length ? undefined
+          : { term: course.term, module: course.module, evidence: hasHumanReview ? "human-reviewed" as const : "source-metadata" as const };
+        const unsupported = course.sourceIds.filter(id => {
+          const original = byId.get(id)?.original;
+          return original && !UPLOADABLE_ORIGINALS.has(original.extension);
+        }).length;
+        const withOriginals = course.sourceIds.filter(id => {
+          const original = byId.get(id)?.original;
+          return !optional.has(id) && original && UPLOADABLE_ORIGINALS.has(original.extension);
+        }).length;
+        const stages: Array<{ options: CourseReaderOptions; kept: number }> = [{ options: {}, kept: unsupported }];
+        if (optional.size) stages.push({ options: { include: id => !optional.has(id) }, kept: unsupported + optional.size });
+        if (withOriginals) stages.push({ options: { include: id => !optional.has(id), originals: false }, kept: unsupported + optional.size + withOriginals });
         for (const [index, stage] of stages.entries()) {
           if (signal?.aborted) throw new DOMException("Publishing was cancelled.", "AbortError");
           try {
             const upload = await prepareAcademicUpload(courseLibraryReader(read, inventory, course, stage.options),
               unscheduled, planTerm ? { planTerm } : {});
+            if (upload.metadata.ready_questions !== course.ready || upload.metadata.review_questions !== course.review)
+              throw new Error("The prepared course question counts differ from its unique planned sources. Review duplicate or changed source files.");
+            await preflightAcademicUpload(upload);
             if (stage.kept) notes.keptLocal.set(course.catalogId, stage.kept);
             return upload;
           } catch (cause) {

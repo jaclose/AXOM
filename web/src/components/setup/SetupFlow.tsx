@@ -5,7 +5,7 @@
 // and the optional guide follow in App.
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
-  ArrowLeft, ArrowRight, Bell, BookMarked, BookOpen, Compass, FlaskConical, Globe2, GraduationCap,
+  ArrowLeft, ArrowRight, ArrowUpRight, Bell, BookMarked, BookOpen, Compass, FlaskConical, Globe2, GraduationCap,
   HeartHandshake, Layers, ListChecks, Monitor, Moon, Plus, ShieldCheck, Sparkles, SquareStack, Stethoscope, Sun, Target,
   type LucideIcon,
 } from "lucide-react";
@@ -24,6 +24,7 @@ import {
   type SetupChoices, type SetupPath, type SetupTool,
 } from "../../lib/setupPlan";
 import { SGU_CURRICULUM } from "../../lib/curricula";
+import { otherWorkspaceUrl } from "../../lib/otherWorkspace";
 import "../../styles/setup.css";
 
 const PATH_ICONS: Record<SetupPath, LucideIcon> = {
@@ -47,6 +48,7 @@ export function SetupFlow({ mode, onComplete, onCancel }: {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const firstStepRender = useRef(true);
   const titleId = useId();
+  const otherWorkspace = otherWorkspaceUrl(location.hostname);
 
   useEffect(() => writeSetupDraft(choices, effectiveMode), [choices, effectiveMode]);
   useEffect(() => {
@@ -105,7 +107,7 @@ export function SetupFlow({ mode, onComplete, onCancel }: {
         <div className="setup-shell">
           <div className="setup-core">
             <section key={choices.step} className="setup-screen" data-dir={direction}>
-              {choices.step === 0 && <YouStep choices={choices} update={update} titleId={titleId} headingRef={headingRef} rerun={effectiveMode === "rerun"} />}
+              {choices.step === 0 && <YouStep choices={choices} update={update} titleId={titleId} headingRef={headingRef} rerun={effectiveMode === "rerun"} otherWorkspace={otherWorkspace} />}
               {choices.step === 1 && <StudyStep choices={choices} update={update} titleId={titleId} headingRef={headingRef} />}
               {choices.step === 2 && <YoursStep titleId={titleId} headingRef={headingRef} />}
             </section>
@@ -147,12 +149,12 @@ function StepCopy({ eyebrow, title, lede, titleId, headingRef, children }: {
   );
 }
 
-function YouStep({ choices, update, titleId, headingRef, rerun }: Omit<StepProps, "headingRef"> & { headingRef: StepProps["headingRef"]; rerun: boolean }) {
+function YouStep({ choices, update, titleId, headingRef, rerun, otherWorkspace }: Omit<StepProps, "headingRef"> & { headingRef: StepProps["headingRef"]; rerun: boolean; otherWorkspace: string | null }) {
   const nameId = useId();
   const focusOptions = focusChoices(choices.path);
   const summary: SummaryRows = [
     ["Course Tracker", choices.path === "sgu"
-      ? `SGU Terms 1 to 5 and Boards, ${SGU_MODULE_COUNT} modules ready`
+      ? `Terms 1 to 5 and Boards, ${SGU_MODULE_COUNT} modules ready`
       : rerun ? "Your courses stay as they are" : "A clean slate you shape with your own courses"],
     ["Focus", focusOptions.find((option) => option.id === choices.focus)?.label ?? ""],
   ];
@@ -165,6 +167,11 @@ function YouStep({ choices, update, titleId, headingRef, rerun }: Omit<StepProps
         titleId={titleId}
         headingRef={headingRef}
       >
+        {!rerun && otherWorkspace && <aside className="setup-other-workspace" aria-label="Other AXOM address">
+          <span>Looking for your saved work?</span>
+          <a href={otherWorkspace} target="_blank" rel="noopener noreferrer">Open www.axom.info <ArrowUpRight size={ICON_SIZE.body} aria-hidden="true" /></a>
+          <small>This page stays open. Work stored here does not move.</small>
+        </aside>}
         <SetupSummary rows={summary} placement="side" />
       </StepCopy>
       <div className="setup-controls">

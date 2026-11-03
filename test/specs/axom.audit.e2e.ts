@@ -810,7 +810,7 @@ async function auditSafeInteractions(): Promise<void> {
                         control.label &&
                         !control.destructive &&
                         (control.safe ||
-                            control.label === "St. George's University (SGU)" ||
+                            control.label === "AXOM term-based MD" ||
                             control.label === 'Pre-clinical'),
                 )
                 .slice(0, 30)

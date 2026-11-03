@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { runInNewContext } from "node:vm";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sha256 } from "../question-content/assets";
-import { academicAssetPath, assertAcademicFigureBudget, academicCollectionId, academicUploadHash, prepareAcademicUpload, uploadAcademicCourse, type AcademicUpload } from "./upload";
+import { academicAssetPath, assertAcademicFigureBudget, assertAcademicStoredFigureBudget, academicCollectionId, academicUploadHash, prepareAcademicUpload, preflightAcademicUpload, uploadAcademicCourse, type AcademicUpload } from "./upload";
+import { planPublication, publicationJobs, readPublicationInventory } from "./publication";
+import { library } from "./publicationFixture.testing";
 
 const tus = vi.hoisted(() => ({
   blobs: new Map<string, Blob>(),
@@ -137,11 +140,16 @@ it("maps figures for both root-level and nested prepared banks without malformed
 it("enforces the local installer's per-question image count and aggregate byte budget", () => {
   const make = (count: number) => [{ assets: Array.from({ length: count }, (_, i) =>
     ({ filename: `figure-${i}.png`, checksum: "a".repeat(64) })) }];
+  expect(() => assertAcademicFigureBudget(make(10))).not.toThrow();
   expect(() => assertAcademicFigureBudget(make(11))).toThrow(/10-figure attachment limit/);
+  expect(() => assertAcademicStoredFigureBudget(make(64))).not.toThrow();
+  expect(() => assertAcademicStoredFigureBudget(make(65))).toThrow(/64-figure source limit/);
   const four = make(4);
   const oversized = new Map(four[0].assets.map(asset => [asset.filename, 8 * 1024 * 1024]));
   expect(() => assertAcademicFigureBudget(four, oversized)).toThrow(/30 MiB total/);
+  expect(() => assertAcademicStoredFigureBudget(four, oversized)).toThrow(/30 MiB total/);
   expect(() => assertAcademicFigureBudget(make(3), oversized)).not.toThrow();
+  expect(() => assertAcademicStoredFigureBudget(make(1), new Map([["figure-0.png", 8 * 1024 * 1024 + 1]]))).toThrow(/8 MiB/);
 });
 
 it("prepares only referenced academic files and omits unrelated learner fields", async () => {
@@ -189,11 +197,21 @@ it("accepts verified private question collections without fabricating an officia
   }));
 });
 
-it("requires source-metadata filing to agree, but lets explicit human review correct one stale source scope", async () => {
+it("requires bank-specific human review to correct one stale source scope", async () => {
   const f = await untemplatedBankFixture();
   await expect(prepareAcademicUpload(f.read, {
     term: "Term 4", module: "FTCM", evidence: "source-metadata",
-  })).rejects.toThrow(/Source-metadata filing must agree/);
+  })).rejects.toThrow(/catalog module does not match/);
+
+  (f.catalog.sources[0] as { module: string }).module = "FTCM";
+  writeFixtureCatalog(f);
+  await expect(prepareAcademicUpload(f.read, {
+    term: "Term 4", module: "FTCM", evidence: "human-reviewed",
+  })).rejects.toThrow(/bank's reviewed filing does not match/);
+  (f.bank as typeof f.bank & { reviewedFiling: object }).reviewedFiling = {
+    term: "Term 4", module: "FTCM", evidence: "human-reviewed", weekAssignment: "unassigned",
+  };
+  writeFixtureCatalog(f);
 
   const corrected = await prepareAcademicUpload(f.read, {
     term: "Term 4", module: "FTCM", evidence: "human-reviewed",
@@ -205,24 +223,70 @@ it("requires source-metadata filing to agree, but lets explicit human review cor
     term: "Term 4", module: "FTCM", evidence: "human-reviewed", weekAssignment: "unassigned",
   });
   expect(bank.pkg.manifest.course).toEqual({ name: "GOER", term: 5, week: 2 });
+  const backend = mockedStorage(corrected, await academicCollectionId("account-a", corrected.catalogId));
+  await expect(uploadAcademicCourse(backend.client, "account-a", corrected, () => {}, () => {}))
+    .resolves.toMatchObject({ status: "active" });
 });
 
-it("replaces a valid incoming filing envelope with the current explicit review instead of trusting it", async () => {
+it("requires a bank-specific human review before a source-only Unfiled collection is prepared", async () => {
+  const f = await untemplatedBankFixture();
+  f.bank.pkg.manifest.course = { name: "Unfiled", term: 0, week: 0 };
+  const question = f.bank.pkg.questions[0] as typeof f.bank.pkg.questions[0] & { course?: string; term?: number };
+  question.course = "Unfiled";
+  question.term = 0;
+  const scope = { term: "Term 5", module: "GOER", evidence: "human-reviewed" } as const;
+  writeFixtureCatalog(f);
+  await expect(prepareAcademicUpload(f.read, scope)).rejects.toThrow(/own exact human-reviewed filing/);
+
+  (f.bank as typeof f.bank & { reviewedFiling?: object }).reviewedFiling = {
+    ...scope, weekAssignment: "unassigned",
+  };
+  writeFixtureCatalog(f);
+  const prepared = await prepareAcademicUpload(f.read, scope);
+  expect(prepared).toMatchObject({ template: "", metadata: { term: "Term 5", module: "GOER", ready_questions: 1 },
+    provenance: { scopeEvidence: "human-reviewed" } });
+  const backend = mockedStorage(prepared, await academicCollectionId("account-a", prepared.catalogId));
+  await expect(uploadAcademicCourse(backend.client, "account-a", prepared, () => {}, () => {}))
+    .resolves.toMatchObject({ status: "active" });
+  const forged = { ...prepared, provenance: { ...prepared.provenance, scopeEvidence: undefined } };
+  const rejected = mockedStorage(forged, await academicCollectionId("account-a", forged.catalogId));
+  await expect(uploadAcademicCourse(rejected.client, "account-a", forged, () => {}, () => {}))
+    .rejects.toThrow(/source-only direct upload needs/i);
+  expect(rejected.rpc).not.toHaveBeenCalled();
+});
+
+it("preflights a mixed source-only course with separate bank-level filing evidence", async () => {
+  const input = await library();
+  const source = input.catalog.sources.find(item => item.name === "unfiled-pq.pdf")!;
+  const bank = JSON.parse(new TextDecoder().decode(input.files.get(source.bankFile!)!));
+  bank.pkg.questions[0].course = "Unfiled";
+  bank.pkg.questions[0].term = 0;
+  bank.reviewedFiling = { term: "Term 4", module: "NCRS", evidence: "human-reviewed", weekAssignment: "unassigned" };
+  source.module = "NCRS";
+  input.files.set(source.bankFile!, encode(JSON.stringify(bank)));
+  input.files.set("catalog.json", encode(JSON.stringify(input.catalog)));
+  const inventory = await readPublicationInventory(input.read);
+  const course = planPublication(inventory).courses.find(item => item.term === "Term 4" && item.moduleKey === "ncrs")!;
+  const prepared = await publicationJobs(input.read, inventory, [course]).jobs[0].prepare();
+  const stored = (path: string) => JSON.parse(new TextDecoder().decode(prepared.files.find(file => file.path === path)!.bytes));
+  const ordinarySource = input.catalog.sources.find(item => item.name === "ncrs-pq.pdf")!;
+  expect(stored(ordinarySource.bankFile!).reviewedFiling.evidence).toBe("source-metadata");
+  expect(stored(source.bankFile!).reviewedFiling.evidence).toBe("human-reviewed");
+  const backend = mockedStorage(prepared, await academicCollectionId("account-a", prepared.catalogId));
+  await expect(uploadAcademicCourse(backend.client, "account-a", prepared, () => {}, () => {}))
+    .resolves.toMatchObject({ status: "active" });
+});
+
+it("rejects an incoming bank filing that conflicts with the source-only course", async () => {
   const f = await untemplatedBankFixture();
   (f.bank as typeof f.bank & { reviewedFiling: object }).reviewedFiling = {
     term: "Term 1", module: "MSK", evidence: "human-reviewed", weekAssignment: "unassigned",
   };
   writeFixtureCatalog(f);
   await expect(prepareAcademicUpload(f.read)).rejects.toThrow(/verified term, module/);
-  const corrected = await prepareAcademicUpload(f.read, {
+  await expect(prepareAcademicUpload(f.read, {
     term: "Term 5", module: "GOER", evidence: "human-reviewed",
-  });
-  const bank = JSON.parse(new TextDecoder().decode(
-    corrected.files.find(file => file.path === "banks/sample/bank.json")!.bytes,
-  ));
-  expect(bank.reviewedFiling).toEqual({
-    term: "Term 5", module: "GOER", evidence: "human-reviewed", weekAssignment: "unassigned",
-  });
+  })).rejects.toThrow(/bank's reviewed filing does not match/);
 });
 
 it("proves a template owns every source, bank and question scope before it bypasses manual review", async () => {
@@ -257,6 +321,33 @@ it("proves a template owns every source, bank and question scope before it bypas
   };
   writeFixtureCatalog(mixedContract);
   await expect(prepareAcademicUpload(mixedContract.read)).rejects.toThrow(/cannot also carry a manual reviewed filing/i);
+});
+
+it("accepts only a human-reviewed uniform Unfiled bank matching its course plan", async () => {
+  const f = await templateBackedBankFixture();
+  f.bank.pkg.manifest.course = { name: "Unfiled", term: 0, week: 0 };
+  const question = f.bank.pkg.questions[0] as typeof f.bank.pkg.questions[0] & { course?: string; term?: number };
+  question.course = "Unfiled";
+  question.term = 0;
+  (f.bank as typeof f.bank & { reviewedFiling?: object }).reviewedFiling = {
+    term: "Term 5", module: "GOER", evidence: "human-reviewed", weekAssignment: "unassigned",
+  };
+  writeFixtureCatalog(f);
+
+  const prepared = await prepareAcademicUpload(f.read);
+  const stored = JSON.parse(new TextDecoder().decode(prepared.files.find(file => file.path === "banks/sample/bank.json")!.bytes));
+  expect(stored.reviewedFiling).toMatchObject({ term: "Term 5", module: "GOER", evidence: "human-reviewed" });
+  expect(stored.pkg.manifest.course).toEqual({ name: "Unfiled", term: 0, week: 0 });
+  expect(stored.pkg.questions[0]).toMatchObject({ course: "Unfiled", term: 0 });
+  const backend = mockedStorage(prepared, await academicCollectionId("account-a", prepared.catalogId));
+  await expect(uploadAcademicCourse(backend.client, "account-a", prepared, () => {}, () => {}))
+    .resolves.toMatchObject({ status: "active" });
+
+  (f.bank as typeof f.bank & { reviewedFiling?: object }).reviewedFiling = {
+    term: "Term 4", module: "NCRS", evidence: "human-reviewed", weekAssignment: "unassigned",
+  };
+  writeFixtureCatalog(f);
+  await expect(prepareAcademicUpload(f.read)).rejects.toThrow(/reviewed filing does not match its course plan/);
 });
 
 it("accepts a documented module alias but rejects an unowned original-only source", async () => {
@@ -307,6 +398,68 @@ it("refuses a figure whose bytes do not match its declared image type", async ()
   await expect(prepareAcademicUpload(f.read, {
     term: "Term 5", module: "GOER", evidence: "human-reviewed",
   })).rejects.toThrow(/image content does not match/);
+});
+
+it("preserves a checked EMF source figure only on an already-held question", async () => {
+  const f = await untemplatedBankFixture();
+  const emf = new Uint8Array(48);
+  emf[0] = 1;
+  emf.set(new TextEncoder().encode(" EMF"), 40);
+  const checksum = await sha256(emf);
+  const question = f.bank.pkg.questions[0] as unknown as {
+    correctAnswer?: unknown; flags?: Array<{ type: string; message: string }>;
+    assets: Array<Record<string, unknown>>; stem: Array<Record<string, unknown>>;
+  };
+  delete question.correctAnswer;
+  question.flags = [{ type: "media_association_uncertain", message: "The source picture needs review." }];
+  question.assets.push({ id: "held-emf", filename: "held.emf", mimeType: "image/emf", byteSize: emf.length,
+    role: "question", questionId: "synthetic-q1", checksum });
+  question.stem.push({ type: "image", assetId: "held-emf", role: "question", alt: "Source figure" });
+  f.catalog.sources[0] = { ...(f.catalog.sources[0] as object), ready: 0, review: 1 };
+  f.files.set("banks/sample/assets/held.emf", emf);
+  writeFixtureCatalog(f);
+
+  const prepared = await prepareAcademicUpload(f.read, { term: "Term 5", module: "GOER", evidence: "source-metadata" });
+  expect(prepared.metadata).toMatchObject({ ready_questions: 0, review_questions: 1 });
+  expect(prepared.files.find(file => file.path === "banks/sample/assets/held.emf")).toMatchObject({
+    sha256: checksum.slice(7), mime_type: "image/emf", byte_size: emf.length,
+  });
+  const stored = JSON.parse(new TextDecoder().decode(prepared.files.find(file => file.path === "banks/sample/bank.json")!.bytes));
+  expect(stored.pkg.questions[0].correctAnswer).toBeUndefined();
+  expect(stored.issues).toContainEqual(expect.objectContaining({
+    severity: "error", code: "missing_required_media", questionId: "synthetic-q1",
+    message: expect.stringContaining("preserved, but AXOM cannot display it"),
+  }));
+  const backend = mockedStorage(prepared, await academicCollectionId("account-a", prepared.catalogId));
+  await expect(uploadAcademicCourse(backend.client, "account-a", prepared, () => {}, () => {}))
+    .resolves.toMatchObject({ status: "active" });
+});
+
+it("refuses EMF on an answer-ready question or when its header is not EMF", async () => {
+  const f = await untemplatedBankFixture();
+  const emf = new Uint8Array(48);
+  emf[0] = 1;
+  emf.set(new TextEncoder().encode(" EMF"), 40);
+  const question = f.bank.pkg.questions[0] as unknown as {
+    assets: Array<Record<string, unknown>>; stem: Array<Record<string, unknown>>;
+    flags?: Array<{ type: string; message: string }>;
+  };
+  question.flags = [{ type: "media_association_uncertain", message: "Check this picture." }];
+  question.assets.push({ id: "held-emf", filename: "held.emf", mimeType: "image/emf", role: "question",
+    questionId: "synthetic-q1", checksum: await sha256(emf) });
+  question.stem.push({ type: "image", assetId: "held-emf", role: "question", alt: "Source figure" });
+  f.files.set("banks/sample/assets/held.emf", emf);
+  writeFixtureCatalog(f);
+  await expect(prepareAcademicUpload(f.read, { term: "Term 5", module: "GOER", evidence: "source-metadata" }))
+    .rejects.toThrow(/Only an already-held question/);
+
+  delete (f.bank.pkg.questions[0] as { correctAnswer?: unknown }).correctAnswer;
+  f.catalog.sources[0] = { ...(f.catalog.sources[0] as object), ready: 0, review: 1 };
+  emf[40] = 0;
+  question.assets[0].checksum = await sha256(emf);
+  writeFixtureCatalog(f);
+  await expect(prepareAcademicUpload(f.read, { term: "Term 5", module: "GOER", evidence: "source-metadata" }))
+    .rejects.toThrow(/held EMF figure.*differs/);
 });
 
 it("rejects package-declared image size or dimensions that disagree with decoded bytes", async () => {
@@ -571,6 +724,25 @@ it("rejects unsafe, duplicate, oversized or noncanonical direct replay manifests
     .rejects.toThrow(/upload hash.*canonical/i);
   expect(backend.rpc).not.toHaveBeenCalled();
   expect(backend.bucket.upload).not.toHaveBeenCalled();
+});
+
+it("accepts genuine bytes from another realm while rejecting other view types", async () => {
+  const original = await prepareAcademicUpload((await fixture()).read);
+  const catalog = original.files.find(file => file.path === "catalog.json")!;
+  const crossRealm = runInNewContext("Uint8Array.from(bytes)", { bytes: [...catalog.bytes] }) as Uint8Array;
+  expect(crossRealm instanceof Uint8Array).toBe(false);
+  const replay = { ...original, files: original.files.map(file =>
+    file === catalog ? { ...file, bytes: crossRealm } : file) };
+  await expect(preflightAcademicUpload(replay)).resolves.toHaveLength(original.files.length);
+  const backend = mockedStorage(replay, await academicCollectionId("account-a", replay.catalogId));
+  await expect(uploadAcademicCourse(backend.client, "account-a", replay, () => {}, () => {}))
+    .resolves.toMatchObject({ status: "active" });
+
+  for (const bytes of [new Uint8ClampedArray(catalog.bytes), new DataView(catalog.bytes.buffer), [...catalog.bytes]]) {
+    const wrongView = { ...original, files: original.files.map(file =>
+      file === catalog ? { ...file, bytes: bytes as unknown as Uint8Array } : file) };
+    await expect(preflightAcademicUpload(wrongView)).rejects.toThrow(/unsafe file path or byte payload/);
+  }
 });
 
 it("rejects duplicate source SHA claims before creating a cloud revision", async () => {

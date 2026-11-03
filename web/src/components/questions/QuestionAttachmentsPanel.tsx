@@ -3,9 +3,9 @@
 // Bytes live in the questionAttachmentBlobs IndexedDB store; this component
 // only ever holds object URLs (revoked on cleanup) and metadata.
 // ===========================================================================
-import { useEffect, useRef, useState, type ClipboardEvent } from "react";
-import { ImagePlus, Trash2, X } from "lucide-react";
-import { GhostButton } from "../ui/primitives";
+import { useEffect, useId, useRef, useState, type ClipboardEvent } from "react";
+import { ImagePlus, RotateCcw, Trash2, X } from "lucide-react";
+import { GButton, GhostButton } from "../ui/primitives";
 import { ICON_SIZE } from "../../lib/iconSize";
 import {
   createQuestionAttachment,
@@ -13,6 +13,8 @@ import {
   getQuestionAttachmentBlob,
   isPrivateLibraryAttachmentBlobKey,
   MAX_QUESTION_ATTACHMENTS,
+  restoreMissingQuestionAttachment,
+  validateMissingQuestionAttachmentFile,
   type QuestionImageAttachment,
 } from "../../lib/questionAttachments";
 
@@ -34,8 +36,17 @@ export function QuestionAttachmentsPanel({
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<QuestionImageAttachment | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<QuestionImageAttachment | null>(null);
+  const [restoreCandidate, setRestoreCandidate] = useState<{ attachment: QuestionImageAttachment; file: File; url: string } | null>(null);
+  const [restoreError, setRestoreError] = useState("");
+  const [repairRevision, setRepairRevision] = useState(0);
   const [urls, setUrls] = useState<Record<string, string | "missing">>({});
+  const restoreTitleId = useId();
   const fileRef = useRef<HTMLInputElement>(null);
+  const restoreFileRef = useRef<HTMLInputElement>(null);
+  const restoreTargetRef = useRef<QuestionImageAttachment | null>(null);
+  const restoreTriggerRef = useRef<HTMLElement | null>(null);
+  const statusRef = useRef<HTMLSpanElement>(null);
   const previewTriggerRef = useRef<HTMLElement | null>(null);
   const attachmentsRef = useRef(attachments);
   attachmentsRef.current = attachments;
@@ -71,9 +82,20 @@ export function QuestionAttachmentsPanel({
       cancelled = true;
       created.forEach((url) => URL.revokeObjectURL(url));
     };
-  }, [questionId, blobSignature]);
+  }, [questionId, blobSignature, repairRevision]);
 
-  useEffect(() => { setPreview(null); setStatus(""); }, [questionId]);
+  useEffect(() => {
+    setPreview(null);
+    setRestoreCandidate(null);
+    setRestoreTarget(null);
+    restoreTargetRef.current = null;
+    setRestoreError("");
+    setStatus("");
+  }, [questionId]);
+
+  useEffect(() => () => {
+    if (restoreCandidate) URL.revokeObjectURL(restoreCandidate.url);
+  }, [restoreCandidate]);
 
   async function addFiles(files: readonly File[]) {
     if (!files.length || busy) return;
@@ -160,6 +182,62 @@ export function QuestionAttachmentsPanel({
     window.setTimeout(() => trigger?.focus(), 0);
   }
 
+  function requestRestore(attachment: QuestionImageAttachment, trigger: HTMLElement) {
+    restoreTargetRef.current = attachment;
+    restoreTriggerRef.current = trigger;
+    setRestoreTarget(attachment);
+    restoreFileRef.current?.click();
+  }
+
+  async function chooseRestoreFile(file: File | undefined) {
+    const attachment = restoreTargetRef.current;
+    if (!file || !attachment || busy) return;
+    setBusy(true);
+    const validation = await validateMissingQuestionAttachmentFile(file, attachment);
+    setBusy(false);
+    if (!validation.ok) {
+      setStatus(validation.message);
+      return;
+    }
+    setRestoreError("");
+    setStatus("");
+    setRestoreCandidate({ attachment, file, url: URL.createObjectURL(file) });
+  }
+
+  function closeRestore() {
+    setRestoreCandidate(null);
+    setRestoreError("");
+    setRestoreTarget(null);
+    restoreTargetRef.current = null;
+    const trigger = restoreTriggerRef.current;
+    restoreTriggerRef.current = null;
+    window.setTimeout(() => trigger?.focus(), 0);
+  }
+
+  async function confirmRestore() {
+    if (!restoreCandidate || busy) return;
+    const { attachment, file } = restoreCandidate;
+    const current = attachmentsRef.current.find((item) => item.id === attachment.id);
+    if (!current || current.blobKey !== attachment.blobKey || current.byteSize !== attachment.byteSize) {
+      setRestoreError("This question changed. Close this preview and choose the image again.");
+      return;
+    }
+    setBusy(true);
+    const result = await restoreMissingQuestionAttachment({ file, attachment: current, questionId });
+    setBusy(false);
+    if (result.status !== "restored") {
+      setRestoreError(result.message);
+      return;
+    }
+    setRestoreCandidate(null);
+    setRestoreTarget(null);
+    restoreTargetRef.current = null;
+    restoreTriggerRef.current = null;
+    setRepairRevision((revision) => revision + 1);
+    setStatus(`Restored "${attachment.fileName}" on this device. Your question was not changed.`);
+    window.setTimeout(() => statusRef.current?.focus(), 0);
+  }
+
   const previewUrl = preview ? urls[preview.id] : undefined;
 
   return (
@@ -180,6 +258,17 @@ export function QuestionAttachmentsPanel({
           hidden
           aria-label="Attach images to this question"
           onChange={(event) => void addFiles([...(event.target.files ?? [])])}
+        />
+        <input
+          ref={restoreFileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          hidden
+          aria-label={restoreTarget ? `Choose original for ${restoreTarget.fileName}` : "Choose original question image"}
+          onChange={(event) => {
+            void chooseRestoreFile(event.target.files?.[0]);
+            event.target.value = "";
+          }}
         />
       </div>
       {attachments.length === 0 && (
@@ -208,6 +297,12 @@ export function QuestionAttachmentsPanel({
                 <div className="question-attachment-meta">
                   <span className="question-attachment-name" title={attachment.fileName}>{attachment.fileName}</span>
                   <span className="sub">{formatBytes(attachment.byteSize)}{attachment.width && attachment.height ? ` · ${attachment.width}×${attachment.height}` : ""}</span>
+                  {url === "missing" && !isPrivateLibraryAttachmentBlobKey(attachment.blobKey) && (
+                    <GhostButton disabled={busy} aria-label={`Restore ${attachment.fileName}`}
+                      onClick={(event) => requestRestore(attachment, event.currentTarget)}>
+                      <RotateCcw size={ICON_SIZE.body} /> Restore image
+                    </GhostButton>
+                  )}
                   <input
                     className="field question-attachment-alt"
                     type="text"
@@ -229,7 +324,35 @@ export function QuestionAttachmentsPanel({
           })}
         </ul>
       )}
-      <span className="sub" role="status" aria-live="polite">{status}</span>
+      <span ref={statusRef} className="sub" role="status" aria-live="polite" tabIndex={-1}>{status}</span>
+
+      {restoreCandidate && (
+        <div className="question-attachment-lightbox" role="dialog" aria-modal="true"
+          aria-labelledby={restoreTitleId}
+          onKeyDown={(event) => { if (event.key === "Escape" && !busy) { event.stopPropagation(); closeRestore(); } }}>
+          <div className="question-attachment-restore-card">
+            <div className="question-attachment-lightbox-head">
+              <h3 id={restoreTitleId}>Restore missing image</h3>
+              <GhostButton className="icon-only" aria-label="Close image restore" autoFocus disabled={busy} onClick={closeRestore}>
+                <X size={ICON_SIZE.body} />
+              </GhostButton>
+            </div>
+            <p>Compare this preview with the original question image before saving it.</p>
+            <img src={restoreCandidate.url} alt={`Selected file: ${restoreCandidate.file.name}`} />
+            <p className="question-attachment-restore-file">{restoreCandidate.file.name} · {formatBytes(restoreCandidate.file.size)}
+              {restoreCandidate.attachment.width && restoreCandidate.attachment.height
+                ? ` · ${restoreCandidate.attachment.width}×${restoreCandidate.attachment.height}` : ""}</p>
+            <p className="sub">The recorded file details match. AXOM cannot prove this is the same original image from those details alone.</p>
+            {restoreError && <p role="alert" className="question-attachment-restore-error">{restoreError}</p>}
+            <div className="question-attachment-restore-actions">
+              <GhostButton disabled={busy} onClick={closeRestore}>Cancel</GhostButton>
+              <GButton variant="primary" disabled={busy} onClick={() => void confirmRestore()}>
+                {busy ? "Verifying…" : "Restore this image"}
+              </GButton>
+            </div>
+          </div>
+        </div>
+      )}
 
       {preview && (
         <div

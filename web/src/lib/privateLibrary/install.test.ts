@@ -4,7 +4,7 @@ import { Blob as NativeBlob, File as NativeFile } from "node:buffer";
 import { useStore } from "../store";
 import { closeWorkspace, openEmptyWorkspace, reloadWorkspace } from "../question-content/persistenceHarness.testing";
 import { sha256 } from "../question-content/assets";
-import { bankFiles, folderLibraryReader, installPrivateLibrary, mergeStoredReview, readCatalog, readPreparedBank, safeLibraryPath } from "./install";
+import { auditedRhpsSourceRefresh, bankFiles, folderLibraryReader, installPrivateLibrary, mergeStoredReview, readCatalog, readPreparedBank, safeLibraryPath } from "./install";
 import { PRIVATE_LIBRARY_DOCUMENT, PRIVATE_LIBRARY_FORMAT, PRIVATE_REVIEW_DOCUMENT, type PreparedBank, type PrivateLibraryCatalog } from "./types";
 import { privateReviewMedia } from "./media";
 import { collectQuestionAttachmentPayloads, deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, listQuestionAttachmentBlobKeys, restoreQuestionAttachmentPayloads, runQuestionAttachmentMaintenance } from "../questionAttachments";
@@ -12,8 +12,21 @@ import { buildCourseBooks } from "../bookshelf/courseBooks";
 import { withPreparedCourses, loadPreparedCourse } from "../bookshelf/preparedCourses";
 import { academicBindings, academicRecord } from "../academicLibrary/contentReferences";
 import { CURRICULA } from "../curricula";
+import { assessBank } from "../question-content/assessBank";
+import { STORAGE_KEYS } from "../brand";
+import { createLocalBackup, refreshLocalBackupSummaries, resetLocalBackupRuntimeForTests } from "../localBackup";
 
 const encode = (value: unknown) => new TextEncoder().encode(typeof value === "string" ? value : JSON.stringify(value));
+
+it("enables source refresh only for the audited RHPS 1090 catalog edition", async () => {
+  const { catalog } = await bundle();
+  const base = "axom-rhps-reconciled-1090-source-verified-2026-11-01";
+  expect(auditedRhpsSourceRefresh(catalog)).toBe(false);
+  expect(auditedRhpsSourceRefresh({ ...catalog, id: base, version: "2026-11-01-1090", preparerVersion: 1 })).toBe(true);
+  expect(auditedRhpsSourceRefresh({ ...catalog, id: `${base}-part-03-of-08`, version: "2026-11-01-1090-part-03", preparerVersion: 1 })).toBe(true);
+  expect(auditedRhpsSourceRefresh({ ...catalog, id: `${base}-part-03-of-08`, version: "2026-11-01-1090-part-04", preparerVersion: 1 })).toBe(false);
+  expect(auditedRhpsSourceRefresh({ ...catalog, id: base, version: "2026-11-01-1090", preparerVersion: 2 })).toBe(false);
+});
 async function bundle() {
   const template = encode("T5 - GOER - Lectures:\nWeek 1:\nLecture 01 Example topic [Lecture]");
   const checksum = (await sha256(template)).slice(7);
@@ -28,9 +41,35 @@ async function bundle() {
 function stubSuccessfulImageDecode(width = 1, height = 1) {
   vi.stubGlobal("createImageBitmap", vi.fn(async () => ({ width, height, close: vi.fn() })));
 }
-beforeEach(async () => { await openEmptyWorkspace(); vi.stubGlobal("Blob", NativeBlob); vi.stubGlobal("File", NativeFile); });
-afterEach(async () => { await closeWorkspace(); vi.unstubAllGlobals(); });
+beforeEach(async () => { await openEmptyWorkspace(); resetLocalBackupRuntimeForTests(); vi.stubGlobal("Blob", NativeBlob); vi.stubGlobal("File", NativeFile); });
+afterEach(async () => { resetLocalBackupRuntimeForTests(); await closeWorkspace(); vi.unstubAllGlobals(); });
 describe("prepared private library installation", () => {
+  it.each([undefined, "a".repeat(64), `sha256:${"d".repeat(64)}`])("rejects invalid source bindings on the first install: %s", async (sourceChecksum) => {
+    const b = await bundle();
+    const bank = readPreparedBank(JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)));
+    bank.pkg.questions[0].provenance.sourceChecksum = sourceChecksum;
+    b.files.set("banks/test/bank.json", encode(bank));
+    const result = await installPrivateLibrary(b.read);
+    expect(result.status).toBe("partial");
+    expect(result.warnings.join(" ")).toContain("does not match its recorded source checksum");
+    expect(useStore.getState().questions).toHaveLength(0);
+    expect(useStore.getState().documents.filter(document => document.fileType === PRIVATE_REVIEW_DOCUMENT)).toHaveLength(0);
+  });
+  it("keeps a held candidate key on reimport without restoring a reviewer-cleared key", async () => {
+    const b = await bundle();
+    const bank = readPreparedBank(JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)));
+    const candidate = bank.pkg.questions[0];
+    candidate.correctAnswer = { labels: ["A"], evidence: "answer-reveal-slide" };
+    candidate.flags = [{ type: "answer_needs_review", message: "Check the observed source mark." }];
+    const merged = mergeStoredReview(bank, bank, `sha256:${"a".repeat(64)}`);
+    expect(merged.pkg.questions[0].correctAnswer).toEqual(candidate.correctAnswer);
+    expect(assessBank(merged.pkg, merged.issues, []).counts).toEqual({ ready: 0, "needs-review": 1, unresolved: 0 });
+    const cleared = structuredClone(bank);
+    delete cleared.pkg.questions[0].correctAnswer;
+    const reinstalled = mergeStoredReview(bank, cleared, `sha256:${"a".repeat(64)}`);
+    expect(reinstalled.pkg.questions[0].correctAnswer).toBeUndefined();
+    expect(assessBank(reinstalled.pkg, reinstalled.issues, []).counts.ready).toBe(0);
+  });
   it("binds original documents by their verified file checksum, never a filename match", async () => {
     const b = await bundle();
     const original = encode("Verified original document bytes.");
@@ -99,6 +138,25 @@ describe("prepared private library installation", () => {
     expect(useStore.getState().questions[0].stem).toBe("My clarified question wording?");
     expect(useStore.getState().tracker.filter(t => t.templateKey)).toHaveLength(1);
     expect(useStore.getState().tracker.find(t => t.id === item.id)).toMatchObject({ passes: 2, label: "My personal title" });
+  });
+  it("hydrates markerless durable backups before choosing import snapshot retention", async () => {
+    const priorKeys = await Promise.all([
+      createLocalBackup(31, 8),
+      createLocalBackup(32, 8),
+      createLocalBackup(33, 8),
+    ]);
+    expect(priorKeys.every(Boolean)).toBe(true);
+    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+      const key = localStorage.key(index);
+      if (key?.startsWith(STORAGE_KEYS.localBackupPrefix)) localStorage.removeItem(key);
+    }
+    resetLocalBackupRuntimeForTests();
+
+    await installPrivateLibrary((await bundle()).read);
+
+    const retained = await refreshLocalBackupSummaries();
+    expect(retained).toHaveLength(4);
+    expect(priorKeys.every(key => retained.some(summary => summary.key === key))).toBe(true);
   });
   it("rejects damaged templates before declaring installation complete, and resumes missing banks", async () => {
     const b = await bundle();
@@ -204,6 +262,27 @@ describe("prepared private library installation", () => {
     expect(() => readPreparedBank({ ...mixed, reviewedFiling: {
       term: "Term 5", module: "GOER", evidence: "human-reviewed", weekAssignment: "unassigned",
     } })).toThrow("cannot collapse several original modules or terms");
+  });
+  it("keeps one Unfiled source scope intact behind an explicit human-reviewed filing", async () => {
+    const b = await bundle();
+    const original = JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)) as PreparedBank;
+    original.pkg.manifest.course = { name: "Unfiled", term: 0, week: 0 };
+    original.pkg.questions[0].course = "Unfiled";
+    original.pkg.questions[0].term = 0;
+    const filing = { term: "Term 4", module: "NCRS", evidence: "human-reviewed", weekAssignment: "unassigned" } as const;
+    const accepted = readPreparedBank({ ...original, reviewedFiling: filing });
+    expect(accepted.reviewedFiling).toEqual(filing);
+    expect(accepted.pkg.manifest.course).toEqual({ name: "Unfiled", term: 0, week: 0 });
+    expect(accepted.pkg.questions[0]).toMatchObject({ course: "Unfiled", term: 0 });
+    expect(() => readPreparedBank({ ...original, reviewedFiling: { ...filing, evidence: "source-metadata" } }))
+      .toThrow(/explicit human review/);
+
+    const mixed = structuredClone(original);
+    mixed.pkg.questions[0].term = 1;
+    expect(() => readPreparedBank({ ...mixed, reviewedFiling: filing })).toThrow(/invalid original module or term/);
+    const invalid = structuredClone(original);
+    invalid.pkg.manifest.course.name = "NCRS";
+    expect(() => readPreparedBank({ ...invalid, reviewedFiling: filing })).toThrow(/invalid original module or term/);
   });
   it("preserves only reviewer-editable content while adopting corrected source metadata", async () => {
     const b = await bundle();

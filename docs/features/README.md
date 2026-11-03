@@ -16,6 +16,9 @@ Choose one row. Existing feature contracts remain canonical at their established
 | Targets, timers, study accounting | [Productivity](productivity.md) | `pages/ProductivityPage.tsx`, `lib/pomodoro.ts` |
 | Soundscapes, focus media, media pipeline | [Soundscapes](soundscapes.md) | `pages/SoundscapesPage.tsx`, `lib/soundscapes/`, `lib/media/` |
 | Dashboard widgets/next action | [Widget contract](../DASHBOARD-WIDGET-ARCHITECTURE.md), [brief evidence](../COMMAND-BRIEF-EVIDENCE.md) | `pages/DashboardPage.tsx`, `lib/dashboardWidgets.ts`, `lib/commandBrief.ts` |
+| Communities and reviewed shared study | [Communities](communities.md), [academic library](academic-library.md) | `pages/CommunitiesPage.tsx`, `lib/academicLibrary/community.ts` |
+| Visual mechanism studies | [Body simulator](body-simulator.md) | `pages/BodySimulatorPage.tsx`, `lib/simulator/asthmaScenario.ts` |
+| Release history and update copy | [Patch notes](patch-notes.md) | `pages/PatchNotesPage.tsx`, `lib/patchNotes.ts` |
 | Courses, tracker, schedule import | [Course design proposal](../COURSE-CENTRAL-ARCHITECTURE.md), not proof of live integrations | `pages/CoursesPage.tsx`, `pages/CourseTrackerPage.tsx`, `lib/courseScheduleImport.ts` |
 | Course templates, file mapping, patterns, review | [Course engine and learning intelligence](course-engine.md) | `lib/course-engine/`, `lib/learning-intelligence/`, `components/questions/AnalysisPanel.tsx` |
 | What a source teaches about a question; source tracing | [Decode](decode.md) | `lib/decode/` |
@@ -52,3 +55,5 @@ Check the registry and do not create parallel question-attempt or assignment sto
 [Communications](communications.md) owns email consent, shared templates, queues,
 editorial publishing, privacy requests and the canonical Pulse snapshot/web experience.
 Provider activation is routed to the [Resend runbook](../operations/communications-resend.md).
+Local configuration checks and the welcome draft are in
+[Communications readiness](../operations/communications-readiness.md).

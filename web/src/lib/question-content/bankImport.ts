@@ -8,10 +8,12 @@
 // pretending that either the whole bank succeeded or nothing was saved.
 // ===========================================================================
 import type { ImportLibrary } from "../questionImportHistory";
-import { prepareReviewedImport, saveReviewedImport, type ReviewedImportStore } from "../questionImportSave";
+import { prepareReviewedImport, saveReviewedImport, type PreparedReviewedImport, type ReviewedImportStore, type SavedReviewedImport } from "../questionImportSave";
 import { hasReviewedImportInFlight, type ReviewedFilingScope } from "../questionImportFinalization";
+import type { ReviewedSourceRefreshFields, ReviewedSourceRefreshResult } from "../questionImportFinalization";
 import type { QuestionRecord } from "../questions";
 import type { ImportPackage, PackageIssue } from "./package";
+import { legacyQuestionFields } from "./legacyFields";
 import { packageToReviewedImport, type HeldQuestion, type PackageImportOptions, type WithheldAsset } from "./toReviewedImport";
 
 export interface SavedSection {
@@ -25,6 +27,8 @@ export interface SavedSection {
   savedIds: string[];
   /** An earlier question set was reused; missing image bytes may have been repaired. */
   reused: boolean;
+  /** Existing source questions brought up to this audited package version. */
+  refreshed?: number;
   images: { attached: number; missing: number; problems: string[] };
 }
 
@@ -209,9 +213,152 @@ async function refileReusedSets(
   });
 }
 
+type SavedSuccess = Extract<SavedReviewedImport, { ok: true }>;
+
+function untouchedSourceEvidence(question: QuestionRecord): boolean {
+  const content = question.content;
+  const extraction = question.extraction;
+  if (!content || !extraction || extraction.reviewed !== true
+    || extraction.reviewedAt !== question.sourceFile?.addedAt
+    || question.sourcePage !== content.source.page
+    || question.questionNumber !== content.source.questionNumber) return false;
+  const source = content.source;
+  const place = source.set === undefined ? "" : `set ${source.set}${source.setTitle ? ` (${source.setTitle})` : ""}`;
+  const citation = [source.filename, place,
+    ...(source.questionNumber !== undefined ? [`question ${source.questionNumber}`] : []),
+  ].filter(Boolean).join(", ");
+  const answerImage = content.assets.find((asset) => asset.role === "answer_reveal");
+  const teachingImage = content.assets.find((asset) => asset.role === "explanation");
+  const answerLabel = content.correctAnswer?.labels.join(", ");
+  const answerSnippet = answerImage && answerLabel
+    ? `${content.correctAnswer?.evidence === "source-mark-verified" ? "Visually marked source answer" : "Source answer image"}: ${answerLabel}. Original image: ${answerImage.sourceFile ?? source.filename}${answerImage.sourcePage !== undefined ? `, page ${answerImage.sourcePage}` : ""}${answerImage.checksum ? `, ${answerImage.checksum}` : ""}.`
+    : undefined;
+  const teachingSnippet = teachingImage
+    ? `Original teaching image: ${teachingImage.sourceFile ?? source.filename}${teachingImage.sourcePage !== undefined ? `, page ${teachingImage.sourcePage}` : ""}${teachingImage.checksum ? `, ${teachingImage.checksum}` : ""}.`
+    : undefined;
+  return question.citation === citation
+    && extraction.questionSourcePage === source.page
+    && extraction.answerEvidenceSnippet === answerSnippet
+    && extraction.answerEvidencePage === answerImage?.sourcePage
+    && extraction.explanationSourceSnippet === teachingSnippet
+    && extraction.explanationSourcePage === teachingImage?.sourcePage
+    && !extraction.sourceSnippet && !extraction.questionSourceSnippet
+    && !extraction.answerEvidence && !extraction.explanationSource
+    && !extraction.explanationRawCandidate && !extraction.explanationCleanupOperations?.length
+    && extraction.answerDetectionConfidence === undefined
+    && extraction.questionDetectionConfidence === undefined
+    && extraction.explanationDetectionConfidence === undefined
+    && extraction.overallImportConfidence === undefined
+    && JSON.stringify(extraction.parserRuleIds) === JSON.stringify([
+      "import.package", `import.package.${content.provenance.method}`,
+    ]);
+}
+
+function untouchedSourceQuestion(question: QuestionRecord, pkg: ImportPackage): boolean {
+  if (question.status !== "unseen" || question.attempts.length || question.marked
+    || question.notes?.trim() || question.annotations?.length || question.userAnswerKey
+    || question.attemptedAt || question.reviewDueAt || question.confidence !== undefined
+    || question.timeSpentSeconds !== undefined || question.errorType || question.needsReview
+    || !question.content) return false;
+  const original = legacyQuestionFields(pkg.manifest, question.content);
+  // Earlier table serialization could drop one trailing cell space. That
+  // whitespace has no learner meaning; all substantive wording must match.
+  return untouchedSourceEvidence(question)
+    && question.stem.trimEnd() === original.stem.trimEnd()
+    && JSON.stringify(question.options) === JSON.stringify(original.options)
+    && (question.explanation ?? "") === (original.explanation ?? "")
+    && question.correctKey === original.correctKey;
+}
+
+async function refreshReusedSource(
+  pkg: ImportPackage,
+  prepared: PreparedReviewedImport,
+  saved: SavedSuccess,
+  workspace: Workspace,
+): Promise<ReviewedSourceRefreshResult> {
+  const failure = (message: string): ReviewedSourceRefreshResult => ({ ok: false, message, rollbackFailures: [] });
+  if (!saved.reused || !saved.setId || !prepared.plan.questionSet) {
+    return failure("An existing source question could not be matched to its saved set; no audited content was replaced.");
+  }
+  if (saved.images.missing || saved.images.problems.length) {
+    return failure("Source images did not finish saving, so the existing questions were not refreshed. Retry with the same package.");
+  }
+  const store = workspace.store();
+  if (!store.commitReviewedSourceRefresh) {
+    return failure("This workspace cannot durably refresh equivalent source questions.");
+  }
+  store.assertCurrent?.();
+  const library = workspace.library();
+  const set = library.questionSets.find((entry) => entry.id === saved.setId);
+  if (!set || set.questionIds.length !== saved.questionIds.length
+    || set.questionIds.some((id) => !saved.questionIds.includes(id))
+    || saved.questionIds.length !== prepared.plan.questions.length) {
+    return failure("The reused source set has different membership. Its existing questions were preserved for inspection.");
+  }
+  const entries: Array<{ expected: QuestionRecord; source: ReviewedSourceRefreshFields }> = [];
+  for (const [index, id] of saved.questionIds.entries()) {
+    const previous = library.questions.find((question) => question.id === id);
+    const candidate = prepared.plan.questions[index];
+    const content = candidate?.content;
+    if (!previous || !content || previous.setId !== set.id || !previous.content
+      || previous.content.id !== content.id || previous.content.bankId !== content.bankId
+      || previous.content.provenance.sourceChecksum !== content.provenance.sourceChecksum
+      || previous.correctKey !== candidate.correctKey) {
+      return failure(`Question ${id} no longer matches this exact source, so its old record was preserved.`);
+    }
+    if (!untouchedSourceQuestion(previous, pkg)) {
+      return failure(`Question ${id} has learner edits or source text changes. The set was preserved without an automatic refresh.`);
+    }
+    entries.push({ expected: previous, source: {
+      content,
+      stem: candidate.stem,
+      options: candidate.options,
+      correctKey: candidate.correctKey,
+      correctAnswerText: candidate.options.find((option) => option.key === candidate.correctKey)?.text,
+      explanation: candidate.explanation,
+      extraction: candidate.extraction,
+      citation: candidate.citation,
+      module: prepared.plan.questionSet.scope?.module,
+      week: prepared.plan.questionSet.scope?.week,
+      courseId: prepared.plan.questionSet.scope?.courseId,
+      questionNumber: candidate.questionNumber,
+      sourcePage: candidate.sourcePage,
+      needsReview: undefined,
+    } });
+  }
+  try {
+    store.assertCurrent?.();
+    return await store.commitReviewedSourceRefresh({
+      setId: set.id,
+      expectedSet: set,
+      targetScope: prepared.plan.questionSet.scope,
+      questions: entries,
+    });
+  } catch (error) {
+    return failure(error instanceof Error ? error.message : "The audited source refresh could not be saved.");
+  }
+}
+
 export async function saveBank(pkg: ImportPackage, issues: readonly PackageIssue[], files: readonly File[], workspace: Workspace, options: PackageImportOptions = {}): Promise<BankSave> {
   const adapted = packageToReviewedImport(pkg, issues, options);
   const result: BankSave = { status: "nothing-ready", sections: [], incompleteSections: [], held: adapted.held, withheldAssets: adapted.withheldAssets, filing: adapted.filing, errors: [] };
+  if (options.refreshEquivalentSource) {
+    const existing = workspace.library().questions;
+    const conflicts = adapted.imports.flatMap((section) => section.request.drafts.flatMap((draft) => {
+      const content = draft.content;
+      if (!content) return [];
+      const match = existing.find((question) => question.content?.id === content.id
+        && question.content.bankId === content.bankId
+        && question.content.provenance.sourceChecksum === content.provenance.sourceChecksum
+        && (!question.setId || question.correctKey !== draft.correctKey));
+      return match ? [content.id] : [];
+    }));
+    if (conflicts.length) {
+      result.status = "failed";
+      result.errors.push(`Audited reimport found existing questions without an intact set or with a different source key: ${conflicts.join(", ")}. No questions from this bank were imported.`);
+      return result;
+    }
+  }
   // A later review can release more questions from the same source. Reuse
   // earlier subsets instead of importing their canonical questions again.
   const imports = adapted.imports.flatMap(section => {
@@ -267,9 +414,44 @@ export async function saveBank(pkg: ImportPackage, issues: readonly PackageIssue
         const previous = section.request.drafts.map(draft => library.questions.find(q =>
           set?.questionIds.includes(q.id) && q.content?.id === draft.content?.id &&
           q.content?.bankId === draft.content?.bankId && q.content?.provenance.sourceChecksum === draft.content?.provenance.sourceChecksum));
+        // A matching source with a changed key is a conflict, never a silent
+        // replacement of a learner's existing answer mapping.
+        if (options.refreshEquivalentSource && previous.some((q, index) => q?.correctKey !== section.request.drafts[index].correctKey)) {
+          const reason = `${name}: an existing source answer differs from the audited package; no question was replaced.`;
+          result.errors.push(reason);
+          result.incompleteSections.push(incomplete(reason));
+          continue;
+        }
         if (set && previous.every(q => q !== undefined)) prepared.equivalent = {
           setId: set.id, questionIds: previous.map(q => q!.id), attachments: previous.map(q => q!.attachments ?? []),
         };
+      }
+      if (options.refreshEquivalentSource && section.existingSetId && !prepared.equivalent) {
+        const reason = `${name}: matching source questions have no intact saved set; no duplicate was imported.`;
+        result.errors.push(reason);
+        result.incompleteSections.push(incomplete(reason));
+        continue;
+      }
+      if (options.refreshEquivalentSource && prepared.equivalent) {
+        const library = workspace.library();
+        const set = library.questionSets.find((entry) => entry.id === prepared.equivalent!.setId);
+        const current = prepared.equivalent.questionIds.map((id) => library.questions.find((question) => question.id === id));
+        if (!set || set.questionIds.length !== current.length
+          || set.questionIds.some((id) => !prepared.equivalent!.questionIds.includes(id))
+          || current.some((question) => !question || !untouchedSourceQuestion(question, pkg))) {
+          const reason = `${name}: a reused source question has learner edits or changed set membership. Its existing record and images were preserved.`;
+          result.errors.push(reason);
+          result.incompleteSections.push(incomplete(reason, {
+            setId: set?.id, questionIds: prepared.equivalent.questionIds, reused: true,
+          }));
+          continue;
+        }
+      }
+      if (options.refreshEquivalentSource && section.existingSetId && !workspace.store().commitReviewedSourceRefresh) {
+        const reason = `${name}: this workspace cannot durably refresh equivalent source questions.`;
+        result.errors.push(reason);
+        result.incompleteSections.push(incomplete(reason));
+        continue;
       }
       const saved = await saveReviewedImport(prepared, workspace.store(), files);
       if (!saved.ok) {
@@ -277,6 +459,19 @@ export async function saveBank(pkg: ImportPackage, issues: readonly PackageIssue
         result.errors.push(reason);
         result.incompleteSections.push(incomplete(reason));
         continue;
+      }
+      let refreshed = 0;
+      if (options.refreshEquivalentSource && section.existingSetId) {
+        const refresh = await refreshReusedSource(pkg, prepared, saved, workspace);
+        if (!refresh.ok) {
+          const reason = `${name}: ${refresh.message}${refresh.rollbackFailures.length ? ` Rollback could not restore ${refresh.rollbackFailures.join(", ")}.` : ""}`;
+          result.errors.push(reason);
+          result.incompleteSections.push(incomplete(reason, {
+            setId: saved.setId, documentId: saved.documentId, questionIds: saved.questionIds, reused: saved.reused,
+          }));
+          continue;
+        }
+        refreshed = refresh.updated;
       }
       const requiresRefiling = Boolean(saved.reused && saved.setId && options.reviewedFiling);
       if (requiresRefiling) refileRequests.push({ setId: saved.setId!, target: section.request.scope! });
@@ -290,6 +485,7 @@ export async function saveBank(pkg: ImportPackage, issues: readonly PackageIssue
         questionIds: section.questionIds,
         savedIds: saved.questionIds,
         reused: saved.reused,
+        ...(refreshed ? { refreshed } : {}),
         images: saved.images,
         requiresRefiling,
       });

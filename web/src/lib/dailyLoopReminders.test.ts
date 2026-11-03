@@ -5,6 +5,8 @@ import {
   emptyDailyLoopReminderMetadata,
   evaluateDailyLoopReminder,
   isWithinDailyLoopQuietHours,
+  journalCatchUpDay,
+  journalPageComplete,
   normalizeDailyLoopReminderPreferences,
 } from "./dailyLoopReminders";
 
@@ -27,6 +29,19 @@ function memoryStorage(initial?: string) {
 }
 
 describe("daily-loop reminder policy", () => {
+  it("offers one yesterday page after 08:00 when activity or a draft exists", () => {
+    const draft = {
+      id: "page", date: "2026-07-13T18:00:00.000Z", today: "", tomorrow: "", blockers: "",
+      energy: "" as const, rating: "", notebookStatus: "draft" as const,
+    };
+    const state = { journal: [draft], logs: [], dayPlans: [], closeouts: [] };
+    expect(journalCatchUpDay(state, localTime(7, 59, 14))).toBeNull();
+    expect(journalCatchUpDay(state, localTime(8, 0, 14))).toBe(DAY);
+    expect(journalCatchUpDay({ ...state, journal: [{ ...draft, notebookStatus: "complete" }] }, localTime(9, 0, 14))).toBeNull();
+    expect(journalPageComplete([{ ...draft, notebookStatus: "complete" }], DAY)).toBe(true);
+    expect(journalCatchUpDay({ journal: [], logs: [], dayPlans: [], closeouts: [] }, localTime(9, 0, 14))).toBeNull();
+  });
+
   it("uses safe morning and 20:30 local defaults while normalizing invalid preferences", () => {
     expect(normalizeDailyLoopReminderPreferences(undefined)).toEqual({
       checkInEnabled: true,

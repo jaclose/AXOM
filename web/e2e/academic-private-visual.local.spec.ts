@@ -20,7 +20,7 @@ for (const width of [1440, 390]) test(`private original PDF renders real QBank r
   await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
   await seedOnboarded(page);
   await page.goto("/#questions");
-  await page.getByRole("button", { name: "Add your own material", exact: true }).click();
+  await page.getByRole("tab", { name: "Add material", exact: true }).click();
   await page.getByLabel("Choose question files or a ZIP to import").setInputFiles(filepath);
   const preview = page.getByRole("region", { name: "Source question bank preview" });
   await expect(preview).toBeVisible({ timeout: 60_000 });

@@ -44,7 +44,7 @@ export interface AnchorOptions {
 }
 
 const HEADED_KEY = /^\s*(?:Q(?:uestion)?\.?\s*)?(\d{1,3})\s*[.)]?\s*$/i;
-const CHOICE_CELL = /^\s*\(?[A-Ha-h]\)?[.)]?(?:\s|$)/;
+const CHOICE_CELL = /^\s*\(?[A-Ia-i]\)?[.)]?(?:\s|$)/;
 
 /**
  * An answer key laid out as a table (question number, then the letter) is
@@ -247,6 +247,8 @@ export function draftsToQuestions(drafts: readonly ParsedQuestionDraft[], anchor
       source: {
         filename: defaults.sourceFilename,
         ...(page !== undefined ? { page } : {}),
+        ...(draft.answerEvidencePage !== undefined ? { answerEvidencePage: draft.answerEvidencePage } : {}),
+        ...(draft.explanationSourcePage !== undefined ? { explanationSourcePage: draft.explanationSourcePage } : {}),
         ...(draft.questionNumber !== undefined ? { questionNumber: draft.questionNumber } : {}),
       },
       stem,

@@ -5,6 +5,7 @@ import { makeSeed } from "../seed";
 import type { SnapshotEnvelope } from "./syncTypes";
 import { accountOperationClient } from "../account/supabase";
 import { repairMissingCloudOriginals, uploadCloudOriginals } from "./cloudOriginals";
+import { uploadCloudContent } from "./cloudContent";
 import { readSyncBaseline } from "./syncBaseline";
 import { SupabaseSyncTransport } from "./supabaseTransport";
 
@@ -42,7 +43,9 @@ function setup(fail: { code: string; message: string }, repaired: number = 1) {
   });
   const chain = {
     select: vi.fn(), neq: vi.fn(), order: vi.fn(), limit: vi.fn(), eq: vi.fn(),
-    maybeSingle: vi.fn(async () => ({ data: { media: [], sources: [], content: "{\\\"documents\\\":[]}" }, error: null })),
+    maybeSingle: vi.fn()
+      .mockResolvedValueOnce({ data: { id: "workspace-id" }, error: null, status: 200 })
+      .mockResolvedValue({ data: { media: [], sources: [], content: "{\\\"documents\\\":[]}" }, error: null, status: 200 }),
     single: vi.fn(async () => ({ data: { id: "recovered-id", revision: 1, content_hash: digest, reason: "automatic" }, error: null, status: 200 })),
   };
   for (const method of ["select", "neq", "order", "limit", "eq"] as const) chain[method].mockReturnValue(chain);
@@ -63,12 +66,53 @@ function setup(fail: { code: string; message: string }, repaired: number = 1) {
     deviceId: "22222222-2222-4222-8222-222222222222", baseRevision: 0,
     idempotencyKey: "33333333-3333-4333-8333-333333333333", reason: "automatic",
   };
-  return { client, rpc, requests, assertCurrent, envelope };
+  return { client, chain, rpc, requests, assertCurrent, envelope };
 }
 
 beforeEach(() => vi.clearAllMocks());
 
 describe("workspace cloud-original repair acknowledgement", () => {
+  it("labels account setup failures without retaining private exception text", async () => {
+    const fixture = setup({ code: "PT409", message: "original source upload is incomplete" });
+    vi.mocked(accountOperationClient).mockRejectedValueOnce({
+      statusCode: 503, code: "Bearer private-token", message: "private source https://example.invalid",
+    });
+    const error = await new SupabaseSyncTransport().push(fixture.envelope).catch(value => value);
+    expect(error).toMatchObject({ failure: { kind: "server", status: 503, phase: "preflight" } });
+    expect(JSON.stringify(error.failure)).not.toMatch(/private|bearer|https/i);
+    expect(error.message).toBe("Account upload stopped during preflight.");
+    expect(fixture.rpc).not.toHaveBeenCalled();
+  });
+
+  it("labels a failed local sync-baseline read before any upload", async () => {
+    const fixture = setup({ code: "PT409", message: "original source upload is incomplete" });
+    vi.mocked(readSyncBaseline).mockRejectedValueOnce(new Error("private source text"));
+    const error = await new SupabaseSyncTransport().push(fixture.envelope).catch(value => value);
+    expect(error).toMatchObject({ failure: { kind: "network", status: 0, phase: "preflight" } });
+    expect(JSON.stringify(error)).not.toContain("private source text");
+    expect(error.message).toBe("Account upload stopped during preflight.");
+    expect(fixture.chain.maybeSingle).not.toHaveBeenCalled();
+  });
+
+  it("records the failing upload stage without retaining private exception text", async () => {
+    const fixture = setup({ code: "PT409", message: "original source upload is incomplete" });
+    vi.mocked(uploadCloudContent).mockRejectedValueOnce({ statusCode: 500, code: "Bearer token https://private.example", message: "private source text" });
+    const error = await new SupabaseSyncTransport().push(fixture.envelope).catch(value => value);
+    expect(error).toMatchObject({ failure: { kind: "server", status: 500, phase: "content" } });
+    expect(JSON.stringify(error.failure)).not.toMatch(/private|bearer|https/);
+    expect(error.message).toBe("Account upload stopped during content.");
+    expect(fixture.rpc).not.toHaveBeenCalled();
+  });
+
+  it("identifies a refreshed account session before the revision request", async () => {
+    const fixture = setup({ code: "PT409", message: "original source upload is incomplete" });
+    fixture.assertCurrent.mockRejectedValueOnce(new Error("The account session was refreshed. Your local work is safe; retry the upload."));
+    await expect(new SupabaseSyncTransport().push(fixture.envelope)).rejects.toMatchObject({
+      failure: { kind: "auth", status: 0, phase: "revision", reason: "session-refreshed" },
+    });
+    expect(fixture.rpc).not.toHaveBeenCalled();
+  });
+
   it("recovers exactly once after missing-original PT409 and replays the same idempotency key", async () => {
     const fixture = setup({ code: "PT409", message: "original source upload is incomplete" });
     const receipt = await new SupabaseSyncTransport().push(fixture.envelope);
@@ -79,8 +123,44 @@ describe("workspace cloud-original repair acknowledgement", () => {
     expect(fixture.requests).toHaveLength(2);
     expect(fixture.requests.map(item => item.name)).toEqual(["push_workspace_revision_v2", "push_workspace_revision_v2"]);
     expect(fixture.requests[0].args.p_idempotency_key).toBe(fixture.requests[1].args.p_idempotency_key);
+    expect(fixture.chain.eq).toHaveBeenCalledWith("user_id", owner);
+    expect(fixture.chain.eq).toHaveBeenCalledWith("workspace_id", "workspace-id");
     expect(fixture.assertCurrent).toHaveBeenCalled();
     expect(uploadCloudOriginals).toHaveBeenCalledOnce();
+  });
+
+  it("reports a timed-out history read as a server failure before uploading", async () => {
+    const fixture = setup({ code: "PT409", message: "original source upload is incomplete" });
+    fixture.chain.maybeSingle.mockReset()
+      .mockResolvedValueOnce({ data: { id: "workspace-id" }, error: null, status: 200 })
+      .mockResolvedValueOnce({ data: null, error: { code: "57014", message: "canceling statement due to statement timeout" }, status: 500 });
+    await expect(new SupabaseSyncTransport().push(fixture.envelope)).rejects.toMatchObject({
+      failure: { kind: "server", status: 500, code: "57014", phase: "preflight" },
+    });
+    expect(fixture.rpc).not.toHaveBeenCalled();
+  });
+
+  it("labels a thrown first-workspace lookup without preserving its private URL", async () => {
+    const fixture = setup({ code: "PT409", message: "original source upload is incomplete" });
+    fixture.chain.maybeSingle.mockRejectedValueOnce({
+      statusCode: 503, code: "PGRST500", message: "private https://example.invalid",
+    });
+    const error = await new SupabaseSyncTransport().push(fixture.envelope).catch(value => value);
+    expect(error).toMatchObject({ failure: { kind: "server", status: 503, code: "PGRST500", phase: "preflight" } });
+    expect(JSON.stringify(error)).not.toMatch(/private|https/i);
+    expect(fixture.rpc).not.toHaveBeenCalled();
+  });
+
+  it("does not retain private account text returned by the first-workspace lookup", async () => {
+    const fixture = setup({ code: "PT409", message: "original source upload is incomplete" });
+    fixture.chain.maybeSingle.mockResolvedValueOnce({
+      data: null, error: { code: "57014", message: "private source https://example.invalid" }, status: 500,
+    });
+    const error = await new SupabaseSyncTransport().push(fixture.envelope).catch(value => value);
+    expect(error).toMatchObject({ failure: { kind: "server", status: 500, code: "57014", phase: "preflight" } });
+    expect(error.message).toBe("Account upload stopped during preflight.");
+    expect(JSON.stringify(error.failure)).not.toMatch(/private|https/i);
+    expect(fixture.rpc).not.toHaveBeenCalled();
   });
 
   it("recovers after a delta-form retry is refused, switching to one full replay without changing the idempotency key", async () => {

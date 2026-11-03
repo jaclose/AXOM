@@ -1,0 +1,103 @@
+.integration-card.unavailable {
+  border-color: var(--hairline);
+  background: var(--surface-1);
+}
+
+.integration-card.unavailable .integration-card-icon {
+  color: var(--text-50);
+  background: var(--neutral-hover);
+  border-color: var(--hairline);
+}
+
+.calendar-export .calendar-export-next {
+  padding: 9px 11px;
+  color: var(--text-80);
+  background: var(--gold-soft);
+  border-left: 2px solid var(--gold);
+  border-radius: var(--radius-xs);
+}
+
+.calendar-export-next a {
+  color: var(--text);
+  font-weight: var(--fw-semibold);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.lb-first-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.lb-shared-section {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.lb-shared-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  padding: 0 2px;
+}
+
+.lb-shared-head h2 {
+  margin: 3px 0 4px;
+  font-family: var(--font-display);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-medium);
+}
+
+.lb-shared-head p {
+  max-width: 65ch;
+  margin: 0;
+  color: var(--text-60);
+  font-size: var(--fs-sm);
+  line-height: var(--leading-normal);
+}
+
+.lb-shared-unavailable {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  border-style: dashed;
+}
+
+.lb-shared-unavailable > svg {
+  flex: 0 0 auto;
+  color: var(--text-45);
+}
+
+.lb-shared-unavailable h3 {
+  margin: 0 0 4px;
+  font-size: var(--fs-md);
+}
+
+.lb-shared-unavailable p {
+  margin: 0 0 12px;
+  color: var(--text-60);
+  font-size: var(--fs-sm);
+  line-height: var(--leading-normal);
+}
+
+@media (max-width: 600px) {
+  .lb-hero-head {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .lb-hero-head > .grow { min-width: 0; }
+  .lb-hero-head > :last-child { grid-column: 2; justify-self: start; }
+  .lb-hero-head h2 { font-size: var(--fs-xl); }
+  .lb-shared-unavailable { gap: 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lb-page .lb-lane-track i { transition: none; }
+}

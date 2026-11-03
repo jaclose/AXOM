@@ -149,7 +149,7 @@ describe("v26 → v27 migration", () => {
     };
     const state = { ...v26State(), schemaVersion: 31, questions: [question] };
     const result = migratePersistedState(structuredClone(state), 31);
-    expect(result.schemaVersion).toBe(34);
+    expect(result.schemaVersion).toBe(SCHEMA_VERSION);
     expect(result.questions[0].stem).toBe(question.stem);
     expect(result.questions[0].explanation).toBe(question.explanation);
     expect(result.questions[0].correctAnswerText).toBe("Beta");
@@ -174,6 +174,29 @@ describe("v26 → v27 migration", () => {
     };
     const result = migratePersistedState(structuredClone(state), 31);
     expect(result.questions[0].correctAnswerText).toBe("Legacy free-text answer");
+  });
+
+  it("relabels legacy institution-branded curated resources without changing their identity or URL", () => {
+    const state = makeSeed();
+    const original = state.resources.find((resource) => resource.title === "Course Materials")!;
+    const personal = state.resources.find((resource) => resource.title === "My Drive")!;
+    original.title = "SGU Materials";
+    original.category = "SGU Materials";
+    original.tags = ["sgu", "materials"];
+    original.ratingReason = "Core SGU material repository.";
+
+    const migrated = migratePersistedState(structuredClone(state), 34);
+    const updated = migrated.resources.find((resource) => resource.id === original.id)!;
+    expect(updated).toMatchObject({
+      id: original.id,
+      created: original.created,
+      url: original.url,
+      title: "Course Materials",
+      category: "Drives",
+      tags: ["Course Library", "course", "materials"],
+    });
+    expect(updated.ratingReason).not.toMatch(/\bSGU\b/i);
+    expect(migrated.resources.find((resource) => resource.id === personal.id)).toEqual(personal);
   });
 
   it("survives a deep-legacy (v1-era) payload without throwing", () => {
@@ -201,7 +224,7 @@ describe("v26 → v27 migration", () => {
     delete state.dailyWordPuzzles;
 
     const migrated = migratePersistedState(structuredClone(state), SCHEMA_VERSION);
-    expect(migrated.schemaVersion).toBe(34);
+    expect(migrated.schemaVersion).toBe(SCHEMA_VERSION);
     expect(migrated.profile.experimentalFlags?.dailyGames).toBe(false);
     expect(migrated.profile.timeZonePreference).toEqual({ mode: "system" });
     expect(migrated.profile.clockPreferences).toMatchObject({ enabled: true, showDigitalSeconds: false, hourCycle: "12" });
@@ -252,7 +275,7 @@ describe("v26 → v27 migration", () => {
     };
 
     const migrated = migratePersistedState(structuredClone(state), SCHEMA_VERSION);
-    expect(migrated.schemaVersion).toBe(34);
+    expect(migrated.schemaVersion).toBe(SCHEMA_VERSION);
     expect(migrated.profile.dashboardLayout).toMatchObject({
       version: 1,
       preset: "custom",
@@ -260,8 +283,8 @@ describe("v26 → v27 migration", () => {
       hiddenWidgetIds: ["future-widget"],
       futureLayoutField: { safe: true },
       widgets: {
-        todayScore: { size: "extra-large", enabledFields: ["progress"] },
-        "future-widget": { size: "medium", enabledFields: ["future-field"], futurePreference: true },
+        todayScore: { size: "large", enabledFields: ["progress"] },
+        "future-widget": { size: "small", enabledFields: ["future-field"], futurePreference: true },
       },
     });
     expect(migratePersistedState(structuredClone(migrated), SCHEMA_VERSION)).toEqual(migrated);
@@ -275,7 +298,7 @@ describe("v26 → v27 migration", () => {
       promptVersion: "promise-prompt-v1",
     };
     const migrated = migratePersistedState(structuredClone(state), SCHEMA_VERSION);
-    expect(migrated.schemaVersion).toBe(34);
+    expect(migrated.schemaVersion).toBe(SCHEMA_VERSION);
     expect(migrated.profile.promisePromptStatus).toEqual(state.profile.promisePromptStatus);
   });
 
@@ -306,5 +329,45 @@ describe("v26 → v27 migration", () => {
     expect(migrated.dailyWordPuzzles).toHaveLength(1);
     expect(migrated.dailyWordPuzzles[0]).toMatchObject({ completed: true, guesses: ["APPLE", "BERRY"] });
     expect(migrated.tasks).toEqual(beforeTasks);
+  });
+
+  it("starts a new workspace with the four requested visible trackers", () => {
+    const trackers = makeSeed().productivityTrackers;
+    expect(trackers.map(({ name, category, dailyTarget, weeklyTarget, visible }) => ({ name, category, dailyTarget, weeklyTarget, visible }))).toEqual([
+      { name: "Study", category: "Academic", dailyTarget: 240, weeklyTarget: 1680, visible: true },
+      { name: "Small Group + Prep", category: "Academic", dailyTarget: 120, weeklyTarget: 360, visible: true },
+      { name: "Class", category: "Academic", dailyTarget: 120, weeklyTarget: 600, visible: true },
+      { name: "Gym", category: "Health", dailyTarget: 45, weeklyTarget: 180, visible: true },
+    ]);
+    expect(new Set(trackers.map(({ id }) => id)).size).toBe(4);
+    expect(trackers.filter(({ name }) => name === "Small Group + Prep" || name === "Class"))
+      .toEqual([expect.objectContaining({ contributesToAcademicStudy: false, contributesToTotalProductiveTime: false }),
+        expect.objectContaining({ contributesToAcademicStudy: false, contributesToTotalProductiveTime: false })]);
+  });
+
+  it("does not add defaults to an existing custom or explicitly empty tracker list", () => {
+    const saved = makeSeed();
+    const renamed = {
+      ...saved.productivityTrackers[1],
+      id: "tracker-coding",
+      name: "Small Group + Prep",
+      visible: false,
+      archived: true,
+    };
+    saved.productivityTrackers = [renamed];
+    const migrated = migratePersistedState(structuredClone(saved), 23);
+    expect(migrated.productivityTrackers).toEqual([renamed]);
+    expect(migratePersistedState(structuredClone(migrated), SCHEMA_VERSION).productivityTrackers).toEqual([renamed]);
+
+    const empty = makeSeed();
+    empty.productivityTrackers = [];
+    expect(migratePersistedState(structuredClone(empty), 23).productivityTrackers).toEqual([]);
+  });
+
+  it("installs defaults only when old tracker data is absent", () => {
+    const saved = makeSeed();
+    delete (saved as Partial<typeof saved>).productivityTrackers;
+    const migrated = migratePersistedState(structuredClone(saved), 23);
+    expect(migrated.productivityTrackers.map(({ name }) => name)).toEqual(["Study", "Small Group + Prep", "Class", "Gym"]);
   });
 });

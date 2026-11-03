@@ -5,152 +5,119 @@ authority: current-state
 ---
 # AXOM current AI state
 
-Snapshot: 2026-10-20 UTC, `feat/academic-library-v1` in
-`AXOM-academic-library-v1`, HEAD `78c00e04`. This reflection batch was pushed to
-main and deployed (authenticated deployment `7203032971`); six old dates were
-dismissed in the live UI and stayed dismissed after reload. Domain contracts remain authoritative.
+## Checkout and release boundary · 2026-11-02 14:55 UTC
 
-Batch pushes: `origin/main` triggers Vercel production, local commits do not.
-After the reflection release, JD approved one additional tested
-batch: participation streaks, compact Activity Log and catalog CI fixture repair.
-That batch is `dc055a2` on `origin/main`; its deployment was not verified on 2026-10-27.
-It does not authorize migrations, private publication or subsequent releases.
-Verify deployed SHA and protected index before release claims.
+Remote `main` is `b1d3bea5` after PR #91, which makes missing static assets return
+404 instead of the SPA HTML fallback and removes the blanket immutable asset
+header. Cache-busted version checks for both `axom.info` and `www.axom.info`
+return the same `b1d3bea5` production build. Apex points directly to Production
+without redirecting to `www`, preserving the browser origin that owns local
+workspace storage.
 
-## Branch `jd-claude/eloquent-shannon-b2xof9` (2026-10-27, cloud)
+The isolated hotfix checkout `codex/axom-startup-fresh-update-20261102` is
+based on that main commit. It moves web-worker registration ahead of shell
+imports, retries missing assets with a cache-busted request, and offers an
+explicit verified-save refresh if browser quota blocks only the extra recovery
+copy. The focused update, checkpoint and route-boundary tests pass 30/30;
+typecheck and lint pass. The first full web test run exposed one mock-export
+mismatch; after fixing it, focused coverage passed. Full build and hosted CI
+remain pending before merge. No user browser storage was cleared or rewritten.
 
-Base `dc055a2`. Adds whole-library publishing: one collection per term and module with
-every plan section, reviewer-confirmed plan terms (both uploaders), an on-device check
-before upload, plan-less question collections, reviewer approval, a curriculum-ordered
-catalog and term-grouped QBank discovery
-([contract](features/academic-library.md#one-course-per-module-and-the-library-publisher)).
-Migration `20261027120000_academic_curriculum_catalog.sql` is replayed locally only.
-`5c04e71` fixes the privacy replay test whose fixed 2026-10-23 expiry fails main's suite.
-Passed: full Vitest (28 skipped), PGlite replay, types/lint/build, a synthetic publish
-journey at 1440/390 and related catalog specs in Chromium. Not done: real-corpus publish,
-hosted migration, reviewer grant, second-account check; the private corpus and board
-were unreachable from the cloud. Next: JD reviews the draft PR, then the owner steps.
+## What this release contains
 
-## Ownership and protected work
+- The frontier joins Ideas/Journal with [Communities](features/communities.md),
+  [Patch Notes](features/patch-notes.md), the qualitative asthma
+  [body simulator](features/body-simulator.md), Dashboard widget improvements,
+  and the **Midnight** palette. It includes earned study credits, bounded
+  one-day streak protection, and account settings work. Community now loads
+  the member's own profile independently, searches opted-in learners on the
+  server, and pages friend connections without silently dropping older ties.
+  Sync verifies a local save before reporting success and bounds content,
+  media and original uploads while preserving the first failure. The simulator is a
+  source-linked study illustration awaiting human medical review, not a
+  clinical tool. Radiordle and Pathordle remain held for provider approval.
+  Course-template file batches now preflight type and size before reads; pasted
+  templates have the same 2 MiB UTF-8 limit. The Host snapshot leads with
+  review and moderation work and has verified desktop/phone theme layouts.
+- [PR #74](https://github.com/jaclose/AXOM/pull/74) adds an explicit route
+  from a reviewed saved source to a private revision and **Unreviewed**
+  Community submission. Sharing needs rights attestation, exact source/media
+  checks and later academic reviewer approval. A synthetic account journey
+  does not prove hosted publishing. [PR #75](https://github.com/jaclose/AXOM/pull/75)
+  records private PDF answer-mark **proposals for review**; visual marks do
+  not change scoring keys or answer-ready status. Current-revision explanation
+  attestation remains required before official academic approval. Local ports
+  of draft PRs #79/#80 add answer-outline and inline-answer-copy receipts for
+  private review only; no bank key or readiness changes.
+- Scoped local ports from draft PRs #33, #36 and #42 add complete-term course
+  downloads/practice, an ordinary shared-course reviewer queue with exact
+  revision and explanation gates, eligible quiz pool counts/multiple subjects,
+  and preservation of unlocks/blueprint lane across backup merges. The
+  [academic library](features/academic-library.md) owns the review contract;
+  these ports passed the combined local gate and still need hosted acceptance. Week
+  practice uses downloaded membership and blocks launch when a question or
+  set was refiled outside the current course.
+- [Host](features/community-operator-console.md#operator-console) uses
+  server-read roles, reasoned/audited moderation and a restricted report
+  queue. Its migrations and verified owner grant are on production; signed-in
+  operator journeys still need real-account acceptance.
+  [Communications](features/communications.md) has a canonical renderer,
+  local previews, unsent Resend welcome/product-update and Broadcast drafts,
+  ten optional opt-out Topics, and a branded preference page. Their exact
+  [readiness record](operations/communications-readiness.md) distinguishes
+  remote drafts from delivery;
+  live Resend send, webhook, SMTP and email-client acceptance remain separate
+  gates.
 
-Read the coordination board and CONVERGENCE before integration. Preserve other
-owners' checkouts and files. Local `main` has 45 protected staged additions and
-six untracked private sources; exclude all. Recheck overlaps against
-the final SHA, then fast-forward only. Compare protected staged entries, cached
-patch and working-file hashes before/after. Never switch, reset, stash or rewrite.
+## Protected content and acceptance
 
-The staged AMBOSS research, source-coverage metadata, stale handoffs, backup
-patch, generated ZIP/demo copies and simulator crawler are excluded. They need
-separate owner review; do not publish private paths or source identities.
+[Academic library](features/academic-library.md) and
+[Questions](features/questions.md) own source identity, media, filing, import
+and reviewer rules. Private RHPS/ESoft/cumulative packages and held questions
+remain unpublished. Missing keys are never inferred from parser suggestions,
+answer marks or medical reasoning. Source rationales are preferred; separate
+AXOM explanations require subject review. The copied NBME/USMLE sample remains
+local pending written website permission; link to the original sample instead.
+The older 20-course upload-free dry run and unresolved inventory are dated
+evidence in `git show e799ed5b:docs/AI_STATE.md`, not hosted delivery.
+A newer private v7 scan accounted for 995 sources and 859 banks, with 192
+inline-answer and 613 answer-mark **review-only** proposals. No answer keys
+were promoted, readiness changed or content uploaded. The duplicate-linked
+publisher guard resolved the earlier 14-row mismatch: the 20-course
+upload-free dry run reconciles 16,965 in-course rows (782 ready, 16,183 held),
+594 Unfiled and zero unaccounted. The private approved-only template holds
+17,179 rows pending review; seven unreadable markers, 30 malformed/filtered
+rows and 343 source-binding-blocked rows remain separate. The offline
+applicator can create a separate private candidate only from exact hash-bound
+human decisions on keys, explanations, sources, filing and rights; no approvals,
+readiness changes or publication occurred. A separate 17-item technical triage
+remains all Hold. Of 17,552 raw v7 rows, 13,239 have no assigned source week;
+Week practice cannot imply full scheduling. Medical and rights review remain separate.
 
-Never merge `backup/pre-large-file-cleanup-2026-09-28`: it contains a 288 MB
-audio file, private assets and broad historical replacement/deletion.
+Production acceptance still needs a cleared-content owner upload, reviewer
+decision, learner reload/media and checksum readback, share withdrawal, privacy
+and multi-device checks. Cloud-backed Community and Host need matching hosted
+policies plus real-account checks. No private content, clinical accuracy or
+source rights are approved by a passing code suite.
 
-## Academic inventory and acceptance
+## Work protection and next action
 
-[Academic library](features/academic-library.md) owns the implementation and
-acceptance contract. The recorded inventory has 2,733 source identities across
-4,213 hashed paths and 2,274 processing jobs. These are inventory counts, not
-verified question totals.
+The original checkout and other worktrees contain independent owner material;
+preserve their staged, untracked and ignored files. Do not reset, stash, clean
+or bulk-merge them. In particular, `backup/pre-large-file-cleanup-2026-09-28`
+contains private assets and broad replacement/deletion. Check the
+`/Users/jd/Developer/AXOM-coordination/BOARD.md` ownership notes and
+[maintenance registry](operations/repository-audit.md#maintenance-registry)
+before shared edits. Historic receipts remain in Git history; do not reload
+them at startup without a specific question.
 
-B4 reconciles 2,090 dispositions: 1,402 unavailable, 675 review-prepared/partial,
-ten no-questions and three unsupported. It records 994 review candidates and
-12,140 unresolved; ready remains zero. B5 reconciles 41: 25 review, 11
-unresolved, six path-only, zero ready/cloud. Counts are not publishing approval.
-
-Twenty-two templates account for 547 activities: T1 250, T2 199, T3 98.
-T4/T5 lack authoritative denominators. Local GOER has five banks, 28 ready and
-44 review-required questions, plus 64 verified ready-question attachments.
-`/Volumes/JDabSSD` is unavailable. Its older 1,280-file scan must not replace
-B4's 1,402 unavailable dispositions. `academicReleaseComplete` remains false.
-
-The private October 20 delivery folder reconciles 28 templates and 655 sources;
-current parsing assesses 439 ready, 582 review-required, 10,968 unresolved and
-23 unreadable retained rows. Source/template/media checksums were checked outside
-Git. Prepared files are not proof of installation, browser decoding or cloud delivery.
-Supported automated folder selection did not start the live import; manual folder
-selection remains pending. No ZIP was created; partial compression suggests the
-full archive would exceed the 1 GiB import cap. Hold import while disk is critical.
-
-## Implemented behavior
-
-Course Library separates term/course maps, plans and local/account context.
-QBank distinguishes ready, review-suggested, unresolved and missing records.
-Image counts describe metadata only; no answer-bearing browsing thumbnails.
-
-Missing-record recovery retains original collection IDs, membership and source
-scope. A fresh import stays separate; only exact original records satisfy the
-live presence check, which is not proof of durable save. Cancel preserves an
-unfinished import. See [Questions](features/questions.md) for the contract.
-
-Reviewer-edited wording retains original source figures through the existing
-visibility gate. During private installation, invalid media used exclusively by
-already-held questions remains unpersisted and explicitly unresolved; verified
-ready siblings can still install. Ready-question image checks and whole-bank
-filename/checksum collision rejection remain strict. Review metadata preserves
-the declared original asset without storing invalid bytes.
-
-Hosted template receipts cannot project onto a same-named local course.
-Connected banks require exact collection/course/term/module and receipt
-membership. Vault fallback promotion compares the last observed durable base
-inside an IndexedDB transaction for workspace and auxiliary keys. Workspace
-conflicts remain latched; unsupported first-ever offline cases fail conservatively.
-
-Preserve account locks, source identity, atomic reviewed filing, attachment rollback,
-revocable shares and owner-only recovery. Uncertain removals retain paths;
-ambiguous cross-service work requires reconciliation, not inferred success.
-
-The last authenticated production inspection on 2026-10-15 recorded 23
-migrations through `20261013230000`. It is not a fresh production check.
-Nine later migrations remain locally tested only:
-
-- `20261014120000_workspace_originals.sql`;
-- `20261014121000_academic_revision_order.sql`;
-- `20261014122000_academic_current_review_gate.sql`;
-- `20261015133000_academic_gif_media_support.sql`;
-- `20261015225638_bound_question_share_recovery.sql`;
-- `20261015230042_enforce_academic_source_identity.sql`;
-- `20261016002404_cascade_academic_owner_deletion.sql`;
-- `20261016011812_harden_privacy_request_barrier.sql`; and
-- `20261017233759_enforce_academic_collection_classification.sql`.
-
-Draft [PR #30](https://github.com/jaclose/AXOM/pull/30) reports a 2026-10-25 audit with
-30 applied and only the last two pending; recheck the live list before any release.
-
-Journal transitions await confirmed writes; failures preserve drafts. Closeout
-copy is opt-in. Images export beyond the 14 MB account limit; teardown is best effort.
-
-Reflection inbox now remembers exact dismissed dates per browser/device/account,
-including across reload and day rollover. New missed dates remain eligible;
-shell reminders share suppression. Undo has a retry path and token-specific
-markers preserve concurrent newer dismissals. Journal, plans and logs are untouched.
-See [reminder lifecycle](DAILY-LOOP-REMINDER-LIFECYCLE.md).
-
-## Current validation
-
-Receipts through `dc055a2` (streaks, Activity Log, catalog fixture, reflection
-`78c00e04`, `81e1a5bb` and its follow-ups) are preserved verbatim at
-`git show dc055a2:docs/AI_STATE.md`. Hosted and real multi-connection SQL behavior
-remain unverified. Existing build warnings concern `jszip`/`webUpdates`
-static/dynamic imports and chunks over 500 kB. The GitHub advisory snapshot (56: 14
-high, 39 moderate, three low) was not refreshed; dependency remediation is separate.
-
-## Cloud and delivery boundary
-
-Read-only production evidence dated 2026-10-15 showed 23 recorded migrations
-and zero academic collections, revisions, files, storage objects or question
-shares. No owner-authenticated production upload, reload, share recovery,
-media/checksum readback or revocation was completed.
-
-Before production acceptance: apply every pending migration (including
-`20261027120000` from the branch above) through the approved path; upload only cleared private material as its authenticated owner; reload it
-through the learner UI; verify media/checksums and revocation; and record exact
-receipts. Also complete a true multi-connection privacy-lock check, Journal
-image-race and broader multi-tab coverage, QBank opener-clone recovery analysis, Safari/WebKit and
-packaged-desktop acceptance, and dependency-advisory review. The missing SSD
-sources, B4/B5 review queues and absent T4/T5 coverage remain blockers to
-complete academic-library acceptance.
-
-Inspect disk before checks; preserve services/sources, no cleanup. Shared beta
-checkpoint holds chat receipts, not completed audits. Local checks are not
-production academic acceptance.
+At `eaad98fa`, the clean combined gate passed typecheck, lint, 4,649 web
+tests (35 skipped), build, update safety, offline games and 167 browser
+journeys (14 conditional skips). On the `c06ae5a6` release tree, root API typecheck,
+88 release tests, 43 repository tests, hygiene, web typecheck/lint/build,
+update/offline checks, 200 focused unit tests and 15 relevant Chrome journeys
+passed. The broad local Vitest run was stopped under severe host load after
+four timing failures; all four files passed serially (88 tests). GitHub
+Quality run 41445654894 passed for `c06ae5a6`.
+Live mail delivery, private-content rights, and real-account Community/Host
+and academic acceptance remain separate gates.

@@ -169,6 +169,22 @@ function matchesSearch(question: QuestionRecord, term: string): boolean {
   return source.includes(term);
 }
 
+function isQuestionImageRole(role: string | undefined): boolean {
+  return role === "question" || role === "stem" || role === "choice";
+}
+
+/** Only media shown with the unanswered question satisfies the image facet. */
+export function hasQuestionImage(question: QuestionRecord): boolean {
+  const assets = new Map(question.content?.assets.map((asset) => [asset.id, asset.role]));
+  return question.attachments?.some((attachment) => {
+    const assetRole = attachment.assetId ? assets.get(attachment.assetId) : undefined;
+    if (assetRole && !isQuestionImageRole(assetRole)) return false;
+    if (attachment.role === "exhibit") return !assetRole || isQuestionImageRole(assetRole);
+    if (attachment.role && !isQuestionImageRole(attachment.role)) return false;
+    return isQuestionImageRole(attachment.role) || isQuestionImageRole(assetRole);
+  }) ?? false;
+}
+
 /** Pure, stable filter. Preserves input order; `now` is injected for testability. */
 export function applyQuestionFilter(
   questions: readonly QuestionRecord[],
@@ -207,7 +223,7 @@ export function applyQuestionFilter(
       const due = question.reviewDueAt ? Date.parse(question.reviewDueAt) : NaN;
       if (!Number.isFinite(due) || due > now) return false;
     }
-    if (criteria.hasAttachment && !(question.attachments?.length)) return false;
+    if (criteria.hasAttachment && !hasQuestionImage(question)) return false;
     if (criteria.hasNotes && !question.notes?.trim()) return false;
     return true;
   });

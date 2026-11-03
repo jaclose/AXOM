@@ -33,6 +33,20 @@ const question: QuestionRecord = {
 afterEach(cleanup);
 
 describe("QuizFeedback", () => {
+  it("shows a sourced related diagram beside a revealed keyed explanation", () => {
+    const rhinovirus = {
+      ...question,
+      stem: "A patient has runny nose and sneezing.",
+      options: [{ key: "A", text: "Rhinovirus" }, { key: "B", text: "Influenza virus" }],
+      correctKey: "A", correctAnswerText: "Rhinovirus",
+    };
+    render(<QuizFeedback question={rhinovirus} pickedKey="B" />);
+    expect(screen.getByRole("complementary", { name: "Related AXOM diagram" }).getAttribute("data-axom-topic-tag")).toBe("axom:diagram:rhinovirus");
+    expect(screen.getByRole("link", { name: /CDC · About Rhinoviruses/ })).toHaveProperty("href", "https://www.cdc.gov/rhinoviruses/about/index.html");
+    expect(screen.getByText("Teaching diagram · not source evidence")).toBeTruthy();
+    expect(screen.getByText("AXOM topic · Respiratory virology")).toBeTruthy();
+    expect(screen.queryByText("axom:diagram:rhinovirus")).toBeNull();
+  });
   it("shows a short incorrect banner, distinct answers, and the stored clean explanation", () => {
     render(<QuizFeedback question={question} pickedKey="A" />);
     expect(screen.getByRole("status").textContent).toContain("Incorrect — you picked A, answer is B");
@@ -61,6 +75,34 @@ describe("QuizFeedback", () => {
     const edited = "Answer choice B is wrong because receptor affinity alone does not determine signaling.";
     render(<QuizFeedback question={{ ...question, explanation: `  ${edited}  ` }} pickedKey="A" />);
     expect(screen.getByText(edited).textContent).toBe(edited);
+  });
+
+  it("shows an honest explanation gap after answering and routes it to review", () => {
+    const flagMissing = vi.fn();
+    render(<QuizFeedback
+      question={{ ...question, explanation: "   " }}
+      pickedKey="A"
+      onMarkExplanationWrong={flagMissing}
+    />);
+
+    expect(screen.getByText("Explanation pending")).toBeTruthy();
+    expect(screen.getByText(/This answer has a mapped key, but no main explanation is recorded yet/)).toBeTruthy();
+    expect(screen.getByText(/The source record is below/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Explanation wrong" })).toBeNull();
+    screen.getByRole("button", { name: "Flag missing explanation" }).click();
+    expect(flagMissing).toHaveBeenCalledOnce();
+  });
+
+  it("does not imply a source record or trusted answer when neither is available", () => {
+    render(<QuizFeedback
+      question={{ ...question, explanation: undefined, correctKey: undefined, correctAnswerText: undefined }}
+      pickedKey="A"
+      showProvenance={false}
+    />);
+
+    expect(screen.getByText("No main explanation is recorded for this question yet.")).toBeTruthy();
+    expect(screen.queryByText(/source record is below/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Flag missing explanation" })).toBeNull();
   });
 
   it("exposes repair actions through explicit callbacks", () => {

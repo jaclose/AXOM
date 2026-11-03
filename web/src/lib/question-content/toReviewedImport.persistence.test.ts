@@ -9,6 +9,7 @@ import { flushLocalVaultWrites, localVaultStorage } from "../localVault";
 import { deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob } from "../questionAttachments";
 import type { ReviewedImportStore } from "../questionImportSave";
 import { useStore } from "../store";
+import type { QuestionRecord } from "../questions";
 import { saveBank } from "./bankImport";
 import { preparedBankImportOptions } from "../privateLibrary/install";
 import { parsePackage } from "./packageJson";
@@ -17,6 +18,7 @@ import type { ImportPackage, PackageIssue } from "./package";
 import { packageToReviewedImport, type PackageImportOptions } from "./toReviewedImport";
 import { validatePackage } from "./validate";
 import { isAssetVisible } from "./visibility";
+import { assessBank } from "./assessBank";
 
 const folder = join(process.cwd(), "..", "fixtures", "qbank", "synthetic", "multimodal-shapes");
 const SOURCE_TEXT = { rawText: "The invented source, as it was read.", pageTexts: ["The invented source,", "as it was read."] };
@@ -44,6 +46,24 @@ function twoSets(): { pkg: ImportPackage; issues: PackageIssue[]; files: File[] 
   return { pkg: split, issues: validatePackage(split, { assetFiles: new Set(files.map((file) => file.name)) }), files };
 }
 
+function auditedEdition(withNewReference = false): { earlier: ImportPackage; revised: ImportPackage; files: File[] } {
+  const { pkg, files } = invented();
+  const earlier = { ...pkg, questions: [structuredClone(pkg.questions[0])] };
+  const question = structuredClone(earlier.questions[0]);
+  question.stem = [{ type: "text", text: "An audited source corrects this incidence question's wording." }];
+  question.explanation = [{ type: "text", text: "The source's revised explanation compares incidence in the two exposed groups." }];
+  if (withNewReference) {
+    const reference = structuredClone(pkg.questions[2].assets[0]);
+    question.assets = [{ ...reference, id: "syn-q01-new-reference", questionId: question.id, role: "reference" }];
+  }
+  const revised = {
+    ...pkg,
+    manifest: { ...pkg.manifest, course: { ...pkg.manifest.course, week: 0 } },
+    questions: [question],
+  };
+  return { earlier, revised, files };
+}
+
 beforeEach(openEmptyWorkspace);
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -51,6 +71,40 @@ afterEach(async () => {
 });
 
 describe("what a package offers to the canonical import", () => {
+  it("uses actual file sizes when a source omits media byte counts", async () => {
+    const { pkg } = invented();
+    const question = pkg.questions[0];
+    question.stem = [{ type: "text", text: "Synthetic source with oversized teaching references." }];
+    question.explanation = [{ type: "text", text: "Original media sizes were not declared." }];
+    question.assets = Array.from({ length: 4 }, (_, index) => ({
+      id: `reference-${index}`, filename: `reference-${index}.png`, mimeType: "image/png",
+      role: "reference" as const, questionId: question.id,
+    }));
+    const single = { ...pkg, questions: [question] };
+    const assessed = assessBank(single, [], question.assets.map(a => ({ name: a.filename, size: 8 * 1024 * 1024 })));
+    expect(assessed.counts).toEqual({ ready: 0, "needs-review": 0, unresolved: 1 });
+    const result = await saveBank(single, assessed.issues, [], realWorkspace, { acknowledged: new Set([question.id]) });
+    expect(result.status).toBe("nothing-ready");
+    expect(useStore.getState().questions).toHaveLength(0);
+  });
+  it.each(["count", "bytes"])("holds oversized teaching media before any partial question save (%s)", async reason => {
+    const { pkg } = invented();
+    const question = pkg.questions[0];
+    question.assets = Array.from({ length: reason === "count" ? 11 : 8 }, (_, index) => ({
+      id: `reference-${index}`, filename: `reference-${index}.png`, mimeType: "image/png",
+      role: "reference" as const, questionId: question.id,
+      byteSize: reason === "bytes" ? 4 * 1024 * 1024 : 1024,
+    }));
+    question.stem = [{ type: "text", text: "Synthetic question with additional teaching pages." }];
+    question.explanation = [{ type: "text", text: "Source references exceed the durable media allowance." }];
+    const single = { ...pkg, questions: [question] };
+    const issues = validatePackage(single);
+    expect(issues).toContainEqual(expect.objectContaining({ questionId: question.id, code: "unsupported_content", severity: "error" }));
+    const result = await saveBank(single, issues, [], realWorkspace, { acknowledged: new Set([question.id]) });
+    expect(result.status).toBe("nothing-ready");
+    expect(result.held[0].readiness).toBe("unresolved");
+    expect(useStore.getState().questions).toHaveLength(0);
+  });
   it("offers only the ready questions, and says why each other one is held", () => {
     const { pkg, issues } = invented();
     const adapted = packageToReviewedImport(pkg, issues);
@@ -80,6 +134,15 @@ describe("what a package offers to the canonical import", () => {
     expect(adapted.imports[0].request.drafts[0].content).toEqual(before.questions[0]);
   });
 
+  it("files a source with no declared teaching week outside the week list", () => {
+    const { pkg, issues } = invented();
+    pkg.manifest.course.week = 0;
+    const adapted = packageToReviewedImport(pkg, issues);
+    expect(adapted.imports[0].request.scope).toEqual({ module: "EXAMPLE" });
+    expect(adapted.filing.week).toBeUndefined();
+    expect(pkg.manifest.course.week).toBe(0);
+  });
+
   it("rejects malformed, mismatched, and week-assigned reviewed filing options", () => {
     const { pkg, issues } = invented();
     expect(() => packageToReviewedImport(pkg, issues, {
@@ -105,9 +168,32 @@ describe("what a package offers to the canonical import", () => {
     expect(draft.reviewAcknowledged).toBe(true);
     expect(draft.warnings).toEqual([expect.stringContaining("slide that marks the answer")]);
     expect(draft.attachmentNames).toEqual(["syn-q03-curves.png", "syn-q03-curves-answer.png"]);
+    expect(draft.answerEvidencePage).toBe(3);
+    expect(draft.answerEvidenceSnippet).toContain("invented.pdf, page 3");
     expect(section.imageNames).toEqual(["syn-q03-curves.png", "syn-q03-curves-answer.png", "syn-q04-micrograph.png", "syn-q07-field-left.png", "syn-q07-field-right.png"]);
     expect(adapted.withheldAssets).toEqual([]);
     expect(draft.content?.assets.find((asset) => asset.role === "answer_reveal")).toBeDefined();
+  });
+
+  it("keeps answer and teaching image provenance visible in saved feedback", () => {
+    const { pkg, issues } = invented();
+    const question = pkg.questions.find((entry) => entry.id === "syn-q03")!;
+    const answerImage = question.assets.find((asset) => asset.role === "answer_reveal")!;
+    question.correctAnswer = { labels: ["B"], evidence: "source-mark-verified" };
+    question.assets.push({
+      ...answerImage,
+      id: "syn-q03-teaching",
+      role: "explanation",
+      sourcePage: 4,
+      revealOf: undefined,
+    });
+    const [section] = packageToReviewedImport(pkg, issues, { acknowledged: new Set(["syn-q03"]) }).imports;
+    const draft = section.request.drafts[section.questionIds.indexOf("syn-q03")];
+    expect(draft.answerEvidenceSnippet).toContain("Visually marked source answer: B");
+    expect(draft.answerEvidenceSnippet).toContain(answerImage.checksum);
+    expect(draft.answerEvidencePage).toBe(3);
+    expect(draft.explanationSourceSnippet).toContain("invented.pdf, page 4");
+    expect(draft.explanationSourcePage).toBe(4);
   });
 
   it("never takes a question with no key, accepted or not", () => {
@@ -118,15 +204,42 @@ describe("what a package offers to the canonical import", () => {
     expect(adapted.held.find((entry) => entry.questionId === "syn-q02")).toEqual({ questionId: "syn-q02", readiness: "needs-review", reasons: ["The answer is only shown by a mark."] });
   });
 
-  it("blocks a merged 9-choice PDF and a one-choice slide even when review is acknowledged", () => {
+  it("keeps all ten source choices and the J key when the source marks J", () => {
     const { pkg, files } = invented();
-    const nineChoices = Array.from({ length: 9 }, (_, i) => ({
+    const question = structuredClone(pkg.questions.find((entry) => entry.id === "syn-q01")!);
+    question.choices = Array.from({ length: 10 }, (_, index) => ({
+      id: `choice-${index}`,
+      label: String.fromCharCode(65 + index),
+      blocks: [{ type: "text" as const, text: `Source alternative ${index + 1}` }],
+    }));
+    question.correctAnswer = { labels: ["J"], evidence: "printed-key" };
+    const ten = { ...pkg, questions: [question] };
+    const issues = validatePackage(ten, { assetFiles: new Set(files.map((file) => file.name)) });
+    expect(issues.filter((issue) => issue.severity === "error")).toEqual([]);
+    const [section] = packageToReviewedImport(ten, issues).imports;
+    expect(section.questionIds).toEqual(["syn-q01"]);
+    expect(section.request.drafts[0].options).toHaveLength(10);
+    expect(section.request.drafts[0].correctKey).toBe("J");
+  });
+
+  it("retains all nine alternatives and an I key from a valid source question", () => {
+    const { pkg, files } = invented();
+    const nineChoices = Array.from({ length: 9 }, (_, i) => ({ id: `nine-${i}`, label: String.fromCharCode(65 + i), blocks: [{ type: "text" as const, text: `Distinct alternative ${i}` }] }));
+    const valid = { ...pkg, questions: [{ ...pkg.questions[0], choices: nineChoices, correctAnswer: { labels: ["I"], evidence: "printed-key" as const } }] };
+    const result = packageToReviewedImport(valid, validatePackage(valid, { assetFiles: new Set(files.map(file => file.name)) }));
+    expect(result.held).toHaveLength(0);
+    expect(result.imports[0].request.drafts[0].options).toHaveLength(9);
+    expect(result.imports[0].request.drafts[0].correctKey).toBe("I");
+  });
+  it("blocks a merged 11-choice PDF and a one-choice slide even when review is acknowledged", () => {
+    const { pkg, files } = invented();
+    const elevenChoices = Array.from({ length: 11 }, (_, i) => ({
       id: "synthetic-option-" + i,
       label: String.fromCharCode(65+i),
       blocks: [{ type: "text" as const, text: "Synthetic alternative " + i }],
     }));
     const malformed = { ...pkg, questions: pkg.questions.map((q) =>
-      q.id === "syn-q01" ? { ...q, choices: nineChoices } :
+      q.id === "syn-q01" ? { ...q, choices: elevenChoices } :
       q.id === "syn-q02" ? { ...q, choices: [q.choices[0]] } : q) };
     const result = packageToReviewedImport(malformed, validatePackage(malformed, {
       assetFiles: new Set(files.map(file=>file.name)),
@@ -134,8 +247,8 @@ describe("what a package offers to the canonical import", () => {
     const accepted = result.imports.flatMap(section => section.questionIds);
     expect(accepted).not.toContain("syn-q01");
     expect(accepted).not.toContain("syn-q02");
-    expect(result.held.find(q=>q.questionId==="syn-q01")?.reasons.join(" ")).toMatch(/2–8/);
-    expect(result.held.find(q=>q.questionId==="syn-q02")?.reasons.join(" ")).toMatch(/2–8/);
+    expect(result.held.find(q=>q.questionId==="syn-q01")?.reasons.join(" ")).toMatch(/2–10/);
+    expect(result.held.find(q=>q.questionId==="syn-q02")?.reasons.join(" ")).toMatch(/2–10/);
   });
   it("lets an advisory note travel with a ready question without marking it as reviewed by hand", () => {
     const { pkg, issues } = invented();
@@ -508,6 +621,113 @@ describe("a package through the canonical import", () => {
     await reloadWorkspace();
     expect((await importPackage(pkg, issues, files)).status).toBe("already-saved");
     expect((await workspaceOnDisk()).questions).toHaveLength(6);
+  });
+
+  it("refreshes an untouched equivalent source in place without losing learner tags or image links", async () => {
+    const { earlier, revised, files } = auditedEdition(true);
+    const first = await importPackage(earlier, validatePackage(earlier), files);
+    const id = first.sections[0].savedIds[0];
+    useStore.getState().updateQuestion(id, { tags: ["learner-tag"] });
+    await flushLocalVaultWrites();
+    const prior = (await workspaceOnDisk()).questions[0];
+    const assessed = validatePackage(revised, { assetFiles: new Set(files.map((file) => file.name)) });
+    const refreshed = await importPackage(revised, assessed, files, { refreshEquivalentSource: true });
+    expect(refreshed).toMatchObject({ status: "already-saved", errors: [], sections: [{ reused: true, refreshed: 1 }] });
+    const after = await reloadWorkspace();
+    expect(after.questions).toHaveLength(1);
+    expect(after.questionSets).toHaveLength(1);
+    expect(after.questions[0]).toMatchObject({ id, stem: "An audited source corrects this incidence question's wording.", tags: ["learner-tag"] });
+    expect(after.questions[0].week).toBeUndefined();
+    expect(after.questions[0].content).toEqual(revised.questions[0]);
+    expect(after.questions[0].explanation).toContain("source's revised explanation");
+    expect(after.questions[0].attempts).toEqual(prior.attempts);
+    expect(after.questions[0].createdAt).toBe(prior.createdAt);
+    expect(after.questionSets[0].scope).toEqual({ module: "EXAMPLE" });
+    expect(after.questions[0].attachments).toEqual(expect.arrayContaining([
+      expect.objectContaining({ assetId: "syn-q01-new-reference", role: "reference" }),
+    ]));
+  });
+
+  it("does not replace equivalent content on ordinary package reimports", async () => {
+    const { earlier, revised, files } = auditedEdition();
+    await importPackage(earlier, validatePackage(earlier), files);
+    const before = await workspaceOnDisk();
+    const result = await importPackage(revised, validatePackage(revised), files);
+    expect(result).toMatchObject({ status: "already-saved", errors: [] });
+    const after = await reloadWorkspace();
+    expect(after.questions).toEqual(before.questions);
+    expect(after.questionSets).toEqual(before.questionSets);
+  });
+
+  it("leaves an edited source and its media untouched instead of replacing it", async () => {
+    const { earlier, revised, files } = auditedEdition(true);
+    const first = await importPackage(earlier, validatePackage(earlier), files);
+    const id = first.sections[0].savedIds[0];
+    useStore.getState().updateQuestion(id, { notes: "My own interpretation" });
+    await flushLocalVaultWrites();
+    const before = await workspaceOnDisk();
+    const result = await importPackage(revised, validatePackage(revised, { assetFiles: new Set(files.map((file) => file.name)) }), files, { refreshEquivalentSource: true });
+    expect(result.status).toBe("failed");
+    expect(result.errors.join(" ")).toMatch(/learner edits/);
+    const after = await reloadWorkspace();
+    expect(after.questions).toEqual(before.questions);
+    expect(after.questionSets).toEqual(before.questionSets);
+    expect(after.questions[0].attachments).toEqual(before.questions[0].attachments);
+  });
+
+  it("does not refresh a question that has been practiced", async () => {
+    const { earlier, revised, files } = auditedEdition();
+    const first = await importPackage(earlier, validatePackage(earlier), files);
+    const id = first.sections[0].savedIds[0];
+    useStore.getState().recordQuestionAttempt(id, { answerKey: "A", status: "incorrect", quizSessionId: "source-refresh-practice", mode: "tutor" });
+    await flushLocalVaultWrites();
+    const before = await workspaceOnDisk();
+    const result = await importPackage(revised, validatePackage(revised), files, { refreshEquivalentSource: true });
+    expect(result.status).toBe("failed");
+    expect(result.errors.join(" ")).toMatch(/learner edits/);
+    const after = await reloadWorkspace();
+    expect(after.questions).toEqual(before.questions);
+    expect(after.questionSets).toEqual(before.questionSets);
+  });
+
+  it.each([
+    ["answer evidence", (question: QuestionRecord) => ({ extraction: { ...question.extraction!, answerEvidenceSnippet: "Reviewer-selected answer excerpt", answerEvidencePage: 9 } })],
+    ["source page", (question: QuestionRecord) => ({ sourcePage: (question.sourcePage ?? 1) + 1,
+      extraction: { ...question.extraction!, questionSourceSnippet: "Reviewer-selected question excerpt", questionSourcePage: (question.sourcePage ?? 1) + 1 } })],
+    ["citation", (_question: QuestionRecord) => ({ citation: "Reviewer-corrected citation" })],
+    ["answer confirmation", (question: QuestionRecord) => ({ extraction: { ...question.extraction!, reviewedAt: "2026-11-02T00:00:00Z", answerDetectionConfidence: 1 } })],
+  ] as Array<[string, (question: QuestionRecord) => Partial<QuestionRecord>]>) ("preserves an unseen question with manually edited %s", async (_field, edit) => {
+    const { earlier, revised, files } = auditedEdition();
+    const first = await importPackage(earlier, validatePackage(earlier), files);
+    const id = first.sections[0].savedIds[0];
+    const question = useStore.getState().questions.find((entry) => entry.id === id)!;
+    useStore.getState().updateQuestion(id, edit(question));
+    await flushLocalVaultWrites();
+    const before = await workspaceOnDisk();
+    expect(before.questions[0].attempts).toEqual([]);
+    expect(before.questions[0].status).toBe("unseen");
+    const result = await importPackage(revised, validatePackage(revised), files, { refreshEquivalentSource: true });
+    expect(result.status).toBe("failed");
+    expect(result.errors.join(" ")).toMatch(/learner edits/);
+    const after = await reloadWorkspace();
+    expect(after.questions).toEqual(before.questions);
+    expect(after.questionSets).toEqual(before.questionSets);
+  });
+
+  it("rolls back a failed audited refresh without changing the prior source", async () => {
+    const { earlier, revised, files } = auditedEdition();
+    await importPackage(earlier, validatePackage(earlier), files);
+    const before = await workspaceOnDisk();
+    const originalSetItem = localVaultStorage.setItem.bind(localVaultStorage);
+    vi.spyOn(localVaultStorage, "setItem")
+      .mockRejectedValueOnce(new Error("Synthetic refresh write failure"))
+      .mockImplementation((name, value) => originalSetItem(name, value));
+    const result = await saveBank(revised, validatePackage(revised), files, realWorkspace, { refreshEquivalentSource: true });
+    expect(result.status).toBe("failed");
+    expect(result.errors.join(" ")).toMatch(/Synthetic refresh write failure/);
+    const after = await reloadWorkspace();
+    expect(after.questions).toEqual(before.questions);
+    expect(after.questionSets).toEqual(before.questionSets);
   });
 
   it("repairs missing image bytes on reimport without duplicating questions", async () => {

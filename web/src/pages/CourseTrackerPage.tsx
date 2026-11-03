@@ -33,6 +33,7 @@ import { pushToast } from "../lib/toast";
 import { ModuleTour, type ModuleTourStep } from "../components/shell/ModuleTour";
 import { cardSystemFor, type CardSystem } from "../lib/cardSystem";
 import { TrackerFirstRun } from "../components/tracker/TrackerFirstRun";
+import { SguCourseMapCompletion } from "../components/tracker/SguCourseMapCompletion";
 import { ICON_SIZE } from "../lib/iconSize";
 import { parseCourseSchedule, reconcileScheduleDuplicates, scheduleCandidatesToTracker, type ScheduleCandidate } from "../lib/courseScheduleImport";
 import { CourseLibrary } from "../components/tracker/CourseLibrary";
@@ -52,6 +53,7 @@ import { BulkCurriculumTemplateInstall } from "./CourseTrackerPage.bulkTemplates
 import { OfficialSguClinicalCatalogReview } from "./CourseTrackerPage.officialCatalog";
 import { PrivateAcademicBatchUpload } from "./CourseTrackerPage.cloudBatch";
 import { activePrimaryPaths, activePrimaryScopes, isPrimaryPath, itemsInPrimary, renamePrimaryScopes, setPrimaryUntil, togglePrimaryScope, type PrimaryTrackerScope } from "../lib/trackerFocus";
+import { externalLinkHref } from "../lib/resourceUtils";
 
 const KINDS: TrackerKind[] = ["Lecture", "DLA", "PQ", "Lab", "Reading", "Requirement", "Milestone", "Evidence", "Question Block", "Assessment", "Review Loop"];
 const TABS = ["All", "Lecture", "DLA", "PQ", "Blueprint", "Extra"] as const;
@@ -303,6 +305,7 @@ export function CourseTrackerPage() {
         </GButton>
       </div>
       {moduleHelpOpen && <CourseTrackerHelpEntry onClose={() => setModuleHelpOpen(false)} onStartTour={() => { setModuleHelpOpen(false); setModuleTourOpen(true); }} />}
+      <SguCourseMapCompletion />
       <div className="tracker-grid">
         <aside className="tracker-utility-column" aria-label="Course Tracker utilities">
           <GlassCard pad data-tour="import" data-module-tour="tracker-structure">
@@ -518,7 +521,7 @@ function downloadAcademicCatalogMetadata(coverage: CurriculumCoverage) {
     url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = "axom-sgu-course-metadata-v1.json";
+    link.download = "axom-course-metadata-v1.json";
     link.style.display = "none";
     document.body.appendChild(link);
     link.click();
@@ -539,10 +542,10 @@ function CurriculumCoverageCard({ coverage }: { coverage: CurriculumCoverage }) 
     <GlassCard pad className="tracker-curriculum-coverage">
       <details>
         <summary>
-          <b>SGU Terms 1–5 · curriculum coverage</b>
+          <b>Terms 1–5 · curriculum coverage</b>
           <span className="sub">{coverage.modulesWithTemplates}/{coverage.totalModules} modules have saved templates · {coverage.installedTemplateItems}/{coverage.sourceItems} saved-template activities represented in tracker</span>
         </summary>
-        <p className="sub">Coverage counts only templates saved in this workspace and tracker rows actually present. The SGU course outline names modules, not a complete official activity schedule. An unavailable template means expected activities are <b>unknown</b>, not zero.</p>
+        <p className="sub">Coverage counts only templates saved in this workspace and tracker rows actually present. The AXOM course outline names modules, not a complete verified activity schedule. An unavailable template means expected activities are <b>unknown</b>, not zero.</p>
         <div className="tracker-catalog-action">
           <GButton size="tiny" onClick={() => downloadAcademicCatalogMetadata(coverage)}>Export metadata-only catalog</GButton>
           <span className="sub">Local JSON only. Excludes uploaded source documents, questions, answers and personal progress; does not authorize redistribution.</span>
@@ -567,10 +570,10 @@ function CurriculumCoverageCard({ coverage }: { coverage: CurriculumCoverage }) 
             </div>
           </details>
         ))}
-        {coverage.unmappedTrackerRows > 0 && <p className="sub" role="note">{coverage.unmappedTrackerRows} tracker activit{coverage.unmappedTrackerRows === 1 ? "y" : "ies"} cannot be uniquely attributed to this SGU course outline. These may be personal tasks or ambiguous legacy paths; they remain preserved in the Course Tracker for review.</p>}
+        {coverage.unmappedTrackerRows > 0 && <p className="sub" role="note">{coverage.unmappedTrackerRows} tracker activit{coverage.unmappedTrackerRows === 1 ? "y" : "ies"} cannot be uniquely attributed to this course outline. These may be personal tasks or ambiguous legacy paths; they remain preserved in the Course Tracker for review.</p>}
         {coverage.unmappedTemplateModules.length > 0 && <p className="sub">Templates without a unique outline match: {coverage.unmappedTemplateModules.join(", ")}. Confirm course ownership before installing.</p>}
         <p className="sub">Week numbers inferred from blank-line groups or even spacing require schedule verification; they are not confirmed school dates. Question collections and ready counts are calculated from locally stored records, not remote uploads, original-file availability, or official activity completeness.</p>
-        {(coverage.unassignedQuestionCollections > 0 || coverage.unassignedQuestions > 0) && <p className="sub" role="note">{coverage.unassignedQuestionCollections} collections and {coverage.unassignedQuestions} question records cannot be uniquely assigned to this SGU term/module outline. They remain in the Question Bank for review, not silently attached to a course.</p>}
+        {(coverage.unassignedQuestionCollections > 0 || coverage.unassignedQuestions > 0) && <p className="sub" role="note">{coverage.unassignedQuestionCollections} collections and {coverage.unassignedQuestions} question records cannot be uniquely assigned to this term/module outline. They remain in the Question Bank for review, not silently attached to a course.</p>}
       </details>
     </GlassCard>
   );
@@ -1208,6 +1211,7 @@ function BlueprintTrackerRow({ install, node }: { install: InstalledBlueprint; n
   const patch = (input: Partial<InstalledBlueprintNode>) => update(install.id, node.id, input);
   const move = (direction: -1 | 1) => moveBlueprintNode(install, node, direction, update);
   const linkedTotal = node.linkedQuestions + node.linkedAnki + node.linkedErrorLog + node.linkedAssessments;
+  const sourceHref = externalLinkHref(node.sourceUrl);
   return (
     <div className={`bp-tracker-row ${isBlueprintNodeDone(node) ? "done" : ""}`}>
       <div className="bp-tracker-row-head">
@@ -1262,7 +1266,7 @@ function BlueprintTrackerRow({ install, node }: { install: InstalledBlueprint; n
       <div className="bp-tracker-foot">
         <Tag tone={node.priority === "high" ? "orange" : node.priority === "low" ? "neutral" : "cyan"}>{node.priority} priority</Tag>
         <Tag tone={node.sourceType === "official" ? "green" : node.sourceType === "tool" ? "cyan" : "neutral"}>{node.sourceType ?? "internal"} source</Tag>
-        {node.sourceUrl && <a className="gbtn tiny" href={node.sourceUrl} target="_blank" rel="noreferrer noopener">Source <ExternalLink size={ICON_SIZE.microInline} /></a>}
+        {sourceHref && <a className="gbtn tiny" href={sourceHref} target="_blank" rel="noreferrer noopener">Source <ExternalLink size={ICON_SIZE.microInline} /></a>}
         {node.sourceVersion && <span className="sub">{node.sourceVersion}</span>}
         {node.lastVerified && <span className="sub">source audited {node.lastVerified}</span>}
       </div>

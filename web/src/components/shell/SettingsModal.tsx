@@ -6,7 +6,9 @@ import {
   Paintbrush, BookOpen, LayoutGrid, GraduationCap, Globe2,
 } from "lucide-react";
 import { ICON_SIZE } from "../../lib/iconSize";
+import { otherWorkspaceUrl } from "../../lib/otherWorkspace";
 import { Modal, Field } from "../ui/Modal";
+import { AxomWordmark } from "../ui/BrandMark";
 import { GButton, Tag } from "../ui/primitives";
 import { useStore, type Store } from "../../lib/store";
 import { privateReviewMedia } from "../../lib/privateLibrary/media";
@@ -31,20 +33,20 @@ import type { DashboardWidgetId, EducationTrackId, ExperienceFocusId, NoctyriumS
 import { HardDrive } from "lucide-react";
 import { SCHEMA_VERSION, APP_BUILD_LABEL } from "../../lib/seed";
 import { lastBackupAt } from "../../lib/backup";
-import { listLocalBackups } from "../../lib/localBackup";
+import { listLocalBackups, refreshLocalBackupSummaries } from "../../lib/localBackup";
 import { restoreLocalWorkspaceBackup } from "../../lib/storageRecovery";
 import { runStorageMigrations } from "../../lib/storageMigrations";
 import { requestOnboardingRerun } from "../../lib/uiStore";
 import { canonicalTimeZone, normalizeClockPreferences, normalizeTimeZonePreference, systemTimeZone } from "../../lib/clock";
 import { normalizeDailyLoopReminderPreferences } from "../../lib/dailyLoopReminders";
 import { AccountSyncPanel } from "./AccountSyncPanel";
+import { useOperatorAccessStatus } from "../../lib/operator/hostClient";
 import { StudyWorkflowSettings } from "./StudyWorkflowSettings";
 import { AppearanceStudio } from "./AppearanceStudio";
 import {
   BackupStatusCard,
   FocusCheckInSettings,
   LastSavedLine,
-  LocalSaveBadge,
   ProfileSection,
   RestoreHistoryCard,
 } from "./SettingsSections";
@@ -210,51 +212,67 @@ export async function persistPortableRestore(input: {
 
 export function SettingsModal({ onClose, initialTab = "general" }: { onClose: () => void; initialTab?: SettingsTab }) {
   const store = useStore();
+  const operatorAccess = useOperatorAccessStatus();
   const { profile } = store;
+  const otherWorkspace = otherWorkspaceUrl(location.hostname);
   const fileRef = useRef<HTMLInputElement>(null);
   const mergeRef = useRef<HTMLInputElement>(null);
   const avatarRef = useRef<HTMLInputElement>(null);
   const [msg, setMsg] = useState<string>("");
   const [backupBusy, setBackupBusy] = useState(false);
+  const [hydratedLocalBackups, setHydratedLocalBackups] = useState<ReturnType<typeof listLocalBackups>>([]);
+  const localBackups = mergeLocalBackupSummaries(listLocalBackups(), hydratedLocalBackups);
   const [tab, setTab] = useState<SettingsSection>(() => normalizeSettingsTab(initialTab));
   const [personalTab, setPersonalTab] = useState<PersonalizationSubsection>(() => initialSubsection(initialTab));
   const tabsId = useId();
   const tabRefs = useRef<Partial<Record<SettingsSection, HTMLButtonElement | null>>>({});
+  const contentRef = useRef<HTMLDivElement>(null);
   const [resigning, setResigning] = useState(false);
   const [viewingPromise, setViewingPromise] = useState(false);
   const promise = profile.promise;
   const tabIntro: Record<SettingsSection, { title: string; body: string }> = {
     profile: {
-      title: "Profile",
-      body: "Your identity, academic path, current focus, and good-enough daily targets.",
+      title: "Find your place.",
+      body: "Choose the path and term that match your work now. AXOM will bring the right study lanes forward.",
     },
-    account: { title: "Account & protection", body: "Optional sign-in, automatic protected versions, and safe restore controls." },
-    appearance: { title: "Appearance", body: "Make AXOM yours: light or dark, an accent palette (or your own color), and motion." },
+    account: { title: "Keep your work close.", body: "See what is saved here, what is protected online, and the next action that matters." },
+    appearance: { title: "Make it feel yours.", body: "Try each atmosphere on a real piece of your workspace before choosing it." },
     data: {
-      title: "Data on this device",
-      body: "See where your workspace lives, whether storage is healthy, and what AXOM has saved.",
+      title: "Know what you have.",
+      body: "See what is on this device and whether any part of your workspace needs attention.",
     },
     backup: {
-      title: "Emergency recovery",
-      body: "Export a portable copy, restore safely, and review automatic local recovery snapshots.",
+      title: "A way back, always.",
+      body: "Keep a copy you control. Choose the right recovery path if you ever need it.",
     },
     personalization: {
-      title: "Personalization",
-      body: "How you study, your daily rhythm, what the dashboard shows, and your program.",
+      title: "Set your rhythm.",
+      body: "Choose the methods, reminders, and daily view that meet you where you are.",
     },
     advanced: {
-      title: "Advanced",
-      body: "Technical versions, diagnostics, optional provider tools, and destructive reset controls.",
+      title: "Under the surface.",
+      body: "Updates, optional connections, and technical details live here.",
     },
   };
-  const localBackups = listLocalBackups();
   const exportedAt = lastBackupAt();
+
+  useEffect(() => {
+    let active = true;
+    void refreshLocalBackupSummaries()
+      .then((backups) => { if (active) setHydratedLocalBackups(backups); })
+      .catch(() => { /* Local markers remain available when IndexedDB discovery is blocked. */ });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (contentRef.current) contentRef.current.scrollTop = 0;
+  }, [tab]);
 
   function onTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, section: SettingsSection) {
     const index = SETTINGS_SECTIONS.findIndex((item) => item.id === section);
     let next: number;
-    if (event.key === "ArrowRight") next = (index + 1) % SETTINGS_SECTIONS.length;
-    else if (event.key === "ArrowLeft") next = (index - 1 + SETTINGS_SECTIONS.length) % SETTINGS_SECTIONS.length;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") next = (index + 1) % SETTINGS_SECTIONS.length;
+    else if (event.key === "ArrowLeft" || event.key === "ArrowUp") next = (index - 1 + SETTINGS_SECTIONS.length) % SETTINGS_SECTIONS.length;
     else if (event.key === "Home") next = 0;
     else if (event.key === "End") next = SETTINGS_SECTIONS.length - 1;
     else return;
@@ -323,11 +341,14 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
 
   return (
     <Modal
-      title="Your AXOM Setup"
+      title="Settings"
       onClose={onClose}
-      footer={<GButton variant="primary" onClick={onClose}>Done</GButton>}
+      className="settings-modal"
+      bodyClassName="settings-modal-body"
+      headerLead={<AxomWordmark size="sm" />}
+      footer={<><LastSavedLine /><button type="button" className="settings-finish" onClick={onClose}>Done <span aria-hidden="true">↗</span></button></>}
     >
-      <div className="filter-bar settings-tabs" style={{ marginBottom: 4 }} role="tablist" aria-label="Settings sections">
+      <div className="settings-tabs" role="tablist" aria-label="Settings sections" aria-orientation="horizontal">
         {SETTINGS_SECTIONS.map(({ id, label, icon: Icon }) => {
           const active = tab === id;
           return (
@@ -340,20 +361,37 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
               aria-selected={active}
               aria-controls={active ? `${tabsId}-panel-${id}` : undefined}
               tabIndex={active ? 0 : -1}
-              className={`filter-pill ${active ? "on" : ""}`}
+              className={`settings-tab ${active ? "on" : ""}`}
               onClick={() => setTab(id)}
               onKeyDown={(event) => onTabKeyDown(event, id)}
             >
-              <Icon size={ICON_SIZE.body} style={{ marginRight: 6, verticalAlign: -2 }} /> {label}
+              <Icon size={ICON_SIZE.body} aria-hidden="true" />
+              <span>{label}</span>
             </button>
           );
         })}
       </div>
+      <label className="settings-mobile-picker">
+        <span>Settings section</span>
+        <select value={tab} onChange={(event) => setTab(event.target.value as SettingsSection)}>
+          {SETTINGS_SECTIONS.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+        </select>
+      </label>
+
+      <div ref={contentRef} className="settings-content">
 
       <div className="settings-intro">
-        <b>{tabIntro[tab].title}</b>
-        <span>{tabIntro[tab].body}</span>
+        <span className="settings-intro-kicker">YOUR WORKSPACE / {String(SETTINGS_SECTIONS.findIndex((item) => item.id === tab) + 1).padStart(2, "0")}</span>
+        <h4>{tabIntro[tab].title}</h4>
+        <p>{tabIntro[tab].body}</p>
+        {tab === "profile" && <dl className="settings-workspace-summary">
+          <div><dt>Your path</dt><dd>{resolveTrack(profile.educationTrack).label}</dd></div>
+          <div><dt>In focus</dt><dd>{focusOption(profile.activeFocusId)?.label ?? "Choose a focus"}</dd></div>
+          <div><dt>Workspace</dt><dd>{profile.name?.trim() || "Yours, from the first step"}</dd></div>
+        </dl>}
       </div>
+
+      <div className="settings-editor">
 
       {tab === "profile" && (
         <section role="tabpanel" id={`${tabsId}-panel-profile`} aria-labelledby={`${tabsId}-tab-profile`}>
@@ -362,7 +400,6 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
             onRemoveAvatar={() => store.updateProfile({ avatarDataUrl: undefined })}
             onViewPromise={() => setViewingPromise(true)}
             onSignPromise={() => setResigning(true)}
-            onOpenProgram={() => { setPersonalTab("program"); setTab("personalization"); }}
             onOpenAccount={() => setTab("account")}
             onClose={onClose}
           />
@@ -373,21 +410,31 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
 
       {tab === "data" && (
         <section role="tabpanel" id={`${tabsId}-panel-data`} aria-labelledby={`${tabsId}-tab-data`} className="backup-center">
-          <div className="backup-actions-panel premium-panel">
-            <div>
-              <div className="sync-title">Local-first workspace</div>
-              <div className="sub">
-                Your workspace lives on this device and saves as you work. If you sign in and enable account protection, AXOM can keep protected versions in your account.
-              </div>
-              <div style={{ marginTop: 8 }}><LastSavedLine /></div>
-            </div>
-            <LocalSaveBadge />
-          </div>
-          <DataHealthPanel />
+          <DataHealthPanel onOpenBackup={() => setTab("backup")} />
         </section>
       )}
-      {tab === "account" && <div className="settings-card"><h3>Communications & privacy</h3><p>Choose your email categories or manage your account data.</p><div className="filter-bar"><a className="gbtn" href="#communications" onClick={onClose}>Notifications & Communications</a><a className="gbtn" href="#privacy" onClick={onClose}>Privacy & Data</a></div></div>}
-      {tab === "account" && <section role="tabpanel" id={`${tabsId}-panel-account`} aria-labelledby={`${tabsId}-tab-account`}><AccountSyncPanel /></section>}
+      {tab === "account" && (
+        <section role="tabpanel" id={`${tabsId}-panel-account`} aria-labelledby={`${tabsId}-tab-account`} className="settings-account-panel">
+          <AccountSyncPanel onOpenBackup={() => setTab("backup")} />
+          {otherWorkspace && <aside className="settings-other-workspace" aria-label="Other AXOM address">
+            <div><b>Looking for work on the other AXOM address?</b><p>Browser work is stored separately at each address. This workspace stays here.</p></div>
+            <a href={otherWorkspace} target="_blank" rel="noopener noreferrer">Open www.axom.info</a>
+          </aside>}
+          {operatorAccess.role && <div className="settings-host-access" aria-label="Host access">
+            <div><span>Verified AXOM role</span><strong>{operatorAccess.role === "owner" ? "Project CEO" : operatorAccess.role === "admin" ? "Administrator" : "Moderator"}</strong></div>
+            <a href="#host" onClick={onClose}>Open host dashboard</a>
+          </div>}
+          {operatorAccess.state === "error" && <div className="settings-update-state error" role="alert">
+            <p>Host access could not be checked. Your permissions are unchanged.</p>
+            <GButton size="sm" onClick={operatorAccess.retry}>Retry Host access</GButton>
+          </div>}
+          <nav className="settings-account-links" aria-label="More account settings">
+            <span>Also in AXOM</span>
+            <a href="#communications" onClick={onClose}>Notifications & communications</a>
+            <a href="#privacy" onClick={onClose}>Privacy & data</a>
+          </nav>
+        </section>
+      )}
 
       {tab === "appearance" && (
         <section role="tabpanel" id={`${tabsId}-panel-appearance`} aria-labelledby={`${tabsId}-tab-appearance`} className="backup-center">
@@ -398,10 +445,6 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
 
       {tab === "backup" && (
         <section role="tabpanel" id={`${tabsId}-panel-backup`} aria-labelledby={`${tabsId}-tab-backup`} className="backup-center">
-          <div className="sub" style={{ marginBottom: 4 }}>
-            Signed-in accounts can retain protected server versions. Manual backup remains an emergency portable safety valve.
-          </div>
-
           <RecoveryStatusCard
             onExport={exportBackup}
             onChoosePortableRestore={() => fileRef.current?.click()}
@@ -418,36 +461,34 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
             onResolved={() => setMsg("Storage update completed successfully.")}
           />
 
-          <div className="backup-actions-panel">
-            <div>
-              <div className="sync-title">Portable emergency copy</div>
-              <div className="sub">Automatic local saving is primary. Export a portable copy you control, or restore or merge a saved AXOM JSON or ZIP backup when recovery is needed. Original files and large image libraries export as ZIP.</div>
+          <div className="settings-backup-export">
+            <div><span className="settings-eyebrow">Your portable safety copy</span><h5>Take your work with you.</h5>
+              <p>Download your workspace, images, and available original files as one AXOM backup. Save it somewhere you control.</p></div>
+            <GButton variant="primary" disabled={backupBusy} onClick={exportBackup}>
+              <Download size={ICON_SIZE.body} /> {backupBusy ? "Preparing backup…" : "Export complete backup"}
+            </GButton>
+          </div>
+
+          <div className="settings-backup-restore" aria-labelledby="backup-restore-heading">
+            <div className="settings-section-heading"><span className="settings-eyebrow">When recovery is needed</span><h5 id="backup-restore-heading">Restore from a backup</h5>
+              <p>Choose how the file changes this device. AXOM checks it before asking for final confirmation.</p></div>
+            <div className="settings-recovery-choice">
+              <div><b>Replace this workspace</b><span>Use the backup as your workspace on this device. Current local changes are replaced.</span></div>
+              <GButton disabled={backupBusy} onClick={() => fileRef.current?.click()}><Upload size={ICON_SIZE.body} /> Choose backup to restore</GButton>
             </div>
-            <div className="row wrap gap8">
-              <GButton size="sm" variant="primary" disabled={backupBusy} onClick={exportBackup}>
-                <Download size={ICON_SIZE.body} /> Export backup
-              </GButton>
-              <GButton size="sm" disabled={backupBusy} onClick={() => fileRef.current?.click()}>
-                <Upload size={ICON_SIZE.body} /> Import / restore
-              </GButton>
-              <GButton size="sm" disabled={backupBusy} onClick={() => mergeRef.current?.click()}>
-                <Upload size={ICON_SIZE.body} /> Merge backup
-              </GButton>
+            <div className="settings-recovery-choice">
+              <div><b>Merge into this workspace</b><span>Combine records by ID. Newer versions win; nothing is deleted.</span></div>
+              <GButton disabled={backupBusy} onClick={() => mergeRef.current?.click()}><Upload size={ICON_SIZE.body} /> Choose backup to merge</GButton>
+            </div>
               <input ref={fileRef} type="file" accept="application/json,application/zip,.json,.zip" hidden
                 onChange={(e) => e.target.files?.[0] && doImport(e.target.files[0], "replace")} />
               <input ref={mergeRef} type="file" accept="application/json,application/zip,.json,.zip" hidden
                 onChange={(e) => e.target.files?.[0] && doImport(e.target.files[0], "merge")} />
-            </div>
-            <div className="row wrap gap8">
-              <GButton size="sm" disabled={backupBusy} aria-describedby="saved-work-description" onClick={() => exportCopy("saved-work")}>
-                <Download size={ICON_SIZE.body} /> Export saved work
-              </GButton>
-              <span className="sub" id="saved-work-description">Works offline. Keeps progress and available files; uncached course content stays as download references.</span>
-            </div>
-            <div className="backup-note">
-              <ShieldCheck size={ICON_SIZE.body} />
-              <span>Replace asks for confirmation. Merge combines records by ID; newer records win and nothing is deleted.</span>
-            </div>
+          </div>
+
+          <div className="settings-backup-saved-work">
+            <div><b>Need a smaller offline copy?</b><span id="saved-work-description">Saved work keeps your progress and files already on this device. Uncached course content stays as download references.</span></div>
+            <GButton disabled={backupBusy} aria-describedby="saved-work-description" onClick={() => exportCopy("saved-work")}><Download size={ICON_SIZE.body} /> Export saved work</GButton>
           </div>
 
           <BackupStatusCard
@@ -487,14 +528,14 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
       {tab === "advanced" && (
         <section role="tabpanel" id={`${tabsId}-panel-advanced`} aria-labelledby={`${tabsId}-tab-advanced`} className="backup-center">
           <AppUpdatePanel />
-          <div className="backup-actions-panel">
-            <div className="sync-title">Technical details</div>
+          <details className="settings-advanced-disclosure">
+            <summary><span>Technical details</span><small>Versions and this device’s workspace ID</small></summary>
             <div className="settings-target-grid">
               <Field label="Schema version" value={`v${store.schemaVersion ?? SCHEMA_VERSION}`} readOnly />
               <Field label="Build version" value={APP_BUILD_LABEL} readOnly />
               <Field label="Local workspace ID" value={profile.userId} readOnly />
             </div>
-          </div>
+          </details>
 
           <details className="backup-actions-panel">
             <summary>AI and provider settings (optional)</summary>
@@ -534,8 +575,24 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
 
       {resigning && <PromiseCutscene onDone={() => setResigning(false)} />}
       {viewingPromise && promise && <SavedPromise onClose={() => setViewingPromise(false)} />}
+      </div>
+      </div>
     </Modal>
   );
+}
+
+function mergeLocalBackupSummaries(
+  ...groups: Array<ReturnType<typeof listLocalBackups>>
+): ReturnType<typeof listLocalBackups> {
+  const byKey = new Map<string, ReturnType<typeof listLocalBackups>[number]>();
+  for (const summaries of groups) {
+    for (const summary of summaries) {
+      const existing = byKey.get(summary.key);
+      if (!existing || summary.savedAt >= existing.savedAt) byKey.set(summary.key, summary);
+    }
+  }
+  return [...byKey.values()].sort((a, b) =>
+    b.savedAt.localeCompare(a.savedAt) || b.key.localeCompare(a.key));
 }
 
 function DailyUtilitiesSettings() {
@@ -929,7 +986,7 @@ function PersonalizationPanel() {
                   <b>{option.label}</b>
                   <span>{option.blurb}</span>
                 </div>
-                <Tag tone={option.group === "SGU Terms" ? "cyan" : option.group === "Boards" ? "purple" : "green"}>{option.group}</Tag>
+                <Tag tone={option.group === "Course Terms" ? "cyan" : option.group === "Boards" ? "purple" : "green"}>{option.group}</Tag>
                 <GButton size="sm" onClick={() => makePrimary(option.id)} disabled={primary}>
                   {primary ? "Primary" : "Make primary"}
                 </GButton>
@@ -943,12 +1000,12 @@ function PersonalizationPanel() {
         <div className="settings-card-head">
           <span className="settings-card-icon"><HardDrive size={ICON_SIZE.body} aria-hidden="true" /></span>
           <div>
-            <h4 id="resources-title">SGU shared drives</h4>
-            <p>Show SGU-specific drives on the Resources page. Your personal drive and universal board packs always stay.</p>
+            <h4 id="resources-title">Course resource drives</h4>
+            <p>Show course-specific drives on the Resources page. Your personal drive and universal board packs always stay.</p>
           </div>
           <button type="button" className={`onboarding-switch ${showSgu ? "on" : ""}`}
             onClick={() => store.updateProfile({ showSguResources: !showSgu })}
-            aria-label="Show SGU shared drives" aria-pressed={showSgu} title={showSgu ? "SGU drives shown" : "SGU drives hidden"}>
+            aria-label="Show course resource drives" aria-pressed={showSgu} title={showSgu ? "Course drives shown" : "Course drives hidden"}>
             <span />
           </button>
         </div>

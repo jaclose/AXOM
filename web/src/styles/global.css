@@ -231,6 +231,7 @@ input, textarea, select { font-family: inherit; }
   position: relative;
   flex: 1;
   display: flex;
+  min-width: 0;
   min-height: 0;
   border-radius: var(--shell-radius);
   background:
@@ -240,7 +241,8 @@ input, textarea, select { font-family: inherit; }
   -webkit-backdrop-filter: var(--blur-deep);
   border: 1px solid rgba(230, 226, 214, 0.10);
   box-shadow: var(--shadow-shell);
-  overflow: hidden;
+  /* Keep the shell out of the scroll chain; pages scroll in .surface-scroll. */
+  overflow: clip;
 }
 /* A single faint gold hairline along the top edge — the "premium seam". */
 .shell::before {
@@ -291,6 +293,7 @@ input, textarea, select { font-family: inherit; }
 .surface {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;

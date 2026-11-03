@@ -247,7 +247,7 @@ export function asAcademicResource(
     category: "Academic videos",
     tags: ["axom:academic-panopto", "axom:unverified-school-week", "axom:bookmark-title-evidence",
       ...(owner ? [`academic:owner:${owner.key}`] : ["axom:unassigned-course"])],
-    note: "Personally bookmarked SGU recording; access may require authorization. The bookmark title alone does not prove official academic term, week, or activity identity.",
+    note: "Personally bookmarked course recording; access may require authorization. The bookmark title alone does not prove official academic term, week, or activity identity.",
   };
 }
 

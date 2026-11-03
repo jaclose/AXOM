@@ -55,7 +55,8 @@ describe("pushing AXOM cards to Anki", () => {
     expect(first).toMatchObject({ added: 3, failed: 0, pending: 0, offline: false, createdNoteTypes: ["AXOM Basic", "AXOM Cloze"] });
     expect(h.fake.call("deckNames")).toEqual(expect.arrayContaining(["AXOM::BPM 501::NB3", "AXOM::BPM 501", "AXOM::Unsorted"]));
     const a = h.noteOf("a")!;
-    expect(a).toMatchObject({ modelName: "AXOM Basic", tags: ["AXOM", "AXOM::bpm-501::nb3", "high_yield"] });
+    expect(a).toMatchObject({ modelName: "AXOM Basic" });
+    expect(a.tags).toEqual(["AXOM", "AXOM::bpm-501::nb3", "AXOM::term-2", "AXOM::term-2::bpm-501", "AXOM::term-2::bpm-501::nb3", "high_yield"]);
     expect(a.fields.Front.value).toBe("Question a?");
     expect(a.fields.Source.value).toBe("NB 58");
     expect(h.deckOf(a.cards[0])).toBe("AXOM::BPM 501::NB3");
@@ -90,6 +91,7 @@ describe("pushing AXOM cards to Anki", () => {
     expect(h.deckOf(note.cards[0])).toBe("AXOM::BPM 501::ER");
     expect(note.tags).toContain("AXOM::bpm-501::er");
     expect(note.tags).not.toContain("AXOM::bpm-501::nb3");
+    expect(note.tags).not.toContain("AXOM::term-2::bpm-501::nb3");
     expect(h.fake.call("areSuspended", { cards: note.cards })).toEqual([true]);
     await h.run([card("a", { courseId: "c501", moduleId: "m-er", suspended: false })]);
     expect(h.fake.call("areSuspended", { cards: note.cards })).toEqual([false]);

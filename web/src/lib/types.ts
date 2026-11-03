@@ -5,6 +5,7 @@
 // ===========================================================================
 
 import type { JournalNotebookEntryFields, JournalNotebookPreferences } from "./journalNotebook";
+import type { StudyStreaks } from "./studyStreaks";
 import type { StudyPlanSettings, StudyWorkflowPreferences } from "./studyPreferences";
 import type { CourseActivity } from "./course-engine/activity";
 
@@ -617,7 +618,7 @@ export type DashboardWidgetId =
   | "resourceFocus"
   | "boardBlueprint";
 
-export type DashboardWidgetSize = "small" | "medium" | "large" | "extra-large";
+export type DashboardWidgetSize = "small" | "large";
 
 export type DashboardLayoutPresetId = "focused" | "study-heavy" | "wellbeing-balanced" | "custom";
 
@@ -814,6 +815,8 @@ export interface Profile {
   clockPreferences?: ClockPreferences;
   /** Undefined keeps accepted legacy scoring; an explicit empty list is neutral. */
   dailySuccess?: DailySuccessConfig;
+  /** Dated reward and one-day freeze receipts; no schema change or inferred completions. */
+  studyStreaks?: StudyStreaks;
   /** Device-owned presentation preference; hiding a shortcut never removes logs. */
   hiddenActivityShortcuts?: string[];
   // Custom Pomodoro durations (§3), persisted with the profile.

@@ -6,11 +6,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { canonicalJson, compressText, decompressText, sha256 } from "../compressedText";
 import type { NoctyriumState } from "../types";
 import { readOriginalFile } from "../sourceOriginal";
+import { SyncPushError } from "./syncFailure";
 
 export const CONTENT_BUCKET = "workspace-content";
 export const MAX_CONTENT_OBJECT_BYTES = 8 * 1024 * 1024;
 const QUESTION_FIELDS = ["content", "stem", "options", "correctKey", "correctAnswerText", "explanation", "choiceRationales", "analyses", "extraction", "citation"] as const;
-export const INLINE_CONTENT_TYPES = new Set(["axom-academic-reference", "axom-course-template"]);
+export const INLINE_CONTENT_TYPES = new Set(["axom-academic-reference", "axom-community-reference", "axom-course-template"]);
 const DOCUMENT_FIELDS = ["rawText", "pageTexts"] as const;
 export interface ContentReference { collection: "questions" | "documents"; id: string; hash: string; byteSize: number; expandedBytes: number; academic?: AcademicRecordReference }
 export interface ContentUpload { reference: ContentReference; content: string; canonicalText: string; canonicalHash: string }
@@ -18,6 +19,8 @@ export interface ContentUpload { reference: ContentReference; content: string; c
 // answer updates never recompress every source document in a large library.
 const cache = new WeakMap<object, Promise<ContentUpload>>();
 const contentCache = new Map<string, string>();
+const confirmedContentUploads = new Map<string, Set<string>>();
+const MAX_CONCURRENT_CONTENT_UPLOADS = 8;
 let cachedBytes = 0;
 function cacheContent(hash: string, content: string) {
   if (contentCache.has(hash)) return;
@@ -39,7 +42,10 @@ export function projectCloudRecord(record: { id: string }, collection: ContentRe
       const text = JSON.stringify(Object.fromEntries(fields.filter(key => source[key] !== undefined).map(key => [key, source[key]])));
       const content = await compressText(text);
       const bytes = new TextEncoder().encode(content);
-      if (bytes.length > MAX_CONTENT_OBJECT_BYTES) throw new Error("A source document exceeds the compressed file limit. Split the source into smaller files before syncing.");
+      if (bytes.length > MAX_CONTENT_OBJECT_BYTES) throw new SyncPushError(
+        { kind: "rejected", rejection: "source-too-large", status: 0 },
+        "A source document exceeds the compressed file limit. Split the source into smaller files before syncing.",
+      );
       const canonicalText = canonicalJson(JSON.parse(text));
       const canonicalHash = await sha256(new TextEncoder().encode(canonicalText));
       return { canonicalText, canonicalHash, reference: { collection, id: record.id, hash: await sha256(bytes), byteSize: bytes.length, expandedBytes: new TextEncoder().encode(text).length }, content };
@@ -74,7 +80,10 @@ export async function splitCloudContent(state: NoctyriumState): Promise<{ worksp
       compact.push(copy);
     }
     const deferredRows = deferred?.[collection] ?? [];
-    if (deferredRows.some(row => compact.some(record => record.id === row.id))) throw new Error("Downloaded and deferred content overlap.");
+    if (deferredRows.some(row => compact.some(record => record.id === row.id))) throw new SyncPushError(
+      { kind: "rejected", rejection: "local-content-conflict", status: 0 },
+      "Downloaded and deferred content overlap. Keep a portable backup and review the account content before retrying.",
+    );
     Object.assign(workspace, { [collection]: [...compact, ...deferredRows].sort((a, b) => String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0) });
   }
   return { workspace, objects, references: references.sort((a, b) => `${a.collection}:${a.id}` < `${b.collection}:${b.id}` ? -1 : `${a.collection}:${a.id}` > `${b.collection}:${b.id}` ? 1 : 0) };
@@ -98,20 +107,40 @@ export function readContentReferences(value: unknown): ContentReference[] {
 }
 
 export async function uploadCloudContent(client: SupabaseClient, userId: string, objects: ContentUpload[], previous: ContentReference[], assertCurrent: () => Promise<void>): Promise<void> {
-  const known = new Set(previous.map((entry) => entry.hash));
-  for (const { reference, content } of objects) {
-    if (reference.academic || known.has(reference.hash)) continue;
-    await assertCurrent();
-    const path = `${userId}/${reference.hash}`;
-    const bucket = client.storage.from(CONTENT_BUCKET);
-    const result = await bucket.upload(path, new Blob([content], { type: "text/plain" }), { contentType: "text/plain", upsert: false, cacheControl: "31536000" });
-    if (result.error) {
-      if (!("statusCode" in result.error) || String(result.error.statusCode) !== "409") throw result.error;
-      const existing = await bucket.download(path);
-      if (existing.error || !existing.data || await sha256(new Uint8Array(await existing.data.arrayBuffer())) !== reference.hash) throw new Error("A source file could not be verified in your account.");
-    }
+  const confirmed = confirmedContentUploads.get(userId) ?? new Set<string>();
+  confirmedContentUploads.set(userId, confirmed);
+  const known = new Set([...previous.map((entry) => entry.hash), ...confirmed]);
+  const pending = objects.filter(({ reference }) => {
+    if (reference.academic || known.has(reference.hash)) return false;
     known.add(reference.hash);
+    return true;
+  });
+  let cursor = 0;
+  let failed = false;
+  let firstError: unknown;
+  async function worker() {
+    while (!failed && cursor < pending.length) {
+      const { reference, content } = pending[cursor++];
+      try {
+        await assertCurrent();
+        if (failed) return;
+        const path = `${userId}/${reference.hash}`;
+        const bucket = client.storage.from(CONTENT_BUCKET);
+        const result = await bucket.upload(path, new Blob([content], { type: "text/plain" }), { contentType: "text/plain", upsert: false, cacheControl: "31536000" });
+        if (result.error) {
+          if (!("statusCode" in result.error) || String(result.error.statusCode) !== "409") throw result.error;
+          const existing = await bucket.download(path);
+          if (existing.error || !existing.data || await sha256(new Uint8Array(await existing.data.arrayBuffer())) !== reference.hash) throw new Error("A source file could not be verified in your account.");
+        }
+        confirmed.add(reference.hash);
+      } catch (error) {
+        if (!failed) { failed = true; firstError = error; }
+      }
+    }
   }
+  // Settle every in-flight request before reporting a failure to the sync coordinator.
+  await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT_CONTENT_UPLOADS, pending.length) }, worker));
+  if (failed) throw firstError;
   await assertCurrent();
 }
 
@@ -158,7 +187,7 @@ export async function hydrateCloudContent(client: SupabaseClient, userId: string
   return workspace;
 }
 
-export function clearCloudContentCache(): void { contentCache.clear(); cachedBytes = 0; }
+export function clearCloudContentCache(): void { contentCache.clear(); confirmedContentUploads.clear(); cachedBytes = 0; }
 
 export function mergeSourceFields(metadata: object, source: object, collection: ContentReference["collection"]): object {
   const record = source as Record<string, unknown>;

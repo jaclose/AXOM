@@ -7,13 +7,11 @@ import { ASSET_ROLES, type AssetRole } from "./question-content/blocks";
 // inline base64 payloads inside the exported file only.
 // ===========================================================================
 import { ATTACHMENT_STORE_NAME, DB_NAME, DB_VERSION, ensureVaultStores } from "./localVault";
+import { MAX_QUESTION_ATTACHMENT_BYTES, MAX_QUESTION_ATTACHMENTS, MAX_QUESTION_ATTACHMENT_TOTAL_BYTES } from "./questionAttachmentLimits";
+export { MAX_QUESTION_ATTACHMENT_BYTES, MAX_QUESTION_ATTACHMENTS, MAX_QUESTION_ATTACHMENT_TOTAL_BYTES } from "./questionAttachmentLimits";
 
 export const QUESTION_ATTACHMENT_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
 export type QuestionAttachmentMimeType = (typeof QUESTION_ATTACHMENT_TYPES)[number];
-
-export const MAX_QUESTION_ATTACHMENT_BYTES = 8 * 1024 * 1024;        // 8 MB per image
-export const MAX_QUESTION_ATTACHMENTS = 10;                          // per question
-export const MAX_QUESTION_ATTACHMENT_TOTAL_BYTES = 30 * 1024 * 1024; // per question
 
 export interface QuestionImageAttachment {
   id: string;
@@ -190,6 +188,81 @@ async function withAttachmentStore<T>(
 
 export function putQuestionAttachmentBlob(blobKey: string, record: QuestionAttachmentBlobRecord): Promise<IDBValidKey> {
   return withAttachmentStore("readwrite", (store) => store.put(record, blobKey));
+}
+
+export type MissingAttachmentRestoreResult =
+  | { status: "restored" }
+  | { status: "rejected" | "exists" | "failed"; message: string };
+
+/** A missing attachment has no stored checksum, so require every recorded
+ * property and a successful decode before the learner reviews the preview. */
+export async function validateMissingQuestionAttachmentFile(
+  file: File,
+  attachment: QuestionImageAttachment,
+): Promise<AttachmentValidation> {
+  if (isPrivateLibraryAttachmentBlobKey(attachment.blobKey)) {
+    return { ok: false, message: "This shared image must be restored from its source library." };
+  }
+  if (normalizeAttachmentFileName(file.name, attachment.mimeType) !== attachment.fileName) {
+    return { ok: false, message: `Choose the original file named "${attachment.fileName}".` };
+  }
+  if (file.type !== attachment.mimeType) {
+    return { ok: false, message: `"${file.name}" has a different image format from the missing file.` };
+  }
+  if (file.size !== attachment.byteSize) {
+    return { ok: false, message: `"${file.name}" has a different file size from the missing image.` };
+  }
+  let dimensions: { width: number; height: number } | undefined;
+  try {
+    dimensions = await probeImageDimensions(file);
+  } catch {
+    return { ok: false, message: `"${file.name}" could not be opened as an image.` };
+  }
+  if (!dimensions) {
+    return { ok: false, message: "This browser could not verify the image. Try a current browser." };
+  }
+  if ((attachment.width && dimensions.width !== attachment.width)
+    || (attachment.height && dimensions.height !== attachment.height)) {
+    return { ok: false, message: `"${file.name}" has different image dimensions from the missing file.` };
+  }
+  return { ok: true };
+}
+
+/** Add only the absent key. `add` protects a concurrently restored image from
+ * replacement; metadata and question content are deliberately untouched. */
+export async function restoreMissingQuestionAttachment(input: {
+  file: File;
+  attachment: QuestionImageAttachment;
+  questionId: string;
+}): Promise<MissingAttachmentRestoreResult> {
+  const { attachment, file, questionId } = input;
+  const validation = await validateMissingQuestionAttachmentFile(file, attachment);
+  if (!validation.ok) return { status: "rejected", message: validation.message };
+  try {
+    await withAttachmentStore("readwrite", (store) => store.add({
+      blob: file,
+      mimeType: attachment.mimeType,
+      byteSize: file.size,
+      questionId,
+      updatedAt: attachment.updatedAt,
+    } satisfies QuestionAttachmentBlobRecord, attachment.blobKey));
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "ConstraintError") {
+      return { status: "exists", message: "This image is already stored. AXOM did not replace it." };
+    }
+    return { status: "failed", message: "AXOM could not save this image. Keep the original file and try again." };
+  }
+  try {
+    const stored = await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true });
+    if (!stored || stored.questionId !== questionId || stored.mimeType !== attachment.mimeType
+      || stored.byteSize !== file.size || stored.blob.size !== file.size
+      || !equalBytes(new Uint8Array(await stored.blob.arrayBuffer()), new Uint8Array(await file.arrayBuffer()))) {
+      return { status: "failed", message: "The image was saved but could not be verified. Keep the original file." };
+    }
+  } catch {
+    return { status: "failed", message: "The image was saved but could not be read back. Keep the original file." };
+  }
+  return { status: "restored" };
 }
 
 type MissingAttachmentLoader = (blobKey: string) => Promise<QuestionAttachmentBlobRecord | undefined>;

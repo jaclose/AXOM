@@ -58,7 +58,7 @@ test("a mapped paste imports with its tags, attaches the named image, and shows 
   page.on("pageerror", (error) => errors.push(error.message));
   await seedOnboarded(page);
   await page.goto("/#questions");
-  await page.getByRole("button", { name: "Add your own material", exact: true }).click();
+  await page.getByRole("tab", { name: "Add material", exact: true }).click();
   await page.getByLabel("Choose question files or a ZIP to import").setInputFiles({ name: "sample-quiz-4.txt", mimeType: "text/plain", buffer: Buffer.from(MAPPED) });
   await expect(page.getByText("Review 3 parsed questions", { exact: false })).toBeVisible();
 
@@ -77,8 +77,8 @@ test("a mapped paste imports with its tags, attaches the named image, and shows 
   await page.getByRole("checkbox", { name: "Include question 3" }).uncheck();
   await page.getByLabel("Set title").fill("Mapped sample");
   await page.getByRole("button", { name: "Finalize import" }).click();
-  await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
-  await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
+  await page.getByRole("tab", { name: "Library (1)", exact: true }).click();
+  await page.getByRole("button", { name: "Weeks & sets", exact: true }).click();
 
   // The tab above appears when the questions are saved; the image is attached in a later step
   // of the same save. So read until the attachment is there, instead of once and too early.
@@ -97,8 +97,8 @@ test("a mapped paste imports with its tags, attaches the named image, and shows 
   // The image is part of the question: it shows with the stem, before answering,
   // and is still there after a reload (its bytes live in the device vault).
   await reloadAfterSave(page);
-  await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
-  await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
+  await page.getByRole("tab", { name: "Library (1)", exact: true }).click();
+  await page.getByRole("button", { name: "Weeks & sets", exact: true }).click();
   await page.getByRole("button", { name: "Practice Mapped sample", exact: true }).click();
   await page.getByRole("button", { name: "Start tutor block" }).click();
   for (let item = 0; item < 2; item += 1) {

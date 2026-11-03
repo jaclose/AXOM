@@ -25,18 +25,21 @@ import {
 } from "../../lib/focusCheckIn";
 import type { NoctyriumState } from "../../lib/types";
 import { playLockInCue } from "../../lib/timerCues";
+import { shellBusy } from "../../lib/shellBusy";
 
 export const FOCUS_CHECKIN_TEST_EVENT = "axom:focus-checkin-preview";
+export const FIRST_VISIT_LOCKIN_PREVIEW_EVENT = "axom:first-visit-lockin-preview";
+export const FIRST_VISIT_LOCKIN_CLOSED_EVENT = "axom:first-visit-lockin-closed";
 
 type Phase =
   | { kind: "hidden" }
-  | { kind: "prompt"; seed: number; preview: boolean }
-  | { kind: "reply"; response: FocusCheckInResponse; line: string; preview: boolean };
+  | { kind: "prompt"; seed: number; preview: boolean; firstVisitSample: boolean }
+  | { kind: "reply"; response: FocusCheckInResponse; line: string; preview: boolean; firstVisitSample: boolean };
 
 function restorePrompt(day: string): Phase {
   try {
     const value = JSON.parse(localStorage.getItem(STORAGE_KEYS.focusCheckInPending) ?? "null");
-    if (value?.kind === "prompt" && value.day === day && Number.isSafeInteger(value.seed)) return { kind: "prompt", seed: value.seed, preview: false };
+    if (value?.kind === "prompt" && value.day === day && Number.isSafeInteger(value.seed)) return { kind: "prompt", seed: value.seed, preview: false, firstVisitSample: false };
     localStorage.removeItem(STORAGE_KEYS.focusCheckInPending);
   } catch { /* A blocked device store must not prevent a check-in. */ }
   return { kind: "hidden" };
@@ -92,12 +95,14 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = currentClock }: 
   const pomodoroRunning = usePomodoro((state) => state.running && state.phase === "focus");
   const [phase, setPhase] = useState<Phase>(() => restorePrompt(dayOf(clock())));
   const [exiting, setExiting] = useState(false);
+  const [suspended, setSuspended] = useState(false);
   const overlayRef = useRef<HTMLDivElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
   const [, refreshProgress] = useState(0);
   const [ledger, setLedger] = useState<FocusCheckInLedger>(() => focusCheckInLedger.read(dayOf(clock())));
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
+  const settingsPreview = phase.kind !== "hidden" && phase.preview && !phase.firstVisitSample;
   const preferences = normalizeFocusCheckInPreferences(preferencesRaw);
   const focusActive = pomodoroRunning || findLiveSession(sessions ?? [])?.status === "active";
 
@@ -106,7 +111,8 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = currentClock }: 
     setLedger(next);
   }, []);
 
-  const openPrompt = useCallback((preview: boolean) => {
+  const openPrompt = useCallback((preview: boolean, firstVisitSample = false) => {
+    if (phaseRef.current.kind !== "hidden") return false;
     setExiting(false);
     const now = clock();
     const state = useStore.getState();
@@ -114,11 +120,14 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = currentClock }: 
     const current = focusCheckInLedger.read(dayOf(now));
     const next = preview ? current : markPrompted(current, now);
     if (!preview) persist(next);
-    setPhase({
+    const nextPhase: Phase = {
       kind: "prompt",
       seed: next.prompts + now.getHours() * 7 + now.getMinutes(),
       preview,
-    });
+      firstVisitSample,
+    };
+    phaseRef.current = nextPhase;
+    setPhase(nextPhase);
     // JD (Ideas 5): the check-in arrives with a quiet, rising chime.
     playLockInCue();
     // A desktop window is often visible but behind other apps: notify
@@ -126,11 +135,12 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = currentClock }: 
     if (!preview && preferences.systemNotifications && typeof document !== "undefined" && (document.visibilityState === "hidden" || !document.hasFocus())) {
       notifyLockIn(focusProgressHint(state, pomodoro, now));
     }
+    return true;
   }, [clock, persist, preferences.systemNotifications]);
 
   useEffect(() => {
     function reconcile() {
-      if (phaseRef.current.kind !== "hidden") return;
+      if (phaseRef.current.kind !== "hidden" || document.visibilityState !== "visible" || shellBusy()) return;
       const now = clock();
       const decision = evaluateFocusCheckIn({
         now,
@@ -160,8 +170,15 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = currentClock }: 
   // Settings → "Preview a check-in" dispatches this event.
   useEffect(() => {
     const onPreview = () => openPrompt(true);
+    const onFirstVisitPreview = (event: Event) => {
+      if (openPrompt(true, true)) (event as CustomEvent<{ accepted: boolean }>).detail.accepted = true;
+    };
     window.addEventListener(FOCUS_CHECKIN_TEST_EVENT, onPreview);
-    return () => window.removeEventListener(FOCUS_CHECKIN_TEST_EVENT, onPreview);
+    window.addEventListener(FIRST_VISIT_LOCKIN_PREVIEW_EVENT, onFirstVisitPreview);
+    return () => {
+      window.removeEventListener(FOCUS_CHECKIN_TEST_EVENT, onPreview);
+      window.removeEventListener(FIRST_VISIT_LOCKIN_PREVIEW_EVENT, onFirstVisitPreview);
+    };
   }, [openPrompt]);
 
   // Only this small device interaction survives reload. Progress is always
@@ -176,19 +193,51 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = currentClock }: 
   // Only an answered prompt times out. An unanswered check-in has no deadline.
   useEffect(() => {
     if (phase.kind !== "reply") return;
+    if (suspended) return;
     const timeout = window.setTimeout(() => setExiting(true), 2200);
     return () => window.clearTimeout(timeout);
-  }, [phase]);
+  }, [phase, suspended]);
 
   useEffect(() => {
-    if (!exiting) return;
+    if (!exiting || suspended) return;
     const timeout = window.setTimeout(() => {
       if (overlayRef.current?.contains(document.activeElement) && returnFocus.current?.isConnected) returnFocus.current.focus();
+      if (phaseRef.current.kind !== "hidden" && phaseRef.current.firstVisitSample) {
+        window.dispatchEvent(new Event(FIRST_VISIT_LOCKIN_CLOSED_EVENT));
+      }
+      phaseRef.current = { kind: "hidden" };
       setPhase({ kind: "hidden" });
       setExiting(false);
     }, 240);
     return () => window.clearTimeout(timeout);
-  }, [exiting]);
+  }, [exiting, suspended]);
+
+  // A regular prompt waits behind Settings or another layer. Its phase stays
+  // intact, and a preview intentionally launched from Settings stays visible.
+  useEffect(() => {
+    if (phase.kind === "hidden" || settingsPreview) { setSuspended(false); return; }
+    const reconcile = () => setSuspended(shellBusy(overlayRef.current));
+    const observer = typeof MutationObserver === "undefined" ? undefined : new MutationObserver(reconcile);
+    observer?.observe(document.body, { childList: true, subtree: true });
+    const onFocusOut = () => queueMicrotask(reconcile);
+    document.addEventListener("focusin", reconcile);
+    document.addEventListener("focusout", onFocusOut);
+    reconcile();
+    return () => {
+      observer?.disconnect();
+      document.removeEventListener("focusin", reconcile);
+      document.removeEventListener("focusout", onFocusOut);
+    };
+  }, [phase.kind, settingsPreview]);
+
+  useEffect(() => {
+    if (!suspended || !overlayRef.current?.contains(document.activeElement)) return;
+    const dialogs = document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]');
+    const modal = dialogs[dialogs.length - 1];
+    if (modal) modal.focus({ preventScroll: true });
+    else if (returnFocus.current?.isConnected) returnFocus.current.focus({ preventScroll: true });
+    else if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  }, [suspended]);
 
   useEffect(() => {
     if (phase.kind === "hidden") return;
@@ -214,13 +263,17 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = currentClock }: 
   }, [phase.kind]);
 
   useEffect(() => {
-    if (phase.kind === "hidden") return;
+    if (phase.kind === "hidden" || suspended) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setExiting(true);
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setExiting(true);
+      }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [phase.kind]);
+  }, [phase.kind, suspended]);
 
   function answer(response: FocusCheckInResponse) {
     if (phase.kind !== "prompt") return;
@@ -235,6 +288,7 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = currentClock }: 
       kind: "reply",
       response,
       preview: phase.preview,
+      firstVisitSample: phase.firstVisitSample,
       line: responseLine(response, preferences.tone, phase.seed + next.lockedIn),
     });
   }
@@ -251,7 +305,7 @@ export function FocusCheckIn({ pollIntervalMs = 20_000, clock = currentClock }: 
   const progress = focusProgressHint(useStore.getState(), pomodoro, clock());
 
   return createPortal(
-    <div ref={overlayRef} className={`focus-checkin ${phase.kind}${exiting ? " is-exiting" : ""}`} role="dialog" aria-modal="false" aria-labelledby="focus-checkin-title" aria-live="polite">
+    <div ref={overlayRef} className={`focus-checkin ${phase.kind}${exiting ? " is-exiting" : ""}${suspended ? " is-suspended" : ""}`} role="dialog" aria-modal="false" aria-hidden={suspended || undefined} aria-labelledby="focus-checkin-title" aria-live="polite">
       <div className="focus-checkin-glow" aria-hidden="true" />
       <button type="button" className="focus-checkin-close" aria-label="Dismiss check-in" onClick={() => setExiting(true)}>
         <X size={ICON_SIZE.body} aria-hidden="true" />

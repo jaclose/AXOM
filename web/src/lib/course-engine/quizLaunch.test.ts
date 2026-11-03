@@ -4,7 +4,7 @@ import { buildQuestionBankBooks } from "../bookshelf/questionBankBooks";
 import { STORAGE_KEYS } from "../brand";
 import type { QuestionRecord } from "../questions";
 import type { QuestionSet } from "../library";
-import { COURSE_QUIZ_LAUNCH_KEY, MAX_COURSE_QUIZ_QUESTIONS, clearCourseQuizLaunch, courseQuizSelection, launchCourseQuiz, readCourseQuizLaunch } from "./quizLaunch";
+import { COURSE_QUIZ_LAUNCH_EVENT, COURSE_QUIZ_LAUNCH_KEY, MAX_COURSE_QUIZ_QUESTIONS, clearCourseQuizLaunch, courseQuizSelection, launchCourseQuiz, readCourseQuizLaunch } from "./quizLaunch";
 
 const q = (id: string, week: number): QuestionRecord => ({ id, source: "imported", stem: "Synthetic source question", options: [{ key: "A", text: "First" }, { key: "B", text: "Second" }], correctKey: "A", status: "unseen", module: "SAMPLE", week, tags: [], attempts: [], createdAt: "2026-01-01", updatedAt: "2026-01-01" });
 const questions = [q("one", 1), q("two", 2)];
@@ -20,6 +20,20 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 describe("course to canonical quiz handoff", () => {
+  it("notifies a mounted Question Bank when a week quiz starts on the same route", () => {
+    const previous = location.href;
+    history.replaceState(null, "", "#questions");
+    const signal = vi.fn();
+    window.addEventListener(COURSE_QUIZ_LAUNCH_EVENT, signal);
+    try {
+      launchCourseQuiz(courseQuizSelection(bank(), 2));
+      expect(signal).toHaveBeenCalledOnce();
+      expect(readCourseQuizLaunch(questions)?.questionIds).toEqual(["two"]);
+    } finally {
+      window.removeEventListener(COURSE_QUIZ_LAUNCH_EVENT, signal);
+      history.replaceState(null, "", previous);
+    }
+  });
   it("keeps exact week membership and never widens an empty scope", () => {
     expect(courseQuizSelection(bank(), 1).questionIds).toEqual(["one"]);
     expect(courseQuizSelection(bank(), 99).questionIds).toEqual([]);

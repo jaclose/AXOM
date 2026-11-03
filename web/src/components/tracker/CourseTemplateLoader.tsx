@@ -15,7 +15,7 @@ import {
   type CourseTemplatePlan, type CourseTemplateSection, type TemplateReconciliation,
 } from "../../lib/course-engine/templateParse";
 import { canonicalModuleKey } from "../../lib/course-engine/vocabulary";
-import { courseTemplateFamily, prepareCourseTemplate, savedCourseTemplates } from "../../lib/course-engine/templateLibrary";
+import { MAX_COURSE_TEMPLATE_BYTES, courseTemplateFamily, prepareCourseTemplate, savedCourseTemplates } from "../../lib/course-engine/templateLibrary";
 import { SavedCourseTemplates } from "./SavedCourseTemplates";
 import { pushToast } from "../../lib/toast";
 import { ICON_SIZE } from "../../lib/iconSize";
@@ -49,6 +49,27 @@ interface ModulePreview {
 }
 
 const EXAMPLE = "FTM 1 - Lectures + DLAs:\n\nFTM Lecture 01 Histology of the Cell [Lecture]\nDLA 01 Membrane Structure [DLA]";
+const MAX_COURSE_TEMPLATE_FILES = 24;
+const MAX_COURSE_TEMPLATE_BATCH_BYTES = 16 * 1024 * 1024;
+
+function preflightTemplateFiles(files: File[]): void {
+  if (files.length > MAX_COURSE_TEMPLATE_FILES) {
+    throw new Error(`${files[MAX_COURSE_TEMPLATE_FILES].name}: choose up to ${MAX_COURSE_TEMPLATE_FILES} template files at a time.`);
+  }
+  let totalBytes = 0;
+  for (const file of files) {
+    if (!/\.txt$/i.test(file.name) || (file.type && !["text/plain", "application/octet-stream"].includes(file.type.toLowerCase().split(";")[0]))) {
+      throw new Error(`${file.name}: choose a plain-text .txt template.`);
+    }
+    if (file.size > MAX_COURSE_TEMPLATE_BYTES) {
+      throw new Error(`${file.name}: template exceeds 2 MiB. Choose a smaller .txt file or split it into modules.`);
+    }
+    totalBytes += file.size;
+    if (totalBytes > MAX_COURSE_TEMPLATE_BATCH_BYTES) {
+      throw new Error(`${file.name}: this selection exceeds 16 MiB. Choose fewer template files at a time.`);
+    }
+  }
+}
 
 function TemplatePage({ title, onClose, footer, children }: { title: string; onClose: () => void; footer: ReactNode; children: ReactNode; className?: string }) {
   return <section className="course-library-page" aria-label={title}><header className="course-library-heading"><h1>{title}</h1><GButton onClick={onClose}>Back to course</GButton></header>{children}<div className="row wrap gap8" style={{ marginTop: 24 }}>{footer}</div></section>;
@@ -91,7 +112,16 @@ export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templa
     setBusy(true);
     setError("");
     try {
-      await saveTemplates(await Promise.all([...files].map(async (file) => ({ text: await file.text(), name: file.name }))));
+      const selected = [...files];
+      preflightTemplateFiles(selected);
+      const inputs: Array<{ text: string; name: string }> = [];
+      for (const file of selected) {
+        let text: string;
+        try { text = await file.text(); }
+        catch { throw new Error(`${file.name}: the file could not be read. Choose it again.`); }
+        inputs.push({ text, name: file.name });
+      }
+      await saveTemplates(inputs);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The file could not be read. Choose it again.");
     } finally { setBusy(false); }
@@ -286,7 +316,7 @@ export function CourseTemplateLoader({ onClose, onApplied, defaultTermId, templa
           }} />
         </details>
         <p className="sub" style={{ margin: 0 }}>
-          Choose a saved version or import a text template. Preview its weeks before loading; existing study progress stays.
+          Choose a saved version or import .txt templates, up to 2 MiB each. Preview their weeks before loading; existing study progress stays.
         </p>
         <div className="row wrap gap8">
           <label className="gbtn sm">

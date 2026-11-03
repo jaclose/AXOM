@@ -14,11 +14,11 @@ test("18 B1 sources preserve 349 review-held candidates and originals without fa
   const errors: string[] = [];
   page.on("pageerror", e => errors.push(e.message));
   const panel = page.getByRole("region", { name: "Prepared library", exact: true });
-  if (!await panel.isVisible()) await page.getByText("Local collection transfer and source review", { exact: true }).click();
+  if (!await panel.isVisible()) await page.getByText("Import status and source review", { exact: true }).click();
 
   async function install() {
     if (!await panel.isVisible()) {
-      await page.getByText("Local collection transfer and source review", { exact: true }).click();
+      await page.getByText("Import status and source review", { exact: true }).click();
       await expect(panel).toBeVisible();
     }
     const chooser = page.waitForEvent("filechooser");

@@ -12,6 +12,7 @@ This directory is retrieved only for a relevant idea, branch or historical quest
 | A branch's last recorded work | Search [IN-FLIGHT.md](02-progress/IN-FLIGHT.md); verify with Git |
 | A particular shipped change | Search [major](02-progress/1-MAJOR.md), [updates](02-progress/2-UPDATES.md), or [hotfixes](02-progress/3-HOTFIXES.md) |
 | A known implementation trap | Matching agent note in [03-notes](03-notes/) |
+| The 2026-11-01 Journal/QBank/Host/Community request | [Ideas 11](01-ideas/IDEAS-11.md), then [the scoped audit and pickup note](03-notes/2026-11-01-IDEAS-WORKFLOW-AUDIT.md) |
 | Completion evidence or parked work | [Completed](04-COMPLETED.md) or [future](05-FUTURE.md) |
 | What governs feature priority (since 2026-10-04) | [Learning Intelligence doctrine](../product/AXOM-LEARNING-INTELLIGENCE-DOCTRINE.md), then the [Ideas 1 to 6 reconciliation](../product/IDEAS-RECONCILIATION-2026-10-04.md) |
 | The first implementation wedge | [Question-first plan](../feature-development/2026-10-04/QUESTION-FIRST-PLAN.md), then the [Decode sequence](../feature-development/2026-10-04/DECODE-IMPLEMENTATION.md) |

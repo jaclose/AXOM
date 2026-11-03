@@ -20,8 +20,8 @@ export const BRAND = {
   productKind: "private academic operating system",
   /** Release channel shown next to versions. */
   channel: "pre-beta",
-  /** Public URLs (hosted preview, changelog). */
-  hostedUrl: "https://noctyrium-cktjdhuhw-jacloses-projects.vercel.app/#dashboard",
+  /** Public URLs (hosted app, changelog). */
+  hostedUrl: "https://www.axom.info/#dashboard",
   changelogRoute: "about",
 } as const;
 

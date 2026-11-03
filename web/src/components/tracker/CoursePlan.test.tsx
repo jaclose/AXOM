@@ -45,8 +45,14 @@ afterEach(cleanup);
 describe("course-plan question availability", () => {
   it("labels remote reviewed counts as downloadable rather than locally ready", () => {
     render(<CoursePlan book={book} availableQuestions={12} {...callbacks} />);
-    expect(screen.getByText("reviewed available to download").querySelector("b")?.textContent).toBe("12");
+    expect(screen.getByText("reviewed questions available to download").querySelector("b")?.textContent).toBe("12");
     expect(screen.queryByText(/12 ready questions/)).toBeNull();
+  });
+
+  it("uses singular question copy for one hosted ready question", () => {
+    render(<CoursePlan book={book} availableQuestions={1} {...callbacks} />);
+    expect(screen.getByText("reviewed question available to download").querySelector("b")?.textContent).toBe("1");
+    expect(screen.getByText(/Load Course to download 1 reviewed question and any images/)).toBeTruthy();
   });
 
   it("labels only the derived local bank count as locally answer-ready", () => {

@@ -264,6 +264,40 @@ export async function cancelDeletion(service: CommunicationsService, userId: str
     return { notificationQueued: false };
   }
 }
+/** The service role can see every account's feedback, so verify ownership again
+ * before placing any row in a portable account export. */
+export async function journalFeedbackForExport(service: CommunicationsService, userId: string): Promise<Record<string, unknown>[]> {
+  const feedback: Record<string, unknown>[] = [];
+  const seen = new Set<string>();
+  let expected: number | undefined;
+  for (let start = 0; ; start += 500) {
+    const result = await service.db.from("journal_experience_feedback")
+      .select("id,user_id,rating,liked,want_more,missing,pain_points,comment,created_at", { count: "exact" })
+      .eq("user_id", userId).order("created_at").order("id").range(start, start + 499);
+    // Account exports predate this optional table. During a staged rollout,
+    // PostgREST reports an absent table through either Postgres or its schema cache.
+    if (start === 0 && result.error
+      && ["42P01", "PGRST205"].includes(result.error.code ?? "")
+      && result.error.message.includes("journal_experience_feedback")) return [];
+    if (result.error || !Array.isArray(result.data) || typeof result.count !== "number")
+      throw new Error("journal-feedback-export-unavailable");
+    if (expected === undefined) expected = result.count;
+    if (result.count !== expected) throw new Error("journal-feedback-export-changed");
+    for (const value of result.data) {
+      const row = value as Record<string, unknown>;
+      if (!row || row.user_id !== userId || typeof row.id !== "string" || seen.has(row.id))
+        throw new Error("journal-feedback-export-invalid");
+      seen.add(row.id);
+      const owned = { ...row };
+      delete owned.user_id;
+      feedback.push(owned);
+    }
+    if (result.data.length < 500) break;
+  }
+  if (feedback.length !== expected) throw new Error("journal-feedback-export-incomplete");
+  return feedback;
+}
+
 export async function processPrivacy(service: CommunicationsService): Promise<number> {
   const now = new Date().toISOString();
   // Any stale job may have crossed an external I/O boundary. Keep its durable
@@ -289,7 +323,8 @@ export async function processPrivacy(service: CommunicationsService): Promise<nu
       if (request.kind === "export") {
         const workspace = await service.workspace(request.user_id);
         const [user, prefs, identity, pulses, history, privacy] = await Promise.all([service.user(request.user_id), service.preferenceRows(request.user_id), service.identity(request.user_id), service.db.from("pulse_snapshots").select("*").eq("user_id", request.user_id), service.db.from("email_jobs").select("id,type,status,created_at,sent_at").eq("user_id", request.user_id), service.db.from("privacy_requests").select("id,kind,status,scheduled_for,created_at").eq("user_id", request.user_id)]);
-        const data = { format: "axom-account-export", version: 1, generatedAt: now, profile: { id: user.id, email: user.email, displayName: user.user_metadata?.display_name }, preferences: prefs, emailPresentation: identity, workspace: workspace?.state ?? null, workspaceUpdatedAt: workspace?.at ?? null, pulse: checked(pulses), communications: checked(history), privacy: checked(privacy), coverage: "Account-held data only. Device-local source files, original PDFs and attachment binaries are not included. Use the local portable backup for device-owned content." };
+        const journalFeedback = await journalFeedbackForExport(service, request.user_id);
+        const data = { format: "axom-account-export", version: 1, generatedAt: now, profile: { id: user.id, email: user.email, displayName: user.user_metadata?.display_name }, preferences: prefs, emailPresentation: identity, workspace: workspace?.state ?? null, workspaceUpdatedAt: workspace?.at ?? null, pulse: checked(pulses), communications: checked(history), journalFeedback, privacy: checked(privacy), coverage: "Account-held data only. Device-local source files, original PDFs and attachment binaries are not included. Use the local portable backup for device-owned content." };
         const object_path = `${request.user_id}/${request.id}.json`;
         const serialized = JSON.stringify(data);
         if (new TextEncoder().encode(serialized).byteLength > 25000000) throw new Error("export-too-large");

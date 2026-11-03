@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { ArrowLeft, BarChart3, Check, CircleDot, Clock3, Copy, Delete, HelpCircle, Lightbulb, Minus, ShieldCheck } from "lucide-react";
+import { ArrowLeft, BarChart3, Check, CircleDot, Clock3, Copy, Delete, Flame, HelpCircle, Lightbulb, Minus, ShieldCheck } from "lucide-react";
 import { GlassCard, GButton } from "../components/ui/primitives";
+import { StreakFreezeMeter } from "../components/productivity/StreakFreezeMeter";
 import { Modal } from "../components/ui/Modal";
 import { DailyWordDemo } from "../components/games/DailyWordDemo";
 import {
@@ -17,8 +18,10 @@ import {
 } from "../lib/dailyWord";
 import { useClockNow } from "../lib/clock";
 import { useStore } from "../lib/store";
+import { dailyWordProtectedStreak, dateKeyInTimeZone } from "../lib/studyStreaks";
 import { dismissAnnouncement, isAnnouncementDismissed, readDismissedAnnouncements } from "../lib/announcements";
 import "../styles/daily-games.css";
+import "../styles/study-streaks.css";
 import { ICON_SIZE } from "../lib/iconSize";
 
 interface WordData {
@@ -124,6 +127,9 @@ export function DailyWordPage() {
     return null;
   }, [answer, evaluations]);
   const stats = useMemo(() => deriveDailyWordStats(history), [history]);
+  const protectedStreak = dailyWordProtectedStreak(history, profile.studyStreaks?.dailyWord.frozenDays ?? [], dateKeyInTimeZone(now, timeZone));
+  const freezesLeft = profile.studyStreaks?.dailyWord.freezesLeft ?? 2;
+  const refillProgress = profile.studyStreaks?.dailyWord.refillProgress ?? 0;
   const nextPuzzleCountdown = useMemo(
     () => puzzle?.completed ? formatCountdown(millisecondsUntilNextCalendarDate(now, puzzle.timezone)) : "",
     [now, puzzle?.completed, puzzle?.timezone],
@@ -313,6 +319,11 @@ export function DailyWordPage() {
         )}
         <span className="daily-word-date"><b>#{dailyWordNumber(puzzle.puzzleDate)}</b><span>{puzzle.puzzleDate}</span></span>
       </div>
+      <div className="study-game-streak-strip" aria-label="Daily Word streak protection">
+        <span><Flame size={ICON_SIZE.body} aria-hidden="true" /> <b>{protectedStreak}</b> day streak</span>
+        <StreakFreezeMeter available={freezesLeft} progress={refillProgress} label="Daily Word" />
+        <small>A freeze covers one missed day, without adding a streak day.</small>
+      </div>
       {/* The top bar already shows the title; keep the page heading for assistive tech. */}
       <header className="sr-only">
         <h1>AXOM Daily Word</h1>
@@ -421,8 +432,8 @@ export function DailyWordPage() {
           <div className="daily-word-stats" aria-label="Daily Word statistics">
             <Stat label="Played" value={stats.gamesPlayed} />
             <Stat label="Win %" value={stats.gamesPlayed ? Math.round((stats.wins / stats.gamesPlayed) * 100) : 0} />
-            <Stat label="Streak" value={stats.currentStreak} />
-            <Stat label="Best" value={stats.maxStreak} />
+            <Stat label="Streak" value={protectedStreak} />
+            <Stat label="Best" value={Math.max(stats.maxStreak, protectedStreak)} />
           </div>
           <div className="daily-word-distribution">
             <h3>Guess distribution</h3>

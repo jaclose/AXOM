@@ -6,6 +6,7 @@ import { exportPremedExperienceWorkbook } from "../lib/premedExport";
 import { premedEvidenceStrength } from "../lib/premedScoring";
 import type { PremedExperienceEntry, PremedExperienceKind } from "../lib/types";
 import { ICON_SIZE } from "../lib/iconSize";
+import { externalLinkHref } from "../lib/resourceUtils";
 
 const TABS: Array<"Overview" | PremedExperienceKind> = ["Overview", "Clinical", "Service", "Research", "Shadowing", "Leadership"];
 const ICONS: Record<PremedExperienceKind, JSX.Element> = {
@@ -92,6 +93,7 @@ export function PremedExperienceLogPage() {
 }
 
 function ExperienceRow({ entry }: { entry: PremedExperienceEntry }) {
+  const evidenceHref = externalLinkHref(entry.evidenceLink);
   return (
     <div className="premed-log-row">
       <span className="mono">{entry.date}</span>
@@ -105,7 +107,7 @@ function ExperienceRow({ entry }: { entry: PremedExperienceEntry }) {
       </span>
       <span className="premed-log-evidence">
         {entry.verified && <Tag tone="green"><ShieldCheck size={ICON_SIZE.microInline} /> Verified</Tag>}
-        {entry.evidenceLink && <a className="gbtn tiny" href={entry.evidenceLink} target="_blank" rel="noreferrer noopener">Evidence</a>}
+        {evidenceHref && <a className="gbtn tiny" href={evidenceHref} target="_blank" rel="noreferrer noopener">Evidence</a>}
         {entry.notes && <small>{entry.notes}</small>}
       </span>
     </div>

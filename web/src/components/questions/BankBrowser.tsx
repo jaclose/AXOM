@@ -341,7 +341,7 @@ export function BankBrowser({
           <FacetChip label="Incorrect" active={!!criteria.incorrect} onClick={() => toggleBool("incorrect")} />
           <FacetChip label="Bookmarked" icon={<Bookmark size={ICON_SIZE.microInline} />} active={!!criteria.bookmarked} onClick={() => toggleBool("bookmarked")} />
           <FacetChip label="Review due" active={!!criteria.reviewDue} onClick={() => toggleBool("reviewDue")} />
-          <FacetChip label="Has image" active={!!criteria.hasAttachment} onClick={() => toggleBool("hasAttachment")} />
+          <FacetChip label="Has question image" active={!!criteria.hasAttachment} onClick={() => toggleBool("hasAttachment")} />
           <FacetChip label="Has notes" active={!!criteria.hasNotes} onClick={() => toggleBool("hasNotes")} />
         </div>
         <div className="qb-facet-group" role="group" aria-label="Difficulty">

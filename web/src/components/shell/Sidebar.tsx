@@ -28,6 +28,8 @@ import { dismissAnnouncement, isAnnouncementDismissed, readDismissedAnnouncement
 import { QuickThemeControl } from "./QuickThemeControl";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { protectionLabel, useAccount } from "../../lib/account/accountStore";
+import { useOperatorAccess } from "../../lib/operator/hostClient";
+import { APP_VERSION_LABEL } from "../../lib/brand";
 
 const MOBILE_SIDEBAR_QUERY = "(max-width: 880px)";
 const PREP_FOLDER_TOGGLE_ID = "sidebar-academic-prep-toggle";
@@ -68,6 +70,7 @@ export function Sidebar({
 }) {
   const profile = useStore((s) => s.profile);
   const accountStatus = useAccount((state) => state.protection);
+  const operatorAccess = useOperatorAccess();
   const updateProfile = useStore((s) => s.updateProfile);
   const [manage, setManage] = useState(false);
   // "Overwhelmed?" -> Show me (CoachLayer) opens Customize.
@@ -130,6 +133,7 @@ export function Sidebar({
   }
 
   function Item({ id, section }: { id: string; section?: readonly string[] }) {
+    if (id === "host" && !operatorAccess) return null;
     const item = navById(id);
     if (!item) return null;
     const I = item.icon;
@@ -222,7 +226,7 @@ export function Sidebar({
         aria-hidden={hiddenOffscreen || undefined}
         tabIndex={-1}
       >
-        <button type="button" className="server-header" onClick={() => onOpenSettings("profile")} title={`Profile & settings · ${profile.versionLabel}`}>
+        <button type="button" className="server-header" onClick={() => onOpenSettings("profile")} title={`Profile & settings · ${APP_VERSION_LABEL}`}>
           <AxomBrandLockup
             className="server-brand"
             layout="horizontal"
@@ -239,14 +243,12 @@ export function Sidebar({
             className={`nav-manage-btn ${manage ? "on" : ""}`}
             onClick={() => setManage((m) => !m)}
             aria-pressed={manage}
-            title={manage ? "Done customizing" : "Subscribe or unsubscribe sections"}
+            title={manage ? "Done customizing" : "Customize sidebar"}
           >
             {manage ? <Check size={ICON_SIZE.body} /> : <SlidersHorizontal size={ICON_SIZE.body} />}
             <span>{manage ? "Done" : "Customize"}</span>
           </button>
-          <div className="nav-manage-hint">
-            {manage ? "Tap to show or hide. Drag, or Alt+Arrow, to reorder." : "Subscribe to sections you use; hide the rest."}
-          </div>
+          {manage && <div className="nav-manage-hint">Tap to show or hide. Drag, or Alt+Arrow, to reorder.</div>}
         </div>
 
         <nav className="nav">
@@ -385,7 +387,7 @@ export function Sidebar({
               </span>
               <span className="user-meta">
                 <span className="user-name">{profile.name || "You"}</span>
-                <span className="user-status">{manage ? "Tap sections to subscribe / hide" : profile.tagline}</span>
+                <span className="user-status">{profile.tagline}</span>
               </span>
             </button>
             <div className="user-actions">

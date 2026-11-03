@@ -4,6 +4,7 @@ import { canonicalModuleKey } from "./vocabulary";
 import { parseCourseTemplate, type CourseTemplateSection } from "./templateParse";
 
 export const COURSE_TEMPLATE_FORMAT = "axom-course-template";
+export const MAX_COURSE_TEMPLATE_BYTES = 2 * 1024 * 1024;
 export interface SavedCourseTemplate {
   document: SourceDocument;
   section: CourseTemplateSection;
@@ -11,6 +12,14 @@ export interface SavedCourseTemplate {
 
 /** Template versions use the existing document vault and travel in workspace backups. */
 export async function prepareCourseTemplate(text: string, fileName: string, now = new Date().toISOString()): Promise<SourceDocument> {
+  // A pasted template has no File.size preflight, so bound it before parsing or hashing.
+  if (text.length > MAX_COURSE_TEMPLATE_BYTES) {
+    throw new Error(`${fileName}: template exceeds 2 MiB. Choose a smaller .txt file or split it into modules.`);
+  }
+  const sizeBytes = new TextEncoder().encode(text).byteLength;
+  if (sizeBytes > MAX_COURSE_TEMPLATE_BYTES) {
+    throw new Error(`${fileName}: template exceeds 2 MiB. Choose a smaller .txt file or split it into modules.`);
+  }
   const section = parseCourseTemplate(text, fileName);
   if (!section.module || !section.items.length) throw new Error(`${fileName}: no course activities could be read. Use a module heading and one activity per line with its kind in brackets.`);
   // A partially parsed template can silently omit required work. The document
@@ -24,7 +33,7 @@ export async function prepareCourseTemplate(text: string, fileName: string, now 
   return {
     id: `course-template-${checksum}`, fileType: COURSE_TEMPLATE_FORMAT, fileName,
     title: `${section.term ? `${section.term} · ` : ""}${section.module} · ${section.title || "Course activities"}`,
-    uploadedAt: now, rawText: text, sizeBytes: new TextEncoder().encode(text).byteLength,
+    uploadedAt: now, rawText: text, sizeBytes,
     checksum, tags: ["course-template"], linkedQuestionSetIds: [], libraryOnly: true,
   };
 }

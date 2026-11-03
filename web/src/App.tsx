@@ -77,10 +77,15 @@ const LazyHubFoldersPage = lazy(() => import("./pages/HubFoldersPage").then((mod
 const LazyHelpPage = lazy(() => import("./pages/HelpPage").then((module) => ({ default: module.HelpPage })));
 const LazyAboutPage = lazy(() => import("./pages/AboutPage").then((module) => ({ default: module.AboutPage })));
 const LazyLeaderboardsPage = lazy(() => import("./pages/LeaderboardsPage").then((module) => ({ default: module.LeaderboardsPage })));
+const LazyCommunityPage = lazy(() => import("./pages/CommunityPage").then((module) => ({ default: module.CommunityPage })));
+const LazyHostPage = lazy(() => import("./pages/HostPage").then((module) => ({ default: module.HostPage })));
 const LazyPremedExperienceLogPage = lazy(() => import("./pages/PremedExperienceLogPage").then((module) => ({ default: module.PremedExperienceLogPage })));
 const LazyActivityHistoryPage = lazy(() => import("./pages/ActivityHistoryPage").then((module) => ({ default: module.ActivityHistoryPage })));
 const LazyStudyMethodsPage = lazy(() => import("./pages/StudyMethodsPage").then((module) => ({ default: module.StudyMethodsPage })));
 const LazySoundscapesPage = lazy(() => import("./pages/SoundscapesPage").then((module) => ({ default: module.SoundscapesPage })));
+const LazyCommunitiesPage = lazy(() => import("./pages/CommunitiesPage").then((module) => ({ default: module.CommunitiesPage })));
+const LazyPatchNotesPage = lazy(() => import("./pages/PatchNotesPage").then((module) => ({ default: module.PatchNotesPage })));
+const LazyBodySimulatorPage = lazy(() => import("./pages/BodySimulatorPage").then((module) => ({ default: module.BodySimulatorPage })));
 
 const LazyCommunicationsPage = lazy(() => import("./pages/CommunicationsPage").then(m => ({ default: m.CommunicationsPage })));
 const LazyPrivacyPage = lazy(() => import("./pages/PrivacyPage").then(m => ({ default: m.PrivacyPage })));
@@ -98,6 +103,9 @@ const PAGES: Record<string, () => JSX.Element> = {
   courses: () => <LazyCoursesPage />,
   tracker: () => <LazyCourseTrackerPage />,
   questions: () => <LazyQuestionWorkspacePage />,
+  communities: () => <LazyCommunitiesPage />,
+  "patch-notes": () => <LazyPatchNotesPage />,
+  simulations: () => <LazyBodySimulatorPage />,
   methods: () => <LazyStudyMethodsPage />,
   soundscapes: () => <LazySoundscapesPage />,
   anki: () => <LazyAnkiLabPage />,
@@ -125,6 +133,8 @@ const PAGES: Record<string, () => JSX.Element> = {
   help: () => <LazyHelpPage />,
   appchecker: () => <LazyApplicationCheckerPage />,
   leaderboards: () => <LazyLeaderboardsPage />,
+  community: () => <LazyCommunityPage />,
+  host: () => <LazyHostPage />,
   "daily-games": () => <LazyDailyGamesPage />,
   "daily-word": () => <LazyDailyWordPage />,
   doctordle: () => <LazyDoctordlePage />,
@@ -136,6 +146,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
   // route via the URL hash so deep-links + the standalone page work
   const [route, setRoute] = useState<string>(() => location.hash.replace("#", "") || "dashboard");
   const routeRef = useRef(route);
+  const surfaceScrollRef = useRef<HTMLDivElement>(null);
   routeRef.current = route;
   const routeTransitionGuardRef = useRef<JournalTransitionGuard | null>(null);
   const appTransitionPendingRef = useRef(false);
@@ -350,6 +361,11 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
   // First visit to a tab this session: its sections settle in (lib/presentation).
   const pageEnter = usePageEntrance(route.split("?")[0]);
 
+  useLayoutEffect(() => {
+    // The shell keeps one scroll container across routes; each page opens at its own start.
+    if (surfaceScrollRef.current) surfaceScrollRef.current.scrollTop = 0;
+  }, [route]);
+
   if (route === "design-preview" && DevDesignPreview) {
     return (
       <Suspense fallback={<div className="design-preview-boot">Preparing AXOM component preview…</div>}>
@@ -391,7 +407,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
   }
 
   const routeKey = route.split("?")[0];
-  const communicationNav: Record<string, { label: string; subtitle: string }> = { communications: { label: "Communications", subtitle: "Your inbox, on your terms" }, privacy: { label: "Privacy & Data", subtitle: "Keep, download and remove" }, "communications-admin": { label: "Communications studio", subtitle: "Considered writing and delivery" } };
+  const communicationNav: Record<string, { label: string; subtitle: string }> = { communications: { label: "Communications", subtitle: "Your inbox, on your terms" }, privacy: { label: "Privacy & Data", subtitle: "Keep, download and remove" }, "communications-admin": { label: "Communications studio", subtitle: "Considered writing and delivery" }, host: { label: "Host dashboard", subtitle: "Private AXOM operations and permissions" } };
   const nav = NAV.find((n) => n.id === routeKey) ?? communicationNav[routeKey] ?? NAV[0];
   const Page: ComponentType = PAGES[routeKey] ?? DashboardPage;
 
@@ -457,7 +473,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
             onRefresh={refresh}
             refreshing={refreshing}
           />
-          <div className="surface-scroll">
+          <div ref={surfaceScrollRef} className="surface-scroll">
             <div className={route === "tracker" ? "page page-tracker" : "page"} data-enter={pageEnter ? "" : undefined}>
               <RouteErrorBoundary key={routeKey} onHome={() => go("dashboard")}>
                 <Suspense fallback={<div className="route-loading" role="status" aria-live="polite">Opening your workspace…</div>}>

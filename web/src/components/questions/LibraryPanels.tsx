@@ -15,6 +15,7 @@ import { pushToast } from "../../lib/toast";
 import type { QuestionRecord } from "../../lib/questions";
 import type { MissingQuestionRecovery } from "../../lib/questionRecovery";
 import { QuestionSetCard } from "./QuestionSetCard";
+import { QuestionSetLibrarySubmitDialog } from "./QuestionSetLibrarySubmitDialog";
 import type { Course, Term } from "../../lib/types";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { createQuestionSetShare } from "../../lib/sharing/questionSetShare";
@@ -27,6 +28,7 @@ import {
 import { CourseBankBrowser, type BankLocation } from "./CourseBankBrowser";
 import { sortByNaturalTitle } from "../../lib/naturalSort";
 import { reviewTaskInputs } from "../../lib/courseWork";
+import { COMMUNITY_REFERENCE_TYPE } from "../../lib/academicLibrary/communityReference";
 
 const NO_QUESTIONS: QuestionRecord[] = [];
 const NO_DOCUMENTS: SourceDocument[] = [];
@@ -45,7 +47,7 @@ export function SourceLibrary({
   onGenerateFrom: (doc: SourceDocument) => void;
 }) {
   const s = useStore();
-  const documents = useMemo(() => (s.documents ?? NO_DOCUMENTS).filter(doc => !["axom-private-library-catalog", "axom-private-bank-review"].includes(doc.fileType)), [s.documents]);
+  const documents = useMemo(() => (s.documents ?? NO_DOCUMENTS).filter(doc => !["axom-private-library-catalog", "axom-private-bank-review", COMMUNITY_REFERENCE_TYPE].includes(doc.fileType)), [s.documents]);
   const [preview, setPreview] = useState<SourceDocument | null>(null);
   const [query, setQuery] = useState("");
   const [sourceLimit, setSourceLimit] = useState(SOURCE_PAGE_SIZE);
@@ -166,6 +168,7 @@ export function QuestionSetList({
   const [query, setQuery] = useState("");
   const [filingSet, setFilingSet] = useState<QuestionSet | null>(null);
   const [shareSet, setShareSet] = useState<QuestionSet | null>(null);
+  const [submitSet, setSubmitSet] = useState<QuestionSet | null>(null);
   const [shareConsent, setShareConsent] = useState(false);
   const [shareBusy, setShareBusy] = useState(false);
   const [shareLookup, setShareLookup] = useState<"idle" | "loading" | "ready" | "error">("idle");
@@ -387,6 +390,7 @@ export function QuestionSetList({
           if (title && title !== set.title) s.updateQuestionSet(set.id, { title });
         } : undefined}
         onShare={!compact ? () => void openShare(set) : undefined}
+        onSubmit={!compact ? () => setSubmitSet(set) : undefined}
         compact={compact}
       >
         {!compact && set.digest && (
@@ -434,6 +438,8 @@ export function QuestionSetList({
       onSave={(scope) => { s.updateQuestionSet(filingSet.id, { scope }); setFilingSet(null); }} />
   );
   const managedShareList = shareSet ? managedShares[shareSet.id] ?? [] : [];
+  const submissionDialog = submitSet && <QuestionSetLibrarySubmitDialog key={submitSet.id} set={submitSet}
+    questions={questions} onClose={() => setSubmitSet(null)} />;
   const shareDialog = shareSet && (
     <Modal title={managedShareList.length > 0 ? `Manage links for ${shareSet.title}` : `Share ${shareSet.title}`}
       onClose={() => {
@@ -495,6 +501,7 @@ export function QuestionSetList({
     />
     {filingDialog}
     {shareDialog}
+    {submissionDialog}
   </>;
 
   return (
@@ -529,6 +536,7 @@ export function QuestionSetList({
     </GlassCard>
     {filingDialog}
     {shareDialog}
+    {submissionDialog}
     </>
   );
 }

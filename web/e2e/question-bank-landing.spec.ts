@@ -7,11 +7,12 @@ test("Question Bank first use stays focused, themed, responsive, and route-scrol
   await completeOnboarding(page);
   await page.evaluate(() => { window.location.hash = "questions"; });
 
-  const primary = page.getByRole("button", { name: "Create Quiz", exact: true });
+  const primary = page.getByRole("button", { name: "Quick practice", exact: true });
   await expect(page.getByRole("heading", { level: 1, name: "Question Bank" })).toBeVisible();
   await expect(primary).toBeVisible();
   await expect(primary).toBeDisabled();
-  await expect(page.getByRole("tablist", { name: "Question Bank sections" }).getByRole("tab")).toHaveCount(3);
+  await expect(page.getByRole("tablist", { name: "Question Bank sections" }).getByRole("tab"))
+    .toHaveText(["Library", "Community", "How it works", "Add material"]);
   await expect(page.getByText("Current mastery", { exact: true })).toHaveCount(0);
 
   for (const theme of ["light", "dark"] as const) {
@@ -37,7 +38,7 @@ test("Question Bank first use stays focused, themed, responsive, and route-scrol
       const surface = document.querySelector<HTMLElement>(".surface-scroll");
       const content = document.querySelector<HTMLElement>(".page");
       const button = [...document.querySelectorAll<HTMLButtonElement>("button")]
-        .find((candidate) => candidate.textContent?.trim() === "Create Quiz");
+        .find((candidate) => candidate.textContent?.trim() === "Quick practice");
       const rect = button?.getBoundingClientRect();
       return {
         surfaceFits: Boolean(surface && surface.scrollWidth <= surface.clientWidth + 1),
@@ -59,7 +60,7 @@ test("Question Bank first use stays focused, themed, responsive, and route-scrol
     expect(layout.buttonHeight).toBeGreaterThanOrEqual(44);
   }
 
-  await page.getByRole("button", { name: "Add your own material", exact: true }).click();
+  await page.getByRole("tab", { name: "Add material", exact: true }).click();
   await expect(page.getByLabel("Choose question files or a ZIP to import")).toBeAttached();
   const previousScroll = await page.locator(".surface-scroll").evaluate((element) => {
     element.scrollTop = element.scrollHeight;

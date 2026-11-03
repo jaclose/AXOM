@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SourceDocument } from "../../lib/library";
 import type { ParsedQuestionDraft } from "../../lib/questionParse";
+import type { QuestionRecord } from "../../lib/questions";
 import { ImportPanel, parseStoredDocument, preserveUserReviewedMappings } from "./ImportPanel";
 import { importFromCsv, importFromJson } from "../../lib/questionImport";
 import { pushToast } from "../../lib/toast";
@@ -20,6 +21,7 @@ const mocked = vi.hoisted(() => ({
   updateDocument: vi.fn(),
   updateQuestion: vi.fn(),
   documents: [] as SourceDocument[],
+  questions: [] as QuestionRecord[],
 }));
 
 vi.mock("../../lib/store", () => ({ useStore: () => mocked }));
@@ -46,6 +48,7 @@ const draft: ParsedQuestionDraft = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocked.documents.splice(0);
+  mocked.questions.splice(0);
   mocked.addQuestion.mockReturnValue({ ok: true, errors: [], id: "question-1" });
 });
 afterEach(() => {
@@ -54,6 +57,54 @@ afterEach(() => {
 });
 
 describe("source-document-first import", () => {
+  it("saves a source-keyed question in one click while leaving the uncertain one unscored", async () => {
+    const user = userEvent.setup();
+    render(<ImportPanel seed={{
+      drafts: [
+        { ...draft, answerEvidence: "Answer: B", parserRuleIds: ["answer.explicit-letter"], questionNumber: 1 },
+        { ...draft, stem: "Which answer is unresolved?", correctKey: undefined, correctAnswerText: undefined,
+          questionNumber: 2, confidence: "low", needsReview: true },
+      ],
+      rawText: "1. Which option is correct? A. Alpha B. Beta Answer: B\n2. Which answer is unresolved? A. Alpha B. Beta",
+      title: "Mixed source", fileName: "mixed.txt", fileType: "text",
+    }} />);
+
+    expect(screen.getByRole("button", { name: "Finalize import" })).toHaveProperty("disabled", true);
+    await user.click(screen.getByRole("button", { name: "Save 1 ready now" }));
+    await waitFor(() => expect(mocked.addQuestion).toHaveBeenCalledTimes(1));
+    expect(mocked.addQuestion.mock.calls[0][0]).toMatchObject({
+      stem: "Which option is correct?", correctKey: "B",
+      extraction: { reviewed: true, parserRuleIds: expect.arrayContaining(["answer.explicit-letter", "import.source-key-validated"]) },
+    });
+    expect(mocked.addQuestionSet).toHaveBeenCalledTimes(1);
+    expect(mocked.addDocument).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves an existing exact question out and explains the match before saving", () => {
+    mocked.questions.push({ id: "existing", stem: draft.stem, options: draft.options, correctKey: "B" } as QuestionRecord);
+    render(<ImportPanel seed={{
+      drafts: [{ ...draft, answerEvidence: "Answer: B", parserRuleIds: ["answer.explicit-letter"] }],
+      rawText: "Existing question source", title: "Existing source", fileName: "existing.txt", fileType: "text",
+    }} />);
+
+    expect(screen.getByText("Already in bank")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Save 1 ready now/ })).toBeNull();
+    expect(screen.getByText(/1 exact question is already in your bank and left out/)).toBeTruthy();
+  });
+
+  it("flags matching wording with a different saved answer key for source review", () => {
+    mocked.questions.push({ id: "existing", stem: draft.stem, options: draft.options, correctKey: "A" } as QuestionRecord);
+    render(<ImportPanel seed={{
+      drafts: [{ ...draft, answerEvidence: "Answer: B", parserRuleIds: ["answer.explicit-letter"] }],
+      rawText: "Conflicting question source", title: "Key conflict", fileName: "key-conflict.txt", fileType: "text",
+    }} />);
+
+    expect(screen.getByText("Answer key differs")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Save 1 ready now/ })).toBeNull();
+    expect(screen.getByText(/1 question has conflicting answer keys and needs source review/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Finalize import" })).toHaveProperty("disabled", true);
+  });
+
   it("blocks an unresolved mapping even if confidence is malformed high", () => {
     render(<ImportPanel seed={{
       drafts: [{ ...draft, correctKey: undefined, correctAnswerText: undefined }],
@@ -121,8 +172,8 @@ describe("source-document-first import", () => {
     render(<ImportPanel seed={{
       drafts: [
         { ...draft, explanation: "Grounded rationale." },
-        { ...draft, correctKey: "A", correctAnswerText: "Alpha", confidence: "medium" },
-        { ...draft, correctKey: undefined, correctAnswerText: undefined, confidence: "low", needsReview: true },
+        { ...draft, stem: "Which choice needs review?", correctKey: "A", correctAnswerText: "Alpha", confidence: "medium" },
+        { ...draft, stem: "Which choice is unresolved?", correctKey: undefined, correctAnswerText: undefined, confidence: "low", needsReview: true },
       ],
       rawText: "Sanitized source",
       title: "Trust summary",
@@ -208,6 +259,41 @@ describe("source-document-first import", () => {
         ]),
       }),
     }));
+  });
+
+  it("batch confirms only source-backed mappings after selected-row attestation", async () => {
+    const user = userEvent.setup();
+    const [candidate] = importFromCsv([
+      "question,a,b,c,answer",
+      '"Which cell releases histamine?","Mast cells","CD4+ T lymphocytes","B lymphocytes","A. Mast cell"',
+    ].join("\n")).drafts;
+    const second = { ...candidate, stem: "Which second cell?", questionNumber: 2, answerEvidence: "A. Mast cell" };
+    const flagged = {
+      ...candidate, stem: "Which flagged cell?", questionNumber: 3,
+      parserRuleIds: [...(candidate.parserRuleIds ?? []), "answer.source-key-flag"],
+      warnings: [...candidate.warnings, "SOURCE-KEY FLAG"],
+    };
+    render(<ImportPanel seed={{
+      drafts: [{ ...candidate, questionNumber: 1 }, second, flagged], rawText: "Original structured source",
+      title: "Bulk source review", fileName: "keys.csv", fileType: "csv",
+    }} />);
+
+    expect(screen.getByText("Review mapped answers together (2)")).toBeTruthy();
+    expect(screen.queryByRole("checkbox", { name: "Select mapped answer for question 3" })).toBeNull();
+    const confirm = screen.getByRole("button", { name: "Confirm 0 selected answers" });
+    expect(confirm).toHaveProperty("disabled", true);
+    await user.click(screen.getByRole("button", { name: "Select all eligible" }));
+    expect(screen.getByRole("button", { name: "Confirm 2 selected answers" })).toHaveProperty("disabled", true);
+    await user.click(screen.getByRole("checkbox", { name: "Attest selected mapped answers checked against the original source" }));
+    await user.click(screen.getByRole("button", { name: "Confirm 2 selected answers" }));
+    expect(screen.queryByText("Review mapped answers together (2)")).toBeNull();
+    expect(screen.getByRole("button", { name: "Finalize import" })).toHaveProperty("disabled", true);
+    await user.click(screen.getByRole("checkbox", { name: "Include question 3" }));
+    await user.click(screen.getByRole("button", { name: "Finalize import" }));
+    expect(mocked.addQuestion).toHaveBeenCalledTimes(2);
+    for (const call of mocked.addQuestion.mock.calls) {
+      expect(call[0]).toMatchObject({ extraction: { reviewed: true, parserRuleIds: expect.arrayContaining(["answer.user-reviewed-mapping"]) } });
+    }
   });
 
   it("shows both sides of a JSON letter/text conflict without preselecting an answer", async () => {
@@ -781,6 +867,50 @@ describe("source-document-first import", () => {
     expect((screen.getByLabelText("Correct answer") as HTMLSelectElement).value).toBe("");
     expect(screen.getByRole("button", { name: "Finalize import" })).toHaveProperty("disabled", true);
     await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("Option C")));
+  });
+
+  it("keeps typing in a field reached before a delayed focus restore", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((frame) => frames.push(frame));
+    const user = userEvent.setup();
+    render(<ImportPanel seed={{
+      drafts: [{
+        ...draft,
+        options: [{ key: "A", text: "Alpha" }, { key: "B", text: "Beta" }, { key: "C", text: "Gamma" }],
+      }],
+      rawText: "Question source", title: "From the file", fileName: "late-frame.txt", fileType: "text",
+    }} />);
+
+    await user.click(screen.getByRole("button", { name: /Which option is correct/ }));
+    await user.click(screen.getByRole("button", { name: "Remove option C" }));
+    const title = screen.getByLabelText("Set title") as HTMLInputElement;
+    title.focus();
+    title.select();
+    frames.splice(0).forEach((frame) => frame(0));
+    await user.keyboard("Typed by the learner");
+
+    expect(title.value).toBe("Typed by the learner");
+    expect(document.activeElement).toBe(title);
+    await user.click(screen.getByRole("button", { name: "Finalize import" }));
+    expect(mocked.addQuestionSet).toHaveBeenCalledWith(expect.objectContaining({ title: "Typed by the learner" }));
+    expect(mocked.addQuestion).toHaveBeenCalledWith(expect.objectContaining({
+      options: [{ key: "A", text: "Alpha" }, { key: "B", text: "Beta" }],
+    }));
+  });
+
+  it("restores focus to the moved option when the learner has not moved elsewhere", async () => {
+    const user = userEvent.setup();
+    render(<ImportPanel seed={{
+      drafts: [{
+        ...draft,
+        options: [{ key: "A", text: "Alpha" }, { key: "B", text: "Beta" }, { key: "C", text: "Gamma" }],
+      }],
+      rawText: "Question source", title: "Moved focus", fileName: "moved.txt", fileType: "text",
+    }} />);
+
+    await user.click(screen.getByRole("button", { name: /Which option is correct/ }));
+    await user.click(screen.getByRole("button", { name: "Move option B up" }));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("Option B")));
   });
 
   it("preserves the intended answer and text when answer choices are reordered", async () => {

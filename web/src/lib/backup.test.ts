@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { mergeStates, parseImport, toPortableState } from "./backup";
-import { makeSeed } from "./seed";
+import { makeSeed, SCHEMA_VERSION } from "./seed";
+import { normalizeProfile } from "./store";
 import { createTextAnnotation } from "./questionAnnotations";
 import { buildQuizPool } from "./quiz";
+import { DEFAULT_JOURNAL_NOTEBOOK } from "./journalNotebook";
 
 describe("portable backup safety", () => {
   it("round-trips exact learner method descriptions, timing and every preference layer", () => {
@@ -18,13 +20,21 @@ describe("portable backup safety", () => {
     expect(parsed.courses[0].studyPlanOverride).toEqual({ lecturePasses: 5 });
     expect(parseImport(JSON.stringify({ _app: "AXOM", ...toPortableState(parsed) })).profile.studyWorkflow).toEqual(parsed.profile.studyWorkflow);
   });
-  it("round-trips notebook metadata, autosaved writing, and bounded local attachments on schema v32", () => {
+  it("round-trips notebook metadata, autosaved writing, and bounded local attachments on the current schema", () => {
     const state = makeSeed();
     state.profile.journalNotebook = {
+      ...DEFAULT_JOURNAL_NOTEBOOK,
       title: "Clinical notebook",
       subtitle: "Daily rounds",
-      coverTone: "forest",
-      paperTone: "cream",
+      coverTone: "copper",
+      paperTone: "linen",
+      laptopTone: "starlight",
+      deskAccent: "lamp",
+      purpose: "focus",
+      writingMode: "free",
+      setupCompleted: true,
+      feedbackPrompted: false,
+      unlockedStyles: ["copper", "linen", "starlight", "lamp"],
     };
     state.journal = [{
       id: "journal-notebook-page",
@@ -56,7 +66,7 @@ describe("portable backup safety", () => {
     }];
 
     const parsed = parseImport(JSON.stringify({ _app: "AXOM", ...toPortableState(state) }));
-    expect(parsed.schemaVersion).toBe(34);
+    expect(parsed.schemaVersion).toBe(SCHEMA_VERSION);
     expect(parsed.profile.journalNotebook).toEqual(state.profile.journalNotebook);
     expect(parsed.journal).toEqual(state.journal);
     expect(JSON.stringify(parsed.journal)).not.toContain("https://");
@@ -75,8 +85,8 @@ describe("portable backup safety", () => {
       hiddenWidgetIds: ["future-hidden"],
       widgets: {
         welcome: { size: "large", enabledFields: ["date", "quote"] },
-        todayScore: { size: "extra-large", enabledFields: [], preferences: { style: "rings" } },
-        "future-widget": { size: "medium", enabledFields: ["future-field"], futurePreference: { safe: true } },
+        todayScore: { size: "large", enabledFields: [], preferences: { style: "rings" } },
+        "future-widget": { size: "small", enabledFields: ["future-field"], futurePreference: { safe: true } },
       },
       dismissedExtraLargeRecommendation: true,
       updatedAt: "2026-07-13T12:00:00.000Z",
@@ -84,7 +94,7 @@ describe("portable backup safety", () => {
     };
 
     const parsed = parseImport(JSON.stringify({ _app: "AXOM", ...toPortableState(state) }));
-    expect(parsed.schemaVersion).toBe(34);
+    expect(parsed.schemaVersion).toBe(SCHEMA_VERSION);
     expect(parsed.profile.dashboardLayout).toMatchObject(state.profile.dashboardLayout);
     const reparsed = parseImport(JSON.stringify({ _app: "AXOM", ...toPortableState(parsed) }));
     expect(reparsed.profile.dashboardLayout).toEqual(parsed.profile.dashboardLayout);
@@ -122,7 +132,7 @@ describe("portable backup safety", () => {
       promptVersion: "promise-prompt-v1",
     };
     const parsed = parseImport(JSON.stringify({ _app: "AXOM", ...toPortableState(state) }));
-    expect(parsed.schemaVersion).toBe(34);
+    expect(parsed.schemaVersion).toBe(SCHEMA_VERSION);
     expect(parsed.profile.promisePromptStatus).toEqual(state.profile.promisePromptStatus);
   });
 
@@ -141,7 +151,7 @@ describe("portable backup safety", () => {
     expect(JSON.stringify(portable)).not.toContain("snoozedUntil");
 
     const parsed = parseImport(JSON.stringify({ _app: "AXOM", ...portable }));
-    expect(parsed.schemaVersion).toBe(34);
+    expect(parsed.schemaVersion).toBe(SCHEMA_VERSION);
     expect(parsed.profile.dailyLoopReminders).toEqual(state.profile.dailyLoopReminders);
   });
 
@@ -455,6 +465,60 @@ describe("portable backup safety", () => {
     expect(merged.questions.find((question) => question.id === "q2")?.stem).toBe("New question");
   });
 
+  it("keeps unlocks and the selected blueprint lane through export and import", () => {
+    const state = makeSeed();
+    state.profile.unlocks = ["again"];
+    state.profile.blueprintMode = "prehealth";
+    const parsed = parseImport(JSON.stringify({ _app: "AXOM", ...toPortableState(state) }));
+    expect(parsed.profile.unlocks).toEqual(["again"]);
+    expect(parsed.profile.blueprintMode).toBe("prehealth");
+
+    const portable = toPortableState(state) as unknown as Record<string, unknown>;
+    Object.assign(portable.profile as Record<string, unknown>, {
+      unlocks: ["again", "again", "Not a slug", 7], blueprintMode: "other",
+    });
+    const cleaned = parseImport(JSON.stringify({ _app: "AXOM", ...portable }));
+    expect(cleaned.profile.unlocks).toEqual(["again"]);
+    expect(cleaned.profile.blueprintMode).toBeUndefined();
+  });
+
+  it("keeps every profile field the store keeps during an account pull", () => {
+    const parsed = parseImport(JSON.stringify({ _app: "AXOM", ...toPortableState(makeSeed()) }));
+    expect(Object.keys(parsed.profile).sort()).toEqual(Object.keys(normalizeProfile({})).sort());
+  });
+
+  it("merges unlocks from either workspace while keeping the current blueprint lane", () => {
+    const current = makeSeed();
+    current.profile.unlocks = ["again"];
+    current.profile.blueprintMode = "usmle";
+    const imported = makeSeed();
+    imported.profile.unlocks = ["hidden-trail", "again"];
+    imported.profile.blueprintMode = "prehealth";
+    const merged = mergeStates(current, imported);
+    expect(merged.profile.unlocks).toEqual(["again", "hidden-trail"]);
+    expect(merged.profile.blueprintMode).toBe("usmle");
+    expect(mergeStates(makeSeed(), makeSeed()).profile.unlocks).toBeUndefined();
+
+    const malformed = makeSeed();
+    (malformed.profile as unknown as Record<string, unknown>).unlocks = 7;
+    expect(mergeStates(current, malformed).profile.unlocks).toEqual(["again"]);
+  });
+
+  it("restores the account blueprint lane on a fresh device without changing its local identity", () => {
+    const current = makeSeed();
+    current.profile.name = "Local learner";
+    expect(current.profile.blueprintMode).toBeUndefined();
+    const account = makeSeed();
+    account.profile.name = "Account learner";
+    account.profile.blueprintMode = "prehealth";
+    const imported = parseImport(JSON.stringify({ _app: "AXOM", ...toPortableState(account) }));
+
+    const merged = mergeStates(current, imported);
+    expect(merged.profile.name).toBe("Local learner");
+    expect(merged.profile.blueprintMode).toBe("prehealth");
+    expect(current.profile.blueprintMode).toBeUndefined();
+  });
+
   it("merges unique attempt history for the same question instead of dropping the older side", () => {
     const current = makeSeed();
     current.questions = [{
@@ -473,7 +537,7 @@ describe("portable backup safety", () => {
     expect(merged.questions[0].attempts.map((attempt) => attempt.answerKey)).toEqual(["A", "B"]);
   });
 
-  it("upgrades a v31 portable import to v32 without erasing answer text", () => {
+  it("upgrades a v31 portable import to the current schema without erasing answer text", () => {
     const legacy = makeSeed() as unknown as Record<string, unknown>;
     legacy.schemaVersion = 31;
     legacy.questions = [{
@@ -483,7 +547,7 @@ describe("portable backup safety", () => {
       createdAt: "2026-07-01T00:00:00.000Z", updatedAt: "2026-07-01T00:00:00.000Z",
     }];
     const parsed = parseImport(JSON.stringify(legacy));
-    expect(parsed.schemaVersion).toBe(34);
+    expect(parsed.schemaVersion).toBe(SCHEMA_VERSION);
     expect(parsed.questions[0].correctAnswerText).toBe("Legacy answer");
     expect(parsed.questions[0].extraction?.overallImportConfidence).toBe(0.65);
   });

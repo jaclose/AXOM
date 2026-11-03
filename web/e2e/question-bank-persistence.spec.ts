@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { completeSetup, expect, test } from "./fixtures";
 import { STORAGE_KEYS } from "../src/lib/brand";
+import { SCHEMA_VERSION } from "../src/lib/seed";
 
 const PPD_FIXTURE = [
   "1. A 36-year-old man with tuberculosis exposure has a positive PPD skin test. Which cell type primarily mediates this reaction?",
@@ -24,12 +25,12 @@ test("onboarding → import → block → repair → reload retains the full que
   await page.goto("/#questions", { waitUntil: "networkidle" });
   await completeOnboarding(page);
   await page.evaluate(() => { window.location.hash = "questions"; });
-  await expect(page.getByRole("tab", { name: "Overview" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "How it works", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { level: 1, name: "Question Bank" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Create Quiz", exact: true })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Add your own material", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Quick practice", exact: true })).toBeDisabled();
+  await expect(page.getByRole("tab", { name: "Add material", exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "Add your own material", exact: true }).click();
+  await page.getByRole("tab", { name: "Add material", exact: true }).click();
   await page.getByLabel("Choose question files or a ZIP to import").setInputFiles({
     name: "ppd-regression.txt",
     mimeType: "text/plain",
@@ -64,8 +65,8 @@ test("onboarding → import → block → repair → reload retains the full que
 
   await page.getByLabel("Set title").fill("AXOM persisted journey");
   await page.getByRole("button", { name: "Finalize import" }).click();
-  await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
-  await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
+  await page.getByRole("tab", { name: "Library (1)", exact: true }).click();
+  await page.getByRole("button", { name: "Weeks & sets", exact: true }).click();
   await page.getByRole("button", { name: "AXOM persisted journey", exact: true }).click();
   const setCard = page.locator("article.qset-card").filter({ hasText: "AXOM persisted journey" });
   await expect(setCard).toBeVisible();
@@ -152,8 +153,8 @@ test("onboarding → import → block → repair → reload retains the full que
 
   await expect.poll(async () => (await readPersistedWorkspace(page)).questions?.[0]?.attempts?.length ?? 0).toBe(1);
   await page.reload({ waitUntil: "networkidle" });
-  await page.getByRole("tab", { name: /Question Sets/ }).click();
-  await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
+  await page.getByRole("tab", { name: /^Library/ }).click();
+  await page.getByRole("button", { name: "Weeks & sets", exact: true }).click();
   await page.getByRole("button", { name: "AXOM persisted journey", exact: true }).click();
   const reloadedCard = page.locator("article.qset-card").filter({ hasText: "AXOM persisted journey" });
   await expect(reloadedCard).toBeVisible();
@@ -169,7 +170,7 @@ test("onboarding → import → block → repair → reload retains the full que
   expect(await page.locator(".surface-scroll").evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
 
   const persisted = await readPersistedWorkspace(page);
-  expect(persisted.schemaVersion).toBe(34);
+  expect(persisted.schemaVersion).toBe(SCHEMA_VERSION);
   expect(persisted.questions).toHaveLength(1);
   expect(persisted.questions[0]).toMatchObject({
     correctKey: "B",

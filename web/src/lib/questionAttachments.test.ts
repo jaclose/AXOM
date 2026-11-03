@@ -1,4 +1,4 @@
-import { indexedDB as fakeIndexedDb, IDBKeyRange } from "fake-indexeddb";
+import { indexedDB as fakeIndexedDb, IDBKeyRange, IDBObjectStore as FakeIDBObjectStore } from "fake-indexeddb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ATTACHMENT_EXPORT_KEY,
@@ -15,10 +15,12 @@ import {
   normalizeAttachmentFileName,
   normalizeQuestionAttachments,
   putQuestionAttachmentBlob,
+  restoreMissingQuestionAttachment,
   restoreQuestionAttachmentPayloads,
   stageQuestionAttachmentPayloads,
   runQuestionAttachmentMaintenance,
   validateQuestionAttachmentFile,
+  validateMissingQuestionAttachmentFile,
   type QuestionImageAttachment,
 } from "./questionAttachments";
 import { DB_NAME, DB_VERSION, STORE_NAME, BACKUP_STORE_NAME, ATTACHMENT_STORE_NAME } from "./localVault";
@@ -91,6 +93,66 @@ describe("validation", () => {
     expect(normalizeAttachmentFileName("../..\\evil:name?.png", "image/png")).not.toContain("/");
     expect(normalizeAttachmentFileName("", "image/jpeg")).toBe("image.jpg");
     expect(normalizeAttachmentFileName("\u0000\u0001", "image/webp")).toBe("image.webp");
+  });
+});
+
+describe("missing direct-image repair", () => {
+  beforeEach(() => {
+    vi.stubGlobal("createImageBitmap", vi.fn(async () => ({ width: 1536, height: 946, close: vi.fn() })));
+  });
+
+  it("requires the recorded name, format, size, and decoded dimensions", async () => {
+    const original = pngFile("original.png");
+    const attachment = metadata({ fileName: "original.png", width: 1536, height: 946 });
+    expect(await validateMissingQuestionAttachmentFile(original, attachment)).toEqual({ ok: true });
+    expect(await validateMissingQuestionAttachmentFile(pngFile("other.png"), attachment))
+      .toMatchObject({ ok: false, message: expect.stringContaining("original file named") });
+    expect(await validateMissingQuestionAttachmentFile(original, { ...attachment, byteSize: 1 }))
+      .toMatchObject({ ok: false, message: expect.stringContaining("different file size") });
+    expect(await validateMissingQuestionAttachmentFile(original, { ...attachment, width: 100 }))
+      .toMatchObject({ ok: false, message: expect.stringContaining("different image dimensions") });
+    expect(await validateMissingQuestionAttachmentFile(original, { ...attachment, mimeType: "image/jpeg" }))
+      .toMatchObject({ ok: false });
+    expect(await validateMissingQuestionAttachmentFile(original, { ...attachment, blobKey: "private-library:shared" }))
+      .toMatchObject({ ok: false, message: expect.stringContaining("source library") });
+  });
+
+  it("restores under the existing key, reads exact bytes back, and does not overwrite a second attempt", async () => {
+    const attachment = metadata({ width: 1536, height: 946 });
+    const file = pngFile();
+    expect(await restoreMissingQuestionAttachment({ attachment, file, questionId: "q1" }))
+      .toEqual({ status: "restored" });
+    const stored = await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true });
+    expect(stored).toMatchObject({ questionId: "q1", mimeType: "image/png", byteSize: file.size });
+    expect([...new Uint8Array(await stored!.blob.arrayBuffer())]).toEqual([...PNG_BYTES]);
+    const changedBytes = new Uint8Array(PNG_BYTES);
+    changedBytes[changedBytes.length - 1] ^= 1;
+    const second = await restoreMissingQuestionAttachment({ attachment, file: pngFile("figure.png", changedBytes), questionId: "q1" });
+    expect(second).toMatchObject({ status: "exists" });
+    expect([...new Uint8Array(await (await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true }))!.blob.arrayBuffer())])
+      .toEqual([...PNG_BYTES]);
+  });
+
+  it("does not write a mismatched candidate", async () => {
+    const attachment = metadata({ byteSize: PNG_BYTES.byteLength + 1 });
+    expect(await restoreMissingQuestionAttachment({ attachment, file: pngFile(), questionId: "q1" }))
+      .toMatchObject({ status: "rejected" });
+    expect(await listQuestionAttachmentBlobKeys()).toEqual([]);
+  });
+
+  it("does not claim success when the just-written blob cannot be read back", async () => {
+    const attachment = metadata({ width: 1536, height: 946 });
+    const originalGet = FakeIDBObjectStore.prototype.get;
+    const getSpy = vi.spyOn(FakeIDBObjectStore.prototype, "get").mockImplementation(function (this: IDBObjectStore) {
+      return originalGet.call(this, "another-key");
+    });
+    try {
+      const result = await restoreMissingQuestionAttachment({ attachment, file: pngFile(), questionId: "q1" });
+      expect(result).toMatchObject({ status: "failed", message: expect.stringContaining("could not be verified") });
+    } finally {
+      getSpy.mockRestore();
+    }
+    expect(await listQuestionAttachmentBlobKeys()).toEqual([attachment.blobKey]);
   });
 });
 

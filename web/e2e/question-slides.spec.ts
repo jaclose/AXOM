@@ -48,7 +48,9 @@ for (const width of [1440, 390]) for (const mode of ["tutor", "exam"] as const) 
     page.on("pageerror", error => errors.push(error.message));
     page.on("console", message => { if (["error", "warning"].includes(message.type())) errors.push(message.text()); });
     await page.goto("/#questions", { waitUntil: "networkidle" }); await seedOnboarded(page);
-    await page.getByText("Local collection transfer and source review", { exact: true }).click();
+    if (!await page.getByRole("region", { name: "Prepared library" }).isVisible()) {
+      await page.getByText("Import status and source review", { exact: true }).click();
+    }
     const chooser = page.waitForEvent("filechooser");
     await page.getByRole("button", { name: "Install prepared library", exact: true }).click();
     await (await chooser).setFiles({ name: "slides-test.zip", mimeType: "application/zip", buffer: await bundle() });
@@ -66,7 +68,7 @@ for (const width of [1440, 390]) for (const mode of ["tutor", "exam"] as const) 
       for (const question of questions) state.updateQuestion(question.id, { stem: `${stem} (${question.content?.id})` });
       await dev.flushVault();
     }, EDITED_STEM);
-    await page.locator(".qb-hero-actions").getByRole("button", { name: "Create Quiz", exact: true }).click();
+    await page.locator(".qb-hero-actions").getByRole("button", { name: "Quick practice", exact: true }).click();
     await page.getByLabel("Custom question count").fill("2");
     await page.getByRole("button", { name: "Slides", exact: true }).click();
     await page.getByRole("button", { name: mode === "tutor" ? "Tutor (feedback per question)" : "Exam (feedback at the end)" }).click();

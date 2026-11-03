@@ -4,7 +4,7 @@ import { JOURNAL_ATTACHMENT_MAX_BYTES, JOURNAL_ATTACHMENT_TOTAL_BYTES } from "..
 import { makeSeed } from "../seed";
 import { SyncCoordinator } from "./syncCoordinator";
 import { prepareCloudSnapshot } from "./cloudSnapshot";
-import { SyncPushError, classifyPushFailure } from "./syncFailure";
+import { SyncPushError, classifyPushFailure, failureOf } from "./syncFailure";
 import { SYNC_METADATA_KEY } from "./syncMetadata";
 import { BLOCKED_RECHECK_MS, MAX_SNAPSHOT_BYTES, PAUSED_RECHECK_MS, RECONNECT_DELAY_MS, RETRY_STEPS_MS } from "./syncPolicy";
 import type { PushResult, SnapshotEnvelope, SyncMetadata, SyncTransport } from "./syncTypes";
@@ -47,6 +47,12 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("SyncCoordinator", () => {
+  it("classifies a Storage HTTP failure instead of reporting no network answer", () => {
+    expect(failureOf({ statusCode: "503", message: "Storage unavailable" })).toMatchObject({ kind: "server", status: 503 });
+    expect(failureOf({ statusCode: "403", message: "Access denied" })).toMatchObject({ kind: "auth", status: 403 });
+    expect(failureOf(new TypeError("Failed to fetch"))).toMatchObject({ kind: "network", status: 0 });
+  });
+
   it("lets an explicit retry reach the backend despite an offline OS hint", async () => {
     Object.defineProperty(navigator, "onLine", { value: false, configurable: true });
     const push = vi.fn<SyncTransport["push"]>().mockResolvedValue(accepted(1));
@@ -294,6 +300,61 @@ describe("SyncCoordinator", () => {
     await c.flush();
     expect(push).toHaveBeenCalledTimes(1);
     expect(c.currentStatus()).toBe("protected");
+    c.dispose();
+  });
+
+  it("holds a local preparation failure across reload and reconnect until work changes", async () => {
+    let repaired = false;
+    const push = vi.fn<SyncTransport["push"]>().mockResolvedValue(accepted(1));
+    const prepare = vi.fn(async (envelope: SnapshotEnvelope) => {
+      if (!repaired) throw new SyncPushError(
+        { kind: "rejected", rejection: "missing-original", status: 0 },
+        "An original is missing on this device.",
+      );
+      return envelope;
+    });
+    const transport = { prepare, push, history: vi.fn(), revision: vi.fn() } as unknown as SyncTransport;
+    const first = new SyncCoordinator(transport, makeSeed, 0, "saved-locally", clock);
+    first.queue();
+    await first.flush();
+    expect(first.currentStatus()).toBe("blocked");
+    expect(meta()).toMatchObject({ pending: true, lastError: { kind: "rejected", rejection: "missing-original", status: 0 } });
+    expect(meta().nextAttemptAt).toBeUndefined();
+    expect(push).not.toHaveBeenCalled();
+    first.dispose();
+
+    const reopened = new SyncCoordinator(transport, makeSeed, 0, "blocked", clock);
+    reopened.resume();
+    reopened.reconnect();
+    reopened.adopt();
+    await reopened.flush();
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(push).not.toHaveBeenCalled();
+
+    repaired = true;
+    reopened.queue();
+    await reopened.flush();
+    expect(push).toHaveBeenCalledOnce();
+    expect(reopened.currentStatus()).toBe("protected");
+    expect(meta().lastError).toBeUndefined();
+    reopened.dispose();
+  });
+
+  it("labels an unexpected local preparation error without scheduling network retries", async () => {
+    const push = vi.fn<SyncTransport["push"]>();
+    const transport = {
+      prepare: vi.fn(async () => { throw new Error("Cannot encode local workspace"); }),
+      push,
+      history: vi.fn(),
+      revision: vi.fn(),
+    } as unknown as SyncTransport;
+    const c = new SyncCoordinator(transport, makeSeed, 0, "saved-locally", clock);
+    c.queue();
+    await c.flush();
+    expect(c.currentStatus()).toBe("blocked");
+    expect(meta().lastError).toMatchObject({ kind: "rejected", rejection: "preparation-failed", status: 0 });
+    expect(meta().nextAttemptAt).toBeUndefined();
+    expect(push).not.toHaveBeenCalled();
     c.dispose();
   });
 

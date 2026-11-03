@@ -3,12 +3,14 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event";
 import { indexedDB as fakeIndexedDb, IDBKeyRange } from "fake-indexeddb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { QuestionSet } from "../lib/library";
+import type { QuestionSet, SourceDocument } from "../lib/library";
 import type { QuestionRecord } from "../lib/questions";
 import type { QuizSession } from "../lib/quiz";
 import { useStore } from "../lib/store";
 import { QuestionWorkspacePage } from "./QuestionWorkspacePage";
 import { STORAGE_KEYS } from "../lib/brand";
+import { launchCourseQuiz } from "../lib/course-engine/quizLaunch";
+import { PRIVATE_REVIEW_DOCUMENT, type PreparedBank } from "../lib/privateLibrary/types";
 
 const localValues = new Map<string, string>();
 const localStorageStub: Storage = {
@@ -60,6 +62,54 @@ const session: QuizSession = {
   answers: [],
 };
 
+function privateReviewDocument(): SourceDocument {
+  const checksum = "b".repeat(64);
+  const prepared: PreparedBank = {
+    pkg: {
+      manifest: {
+        schemaVersion: 2,
+        course: { name: "RHPS", term: 4, week: 0 },
+        bank: { id: "retained-review", title: "Retained review", discipline: "Medicine" },
+        source: { filename: "review.pdf", sourceWeekDeclared: false },
+        questionsFile: "questions.json",
+        assetsDirectory: "assets",
+      },
+      questions: ["needs-review", "unresolved"].map((readiness, index) => ({
+        id: `retained-${index + 1}`,
+        source: { filename: "review.pdf", questionNumber: index + 1 },
+        stem: [{ type: "text" as const, text: "Which answer is supported?" }],
+        choices: [
+          { id: `retained-${index + 1}-a`, label: "A", blocks: [{ type: "text" as const, text: "Alpha" }] },
+          { id: `retained-${index + 1}-b`, label: "B", blocks: [{ type: "text" as const, text: "Beta" }] },
+        ],
+        ...(readiness === "needs-review" ? {
+          correctAnswer: { labels: ["A"], evidence: "answer-reveal-slide" as const },
+          flags: [{ type: "answer_needs_review" as const, message: "Confirm the source mark." }],
+        } : {}),
+        assets: [],
+        provenance: { method: "pdf-import" as const, sourceChecksum: `sha256:${checksum}` },
+      })),
+    },
+    issues: [],
+    sourceText: { rawText: "Retained source text" },
+    sourceBytes: 20,
+    notes: [],
+  };
+  const rawText = JSON.stringify(prepared);
+  return {
+    id: `private-review-${checksum}`,
+    title: "Retained review",
+    fileName: "review.pdf",
+    fileType: PRIVATE_REVIEW_DOCUMENT,
+    uploadedAt: "2026-10-23T12:00:00.000Z",
+    rawText,
+    sizeBytes: rawText.length,
+    tags: ["RHPS"],
+    linkedQuestionSetIds: [],
+    libraryOnly: true,
+  };
+}
+
 beforeEach(async () => {
   localValues.clear();
   vi.stubGlobal("indexedDB", fakeIndexedDb);
@@ -84,15 +134,17 @@ describe("QuestionWorkspacePage first use", () => {
     const { container } = render(<QuestionWorkspacePage />);
 
     expect(screen.getByRole("heading", { level: 1, name: "Question Bank" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Create Quiz" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Quick practice" })).toHaveProperty("disabled", true);
     expect(screen.getByRole("region", { name: "Question bank library" })).toBeTruthy();
     expect(screen.queryByText("Current mastery")).toBeNull();
     expect(screen.queryByText("Attempt accuracy")).toBeNull();
     expect(screen.queryByRole("tab", { name: /Insights/ })).toBeNull();
-    expect(within(screen.getByRole("tablist", { name: "Question Bank sections" })).getAllByRole("tab").map(tab => tab.textContent)).toEqual(["Browse Courses / Question Sets", "Overview", "Import custom material"]);
+    expect(within(screen.getByRole("tablist", { name: "Question Bank sections" })).getAllByRole("tab").map(tab => tab.textContent)).toEqual(["Library", "Community", "How it works", "Add material"]);
+    expect(screen.getByLabelText("Question Bank inventory").textContent).toContain("Answer-ready0Main explanation text0Held for review0Saved sets0");
+    expect(screen.getByLabelText("How to start a practice set").textContent).toBe("1Course2Question set3Practice");
     expect(container.querySelector('[data-tour="question-bank-entry"]')).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Add your own material" }));
+    await user.click(screen.getByRole("tab", { name: "Add material" }));
     expect(screen.getByLabelText(/Choose question files or a ZIP to import/)).toBeTruthy();
   });
 
@@ -100,7 +152,7 @@ describe("QuestionWorkspacePage first use", () => {
     const user = userEvent.setup();
     render(<QuestionWorkspacePage />);
 
-    await user.click(screen.getByRole("button", { name: "Add your own material" }));
+    await user.click(screen.getByRole("tab", { name: "Add material" }));
     await user.click(within(screen.getByLabelText("Import source type")).getByRole("button", { name: "Paste text" }));
     expect(screen.getByRole("heading", { name: "Import questions" })).toBeTruthy();
     expect(screen.getByLabelText("Structured question text")).toBeTruthy();
@@ -111,7 +163,7 @@ describe("QuestionWorkspacePage first use", () => {
     const user = userEvent.setup();
     render(<QuestionWorkspacePage />);
 
-    await user.click(screen.getByRole("button", { name: "Add your own material" }));
+    await user.click(screen.getByRole("tab", { name: "Add material" }));
     await user.click(within(screen.getByLabelText("Import source type")).getByRole("button", { name: "Paste text" }));
     await user.type(screen.getByLabelText("Structured question text"), [
       "1. Which option is correct?",
@@ -123,7 +175,7 @@ describe("QuestionWorkspacePage first use", () => {
     await user.click(screen.getByRole("button", { name: "Parse and review" }));
     await user.click(screen.getByRole("button", { name: "Finalize import" }));
 
-    await waitFor(() => expect(screen.getByRole("tab", { name: "Question Sets (1)" }).getAttribute("aria-selected")).toBe("true"));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Library (1)" }).getAttribute("aria-selected")).toBe("true"));
     const state = useStore.getState();
     expect(state.questions).toHaveLength(1);
     expect(state.questions[0]).toMatchObject({
@@ -132,7 +184,7 @@ describe("QuestionWorkspacePage first use", () => {
       correctAnswerText: "Beta",
       explanation: "Beta follows from the source.",
     });
-    await user.click(screen.getByRole("button", { name: "Browse weeks" }));
+    await user.click(screen.getByRole("button", { name: "Weeks & sets" }));
     expect(screen.getByRole("button", { name: state.questionSets[0].title })).toBeTruthy();
   });
 
@@ -153,15 +205,16 @@ describe("QuestionWorkspacePage first use", () => {
     const user = userEvent.setup();
     render(<QuestionWorkspacePage />);
     const tabs = within(screen.getByRole("tablist", { name: "Question Bank sections" }));
-    const browse = tabs.getByRole("tab", { name: "Browse Courses / Question Sets" });
-    const overview = tabs.getByRole("tab", { name: "Overview" });
-    const importTab = tabs.getByRole("tab", { name: "Import custom material" });
+    const browse = tabs.getByRole("tab", { name: "Library" });
+    const community = tabs.getByRole("tab", { name: "Community" });
+    const overview = tabs.getByRole("tab", { name: "How it works" });
+    const importTab = tabs.getByRole("tab", { name: "Add material" });
     expect(browse.getAttribute("aria-selected")).toBe("true");
     expect(browse.getAttribute("tabindex")).toBe("0");
     expect(overview.getAttribute("tabindex")).toBe("-1");
     browse.focus();
     for (const [key, target, id] of [
-      ["{ArrowRight}", overview, "overview"], ["{ArrowRight}", importTab, "import"],
+      ["{ArrowRight}", community, "community"], ["{ArrowRight}", overview, "overview"], ["{ArrowRight}", importTab, "import"],
       ["{Home}", browse, "sets"], ["{End}", importTab, "import"],
     ] as const) {
       await user.keyboard(key);
@@ -192,8 +245,8 @@ describe("QuestionWorkspacePage first use", () => {
     });
     render(<QuestionWorkspacePage />);
 
-    const sourceTab = screen.getByRole("tab", { name: "Source Library (1)" });
-    expect(within(screen.getByRole("tablist", { name: "Question Bank sections" })).getAllByRole("tab").map(item => item.textContent)).toEqual(["Browse Courses / Question Sets", "Overview", "Import custom material", "Source Library (1)"]);
+    const sourceTab = screen.getByRole("tab", { name: "Sources (1)" });
+    expect(within(screen.getByRole("tablist", { name: "Question Bank sections" })).getAllByRole("tab").map(item => item.textContent)).toEqual(["Library", "Community", "How it works", "Add material", "Sources (1)"]);
     expect(sourceTab.hasAttribute("aria-controls")).toBe(false);
     await user.click(sourceTab);
     expect(sourceTab.getAttribute("aria-controls")).toBe("question-bank-panel-library");
@@ -227,7 +280,7 @@ describe("QuestionWorkspacePage returning state", () => {
         extraction: { confidence: "medium", reviewed: false },
         attempts: [{ at: "2026-07-10T13:00:00+02:00", answerKey: "A", status: "correct" }],
       }),
-      question({ id: "stable", stem: "Stable ready question", setId: "stable-set" }),
+      question({ id: "stable", stem: "Stable ready question", setId: "stable-set", explanation: "The source supports Alpha." }),
     ];
     useStore.setState({
       questions,
@@ -240,13 +293,26 @@ describe("QuestionWorkspacePage returning state", () => {
     });
   }
 
+  it("includes the retained private-library backlog in both inventory summaries", () => {
+    useStore.setState({
+      questions: [question({ id: "ready-private-question" })],
+      documents: [privateReviewDocument()],
+    });
+    render(<QuestionWorkspacePage />);
+
+    expect(screen.getByLabelText("Question Bank inventory").textContent)
+      .toContain("Answer-ready1Main explanation text0Held for review2Saved sets0");
+    expect(screen.getByText("1 ready to practice · 2 held for answer or source review.")).toBeTruthy();
+  });
+
   it("offers a new quiz for a finished session, recent sets, mapping review, and explicit metrics", async () => {
     seedReturningState();
     const user = userEvent.setup();
     const { container } = render(<QuestionWorkspacePage />);
-    await user.click(screen.getByRole("tab", { name: "Command Center" }));
+    expect(container.querySelector<HTMLDetailsElement>(".qb-course-catalog")?.open).toBe(false);
+    await user.click(screen.getByRole("tab", { name: "Study" }));
 
-    expect(screen.getByRole("button", { name: "Create Quiz" })).toHaveProperty("disabled", false);
+    expect(screen.getByRole("button", { name: "Quick practice" })).toHaveProperty("disabled", false);
     expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
     const titles = [...container.querySelectorAll(".qset-grid.compact .qset-title-wrap h3")].map((node) => node.textContent);
     expect(screen.getByRole("heading", { name: "Recent sets" })).toBeTruthy();
@@ -259,10 +325,11 @@ describe("QuestionWorkspacePage returning state", () => {
     expect(within(performance).getByText("Attempt accuracy")).toBeTruthy();
     expect(within(performance).getByText("Questions attempted")).toBeTruthy();
     expect(within(performance).getByText("Total attempts")).toBeTruthy();
+    expect(screen.getByLabelText("Question Bank inventory").textContent).toContain("Answer-ready1Main explanation text1Held for review2Saved sets3");
     expect(container.querySelector('[data-tour="question-bank-entry"]')).toBeTruthy();
 
     await user.click(within(mappingRegion).getByRole("button", { name: "Review issues" }));
-    expect(screen.getByRole("tab", { name: /Bank \(3\)/ }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: /Questions \(3\)/ }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("button", { name: /Mapping Review \(2\)/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Old unresolved question" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "New suggested question" })).toBeTruthy();
@@ -291,7 +358,7 @@ describe("QuestionWorkspacePage returning state", () => {
     const user = userEvent.setup();
     render(<QuestionWorkspacePage />);
 
-    await user.click(screen.getByRole("button", { name: "Browse weeks" }));
+    await user.click(screen.getByRole("button", { name: "Weeks & sets" }));
     await user.click(screen.getByRole("button", { name: snapshot.title }));
     const card = screen.getByRole("heading", { name: snapshot.title }).closest("article");
     expect(card).not.toBeNull();
@@ -304,7 +371,7 @@ describe("QuestionWorkspacePage returning state", () => {
     seedReturningState();
     const user = userEvent.setup();
     render(<QuestionWorkspacePage />);
-    await user.click(screen.getByRole("tab", { name: "Command Center" }));
+    await user.click(screen.getByRole("tab", { name: "Study" }));
     expect(screen.getByRole("region", { name: "2 questions need review" })).toBeTruthy();
 
     act(() => {
@@ -334,7 +401,7 @@ describe("QuestionWorkspacePage returning state", () => {
     });
     render(<QuestionWorkspacePage />);
 
-    await user.click(screen.getByRole("tab", { name: "Command Center" }));
+    await user.click(screen.getByRole("tab", { name: "Study" }));
     expect(screen.getByRole("heading", { name: "Import another clean set" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: /Review .* due questions/ })).toBeNull();
     expect(screen.queryByRole("heading", { name: /Retry .* misses/ })).toBeNull();
@@ -377,11 +444,45 @@ describe("QuestionWorkspacePage Course Tracker handoff", () => {
     await user.click(screen.getByRole("button", { name: "A. Alpha" }));
     await user.click(screen.getByRole("button", { name: "Check answer" }));
     await user.click(screen.getByRole("button", { name: "Finish block" }));
-    expect(screen.getByRole("heading", { name: "Block results" })).toBeTruthy();
+    // Results appear only after the asynchronous workspace save is confirmed.
+    expect(await screen.findByRole("heading", { name: "Block results" })).toBeTruthy();
     expect(useStore.getState().quizSessions.some((item) => item.questionIds.includes("tracker-ready"))).toBe(true);
     await user.click(screen.getByRole("button", { name: "Return to Course Tracker" }));
     expect(window.location.hash).toBe("#tracker");
     expect(screen.queryByText("Verified course question")).toBeNull();
+    sessionStorage.clear();
+  });
+
+  it("starts another exact week after closing a same-route course quiz", async () => {
+    sessionStorage.clear();
+    history.replaceState(null, "", "#questions");
+    vi.stubGlobal("confirm", () => true);
+    useStore.setState({
+      questions: [question({ id: "week-2", stem: "Week 2 only" }), question({ id: "week-3", stem: "Week 3 only" })],
+      questionSets: [
+        { ...set("set-week-2", "Week 2 set", "week-2", "2026-10-14T10:00:00.000Z"), scope: { module: "Neuro", week: 2 } },
+        { ...set("set-week-3", "Week 3 set", "week-3", "2026-10-14T10:00:00.000Z"), scope: { module: "Neuro", week: 3 } },
+      ],
+    });
+    const user = userEvent.setup();
+    render(<QuestionWorkspacePage />);
+
+    act(() => launchCourseQuiz({ module: "Neuro", term: "Term 4", week: 2, questionIds: ["week-2"], setIds: ["set-week-2"] }));
+    expect(await screen.findByText("Week 2 only")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "A. Alpha" }));
+    await user.click(screen.getByRole("button", { name: "Check answer" }));
+    await user.click(screen.getByRole("button", { name: "Finish block" }));
+    expect(await screen.findByRole("heading", { name: "Block results" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Return to Course Tracker" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(screen.queryByText("Week 2 only")).toBeNull());
+    expect(location.hash).toBe("#questions");
+
+    act(() => launchCourseQuiz({ module: "Neuro", term: "Term 4", week: 3, questionIds: ["week-3"], setIds: ["set-week-3"] }));
+    expect(await screen.findByText("Week 3 only")).toBeTruthy();
+    expect(screen.queryByText("Week 2 only")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Exit block" }));
+    history.replaceState(null, "", "/");
     sessionStorage.clear();
   });
 });
@@ -394,9 +495,9 @@ describe("QuestionWorkspacePage collection recovery routing", () => {
     });
     const user = userEvent.setup();
     render(<QuestionWorkspacePage />);
-    await user.click(screen.getByRole("button", { name: "Browse weeks" }));
+    await user.click(screen.getByRole("button", { name: "Weeks & sets" }));
     await user.click(screen.getByRole("button", { name: "Resolve unresolved questions for School IMCQ needing review" }));
-    expect(screen.getByRole("tab", { name: "Bank (1)" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: "Questions (1)" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("button", { name: "Needs source review" })).toBeTruthy();
   });
 
@@ -407,10 +508,10 @@ describe("QuestionWorkspacePage collection recovery routing", () => {
     });
     const user = userEvent.setup();
     render(<QuestionWorkspacePage />);
-    await user.click(screen.getByRole("button", { name: "Browse weeks" }));
+    await user.click(screen.getByRole("button", { name: "Weeks & sets" }));
     expect(screen.getByRole("button", { name: "Practice Absent source PQ" }).hasAttribute("disabled")).toBe(true);
     await user.click(screen.getByRole("button", { name: "Import missing source for Absent source PQ" }));
-    expect(screen.getByRole("tab", { name: "Import" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: "Add" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("heading", { name: "Import questions" })).toBeTruthy();
     const recovery = screen.getByRole("region", { name: "Missing question recovery" });
     expect(within(recovery).getByRole("heading", { name: "Recover Absent source PQ" })).toBeTruthy();
@@ -424,7 +525,7 @@ describe("QuestionWorkspacePage collection recovery routing", () => {
     useStore.setState({ questions: [question({ id: "kept", notes: "Preserve this note" })], questionSets: [original] });
     const user = userEvent.setup();
     render(<QuestionWorkspacePage />);
-    await user.click(screen.getByRole("button", { name: "Browse weeks" }));
+    await user.click(screen.getByRole("button", { name: "Weeks & sets" }));
     await user.click(screen.getByRole("button", { name: "Import missing source for Original source PQ" }));
     await user.click(within(screen.getByLabelText("Import source type")).getByRole("button", { name: "Paste text" }));
     await user.type(screen.getByLabelText("Structured question text"), [
@@ -434,7 +535,7 @@ describe("QuestionWorkspacePage collection recovery routing", () => {
     await user.click(screen.getByRole("button", { name: "Finalize import" }));
     await waitFor(() => expect(useStore.getState().questionSets).toHaveLength(2));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Finalize import" })).toBeNull());
-    expect(screen.getByRole("tab", { name: "Import" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: "Add" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("region", { name: "Missing question recovery" }).textContent).toContain("1 of 1 original question records still missing");
     expect(useStore.getState().questionSets.find(item => item.id === original.id)).toEqual(original);
     expect(useStore.getState().questions.find(item => item.id === "kept")?.notes).toBe("Preserve this note");
@@ -446,10 +547,10 @@ describe("QuestionWorkspacePage collection recovery routing", () => {
     useStore.setState({ questions: [], questionSets: [original] });
     const user = userEvent.setup();
     render(<QuestionWorkspacePage />);
-    await user.click(screen.getByRole("button", { name: "Browse weeks" }));
+    await user.click(screen.getByRole("button", { name: "Weeks & sets" }));
     await user.click(screen.getByRole("button", { name: "Import missing source for Original source PQ" }));
     await user.click(screen.getByRole("button", { name: "Back to collection" }));
-    await user.click(screen.getByRole("tab", { name: "Import" }));
+    await user.click(screen.getByRole("tab", { name: "Add" }));
     expect(screen.getByRole("region", { name: "Missing question recovery" }).textContent).toContain("2 of 2 original question records still missing");
     act(() => { useStore.setState({ questions: [question({ id: "lost-a" })] }); });
     expect(screen.getByRole("region", { name: "Missing question recovery" }).textContent).toContain("1 of 2 original question records still missing");
@@ -465,11 +566,11 @@ describe("QuestionWorkspacePage collection recovery routing", () => {
     expect(recovery.textContent).toContain("0 present now. 0 ready to practice. 0 need answer review.");
   });
 
-  it.each(["Cancel recovery", "Add your own material"])("clears recovery explicitly with %s", async (control) => {
+  it.each(["Cancel recovery", "Start a separate import"])("clears recovery explicitly with %s", async (control) => {
     useStore.setState({ questionSets: [set("missing-set", "Absent source PQ", "lost-question", "2026-10-14T12:00:00Z")] });
     const user = userEvent.setup();
     render(<QuestionWorkspacePage />);
-    await user.click(screen.getByRole("button", { name: "Browse weeks" }));
+    await user.click(screen.getByRole("button", { name: "Weeks & sets" }));
     await user.click(screen.getByRole("button", { name: "Import missing source for Absent source PQ" }));
     await user.click(screen.getByRole("button", { name: control }));
     expect(screen.queryByRole("region", { name: "Missing question recovery" })).toBeNull();
@@ -480,7 +581,7 @@ describe("QuestionWorkspacePage collection recovery routing", () => {
     useStore.setState({ questionSets: [set("missing-set", "Absent source PQ", "lost-question", "2026-10-14T12:00:00Z")] });
     const user = userEvent.setup();
     render(<QuestionWorkspacePage />);
-    await user.click(screen.getByRole("button", { name: "Browse weeks" }));
+    await user.click(screen.getByRole("button", { name: "Weeks & sets" }));
     await user.click(screen.getByRole("button", { name: "Import missing source for Absent source PQ" }));
     await user.click(within(screen.getByLabelText("Import source type")).getByRole("button", { name: "Paste text" }));
     await user.type(screen.getByLabelText("Structured question text"), "1. Keep this pending question?\nA. Alpha\nB. Beta\nAnswer: B");
@@ -502,9 +603,9 @@ describe("QuestionWorkspacePage collection recovery routing", () => {
     });
     const user = userEvent.setup();
     render(<QuestionWorkspacePage />);
-    await user.click(screen.getByRole("button", { name: "Browse weeks" }));
+    await user.click(screen.getByRole("button", { name: "Weeks & sets" }));
     await user.click(screen.getByRole("button", { name: "Import missing source for Absent source PQ" }));
-    await user.click(screen.getByRole("tab", { name: "Source Library (1)" }));
+    await user.click(screen.getByRole("tab", { name: "Sources (1)" }));
     await user.click(screen.getByRole("button", { name: "Parse into questions" }));
     expect(screen.queryByRole("region", { name: "Missing question recovery" })).toBeNull();
     expect(screen.getByRole("button", { name: "Finalize import" })).toBeTruthy();
@@ -515,7 +616,7 @@ describe("QuestionWorkspacePage collection recovery routing", () => {
     useStore.setState({ questionSets: [original] });
     const user = userEvent.setup();
     render(<QuestionWorkspacePage />);
-    await user.click(screen.getByRole("button", { name: "Browse weeks" }));
+    await user.click(screen.getByRole("button", { name: "Weeks & sets" }));
     await user.click(screen.getByRole("button", { name: "Import missing source for Absent source PQ" }));
     act(() => { useStore.setState({ questionSets: [{ ...original, questionIds: ["new-id"] }], questions: [question({ id: "lost-question" })] }); });
     expect(screen.getByRole("region", { name: "Missing question recovery" }).textContent).toContain("The original collection changed");
@@ -544,7 +645,7 @@ describe("QuestionWorkspacePage complete week block defaults", () => {
     });
     const user = userEvent.setup();
     render(<QuestionWorkspacePage />);
-    await user.click(screen.getByRole("button", { name: "Browse weeks" }));
+    await user.click(screen.getByRole("button", { name: "Weeks & sets" }));
     await user.click(screen.getByRole("button", { name: "Practice week" }));
     const dialog = screen.getByRole("dialog", { name: "Set up a tutor block" });
     expect(within(dialog).getByRole("spinbutton", { name: "Custom question count" })).toHaveProperty("value", "3");
@@ -615,6 +716,25 @@ describe("QBank single-question medical-media integrity", () => {
     altText: "Essential ECG", role: "exhibit" as const,
     createdAt: "2026-10-14", updatedAt: "2026-10-14",
   };
+  it("keeps an Unreviewed warning visible while browsing and opening a community question", async () => {
+    const user = userEvent.setup();
+    const revisionId = "11111111-1111-4111-8111-111111111111";
+    const rawText = JSON.stringify({ version: 1, accountId: "owner", revisionId,
+      questionIds: ["community-direct"], pending: false });
+    useStore.setState({
+      questions: [question({ id: "community-direct", stem: "Community question" })],
+      documents: [{ id: `community-${revisionId}`, title: "Community review status",
+        fileName: "community-reference.json", fileType: "axom-community-reference",
+        uploadedAt: "2026-11-01T00:00:00.000Z", rawText, sizeBytes: rawText.length,
+        tags: [], linkedQuestionSetIds: [], libraryOnly: true }],
+    });
+    render(<QuestionWorkspacePage />);
+    await user.click(screen.getByRole("tab", { name: "Questions (1)" }));
+    expect(screen.getByText(/Unreviewed community material/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Community question" }));
+    expect(within(screen.getByRole("dialog", { name: "Question" }))
+      .getByText(/Unreviewed community material/)).toBeTruthy();
+  });
   it("does not expose a direct Check answer pathway for a figure-essential question missing its image", async () => {
     const user = userEvent.setup();
     useStore.setState({ questions: [question({
@@ -622,7 +742,7 @@ describe("QBank single-question medical-media integrity", () => {
       attachments: [baseAttachment],
     })] });
     render(<QuestionWorkspacePage />);
-    await user.click(screen.getByRole("tab", { name: "Bank (1)" }));
+    await user.click(screen.getByRole("tab", { name: "Questions (1)" }));
     await user.click(screen.getByRole("button", { name: "Interpret this ECG before answering." }));
     expect(screen.getByRole("dialog", { name: "Verify essential clinical figures" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Check answer" })).toBeNull();
@@ -635,7 +755,7 @@ describe("QBank single-question medical-media integrity", () => {
       attachments: [{ ...baseAttachment, role: undefined }],
     })] });
     render(<QuestionWorkspacePage />);
-    await user.click(screen.getByRole("tab", { name: "Bank (1)" }));
+    await user.click(screen.getByRole("tab", { name: "Questions (1)" }));
     await user.click(screen.getByRole("button", { name: "Text-only question with an unrelated study note." }));
     expect(screen.getByRole("dialog", { name: "Question" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Check answer" })).toBeTruthy();

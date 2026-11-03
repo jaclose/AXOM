@@ -5,6 +5,7 @@ import { accountOperationClient } from "../account/supabase";
 import { sha256 } from "../question-content/assets";
 import { installPrivateLibrary, safeLibraryPath, type LibraryReader, type LibraryInstallation } from "../privateLibrary/install";
 import type { LibraryInstallScope } from "../privateLibrary/install";
+import { attestAcademicExplanations, type ExplanationReviewReceipt } from "./explanationReview";
 
 export interface AcademicCourse {
   id: string;
@@ -142,40 +143,35 @@ export function isAcademicReviewer(accountId: string): Promise<boolean> {
 }
 
 /** Approve or withdraw approval of a course's current revision. */
-export async function reviewAcademicCourse(collection: string, approved: boolean, accountId: string): Promise<void> {
+export async function reviewAcademicCourse(collection: string, approved: boolean, accountId: string,
+  receipt?: ExplanationReviewReceipt, rationaleReviewed = false): Promise<void> {
+  if (approved) {
+    if (!receipt || receipt.collectionId !== collection) throw new Error("Check this exact revision's explanations before approval.");
+    await attestAcademicExplanations(receipt, accountId, rationaleReviewed);
+  }
   const { error } = await (await academicClient(accountId)).rpc("academic_review", { collection, approved });
   if (error) throw new Error(/Reviewer access/.test(error.message ?? "")
     ? "Only an academic reviewer can approve shared courses."
     : "The review could not be saved. Refresh the course to check its status, then retry.");
 }
 
-export interface AcademicSharingOutcome { collectionId: string; shared: boolean; approved: boolean; error?: string }
+export interface AcademicSharingOutcome { collectionId: string; shared: boolean; error?: string }
 
 /**
- * Ask for every listed course to be shared with every signed-in account and,
- * for a reviewer who chose to, approve each one. Sharing alone stays private
- * until review. Each course reports its own outcome; one failure stops none.
+ * Submit each listed course for academic review. Learners cannot find it until
+ * a reviewer approves its current revision. One failure stops none.
  */
 export async function shareAcademicCourses(collectionIds: readonly string[], accountId: string,
-  options: { approve: boolean; assertCurrent?: () => void; signal?: AbortSignal }): Promise<AcademicSharingOutcome[]> {
+  options: { assertCurrent?: () => void; signal?: AbortSignal }): Promise<AcademicSharingOutcome[]> {
   const client = await academicClient(accountId);
   const outcomes: AcademicSharingOutcome[] = [];
   for (const collectionId of collectionIds) {
     if (options.signal?.aborted) break;
     options.assertCurrent?.();
-    const outcome: AcademicSharingOutcome = { collectionId, shared: false, approved: false };
+    const outcome: AcademicSharingOutcome = { collectionId, shared: false };
     const shared = await client.rpc("academic_set_visibility", { collection: collectionId, visibility: "shared", group_id: null });
     if (shared.error) outcome.error = "Sharing could not be requested for this course.";
-    else {
-      outcome.shared = true;
-      if (options.approve) {
-        const reviewed = await client.rpc("academic_review", { collection: collectionId, approved: true });
-        if (reviewed.error) outcome.error = /Reviewer access/.test(reviewed.error.message ?? "")
-          ? "Sharing was requested; only an academic reviewer can approve it."
-          : "Sharing was requested, but approval was not saved.";
-        else outcome.approved = true;
-      }
-    }
+    else outcome.shared = true;
     outcomes.push(outcome);
   }
   return outcomes;

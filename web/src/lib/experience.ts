@@ -3,7 +3,7 @@ import type { AcademicPhase, Course, ExperienceFocusId, Term } from "./types";
 export interface FocusOption {
   id: ExperienceFocusId;
   label: string;
-  group: "SGU Terms" | "Boards" | "Pre-Med";
+  group: "Course Terms" | "Boards" | "Pre-Med";
   blurb: string;
   phase: AcademicPhase;
   cardTarget: number;
@@ -15,7 +15,7 @@ export const FOCUS_OPTIONS: FocusOption[] = [
   {
     id: "term1",
     label: "Term 1 · BPM 500",
-    group: "SGU Terms",
+    group: "Course Terms",
     blurb: "FTM 1, FTM 2, MSK, CPR 1, CPR 2, and BSCE T1.",
     phase: "preclinical",
     cardTarget: 100,
@@ -25,7 +25,7 @@ export const FOCUS_OPTIONS: FocusOption[] = [
   {
     id: "term2",
     label: "Term 2 · BPM 501",
-    group: "SGU Terms",
+    group: "Course Terms",
     blurb: "ER, DM, NB1, NB2, NB3, and BSCE T2.",
     phase: "preclinical",
     cardTarget: 130,
@@ -35,7 +35,7 @@ export const FOCUS_OPTIONS: FocusOption[] = [
   {
     id: "term3",
     label: "Term 3 · BPM 502",
-    group: "SGU Terms",
+    group: "Course Terms",
     blurb: "Pre-midterm and post-midterm module structure.",
     phase: "preclinical",
     cardTarget: 140,
@@ -45,7 +45,7 @@ export const FOCUS_OPTIONS: FocusOption[] = [
   {
     id: "term4",
     label: "Term 4 · PPM 500",
-    group: "SGU Terms",
+    group: "Course Terms",
     blurb: "FTCM pending structure and BSCE T4 readiness.",
     phase: "clinical",
     cardTarget: 110,
@@ -55,7 +55,7 @@ export const FOCUS_OPTIONS: FocusOption[] = [
   {
     id: "term5",
     label: "Term 5 · PPM 501",
-    group: "SGU Terms",
+    group: "Course Terms",
     blurb: "CBSE-facing final preclinical runway.",
     phase: "step1-dedicated",
     cardTarget: 180,

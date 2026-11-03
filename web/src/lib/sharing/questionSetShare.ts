@@ -189,7 +189,7 @@ export function importSharedQuestionSet(input: {
     questionIds,
     tags: normalizeTagList(snapshot.tags),
     aiEnhanced: false,
-    parserWarnings: ["Imported from an unlisted Question Set link."],
+    parserWarnings: ["Imported from a shared Question Set."],
     ordering: "import",
     kind: "source",
     importProvenance: {

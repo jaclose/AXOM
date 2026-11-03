@@ -17,7 +17,8 @@ attachment asset IDs and roles retain every image, including restricted answer s
 Tutor, exam layouts and question detail use the shared renderer and visibility rules.
 The three private GOER PDFs were exercised in the actual app: 32 verified questions,
 three sets, nine stem tables and three figures survived reload; 15 keys remained held.
-Source files and browser artifacts stay outside Git. DOCX and batch UI wiring remain next.
+Source files and browser artifacts stay outside Git. Recheck later parser and
+batch-review claims against the current adapter before using them as release evidence.
 
 | Responsibility | Files |
 | --- | --- |
@@ -76,6 +77,17 @@ Storage and schema: [data model](../architecture/data-model.md).
    keeps its own numbering and provenance. Sets are never flattened into one run of numbers
    to get round a repeated number.
 
+For a prepared library, `source-mark-verified` records a choice whose mark was checked
+against the original answer slide. It requires an attached `answer_reveal` image with
+its source file, page and SHA-256 checksum. The mark remains distinct from a printed
+key and a person's review. An unchecked extraction remains `answer-reveal-slide` and
+is held. Source conflicts and missing essential content still hold the question.
+Student-authored answer sources use a visible `student_source` advisory while
+remaining eligible for practice when their answer mark has been checked.
+`source_nonkey_discrepancy` keeps a documented source error visible when it
+does not change which marked choice can be scored; doubts about the key remain
+blocking `source_inconsistency` flags.
+
 **Image visibility** (`visibility.ts`, every role tested in every mode):
 
 | Role | While answering | After answering (tutor) | Review |
@@ -96,11 +108,12 @@ a separate exam tool, not an asset.
   visible text: nothing is deleted and nothing can run.
 - **Choices** hold blocks too. Two forms, both supported: a table inside each choice, or
   one shared `choiceTable` whose `rowKeys` name the choice of each row.
+  Prepared packages preserve two to ten labeled choices when the source uses A–J.
 - **Assets** are named by id from a block. Bytes are never in the questions file. Each has
   a role: `question`, `stem`, `choice`, `explanation`, `answer_reveal`, `reference`,
   `source_page`; and a derivation: `embedded`, `region-render`, `page-render`, `authored`.
 - **Flags** record a problem beside the question and never change it:
-  `source_inconsistency`, `missing_explanation`, `possible_duplicate`,
+  `source_inconsistency`, `source_nonkey_discrepancy`, `missing_explanation`, `possible_duplicate`,
   `answer_reveal_asset`, `media_association_uncertain`, `table_parse_uncertain`,
   `missing_required_media`.
 - **Provenance** says how each question was made and from which file.
@@ -262,6 +275,14 @@ left out. No table is guessed from positions.
   a drawn mark points at is not read here: that is Codex's `pdfMarkedAnswers.ts`. A
   question whose only key is a mark has no key and says why.
 
+The current tagged-PDF import path keeps a choice marked only by a drawn vector
+shape in review. Its bulk confirmation list requires a uniquely matched,
+source-backed single-choice candidate that would otherwise become ready; it
+cannot make an unrecognized drawing into a key. The synthetic three-question
+slide deck has zero bulk candidates and all three questions remain held for
+manual source review. This is a verified limit of that import path, not approval
+to infer the marked choices.
+
 `taggedPdfToQuestions` returns the questions, the issues, what has to be drawn from the
 PDF for each picture (`renders`: a page, and a box for a region), what could not be tied
 to a question (`unplaced`), plain notes and a counts-only report.
@@ -297,7 +318,7 @@ hold the question back, and `advisories` that do not. It follows decision 7.
   `possible_answer_marking`, `choices_incomplete`, `unsupported_content`, and a picture
   that shows the answer placed where the question would show it.
 - **Advisory:** `media_position_uncertain` (the picture is the question's; only its place
-  among the lines is unsure), `possible_duplicate`, `scope_mismatch`, `media_cropped`,
+  among the lines is unsure), `source_nonkey_discrepancy`, `possible_duplicate`, `scope_mismatch`, `media_cropped`,
   `rich_text_escaped`, `tracked_changes`, `unknown_field`, `unknown_flag`,
   `asset_reference_broken` (not needed to answer). Plain information, such as a missing
   explanation, is neither.
@@ -306,6 +327,9 @@ hold the question back, and `advisories` that do not. It follows decision 7.
   recorded with evidence `reviewer` and the request for review is cleared. Only a person's
   action calls it. A proposal from a program, such as a mark read off a slide, goes to the
   person first. Run `assessBank` again afterwards.
+- **In the import review** a key read from a marked answer slide is preselected and named
+  as the slide's suggestion. It counts only when the person confirms it outside the
+  answering view; if they clear the choice, it stays cleared.
 
 ## Saving a package through the canonical import
 
@@ -330,13 +354,16 @@ const saved = await saveBank(bank.pkg, bank.issues, bank.files, { library, store
   checksum, and every set made from the file is tied to that record. Without it only the
   questions are saved.
 - Only a ready question is offered. One that needs review is offered once its id is in
-  `acknowledged`, and never without a key. Two questions of one set that share a number are
+  `acknowledged`, and never without a key. A question needs 2 to 9 choices (A to I,
+  `MAX_PACKAGE_CHOICES`); more means merged questions, and review cannot override that.
+  The plain-text parsers still read choice letters A to H only. Two questions of one set that share a number are
   both held. Everything held is in `held` with its reasons.
 - The sets are filed by the manifest: `scope: { module, week }`. `filing.agrees` says
   whether the curriculum puts that module in the manifest's term.
 - All image bytes are saved in the existing attachment vault. Stable asset IDs join them
   to blocks. Restricted roles are enforced by the shared renderer: answer-reveal and
-  explanation images appear after answering, whole source pages only in review.
+  explanation images appear after answering, whole source pages only in review. An image
+  a block already places is not shown again from the asset list.
 - Reimport repairs missing bytes without duplicating questions. A later answer review
   adds only newly accepted questions in a continuation set; prior attempts stay attached.
 - Advisory notes travel with the question as its warnings.
@@ -384,8 +411,14 @@ check prints counts only.
 | 4 | `content` on `QuestionRecord`; one block renderer under every exam interface; wider attachment roles; image enlarge, zoom, pan; deletion, backup and restore of the pictures | Open. Edits `questions.ts`, `questionAttachments.ts`, `ExamRunner.tsx`: Codex's files |
 | 5 | Build the three Term 5 GOER Week 2 banks locally and run them as the real regression set | In part (`feat/goer-pdf-bank-import-v1`). All three PDFs are tagged and are built locally: 47 questions, 11 tables, 7 figures. 32 are ready (two banks, every key agreed by a second PDF reader) and were saved, reloaded and re-imported without a duplicate through the canonical import, in memory. 15 need review (the slide deck: its answers are drawn marks, 14 of 15 slides). In a real browser, on the harness page, each of the three files was chosen, read, previewed, classified, imported, reloaded and checked. The 32 ready questions were saved as three sets from two source files (the biostatistics file keeps its two sets), every stem, key, number, page and picture unchanged after the reload, every table cell found, no answer slide on the page while a question is open, nothing written by a second import. Not done: reading the deck's marks (Codex), the import screen (Codex) |
 
-Known limits to carry forward: a rendered question must apply an asset's `crop`; annotations store positions in the plain stem, so
-highlights on block text need a mapping in Phase 4. Picture bytes are stored on the
+Highlights on an imported stem are saved as positions in the plain stem, as for typed
+questions. Each paragraph (text, formatted text, callout) knows where its words start in
+that stem (`components/questions/stemMarks.ts`), so a drag maps to stem positions, a
+highlight is drawn in pieces across formatting, and dragging across a mark grows it, in
+every exam interface. Tables, figures and equations are never marked; an edited stem
+falls back to the plain text renderer.
+
+Known limits to carry forward: a rendered question must apply an asset's `crop`. Picture bytes are stored on the
 device; account sync carries the question, its blocks and the asset records, not the
 bytes ([data model](../architecture/data-model.md)). Attachments are limited to PNG,
 JPEG, WebP and GIF, ten per question, 8 MB each; a Word file may hold EMF or WMF

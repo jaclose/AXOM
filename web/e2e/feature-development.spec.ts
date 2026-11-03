@@ -113,7 +113,7 @@ test("setup keeps its choices across refresh and they stay editable in Settings"
   await page.reload({ waitUntil: "networkidle" });
   await page.getByRole("button", { name: "Open navigation menu" }).click();
   await page.getByTitle("Settings", { exact: true }).click();
-  await page.getByRole("tab", { name: "Personalization", exact: true }).click();
+  await page.getByRole("combobox", { name: "Settings section" }).selectOption("personalization");
   await expect(page.getByRole("button", { name: "Quizlet", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: "Noji", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: "Anki", exact: true })).toHaveAttribute("aria-pressed", "false");
@@ -160,7 +160,13 @@ test("personal standings use real logs, separate partial weeks and survive reloa
   await page.getByRole("button", { name: "Logged cards", exact: true }).click();
   await expect(standings.getByRole("listitem")).toHaveCount(2);
   await expect(standings.locator(".lb-rank")).toHaveText(["1", "1"]);
-  await expect(page.getByRole("heading", { name: "Daily challenge", exact: true })).toBeVisible();
-  await expect(page.getByText("Sign in to see approved challenges and shared daily standings.", { exact: true })).toBeVisible();
+  await page.goto("/#communities");
+  await expect(page).toHaveURL(/#communities$/);
+  await page.getByRole("button", { name: /Daily challenge/ }).click();
+  await expect(page.getByRole("region", { name: "Daily challenge" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "One day. One shared field." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Shared challenges are unavailable here" })).toBeVisible();
+  await expect(page.getByText("This build has no account service. Your personal practice is still available in Question Bank.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open Question Bank" })).toHaveAttribute("href", "#questions");
   expect(errors).toEqual([]);
 });

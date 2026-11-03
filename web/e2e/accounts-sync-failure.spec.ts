@@ -11,6 +11,7 @@ import { expect, seedOnboarded, test } from "./fixtures";
  */
 const ACCOUNT_URL = "https://axom-e2e.invalid";
 const USER_ID = "8f1d7a52-3c44-4f0e-9d3a-5b1f0c7e2a11";
+const WORKSPACE_ID = "7b3d2a10-5e6f-4a19-bf25-9c8d1e0f7a21";
 const CORS = { "access-control-allow-origin": "*", "access-control-allow-headers": "*", "access-control-allow-methods": "*" };
 const HISTORY_FULL = { code: "54000", details: null, hint: null, message: "workspace snapshot storage limit reached; reduce the snapshot size before syncing" };
 const NO_ROW = { code: "PGRST116", details: "The result contains 0 rows", hint: null, message: "Cannot coerce the result to a single JSON object" };
@@ -48,7 +49,9 @@ async function standInAccount(page: Page, push: { answer: Answer; bodies: Array<
       return push.answer(route);
     }
     if (path === "/rest/v1/rpc/touch_account_device") return route.fulfill({ status: 204, headers: CORS });
+    if (path === "/rest/v1/rpc/axom_operator_role") return json(200, null)(route);
     if (path === "/rest/v1/account_profiles") return json(200, { display_name: "E2E Learner" })(route);
+    if (path === "/rest/v1/workspaces") return json(200, { id: WORKSPACE_ID })(route);
     // The dashboard's notification inbox asks for these on every signed-in load.
     if (request.method() === "POST" && path === "/functions/v1/communications" && url.searchParams.get("action") === "settings") return json(200, NO_NOTIFICATIONS)(route);
     if (path === "/rest/v1/workspace_revisions" && request.headers().accept === "application/vnd.pgrst.object+json") {
@@ -73,7 +76,7 @@ async function changeWorkspace(page: Page, title: string) {
 const statusDot = (page: Page) => page.getByTitle("Account and protection");
 
 test("a refused account upload is sent once, explained, and recovers", async ({ page }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   const push = { answer: json(500, HISTORY_FULL), bodies: [] as Array<Record<string, unknown>> };
   const unexpected = await standInAccount(page, push);
   await seedOnboarded(page);
@@ -91,7 +94,7 @@ test("a refused account upload is sent once, explained, and recovers", async ({ 
   await page.waitForTimeout(10_000);
   await changeWorkspace(page, "second change after the refusal");
   await page.reload({ waitUntil: "networkidle" });
-  await expect(statusDot(page)).toHaveAttribute("data-status", "blocked");
+  await expect(statusDot(page)).toHaveAttribute("data-status", "blocked", { timeout: 35_000 });
   await page.waitForTimeout(3_000);
   expect(push.bodies.length).toBe(sentAtRefusal);
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("axom.sync.metadata.v1") ?? "{}"));

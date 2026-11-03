@@ -21,7 +21,7 @@ test("Dashboard widgets stay configurable, keyboard-reorderable, and responsive"
   await page.keyboard.press("Enter");
   const settings = page.getByRole("region", { name: "Customize Course Tracker" });
   await expect(settings).toBeVisible();
-  await expect(settings.locator('input[type="radio"]').first()).toBeFocused();
+  await expect(settings.getByRole("button", { name: "Close Course Tracker settings" })).toBeFocused();
 
   const originalSize = await settings.locator('input[type="radio"]:checked').getAttribute("value");
   expect(originalSize).toBeTruthy();

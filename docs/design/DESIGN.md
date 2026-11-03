@@ -19,7 +19,11 @@ mark reference: `AXOM_Opening_Cinematic_v1/`. This revision does not replace she
 
 ## 2. Tokens (web/src/styles/theme.css)
 
-Use tokens, not literals. Every token has a light and a dark value; palettes change the accent.
+Use tokens, not literals. Mode chooses light, dark, or the device setting. Palettes
+coordinate the accent, canvas, paper, surfaces, and mineral tones in both modes.
+AXOM Classic is the navy/gold default; AXOM Legacy preserves the original
+graphite/gold look; Midnight is the near-black option. `index.html`
+paints the default from the first frame (`DEFAULT_PALETTE_ID` in `lib/palette.ts`).
 
 | Group | Tokens |
 |---|---|
@@ -32,7 +36,9 @@ Use tokens, not literals. Every token has a light and a dark value; palettes cha
 
 Gotcha: `rgba(var(--x))` only works for the `*-rgb` tokens (comma triplets). `color-mix(in srgb, var(--gold) 20%, transparent)` works for any colour token.
 
-Light theme: any surface with a hard-coded dark gradient needs a `:root[data-theme="light"]` override (cream `#fffdf9 -> #f4eee3`, border `rgba(var(--ink-rgb), 0.16)`).
+Light theme: any surface with a hard-coded dark gradient needs a
+`:root[data-theme="light"]` override that follows the active palette's light
+surface tokens. The legacy graphite/gold palette uses cream paper.
 
 ## 3. Surfaces and primitives (reuse before you build)
 

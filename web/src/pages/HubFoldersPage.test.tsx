@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeSeed } from "../lib/seed";
 import { useStore } from "../lib/store";
@@ -37,5 +37,19 @@ describe("Hub Folders", () => {
     fireEvent.change(screen.getByLabelText("Search folders"), { target: { value: "renal" } });
     expect(screen.queryByText("Cardio lectures")).toBeNull();
     expect(screen.getByText("Renal")).toBeTruthy();
+  });
+
+  it("opens only safe recent web links and keeps unsafe saved links out of quick launch", () => {
+    const folders = useStore.getState().folders.map((folder) => folder.id === "b"
+      ? { ...folder, link: "www.uworld.com", lastOpenedAt: "2026-11-02T05:00:00.000Z" }
+      : folder);
+    folders.push({ id: "unsafe", name: "Unsafe destination", link: "javascript:alert(1)", lastOpenedAt: "2026-11-02T05:01:00.000Z" });
+    useStore.setState({ folders });
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    const { container } = render(<HubFoldersPage />);
+    const recent = container.querySelector(".folders-recent") as HTMLElement;
+    expect(within(recent).queryByRole("button", { name: "Unsafe destination" })).toBeNull();
+    fireEvent.click(within(recent).getByRole("button", { name: "UWorld" }));
+    expect(open).toHaveBeenCalledWith("https://www.uworld.com/", "_blank", "noopener");
   });
 });

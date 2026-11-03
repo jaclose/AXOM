@@ -50,4 +50,21 @@ describe("RouteErrorBoundary", () => {
     expect(screen.getByRole("button", { name: "Reload AXOM" }).hasAttribute("disabled")).toBe(false);
   });
 
+  it("offers a verified-save refresh only after the browser backup hits quota", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(createUpdateCheckpoint).mockReset();
+    vi.mocked(activateWaitingWebUpdate).mockReset();
+    vi.mocked(createUpdateCheckpoint)
+      .mockRejectedValueOnce(Object.assign(new Error("Browser storage is full"), { canContinueWithoutRecoverySnapshot: true }))
+      .mockResolvedValueOnce("verified-persisted-state");
+    vi.mocked(activateWaitingWebUpdate).mockRejectedValueOnce(new Error("Worker unavailable"));
+    render(<RouteErrorBoundary onHome={() => {}}><Boom error={new TypeError("Failed to fetch dynamically imported module: x.js")} /></RouteErrorBoundary>);
+
+    fireEvent.click(screen.getByRole("button", { name: "Reload AXOM" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh with verified save" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Refresh with verified save" }));
+    await waitFor(() => expect(createUpdateCheckpoint).toHaveBeenNthCalledWith(2, false, { skipRecoverySnapshot: true }));
+    expect(screen.getByRole("status").textContent).toContain("Worker unavailable");
+  });
+
 });

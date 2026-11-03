@@ -1,14 +1,19 @@
 import { IDBFactory } from "fake-indexeddb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { STORAGE_KEYS } from "./brand";
-import { localVaultStorage } from "./localVault";
+import { localVaultStorage, resolveVaultSnapshotRecord } from "./localVault";
 import { readLocalBackup } from "./localBackup";
 import { createUpdateCheckpoint } from "./updateCheckpoint";
 import { saveNativeSnapshot } from "../services/nativeSqlite";
 
 const runtime = vi.hoisted(() => ({
   hydrated: true,
-  state: { profile: { name: "Test", userId: "test" }, schemaVersion: 32, tasks: [{ id: "unsaved-latest" }] },
+  state: {
+    profile: { name: "Test", userId: "test" },
+    schemaVersion: 32,
+    tasks: [{ id: "unsaved-latest" }],
+    libraryText: "",
+  },
 }));
 vi.mock("./store", () => ({ useStore: {
   getState: () => runtime.state,
@@ -18,7 +23,12 @@ vi.mock("../services/nativeSqlite", () => ({ saveNativeSnapshot: vi.fn(async () 
 
 beforeEach(() => {
   runtime.hydrated = true;
-  runtime.state = { profile: { name: "Test", userId: "test" }, schemaVersion: 32, tasks: [{ id: "unsaved-latest" }] };
+  runtime.state = {
+    profile: { name: "Test", userId: "test" },
+    schemaVersion: 32,
+    tasks: [{ id: "unsaved-latest" }],
+    libraryText: "",
+  };
   vi.mocked(saveNativeSnapshot).mockReset().mockResolvedValue({ ok: true });
   const values = new Map<string, string>();
   vi.stubGlobal("indexedDB", new IDBFactory());
@@ -34,12 +44,19 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("pre-update workspace checkpoint", () => {
   it("flushes earlier writes and verifies the latest in-memory workspace in a readable snapshot", async () => {
+    runtime.state.libraryText = "private source review ".repeat(60_000);
     const earlier = localVaultStorage.setItem(STORAGE_KEYS.persistedState, JSON.stringify({ state: { tasks: [] }, version: 32 }));
     const key = await createUpdateCheckpoint(false);
     await earlier;
     const snapshot = await readLocalBackup(key);
-    const saved = JSON.parse(snapshot!.indexedDb!.records[STORAGE_KEYS.persistedState]);
+    const physical = snapshot!.indexedDb!.records[STORAGE_KEYS.persistedState];
+    expect(JSON.parse(physical)).toMatchObject({ format: "axom-local-vault-chunks", version: 1 });
+    const saved = JSON.parse(resolveVaultSnapshotRecord(
+      snapshot!.indexedDb!.records,
+      STORAGE_KEYS.persistedState,
+    )!);
     expect(saved.state.tasks).toEqual([{ id: "unsaved-latest" }]);
+    expect(saved.state.libraryText).toBe(runtime.state.libraryText);
     expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBe(JSON.stringify({ state: runtime.state, version: 32 }));
   });
 
@@ -74,6 +91,26 @@ describe("pre-update workspace checkpoint", () => {
   it("fails closed when persisted data cannot be read back", async () => {
     vi.spyOn(localVaultStorage, "getItem").mockResolvedValue(null);
     await expect(createUpdateCheckpoint(false)).rejects.toThrow("Could not verify");
+  });
+
+  it("allows a web refresh after quota blocks only the extra snapshot and saved data verifies", async () => {
+    const originalSetItem = localStorage.setItem.bind(localStorage);
+    vi.spyOn(localStorage, "setItem").mockImplementation((key, value) => {
+      if (key.startsWith(STORAGE_KEYS.localBackupPrefix)) {
+        throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+      }
+      originalSetItem(key, value);
+    });
+    vi.stubGlobal("indexedDB", undefined);
+
+    await expect(createUpdateCheckpoint(false)).rejects.toMatchObject({
+      name: "RecoverySnapshotQuotaError",
+      canContinueWithoutRecoverySnapshot: true,
+    });
+    const persisted = JSON.stringify({ state: runtime.state, version: 32 });
+    expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBe(persisted);
+    await expect(createUpdateCheckpoint(false, { skipRecoverySnapshot: true })).resolves.toBe("verified-persisted-state");
+    expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBe(persisted);
   });
 
   it("keeps a full verified fallback snapshot when IndexedDB is unavailable", async () => {

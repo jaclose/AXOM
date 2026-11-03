@@ -81,6 +81,21 @@ export function courseBookId(term: string, courseCode: string, module: string): 
   return `course:${moduleKey(term)}:${moduleKey(courseCode)}:${canonicalModuleKey(module)}`;
 }
 
+/** Keep saved courses visible without presenting unmatched legacy shells as SGU modules. */
+export function partitionCourseMap(books: readonly CourseBook[], curricula: readonly CurriculumTemplate[]):
+  { canonical: CourseBook[]; otherLocal: CourseBook[] } {
+  const canonicalKeys = new Set(curricula.flatMap(curriculum => curriculum.terms.flatMap(term =>
+    term.courses.flatMap(course => course.modules.map(module =>
+      `${termKey(term.name)}|${moduleKey(course.code)}|${canonicalModuleKey(module)}`)))));
+  const canonical: CourseBook[] = [];
+  const otherLocal: CourseBook[] = [];
+  for (const book of books) {
+    const key = `${termKey(book.term)}|${moduleKey(book.courseCode ?? "")}|${canonicalModuleKey(book.module)}`;
+    (canonicalKeys.has(key) ? canonical : otherLocal).push(book);
+  }
+  return { canonical, otherLocal };
+}
+
 export function buildCourseBooks(input: CourseBookInput): CourseBook[] {
   const setsById = new Map((input.sets ?? []).map((set) => [set.id, set]));
   // The Course Engine is keyed by term / course / canonical module. A flat

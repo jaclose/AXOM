@@ -2,7 +2,7 @@ import type { Resource } from "./types";
 
 export const RESOURCE_GROUPS = [
   "Personal Core",
-  "Medical School / SGU",
+  "Medical School / Course",
   "Anki / Boards",
   "MCAT",
   "Pre-Med",
@@ -18,6 +18,19 @@ export const RESOURCE_GROUPS = [
 
 export const SOURCE_TYPES = ["Google Drive", "MEGA", "Notion", "Other"] as const;
 export type SourceType = (typeof SOURCE_TYPES)[number];
+
+/** Render only web URLs from stored or imported links; a bare domain gains HTTPS. */
+export function externalLinkHref(input: string | undefined): string | undefined {
+  if (typeof input !== "string") return undefined;
+  const raw = input.trim();
+  if (!raw) return undefined;
+  try {
+    const url = new URL(/^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export function normalizeResourceUrl(input: string): string {
   const raw = input.trim();
@@ -68,7 +81,7 @@ export function resourceGroup(resource: Pick<Resource, "category" | "tags" | "ti
   if (resource.category === "Drives") {
     const first = resource.tags?.[0];
     if (first && !["sgu", "shared", "drive"].includes(first.toLowerCase())) return first;
-    return "Medical School / SGU";
+    return "Medical School / Course";
   }
   if (/mcat/i.test(resource.category)) return "MCAT";
   if (/pre[-\s]?med|amcas|aacom/i.test(resource.category)) return "Pre-Med";

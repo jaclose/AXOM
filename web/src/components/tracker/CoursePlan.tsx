@@ -43,7 +43,7 @@ export function CoursePlan({ book, bank, availableQuestions, onBack, onOpen, onC
         <p>{book.courseName || "Your weekly course plan"}</p>
         <div className="course-plan-facts"><span><b>{book.weeks.length}</b> weeks</span><span><b>{book.count}</b> activities</span>{bank
           ? <span><b>{bank.ready}</b> locally answer-ready</span>
-          : <span><b>{availableQuestions ?? 0}</b> reviewed available to download</span>}</div>
+          : <span><b>{availableQuestions ?? 0}</b> reviewed {availableQuestions === 1 ? "question" : "questions"} available to download</span>}</div>
         {loaded && <p className="course-activation"><Check size={ICON_SIZE.body} /> In My Courses{book.loadedActivities !== undefined ? ` · ${book.loadedActivities} activities loaded` : ""}</p>}
       </div>
     </div>
@@ -68,7 +68,7 @@ export function CoursePlan({ book, bank, availableQuestions, onBack, onOpen, onC
         <GButton variant="primary" onClick={() => void load()} disabled={busy || !book.templateIds?.length || !weeks.length || book.term === "Term unconfirmed"}>{busy ? "Saving course…" : "Load Course"}</GButton>
         {loaded && <GButton onClick={() => onOpen(book)}>Open Course / Continue</GButton>}
         <GButton onClick={() => onCustomize(book)}>Customize Weeks &amp; Activities</GButton>
-        <div className="course-practice-action"><h3>Study this course</h3><p>{bank?.ready ? `${bank.ready} reviewed questions from this course. Questions without a confirmed week stay in the course scope.` : availableQuestions ? `Load Course to download ${availableQuestions} reviewed questions and their images.` : "No reviewed question set is ready for this course yet."}</p><GButton onClick={() => quiz()} disabled={!bank?.ready}><Play size={ICON_SIZE.body} /> Create Quiz</GButton></div>
+        <div className="course-practice-action"><h3>Study this course</h3><p>{bank?.ready ? `${bank.ready} reviewed ${bank.ready === 1 ? "question" : "questions"} from this course. Questions without a confirmed week stay in the course scope.` : availableQuestions ? `Load Course to download ${availableQuestions} reviewed ${availableQuestions === 1 ? "question" : "questions"} and any images.` : "No reviewed question set is ready for this course yet."}</p><GButton onClick={() => quiz()} disabled={!bank?.ready}><Play size={ICON_SIZE.body} /> Create Quiz</GButton></div>
         {error && <p role="alert">{error}</p>}<p role="status" aria-live="polite">{notice}</p>
         <details><summary>Source and version details</summary><p>{book.templateIds?.length ? `${book.templateIds.length} saved template sections` : "No saved course template"}</p>{book.academicContext?.sourceRevision && <p>Source revision: {book.academicContext.sourceRevision}</p>}{book.academicContext?.cohort && <p>Cohort: {book.academicContext.cohort}</p>}{book.templateVersion && <p className="course-version">{book.templateVersion}</p>}<p>Import time does not establish academic currency. Unconfirmed week mappings require source review.</p></details>
       </aside>

@@ -46,7 +46,7 @@ describe("Dashboard Daily Check-In", () => {
 
     render(<DashboardPage />);
     expect(useStore.getState().dayPlans).toEqual([]);
-    expect(screen.getByText("One to three win conditions (optional)")).toBeTruthy();
+    expect(screen.getByText(/Win conditions/, { selector: "summary" }).closest("details")?.open).toBe(false);
     expect(screen.getByText("Add context (optional)")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
@@ -70,6 +70,7 @@ describe("Dashboard Daily Check-In", () => {
     fireEvent.change(screen.getByLabelText("Primary intention"), {
       target: { value: "Finish the renal review" },
     });
+    fireEvent.click(screen.getByText(/Win conditions/, { selector: "summary" }));
     fireEvent.change(screen.getByLabelText("One to three win conditions (optional)"), {
       target: { value: "Review filtration\nComplete 20 cards\nWrite summary\nIgnored fourth win" },
     });
@@ -113,6 +114,22 @@ describe("Dashboard Daily Check-In", () => {
     expect(useStore.getState().dayPlans[0].outcome).toBeUndefined();
     expect(useStore.getState().dayPlans[0].reviewNote).toBeUndefined();
     expect(screen.getByPlaceholderText("End-of-day note (optional)")).toBeTruthy();
+  });
+
+  it("keeps optional wins while the disclosure closes and reopens", () => {
+    setCheckInState("2035-04-15");
+    render(<DashboardPage />);
+    const summary = screen.getByText(/Win conditions/, { selector: "summary" });
+    fireEvent.click(summary);
+    const wins = screen.getByRole("textbox", { name: "One to three win conditions (optional)" }) as HTMLTextAreaElement;
+    fireEvent.change(wins, { target: { value: "Review filtration\nComplete 20 cards" } });
+    fireEvent.click(summary);
+    expect(screen.getByText("2 added")).toBeTruthy();
+    expect(summary.closest("details")?.open).toBe(false);
+    fireEvent.click(summary);
+    expect(summary.closest("details")?.open).toBe(true);
+    expect((screen.getByRole("textbox", { name: "One to three win conditions (optional)" }) as HTMLTextAreaElement).value)
+      .toBe("Review filtration\nComplete 20 cards");
   });
 
   it("uses the eligible configured target labels without inventing extra wins", () => {
@@ -168,7 +185,7 @@ describe("Dashboard Daily Check-In", () => {
     const option = screen.getByRole("checkbox", { name: /A short note after an energy check/ }) as HTMLInputElement;
     expect(option.checked).toBe(false);
     fireEvent.click(option);
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     expect(useStore.getState().profile.dashboardLayout?.widgets.winDay?.preferences).toMatchObject({ writing: true });
 
     fireEvent.click(screen.getByRole("button", { name: "Log energy: Low" }));

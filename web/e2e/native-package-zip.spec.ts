@@ -81,7 +81,7 @@ test("native multi-bank ZIP installs without catalog.json and persists practice"
   const buffer = await nativeZip();
   async function chooseBundle(button: string) {
     const library = page.getByRole("region", { name: "Prepared library" });
-    if (!await library.isVisible()) await page.getByText("Local collection transfer and source review", { exact: true }).click();
+    if (!await library.isVisible()) await page.getByText("Import status and source review", { exact: true }).click();
     const chooser = page.waitForEvent("filechooser");
     await page.getByRole("button", { name: button, exact: true }).click();
     await (await chooser).setFiles({ name: "native-question-banks.zip", mimeType: "application/zip", buffer });
@@ -133,7 +133,7 @@ test("native multi-bank ZIP installs without catalog.json and persists practice"
   expect(repeated.ids).toEqual(installed.ids);
   expect(repeated.notes).toContain("My protected study note");
 
-  const start = page.locator(".qb-hero-actions").getByRole("button", { name: "Create Quiz", exact: true });
+  const start = page.locator(".qb-hero-actions").getByRole("button", { name: "Quick practice", exact: true });
   await start.click();
   await page.getByLabel("Custom question count").fill("2");
   await page.getByRole("button", { name: "Start tutor block", exact: true }).click();

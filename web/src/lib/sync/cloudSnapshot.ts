@@ -17,7 +17,7 @@ export interface CloudSnapshot {
   sources: ContentReference[];
 }
 export async function prepareCloudSnapshot(envelope: SnapshotEnvelope): Promise<SnapshotEnvelope> {
-  if (envelope.payloadBytes > MAX_EXPANDED_TEXT_BYTES) throw new SyncPushError({ kind: "rejected", rejection: "too-large", status: 0 }, "This workspace exceeds the safe account restore size.");
+  if (envelope.payloadBytes > MAX_EXPANDED_TEXT_BYTES) throw new SyncPushError({ kind: "rejected", rejection: "workspace-too-large", status: 0 }, "This workspace exceeds the safe account restore size.");
   const { workspace, objects, references } = await splitCloudContent(envelope.payload);
   const text = JSON.stringify(workspace);
   const packed: CloudSnapshot = { _axomCloudFormat: 2, _axomDeltaFormat: 1, _axomHashFormat: 2, content: text, expandedBytes: new TextEncoder().encode(text).length, media: [], sources: references };

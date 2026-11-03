@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
-import { Award, CalendarDays, Crown, Flame, Medal, TrendingUp, Trophy, Zap } from "lucide-react";
-import { GlassCard, PanelHeader, Tag } from "../components/ui/primitives";
+import { ArrowRight, Award, CalendarDays, CloudOff, Crown, Flame, Medal, TrendingUp, Trophy, Zap } from "lucide-react";
+import { GButton, GlassCard, PanelHeader, Tag } from "../components/ui/primitives";
 import { useStore } from "../lib/store";
+import { useAccount } from "../lib/account/accountStore";
+import { useUi } from "../lib/uiStore";
 import {
   bestDay,
   longestActiveStreak,
@@ -14,6 +16,7 @@ import {
 import { isoDate } from "../lib/scoring";
 import { ICON_SIZE } from "../lib/iconSize";
 import { SharedDailyLeaderboard } from "../components/tracker/SharedDailyLeaderboard";
+import "../styles/wip-experience.css";
 
 const BOARDS: Array<{ id: PersonalBoardMetric; label: string }> = [
   { id: "activeDays", label: "Study days" }, { id: "cards", label: "Logged cards" }, { id: "minutes", label: "Study time" },
@@ -33,7 +36,7 @@ function formatValue(amount: number, metric: PersonalBoardMetric, compact = fals
 function paceHeadline(pace: WeekPace): { title: string; body: string } {
   const metric = pace.metric;
   if (pace.status === "no-history") {
-    return { title: "Your first week is the baseline", body: "Finish this week and AXOM will race every future week against it." };
+    return { title: "Your first week sets the baseline", body: "Log study as you go. Completed weeks become your personal standings after Sunday." };
   }
   const gap = Math.abs(pace.current - pace.typicalSoFar);
   if (pace.status === "ahead") {
@@ -49,8 +52,8 @@ function paceHeadline(pace: WeekPace): { title: string; body: string } {
     };
   }
   return {
-    title: "Behind your usual pace — still very catchable",
-    body: `${formatValue(gap, metric)} behind a typical week by ${WEEKDAYS[pace.elapsedDays - 1]}. One solid block today closes most of it.`,
+    title: "A lighter week so far",
+    body: `${formatValue(gap, metric)} below your usual pace by ${WEEKDAYS[pace.elapsedDays - 1]}. Use this as context for your next study block.`,
   };
 }
 
@@ -63,7 +66,7 @@ export function beatYourBestMessage(pace: WeekPace): { done: boolean; text: stri
   if (pace.metric === "activeDays") {
     const needed = Math.max(0, pace.best.activeDays + 1 - pace.current);
     return needed > remaining
-      ? { done: false, text: `Your best week (${dayWord(pace.best.activeDays)}) is out of reach this week — matching your usual pace is still a strong week.` }
+      ? { done: false, text: `Your best week (${dayWord(pace.best.activeDays)}) is out of reach this week. A steady finish still counts.` }
       : { done: false, text: `To beat your best week: study on ${needed} of the next ${dayWord(remaining)}.` };
   }
   return { done: false, text: `To beat your best week: about ${formatValue(pace.neededPerDayToBeatBest, pace.metric)} per day for the next ${dayWord(remaining)}.` };
@@ -82,6 +85,8 @@ function BeatYourBest({ pace }: { pace: WeekPace }) {
 
 export function LeaderboardsPage() {
   const logs = useStore((s) => s.logs);
+  const accountPhase = useAccount((s) => s.phase);
+  const accountId = useAccount((s) => s.user?.id);
   const [metric, setMetric] = useState<PersonalBoardMetric>("activeDays");
   const today = isoDate(new Date());
   const now = useMemo(() => new Date(`${today}T12:00:00`), [today]);
@@ -97,14 +102,14 @@ export function LeaderboardsPage() {
 
   return (
     <div className="lb-page">
-      <SharedDailyLeaderboard />
       <GlassCard pad className="lb-hero">
         <div className="lb-hero-head">
           <span className="lb-hero-icon"><Trophy size={ICON_SIZE.control} aria-hidden="true" /></span>
           <div className="grow">
-            <span className="lb-kicker">Race your past self</span>
+            <span className="lb-kicker">Your study record</span>
             <h2>{headline.title}</h2>
             <p>{headline.body}</p>
+            {pace.status === "no-history" && <a className="gbtn sm lb-first-action" href="#productivity">Log a study session <ArrowRight size={ICON_SIZE.body} aria-hidden="true" /></a>}
           </div>
           <Tag tone="cyan">Personal standings</Tag>
         </div>
@@ -162,14 +167,37 @@ export function LeaderboardsPage() {
         ) : (
           <div className="application-state">
             <h3>No completed weeks with {BOARDS.find((board) => board.id === metric)?.label.toLowerCase()} yet</h3>
-            <p className="sub">Log your study from Today. Your standings appear after the week ends.</p>
-            <a className="ghost-btn" href="#dashboard">Go to Today</a>
+            <p className="sub">Log study from Productivity. Completed weeks appear here after Sunday.</p>
+            <a className="ghost-btn" href="#productivity">Log a study session</a>
           </div>
         )}
         <p className="sub">Based only on academic activity recorded in AXOM. Logged cards are not a verified connection to the Anki Leaderboard add-on.</p>
       </GlassCard>
-
-
+      <section className="lb-shared-section" aria-labelledby="lb-shared-title">
+        <div className="lb-shared-head">
+          <div>
+            <span className="lb-kicker">Optional · Shared</span>
+            <h2 id="lb-shared-title">Shared study</h2>
+            <p>Shared standings use approved questions and an account. Your personal record above stays on this device.</p>
+          </div>
+          <Tag tone="orange">Work in progress</Tag>
+        </div>
+        {accountPhase === "unconfigured" ? (
+          <GlassCard pad className="lb-shared-unavailable">
+            <CloudOff size={ICON_SIZE.emphasis} aria-hidden="true" />
+            <div>
+              <h3>Account challenges are unavailable here</h3>
+              <p>This build has no account service. Keep logging locally while shared challenges are being prepared.</p>
+              <a className="gbtn sm" href="#productivity">Keep logging locally <ArrowRight size={ICON_SIZE.body} aria-hidden="true" /></a>
+            </div>
+          </GlassCard>
+        ) : (
+          <>
+            <SharedDailyLeaderboard />
+            {!accountId && <GButton size="sm" onClick={() => useUi.getState().requestSettings("account")}>Open account settings <ArrowRight size={ICON_SIZE.body} aria-hidden="true" /></GButton>}
+          </>
+        )}
+      </section>
     </div>
   );
 }

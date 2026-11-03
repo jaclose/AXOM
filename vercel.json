@@ -1,14 +1,13 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
-  "installCommand": "npm install --global npm@10.9.8 && node scripts/toolchain.mjs && npm ci && npm --prefix web ci",
+  "installCommand": "npm install --global npm@10.9.9 && node scripts/toolchain.mjs && npm ci && npm --prefix web ci",
   "buildCommand": "npm run build",
   "outputDirectory": "web/dist",
   "headers": [
     { "source": "/version.json", "headers": [{ "key": "Cache-Control", "value": "no-store" }] },
     { "source": "/sw.js", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
-    { "source": "/index.html", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
-    { "source": "/assets/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }] }
+    { "source": "/index.html", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }
   ],
   "redirects": [{ "source": "/pulse/:year", "destination": "/#pulse?year=:year", "permanent": false }],
   "rewrites": [
@@ -23,6 +22,6 @@
     { "source": "/api/data/:userId", "destination": "/api/data?userId=:userId" },
     { "source": "/api/ai/:feature", "destination": "/api/ai?feature=:feature" },
     { "source": "/api/(.*)", "destination": "/api/$1" },
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/((?!assets(?:/|$)).*)", "destination": "/index.html" }
   ]
 }

@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useStore } from "../../lib/store";
 import { millisecondsUntilNextLocalDay, ROLLOVER_DONE_KEY, type RolloverReason } from "../../lib/dailyRollover";
 import { pushToast } from "../../lib/toast";
+import { StudyStreakWatcher } from "./StudyStreakWatcher";
 
 export function DailyRolloverWatcher() {
   useEffect(() => {
@@ -57,5 +58,5 @@ export function DailyRolloverWatcher() {
     };
   }, []);
 
-  return null;
+  return <StudyStreakWatcher />;
 }

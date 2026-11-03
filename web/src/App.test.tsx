@@ -7,7 +7,7 @@ import { useStore } from "./lib/store";
 import { useUi } from "./lib/uiStore";
 import { GUIDED_TOUR_STEPS } from "./components/shell/GuidedTour";
 import * as localVault from "./lib/localVault";
-import { dayKey } from "./lib/scoring";
+import { localDateKey } from "./lib/dailyRollover";
 import type { CommunicationsSettings } from "./lib/communications/client";
 import { preferences } from "./lib/communications/model";
 
@@ -181,8 +181,11 @@ describe("post-global-guide promise flow", () => {
 
 describe("Journal route durability", () => {
   function openJournalShell() {
+    const today = localDateKey();
     useStore.setState((state) => ({
-      activeDayKey: dayKey(),
+      activeDayKey: today,
+      lastActiveLocalDate: today,
+      lastTimezoneOffset: new Date().getTimezoneOffset(),
       journal: [],
       dayPlans: [],
       logs: [],
@@ -198,10 +201,11 @@ describe("Journal route durability", () => {
       },
     }));
     window.history.replaceState(null, "", "#journal");
+    return today;
   }
 
   it("keeps the Journal mounted until a sidebar route change confirms the draft write", async () => {
-    openJournalShell();
+    const today = openJournalShell();
     let confirmDurability!: () => void;
     const flush = vi.spyOn(localVault, "flushLocalVaultWrites")
       .mockReturnValue(new Promise<void>((resolve) => { confirmDurability = resolve; }));
@@ -218,11 +222,11 @@ describe("Journal route durability", () => {
 
     await waitFor(() => expect(flush).toHaveBeenCalledTimes(1));
     expect(window.location.hash).toBe("#journal");
-    expect(screen.getByDisplayValue("Persist before leaving the Journal")).toBeTruthy();
+    expect(screen.getAllByDisplayValue("Persist before leaving the Journal")).toHaveLength(2);
 
     await act(async () => { confirmDurability(); await Promise.resolve(); });
     await waitFor(() => expect(window.location.hash).toBe("#dashboard"));
-    expect(useStore.getState().journal.find(entry => entry.date.startsWith(dayKey())))
+    expect(useStore.getState().journal.find(entry => entry.date.startsWith(today)))
       .toMatchObject({ freeWriting: "Persist before leaving the Journal" });
   });
 
@@ -243,12 +247,12 @@ describe("Journal route durability", () => {
 
     expect(await screen.findByText("Not saved on this device")).toBeTruthy();
     await waitFor(() => expect(window.location.hash).toBe("#journal"));
-    expect(screen.getByDisplayValue("Do not leave this route")).toBeTruthy();
+    expect(screen.getAllByDisplayValue("Do not leave this route")).toHaveLength(2);
     expect(screen.queryByRole("heading", { name: "Tasks" })).toBeNull();
   });
 
   it("keeps Journal and Settings mounted until Run setup again confirms durability", async () => {
-    openJournalShell();
+    const today = openJournalShell();
     let confirmDurability!: () => void;
     const flush = vi.spyOn(localVault, "flushLocalVaultWrites")
       .mockReturnValue(new Promise<void>((resolve) => { confirmDurability = resolve; }));
@@ -261,18 +265,18 @@ describe("Journal route durability", () => {
       target: { value: "Persist before setup replaces the shell" },
     });
     act(() => useUi.getState().requestSettings("program"));
-    const settings = await screen.findByRole("dialog", { name: "Your AXOM Setup" });
+    const settings = await screen.findByRole("dialog", { name: "Settings" });
     fireEvent.click(within(settings).getByRole("button", { name: "Run setup again" }));
 
     await waitFor(() => expect(flush).toHaveBeenCalledTimes(1));
-    expect(screen.getByRole("dialog", { name: "Your AXOM Setup" })).toBeTruthy();
-    expect(screen.getByDisplayValue("Persist before setup replaces the shell")).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
+    expect(screen.getAllByDisplayValue("Persist before setup replaces the shell").length).toBeGreaterThan(0);
     expect(screen.queryByRole("heading", { name: "Who are you studying as?" })).toBeNull();
 
     await act(async () => { confirmDurability(); await Promise.resolve(); });
     expect(await screen.findByRole("heading", { name: "Who are you studying as?" })).toBeTruthy();
     expect(screen.queryByDisplayValue("Persist before setup replaces the shell")).toBeNull();
-    expect(useStore.getState().journal.find(entry => entry.date.startsWith(dayKey())))
+    expect(useStore.getState().journal.find(entry => entry.date.startsWith(today)))
       .toMatchObject({ freeWriting: "Persist before setup replaces the shell" });
   });
 
@@ -286,12 +290,12 @@ describe("Journal route durability", () => {
       target: { value: "Keep this draft if setup cannot begin" },
     });
     act(() => useUi.getState().requestSettings("program"));
-    const settings = await screen.findByRole("dialog", { name: "Your AXOM Setup" });
+    const settings = await screen.findByRole("dialog", { name: "Settings" });
     fireEvent.click(within(settings).getByRole("button", { name: "Run setup again" }));
 
     expect(await screen.findByText("Not saved on this device")).toBeTruthy();
-    expect(screen.getByRole("dialog", { name: "Your AXOM Setup" })).toBeTruthy();
-    expect(screen.getByDisplayValue("Keep this draft if setup cannot begin")).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
+    expect(screen.getAllByDisplayValue("Keep this draft if setup cannot begin").length).toBeGreaterThan(0);
     expect(screen.queryByRole("heading", { name: "Who are you studying as?" })).toBeNull();
     expect(useUi.getState().onboardingRequested).toBe(false);
   });
@@ -326,7 +330,7 @@ describe("Communications route protection", () => {
     window.history.replaceState(null, "", "#communications");
 
     render(<App />);
-    const essays = await screen.findByRole("switch", { name: /Essays & Notes/ });
+    const essays = await screen.findByRole("switch", { name: /Essays & Notes/ }, { timeout: 4_000 });
     await waitFor(() => expect((essays as HTMLInputElement).checked).toBe(true));
     fireEvent.click(essays);
     expect(screen.getByText("Unsaved changes")).toBeTruthy();

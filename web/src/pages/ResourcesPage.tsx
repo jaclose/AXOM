@@ -28,7 +28,7 @@ export function ResourcesPage() {
   const track = resolveTrack(s.profile.educationTrack);
   const showSgu = s.profile.showSguResources ?? track.showsSguResources;
   const allDrives = s.resources.filter((r) => r.category === "Drives");
-  // SGU-scoped drives hide when the toggle is off; personal + universal stay.
+  // Course-scoped drives hide when the toggle is off; personal + universal stay.
   const hiddenSguCount = allDrives.filter((r) => !isDriveVisibleForTrack(r, showSgu)).length;
   const drives = allDrives
     .filter((r) => isDriveVisibleForTrack(r, showSgu))
@@ -82,28 +82,28 @@ export function ResourcesPage() {
         </div>
       </GlassCard>
 
-      {/* Shared Drives — curated, mostly SGU. Always visible. */}
+      {/* Curated drives are optional by course; personal and universal links remain. */}
       {(cat === "All" || cat === "Drives" || drives.length > 0) && (
         <GlassCard pad className="drives-band" data-tour="resources">
           <PanelHeader title="Curated Drives"
-            sub={`Tailored to ${track.short}. Your personal drive and universal board packs always stay; SGU-only drives follow the toggle.`}
+            sub={`Tailored to ${track.short}. Personal drives and universal board packs always stay; course-specific drives follow the toggle.`}
             action={
               <div className="row gap8">
                 <button type="button" className={`filter-pill drive-sgu-toggle ${showSgu ? "on" : ""}`}
                   onClick={() => s.updateProfile({ showSguResources: !showSgu })}
-                  title={showSgu ? "Hide SGU-specific drives" : "Show SGU-specific drives"}>
-                  {showSgu ? <HardDrive size={ICON_SIZE.body} /> : <EyeOff size={ICON_SIZE.body} />} SGU drives {showSgu ? "on" : "off"}
+                  title={showSgu ? "Hide course-specific drives" : "Show course-specific drives"}>
+                  {showSgu ? <HardDrive size={ICON_SIZE.body} /> : <EyeOff size={ICON_SIZE.body} />} Course drives {showSgu ? "on" : "off"}
                 </button>
                 <GButton size="sm" onClick={() => setAddDrive(true)}><Plus size={ICON_SIZE.body} /> Add drive</GButton>
               </div>} />
           {hiddenSguCount > 0 && !showSgu && (
             <div className="drives-hidden-note">
-              <EyeOff size={ICON_SIZE.body} /> {hiddenSguCount} SGU-specific drive{hiddenSguCount === 1 ? "" : "s"} hidden for your program — toggle them on any time.
+              <EyeOff size={ICON_SIZE.body} /> {hiddenSguCount} course-specific drive{hiddenSguCount === 1 ? "" : "s"} hidden for your program. Toggle them on any time.
             </div>
           )}
           {drives.length === 0 ? (
             <EmptyState icon={<HardDrive size={ICON_SIZE.display} />} title="No drives yet"
-              hint="Paste an SGU shared-drive / Google Drive link — it stays here permanently." />
+              hint="Paste a course or Google Drive link. It stays in your private workspace." />
           ) : (
             <div className="grid grid-courses">
               {drives.map((r) => {
@@ -311,7 +311,7 @@ function BulkLinksModal({ onClose }: { onClose: () => void }) {
         {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
       </SelectField>
       <ol className="import-steps">
-        <li>Choose the bucket first: <b>Drives</b> for SGU / Google Drive packages, <b>STEP 1</b> or <b>STEP 2</b> for board resources.</li>
+        <li>Choose the bucket first: <b>Drives</b> for course or Google Drive packages, <b>STEP 1</b> or <b>STEP 2</b> for board resources.</li>
         <li>Paste one link per line. Use <span className="mono">Title | URL</span> when you want a clean name.</li>
         <li>Blank or malformed links are ignored, so dead placeholders will not be imported.</li>
       </ol>

@@ -41,7 +41,8 @@ function confirmStorageConsent() {
 }
 const verified = (key: string, originalFileStatus: "cloud-verified" | "local-only" | "not-provided" = "cloud-verified") => ({
   key, state: "verified" as const, receipt: {
-    collectionId: "owned-a", revisionId: "revision-1", readyQuestions: 3,
+    collectionId: "owned-a", revisionId: "revision-1", contentHash: "a".repeat(64), readyQuestions: 3,
+    explainedReadyQuestions: 3, missingExplanations: 0,
     reviewQuestions: 2, sourceReceipts: [{
       sha256: "a".repeat(64), questionCount: 3, reviewCount: 2,
       figureReferences: 1, distinctFigureFiles: 1, figureReadbackVerified: true as const,
@@ -260,7 +261,7 @@ describe("owner-private reviewed academic ZIP batch", () => {
     expect(consent.disabled).toBe(true);
     expect(consent.checked).toBe(false);
     expect(action.disabled).toBe(true);
-    expect(container.textContent).toMatch(/current SGU catalog lists PCM 500\/PCM 501/);
+    expect(container.textContent).toMatch(/reviewed source catalog lists PCM 500\/PCM 501/);
     expect(uploadAcademicBatch).toHaveBeenCalledOnce();
   });
 

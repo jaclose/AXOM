@@ -5,7 +5,7 @@ import { QuestionContent, QuestionSupportingContent } from "./QuestionContent";
 // miss into an error-repair card in one tap (the Capture → Review link in the
 // daily loop).
 // ===========================================================================
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { PencilLine, Trash2, WandSparkles } from "lucide-react";
 import { useStore } from "../../lib/store";
 import {
@@ -28,7 +28,9 @@ import { QuestionAttachmentsPanel } from "./QuestionAttachmentsPanel";
 
 const ERROR_TYPES = Object.keys(ERROR_TYPE_LABEL) as QuestionErrorType[];
 
-export function QuestionDetailModal({ question, onClose }: { question: QuestionRecord; onClose: () => void }) {
+export function QuestionDetailModal({ question, onClose, notice }: {
+  question: QuestionRecord; onClose: () => void; notice?: ReactNode;
+}) {
   const s = useStore();
   const [picked, setPicked] = useState<string | undefined>();
   const [firstPick, setFirstPick] = useState<string | undefined>();
@@ -176,6 +178,7 @@ export function QuestionDetailModal({ question, onClose }: { question: QuestionR
         reviewed: true,
         reviewedAt,
         answerDetectionConfidence: 1,
+        parserRuleIds: [...new Set([...(question.extraction.parserRuleIds ?? []), "import.user-reviewed"])],
       } : undefined,
     });
     pushToast({ title: "Answer mapping confirmed", body: `${mappingKey}. ${correctOption.text}`, tone: "success" });
@@ -222,6 +225,7 @@ export function QuestionDetailModal({ question, onClose }: { question: QuestionR
         </>
       }
     >
+      {notice}
       <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
         <Tag tone="neutral">{question.status}</Tag>
         {question.category && <Tag tone="neutral">{question.category}</Tag>}
@@ -260,7 +264,11 @@ export function QuestionDetailModal({ question, onClose }: { question: QuestionR
         label="Question stem"
         onDelete={deleteAnnotation}
         onSelection={(range) => setAnnotationSelection(range ? { target: "stem", range } : null)}
-      />} />
+      />} annotate={{
+        annotations: annotations.filter((annotation) => annotation.target === "stem"),
+        onSelection: (range) => setAnnotationSelection(range ? { target: "stem", range } : null),
+        onDelete: deleteAnnotation,
+      }} />
       <QuestionSupportingContent question={question} mode="question" />
 
       <QuestionProvenance

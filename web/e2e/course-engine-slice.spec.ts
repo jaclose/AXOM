@@ -47,7 +47,7 @@ test("a source file becomes a filed set, recorded answers, a finding and a revie
   await page.goto("/#questions");
 
   // --- import: the name proposes where the set belongs -----------------------
-  await page.getByRole("button", { name: "Add your own material", exact: true }).click();
+  await page.getByRole("tab", { name: "Add material", exact: true }).click();
   await page.getByLabel("Choose question files or a ZIP to import").setInputFiles({
     name: "FTM 1 Week 2 Practice Questions.txt", mimeType: "text/plain", buffer: Buffer.from(SOURCE),
   });
@@ -61,8 +61,8 @@ test("a source file becomes a filed set, recorded answers, a finding and a revie
   await page.getByRole("button", { name: "Finalize import" }).click();
 
   // --- question bank: filed by module, then week ------------------------------
-  await page.getByRole("tab", { name: /Question Sets \(1\)/ }).click();
-  await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
+  await page.getByRole("tab", { name: "Library (1)", exact: true }).click();
+  await page.getByRole("button", { name: "Weeks & sets", exact: true }).click();
   const group = page.getByRole("region", { name: "Course question bank" });
   await expect(group.getByRole("heading", { name: "Week 2", exact: true })).toBeVisible();
   await group.getByRole("button", { name: "Practice Week 2 practice", exact: true }).click();
@@ -124,8 +124,8 @@ test("a source file becomes a filed set, recorded answers, a finding and a revie
   expect(review).toMatchObject({ parentSetId: source.id, scope: { module: "FTM 1", week: 2 }, questionIds: [tracing.id] });
   expect(saved.questions).toHaveLength(2);
 
-  await page.getByRole("tab", { name: /Question Sets \(2\)/ }).click();
-  await page.getByRole("button", { name: "Browse weeks", exact: true }).click();
+  await page.getByRole("tab", { name: "Library (2)", exact: true }).click();
+  await page.getByRole("button", { name: "Weeks & sets", exact: true }).click();
   await expect(group.locator(".cb-set-row")).toHaveCount(2);
   expect(errors).toEqual([]);
 });

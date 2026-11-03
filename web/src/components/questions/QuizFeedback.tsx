@@ -3,6 +3,8 @@ import { questionMappingStatus, type QuestionRecord } from "../../lib/questions"
 import { GhostButton } from "../ui/primitives";
 import { ICON_SIZE } from "../../lib/iconSize";
 import type { ReactNode } from "react";
+import { ChoiceTeaching } from "./ChoiceTeaching";
+import { AxomDiagramCard } from "./AxomDiagramCard";
 
 export function QuizFeedback({
   question,
@@ -35,9 +37,15 @@ export function QuizFeedback({
   const result = !trusted ? "review" : pickedKey === question.correctKey ? "correct" : "incorrect";
   // Import owns cleanup; display must preserve legitimate user edits.
   const explanation = (question.explanation ?? "").trim();
+  const hasSourceRecord = Boolean(
+    sourceTitle || question.citation || question.sourceDocumentId || question.sourcePage
+    || question.extraction?.sourceSnippet || question.extraction?.answerEvidence
+    || question.extraction?.explanationSource,
+  );
 
   return (
-    <section className="quiz-feedback" aria-live="polite" data-module-tour="qb-feedback">
+    <section className="quiz-feedback" aria-live="polite" data-module-tour="qb-feedback"
+      data-study-text="question-feedback" data-question-id={question.id}>
       <div className={`result-banner ${result}`} role="status">
         <span className="result-dot" aria-hidden="true" />
         <strong>
@@ -62,12 +70,27 @@ export function QuizFeedback({
         </div>
       </div>
 
-      {explanation && (
+      {explanation ? (
         <div className="feedback-explanation">
           <span className="field-label">Explanation</span>
           {question.content ? <div>{explanationContent ?? explanation}</div> : <p>{explanationContent ?? explanation}</p>}
         </div>
+      ) : (
+        <div className="feedback-explanation feedback-explanation-missing">
+          <span className="field-label">Explanation pending</span>
+          <p>{trusted
+            ? "This answer has a mapped key, but no main explanation is recorded yet."
+            : "No main explanation is recorded for this question yet."}
+            {showProvenance && hasSourceRecord ? " The source record is below." : ""}</p>
+          {onMarkExplanationWrong && (
+            <GhostButton onClick={onMarkExplanationWrong}>
+              <AlertTriangle size={ICON_SIZE.body} aria-hidden="true" /> Flag missing explanation
+            </GhostButton>
+          )}
+        </div>
       )}
+
+      <AxomDiagramCard question={question} />
 
       {question.objective && (
         <div className="learning-objective">
@@ -75,6 +98,8 @@ export function QuizFeedback({
           <p>{question.objective}</p>
         </div>
       )}
+
+      <ChoiceTeaching question={question} pickedKey={pickedKey} />
 
       {showProvenance && (
         <QuestionProvenance
@@ -89,7 +114,7 @@ export function QuizFeedback({
         <div className="row wrap gap6">
           {onRepairCard && <GhostButton onClick={onRepairCard}><WandSparkles size={ICON_SIZE.body} /> Repair card</GhostButton>}
           {onAddReview && <GhostButton onClick={onAddReview}><BookMarked size={ICON_SIZE.body} /> Add to review</GhostButton>}
-          {onMarkExplanationWrong && <GhostButton onClick={onMarkExplanationWrong}><AlertTriangle size={ICON_SIZE.body} /> Explanation wrong</GhostButton>}
+          {onMarkExplanationWrong && explanation && <GhostButton onClick={onMarkExplanationWrong}><AlertTriangle size={ICON_SIZE.body} /> Explanation wrong</GhostButton>}
           {onMarkAnswerWrong && <GhostButton onClick={onMarkAnswerWrong}><AlertTriangle size={ICON_SIZE.body} /> Answer wrong</GhostButton>}
           {onEditMapping && <GhostButton onClick={onEditMapping}><PencilLine size={ICON_SIZE.body} /> Edit mapping</GhostButton>}
         </div>
