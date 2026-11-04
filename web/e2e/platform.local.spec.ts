@@ -63,8 +63,11 @@ test("Host and Community persist across two synthetic accounts with real SQL aut
     // No identity gets an operator role from a display name or a client request.
     await expect(database.rpc(member.id, "axom_operator_accounts", { query_text: "" })).rejects.toThrow(/access required/i);
     await expect(database.asUser(member.id, "insert into public.axom_operator_roles(user_id,role) values($1,'owner')", [member.id])).rejects.toThrow(/permission denied/i);
+    // Host is the owner's private console: any other account gets the dashboard.
     await other.goto(`${baseURL}/#host`);
-    await expect(other.getByRole("heading", { name: "Operator permission required" })).toBeVisible();
+    await expect(other.locator(".tb-title")).toHaveText("Dashboard");
+    await expect(other.locator(".host-page")).toHaveCount(0);
+    await expect(other.getByRole("button", { name: "Host", exact: true })).toHaveCount(0);
     await other.goto(`${baseURL}/#community`);
 
     await page.getByLabel("Public handle", { exact: true }).fill(owner.handle);
@@ -149,15 +152,18 @@ test("Host and Community persist across two synthetic accounts with real SQL aut
     await expect(page.getByText("Role updated and audited.", { exact: true })).toBeVisible();
     expect(await database.rpc(member.id, "axom_operator_role")).toBe("moderator");
     await expect(database.rpc(member.id, "axom_operator_accounts", { query_text: "" })).rejects.toThrow(/access required/i);
+    // A moderator role is enforced on the server, but Host still shows only for the owner.
     await other.goto(`${baseURL}/#host`);
-    await expect(other.locator(".host-page").getByText("Moderator", { exact: true }).first()).toBeVisible();
+    await expect(other.locator(".tb-title")).toHaveText("Dashboard");
+    await expect(other.locator(".host-page")).toHaveCount(0);
     await expect(other.getByRole("heading", { name: "Accounts & AI", exact: true })).toHaveCount(0);
     await accountRow.getByRole("combobox", { name: "Role", exact: true }).selectOption("member");
     await accountRow.getByRole("textbox", { name: /^Reason for changing Fixture Briar/ }).fill("Synthetic acceptance: revoke moderation access.");
     await accountRow.getByRole("button", { name: "Apply role", exact: true }).click();
     await expect.poll(() => database.rpc(member.id, "axom_operator_role")).toBeNull();
     await other.reload();
-    await expect(other.getByRole("heading", { name: "Operator permission required" })).toBeVisible();
+    await expect(other.locator(".tb-title")).toHaveText("Dashboard");
+    await expect(other.locator(".host-page")).toHaveCount(0);
     await other.goto(`${baseURL}/#community`);
 
     await accountRow.getByLabel("Daily AI request cap", { exact: true }).fill("2");

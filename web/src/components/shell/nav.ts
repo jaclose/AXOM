@@ -37,7 +37,6 @@ export const MODULE_STATUS_META = {
 // All routable pages, keyed for lookup. Order here is not the sidebar order
 // (that lives in the SIDEBAR_* groups below).
 export const NAV = [
-  { id: "host", label: "Host", subtitle: "Account permissions and platform operations", icon: ShieldCheck },
   { id: "dashboard", label: "Dashboard", subtitle: "Your command center at a glance", icon: LayoutGrid },
   { id: "courses", label: "Courses", subtitle: "Term-based course map with module-level folders", icon: BookOpen },
   { id: "tracker", label: "Course Tracker", subtitle: "Lecture, DLA, and PQ completion map", icon: BadgeCheck },
@@ -78,6 +77,8 @@ export const NAV = [
   // After Tools
   { id: "about", label: "About", subtitle: "What AXOM is, where it is headed, and the live project preview", icon: Info },
   { id: "folders", label: "Hub Folders", subtitle: "Your modular folders and shortcuts", icon: Folder },
+  // Shown only to the verified Project CEO (lib/operator/hostAccess.ts).
+  { id: "host", label: "Host", subtitle: "Account permissions and platform operations", icon: ShieldCheck },
   { id: "building", label: "Building", subtitle: "A transparent map of AXOM systems and planned concepts", icon: Blocks },
   // Footer (Help is a page; Settings + Account open the modal)
   { id: "help", label: "Help", subtitle: "Guided tour, master guide, Anki import, and feedback", icon: LifeBuoy },

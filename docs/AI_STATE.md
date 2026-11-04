@@ -5,6 +5,17 @@ authority: current-state
 ---
 # AXOM current AI state
 
+## Host and Communities repair · 2026-11-04
+
+Branch `claude/host-communities-20261104` from `a96f1491`. Host now shows only
+for the verified Project CEO (sidebar, title, Settings, Community shortcut and
+the `#host` route); unknown routes no longer borrow the Host title. New forward
+migration `20261104120000_operator_accounts_email_text.sql` fixes the owner's
+Host dashboard, which failed on every load because `auth.users.email` is
+`varchar(255)` on Supabase. See the
+[operator console](features/community-operator-console.md#operator-console).
+The migration is not on production yet; push, `db push` and deploy need JD.
+
 ## Checkout and release boundary · 2026-11-02 14:55 UTC
 
 Remote `main` is `b1d3bea5` after PR #91, which makes missing static assets return

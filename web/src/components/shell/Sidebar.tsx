@@ -29,6 +29,7 @@ import { QuickThemeControl } from "./QuickThemeControl";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { protectionLabel, useAccount } from "../../lib/account/accountStore";
 import { useOperatorAccess } from "../../lib/operator/hostClient";
+import { canOpenHost } from "../../lib/operator/hostAccess";
 import { APP_VERSION_LABEL } from "../../lib/brand";
 
 const MOBILE_SIDEBAR_QUERY = "(max-width: 880px)";
@@ -133,7 +134,7 @@ export function Sidebar({
   }
 
   function Item({ id, section }: { id: string; section?: readonly string[] }) {
-    if (id === "host" && !operatorAccess) return null;
+    if (id === "host" && !canOpenHost(operatorAccess)) return null;
     const item = navById(id);
     if (!item) return null;
     const I = item.icon;

@@ -41,6 +41,7 @@ import { canonicalTimeZone, normalizeClockPreferences, normalizeTimeZonePreferen
 import { normalizeDailyLoopReminderPreferences } from "../../lib/dailyLoopReminders";
 import { AccountSyncPanel } from "./AccountSyncPanel";
 import { useOperatorAccessStatus } from "../../lib/operator/hostClient";
+import { canOpenHost } from "../../lib/operator/hostAccess";
 import { StudyWorkflowSettings } from "./StudyWorkflowSettings";
 import { AppearanceStudio } from "./AppearanceStudio";
 import {
@@ -420,13 +421,9 @@ export function SettingsModal({ onClose, initialTab = "general" }: { onClose: ()
             <div><b>Looking for work on the other AXOM address?</b><p>Browser work is stored separately at each address. This workspace stays here.</p></div>
             <a href={otherWorkspace} target="_blank" rel="noopener noreferrer">Open www.axom.info</a>
           </aside>}
-          {operatorAccess.role && <div className="settings-host-access" aria-label="Host access">
-            <div><span>Verified AXOM role</span><strong>{operatorAccess.role === "owner" ? "Project CEO" : operatorAccess.role === "admin" ? "Administrator" : "Moderator"}</strong></div>
+          {canOpenHost(operatorAccess.role) && <div className="settings-host-access" aria-label="Host access">
+            <div><span>Verified AXOM role</span><strong>Project CEO</strong></div>
             <a href="#host" onClick={onClose}>Open host dashboard</a>
-          </div>}
-          {operatorAccess.state === "error" && <div className="settings-update-state error" role="alert">
-            <p>Host access could not be checked. Your permissions are unchanged.</p>
-            <GButton size="sm" onClick={operatorAccess.retry}>Retry Host access</GButton>
           </div>}
           <nav className="settings-account-links" aria-label="More account settings">
             <span>Also in AXOM</span>

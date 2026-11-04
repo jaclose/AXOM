@@ -189,16 +189,17 @@ describe("Settings information architecture", () => {
     expect(within(hostAccess).getByRole("link", { name: "Open host dashboard" }).getAttribute("href")).toBe("#host");
   });
 
-  it("offers a retry without revealing Host access when the role check fails", async () => {
-    operatorMocks.state = "error";
-    const user = userEvent.setup();
-    render(<SettingsModal onClose={() => {}} initialTab="account" />);
-    const panel = screen.getByRole("tabpanel", { name: "Account" });
-    expect(within(panel).getByRole("alert").textContent).toContain("Host access could not be checked");
-    expect(within(panel).queryByText("Project CEO")).toBeNull();
-    expect(within(panel).queryByRole("link", { name: "Open host dashboard" })).toBeNull();
-    await user.click(within(panel).getByRole("button", { name: "Retry Host access" }));
-    expect(operatorMocks.retry).toHaveBeenCalledOnce();
+  it("never mentions Host to an account that is not the verified owner", () => {
+    for (const [role, state] of [[null, "error"], [null, "denied"], ["admin", "verified"], ["moderator", "verified"]] as const) {
+      operatorMocks.role = role;
+      operatorMocks.state = state;
+      const { unmount } = render(<SettingsModal onClose={() => {}} initialTab="account" />);
+      const panel = screen.getByRole("tabpanel", { name: "Account" });
+      expect(within(panel).queryByText(/\bHost\b/)).toBeNull();
+      expect(within(panel).queryByRole("link", { name: "Open host dashboard" })).toBeNull();
+      expect(within(panel).queryByRole("alert")).toBeNull();
+      unmount();
+    }
   });
 
   it("lets a narrow-screen section picker reach every Settings area", async () => {

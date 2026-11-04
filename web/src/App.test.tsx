@@ -365,3 +365,22 @@ describe("Communications route protection", () => {
     expect(screen.queryByText("Unsaved changes")).toBeNull();
   });
 });
+
+describe("Host stays private to the verified owner", () => {
+  it("renders a #host link as the dashboard for an account without the owner role", () => {
+    window.location.hash = "host";
+    render(<App />);
+    expect(document.querySelector(".tb-title")?.textContent).toBe("Dashboard");
+    expect(document.title).toBe("Dashboard · AXOM");
+    expect(screen.queryByText("Host dashboard")).toBeNull();
+    expect(screen.queryByText(/operator console/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Host" })).toBeNull();
+  });
+
+  it("titles an unknown route as the dashboard it renders, never as Host", () => {
+    window.location.hash = "retired-route";
+    render(<App />);
+    expect(document.querySelector(".tb-title")?.textContent).toBe("Dashboard");
+    expect(document.title).toBe("Dashboard · AXOM");
+  });
+});

@@ -12,7 +12,7 @@ vi.mock("../lib/account/accountStore", () => ({
 vi.mock("../lib/store", () => ({
   useStore: (select: (state: { logs: []; questionSets: [] }) => unknown) => select({ logs: [], questionSets: [] }),
 }));
-vi.mock("../lib/operator/hostClient", () => ({ useAccountIdentity: () => "me", operatorRole: async () => null }));
+vi.mock("../lib/operator/hostClient", () => ({ useAccountIdentity: () => "me", useOperatorAccess: () => null }));
 vi.mock("../lib/community/community", async importOriginal => ({
   ...await importOriginal<typeof import("../lib/community/community")>(),
   loadCommunity: vi.fn(),

@@ -29,7 +29,9 @@ import { UserMediaBridge } from "./components/soundscapes/UserMediaBridge";
 import { FocusCheckIn } from "./components/shell/FocusCheckIn";
 import { AccountSyncWatcher } from "./components/shell/AccountSyncWatcher";
 import { VaultSaveWatcher } from "./components/shell/VaultSaveWatcher";
-import { NAV } from "./components/shell/nav";
+import { NAV, navById } from "./components/shell/nav";
+import { useOperatorAccess } from "./lib/operator/hostClient";
+import { canOpenHost } from "./lib/operator/hostAccess";
 import { NotificationActionBridge } from "./components/shell/NotificationActionBridge";
 import { useStore } from "./lib/store";
 import { useUi } from "./lib/uiStore";
@@ -180,6 +182,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
   const updateProfile = useStore((s) => s.updateProfile);
   // Show the tour once after onboarding; "Replay tour" simply clears tourDone.
   const showTour = onboarded && !tourDone;
+  const hostRole = useOperatorAccess();
 
   const openDrawer = useCallback(() => {
     drawerOpenRef.current = true;
@@ -406,9 +409,13 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
     setTimeout(() => setRefreshing(false), 650);
   }
 
-  const routeKey = route.split("?")[0];
+  const requestedRoute = route.split("?")[0];
+  // Host is JD's private console. For every other account, including while the
+  // role is still being checked, a #host link is simply the dashboard.
+  const routeKey = requestedRoute === "host" && !canOpenHost(hostRole) ? "dashboard" : requestedRoute;
   const communicationNav: Record<string, { label: string; subtitle: string }> = { communications: { label: "Communications", subtitle: "Your inbox, on your terms" }, privacy: { label: "Privacy & Data", subtitle: "Keep, download and remove" }, "communications-admin": { label: "Communications studio", subtitle: "Considered writing and delivery" }, host: { label: "Host dashboard", subtitle: "Private AXOM operations and permissions" } };
-  const nav = NAV.find((n) => n.id === routeKey) ?? communicationNav[routeKey] ?? NAV[0];
+  // An unknown route renders the dashboard, so it also takes the dashboard's title.
+  const nav = NAV.find((n) => n.id === routeKey) ?? communicationNav[routeKey] ?? navById("dashboard") ?? NAV[0];
   const Page: ComponentType = PAGES[routeKey] ?? DashboardPage;
 
   if (routeKey === "pulse") {

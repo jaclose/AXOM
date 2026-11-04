@@ -9,7 +9,8 @@ import {
   type CommunityConnection, type CommunityProfile, type CommunitySnapshot,
 } from "../lib/community/community";
 import { GButton, GhostButton, GlassCard, PanelHeader, Tag } from "../components/ui/primitives";
-import { operatorRole, useAccountIdentity } from "../lib/operator/hostClient";
+import { useAccountIdentity, useOperatorAccess } from "../lib/operator/hostClient";
+import { canOpenHost } from "../lib/operator/hostAccess";
 import { useUi } from "../lib/uiStore";
 import "../styles/community.css";
 
@@ -52,7 +53,7 @@ function CommunityAccountPage() {
   const [peopleSearch, setPeopleSearch] = useState("");
   const [peopleSearchState, setPeopleSearchState] = useState<PeopleSearch>();
   const [peopleSearchRetry, setPeopleSearchRetry] = useState(0);
-  const [hostAvailable, setHostAvailable] = useState(false);
+  const hostAvailable = canOpenHost(useOperatorAccess());
   const [reportPostId, setReportPostId] = useState<string | null>(null);
   const [deletePostId, setDeletePostId] = useState<string | null>(null);
   const [reportReason, setReportReason] = useState<"spam" | "harassment" | "copyright" | "inaccurate" | "other">("other");
@@ -72,12 +73,6 @@ function CommunityAccountPage() {
     return () => { active = false; };
   }, [accountId, refreshId]);
 
-  useEffect(() => {
-    let active = true;
-    setHostAvailable(false);
-    if (accountId) void operatorRole(accountId).then(role => { if (active) setHostAvailable(Boolean(role)); }).catch(() => {});
-    return () => { active = false; };
-  }, [accountId]);
   const mine = data?.profiles.find(p => p.user_id === accountId);
   const mineId = mine?.user_id;
   const normalizedPeopleSearch = peopleSearch.trim();
