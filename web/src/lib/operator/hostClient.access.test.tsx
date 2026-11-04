@@ -61,4 +61,33 @@ describe("Host access recovery", () => {
     expect(result.current.state).toBe("signed-out");
     expect(result.current.role).toBeNull();
   });
+
+  it("shares one answer across screens and keeps it through a background recheck", async () => {
+    rpc.mockResolvedValueOnce({ data: "owner", error: null });
+    const shell = renderHook(() => useOperatorAccessStatus());
+    const route = renderHook(() => useOperatorAccessStatus());
+    await waitFor(() => expect(shell.result.current.state).toBe("verified"));
+    expect(route.result.current.role).toBe("owner");
+    expect(rpc).toHaveBeenCalledTimes(1);
+
+    let finishRecheck!: (response: { data: null; error: { message: string } }) => void;
+    rpc.mockReturnValueOnce(new Promise(resolve => { finishRecheck = resolve; }));
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
+    expect(rpc).toHaveBeenCalledTimes(2);
+    expect(shell.result.current.role).toBe("owner");
+    await act(async () => { finishRecheck({ data: null, error: { message: "offline" } }); });
+    expect(route.result.current.state).toBe("verified");
+
+    rpc.mockResolvedValueOnce({ data: null, error: null });
+    act(() => { window.dispatchEvent(new Event("axom:operator-access-changed")); });
+    await waitFor(() => expect(shell.result.current.state).toBe("denied"));
+    expect(route.result.current.role).toBeNull();
+
+    act(() => account.change("another-account"));
+    expect(shell.result.current.state).toBe("checking");
+    expect(shell.result.current.role).toBeNull();
+    // The scoped client still belongs to the first account, so this check fails closed.
+    await waitFor(() => expect(shell.result.current.state).toBe("error"));
+    expect(route.result.current.role).toBeNull();
+  });
 });

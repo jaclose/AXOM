@@ -83,10 +83,15 @@ afterEach(() => {
 });
 
 describe("mobile sidebar accessibility", () => {
-  it("shows Host only with server-confirmed operator access and removes it on revocation", () => {
+  it("shows Host only to the server-verified owner and removes it on revocation", () => {
     const props = { active: "dashboard", onSelect: vi.fn(), onOpenSettings: vi.fn(), onClose: vi.fn(), collapsed: true };
     const { rerender } = render(<Sidebar {...props} />);
     expect(screen.queryByRole("button", { name: "Host" })).toBeNull();
+    for (const role of ["admin", "moderator"] as const) {
+      vi.mocked(useOperatorAccess).mockReturnValue(role);
+      rerender(<Sidebar {...props} />);
+      expect(screen.queryByRole("button", { name: "Host" })).toBeNull();
+    }
     vi.mocked(useOperatorAccess).mockReturnValue("owner");
     rerender(<Sidebar {...props} />);
     expect(screen.getByRole("button", { name: "Host" })).toBeTruthy();

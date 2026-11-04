@@ -1,5 +1,5 @@
 import { accountOperationClient } from "../account/supabase";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { useAccount } from "../account/accountStore";
 import { academicAccountScope } from "../academicLibrary/accountScope";
@@ -102,31 +102,78 @@ export async function operatorRole(accountId: string): Promise<OperatorRole | nu
     return data as OperatorRole | null;
   });
 }
-export function useOperatorAccessStatus() {
-  const identity = useAccountIdentity();
-  const accountId = useAccount(state => state.user?.id);
-  const [revision, setRevision] = useState(0);
-  const [access, setAccess] = useState<{ identity: string; revision: number; role: OperatorRole | null; failed: boolean }>();
-  useEffect(() => {
-    const refresh = () => setRevision(value => value + 1);
-    window.addEventListener("focus", refresh);
-    window.addEventListener("axom:operator-access-changed", refresh);
-    return () => { window.removeEventListener("focus", refresh); window.removeEventListener("axom:operator-access-changed", refresh); };
-  }, []);
-  useEffect(() => {
-    let active = true;
-    setAccess(undefined);
-    if (accountId) void operatorRole(accountId).then(role => { if (active) setAccess({ identity, revision, role, failed: false }); })
-      .catch(() => { if (active) setAccess({ identity, revision, role: null, failed: true }); });
-    return () => { active = false; };
-  }, [identity, accountId, revision]);
-  const current = access?.identity === identity && access.revision === revision ? access : undefined;
-  const state = !accountId ? "signed-out" : !current ? "checking" : current.failed ? "error" : current.role ? "verified" : "denied";
-  return {
-    role: state === "verified" ? current?.role ?? null : null,
-    state,
-    retry: () => setRevision(value => value + 1),
-  };
+// One shared, server-read role per signed-in account. The shell, the route
+// guard, Settings and Community all read the same answer, so they never
+// disagree and a window focus costs one role check instead of one per screen.
+// A background recheck keeps the last answer for the same account until the
+// server replies, so Host does not vanish while it revalidates; an account
+// switch or an explicit retry drops it at once.
+export type OperatorAccessState = "signed-out" | "checking" | "verified" | "denied" | "error";
+type AccessResult = { identity: string; revision: number; role: OperatorRole | null; failed: boolean };
+let accessRevision = 0;
+let accessResult: AccessResult | undefined;
+let accessPending: { identity: string; revision: number } | undefined;
+let accessView: { key: string; value: { role: OperatorRole | null; state: OperatorAccessState } } | undefined;
+let accessEventsBound = false;
+const accessListeners = new Set<() => void>();
+const emitAccess = () => { for (const listener of accessListeners) listener(); };
+
+function readOperatorAccess() {
+  const identity = identitySnapshot();
+  const signedIn = Boolean(useAccount.getState().user?.id);
+  const current = accessResult?.identity === identity ? accessResult : undefined;
+  const state: OperatorAccessState = !signedIn ? "signed-out" : !current ? "checking" : current.failed ? "error" : current.role ? "verified" : "denied";
+  const role = state === "verified" ? current?.role ?? null : null;
+  const key = `${state}:${role ?? ""}`;
+  if (accessView?.key !== key) accessView = { key, value: { role, state } };
+  return accessView.value;
+}
+
+function checkOperatorAccess() {
+  const accountId = useAccount.getState().user?.id;
+  if (!accountId || !accessListeners.size) return;
+  const identity = identitySnapshot();
+  const revision = accessRevision;
+  if (accessResult?.identity === identity && accessResult.revision === revision) return;
+  if (accessPending?.identity === identity && accessPending.revision === revision) return;
+  accessPending = { identity, revision };
+  void operatorRole(accountId)
+    .then(role => ({ role, failed: false }), () => ({ role: null, failed: true }))
+    .then(outcome => {
+      if (accessPending?.identity !== identity || accessPending.revision !== revision) return;
+      accessPending = undefined;
+      if (identitySnapshot() !== identity) return;
+      const previous = accessResult?.identity === identity && !accessResult.failed ? accessResult : undefined;
+      // A dropped connection during a background recheck is not a revocation.
+      accessResult = outcome.failed && previous ? { ...previous, revision } : { identity, revision, ...outcome };
+      emitAccess();
+    });
+}
+
+function recheckOperatorAccess(discardCurrent: boolean) {
+  accessRevision++;
+  if (discardCurrent) accessResult = undefined;
+  emitAccess();
+  checkOperatorAccess();
+}
+const retryOperatorAccess = () => recheckOperatorAccess(true);
+
+function subscribeOperatorAccess(listener: () => void) {
+  if (!accessEventsBound && typeof window !== "undefined") {
+    accessEventsBound = true;
+    const recheck = () => { if (accessListeners.size) recheckOperatorAccess(false); };
+    window.addEventListener("focus", recheck);
+    window.addEventListener("axom:operator-access-changed", recheck);
+  }
+  accessListeners.add(listener);
+  const stopIdentity = subscribeIdentity(listener);
+  return () => { accessListeners.delete(listener); stopIdentity(); };
+}
+
+export function useOperatorAccessStatus(): { role: OperatorRole | null; state: OperatorAccessState; retry: () => void } {
+  const access = useSyncExternalStore(subscribeOperatorAccess, readOperatorAccess, readOperatorAccess);
+  useEffect(() => { checkOperatorAccess(); }, [access]);
+  return useMemo(() => ({ ...access, retry: retryOperatorAccess }), [access]);
 }
 export function useOperatorAccess() { return useOperatorAccessStatus().role; }
 export async function loadOperatorDashboard(accountId: string): Promise<OperatorDashboard> {

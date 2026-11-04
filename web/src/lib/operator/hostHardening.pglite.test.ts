@@ -19,7 +19,8 @@ beforeAll(async () => {
     alter default privileges in schema public grant all on tables to anon,authenticated,service_role;
     alter default privileges in schema public grant all on functions to anon,authenticated,service_role;
     create schema auth;
-    create table auth.users(id uuid primary key,email text,created_at timestamptz not null default now(),last_sign_in_at timestamptz);
+    -- Same email type as Supabase Auth: varchar(255), not text.
+    create table auth.users(id uuid primary key,email varchar(255),created_at timestamptz not null default now(),last_sign_in_at timestamptz);
     create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
     grant usage on schema auth to anon,authenticated,service_role;
     grant execute on function auth.uid() to anon,authenticated,service_role;
@@ -46,6 +47,7 @@ beforeAll(async () => {
     "20261101190000_community_social.sql",
     "20261101191000_operator_console.sql",
     "20261102160000_operator_privacy_audit_hardening.sql",
+    "20261104120000_operator_accounts_email_text.sql",
   ]) {
     await db.exec(readFileSync(new URL(`../../../../supabase/migrations/${name}`, import.meta.url), "utf8"));
   }
@@ -71,6 +73,18 @@ describe("forward Host privacy and audit hardening", () => {
     await expect(as(LEARNER, "select * from public.axom_operator_review_queue()")).rejects.toThrow(/Operator access required/);
     await expect(as(null, "select * from public.axom_operator_review_queue()")).rejects.toThrow(/permission denied/);
     await expect(as(LEARNER, "insert into public.axom_operator_roles(user_id,role) values($1,'admin')", [LEARNER])).rejects.toThrow(/permission denied/);
+  });
+
+  it("lists and searches the account directory with Supabase's varchar email column", async () => {
+    const all = await as<{ user_id: string; email: string; role: string | null }>(OWNER,
+      "select user_id,email,role from public.axom_operator_accounts('') order by email");
+    expect(all.map(row => row.email)).toEqual(["learner@example.test", "moderator@example.test", "owner@example.test"]);
+    expect(all.find(row => row.user_id === OWNER)?.role).toBe("owner");
+    expect(await as(OWNER, "select email from public.axom_operator_accounts('learner@')")).toEqual([{ email: "learner@example.test" }]);
+    expect(await as(OWNER, "select email from public.axom_operator_accounts('nobody-matches')")).toEqual([]);
+    await expect(as(MODERATOR, "select * from public.axom_operator_accounts('')")).rejects.toThrow(/Account management access required/);
+    await expect(as(LEARNER, "select * from public.axom_operator_accounts('')")).rejects.toThrow(/Account management access required/);
+    await expect(as(null, "select * from public.axom_operator_accounts('')")).rejects.toThrow(/permission denied/);
   });
 
   it("shows only current, ready, explicitly submitted academic metadata", async () => {
