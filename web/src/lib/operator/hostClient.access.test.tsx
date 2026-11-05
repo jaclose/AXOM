@@ -90,4 +90,37 @@ describe("Host access recovery", () => {
     await waitFor(() => expect(shell.result.current.state).toBe("error"));
     expect(route.result.current.role).toBeNull();
   });
+
+  it("checks the new account when the previous account's role is still pending", async () => {
+    let finishOwner!: (response: { data: string; error: null }) => void;
+    let finishMember!: (response: { data: null; error: null }) => void;
+    rpc.mockReturnValueOnce(new Promise(resolve => { finishOwner = resolve; }))
+      .mockReturnValueOnce(new Promise(resolve => { finishMember = resolve; }));
+    vi.mocked(accountOperationClient).mockImplementation(async () => ({
+      userId: account.getState().user?.id,
+      client: { rpc },
+      assertCurrent: vi.fn().mockResolvedValue(undefined),
+    } as unknown as Awaited<ReturnType<typeof accountOperationClient>>));
+
+    const shell = renderHook(() => useOperatorAccessStatus());
+    const route = renderHook(() => useOperatorAccessStatus());
+    await waitFor(() => expect(rpc).toHaveBeenCalledTimes(1));
+    expect(shell.result.current.state).toBe("checking");
+
+    act(() => account.change("pending-member-account"));
+    await waitFor(() => expect(rpc).toHaveBeenCalledTimes(2));
+    expect(shell.result.current.state).toBe("checking");
+    expect(route.result.current.role).toBeNull();
+
+    await act(async () => { finishMember({ data: null, error: null }); });
+    expect(shell.result.current.state).toBe("denied");
+    expect(route.result.current.state).toBe("denied");
+
+    await act(async () => { finishOwner({ data: "owner", error: null }); });
+    expect(shell.result.current.state).toBe("denied");
+    expect(shell.result.current.role).toBeNull();
+    expect(route.result.current.state).toBe("denied");
+    expect(route.result.current.role).toBeNull();
+    expect(rpc).toHaveBeenCalledTimes(2);
+  });
 });
