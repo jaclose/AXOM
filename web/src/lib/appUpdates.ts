@@ -14,6 +14,8 @@ export interface UpdateState {
   totalBytes?: number;
   error?: string;
   canContinueWithoutRecoverySnapshot?: boolean;
+  /** A web checkpoint failed. The user may explicitly accept loss of unsaved work. */
+  canRefreshWithoutVerifiedSave?: boolean;
   deferred: boolean;
   /** Installation/activation succeeded; retry only the checkpoint and restart. */
   restartPending: boolean;
@@ -46,6 +48,8 @@ export interface UpdateDependencies {
 }
 export interface UpdateApplyOptions {
   skipRecoverySnapshot?: boolean;
+  /** Only for a confirmed web refresh after an attempted workspace checkpoint fails. */
+  refreshWithoutVerifiedSave?: boolean;
 }
 
 /** Explicit lifecycle shared by Settings, automatic notices, and native menus.
@@ -96,7 +100,8 @@ export function createUpdateController(deps: UpdateDependencies) {
         const previous = candidate;
         candidate = null;
         update({
-          phase: "checking", error: undefined, canContinueWithoutRecoverySnapshot: false, version: undefined, buildId: undefined,
+          phase: "checking", error: undefined, canContinueWithoutRecoverySnapshot: false,
+          canRefreshWithoutVerifiedSave: false, version: undefined, buildId: undefined,
           notes: undefined, downloadedBytes: 0, totalBytes: undefined, deferred: false,
         });
         if (previous) await previous.close().catch(() => undefined);
@@ -139,10 +144,31 @@ export function createUpdateController(deps: UpdateDependencies) {
         if (options.skipRecoverySnapshot && (deps.desktop || !state.canContinueWithoutRecoverySnapshot)) {
           throw new Error("The update cannot continue without a verified recovery snapshot.");
         }
+        const confirmedUnverifiedRefresh = !deps.desktop
+          && options.refreshWithoutVerifiedSave === true
+          && state.canRefreshWithoutVerifiedSave === true;
+        if (options.refreshWithoutVerifiedSave && !confirmedUnverifiedRefresh) {
+          throw new Error("A refresh without a verified workspace save requires a previous failed checkpoint and your confirmation.");
+        }
         if (deps.desktop && !state.restartPending && (!candidate || !downloaded)) throw new Error("Download the update before installing it.");
         if (!deps.desktop && !state.version) throw new Error("Check for a web update before refreshing.");
-        update({ phase: "preparing", error: undefined, canContinueWithoutRecoverySnapshot: false });
-        await deps.checkpoint(options);
+        update({
+          phase: "preparing", error: undefined,
+          canContinueWithoutRecoverySnapshot: false, canRefreshWithoutVerifiedSave: false,
+        });
+        if (!confirmedUnverifiedRefresh) {
+          try {
+            await deps.checkpoint(options);
+          } catch (error) {
+            // Only web checkpoint failures unlock the manual, loss-risk-confirmed
+            // escape hatch. Failed downloads, worker activation, and restarts do not.
+            // A verified-save quota failure already has a safer separate path.
+            if (!deps.desktop && !hasVerifiedSaveWithoutSnapshot(error)) {
+              update({ canRefreshWithoutVerifiedSave: true });
+            }
+            throw error;
+          }
+        }
         if (!state.restartPending) {
           if (deps.desktop) {
             update({ phase: "installing" });

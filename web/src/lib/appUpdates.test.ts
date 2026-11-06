@@ -184,6 +184,68 @@ describe("explicit app update lifecycle", () => {
     expect(calls).toEqual(["checkpoint", "checkpoint", "activate", "restart"]);
   });
 
+  it("offers a confirmed web refresh after workspace verification fails without retrying the blocked save", async () => {
+    const { controller, deps, calls } = fixture(false);
+    await controller.check();
+    vi.mocked(deps.checkpoint).mockRejectedValueOnce(
+      new Error("Could not verify the saved workspace. Export a backup in Settings before retrying."),
+    );
+
+    await controller.apply();
+
+    expect(controller.getSnapshot()).toMatchObject({ phase: "error", canRefreshWithoutVerifiedSave: true });
+    expect(deps.activateWeb).not.toHaveBeenCalled();
+    expect(deps.restart).not.toHaveBeenCalled();
+
+    await controller.apply({ refreshWithoutVerifiedSave: true });
+
+    expect(deps.checkpoint).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual(["activate", "restart"]);
+  });
+
+  it("never permits an unconfirmed refresh without a prior workspace checkpoint failure", async () => {
+    const { controller, deps } = fixture(false);
+    await controller.check();
+    await controller.apply({ refreshWithoutVerifiedSave: true });
+    expect(controller.getSnapshot().phase).toBe("error");
+    expect(deps.checkpoint).not.toHaveBeenCalled();
+    expect(deps.activateWeb).not.toHaveBeenCalled();
+    expect(deps.restart).not.toHaveBeenCalled();
+  });
+
+  it("clears a failed-save override when a new web update check replaces the candidate", async () => {
+    const { controller, deps } = fixture(false);
+    await controller.check();
+    vi.mocked(deps.checkpoint).mockRejectedValueOnce(new Error("Cannot save workspace"));
+    await controller.apply();
+    expect(controller.getSnapshot().canRefreshWithoutVerifiedSave).toBe(true);
+    await controller.check(true);
+    expect(controller.getSnapshot().canRefreshWithoutVerifiedSave).toBe(false);
+    await controller.apply({ refreshWithoutVerifiedSave: true });
+    expect(deps.activateWeb).not.toHaveBeenCalled();
+    expect(deps.restart).not.toHaveBeenCalled();
+  });
+
+  it("never permits a desktop update without a verified checkpoint even after a save error", async () => {
+    const { controller, deps, candidate } = fixture(true);
+    await controller.check();
+    await controller.download();
+    vi.mocked(deps.checkpoint).mockRejectedValueOnce(new Error("Unable to save"));
+    await controller.apply();
+    expect(controller.getSnapshot().canRefreshWithoutVerifiedSave).toBe(false);
+    await controller.apply({ refreshWithoutVerifiedSave: true });
+    expect(candidate.install).not.toHaveBeenCalled();
+    expect(deps.restart).not.toHaveBeenCalled();
+  });
+
+  it("does not expose a failed-save override after worker activation fails", async () => {
+    const { controller, deps } = fixture(false);
+    await controller.check();
+    vi.mocked(deps.activateWeb).mockRejectedValueOnce(new Error("Update could not activate"));
+    await controller.apply();
+    expect(controller.getSnapshot().canRefreshWithoutVerifiedSave).toBe(false);
+  });
+
   it("retains the app if worker activation fails", async () => {
     const { controller, deps, calls } = fixture(false);
     await controller.check();
