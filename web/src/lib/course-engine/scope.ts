@@ -36,22 +36,30 @@ export function scopeKey(scope: CourseScope): string {
 export function parseWeek(value: unknown): number | undefined {
   if (typeof value === "number") return Number.isInteger(value) && value > 0 && value < 100 ? value : undefined;
   if (typeof value !== "string") return undefined;
-  const match = value.match(/(\d{1,2})/);
+  // Do not turn a date, module number or source-week range into a single week.
+  // Separators own their whitespace so malformed padding cannot backtrack cubically.
+  const match = value.trim().match(/^(?:(?:week|wk|w)\s*(?::\s*)?(?:#\s*)?)?(\d{1,2})$/i);
   return match ? parseWeek(Number(match[1])) : undefined;
 }
 
 /**
- * Where a question belongs. Its own module and week win; otherwise it takes
- * the scope of the set it was imported into.
+ * Own filing wins. Only an absent week may inherit from a compatible source
+ * set; invalid weeks and contradictory refiling stay unassigned.
  */
 export function questionScope(
   question: Pick<QuestionRecord, "module" | "week" | "courseId" | "setId">,
   setsById?: ReadonlyMap<ID, Pick<QuestionSet, "scope">>,
 ): CourseScope {
   const inherited = question.setId ? setsById?.get(question.setId)?.scope : undefined;
+  // Empty legacy values are absent, but an explicit invalid week is not.
+  const declaredWeek: unknown = question.week;
+  const hasOwnWeek = declaredWeek != null && (typeof declaredWeek !== "string" || declaredWeek.trim() !== "");
+  const sameModule = question.module == null || inherited?.module == null
+    || canonicalModuleKey(question.module) === canonicalModuleKey(inherited.module);
+  const sameCourse = question.courseId == null || inherited?.courseId == null || question.courseId === inherited.courseId;
   return {
     module: question.module ?? inherited?.module,
-    week: parseWeek(question.week) ?? inherited?.week,
+    week: hasOwnWeek ? parseWeek(declaredWeek) : sameModule && sameCourse ? parseWeek(inherited?.week) : undefined,
     courseId: question.courseId ?? inherited?.courseId,
   };
 }
