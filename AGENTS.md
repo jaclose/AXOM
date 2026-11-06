@@ -3,6 +3,22 @@
 Canonical repository policy for Codex, Claude Code and Copilot. User instructions
 take precedence. Optimize correct implementation, reasoning and validation per token.
 
+## Route work through the current standards
+
+Use [engineering SOP](docs/operations/engineering-sop.md) for IDE, programming,
+testing and data-recovery practice; [brand guide](docs/design/BRAND-GUIDE.md) and
+[product guide](docs/product/PRODUCT-GUIDE.md) for approved-source-aware expression;
+[document control](docs/operations/document-control.md) for policy edits. These
+are routed references, not a required full read on every task.
+
+**AXOM FORGE** is the sole ordinary final release integrator and publisher. Source
+owners, MOTHERSHIP, APEX, Journal and Registry keep their implementation scopes,
+commit to their own branches and submit pinned candidate evidence to [gateway #140](https://github.com/jaclose/AXOM/issues/140).
+Independent QA remains separate. No ordinary source worker independently merges
+to main or deploys to production. Follow the [release gate](docs/operations/deployment.md#axom-unified-release-gateway)
+and [edition rules](docs/operations/release-nomenclature.md). Emergency hotfixes
+require the documented separate safety path; prompts do not replace branch protection.
+
 ## Orient and retrieve
 
 Start with only **AGENTS + [AI_STATE](docs/AI_STATE.md) + task**. Check
