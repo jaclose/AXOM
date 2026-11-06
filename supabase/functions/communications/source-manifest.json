@@ -28,7 +28,7 @@
     "web/src/lib/scoring.ts": "9799b3c92cecb5b7dc586c7e7aa1daf61a5185ec8c3a3e42028817c5cc30b55a",
     "web/src/lib/targetContributions.ts": "301704eb40288568396fd10702ca7d30ab47d3a4628e5b61508b53285a6009e7",
     "web/src/lib/tracker.ts": "ffc762dc996085a485a95bcef0ac00b54b16a70e0f8822513b184f836c972922",
-    "web/src/lib/vaultActivity.ts": "77b2fde92fa0d681419f2ccfcb63560be3b659f6f695c870fe5b548c1b93e052"
+    "web/src/lib/vaultActivity.ts": "5ca3dcd08dff7d108e58e417d31d8bf7085621f8e98bc5dbabe768040fd8697f"
   },
   "bundle": {
     "path": "supabase/functions/communications/service.js",
