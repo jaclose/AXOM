@@ -10,6 +10,7 @@ import type { JournalImageAttachment } from "../lib/journalNotebook";
 import * as journalNotebook from "../lib/journalNotebook";
 import { normalizeStudyStreaks, studyCreditsBalance } from "../lib/studyStreaks";
 import * as localVault from "../lib/localVault";
+import * as journalFeedback from "../lib/journalFeedback";
 import { useAccount } from "../lib/account/accountStore";
 import { JournalPage } from "./JournalPage";
 import { useSoundscape } from "../lib/soundscapes/store";
@@ -371,6 +372,53 @@ describe("Journal notebook foundation", () => {
       useStore.setState({ profile: previousProfile });
       window.localStorage.removeItem(keyA);
       window.localStorage.removeItem(keyB);
+    }
+  });
+
+  it("keeps feedback drafts editable after a failed send but locks fields while sending", async () => {
+    const previousAccount = { user: useAccount.getState().user, phase: useAccount.getState().phase };
+    const previousProfile = useStore.getState().profile;
+    const workspaceId = "journal-feedback-pending-send";
+    const account = { id: "journal-feedback-pending-account", email: "pending@example.test", displayName: "Test", emailConfirmed: true };
+    const draftKey = `axom-journal-feedback-draft:${workspaceId}:account:${account.id}`;
+    let rejectRequest!: (reason: Error) => void;
+    const submit = vi.spyOn(journalFeedback, "submitJournalFeedback").mockImplementation(() => (
+      new Promise<string>((_resolve, reject) => { rejectRequest = reject; })
+    ));
+    window.localStorage.removeItem(draftKey);
+    useStore.setState({ profile: { ...previousProfile, userId: workspaceId } });
+    useAccount.setState({ user: account, phase: "signed-in" });
+    try {
+      render(<JournalPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+      fireEvent.click(screen.getByRole("button", { name: "4 out of 5" }));
+      const liked = () => screen.getByLabelText("What do you like?") as HTMLTextAreaElement;
+      fireEvent.change(liked(), { target: { value: "A note that must not disappear." } });
+      fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+
+      expect(submit).toHaveBeenCalledWith(account.id, expect.objectContaining({
+        rating: 4, liked: "A note that must not disappear.",
+      }));
+      expect(liked().readOnly).toBe(true);
+      expect((screen.getByRole("button", { name: "5 out of 5" }) as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByRole("button", { name: "Sending…" }) as HTMLButtonElement).disabled).toBe(true);
+      expect(JSON.parse(window.localStorage.getItem(draftKey) ?? "{}").liked)
+        .toBe("A note that must not disappear.");
+
+      await act(async () => { rejectRequest(new Error("Submission interrupted")); await Promise.resolve(); });
+      await waitFor(() => expect(liked().readOnly).toBe(false));
+      expect((screen.getByRole("button", { name: "5 out of 5" }) as HTMLButtonElement).disabled).toBe(false);
+      expect(screen.getByRole("alert").textContent).toContain("Submission interrupted");
+      expect(JSON.parse(window.localStorage.getItem(draftKey) ?? "{}").liked)
+        .toBe("A note that must not disappear.");
+      fireEvent.change(liked(), { target: { value: "New changes after the failed request." } });
+      expect(JSON.parse(window.localStorage.getItem(draftKey) ?? "{}").liked)
+        .toBe("New changes after the failed request.");
+    } finally {
+      cleanup();
+      useAccount.setState(previousAccount);
+      useStore.setState({ profile: previousProfile });
+      window.localStorage.removeItem(draftKey);
     }
   });
 

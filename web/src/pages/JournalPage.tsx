@@ -1498,15 +1498,15 @@ function JournalFeedbackForOwner({ onClose, draftKey }: { onClose: () => void; d
         <fieldset className="journal-rating-fieldset">
           <legend>Overall experience</legend>
           <div className="journal-rating-choices">
-            {[1, 2, 3, 4, 5].map((value) => <button key={value} type="button" aria-label={`${value} out of 5`} aria-pressed={draft.rating === value} onClick={() => setDraft({ ...draft, rating: value })}>{value}</button>)}
+            {[1, 2, 3, 4, 5].map((value) => <button key={value} type="button" aria-label={`${value} out of 5`} aria-pressed={draft.rating === value} disabled={sending} onClick={() => setDraft({ ...draft, rating: value })}>{value}</button>)}
           </div>
         </fieldset>
         <div className="journal-feedback-fields">
-          <TextAreaField label="What do you like?" value={draft.liked} maxLength={1000} onChange={(event) => setDraft({ ...draft, liked: event.target.value })} />
-          <TextAreaField label="What do you want more of?" value={draft.wantMore} maxLength={1000} onChange={(event) => setDraft({ ...draft, wantMore: event.target.value })} />
-          <TextAreaField label="What feels missing?" value={draft.missing} maxLength={1000} onChange={(event) => setDraft({ ...draft, missing: event.target.value })} />
-          <TextAreaField label="Where does it get in your way?" value={draft.painPoints} maxLength={1000} onChange={(event) => setDraft({ ...draft, painPoints: event.target.value })} />
-          <TextAreaField label="Anything else?" value={draft.comment} maxLength={2000} onChange={(event) => setDraft({ ...draft, comment: event.target.value })} />
+          <TextAreaField label="What do you like?" value={draft.liked} readOnly={sending} maxLength={1000} onChange={(event) => setDraft({ ...draft, liked: event.target.value })} />
+          <TextAreaField label="What do you want more of?" value={draft.wantMore} readOnly={sending} maxLength={1000} onChange={(event) => setDraft({ ...draft, wantMore: event.target.value })} />
+          <TextAreaField label="What feels missing?" value={draft.missing} readOnly={sending} maxLength={1000} onChange={(event) => setDraft({ ...draft, missing: event.target.value })} />
+          <TextAreaField label="Where does it get in your way?" value={draft.painPoints} readOnly={sending} maxLength={1000} onChange={(event) => setDraft({ ...draft, painPoints: event.target.value })} />
+          <TextAreaField label="Anything else?" value={draft.comment} readOnly={sending} maxLength={2000} onChange={(event) => setDraft({ ...draft, comment: event.target.value })} />
         </div>
         {!user && <p className="journal-feedback-note">Sign in to send this to AXOM. You can keep writing and download the draft now.</p>}
         {storageError && <p className="journal-feedback-note" role="alert">{storageError}</p>}
