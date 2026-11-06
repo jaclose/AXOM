@@ -138,6 +138,7 @@ describe("course bank read model", () => {
       { ...question, options: [{ key: "A", text: "Changed source" }, { key: "B", text: "Two" }] },
       { ...question, correctKey: "B" },
       { ...question, sourceDocumentId: "other-original" },
+      { ...question, sourceFile: { name: "other.pdf", type: "application/pdf", size: 100, addedAt: "2026-10-08" } },
       { ...question, sourcePage: 43 },
       { ...question, questionNumber: 19 },
       { ...question, week: 3 },
@@ -161,7 +162,8 @@ describe("course bank read model", () => {
   });
 
   it("counts identical originals once despite different learner-only notes or flags", () => {
-    const learnerCopy: QuestionRecord = { ...question, notes: "My own mnemonic", marked: true, tags: ["revisit"] };
+    const learnerCopy: QuestionRecord = { ...question, notes: "My own mnemonic", marked: true, tags: ["revisit"],
+      attempts: question.attempts.map((attempt) => ({ ...attempt, note: "Personal review", confidence: 5 })) };
     for (const rows of [[question, learnerCopy], [learnerCopy, question]]) {
       const [module] = indexed([set], rows);
       expect(module.weeks[0]).toMatchObject({

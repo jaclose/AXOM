@@ -57,13 +57,19 @@ export function buildCourseQuestionBank(
   const questionsById = new Map<string, QuestionRecord>();
   const conflictingQuestionIds = new Set<string>();
   const identity = (question: QuestionRecord): string => JSON.stringify([
-    question.source, question.setId ?? null, question.sourceDocumentId ?? null,
+    question.source, question.sourceFile
+      ? [question.sourceFile.name, question.sourceFile.type, question.sourceFile.size] : null,
+    question.setId ?? null, question.sourceDocumentId ?? null,
     question.sourcePage ?? null, question.questionNumber ?? null,
     question.courseId ?? null, canonicalModuleKey(question.module ?? ""),
     hasDeclaredWeek(question.week) ? parseWeek(question.week) ?? "invalid" : null,
     question.stem, question.options.map((option) => [option.key, option.text]),
     question.content ?? null, question.correctKey ?? null,
-    questionMappingStatus(question), question.status, question.attempts,
+    questionMappingStatus(question), question.status,
+    // Attempt notes, confidence and timing are learner annotations, not score
+    // identity. Different actual outcomes or session membership remain held.
+    question.attempts.map(({ at, status, answerKey, quizSessionId }) =>
+      [at, status, answerKey ?? null, quizSessionId ?? null]),
   ]);
   for (const question of questions) {
     const first = questionsById.get(question.id);
