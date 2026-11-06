@@ -113,4 +113,23 @@ describe("Integrations", () => {
     vi.unstubAllGlobals();
   });
 
+  it("releases a generated URL and temporary link when the browser refuses the click", () => {
+    const createObjectURL = vi.fn(() => "blob:ics");
+    stubCalendarObjectUrl(createObjectURL);
+    const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL");
+    const browserClick = vi.spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => { throw new Error("download blocked after URL allocation"); });
+
+    render(<IntegrationsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Create calendar file/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Download .ics/ }));
+
+    expect(screen.getByRole("alert").textContent).toMatch(/could not be downloaded/i);
+    expect(createObjectURL).toHaveBeenCalledOnce();
+    expect(browserClick).toHaveBeenCalledOnce();
+    expect(revokeObjectURL).toHaveBeenCalledOnce();
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:ics");
+    expect(document.querySelector('a[download="axom-study-plan.ics"]')).toBeNull();
+  });
+
 });
