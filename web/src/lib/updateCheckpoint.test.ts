@@ -113,6 +113,26 @@ describe("pre-update workspace checkpoint", () => {
     expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBe(persisted);
   });
 
+  it("offers web refresh after a verified save when an extra recovery copy fails for a non-quota reason", async () => {
+    const originalSetItem = localStorage.setItem.bind(localStorage);
+    vi.spyOn(localStorage, "setItem").mockImplementation((key, value) => {
+      if (key.startsWith(STORAGE_KEYS.localBackupPrefix)) {
+        throw new Error("Browser policy blocked the additional recovery copy.");
+      }
+      originalSetItem(key, value);
+    });
+    vi.stubGlobal("indexedDB", undefined);
+
+    await expect(createUpdateCheckpoint(false)).rejects.toMatchObject({
+      name: "RecoverySnapshotUnavailableError",
+      canContinueWithoutRecoverySnapshot: true,
+    });
+    const persisted = JSON.stringify({ state: runtime.state, version: 32 });
+    expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBe(persisted);
+    await expect(createUpdateCheckpoint(false, { skipRecoverySnapshot: true })).resolves.toBe("verified-persisted-state");
+    expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBe(persisted);
+  });
+
   it("keeps a full verified fallback snapshot when IndexedDB is unavailable", async () => {
     vi.stubGlobal("indexedDB", undefined);
     const key = await createUpdateCheckpoint(false);
