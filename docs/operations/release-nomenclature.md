@@ -60,7 +60,7 @@ Use all four fields in the release record:
 1. **Public edition:** e.g. “AXOM CONVERGENCE 01” (illustrative, not a claim of publication).
 2. **Actual package version:** read from the coordinated root/web/native manifests, do not invent or manually bump one file.
 3. **Immutable source:** merge SHA and exact deployed artifact/build SHA; record both when different.
-4. **Date/channel:** \`2026-11-06\`, \`production\`, \`preview\` or \`internal\`; never label preview as production.
+4. **Date/channel:** `2026-11-06`, `production`, `preview` or `internal`; never label preview as production.
 
 Illustrative *not-current* examples:
 
@@ -73,19 +73,19 @@ The numbers above are illustrative and are **not** AXOM's observed current versi
 
 ### Git conventions
 
-- Source feature branch: \`feat/<workstream>/<scope>\`, \`fix/<workstream>/<defect>\`, \`docs/<scope>\`.
-- Integration branch: \`release/YYYY-MM-DD-<scope>\`. Current existing train is \`release/2026-11-06-integrated-gateway\`.
-- Emergency branch: \`hotfix/YYYY-MM-DD-<incident-id>\` created from observed production baseline.
-- Release tag: \`vX.Y.Z\` once actual manifest version and shipped SHA are verified; optional release title is a GitHub release title, **not** a replacement for the tag.
-- Conventional commit prefixes: \`feat:\`, \`fix:\`, \`docs:\`, \`test:\`, \`refactor:\`, \`perf:\`, \`chore:\`, \`security:\` when semantically valid. Commit subjects describe behavior, not marketing edition names.
+- Source feature branch: `feat/<workstream>/<scope>`, `fix/<workstream>/<defect>`, `docs/<scope>`.
+- Integration branch: `release/YYYY-MM-DD-<scope>`. Current existing train is `release/2026-11-06-integrated-gateway`.
+- Emergency branch: `hotfix/YYYY-MM-DD-<incident-id>` created from observed production baseline.
+- Release tag: `vX.Y.Z` once actual manifest version and shipped SHA are verified; optional release title is a GitHub release title, **not** a replacement for the tag.
+- Conventional commit prefixes: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `perf:`, `chore:`, `security:` when semantically valid. Commit subjects describe behavior, not marketing edition names.
 
 Do not squash history so aggressively that original source PRs or safety reviews lose traceability. Use one *release merge* into main, not necessarily one giant commit for every feature.
 
 ## 4. FORGE states, review and stop conditions
 
-\`PROPOSED → CLAIMED → FROZEN → INTEGRATED → CI_VERIFIED → PREVIEW_ACCEPTED → MERGED → DEPLOYED → LIVE_ACCEPTED\`.
+`PROPOSED → CLAIMED → FROZEN → INTEGRATED → CI_VERIFIED → PREVIEW_ACCEPTED → MERGED → DEPLOYED → LIVE_ACCEPTED`.
 
-Side states: \`HELD\`, \`SUPERSEDED\`, \`ALREADY_IN_MAIN\`, \`BLOCKED_ACCESS\`, \`ROLLED_BACK\` and \`RECOVERING\`. These require exact evidence and ownership. A state transition needs proof tied to immutable SHA; “CI green” can never be rewritten as “deployed”.
+Side states: `HELD`, `SUPERSEDED`, `ALREADY_IN_MAIN`, `BLOCKED_ACCESS`, `ROLLED_BACK` and `RECOVERING`. These require exact evidence and ownership. A state transition needs proof tied to immutable SHA; “CI green” can never be rewritten as “deployed”.
 
 **Every source candidate packet records:** owner, issue, PR URL, base SHA, exact head SHA, changed files, dependency ordering, original tests with environment/exit code, exact-head workflow URLs, open review comments, source/media rights, privacy/security implications, schema/RLS/migrations, data-preservation/rollback, synthetic versus real browser/account acceptance, and readiness disposition.
 
@@ -97,7 +97,7 @@ SUTURE must include an incident ID, severity, observed user harm, minimal correc
 
 ## 5. Release ledger and handoff format
 
-\`\`\`yaml
+```yaml
 edition: "AXOM INCUS 01"   # example only
 status: HELD
 channel: preview
@@ -119,7 +119,7 @@ production_deploy_sha: null
 live_acceptance: UNRUN
 next_actor: "<named owner>"
 next_action: "<one specific unblock>"
-\`\`\`
+```
 
 Every edition ends with one release note: learner-visible benefit, exact included changes, unchanged behaviors, risk/migration warnings, verification boundaries, known limitations, rollback reference, and status. Do not advertise a draft release as a customer upgrade.
 
