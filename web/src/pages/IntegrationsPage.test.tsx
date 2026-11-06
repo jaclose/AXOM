@@ -16,17 +16,33 @@ beforeEach(() => {
   useAccount.setState({ phase: "unconfigured", user: null });
   useUi.getState().clearSettingsRequest();
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+let restoreCalendarObjectUrls: (() => void) | undefined;
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  restoreCalendarObjectUrls?.();
+  restoreCalendarObjectUrls = undefined;
+  vi.unstubAllGlobals();
+});
 
-// Keep URL constructible for app/library consumers while replacing only the
-// browser object-URL surface exercised by the calendar download action.
+// Keep the native URL constructor identity stable for jsdom, React and
+// the app. Only replace the two browser Blob URL methods actually tested.
 function stubCalendarObjectUrl(createObjectURL: (blob: Blob | MediaSource) => string) {
-  const NativeURL = globalThis.URL;
-  class DownloadURL extends NativeURL {
-    static createObjectURL = createObjectURL;
-    static revokeObjectURL = vi.fn();
-  }
-  vi.stubGlobal("URL", DownloadURL);
+  const nativeURL = globalThis.URL;
+  const createDescriptor = Object.getOwnPropertyDescriptor(nativeURL, "createObjectURL");
+  const revokeDescriptor = Object.getOwnPropertyDescriptor(nativeURL, "revokeObjectURL");
+  Object.defineProperty(nativeURL, "createObjectURL", {
+    configurable: true, writable: true, value: createObjectURL,
+  });
+  Object.defineProperty(nativeURL, "revokeObjectURL", {
+    configurable: true, writable: true, value: vi.fn(),
+  });
+  restoreCalendarObjectUrls = () => {
+    if (createDescriptor) Object.defineProperty(nativeURL, "createObjectURL", createDescriptor);
+    else Reflect.deleteProperty(nativeURL, "createObjectURL");
+    if (revokeDescriptor) Object.defineProperty(nativeURL, "revokeObjectURL", revokeDescriptor);
+    else Reflect.deleteProperty(nativeURL, "revokeObjectURL");
+  };
 }
 
 describe("Integrations", () => {
