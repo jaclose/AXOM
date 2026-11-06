@@ -147,12 +147,16 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
   }
   const memberships = new Map<string, CourseScope[]>();
   for (const set of input.sets) {
+    // A secondary review list is never original source evidence for legacy
+    // questions that have no declared primary collection.
+    if (set.kind === "review") continue;
     for (const id of new Set(set.questionIds)) {
       if (!set.scope) continue;
       memberships.set(id, [...(memberships.get(id) ?? []), set.scope]);
     }
   }
   let unassignedQuestions = 0;
+  const resolvedScopesById = new Map<string, CourseScope>();
   const unassignedIds = new Set<string>();
   const sourceHeldIds = new Set(conflictingOriginals);
   for (const question of input.questions) {
@@ -181,6 +185,7 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
       courseId: scope.courseId ?? (compatibleFallback && relatedCourseIds.size === 1 ? fallbackScope?.courseId : undefined),
       week: scope.week ?? (!hasDeclaredWeek(question.week) && compatibleFallback ? inheritedWeek : undefined),
     };
+    resolvedScopesById.set(question.id, finalScope);
     const resolved = resolve(finalScope);
     if (!resolved || ambiguousOwners.has(question.id)) {
       sourceHeldIds.add(question.id);
@@ -236,12 +241,20 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
     // Set-owned metadata wins if it resolves. A collection whose membership
     // spans different modules is not assigned by a filename or first record.
     const memberAssignments = presentMembers.map((member) => {
-      const scope = questionScope(member, setsById);
+      const scope = resolvedScopesById.get(member.id) ?? questionScope(member, setsById);
       return { scope, assignment: resolve(scope),
         invalidWeek: hasDeclaredWeek(member.week) && parseWeek(member.week) === undefined,
         alternatePrimary: member.setId != null && member.setId !== set.id };
 
     });
+    // Review-only metadata cannot independently turn a legacy or personal
+    // unscheduled question into a source-indexed week. The inferred scope here
+    // comes only from an original set or an explicit question assignment.
+    if (set.kind === "review" && indexedSetWeek !== undefined
+      && !presentMembers.some((member) => resolvedScopesById.get(member.id)?.week === indexedSetWeek)) {
+      unassignedCollections += 1;
+      continue;
+    }
     const memberResolutions = memberAssignments.flatMap(({ assignment }) => assignment ? [assignment] : []);
     const direct = set.scope ? resolve(set.scope) : undefined;
     const uniqueMemberKeys = new Set(memberResolutions.map((entry) => entry.key));
