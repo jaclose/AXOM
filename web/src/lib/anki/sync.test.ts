@@ -258,12 +258,12 @@ describe("pushing AXOM cards to Anki", () => {
   it("persists only the unfinished deletion receipt after partial multi-note disconnection", async () => {
     const fake = new FakeAnkiConnect();
     const realFetch = createFakeFetch(fake);
-    let interruptCard: number | undefined;
+    const interruptCard = { value: -1 };
     let interrupted = false;
     const fetchImpl: typeof fetch = async (input, init) => {
       const request = JSON.parse(String(init?.body)) as { action?: string; params?: { cards?: number[] } };
       if (!interrupted && request.action === "suspend" &&
-          request.params?.cards?.includes(interruptCard ?? -1)) {
+          request.params?.cards?.includes(interruptCard.value)) {
         interrupted = true;
         throw new TypeError("Anki disconnected before the second deleted note was suspended");
       }
@@ -276,7 +276,7 @@ describe("pushing AXOM cards to Anki", () => {
     const initial = await run([card("a"), card("b")], emptyLinkState());
     const aCards = initial.state.links.a.cardIds;
     const bCards = initial.state.links.b.cardIds;
-    interruptCard = bCards[0];
+    interruptCard.value = bCards[0];
     const deletion = recordAxomDeletion(recordAxomDeletion(initial.state, "a", "suspend"), "b", "suspend");
     const partial = await run([], deletion);
     expect(partial.report).toMatchObject({ deletedSuspended: 1, pending: 1, offline: true });
