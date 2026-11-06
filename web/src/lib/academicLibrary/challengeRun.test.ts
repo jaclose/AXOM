@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { NoctyriumState } from "../types";
+import type { AxomState } from "../types";
 import type { QuizSession } from "../quiz";
 import type { DailyChallenge } from "./challenges";
 import { STORAGE_KEYS } from "../brand";
-const mock = vi.hoisted(() => ({ state: { quizSessions: [] } as unknown as NoctyriumState,
-  listener: undefined as undefined | ((state: NoctyriumState) => void), rpc: vi.fn(), flush: vi.fn(), assert: vi.fn(), write: vi.fn(), saved: new Map<string, string>() }));
-vi.mock("../store", () => ({ useStore: { getState: () => mock.state, subscribe: (listener: (state: NoctyriumState) => void) => { mock.listener = listener; return () => { mock.listener = undefined; }; } } }));
+const mock = vi.hoisted(() => ({ state: { quizSessions: [] } as unknown as AxomState,
+  listener: undefined as undefined | ((state: AxomState) => void), rpc: vi.fn(), flush: vi.fn(), assert: vi.fn(), write: vi.fn(), saved: new Map<string, string>() }));
+vi.mock("../store", () => ({ useStore: { getState: () => mock.state, subscribe: (listener: (state: AxomState) => void) => { mock.listener = listener; return () => { mock.listener = undefined; }; } } }));
 vi.mock("../localVault", () => ({ flushLocalVaultWrites: mock.flush, getVaultWriteCheckpoint: () => 0, assertVaultWritesSince: () => {},
   localVaultStorage: { getItem: async (key: string) => mock.saved.get(key) ?? null,
     setItem: async (key: string, value: string) => { await mock.write(); mock.saved.set(key, value); }, removeItem: async (key: string) => { mock.saved.delete(key); } } }));
@@ -27,7 +27,7 @@ beforeEach(() => {
     locks.set(key, result.catch(() => {})); return result;
   } } });
   mock.rpc.mockResolvedValue({ data: { accepted: true }, error: null }); });
-afterEach(() => { mock.listener = undefined; mock.state = { quizSessions: [] } as unknown as NoctyriumState; mock.saved.clear(); vi.resetAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { mock.listener = undefined; mock.state = { quizSessions: [] } as unknown as AxomState; mock.saved.clear(); vi.resetAllMocks(); vi.unstubAllGlobals(); });
 
 it("persists only a scoped quiz reference before launch and refuses to overwrite pending work", async () => {
   const intent = await prepareChallengeRun("account", challenge, mapping);

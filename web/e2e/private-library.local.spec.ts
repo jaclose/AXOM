@@ -4,7 +4,7 @@ import { test as base, expect } from "@playwright/test";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { NoctyriumState } from "../src/lib/types";
+import type { AxomState } from "../src/lib/types";
 // Incognito contexts have a separate, memory-based quota. A clean persistent
 // profile exercises the same durable storage class as the user's normal app.
 const test = base.extend({ context: async ({ playwright }, use) => {
@@ -43,7 +43,7 @@ test("prepared private collection installs through first run and remains usable 
   // isolated profile. The user's browser database is never opened or edited.
   const backup = process.env.AXOM_PRIVATE_WORKSPACE_BACKUP;
   const progress = () => page.evaluate(async () => {
-    const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => NoctyriumState } }> }).__AXOM_DEV__;
+    const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => AxomState } }> }).__AXOM_DEV__;
     const s = dev.useStore.getState();
     return { questions: s.questions.map(q => ({ id: q.id, stem: q.stem, notes: q.notes, attempts: q.attempts })), tracker: s.tracker };
   });

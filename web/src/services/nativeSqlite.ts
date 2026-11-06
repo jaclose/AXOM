@@ -1,5 +1,5 @@
 import { toPortableState } from "../lib/backup";
-import type { NoctyriumState } from "../lib/types";
+import type { AxomState } from "../lib/types";
 
 const DB_URL = "sqlite:noctyrium.db";
 
@@ -7,7 +7,7 @@ export function isNativeSqliteAvailable(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
-export async function saveNativeSnapshot(state: NoctyriumState, backupLabel?: string) {
+export async function saveNativeSnapshot(state: AxomState, backupLabel?: string) {
   if (!isNativeSqliteAvailable()) return { ok: false, reason: "Tauri runtime unavailable" };
   const Database = (await import("@tauri-apps/plugin-sql")).default;
   const db = await Database.load(DB_URL);

@@ -11,7 +11,7 @@ import { prepareCloudSnapshot, decodeCloudSnapshot } from "./cloudSnapshot";
 import { CONTENT_BUCKET, clearCloudContentCache, hydrateCloudContent, splitCloudContent, uploadCloudContent } from "./cloudContent";
 import { MEDIA_BUCKET, uploadCloudMedia, validateWorkspaceMedia, workspaceMedia } from "./cloudMedia";
 import { installCloudMediaCache, saveCloudMediaIndex } from "./cloudMediaCache";
-import type { NoctyriumState } from "../types";
+import type { AxomState } from "../types";
 import { deferContent } from "./deferredContent";
 import { materializeState, retainDownloadedContent } from "./contentDownloads";
 import { parseImport } from "../backup";
@@ -30,7 +30,7 @@ const client = { storage: { from: (bucket: string) => ({ upload: (path: string, 
 const guard = vi.fn(async () => undefined);
 let dispose: (() => void) | undefined;
 
-function fixture(): NoctyriumState {
+function fixture(): AxomState {
   const state = makeSeed();
   state.questions = [{ id: "q1", stem: "Source question", options: [{ key: "A", text: "Answer" }], source: "manual", correctKey: "A", status: "unseen", tags: [], attempts: [], notes: "Private learner note", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" }];
   state.documents = [{ id: "source1", title: "Source", fileName: "source.txt", fileType: "text/plain", uploadedAt: "2026-10-01T00:00:00.000Z", sizeBytes: 180000, rawText: "Source material. ".repeat(10000), tags: [], linkedQuestionSetIds: [], libraryOnly: false }];
@@ -118,7 +118,7 @@ describe("private cloud content and media", () => {
 
   it("keeps bootstrap bytes bounded when source text grows a hundredfold", async () => {
     const state = fixture();
-    async function size(value: NoctyriumState) {
+    async function size(value: AxomState) {
       const prepared = await prepareCloudSnapshot(await snapshotWorkspace(value, { deviceId: "d", baseRevision: 0, reason: "manual" }));
       return prepared.payloadBytes;
     }

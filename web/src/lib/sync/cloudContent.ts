@@ -4,7 +4,7 @@ import { academicRecord, downloadAcademicAsset, storedAcademicBindings, validAca
 import { readDeferredContent } from "./deferredContent";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { canonicalJson, compressText, decompressText, sha256 } from "../compressedText";
-import type { NoctyriumState } from "../types";
+import type { AxomState } from "../types";
 import { readOriginalFile } from "../sourceOriginal";
 import { SyncPushError } from "./syncFailure";
 
@@ -56,7 +56,7 @@ export function projectCloudRecord(record: { id: string }, collection: ContentRe
   return projection;
 }
 
-export async function splitCloudContent(state: NoctyriumState): Promise<{ workspace: NoctyriumState; objects: ContentUpload[]; references: ContentReference[] }> {
+export async function splitCloudContent(state: AxomState): Promise<{ workspace: AxomState; objects: ContentUpload[]; references: ContentReference[] }> {
   const workspace = { ...state };
   const objects: ContentUpload[] = [];
   const deferred = readDeferredContent(state.deferredContent);
@@ -66,7 +66,7 @@ export async function splitCloudContent(state: NoctyriumState): Promise<{ worksp
   for (const collection of ["documents", "questions"] as const) {
     const compact: Record<string, unknown>[] = [];
     for (const record of state[collection] ?? []) {
-      if (collection === "documents") readOriginalFile(record as NoctyriumState["documents"][number]);
+      if (collection === "documents") readOriginalFile(record as AxomState["documents"][number]);
       const fields = collection === "documents" && "fileType" in record && INLINE_CONTENT_TYPES.has(record.fileType)
         ? [] : collection === "documents" ? DOCUMENT_FIELDS : QUESTION_FIELDS;
       const projected = await projectCloudRecord(record, collection);
@@ -144,7 +144,7 @@ export async function uploadCloudContent(client: SupabaseClient, userId: string,
   await assertCurrent();
 }
 
-export async function hydrateCloudContent(client: SupabaseClient, userId: string, state: NoctyriumState, value: unknown, assertCurrent: () => Promise<void>): Promise<NoctyriumState> {
+export async function hydrateCloudContent(client: SupabaseClient, userId: string, state: AxomState, value: unknown, assertCurrent: () => Promise<void>): Promise<AxomState> {
   const references = readContentReferences(value);
   const workspace = { ...state, questions: [...state.questions], documents: [...state.documents] };
   const byId = { questions: new Map(state.questions.map((q, i) => [q.id, i])), documents: new Map(state.documents.map((d, i) => [d.id, i])) };

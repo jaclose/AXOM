@@ -2,7 +2,7 @@ import { addLocalDays, localDateKey, previousLocalDateKey } from "./dailyRollove
 import { isCalendarDateKey } from "./dailyWordCalendar";
 import { JOURNAL_STYLE_COST, journalInkEarned } from "./journalNotebook";
 import { advanceRefill, safeFreezeCount, safeRefillProgress } from "./streakFreeze";
-import type { DailyWordPuzzleState, NoctyriumState } from "./types";
+import type { DailyWordPuzzleState, AxomState } from "./types";
 
 export { STARTER_STREAK_FREEZES, FREEZE_REFILL_EARNED_DAYS } from "./streakFreeze";
 
@@ -66,7 +66,7 @@ export function normalizeStudyStreaks(value: unknown, today = localDateKey()): S
 }
 
 /** Existing completed-session value and saved purchases remain valid. */
-export function studyCreditsBalance(state: Pick<NoctyriumState, "profile" | "sessions">): number {
+export function studyCreditsBalance(state: Pick<AxomState, "profile" | "sessions">): number {
   const earnedFromSessions = journalInkEarned(state.sessions);
   const ledger = state.profile.studyStreaks;
   const earnedFromGoals = ledger?.productivity.creditedDays.length ?? 0;

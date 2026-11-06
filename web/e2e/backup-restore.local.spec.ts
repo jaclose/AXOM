@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import JSZip from "jszip";
 import { completeSetup, deferPromisePrompt, QUIET_NUDGES } from "./fixtures";
-import type { NoctyriumState, TrackerItem } from "../src/lib/types";
+import type { AxomState, TrackerItem } from "../src/lib/types";
 import type { QuestionRecord } from "../src/lib/questions";
 
 const backupPath = process.env.AXOM_RESTORE_BACKUP;
@@ -75,7 +75,7 @@ test("an existing portable ZIP restores progress and every image through Setting
   const readProgress = async () => {
     await page.waitForFunction(() => Boolean((window as unknown as { __AXOM_DEV__?: unknown }).__AXOM_DEV__));
     return page.evaluate(async () => {
-      const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => NoctyriumState }; flushVault: () => Promise<void> }> }).__AXOM_DEV__;
+      const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => AxomState }; flushVault: () => Promise<void> }> }).__AXOM_DEV__;
       await dev.flushVault();
       const s = dev.useStore.getState();
       return { questions: s.questions.map(({ id, notes, attempts }) => ({ id, notes, attempts })),

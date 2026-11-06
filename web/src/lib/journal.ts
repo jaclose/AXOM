@@ -1,7 +1,7 @@
 // Standup / journal status helpers. A "standup" is a journal entry for a given
 // calendar day. These compute when today's standup is due on the dashboard, when
 // the window has lapsed (missed), and which recent active days can be remediated.
-import type { DayPlan, JournalEntry, NoctyriumState } from "./types";
+import type { DayPlan, JournalEntry, AxomState } from "./types";
 import { isoDate } from "./scoring";
 
 // The standup prompt is visible on the dashboard from the user's review time for
@@ -28,7 +28,7 @@ function parseReviewTime(value: string | undefined): { h: number; m: number } {
   return { h: Math.min(23, Number(match[1])), m: Math.min(59, Number(match[2])) };
 }
 
-function dayHadActivity(state: Pick<NoctyriumState, "logs" | "dayPlans">, key: string): boolean {
+function dayHadActivity(state: Pick<AxomState, "logs" | "dayPlans">, key: string): boolean {
   if (state.logs.some((log) => log.dayKey === key && (log.minutes !== 0 || log.cards !== 0))) return true;
   if (state.dayPlans.some((plan) => plan.dayKey === key)) return true;
   return false;
@@ -36,7 +36,7 @@ function dayHadActivity(state: Pick<NoctyriumState, "logs" | "dayPlans">, key: s
 
 /** Today's standup status, given the user's review time + a clock. */
 export function standupStatusToday(
-  state: Pick<NoctyriumState, "journal" | "profile">,
+  state: Pick<AxomState, "journal" | "profile">,
   now: Date = new Date(),
 ): StandupStatus {
   const todayKey = isoDate(now);
@@ -55,7 +55,7 @@ export function standupStatusToday(
  * set the user can still go back and remediate.
  */
 export function missedStandupDays(
-  state: Pick<NoctyriumState, "journal" | "logs" | "dayPlans">,
+  state: Pick<AxomState, "journal" | "logs" | "dayPlans">,
   todayKey: string = isoDate(new Date()),
   lookback: number = STANDUP_LOOKBACK_DAYS,
 ): string[] {

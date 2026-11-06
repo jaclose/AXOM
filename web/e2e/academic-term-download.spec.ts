@@ -1,12 +1,12 @@
 import type { Page } from "@playwright/test";
-import type { NoctyriumState } from "../src/lib/types";
+import type { AxomState } from "../src/lib/types";
 import type { QuestionRecord } from "../src/lib/questions";
 import { STORAGE_KEYS } from "../src/lib/brand";
 import { academicPublishFixture } from "./academicPublishFixture";
 import { expect, reloadAfterSave, seedOnboarded, test } from "./fixtures";
 
 type Dev = {
-  useStore: { getState: () => NoctyriumState & { updateQuestion: (id: string, patch: Partial<QuestionRecord>) => void } };
+  useStore: { getState: () => AxomState & { updateQuestion: (id: string, patch: Partial<QuestionRecord>) => void } };
   flushVault: () => Promise<void>;
 };
 

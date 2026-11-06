@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { makeSeed } from "../../lib/seed";
 import type { Store } from "../../lib/store";
-import type { NoctyriumState } from "../../lib/types";
+import type { AxomState } from "../../lib/types";
 import { persistPortableRestore } from "./SettingsModal";
 
 type Mode = "replace" | "merge";
@@ -10,13 +10,13 @@ type Mode = "replace" | "merge";
 function restoreHarness(mode: Mode) {
   const prior = makeSeed();
   prior.profile = { ...prior.profile, name: `Prior ${mode}` };
-  const target: NoctyriumState = {
+  const target: AxomState = {
     ...makeSeed(),
     profile: { ...makeSeed().profile, name: `Recovered ${mode}` },
   };
 
   let live: Store;
-  const replaceAll = vi.fn((next: NoctyriumState) => {
+  const replaceAll = vi.fn((next: AxomState) => {
     live = { ...next, replaceAll } as unknown as Store;
   });
   const current = { ...prior, replaceAll } as unknown as Store;

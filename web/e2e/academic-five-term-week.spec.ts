@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import type { NoctyriumState } from "../src/lib/types";
+import type { AxomState } from "../src/lib/types";
 import { STORAGE_KEYS } from "../src/lib/brand";
 import { academicPublishFixture } from "./academicPublishFixture";
 import { expect, reloadAfterSave, seedOnboarded, test } from "./fixtures";
@@ -8,7 +8,7 @@ async function courseState(page: Page) {
   return page.evaluate(async () => {
     const dev = await (window as unknown as { __AXOM_DEV__: Promise<{
       flushVault: () => Promise<void>;
-      useStore: { getState: () => NoctyriumState };
+      useStore: { getState: () => AxomState };
     }> }).__AXOM_DEV__;
     await dev.flushVault();
     const state = dev.useStore.getState();

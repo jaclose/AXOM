@@ -8,10 +8,10 @@ import { questionMappingStatus, type QuestionAttempt } from "./questions";
 import { dayTotals } from "./scoring";
 import { sessionElapsedMinutes, type SessionLink, type SessionStatus } from "./sessions";
 import type { TargetContribution } from "./targetContributions";
-import type { HabitCheckStatus, NoctyriumState, Task } from "./types";
+import type { HabitCheckStatus, AxomState, Task } from "./types";
 
 export type DayAtAGlanceState = Pick<
-  NoctyriumState,
+  AxomState,
   | "profile"
   | "activeDayKey"
   | "dayPlans"
@@ -710,7 +710,7 @@ function latestJournal(state: DayAtAGlanceState, dayKey: string) {
     .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))[0];
 }
 
-function latestHabitEntry(entries: NoctyriumState["habitEntries"], habitId: string, dayKey: string) {
+function latestHabitEntry(entries: AxomState["habitEntries"], habitId: string, dayKey: string) {
   return entries
     .filter((entry) => entry.habitId === habitId && entry.date === dayKey)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))[0];

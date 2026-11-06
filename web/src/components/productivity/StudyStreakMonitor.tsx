@@ -8,12 +8,12 @@ import {
   reachedProductivityGoal,
   studyCreditsBalance,
 } from "../../lib/studyStreaks";
-import type { NoctyriumState } from "../../lib/types";
+import type { AxomState } from "../../lib/types";
 import "../../styles/study-streaks.css";
 import { StreakFreezeMeter } from "./StreakFreezeMeter";
 
 export function StudyStreakMonitor({ state, result }: {
-  state: NoctyriumState;
+  state: AxomState;
   result: DailySuccessResult;
 }) {
   const today = state.activeDayKey;

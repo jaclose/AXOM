@@ -1,7 +1,7 @@
 import type { ContentReference, ContentUpload } from "./cloudContent";
 import type { CloudSnapshot } from "./cloudSnapshot";
 import type { CloudMediaReference } from "./cloudMedia";
-import type { NoctyriumState } from "../types";
+import type { AxomState } from "../types";
 
 export type ProtectionStatus =
   | "local-only"
@@ -88,7 +88,7 @@ export interface SnapshotEnvelope {
   accountUserId?: string;
   schemaVersion: number;
   contentHash: string;
-  payload: NoctyriumState;
+  payload: AxomState;
   packed?: CloudSnapshot;
   contentObjects?: ContentUpload[];
   /** Size of the payload as compact JSON, in bytes. */
@@ -110,7 +110,7 @@ export interface ProtectedRevision {
   revision: number;
   schemaVersion: number;
   contentHash: string;
-  payload: NoctyriumState;
+  payload: AxomState;
   reason: string;
   media?: CloudMediaReference[];
   sources?: ContentReference[];

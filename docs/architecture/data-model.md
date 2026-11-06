@@ -12,7 +12,7 @@ Governed by: [local workspace with additive account protection](../decisions/002
 
 | Responsibility | Source of truth |
 | --- | --- |
-| Workspace domain shape | `web/src/lib/types.ts` (`NoctyriumState`) |
+| Workspace domain shape | `web/src/lib/types.ts` (`AxomState`) |
 | Current schema and defaults | `web/src/lib/seed.ts` (`SCHEMA_VERSION`, 34 at the migration baseline) |
 | Actions, persisted selection, normalization | `web/src/lib/store.ts` (`useStore`, `partialize`, `migratePersistedState`) |
 | Local Vault writes, flush and failure checks | `web/src/lib/localVault.ts` |

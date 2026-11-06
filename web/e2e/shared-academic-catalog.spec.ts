@@ -1,9 +1,9 @@
 import { expect, test, reloadAfterSave } from "./fixtures";
 import { academicCatalogFixture, collection } from "./academicCatalogFixture";
-import type { NoctyriumState } from "../src/lib/types";
+import type { AxomState } from "../src/lib/types";
 import type { Page } from "@playwright/test";
 const state = (page: Page) => page.evaluate(async () => {
-  const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => NoctyriumState }; flushVault: () => Promise<void> }> }).__AXOM_DEV__;
+  const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => AxomState }; flushVault: () => Promise<void> }> }).__AXOM_DEV__;
   await dev.flushVault(); const s = dev.useStore.getState();
   return { activities: s.tracker.filter(t => t.templateKey).map(t => t.id).sort(), questions: s.questions.map(q => q.id), attempts: s.questions.flatMap(q => q.attempts), images: s.questions.flatMap(q => q.attachments ?? []).length };
 });

@@ -1,11 +1,11 @@
-import type { NoctyriumState } from "../types";
+import type { AxomState } from "../types";
 import { buildCanonicalReportSummary } from "../reports";
 import { attemptEvents, tally } from "../learning-intelligence/attempts";
 import { MIN_GROUP_ANSWERS } from "../learning-intelligence/patterns";
 import { localClock, safeAccent, type PulseData } from "./model";
 
 /** A presentation snapshot of canonical records, never a second activity store. */
-export function buildPulse(state: NoctyriumState, options: { start: string; end: string; scope: PulseData["scope"]; timezone: string; accent: string; source?: PulseData["source"]; sourceUpdatedAt?: string; now?: Date }): PulseData {
+export function buildPulse(state: AxomState, options: { start: string; end: string; scope: PulseData["scope"]; timezone: string; accent: string; source?: PulseData["source"]; sourceUpdatedAt?: string; now?: Date }): PulseData {
   const { start, end, timezone } = options;
   const range = Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400000) + 1;
   if (!Number.isFinite(range) || range < 1 || range > 370) throw new Error("Choose a reporting period of 1 to 370 days.");

@@ -23,7 +23,7 @@ import {
   type FocusCheckInResponse,
   type FocusProgressHint,
 } from "../../lib/focusCheckIn";
-import type { NoctyriumState } from "../../lib/types";
+import type { AxomState } from "../../lib/types";
 import { playLockInCue } from "../../lib/timerCues";
 import { shellBusy } from "../../lib/shellBusy";
 
@@ -49,7 +49,7 @@ const currentClock = () => new Date();
 
 /** What is left right now: the running sprint and the nearest unmet target. */
 export function focusProgressHint(
-  state: Pick<NoctyriumState, "profile" | "logs" | "productivityTrackers" | "habits" | "habitEntries" | "closeouts" | "activeDayKey"> & Partial<Pick<NoctyriumState, "sessions">>,
+  state: Pick<AxomState, "profile" | "logs" | "productivityTrackers" | "habits" | "habitEntries" | "closeouts" | "activeDayKey"> & Partial<Pick<AxomState, "sessions">>,
   pomodoro: { phase: string; running: boolean; secondsLeft: number },
   now = new Date(),
 ): FocusProgressHint {

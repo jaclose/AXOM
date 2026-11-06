@@ -10,14 +10,14 @@ import {
   resolveVaultSnapshotRecord,
 } from "./localVault";
 import { SCHEMA_VERSION } from "./seed";
-import type { NoctyriumState } from "./types";
+import type { AxomState } from "./types";
 
 export interface LocalWorkspaceBackupInspection {
   key: string;
   savedAt: string;
   oldSchemaVersion: number;
   snapshotAppVersion: string;
-  state: NoctyriumState;
+  state: AxomState;
 }
 
 /**

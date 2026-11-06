@@ -1,4 +1,4 @@
-import type { DailyArchive, DailyRolloverEvent, EnergyFactor, JournalEntry, NoctyriumState, StudyLog, Task } from "./types";
+import type { DailyArchive, DailyRolloverEvent, EnergyFactor, JournalEntry, AxomState, StudyLog, Task } from "./types";
 import { dayTotals, isoDate } from "./scoring";
 
 export type RolloverReason = DailyRolloverEvent["reason"];
@@ -47,7 +47,7 @@ export function millisecondsUntilNextLocalDay(now: Date = new Date()): number {
 }
 
 export function shouldRollover(
-  state: Pick<NoctyriumState, "lastActiveLocalDate" | "activeDayKey" | "lastTimezoneOffset">,
+  state: Pick<AxomState, "lastActiveLocalDate" | "activeDayKey" | "lastTimezoneOffset">,
   now: Date = new Date(),
 ): { due: boolean; today: string; lastDate: string; daysAway: number; timezoneChanged: boolean } {
   const today = localDateKey(now);
@@ -64,7 +64,7 @@ export function shouldRollover(
 }
 
 export function buildDailyArchive(
-  state: Pick<NoctyriumState, "logs" | "tasks" | "journal" | "dayPlans"> & { energyFactors?: EnergyFactor[] },
+  state: Pick<AxomState, "logs" | "tasks" | "journal" | "dayPlans"> & { energyFactors?: EnergyFactor[] },
   date: string,
   carriedTaskIds: string[],
   archivedAt: string,

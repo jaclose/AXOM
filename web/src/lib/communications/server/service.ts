@@ -1,5 +1,5 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
-import type { NoctyriumState } from "../../types";
+import type { AxomState } from "../../types";
 import { examContext } from "../context";
 import { attemptEvents } from "../../learning-intelligence/attempts";
 import { buildPulse } from "../snapshot";
@@ -18,11 +18,11 @@ export class CommunicationsService {
   async user(id: string): Promise<User> { const result = await this.db.auth.admin.getUserById(id); if (result.error || !result.data.user) throw new Error("account-unavailable"); const data = result.data; if (!data.user) throw new Error("account-unavailable"); return data.user; }
   async preferenceRows(id: string): Promise<Preference[]> { const rows = checked(await this.db.from("communication_preferences").select("category,enabled,time,weekday,timezone").eq("user_id", id)) as Preference[]; return preferences().map(p => rows.find(r => r.category === p.category) ?? p); }
   async identity(id: string): Promise<Identity> { return checked(await this.db.from("communication_identity").select("accent,theme,locale,contact_id,updated_at").eq("user_id", id).maybeSingle()) ?? { accent: "#c8a96a", theme: "dark", locale: "en" }; }
-  async workspace(id: string): Promise<{ state: NoctyriumState; at: string; hash: string } | null> {
+  async workspace(id: string): Promise<{ state: AxomState; at: string; hash: string } | null> {
     const w = checked(await this.db.from("workspaces").select("current_revision").eq("user_id", id).maybeSingle()); if (!w) return null;
     const r = checked(await this.db.from("workspace_revisions").select("snapshot_payload,created_at,content_hash").eq("user_id", id).eq("revision", w.current_revision).neq("reason", "conflict").maybeSingle());
     if (!r) return null;
-    const s = r.snapshot_payload as NoctyriumState;
+    const s = r.snapshot_payload as AxomState;
     if (!s.profile || !Array.isArray(s.questions) || !Array.isArray(s.logs)) throw new Error("protected-copy-needs-upgrade");
     return { state: s, at: r.created_at, hash: r.content_hash };
   }

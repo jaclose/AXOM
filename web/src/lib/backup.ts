@@ -5,7 +5,7 @@ import { backupOriginalDocuments, createMediaBackupArchive, LARGE_MEDIA_BACKUP_B
 // ===========================================================================
 // JSON export / import. The portable backup story for the browser-stored data.
 // ===========================================================================
-import type { ClockPreferences, DailyWordPuzzleState, NoctyriumState, TimeZonePreference } from "./types";
+import type { ClockPreferences, DailyWordPuzzleState, AxomState, TimeZonePreference } from "./types";
 import { normalizeNavOrder } from "./navLayout";
 import { normalizeHintFields } from "./dailyWordHints";
 import { normalizeEnergyChecks } from "./energyInsights";
@@ -54,14 +54,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function toPortableState(state: NoctyriumState): NoctyriumState {
+export function toPortableState(state: AxomState): AxomState {
   const payload: Record<string, unknown> = {};
   const src = state as unknown as Record<string, unknown>;
   for (const k of DATA_KEYS) payload[k] = src[k];
-  return payload as unknown as NoctyriumState;
+  return payload as unknown as AxomState;
 }
 
-export function exportState(state: NoctyriumState) {
+export function exportState(state: AxomState) {
   downloadBackupPayload({
     _app: BRAND.productName,
     _exported: new Date().toISOString(),
@@ -76,7 +76,7 @@ export type BackupScope = "complete" | "saved-work";
  * Saved-work recovery explicitly stays local and keeps unfetched references.
  * Ordinary account checkpoints do not use this export path. */
 export async function exportStateWithAttachments(
-  state: NoctyriumState,
+  state: AxomState,
   scope: BackupScope = "complete",
 ): Promise<{ attachmentCount: number; missingBlobKeys: string[]; originalCount: number; missingOriginalIds: string[]; deferredSourceCount: number }> {
   if (state.deferredContent && scope === "complete") {
@@ -153,7 +153,7 @@ export function lastBackupAt(): string | null {
  * fields keep the CURRENT values — merge never silently changes who you are
  * or what day it is. Use replace (with explicit confirmation) for full restore.
  */
-export function mergeStates(current: NoctyriumState, imported: NoctyriumState): NoctyriumState {
+export function mergeStates(current: AxomState, imported: AxomState): AxomState {
   if (current.deferredContent || imported.deferredContent) throw new Error("Download saved account content before merging workspaces. Your existing work is unchanged.");
   const listKeys = [
     "terms", "courses", "tracker", "productivityTrackers", "resources", "tasks", "journal",
@@ -203,7 +203,7 @@ export function mergeStates(current: NoctyriumState, imported: NoctyriumState): 
     // Unlocks follow the learner, so a merge retains those earned in either workspace.
     ...(unlocks?.length ? { unlocks } : {}),
   };
-  return merged as unknown as NoctyriumState;
+  return merged as unknown as AxomState;
 }
 
 function mergeById(
@@ -352,7 +352,7 @@ function preferDailyWordPuzzle(left: DailyWordPuzzleState, right: DailyWordPuzzl
   return left;
 }
 
-export function parseImport(text: string): NoctyriumState {
+export function parseImport(text: string): AxomState {
   const data = JSON.parse(text);
   if (!data || typeof data !== "object" || !Array.isArray(data.terms)) {
     throw new Error("This file doesn't look like an AXOM backup.");
@@ -364,7 +364,7 @@ export function parseImport(text: string): NoctyriumState {
   const name = String(profile.name ?? "");
   const focusSubscriptions = normalizedFocusIds(profile.focusSubscriptions);
   const activeFocusId = focusSubscriptions.includes(profile.activeFocusId as (typeof focusSubscriptions)[number])
-    ? profile.activeFocusId as NoctyriumState["profile"]["activeFocusId"]
+    ? profile.activeFocusId as AxomState["profile"]["activeFocusId"]
     : focusSubscriptions[0] ?? DEFAULT_FOCUS_IDS[0];
   const activeFocus = focusOption(activeFocusId);
   const educationTrack = resolveTrack(typeof profile.educationTrack === "string" ? profile.educationTrack : undefined).id;
@@ -384,7 +384,7 @@ export function parseImport(text: string): NoctyriumState {
       tourDone: typeof profile.tourDone === "boolean" ? profile.tourDone : undefined,
       promise: normalizePromise(profile.promise),
       promisePromptStatus: normalizePromisePromptStatus(profile.promisePromptStatus),
-      phase: typeof profile.phase === "string" ? profile.phase as NoctyriumState["profile"]["phase"] : activeFocus?.phase,
+      phase: typeof profile.phase === "string" ? profile.phase as AxomState["profile"]["phase"] : activeFocus?.phase,
       educationTrack,
       academicStageId: isAcademicStageId(profile.academicStageId) ? profile.academicStageId : undefined,
       customAcademicStage: typeof profile.customAcademicStage === "string"
@@ -423,7 +423,7 @@ export function parseImport(text: string): NoctyriumState {
       // Preserve newer opt-in settings across export/import.
       blueprintMode: normalizeBlueprintMode(profile.blueprintMode),
       taskAutofillDisabled: typeof profile.taskAutofillDisabled === "boolean" ? profile.taskAutofillDisabled : undefined,
-      taskTemplates: Array.isArray(profile.taskTemplates) ? profile.taskTemplates as NoctyriumState["profile"]["taskTemplates"] : undefined,
+      taskTemplates: Array.isArray(profile.taskTemplates) ? profile.taskTemplates as AxomState["profile"]["taskTemplates"] : undefined,
       experimentalFlags: normalizeExperimentalFlags(profile.experimentalFlags),
       timeZonePreference: normalizeTimeZonePreference(profile.timeZonePreference),
       clockPreferences: normalizeClockPreferences(profile.clockPreferences),
@@ -437,7 +437,7 @@ export function parseImport(text: string): NoctyriumState {
         ? [...new Set(profile.hiddenActivityShortcuts.filter((value): value is string => typeof value === "string" && Boolean(value.trim())).map((value) => value.slice(0, 240)))].slice(0, 100)
         : undefined,
       pomodoroCustom: profile.pomodoroCustom && typeof profile.pomodoroCustom === "object"
-        ? profile.pomodoroCustom as NoctyriumState["profile"]["pomodoroCustom"] : undefined,
+        ? profile.pomodoroCustom as AxomState["profile"]["pomodoroCustom"] : undefined,
       pomodoroPreferences: normalizePomodoroPreferences(profile.pomodoroPreferences),
       studyWorkflow: normalizeStudyWorkflow(profile.studyWorkflow),
       applicationResearch: normalizeApplicationResearch(profile.applicationResearch),
@@ -490,7 +490,7 @@ export function parseImport(text: string): NoctyriumState {
     ankiCards: Array.isArray(data.ankiCards) ? data.ankiCards : [],
     cardReviews: Array.isArray(data.cardReviews) ? data.cardReviews : [],
     dailyWordPuzzles: normalizeDailyWordPuzzles(data.dailyWordPuzzles),
-  } as NoctyriumState;
+  } as AxomState;
 }
 
 function migrateImportedQuestion(value: unknown, fromVersion: number): unknown {
@@ -538,7 +538,7 @@ function migrateImportedQuestion(value: unknown, fromVersion: number): unknown {
   return reconcileAnnotationRecord(question);
 }
 
-function normalizeDashboardWidgetOrder(value: unknown): NonNullable<NoctyriumState["profile"]["dashboardWidgetOrder"]> {
+function normalizeDashboardWidgetOrder(value: unknown): NonNullable<AxomState["profile"]["dashboardWidgetOrder"]> {
   if (!Array.isArray(value)) return [...DEFAULT_DASHBOARD_WIDGETS];
   const valid = new Set(STORED_DASHBOARD_WIDGET_IDS);
   const incoming = value.filter((item): item is typeof DEFAULT_DASHBOARD_WIDGETS[number] =>
@@ -547,7 +547,7 @@ function normalizeDashboardWidgetOrder(value: unknown): NonNullable<NoctyriumSta
   return [...new Set([...incoming, ...DEFAULT_DASHBOARD_WIDGETS])];
 }
 
-function normalizeDashboardWidgetList(value: unknown): NonNullable<NoctyriumState["profile"]["hiddenDashboardWidgets"]> {
+function normalizeDashboardWidgetList(value: unknown): NonNullable<AxomState["profile"]["hiddenDashboardWidgets"]> {
   if (!Array.isArray(value)) return [...DEFAULT_HIDDEN_DASHBOARD_WIDGETS];
   const valid = new Set(STORED_DASHBOARD_WIDGET_IDS);
   return [...new Set(value.filter((item): item is typeof DEFAULT_DASHBOARD_WIDGETS[number] =>
@@ -569,7 +569,7 @@ function normalizeJournalReviewTime(value: unknown) {
   return typeof value === "string" && /^\d{2}:\d{2}$/.test(value) ? value : "20:00";
 }
 
-function normalizePromise(value: unknown): NoctyriumState["profile"]["promise"] {
+function normalizePromise(value: unknown): AxomState["profile"]["promise"] {
   if (!value || typeof value !== "object") return undefined;
   const record = value as Record<string, unknown>;
   const signedName = typeof record.signedName === "string" ? record.signedName.trim() : "";
@@ -583,7 +583,7 @@ function normalizePromise(value: unknown): NoctyriumState["profile"]["promise"] 
   };
 }
 
-function normalizePromisePromptStatus(value: unknown): NoctyriumState["profile"]["promisePromptStatus"] {
+function normalizePromisePromptStatus(value: unknown): AxomState["profile"]["promisePromptStatus"] {
   if (!isRecord(value) || (value.state !== "deferred" && value.state !== "skipped")) return undefined;
   const updatedAt = typeof value.updatedAt === "string" && !Number.isNaN(new Date(value.updatedAt).getTime())
     ? new Date(value.updatedAt).toISOString()
@@ -597,10 +597,10 @@ function normalizePromisePromptStatus(value: unknown): NoctyriumState["profile"]
   };
 }
 
-function normalizeExperimentalFlags(value: unknown): NoctyriumState["profile"]["experimentalFlags"] {
+function normalizeExperimentalFlags(value: unknown): AxomState["profile"]["experimentalFlags"] {
   const flags = isRecord(value) ? value : {};
   return {
-    ...(flags as NoctyriumState["profile"]["experimentalFlags"]),
+    ...(flags as AxomState["profile"]["experimentalFlags"]),
     habits: typeof flags.habits === "boolean" ? flags.habits : undefined,
     dailyGames: flags.dailyGames === true,
   };

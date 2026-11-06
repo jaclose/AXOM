@@ -7,7 +7,7 @@
 //   - documents' linkedQuestionSetIds pointing at missing sets → pruned
 // Returns a report so the UI can show what (if anything) it repaired.
 // ===========================================================================
-import type { NoctyriumState } from "./types";
+import type { AxomState } from "./types";
 import type { QuestionRecord } from "./questions";
 import type { QuestionSet, SourceDocument } from "./library";
 
@@ -27,7 +27,7 @@ export interface OrphanRepairResult {
   documents: SourceDocument[];
 }
 
-export function findOrphans(state: Pick<NoctyriumState, "questions" | "questionSets" | "documents">): OrphanReport {
+export function findOrphans(state: Pick<AxomState, "questions" | "questionSets" | "documents">): OrphanReport {
   const questions = state.questions ?? [];
   const sets = state.questionSets ?? [];
   const documents = state.documents ?? [];
@@ -49,7 +49,7 @@ export function findOrphans(state: Pick<NoctyriumState, "questions" | "questionS
   return report;
 }
 
-export function repairOrphans(state: Pick<NoctyriumState, "questions" | "questionSets" | "documents">): OrphanRepairResult {
+export function repairOrphans(state: Pick<AxomState, "questions" | "questionSets" | "documents">): OrphanRepairResult {
   const questions = state.questions ?? [];
   const sets = state.questionSets ?? [];
   const documents = state.documents ?? [];

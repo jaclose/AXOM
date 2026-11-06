@@ -254,7 +254,7 @@ function normalizeTags(tags: string[]) {
     .flatMap((tag) => tag.split(/[,\s]+/))
     .map((tag) => tag.trim().replace(/[^a-zA-Z0-9:_-]/g, ""))
     .filter(Boolean);
-  return [...new Set(["noctyrium", "draft", ...clean])].slice(0, 12);
+  return [...new Set(["axom", "draft", ...clean])].slice(0, 12);
 }
 
 function summarizeInput(feature: AiFeature, body: AiRequestBody) {

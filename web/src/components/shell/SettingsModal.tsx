@@ -29,7 +29,7 @@ import { PromiseCutscene } from "./PromiseCutscene";
 import { FOCUS_OPTIONS, focusOption, normalizedFocusIds } from "../../lib/experience";
 import { EDUCATION_TRACKS, resolveTrack } from "../../lib/tracks";
 import { SavedPromise } from "./PromiseCutscene";
-import type { DashboardWidgetId, EducationTrackId, ExperienceFocusId, NoctyriumState } from "../../lib/types";
+import type { DashboardWidgetId, EducationTrackId, ExperienceFocusId, AxomState } from "../../lib/types";
 import { HardDrive } from "lucide-react";
 import { SCHEMA_VERSION, APP_BUILD_LABEL } from "../../lib/seed";
 import { lastBackupAt } from "../../lib/backup";
@@ -122,7 +122,7 @@ export async function persistPortableRestore(input: {
   current: Store;
   fileName: string;
   mode: PortableRestoreMode;
-  restoredState: NoctyriumState;
+  restoredState: AxomState;
   restoreMedia: PortableBackupRead["restoreMedia"];
   restoreOriginals: PortableBackupRead["restoreOriginals"];
   onProgress?: (message: string) => void;

@@ -1,4 +1,4 @@
-import type { NoctyriumState } from "../types";
+import type { AxomState } from "../types";
 import { SyncPushError, failureOf, type FailureDetails } from "./syncFailure";
 import { deviceId, read, write } from "./syncMetadata";
 import {
@@ -48,7 +48,7 @@ export class SyncCoordinator {
 
   constructor(
     private transport: SyncTransport,
-    private state: () => NoctyriumState,
+    private state: () => AxomState,
     private delay = 3000,
     initialStatus: ProtectionStatus = "saved-locally",
     private clock: SyncClock = { now: () => Date.now(), random: () => Math.random() },
