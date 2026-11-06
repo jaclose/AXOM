@@ -29,6 +29,21 @@ export const AXOM_CORRESPONDENTS = [
   { id: "cipher", name: "Cipher", localPart: "cipher", hue: 222, tags: ["precision","systems","connection"], description: "A careful reader of hidden patterns and explicit evidence." },
   { id: "harbor", name: "Harbor", localPart: "harbor", hue: 181, tags: ["calm","steady","reflection"], description: "A composed place to gather, review and continue." },
   { id: "verge", name: "Verge", localPart: "verge", hue: 100, tags: ["exploration","growth","practical"], description: "A practical edge between possibility and the next action." },
+  { id: "orrery", name: "Orrery", localPart: "orrery", hue: 202, tags: ["systems","visual","exploration"], description: "An orbital hummingbird whose mechanisms reveal cycles, feedback and time." },
+  { id: "eidolon", name: "Eidolon", localPart: "eidolon", hue: 228, tags: ["research","reflection","exploration"], description: "A spectral wolf that turns unspoken assumptions into better questions." },
+  { id: "rook", name: "Rook", localPart: "rook", hue: 220, tags: ["precision","reflection","systems"], description: "An obsidian rook that protects the record by recognizing meaningful exceptions." },
+  { id: "thren", name: "Thren", localPart: "thren", hue: 220, tags: ["precision","calm","planning"], description: "A slate night crane that guards the boundary between evidence and alarm." },
+  { id: "virelai", name: "Virelai", localPart: "virelai", hue: 37, tags: ["writing","creative","reflection"], description: "A lyrebird that gives memory rhythm without replacing an underlying mechanism." },
+  { id: "tessera", name: "Tessera", localPart: "tessera", hue: 280, tags: ["visual","creative","systems"], description: "A prismatic beetle that builds useful models from tested fragments." },
+  { id: "zephyr", name: "Zephyr", localPart: "zephyr", hue: 193, tags: ["exploration","planning","practical"], description: "A sky serpent that adjusts the route without surrendering the destination." },
+  { id: "halcyon", name: "Halcyon", localPart: "halcyon", hue: 205, tags: ["precision","calm","planning"], description: "A kingfisher that discovers the value of stillness before commitment." },
+  { id: "thistle", name: "Thistle", localPart: "thistle", hue: 114, tags: ["steady","practical","calm"], description: "A thorn-backed hedgehog that shelters a learner-chosen focus window." },
+  { id: "calyx", name: "Calyx", localPart: "calyx", hue: 131, tags: ["growth","visual","reflection"], description: "A botanical glass mantis that makes gradual transformation legible." },
+  { id: "aureline", name: "Aureline", localPart: "aureline", hue: 46, tags: ["growth","writing","creative"], description: "A dawn hummingbird that carries hard-won knowledge toward service." },
+  { id: "helion", name: "Helion", localPart: "helion", hue: 41, tags: ["precision","practical","planning"], description: "A solar-maned lion that leads by making its strongest reason inspectable." },
+  { id: "caelum", name: "Caelum", localPart: "caelum", hue: 210, tags: ["exploration","visual","creative"], description: "A sky dragon that imagines farther and returns to the next experiment." },
+  { id: "solara", name: "Solara", localPart: "solara", hue: 217, tags: ["reflection","systems","research"], description: "A comet-finned koi that joins reviewed knowledge across a longer horizon." },
+  { id: "noctis", name: "Noctis", localPart: "noctis", hue: 240, tags: ["precision","reflection","research"], description: "An obsidian star panther balancing ambitious independence with proof." },
 ] as const;
 
 export type CorrespondentId = (typeof AXOM_CORRESPONDENTS)[number]["id"];
@@ -70,7 +85,7 @@ function family(h: number) {
 function stableHash(s: string) { let h=2166136261; for (const c of s) { h ^= c.charCodeAt(0); h=Math.imul(h,16777619); } return h>>>0; }
 function starter(card: Card): CorrespondentMatch {
   return { id:card.id,name:card.name,localPart:card.localPart,description:card.description,accent:"#C8A96A",
-    basis:"starter",reasons:["AXOM assigned a starter correspondent from its 25-name collection. No personal writing was used."],inferredPersonality:false };
+    basis:"starter",reasons:["AXOM assigned a starter correspondent from its 40-name collection. No personal writing was used."],inferredPersonality:false };
 }
 export function matchCorrespondent(input: CorrespondentInput): CorrespondentMatch {
   const chosen=AXOM_CORRESPONDENTS.find(c=>c.id===input.preferredId);
