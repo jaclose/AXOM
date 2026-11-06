@@ -7,7 +7,7 @@ never authorizes an unrelated, destructive or unreviewed release.
 
 | Need | Canonical procedure / implementation |
 | --- | --- |
-| Native packaging, signing, updater feed | [Desktop release](../DESKTOP-RELEASE.md), \`scripts/release.mjs\`, \`.github/workflows/release.yml\`, \`.github/workflows/update-feed.yml\` |
+| Native packaging, signing, updater feed | [Desktop release](../DESKTOP-RELEASE.md), `scripts/release.mjs`, `.github/workflows/release.yml`, `.github/workflows/update-feed.yml` |
 | Coordinated edition names and intake fields | [AXOM FORGE release nomenclature](release-nomenclature.md) |
 | General coding, ownership and IDE practice | [Engineering SOP](engineering-sop.md) |
 | Web update consent/recovery/offline behavior | [Update policy](../UPDATE-POLICY.md), `web/src/lib/webUpdates.ts`, `web/public/sw.js` |
