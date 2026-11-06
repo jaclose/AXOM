@@ -63,7 +63,7 @@ export function AppUpdatePanel() {
     available: `Version ${state.version} is available.`,
     downloading: "Downloading and verifying the update…",
     ready: "Download verified. Install when you’re ready to restart.",
-    preparing: "Saving your workspace and preparing the update…",
+    preparing: "Preparing the update…",
     installing: "Installing the update. Keep AXOM open until it restarts.",
     restarting: "Update ready. Restarting AXOM…",
     disabled: state.error ?? "Updates are unavailable for this build.",
