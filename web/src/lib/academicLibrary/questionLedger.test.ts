@@ -65,6 +65,46 @@ describe("every question in a prepared library is accounted for", () => {
     expect(accountQuestions(inventory, twice).unaccounted).toBe(4);
   });
 
+  it("holds repeated bank source IDs instead of treating last-write-wins as reconciled", async () => {
+    const { read } = await library();
+    const inventory = await readPublicationInventory(read);
+    const bank = inventory.sources.find(source => source.name === "goer-pq.pdf")!;
+    const basePlan = planPublication(inventory);
+    expect(basePlan.courses.some(course => course.sourceIds.includes(bank.id))).toBe(true);
+    const baseline = accountQuestions(inventory, basePlan);
+    const originalRows = bank.rows ?? bank.ready + bank.review;
+    const conflict = { ...bank, name: "altered-goer.pdf", checksum: "f".repeat(64),
+      rows: originalRows + 2, ready: bank.ready + 1, review: bank.review + 1 };
+
+    for (const [first, second] of [[bank, conflict], [conflict, bank]]) {
+      const disputedInventory = { ...inventory,
+        sources: [...inventory.sources.filter(source => source.id !== bank.id), first, second] };
+      const ledger = accountQuestions(disputedInventory, basePlan);
+      // All claimed source rows remain visible, but neither disputed record
+      // can be attributed to a publishable course or reported as reconciled.
+      expect(ledger.total.questions).toBe(baseline.total.questions + conflict.rows);
+      expect(ledger.inCourses.questions).toBe(baseline.inCourses.questions - originalRows);
+      expect(ledger.inCourses.ready).toBe(baseline.inCourses.ready - bank.ready);
+      expect(ledger.unaccounted).toBe(originalRows + conflict.rows);
+      const excluded = { ...basePlan, excluded: [...basePlan.excluded,
+        { id: bank.id, name: conflict.name, hasBank: true, reason: "Review ambiguous identity." }] };
+      const withExcluded = accountQuestions(disputedInventory, excluded);
+      expect(withExcluded.unaccounted).toBe(originalRows + conflict.rows);
+      expect(withExcluded.leftOut.some(group => group.reason === "Review ambiguous identity.")).toBe(false);
+    }
+  });
+
+  it("holds repeated bank catalog rows even when their source bytes match", async () => {
+    const { read } = await library();
+    const inventory = await readPublicationInventory(read);
+    const bank = inventory.sources.find(source => source.name === "goer-pq.pdf")!;
+    const plan = planPublication(inventory);
+    const rows = bank.rows ?? bank.ready + bank.review;
+    const ledger = accountQuestions({ ...inventory, sources: [...inventory.sources, { ...bank }] }, plan);
+    expect(ledger.unaccounted).toBe(rows * 2);
+    expect(ledger.inCourses.questions).toBe(accountQuestions(inventory, plan).inCourses.questions - rows);
+  });
+
   it("does not count a duplicate-linked catalog row as another copy of its bank", async () => {
     const { read } = await library();
     const inventory = await readPublicationInventory(read);
