@@ -152,7 +152,7 @@ test("Productivity primary panels stay usable across themes and narrow screens",
       }
       const focusMeter = page.getByRole("progressbar", { name: "Focus session progress" });
       await expect(focusMeter).toBeVisible();
-      await expect(focusMeter).toHaveAttribute("aria-valuenow", /^(0|[1-9]\\d?|100)$/);
+      await expect(focusMeter).toHaveAttribute("aria-valuenow", /^(0|[1-9]\d?|100)$/);
       const fields = await page.locator(".productivity-primary-grid .pomo-target-box").evaluate((box) => {
         const outer = box.getBoundingClientRect();
         return Array.from(box.querySelectorAll("input, select")).map((field) => {
