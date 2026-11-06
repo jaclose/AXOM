@@ -153,7 +153,7 @@ export function Pomodoro({ compact = false }: { compact?: boolean }) {
               strokeDasharray={circumference}
               strokeDashoffset={circumference * (1 - pct / 100)}
               transform={`rotate(-90 ${dim / 2} ${dim / 2})`}
-              style={{ transition: "stroke-dashoffset 1s linear" }}
+              className="pomo-ring-progress"
             />
           </svg>
           <div className="pomo-clock">
@@ -161,6 +161,30 @@ export function Pomodoro({ compact = false }: { compact?: boolean }) {
             <span className="pomo-sub">{isFocus ? "until break" : "until focus"}</span>
           </div>
         </div>
+
+        {!compact && (
+          <div className="pomo-live-progress">
+            <div className="pomo-live-progress-head">
+              <span>{isFocus ? "Focus elapsed" : "Break elapsed"}</span>
+              <strong>{Math.round(pct)}% <small>{formatClock(pomo.secondsLeft)} left</small></strong>
+            </div>
+            <div
+              className="pomo-live-track"
+              role="progressbar"
+              aria-label={`${isFocus ? "Focus" : "Break"} session progress`}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(pct)}
+              aria-valuetext={`${Math.floor(Math.max(0, elapsed) / 60)} of ${total / 60} minutes elapsed`}
+            >
+              <span className="pomo-live-fill" style={{ width: `${pct}%` }} />
+            </div>
+            <div className="pomo-live-progress-foot">
+              <span>{pomo.running ? "Running" : elapsed > 0 ? "Paused" : "Ready"}</span>
+              <span>Session time, not daily target credit</span>
+            </div>
+          </div>
+        )}
 
         <div className="pomo-controls">
           <div className="pomo-presets">
@@ -304,6 +328,13 @@ export function Pomodoro({ compact = false }: { compact?: boolean }) {
               </label>
             )}
           </div>
+          {!compact && (
+            <p className="pomo-log-truth" role="note">
+              {pomo.autoLog
+                ? "Auto-log is on. Whole-minute focus time is recorded on finish, skip, reset, or preset change."
+                : "Auto-log is off. Timer time will not enter your activity history."}
+            </p>
+          )}
         </div>
       </div>
     </GlassCard>
