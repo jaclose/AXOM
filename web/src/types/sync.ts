@@ -1,4 +1,4 @@
-import type { NoctyriumState } from "../lib/types";
+import type { AxomState } from "../lib/types";
 
 export interface CloudUser {
   id: string;
@@ -27,7 +27,7 @@ export interface CloudSnapshot {
   userId: string;
   appVersion: string;
   schemaVersion: number;
-  dataJson: NoctyriumState;
+  dataJson: AxomState;
   deviceLabel?: string;
   backupLabel?: string;
   createdAt: string;
@@ -58,7 +58,7 @@ export interface SyncMeta {
 export interface SaveCloudInput {
   appVersion: string;
   schemaVersion: number;
-  dataJson: NoctyriumState;
+  dataJson: AxomState;
   deviceLabel?: string;
   backupLabel?: string;
 }
