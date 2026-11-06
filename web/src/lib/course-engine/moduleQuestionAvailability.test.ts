@@ -628,3 +628,39 @@ describe("secondary collection IDs do not confer primary academic provenance", (
     });
   });
 });
+
+describe("immutable original question body conflicts", () => {
+  it("holds duplicate original IDs with different stems or options in both orders", () => {
+    const original = question("collision", { setId: "source", ...goerScope });
+    const source = set("source", ["collision"], { scope: goerScope, kind: "source" });
+    for (const altered of [
+      { ...original, stem: "A second, different source question" },
+      { ...original, options: [{ key: "A", text: "Changed answer text" }, { key: "B", text: "Other" }] },
+      { ...original, questionNumber: 7 },
+    ]) {
+      for (const pair of [[original, altered], [altered, original]]) {
+        const snapshot = JSON.stringify([source, ...pair]);
+        const index = buildQuestionAvailabilityIndex(input([source], pair));
+        expect(index.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+          storedQuestions: 1, readyQuestions: 0, reviewQuestions: 1,
+          collections: 1, indexedWeeks: [2],
+        });
+        expect(index.unassignedQuestions).toBe(0);
+        expect(JSON.stringify([source, ...pair])).toBe(snapshot);
+      }
+    }
+  });
+
+  it("does not hold identical source-body clones for learner-owned notes", () => {
+    const original = question("equivalent", { setId: "source", ...goerScope });
+    const clone = { ...original, notes: "Personal review overlay", marked: true };
+    const index = buildQuestionAvailabilityIndex(input(
+      [set("source", ["equivalent"], { scope: goerScope })],
+      [original, clone],
+    ));
+    expect(index.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+      storedQuestions: 1, readyQuestions: 1, reviewQuestions: 0,
+      collections: 1, indexedWeeks: [2],
+    });
+  });
+});

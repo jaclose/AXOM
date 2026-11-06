@@ -148,6 +148,11 @@ export function conflictingDuplicateIds(
   const held = new Set<ID>();
   const signature = (question: QuestionRecord, own: CourseScope): string => JSON.stringify([
     question.setId ?? null, question.sourceDocumentId ?? null, question.correctKey ?? null,
+    // Original source bodies and question numbering are immutable evidence.
+    // Distinct stems, choices or ordered content cannot share progress credit
+    // under one ID even when their current answer key and set match.
+    question.stem ?? null, question.options ?? null, question.content ?? null,
+    question.questionNumber ?? null, question.sourcePage ?? null,
     own.courseId ?? null, canonicalModuleKey(own.module ?? ""), own.week ?? null,
     question.status, question.attempts[0]?.status ?? null, question.attempts.length > 0,
   ]);
