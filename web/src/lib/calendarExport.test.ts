@@ -30,4 +30,28 @@ describe("calendar export", () => {
     expect(folded.split("\r\n").every((line) => line.length <= 75)).toBe(true);
     expect(folded.replace(/\r\n /g, "")).toBe(`SUMMARY:${"x".repeat(200)}`);
   });
+  it("folds long Unicode text to 75 UTF-8 octets without splitting a code point", () => {
+    const line = `SUMMARY:${"é🧠الطب".repeat(45)}`;
+    const folded = foldIcsLine(line);
+    const segments = folded.split("\r\n");
+    expect(segments.length).toBeGreaterThan(2);
+    expect(segments.every((segment) => new TextEncoder().encode(segment).length <= 75)).toBe(true);
+    expect(segments.slice(1).every((segment) => segment.startsWith(" "))).toBe(true);
+    expect(folded.replace(/\r\n /g, "")).toBe(line);
+    expect(folded.includes("�")).toBe(false);
+    expect(foldIcsLine("SUMMARY:short")).toBe("SUMMARY:short");
+  });
+
+  it("escapes lone CR, LF and CRLF in user event text as TEXT, not calendar records", () => {
+    expect(escapeIcsText("one\rtwo\nthree\r\nfour")).toBe("one\\ntwo\\nthree\\nfour");
+    const ics = buildIcs([{
+      uid: "task-unsafe", day: "2026-12-31",
+      title: "Due: review\rBEGIN:VEVENT\nSecond\r\nline",
+      category: "AXOM task",
+    }], new Date("2026-09-26T10:00:00.000Z"));
+    expect(ics).toContain("SUMMARY:Due: review\\nBEGIN:VEVENT\\nSecond\\nline");
+    expect(ics.split("\r\n").filter((row) => row === "BEGIN:VEVENT")).toHaveLength(1);
+    expect(ics.split("\r\n").filter((row) => row === "END:VEVENT")).toHaveLength(1);
+  });
+
 });
