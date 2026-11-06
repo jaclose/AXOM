@@ -7,7 +7,9 @@ never authorizes an unrelated, destructive or unreviewed release.
 
 | Need | Canonical procedure / implementation |
 | --- | --- |
-| Native packaging, signing, updater feed | [Desktop release](../DESKTOP-RELEASE.md), `scripts/release.mjs`, `.github/workflows/release.yml`, `.github/workflows/update-feed.yml` |
+| Native packaging, signing, updater feed | [Desktop release](../DESKTOP-RELEASE.md), \`scripts/release.mjs\`, \`.github/workflows/release.yml\`, \`.github/workflows/update-feed.yml\` |
+| Coordinated edition names and intake fields | [AXOM FORGE release nomenclature](release-nomenclature.md) |
+| General coding, ownership and IDE practice | [Engineering SOP](engineering-sop.md) |
 | Web update consent/recovery/offline behavior | [Update policy](../UPDATE-POLICY.md), `web/src/lib/webUpdates.ts`, `web/public/sw.js` |
 | Accounts configuration/migrations | [Account setup](../ACCOUNTS-SETUP.md), `supabase/config.toml`, `supabase/migrations/` |
 | Cloud AI function/secrets | [Cloud AI](../CLOUD-AI.md), `supabase/functions/ai-proxy/` |
@@ -34,6 +36,13 @@ account incident](../release/2026-10-01-ACCOUNT-SYNC-INCIDENT.md) documents a da
 failure and repair; its existence does not prove the migration is deployed.
 
 ## AXOM unified release gateway
+
+**Release authority name: AXOM FORGE.** The guide to named release families,
+technical versions and source-packet expectations is [release nomenclature](release-nomenclature.md).
+FORGE operates independently of MOTHERSHIP engineering coordination and APEX PRIME
+academic source integration; its release state and decisions belong to issue
+[#140](https://github.com/jaclose/AXOM/issues/140).
+
 
 **Standing operating standard (owner-authorized 2026-11-06):** combine compatible
 feature-branch work into one coherent, tested release instead of independently
