@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { ArrowUpRight, BookOpen, RefreshCw, ShieldCheck, UploadCloud } from "lucide-react";
+import { ArrowUpRight, BookOpen, BookUp2, RefreshCw, ShieldCheck, UploadCloud } from "lucide-react";
 import { useAccount } from "../../lib/account/accountStore";
 import { useUi } from "../../lib/uiStore";
 import { useStore } from "../../lib/store";
@@ -19,6 +19,8 @@ import {
 } from "../../lib/academicLibrary/community";
 import { listOwnedAcademicCourses, ownedCourseStatus } from "../../lib/academicLibrary/ownedCourses";
 import { AcademicCourseUpload } from "../tracker/AcademicCourseUpload";
+import { QuestionSetLibrarySubmitDialog } from "./QuestionSetLibrarySubmitDialog";
+import { CommunityQuestionSetLibrary } from "./CommunityQuestionSetLibrary";
 import { GButton, GlassCard, Tag } from "../ui/primitives";
 import { TechnicalDetails } from "../shell/TechnicalDetails";
 import { ICON_SIZE } from "../../lib/iconSize";
@@ -52,6 +54,9 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
   const [search, setSearch] = useState("");
   const [term, setTerm] = useState("");
   const [refresh, setRefresh] = useState(0);
+  const [selectedQuestionSetId, setSelectedQuestionSetId] = useState("");
+  const [submittingQuestionSetId, setSubmittingQuestionSetId] = useState("");
+  const [browseQuestionSets, setBrowseQuestionSets] = useState(false);
   const [page, setPage] = useState<Page>();
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState("");
@@ -104,6 +109,9 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
     });
   }, [questionSets, questions, documents]);
   const localSource = localSources.find(source => source.document.id === localSourceId);
+  const availableQuestionSets = useMemo(() => questionSets.filter(set => set.questionIds.length > 0)
+    .sort((a, b) => a.title.localeCompare(b.title)), [questionSets]);
+  const submittingQuestionSet = availableQuestionSets.find(set => set.id === submittingQuestionSetId);
   const preparedSource = localPrepared && localPrepared.accountId === accountId && localPrepared.sourceId === localSourceId
     && localPrepared.revision === localSource?.revision ? localPrepared : undefined;
 
@@ -120,6 +128,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
     setReviewReceipt(undefined);
     setRights(false);
     setLocalSourceId(""); setLocalTerm(""); setLocalModule("");
+    setSelectedQuestionSetId(""); setSubmittingQuestionSetId(""); setBrowseQuestionSets(false);
     setLocalFilingConfirmed(false); setLocalRights(false); setLocalPrepared(undefined);
     setProgress(""); setError(""); setFeedbackLocation(""); setBusyId(""); setWithdrawId("");
     if (accountId) void isAcademicReviewer(accountId).then(value => { if (current) setReviewer(value); });
@@ -378,7 +387,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
     <header className="community-hero">
       <span className="qb-eyebrow">Shared by learners</span>
       <h2>Community Uploads</h2>
-      <p>Explore courses shared by AXOM members. Practice answer-ready questions with an Unreviewed warning. An academic reviewer must approve a course before it enters the official Question Bank.</p>
+      <p>Discover standalone Question Sets and courses shared by learners. Question Sets enter search only after academic review; community courses remain visibly Unreviewed until approved.</p>
     </header>
 
     {!accountId ? accountPhase === "loading" ? <GlassCard pad><p role="status">Checking your account…</p></GlassCard>
@@ -386,6 +395,12 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
       : <GlassCard pad><h3>Sign in to browse and contribute</h3><p>Community uploads are available to signed-in AXOM accounts.</p><GButton onClick={() => useUi.getState().requestSettings("account")}>Open account settings</GButton></GlassCard> : <>
       <div className="community-layout">
         <div className="community-results">
+          <div className="community-qbank-discovery">
+            <GButton size="sm" onClick={() => setBrowseQuestionSets(value => !value)}>
+              <BookUp2 size={ICON_SIZE.body} aria-hidden="true" /> {browseQuestionSets ? "Hide approved Question Sets" : "Browse approved Question Sets"}
+            </GButton>
+            {browseQuestionSets && <CommunityQuestionSetLibrary />}
+          </div>
           <form className="community-search" onSubmit={searchNow}>
             <label>Find an upload<input type="search" value={draftSearch} onChange={event => setDraftSearch(event.target.value)} placeholder="Course or module" /></label>
             <label>Term<select value={term} onChange={event => setTerm(event.target.value)}><option value="">All terms</option>{TERMS.map(value => <option key={value}>{value}</option>)}</select></label>
@@ -428,6 +443,25 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
         </div>
 
         <aside className="community-contribute">
+          <GlassCard pad className="community-qbank-publish">
+            <BookUp2 size={ICON_SIZE.display} aria-hidden="true" />
+            <h3>Share a Question Set</h3>
+            <p>Publish a standalone QBank set, without a course or module. AXOM can prepare missing explanations for your review.</p>
+            {availableQuestionSets.length ? <div className="community-qbank-picker">
+              <label htmlFor="community-qbank-choice">My Question Set
+                <select id="community-qbank-choice" value={selectedQuestionSetId}
+                  onChange={event => setSelectedQuestionSetId(event.target.value)}>
+                  <option value="">Choose a saved set</option>
+                  {availableQuestionSets.map(set => <option key={set.id} value={set.id}>
+                    {set.title} · {set.questionIds.length} questions
+                  </option>)}
+                </select>
+              </label>
+              <GButton variant="primary" disabled={!selectedQuestionSetId}
+                onClick={() => setSubmittingQuestionSetId(selectedQuestionSetId)}>Review and submit set</GButton>
+            </div> : <p>No saved Question Sets yet. <a href="#questions">Create one in Question Bank</a>, then return to publish it.</p>}
+            <p className="sub">Only reviewed, text-only questions with explanations can enter this library. Personal attempts and files remain private.</p>
+          </GlassCard>
           <GlassCard pad><UploadCloud size={ICON_SIZE.display} aria-hidden="true" /><h3>Share a course</h3>
             <p>Share a saved source from your Question Bank. AXOM checks its questions and figures, saves a private copy, then lists it here as Unreviewed.</p>
             <fieldset className="community-local-upload" disabled={busyId === "local-source"}>
@@ -504,6 +538,8 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
           </GlassCard>
         </aside>
       </div>
+      {submittingQuestionSet && <QuestionSetLibrarySubmitDialog key={submittingQuestionSet.id}
+        set={submittingQuestionSet} questions={questions} onClose={() => setSubmittingQuestionSetId("")} />}
     </>}
   </section>;
 }
