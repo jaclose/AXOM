@@ -82,13 +82,16 @@ describe("Integrations", () => {
     stubCalendarObjectUrl(createObjectURL);
     const task = useStore.getState().tasks[0];
     useStore.setState({ tasks: [{ ...task, due: "2999-02-31" }] });
-    render(<IntegrationsPage />);
+    const { rerender } = render(<IntegrationsPage />);
     fireEvent.click(screen.getByRole("button", { name: /Create calendar file/ }));
     fireEvent.click(screen.getByRole("button", { name: /Download .ics/ }));
     expect(screen.getByRole("alert").textContent).toMatch(/invalid date or identifier/i);
     expect(createObjectURL).not.toHaveBeenCalled();
 
     act(() => useStore.setState({ tasks: [{ ...task, due: "2999-03-01" }] }));
+    // Exercise React's mounted update boundary after the external store write.
+    // The real-browser E2E separately proves automatic subscription refresh.
+    rerender(<IntegrationsPage />);
     // The learner repairs the task elsewhere while this panel remains open.
     // Retrying must use the updated store values, download valid bytes and
     // clear the stale validation error without reloading or remounting.
