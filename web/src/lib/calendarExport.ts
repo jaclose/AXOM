@@ -149,19 +149,23 @@ export function buildIcs(events: readonly CalendarEventInput[], now: Date = new 
 export function downloadIcs(content: string, filename = "axom-study-plan.ics"): void {
   const blob = new Blob([content], { type: "text/calendar;charset=utf-8" });
   const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
+  // Capture the revoker before scheduling: testing or app lifecycles may
+  // replace the global URL object before a deferred callback fires.
+  const revokeUrl = URL.revokeObjectURL.bind(URL);
+  let link: HTMLAnchorElement | undefined;
   let revokeScheduled = false;
   try {
+    link = document.createElement("a");
     link.href = url;
     link.download = filename;
     document.body.appendChild(link);
     link.click();
     // Keep the object URL alive briefly so the browser can consume the file.
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    window.setTimeout(() => revokeUrl(url), 1000);
     revokeScheduled = true;
   } finally {
-    link.remove();
+    link?.remove();
     // If initiating the download fails, do not leave a dangling link or URL.
-    if (!revokeScheduled) URL.revokeObjectURL(url);
+    if (!revokeScheduled) revokeUrl(url);
   }
 }
