@@ -1,6 +1,25 @@
 # In flight
 
-What each branch is doing right now. Update when a branch starts, changes scope, or merges.
+## Current GitHub workstreams (dated snapshot: 2026-11-06 20:39 UTC)
+
+Source snapshot: GitHub `main` `382308aba5ececd039285d4b8ccee9a181b40d7c` plus open PR metadata, not a read of JD's local BOARD/worktrees. **This table is not automatically refreshed.** Recheck each linked issue and exact PR head before editing, merging or reporting success. A source commit, passing CI, combined release, deployed build and authenticated live acceptance are distinct evidence states. The sole unified release authority is [gateway #140](https://github.com/jaclose/AXOM/issues/140); the current Vercel quota and independent review gates cannot be bypassed by merely combining commits.
+
+| Stable key / idea | Owner and bounded scope | GitHub source evidence at snapshot | Status / next acceptance |
+| --- | --- | --- | --- |
+| `MOTHERSHIP-CORE` / [#106](https://github.com/jaclose/AXOM/issues/106), release [#140](https://github.com/jaclose/AXOM/issues/140) | MOTHERSHIP; one release integrator, not feature writer | Draft [#141](https://github.com/jaclose/AXOM/pull/141) `25ed28dc05547d8acf893c5e5287880fc374ab86` | INTEGRATED / HELD; exact combined checks, independent review, usable Vercel preview and account/device acceptance required; not merged or deployed |
+| `APEX-PRIME` / [#101](https://github.com/jaclose/AXOM/issues/101) | APEX; QBank/Course Tracker academic integrator | Open [#130](https://github.com/jaclose/AXOM/pull/130) `087588e8b21fe2eda2d11c8aa83fde94dac62b17`; draft [#147](https://github.com/jaclose/AXOM/pull/147) `77e6d32e6da9d936b6e2315fba3f3865651e38d9`; draft [#153](https://github.com/jaclose/AXOM/pull/153) `cf44894dfb145b649c0e80b50e27a9cdf14b33c3` | OPEN SOURCE; independent exact-head review, rights, learner acceptance, branch intake; later source heads not in #141 automatically |
+| `AUX-REGISTRY` / [#107](https://github.com/jaclose/AXOM/issues/107) | Registry; Ideas/ownership documentation only | [#113](https://github.com/jaclose/AXOM/pull/113) merged Ideas duplicate IDs; this document updates a separate historical-status defect | ID FIX MERGED, live roster work ongoing; retain original ideas, verify documentation tests and gate this source PR separately |
+| `AUX-EXPERIENCE-JOURNAL` / [#111](https://github.com/jaclose/AXOM/issues/111), `I11-01` | Journal Engineer; scoped Journal durability/UX only | No new Journal-worker committed candidate identified among the observed open PRs | QUEUED; require a reproducible save/reload RED regression, GREEN tests and review before claiming ready |
+| `MOTHERSHIP-WIP` / [#110](https://github.com/jaclose/AXOM/issues/110) | WIP/Integrations; calendar outside APEX files | Draft [#114](https://github.com/jaclose/AXOM/pull/114) `599b3519661e73f204738c04b9830b17ad5bda5f` | SOURCE OPEN / REVIEW REQUIRED; independent review, external calendar acceptance and hosted checks outstanding |
+| `MOTHERSHIP-PLATFORM` / [#108](https://github.com/jaclose/AXOM/issues/108) | MOTHERSHIP platform; save integrity and CI work, not academic writer | Draft [#128](https://github.com/jaclose/AXOM/pull/128) `274042a225f40f34fe1629ced3cb9e70899aea44`; draft [#150](https://github.com/jaclose/AXOM/pull/150) `f74360c16ee29e9a5f7b2ab3d46bfd6e7e6bfdba` | SOURCE OPEN; actual authenticated save/recovery, deployment and exact CI results not inferred from commits |
+| `MOTHERSHIP-COMMS` / [#109](https://github.com/jaclose/AXOM/issues/109), `I11-15` | Communications; Resend/Supabase with consent, no blanket mail authorization | Draft [#146](https://github.com/jaclose/AXOM/pull/146) `952cdbfe35c90221dbb0d83ad0d41bb4c17cedd4`; draft [#149](https://github.com/jaclose/AXOM/pull/149) `7ef3454d266cec778271d83a207cf7d2f17f49db` | HELD / REVIEW REQUIRED; project binding, staged Vault/cron tests, sender/recipient approval and delivery receipts not complete |
+| Productivity/Soundscapes, `I11-16` direction / [#106](https://github.com/jaclose/AXOM/issues/106) | Existing separate feature owner; measured activity and media | [#122](https://github.com/jaclose/AXOM/pull/122) merged; [#151](https://github.com/jaclose/AXOM/pull/151) OPEN `c07023eef0a2386fd96b501bcd4ac41b054bc1f4` | BASE SOURCE MERGED / FOLLOW-UP OPEN; validate responsive/browser outcomes; broad autonomous-OS concept NOT complete |
+
+**Coordination rule:** Before writing, claim a named file set, owner key, exact base/head, test and next checkpoint in the workstream issue. Treat old branches and historical `VERIFIED`/`SHIPPED` labels as dated evidence, never current service acceptance. No worker may silently take another writer's files; MOTHERSHIP alone evaluates the pinned source candidates for a single compatible release. Unverified private academic content, clinic/source review, real-device behavior and external-provider checks remain held.
+
+## Historical local-worktree inventory (October 2026; preserved)
+
+The original entries below document historical local checkout/worktree states (mostly October 7–27). Their branch descriptions were **not** reconfirmed on JD's machine, and are preserved verbatim for provenance, not represented as active owners or present release status.
 
 | Branch | Worktree | Owner | Plan | State |
 |---|---|---|---|---|
