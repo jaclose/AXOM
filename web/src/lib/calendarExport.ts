@@ -118,16 +118,20 @@ export function buildIcs(events: readonly CalendarEventInput[], now: Date = new 
   for (const event of events) {
     // UID is an RFC 5545 TEXT value, not an arbitrary unescaped content line.
     // Reject ambiguous IDs rather than allowing collisions or additional events.
-    if (!event.uid || seenUids.has(event.uid)
-      || [...event.uid].some(isNonTextControl)
+    if (!event.uid || [...event.uid].some(isNonTextControl)
       || [...event.uid].some((character) => character.length === 1
         && character.charCodeAt(0) >= 0xD800 && character.charCodeAt(0) <= 0xDFFF))
       throw new RangeError("AXOM calendar event UID is missing, duplicated, or invalid");
-    seenUids.add(event.uid);
+    // CR, LF and CRLF spellings may map to the same escaped wire identifier.
+    // Enforce uniqueness after canonical TEXT escaping, not just on raw strings.
+    const escapedUid = escapeIcsText(event.uid);
+    if (seenUids.has(escapedUid))
+      throw new RangeError("AXOM calendar event UID is duplicated after escaping");
+    seenUids.add(escapedUid);
     const [start, end] = allDayDates(event.day);
     lines.push(
       "BEGIN:VEVENT",
-      `UID:${escapeIcsText(event.uid)}@axom.local`,
+      `UID:${escapedUid}@axom.local`,
       `DTSTAMP:${stamp}`,
       `DTSTART;VALUE=DATE:${start}`,
       `DTEND;VALUE=DATE:${end}`,
