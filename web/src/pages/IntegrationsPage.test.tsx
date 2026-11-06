@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeSeed } from "../lib/seed";
 import { useStore } from "../lib/store";
@@ -74,7 +74,7 @@ describe("Integrations", () => {
     expect(screen.getByRole("alert").textContent).toMatch(/invalid date or identifier/i);
     expect(createObjectURL).not.toHaveBeenCalled();
 
-    useStore.setState({ tasks: [{ ...task, due: "2999-03-01" }] });
+    act(() => useStore.setState({ tasks: [{ ...task, due: "2999-03-01" }] }));
     fireEvent.click(screen.getByRole("button", { name: /Download .ics/ }));
     expect(screen.queryByRole("alert")).toBeNull();
     expect(createObjectURL).toHaveBeenCalledOnce();
