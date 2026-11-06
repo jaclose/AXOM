@@ -102,7 +102,11 @@ describe("Integrations", () => {
     const unsubscribeTaskCheck = useStore.subscribe((state, previous) => {
       if (state.tasks !== previous.tasks) taskChangeNotifications++;
     });
-    act(() => useStore.getState().updateTask(task.id, { due: "2999-03-01" }));
+    // Await React's full external-store/effect flush, not only synchronous
+    // Zustand notification, before asserting the mounted panel's update.
+    await act(async () => {
+      useStore.getState().updateTask(task.id, { due: "2999-03-01" });
+    });
     unsubscribeTaskCheck();
     expect(taskChangeNotifications).toBe(1);
     expect(useStore.getState().tasks).not.toBe(tasksBeforeRepair);
