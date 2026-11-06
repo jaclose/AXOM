@@ -86,9 +86,10 @@ describe("Integrations", () => {
     expect(createObjectURL).not.toHaveBeenCalled();
 
     act(() => useStore.setState({ tasks: [{ ...task, due: "2999-03-01" }] }));
-    // Editing a task occurs outside the export panel. Reopen it to exercise the
-    // actual return journey, not an impossible in-panel date editor.
-    fireEvent.click(screen.getByRole("button", { name: /Hide options/ }));
+    // The date is edited outside Integrations. Remount like a route return,
+    // instead of assuming a task editor exists inside the calendar panel.
+    cleanup();
+    render(<IntegrationsPage />);
     fireEvent.click(screen.getByRole("button", { name: /Create calendar file/ }));
     expect(screen.getByText(/^1 event/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Download .ics/ }));
