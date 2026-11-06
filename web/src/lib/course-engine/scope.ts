@@ -37,7 +37,8 @@ export function parseWeek(value: unknown): number | undefined {
   if (typeof value === "number") return Number.isInteger(value) && value > 0 && value < 100 ? value : undefined;
   if (typeof value !== "string") return undefined;
   // Do not turn a date, module number or source-week range into a single week.
-  const match = value.trim().match(/^(?:(?:week|wk|w)\s*:?\s*#?\s*)?(\d{1,2})$/i);
+  // Separators own their whitespace so malformed padding cannot backtrack cubically.
+  const match = value.trim().match(/^(?:(?:week|wk|w)\s*(?::\s*)?(?:#\s*)?)?(\d{1,2})$/i);
   return match ? parseWeek(Number(match[1])) : undefined;
 }
 

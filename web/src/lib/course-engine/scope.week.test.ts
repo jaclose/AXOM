@@ -1,5 +1,6 @@
 import { describe, it } from "vitest";
 import { strict as assert } from "node:assert";
+import { spawnSync } from "node:child_process";
 import type { QuestionRecord } from "../questions";
 import {
   groupQuestionsByScope, parseWeek, questionScope, scopeProgress, trackerPathScope,
@@ -32,6 +33,20 @@ describe("source-week integrity", () => {
       "Week 0", "Week 100", "-2", "+2", "1.5", "1e1", "0x10", "009", "#2",
       "Week 2\nWeek 3", "Week 2\u0000", "Week ２", "2w",
     ]) assert.equal(parseWeek(input), undefined, String(input));
+  });
+
+  it("rejects heavily padded malformed labels within a bounded process", () => {
+    // A subprocess bounds a future regexp regression without wedging Vitest.
+    const moduleUrl = new URL("./scope.ts", import.meta.url).href;
+    const probe = spawnSync(process.execPath, [
+      "--experimental-strip-types", "--input-type=module", "--eval",
+      `import { parseWeek } from ${JSON.stringify(moduleUrl)};
+       for (const prefix of ["Week", "Week:", "Week:#"]) {
+         if (parseWeek(prefix + " ".repeat(100_000) + "x") !== undefined) process.exit(1);
+       }`,
+    ], { encoding: "utf8", timeout: 5_000 });
+    assert.equal(probe.error, undefined, probe.error?.message);
+    assert.equal(probe.status, 0, probe.stderr);
   });
 
   it("round-trips every supported week without accepting trailing source text", () => {
