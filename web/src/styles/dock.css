@@ -97,7 +97,7 @@
 /* Only mounted while expanded, so secondary actions belong to the pill's
    layout instead of becoming a detached hover capsule. */
 .dock-more { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 2px; }
-.dock-more .dock-icon { width: 26px; height: 32px; }
+.dock-more .dock-icon { width: 24px; height: 32px; }
 .dock-log-menu {
   position: absolute;
   right: 12px;
@@ -338,21 +338,23 @@
 .dock-sound-name { flex: 1 1 auto; min-width: 0; overflow: hidden; }
 .dock-sound-name b, .dock-sound-name small { overflow: hidden; text-overflow: ellipsis; }
 .dock-timer .dock-label { flex: 1; min-width: 0; }
-/* Make space for inline actions by swapping the decorative ring and title
-   for controls while retaining the clock and primary pause/play button. */
-.dock-timer.expanded { gap: 4px; padding-inline: 7px; }
-.dock-timer.expanded .dock-ring,
+/* Keep the ring and clock anchored while hover reveals secondary actions:
+   moving the timer trigger under the pointer can swallow its click. */
 .dock-timer.expanded .dock-label { display: none; }
 .dock-timer.expanded .dock-clock {
   flex: 1 1 auto;
-  min-width: 40px;
+  min-width: 50px;
   max-width: 100%;
   overflow: hidden;
-  font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.dock-timer.expanded > .dock-icon.primary { width: 30px; }
+/* A three-action live session needs the decorative ring's space. */
+.dock-timer.expanded:has(.dock-more .dock-icon:nth-child(3)) .dock-ring { display: none; }
+.dock-timer.expanded:has(.dock-more .dock-icon:nth-child(3)) .dock-clock {
+  min-width: 40px;
+  font-size: 14px;
+}
 .dock-timer-trigger { padding: 0; color: inherit; background: transparent; border: 0; cursor: pointer; }
 .dock-timer-trigger:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); border-radius: 4px; }
 .dock-setup {
@@ -378,14 +380,27 @@
   .dock-sound-name { padding-inline: 2px; }
   .dock-sound-name b { max-width: 100%; }
 }
-/* Keep the floating controls reachable across the gap above the pill. */
+/* Keep the timer setup and quick-log popovers reachable across the gap. */
 .dock-timer.expanded::before { content: ""; position: absolute; bottom: 100%; left: 0; width: 100%; height: 12px; }
 
 /* Small screens get a two-row timer on expansion. Both capsules share the
    same height, with quick actions inside (not floating above) the timer. */
 @media (max-width: 440px) {
   .focus-dock .dock-capsule { height: 64px; }
-  .dock-timer.expanded { padding-bottom: 32px; }
+  /* Reserve the second line in both states so tapping the clock never moves it. */
+  .dock-timer { padding-bottom: 32px; }
+  .dock-timer .dock-label {
+    position: absolute;
+    display: block;
+    bottom: 6px;
+    left: 10px;
+    right: 10px;
+    max-width: none;
+    font-size: 10px;
+    text-align: center;
+  }
+  .dock-timer.expanded .dock-label { display: none; }
+  .dock-timer.expanded .dock-clock { min-width: 40px; font-size: 15px; }
   .dock-timer.expanded .dock-more {
     position: absolute;
     inset: auto 5px 0;
