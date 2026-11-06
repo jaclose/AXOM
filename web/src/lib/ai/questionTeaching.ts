@@ -47,6 +47,7 @@ export async function draftQuestionExplanation(
     throw new Error("An image or media question needs its actual exhibit before a model can explain it.");
   }
   if (question.explanation?.trim()) throw new Error("An existing explanation must never be replaced automatically.");
+  if (Object.keys(question.choiceRationales ?? {}).length > 0) throw new Error("An existing choice rationale must never be replaced automatically.");
   const correct = question.options.find(option => option.key === question.correctKey);
   if (!correct) throw new Error("A reviewed answer is required before an explanation can be drafted.");
 
