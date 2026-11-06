@@ -64,6 +64,12 @@ vi.mock("../../lib/academicLibrary/ownedCourses", () => ({
   ownedCourseStatus: (course: { visibility: string }) => course.visibility,
 }));
 vi.mock("../tracker/AcademicCourseUpload", () => ({ AcademicCourseUpload: () => <p>Prepared package uploader</p> }));
+vi.mock("./CommunityQuestionSetPublisher", () => ({
+  CommunityQuestionSetPublisher: () => <h3>Publish a Question Set</h3>,
+}));
+vi.mock("./CommunityQuestionSetLibrary", () => ({
+  CommunityQuestionSetLibrary: () => <p>Approved Question Set Library loaded</p>,
+}));
 
 const row = { id: ids.collection, title: "Current course", module: "NCRS", term: "Term 4",
   current_revision_id: ids.revision, ready_questions: 8, review_questions: 2,
@@ -92,6 +98,17 @@ describe("Community Uploads", () => {
     mocks.prepareSaved.mockResolvedValue({ metadata: { ready_questions: 1, term: "Term 4", module: "NCRS" } });
   });
   afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+  it("offers separate Question Set publishing and loads approved sets only on request", () => {
+    render(<CommunityUploads onOpenLibrary={vi.fn()} />);
+    expect(screen.getByRole("heading", { name: "Publish a Question Set" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Share a course" })).toBeTruthy();
+    expect(screen.queryByText("Approved Question Set Library loaded")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Browse approved Question Sets" }));
+    expect(screen.getByText("Approved Question Set Library loaded")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Hide approved Question Sets" }));
+    expect(screen.queryByText("Approved Question Set Library loaded")).toBeNull();
+  });
 
   it("requires sign-in and keeps unreviewed courses outside the official catalog", () => {
     mocks.account.id = undefined;
