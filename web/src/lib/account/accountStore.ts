@@ -354,7 +354,7 @@ export const useAccount = create<AccountState>((set, get) => {
         if (data.session) applySession(data.session);
         return data.session ? "signed-in" : "confirm";
       });
-      if (result === "confirm") set({ pendingCodeEmail: email.trim(), pendingCodeKind: "signup", message: `We emailed a confirmation code to ${email.trim()}. Enter it below, or use the link in the email. Local work is unchanged.` });
+      if (result === "confirm") set({ pendingCodeEmail: undefined, pendingCodeKind: undefined, message: "Check your email for the account confirmation link. After confirming, sign in with your password. Your local workspace has not changed." });
       if (result === "signed-in") set({ message: "Account created. Choose whether to protect this device’s workspace." });
       return Boolean(result);
     },
