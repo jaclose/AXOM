@@ -69,6 +69,39 @@ describe("AnkiConnect client", () => {
     await expect(timeout.call("findCards", { query: "deck:X" })).rejects.toMatchObject({ kind: "endpoint-unreachable", message: expect.stringContaining("did not answer") });
   });
 
+  it("blocks public endpoints and hostname-prefix spoofing before transmitting an Anki API key", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ result: 6, error: null })));
+    for (const endpoint of [
+      "https://anki.example.com:8765",
+      "http://8.8.8.8:8765",
+      "http://127.0.0.1.attacker.example:8765",
+      "http://10.attacker.example:8765",
+      "http://192.168.attacker.example:8765",
+      "http://172.16.attacker.example:8765",
+      "http://169.254.attacker.example:8765",
+      "http://user:pass@127.0.0.1:8765",
+    ]) {
+      await expect(createAnkiClient({ endpoint, apiKey: "device-secret", fetchImpl }).call("version"))
+        .rejects.toMatchObject({ kind: "malformed-endpoint" });
+    }
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("prevents API-key POST redirects while preserving local/private-LAN transport", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ result: 6, error: null })));
+    for (const endpoint of ["http://127.0.0.1:8765", "http://192.168.1.20:8765"]) {
+      const client = createAnkiClient({ endpoint, apiKey: "device-secret", fetchImpl });
+      await expect(client.call("version")).resolves.toBe(6);
+    }
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    for (const [, init] of fetchImpl.mock.calls as unknown as [string, RequestInit][]) {
+      expect(init).toMatchObject({
+        method: "POST", mode: "cors", credentials: "omit", redirect: "error",
+      });
+      expect(JSON.parse(String(init.body))).toMatchObject({ key: "device-secret", action: "version" });
+    }
+  });
+
   it("recognizes loopback and private addresses for Local Network Access", () => {
     expect(addressSpaceFor(new URL("http://127.0.0.1:8765"))).toBe("loopback");
     expect(addressSpaceFor(new URL("http://localhost:8765"))).toBe("loopback");
@@ -76,6 +109,11 @@ describe("AnkiConnect client", () => {
     expect(addressSpaceFor(new URL("http://192.168.1.20:8765"))).toBe("local");
     expect(addressSpaceFor(new URL("http://anki.local:8765"))).toBe("local");
     expect(addressSpaceFor(new URL("https://example.com"))).toBeNull();
+    expect(addressSpaceFor(new URL("http://127.attacker.example:8765"))).toBeNull();
+    expect(addressSpaceFor(new URL("http://10.attacker.example:8765"))).toBeNull();
+    expect(addressSpaceFor(new URL("http://192.168.attacker.example:8765"))).toBeNull();
+    expect(addressSpaceFor(new URL("http://172.16.attacker.example:8765"))).toBeNull();
+    expect(addressSpaceFor(new URL("http://169.254.attacker.example:8765"))).toBeNull();
   });
 
   it("reads a review snapshot in chart order", async () => {
