@@ -331,19 +331,24 @@ export async function loadProgressBoard(accountId: string, fromDay: string): Pro
 }
 
 
-/** Read every page before ranking. A service bound is explicit; a partial board
- * must never look like a complete ranking of the community. */
+/** Read every page before ranking. Immutable UUID keysets prevent an earlier
+ * deletion from shifting an unread learner past an offset. A service bound is
+ * explicit; a partial board must never look like a complete ranking. */
 async function loadAllBoardPosts(client: SupabaseClient, fromDay: string): Promise<CommunityPost[]> {
   const posts: CommunityPost[] = [];
   const seen = new Set<string>();
-  for (let offset = 0; offset <= maxBoardPosts; offset += boardPageSize) {
-    const { data, error } = await client.from("social_posts").select(postFields).eq("kind", "progress").neq("visibility", "private").gte("activity_day", fromDay)
-      .order("activity_day", { ascending: false }).order("id", { ascending: true }).range(offset, offset + boardPageSize - 1);
+  let cursor: string | undefined;
+  for (let page = 0; page <= maxBoardPosts / boardPageSize; page++) {
+    let query = client.from("social_posts").select(postFields).eq("kind", "progress").neq("visibility", "private").gte("activity_day", fromDay)
+      .order("id", { ascending: true }).limit(boardPageSize);
+    if (cursor) query = query.gt("id", cursor);
+    const { data, error } = await query;
     if (error || !bounded(data, boardPageSize, validPost)) throw new Error(boardError);
     for (const post of data as CommunityPost[]) {
-      if (seen.has(post.id)) throw new Error("Shared activity changed while loading. Refresh the leaderboard.");
+      if ((cursor && post.id <= cursor) || seen.has(post.id)) throw new Error("Shared activity changed while loading. Refresh the leaderboard.");
       seen.add(post.id);
       posts.push(post);
+      cursor = post.id;
     }
     if (posts.length > maxBoardPosts) throw new Error("There is too much shared activity to rank safely here. Try again after the community service is updated.");
     if (data.length < boardPageSize) return posts;

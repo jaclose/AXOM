@@ -107,7 +107,10 @@ test("community conversations, profile edits and audience withdrawal work across
       for (const theme of ["dark", "light"] as const) {
         await other.setViewportSize({ width, height: width < 768 ? 844 : 900 });
         await other.emulateMedia({ reducedMotion: "reduce", colorScheme: theme });
-        await other.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
+        await other.evaluate(value => {
+          document.documentElement.dataset.theme = value;
+          document.querySelector(".surface-scroll")?.scrollTo({ top: 0, behavior: "instant" });
+        }, theme);
         expect(await other.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
         expect(await other.locator(".community-page").evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
         await other.screenshot({ path: `/tmp/axom-community-${width}-${theme}.png` });

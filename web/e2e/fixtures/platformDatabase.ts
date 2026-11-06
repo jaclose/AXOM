@@ -101,6 +101,7 @@ export async function createPlatformDatabase() {
       if (value.startsWith("eq.")) predicates.push(`${identifier(column)} = ${bind(value.slice(3))}`);
       else if (value.startsWith("neq.")) predicates.push(`${identifier(column)} <> ${bind(value.slice(4))}`);
       else if (value.startsWith("gte.")) predicates.push(`${identifier(column)} >= ${bind(value.slice(4))}`);
+      else if (value.startsWith("gt.")) predicates.push(`${identifier(column)} > ${bind(value.slice(3))}`);
       else if (value.startsWith("ilike.")) predicates.push(`${identifier(column)} ilike ${bind(value.slice(6))}`);
       else if (value.startsWith("in.(") && value.endsWith(")")) {
         const members = value.slice(4, -1).split(",");

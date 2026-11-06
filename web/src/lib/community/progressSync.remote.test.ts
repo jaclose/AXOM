@@ -22,6 +22,7 @@ function mockBackend(answer: (query: Query) => Response | Promise<Response>) {
       limit: (size: number) => { query.limit = size; return result; },
       eq: (field: string, value: unknown) => { query.filters[field] = value; return result; },
       neq: (field: string, value: unknown) => { query.filters[`neq:${field}`] = value; return result; },
+      gt: (field: string, value: unknown) => { query.filters[`gt:${field}`] = value; return result; },
       gte: (field: string, value: unknown) => { query.filters[`gte:${field}`] = value; return result; },
       in: (field: string, value: unknown[]) => { query.filters[`in:${field}`] = value; return result; },
       abortSignal: (signal: AbortSignal) => { query.signal = signal; return result; },
@@ -133,21 +134,45 @@ describe("automatic daily sharing with server consent and conflict control", () 
 
 describe("leaderboard data and account sharing preferences", () => {
   it("loads every page before ranking and resolves every author's visible profile", async () => {
-    const rows = Array.from({ length: 501 }, (_, index) => ({ id: `p${index}`, user_id: "ana", kind: "progress", visibility: "friends", activity_day: "2026-11-05",
+    const rows = Array.from({ length: 501 }, (_, index) => ({ id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, user_id: "ana", kind: "progress", visibility: "friends", activity_day: "2026-11-05",
       minutes: 30, cards: 0, questions: 4, set_title: null, caption: "", created_at: "2026-11-05T12:00:00Z" }));
     const queries = mockBackend(query => {
       if (query.table === "social_profiles" && query.filters.user_id === "me") return ok([{ user_id: "me", handle: "me_handle", display_name: "Me", bio: "", discoverable: false }]);
       if (query.table === "social_profiles") return ok([{ user_id: "ana", handle: "ana", display_name: "Ana", bio: "", discoverable: true }]);
       if (query.table === "social_connections") return ok([{ id: "c1", requester_id: "me", addressee_id: "ana", status: "accepted" }]);
-      if (query.table === "social_posts") return ok(rows.slice(query.range?.[0], (query.range?.[1] ?? 0) + 1));
+      if (query.table === "social_posts") return ok(rows.filter(row => row.id > String(query.filters["gt:id"] ?? "")).slice(0, query.limit));
       throw new Error("Unexpected query");
     });
     const data = await loadProgressBoard("me", "2026-10-07");
     expect(data.friendIds).toEqual(["ana"]);
     expect(data.posts).toHaveLength(501);
     expect(data.profiles.map(item => item.user_id)).toEqual(["me", "ana"]);
-    expect(queries.filter(query => query.table === "social_posts").map(query => query.range)).toEqual([[0, 499], [500, 999]]);
+    expect(queries.filter(query => query.table === "social_posts").map(query => [query.filters["gt:id"], query.limit, query.range]))
+      .toEqual([[undefined, 500, undefined], [rows[499].id, 500, undefined]]);
     await expect(loadProgressBoard("me", "last month")).rejects.toThrow(/period/);
+  });
+
+  it("does not skip another learner when an already-read row is deleted between board pages", async () => {
+    const rows = Array.from({ length: 501 }, (_, index) => ({ id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      user_id: index === 500 ? "ben" : "ana", kind: "progress", visibility: "community", activity_day: "2026-11-05",
+      minutes: 30, cards: 0, questions: 4, set_title: null, caption: "", created_at: "2026-11-05T12:00:00Z" }));
+    const removedId = rows[0].id;
+    let postReads = 0;
+    mockBackend(query => {
+      if (query.table === "social_posts") {
+        if (++postReads === 2) rows.shift();
+        return ok(rows.filter(row => row.id > String(query.filters["gt:id"] ?? "")).slice(0, query.limit));
+      }
+      if (query.table === "social_profiles" && query.filters.user_id === "me") return ok([]);
+      if (query.table === "social_profiles") return ok(["ana", "ben"].map(id => ({ user_id: id, handle: id, display_name: id, bio: "", discoverable: true })));
+      if (query.table === "social_connections") return ok([]);
+      throw new Error("Unexpected query");
+    });
+    const data = await loadProgressBoard("me", "2026-10-07");
+    expect(postReads).toBe(2);
+    expect(data.posts.filter(post => post.id !== removedId).map(post => post.id)).toEqual(rows.map(post => post.id));
+    expect(data.posts.filter(post => post.user_id === "ben")).toHaveLength(1);
+    expect(new Set(data.posts.map(post => post.id)).size).toBe(data.posts.length);
   });
 
   it("reads and saves validated preferences through account-bound RPCs", async () => {

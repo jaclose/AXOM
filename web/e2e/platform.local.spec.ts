@@ -109,6 +109,7 @@ test("Host and Community persist across two synthetic accounts with real SQL aut
     const sharedPost = other.locator(".community-post").filter({ hasText: "A focused study block, shared with friends." });
     await expect(sharedPost).toContainText("45");
     await expect(sharedPost).toContainText("9");
+    await other.locator(".community-board-note summary").click();
     await expect(other.getByText(/Self-shared daily totals, not independently verified/)).toBeVisible();
     await expect(other.locator(".community-board-row").filter({ hasText: owner.name })).toContainText("9 questions");
     await expect(other.getByText("PRIVATE FIXTURE NOTE MUST NEVER ENTER A SOCIAL POST", { exact: true })).toHaveCount(0);
