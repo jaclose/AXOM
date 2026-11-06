@@ -106,10 +106,10 @@ function hasConsistentPrimaryFiling(
 ): boolean {
   // A source-unbound legacy question may be valid, but a malformed *declared*
   // week cannot become module-wide eligible progress when full evidence exists.
-  const declaredWeek: unknown = question.week;
-  if (hasFullSourceIndex && declaredWeek != null
-    && (typeof declaredWeek !== "string" || declaredWeek.trim() !== "")
-    && parseWeek(declaredWeek) === undefined) return false;
+  const rawQuestionWeek: unknown = question.week;
+  if (hasFullSourceIndex && rawQuestionWeek != null
+    && (typeof rawQuestionWeek !== "string" || rawQuestionWeek.trim() !== "")
+    && parseWeek(rawQuestionWeek) === undefined) return false;
   if (!question.setId || !setsById) return true;
   const primary = setsById.get(question.setId);
   if (!primary) return false;
