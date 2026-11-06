@@ -47,11 +47,30 @@ export const AXOM_CORRESPONDENTS = [
 ] as const;
 
 export type CorrespondentId = (typeof AXOM_CORRESPONDENTS)[number]["id"];
+export const CORRESPONDENT_ORDERS = {
+  ARCHITECTS: ["meridian","lattice","atlas","cipher","orrery"],
+  SEEKERS: ["fathom","aster","oriel","verge","eidolon"],
+  SENTINELS: ["argent","kestrel","cairn","rook","thren"],
+  KEEPERS: ["vellum","quill","vesper","nacre","virelai"],
+  ALCHEMISTS: ["calder","ember","mosaic","arc","tessera"],
+  WAYFINDERS: ["morrow","vela","solstice","zephyr","halcyon"],
+  WARDENS: ["juniper","harbor","serein","thistle","calyx"],
+  LUMINARIES: ["aureline","helion","caelum","solara","noctis"],
+} as const;
+export type CorrespondentOrder = keyof typeof CORRESPONDENT_ORDERS;
+function orderOf(id: string): CorrespondentOrder {
+  return (Object.keys(CORRESPONDENT_ORDERS) as CorrespondentOrder[])
+    .find(order => (CORRESPONDENT_ORDERS[order] as readonly string[]).includes(id)) ?? "ARCHITECTS";
+}
+
 export const CORRESPONDENT_STYLES = ["planning","systems","visual","writing","reflection","creative","research","precision","calm","steady","practical","growth","connection","exploration"] as const;
 export type CorrespondentStyle = (typeof CORRESPONDENT_STYLES)[number];
 type Card = (typeof AXOM_CORRESPONDENTS)[number];
 export interface CorrespondentInput {
   userKey: string;
+  academicHouse?: CorrespondentOrder;
+  preferredRhythm?: "steady" | "focused" | "deep" | "bursts" | "flexible";
+  supportStyle?: "encourage" | "challenge" | "neutral";
   selectedAccent?: string; // only a deliberately chosen color; not default #C8A96A
   declaredStyles?: readonly string[];
   journalOptIn?: boolean;
@@ -88,26 +107,34 @@ function starter(card: Card): CorrespondentMatch {
     basis:"starter",reasons:["AXOM assigned a starter correspondent from its 40-name collection. No personal writing was used."],inferredPersonality:false };
 }
 export function matchCorrespondent(input: CorrespondentInput): CorrespondentMatch {
-  const chosen=AXOM_CORRESPONDENTS.find(c=>c.id===input.preferredId);
-  if (chosen) return { ...starter(chosen),basis:"chosen",reasons:["You chose this correspondent."] };
-  const accent=safeAccent(input.selectedAccent), hue=accent?hueOf(accent):-1;
-  const declared=styles(input.declaredStyles), journal=input.journalOptIn===true?styles(input.journalThemes):[];
-  const idHash=stableHash(input.userKey||"axom");
-  if (!accent && !declared.length && !journal.length) return starter(AXOM_CORRESPONDENTS[idHash%AXOM_CORRESPONDENTS.length]);
-  let selected:Card|undefined, highest=-Infinity;
+  const chosen = AXOM_CORRESPONDENTS.find(c => c.id === input.preferredId);
+  if (chosen) return { ...starter(chosen), basis: "chosen", reasons: ["You chose this correspondent."] };
+  const accent = safeAccent(input.selectedAccent);
+  // Only explicit academic preferences affect correspondence. Color changes presentation, not inferred personality.
+  const declared = styles(input.declaredStyles);
+  const journal = input.journalOptIn === true ? styles(input.journalThemes) : [];
+  const hasEvidence = Boolean(input.academicHouse || input.preferredRhythm || input.supportStyle || declared.length || journal.length);
+  const seed = stableHash(input.userKey || "axom");
+  if (!hasEvidence) return { ...starter(AXOM_CORRESPONDENTS[seed % AXOM_CORRESPONDENTS.length]), accent: accent ?? "#C8A96A" };
+  let selected: Card | undefined;
+  let highest = -Infinity;
+  const paceByOrder: Record<CorrespondentOrder, string> = { ARCHITECTS:"steady", SEEKERS:"deep", SENTINELS:"focused", KEEPERS:"deep", ALCHEMISTS:"bursts", WAYFINDERS:"flexible", WARDENS:"steady", LUMINARIES:"focused" };
+  const supportByOrder: Record<CorrespondentOrder, string> = { ARCHITECTS:"challenge", SEEKERS:"neutral", SENTINELS:"challenge", KEEPERS:"encourage", ALCHEMISTS:"challenge", WAYFINDERS:"neutral", WARDENS:"encourage", LUMINARIES:"encourage" };
   for (const card of AXOM_CORRESPONDENTS) {
-    const d=hue<0?180:Math.min(Math.abs(hue-card.hue),360-Math.abs(hue-card.hue));
-    const colorScore=accent?(hue<0?1:Math.max(0,120-d)/40):0;
-    const overlap=(tag:string)=> (card.tags as readonly string[]).includes(tag);
-    const score=colorScore+declared.reduce((n,t)=>n+(overlap(t)?3:0),0)+journal.reduce((n,t)=>n+(overlap(t)?2:0),0)
-      + (stableHash(input.userKey+"|"+card.id)/0xffffffff)*0.0001;
-    if(score>highest){highest=score;selected=card;}
+    const overlap = (tag: string) => (card.tags as readonly string[]).includes(tag);
+    const order = orderOf(card.id);
+    const score = (input.academicHouse === order ? 14 : 0)
+      + declared.reduce((sum, tag) => sum + (overlap(tag) ? 5 : 0), 0)
+      + journal.reduce((sum, tag) => sum + (overlap(tag) ? 2 : 0), 0)
+      + (input.preferredRhythm === paceByOrder[order] ? 3 : 0)
+      + (input.supportStyle === supportByOrder[order] ? 2 : 0)
+      + stableHash((input.userKey || "axom") + "|" + card.id) / 0xFFFFFFFF * 0.0001;
+    if (score > highest) { highest = score; selected = card; }
   }
-  const reasons:string[]=[];
-  if(accent) reasons.push("Your selected "+family(hue)+" color informed the visual pairing.");
-  if(declared.length) reasons.push("You selected "+declared.join(", ")+" as work-style preferences.");
-  if(journal.length) reasons.push("An optional journal theme you reviewed locally informed this suggestion; no entry text was shared.");
-  return { ...starter(selected!),accent:accent??"#C8A96A",basis:"preferences",reasons };
+  const reasons: string[] = [];
+  if (input.academicHouse || declared.length || input.preferredRhythm || input.supportStyle) reasons.push("Academic study preferences contributed to this optional suggestion.");
+  if (journal.length) reasons.push("An optional journal theme you reviewed locally informed this suggestion; no entry text was shared.");
+  return { ...starter(selected!), accent: accent ?? "#C8A96A", basis:"preferences", reasons, inferredPersonality:false };
 }
 
 function escapeHtml(s:string){return s.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]!));}
