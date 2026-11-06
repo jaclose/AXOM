@@ -5,15 +5,9 @@ authority: current-state
 ---
 # AXOM current AI state
 
-## Homepage alpha · 2026-11-06
+## Homepage alpha
 
-[PR #123](https://github.com/jaclose/AXOM/pull/123) publishes JD's approved
-36-second desktop/portrait films as the full-page homepage. Source assets retain
-exact SHA-256 hashes; entry, auth, themes and learner data stay unchanged.
-See [cinematic entry](features/cinematic-landing.md). Approval includes commit,
-push and publication. Use PR checks and deployment status for release evidence,
-not this source handoff. Other owners' worktrees remain untouched.
-
+See [cinematic entry](features/cinematic-landing.md).
 
 ## Productivity and Soundscapes · 2026-11-05
 
