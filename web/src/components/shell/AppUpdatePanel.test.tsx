@@ -42,7 +42,7 @@ describe("app update save-failure confirmation", () => {
   it("shows a clear data-loss warning and allows the user to cancel without refreshing", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     render(<AppUpdatePanel />);
-    expect(screen.getByRole("alert").textContent).toContain("unverified changes could be permanently lost");
+    expect(screen.getAllByRole("alert").some((alert) => alert.textContent?.includes("unverified changes could be permanently lost"))).toBe(true);
     expect(screen.getByRole("button", { name: "Retry save and refresh" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Refresh anyway" }));
     expect(confirm).toHaveBeenCalledOnce();
