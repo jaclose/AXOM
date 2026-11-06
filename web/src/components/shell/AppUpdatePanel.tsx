@@ -29,7 +29,7 @@ export function requestApplyUpdate(): void {
 }
 
 export function requestApplyUpdateWithVerifiedSave(): void {
-  const prompt = "AXOM saved and verified your latest workspace, but browser storage could not hold an extra recovery copy. Refresh now using the verified saved workspace? Export a backup first if you want a separate copy.";
+  const prompt = "AXOM saved and verified your latest workspace, but could not create an extra recovery copy. Are you sure you want to refresh without that extra copy? AXOM will verify the saved workspace again before refreshing. You can export a backup first.";
   if (window.confirm(prompt)) void appUpdates.apply({ skipRecoverySnapshot: true });
 }
 
@@ -87,7 +87,7 @@ export function AppUpdatePanel() {
         {state.lastChecked && <small>Last checked {new Date(state.lastChecked).toLocaleString()}</small>}
       </div>
       {state.restartPending && state.phase === "error" && <p className="sub">The update is already prepared. Retry the restart below; it will save your current workspace again without reinstalling.</p>}
-      {canContinueWithVerifiedSave && <p className="sub">Your saved workspace was verified. The browser could not make a second recovery copy because storage is full. Export a backup first, or refresh with the verified save.</p>}
+      {canContinueWithVerifiedSave && <p className="sub">Your latest workspace was saved and verified. AXOM could not create the additional recovery copy. You can retry saving the full backup or refresh with the verified save after confirmation.</p>}
       {canRefreshWithoutVerifiedSave && <p className="sub" role="alert">AXOM could not verify your latest workspace save. You may retry saving or choose to refresh anyway, but unverified changes could be permanently lost. Export a backup from Settings first if possible.</p>}
       {state.phase === "downloading" && <div>
         <progress aria-label="Update download" value={state.totalBytes ? state.downloadedBytes : undefined} max={state.totalBytes ?? 1} style={{ width: "100%" }} />
@@ -109,7 +109,7 @@ export function AppUpdatePanel() {
           Download updates in the background (installing always waits for you)
         </label>
       )}
-      <p className="settings-update-note">AXOM normally saves and verifies your workspace before updating. If saving fails, a refresh without verification is available only after you confirm the risk of losing changes.</p>
+      <p className="settings-update-note">AXOM normally verifies the primary workspace save and a separate recovery copy before updating. If only the extra copy fails, a confirmed web refresh can use the verified workspace. If the primary save fails, refreshing without verification requires a separate data-loss confirmation.</p>
       <Suspense fallback={<p className="sub">Loading release notes…</p>}><ReleaseNotesHistory /></Suspense>
     </section>
   );
