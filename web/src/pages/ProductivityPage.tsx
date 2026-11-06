@@ -130,11 +130,15 @@ export function ProductivityPage() {
               <GButton size="sm" onClick={() => setModuleTourOpen(true)} aria-label="Open Productivity help tour"><HelpCircle size={ICON_SIZE.body} /> Help</GButton>
             </div>
           ) : <div className="row wrap gap6"><GButton size="sm" onClick={() => setPickedDay(null)}>Back to today</GButton><GButton size="sm" onClick={() => setModuleTourOpen(true)} aria-label="Open Productivity help tour"><HelpCircle size={ICON_SIZE.body} /> Help</GButton></div>} />
-        <DailyProgressVessel result={dailyProgress} />
+        <DailyProgressVessel result={dailyProgress} dayLabel={isActive ? "Today" : "Selected day"} />
         {isActive && <StudyStreakMonitor state={s} result={dailyProgress} />}
 
         {isActive ? (
           <>
+            <div className="productivity-report-context">
+              <span><Activity size={ICON_SIZE.body} aria-hidden="true" /> Self-report</span>
+              <small>These entries are reported by you. Focus time is recorded separately when auto-log is on.</small>
+            </div>
             <div className="fast-activity-logger">
               <ActivityLabelInput value={manualType} onChange={setManualType} />
               <div className="fast-activity-measures" aria-label="Optional activity measurements">
