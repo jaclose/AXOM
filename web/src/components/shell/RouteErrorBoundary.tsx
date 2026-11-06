@@ -37,6 +37,9 @@ export class RouteErrorBoundary extends Component<Props, State> {
     }
   };
   reloadWithVerifiedSave = async () => {
+    // A verified primary save does not imply an independent recovery backup.
+    // Keep the fallback opt-in, even when a stale screen interrupted work.
+    if (!window.confirm("AXOM verified your saved workspace, but could not create an extra recovery copy. Are you sure you want to refresh without that extra recovery copy? Export a backup first if you need one.")) return;
     this.setState({ saving: true, recoveryError: undefined, canContinueWithoutRecoverySnapshot: false });
     try {
       await createUpdateCheckpoint(false, { skipRecoverySnapshot: true });
@@ -82,7 +85,7 @@ export class RouteErrorBoundary extends Component<Props, State> {
             </GButton>
           </div>
           {this.state.recoveryError && <p role="status">{this.state.recoveryError} This window has been kept open.</p>}
-          {this.state.canContinueWithoutRecoverySnapshot && <p className="sub">Your saved workspace was verified. Browser storage is full, so AXOM could not make a second recovery copy. Export a backup first, or refresh with the verified save.</p>}
+          {this.state.canContinueWithoutRecoverySnapshot && <p className="sub">Your saved workspace was verified, but AXOM could not create an extra recovery copy. Export a backup first if you need one, or refresh with the verified save after confirmation.</p>}
           <details className="route-error-details">
             <summary>Technical details</summary>
             <pre>{String(error.message).slice(0, 1200)}</pre>

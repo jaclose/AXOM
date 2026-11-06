@@ -5,6 +5,10 @@ authority: current-state
 ---
 # AXOM current AI state
 
+## Homepage alpha
+
+See [cinematic entry](features/cinematic-landing.md).
+
 ## Productivity and Soundscapes · 2026-11-05
 
 PR #122, `codex/productivity-soundscapes-20261105`, includes `eb4e5d3`. JD authorized
