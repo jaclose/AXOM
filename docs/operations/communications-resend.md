@@ -288,6 +288,17 @@ email delivery. To pause destructive work alone, set the deletion flag false.
 7. Start a small explicitly approved campaign. Watch provider errors, queue age and bounce
    rate. Production readiness depends on this acceptance, not on passing local mocks.
 
+## Resend Broadcast draft bridge (candidate, no live sending)
+
+The [draft-only Resend Broadcast bridge](resend-broadcast-bridge.md) prepares, creates,
+inspects and updates provider **drafts** from AXOM Studio exports with an ignored
+operator ledger and fail-closed ambiguous-response handling. It does not send or
+schedule mail, change production Contacts or create subscriber Segments. Provider
+Segments must be category-specific and audited against AXOM opt-in preferences:
+Resend Topic defaults alone do not prove consent for a Broadcast. Do not enable
+provider sends or dual-route scheduling until the bridge runbook's shared ledger,
+segment reconciliation and mutual-exclusion gates are implemented.
+
 ## 9. Publishing an essay using either path
 
 **AXOM delivery:** open `/#communications-admin`, author, save, review eligible audience,
