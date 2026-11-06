@@ -50,7 +50,7 @@ describe("RouteErrorBoundary", () => {
     expect(screen.getByRole("button", { name: "Reload AXOM" }).hasAttribute("disabled")).toBe(false);
   });
 
-  it("offers a verified-save refresh only after the browser backup hits quota", async () => {
+  it("offers a separately confirmed verified-save refresh after an extra backup fails", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.mocked(createUpdateCheckpoint).mockReset();
     vi.mocked(activateWaitingWebUpdate).mockReset();
@@ -58,13 +58,35 @@ describe("RouteErrorBoundary", () => {
       .mockRejectedValueOnce(Object.assign(new Error("Browser storage is full"), { canContinueWithoutRecoverySnapshot: true }))
       .mockResolvedValueOnce("verified-persisted-state");
     vi.mocked(activateWaitingWebUpdate).mockRejectedValueOnce(new Error("Worker unavailable"));
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<RouteErrorBoundary onHome={() => {}}><Boom error={new TypeError("Failed to fetch dynamically imported module: x.js")} /></RouteErrorBoundary>);
 
     fireEvent.click(screen.getByRole("button", { name: "Reload AXOM" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Refresh with verified save" })).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "Refresh with verified save" }));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("extra recovery copy"));
     await waitFor(() => expect(createUpdateCheckpoint).toHaveBeenNthCalledWith(2, false, { skipRecoverySnapshot: true }));
     expect(screen.getByRole("status").textContent).toContain("Worker unavailable");
+  });
+
+  it("does not refresh on rejected consent or misdiagnose a non-quota copy failure", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(createUpdateCheckpoint).mockReset();
+    vi.mocked(activateWaitingWebUpdate).mockReset();
+    vi.mocked(createUpdateCheckpoint).mockRejectedValueOnce(
+      Object.assign(new Error("Browser policy blocked a recovery copy"), { canContinueWithoutRecoverySnapshot: true }),
+    );
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<RouteErrorBoundary onHome={() => {}}><Boom error={new TypeError("Failed to fetch dynamically imported module: x.js")} /></RouteErrorBoundary>);
+
+    fireEvent.click(screen.getByRole("button", { name: "Reload AXOM" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh with verified save" })).toBeTruthy());
+    expect(screen.getByText(/could not create an extra recovery copy/i)).toBeTruthy();
+    expect(screen.queryByText(/browser storage is full/i)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh with verified save" }));
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(createUpdateCheckpoint).toHaveBeenCalledTimes(1);
+    expect(activateWaitingWebUpdate).not.toHaveBeenCalled();
   });
 
 });
