@@ -10,6 +10,7 @@ authority: navigation
 - [Deployment and updates](deployment.md)
 - [Troubleshooting](troubleshooting.md)
 - [Repository audit and hygiene policy](repository-audit.md)
+- [Maintenance lead cycle and 30-minute test sentinel](maintenance-lead-v1.md)
 - [Active protection and deferred maintenance](repository-audit.md#maintenance-registry)
 - [Branch recovery and consolidation checkpoint](branch-recovery-2026-10-07.md)
 
