@@ -144,8 +144,20 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
       }
     }
     for (const draft of drafts) {
+      const question = current.get(draft.questionId);
+      const keys = question?.options.map(option => option.key) ?? [];
+      if (draft.explanation.trim().length < 40 || draft.explanation.length > 30_000
+        || keys.some(key => (draft.choiceRationales[key] ?? "").trim().length < 10
+          || draft.choiceRationales[key].length > 10_000)) {
+        setGenerationError("Finish the explanation and every choice rationale before saving.");
+        return;
+      }
+    }
+    for (const draft of drafts) {
       bank.updateQuestion(draft.questionId, {
-        explanation: draft.explanation, choiceRationales: draft.choiceRationales,
+        // Do not silently masquerade AI-authored teaching prose as a source rationale.
+        explanation: `AXOM AI-assisted explanation (verify against source): ${draft.explanation.trim()}`,
+        choiceRationales: draft.choiceRationales,
       });
     }
     setDrafts([]);
@@ -211,8 +223,20 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
         <b>{drafts.length} AI draft{drafts.length === 1 ? "" : "s"} to inspect</b>
         {drafts.map((draft, index) => <details key={draft.questionId}>
           <summary>Question {set.questionIds.indexOf(draft.questionId) + 1 || index + 1} · Review explanation and choices</summary>
-          <p>{draft.explanation}</p>
-          <ul>{Object.entries(draft.choiceRationales).map(([key, rationale]) => <li key={key}>{key}: {rationale}</li>)}</ul>
+          <p className="qsl-draft-stem">{sourceQuestions.find(question => question?.id === draft.questionId)?.stem}</p>
+          <ul className="qsl-draft-options">{sourceQuestions.find(question => question?.id === draft.questionId)?.options.map(option =>
+            <li key={option.key}>{option.key}. {option.text}</li>)}</ul>
+          <label className="qsl-draft-field">Question {set.questionIds.indexOf(draft.questionId) + 1 || index + 1} explanation
+            <textarea rows={4} maxLength={30_000} value={draft.explanation}
+              onChange={event => setDrafts(current => current.map(item => item.questionId === draft.questionId
+                ? { ...item, explanation: event.target.value } : item))} />
+          </label>
+          {Object.entries(draft.choiceRationales).map(([key, rationale]) => <label className="qsl-draft-field"
+            key={key}>Question {set.questionIds.indexOf(draft.questionId) + 1 || index + 1} choice {key} rationale
+            <textarea rows={2} maxLength={10_000} value={rationale}
+              onChange={event => setDrafts(current => current.map(item => item.questionId === draft.questionId
+                ? { ...item, choiceRationales: { ...item.choiceRationales, [key]: event.target.value } } : item))} />
+          </label>)}
         </details>)}
         <GButton disabled={generating || busy} onClick={saveReviewedDrafts}>Save inspected explanations to my QBank</GButton>
         <p className="sub">Check these AI-generated drafts against the actual source. No explanation is saved or published automatically.</p>
