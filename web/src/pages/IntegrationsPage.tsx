@@ -163,11 +163,26 @@ function CalendarExportPanel() {
     const { tasks, boardPrep, dayPlans, activeDayKey } = useStore.getState();
     setExportError({ message, sources: { tasks, boardPrep, dayPlans, activeDayKey } });
   };
-  // Release obsolete errors after the normal subscribed update, too, so they
-  // cannot reappear if a later undo reuses the old source references.
+  // A source may change while this panel remains mounted and while React is
+  // processing a different surface. Watch the canonical store for the lifetime
+  // of the error rather than relying on a later parent render to dismiss it.
+  // Do not dismiss a real error for unrelated workspace state changes.
   useEffect(() => {
-    setExportError(null);
-  }, [state.tasks, state.boardPrep, state.dayPlans, state.activeDayKey]);
+    if (!exportError) return;
+    const stillCurrent = (next: ReturnType<typeof useStore.getState>) =>
+      exportError.sources.tasks === next.tasks
+      && exportError.sources.boardPrep === next.boardPrep
+      && exportError.sources.dayPlans === next.dayPlans
+      && exportError.sources.activeDayKey === next.activeDayKey;
+    // The source could have changed between reporting and subscribing.
+    if (!stillCurrent(useStore.getState())) {
+      setExportError(null);
+      return;
+    }
+    return useStore.subscribe((next) => {
+      if (!stillCurrent(next)) setExportError(null);
+    });
+  }, [exportError]);
   const events = calendarEvents(state, { tasks, exams, dayPlans, fromDay: state.activeDayKey });
   const downloadSelected = () => {
     let content: string;
