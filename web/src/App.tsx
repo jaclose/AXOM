@@ -28,6 +28,7 @@ import { SoundscapeTimerSync } from "./components/soundscapes/SoundscapeTimerSyn
 import { UserMediaBridge } from "./components/soundscapes/UserMediaBridge";
 import { FocusCheckIn } from "./components/shell/FocusCheckIn";
 import { AccountSyncWatcher } from "./components/shell/AccountSyncWatcher";
+import { CommunityProgressSync } from "./components/community/CommunityProgressSync";
 import { VaultSaveWatcher } from "./components/shell/VaultSaveWatcher";
 import { NAV, navById } from "./components/shell/nav";
 import { useOperatorAccess } from "./lib/operator/hostClient";
@@ -532,6 +533,7 @@ export default function App({ startupStatus }: { startupStatus?: StorageMigratio
       <FocusCheckIn />
       <NotificationActionBridge />
       <AccountSyncWatcher />
+      <CommunityProgressSync />
       <VaultSaveWatcher />
       <Toaster />
     </div>

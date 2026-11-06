@@ -29,7 +29,10 @@ migration `20261104120000_operator_accounts_email_text.sql` fixes the owner's
 Host dashboard, which failed on every load because `auth.users.email` is
 `varchar(255)` on Supabase. See the
 [operator console](features/community-operator-console.md#operator-console).
-The migration is not on production yet; push, `db push` and deploy need JD.
+Merged as PR #100 and deployed 2026-11-04; the migration is applied on
+production. On 2026-11-05 `claude/community-progress-20261105` added optional
+automatic progress sharing, Friends/Community leaderboards and a Community
+Reports panel for moderators and administrators (no migration).
 
 ## Checkout and release boundary · 2026-11-02 14:55 UTC
 

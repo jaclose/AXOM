@@ -16,6 +16,7 @@ import {
 import { isoDate } from "../lib/scoring";
 import { ICON_SIZE } from "../lib/iconSize";
 import { SharedDailyLeaderboard } from "../components/tracker/SharedDailyLeaderboard";
+import { CommunityLeaderboard } from "../components/community/CommunityLeaderboard";
 import "../styles/wip-experience.css";
 
 const BOARDS: Array<{ id: PersonalBoardMetric; label: string }> = [
@@ -178,7 +179,7 @@ export function LeaderboardsPage() {
           <div>
             <span className="lb-kicker">Optional · Shared</span>
             <h2 id="lb-shared-title">Shared study</h2>
-            <p>Shared standings use approved questions and an account. Your personal record above stays on this device.</p>
+            <p>Compare the study you and your friends share, and answer the Daily Challenge together. Your record above stays on this device unless you share daily totals from Community.</p>
           </div>
           <Tag tone="orange">Work in progress</Tag>
         </div>
@@ -193,6 +194,7 @@ export function LeaderboardsPage() {
           </GlassCard>
         ) : (
           <>
+            {accountId && <CommunityLeaderboard accountId={accountId} headingLevel={3} />}
             <SharedDailyLeaderboard />
             {!accountId && <GButton size="sm" onClick={() => useUi.getState().requestSettings("account")}>Open account settings <ArrowRight size={ICON_SIZE.body} aria-hidden="true" /></GButton>}
           </>

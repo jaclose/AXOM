@@ -123,8 +123,8 @@ test("Host and Community persist across two synthetic accounts with real SQL aut
     const sharedPost = other.locator(".community-post").filter({ hasText: "A focused study block, shared with friends." });
     await expect(sharedPost).toContainText("45");
     await expect(sharedPost).toContainText("9");
-    await expect(other.getByText(/Self-shared totals, not independently verified/)).toBeVisible();
-    await expect(other.locator(".community-rank").filter({ hasText: owner.name })).toContainText("9 questions");
+    await expect(other.getByText(/Self-shared daily totals, not independently verified/)).toBeVisible();
+    await expect(other.locator(".community-board-row").filter({ hasText: owner.name })).toContainText("9 questions");
     await expect(other.getByText("PRIVATE FIXTURE NOTE MUST NEVER ENTER A SOCIAL POST", { exact: true })).toHaveCount(0);
     await sharedPost.getByRole("button", { name: /Kudos/ }).click();
     await expect(other.getByText("Reaction saved.", { exact: true })).toBeVisible();
@@ -132,6 +132,31 @@ test("Host and Community persist across two synthetic accounts with real SQL aut
     await expect(sharedPost.getByRole("button", { name: /Kudos/ })).toHaveAttribute("aria-pressed", "true");
     expect(await database.asUser(owner.id, "select count(*)::integer as count from public.social_reactions")).toEqual([{ count: 1 }]);
     console.info("Platform fixture: Kudos persisted after acknowledgement and reload.");
+
+    // Automatic sharing: the member's logged day reaches a friend's leaderboard with no manual post.
+    await other.evaluate(async () => {
+      const dev = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
+      const now = new Date();
+      const dayKey = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
+      dev.useStore.setState({ logs: [{ id: "fixture-auto-share", dayKey, ts: now.toISOString(), type: "Manual",
+        minutes: 30, cards: 4, quantity: 6, quantityKind: "questions", academic: true, note: "AUTO SHARE NOTE MUST STAY PRIVATE" }] });
+      await dev.flushVault();
+    });
+    const sharing = other.getByRole("group", { name: "Automatic sharing", exact: true });
+    await expect(sharing.getByRole("button", { name: /^Off/ })).toHaveAttribute("aria-pressed", "true");
+    await sharing.getByRole("button", { name: /^Friends/ }).click();
+    await expect(sharing.getByRole("button", { name: /^Friends/ })).toHaveAttribute("aria-pressed", "true");
+    await expect(other.getByText(/Today's totals are shared/)).toBeVisible();
+    expect(await database.asUser(member.id, "select visibility,minutes,cards,questions,caption from public.social_posts where user_id=$1 and kind='progress'", [member.id]))
+      .toEqual([{ visibility: "friends", minutes: 30, cards: 4, questions: 6, caption: "" }]);
+    await other.reload();
+    await expect(other.getByRole("group", { name: "Automatic sharing", exact: true }).getByRole("button", { name: /^Friends/ })).toHaveAttribute("aria-pressed", "true");
+    await refreshCommunity(page);
+    const memberRow = page.locator(".community-board-row").filter({ hasText: member.name });
+    await expect(memberRow).toContainText("30 min");
+    await expect(memberRow).toContainText("Today 30 min");
+    await expect(page.getByText("AUTO SHARE NOTE MUST STAY PRIVATE", { exact: true })).toHaveCount(0);
+    console.info("Platform fixture: automatic sharing reached the friend's leaderboard.");
     await inspectResponsive(other, "community");
 
     await sharedPost.getByRole("button", { name: "Report", exact: true }).click();
@@ -157,6 +182,12 @@ test("Host and Community persist across two synthetic accounts with real SQL aut
     await expect(other.locator(".tb-title")).toHaveText("Dashboard");
     await expect(other.locator(".host-page")).toHaveCount(0);
     await expect(other.getByRole("heading", { name: "Accounts & AI", exact: true })).toHaveCount(0);
+    // Moderators review reports inside Community instead.
+    await other.goto(`${baseURL}/#community`);
+    await expect(other.getByRole("heading", { name: "Reported posts", exact: true })).toBeVisible();
+    await expect(other.getByText(/^Moderator review/)).toBeVisible();
+    await expect(other.getByText("No open reports. Private posts never enter this queue.", { exact: true })).toBeVisible();
+    await other.goto(`${baseURL}/#host`);
     await accountRow.getByRole("combobox", { name: "Role", exact: true }).selectOption("member");
     await accountRow.getByRole("textbox", { name: /^Reason for changing Fixture Briar/ }).fill("Synthetic acceptance: revoke moderation access.");
     await accountRow.getByRole("button", { name: "Apply role", exact: true }).click();
@@ -165,6 +196,8 @@ test("Host and Community persist across two synthetic accounts with real SQL aut
     await expect(other.locator(".tb-title")).toHaveText("Dashboard");
     await expect(other.locator(".host-page")).toHaveCount(0);
     await other.goto(`${baseURL}/#community`);
+    await expect(other.getByRole("heading", { name: "Your privacy", exact: true })).toBeVisible();
+    await expect(other.getByRole("heading", { name: "Reported posts", exact: true })).toHaveCount(0);
 
     await accountRow.getByLabel("Daily AI request cap", { exact: true }).fill("2");
     await accountRow.getByRole("textbox", { name: /^Reason for changing Fixture Briar/ }).fill("Synthetic acceptance: cap AI requests at two.");
