@@ -109,7 +109,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
     });
   }, [questionSets, questions, documents]);
   const localSource = localSources.find(source => source.document.id === localSourceId);
-  const availableQuestionSets = useMemo(() => questionSets.filter(set => set.questionIds.length > 0)
+  const availableQuestionSets = useMemo(() => questionSets.filter(set => Array.isArray(set.questionIds) && set.questionIds.length > 0)
     .sort((a, b) => a.title.localeCompare(b.title)), [questionSets]);
   const submittingQuestionSet = availableQuestionSets.find(set => set.id === submittingQuestionSetId);
   const preparedSource = localPrepared && localPrepared.accountId === accountId && localPrepared.sourceId === localSourceId
