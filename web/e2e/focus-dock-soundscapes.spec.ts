@@ -99,7 +99,7 @@ test("timer secondary actions remain inside their capsule at desktop and phone w
   const timer = dock.locator(".focus-dock-content .dock-timer");
   const sound = dock.locator(".focus-dock-content .dock-sound");
 
-  for (const width of [1440, 390, 320]) {
+  for (const width of [1440, 500, 390, 320]) {
     await page.setViewportSize({ width, height: 844 });
     await timer.getByRole("button", { name: "Pause timer" }).focus();
     const skip = timer.getByRole("button", { name: "Skip to next phase" });
@@ -115,6 +115,8 @@ test("timer secondary actions remain inside their capsule at desktop and phone w
       expect(soundBounds).not.toBeNull();
       expect(timerBounds!.width).toBeCloseTo(soundBounds!.width, 0);
       expect(timerBounds!.height).toBe(soundBounds!.height);
+      const clockBounds = await timer.getByRole("button", { name: "Timer options" }).boundingBox();
+      const primaryBounds = await timer.getByRole("button", { name: "Pause timer" }).boundingBox();
       for (const action of [skip, reset]) {
         const bounds = await action.boundingBox();
         expect(bounds).not.toBeNull();
@@ -122,6 +124,14 @@ test("timer secondary actions remain inside their capsule at desktop and phone w
         expect(bounds!.y).toBeGreaterThanOrEqual(timerBounds!.y);
         expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(timerBounds!.x + timerBounds!.width);
         expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(timerBounds!.y + timerBounds!.height);
+        if (width > 440) {
+          // At the intermediate no-label breakpoint, quick actions must not
+          // overlap the clock or the primary pause control.
+          expect(clockBounds).not.toBeNull();
+          expect(primaryBounds).not.toBeNull();
+          expect(bounds!.x).toBeGreaterThanOrEqual(clockBounds!.x + clockBounds!.width);
+          expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(primaryBounds!.x);
+        }
       }
     }).toPass({ timeout: 5_000 });
   }
