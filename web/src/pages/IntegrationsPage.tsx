@@ -172,7 +172,7 @@ function CalendarExportPanel({ state }: { state: ReturnType<typeof useStore.getS
       </div>
       {exportError && <p className="calendar-export-next" role="alert">{exportError}</p>}
       {!events.length && <p className="calendar-export-next">Nothing dated is ready to export. <a href="#productivity">Add a task with a due date</a> or choose another source above.</p>}
-      <p>Import it in Google Calendar (Settings → Import), Apple Calendar (File → Import), or Outlook. Re-export any time; events keep stable IDs so re-importing updates instead of duplicating in most apps.</p>
+      <p>Import it in Google Calendar (Settings → Import), Apple Calendar (File → Import), or Outlook. This is a file export, not live sync. On re-import, your calendar app may skip, update, or duplicate events; check the target calendar first.</p>
     </div>
   );
 }
