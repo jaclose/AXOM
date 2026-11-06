@@ -28,6 +28,7 @@ web/tsconfig.tsbuildinfo
 !/scripts/release-notes.mjs
 !/scripts/release-notes.d.mts
 !/scripts/deployment-inputs.mjs
+!/scripts/vercel-branch-gate.mjs
 !/scripts/toolchain.mjs
 
 # Shared Supabase AI proxy core used by web TypeScript tests.
