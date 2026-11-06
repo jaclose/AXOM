@@ -515,3 +515,48 @@ describe("review-only source collections cannot certify unsupported weeks", () =
     expect(index.unassignedCollections).toBe(0);
   });
 });
+
+
+describe("review-set weeks require original source or explicit question-week evidence", () => {
+  it("does not infer a legacy question's course or week from review-only membership", () => {
+    const secondary = set("review-only", ["legacy"], {
+      scope: { module: "GOER", week: 3, courseId: "ppm-501" }, kind: "review",
+    });
+    const legacy = question("legacy", { setId: undefined, module: undefined, week: undefined, courseId: undefined });
+    const index = buildQuestionAvailabilityIndex(input([secondary], [legacy]));
+    expect(index.unassignedQuestions).toBe(1);
+    expect(index.unassignedCollections).toBe(1);
+    expect(index.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toBeUndefined();
+  });
+
+  it("indexes the true original source week, not a secondary review-set week, for a legacy question", () => {
+    const primary = set("original", ["legacy"], {
+      scope: { module: "GOER", week: 2, courseId: "ppm-501" },
+    });
+    const secondary = set("review", ["legacy"], {
+      scope: { module: "GOER", week: 4, courseId: "ppm-501" }, kind: "review",
+    });
+    const legacy = question("legacy", { setId: undefined, module: undefined, week: undefined, courseId: undefined });
+    const before = JSON.stringify([primary, secondary, legacy]);
+    const index = buildQuestionAvailabilityIndex(input([primary, secondary], [legacy]));
+    expect(index.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+      storedQuestions: 1, readyQuestions: 1, reviewQuestions: 0,
+      unresolvedWeekQuestions: 0, indexedWeeks: [2], collections: 1,
+    });
+    expect(index.unassignedCollections).toBe(1);
+    expect(JSON.stringify([primary, secondary, legacy])).toBe(before);
+  });
+
+  it("does not invent a week for a personally filed but unscheduled question in a review set", () => {
+    const secondary = set("review", ["personal"], {
+      scope: { module: "GOER", week: 3, courseId: "ppm-501" }, kind: "review",
+    });
+    const personal = question("personal", { setId: undefined, module: "GOER", courseId: "ppm-501", week: undefined });
+    const index = buildQuestionAvailabilityIndex(input([secondary], [personal]));
+    expect(index.byModule.get(questionAvailabilityModuleKey("Term 5", "GOER"))).toMatchObject({
+      storedQuestions: 1, readyQuestions: 1, reviewQuestions: 0,
+      unresolvedWeekQuestions: 1, indexedWeeks: [], collections: 0,
+    });
+    expect(index.unassignedCollections).toBe(1);
+  });
+});
