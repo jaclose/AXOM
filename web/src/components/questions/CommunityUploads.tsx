@@ -19,6 +19,8 @@ import {
 } from "../../lib/academicLibrary/community";
 import { listOwnedAcademicCourses, ownedCourseStatus } from "../../lib/academicLibrary/ownedCourses";
 import { AcademicCourseUpload } from "../tracker/AcademicCourseUpload";
+import { CommunityQuestionSetPublisher } from "./CommunityQuestionSetPublisher";
+import { CommunityQuestionSetLibrary } from "./CommunityQuestionSetLibrary";
 import { GButton, GlassCard, Tag } from "../ui/primitives";
 import { TechnicalDetails } from "../shell/TechnicalDetails";
 import { ICON_SIZE } from "../../lib/iconSize";
@@ -52,6 +54,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
   const [search, setSearch] = useState("");
   const [term, setTerm] = useState("");
   const [refresh, setRefresh] = useState(0);
+  const [browseQuestionSets, setBrowseQuestionSets] = useState(false);
   const [page, setPage] = useState<Page>();
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState("");
@@ -378,7 +381,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
     <header className="community-hero">
       <span className="qb-eyebrow">Shared by learners</span>
       <h2>Community Uploads</h2>
-      <p>Explore courses shared by AXOM members. Practice answer-ready questions with an Unreviewed warning. An academic reviewer must approve a course before it enters the official Question Bank.</p>
+      <p>Publish and discover standalone Question Sets alongside course and source uploads. Question Sets are searchable after academic approval; courses remain Unreviewed until their exact revision is approved.</p>
     </header>
 
     {!accountId ? accountPhase === "loading" ? <GlassCard pad><p role="status">Checking your account…</p></GlassCard>
@@ -386,6 +389,18 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
       : <GlassCard pad><h3>Sign in to browse and contribute</h3><p>Community uploads are available to signed-in AXOM accounts.</p><GButton onClick={() => useUi.getState().requestSettings("account")}>Open account settings</GButton></GlassCard> : <>
       <div className="community-layout">
         <div className="community-results">
+          <section className="community-set-discovery" aria-label="Reviewed learner Question Sets">
+            <div>
+              <h3>Reviewed learner Question Sets</h3>
+              <p>Search approved learner collections and import a private copy. No course or module is required.</p>
+            </div>
+            <GButton type="button" aria-expanded={browseQuestionSets}
+              onClick={() => setBrowseQuestionSets(open => !open)}>
+              {browseQuestionSets ? "Hide approved Question Sets" : "Browse approved Question Sets"}
+            </GButton>
+            {browseQuestionSets && <CommunityQuestionSetLibrary />}
+          </section>
+          <h3 className="community-course-heading">Course uploads awaiting review</h3>
           <form className="community-search" onSubmit={searchNow}>
             <label>Find an upload<input type="search" value={draftSearch} onChange={event => setDraftSearch(event.target.value)} placeholder="Course or module" /></label>
             <label>Term<select value={term} onChange={event => setTerm(event.target.value)}><option value="">All terms</option>{TERMS.map(value => <option key={value}>{value}</option>)}</select></label>
@@ -428,6 +443,7 @@ export function CommunityUploads({ onOpenLibrary }: { onOpenLibrary: () => void 
         </div>
 
         <aside className="community-contribute">
+          <CommunityQuestionSetPublisher onOpenLibrary={onOpenLibrary} />
           <GlassCard pad><UploadCloud size={ICON_SIZE.display} aria-hidden="true" /><h3>Share a course</h3>
             <p>Share a saved source from your Question Bank. AXOM checks its questions and figures, saves a private copy, then lists it here as Unreviewed.</p>
             <fieldset className="community-local-upload" disabled={busyId === "local-source"}>

@@ -24,9 +24,9 @@ export function CommunitiesPage() {
       <div className="communities-masthead-copy">
         <span className="communities-kicker"><UsersRound size={ICON_SIZE.body} aria-hidden="true" /> AXOM / COMMUNITIES</span>
         <h1 id="communities-title">Shared study, with provenance.</h1>
-        <p>Explore learner-contributed courses, join a daily challenge, and connect with people you choose. Review status is visible before you practice.</p>
+        <p>Explore learner-contributed Question Sets and courses, join a daily challenge, and connect with people you choose. Review status is visible before you practice.</p>
         <div className="communities-index" aria-label="Community spaces">
-          <span><b>01</b> Course exchange</span>
+          <span><b>01</b> Study exchange</span>
           <span><b>02</b> Daily challenge</span>
           <span><b>03</b> Study circle</span>
         </div>
@@ -41,7 +41,7 @@ export function CommunitiesPage() {
         aria-pressed={space === "courses"} aria-controls="communities-content"
         onClick={() => setSpace("courses")}>
         <BookOpen size={ICON_SIZE.emphasis} aria-hidden="true" />
-        <span><b>Course exchange</b><small>Browse, preview, contribute</small></span>
+        <span><b>Study exchange</b><small>Question Sets and courses</small></span>
       </button>
       <button type="button" className={space === "challenge" ? "is-active" : ""}
         aria-pressed={space === "challenge"} aria-controls="communities-content"
@@ -57,7 +57,7 @@ export function CommunitiesPage() {
       </button>
     </div>
 
-    <section id="communities-content" className="communities-content" aria-label={space === "courses" ? "Course exchange" : space === "challenge" ? "Daily challenge" : "Study circle"}>
+    <section id="communities-content" className="communities-content" aria-label={space === "courses" ? "Study exchange" : space === "challenge" ? "Daily challenge" : "Study circle"}>
       {space === "courses" ? <CommunityUploads onOpenLibrary={() => { location.hash = "questions"; }} /> : space === "circle" ?
         <Suspense fallback={<p role="status">Opening your study circle…</p>}><CommunityPage /></Suspense> : <>
         <div className="communities-section-heading">

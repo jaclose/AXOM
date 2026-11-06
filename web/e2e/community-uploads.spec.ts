@@ -139,3 +139,59 @@ test("a reviewed saved source is checked, privately saved, then submitted as Unr
   expect(backend.calls).toContain("HEAD /rest/v1/academic_files");
   expect(errors).toEqual([]);
 });
+
+test("standalone QBank sets submit from Community without course filing or private overlays", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  const fixture = await academicCatalogFixture(page);
+  const submissionId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const submittedAt = "2026-11-06T12:00:00Z";
+  const submittedRows: Array<Record<string, unknown>> = [];
+  let payload: Record<string, unknown> | undefined;
+  await page.route("**/rpc/my_question_set_library", route => route.fulfill({ headers, json: submittedRows }));
+  await page.route("**/rpc/submit_question_set_library", route => {
+    payload = route.request().postDataJSON() as Record<string, unknown>;
+    submittedRows.push({ id: submissionId, source_id: "synthetic-independent-set",
+      title: "Independent clinical cases", credit: "", question_count: 1,
+      status: "pending", review_note: "", created_at: submittedAt });
+    return route.fulfill({ headers, json: submissionId });
+  });
+  await page.evaluate(async () => {
+    const dev = await (window as unknown as { __AXOM_DEV__: Promise<{ useStore: { getState: () => {
+      addQuestionSet: (value: unknown) => void;
+      addQuestion: (value: unknown) => { ok: boolean; errors: string[] };
+    } } }> }).__AXOM_DEV__;
+    const now = new Date().toISOString();
+    const state = dev.useStore.getState();
+    const result = state.addQuestion({ id: "synthetic-independent-question", source: "manual", status: "unseen",
+      stem: "Which synthetic letter comes first?", options: [{ key: "A", text: "A" }, { key: "B", text: "B" }],
+      correctKey: "A", explanation: "A is first in alphabetical order.", notes: "Private learner note.",
+      tags: [], attempts: [], createdAt: now, updatedAt: now });
+    if (!result.ok) throw new Error(`Synthetic question rejected: ${result.errors.join("; ")}`);
+    state.addQuestionSet({ id: "synthetic-independent-set", title: "Independent clinical cases", kind: "custom",
+      sourceDocumentIds: [], questionIds: ["synthetic-independent-question"], tags: ["synthetic"],
+      createdAt: now, aiEnhanced: false, parserWarnings: [] });
+  });
+  await page.getByRole("tab", { name: "Community" }).click();
+  const community = page.getByRole("region", { name: "Community Uploads" });
+  const selector = community.getByRole("combobox", { name: "Saved Question Set" });
+  await selector.selectOption("synthetic-independent-set");
+  await expect(community.getByText(/1 question selected/)).toBeVisible();
+  await community.getByRole("button", { name: "Review and submit set" }).click();
+  const dialog = page.getByRole("dialog", { name: "Submit Independent clinical cases" });
+  await expect(dialog.getByRole("button", { name: "Send for review" })).toBeDisabled();
+  await dialog.getByRole("checkbox", { name: /I own this content/ }).check();
+  await dialog.getByRole("checkbox", { name: /I checked every answer/ }).check();
+  await dialog.getByRole("button", { name: "Send for review" }).click();
+  await expect(dialog.getByText(/Submission received/)).toBeVisible();
+  expect(payload?.p_source_id).toBe("synthetic-independent-set");
+  expect(payload?.p_rights_confirmed).toBe(true);
+  expect(payload?.p_answers_confirmed).toBe(true);
+  const snapshot = payload?.p_snapshot as { questions: Array<Record<string, unknown>> };
+  expect(snapshot.questions).toHaveLength(1);
+  expect(snapshot.questions[0]).not.toHaveProperty("notes");
+  expect(fixture.requests).not.toContain("/rest/v1/rpc/academic_submit_community");
+  expect(await community.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+  expect(errors).toEqual([]);
+});

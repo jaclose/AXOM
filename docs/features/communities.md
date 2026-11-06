@@ -12,7 +12,18 @@ publication route, score rule, consent model, or medical content. The older
 `#community` route remains available for existing links; new navigation opens
 the Study circle space inside `#communities`.
 
-The course exchange reuses `CommunityUploads`. Members can browse, preview,
+Community Uploads now exposes two independent publication paths. A member can
+select an eligible locally saved QBank Question Set, preview its readiness and
+submit it directly, without inventing a course, term or module. This reuses
+`QuestionSetLibrarySubmitDialog` and the existing moderated Question Set Library:
+the contributor explicitly confirms sharing rights and answer review, and only
+approved sets become searchable and importable. Snapshot publication excludes
+notes, attempts, analytics, source files, attachments and course filing; media
+and unresolved answers block submission. Personal missed-review sets and imported
+community copies are not offered for republication. The approved-set browser
+is opened on demand, independently of the course submission list.
+
+The course exchange also reuses `CommunityUploads`. Members can browse, preview,
 download, contribute, and withdraw exact course revisions through the existing
 academic library boundary. Contributions remain visibly **Unreviewed** until an
 academic reviewer approves the stored revision. The [academic library](academic-library.md)
