@@ -142,9 +142,27 @@ function CalendarExportPanel({ state }: { state: ReturnType<typeof useStore.getS
   const [tasks, setTasks] = useState(true);
   const [exams, setExams] = useState(true);
   const [dayPlans, setDayPlans] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
-  // A learner may repair a malformed task or exam elsewhere while this panel
-  // remains mounted. Do not keep an error describing an obsolete snapshot.
+  // An error applies to the exact source revision that produced it. Derive its
+  // visibility from the canonical store on each render instead of relying on a
+  // passive effect to clear it before paint (or before an immediate retry).
+  const [exportError, setExportError] = useState<{
+    message: string;
+    sources: Pick<ReturnType<typeof useStore.getState>,
+      "tasks" | "boardPrep" | "dayPlans" | "activeDayKey">;
+  } | null>(null);
+  const currentSources = useStore.getState();
+  const errorMessage = exportError
+    && exportError.sources.tasks === currentSources.tasks
+    && exportError.sources.boardPrep === currentSources.boardPrep
+    && exportError.sources.dayPlans === currentSources.dayPlans
+    && exportError.sources.activeDayKey === currentSources.activeDayKey
+    ? exportError.message : null;
+  const reportError = (message: string) => {
+    const { tasks, boardPrep, dayPlans, activeDayKey } = useStore.getState();
+    setExportError({ message, sources: { tasks, boardPrep, dayPlans, activeDayKey } });
+  };
+  // Release obsolete errors after the normal subscribed update, too, so they
+  // cannot reappear if a later undo reuses the old source references.
   useEffect(() => {
     setExportError(null);
   }, [state.tasks, state.boardPrep, state.dayPlans, state.activeDayKey]);
@@ -157,19 +175,19 @@ function CalendarExportPanel({ state }: { state: ReturnType<typeof useStore.getS
       const latest = useStore.getState();
       const selected = calendarEvents(latest, { tasks, exams, dayPlans, fromDay: latest.activeDayKey });
       if (!selected.length) {
-        setExportError("The selected calendar items changed. Review the choices above and try again.");
+        reportError("The selected calendar items changed. Review the choices above and try again.");
         return;
       }
       content = buildIcs(selected);
     } catch {
-      setExportError("A calendar item has an invalid date or identifier. Correct it in AXOM and try again.");
+      reportError("A calendar item has an invalid date or identifier. Correct it in AXOM and try again.");
       return;
     }
     try {
       downloadIcs(content);
       setExportError(null);
     } catch {
-      setExportError("The calendar file could not be downloaded. Check your browser settings and retry.");
+      reportError("The calendar file could not be downloaded. Check your browser settings and retry.");
     }
   };
   return (
@@ -183,7 +201,7 @@ function CalendarExportPanel({ state }: { state: ReturnType<typeof useStore.getS
           <Download size={ICON_SIZE.body} /> Download .ics
         </GButton>
       </div>
-      {exportError && <p className="calendar-export-next" role="alert">{exportError}</p>}
+      {errorMessage && <p className="calendar-export-next" role="alert">{errorMessage}</p>}
       {!events.length && <p className="calendar-export-next">Nothing dated is ready to export. <a href="#productivity">Add a task with a due date</a> or choose another source above.</p>}
       <p>Import it in Google Calendar (Settings → Import), Apple Calendar (File → Import), or Outlook. This is a file export, not live sync. On re-import, your calendar app may skip, update, or duplicate events; check the target calendar first.</p>
     </div>
