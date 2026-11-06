@@ -338,23 +338,29 @@
 .dock-sound-name { flex: 1 1 auto; min-width: 0; overflow: hidden; }
 .dock-sound-name b, .dock-sound-name small { overflow: hidden; text-overflow: ellipsis; }
 .dock-timer .dock-label { flex: 1; min-width: 0; }
-/* Keep the ring and clock anchored while hover reveals secondary actions:
-   moving the timer trigger under the pointer can swallow its click. */
-.dock-timer.expanded .dock-label { display: none; }
+/* Reserve the label slot for actions; keep both the clock and main button
+   stationary when a pointer first enters the pill. */
+.dock-timer.expanded .dock-label { visibility: hidden; }
 .dock-timer.expanded .dock-clock {
-  flex: 1 1 auto;
   min-width: 50px;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* A three-action live session needs the decorative ring's space. */
+.dock-timer.expanded .dock-more {
+  position: absolute;
+  right: 47px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+/* Three-action sessions reclaim the decorative ring's width. */
 .dock-timer.expanded:has(.dock-more .dock-icon:nth-child(3)) .dock-ring { display: none; }
 .dock-timer.expanded:has(.dock-more .dock-icon:nth-child(3)) .dock-clock {
   min-width: 40px;
   font-size: 14px;
 }
+.dock-timer.expanded:has(.dock-more .dock-icon:nth-child(3)) .dock-more .dock-icon { width: 22px; }
 .dock-timer-trigger { padding: 0; color: inherit; background: transparent; border: 0; cursor: pointer; }
 .dock-timer-trigger:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); border-radius: 4px; }
 .dock-setup {
@@ -399,11 +405,12 @@
     font-size: 10px;
     text-align: center;
   }
-  .dock-timer.expanded .dock-label { display: none; }
-  .dock-timer.expanded .dock-clock { min-width: 40px; font-size: 15px; }
+  .dock-timer.expanded .dock-label { visibility: hidden; }
+  .dock-timer.expanded .dock-clock { min-width: 44px; font-size: 15px; }
   .dock-timer.expanded .dock-more {
     position: absolute;
     inset: auto 5px 0;
+    transform: none;
     justify-content: center;
     gap: 4px;
   }
