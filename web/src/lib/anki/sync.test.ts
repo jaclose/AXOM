@@ -208,6 +208,88 @@ describe("pushing AXOM cards to Anki", () => {
     expect(policy.fake.call("areSuspended", { cards: cardsX })).toEqual([true]);
   });
 
+  it("holds deletion suspension when an Anki note is replaced under the same numeric ID", async () => {
+    const h = harness();
+    await h.run([card("a")]);
+    const former = h.state.links.a;
+    h.state = recordAxomDeletion(h.state, "a", "suspend");
+    h.fake.call("updateNoteFields", { note: { id: former.noteId, fields: { AxomId: "a-different-profile" } } });
+    const held = await h.run([]);
+    expect(held).toMatchObject({ deletedSuspended: 0, pending: 1 });
+    expect(held.error).toMatch(/identity changed/);
+    expect(h.state.pendingSuspends).toHaveLength(1);
+    expect(h.fake.call("areSuspended", { cards: former.cardIds })).toEqual([false]);
+    expect(h.fake.actionsCalled("suspend")).toHaveLength(0);
+  });
+
+  it("does not clear a deleted-card receipt when Anki acknowledges but does not suspend", async () => {
+    const fake = new FakeAnkiConnect();
+    const realFetch = createFakeFetch(fake);
+    let suppressOnce = true;
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const action = JSON.parse(String(init?.body)) as { action?: string };
+      if (suppressOnce && action.action === "suspend") {
+        suppressOnce = false;
+        return new Response(JSON.stringify({ result: true, error: null }), {
+          status: 200, headers: { "Content-Type": "application/json" },
+        });
+      }
+      return realFetch(input, init);
+    };
+    const client = createAnkiClient({ fetchImpl });
+    const run = (cards: AnkiCard[], state: LinkState) => syncCardsToAnki({
+      client, cards, catalog, layout: DEFAULT_DECK_LAYOUT, deletePolicy: "ask", state,
+    });
+    const initial = await run([card("a")], emptyLinkState());
+    const ids = initial.state.links.a.cardIds;
+    const deletion = recordAxomDeletion(initial.state, "a", "suspend");
+    const held = await run([], deletion);
+    expect(held.report).toMatchObject({ deletedSuspended: 0, pending: 1, offline: false });
+    expect(held.report.error).toMatch(/did not confirm suspension/);
+    expect(held.state.pendingSuspends).toHaveLength(1);
+    expect(fake.call("areSuspended", { cards: ids })).toEqual([false]);
+    const recovered = await run([], normalizeLinkState(JSON.parse(JSON.stringify(held.state))));
+    expect(recovered.report).toMatchObject({ deletedSuspended: 1, pending: 0, offline: false });
+    expect(recovered.state.pendingSuspends).toEqual([]);
+    expect(fake.call("areSuspended", { cards: ids })).toEqual([true]);
+    expect(fake.actionsCalled("deleteNotes")).toEqual([]);
+  });
+
+  it("persists only the unfinished deletion receipt after partial multi-note disconnection", async () => {
+    const fake = new FakeAnkiConnect();
+    const realFetch = createFakeFetch(fake);
+    let interruptCard: number | undefined;
+    let interrupted = false;
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const request = JSON.parse(String(init?.body)) as { action?: string; params?: { cards?: number[] } };
+      if (!interrupted && request.action === "suspend" &&
+          request.params?.cards?.includes(interruptCard ?? -1)) {
+        interrupted = true;
+        throw new TypeError("Anki disconnected before the second deleted note was suspended");
+      }
+      return realFetch(input, init);
+    };
+    const client = createAnkiClient({ fetchImpl });
+    const run = (cards: AnkiCard[], state: LinkState) => syncCardsToAnki({
+      client, cards, catalog, layout: DEFAULT_DECK_LAYOUT, deletePolicy: "ask", state,
+    });
+    const initial = await run([card("a"), card("b")], emptyLinkState());
+    const aCards = initial.state.links.a.cardIds;
+    const bCards = initial.state.links.b.cardIds;
+    interruptCard = bCards[0];
+    const deletion = recordAxomDeletion(recordAxomDeletion(initial.state, "a", "suspend"), "b", "suspend");
+    const partial = await run([], deletion);
+    expect(partial.report).toMatchObject({ deletedSuspended: 1, pending: 1, offline: true });
+    expect(partial.state.pendingSuspends).toMatchObject([{ axomId: "b" }]);
+    expect(fake.call("areSuspended", { cards: aCards })).toEqual([true]);
+    expect(fake.call("areSuspended", { cards: bCards })).toEqual([false]);
+    const resumed = await run([], normalizeLinkState(JSON.parse(JSON.stringify(partial.state))));
+    expect(resumed.report).toMatchObject({ deletedSuspended: 1, pending: 0, offline: false });
+    expect(resumed.state.pendingSuspends).toEqual([]);
+    expect(fake.call("areSuspended", { cards: bCards })).toEqual([true]);
+    expect(fake.actionsCalled("deleteNotes")).toEqual([]);
+  });
+
   it("replaces the note when a card switches between Basic and Cloze, keeping the old one suspended", async () => {
     const h = harness();
     await h.run([card("a")]);
