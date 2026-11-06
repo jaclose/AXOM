@@ -92,15 +92,6 @@ function styles(value?: readonly string[]) {
   return (Array.isArray(value) ? [...new Set(value.filter(t => typeof t === "string" && allowed.has(t)))].slice(0,3) : []);
 }
 function safeAccent(s?: string) { return s && /^#[\da-f]{6}$/i.test(s) ? s.toUpperCase() : undefined; }
-function hueOf(hex: string) {
-  const r = parseInt(hex.slice(1,3),16)/255, g = parseInt(hex.slice(3,5),16)/255, b = parseInt(hex.slice(5,7),16)/255;
-  const max = Math.max(r,g,b), min = Math.min(r,g,b), d = max-min;
-  if (d < 0.001) return -1;
-  return (((max===r ? (g-b)/d % 6 : max===g ? (b-r)/d+2 : (r-g)/d+4)*60)%360+360)%360;
-}
-function family(h: number) {
-  return h < 0 ? "neutral" : h < 30 || h > 345 ? "warm-red" : h < 70 ? "gold" : h < 170 ? "green" : h < 205 ? "teal" : h < 255 ? "blue" : h < 315 ? "violet" : "rose";
-}
 function stableHash(s: string) { let h=2166136261; for (const c of s) { h ^= c.charCodeAt(0); h=Math.imul(h,16777619); } return h>>>0; }
 function starter(card: Card): CorrespondentMatch {
   return { id:card.id,name:card.name,localPart:card.localPart,description:card.description,accent:"#C8A96A",
@@ -143,10 +134,9 @@ export interface CorrespondentIntroOpts { displayName?:string; useCase:"welcome"
 export interface CorrespondentEmailPOC { subject:string;html:string;text:string }
 export function renderCorrespondentIntroduction(match:CorrespondentMatch,options:CorrespondentIntroOpts):CorrespondentEmailPOC {
   const name=escapeHtml((options.displayName||"Learner").trim().slice(0,64)||"Learner"), alias=escapeHtml(match.name);
-  const explain=match.basis==="chosen"?"You selected this correspondent yourself.":match.basis==="starter"
-    ?"An initial name from AXOM's 25 correspondents, ready to change whenever you like."
-    :"A visual/work-style pairing based on preferences you shared.";
-  const disclaimer="This is a suggested AXOM correspondence identity, not a personality assessment. Journal entries were never sent to Resend or included in this email.";
+  // Narrative material is fictional. Matching evidence stays in the private settings UI.
+  const explain="The Living Atlas opens to "+match.name+". "+match.description;
+  const disclaimer="This is an AXOM fictional companion, not a personality assessment or a human support agent. No journal entry or private academic data appears in this email.";
   const subject=(options.poc===false?"AXOM · Meet ":"AXOM POC · "+options.useCase.toUpperCase().replaceAll("_"," ")+" · Meet ")+match.name;
   const font="Arial,Helvetica,sans-serif", mono="'Courier New',Consolas,monospace";
   const stage=(number:string,title:string,copy:string)=>[
@@ -155,26 +145,26 @@ export function renderCorrespondentIntroduction(match:CorrespondentMatch,options
     '<p style="color:#E6E2D6;font:bold 11px '+font+';margin:0 0 9px;letter-spacing:1px">'+title+'</p>',
     '<p style="color:#BCB7AC;font:12px/19px '+font+';margin:0">'+copy+'</p></td>'
   ].join("");
-  const why=match.reasons.map(x=>'<tr><td style="border-top:1px solid #494640;color:#E6E2D6;font:13px/22px '+font+';padding:12px 0">'+escapeHtml(x)+'</td></tr>').join("");
+  const why='<tr><td style="border-top:1px solid #494640;color:#E6E2D6;font:13px/22px '+font+';padding:12px 0">'+escapeHtml(match.description)+'</td></tr>';
   const html=[
     '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>',escapeHtml(subject),'</title></head>',
     '<body style="margin:0;background:#0D0D0E;color:#E6E2D6;font-family:',font,'">',
     '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#0D0D0E"><tr><td align="center" style="padding:26px 10px">',
     '<table role="presentation" width="600" cellspacing="0" cellpadding="0" style="width:100%;max-width:600px;background:#1C1C1E;border:1px solid #48433C">',
     '<tr><td style="padding:25px 28px;border-bottom:1px solid #48433C"><table role="presentation" width="100%"><tr><td width="58"><img alt="AXOM Orb" src="',escapeHtml(orbUrl(options.orbUrl)),'" width="44" height="44" style="border:0;display:block"></td>',
-    '<td style="font:bold 16px ',font,';color:#E6E2D6;letter-spacing:4px">AXOM<p style="font:10px ',mono,';letter-spacing:1px;color:#C8A96A;margin:5px 0 0">THE CORRESPONDENCE ATLAS</p></td>',
-    '<td align="right" style="font:10px ',mono,';color:#BCB7AC">01 / 25</td></tr></table></td></tr>',
+    '<td style="font:bold 16px ',font,';color:#E6E2D6;letter-spacing:4px">AXOM<p style="font:10px ',mono,';letter-spacing:1px;color:#C8A96A;margin:5px 0 0">THE LIVING ATLAS</p></td>',
+    '<td align="right" style="font:10px ',mono,';color:#BCB7AC">01 / 40</td></tr></table></td></tr>',
     '<tr><td style="padding:30px 28px"><table role="presentation"><tr><td width="90" height="3" bgcolor="',escapeHtml(match.accent),'"></td></tr></table>',
     '<p style="margin:25px 0 15px;color:#C8A96A;font:10px ',mono,';letter-spacing:1.3px">WELCOME / A NAME FOR THE WORK</p>',
-    '<p style="margin:0 0 12px;color:#BCB7AC;font:14px/22px ',font,'">',name,', meet your AXOM correspondent.</p>',
+    '<p style="margin:0 0 12px;color:#BCB7AC;font:14px/22px ',font,'">',name,', the Archive opens to a new companion.</p>',
     '<h1 style="font:normal 46px/54px Georgia,Times,serif;color:#E6E2D6;margin:0 0 17px">',alias,'.</h1>',
     '<p style="font:15px/24px ',font,';color:#E6E2D6;margin:0 0 26px">',escapeHtml(explain),'</p>',
     '<table role="presentation" width="100%" cellspacing="3" cellpadding="0" style="margin-bottom:26px">',
-    '<tr>',stage("01 / SOURCE","YOUR CHOICES",match.basis==="starter"?"No preferences required":"Explicit preferences"),'</tr>',
-    '<tr>',stage("02 / MATCH","TRANSPARENT RULES","Color and work-style fit"),'</tr>',
-    '<tr>',stage("03 / IDENTITY","CORRESPONDENT",alias),'</tr>',
+    '<tr>',stage("01 / ORIGIN","THE ARCHIVE","Where the story begins"),'</tr>',
+    '<tr>',stage("02 / NATURE","THE METHOD","How this creature learns"),'</tr>',
+    '<tr>',stage("03 / COMPANION","A LIVING GUIDE",alias),'</tr>',
     '</table>',
-    '<p style="font:10px ',mono,';color:#C8A96A;letter-spacing:1.4px;margin:0 0 9px">WHY THIS CORRESPONDENT</p>',
+    '<p style="font:10px ',mono,';color:#C8A96A;letter-spacing:1.4px;margin:0 0 9px">THE ACADEMIC NATURE</p>',
     '<table role="presentation" width="100%" cellspacing="0" cellpadding="0">',why,'</table>',
     '<p style="color:#BCB7AC;font:13px/22px ',font,';margin:22px 0">',escapeHtml(match.description),'</p>',
     '<p style="background:#161618;border-left:2px solid #C8A96A;color:#BCB7AC;font:12px/20px ',font,';padding:17px;margin:0 0 25px">',escapeHtml(disclaimer),'</p>',
@@ -183,8 +173,8 @@ export function renderCorrespondentIntroduction(match:CorrespondentMatch,options
     '<p style="color:#BCB7AC;font:11px/19px ',font,';margin:0">This is an AXOM email identity, not a human support agent. Security mail always uses the official account sender.</p></td></tr>',
     '</table></td></tr></table></body></html>'
   ].join("");
-  const text=["AXOM / THE CORRESPONDENCE ATLAS", (options.displayName||"Learner")+", meet "+match.name+".",explain,
-    "SOURCE -> MATCH -> CORRESPONDENT","Why this correspondent:",...match.reasons,match.description,disclaimer,
+  const text=["AXOM / THE LIVING ATLAS", (options.displayName||"Learner")+", meet "+match.name+".",explain,
+    "ORIGIN -> NATURE -> COMPANION","The character:",match.description,disclaimer,
     "Review email preferences: https://axom.info/#communications",
     "This is an AXOM email identity, not a human support agent."].join("\n\n");
   return {subject,html,text};
