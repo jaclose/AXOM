@@ -69,3 +69,18 @@
   background: #fff0d9; color: #332211; font: 13px/1.35 Arial, sans-serif;
 }
 .community-sim-warning b, .community-sim-warning svg { color: #7b3c00; }
+
+/* Standalone QBank publishing reuses the same community surface and review rules. */
+.community-contribute { display: grid; gap: 14px; align-content: start; }
+.community-qbank-discovery { display: grid; gap: 8px; min-width: 0; }
+.community-qbank-discovery > .gbtn { justify-self: start; }
+.community-qbank-discovery .qsl-library { margin-top: 0; }
+.community-qbank-picker { display: grid; gap: 12px; margin-top: 14px; }
+.community-qbank-picker label { display: grid; gap: 6px; font-size: var(--fs-small); color: var(--text-80); }
+.community-qbank-picker select {
+  width: 100%; min-width: 0; min-height: 42px; padding: 8px 11px;
+  color: var(--text); background: var(--surface-1); border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm); font: inherit;
+}
+.community-qbank-picker select:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: 2px; }
+.community-qbank-publish > .sub { margin: 12px 0 0; font-size: var(--fs-small); }
