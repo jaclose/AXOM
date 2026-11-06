@@ -56,10 +56,18 @@ export function calendarEvents(state: Pick<NoctyriumState, "tasks" | "boardPrep"
   return events.sort((a, b) => a.day.localeCompare(b.day) || a.title.localeCompare(b.title));
 }
 
+/** Reject C0/DEL code points not representable in RFC 5545 TEXT. */
+function isNonTextControl(character: string): boolean {
+  const code = character.codePointAt(0) ?? 0;
+  return code <= 8 || code === 11 || code === 12
+    || (code >= 14 && code <= 31) || code === 127;
+}
+
 /** RFC 5545 TEXT escaping. Calendar values can contain CR, LF or CRLF. */
 export function escapeIcsText(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r\n|\r|\n/g, "\\n")
-    .replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, " ");
+  const escaped = value.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,")
+    .replace(/\r\n|\r|\n/g, "\\n");
+  return [...escaped].map((character) => isNonTextControl(character) ? " " : character).join("");
 }
 
 /** Fold at 75 UTF-8 octets, reserving one octet for continuation whitespace. */
@@ -111,7 +119,7 @@ export function buildIcs(events: readonly CalendarEventInput[], now: Date = new 
     // UID is an RFC 5545 TEXT value, not an arbitrary unescaped content line.
     // Reject ambiguous IDs rather than allowing collisions or additional events.
     if (!event.uid || seenUids.has(event.uid)
-      || /[\u0000-\u0008\u000B-\u001F\u007F]/.test(event.uid)
+      || [...event.uid].some(isNonTextControl)
       || [...event.uid].some((character) => character.length === 1
         && character.charCodeAt(0) >= 0xD800 && character.charCodeAt(0) <= 0xDFFF))
       throw new RangeError("AXOM calendar event UID is missing, duplicated, or invalid");
