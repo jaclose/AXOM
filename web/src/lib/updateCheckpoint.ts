@@ -18,6 +18,17 @@ export class RecoverySnapshotQuotaError extends Error {
   }
 }
 
+/** The primary workspace is verified but a separate recovery copy could not be made.
+ * A web update may offer an explicit confirmation; it must never silently proceed. */
+export class RecoverySnapshotUnavailableError extends Error {
+  readonly canContinueWithoutRecoverySnapshot = true;
+
+  constructor() {
+    super("Your workspace is saved and verified, but AXOM could not create an additional recovery copy.");
+    this.name = "RecoverySnapshotUnavailableError";
+  }
+}
+
 /** Fail closed: never reload or install if the live workspace cannot be saved
  * and read back. Local snapshots cover workspace data and device settings;
  * question-image blobs stay in their existing store (portable exports include
@@ -62,9 +73,13 @@ export async function createUpdateCheckpoint(desktop: boolean, checkpointOptions
         throw new Error("Could not verify the recovery snapshot. The update has been paused; your current workspace is still open.");
       }
     } catch (error) {
-      if (!desktop && isStorageQuotaError(error)) {
+      if (!desktop) {
+        // Only an extra recovery-copy failure is recoverable. Re-verify the
+        // authoritative saved workspace and current edits before offering consent.
+        // A failed primary save, changed workspace, or unreadable state stays blocked.
         await verifyWorkspaceStillMatches(serialized);
-        throw new RecoverySnapshotQuotaError();
+        if (isStorageQuotaError(error)) throw new RecoverySnapshotQuotaError();
+        throw new RecoverySnapshotUnavailableError();
       }
       throw error;
     }
