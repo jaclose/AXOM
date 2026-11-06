@@ -9,6 +9,7 @@ import {
   SOUNDSCAPES,
   FREQUENCY_ORDER,
   AMBIENT_ORDER,
+  versionOf,
   type SoundscapeId,
 } from "../lib/soundscapes/presets";
 import { useSoundscape } from "../lib/soundscapes/store";
@@ -20,6 +21,7 @@ import { AmbientCard, FrequencyCard } from "../components/soundscapes/FrequencyC
 import { SpotifySection } from "../components/soundscapes/SpotifySection";
 import { SoundscapeOpener } from "../components/soundscapes/SoundscapeOpener";
 import { ForYouRow } from "../components/soundscapes/ForYouRow";
+import { MainSound } from "../components/soundscapes/MainSound";
 import { YourSounds } from "../components/soundscapes/YourSounds";
 import { PinButton } from "../components/soundscapes/PinButton";
 import { forYouOrder, preferFirst } from "../lib/soundscapes/taste";
@@ -44,6 +46,9 @@ export function SoundscapesPage() {
   const status = useSoundscape((state) => state.status);
   const presetId = useSoundscape((state) => state.presetId);
   const lastPresetId = useSoundscape((state) => state.lastPresetId);
+  const mainSound = useSoundscape((state) => state.mainSound);
+  const versions = useSoundscape((state) => state.versions);
+  const loadedVersionId = useSoundscape((state) => state.loadedVersionId);
   const output = useSoundscape((state) => state.output);
   const supported = useSoundscape((state) => state.supported);
   const error = useSoundscape((state) => state.error);
@@ -52,6 +57,7 @@ export function SoundscapesPage() {
   const heroId = focused ?? presetId ?? lastPresetId;
   const hero = SOUNDSCAPES[heroId];
   const heroPair = carrierPair(hero, output);
+  const heroVersion = versionOf(hero, status !== "idle" && presetId === heroId ? loadedVersionId ?? undefined : versions[heroId]);
   const stopLabel = useStopTimerLabel();
   const { heroRef, heroEl, fullscreen, toggleFullscreen, awake, wake, rest } = useStageChrome();
   // While a sound plays, the controls step back when you're not using them, leaving just the scene.
@@ -64,7 +70,7 @@ export function SoundscapesPage() {
   return (
     <div className="soundscapes-page">
       {openerOpen && <SoundscapeOpener onClose={() => setOpenerOpen(false)} />}
-      <ForYouRow onPersonalize={() => setOpenerOpen(true)} />
+      <MainSound />
       <section
         ref={heroRef}
         className={`soundscape-hero ${status === "playing" && presetId === heroId ? "live" : ""} ${calm ? "calm" : ""} ${fullscreen ? "is-fullscreen" : ""}`}
@@ -86,7 +92,8 @@ export function SoundscapesPage() {
         </button>
         <div className="soundscape-hero-copy">
           <span className="soundscape-kicker"><AudioWaveform size={ICON_SIZE.body} aria-hidden="true" /> Soundscapes</span>
-          <h2>{hero.name}</h2>
+          <h2>{heroVersion.label}</h2>
+          {mainSound.presetId === heroId && mainSound.versionId === heroVersion.id && <span className="main-sound-kicker">MAIN SOUND</span>}
           <p>{hero.bestFor.join(" · ")}</p>
           <p className="soundscape-hero-meta">
             {heroPair ? `${output === "headphones" ? "Left" : "Tones"} ${heroPair[0]} Hz · ${output === "headphones" ? "Right" : ""} ${heroPair[1]} Hz → ${hero.beatHz} Hz beat` : hero.band}
@@ -96,6 +103,7 @@ export function SoundscapesPage() {
           <div className="soundscape-hero-controls">
             <TransportButtons presetId={heroId} />
             <PinButton presetId={heroId} />
+            <button type="button" className="gbtn sm" disabled={mainSound.presetId === heroId && mainSound.versionId === heroVersion.id} onClick={() => useSoundscape.getState().setMainSound(heroId, heroVersion.id)}>{mainSound.presetId === heroId && mainSound.versionId === heroVersion.id ? "Main sound" : "Make main"}</button>
             <VolumeControl />
             <StopTimerControl />
             <ScenePicker presetId={heroId} onPreview={setPreviewScene} host={heroEl} />
@@ -114,6 +122,7 @@ export function SoundscapesPage() {
       </p>
 
       <YourSounds />
+      <ForYouRow onPersonalize={() => setOpenerOpen(true)} />
 
       <GlassCard pad>
         <PanelHeader

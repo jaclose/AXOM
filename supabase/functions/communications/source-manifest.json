@@ -26,13 +26,13 @@
     "web/src/lib/questions.ts": "dc002f056ad1852df89ba7e6e7e2a2d284cdb1dd73e645a4f35a90011fd17a83",
     "web/src/lib/reports.ts": "6b7521623409395c794c18bfedca8e2391dd08b1d16a156f2ed09048da8aa498",
     "web/src/lib/scoring.ts": "9799b3c92cecb5b7dc586c7e7aa1daf61a5185ec8c3a3e42028817c5cc30b55a",
-    "web/src/lib/targetContributions.ts": "0f3bbe44a042b959cfa340a1a0861a775db9d843436f1ace8f792a34e346ff40",
+    "web/src/lib/targetContributions.ts": "301704eb40288568396fd10702ca7d30ab47d3a4628e5b61508b53285a6009e7",
     "web/src/lib/tracker.ts": "ffc762dc996085a485a95bcef0ac00b54b16a70e0f8822513b184f836c972922",
     "web/src/lib/vaultActivity.ts": "f9bb47fd0accb27db1b1413444c31a666a48d44e2f2aa0f3900bdce43f66fa47"
   },
   "bundle": {
     "path": "supabase/functions/communications/service.js",
-    "sha256": "2d31c5f0add3ec2995588515ae88a07808ea56ca03b2eb91475e5ad5f931eb42"
+    "sha256": "6febc24061ed33d723ed4ec5a743401d8724cf28a0ac96baf2247fcbf1619fde"
   },
   "authTemplates": {
     "supabase/templates/communications/confirmation.html": "e79c100868c837f0619bfa6cf995df5cdd4cd89b59f5434d607df3185f387ab2",

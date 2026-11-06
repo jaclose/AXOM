@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeSeed } from "../lib/seed";
+import { makeDailyRequirement } from "../lib/dailySuccess";
 import { useStore } from "../lib/store";
 import { ProductivityPage } from "./ProductivityPage";
 
@@ -105,7 +106,82 @@ describe("ProductivityPage daily console", () => {
     expect(screen.getByRole("dialog", { name: "Read trends" }).classList.contains("centered")).toBe(true);
   });
 
-  it("places a five-entry Activity Log preview directly after the focus timer", () => {
+  it("keeps future records out of elapsed monthly totals and disables their dates", () => {
+    const state = makeSeed();
+    state.activeDayKey = "2026-07-13";
+    state.logs = ["2026-07-10", "2026-07-11", "2026-07-13", "2026-07-14"].map((dayKey, index) => ({ id: `day-${index}`, dayKey, ts: `${dayKey}T12:00:00`, type: "Study", minutes: index === 3 ? 999 : 10, cards: 0 }));
+    useStore.setState(state);
+    render(<ProductivityPage />);
+    const month = screen.getByText("Monthly activity calendar").closest(".glass-card") as HTMLElement;
+    expect(within(month).getByText("0h 30m")).toBeTruthy();
+    expect(within(month).getByText("3/4 active")).toBeTruthy();
+    const future = month.querySelector('button[title*="future date"]') as HTMLButtonElement;
+    expect(future.disabled).toBe(true);
+  });
+
+  it("selects a recorded day when activity has no study minutes or cards", () => {
+    const state = makeSeed();
+    state.activeDayKey = "2026-07-13";
+    state.logs = ["2026-07-10", "2026-07-11", "2026-07-12"].map((dayKey, index) => ({
+      id: dayKey, dayKey, ts: `${dayKey}T12:00:00`, type: index ? "Prayer" : "Read a chapter",
+      minutes: 0, cards: 0, quantity: index ? 1 : 18, quantityKind: "count" as const, quantityLabel: index ? "completions" : "pages",
+    }));
+    useStore.setState(state);
+    render(<ProductivityPage />);
+
+    const month = screen.getByText("Monthly activity calendar").closest(".glass-card") as HTMLElement;
+    const bestDay = within(month).getByText("Best day").closest(".metric-tile") as HTMLElement;
+    expect(within(month).getByText("3/4 active")).toBeTruthy();
+    expect(within(bestDay).getByText("Jul 10, 2026")).toBeTruthy();
+    expect(within(bestDay).getByText("0m · 0 cards")).toBeTruthy();
+  });
+
+  it("uses canonical activity for period boundaries and shortcuts without deleting duplicate records", () => {
+    const state = makeSeed();
+    state.activeDayKey = "2026-07-13";
+    const old = { id: "moved", dayKey: "2026-07-01", ts: "2026-07-13T11:00:00", type: "Obsolete study label", minutes: 999, cards: 0 };
+    const latest = { ...old, dayKey: state.activeDayKey, ts: "2026-07-13T12:00:00", type: "Corrected study label", minutes: 10 };
+    state.logs = [old, latest, ...["2026-07-11", "2026-07-12"].map((dayKey) => ({ id: dayKey, dayKey, ts: `${dayKey}T12:00:00`, type: `Study ${dayKey}`, minutes: 10, cards: 0 }))];
+    const original = structuredClone(state.logs);
+    useStore.setState(state);
+    render(<ProductivityPage />);
+
+    const month = screen.getByText("Monthly activity calendar").closest(".glass-card") as HTMLElement;
+    const week = screen.getByText("Weekly activity").closest(".glass-card") as HTMLElement;
+    expect(within(month).getByText("3/3 active")).toBeTruthy();
+    expect(within(week).getByText("3/3 active")).toBeTruthy();
+    expect(within(month).getByText("0h 30m")).toBeTruthy();
+    expect(screen.queryByText("Obsolete study label")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Review activity records" })).toBeTruthy();
+    expect(useStore.getState().logs).toEqual(original);
+  });
+
+  it("keeps earlier activity visible after selecting a new target and shows only the picked day's history", () => {
+    const state = makeSeed();
+    state.activeDayKey = "2026-07-13";
+    const requirement = makeDailyRequirement({ id: "new-target", label: "Study", source: { kind: "study-minutes" }, target: 60, unit: "minutes", trackingStartsAt: state.activeDayKey }, state.activeDayKey);
+    state.profile.dailySuccess = { version: 1, configuredAt: state.activeDayKey, requirements: [requirement] };
+    state.logs = ["2026-07-10", "2026-07-11", "2026-07-12"].map((dayKey) => ({ id: dayKey, dayKey, ts: `${dayKey}T12:00:00`, type: `Study ${dayKey}`, minutes: 10, cards: 0 }));
+    const original = structuredClone(state.logs);
+    useStore.setState(state);
+    render(<ProductivityPage />);
+
+    const month = screen.getByText("Monthly activity calendar").closest(".glass-card") as HTMLElement;
+    expect(month.querySelectorAll("button.cal-day")).toHaveLength(31);
+    expect(within(month).getByText("3/4 active")).toBeTruthy();
+    const earlierDay = within(month).getByRole("button", { name: "10" });
+    expect(earlierDay.title).toBe("Jul 10, 2026: 10m, 0 cards");
+    fireEvent.click(earlierDay);
+
+    const history = screen.getByRole("region", { name: "Activity Log" });
+    expect(within(history).getByText(/Study 2026-07-10/)).toBeTruthy();
+    expect(within(history).queryByText(/Study 2026-07-11/)).toBeNull();
+    expect(screen.getByText("10 study minutes")).toBeTruthy();
+    expect(screen.getByText("History is read-only.")).toBeTruthy();
+    expect(useStore.getState().logs).toEqual(original);
+  });
+
+  it("places a five-entry Activity Log preview after the primary panels", () => {
     const state = makeSeed();
     state.logs = Array.from({ length: 8 }, (_, index) => ({
       id: `activity-${index}`, dayKey: state.activeDayKey, ts: `2026-10-20T12:0${7 - index}:00.000Z`,
@@ -115,7 +191,8 @@ describe("ProductivityPage daily console", () => {
     const original = structuredClone(state.logs);
     const { container } = render(<ProductivityPage />);
     const log = screen.getByRole("region", { name: "Activity Log" });
-    expect(container.querySelector('[data-module-tour="productivity-focus"]')?.nextElementSibling).toBe(log);
+    expect(container.querySelector('.productivity-primary-grid [data-module-tour="productivity-focus"]')).toBeTruthy();
+    expect(container.querySelector('.productivity-primary-grid')!.compareDocumentPosition(log) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(log.querySelectorAll(".activity-row")).toHaveLength(5);
     expect(within(log).getByText("Showing 5 of 8 events.")).toBeTruthy();
     expect(within(log).queryByText(/Review block 6/)).toBeNull();

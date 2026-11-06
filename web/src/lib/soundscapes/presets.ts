@@ -73,7 +73,10 @@ export interface SoundscapePreset {
   source?: string;
 }
 
-export type SoundscapeId = "gamma-40" | "beta-20" | "alpha-10" | "delta-2" | "brown-noise" | "soft-rain"
+export const DEFAULT_SOUNDSCAPE_ID = "axom-1" as const;
+export const DEFAULT_SOUNDSCAPE_VERSION = "axom-soundscape-1" as const;
+
+export type SoundscapeId = "axom-1" | "gamma-40" | "beta-20" | "alpha-10" | "delta-2" | "brown-noise" | "soft-rain"
   | "white-noise" | "cafe" | "fan" | "airplane" | "forest" | "ocean"
   /** Files you added that don't lead a preset (versions come from userMedia). */
   | "yours"
@@ -88,6 +91,12 @@ export const EVIDENCE_LABEL: Record<EvidenceLevel, string> = {
 };
 
 export const SOUNDSCAPES: Record<SoundscapeId, SoundscapePreset> = {
+  "axom-1": {
+    id: "axom-1", name: "AXOM Soundscape 1", short: "AXOM 1", band: "Music", family: "ambient",
+    versions: [{ id: DEFAULT_SOUNDSCAPE_VERSION, label: "AXOM Soundscape 1", description: "An AXOM original soundscape.", src: "soundscapes/axom-soundscape-1.m4a" }],
+    bestFor: ["Study", "Focus"], howTo: "Play at a comfortable volume.", evidence: "comfort",
+    evidenceNote: "A listening option for comfort and focus.", visual: "flow",
+  },
   "gamma-40": {
     id: "gamma-40",
     name: "40 Hz Gamma",
@@ -416,7 +425,7 @@ export const AMBIENT_ORDER: SoundscapeId[] = ["white-noise", "brown-noise", "fan
 export const SOUNDSCAPE_ORDER: SoundscapeId[] = [...FREQUENCY_ORDER, ...AMBIENT_ORDER];
 
 export function isSoundscapeId(value: unknown): value is SoundscapeId {
-  return typeof value === "string" && value in SOUNDSCAPES;
+  return typeof value === "string" && Object.hasOwn(SOUNDSCAPES, value);
 }
 
 export interface RegimenStep {

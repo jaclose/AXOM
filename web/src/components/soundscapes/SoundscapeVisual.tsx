@@ -45,7 +45,8 @@ export function SoundscapeVisual({ visual, overlay, overlayMix = 0.55, animate, 
     let visible = true;
     let colors = paletteColors();
     let level = 0;
-    const samples = new Uint8Array(256);
+    let samples = new Uint8Array(0);
+    let lastPaint = 0;
     const started = performance.now() - 12_000;
     const draw = VISUAL_RENDERERS[visual];
 
@@ -62,6 +63,7 @@ export function SoundscapeVisual({ visual, overlay, overlayMix = 0.55, animate, 
         const analyser = soundscapeAnalyser();
         let target = 0;
         if (analyser) {
+          if (samples.length !== analyser.fftSize) samples = new Uint8Array(analyser.fftSize);
           analyser.getByteTimeDomainData(samples);
           let sum = 0;
           for (const sample of samples) sum += ((sample - 128) / 128) ** 2;
@@ -99,8 +101,9 @@ export function SoundscapeVisual({ visual, overlay, overlayMix = 0.55, animate, 
       }
     };
     const loop = (now: number) => {
-      paint(now);
-      if (animate && !reduced && visible && !document.hidden) frame = requestAnimationFrame(loop);
+      if (!animate || reduced || !visible || document.hidden) return;
+      if (now - lastPaint >= 1000 / 30) { lastPaint = now; paint(now); }
+      frame = requestAnimationFrame(loop);
     };
     const restart = () => {
       cancelAnimationFrame(frame);
@@ -115,9 +118,10 @@ export function SoundscapeVisual({ visual, overlay, overlayMix = 0.55, animate, 
     const intersection = typeof IntersectionObserver !== "undefined" ? new IntersectionObserver(([entry]) => {
       visible = entry.isIntersecting;
       if (visible && animate && !reduced) restart();
+      else cancelAnimationFrame(frame);
     }) : null;
     intersection?.observe(canvas);
-    const onVisibility = () => { if (!document.hidden && animate && !reduced) restart(); };
+    const onVisibility = () => { if (!document.hidden && animate && !reduced) restart(); else cancelAnimationFrame(frame); };
     const onPalette = () => { colors = paletteColors(); paint(performance.now()); };
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("axom:palette-change", onPalette);

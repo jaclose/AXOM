@@ -18,7 +18,7 @@ async function savedLogs(page: Page): Promise<StudyLog[]> {
 }
 
 for (const width of [1440, 390]) {
-  test(`Activity Log stays compact below the timer without changing history (${width}px)`, async ({ page }, testInfo) => {
+  test(`Activity Log stays compact below the primary panels without changing history (${width}px)`, async ({ page }, testInfo) => {
     const errors: string[] = [];
     page.on("pageerror", error => errors.push(error.message));
     page.on("console", message => {
@@ -57,7 +57,10 @@ for (const width of [1440, 390]) {
     await expect(log).toContainText("Showing 5 of 8 events.");
     await expect(expand).toHaveAttribute("aria-expanded", "false");
     await expect(firstNote).toHaveCSS("white-space", "nowrap");
-    expect(await page.locator('[data-module-tour="productivity-focus"]').evaluate(element => element.nextElementSibling?.classList.contains("activity-log-card"))).toBe(true);
+    expect(await log.evaluate(element => {
+      const primary = document.querySelector(".productivity-primary-grid");
+      return primary !== null && element.getBoundingClientRect().top >= primary.getBoundingClientRect().bottom;
+    })).toBe(true);
     expect(await expand.getAttribute("aria-controls")).toBe(await feed.getAttribute("id"));
     await log.scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath(`activity-preview-${width}.png`), fullPage: false });

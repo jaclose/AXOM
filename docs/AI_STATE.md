@@ -5,6 +5,21 @@ authority: current-state
 ---
 # AXOM current AI state
 
+## Productivity and Soundscapes · 2026-11-05
+
+PR #122, `codex/productivity-soundscapes-20261105`, includes `eb4e5d3`. JD authorized
+audio publication, push and merge after verification.
+The 566.920-second stereo loop is the default main sound and initial pin.
+[Soundscapes](features/soundscapes.md) owns playback, the reactive Orb and persistent
+dock; [Productivity](features/productivity.md) owns source accounting. No workspace
+schema change. Initial CI passed 4,765 unit tests (35 skips), 89 release tests and
+typecheck/lint/build. Local update/offline and feature browser checks passed.
+Review fixes cover audio races, best-day selection, responsive forms, mobile dock
+interception and readable capsule surfaces. Hosted acceptance and production
+readback are tracked in PR #122.
+Production Supabase denies this connection access: the regenerated Communications
+export bundle still needs deployment. The frontend does not depend on that update.
+
 ## Host and Communities repair · 2026-11-04
 
 Branch `claude/host-communities-20261104` from `a96f1491`. Host now shows only

@@ -84,6 +84,11 @@ export function volumeToGain(volume: number): number {
  * near-silent anchor file makes AXOM a "persistent" media player, so macOS
  * Now Playing, Control Center and the media keys see it.
  */
+/** Resolve a bundled recording once against the configured app base. */
+export function recordingUrl(src: string, base = import.meta.env.BASE_URL): string {
+  return /^(blob:|https?:|data:|\/)/.test(src) ? src : `${base.replace(/\/?$/, "/")}${src}`;
+}
+
 export class SoundscapeEngine {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
@@ -93,6 +98,11 @@ export class SoundscapeEngine {
   private anchor: HTMLAudioElement | null = null;
   private analyser: AnalyserNode | null = null;
   private layer: Layer | null = null;
+  private pending: Layer | null = null;
+  private layers = new Set<Layer>();
+  private recordings = new Map<GainNode, HTMLAudioElement>();
+  /** Invalidates asynchronous starts when another control takes over. */
+  private request = 0;
   private kit: LayerKit | null = null;
   private rooms = new Map<number, AudioBuffer>();
 
@@ -151,7 +161,7 @@ export class SoundscapeEngine {
     limiter.attack.value = 0.001;
     limiter.release.value = 0.3;
     const analyser = ctx.createAnalyser();
-    analyser.fftSize = 512;
+    analyser.fftSize = 2048;
     analyser.smoothingTimeConstant = 0.86;
     master.connect(limiter).connect(analyser);
     // Straight to the speakers. (A MediaStream <audio> route used to sit here;
@@ -180,18 +190,46 @@ export class SoundscapeEngine {
   }
 
   /** Start (or crossfade to) a preset version. Must follow a user gesture the first time. */
-  async play(preset: SoundscapePreset, options: { volume: number; output: OutputMode; versionId?: string }): Promise<void> {
+  async play(preset: SoundscapePreset, options: { volume: number; output: OutputMode; versionId?: string; replacePaused?: boolean }): Promise<void> {
+    const request = ++this.request;
+    if (this.pending) this.release(this.pending);
+    this.pending = null;
+    if (options.replacePaused && this.layer) {
+      // Remove every old crossfade layer before waking a paused context.
+      this.layers.forEach((layer) => this.release(layer));
+      this.layer = null;
+    }
     const ctx = await this.context();
+    if (request !== this.request) return;
     const version = versionOf(preset, options.versionId);
-    const now = ctx.currentTime;
     const previous = this.layer;
     const bus = ctx.createGain();
     const trim = "recipe" in version ? 10 ** (Math.min(MAX_TRIM_DB, version.recipe.trimDb ?? 0) / 20) : 1;
-    bus.gain.setValueAtTime(0, now);
-    bus.gain.linearRampToValueAtTime(trim, now + CROSSFADE_S);
+    bus.gain.setValueAtTime(0, ctx.currentTime);
     bus.connect(this.input!);
-    const stops = this.build(ctx, bus, version, options.output);
-    this.layer = { bus, stop: () => stops.forEach((stop) => stop()) };
+    let next: Layer | null = null;
+    try {
+      const stops = this.build(ctx, bus, version, options.output);
+      next = { bus, stop: () => stops.forEach((stop) => stop()) };
+      this.layers.add(next);
+      this.pending = next;
+      // A rejected recording must not retire the working track or report playback.
+      await this.recordings.get(bus)?.play();
+    } catch (error) {
+      if (next) this.release(next); else bus.disconnect();
+      if (this.pending === next) this.pending = null;
+      if (request === this.request && !this.layer) {
+        this.anchor?.pause();
+        await ctx.suspend().catch(() => undefined);
+      }
+      if (request === this.request) throw error;
+      return;
+    }
+    if (request !== this.request) { this.release(next); return; }
+    this.pending = null;
+    this.layer = next;
+    const now = ctx.currentTime;
+    bus.gain.linearRampToValueAtTime(trim, now + CROSSFADE_S);
     // From silence, fade in slowly; between versions the crossfade already does the work.
     const fromSilence = !previous || this.master!.gain.value < 0.002;
     this.master!.gain.cancelScheduledValues(now);
@@ -229,7 +267,7 @@ export class SoundscapeEngine {
   /** An imported recording: a pre-looped file streamed through the graph. */
   private recording(ctx: AudioContext, bus: GainNode, version: Extract<SoundscapeVersion, { src: string }>): Array<() => void> {
     // Shipped files are relative to the app; your own files arrive as blob: URLs.
-    const url = /^(blob:|https?:|data:)/.test(version.src) ? version.src : `${import.meta.env.BASE_URL}${version.src}`;
+    const url = recordingUrl(version.src);
     const element = new Audio(url);
     element.loop = true;
     if (!url.startsWith("blob:")) element.crossOrigin = "anonymous";
@@ -237,8 +275,14 @@ export class SoundscapeEngine {
     const level = ctx.createGain();
     level.gain.value = version.gain ?? 0.8;
     source.connect(level).connect(bus);
-    void element.play().catch(() => undefined);
-    return [() => { element.pause(); element.removeAttribute("src"); element.load(); source.disconnect(); level.disconnect(); }];
+    this.recordings.set(bus, element);
+    return [() => { this.recordings.delete(bus); element.pause(); element.removeAttribute("src"); element.load(); source.disconnect(); level.disconnect(); }];
+  }
+
+  private release(layer: Layer): void {
+    if (!this.layers.delete(layer)) return;
+    layer.stop();
+    layer.bus.disconnect();
   }
 
   private retire(layer: Layer, at: number, seconds = CROSSFADE_S): void {
@@ -246,8 +290,7 @@ export class SoundscapeEngine {
     layer.bus.gain.setValueAtTime(layer.bus.gain.value, at);
     layer.bus.gain.linearRampToValueAtTime(0, at + seconds);
     window.setTimeout(() => {
-      layer.stop();
-      layer.bus.disconnect();
+      this.release(layer);
     }, seconds * 1000 + 120);
   }
 
@@ -257,25 +300,48 @@ export class SoundscapeEngine {
   }
 
   async pause(): Promise<void> {
+    ++this.request;
+    if (this.pending) this.release(this.pending);
+    this.pending = null;
+    this.recordings.forEach((element) => element.pause());
     this.anchor?.pause();
     await this.ctx?.suspend();
   }
 
   async resume(): Promise<void> {
-    await this.ctx?.resume();
-    await this.anchor?.play().catch(() => undefined);
+    const request = ++this.request;
+    try {
+      // Media elements keep time independently from Web Audio. Resume them while
+      // the graph is still suspended, then make the graph audible together.
+      await Promise.all([...this.recordings.values()].map((element) => element.play()));
+      if (request !== this.request) return;
+      await this.ctx?.resume();
+      if (request !== this.request) return;
+      await this.anchor?.play().catch(() => undefined);
+    } catch (error) {
+      if (request !== this.request) return;
+      this.recordings.forEach((element) => element.pause());
+      await this.ctx?.suspend().catch(() => undefined);
+      throw error;
+    }
   }
 
   /** Fade out, then release the sources. A long fade suits the sleep timer. */
   stop(fadeSeconds = 1.2): Promise<void> {
+    const request = ++this.request;
+    if (this.pending) this.release(this.pending);
+    this.pending = null;
     const ctx = this.ctx;
     const layer = this.layer;
     this.layer = null;
-    if (!ctx || !layer) return Promise.resolve();
+    if (!ctx || !layer) {
+      this.anchor?.pause();
+      return ctx?.suspend().catch(() => undefined) ?? Promise.resolve();
+    }
     this.retire(layer, ctx.currentTime, fadeSeconds);
     return new Promise((resolve) => {
       window.setTimeout(() => {
-        if (!this.layer) {
+        if (request === this.request && !this.layer && !this.pending) {
           this.anchor?.pause();
           void ctx.suspend().catch(() => undefined);
         }

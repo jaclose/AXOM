@@ -3985,7 +3985,7 @@ function me(e) {
 //#endregion
 //#region web/src/lib/targetContributions.ts
 function he(e) {
-	let { requirement: t, dayKey: n } = e, r = _e(t, e.productivityTrackers, e.habits), i = /* @__PURE__ */ new Map(), a = xe(e.logs.filter((e) => e.dayKey === n)), o = new Set(t.excludedSourceRecordIds ?? []), s = new Set(t.includedSourceRecordIds ?? []);
+	let { requirement: t, dayKey: n } = e, r = _e(t, e.productivityTrackers, e.habits), i = /* @__PURE__ */ new Map(), a = xe(e.logs).filter((e) => e.dayKey === n), o = new Set(t.excludedSourceRecordIds ?? []), s = new Set(t.includedSourceRecordIds ?? []);
 	for (let s of a) {
 		if (o.has(s.id)) continue;
 		let a = ye(t, s, r, e.productivityTrackers);
@@ -4242,18 +4242,24 @@ function Ee(e, t) {
 	return t.has(je(e.type));
 }
 function De(e, t) {
-	return e.ts.localeCompare(t.ts) || e.id.localeCompare(t.id) || Oe(e).localeCompare(Oe(t));
+	let n = Date.parse(e.ts), r = Date.parse(t.ts);
+	return (Number.isFinite(n) && Number.isFinite(r) ? n - r : Number.isFinite(n) ? 1 : Number.isFinite(r) ? -1 : e.ts.localeCompare(t.ts)) || e.id.localeCompare(t.id) || Oe(e).localeCompare(Oe(t)) || e.ts.localeCompare(t.ts);
 }
 function Oe(e) {
 	return [
+		e.dayKey,
 		e.type,
 		e.minutes,
 		e.cards,
 		e.quantity,
 		e.quantityKind,
 		e.quantityLabel,
-		e.trackerId
-	].join("|");
+		e.trackerId,
+		e.unitType,
+		e.academic,
+		e.productive,
+		e.note
+	].map((e) => JSON.stringify(e) ?? "").join("|");
 }
 function ke(e, t) {
 	return e.updatedAt.localeCompare(t.updatedAt) || e.createdAt.localeCompare(t.createdAt) || e.id.localeCompare(t.id) || e.value - t.value;

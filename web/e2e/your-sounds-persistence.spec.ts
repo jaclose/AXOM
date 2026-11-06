@@ -53,7 +53,7 @@ test("a renamed and reassigned sound of your own keeps both across a reload", as
   await seedOnboarded(page);
   await openSoundscapes(page);
 
-  const original = page.locator(".your-sound.axom-original");
+  const original = page.locator(".your-sound.axom-original").filter({ has: page.getByRole("button", { name: "Play Afterlight", exact: true }) });
   await expect(original).toContainText("AXOM Original · Afterlight");
   await original.getByRole("button", { name: "Play Afterlight" }).click();
   await expect.poll(async () => (await player(page)).presetId).toBe("yours");
