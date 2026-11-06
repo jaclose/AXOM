@@ -21,6 +21,8 @@ export const VAULT_WRITE_FAILURE_EVENT = "axom:vault-write-failure";
 let lastWrite: VaultWriteRecord | null = null;
 let lastPersistedAt = 0;
 let failingSince: string | null = null;
+/** A removed/missing workspace must not rehydrate stale save-success metadata. */
+let statusInvalidated = false;
 
 /**
  * A save reached neither IndexedDB nor the browser-storage fallback. Ordinary
@@ -41,6 +43,7 @@ export function readVaultWriteFailure(): string | null {
 
 export function markVaultWrite(target: VaultWriteTarget, now: Date = new Date()): void {
   // PR #128 only calls this after the persisted workspace key actually landed.
+  statusInvalidated = false;
   lastWrite = { at: now.toISOString(), target, version: WORKSPACE_WRITE_MARKER_VERSION, scope: "workspace" };
   failingSince = null;
   // Keep the tiny localStorage marker current without hammering it on every
@@ -54,7 +57,33 @@ export function markVaultWrite(target: VaultWriteTarget, now: Date = new Date())
   }
 }
 
+/**
+ * Clear only the small save-success marker when the workspace is removed or
+ * hydration finds no durable workspace. Never erase workspace or backup bytes.
+ * The next confirmed write renews the marker, even inside the throttle window.
+ */
+export function invalidateVaultWrite(): void {
+  const hadMemoryRecord = lastWrite !== null;
+  let hadStoredRecord = false;
+  try {
+    hadStoredRecord = window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt) !== null;
+  } catch { /* Optional metadata may be unavailable. */ }
+  lastWrite = null;
+  lastPersistedAt = 0;
+  statusInvalidated = true;
+  try {
+    window.localStorage.removeItem(STORAGE_KEYS.lastVaultWriteAt);
+  } catch {
+    // Storage shims may forbid removal but allow a fail-closed replacement.
+    try { window.localStorage.setItem(STORAGE_KEYS.lastVaultWriteAt, "null"); } catch { /* optional */ }
+  }
+  if ((hadMemoryRecord || hadStoredRecord) && typeof window !== "undefined" && typeof CustomEvent !== "undefined") {
+    window.dispatchEvent(new CustomEvent(VAULT_WRITE_EVENT));
+  }
+}
+
 export function readLastVaultWrite(): VaultWriteRecord | null {
+  if (statusInvalidated) return null;
   if (lastWrite) return lastWrite;
   try {
     const parsed: unknown = JSON.parse(window.localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt) ?? "null");

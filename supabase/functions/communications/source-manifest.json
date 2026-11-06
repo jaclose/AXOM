@@ -20,7 +20,7 @@
     "web/src/lib/learning-intelligence/attempts.ts": "7aad725357592550afcabe88b60bb66a2a4ce2abe9e7695e09b4415c1b680d98",
     "web/src/lib/learning-intelligence/patterns.ts": "96ad68a9638b45ca7a48094b7ee8b5af5c9027c57b1ec8aeae6442ec9c852b25",
     "web/src/lib/learning-intelligence/questionFeatures.ts": "a75b3a03ccdf1edb53b268a222bb629c41b057f82a9010257b62047bd8d4ec88",
-    "web/src/lib/localVault.ts": "4d92eb0a458fcc43f33707994695b6c1069e1fbeb299dd471898b604d15b7724",
+    "web/src/lib/localVault.ts": "8d182cd317205c4546c4c2ea46922a91818c6bbd47e7716f1ef205c87091b0d1",
     "web/src/lib/questionAnnotations.ts": "d697acb109debc8747b57c0efda3136a3982c16dd99be4391b0ae444b25275a4",
     "web/src/lib/questionAttachments.ts": "ae016c1450aba37bb17fec3e31a640f0e8ba0b705d436094a2a8939fd29847d9",
     "web/src/lib/questions.ts": "dc002f056ad1852df89ba7e6e7e2a2d284cdb1dd73e645a4f35a90011fd17a83",
@@ -28,7 +28,7 @@
     "web/src/lib/scoring.ts": "9799b3c92cecb5b7dc586c7e7aa1daf61a5185ec8c3a3e42028817c5cc30b55a",
     "web/src/lib/targetContributions.ts": "301704eb40288568396fd10702ca7d30ab47d3a4628e5b61508b53285a6009e7",
     "web/src/lib/tracker.ts": "ffc762dc996085a485a95bcef0ac00b54b16a70e0f8822513b184f836c972922",
-    "web/src/lib/vaultActivity.ts": "eaad12eccf2330e7386fb83acc493e995de326525b01b3bdeb623dc5f56eca57"
+    "web/src/lib/vaultActivity.ts": "77b2fde92fa0d681419f2ccfcb63560be3b659f6f695c870fe5b548c1b93e052"
   },
   "bundle": {
     "path": "supabase/functions/communications/service.js",

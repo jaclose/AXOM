@@ -1,7 +1,7 @@
 import type { StateStorage } from "zustand/middleware";
 import { userIdFromName } from "./userIdentity";
 import { STORAGE_KEYS } from "./brand";
-import { markVaultWrite, markVaultWriteFailure, readVaultWriteFailure } from "./vaultActivity";
+import { invalidateVaultWrite, markVaultWrite, markVaultWriteFailure, readVaultWriteFailure } from "./vaultActivity";
 
 export const DB_NAME = STORAGE_KEYS.vaultDb;
 export const STORE_NAME = "state";
@@ -871,6 +871,8 @@ const vaultStorage: StateStorage = {
   },
 
   async removeItem(name) {
+    // Partial/best-effort workspace removal also invalidates the old save badge.
+    if (name === STORAGE_KEYS.persistedState) invalidateVaultWrite();
     const fallback = localFallback();
     let active = fallback?.getItem(activeUserKey(name)) ?? undefined;
     if (!active) {
@@ -955,7 +957,12 @@ export function flushLocalVaultWrites(): Promise<void> {
 }
 
 export const localVaultStorage: StateStorage = {
-  getItem: (name) => vaultStorage.getItem(name),
+  getItem: async (name) => {
+    const value = await vaultStorage.getItem(name);
+    // Hydration must not trust stale metadata if IndexedDB and fallback are empty.
+    if (name === STORAGE_KEYS.persistedState && value === null) invalidateVaultWrite();
+    return value;
+  },
   setItem: (name, value) => scheduleVaultWrite(name, { kind: "set", value }),
   removeItem: (name) => scheduleVaultWrite(name, { kind: "remove" }),
 };

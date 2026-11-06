@@ -66,4 +66,24 @@ describe("verified local workspace save timestamps across upgrades", () => {
     window.localStorage.setItem(markerKey, JSON.stringify(record));
     expect((await import("./vaultActivity")).readLastVaultWrite()).toBeNull();
   });
+  it("invalidates the marker without deleting a workspace and allows immediate renewal", async () => {
+    const workspace = JSON.stringify({ state: { notebook: "preserve" } });
+    window.localStorage.setItem(STORAGE_KEYS.persistedState, workspace);
+    const { markVaultWrite, invalidateVaultWrite, readLastVaultWrite } = await import("./vaultActivity");
+    markVaultWrite("indexeddb", new Date(savedAt));
+    expect(readLastVaultWrite()?.scope).toBe("workspace");
+    expect(window.localStorage.getItem(markerKey)).not.toBeNull();
+
+    invalidateVaultWrite();
+    expect(readLastVaultWrite()).toBeNull();
+    expect(window.localStorage.getItem(markerKey)).toBeNull();
+    expect(window.localStorage.getItem(STORAGE_KEYS.persistedState)).toBe(workspace);
+
+    const shortlyAfter = new Date(new Date(savedAt).getTime() + 300);
+    markVaultWrite("local-fallback", shortlyAfter);
+    expect(JSON.parse(window.localStorage.getItem(markerKey) ?? "null")).toEqual({
+      at: shortlyAfter.toISOString(), target: "local-fallback", version: 2, scope: "workspace",
+    });
+  });
+
 });

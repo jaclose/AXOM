@@ -13,7 +13,7 @@ import {
   writeLocalFallback,
 } from "./localVault";
 import { STORAGE_KEYS } from "./brand";
-import { readVaultWriteFailure } from "./vaultActivity";
+import { readLastVaultWrite, readVaultWriteFailure } from "./vaultActivity";
 
 const values = new Map<string, string>();
 const storage = {
@@ -255,6 +255,42 @@ describe("IndexedDB-first local vault", () => {
     await localVaultStorage.removeItem(STORAGE_KEYS.persistedState);
     expect(await localVaultStorage.getItem(STORAGE_KEYS.persistedState)).toBeNull();
     expect(localStorage.getItem(`${STORAGE_KEYS.persistedState}:active-user`)).toBeNull();
+  });
+
+  it("removes obsolete status on workspace deletion but not on auxiliary-key removal", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const saved = JSON.stringify({ state: { profile: { userId: "jd" }, journal: "private" }, version: 34 });
+    await localVaultStorage.setItem(key, saved);
+    const record = readLastVaultWrite();
+    expect(record?.scope).toBe("workspace");
+    localStorage.setItem(STORAGE_KEYS.lastVaultWriteAt, JSON.stringify(record));
+
+    await localVaultStorage.setItem(STORAGE_KEYS.aiGenerations, '{"generations":[]}');
+    await localVaultStorage.removeItem(STORAGE_KEYS.aiGenerations);
+    expect(readLastVaultWrite()).toEqual(record);
+    expect(localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt)).not.toBeNull();
+
+    await localVaultStorage.removeItem(key);
+    expect(readLastVaultWrite()).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt)).toBeNull();
+    expect(await localVaultStorage.getItem(key)).toBeNull();
+  });
+
+  it("drops a saved badge if hydration finds the previously saved vault missing", async () => {
+    const key = STORAGE_KEYS.persistedState;
+    const saved = JSON.stringify({ state: { profile: { userId: "jd" }, journal: "protected" }, version: 34 });
+    await localVaultStorage.setItem(key, saved);
+    const record = readLastVaultWrite();
+    expect(record?.scope).toBe("workspace");
+    localStorage.setItem(STORAGE_KEYS.lastVaultWriteAt, JSON.stringify(record));
+
+    // IndexedDB may be purged independently of the tiny browser status marker.
+    await deleteDatabase(STORAGE_KEYS.vaultDb);
+    expect(localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt)).not.toBeNull();
+
+    expect(await localVaultStorage.getItem(key)).toBeNull();
+    expect(readLastVaultWrite()).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.lastVaultWriteAt)).toBeNull();
   });
 
   it("requires the physical v4 upgrade before writing chunks and falls back while a v3 tab blocks it", async () => {
