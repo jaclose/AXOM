@@ -11,11 +11,10 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
  *   SUPABASE_SECRET_KEY=sb_secret_…         # test-runner only; never in .env files
  *   (web/.env.local must hold VITE_SUPABASE_URL and the publishable key)
  *
- * The admin key only mints the same one-time codes the emails carry, so the
- * test does not need to read an inbox, and deletes the test user afterwards.
- * The UI still sends two real emails (confirmation + sign-in code), which checks
- * delivery and the templates; Supabase's built-in mailer allows only a few per
- * hour, so do not loop this test.
+ * The admin credential verifies only the disposable test account if the
+ * backend requires confirmation, then the test exercises password sign-in.
+ * This does NOT prove real inbox delivery or confirmation-link acceptance.
+ * A separate allowlisted end-to-end email test is required before activation.
  */
 const live = process.env.AXOM_LIVE_ACCOUNTS === "1";
 const email = process.env.AXOM_LIVE_EMAIL ?? "";
@@ -49,13 +48,13 @@ test.afterAll(async () => {
   if (userId) await admin.auth.admin.deleteUser(userId);
 });
 
-async function mintCode(type: "signup" | "magiclink"): Promise<string> {
-  const { data, error } = type === "signup"
-    ? await admin.auth.admin.generateLink({ type, email, password })
-    : await admin.auth.admin.generateLink({ type, email });
+async function captureDisposableUser(): Promise<string> {
+  const { data, error } = await admin.auth.admin.listUsers({ perPage: 1000 });
   if (error) throw error;
-  userId = data.user.id;
-  return data.properties.email_otp;
+  const user = data.users.find((item) => item.email?.toLowerCase() === email.toLowerCase());
+  if (!user) throw new Error("The new disposable test account is unavailable.");
+  userId = user.id;
+  return user.id;
 }
 
 async function openWorkspace(page: Page, taskTitle: string) {
@@ -90,40 +89,37 @@ async function secondDevice(browser: Browser) {
   return { context, page: await context.newPage() };
 }
 
-test("create, confirm by code, password and code sign-in, protect, merge, restore, devices, delete", async ({ page, browser }) => {
+test("create with email and password, sign in, protect, merge, restore, devices, delete", async ({ page, browser }) => {
   page.on("dialog", (dialog) => void dialog.accept());
   await openWorkspace(page, "From device A");
   await openAccount(page);
 
-  // Create the account. With email confirmation off it is signed in at once;
-  // while the project still asks for it, confirm with the emailed code.
-  await panel(page).getByRole("tab", { name: "Create account" }).click();
+  await panel(page).getByRole("button", { name: "Create", exact: true }).click();
   await panel(page).getByLabel("Email", { exact: true }).fill(email);
   await panel(page).getByLabel(/^Password/).fill(password);
   await panel(page).getByRole("button", { name: "Create account", exact: true }).click();
   const signOut = panel(page).getByRole("button", { name: "Sign out" });
-  const codePrompt = panel(page).getByText(/Confirmation code sent to/);
-  await expect(signOut.or(codePrompt)).toBeVisible();
-  if (await codePrompt.isVisible()) {
-    await panel(page).locator(".account-code").fill(await mintCode("signup"));
-    await panel(page).getByRole("button", { name: "Verify code" }).click();
+  const linkNotice = panel(page).getByText(/account confirmation link/i);
+  await expect(signOut.or(linkNotice)).toBeVisible();
+
+  const testUserId = await captureDisposableUser();
+  if (await linkNotice.isVisible()) {
+    // Disposable-test-only confirmation avoids entering an OTP in the product UI.
+    // Actual confirmation-link email delivery must be separately verified.
+    const { error } = await admin.auth.admin.updateUserById(testUserId, { email_confirm: true });
+    if (error) throw error;
+    await panel(page).getByRole("button", { name: "Sign in", pressed: true }).click();
+    await panel(page).getByLabel("Email", { exact: true }).fill(email);
+    await panel(page).getByLabel(/^Password/).fill(password);
+    await panel(page).getByRole("button", { name: "Sign in", exact: true }).click();
   }
   await expect(signOut).toBeVisible();
 
-  // Password sign-in, then passwordless code sign-in.
   await panel(page).getByRole("button", { name: "Sign out" }).click();
   await panel(page).getByLabel("Email", { exact: true }).fill(email);
   await panel(page).getByLabel(/^Password/).fill(password);
   await panel(page).getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(panel(page).getByRole("button", { name: "Sign out" })).toBeVisible();
-  await panel(page).getByRole("button", { name: "Sign out" }).click();
-  await panel(page).getByRole("tab", { name: "Email me a code" }).click();
-  await panel(page).getByLabel("Email", { exact: true }).fill(email);
-  await panel(page).getByRole("button", { name: "Send code" }).click();
-  await expect(panel(page).getByText(/Sign-in code sent to/)).toBeVisible();
-  await panel(page).locator(".account-code").fill(await mintCode("magiclink"));
-  await panel(page).getByRole("button", { name: "Verify code" }).click();
-  await expect(panel(page).getByRole("button", { name: "Sign out" })).toBeVisible();
+  await expect(signOut).toBeVisible();
 
   // Protect device A.
   await panel(page).getByRole("button", { name: "Protect this workspace" }).click();

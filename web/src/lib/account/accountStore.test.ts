@@ -188,12 +188,11 @@ describe("account lifecycle", () => {
     expect(useAccount.getState().phase).toBe("signed-in");
   });
 
-  it("confirms a new account with the emailed code instead of the link", async () => {
+  it("creates a password account without routing signup into an enter-code form", async () => {
     expect(await useAccount.getState().signUp("learner@example.com", "password123", "Learner")).toBe(true);
-    expect(useAccount.getState()).toMatchObject({ pendingCodeEmail: "learner@example.com", pendingCodeKind: "signup" });
-    expect(await useAccount.getState().verifyCode("learner@example.com", "12345678")).toBe(true);
-    expect(auth.verifyOtp).toHaveBeenCalledWith({ email: "learner@example.com", token: "12345678", type: "email" });
-    expect(useAccount.getState()).toMatchObject({ phase: "signed-in", pendingCodeEmail: undefined, pendingCodeKind: undefined });
+    expect(useAccount.getState()).toMatchObject({ phase: "signed-out", pendingCodeEmail: undefined, pendingCodeKind: undefined });
+    expect(useAccount.getState().message).toMatch(/confirmation link/i);
+    expect(auth.verifyOtp).not.toHaveBeenCalled();
   });
 
   it("signs a new account straight in when the project does not ask for email confirmation", async () => {
