@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { create } from "zustand";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeSeed } from "../lib/seed";
@@ -45,6 +46,31 @@ function stubCalendarObjectUrl(createObjectURL: (blob: Blob | MediaSource) => st
 }
 
 describe("Integrations", () => {
+  it("diagnostic: independent Zustand hook commits a subscribed change", async () => {
+    const useCounter = create<{ count: number }>(() => ({ count: 0 }));
+    function Counter() {
+      const count = useCounter((state) => state.count);
+      return <output data-testid="counter-probe">{count}</output>;
+    }
+    render(<Counter />);
+    expect(screen.getByTestId("counter-probe").textContent).toBe("0");
+    await act(async () => { useCounter.setState({ count: 1 }); });
+    expect(screen.getByTestId("counter-probe").textContent).toBe("1");
+  });
+
+  it("diagnostic: persisted AXOM task hook commits a subscribed change", async () => {
+    function TaskProbe() {
+      const due = useStore((state) => state.tasks[0]?.due ?? "missing");
+      return <output data-testid="task-probe">{due}</output>;
+    }
+    render(<TaskProbe />);
+    expect(screen.getByTestId("task-probe").textContent).toBe("2999-01-01");
+    const id = useStore.getState().tasks[0].id;
+    await act(async () => { useStore.getState().updateTask(id, { due: "2999-03-01" }); });
+    expect(useStore.getState().tasks[0].due).toBe("2999-03-01");
+    expect(screen.getByTestId("task-probe").textContent).toBe("2999-03-01");
+  });
+
   it("groups integrations by readiness and states what leaves the device", () => {
     render(<IntegrationsPage />);
     expect(screen.getByRole("heading", { name: "Works today" })).toBeTruthy();
