@@ -161,10 +161,26 @@ export function buildQuestionAvailabilityIndex(input: QuestionAvailabilityInput)
     };
     const resolved = resolve(finalScope);
     if (!resolved) { unassignedQuestions += 1; continue; }
+    // A key can be score-ready without its claimed primary source being valid.
+    // Keep the stored record visible, but never advertise it as scheduled,
+    // runnable material when exact source membership or filing disagrees.
+    const primary = question.setId != null ? setsById.get(question.setId) : undefined;
+    const primaryScope = primary?.scope;
+    const primaryWeek = parseWeek(primaryScope?.week);
+    const sourceReviewHeld = (hasDeclaredWeek(question.week) && parseWeek(question.week) === undefined)
+      || (question.setId != null && (
+        !primary || !primary.questionIds.includes(question.id)
+        || (hasDeclaredWeek(primaryScope?.week) && primaryWeek === undefined)
+        || Boolean(primaryScope?.module && finalScope.module
+          && canonicalModuleKey(primaryScope.module) !== canonicalModuleKey(finalScope.module))
+        || Boolean(primaryScope?.courseId && finalScope.courseId
+          && primaryScope.courseId !== finalScope.courseId)
+        || (primaryWeek !== undefined && finalScope.week !== undefined && primaryWeek !== finalScope.week)
+      ));
     const draft = draftFor(resolved);
     draft.present.add(question.id);
-    (questionMappingStatus(question) === "ready" ? draft.ready : draft.review).add(question.id);
-    if (finalScope.week !== undefined) draft.weeks.add(finalScope.week);
+    (!sourceReviewHeld && questionMappingStatus(question) === "ready" ? draft.ready : draft.review).add(question.id);
+    if (!sourceReviewHeld && finalScope.week !== undefined) draft.weeks.add(finalScope.week);
     else draft.unresolvedWeeks.add(question.id);
     (resolved.method === "course" ? draft.courseAssignments : draft.outlineAssignments).add(question.id);
   }
